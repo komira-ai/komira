@@ -1,6 +1,7 @@
 //! conda_unpack: extract the Mojo compiler closure out of a `.conda` package.
 //!
-//! usage: conda_unpack <package.conda> <out_dir> [--lib <library.conda> <member>]...
+//! usage: conda_unpack <package.conda> <out_dir> [--keep <member>]...
+//!            [--lib <library.conda> <member>]...
 //!        conda_unpack --only-libs <out_dir> (--lib <library.conda> <member>)...
 //!
 //! The second form writes only the `--lib` members (and CLOSURE_MANIFEST):
@@ -15,7 +16,10 @@
 //! What it writes into <out_dir>:
 //!   * the closure members only: `bin/mojo`, everything under `lib/`, and
 //!     `share/max/modular.cfg`. (`bin/lld`, the crash handler and man pages
-//!     are not needed to compile and are left out of every action's inputs.)
+//!     are not needed to compile and are left out of every action's inputs,
+//!     unless named with `--keep <member>`: the osx-arm64 compiler links
+//!     through its own `bin/lld`.) The compiler's runtime library is
+//!     `lib/libKGENCompilerRTShared.so` or, in an osx-arm64 package, `.dylib`.
 //!   * `share/max/modular.cfg` with the package's install-prefix placeholder
 //!     replaced by `@@MOJO_TOOLCHAIN_ROOT@@`. The wrapper renders it at run
 //!     time, so no absolute path enters an action key.
@@ -38,9 +42,14 @@ const token = "@@MOJO_TOOLCHAIN_ROOT@@";
 const cfg_path = "share/max/modular.cfg";
 const required = [_][]const u8{
     "bin/mojo",
-    "lib/libKGENCompilerRTShared.so",
     "lib/mojo/std.mojoc",
     cfg_path,
+};
+// One of these must be present: linux packages carry the `.so`, osx-arm64
+// packages the `.dylib`.
+const required_one_of = [_][]const u8{
+    "lib/libKGENCompilerRTShared.so",
+    "lib/libKGENCompilerRTShared.dylib",
 };
 
 fn fail(comptime fmt: []const u8, args: anytype) noreturn {
@@ -48,8 +57,11 @@ fn fail(comptime fmt: []const u8, args: anytype) noreturn {
     std.process.exit(2);
 }
 
-fn keep(name: []const u8) bool {
+fn keep(name: []const u8, extra: []const []const u8) bool {
     if (std.mem.eql(u8, name, "bin/mojo")) return true;
+    for (extra) |e| {
+        if (std.mem.eql(u8, name, e)) return true;
+    }
     if (std.mem.eql(u8, name, cfg_path)) return true;
     return std.mem.startsWith(u8, name, "lib/");
 }
@@ -91,7 +103,7 @@ fn lessThan(_: void, a: []const u8, b: []const u8) bool {
 /// Value of `"prefix_placeholder"` in paths.json for the entry whose `_path`
 /// is `path`, or null if that entry has none. Fails if any OTHER kept member
 /// carries a placeholder: only modular.cfg is rewritten.
-fn findPlaceholder(json: []const u8) ?[]const u8 {
+fn findPlaceholder(json: []const u8, extra: []const []const u8) ?[]const u8 {
     const path_key = "\"_path\"";
     const ph_key = "\"prefix_placeholder\"";
     var found: ?[]const u8 = null;
@@ -101,7 +113,7 @@ fn findPlaceholder(json: []const u8) ?[]const u8 {
         const obj = json[p..next];
         const name = stringValue(obj, path_key) orelse fail("paths.json: unreadable _path", .{});
         if (stringValue(obj, ph_key)) |ph| {
-            if (keep(name)) {
+            if (keep(name, extra)) {
                 if (!std.mem.eql(u8, name, cfg_path)) {
                     fail("paths.json: closure member {s} carries an install-prefix placeholder; only {s} is rewritten", .{ name, cfg_path });
                 }
@@ -275,11 +287,23 @@ pub fn main() !void {
 
     const args = try std.process.argsAlloc(a);
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--only-libs")) return onlyLibs(a, args);
-    if (args.len < 3 or (args.len - 3) % 3 != 0)
-        fail("usage: conda_unpack <package.conda> <out_dir> [--lib <library.conda> <member>]...", .{});
+    const usage = "usage: conda_unpack <package.conda> <out_dir> [--keep <member>]... [--lib <library.conda> <member>]...";
+    if (args.len < 3) fail(usage, .{});
+    // `--keep <member>`: one more package member to extract (e.g. bin/lld).
+    // `--lib <library.conda> <member>`: one member of another package.
+    var keep_members = std.ArrayList([]const u8).init(a);
+    var libs = std.ArrayList([2][]const u8).init(a);
     var li: usize = 3;
-    while (li < args.len) : (li += 3) {
-        if (!std.mem.eql(u8, args[li], "--lib")) fail("expected --lib, got {s}", .{args[li]});
+    while (li < args.len) {
+        if (std.mem.eql(u8, args[li], "--keep") and li + 1 < args.len) {
+            if (std.mem.startsWith(u8, args[li + 1], "/") or std.mem.indexOf(u8, args[li + 1], "..") != null)
+                fail("--keep {s}: expected a relative package member", .{args[li + 1]});
+            try keep_members.append(args[li + 1]);
+            li += 2;
+        } else if (std.mem.eql(u8, args[li], "--lib") and li + 2 < args.len) {
+            try libs.append(.{ args[li + 1], args[li + 2] });
+            li += 3;
+        } else fail(usage, .{});
     }
     const data = std.fs.cwd().readFileAlloc(a, args[1], 1 << 31) catch |e|
         fail("cannot read {s}: {s}", .{ args[1], @errorName(e) });
@@ -331,7 +355,7 @@ pub fn main() !void {
                 }
                 continue;
             }
-            if (!keep(f.name)) continue;
+            if (!keep(f.name, keep_members.items)) continue;
             if (f.kind != .file) fail("closure member {s} is not a regular file", .{f.name});
             if (std.fs.path.dirname(f.name)) |d| try out.makePath(d);
             const mode: std.fs.File.Mode = if (f.mode & 0o111 != 0) 0o755 else 0o644;
@@ -354,9 +378,23 @@ pub fn main() !void {
         }
         if (!present) fail("package lacks required closure member {s}", .{r});
     }
+    var runtime_found = false;
+    for (required_one_of) |r| {
+        for (kept.items) |k| {
+            if (std.mem.eql(u8, k, r)) runtime_found = true;
+        }
+    }
+    if (!runtime_found) fail("package lacks required closure member {s} (or {s})", .{ required_one_of[0], required_one_of[1] });
+    for (keep_members.items) |e| {
+        var present = false;
+        for (kept.items) |k| {
+            if (std.mem.eql(u8, k, e)) present = true;
+        }
+        if (!present) fail("--keep {s}: no such regular file in the package", .{e});
+    }
 
     // Tokenize the install prefix in modular.cfg.
-    const ph = findPlaceholder(pj) orelse fail("paths.json names no prefix_placeholder for {s}", .{cfg_path});
+    const ph = findPlaceholder(pj, keep_members.items) orelse fail("paths.json names no prefix_placeholder for {s}", .{cfg_path});
     const cfg = try out.readFileAlloc(a, cfg_path, 1 << 24);
     const needle = try std.mem.concat(a, u8, &.{ ph, "/bin/mojo" });
     if (std.mem.indexOf(u8, cfg, needle) == null) fail("{s} does not name the placeholder as <prefix>/bin/mojo", .{cfg_path});
@@ -364,10 +402,9 @@ pub fn main() !void {
     if (std.mem.indexOf(u8, tokenized, "= /") != null) fail("{s} still holds an absolute path after tokenizing", .{cfg_path});
     try out.writeFile(cfg_path, tokenized);
 
-    li = 3;
-    while (li < args.len) : (li += 3) {
-        try extractLib(a, out, args[li + 1], args[li + 2], window, &name_buf, &link_buf);
-        try kept.append(args[li + 2]);
+    for (libs.items) |l| {
+        try extractLib(a, out, l[0], l[1], window, &name_buf, &link_buf);
+        try kept.append(l[1]);
     }
 
     std.mem.sort([]const u8, kept.items, {}, lessThan);

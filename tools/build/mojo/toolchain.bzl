@@ -80,6 +80,8 @@ def _conda_closure_impl(ctx):
     out = ctx.actions.declare_output("compiler", dir = True)
     # The unpacker is a static executable: it runs with no shell and no PATH.
     libs = []
+    for member in ctx.attrs.keep:
+        libs.extend(["--keep", member])
     for member, package in sorted(ctx.attrs.libs.items()):
         libs.extend(["--lib", package[DefaultInfo].default_outputs[0], member])
     ctx.actions.run(
@@ -91,6 +93,9 @@ def _conda_closure_impl(ctx):
 conda_closure = rule(
     impl = _conda_closure_impl,
     attrs = {
+        # More package members to extract, beyond bin/mojo, lib/ and
+        # modular.cfg (e.g. bin/lld, which the osx-arm64 compiler links with).
+        "keep": attrs.list(attrs.string(), default = []),
         # member path under lib/ -> the pinned package it is taken from. These
         # land next to the compiler's own libraries, so the loader resolves
         # them from the toolchain (LD_LIBRARY_PATH, and the compiler's
