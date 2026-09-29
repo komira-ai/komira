@@ -170,7 +170,8 @@ binaries that depend on it. Generation is deterministic, checked by
 comparing two uncached builds
 ([check 23](../checks/README.md#23-protobuf)).
 
-The toolchain, `komira//tools/build/toolchains/proto:mojo_proto`, is protoc
+The toolchain, `toolchains//:mojo_proto` (declared by
+`komira_proto_toolchains()`, see [toolchains](../toolchains/README.md)), is protoc
 29.1 (the sha256-pinned static release build, with its well-known-type
 `.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo`,
 built from source with the [Rust rules](../rust/README.md) against the

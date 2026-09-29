@@ -26,7 +26,7 @@ Output layout of a target `L` with import name `I`:
     L/gen/I/...            the generated package (sub-target per file name)
     L/pkg/I.mojoc          the precompiled package
 
-protoc and the plugin come from `komira//tools/build/toolchains/proto:mojo_proto`. Options reach
+protoc and the plugin come from `toolchains//:mojo_proto`. Options reach
 the plugin as `--mojo_opt` arguments, never from a file, so they are part of
 the action key.
 """
@@ -274,7 +274,7 @@ mojo_proto_library = rule(
         "package_name": attrs.option(attrs.string(), default = None),
         # mojo_proto_library targets whose .proto files these import.
         "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
-        "proto_toolchain": attrs.toolchain_dep(default = "komira//tools/build/toolchains/proto:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
         "srcs": attrs.list(attrs.source()),
         "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
     },

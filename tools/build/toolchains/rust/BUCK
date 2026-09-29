@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
-load("@komira//tools/build/rust:defs.bzl", "rust_sysroot", "rust_toolchain")
+load("@komira//tools/build/rust:defs.bzl", "rust_sysroot")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 
@@ -54,21 +54,6 @@ rust_sysroot(
     visibility = ["PUBLIC"],
 )
 
-# The toolchain of rust_library and rust_binary. Compiles run on the compile
-# workers (the `mojo_compile` class, one NUMA node), like Mojo compiles.
-# rustc loads only glibc from the worker (everything else it needs is in the
-# sysroot; checks/rust_checks.sh reads their NEEDED entries); links target
-# glibc 2.34 through zig, so the binaries run on any worker with glibc 2.34
-# or newer.
-rust_toolchain(
-    name = "rust",
-    exec_compatible_with = [
-        "komira//tools/build/platforms:mojo_compile",
-        "komira//tools/build/platforms:numa_single",
-    ],
-    busybox = "komira//tools/build/toolchains:busybox",
-    cc_target = "x86_64-linux-gnu.2.34",
-    sysroot = ":sysroot",
-    zig = "komira//tools/build/toolchains:zig",
-    visibility = ["PUBLIC"],
-)
+# The toolchain itself, `toolchains//:rust`, is declared by
+# komira_rust_toolchains() in ../defs.bzl, called from the root repository's
+# `toolchains` cell.

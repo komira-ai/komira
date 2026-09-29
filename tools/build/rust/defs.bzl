@@ -1,6 +1,6 @@
 """Rust rules for Buck2: rust_library, rust_binary, crates_io_library.
 
-Every compile runs the pinned rustc from `komira//tools/build/toolchains/rust:rust` through
+Every compile runs the pinned rustc from `toolchains//:rust` through
 `rustc_wrapper.sh`, which links through zig (see that file). Nothing is
 taken from the worker except glibc: the sysroot carries rustc's own
 libraries and, from pinned packages, the other libraries they need
@@ -238,7 +238,7 @@ _COMMON_ATTRS = {
     # What paths inside `src_dir` are recorded as, e.g. `anyhow-1.0.102`.
     "src_dir_label": attrs.option(attrs.string(), default = None),
     "srcs": attrs.list(attrs.source(), default = []),
-    "toolchain": attrs.toolchain_dep(default = "komira//tools/build/toolchains/rust:rust", providers = [RustToolchainInfo]),
+    "toolchain": attrs.toolchain_dep(default = "toolchains//:rust", providers = [RustToolchainInfo]),
 }
 
 def _library_impl(ctx):

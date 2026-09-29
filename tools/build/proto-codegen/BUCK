@@ -2,7 +2,7 @@ load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library")
 
 # The protoc plugins that generate Mojo, from the `komira_proto_codegen`
 # crate. The Mojo proto rules name these binaries through the toolchain
-# `komira//tools/build/toolchains/proto:mojo_proto`.
+# `toolchains//:mojo_proto`.
 
 _DEPS = [
     "komira//third_party/rust:prost",

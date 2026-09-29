@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
-load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_toolchain", "protoc_dist")
+load("@komira//tools/build/mojo:proto.bzl", "protoc_dist")
 
 # protoc 29.1, the release build for linux x86_64 (a static executable),
 # with the well-known-type .proto files under include/.
@@ -17,14 +17,6 @@ protoc_dist(
     visibility = ["PUBLIC"],
 )
 
-# protoc and the plugin, for mojo_proto_library. States no execution
-# constraint: a mojo_proto_library also precompiles the generated package,
-# and one target has one execution platform, so code generation runs where
-# the Mojo toolchain puts that target (the compile workers).
-mojo_proto_toolchain(
-    name = "mojo_proto",
-    busybox = "komira//tools/build/toolchains:busybox",
-    plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo",
-    protoc = ":protoc",
-    visibility = ["PUBLIC"],
-)
+# The toolchain of mojo_proto_library, `toolchains//:mojo_proto` (protoc and
+# the plugin), is declared by komira_proto_toolchains() in ../defs.bzl,
+# called from the root repository's `toolchains` cell.

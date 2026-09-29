@@ -14,7 +14,8 @@ The rules are in [`defs.bzl`](defs.bzl). Worked uses are in
 | `rust_binary(srcs, crate_root, deps, expected_stdout)` | an executable, and `RunInfo`. With `expected_stdout`, `[run_check]` runs it remotely and compares its stdout exactly. |
 | `crates_io_library(name, version, sha256, ...)` | a crates.io crate, downloaded by the sha256 of its `.crate` file, unpacked remotely, and compiled with `rust_library` |
 
-The toolchain, `komira//tools/build/toolchains/rust:rust`, is rustc 1.85.0
+The toolchain, `toolchains//:rust` (declared by `komira_rust_toolchains()`, see
+[toolchains](../toolchains/README.md)), is rustc 1.85.0
 and its standard library for `x86_64-unknown-linux-gnu`, both sha256-pinned
 release tarballs. rustc runs through [`rustc_wrapper.sh`](rustc_wrapper.sh)
 with `--sysroot` set to the unpacked toolchain; links go through zig

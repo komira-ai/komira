@@ -1,4 +1,4 @@
-"""The Mojo toolchains, declared in the `toolchains` cell of whichever repository is at the project root.
+"""The Mojo, C/C++, Rust and protobuf toolchains, declared in the `toolchains` cell of whichever repository is at the project root.
 
 The Mojo rules take their toolchain from `toolchains//:mojo` and
 `toolchains//:mojo_multi_numa`, the prelude's convention: the `toolchains`
@@ -15,10 +15,13 @@ it, which is the intended refusal.
 """
 
 load("@komira//tools/build/mojo:cxx.bzl", "no_python_bootstrap_toolchain", "zig_cxx_toolchain")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_toolchain")
 load("@komira//tools/build/mojo:toolchain.bzl", "mojo_toolchain")
+load("@komira//tools/build/rust:defs.bzl", "rust_toolchain")
 
 _TOOLCHAINS = "komira//tools/build/toolchains:"
 _PLATFORMS = "komira//tools/build/platforms:"
+_TOOLCHAINS_RUST = "komira//tools/build/toolchains/rust:"
 
 MOJO_TOOLCHAIN_ATTRS = dict(
     busybox = _TOOLCHAINS + "busybox",
@@ -98,4 +101,56 @@ def komira_cxx_toolchains(**overrides):
         exec_compatible_with = [_PLATFORMS + "light"],
         busybox = attrs["busybox"],
         visibility = ["PUBLIC"],
+    )
+
+RUST_TOOLCHAIN_ATTRS = dict(
+    busybox = _TOOLCHAINS + "busybox",
+    # Links go through zig to the same glibc floor as the Mojo link steps.
+    cc_target = MOJO_TOOLCHAIN_ATTRS["cc_target"],
+    sysroot = _TOOLCHAINS_RUST + "sysroot",
+    zig = _TOOLCHAINS + "zig",
+)
+
+def komira_rust_toolchains(**overrides):
+    """Declare `:rust`, the toolchain of rust_library and rust_binary, in the calling package.
+
+    rustc 1.85.0 from `komira//tools/build/toolchains/rust:sysroot`. Compiles
+    run on the compile workers (the `mojo_compile` class, one NUMA node),
+    like Mojo compiles. rustc loads only glibc from the worker (everything
+    else it needs is in the sysroot); links target glibc 2.34 through zig, so
+    the binaries run on any worker with glibc 2.34 or newer. Each keyword in
+    `overrides` replaces the `rust_toolchain` attribute of that name (see
+    RUST_TOOLCHAIN_ATTRS).
+    """
+    attrs = dict(RUST_TOOLCHAIN_ATTRS)
+    attrs.update(overrides)
+    rust_toolchain(
+        name = "rust",
+        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"],
+        visibility = ["PUBLIC"],
+        **attrs
+    )
+
+PROTO_TOOLCHAIN_ATTRS = dict(
+    busybox = _TOOLCHAINS + "busybox",
+    plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo",
+    protoc = "komira//tools/build/toolchains/proto:protoc",
+)
+
+def komira_proto_toolchains(**overrides):
+    """Declare `:mojo_proto`, the toolchain of mojo_proto_library, in the calling package.
+
+    protoc 29.1 and protoc-gen-mojo, built from source with `:rust`. It
+    states no execution constraint: a mojo_proto_library also precompiles the
+    generated package, and one target has one execution platform, so code
+    generation runs where the Mojo toolchain puts that target (the compile
+    workers). Each keyword in `overrides` replaces the `mojo_proto_toolchain`
+    attribute of that name (see PROTO_TOOLCHAIN_ATTRS).
+    """
+    attrs = dict(PROTO_TOOLCHAIN_ATTRS)
+    attrs.update(overrides)
+    mojo_proto_toolchain(
+        name = "mojo_proto",
+        visibility = ["PUBLIC"],
+        **attrs
     )

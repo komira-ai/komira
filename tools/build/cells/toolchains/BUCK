@@ -13,10 +13,18 @@
 # `mojo_toolchain`) to komira_mojo_toolchains. Keeping the call as it is gives
 # the same action digests as a standalone checkout, so builds share its
 # remote cache entries.
-load("@komira//tools/build/toolchains:defs.bzl", "komira_cxx_toolchains", "komira_mojo_toolchains")
+#
+# komira_cxx_toolchains declares `:cxx` for C and C++ deps (drop it to keep
+# your own); komira_rust_toolchains and komira_proto_toolchains declare `:rust`
+# for the Rust rules and `:mojo_proto` for mojo_proto_library.
+load("@komira//tools/build/toolchains:defs.bzl", "komira_cxx_toolchains", "komira_mojo_toolchains", "komira_proto_toolchains", "komira_rust_toolchains")
 
 komira_mojo_toolchains()
 
 # The C/C++ toolchain of the prelude's cxx_library (`:cxx`, `:python_bootstrap`).
 # A repository with its own C/C++ toolchain drops this call and keeps its own.
 komira_cxx_toolchains()
+
+komira_rust_toolchains()
+
+komira_proto_toolchains()
