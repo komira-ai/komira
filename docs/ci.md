@@ -166,12 +166,30 @@ it on the farm.
   that may create auth keys for `tag:ci`) and `BUCKCONFIG_LOCAL` (the whole
   `.buckconfig.local`, in the format of `.buckconfig.local.example`, with
   `instance_name = <prefix>/ci`):
-  - `farm`: deployment branches "Selected branches", `main` only. A branch
-    that edits the workflow to name `farm` is refused before any step runs.
-    Manual runs work from `main` only.
+  - `farm`: deployment branches "Selected branches and tags", one rule of
+    ref type Branch, pattern `main`. A branch that edits the workflow to
+    name `farm` is refused before any step runs, but only because `main`
+    is protected (next item). Manual runs work from `main` only.
   - `farm-pr`: required reviewers (maintainers), "Prevent self-review" on
     when there is more than one maintainer. Every pull-request run waits for
     approval.
+- Protection on `main` (required, not optional). Settings > Rules >
+  Rulesets, a branch ruleset on `main`, active, with an empty bypass list
+  (no admins, apps or roles): require a pull request with at least one
+  approval, dismiss stale approvals, require the `static` and `farm`
+  checks, block force pushes and deletions. Plus a tag ruleset that
+  refuses creating a tag named `main`.
+  Why the `farm` rule depends on it: the rule admits any run whose ref is
+  `main`, and a run uses the workflow file in that commit. If `main` takes
+  direct pushes, anyone holding a write credential (a leaked token, an app
+  with contents write) pushes a changed `ci.yml` to `main`, and that run
+  gets `TS_OAUTH_SECRET` and `BUCKCONFIG_LOCAL` with no approval. Requiring
+  a reviewed pull request makes every change to `main`, `.github/`
+  included, pass a maintainer first. Nothing needs a direct push: no bot
+  writes to this repository's `main`. With a single maintainer, one
+  required approval blocks their own merges; zero approvals still blocks
+  direct pushes, but a stolen maintainer credential can then merge its own
+  pull request.
 - Stronger, if you can: Tailscale workload identity federation instead of an
   OAuth secret. The pinned `tailscale/github-action` accepts `oauth-client-id`
   plus `audience` with `permissions: id-token: write`; trust the subjects
