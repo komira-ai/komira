@@ -1,0 +1,207 @@
+//! conda_unpack: extract the Mojo compiler closure out of a `.conda` package.
+//!
+//! usage: conda_unpack <package.conda> <out_dir>
+//!
+//! A `.conda` file is a zip holding `pkg-*.tar.zst` (the payload) and
+//! `info-*.tar.zst` (metadata). This tool needs nothing from the host: it is a
+//! static executable built from this file by the pinned zig, so the toolchain
+//! can be unpacked on a worker that has no unzip, zstd or python.
+//!
+//! What it writes into <out_dir>:
+//!   * the closure members only: `bin/mojo`, everything under `lib/`, and
+//!     `share/max/modular.cfg`. (`bin/lld`, the crash handler and man pages
+//!     are not needed to compile and are left out of every action's inputs.)
+//!   * `share/max/modular.cfg` with the package's install-prefix placeholder
+//!     replaced by `@@MOJO_TOOLCHAIN_ROOT@@`. The wrapper renders it at run
+//!     time, so no absolute path enters an action key.
+//!   * `CLOSURE_MANIFEST`: the sorted list of members, one per line. The
+//!     wrapper refuses to run (exit 2) if any member is missing or empty.
+//!
+//! Exit status 2 on any malformed or unexpected input.
+
+const std = @import("std");
+
+const token = "@@MOJO_TOOLCHAIN_ROOT@@";
+const cfg_path = "share/max/modular.cfg";
+const required = [_][]const u8{
+    "bin/mojo",
+    "lib/libKGENCompilerRTShared.so",
+    "lib/mojo/std.mojoc",
+    cfg_path,
+};
+
+fn fail(comptime fmt: []const u8, args: anytype) noreturn {
+    std.debug.print("conda_unpack: " ++ fmt ++ "\n", args);
+    std.process.exit(2);
+}
+
+fn keep(name: []const u8) bool {
+    if (std.mem.eql(u8, name, "bin/mojo")) return true;
+    if (std.mem.eql(u8, name, cfg_path)) return true;
+    return std.mem.startsWith(u8, name, "lib/");
+}
+
+fn le16(b: []const u8, at: usize) u16 {
+    return std.mem.readInt(u16, b[at..][0..2], .little);
+}
+
+fn le32(b: []const u8, at: usize) u32 {
+    return std.mem.readInt(u32, b[at..][0..4], .little);
+}
+
+fn le64(b: []const u8, at: usize) u64 {
+    return std.mem.readInt(u64, b[at..][0..8], .little);
+}
+
+/// Compressed size from a local header's zip64 extra field (id 0x0001).
+fn zip64CompressedSize(extra: []const u8, usize_is_64: bool) ?u64 {
+    var i: usize = 0;
+    while (i + 4 <= extra.len) {
+        const id = le16(extra, i);
+        const len = le16(extra, i + 2);
+        if (i + 4 + len > extra.len) return null;
+        if (id == 0x0001) {
+            var at = i + 4;
+            if (usize_is_64) at += 8;
+            if (at + 8 > i + 4 + len) return null;
+            return le64(extra, at);
+        }
+        i += 4 + len;
+    }
+    return null;
+}
+
+fn lessThan(_: void, a: []const u8, b: []const u8) bool {
+    return std.mem.lessThan(u8, a, b);
+}
+
+/// Value of `"prefix_placeholder"` in paths.json for the entry whose `_path`
+/// is `path`, or null if that entry has none. Fails if any OTHER kept member
+/// carries a placeholder: only modular.cfg is rewritten.
+fn findPlaceholder(json: []const u8) ?[]const u8 {
+    const path_key = "\"_path\"";
+    const ph_key = "\"prefix_placeholder\"";
+    var found: ?[]const u8 = null;
+    var pos: usize = 0;
+    while (std.mem.indexOfPos(u8, json, pos, path_key)) |p| {
+        const next = std.mem.indexOfPos(u8, json, p + path_key.len, path_key) orelse json.len;
+        const obj = json[p..next];
+        const name = stringValue(obj, path_key) orelse fail("paths.json: unreadable _path", .{});
+        if (stringValue(obj, ph_key)) |ph| {
+            if (keep(name)) {
+                if (!std.mem.eql(u8, name, cfg_path)) {
+                    fail("paths.json: closure member {s} carries an install-prefix placeholder; only {s} is rewritten", .{ name, cfg_path });
+                }
+                found = ph;
+            }
+        }
+        pos = next;
+    }
+    return found;
+}
+
+fn stringValue(obj: []const u8, key: []const u8) ?[]const u8 {
+    const k = std.mem.indexOf(u8, obj, key) orelse return null;
+    const open = std.mem.indexOfScalarPos(u8, obj, k + key.len, '"') orelse return null;
+    const close = std.mem.indexOfScalarPos(u8, obj, open + 1, '"') orelse return null;
+    return obj[open + 1 .. close];
+}
+
+pub fn main() !void {
+    var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
+    defer arena.deinit();
+    const a = arena.allocator();
+
+    const args = try std.process.argsAlloc(a);
+    if (args.len != 3) fail("usage: conda_unpack <package.conda> <out_dir>", .{});
+    const data = std.fs.cwd().readFileAlloc(a, args[1], 1 << 31) catch |e|
+        fail("cannot read {s}: {s}", .{ args[1], @errorName(e) });
+    std.fs.cwd().makePath(args[2]) catch |e| fail("cannot create {s}: {s}", .{ args[2], @errorName(e) });
+    var out = try std.fs.cwd().openDir(args[2], .{});
+    defer out.close();
+
+    const window = try a.alloc(u8, 1 << 27);
+    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+
+    var kept = std.ArrayList([]const u8).init(a);
+    var paths_json: ?[]const u8 = null;
+    var saw_pkg = false;
+
+    var off: usize = 0;
+    while (off + 30 <= data.len and le32(data, off) == 0x04034b50) {
+        const flags = le16(data, off + 6);
+        const method = le16(data, off + 8);
+        var csize: u64 = le32(data, off + 18);
+        const usize32 = le32(data, off + 22);
+        const nlen = le16(data, off + 26);
+        const xlen = le16(data, off + 28);
+        const start = off + 30 + nlen + xlen;
+        if (start > data.len) fail("truncated zip local header at offset {d}", .{off});
+        const name = data[off + 30 .. off + 30 + nlen];
+        const extra = data[off + 30 + nlen .. start];
+        if (flags & 0x8 != 0) fail("{s}: zip data descriptors are not supported", .{name});
+        if (method != 0) fail("{s}: zip compression method {d}; only stored (0) is supported", .{ name, method });
+        if (csize == 0xffffffff) {
+            csize = zip64CompressedSize(extra, usize32 == 0xffffffff) orelse
+                fail("{s}: zip64 size field missing", .{name});
+        }
+        if (start + csize > data.len) fail("{s}: entry runs past end of file", .{name});
+        const body = data[start .. start + csize];
+        off = start + @as(usize, @intCast(csize));
+
+        const is_pkg = std.mem.startsWith(u8, name, "pkg-") and std.mem.endsWith(u8, name, ".tar.zst");
+        const is_info = std.mem.startsWith(u8, name, "info-") and std.mem.endsWith(u8, name, ".tar.zst");
+        if (!is_pkg and !is_info) continue;
+
+        var fbs = std.io.fixedBufferStream(body);
+        var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
+        var it = std.tar.iterator(dz.reader(), .{ .file_name_buffer = &name_buf, .link_name_buffer = &link_buf });
+        while (try it.next()) |f| {
+            if (is_info) {
+                if (f.kind == .file and std.mem.eql(u8, f.name, "info/paths.json")) {
+                    paths_json = try f.reader().readAllAlloc(a, 1 << 26);
+                }
+                continue;
+            }
+            if (!keep(f.name)) continue;
+            if (f.kind != .file) fail("closure member {s} is not a regular file", .{f.name});
+            if (std.fs.path.dirname(f.name)) |d| try out.makePath(d);
+            const mode: std.fs.File.Mode = if (f.mode & 0o111 != 0) 0o755 else 0o644;
+            const file = try out.createFile(f.name, .{ .exclusive = true, .mode = mode });
+            defer file.close();
+            var bw = std.io.bufferedWriter(file.writer());
+            try f.writeAll(bw.writer());
+            try bw.flush();
+            try kept.append(try a.dupe(u8, f.name));
+        }
+        if (is_pkg) saw_pkg = true;
+    }
+    if (!saw_pkg) fail("{s}: no pkg-*.tar.zst member", .{args[1]});
+    const pj = paths_json orelse fail("{s}: no info/paths.json", .{args[1]});
+
+    for (required) |r| {
+        var present = false;
+        for (kept.items) |k| {
+            if (std.mem.eql(u8, k, r)) present = true;
+        }
+        if (!present) fail("package lacks required closure member {s}", .{r});
+    }
+
+    // Tokenize the install prefix in modular.cfg.
+    const ph = findPlaceholder(pj) orelse fail("paths.json names no prefix_placeholder for {s}", .{cfg_path});
+    const cfg = try out.readFileAlloc(a, cfg_path, 1 << 24);
+    const needle = try std.mem.concat(a, u8, &.{ ph, "/bin/mojo" });
+    if (std.mem.indexOf(u8, cfg, needle) == null) fail("{s} does not name the placeholder as <prefix>/bin/mojo", .{cfg_path});
+    const tokenized = try std.mem.replaceOwned(u8, a, cfg, ph, token);
+    if (std.mem.indexOf(u8, tokenized, "= /") != null) fail("{s} still holds an absolute path after tokenizing", .{cfg_path});
+    try out.writeFile(cfg_path, tokenized);
+
+    std.mem.sort([]const u8, kept.items, {}, lessThan);
+    var manifest = std.ArrayList(u8).init(a);
+    for (kept.items) |k| {
+        try manifest.appendSlice(k);
+        try manifest.append('\n');
+    }
+    try out.writeFile("CLOSURE_MANIFEST", manifest.items);
+}
