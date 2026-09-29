@@ -40,26 +40,37 @@ expect_red() { # name, required text, target
 EXAMPLES=(
     //examples:hello //examples:hellopkg //examples:hello_pkg_user
     //examples/libgate_ok:libgate_ok //examples:test_hellopkg
-    "//examples:hello[run_check]" "//examples:hello_pkg_user[run_check]"
 )
+# Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
+# was observed to skip the sub-target, so never rely on combining them with a
+# recursive pattern.)
+RUN_CHECKS=("//examples:hello[run_check]" "//examples:hello_pkg_user[run_check]")
+
+# The execution platform disables local execution outright; this reads the
+# build log to confirm it. Only meaningful when something executed (a remote
+# run or a remote cache hit): an invocation with nothing to do proves
+# nothing, and says so.
+check_remote() { # name
+    local name=$1 executed
+    if ! "$BUCK2" log what-ran > "$LOG/$name.what_ran.txt" 2>&1; then
+        fail "$name: cannot read what-ran"
+        return
+    fi
+    executed=$(awk -F'\t' 'NF >= 3' "$LOG/$name.what_ran.txt" | wc -l)
+    if awk -F'\t' 'NF >= 3 && $3 !~ /^(re\(|cache)/' "$LOG/$name.what_ran.txt" | grep -q .; then
+        fail "$name: an action ran outside remote execution (see $LOG/$name.what_ran.txt)"
+    elif [ "$executed" = 0 ]; then
+        echo "SKIP  $name: nothing executed in this invocation, remote-only not re-observed"
+    else
+        pass "$name: all $executed executed actions were remote runs or remote cache hits"
+    fi
+}
 
 # 1
 expect_green examples "${EXAMPLES[@]}"
-# The execution platform disables local execution outright; this reads the
-# build log to confirm it. Only meaningful when something executed: a fully
-# up-to-date build executes nothing and proves nothing, and says so.
-if ! "$BUCK2" log what-ran > "$LOG/what_ran.txt" 2>&1; then
-    fail "examples: cannot read what-ran"
-else
-    executed=$(awk -F'\t' 'NF >= 4' "$LOG/what_ran.txt" | wc -l)
-    if awk -F'\t' 'NF >= 4 && $4 !~ /^(re|cache)/' "$LOG/what_ran.txt" | grep -q .; then
-        fail "examples: an action ran outside remote execution (see $LOG/what_ran.txt)"
-    elif [ "$executed" = 0 ]; then
-        echo "SKIP  examples: nothing executed in this invocation (already up to date), remote-only not re-observed"
-    else
-        pass "examples: all $executed executed actions were remote or cache hits"
-    fi
-fi
+check_remote examples
+expect_green run_checks "${RUN_CHECKS[@]}"
+check_remote run_checks
 
 # 2
 expect_red gate_red "GATED TEST FAILED" checks//libgate_bad:libgate_bad
@@ -72,7 +83,7 @@ expect_red missing_dep "unable to locate module 'hellopkg'" checks//missing_dep:
 expect_red closure_refusal "REFUSING: toolchain member" checks//closure_refusal:hello_incomplete_toolchain
 
 # 5
-query="deps(set($(printf '"%s" ' "${EXAMPLES[@]}")))"
+query="deps(set($(printf '"%s" ' "${EXAMPLES[@]}" "${RUN_CHECKS[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
     fail "host paths: the scan pattern does not detect a planted absolute path"
