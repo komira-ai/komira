@@ -218,7 +218,11 @@ The multi-NUMA run checks the hardware it got, not only its label:
 - on a stand-in platform whose multi-NUMA workers are the single-NUMA
   `mojo_compile` workers ([`numa/standin`](numa/standin/BUCK)), both the
   build's run check and `buck2 test` refuse to start
-  (`numa_guard: REFUSING to run`).
+  (`numa_guard: REFUSING to run`);
+- on that stand-in, the `buck2 test` command minus the guard
+  (`checks//numa:gate_run`, [`numa/defs.bzl`](numa/defs.bzl)) exits 0
+  through the gate runner: the runner accepts the arguments this rule gives
+  it, which the guard's refusal would otherwise hide.
 
 ```sh
 buck2 build checks//numa:guard_cases --show-full-simple-output
@@ -444,6 +448,22 @@ the case); a tree spinning itself or through a child, a short idle and a
 disabled watchdog run to completion; a compiler error keeps its status;
 malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
 that never fires is a failed case, not a hung action.
+
+## 29. Test data, environment and scratch
+
+[`test_data/`](test_data/BUCK): `declared` builds, its test opening a
+declared fixture by its repository path from the staged `share/`, and two
+further tests each finding `TEST_TMPDIR` set, not under `/tmp`, empty at the
+start, equal to `TMPDIR`, and the library's `test_env` value present;
+`undeclared` must fail with `GATED TEST FAILED` and the test's
+`No such file or directory` for a fixture that exists in the repository but
+was not declared. `buck2 test checks//test_data:mojo_test_data` must pass: a
+`mojo_test` with dict `data` and `env`. Five `bad_*` targets must each fail
+at analysis with their own refusal: a `..` destination, a destination that
+is also another's directory, a `test_data` key that is not a test, a
+runner-owned env name, an env name that is not a variable name. The gate test
+of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
+the examples) covers the executable-relative helpers.
 
 ## Diagnostics
 

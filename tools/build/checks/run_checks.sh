@@ -62,7 +62,10 @@
 #      refuses a multi-NUMA property set equal to the mojo_compile one; and on
 #      a stand-in platform whose multi-NUMA workers are the single-NUMA
 #      mojo_compile workers (checks//numa/standin), both the build's run
-#      check and `buck2 test` refuse to start (numa_guard: REFUSING to run).
+#      check and `buck2 test` refuse to start (numa_guard: REFUSING to run);
+#      there, the same `buck2 test` command minus the guard
+#      (checks//numa:gate_run) passes through the gate runner, which is how
+#      a multi-NUMA worker would run it.
 #  12. Actions run with their platform's property set, read per action: an
 #      uncached build of //tools/build/examples:hello (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really executes)
@@ -147,6 +150,17 @@
 #      through an orphaned member of its session while it waits), a
 #      short idle and a disabled watchdog are not killed; a compiler error
 #      keeps its exit status; malformed knobs are refused (exit 2).
+#  29. The test runtime contract (checks//test_data): a gated test opens a
+#      declared fixture by its repository path from its staged share/, and a
+#      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
+#      is private, empty and not /tmp in each of two actions; test_env and a
+#      mojo_test's data and env arrive under `buck2 test`; a red test stays
+#      red with test_env {HELD: 1} (library) and env {BIN: true} (mojo_test);
+#      the runner itself, run twice in ONE action directory
+#      (checks//test_data:runner_cases), gives each run its own empty
+#      TEST_TMPDIR under that directory and removes it, and no --env reaches
+#      the verdict; five inadmissible data/env declarations are refused at
+#      analysis.
 set -uo pipefail
 
 umbrella=1
@@ -222,6 +236,7 @@ expect_red() { # name, required text, target
 EXAMPLES=(
     //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user
     //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
+    //tools/build/mojo/runtime_paths:komira_runtime_paths
     //tools/build/examples:hello_bundle //tools/build/package:level_test
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
@@ -495,6 +510,16 @@ else
     else
         pass "multi-NUMA hardware: buck2 test refused on single-NUMA workers"
     fi
+    if ! timeout 600 "$BUCK2" build "${STANDIN[@]}" checks//numa:gate_run --show-full-simple-output > "$LOG/numa_gate_run.txt" 2> "$LOG/numa_gate_run.log"; then
+        fail "multi-NUMA gate run: checks//numa:gate_run failed to build (see $LOG/numa_gate_run.log)"
+    else
+        report=$(tail -n 1 "$LOG/numa_gate_run.txt")
+        if [ "$(head -n 1 "$report")" = "rc 0" ]; then
+            pass "multi-NUMA gate run: the rule's buck2 test command, minus the guard, passes the gate runner"
+        else
+            fail "multi-NUMA gate run: $(head -n 4 "$report" | tr '\n' ' ')(see $report)"
+        fi
+    fi
 fi
 
 # 12
@@ -748,6 +773,40 @@ else
         pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
     fi
 fi
+
+# 29
+expect_green td_declared checks//test_data:declared
+expect_red td_undeclared "No such file or directory" checks//test_data:undeclared
+expect_red td_undeclared_gate "GATED TEST FAILED: checks//test_data:undeclared:" checks//test_data:undeclared
+if timeout 900 "$BUCK2" test checks//test_data:mojo_test_data > "$LOG/td_mojo_test.log" 2>&1; then
+    pass "td_mojo_test: buck2 test of a mojo_test with data and env"
+else
+    fail "td_mojo_test: buck2 test checks//test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
+fi
+expect_red td_env_held "GATED TEST FAILED: checks//test_data:env_held:tests/test_red.mojo" checks//test_data:env_held
+if timeout 900 "$BUCK2" test checks//test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then
+    fail "td_env_bin: buck2 test checks//test_data:env_bin passed, but its test is red (env BIN reached the runner; see $LOG/td_env_bin.log)"
+elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
+    pass "td_env_bin: env {BIN: true} does not replace a red mojo_test"
+else
+    fail "td_env_bin: failed without the test's own failure (see $LOG/td_env_bin.log)"
+fi
+if ! "$BUCK2" build checks//test_data:runner_cases --show-full-simple-output > "$LOG/runner_cases.txt" 2> "$LOG/runner_cases.log"; then
+    fail "gate runner cases: $(grep '^BAD ' "$LOG/runner_cases.log" | sort -u | tr '\n' ' ')(see $LOG/runner_cases.log)"
+else
+    report=$(tail -n 1 "$LOG/runner_cases.txt")
+    ok=$(grep -c '^ok ' "$report" || true)
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 5 ]; then
+        fail "gate runner cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
+    else
+        pass "gate runner: $ok cases in one action (private TEST_TMPDIR per run; env cannot reach the verdict)"
+    fi
+fi
+expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" checks//test_data:bad_dest
+expect_red td_bad_dest_clash "is both a file and the directory of" checks//test_data:bad_dest_clash
+expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" checks//test_data:bad_data_entry
+expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" checks//test_data:bad_env_owned
+expect_red td_bad_env_name "is not a shell variable name" checks//test_data:bad_env_name
 
 # 9
 if [ "$MODE" = local ]; then

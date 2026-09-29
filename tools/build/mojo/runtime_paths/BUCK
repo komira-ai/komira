@@ -1,0 +1,21 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Where a running program finds its files, from its own executable path; see
+# __init__.mojo. The gate test also exercises the test runtime contract
+# (tools/build/mojo/README.md, "Test data, environment and scratch").
+mojo_library(
+    name = "komira_runtime_paths",
+    srcs = [
+        "__init__.mojo",
+        "paths.mojo",
+    ],
+    test_srcs = ["tests/test_runtime_paths.mojo"],
+    test_data = {
+        "tests/test_runtime_paths.mojo": {
+            "renamed/other.txt": "fixtures/other.txt",
+            "tools/build/mojo/runtime_paths/fixtures/greeting.txt": "fixtures/greeting.txt",
+        },
+    },
+    test_env = {"KOMIRA_TEST_GREETING": "hello, env"},
+    visibility = ["PUBLIC"],
+)

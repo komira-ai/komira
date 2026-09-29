@@ -10,14 +10,15 @@ Output layout of a library `L` with import name `I`:
     L/pkg/I.mojoc          the public package: a copy of the ungated one that
                            takes every test's PASS marker as an input
     L/src/I/...            the staged package sources
-    L/tests/<t>/...        one binary and one PASS marker per test
+    L/tests/<t>/...        per test: its binary, its staged tree `root/`
+                           (bin/<t> and share/, see _test_root) and its marker
 
 Each `-I` directory given to the compiler holds exactly one `.mojoc`, so a
 staged source directory can never shadow a package.
 """
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
+load(":providers.bzl", "MojoGateRunInfo", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -252,6 +253,80 @@ def _admit_known_failing(ctx):
         fail("{}: holds all {} tests. That gate asserts nothing passes; a library whose whole suite is red has a defect, not a debt.".format(where, len(keys)))
     return held
 
+# ---- the test runtime contract ------------------------------------------
+#
+# A test runs from a staged tree built for it alone:
+#
+#     root/bin/<test>        the test binary (a copy, so /proc/self/exe is here)
+#     root/share/<dest>      each declared data file
+#
+# gate_runner.sh starts the test with root/share as its current directory, so
+# a relative path to a declared file opens and any other relative path names
+# nothing. komira//tools/build/mojo/runtime_paths finds root/share from the
+# executable, the same way a bundle finds its share/.
+
+# Names the runner sets itself; a test may not override them through env.
+_RUNNER_ENV = ["PATH", "LD_LIBRARY_PATH", "LD_PRELOAD", "DYLD_LIBRARY_PATH", "DYLD_FALLBACK_LIBRARY_PATH", "DYLD_INSERT_LIBRARIES", "TMPDIR", "TEST_TMPDIR", "HOME", "PWD"]
+
+def _data_map(ctx, where, data):
+    """{dest: artifact} for a `data` value: a list of sources (each staged at
+    its path from the cell root) or a dict {dest: source}."""
+    if type(data) == type([]):
+        out = {}
+        pkg = ctx.label.package
+        for a in data:
+            if not a.is_source:
+                fail("{}: {} is a build output; a list entry is staged at its source path, so name a build output in the dict form, {{dest: source}}".format(where, a))
+            # A source's short_path is relative to its package.
+            out[pkg + "/" + a.short_path if pkg else a.short_path] = a
+    else:
+        out = dict(data)
+    prefixes = {}
+    for dest in out:
+        if dest == "" or dest.startswith("/") or dest.endswith("/"):
+            fail("{}: data destination {} must be a relative file path".format(where, repr(dest)))
+        parts = dest.split("/")
+        for part in parts:
+            if part in ("", ".", ".."):
+                fail("{}: data destination {} holds an empty, `.` or `..` segment".format(where, repr(dest)))
+        for i in range(1, len(parts)):
+            prefixes["/".join(parts[:i])] = dest
+    for dest in out:
+        if dest in prefixes:
+            fail("{}: data destination {} is both a file and the directory of {}".format(where, repr(dest), repr(prefixes[dest])))
+    return out
+
+def _env_args(where, env):
+    """`--env NAME=VALUE` runner arguments, after refusing names the runner owns."""
+    args = []
+    for name in sorted(env.keys()):
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
+            fail("{}: env name {} is not a shell variable name".format(where, repr(name)))
+        if name in _RUNNER_ENV:
+            fail("{}: env sets {}, which the test runner sets itself (runner-owned: {})".format(where, name, ", ".join(_RUNNER_ENV)))
+        args += ["--env", "{}={}".format(name, env[name])]
+    return args
+
+def _test_root(ctx, path, exe, data):
+    """The staged tree of one test; returns (root, binary inside it)."""
+    name = exe.basename
+    files = {"bin/" + name: exe}
+    for dest, a in data.items():
+        files["share/" + dest] = a
+    root = ctx.actions.copied_dir(path, files)
+    return root, root.project("bin/" + name)
+
+def _admit_test_data(ctx):
+    """{test_srcs key: {dest: artifact}} for mojo_library's `test_data`."""
+    keys = [_test_key(ctx, t) for t in ctx.attrs.test_srcs]
+    where = "{}: test_data".format(ctx.label.raw_target())
+    out = {}
+    for entry, data in ctx.attrs.test_data.items():
+        if entry not in keys:
+            fail("{}[{}]: not a test_srcs entry (entries: {}). Data keyed to no test is staged for nothing.".format(where, repr(entry), ", ".join(keys)))
+        out[entry] = _data_map(ctx, "{}[{}]".format(where, repr(entry)), data)
+    return out
+
 def _check_import_name(ctx, name):
     # The `.mojoc` basename is the import name. A name that is not a Mojo
     # identifier (a dot, a dash) yields a package that cannot be imported and
@@ -287,6 +362,8 @@ def _library_impl(ctx):
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
 
     held = _admit_known_failing(ctx)
+    test_data = _admit_test_data(ctx)
+    env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
 
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
@@ -309,7 +386,8 @@ def _library_impl(ctx):
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
-        hold = [key, held[key]["issue"], held[key]["reason"]] if key in held else []
+        root, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
+        hold = ["--hold", key, held[key]["issue"], held[key]["reason"]] if key in held else []
         ctx.actions.run(
             cmd_args(
                 tc.busybox,
@@ -318,14 +396,16 @@ def _library_impl(ctx):
                 tc.busybox,
                 tc.compiler,
                 "{}:{}".format(ctx.label.raw_target(), t.short_path),
-                exe,
+                staged,
                 marker.as_output(),
+                env_args,
                 hold,
+                hidden = root,
             ),
             category = "mojo_gated_test",
             identifier = stem,
         )
-        test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [exe])]
+        test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
         markers.append(marker)
 
     if markers:
@@ -376,6 +456,10 @@ mojo_library = rule(
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = "3"),
         "test_srcs": attrs.list(attrs.source(), default = []),
+        # {test_srcs path: data}, data as in mojo_test's `data`; see _admit_test_data.
+        "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
+        # Environment for every gated test of this library.
+        "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
         # {test_srcs path: {"issue": ..., "reason": ...}}; see _admit_known_failing.
         "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
     } | _TOOLCHAIN_ATTR,
@@ -437,6 +521,8 @@ def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
     run_dir, command = _runnable(ctx, tc, exe)
     shared = _shared(ctx, tc)
+    # Built only when a mojo_multi_numa_test runs this binary as its test.
+    test_root, test_binary = _test_root(ctx, ctx.label.name + ".testroot", exe, {})
     return [
         DefaultInfo(
             default_output = exe,
@@ -447,7 +533,7 @@ def _binary_impl(ctx):
             },
         ),
         RunInfo(args = command),
-        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
+        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir, test_root = test_root, test_binary = test_binary, test_env = []),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
     ]
 
@@ -469,26 +555,35 @@ mojo_binary = rule(
 
 def _test_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build_test")
+    where = str(ctx.label.raw_target())
+    data = _data_map(ctx, where + ": data", ctx.attrs.data)
+    env_args = _env_args(where + ": env", ctx.attrs.env)
+    root, staged = _test_root(ctx, ctx.label.name + ".testroot", exe, data)
     command = cmd_args(
         tc.busybox,
         "sh",
         tc.gate_runner,
         tc.busybox,
         tc.compiler,
-        str(ctx.label.raw_target()),
-        exe,
+        where,
+        staged,
         "/dev/null",
+        env_args,
+        hidden = root,
     )
     run_dir, run_command = _runnable(ctx, tc, exe)
     return [
         DefaultInfo(
             default_output = exe,
-            sub_targets = {"runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = run_command)]},
+            sub_targets = {
+                "runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = run_command)],
+                "testroot": [DefaultInfo(default_output = root)],
+            },
         ),
         # `buck2 run` of a test runs its binary directly, from the runnable
         # directory; `buck2 test` runs it through the gate runner on RE.
         RunInfo(args = run_command),
-        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir),
+        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir, test_root = root, test_binary = staged, test_env = env_args),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],
@@ -499,6 +594,11 @@ def _test_impl(ctx):
 mojo_test = rule(
     impl = _test_impl,
     attrs = _EXECUTABLE_ATTRS | {
+        # Files staged under the test's share/, its current directory: a list
+        # of sources (each at its path from the cell root) or {dest: source}.
+        "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = []),
+        # Environment for the test; names the runner sets are refused.
+        "env": attrs.dict(attrs.string(), attrs.string(), default = {}),
         "labels": attrs.list(attrs.string(), default = []),
     },
 )
@@ -532,22 +632,27 @@ def _multi_numa_test_impl(ctx):
     # platform): it must start with no library path, exit 0, and print
     # `expected_stdout` when that is set.
     stdout = _run_check(ctx, tc, runnable.command, guard)
-    test_command = cmd_args(
-        guard,
+    # `buck2 test` runs the binary as a test, exactly as mojo_test does: from
+    # its staged tree (bin/<name>, with the data and env of a mojo_test), with
+    # private scratch. gate_runner puts <dir>/lib on the library path; the
+    # runnable directory holds lib/, so the compiler is not an input of the run.
+    gate_run = cmd_args(
         tc.busybox,
         "sh",
         tc.gate_runner,
         tc.busybox,
-        # gate_runner puts <dir>/lib on the library path; the runnable
-        # directory holds lib/, so the compiler is not an input of the run.
         runnable.run_dir,
         str(ctx.label.raw_target()),
-        runnable.run_dir.project(runnable.binary),
+        runnable.test_binary,
         "/dev/null",
+        runnable.test_env,
+        hidden = runnable.test_root,
     )
+    test_command = cmd_args(guard, gate_run)
     return [
         DefaultInfo(default_output = stdout),
         RunInfo(args = runnable.command),
+        MojoGateRunInfo(command = gate_run),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [test_command],
