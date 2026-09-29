@@ -1,9 +1,71 @@
 {
  "format": 1,
  "generated_by": "python3 tools/kg/kg.py graph",
- "inputs": "a01eac49d93db9933dda86aa80aaa247707852bcb289c7fcc1290d18b3bcfc44",
- "query": "kind(\".*\", //... + checks//... + mojo//... + toolchains//...)",
+ "inputs": "5b8acaae1b09374103fe050de9c99459121371538b8625c0f1e94fb42b93d87c",
+ "query": "kind(\".*\", //... + checks//... + toolchains//...)",
  "targets": {
+  "checks//bundle_parity:parity": {
+   "deps": [
+    "checks//bundle_parity:parity.sh",
+    "checks//bundle_parity:probe",
+    "checks//bundle_parity:probe_bundle",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "bundle_parity"
+  },
+  "checks//bundle_parity:parity.sh": {
+   "kind": "export_file"
+  },
+  "checks//bundle_parity:probe": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/checks/bundle_parity/probe.mojo"
+   ]
+  },
+  "checks//bundle_parity:probe_bundle": {
+   "deps": [
+    "checks//bundle_parity:probe",
+    "komira//tools/build/package/launcher:sources",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "_mojo_bundle"
+  },
+  "checks//c_deps:bad_dep": {
+   "deps": [
+    "checks//c_deps:not_a_library",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/checks/c_deps/main.mojo"
+   ]
+  },
+  "checks//c_deps:c_linked": {
+   "deps": [
+    "komira//tools/build/examples/cshim:add",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/checks/c_deps/main.mojo"
+   ]
+  },
+  "checks//c_deps:c_missing": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/checks/c_deps/main.mojo"
+   ]
+  },
+  "checks//c_deps:not_a_library": {
+   "kind": "export_file"
+  },
   "checks//closure_refusal:compiler_missing_member": {
    "deps": [
     "toolchains//:mojo"
@@ -16,22 +78,55 @@
    ],
    "kind": "mojo_binary",
    "srcs": [
-    "checks/closure_refusal/hello.mojo"
+    "tools/build/checks/closure_refusal/hello.mojo"
    ]
   },
   "checks//closure_refusal:incomplete_toolchain": {
    "deps": [
     "checks//closure_refusal:compiler_missing_member",
-    "mojo//:gate_runner.sh",
-    "mojo//:launch.sh",
-    "mojo//:mojo_wrapper.sh",
-    "mojo//:numa_guard.sh",
-    "mojo//:run_check.sh",
-    "toolchains//:busybox",
-    "toolchains//:mojo_runtime",
-    "toolchains//:zig"
+    "komira//tools/build/mojo:gate_runner.sh",
+    "komira//tools/build/mojo:launch.sh",
+    "komira//tools/build/mojo:mojo_wrapper.sh",
+    "komira//tools/build/mojo:numa_guard.sh",
+    "komira//tools/build/mojo:run_check.sh",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:mojo_runtime",
+    "komira//tools/build/toolchains:zig"
    ],
    "kind": "mojo_toolchain"
+  },
+  "checks//darwin:host_census": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "darwin_host_census"
+  },
+  "checks//darwin:macho.py": {
+   "kind": "export_file"
+  },
+  "checks//formats:long_bundle": {
+   "deps": [
+    "komira//tools/build/examples:hello",
+    "komira//tools/build/package/launcher:sources",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "_mojo_bundle"
+  },
+  "checks//formats:long_image": {
+   "deps": [
+    "checks//formats:long_bundle",
+    "komira//tools/build/package:komira_pack",
+    "komira//tools/build/toolchains:distroless_base"
+   ],
+   "kind": "_oci_image"
+  },
+  "checks//formats:long_tarball": {
+   "deps": [
+    "checks//formats:long_bundle",
+    "komira//tools/build/package:komira_pack"
+   ],
+   "kind": "_bundle_tarball"
   },
   "checks//libgate_bad:bypass_consumer": {
    "deps": [
@@ -40,7 +135,7 @@
    ],
    "kind": "mojo_binary",
    "srcs": [
-    "checks/libgate_bad/consumer.mojo"
+    "tools/build/checks/libgate_bad/consumer.mojo"
    ]
   },
   "checks//libgate_bad:gated_consumer": {
@@ -50,7 +145,7 @@
    ],
    "kind": "mojo_binary",
    "srcs": [
-    "checks/libgate_bad/consumer.mojo"
+    "tools/build/checks/libgate_bad/consumer.mojo"
    ]
   },
   "checks//libgate_bad:libgate_bad": {
@@ -59,11 +154,20 @@
    ],
    "kind": "mojo_library",
    "srcs": [
-    "checks/libgate_bad/__init__.mojo",
-    "checks/libgate_bad/payload.mojo"
+    "tools/build/checks/libgate_bad/__init__.mojo",
+    "tools/build/checks/libgate_bad/payload.mojo"
    ],
    "test_srcs": [
-    "checks/libgate_bad/tests/test_payload_deliberate_failure.mojo"
+    "tools/build/checks/libgate_bad/tests/test_payload_deliberate_failure.mojo"
+   ]
+  },
+  "checks//location_path:main": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/checks/location_path/main.mojo"
    ]
   },
   "checks//missing_dep:missing_dep": {
@@ -72,14 +176,14 @@
    ],
    "kind": "mojo_binary",
    "srcs": [
-    "checks/missing_dep/main.mojo"
+    "tools/build/checks/missing_dep/main.mojo"
    ]
   },
   "checks//numa/standin:single_numa_standin": {
    "deps": [
-    "komira//platforms:exec-light",
-    "komira//platforms:exec-mojo",
-    "komira//platforms:exec-mojo-multi-numa"
+    "komira//tools/build/platforms:exec-light",
+    "komira//tools/build/platforms:exec-mojo",
+    "komira//tools/build/platforms:exec-mojo-multi-numa"
    ],
    "kind": "remote_execution_platforms"
   },
@@ -95,7 +199,7 @@
    ],
    "kind": "mojo_binary",
    "srcs": [
-    "checks/numa/hello.mojo"
+    "tools/build/checks/numa/hello.mojo"
    ]
   },
   "checks//numa:hello_multi_numa": {
@@ -104,6 +208,94 @@
     "toolchains//:mojo_multi_numa"
    ],
    "kind": "mojo_multi_numa_test"
+  },
+  "checks//proto:komira_serde": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "tools/build/checks/proto/komira_serde/__init__.mojo"
+   ]
+  },
+  "checks//proto:person_proto": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/v1/person.proto"
+   ]
+  },
+  "checks//proto:person_renamed_proto": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/renamed/person.proto"
+   ]
+  },
+  "checks//proto:team_proto": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/team/team.proto"
+   ]
+  },
+  "checks//proto:team_unbundled_proto": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/team/team.proto"
+   ]
+  },
+  "checks//proto:test_person": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/checks/proto/test_person.mojo"
+   ]
+  },
+  "checks//proto:test_person_renamed": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_renamed_proto",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/checks/proto/test_person.mojo"
+   ]
+  },
+  "checks//proto:test_team": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:team_proto",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/checks/proto/test_team.mojo"
+   ]
   },
   "checks//re_probe:probe": {
    "deps": [
@@ -117,220 +309,887 @@
    ],
    "kind": "compiler_loader_trace"
   },
-  "komira//examples/libgate_ok:libgate_ok": {
+  "checks//rust_missing_dep:main": {
    "deps": [
+    "toolchains//:rust"
+   ],
+   "kind": "rust_binary",
+   "srcs": [
+    "tools/build/checks/rust_missing_dep/src/main.rs"
+   ]
+  },
+  "komira//third_party/rust:anyhow": {
+   "deps": [
+    "komira//third_party/rust:anyhow.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:anyhow.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:anyhow.src": {
+   "deps": [
+    "komira//third_party/rust:anyhow.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:bytes": {
+   "deps": [
+    "komira//third_party/rust:bytes.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:bytes.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:bytes.src": {
+   "deps": [
+    "komira//third_party/rust:bytes.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:either": {
+   "deps": [
+    "komira//third_party/rust:either.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:either.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:either.src": {
+   "deps": [
+    "komira//third_party/rust:either.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:itertools": {
+   "deps": [
+    "komira//third_party/rust:either",
+    "komira//third_party/rust:itertools.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:itertools.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:itertools.src": {
+   "deps": [
+    "komira//third_party/rust:itertools.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:proc-macro2": {
+   "deps": [
+    "komira//third_party/rust:proc-macro2.src",
+    "komira//third_party/rust:unicode-ident",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:proc-macro2.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:proc-macro2.src": {
+   "deps": [
+    "komira//third_party/rust:proc-macro2.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:prost": {
+   "deps": [
+    "komira//third_party/rust:bytes",
+    "komira//third_party/rust:prost-derive",
+    "komira//third_party/rust:prost.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:prost-derive": {
+   "deps": [
+    "komira//third_party/rust:anyhow",
+    "komira//third_party/rust:itertools",
+    "komira//third_party/rust:proc-macro2",
+    "komira//third_party/rust:prost-derive.src",
+    "komira//third_party/rust:quote",
+    "komira//third_party/rust:syn",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:prost-derive.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:prost-derive.src": {
+   "deps": [
+    "komira//third_party/rust:prost-derive.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:prost-types": {
+   "deps": [
+    "komira//third_party/rust:prost",
+    "komira//third_party/rust:prost-types.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:prost-types.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:prost-types.src": {
+   "deps": [
+    "komira//third_party/rust:prost-types.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:prost.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:prost.src": {
+   "deps": [
+    "komira//third_party/rust:prost.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:quote": {
+   "deps": [
+    "komira//third_party/rust:proc-macro2",
+    "komira//third_party/rust:quote.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:quote.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:quote.src": {
+   "deps": [
+    "komira//third_party/rust:quote.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:syn": {
+   "deps": [
+    "komira//third_party/rust:proc-macro2",
+    "komira//third_party/rust:quote",
+    "komira//third_party/rust:syn.src",
+    "komira//third_party/rust:unicode-ident",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:syn.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:syn.src": {
+   "deps": [
+    "komira//third_party/rust:syn.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/rust:unicode-ident": {
+   "deps": [
+    "komira//third_party/rust:unicode-ident.src",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_library"
+  },
+  "komira//third_party/rust:unicode-ident.crate": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/rust:unicode-ident.src": {
+   "deps": [
+    "komira//third_party/rust:unicode-ident.crate",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "crate_source"
+  },
+  "komira//third_party/snappy:config": {
+   "kind": "staged_files",
+   "srcs": [
+    "third_party/snappy/config.h"
+   ]
+  },
+  "komira//third_party/snappy:snappy": {
+   "deps": [
+    "komira//third_party/snappy:config",
+    "komira//third_party/snappy:src",
+    "komira//tools/build/toolchains:libcxx",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/snappy:src[snappy-c.cc]",
+    "komira//third_party/snappy:src[snappy-sinksource.cc]",
+    "komira//third_party/snappy:src[snappy-stubs-internal.cc]",
+    "komira//third_party/snappy:src[snappy.cc]"
+   ]
+  },
+  "komira//third_party/snappy:snappy-1.2.2.tar.gz": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/snappy:src": {
+   "deps": [
+    "komira//third_party/snappy:snappy-1.2.2.tar.gz",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "archive_files"
+  },
+  "komira//tools/build/examples/cshim:add": {
+   "deps": [
+    "komira//tools/build/examples/cshim:add_files",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//tools/build/examples/cshim:add_files[add.c]"
+   ]
+  },
+  "komira//tools/build/examples/cshim:add_files": {
+   "kind": "staged_files",
+   "srcs": [
+    "tools/build/examples/cshim/add.c",
+    "tools/build/examples/cshim/add.h"
+   ]
+  },
+  "komira//tools/build/examples/cshim:cadd": {
+   "deps": [
+    "komira//tools/build/examples/cshim:add",
     "toolchains//:mojo"
    ],
    "kind": "mojo_library",
    "srcs": [
-    "examples/libgate_ok/__init__.mojo",
-    "examples/libgate_ok/payload.mojo"
+    "tools/build/examples/cshim/cadd/__init__.mojo"
    ],
    "test_srcs": [
-    "examples/libgate_ok/tests/test_payload_passes.mojo"
+    "tools/build/examples/cshim/tests/test_cadd.mojo"
    ]
   },
-  "komira//examples:hello": {
+  "komira//tools/build/examples/cshim:cadd_user": {
    "deps": [
+    "komira//tools/build/examples/cshim:cadd",
     "toolchains//:mojo"
    ],
    "kind": "mojo_binary",
    "srcs": [
-    "examples/hello.mojo"
+    "tools/build/examples/cshim/cadd_user.mojo"
    ]
   },
-  "komira//examples:hello_pkg_user": {
+  "komira//tools/build/examples/cshim:test_add_direct": {
    "deps": [
-    "komira//examples:hellopkg",
-    "toolchains//:mojo"
-   ],
-   "kind": "mojo_binary",
-   "srcs": [
-    "examples/hello_pkg_user.mojo"
-   ]
-  },
-  "komira//examples:hellopkg": {
-   "deps": [
-    "toolchains//:mojo"
-   ],
-   "kind": "mojo_library",
-   "srcs": [
-    "examples/hellopkg/__init__.mojo",
-    "examples/hellopkg/greet.mojo"
-   ]
-  },
-  "komira//examples:test_hellopkg": {
-   "deps": [
-    "komira//examples:hellopkg",
+    "komira//tools/build/examples/cshim:add",
     "toolchains//:mojo"
    ],
    "kind": "mojo_test",
    "srcs": [
-    "examples/test_hellopkg.mojo"
+    "tools/build/examples/cshim/test_add_direct.mojo"
    ]
   },
-  "komira//platforms/remote:remote": {
+  "komira//tools/build/examples/libgate_ok:libgate_ok": {
    "deps": [
-    "komira//platforms:exec-light",
-    "komira//platforms:exec-mojo"
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "tools/build/examples/libgate_ok/__init__.mojo",
+    "tools/build/examples/libgate_ok/payload.mojo"
+   ],
+   "test_srcs": [
+    "tools/build/examples/libgate_ok/tests/test_payload_passes.mojo"
+   ]
+  },
+  "komira//tools/build/examples/rust:prost_roundtrip": {
+   "deps": [
+    "komira//third_party/rust:prost",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_binary",
+   "srcs": [
+    "tools/build/examples/rust/src/main.rs"
+   ]
+  },
+  "komira//tools/build/examples/snappy:test_snappy": {
+   "deps": [
+    "komira//third_party/snappy:snappy",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/examples/snappy/test_snappy.mojo"
+   ]
+  },
+  "komira//tools/build/examples:hello": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/examples/hello.mojo"
+   ]
+  },
+  "komira//tools/build/examples:hello_bundle": {
+   "deps": [
+    "komira//tools/build/examples:hello",
+    "komira//tools/build/package/launcher:sources",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "_mojo_bundle"
+  },
+  "komira//tools/build/examples:hello_image": {
+   "deps": [
+    "komira//tools/build/examples:hello_bundle",
+    "komira//tools/build/package:komira_pack",
+    "komira//tools/build/toolchains:distroless_base"
+   ],
+   "kind": "_oci_image"
+  },
+  "komira//tools/build/examples:hello_pkg_user": {
+   "deps": [
+    "komira//tools/build/examples:hellopkg",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/examples/hello_pkg_user.mojo"
+   ]
+  },
+  "komira//tools/build/examples:hello_tarball": {
+   "deps": [
+    "komira//tools/build/examples:hello_bundle",
+    "komira//tools/build/package:komira_pack"
+   ],
+   "kind": "_bundle_tarball"
+  },
+  "komira//tools/build/examples:hellopkg": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "tools/build/examples/hellopkg/__init__.mojo",
+    "tools/build/examples/hellopkg/greet.mojo"
+   ]
+  },
+  "komira//tools/build/examples:test_hellopkg": {
+   "deps": [
+    "komira//tools/build/examples:hellopkg",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/examples/test_hellopkg.mojo"
+   ]
+  },
+  "komira//tools/build/mojo/darwin:busybox.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo/darwin:cc": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo/darwin:dyld_prelude.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo/darwin:host_identity.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo/darwin:mojo_wrapper.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:conda_unpack.zig": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:gate_runner.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:launch.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:mojo_wrapper.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:numa_guard.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:run_check.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/mojo:zig_cc_launcher.zig": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/package/launcher:sources": {
+   "kind": "filegroup",
+   "srcs": [
+    "tools/build/package/launcher/cpu_level.h",
+    "tools/build/package/launcher/cpu_models.h",
+    "tools/build/package/launcher/launcher.c",
+    "tools/build/package/launcher/level_test.c"
+   ]
+  },
+  "komira//tools/build/package:komira_pack": {
+   "deps": [
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "zig_exe"
+  },
+  "komira//tools/build/package:level_test": {
+   "deps": [
+    "komira//tools/build/package/launcher:sources",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "launcher_level_test"
+  },
+  "komira//tools/build/platforms/remote:remote": {
+   "deps": [
+    "komira//tools/build/platforms:exec-light",
+    "komira//tools/build/platforms:exec-mojo"
    ],
    "kind": "remote_execution_platforms"
   },
-  "komira//platforms:exec-light": {
+  "komira//tools/build/platforms:darwin-arm64": {
    "deps": [
-    "komira//platforms:light",
-    "komira//platforms:linux-x86_64"
+    "prelude//cpu/constraints:arm64",
+    "prelude//os/constraints:macos"
    ],
    "kind": "platform"
   },
-  "komira//platforms:exec-mojo": {
+  "komira//tools/build/platforms:exec-light": {
    "deps": [
-    "komira//platforms:linux-x86_64",
-    "komira//platforms:mojo_compile",
-    "komira//platforms:numa_single"
+    "komira//tools/build/platforms:light",
+    "komira//tools/build/platforms:linux-x86_64"
    ],
    "kind": "platform"
   },
-  "komira//platforms:exec-mojo-multi-numa": {
+  "komira//tools/build/platforms:exec-mojo": {
    "deps": [
-    "komira//platforms:linux-x86_64",
-    "komira//platforms:mojo_compile",
-    "komira//platforms:numa_multi"
+    "komira//tools/build/platforms:linux-x86_64",
+    "komira//tools/build/platforms:mojo_compile",
+    "komira//tools/build/platforms:numa_single"
    ],
    "kind": "platform"
   },
-  "komira//platforms:exec_class": {
+  "komira//tools/build/platforms:exec-mojo-darwin-arm64": {
+   "deps": [
+    "komira//tools/build/platforms:darwin-arm64",
+    "komira//tools/build/platforms:mojo_compile"
+   ],
+   "kind": "platform"
+  },
+  "komira//tools/build/platforms:exec-mojo-multi-numa": {
+   "deps": [
+    "komira//tools/build/platforms:linux-x86_64",
+    "komira//tools/build/platforms:mojo_compile",
+    "komira//tools/build/platforms:numa_multi"
+   ],
+   "kind": "platform"
+  },
+  "komira//tools/build/platforms:exec_class": {
    "kind": "constraint_setting"
   },
-  "komira//platforms:light": {
+  "komira//tools/build/platforms:light": {
    "deps": [
-    "komira//platforms:exec_class",
+    "komira//tools/build/platforms:exec_class",
     "prelude//cfg/exec_platform/marker:is_exec_platform"
    ],
    "kind": "constraint_value"
   },
-  "komira//platforms:linux-x86_64": {
+  "komira//tools/build/platforms:linux-x86_64": {
    "deps": [
     "prelude//cpu/constraints:x86_64",
     "prelude//os/constraints:linux"
    ],
    "kind": "platform"
   },
-  "komira//platforms:mojo_compile": {
+  "komira//tools/build/platforms:mojo_compile": {
    "deps": [
-    "komira//platforms:exec_class",
+    "komira//tools/build/platforms:exec_class",
     "prelude//cfg/exec_platform/marker:is_exec_platform"
    ],
    "kind": "constraint_value"
   },
-  "komira//platforms:numa": {
+  "komira//tools/build/platforms:numa": {
    "kind": "constraint_setting"
   },
-  "komira//platforms:numa_multi": {
+  "komira//tools/build/platforms:numa_multi": {
    "deps": [
-    "komira//platforms:numa",
+    "komira//tools/build/platforms:numa",
     "prelude//cfg/exec_platform/marker:is_exec_platform"
    ],
    "kind": "constraint_value"
   },
-  "komira//platforms:numa_single": {
+  "komira//tools/build/platforms:numa_single": {
    "deps": [
-    "komira//platforms:numa",
+    "komira//tools/build/platforms:numa",
     "prelude//cfg/exec_platform/marker:is_exec_platform"
    ],
    "kind": "constraint_value"
   },
-  "mojo//:conda_unpack.zig": {
-   "kind": "export_file"
-  },
-  "mojo//:gate_runner.sh": {
-   "kind": "export_file"
-  },
-  "mojo//:launch.sh": {
-   "kind": "export_file"
-  },
-  "mojo//:mojo_wrapper.sh": {
-   "kind": "export_file"
-  },
-  "mojo//:numa_guard.sh": {
-   "kind": "export_file"
-  },
-  "mojo//:run_check.sh": {
-   "kind": "export_file"
-  },
-  "toolchains//:busybox": {
-   "kind": "pinned_file"
-  },
-  "toolchains//:conda_unpack": {
+  "komira//tools/build/proto-codegen:komira_proto_codegen": {
    "deps": [
-    "mojo//:conda_unpack.zig",
-    "toolchains//:busybox",
-    "toolchains//:zig"
+    "komira//third_party/rust:prost",
+    "komira//third_party/rust:prost-types",
+    "toolchains//:rust"
    ],
-   "kind": "zig_exe"
+   "kind": "rust_library",
+   "srcs": [
+    "tools/build/proto-codegen/src/aws_conformance.rs",
+    "tools/build/proto-codegen/src/aws_in.rs",
+    "tools/build/proto-codegen/src/db_options.rs",
+    "tools/build/proto-codegen/src/emit.rs",
+    "tools/build/proto-codegen/src/emit_aws.rs",
+    "tools/build/proto-codegen/src/emit_dbstorable.rs",
+    "tools/build/proto-codegen/src/emit_index.rs",
+    "tools/build/proto-codegen/src/emit_rest.rs",
+    "tools/build/proto-codegen/src/http_options.rs",
+    "tools/build/proto-codegen/src/ir.rs",
+    "tools/build/proto-codegen/src/json.rs",
+    "tools/build/proto-codegen/src/lib.rs",
+    "tools/build/proto-codegen/src/lower.rs",
+    "tools/build/proto-codegen/src/mojo_names.rs",
+    "tools/build/proto-codegen/src/openapi_emit.rs",
+    "tools/build/proto-codegen/src/openapi_in.rs",
+    "tools/build/proto-codegen/src/overrides.rs",
+    "tools/build/proto-codegen/src/path_template.rs",
+    "tools/build/proto-codegen/src/plugin.rs",
+    "tools/build/proto-codegen/src/retry_policy.rs",
+    "tools/build/proto-codegen/src/routing_options.rs",
+    "tools/build/proto-codegen/src/xml_equiv.rs"
+   ]
   },
-  "toolchains//:libgcc_15.3.0_linux-64.conda": {
-   "kind": "pinned_file"
-  },
-  "toolchains//:libstdcxx_15.3.0_linux-64.conda": {
-   "kind": "pinned_file"
-  },
-  "toolchains//:mojo": {
+  "komira//tools/build/proto-codegen:protoc-gen-mojo": {
    "deps": [
-    "mojo//:gate_runner.sh",
-    "mojo//:launch.sh",
-    "mojo//:mojo_wrapper.sh",
-    "mojo//:numa_guard.sh",
-    "mojo//:run_check.sh",
-    "toolchains//:busybox",
-    "toolchains//:mojo_compiler",
-    "toolchains//:mojo_runtime",
-    "toolchains//:zig"
+    "komira//third_party/rust:prost",
+    "komira//third_party/rust:prost-types",
+    "komira//tools/build/proto-codegen:komira_proto_codegen",
+    "toolchains//:rust"
    ],
-   "kind": "mojo_toolchain"
+   "kind": "rust_binary",
+   "srcs": [
+    "tools/build/proto-codegen/src/main.rs"
+   ]
   },
-  "toolchains//:mojo_compiler": {
+  "komira//tools/build/proto-codegen:protoc-gen-mojo-db": {
    "deps": [
-    "toolchains//:conda_unpack",
-    "toolchains//:libgcc_15.3.0_linux-64.conda",
-    "toolchains//:libstdcxx_15.3.0_linux-64.conda",
-    "toolchains//:mojo_compiler_1.0.0_linux-64.conda"
+    "komira//third_party/rust:prost",
+    "komira//third_party/rust:prost-types",
+    "komira//tools/build/proto-codegen:komira_proto_codegen",
+    "toolchains//:rust"
+   ],
+   "kind": "rust_binary",
+   "srcs": [
+    "tools/build/proto-codegen/src/main_db.rs"
+   ]
+  },
+  "komira//tools/build/rust:rustc_wrapper.sh": {
+   "kind": "export_file"
+  },
+  "komira//tools/build/toolchains/darwin:gate_runner": {
+   "deps": [
+    "komira//tools/build/mojo/darwin:dyld_prelude.sh",
+    "komira//tools/build/mojo:gate_runner.sh",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "dyld_script"
+  },
+  "komira//tools/build/toolchains/darwin:launcher": {
+   "deps": [
+    "komira//tools/build/mojo/darwin:dyld_prelude.sh",
+    "komira//tools/build/mojo:launch.sh",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "dyld_script"
+  },
+  "komira//tools/build/toolchains/darwin:link": {
+   "deps": [
+    "komira//tools/build/mojo/darwin:cc",
+    "komira//tools/build/mojo/darwin:host_identity.sh"
+   ],
+   "kind": "mojo_darwin_link"
+  },
+  "komira//tools/build/toolchains/darwin:mojo": {
+   "deps": [
+    "komira//tools/build/mojo/darwin:busybox.sh",
+    "komira//tools/build/mojo/darwin:mojo_wrapper.sh",
+    "komira//tools/build/mojo:numa_guard.sh",
+    "komira//tools/build/mojo:run_check.sh",
+    "komira//tools/build/toolchains/darwin:gate_runner",
+    "komira//tools/build/toolchains/darwin:launcher",
+    "komira//tools/build/toolchains/darwin:link",
+    "komira//tools/build/toolchains/darwin:mojo_compiler",
+    "komira//tools/build/toolchains/darwin:mojo_runtime"
+   ],
+   "kind": "mojo_darwin_toolchain"
+  },
+  "komira//tools/build/toolchains/darwin:mojo_compiler": {
+   "deps": [
+    "komira//tools/build/toolchains/darwin:mojo_compiler_1.0.0_osx-arm64.conda",
+    "komira//tools/build/toolchains:conda_unpack"
    ],
    "kind": "conda_closure"
   },
-  "toolchains//:mojo_compiler_1.0.0_linux-64.conda": {
+  "komira//tools/build/toolchains/darwin:mojo_compiler_1.0.0_osx-arm64.conda": {
    "kind": "pinned_file"
   },
-  "toolchains//:mojo_multi_numa": {
+  "komira//tools/build/toolchains/darwin:mojo_runtime": {
    "deps": [
-    "mojo//:gate_runner.sh",
-    "mojo//:launch.sh",
-    "mojo//:mojo_wrapper.sh",
-    "mojo//:numa_guard.sh",
-    "mojo//:run_check.sh",
-    "toolchains//:busybox",
-    "toolchains//:mojo_compiler",
-    "toolchains//:mojo_runtime",
-    "toolchains//:zig"
-   ],
-   "kind": "mojo_toolchain"
-  },
-  "toolchains//:mojo_runtime": {
-   "deps": [
-    "toolchains//:busybox",
-    "toolchains//:mojo_compiler"
+    "komira//tools/build/toolchains/darwin:mojo_compiler",
+    "komira//tools/build/toolchains:busybox"
    ],
    "kind": "mojo_runtime"
   },
-  "toolchains//:zig": {
+  "komira//tools/build/toolchains/proto:protoc": {
    "deps": [
-    "toolchains//:busybox",
-    "toolchains//:zig_linux_x86_64.tar.xz"
+    "komira//tools/build/toolchains/proto:protoc-29.1-linux-x86_64.zip",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "protoc_dist"
+  },
+  "komira//tools/build/toolchains/proto:protoc-29.1-linux-x86_64.zip": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains/rust:libzlib_1.3.1_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains/rust:rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains/rust:rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains/rust:rustc_libs": {
+   "deps": [
+    "komira//tools/build/toolchains/rust:libzlib_1.3.1_linux-64.conda",
+    "komira//tools/build/toolchains:conda_unpack",
+    "komira//tools/build/toolchains:libgcc_15.3.0_linux-64.conda"
+   ],
+   "kind": "conda_libs"
+  },
+  "komira//tools/build/toolchains/rust:sysroot": {
+   "deps": [
+    "komira//tools/build/toolchains/rust:rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    "komira//tools/build/toolchains/rust:rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    "komira//tools/build/toolchains/rust:rustc_libs",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "rust_sysroot"
+  },
+  "komira//tools/build/toolchains:busybox": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:conda_unpack": {
+   "deps": [
+    "komira//tools/build/mojo:conda_unpack.zig",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "zig_exe"
+  },
+  "komira//tools/build/toolchains:distroless_base": {
+   "deps": [
+    "komira//tools/build/toolchains:distroless_base_config",
+    "komira//tools/build/toolchains:distroless_base_layer_0",
+    "komira//tools/build/toolchains:distroless_base_layer_1",
+    "komira//tools/build/toolchains:distroless_base_layer_10",
+    "komira//tools/build/toolchains:distroless_base_layer_11",
+    "komira//tools/build/toolchains:distroless_base_layer_12",
+    "komira//tools/build/toolchains:distroless_base_layer_13",
+    "komira//tools/build/toolchains:distroless_base_layer_2",
+    "komira//tools/build/toolchains:distroless_base_layer_3",
+    "komira//tools/build/toolchains:distroless_base_layer_4",
+    "komira//tools/build/toolchains:distroless_base_layer_5",
+    "komira//tools/build/toolchains:distroless_base_layer_6",
+    "komira//tools/build/toolchains:distroless_base_layer_7",
+    "komira//tools/build/toolchains:distroless_base_layer_8",
+    "komira//tools/build/toolchains:distroless_base_layer_9"
+   ],
+   "kind": "_oci_base"
+  },
+  "komira//tools/build/toolchains:distroless_base_config": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_0": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_1": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_10": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_11": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_12": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_13": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_2": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_3": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_4": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_5": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_6": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_7": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_8": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:distroless_base_layer_9": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:libcxx": {
+   "deps": [
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library"
+  },
+  "komira//tools/build/toolchains:libgcc_15.3.0_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:libstdcxx_15.3.0_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:mojo_compiler": {
+   "deps": [
+    "komira//tools/build/toolchains:conda_unpack",
+    "komira//tools/build/toolchains:libgcc_15.3.0_linux-64.conda",
+    "komira//tools/build/toolchains:libstdcxx_15.3.0_linux-64.conda",
+    "komira//tools/build/toolchains:mojo_compiler_1.0.0_linux-64.conda"
+   ],
+   "kind": "conda_closure"
+  },
+  "komira//tools/build/toolchains:mojo_compiler_1.0.0_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "komira//tools/build/toolchains:mojo_runtime": {
+   "deps": [
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:mojo_compiler"
+   ],
+   "kind": "mojo_runtime"
+  },
+  "komira//tools/build/toolchains:zig": {
+   "deps": [
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig_linux_x86_64.tar.xz"
    ],
    "kind": "zig_dist"
   },
-  "toolchains//:zig_linux_x86_64.tar.xz": {
+  "komira//tools/build/toolchains:zig_cc_launcher": {
+   "deps": [
+    "komira//tools/build/mojo:zig_cc_launcher.zig",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "zig_exe"
+  },
+  "komira//tools/build/toolchains:zig_linux_x86_64.tar.xz": {
    "kind": "pinned_file"
+  },
+  "toolchains//:cxx": {
+   "deps": [
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig",
+    "komira//tools/build/toolchains:zig_cc_launcher"
+   ],
+   "kind": "zig_cxx_toolchain"
+  },
+  "toolchains//:mojo": {
+   "deps": [
+    "komira//tools/build/toolchains/darwin:mojo",
+    "toolchains//:mojo_linux_x86_64"
+   ],
+   "kind": "toolchain_alias"
+  },
+  "toolchains//:mojo_linux_x86_64": {
+   "deps": [
+    "komira//tools/build/mojo:gate_runner.sh",
+    "komira//tools/build/mojo:launch.sh",
+    "komira//tools/build/mojo:mojo_wrapper.sh",
+    "komira//tools/build/mojo:numa_guard.sh",
+    "komira//tools/build/mojo:run_check.sh",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:mojo_compiler",
+    "komira//tools/build/toolchains:mojo_runtime",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "mojo_toolchain"
+  },
+  "toolchains//:mojo_multi_numa": {
+   "deps": [
+    "komira//tools/build/mojo:gate_runner.sh",
+    "komira//tools/build/mojo:launch.sh",
+    "komira//tools/build/mojo:mojo_wrapper.sh",
+    "komira//tools/build/mojo:numa_guard.sh",
+    "komira//tools/build/mojo:run_check.sh",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:mojo_compiler",
+    "komira//tools/build/toolchains:mojo_runtime",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "mojo_toolchain"
+  },
+  "toolchains//:mojo_proto": {
+   "deps": [
+    "komira//tools/build/proto-codegen:protoc-gen-mojo",
+    "komira//tools/build/toolchains/proto:protoc",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "mojo_proto_toolchain"
+  },
+  "toolchains//:python_bootstrap": {
+   "deps": [
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "no_python_bootstrap_toolchain"
+  },
+  "toolchains//:rust": {
+   "deps": [
+    "komira//tools/build/mojo:run_check.sh",
+    "komira//tools/build/rust:rustc_wrapper.sh",
+    "komira//tools/build/toolchains/rust:sysroot",
+    "komira//tools/build/toolchains:busybox",
+    "komira//tools/build/toolchains:zig"
+   ],
+   "kind": "rust_toolchain"
   }
  }
 }

@@ -170,25 +170,45 @@ def export(root, tree, cfg, buck2, treeish=None):
         raise KgError("the Buck2 graph would not index every cell: %s" % "; ".join(bad))
     scratch = tempfile.mkdtemp(prefix="kg-graph-")
     work = os.path.join(scratch, "tree")
+    env = buck2_env(scratch)
     try:
         _checkout(root, treeish, work)
-        return render(normalize(_uquery(work, cfg, buck2), cells(tree)), fingerprint(tree, cfg), cfg)
+        return render(normalize(_uquery(work, cfg, buck2, env), cells(tree)), fingerprint(tree, cfg), cfg)
     finally:
         try:
-            subprocess.run([buck2, "--isolation-dir", "kg", "kill"], cwd=work, capture_output=True, timeout=60)
+            subprocess.run([buck2, "--isolation-dir", "kg", "kill"], cwd=work, capture_output=True, timeout=60,
+                           env=env)
         except (OSError, subprocess.TimeoutExpired):
             pass
         shutil.rmtree(scratch, ignore_errors=True)
 
 
-def _uquery(work, cfg, buck2):
+# buck2 reads buckconfig from outside the project too: /etc/buckconfig, /etc/buckconfig.d/*,
+# ~/.buckconfig, ~/.buckconfig.d/* and ~/.buckconfig.local. A machine that opts every project
+# into its build farm that way (or sets a darwin key) would change what the graph loads, so
+# the bytes would depend on the machine. The query reads none of them: this variable makes
+# buck2 skip the default external config files, and HOME is an empty scratch directory, which
+# also keeps the daemon's state (~/.buck) out of the user's home.
+SKIP_EXTERNAL_CONFIG = "BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG"
+
+
+def buck2_env(scratch):
+    """The environment buck2 runs in: no user or system buckconfig, HOME under `scratch`."""
+    home = os.path.join(scratch, "home")
+    os.makedirs(home, exist_ok=True)
+    env = dict(os.environ, HOME=home)
+    env[SKIP_EXTERNAL_CONFIG] = "true"
+    return env
+
+
+def _uquery(work, cfg, buck2, env):
     # Its own isolation dir, in its own scratch project: its own daemon, killed afterwards.
     argv = [buck2, "--isolation-dir", "kg", "uquery"]
     for c in cfg.graph_config:
         argv += ["-c", c]
     argv += [query_expr(cfg), "--json", "--output-attribute", "buck.type|buck.deps|srcs|test_srcs"]
     try:
-        r = subprocess.run(argv, cwd=work, capture_output=True, timeout=600)
+        r = subprocess.run(argv, cwd=work, capture_output=True, timeout=600, env=env)
     except FileNotFoundError:
         raise KgError("buck2 not found at %r; set BUCK2=/path/to/buck2" % buck2)
     if r.returncode != 0:

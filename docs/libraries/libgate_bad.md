@@ -2,4 +2,4 @@
 # libgate_bad
 libgate_bad: a library whose own test FAILS ON PURPOSE.
 - Buck2: `checks//libgate_bad:libgate_bad` · welded tests: its `test_srcs` run when it is built (`kg tests checks//libgate_bad:libgate_bad`)
-- Dir: `checks/libgate_bad/`
+- Dir: `tools/build/checks/libgate_bad/`

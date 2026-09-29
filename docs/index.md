@@ -7,6 +7,11 @@ dead.
 
 | Authority for | Doc |
 |---|---|
-| Building, the Buck2 Mojo rules, remote execution | [README.md](../README.md) |
+| What komira is, and the map of its docs | [README.md](../README.md) |
+| Developer setup: buck2, the build farm, running the checks | [DEVELOPMENT.md](../DEVELOPMENT.md) |
+| The build tooling, and using komira from another repository | [tools/build/README.md](../tools/build/README.md) |
+| The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
+| The end-to-end checks | [tools/build/checks/README.md](../tools/build/checks/README.md) |
+| Continuous integration: the workflows, farm access, secrets | [ci.md](ci.md) |
 | The knowledge graph: what is indexed, the hooks, the CI check | [knowledge_graph.md](knowledge_graph.md) |
 | The `kg` command and the library-page contract | [tools/kg/README.md](../tools/kg/README.md) |

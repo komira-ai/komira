@@ -32,6 +32,9 @@ tools/buck2 run //tools/build/examples:hello     # build remotely, run here
 | [tools/build/package/README.md](tools/build/package/README.md) | packaging: `mojo_bundle`, a relocatable bundle with a CPU-level launcher; `bundle_tarball` and `oci_image` |
 | [tools/build/toolchains/README.md](tools/build/toolchains/README.md) | the hermetic toolchain: what is pinned, the host floor, updating a pin |
 | [tools/build/checks/README.md](tools/build/checks/README.md) | the end-to-end checks: what each one proves and how to run it |
+| [docs/ci.md](docs/ci.md) | continuous integration: the static and farm jobs, how CI reaches the farm, secrets and log redaction |
+| [docs/knowledge_graph.md](docs/knowledge_graph.md) | the committed knowledge graph (library pages, docs graph, Buck2 graph), its git hooks and CI check |
+| [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
 | [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |
 

@@ -41,7 +41,9 @@ UQUERY = {
                         "srcs": ["komira//src/use.mojo"]},
 }
 # The stub answers like buck2 would in its cwd: a `.buckconfig.local` there adds the target a
-# machine-local key would add, and a stray (untracked) source adds a target that globs it.
+# machine-local key would add, and a stray (untracked) source adds a target that globs it. A
+# user buckconfig (~/.buckconfig.d/*) adds one too, unless buck2 is told to skip the external
+# config files, as buck2 itself does.
 STUB = '''#!/usr/bin/env python3
 import json, os, sys
 if "kill" in sys.argv:
@@ -50,6 +52,9 @@ assert "uquery" in sys.argv and "--json" in sys.argv, sys.argv
 ans = json.load(open(os.environ["KG_STUB_ANSWER"]))
 if os.path.exists(".buckconfig.local"):
     ans["komira//platforms:local-only"] = {"buck.type": "platform"}
+if os.environ.get("BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG") != "true" and \\
+        os.path.isdir(os.path.expanduser("~/.buckconfig.d")):
+    ans["komira//platforms:machine-wide"] = {"buck.type": "platform"}
 if os.path.exists("src/alpha/stray.mojo"):
     ans["komira//src:stray"] = {"buck.type": "mojo_library", "srcs": ["komira//src/alpha/stray.mojo"]}
 with open(os.environ["KG_STUB_CWDS"], "a") as f:
@@ -229,6 +234,20 @@ class Repo(test_git.Base):
             cwds = f.read().split()
         self.assertTrue(cwds and all(os.path.realpath(d) != os.path.realpath(r.dir) for d in cwds), cwds)
         self.assertFalse([d for d in cwds if os.path.exists(d)], "scratch checkouts are removed")
+
+    def test_user_and_system_buckconfig_never_reach_the_graph(self):
+        r = self.make()
+        committed = r.git("show", "HEAD:docs/kg/buck_graph.json").stdout
+        home = os.path.join(self.tmp, "home")
+        os.makedirs(os.path.join(home, ".buckconfig.d"))
+        with open(os.path.join(home, ".buckconfig.d", "farm"), "w") as f:
+            f.write("[komira_re]\n  darwin_mojo_compile_properties = pool=mac\n")
+        r.env["HOME"] = home
+        r.kg("graph")
+        self.assertEqual(r.git("diff", "--cached", "--name-only").stdout, "")
+        with open(os.path.join(r.dir, "docs/kg/buck_graph.json")) as f:
+            self.assertEqual(f.read(), committed)
+        self.assertEqual(os.listdir(home), [".buckconfig.d"], "buck2 ran with its own HOME")
 
     def test_check_graph_judges_the_named_commit_not_the_checkout(self):
         r = self.make()

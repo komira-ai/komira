@@ -34,10 +34,11 @@ dirs = ["tools/kg"]
 # scratch checkout of the tree being graphed. Every cell in .buckconfig [cells] is in
 # `universe` (as `<cell>//...`; the root cell is `//...`) or in `exclude`; a cell in neither
 # is refused. `config` lets that clean tree, which has no .buckconfig.local, load
-# //platforms/remote and checks//numa/standin; the placeholder values appear nowhere in the
-# output.
+# //tools/build/platforms/remote and checks//numa/standin; the placeholder values appear
+# nowhere in the output. buck2 reads no user or system buckconfig (~/.buckconfig*,
+# /etc/buckconfig*) for this query, so a machine's own settings cannot change the bytes.
 out = "docs/kg/buck_graph.json"
-universe = ["//...", "checks//...", "mojo//...", "toolchains//..."]
+universe = ["//...", "checks//...", "toolchains//..."]
 config = ["komira_re.light_properties=kg=unset", "komira_re.mojo_compile_properties=kg=unset"]
 # `prelude` is buck2's bundled rule library and `none` is a directory-less alias target.
 exclude = ["prelude", "none"]

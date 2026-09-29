@@ -95,7 +95,20 @@ directory. The scratch checkouts are deleted on exit,
 pass or fail (`KEEP_SCRATCH=1` keeps them); logs are kept, and the last line
 of output names their directory. It exits non-zero if any check failed.
 Each check is described, with how to run it on its own, in
-[tools/build/checks/README.md](tools/build/checks/README.md).
+[tools/build/checks/README.md](tools/build/checks/README.md). CI runs the same
+script on the farm, after static checks you can also run yourself
+(`.github/ci/static_checks.sh`); see [docs/ci.md](docs/ci.md).
+
+## 5. Enable the knowledge-graph hooks
+
+```sh
+python3 tools/kg/kg.py setup   # once per clone: core.hooksPath = .githooks
+```
+
+The pre-commit hook keeps the generated library pages and docs graph in
+step with the tree; the Buck2 graph is re-rendered with
+`python3 tools/kg/kg.py graph`. See
+[docs/knowledge_graph.md](docs/knowledge_graph.md).
 
 ## Host floor
 
