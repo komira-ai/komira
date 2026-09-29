@@ -124,6 +124,7 @@ TARGETS=(
     komira//tools/build/examples:hello komira//tools/build/examples:hellopkg komira//tools/build/examples:hello_pkg_user
     komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/examples:test_hellopkg
     komira//tools/build/examples/cshim:cadd_user komira//tools/build/examples/snappy:test_snappy
+    komira//tools/build/examples/s2n_tls:test_s2n_handshake
     komira//tools/build/examples/rust:prost_roundtrip komira//tools/build/proto-codegen:protoc-gen-mojo
 )
 RUN_CHECKS=("komira//tools/build/examples:hello[run_check]" "komira//tools/build/examples:hello_pkg_user[run_check]"

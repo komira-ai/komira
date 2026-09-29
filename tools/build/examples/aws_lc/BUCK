@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+
+# aws-lc's libcrypto called from Mojo: its own self tests, then SHA-256,
+# AES-128 and ChaCha20 known-answer vectors. Building `[run_check]` runs it
+# on a worker and compares its output.
+mojo_binary(
+    name = "test_aws_lc",
+    srcs = ["test_aws_lc.mojo"],
+    deps = ["//third_party/aws-lc:crypto"],
+    expected_stdout = "BORINGSSL_self_test: ok\nSHA-256: ok\nAES-128: ok\nChaCha20: ok\n",
+)

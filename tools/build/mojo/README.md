@@ -225,7 +225,22 @@ runtime's C++ internals.
 pinned source archive, with CMake-style template substitution, for
 third-party code built from source: see
 [`third_party/snappy`](../../../third_party/snappy) (snappy 1.2.2, called from
-Mojo in [`../examples/snappy`](../examples/snappy)).
+Mojo in [`../examples/snappy`](../examples/snappy)). With `one_tree = True`
+its output is one directory holding every file at its archive path, for code
+that includes its own headers by relative path; `tree_dirs` names directories
+of it for `-I$(location ...)`.
+
+[`third_party/aws-lc`](../../../third_party/aws-lc) (libcrypto 1.39.0, not
+FIPS, linux x86_64) and [`third_party/s2n-tls`](../../../third_party/s2n-tls)
+(1.5.6, over that libcrypto) are built from their archives without their CMake
+builds. Their source and header lists (`srcs.bzl`) are generated from the
+archive's CMake lists by
+[`third_party/gen_srcs.py`](../../../third_party/gen_srcs.py); s2n-tls's
+feature defines are `features.bzl`, the probes that pass. Check 25 holds
+both to the archives and to a compile of every probe, and runs known-answer
+tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
+([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
+assembly lists are generated but not built yet.
 
 ## Errors
 

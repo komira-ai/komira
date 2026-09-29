@@ -1,0 +1,100 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load(
+    ":srcs.bzl",
+    "BCM_ASM_X86_64",
+    "BCM_SRCS",
+    "CRYPTO_ASM_X86_64",
+    "CRYPTO_SRCS",
+    "PRIVATE_HEADERS",
+    "PUBLIC_HEADERS",
+    "S2N_BIGNUM_ASM_X86_64",
+)
+
+# aws/aws-lc 1.39.0, Apache-2.0 OR ISC (LICENSE in the archive).
+#
+# libcrypto, built the way aws-lc's CMake build builds it with
+#   BUILD_LIBSSL=OFF BUILD_TOOL=OFF DISABLE_PERL=ON DISABLE_GO=ON
+#   CMAKE_BUILD_TYPE=Release BUILD_SHARED_LIBS=OFF (and FIPS off)
+# for linux x86_64, without CMake: the source lists are srcs.bzl, generated
+# from the archive's CMakeLists.txt by third_party/gen_srcs.py (and held to
+# it by the drift check of tools/build/checks/c_libs_checks.sh). Without Perl
+# and Go the build uses the assembly and err_data.c the archive ships under
+# generated-src/, so nothing is generated here.
+pinned_file(
+    name = "aws-lc-1.39.0.tar.gz",
+    url = "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
+    sha256 = "37f5a379081b97adba3e1316017e09484d6c4ed6dc336d57fae6f0b7b27472fc",
+)
+
+_SRCS = CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64 + S2N_BIGNUM_ASM_X86_64
+
+# Every source and header, in one directory tree: aws-lc includes its own
+# headers (and bcm.c its module's .c files) by relative path, so they keep
+# their places in the archive.
+archive_files(
+    name = "src",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    archive = ":aws-lc-1.39.0.tar.gz",
+    files = ["LICENSE"] + _SRCS + PUBLIC_HEADERS + sorted(PRIVATE_HEADERS.values()),
+    strip_prefix = "aws-lc-1.39.0",
+    one_tree = True,
+    tree_dirs = ["include"],
+)
+
+# What the CMake build adds to every compile of these sources: its Release
+# flags, C11, hidden visibility (nothing is exported from a binary linking
+# this), the positive results of its two compiler probes on clang
+# (stdalign_check.c, builtin_swap_check.c), _XOPEN_SOURCE on Linux, and
+# BORINGSSL_IMPLEMENTATION on the library's own objects.
+_C_FLAGS = [
+    "-std=c11",
+    "-O3",
+    "-fvisibility=hidden",
+    "-fno-common",
+]
+
+_DEFINES = [
+    # CMake's -I include, which three sources need: they include
+    # "../crypto/<dir>/internal.h" from the include directory.
+    "-I$(location :src[include])",
+    "-DNDEBUG",
+    "-DBORINGSSL_IMPLEMENTATION",
+    "-DBORINGSSL_RELEASE_BUILD",
+    "-DAWS_LC_STDALIGN_AVAILABLE",
+    "-DAWS_LC_BUILTIN_SWAP_SUPPORTED",
+    "-D_XOPEN_SOURCE=700",
+]
+
+# s2n-bignum's assembly, as CMake's s2n_asm_cpreprocess passes it.
+_S2N_BIGNUM_FLAGS = ["-DS2N_BN_HIDE_SYMBOLS"]
+
+# Not part of aws-lc: the one compiler builtin libcrypto needs, so that
+# zig's compiler_rt stays out of the link (see the file).
+staged_files(
+    name = "builtins",
+    srcs = ["umodti3.c"],
+)
+
+cxx_library(
+    name = "crypto",
+    srcs = [":src[{}]".format(f) for f in CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64] +
+           [(":src[{}]".format(f), _S2N_BIGNUM_FLAGS) for f in S2N_BIGNUM_ASM_X86_64] +
+           [":builtins[umodti3.c]"],
+    # The sources include their own headers by relative path, which the
+    # compiler resolves from the source's own directory: every header is an
+    # input at its path in :src (raw_headers, and one_tree above); the few
+    # included through an -I directory are also in a header tree.
+    raw_headers = [":src[{}]".format(v) for v in sorted(PRIVATE_HEADERS.values())],
+    headers = {k: ":src[{}]".format(v) for k, v in PRIVATE_HEADERS.items() if k != v},
+    # Warnings off: this is upstream code, built as upstream builds it.
+    compiler_flags = ["-w"],
+    lang_compiler_flags = {"c_cpp_output": _C_FLAGS},
+    preprocessor_flags = _DEFINES,
+    exported_headers = {h[len("include/"):]: ":src[{}]".format(h) for h in PUBLIC_HEADERS},
+    header_namespace = "",
+    # The assembly above is x86_64 ELF; see srcs.bzl for the aarch64 lists.
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],
+    visibility = ["PUBLIC"],
+)

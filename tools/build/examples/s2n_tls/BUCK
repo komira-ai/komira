@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+
+staged_files(
+    name = "c_srcs",
+    srcs = ["handshake.c"],
+)
+
+# The C half of the test: a client and a server, both s2n-tls, and the
+# certificate aws-lc makes for them.
+cxx_library(
+    name = "handshake",
+    srcs = [":c_srcs[handshake.c]"],
+    compiler_flags = ["-O1", "-std=gnu99"],
+    preprocessor_flags = ["-D_POSIX_C_SOURCE=200809L"],
+    deps = ["//third_party/s2n-tls:s2n"],
+)
+
+# Building `[run_check]` runs the handshake on a worker.
+mojo_binary(
+    name = "test_s2n_handshake",
+    srcs = ["handshake_test.mojo"],
+    deps = [":handshake"],
+    expected_stdout = "s2n_init: ok\nhandshake: TLS 1.3, certificate verified, ping/pong exchanged\n",
+)

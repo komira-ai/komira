@@ -1,0 +1,74 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load(":features.bzl", "S2N_FEATURES")
+load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
+
+# aws/s2n-tls 1.5.6, Apache-2.0 (LICENSE in the archive).
+#
+# libs2n, built the way s2n-tls's CMake build builds it with
+#   BUILD_TESTING=OFF BUILD_SHARED_LIBS=OFF S2N_INTERN_LIBCRYPTO=OFF
+#   CMAKE_BUILD_TYPE=Release
+# against //third_party/aws-lc:crypto, without CMake: the source lists are
+# srcs.bzl (generated from the archive by third_party/gen_srcs.py and held to
+# it by tools/build/checks/c_libs_checks.sh), and the results of its feature
+# probes are features.bzl (held to a compile of every probe by the same
+# checks).
+pinned_file(
+    name = "s2n-tls-1.5.6.tar.gz",
+    url = "https://github.com/aws/s2n-tls/archive/refs/tags/v1.5.6.tar.gz",
+    sha256 = "85602d0ad672cb233052504624dec23b47fc6d324bb82bd6eaff13b8f652dec3",
+)
+
+archive_files(
+    name = "src",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    archive = ":s2n-tls-1.5.6.tar.gz",
+    files = ["LICENSE"] + SRCS + PUBLIC_HEADERS + sorted(PRIVATE_HEADERS.values()) +
+            ["tests/features/{}.c".format(p) for p in sorted(PROBES)],
+    strip_prefix = "s2n-tls-1.5.6",
+    one_tree = True,
+    visibility = ["PUBLIC"],
+)
+
+# CMake's flags for the library target in a Release build (its warning
+# flags aside), and one -D per passing feature probe (S2N_STACKTRACE follows
+# S2N_EXECINFO_AVAILABLE).
+_C_FLAGS = [
+    "-std=gnu99",
+    "-O3",
+    "-fvisibility=hidden",
+    "-Wa,--noexecstack",
+    "-w",
+]
+
+_DEFINES = [
+    "-DNDEBUG",
+    "-DS2N_EXPORTS",
+    "-D_POSIX_C_SOURCE=200809L",
+    "-D_FORTIFY_SOURCE=2",
+] + ["-D" + f for f in S2N_FEATURES] + (
+    ["-DS2N_STACKTRACE"] if "S2N_EXECINFO_AVAILABLE" in S2N_FEATURES else []
+)
+
+cxx_library(
+    name = "s2n",
+    srcs = [":src[{}]".format(f) for f in SRCS],
+    # s2n-tls includes its headers by their path from the repository root
+    # ("tls/s2n_tls.h", "api/s2n.h"), found in the header tree, and some by
+    # their path from the including source ("extensions/..." in tls/), found
+    # at their real paths in :src (one_tree, raw_headers).
+    headers = {k: ":src[{}]".format(v) for k, v in PRIVATE_HEADERS.items()} |
+              {h: ":src[{}]".format(h) for h in PUBLIC_HEADERS},
+    raw_headers = [":src[{}]".format(v) for v in sorted(PRIVATE_HEADERS.values())],
+    compiler_flags = _C_FLAGS,
+    preprocessor_flags = _DEFINES,
+    # Installed as <s2n.h> and <s2n/unstable/...>.
+    exported_headers = {
+        ("s2n.h" if h == "api/s2n.h" else "s2n/" + h[len("api/"):]): ":src[{}]".format(h)
+        for h in PUBLIC_HEADERS
+    },
+    header_namespace = "",
+    exported_deps = ["//third_party/aws-lc:crypto"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],
+    visibility = ["PUBLIC"],
+)

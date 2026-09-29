@@ -127,6 +127,9 @@
 #      naming `[komira_re]`; and three toolchain actions (a zig unpack and two
 #      concurrent zig program builds, no Mojo compile) run locally with an
 #      empty PATH (tools/build/checks/local_default.sh). Runs in both modes.
+#  26. The vendored aws-lc and s2n-tls: source lists against their archives,
+#      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
+#      tools/build/checks/c_libs_checks.sh.
 set -uo pipefail
 
 umbrella=1
@@ -263,9 +266,10 @@ expect_red closure_refusal "REFUSING: toolchain member" checks//closure_refusal:
 
 # 5
 # The scan covers the Rust and protobuf actions too (rustc, protoc, the
-# plugin, the generated packages).
+# plugin, the generated packages), and aws-lc's and s2n-tls's.
 SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" //tools/build/examples/rust:prost_roundtrip
-    checks//proto:test_person checks//proto:team_proto)
+    checks//proto:test_person checks//proto:team_proto
+    //tools/build/examples/aws_lc:test_aws_lc //tools/build/examples/s2n_tls:test_s2n_handshake)
 query="deps(set($(printf '"%s" ' "${SCAN[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
@@ -665,6 +669,10 @@ expect_green location_path "checks//location_path:main[run_check]"
 # 23
 # shellcheck source=tools/build/checks/proto_checks.sh
 . "$ROOT/tools/build/checks/proto_checks.sh"
+
+# 26 (before 24, which prints its own lines)
+# shellcheck source=tools/build/checks/c_libs_checks.sh
+. "$ROOT/tools/build/checks/c_libs_checks.sh"
 
 # 24
 if [ "$MODE" = local ]; then
