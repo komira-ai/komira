@@ -3,7 +3,7 @@
 # (gitignored); see `.buckconfig.local.example`.
 
 [cells]
-  root = .
+  komira = .
   prelude = prelude
   mojo = mojo
   toolchains = toolchains
@@ -26,10 +26,10 @@
   name = BUCK
 
 [parser]
-  target_platform_detector_spec = target:root//...->root//platforms:linux-x86_64 target:mojo//...->root//platforms:linux-x86_64 target:toolchains//...->root//platforms:linux-x86_64 target:checks//...->root//platforms:linux-x86_64
+  target_platform_detector_spec = target:komira//...->komira//platforms:linux-x86_64 target:mojo//...->komira//platforms:linux-x86_64 target:toolchains//...->komira//platforms:linux-x86_64 target:checks//...->komira//platforms:linux-x86_64
 
 [build]
-  execution_platforms = root//platforms:remote
+  execution_platforms = komira//platforms/remote:remote
 
 [buck2]
   materializations = deferred

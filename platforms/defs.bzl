@@ -26,7 +26,14 @@ def _remote_platforms_impl(ctx):
     platforms = []
     for name, (constraints_dep, props) in zip(ctx.attrs.names, zip(ctx.attrs.constraints, ctx.attrs.properties)):
         platforms.append(ExecutionPlatformInfo(
-            label = ctx.label.raw_target(),
+            # Named after the abstract platform it realizes, not after this
+            # target: the name keys the configuration of every exec dep (the
+            # toolchain) and so appears in their output paths and in every
+            # command that reads them. A repository mounting komira declares
+            # its own execution platform; naming both after
+            # `komira//platforms:<name>` keeps its action keys equal to a
+            # standalone checkout's.
+            label = constraints_dep.label.raw_target(),
             configuration = constraints_dep[PlatformInfo].configuration,
             executor_config = CommandExecutorConfig(
                 local_enabled = False,

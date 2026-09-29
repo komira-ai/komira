@@ -1,5 +1,3 @@
-load(":defs.bzl", "re_properties", "remote_execution_platforms")
-
 # Target platform for everything in this repo (see `[parser]` in .buckconfig).
 platform(
     name = "linux-x86_64",
@@ -7,13 +5,5 @@ platform(
         "prelude//os/constraints:linux",
         "prelude//cpu/constraints:x86_64",
     ],
-    visibility = ["PUBLIC"],
-)
-
-remote_execution_platforms(
-    name = "remote",
-    names = ["linux-x86_64"],
-    constraints = [":linux-x86_64"],
-    properties = [re_properties("linux_x86_64_properties")],
     visibility = ["PUBLIC"],
 )
