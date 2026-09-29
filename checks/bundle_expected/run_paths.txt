@@ -1,0 +1,12 @@
+# Every run path in the bundle of //examples:hello: "<file> <RPATH|RUNPATH> <value>".
+# bin/hello and libhello.so are ours. The lib/*.so files are the vendor's
+# runtime libraries (Mojo runtime, C++ runtime), copied byte for byte; their
+# run paths are the vendor's, point only inside the bundle or at directories
+# that do not exist there, and are listed so that a change to them is seen.
+bin/hello RUNPATH $ORIGIN/../lib
+lib/glibc-hwcaps/x86-64-v3/libhello.so RUNPATH $ORIGIN/../..
+lib/libAsyncRTRuntimeGlobals.so RPATH $ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libAsyncRTRuntimeGlobals.so.runfiles/_main/_solib_k8/_USupport
+lib/libKGENCompilerRTShared.so RPATH $ORIGIN:$ORIGIN/../lib:$ORIGIN/../_solib_k8/_USupport:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_USupport:$ORIGIN/../_solib_k8/_UAsyncRT:$ORIGIN/libKGENCompilerRTShared.so.runfiles/_main/_solib_k8/_UAsyncRT
+lib/libMSupportGlobals.so RPATH $ORIGIN:$ORIGIN/../lib
+lib/libgcc_s.so.1 RPATH $ORIGIN/.
+lib/libstdc++.so.6 RPATH $ORIGIN/.

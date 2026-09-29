@@ -41,6 +41,66 @@ static const struct komira_cpu_model komira_cpu_models[] = {
 
 #define KOMIRA_CPU_MODEL_COUNT (sizeof(komira_cpu_models) / sizeof(komira_cpu_models[0]))
 
+/* Every feature glibc requires for a level, one row each, written from
+ * glibc's sysdeps/x86/get-isa-level.h and NOT from cpu_level.h, so that a
+ * check dropped from komira_x86_level() is caught: the level test clears each
+ * row's bit, alone, in every model below at or above the row's level, and
+ * wants the level just under the row's. */
+enum komira_word { W_L1_ECX, W_L1_EDX, W_L7_EBX, W_E1_ECX, W_XCR0 };
+
+struct komira_level_feature {
+    const char *name;
+    enum komira_word word;
+    unsigned bit;
+    int level;
+};
+
+static const struct komira_level_feature komira_level_features[] = {
+    /* baseline */
+    {"FPU", W_L1_EDX, 0, 1},
+    {"CX8", W_L1_EDX, 8, 1},
+    {"CMOV", W_L1_EDX, 15, 1},
+    {"MMX", W_L1_EDX, 23, 1},
+    {"FXSR", W_L1_EDX, 24, 1},
+    {"SSE", W_L1_EDX, 25, 1},
+    {"SSE2", W_L1_EDX, 26, 1},
+    /* x86-64-v2 */
+    {"SSE3", W_L1_ECX, 0, 2},
+    {"SSSE3", W_L1_ECX, 9, 2},
+    {"CMPXCHG16B", W_L1_ECX, 13, 2},
+    {"SSE4_1", W_L1_ECX, 19, 2},
+    {"SSE4_2", W_L1_ECX, 20, 2},
+    {"POPCNT", W_L1_ECX, 23, 2},
+    {"LAHF64_SAHF64", W_E1_ECX, 0, 2},
+    /* x86-64-v3; AVX, AVX2, F16C and FMA are usable only with YMM state */
+    {"OSXSAVE", W_L1_ECX, 27, 3},
+    {"XCR0.SSE", W_XCR0, 1, 3},
+    {"XCR0.AVX", W_XCR0, 2, 3},
+    {"AVX", W_L1_ECX, 28, 3},
+    {"AVX2", W_L7_EBX, 5, 3},
+    {"F16C", W_L1_ECX, 29, 3},
+    {"FMA", W_L1_ECX, 12, 3},
+    {"BMI1", W_L7_EBX, 3, 3},
+    {"BMI2", W_L7_EBX, 8, 3},
+    {"LZCNT", W_E1_ECX, 5, 3},
+    {"MOVBE", W_L1_ECX, 22, 3},
+    /* x86-64-v4; usable only with opmask and ZMM state */
+    {"XCR0.OPMASK", W_XCR0, 5, 4},
+    {"XCR0.ZMM_Hi256", W_XCR0, 6, 4},
+    {"XCR0.Hi16_ZMM", W_XCR0, 7, 4},
+    {"AVX512F", W_L7_EBX, 16, 4},
+    {"AVX512BW", W_L7_EBX, 30, 4},
+    {"AVX512CD", W_L7_EBX, 28, 4},
+    {"AVX512DQ", W_L7_EBX, 17, 4},
+    {"AVX512VL", W_L7_EBX, 31, 4},
+};
+
+#define KOMIRA_LEVEL_FEATURE_COUNT (sizeof(komira_level_features) / sizeof(komira_level_features[0]))
+
+/* One model of each level, the ones rows are cleared from. */
+static const char *const komira_level_bases[] = {"qemu64", "nehalem", "haswell", "skylake-x"};
+
+
 static void komira_model_cpuid(const struct komira_cpu_source *src, uint32_t leaf, uint32_t sub,
                                struct komira_cpuid *r) {
     const struct komira_cpu_model *m = (const struct komira_cpu_model *)src->data;

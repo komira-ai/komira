@@ -9,18 +9,30 @@
 #               own libraries only, no symbol newer than GLIBC_2.34, and has
 #               run path $ORIGIN/../lib; lib<name>.so sits in
 #               lib/glibc-hwcaps/x86-64-v3/, its SONAME is its file name and
-#               its run path $ORIGIN/../..; every run path in the bundle is
-#               $ORIGIN-relative and no file names a buck-out path.
+#               its run path $ORIGIN/../..; the run paths of every file are
+#               exactly checks/bundle_expected/run_paths.txt (the Mojo and C++
+#               runtime libraries are vendor files, copied unchanged, and keep
+#               the vendor's), all $ORIGIN-relative; no file names a buck-out
+#               path.
 #   relocated   a copy of the bundle in a fresh directory prints the greeting
 #               with an empty environment, and so does a symlink to its
 #               bin/hello found on PATH.
 #   refusal     the TEST launcher ([test_launcher], built with the test hook)
 #               told the CPU is a Nehalem (x86-64-v2) prints exactly
 #               "hello requires an x86-64-v3 CPU (Haswell or newer)" and exits
-#               1, even with lib/ deleted (nothing is loaded before the
+#               126, even with lib/ deleted (nothing is loaded before the
 #               check); told Haswell, it runs the program. The shipped
 #               launcher carries no hook: it ignores $KOMIRA_TEST_CPU and holds
 #               no such string.
+#   loader      (needs a host whose glibc supports x86-64-v3) glibc's loader
+#               finds libhello.so through the launcher's run path in
+#               lib/glibc-hwcaps/x86-64-v3/, first try (LD_DEBUG=libs); with
+#               hwcaps masked below v3 (GLIBC_TUNABLES) the launcher exits 127
+#               and says the library is present only for x86-64-v3 and the
+#               loader did not accept that level; LD_LIBRARY_PATH comes before
+#               the run path (RUNPATH semantics, accepted): a different
+#               libhello.so there is loaded and refused for lacking
+#               komira_main, exit 127.
 #   uncached    two builds in two fresh daemons with --no-remote-cache
 #               (every action, the compiles included, runs again) give
 #               byte-identical bundles (modes included), tarballs and docker
@@ -104,18 +116,21 @@ case "$newest" in 2.[0-9] | 2.[0-9].* | 2.[12][0-9] | 2.[12][0-9].* | 2.3[0-4] |
 nrp=0
 while IFS= read -r f; do
     head -c 4 "$L/$f" | grep -q 'ELF' || continue
+    readelf -d "$L/$f" | sed -nE "s|.*\\((RPATH\|RUNPATH)\\).*\\[(.*)\\]\$|$f \\1 \\2|p" >> "$W/run_paths.txt"
     for p in $(readelf -d "$L/$f" | sed -nE 's/.*\((RPATH|RUNPATH)\).*\[(.*)\]$/\2/p' | tr ':' ' '); do
         nrp=$((nrp + 1))
         case "$p" in '$ORIGIN' | '$ORIGIN/'*) ;; *) problems="$problems run-path:$f:$p" ;; esac
     done
 done < "$W/files.txt"
+grep -v '^#' checks/bundle_expected/run_paths.txt | diff - "$W/run_paths.txt" > "$W/run_paths.diff" ||
+    problems="$problems run-paths-differ:$(grep -E '^[<>]' "$W/run_paths.diff" | cut -c1-160 | tr '\n' ' ')"
 grep -rlaF 'buck-out/' "$L" > "$W/buckout.txt" && problems="$problems names-buck-out:[$(tr '\n' ' ' < "$W/buckout.txt")]"
 grep -qaF KOMIRA_TEST_CPU "$L/bin/hello" && problems="$problems shipped-launcher-has-test-hook"
 grep -qaF KOMIRA_TEST_CPU "$TL" || problems="$problems test-launcher-has-no-hook"
 if [ -n "$problems" ]; then
     fail "layout:$problems"
 else
-    pass "layout: $(wc -l < "$W/files.txt") files as expected, SHA256SUMS verifies, launcher needs [$(dyn "$L/bin/hello" NEEDED)] up to GLIBC_$newest, $nrp run paths all \$ORIGIN-relative"
+    pass "layout: $(wc -l < "$W/files.txt") files as expected, SHA256SUMS verifies, launcher needs [$(dyn "$L/bin/hello" NEEDED)] up to GLIBC_$newest, $nrp run paths all \$ORIGIN-relative and as listed"
 fi
 
 # ---- relocated ---------------------------------------------------------------
@@ -138,14 +153,37 @@ rc=0; run_in "$W/cwd" "KOMIRA_TEST_CPU=haswell" -- "$W/test_bundle/bin/hello" ||
 [ "$rc" = 0 ] && [ "$(cat "$W/run.out")" = "hello from mojo" ] || problems="$problems haswell:rc=$rc:[$(head -c 300 "$W/run.out")]"
 for model in nehalem qemu64; do
     rc=0; run_in "$W/cwd" "KOMIRA_TEST_CPU=$model" -- "$W/test_bundle/bin/hello" || rc=$?
-    [ "$rc" = 1 ] && [ "$(cat "$W/run.out")" = "$EXPECT_REFUSAL" ] || problems="$problems $model:rc=$rc:[$(head -c 300 "$W/run.out")]"
+    [ "$rc" = 126 ] && [ "$(cat "$W/run.out")" = "$EXPECT_REFUSAL" ] || problems="$problems $model:rc=$rc:[$(head -c 300 "$W/run.out")]"
 done
 chmod -R u+w "$W/test_bundle/lib" && find "$W/test_bundle/lib" -type f -delete
 rc=0; run_in "$W/cwd" "KOMIRA_TEST_CPU=nehalem" -- "$W/test_bundle/bin/hello" || rc=$?
-[ "$rc" = 1 ] && [ "$(cat "$W/run.out")" = "$EXPECT_REFUSAL" ] || problems="$problems nehalem-without-lib:rc=$rc:[$(head -c 300 "$W/run.out")]"
+[ "$rc" = 126 ] && [ "$(cat "$W/run.out")" = "$EXPECT_REFUSAL" ] || problems="$problems nehalem-without-lib:rc=$rc:[$(head -c 300 "$W/run.out")]"
 rc=0; run_in "$W/cwd" "KOMIRA_TEST_CPU=nehalem" -- "$W/elsewhere/deeper/hello-0.1.0/bin/hello" || rc=$?
 [ "$rc" = 0 ] && [ "$(cat "$W/run.out")" = "hello from mojo" ] || problems="$problems shipped-launcher-honours-hook:rc=$rc:[$(head -c 300 "$W/run.out")]"
-if [ -n "$problems" ]; then fail "refusal:$problems"; else pass "refusal: below x86-64-v3 -> '$EXPECT_REFUSAL', exit 1, nothing loaded; shipped launcher has no hook"; fi
+if [ -n "$problems" ]; then fail "refusal:$problems"; else pass "refusal: below x86-64-v3 -> '$EXPECT_REFUSAL', exit 126, nothing loaded; shipped launcher has no hook"; fi
+
+# ---- loader ------------------------------------------------------------------
+R="$W/elsewhere/deeper/hello-0.1.0"
+active=$(env -i /lib64/ld-linux-x86-64.so.2 --list-diagnostics 2> /dev/null | sed -n 's/^dl_hwcaps_subdirs_active=//p')
+case "$active" in
+0x6 | 0x7)
+    problems=""
+    run_in "$W/cwd" LD_DEBUG=libs -- "$R/bin/hello" || problems="$problems ld-debug-rc=$?"
+    first=$(grep -A 2 'find library=libhello.so' "$W/run.out" | sed -n 's/.*trying file=//p' | head -n 1)
+    [ "$first" = "$R/bin/../lib/glibc-hwcaps/x86-64-v3/libhello.so" ] || problems="$problems first-try:[$first]"
+    grep -qF "calling init: $R/bin/../lib/glibc-hwcaps/x86-64-v3/libhello.so" "$W/run.out" || problems="$problems not-loaded-from-hwcaps"
+    grep -qx 'hello from mojo' "$W/run.out" || problems="$problems no-greeting"
+    rc=0; run_in "$W/cwd" "GLIBC_TUNABLES=glibc.cpu.hwcaps=-AVX2" -- "$R/bin/hello" || rc=$?
+    [ "$rc" = 127 ] && grep -qxF "hello: libhello.so is present only for x86-64-v3 and the system loader did not accept that level (glibc older than 2.33, or hwcaps masked by GLIBC_TUNABLES or --glibc-hwcaps-mask)" "$W/run.out" ||
+        problems="$problems hwcaps-masked:rc=$rc:[$(head -c 300 "$W/run.out")]"
+    mkdir -p "$W/decoy" && cp "$R/lib/libMSupportGlobals.so" "$W/decoy/libhello.so"
+    rc=0; run_in "$W/cwd" "LD_LIBRARY_PATH=$W/decoy" -- "$R/bin/hello" || rc=$?
+    [ "$rc" = 127 ] && [ "$(cat "$W/run.out")" = "hello: libhello.so has no komira_main" ] ||
+        problems="$problems ld-library-path:rc=$rc:[$(head -c 300 "$W/run.out")]"
+    if [ -n "$problems" ]; then fail "loader:$problems"; else pass "loader: libhello.so found first try in lib/glibc-hwcaps/x86-64-v3/; hwcaps masked -> exit 127 naming the level; LD_LIBRARY_PATH decoy wins (RUNPATH, accepted) -> exit 127"; fi
+    ;;
+*) echo "SKIP  bundle loader (this host's glibc does not support x86-64-v3: dl_hwcaps_subdirs_active=[$active])" ;;
+esac
 
 # ---- uncached ----------------------------------------------------------------
 if [ "$uncached" = 1 ]; then

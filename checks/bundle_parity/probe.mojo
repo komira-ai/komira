@@ -45,6 +45,12 @@ def main() raises:
     elif mode == "buffered":
         for i in range(3000):
             print("line", i)
+    elif mode == "abort":
+        print("before abort")
+        external_call["abort", NoneType]()
+    elif mode == "segv":
+        print("before SIGSEGV")
+        _ = external_call["raise", Int32](Int32(11))
     elif mode == "data":
         var root = _parent(_parent(_self_exe()))
         with open(root + "/share/probe.txt", "r") as f:

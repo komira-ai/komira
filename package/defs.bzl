@@ -169,24 +169,29 @@ def _level_test_impl(ctx):
     zig = ctx.attrs._zig[DefaultInfo].default_outputs[0]
     src = ctx.attrs._launcher_sources[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output(ctx.label.name + ".txt")
+    exe = ctx.actions.declare_output(ctx.label.name)
     script = _PRELUDE + """
-ZIG="$1"; SRC="$2"; OUT="$3"
+ZIG="$1"; SRC="$2"; OUT="$3"; EXE="$4"
 case "$ZIG" in /*) ;; *) ZIG="$PWD/$ZIG" ;; esac
 ZIG_GLOBAL_CACHE_DIR="$T/zig-global"; ZIG_LOCAL_CACHE_DIR="$T/zig-local"; HOME="$T/home"
 export ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR HOME
 "$ZIG/zig" cc -target x86_64-linux-musl -static -mcpu=baseline -O2 -Wall -Wextra -Werror \\
-    -I "$SRC" -o "$T/level_test" "$SRC/level_test.c"
+    -I "$SRC" -o "$EXE" "$SRC/level_test.c"
 rc=0
-"$T/level_test" > "$OUT" || rc=$?
+"$EXE" > "$OUT" || rc=$?
 cat "$OUT" >&2
 rm -rf "$T"
 exit "$rc"
 """
-    ctx.actions.run(busybox_sh(bb, script, zig, src, out.as_output()), category = "launcher_level_test")
-    return [DefaultInfo(default_output = out)]
+    ctx.actions.run(busybox_sh(bb, script, zig, src, out.as_output(), exe.as_output()), category = "launcher_level_test")
+    return [DefaultInfo(default_output = out, sub_targets = {"bin": [DefaultInfo(default_output = exe)]})]
 
 # Builds and runs level_test.c (remotely): the launcher's level function
-# against made-up CPUs. Building it fails on any wrong level.
+# against made-up CPUs. Building it fails on any wrong level. [bin] is the
+# static test program: checks/glibc_level.sh runs it on a host and compares
+# its level for the host's CPU with the host's glibc loader. (Not done here: a
+# build action must not read the worker's /lib64, and its cached result would
+# not measure the next worker anyway.)
 launcher_level_test = rule(
     impl = _level_test_impl,
     attrs = {

@@ -54,10 +54,16 @@
 #      daemon's buck-out/komira_checks_uncached (~50 MB) is reused per run.
 #  13. A program built as a bundle behaves as its executable: stdout, stderr
 #      and exit status agree byte for byte across argv, environment, exit(),
-#      an unhandled error, buffered output and a data file found through
-#      /proc/self/exe (checks//bundle_parity:parity, a remote action).
-#  14. The launcher's CPU level function gives glibc's level for 13 made-up
-#      CPUs (//package:level_test, a remote action).
+#      an unhandled error, buffered output, a data file found through
+#      /proc/self/exe, abort() and SIGSEGV (status and stdout exact, the
+#      stack dump's first line), and a symlink invocation with another
+#      argv[0] (checks//bundle_parity:parity, a remote action).
+#  14. The launcher's CPU level function gives glibc's level for the made-up
+#      CPUs of package/launcher/cpu_models.h: the hand-written ones, and one
+#      per feature glibc requires, a CPU of that level or above with just that
+#      bit cleared (//package:level_test, a remote action). On an x86-64
+#      glibc host, its level for this host's CPU agrees with this host's
+#      glibc loader (checks/glibc_level.sh).
 #  15. The bundle of //examples:hello (checks/bundle.sh): layout, run paths
 #      and SHA256SUMS; it runs from a relocated copy and through a symlink on
 #      PATH; a CPU below x86-64-v3 gets the one-line refusal (test launcher);
@@ -431,7 +437,13 @@ fi
 
 # 14
 if "$BUCK2" build //package:level_test --show-full-simple-output > "$LOG/level.txt" 2> "$LOG/level.log"; then
-    pass "launcher levels: $(grep -c '^ok ' "$(tail -n 1 "$LOG/level.txt")") made-up CPUs judged as glibc does"
+    lt=$(tail -n 1 "$LOG/level.txt")
+    ltbin=$("$BUCK2" build '//package:level_test[bin]' --show-full-simple-output 2>> "$LOG/level.log" | tail -n 1)
+    rc=0; here=$("$ROOT/checks/glibc_level.sh" "$ltbin") || rc=$?
+    case "$rc" in
+    0 | 2) pass "launcher levels: $(grep -c '^ok ' "$lt") made-up CPUs judged as glibc does ($(sed -n 's/^models: //p' "$lt")); $here" ;;
+    *) fail "launcher levels: $here (see $LOG/level.log)" ;;
+    esac
 else
     fail "launcher levels: $(grep -m3 '^BAD' "$LOG/level.log" | tr '\n' ' ')(see $LOG/level.log)"
 fi

@@ -138,7 +138,8 @@ SHA256SUMS                                every other file
 starts on any x86-64 CPU. It reads the CPU's x86-64 level the way glibc's
 loader does (cpuid, and whether the OS saves the AVX and AVX-512 registers).
 Below the level the program was compiled for (the toolchain's `target_cpu`)
-it prints one line and exits 1, before loading anything:
+it prints one line and exits 126 (not 1, so a supervisor can tell a wrong
+CPU from a failing program), before loading anything:
 
 ```
 hello requires an x86-64-v3 CPU (Haswell or newer)
@@ -147,14 +148,23 @@ hello requires an x86-64-v3 CPU (Haswell or newer)
 Otherwise it loads `libhello.so` by name. The loader looks in the launcher's
 run path, `$ORIGIN/../lib`, and in the `glibc-hwcaps/x86-64-v<N>/`
 directories under it that the CPU supports, so builds for other levels can
-sit next to this one. The launcher then calls the program's C entry point
+sit next to this one. If the library cannot be loaded the launcher prints
+the loader's error and exits 127; when the file is in the bundle but the
+loader did not search its `glibc-hwcaps/x86-64-v<N>/` directory (glibc older
+than 2.33, or hwcaps masked with `GLIBC_TUNABLES` or `--glibc-hwcaps-mask`),
+it says so. The run paths are `DT_RUNPATH`, so `LD_LIBRARY_PATH`, which the
+loader searches first, can put a different `libhello.so` or runtime library
+in place of the bundle's; that is accepted and checked (checks/bundle.sh
+`loader`). The launcher then calls the program's C entry point
 `komira_main`, which runs `main` through the same standard-library function a
 Mojo executable uses: arguments, environment, output and exit status are
 those of the executable (checks//bundle_parity compares the two).
 `lib<name>.so` has run path `$ORIGIN/../..`, the bundle's `lib/`. Every run
 path is relative to its file, so the bundle runs from wherever it is copied
 and through a symlink. A program finds its data through `/proc/self/exe`:
-`<its directory>/../share`.
+`<its directory>/../share`. The runtime libraries in `lib/` are the vendor's
+files, unchanged, and keep the vendor's run paths; checks/bundle_expected
+lists every run path in the bundle.
 
 The bundle is built by copying files with fixed modes (0755 for `bin/`,
 0644 otherwise); `VERSION` holds no time or revision, so the same sources
@@ -187,17 +197,26 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   layers of a base image, then one layer holding the bundle at `/opt/hello/`,
   with entrypoint `/opt/hello/bin/hello` and platform linux/amd64.
   `[docker_archive]` is the same image as one tar for `docker load`, and
-  `[digest]` a file holding the image manifest digest.
+  `[digest]` a file holding the image manifest digest. The image is named
+  `<repository>:<bundle version>`, so
+
+  ```sh
+  docker load < "$(buck2 build '//examples:hello_image[docker_archive]' --show-full-simple-output)"
+  docker run --rm komira/hello:0.1.0
+  ```
 
 The base image is `toolchains//:distroless_base` (distroless base-debian12,
 which has glibc, CA certificates and no shell), declared with `oci_base`: the
 digest of its linux/amd64 manifest, that manifest's bytes checked in, and one
-pinned download per blob. The packing action has no network access to need:
-it reads only those files and refuses unless the manifest hashes to its
+pinned download per blob. The packing action does not use the network: it
+takes no URLs, reads only those files and refuses unless the manifest hashes to its
 digest and names exactly the downloaded blobs.
 
 Both formats are written by `komira_pack` (`package/pack/komira_pack.zig`), a
-static executable built by the pinned zig and run with no shell. The bytes
+static executable built by the pinned zig and run with no shell. It holds
+its output in memory until it exits, up to about three times the bundle's
+size at peak, which sets the size of bundle a `light` worker can pack. The
+bytes
 depend only on the bundle and the base: tar entries are sorted, with
 directories listed, mtime and uid/gid 0 and modes 0755/0644; gzip headers
 carry no time; JSON keys are sorted and every timestamp is
