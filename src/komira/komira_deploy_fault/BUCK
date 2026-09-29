@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The deploy-fault raise protocol: the PERMANENT prefix and the IN-FLIGHT marker
+# that deploy steps (the cloud bridges) stamp on a raise and a reconciler reads.
+# A zero-dependency leaf, so a raiser needs no dependency on the reconciler.
+# It welds no test of its own.
+mojo_library(
+    name = "komira_deploy_fault",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["PUBLIC"],
+)
