@@ -99,7 +99,9 @@
 #      (checks//location_path).
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/checks/rust_checks.sh.
-#  23. mojo_proto_library: see tools/build/checks/proto_checks.sh.
+#  23. mojo_proto_library, and deterministic generation across two uncached
+#      builds (skipped with --no-uncached; about 16 minutes): see
+#      tools/build/checks/proto_checks.sh.
 set -uo pipefail
 
 umbrella=1

@@ -166,7 +166,9 @@ module of the same package: with `bundle_proto_deps = True` the whole
 `[gen]` (the generated directory), `[<stem>.mojo]`, `[proto]` (the staged
 `.proto` files). A generated package has no tests of its own (no
 `test_srcs`): it is gated only through the tests of the libraries and
-binaries that depend on it.
+binaries that depend on it. Generation is deterministic, checked by
+comparing two uncached builds
+([check 23](../checks/README.md#23-protobuf)).
 
 The toolchain, `komira//tools/build/toolchains/proto:mojo_proto`, is protoc
 29.1 (the sha256-pinned static release build, with its well-known-type

@@ -311,6 +311,13 @@ the test written for the old name fails to compile
 message compiles only with that file bundled
 (`checks//proto:team_unbundled_proto` must fail).
 
+Generation is deterministic: two uncached builds (an isolated daemon,
+`komira_checks_det`, its buck-out cleaned, `--no-remote-cache`) of the
+plugin, the generated sources of two packages and one compiled package give
+the same bytes. Each build must have run the plugin's rustc and both
+generations remotely, or the comparison proves nothing. About 16 minutes;
+skipped with `--no-uncached`.
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build checks//re_probe:probe`
