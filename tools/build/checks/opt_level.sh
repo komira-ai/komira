@@ -6,7 +6,7 @@
 #
 # usage: tools/build/checks/opt_level.sh [LOG_DIR]   (from the repo root; BUCK2 overrides the binary)
 set -uo pipefail
-BUCK2=${BUCK2:-buck2}
+BUCK2=${BUCK2:-$(cd "$(dirname "$0")/../../.." && pwd)/buck2}
 LOG=${1:-${TMPDIR:-/tmp}}
 out="$LOG/opt_level.json"
 

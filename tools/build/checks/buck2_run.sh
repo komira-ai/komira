@@ -16,15 +16,16 @@
 #   3. The runnable directory, copied to an unrelated directory, still starts:
 #      its run path is relative to the binary, not to buck-out.
 #
-# Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
-# copied into the scratch clone. Scratch goes under $TMPDIR (set it to a disk
+# The remote-execution settings come from `.buckconfig.local` in the repo root,
+# copied into the scratch clone when present, or from the machine-wide
+# buckconfig (as on the CI runner). Scratch goes under $TMPDIR (set it to a disk
 # directory where /tmp is memory); the clone, its buck-out and the moved copy
 # are deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Logs are kept.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
-    if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
+    BUCK2="$ROOT/buck2"
 fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; esac
 EXPECTED='hello from mojo'
@@ -44,7 +45,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[ -f "$ROOT/.buckconfig.local" ] || die "no .buckconfig.local in $ROOT (remote-execution settings)"
 
 mkdir "$W/src"
 (cd "$ROOT" && git ls-files -co --exclude-standard -z) |
@@ -53,7 +53,7 @@ mkdir "$W/src"
 ("${GIT[@]}" -C "$W/src" init -q && "${GIT[@]}" -C "$W/src" add -A &&
     "${GIT[@]}" -C "$W/src" commit -qm snapshot) || die "cannot commit the snapshot"
 "${GIT[@]}" clone -q "$W/src" "$W/clone" || die "cannot clone the snapshot"
-cp "$ROOT/.buckconfig.local" "$W/clone/"
+[ ! -f "$ROOT/.buckconfig.local" ] || cp "$ROOT/.buckconfig.local" "$W/clone/"
 
 # 1
 rc=0

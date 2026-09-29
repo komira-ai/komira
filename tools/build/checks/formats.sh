@@ -42,7 +42,7 @@ set -uo pipefail
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 cd "$ROOT" || exit 2
 if [ -z "${BUCK2:-}" ]; then
-    if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
+    BUCK2="$ROOT/buck2"
 fi
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_formats.XXXXXX")
 fails=0

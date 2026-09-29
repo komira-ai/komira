@@ -45,7 +45,7 @@ set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
-    if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
+    BUCK2="$ROOT/buck2"
 fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; *) BUCK2=$(command -v "$BUCK2") ;; esac
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_local.XXXXXX")

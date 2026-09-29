@@ -19,7 +19,8 @@ holding every log, and exits 1 if any check failed. `BUCK2=...`, `TMPDIR` and
 The checks run where the checkout builds, read from the execution platforms
 buck2 registers, and the first line of output names it:
 
-- `MODE  remote`: `.buckconfig.local` names a remote-execution service
+- `MODE  remote`: `.buckconfig.local`, or a machine-wide buckconfig as on the
+  CI runner, names a remote-execution service
   ([DEVELOPMENT.md](../../../DEVELOPMENT.md#3-optional-build-on-a-remote-execution-service)).
   Every action runs there, and every check runs. CI runs this way.
 - `MODE  local`: no service is configured; every action runs on this
@@ -484,6 +485,34 @@ in [`opt_level/`](opt_level/BUCK) (a test and a library's gated test at
 
 ```sh
 tools/build/checks/opt_level.sh
+```
+
+## 31. Lint weld
+
+The lints are validations ([`lint/defs.bzl`](../lint/defs.bzl)), so
+`./buck2 build //...` runs them. [`lint_weld.sh`](lint_weld.sh) plants an
+unused variable (SC2034) in `tools/build/mojo/run_check.sh` in a snapshot of
+the tree and requires the builds of `//tools/build/examples:hello` and
+`//tools/build/examples/rust:prost_roundtrip` to fail naming the validation
+of `komira//tools/build/mojo:shell_lint`: the lint reaches every Mojo and Rust
+target through its toolchain, not only the lint target itself.
+
+```sh
+tools/build/checks/lint_weld.sh
+```
+
+## 32. The ./buck2 bootstrap
+
+[`bootstrap.sh`](bootstrap.sh) runs [`./buck2`](../../../buck2) against a
+made-up release (a small script, zstd-compressed, served from a `file://`
+URL, with a pin file in the layout of `tools/buck2`): a matching pin installs,
+runs with the caller's arguments and is cached under
+`komira/buck2/<sha256>/`; a pin with a wrong sha256, or a wrong size, is
+refused and leaves the cache empty; and the real `tools/buck2` has a size,
+sha256 and `.zst` URL for both platforms. No network.
+
+```sh
+tools/build/checks/bootstrap.sh "$(mktemp -d)/bootstrap"
 ```
 
 ## Diagnostics

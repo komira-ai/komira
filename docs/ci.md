@@ -1,214 +1,142 @@
 # Continuous integration
 
-`.github/workflows/ci.yml` has two jobs.
+CI is one job, `build` in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml),
+on a GitHub Actions runner that lives on the build farm. The runner is a thin
+buck2 client: it checks the repository out and asks the farm to build it.
+Nothing is compiled on the runner.
 
-| job | runs for | reaches the build farm | what it runs |
-|---|---|---|---|
-| `static` | every push to `main`, every pull request (forks included), nightly, manual | no | `.github/ci/static_checks.sh`, and a download of the pinned buck2 checked against its sha256 |
-| `farm` | pushes to `main`, nightly, manual runs of `main`, and pull requests from a branch of this repository once a maintainer approves the run | yes, as an ephemeral tailnet node | `tools/build/checks/run_checks.sh` on remote execution |
+| event | runs |
+|---|---|
+| push to `main` | always |
+| pull request from a branch of this repository | always |
+| pull request from a fork | only after a maintainer approves the run ([below](#pull-requests-from-forks)) |
+| manual (`workflow_dispatch`) | on the chosen ref |
 
-`farm` waits for `static`, so a lint failure stops a run before it uses the
-farm.
+There is no nightly run, and no separate static or lint job.
 
-## What each job checks
+## What the job runs
 
-`static_checks.sh` needs no secret and runs nothing from the change except as
-text to lint:
+```sh
+./buck2 build //...
+./buck2 test //...
+tools/build/checks/run_checks.sh
+```
 
-1. shellcheck, severity warning, over every tracked shell script. Scripts the
-   rules run as `busybox sh <script>` have no shebang and are checked as
-   busybox; a file sourced by a bash script names its shell with a
-   `# shellcheck shell=bash` directive instead. A per-file exclusion must
-   name a file that exists.
-2. actionlint over the workflows.
-3. Every `uses:` names a full commit SHA, never a tag or branch.
-4. No committed file configures remote execution: `.buckconfig` names no
-   endpoint, and `.buckconfig.local` is gitignored and untracked.
-5. Secrets and uploads are fenced (`.github/ci/workflow_fences.py`): a job
-   that reads a secret names an `environment:`, nothing outside a job reads
-   one, and an artifact upload runs only if the job's `redact` step
-   succeeded.
+1. **`./buck2 build //...`** builds every target of the komira cell on the
+   farm. That is more than compiling:
+   - A Mojo library or binary that declares `tests = [...]` cannot build
+     unless those tests pass, and it builds only on dependencies whose own
+     welded tests passed
+     ([tools/build/mojo/README.md](../tools/build/mojo/README.md)). So
+     building a release target tests every unit it depends on, then the
+     target itself.
+   - The lints are validations of the targets they guard
+     ([tools/build/lint/defs.bzl](../tools/build/lint/defs.bzl)): shellcheck
+     over every shell script, actionlint over the workflows, every `uses:`
+     pinned to a commit SHA, and no remote-execution endpoint in a committed
+     file. The lint of the scripts the Mojo and Rust rules run is reached
+     through their toolchains, so no Mojo or Rust target builds while one of
+     those scripts has a finding. The linters are pinned downloads, run on
+     the farm like any other action.
+2. **`./buck2 test //...`** runs the standalone tests (`mojo_test` and
+   friends).
+3. **[`tools/build/checks/run_checks.sh`](../tools/build/checks/README.md)**
+   checks what no build action can observe: where actions ran, cache
+   identity across checkouts, analysis-time refusals, a `buck2 run` from a
+   fresh clone, targets that must fail by design, the lint coverage of the
+   tree, and the `./buck2` bootstrap.
 
-shellcheck and actionlint are downloaded at pinned versions and refused unless
-their sha256 matches the pin in the script.
+A contributor runs the same three commands. A green local
+`./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
+prove.
 
-`farm` runs `tools/build/checks/run_checks.sh` in full, the umbrella-mount check included
-(a manual run can turn that one off). Most of it is remote cache hits; the one
-part that always executes on the farm is the uncached build behind the
-per-action platform check. The nightly run re-checks `main` when nothing was
-pushed, which catches drift on the farm side (cache eviction, workers,
-toolchain downloads).
+There is no publish step yet. When release targets exist, publishing is a
+step after these, on pushes to `main` only, of artifacts the same job built.
 
-## How the farm job reaches the farm
+## The runner
 
-1. `tailscale/github-action` joins the tailnet with an OAuth client, as an
-   ephemeral node tagged `tag:ci`. The node is removed when the runner goes
-   away. The tailnet policy lets `tag:ci` reach the remote-execution port and
-   nothing else.
-2. `.github/ci/buckconfig_local.sh write` writes `.buckconfig.local` from the
-   `BUCKCONFIG_LOCAL` environment secret. No committed file names the farm.
-   Each address in it is registered with the runner's log masking. It refuses
-   a config whose `instance_name` is not a CI sub-instance, one whose last
-   `/`-separated component is `ci` (see "What farm access means" below).
-3. `.github/ci/fetch_buck2.sh` installs the buck2 that `tools/buck2` pins,
-   reading the URL, size and sha256 from that file, so CI and a developer run
-   the same binary.
-4. `tools/build/checks/run_checks.sh` runs with `TMPDIR` in the runner's temp directory.
-
-The runner keeps no cache of its own: the farm's action cache and CAS are the
-cache. Builds use deferred materialization, so the runner downloads only what
-a check reads.
-
-The execution platforms set `allow_cache_uploads = False`, so buck2 itself
-does not upload action results from the runner. That is a setting in
-`tools/build/platforms/defs.bzl`, which a change can edit; it is not a control. The
-controls are on the service side, below.
-
-On failure, `buckconfig_local.sh redact` replaces every address from
-`.buckconfig.local`, and as a backstop every private or shared-range IPv4
-address, with `<redacted>` in the check logs, deletes any copy of the file,
-then re-reads every file and fails if any of those strings remains. The logs
-are uploaded as a workflow artifact only if that step succeeded; if
-redaction fails, nothing is uploaded. Artifacts of a public repository can be
-downloaded by anyone, and log masking does not apply to them.
-
-## What farm access means
-
-Remote execution runs the commands a build describes. A run of the `farm`
-job can therefore run any command on the remote-execution workers, and on a
-typical Buildbarn deployment that is more than "a build": unless the service
-is hardened, an action runs with the worker's privileges, on the worker's
-network, next to the shared storage servers. A malicious action there can
-write action-cache entries for any instance name directly to storage, and can
-tamper with files a worker shares between actions. Denying action-cache
-writes at the client-facing endpoint does not stop that, because the action
-does not come through that endpoint.
-
-So CI gives farm access only to code that someone trusted has pushed or
-approved, and it narrows what an accident or a leaked credential can reach:
-
-- CI uses its own instance name, a sub-instance ending in `/ci` (for example
-  `<prefix>/ci`). Its actions still reach the same workers: the Buildbarn
-  scheduler routes a sub-instance to workers registered for its prefix
-  (matching whole `/`-separated components, so `<prefix>-ci` would not
-  route). Buildbarn's own storage keys the action cache by instance name, so
-  there CI's entries are kept apart from developers'. A cache tier that
-  ignores instance names does not keep them apart: bazel-remote, for
-  example, merges them unless it runs with
-  `--enable_ac_key_instance_mangling`. So the separate instance is necessary
-  but, on its own, not sufficient; and it does not stop an action that talks
-  to storage directly.
-- The farm credentials live in GitHub Environments with branch and reviewer
-  rules (below), not in repository secrets.
-- The tailnet policy lets `tag:ci` reach the remote-execution endpoint on one
-  host and nothing else.
-
-What closes the rest is on the service side, and is the farm operator's to
-apply: authenticate the storage and scheduler servers so only worker
-identities can write the action cache or register as workers; run actions as
-a non-root user with no write access to the worker's shared cache; restrict
-the workers' network so an action cannot reach storage or the scheduler; deny
-action-cache writes at the client-facing endpoint. Until then, treat a `farm`
-run as able to affect every build that uses the same service.
+- A container on the farm's Kubernetes cluster, registered to this
+  repository only, with the labels `self-hosted` and `komira-farm`, running
+  one job per container and discarding it afterwards (an ephemeral runner).
+  Nothing from one job, including a fork's, survives into the next.
+- It holds `git`, and what [`./buck2`](../buck2) needs: `sh`, `curl`, `zstd`
+  and `sha256sum`. `run_checks.sh` still needs `python3` (the doc link check
+  and a few JSON reads), `readelf` and `objdump`, and `docker` for the image
+  run leg of the format check (skipped without it).
+- The farm connection is **machine configuration**, not repository
+  configuration: the runner image carries a machine-wide buckconfig (buck2
+  reads `/etc/buckconfig.d/` and `~/.buckconfig.d/`) with the
+  `[buck2_re_client]` endpoints and the `[komira_re]` worker property sets.
+  The job reads no secret, writes no `.buckconfig.local` and names no GitHub
+  Environment. Its logs are not redacted and are public, so the endpoints in
+  that configuration must be addresses reachable only from inside the farm.
+- Give CI its own remote-execution instance name, a sub-instance such as
+  `<prefix>/ci`, so its action-cache entries are kept apart from developers'
+  on a service that keys the cache by instance (Buildbarn does; a cache tier
+  that ignores instance names, such as bazel-remote without
+  `--enable_ac_key_instance_mangling`, does not).
 
 ## Pull requests from forks
 
-A pull request from a fork never reaches the farm. Remote execution runs the
-commands a build describes, so farm access is code execution on the workers;
-it is given only to code that someone with write access to this repository
-has pushed.
+Remote execution runs the commands a build describes, so running a pull
+request's build is running its code on the farm's workers. A fork's pull
+request therefore runs only after a maintainer approves that run:
 
-Two independent things enforce this:
+- **Repository setting** (Settings > Actions > General > "Approval for
+  running fork pull request workflows from contributors"): **Require approval
+  for all external contributors**. GitHub then holds every run from a fork
+  until someone with write access clicks "Approve and run" on the pull
+  request's Checks tab.
+- **Approving is a code review.** Read the whole change first, `.github/`,
+  `tools/` and every `BUCK` and `.bzl` file included: the workflow, the
+  rules and the lint scripts all run from the pull request's own tree.
+  Approve again after each new push; GitHub asks for a fresh approval.
+- The workflow uses `pull_request` only. There is no `pull_request_target`
+  workflow here, on purpose: it runs with the base repository's token, and
+  checking the fork's code out under it hands that token to the code.
+- The job's token is read-only (`permissions: contents: read`) and the
+  checkout does not keep it (`persist-credentials: false`).
 
-- The `farm` job's `if:` skips it unless the pull request's head branch is in
-  this repository. Only people with write access can push one.
-- GitHub gives a `pull_request` run from a fork no secrets (repository or environment) and a
-  read-only token, whatever the workflow file in the fork says. Without the
-  OAuth secret the runner cannot join the tailnet, and without
-  `BUCKCONFIG_LOCAL` it does not know where the farm is. Editing the `if:` in
-  a fork gains nothing.
+## What farm access means
 
-This workflow deliberately uses no `pull_request_target`. That event runs in
-the context of this repository, with its secrets and a token that can write;
-it is meant for workflows that never execute the pull request's code.
-Checking out the fork's head under it and building it gives that code the
-secrets (the "pwn request" pattern). A "safe to test" label on top does not
-fix it: the label approves a pull request, not a commit, so a push after the
-label runs unreviewed code, and even the reviewed commit can edit the build
-rules or the scripts that run with the secrets.
+An action can run any command on a worker. On a typical Buildbarn
+deployment, unless the service is hardened, that command runs with the
+worker's privileges, on the worker's network, next to the shared storage: it
+can write action-cache entries for any instance directly to storage, and
+tamper with files a worker shares between actions. Denying action-cache
+writes at the client-facing endpoint does not stop that, because the action
+does not come through that endpoint. The runner living on the farm does not
+change this; approval does, by deciding whose code runs.
 
-To run a fork's change on the farm, a maintainer reviews it and pushes the
-reviewed commit to a branch of this repository, then opens a pull request
-from that branch:
+What closes the rest is on the service side, for the farm operator to apply:
+authenticate the storage and scheduler servers so only worker identities can
+write the action cache or register as workers; run actions as a non-root user
+with no write access to the worker's shared cache; restrict the workers'
+network so an action cannot reach storage or the scheduler; deny
+action-cache writes at the client-facing endpoint. Until then, treat an
+approved run as able to affect every build that uses the same service.
 
-```sh
-git fetch origin pull/<N>/head
-git push origin FETCH_HEAD:refs/heads/ci/pr-<N>
-```
+## merge-from-live (not yet running)
 
-The run tests exactly the commit the maintainer pushed.
+[`.github/workflows/merge_from_live.yml`](../.github/workflows/merge_from_live.yml)
+is the planned weekly pull request bumping every pin (buck2, the toolchain
+downloads, third-party archives) to its live release, merged only if its own
+`ci` run is green. It is a stub: its script,
+[`.github/ci/merge_from_live.sh`](../.github/ci/merge_from_live.sh), states the
+design and exits 1, and the workflow has no schedule until the script opens
+pull requests.
 
-A skipped job satisfies a required status check, so a fork's pull request
-shows `farm` as passed without having run it. Merge a fork's change only
-after its commit has a `farm` run from a branch of this repository.
-
-Pull requests from a branch of this repository run `farm` through the
-`farm-pr` environment, which requires a maintainer to approve each run. The
-branch's own workflow file is what runs, so before approving, read the whole
-change, `.github/` included: an approved run gets the farm secrets.
-
-The `farm` job skips pull requests opened by Dependabot (they get Dependabot
-secrets, not these). Push the change to a branch of this repository to test
-it on the farm.
-
-## Repository settings CI expects
-
-- No repository secrets. Two environments (Settings > Environments), each
-  holding `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` (a Tailscale OAuth client
-  that may create auth keys for `tag:ci`) and `BUCKCONFIG_LOCAL` (the whole
-  `.buckconfig.local`, in the format of `.buckconfig.local.example`, with
-  `instance_name = <prefix>/ci`):
-  - `farm`: deployment branches "Selected branches and tags", one rule of
-    ref type Branch, pattern `main`. A branch that edits the workflow to
-    name `farm` is refused before any step runs, but only because `main`
-    is protected (next item). Manual runs work from `main` only.
-  - `farm-pr`: required reviewers (maintainers), "Prevent self-review" on
-    when there is more than one maintainer. Every pull-request run waits for
-    approval.
-- Protection on `main` (required, not optional). Settings > Rules >
-  Rulesets, a branch ruleset on `main`, active, with an empty bypass list
-  (no admins, apps or roles): require a pull request with at least one
-  approval, dismiss stale approvals, require the `static` and `farm`
-  checks, block force pushes and deletions. Plus a tag ruleset that
-  refuses creating a tag named `main`.
-  Why the `farm` rule depends on it: the rule admits any run whose ref is
-  `main`, and a run uses the workflow file in that commit. If `main` takes
-  direct pushes, anyone holding a write credential (a leaked token, an app
-  with contents write) pushes a changed `ci.yml` to `main`, and that run
-  gets `TS_OAUTH_SECRET` and `BUCKCONFIG_LOCAL` with no approval. Requiring
-  a reviewed pull request makes every change to `main`, `.github/`
-  included, pass a maintainer first. Nothing needs a direct push: no bot
-  writes to this repository's `main`. With a single maintainer, one
-  required approval blocks their own merges; zero approvals still blocks
-  direct pushes, but a stolen maintainer credential can then merge its own
-  pull request.
-- Stronger, if you can: Tailscale workload identity federation instead of an
-  OAuth secret. The pinned `tailscale/github-action` accepts `oauth-client-id`
-  plus `audience` with `permissions: id-token: write`; trust the subjects
-  `repo:komira-ai/komira:environment:farm` and
-  `repo:komira-ai/komira:environment:farm-pr`. No long-lived Tailscale
-  secret is then stored in GitHub, and a token is valid for one run.
-- Settings > Actions > General > "Approval for running fork pull request
-  workflows from contributors": "Require approval for all external
-  contributors". This limits what a fork can run on GitHub's hosted runners;
-  it is not what keeps forks off the farm.
-- Settings > Actions > General > "Workflow permissions": "Read repository
-  contents and packages permissions". The workflow also sets `permissions:`
-  per job.
-
-## Running the checks yourself
+## Running it yourself
 
 ```sh
-.github/ci/static_checks.sh "$(mktemp -d)"   # linux x86_64; no farm needed
-tools/build/checks/run_checks.sh             # needs .buckconfig.local
+./buck2 build //... && ./buck2 test //...
+tools/build/checks/run_checks.sh
 ```
+
+The lints alone, without building the rest:
+
+```sh
+./buck2 build //:shell_lint //:workflow_lint //:action_pins //:no_endpoint
+```
+
+A failing lint prints `Validation for <target> failed:` and its findings.

@@ -44,15 +44,17 @@
 # light_properties, or mojo_compile_properties, must refuse, naming the key
 # (analysis only; nothing runs).
 #
-# Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
-# copied into every scratch checkout. Scratch goes under $TMPDIR (set it to a
+# The remote-execution settings come from `.buckconfig.local` in the repo root,
+# copied into every scratch checkout when present, or from the machine-wide
+# buckconfig (as on the CI runner), which the fifth consumer gets appended to
+# its root `.buckconfig` in the same way. Scratch goes under $TMPDIR (set it to a
 # disk directory where /tmp is memory); the checkouts, and their buck-out, are
 # deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Logs are kept.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
-    if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
+    BUCK2="$ROOT/buck2"
 fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; esac
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_umbrella.XXXXXX")
@@ -78,7 +80,6 @@ cleanup() {
 }
 trap cleanup EXIT
 
-[ -f "$ROOT/.buckconfig.local" ] || die "no .buckconfig.local in $ROOT (remote-execution settings)"
 
 # Snapshot the working tree (tracked and untracked, minus ignored files).
 mkdir "$W/src"
@@ -90,7 +91,7 @@ mkdir "$W/src"
 
 # Standalone checkout.
 "${GIT[@]}" clone -q "$W/src" "$W/standalone" || die "cannot clone the snapshot"
-cp "$ROOT/.buckconfig.local" "$W/standalone/"
+[ ! -f "$ROOT/.buckconfig.local" ] || cp "$ROOT/.buckconfig.local" "$W/standalone/"
 
 # Repositories that use komira: two mount it with `git submodule add`, at
 # depth 1 and 2, and one fetches it as a git external cell from a bare clone.
@@ -119,7 +120,7 @@ make_consumer() { # checkout, mount path (empty: git external cell)
     fi
     grep -q "^  komira = ${m:-komira-ext}\$" "$W/$d/.buckconfig" ||
         die "$d: tools/build/consumer.buckconfig no longer has the lines this check edits"
-    cp "$ROOT/.buckconfig.local" "$W/$d/"
+    [ ! -f "$ROOT/.buckconfig.local" ] || cp "$ROOT/.buckconfig.local" "$W/$d/"
     mkdir "$W/$d/toolchains" "$W/$d/platforms"
     if [ "$d" = umbrella_deep ]; then
         cp "$W/src/tools/build/checks/umbrella/toolchains.BUCK.frozen" "$W/$d/toolchains/BUCK"
@@ -132,8 +133,15 @@ make_consumer umbrella komira
 make_consumer umbrella_deep third_party/komira
 make_consumer external ""
 make_consumer rootcfg ""
-rm "$W/rootcfg/.buckconfig.local"
-{ echo; cat "$ROOT/.buckconfig.local"; } >> "$W/rootcfg/.buckconfig"
+rm -f "$W/rootcfg/.buckconfig.local"
+if [ -f "$ROOT/.buckconfig.local" ]; then
+    { echo; cat "$ROOT/.buckconfig.local"; } >> "$W/rootcfg/.buckconfig"
+else
+    # The machine-wide files buck2 reads, in its own order.
+    for cfg in /etc/buckconfig /etc/buckconfig.d/* "$HOME/.buckconfig" "$HOME/.buckconfig.d"/*; do
+        [ ! -f "$cfg" ] || { echo; cat "$cfg"; } >> "$W/rootcfg/.buckconfig"
+    done
+fi
 mkdir "$W/rootcfg_home"
 b2_rootcfg() { # buck2 in the rootcfg consumer, configured by its own .buckconfig alone
     (cd "$W/rootcfg" && env HOME="$W/rootcfg_home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true "$BUCK2" "$@")

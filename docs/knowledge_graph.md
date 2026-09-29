@@ -41,14 +41,17 @@ buck2.** `setup` refuses to replace a `core.hooksPath` you already set.
 |---|---|---|---|
 | pre-commit (`.githooks/pre-commit`) | no | Rebuilds the pages and the docs graph from the commit's index and stages them; compares the Buck2 graph's recorded fingerprint with the index | a dead doc reference; a generator change the commit does not hold. A Buck2 graph from other inputs is only a WARNING here |
 | pre-push (`.githooks/pre-push`) | no | `kg check` of each new branch tip, with that tip's own generator | stale pages or docs graph, a dead reference, a Buck2 graph from other inputs |
-| `kg` workflow, every pull request | yes, loading only | `kg check --graph`: the pre-push check, plus one `buck2 uquery` whose output must equal the committed graph byte for byte; then the kg test suites | all of the above, and a graph whose inputs match but whose bytes do not |
-| `kg` workflow, push to `main` | yes, loading only | the same check; nothing is uploaded, since the committed files are the render | the same |
+| by hand, `python3 -B tools/kg/kg.py check --graph` | yes, loading only | the pre-push check, plus one `buck2 uquery` whose output must equal the committed graph byte for byte | all of the above, and a graph whose inputs match but whose bytes do not |
+
+CI no longer runs kg: CI is one job ([ci.md](ci.md)), with no Python on its path. kg is to
+return as a pinned prebuilt Mojo binary that the hooks run and a build-time check re-runs.
+Until then the graph is checked only by the hooks and by hand, so it can fall behind the tree.
 
 The Buck2 half is a split on purpose. The query is loading only (`uquery`: no configuration,
 no actions, no remote execution), but it starts a buck2 daemon, and a hook that needs a
 daemon or a download is a hook people disable. So the hook checks a fingerprint (the build
 files, every `.bzl`, `.buckconfig`, the buck2 pin, and the paths of the files inside
-packages), and CI proves the bytes.
+packages), and `kg check --graph` proves the bytes.
 
 `kg graph` and `kg check --graph` never query the working tree. They check the tree being
 graphed (the index, or the commit) out into a scratch directory and run buck2 there, with a

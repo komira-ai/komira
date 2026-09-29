@@ -167,6 +167,11 @@
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target
 #      override honoured either way; a level mojo build does not accept is
 #      refused at analysis (tools/build/checks/opt_level.sh).
+#  31. Lints are part of the build: a planted shellcheck warning in a script
+#      the rules run fails the build of a Mojo and a Rust example
+#      (tools/build/checks/lint_weld.sh).
+#  32. The ./buck2 bootstrap installs only what tools/buck2 pins
+#      (tools/build/checks/bootstrap.sh; a made-up release, no network).
 set -uo pipefail
 
 umbrella=1
@@ -183,7 +188,7 @@ done
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
-    if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
+    BUCK2="$ROOT/buck2"
 fi
 # Logs, and the scratch checkouts of checks 7 and 9, go under $TMPDIR. Where
 # /tmp is memory, point TMPDIR at a disk directory. The checkouts are deleted
@@ -821,6 +826,20 @@ else
     fail "$(grep -o 'FAIL  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-) (see $LOG/opt_level.log)"
 fi
 expect_red opt_bad_level "optimization level \`fast\` is not one of 0, 1, 2, 3" checks//opt_level:bad_level
+
+# 31
+if "$ROOT/tools/build/checks/lint_weld.sh" > "$LOG/lint_weld.log" 2>&1; then
+    pass "$(grep -m1 '^PASS' "$LOG/lint_weld.log" | cut -c 7-)"
+else
+    fail "$(grep -m1 '^FAIL' "$LOG/lint_weld.log" | cut -c 7-) (see $LOG/lint_weld.log)"
+fi
+
+# 32
+if "$ROOT/tools/build/checks/bootstrap.sh" "$LOG/bootstrap" > "$LOG/bootstrap.log" 2>&1; then
+    pass "./buck2 bootstrap: $(grep -c '^PASS' "$LOG/bootstrap.log") cases: installs and caches a matching pin, refuses a wrong sha256 or size leaving the cache empty, reads tools/buck2"
+else
+    fail "./buck2 bootstrap: $(grep '^FAIL' "$LOG/bootstrap.log" | cut -c 18- | tr '\n' ' ')(see $LOG/bootstrap.log)"
+fi
 
 # 9
 if [ "$MODE" = local ]; then
