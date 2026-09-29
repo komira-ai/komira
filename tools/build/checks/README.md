@@ -78,8 +78,9 @@ buck2 build checks//closure_refusal:hello_incomplete_toolchain
 ## 5. Host paths
 
 No action's argv or environment names an absolute host path, read from
-`buck2 aquery` over the examples and their run checks. The scan first proves
-it detects a planted absolute path.
+`buck2 aquery` over the examples and their run checks, the Rust example and
+the protobuf checks (rustc, protoc, the plugin, the generated packages). The
+scan first proves it detects a planted absolute path.
 
 ## 6. Outputs
 
@@ -294,6 +295,10 @@ macro, so it compiles registry crates, a proc-macro and the zig link; its run
 check compares stdout exactly, and must have run remotely. A binary using
 prost without depending on it fails to compile
 (`checks//rust_missing_dep:main`): crates reach rustc only through `deps`.
+The host floor of rustc: every `NEEDED` entry of the sysroot's `bin/rustc`
+and of its shared libraries (read with the host's `readelf`) is glibc's or a
+file in a directory named by that object's own `$ORIGIN`-relative run path,
+and no run path is absolute.
 
 ## 23. Protobuf
 

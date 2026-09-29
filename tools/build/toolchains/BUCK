@@ -41,6 +41,7 @@ pinned_file(
     name = "libgcc_15.3.0_linux-64.conda",
     url = "https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.3.0-h3363355_7.conda",
     sha256 = "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
+    visibility = ["PUBLIC"],
 )
 
 # The base of oci_image: distroless base-debian12 (glibc, CA certificates,
@@ -96,6 +97,7 @@ zig_exe(
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
     zig = ":zig",
+    visibility = ["PUBLIC"],
 )
 
 conda_closure(

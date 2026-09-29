@@ -14,7 +14,8 @@
 #      hellopkg without depending on it fails to compile.
 #   4. The toolchain refuses an incomplete closure (exit 2) instead of falling
 #      back to anything on the worker.
-#   5. No action argv or env names an absolute host path.
+#   5. No action argv or env names an absolute host path (Mojo, Rust and
+#      protobuf actions).
 #   6. Built outputs are path-free: the linked binary's only run path is
 #      DT_RUNPATH `$ORIGIN/lib`, and no string in it names a buck-out
 #      directory. (Inside every compile action the
@@ -96,7 +97,8 @@
 #      index) builds and runs: the compile wrapper strips the staging
 #      directory from recorded paths, so its exit-4 refusal does not fire
 #      (checks//location_path).
-#  22. Rust rules: see tools/build/checks/rust_checks.sh.
+#  22. Rust rules, and rustc's host floor: see
+#      tools/build/checks/rust_checks.sh.
 #  23. mojo_proto_library: see tools/build/checks/proto_checks.sh.
 set -uo pipefail
 
@@ -194,7 +196,11 @@ expect_red missing_dep "unable to locate module 'hellopkg'" checks//missing_dep:
 expect_red closure_refusal "REFUSING: toolchain member" checks//closure_refusal:hello_incomplete_toolchain
 
 # 5
-query="deps(set($(printf '"%s" ' "${EXAMPLES[@]}" "${RUN_CHECKS[@]}")))"
+# The scan covers the Rust and protobuf actions too (rustc, protoc, the
+# plugin, the generated packages).
+SCAN=("${EXAMPLES[@]}" "${RUN_CHECKS[@]}" //tools/build/examples/rust:prost_roundtrip
+    checks//proto:test_person checks//proto:team_proto)
+query="deps(set($(printf '"%s" ' "${SCAN[@]}")))"
 abs_path_re="[\"' =:]/[A-Za-z][A-Za-z0-9_.-]*"
 if ! printf '%s\n' "\"cmd\": \"['/bin/sh', 'x']\"" | grep -qE "$abs_path_re"; then
     fail "host paths: the scan pattern does not detect a planted absolute path"

@@ -101,6 +101,30 @@ conda_closure = rule(
     },
 )
 
+def _conda_libs_impl(ctx):
+    tool = ctx.attrs.unpacker[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output("libs", dir = True)
+    libs = []
+    for member, package in sorted(ctx.attrs.libs.items()):
+        libs.extend(["--lib", package[DefaultInfo].default_outputs[0], member])
+    ctx.actions.run(
+        cmd_args(tool, "--only-libs", out.as_output(), libs),
+        category = "conda_unpack",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# Shared libraries taken out of pinned conda packages, for a tool that is not
+# the Mojo compiler: `<out>/lib/<name>`, each a regular file (a library's
+# SONAME link is resolved to the bytes it names).
+conda_libs = rule(
+    impl = _conda_libs_impl,
+    attrs = {
+        # member path under lib/ -> the pinned package it is taken from.
+        "libs": attrs.dict(attrs.string(), attrs.dep()),
+        "unpacker": attrs.dep(),
+    },
+)
+
 def _mojo_runtime_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0]

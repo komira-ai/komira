@@ -2,7 +2,9 @@
 
 Every compile runs the pinned rustc from `komira//tools/build/toolchains/rust:rust` through
 `rustc_wrapper.sh`, which links through zig (see that file). Nothing is
-taken from the worker except glibc, which rustc itself loads.
+taken from the worker except glibc: the sysroot carries rustc's own
+libraries and, from pinned packages, the other libraries they need
+(libgcc_s, zlib), in the directory their run path names.
 
 The execution platform and the target platform are the same os and cpu
 (linux x86_64), so a proc-macro crate is an ordinary dependency: it is
@@ -62,9 +64,10 @@ def _rust_sysroot_impl(ctx):
     bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("sysroot", dir = True)
     # Keeps only what compiling needs: the rustc driver, the libraries it
-    # loads, and the standard library for the one target.
+    # loads (its own, and `libs`: the non-glibc libraries those need), and
+    # the standard library for the one target.
     script = """
-RUSTC="$1"; STD="$2"; OUT="$3"; TRIPLE="$4"; VERSION="$5"
+RUSTC="$1"; STD="$2"; OUT="$3"; TRIPLE="$4"; VERSION="$5"; LIBS="$6"
 X="$OUT.x"
 mkdir -p "$X" "$OUT/bin" "$OUT/lib/rustlib/$TRIPLE"
 tar -xJf "$RUSTC" -C "$X"
@@ -72,7 +75,14 @@ tar -xJf "$STD" -C "$X"
 R="$X/rustc-$VERSION-$TRIPLE/rustc"
 S="$X/rust-std-$VERSION-$TRIPLE/rust-std-$TRIPLE/lib/rustlib/$TRIPLE/lib"
 mv "$R/bin/rustc" "$OUT/bin/rustc"
-for f in "$R"/lib/*.so*; do mv "$f" "$OUT/lib/"; done
+for f in $R/lib/*.so*; do mv "$f" "$OUT/lib/"; done
+for f in $LIBS/lib/*; do
+    if [ -e "$OUT/lib/${f##*/}" ]; then
+        echo "rust_sysroot: REFUSING: ${f##*/} is both a rustc library and in libs" >&2
+        exit 2
+    fi
+    cp "$f" "$OUT/lib/"
+done
 mv "$S" "$OUT/lib/rustlib/$TRIPLE/lib"
 rm -rf "$X"
 test -x "$OUT/bin/rustc"
@@ -88,6 +98,7 @@ rm -rf "$T"
             out.as_output(),
             ctx.attrs.triple,
             ctx.attrs.version,
+            ctx.attrs.libs[DefaultInfo].default_outputs[0],
         ),
         category = "rust_sysroot",
     )
@@ -97,6 +108,9 @@ rust_sysroot = rule(
     impl = _rust_sysroot_impl,
     attrs = {
         "busybox": attrs.dep(),
+        # A directory whose lib/ holds shared libraries rustc's own need
+        # beyond glibc (conda_libs); copied into the sysroot's lib/.
+        "libs": attrs.dep(),
         "rust_std": attrs.dep(),
         "rustc": attrs.dep(),
         "triple": attrs.string(),

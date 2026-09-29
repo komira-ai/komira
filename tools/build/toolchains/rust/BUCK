@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/rust:defs.bzl", "rust_sysroot", "rust_toolchain")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
@@ -17,12 +18,35 @@ pinned_file(
     sha256 = "285e105d25ebdf501341238d4c0594ecdda50ec9078f45095f793a736b1f1ac2",
 )
 
-# ---- Unpacked by a remote action --------------------------------------------
+# zlib, which rustc's libLLVM needs (NEEDED libz.so.1). conda-forge.
+pinned_file(
+    name = "libzlib_1.3.1_linux-64.conda",
+    url = "https://conda.anaconda.org/conda-forge/linux-64/libzlib-1.3.1-hb9d3cd8_2.conda",
+    sha256 = "d4bfe88d7cb447768e31650f06257995601f89076080e76df55e3112d4e47dc4",
+)
+
+# ---- Unpacked by remote actions ---------------------------------------------
+
+# The shared libraries rustc and its own libraries need beyond glibc:
+# libgcc_s.so.1 (librustc_driver, libLLVM) and libz.so.1 (libLLVM). They go
+# into the sysroot's lib/, which is the run path ($ORIGIN/../lib) of
+# bin/rustc and of those libraries. libgcc is the same pinned package the
+# Mojo compiler closure takes its libgcc_s.so.1 from.
+conda_libs(
+    name = "rustc_libs",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    libs = {
+        "lib/libgcc_s.so.1": "komira//tools/build/toolchains:libgcc_15.3.0_linux-64.conda",
+        "lib/libz.so.1": ":libzlib_1.3.1_linux-64.conda",
+    },
+    unpacker = "komira//tools/build/toolchains:conda_unpack",
+)
 
 rust_sysroot(
     name = "sysroot",
     exec_compatible_with = ["komira//tools/build/platforms:light"],
     busybox = "komira//tools/build/toolchains:busybox",
+    libs = ":rustc_libs",
     rust_std = ":rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
     rustc = ":rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
     triple = "x86_64-unknown-linux-gnu",
@@ -32,8 +56,10 @@ rust_sysroot(
 
 # The toolchain of rust_library and rust_binary. Compiles run on the compile
 # workers (the `mojo_compile` class, one NUMA node), like Mojo compiles.
-# rustc loads the worker's glibc; links target glibc 2.34 through zig, so
-# the binaries run on any worker with glibc 2.34 or newer.
+# rustc loads only glibc from the worker (everything else it needs is in the
+# sysroot; checks/rust_checks.sh reads their NEEDED entries); links target
+# glibc 2.34 through zig, so the binaries run on any worker with glibc 2.34
+# or newer.
 rust_toolchain(
     name = "rust",
     exec_compatible_with = [

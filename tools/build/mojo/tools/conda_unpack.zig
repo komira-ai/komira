@@ -1,6 +1,11 @@
 //! conda_unpack: extract the Mojo compiler closure out of a `.conda` package.
 //!
 //! usage: conda_unpack <package.conda> <out_dir> [--lib <library.conda> <member>]...
+//!        conda_unpack --only-libs <out_dir> (--lib <library.conda> <member>)...
+//!
+//! The second form writes only the `--lib` members (and CLOSURE_MANIFEST):
+//! shared libraries from pinned packages for a tool that is not the Mojo
+//! compiler.
 //!
 //! A `.conda` file is a zip holding `pkg-*.tar.zst` (the payload) and
 //! `info-*.tar.zst` (metadata). This tool needs nothing from the host: it is a
@@ -230,12 +235,46 @@ fn extractLib(
     try file.writeAll(entry.bytes);
 }
 
+fn writeManifest(a: std.mem.Allocator, out: std.fs.Dir, kept: [][]const u8) !void {
+    std.mem.sort([]const u8, kept, {}, lessThan);
+    var manifest = std.ArrayList(u8).init(a);
+    for (kept) |k| {
+        try manifest.appendSlice(k);
+        try manifest.append('\n');
+    }
+    try out.writeFile("CLOSURE_MANIFEST", manifest.items);
+}
+
+/// `--only-libs <out_dir> (--lib <library.conda> <member>)...`
+fn onlyLibs(a: std.mem.Allocator, args: []const [:0]u8) !void {
+    const usage = "usage: conda_unpack --only-libs <out_dir> (--lib <library.conda> <member>)...";
+    if (args.len < 6 or (args.len - 3) % 3 != 0) fail(usage, .{});
+    var li: usize = 3;
+    while (li < args.len) : (li += 3) {
+        if (!std.mem.eql(u8, args[li], "--lib")) fail("expected --lib, got {s}", .{args[li]});
+    }
+    std.fs.cwd().makePath(args[2]) catch |e| fail("cannot create {s}: {s}", .{ args[2], @errorName(e) });
+    var out = try std.fs.cwd().openDir(args[2], .{});
+    defer out.close();
+    const window = try a.alloc(u8, 1 << 27);
+    var name_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var link_buf: [std.fs.MAX_PATH_BYTES]u8 = undefined;
+    var kept = std.ArrayList([]const u8).init(a);
+    li = 3;
+    while (li < args.len) : (li += 3) {
+        try extractLib(a, out, args[li + 1], args[li + 2], window, &name_buf, &link_buf);
+        try kept.append(args[li + 2]);
+    }
+    try writeManifest(a, out, kept.items);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
 
     const args = try std.process.argsAlloc(a);
+    if (args.len >= 2 and std.mem.eql(u8, args[1], "--only-libs")) return onlyLibs(a, args);
     if (args.len < 3 or (args.len - 3) % 3 != 0)
         fail("usage: conda_unpack <package.conda> <out_dir> [--lib <library.conda> <member>]...", .{});
     var li: usize = 3;
