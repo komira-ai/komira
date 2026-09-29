@@ -102,6 +102,11 @@
 #  23. mojo_proto_library, and deterministic generation across two uncached
 #      builds (skipped with --no-uncached; about 16 minutes): see
 #      tools/build/checks/proto_checks.sh.
+#  24. The macOS arm64 target and execution platform: registration only when
+#      configured, resolution, compile command lines, linux actions
+#      unchanged, the osx-arm64 closure's Mach-O load commands (unpacked on
+#      the farm) and the macOS scripts against stand-ins
+#      (tools/build/checks/darwin/check.sh).
 set -uo pipefail
 
 umbrella=1
@@ -595,6 +600,17 @@ expect_green location_path "checks//location_path:main[run_check]"
 # 23
 # shellcheck source=tools/build/checks/proto_checks.sh
 . "$ROOT/tools/build/checks/proto_checks.sh"
+
+# 24
+darwin_rc=0
+darwin_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/checks/darwin/check.sh "$LOG" 2>&1) || darwin_rc=$?
+printf '%s\n' "$darwin_out" > "$LOG/darwin.log"
+grep -E '^(PASS|FAIL)  ' "$LOG/darwin.log"
+darwin_fails=$(grep -c '^FAIL  ' "$LOG/darwin.log" || true)
+if [ "$darwin_rc" != 0 ] && [ "$darwin_fails" = 0 ]; then
+    fail "darwin: tools/build/checks/darwin/check.sh exited $darwin_rc without a FAIL line (see $LOG/darwin.log)"
+fi
+fails=$((fails + darwin_fails))
 
 # 9
 if [ "$run" = 1 ]; then
