@@ -27,9 +27,11 @@ the one bundled with that binary.
 cp .buckconfig.local.example .buckconfig.local   # gitignored
 ```
 
-Fill in the `[buck2_re_client]` addresses and `[komira_re]
-linux_x86_64_properties`, the exact platform property set your Linux x86_64
-workers advertise (for example `pool=mojo`).
+Fill in the `[buck2_re_client]` addresses and, under `[komira_re]`, the
+exact platform property set of each kind of Linux x86_64 worker (see
+[Execution platforms](#execution-platforms)): `light_properties` and
+`mojo_compile_properties` (for example `pool=light` and `pool=mojo`; both may
+name the same set), and optionally `mojo_compile_multi_numa_properties`.
 
 `.buckconfig` caps each batched CAS request at 1 MiB
 (`[buck2_re_client] max_total_batch_size`); larger blobs use ByteStream.
@@ -59,13 +61,14 @@ binary missing a dependency, an incomplete toolchain). They are outside
 
 ## Mojo rules
 
-`load("@mojo//:defs.bzl", "mojo_library", "mojo_binary", "mojo_test")`
+`load("@mojo//:defs.bzl", "mojo_library", "mojo_binary", "mojo_test", "mojo_multi_numa_test")`
 
 | rule | produces |
 |---|---|
 | `mojo_library(srcs, deps, test_srcs)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. |
 | `mojo_binary(srcs, deps, main, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. |
 | `mojo_test(srcs, deps)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. |
+| `mojo_multi_numa_test(binary, expected_stdout)` | runs `binary` (a `mojo_binary` or `mojo_test`, compiled by its own target) on a worker spanning more than one NUMA node. Building it runs the binary like `[run_check]`; `buck2 test` runs it like a `mojo_test`. Fails to configure when no execution platform provides `numa_multi`. |
 
 `deps` carries the full transitive closure of packages to the compiler, one
 `-I` directory per package. The import name (the label name, or
@@ -96,13 +99,62 @@ modules or test-only deps (each gated test is built from its one file against
 the library); holding a known-failing test; extra compile flags, defines,
 include roots, or C libraries to link; a compile watchdog; choosing the
 package root (the shallowest `__init__.mojo` in `srcs` is the root); a
-separate worker pool for non-compile actions. Gated tests build at `-O3` by
+gated library test that needs more than one NUMA node (see below). Gated tests build at `-O3` by
 default (`test_optimization_level`).
 
 Rules are loaded from one cell: a `.bzl` file's providers are distinct per
 loading cell, so a Mojo target in one cell cannot depend on a Mojo library in
 another. The `checks` cell therefore has its own fixtures rather than reusing
 `examples`.
+
+## Execution platforms
+
+`//platforms` declares two abstract execution constraints, and three
+execution configurations built from them:
+
+| configuration | constraints | runs |
+|---|---|---|
+| `exec-mojo` | `mojo_compile`, `numa_single` | Mojo compiles, gated library tests, run checks, `buck2 test` of a `mojo_test`; also any target that states no constraint |
+| `exec-light` | `light` | unpacking and copying toolchain files (`toolchains//:zig`, `:conda_unpack`, `:mojo_compiler`, `:mojo_runtime`) |
+| `exec-mojo-multi-numa` | `mojo_compile`, `numa_multi` | `mojo_multi_numa_test` only |
+
+The Mojo rules get their constraints from their toolchain:
+`toolchains//:mojo` states `mojo_compile` + `numa_single`, and
+`toolchains//:mojo_multi_numa` (the private toolchain of
+`mojo_multi_numa_test`) states `mojo_compile` + `numa_multi`. A toolchain's
+`exec_compatible_with` binds every target that uses it.
+
+`komira_execution_platforms` (`//platforms:defs.bzl`) registers one remote
+execution platform per configuration, given the worker property set of each.
+A standalone checkout reads those sets from `[komira_re]` in
+`.buckconfig.local` (`//platforms/remote`); a repository mounting komira calls
+the same macro with its own sets. Nothing committed here names a worker pool.
+`buck2 audit execution-platform-resolution <target>` shows which
+configuration a target got and why the others were skipped.
+
+**Multi-NUMA runs.** `exec-mojo-multi-numa` is registered only when
+`mojo_compile_multi_numa_properties` is set. Without it, a target requiring
+`numa_multi` fails to configure (`Can't find toolchain_dep execution
+platform`, with `exec-mojo` skipped because `numa_multi` is not satisfied),
+before any action runs; it never falls back to a single-NUMA worker. A
+repository that sets it must point it at workers that can each place a
+process across more than one NUMA node: every CPU and all memory of at least
+two nodes visible to the action (no cpuset or memory binding narrowing it to
+one node), with the same OS image and runtime floor as the `mojo_compile`
+workers, since the binary it runs was built there.
+
+**One platform per target.** Buck2 chooses the execution platform per
+target, not per action: a target's compiles, gated tests and run checks all
+run on the same kind of worker. A run that needs a multi-NUMA worker is
+therefore its own target. `mojo_multi_numa_test(binary = ":b")` runs the
+binary `:b` built on `exec-mojo`, so only the run occupies a multi-NUMA
+worker, and the compiler is not one of its inputs. A gated library test
+(`test_srcs`) runs inside the library's target and so always on
+`exec-mojo`. A library test that needs several NUMA nodes is declared as a
+`mojo_test` plus a `mojo_multi_numa_test` over it; it is not welded into the
+library's package, since that would need a platform per action. A gate that
+publishes a package only after such a run would take the run's output as an
+input of a separate publishing target.
 
 ## Toolchain
 
@@ -165,19 +217,21 @@ cell and execution platform:
 
 ```python
 # platforms/BUCK in the outer repository
-load("@komira//platforms:defs.bzl", "re_properties", "remote_execution_platforms")
+load("@komira//platforms:defs.bzl", "komira_execution_platforms")
 
-remote_execution_platforms(
+komira_execution_platforms(
     name = "remote",
-    names = ["linux-x86_64"],
-    constraints = ["komira//platforms:linux-x86_64"],
-    properties = [re_properties("linux_x86_64_properties")],
+    light = {...},         # property set of the workers for `exec-light`
+    mojo_compile = {...},  # ... for `exec-mojo`
+    # mojo_compile_multi_numa = {...},  # only for workers spanning >1 NUMA node
     visibility = ["PUBLIC"],
 )
 ```
 
-plus `[buck2_re_client]` and `[komira_re] linux_x86_64_properties` in its own
-`.buckconfig` or `.buckconfig.local`. Build komira targets as
+The property sets may be written inline or read with
+`re_properties("<key>")` from a `[komira_re]` section, as //platforms/remote
+does. Add `[buck2_re_client]` in the outer repository's own `.buckconfig` or
+`.buckconfig.local`. Build komira targets as
 `buck2 build komira//examples/...`.
 
 What keeps the digests equal:
@@ -186,9 +240,9 @@ What keeps the digests equal:
   so every komira cell keeps its name in the outer repository. The mount path
   itself never reaches a command: sources enter actions through copies under
   `buck-out`.
-- **Execution platform name.** `remote_execution_platforms` names each
-  platform after the abstract platform it realizes
-  (`komira//platforms:linux-x86_64`), not after the target that declares it.
+- **Execution platform name.** `komira_execution_platforms` names each
+  platform after the abstract configuration it realizes
+  (`komira//platforms:exec-mojo`, ...), not after the target that declares it.
   That name keys the configuration of the toolchain, and so the toolchain's
   output paths. An execution platform declared some other way must do the
   same.
@@ -198,8 +252,8 @@ What keeps the digests equal:
   platform lives in `//platforms/remote`, which the outer repository never
   loads.
 - **Worker properties.** They are part of every action digest, so the outer
-  repository must send the same `linux_x86_64_properties` as the checkouts it
-  wants to share a cache with.
+  repository must give each configuration the same property set as the
+  checkouts it wants to share a cache with.
 
 `checks/umbrella_cache.sh` builds the examples in a fresh standalone clone and
 then in a scratch umbrella repository mounting the working tree as a

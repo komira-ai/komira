@@ -1,4 +1,4 @@
-"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test.
+"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test, mojo_multi_numa_test.
 
 Every action runs the hermetic toolchain from `toolchains//:mojo` through
 `mojo_wrapper.sh`; see that file for the environment the compiler sees.
@@ -16,7 +16,7 @@ Each `-I` directory given to the compiler holds exactly one `.mojoc`, so a
 staged source directory can never shadow a package.
 """
 
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoRunnableInfo", "MojoToolchainInfo")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -238,6 +238,7 @@ def _runnable(ctx, tc, exe):
 def _run_check(ctx, tc, command):
     # Runs the RunInfo command itself, in a remote action with no library
     # path, so a runnable directory that cannot start on its own fails here.
+    # The action runs on this target's execution platform.
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
     args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout != None:
@@ -257,6 +258,7 @@ def _binary_impl(ctx):
             },
         ),
         RunInfo(args = command),
+        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
     ]
 
 _EXECUTABLE_ATTRS = {
@@ -295,6 +297,7 @@ def _test_impl(ctx):
         # `buck2 run` of a test runs its binary directly, from the runnable
         # directory; `buck2 test` runs it through the gate runner on RE.
         RunInfo(args = run_command),
+        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],
@@ -306,5 +309,59 @@ mojo_test = rule(
     impl = _test_impl,
     attrs = _EXECUTABLE_ATTRS | {
         "labels": attrs.list(attrs.string(), default = []),
+    },
+)
+
+# ---- mojo_multi_numa_test ---------------------------------------------------
+#
+# Buck2 picks one execution platform per TARGET, so every action of a target
+# (its compile, its gated tests, its run check) runs on the same kind of
+# worker. A run that needs a worker spanning more than one NUMA node is
+# therefore its own target: `binary` (a mojo_binary or mojo_test) is compiled
+# by its own target on the default single-NUMA platform, and this target only
+# RUNS it, on a platform providing `komira//platforms:numa_multi`.
+#
+# The toolchain is private and states `numa_multi`, so the requirement cannot
+# be dropped from a BUCK file. When no registered execution platform provides
+# `numa_multi`, the target fails to configure; it never falls back to a
+# single-NUMA worker.
+
+def _multi_numa_test_impl(ctx):
+    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    runnable = ctx.attrs.binary[MojoRunnableInfo]
+    # Building the target runs the binary (a build action on the multi-NUMA
+    # platform): it must start with no library path, exit 0, and print
+    # `expected_stdout` when that is set.
+    stdout = _run_check(ctx, tc, runnable.command)
+    test_command = cmd_args(
+        tc.busybox,
+        "sh",
+        tc.gate_runner,
+        tc.busybox,
+        # gate_runner puts <dir>/lib on the library path; the runnable
+        # directory holds lib/, so the compiler is not an input of the run.
+        runnable.run_dir,
+        str(ctx.label.raw_target()),
+        runnable.run_dir.project(runnable.binary),
+        "/dev/null",
+    )
+    return [
+        DefaultInfo(default_output = stdout),
+        RunInfo(args = runnable.command),
+        ExternalRunnerTestInfo(
+            type = "mojo",
+            command = [test_command],
+            labels = ctx.attrs.labels,
+        ),
+    ]
+
+mojo_multi_numa_test = rule(
+    impl = _multi_numa_test_impl,
+    attrs = {
+        "binary": attrs.dep(providers = [MojoRunnableInfo]),
+        # When set, building this target fails unless the run's stdout equals it.
+        "expected_stdout": attrs.option(attrs.string(), default = None),
+        "labels": attrs.list(attrs.string(), default = []),
+        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_multi_numa", providers = [MojoToolchainInfo]),
     },
 )

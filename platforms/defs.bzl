@@ -1,14 +1,21 @@
 """Execution platforms. Every action runs remotely; nothing runs on the client.
 
-The remote worker property set is read from `.buckconfig.local`
-(`[komira_re] linux_x86_64_properties = key=value,...`) so that no service
-address or pool name is committed.
+Each execution platform realizes one of the abstract configurations in
+//platforms (`exec-light`, `exec-mojo`, `exec-mojo-multi-numa`); the worker
+property set behind it is read from `.buckconfig.local`
+(`[komira_re] <key> = key=value,...`) so that no service address or pool name
+is committed.
 """
 
-def re_properties(key):
-    """Parse `[komira_re] <key>` into a dict. Fails if unset."""
+def re_properties(key, required = True):
+    """Parse `[komira_re] <key>` into a dict.
+
+    Fails if unset and `required`; returns None if unset and not `required`.
+    """
     raw = read_config("komira_re", key, "")
     if not raw.strip():
+        if not required:
+            return None
         fail("`[komira_re] {}` is not set. Copy .buckconfig.local.example to " +
              ".buckconfig.local and fill in your remote-execution worker properties.".format(key))
     props = {}
@@ -55,3 +62,48 @@ remote_execution_platforms = rule(
         "properties": attrs.list(attrs.dict(attrs.string(), attrs.string())),
     },
 )
+
+# Registration order matters: a target that states no execution constraint
+# gets the first platform, so `exec-mojo` comes first (an unconstrained action
+# lands on a worker able to run anything komira runs). Mojo targets state
+# `mojo_compile` + `numa_single` through their toolchain; toolchain unpack and
+# copy targets state `light`.
+_EXEC_PLATFORMS = [
+    ("mojo_compile", "komira//platforms:exec-mojo"),
+    ("light", "komira//platforms:exec-light"),
+    ("mojo_compile_multi_numa", "komira//platforms:exec-mojo-multi-numa"),
+]
+
+def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None, visibility = None):
+    """Registers komira's execution platforms, given their worker property sets.
+
+    Each argument is the exact REAPI platform property dict of the workers that
+    realize that configuration. `mojo_compile_multi_numa` is optional: when it
+    is None no platform provides `numa_multi`, and a target that requires it
+    fails to configure ("no compatible execution platform") instead of running
+    on a single-NUMA worker. Give it only for workers that span more than one
+    NUMA node.
+    """
+    props = {
+        "light": light,
+        "mojo_compile": mojo_compile,
+        "mojo_compile_multi_numa": mojo_compile_multi_numa,
+    }
+    names = []
+    constraints = []
+    properties = []
+    for key, platform in _EXEC_PLATFORMS:
+        if props[key] == None:
+            if key == "mojo_compile_multi_numa":
+                continue
+            fail("komira_execution_platforms: `{}` is required".format(key))
+        names.append(key)
+        constraints.append(platform)
+        properties.append(props[key])
+    remote_execution_platforms(
+        name = name,
+        names = names,
+        constraints = constraints,
+        properties = properties,
+        visibility = visibility,
+    )

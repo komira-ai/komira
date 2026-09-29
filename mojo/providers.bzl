@@ -36,3 +36,11 @@ MojoToolchainInfo = provider(fields = {
     # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
     "runtime": provider_field(typing.Any),
 })
+
+# A built binary that starts on its own: `run_dir` holds the binary and lib/,
+# its runtime libraries, and `command` runs it from there with no launcher.
+MojoRunnableInfo = provider(fields = {
+    "binary": provider_field(str),  # the binary's file name inside run_dir
+    "command": provider_field(typing.Any),  # cmd_args
+    "run_dir": provider_field(typing.Any),  # artifact (directory)
+})

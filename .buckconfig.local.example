@@ -11,8 +11,17 @@
   execution_concurrency_limit = 64
 
 [komira_re]
-  # Exact REAPI platform property set of the workers that run Mojo actions,
-  # as comma-separated key=value pairs. Workers match this set exactly: a key
-  # the workers do not advertise leaves actions queued until the scheduler
-  # gives up.
-  linux_x86_64_properties = pool=mojo
+  # Exact REAPI platform property sets of your workers, as comma-separated
+  # key=value pairs, one per execution configuration (see platforms/BUCK).
+  # Workers match a set exactly: a key the workers do not advertise leaves
+  # actions queued until the scheduler gives up. Two keys may name the same
+  # set if you have one kind of worker.
+  #
+  # Unpacking and copying toolchain files.
+  light_properties = pool=light
+  # Mojo compiles, gated tests and run checks, on one NUMA node.
+  mojo_compile_properties = pool=mojo
+  # Optional: workers that span more than one NUMA node. Leave unset unless
+  # you have them; targets that require them then fail to configure instead
+  # of running on single-node workers.
+  # mojo_compile_multi_numa_properties = pool=mojo-multi-numa

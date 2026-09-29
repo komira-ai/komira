@@ -44,8 +44,14 @@ pinned_file(
 
 # ---- Unpacked by remote actions ---------------------------------------------
 
+# Unpacking and copying run on `light` workers. The Mojo toolchains below
+# state `mojo_compile` + a NUMA constraint; a toolchain's
+# `exec_compatible_with` binds every target that uses it, so each Mojo target
+# builds on an execution platform providing both.
+
 zig_dist(
     name = "zig",
+    exec_compatible_with = ["komira//platforms:light"],
     archive = ":zig_linux_x86_64.tar.xz",
     busybox = ":busybox",
     strip_prefix = "zig-linux-x86_64-0.12.0",
@@ -54,6 +60,7 @@ zig_dist(
 
 zig_exe(
     name = "conda_unpack",
+    exec_compatible_with = ["komira//platforms:light"],
     src = "mojo//:conda_unpack.zig",
     busybox = ":busybox",
     zig = ":zig",
@@ -61,6 +68,7 @@ zig_exe(
 
 conda_closure(
     name = "mojo_compiler",
+    exec_compatible_with = ["komira//platforms:light"],
     libs = {
         "lib/libgcc_s.so.1": ":libgcc_15.3.0_linux-64.conda",
         "lib/libstdc++.so.6": ":libstdcxx_15.3.0_linux-64.conda",
@@ -75,6 +83,7 @@ conda_closure(
 # checks/run_checks.sh fails if this list and that record disagree.
 mojo_runtime(
     name = "mojo_runtime",
+    exec_compatible_with = ["komira//platforms:light"],
     busybox = ":busybox",
     compiler = ":mojo_compiler",
     libs = [
@@ -87,8 +96,7 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
-mojo_toolchain(
-    name = "mojo",
+_MOJO_TOOLCHAIN = dict(
     busybox = ":busybox",
     cc_target = "x86_64-linux-gnu.2.34",
     compiler = ":mojo_compiler",
@@ -99,4 +107,28 @@ mojo_toolchain(
     target_cpu = "x86-64-v3",
     zig = ":zig",
     visibility = ["PUBLIC"],
+)
+
+# The toolchain of mojo_library, mojo_binary and mojo_test: compiles, gated
+# tests and run checks on one NUMA node.
+mojo_toolchain(
+    name = "mojo",
+    exec_compatible_with = [
+        "komira//platforms:mojo_compile",
+        "komira//platforms:numa_single",
+    ],
+    **_MOJO_TOOLCHAIN
+)
+
+# The toolchain of mojo_multi_numa_test: runs a built binary on a worker
+# spanning more than one NUMA node. Only an execution platform realizing
+# `komira//platforms:exec-mojo-multi-numa` satisfies it; with none
+# registered, its users fail to configure.
+mojo_toolchain(
+    name = "mojo_multi_numa",
+    exec_compatible_with = [
+        "komira//platforms:mojo_compile",
+        "komira//platforms:numa_multi",
+    ],
+    **_MOJO_TOOLCHAIN
 )

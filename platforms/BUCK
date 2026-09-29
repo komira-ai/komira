@@ -1,3 +1,8 @@
+# Abstract constraints and platforms only. Nothing here names a service, a
+# worker pool or a property set: the execution platforms that realize these
+# configurations are declared in //platforms/remote for a standalone checkout,
+# and by any repository that mounts komira for its own workers.
+
 # Target platform for everything in this repo (see `[parser]` in .buckconfig).
 platform(
     name = "linux-x86_64",
@@ -5,5 +10,85 @@ platform(
         "prelude//os/constraints:linux",
         "prelude//cpu/constraints:x86_64",
     ],
+    visibility = ["PUBLIC"],
+)
+
+# ---- Execution constraints ---------------------------------------------------
+
+# What kind of worker an action needs.
+#   light         unpacking and copying toolchain files: little CPU, memory
+#                 bounded by the archive being unpacked.
+#   mojo_compile  running the Mojo compiler, and running what it built (gated
+#                 tests, run checks): many cores and a lot of memory.
+constraint_setting(
+    name = "exec_class",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "light",
+    constraint_setting = ":exec_class",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "mojo_compile",
+    constraint_setting = ":exec_class",
+    visibility = ["PUBLIC"],
+)
+
+# How many NUMA nodes an action may use.
+#   numa_single  the worker's CPUs and memory lie on one NUMA node. The
+#                default for every Mojo action.
+#   numa_multi   the worker spans more than one NUMA node, for tests that
+#                measure or depend on cross-node placement.
+constraint_setting(
+    name = "numa",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "numa_single",
+    constraint_setting = ":numa",
+    visibility = ["PUBLIC"],
+)
+
+constraint_value(
+    name = "numa_multi",
+    constraint_setting = ":numa",
+    visibility = ["PUBLIC"],
+)
+
+# ---- Execution platform configurations ----------------------------------------
+
+# The configurations an execution platform may realize. An execution platform
+# is registered under one of these labels (see `komira_execution_platforms` in
+# defs.bzl), so the configuration of every exec dep, and with it every output
+# path and action digest, is the same in any repository that builds komira.
+
+platform(
+    name = "exec-light",
+    constraint_values = [":light"],
+    deps = [":linux-x86_64"],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "exec-mojo",
+    constraint_values = [
+        ":mojo_compile",
+        ":numa_single",
+    ],
+    deps = [":linux-x86_64"],
+    visibility = ["PUBLIC"],
+)
+
+platform(
+    name = "exec-mojo-multi-numa",
+    constraint_values = [
+        ":mojo_compile",
+        ":numa_multi",
+    ],
+    deps = [":linux-x86_64"],
     visibility = ["PUBLIC"],
 )

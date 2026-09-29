@@ -63,13 +63,12 @@ printf '\n[cells]\n  umbrella = .\n\n[build]\n  execution_platforms = umbrella//
 cp "$ROOT/.buckconfig.local" "$W/umbrella/"
 mkdir "$W/umbrella/platforms"
 cat > "$W/umbrella/platforms/BUCK" << 'EOF'
-load("@komira//platforms:defs.bzl", "re_properties", "remote_execution_platforms")
+load("@komira//platforms:defs.bzl", "komira_execution_platforms", "re_properties")
 
-remote_execution_platforms(
+komira_execution_platforms(
     name = "remote",
-    names = ["linux-x86_64"],
-    constraints = ["komira//platforms:linux-x86_64"],
-    properties = [re_properties("linux_x86_64_properties")],
+    light = re_properties("light_properties"),
+    mojo_compile = re_properties("mojo_compile_properties"),
     visibility = ["PUBLIC"],
 )
 EOF

@@ -1,16 +1,17 @@
-load("//platforms:defs.bzl", "re_properties", "remote_execution_platforms")
+load("//platforms:defs.bzl", "komira_execution_platforms", "re_properties")
 
-# The remote execution platform for a standalone checkout: every action runs
-# remotely, on workers with the property set named in `.buckconfig.local`.
-# It lives apart from `//platforms`, which holds only abstract constraints, so
-# that a repository mounting komira as a cell can load the target platform
-# without configuring this one (see "Mounting komira in another repository"
-# in README.md).
+# The execution platforms of a standalone checkout: every action runs
+# remotely, on workers with the property sets named in `.buckconfig.local`.
+# They live apart from `//platforms`, which holds only abstract constraints,
+# so that a repository mounting komira as a cell can load the target platform
+# without configuring these (see "Mounting komira in another repository" in
+# README.md).
 
-remote_execution_platforms(
+komira_execution_platforms(
     name = "remote",
-    names = ["linux-x86_64"],
-    constraints = ["//platforms:linux-x86_64"],
-    properties = [re_properties("linux_x86_64_properties")],
+    light = re_properties("light_properties"),
+    mojo_compile = re_properties("mojo_compile_properties"),
+    # Unset unless your service has workers spanning more than one NUMA node.
+    mojo_compile_multi_numa = re_properties("mojo_compile_multi_numa_properties", required = False),
     visibility = ["PUBLIC"],
 )
