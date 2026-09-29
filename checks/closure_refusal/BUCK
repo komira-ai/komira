@@ -1,0 +1,25 @@
+load("@mojo//:defs.bzl", "mojo_binary")
+load("@mojo//:toolchain.bzl", "mojo_toolchain")
+load(":defs.bzl", "compiler_without_member")
+
+# The compiler closure minus one runtime library it needs.
+compiler_without_member(
+    name = "compiler_missing_member",
+    delete = "lib/libKGENCompilerRTShared.so",
+)
+
+mojo_toolchain(
+    name = "incomplete_toolchain",
+    busybox = "toolchains//:busybox",
+    cc_target = "x86_64-linux-gnu.2.34",
+    compiler = ":compiler_missing_member",
+    zig = "toolchains//:zig",
+)
+
+# Must FAIL: the wrapper refuses (exit 2) before running the compiler,
+# naming the missing member, instead of falling back to anything on the host.
+mojo_binary(
+    name = "hello_incomplete_toolchain",
+    srcs = ["hello.mojo"],
+    toolchain = ":incomplete_toolchain",
+)

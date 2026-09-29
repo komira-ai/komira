@@ -1,0 +1,34 @@
+load("@mojo//:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# A binary with no dependencies. `[run_check]` runs it remotely and compares
+# its stdout byte for byte.
+mojo_binary(
+    name = "hello",
+    srcs = ["hello.mojo"],
+    expected_stdout = "hello from mojo\n",
+)
+
+# A package: `buck2 build` produces hellopkg.mojoc.
+mojo_library(
+    name = "hellopkg",
+    srcs = [
+        "hellopkg/__init__.mojo",
+        "hellopkg/greet.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# A binary that imports the package.
+mojo_binary(
+    name = "hello_pkg_user",
+    srcs = ["hello_pkg_user.mojo"],
+    deps = [":hellopkg"],
+    expected_stdout = "hello from hellopkg\n",
+)
+
+# A standalone test target: `buck2 test //examples:test_hellopkg`.
+mojo_test(
+    name = "test_hellopkg",
+    srcs = ["test_hellopkg.mojo"],
+    deps = [":hellopkg"],
+)
