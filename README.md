@@ -112,3 +112,74 @@ binaries need glibc and the toolchain's own runtime libraries.
 The client only downloads the pinned files and uploads them; on macOS
 (`tools/buck2` has a macos-aarch64 entry) buck2 works as a client, and every
 action still runs on the Linux workers.
+
+## Mounting komira in another repository
+
+A larger repository can include komira as a git submodule and build it as a
+set of cells, sharing remote cache entries with standalone checkouts: the same
+targets, built at the same revision with the same buck2 release and worker
+property set, have the same action digests in both.
+
+```sh
+git submodule add <komira-url> komira
+komira/tools/umbrella_buckconfig.sh komira > .buckconfig
+```
+
+`tools/umbrella_buckconfig.sh` prints the cells komira declares, moved under
+the mount point with their names unchanged, and copies `[cell_aliases]`,
+`[external_cells]`, `[buildfile]` and `[parser]`. Buck2 registers cells only
+from the project root's `.buckconfig` (and does not follow `<file:...>`
+includes there), so the outer repository has to restate them; regenerate the
+output whenever the submodule moves. Then add the outer repository's own root
+cell and execution platform:
+
+```
+[cells]
+  umbrella = .
+
+[build]
+  execution_platforms = umbrella//platforms:remote
+```
+
+```python
+# platforms/BUCK in the outer repository
+load("@komira//platforms:defs.bzl", "re_properties", "remote_execution_platforms")
+
+remote_execution_platforms(
+    name = "remote",
+    names = ["linux-x86_64"],
+    constraints = ["komira//platforms:linux-x86_64"],
+    properties = [re_properties("linux_x86_64_properties")],
+    visibility = ["PUBLIC"],
+)
+```
+
+plus `[buck2_re_client]` and `[komira_re] linux_x86_64_properties` in its own
+`.buckconfig` or `.buckconfig.local`. Build komira targets as
+`buck2 build komira//examples/...`.
+
+What keeps the digests equal:
+
+- **Cell names.** Output paths contain the cell name (`buck-out/v2/.../komira/...`),
+  so every komira cell keeps its name in the outer repository. The mount path
+  itself never reaches a command: sources enter actions through copies under
+  `buck-out`.
+- **Execution platform name.** `remote_execution_platforms` names each
+  platform after the abstract platform it realizes
+  (`komira//platforms:linux-x86_64`), not after the target that declares it.
+  That name keys the configuration of the toolchain, and so the toolchain's
+  output paths. An execution platform declared some other way must do the
+  same.
+- **Target platform.** Every komira cell maps to
+  `komira//platforms:linux-x86_64` in `[parser]`, copied unchanged.
+  `//platforms` holds only abstract constraints; the standalone remote
+  platform lives in `//platforms/remote`, which the outer repository never
+  loads.
+- **Worker properties.** They are part of every action digest, so the outer
+  repository must send the same `linux_x86_64_properties` as the checkouts it
+  wants to share a cache with.
+
+`checks/umbrella_cache.sh` builds the examples in a fresh standalone clone and
+then in a scratch umbrella repository mounting the working tree as a
+submodule, each with a fresh daemon, and fails unless every umbrella command
+is a cache hit and both builds report the same action digests.

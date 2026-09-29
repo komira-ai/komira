@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_checks.sh -- end-to-end checks of the Mojo rules. Each check can fail.
 #
-# usage: checks/run_checks.sh            (from the repo root; BUCK2 overrides the binary)
+# usage: checks/run_checks.sh [--no-umbrella]   (from the repo root; BUCK2 overrides the binary)
 #
 #   1. The examples build and their run checks pass (stdout compared byte for
 #      byte), and every action that executed ran remotely.
@@ -18,7 +18,18 @@
 #      string naming a buck-out directory. (Inside every compile action the
 #      wrapper also refuses an output containing that action's working
 #      directory, exit 4.)
+#   7. A repository mounting komira as a git submodule gets remote cache hits
+#      with the same action digests as a standalone checkout
+#      (checks/umbrella_cache.sh; two scratch checkouts and daemons, skipped
+#      with --no-umbrella).
 set -uo pipefail
+
+umbrella=1
+case "${1:-}" in
+    "") ;;
+    --no-umbrella) umbrella=0 ;;
+    *) echo "usage: $0 [--no-umbrella]" >&2; exit 2 ;;
+esac
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
@@ -124,6 +135,17 @@ else
     else
         pass "outputs: $bin has no run path and names no buck-out path"
     fi
+fi
+
+# 7
+if [ "$umbrella" = 1 ]; then
+    if BUCK2="$BUCK2" "$ROOT/checks/umbrella_cache.sh" > "$LOG/umbrella.log" 2>&1; then
+        pass "umbrella cache: $(grep -o 'PASS  umbrella cache: .*' "$LOG/umbrella.log" | cut -c 23-)"
+    else
+        fail "umbrella cache: $(grep -o 'FAIL  umbrella cache: .*' "$LOG/umbrella.log" | cut -c 23-) (see $LOG/umbrella.log)"
+    fi
+else
+    echo "SKIP  umbrella cache (--no-umbrella)"
 fi
 
 echo "logs: $LOG"
