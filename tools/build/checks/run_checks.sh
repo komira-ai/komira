@@ -124,8 +124,9 @@
 #      clone of the working tree, with no user or system buckconfig, every
 #      registered execution platform is local-only, Mojo and toolchain
 #      targets resolve to them, and forcing remote execution there refuses,
-#      naming `[komira_re]` (tools/build/checks/local_default.sh; resolution
-#      only, nothing is built). Runs in both modes.
+#      naming `[komira_re]`; and three toolchain actions (a zig unpack and two
+#      concurrent zig program builds, no Mojo compile) run locally with an
+#      empty PATH (tools/build/checks/local_default.sh). Runs in both modes.
 set -uo pipefail
 
 umbrella=1

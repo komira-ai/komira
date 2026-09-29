@@ -375,8 +375,13 @@ fails closed), as does a `[komira_re]` without `light_properties`, while
 `-c komira.execution=local` still registers the local platforms;
 `[komira] execution = remote` in a user `~/.buckconfig.local` refuses; and an
 unknown mode refuses. On any other host the clone must refuse local
-execution, naming the host and `.buckconfig.local`. Resolution only: nothing
-is built, so it runs in a few seconds in both modes.
+execution, naming the host and `.buckconfig.local`. Last, on Linux x86_64,
+it builds `komira//tools/build/toolchains:conda_unpack` and `:zig_cc_launcher`
+locally, from a daemon started with an empty environment and `PATH`: zig is
+unpacked, then the two zig programs are built at once, and every action must
+have run locally. Local actions share the checkout root as their working
+directory, so this is what fails if two of them share scratch space. It
+downloads about 45 MB, compiles no Mojo, and runs in both modes.
 
 ```sh
 tools/build/checks/local_default.sh

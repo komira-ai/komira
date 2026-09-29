@@ -79,7 +79,8 @@ What that gives you, and what it does not:
 - **Measured locally so far: toolchain, zig and C actions only.** With an
   empty host `PATH`, unpacking zig and the conda packages, building the zig
   programs, assembling the Mojo runtime, and one C compile and archive run
-  locally and succeed. **A local
+  locally and succeed; [check 25](tools/build/checks/README.md) repeats the
+  zig unpack and two concurrent zig builds on every run. **A local
   Mojo compile has not yet been measured**: `mojo_build`, `mojo_precompile`,
   gated tests, run checks and bundles have so far run only on a
   remote-execution service. Until they have, do not assume a local build of

@@ -8,8 +8,9 @@
 # `.buckconfig.local` is gitignored and never copied) into a scratch clone and
 # runs buck2 there with its own daemon, no user or system buckconfig
 # (BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG) and HOME in the scratch directory,
-# so nothing on this machine can configure a remote service. Resolution only:
-# nothing is built. Then, on a Linux x86_64 host:
+# so nothing on this machine can configure a remote service. Steps 1-4 only
+# resolve configuration and build nothing; step 5 builds toolchain targets on
+# this machine. On a Linux x86_64 host:
 #   1. `[build] execution_platforms` is komira//tools/build/platforms/default:default,
 #      and every platform it registers has a local executor and no remote one:
 #      exactly exec-mojo and exec-light, in that order.
@@ -28,8 +29,15 @@
 #      builds here with a service named; `[komira] execution = remote` in a
 #      user ~/.buckconfig.local refuses; and an unknown `komira.execution`
 #      refuses, naming the modes.
+#   5. Toolchain actions run locally, concurrently, with an empty host PATH:
+#      zig unpacked, then two zig programs (conda_unpack, zig_cc_launcher)
+#      built at once (about 45 MB downloaded; no Mojo compile). Local actions
+#      share the checkout root as their working directory, so this fails if
+#      they share scratch space.
 # On any other host, (1) is replaced by the refusal that names the host and
 # `.buckconfig.local`.
+#
+# Only (5) executes anything, and only on Linux x86_64.
 #
 # Scratch goes under $TMPDIR (a disk directory where /tmp is memory); it is
 # deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Needs git and python3.
@@ -39,7 +47,7 @@ ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
     if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
 fi
-case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; esac
+case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; *) BUCK2=$(command -v "$BUCK2") ;; esac
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_local.XXXXXX")
 GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main)
 C="$W/clone"
@@ -158,4 +166,28 @@ elif ! grep -qF '`[komira] execution`: expected one of' "$W/bad_mode.txt"; then
     die "-c komira.execution=farm failed without naming the modes (see $W/bad_mode.txt)"
 fi
 
-echo "PASS  local default: a fresh clone registers only local platforms (exec-mojo, exec-light); $(printf '%s\n' "$want" | grep -c '#') targets resolve to them with the pinned configuration hashes, numa_multi does not configure, forcing remote names [komira_re], a service named without [komira_re] refuses"
+# 5
+# The daemon takes its environment from the client that starts it, and local
+# actions inherit it: start it with nothing but HOME.
+b2 kill > /dev/null 2>&1
+if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+        "$BUCK2" build komira//tools/build/toolchains:conda_unpack komira//tools/build/toolchains:zig_cc_launcher) > "$W/local_build.log" 2>&1; then
+    die "the local toolchain build failed with an empty PATH (see $W/local_build.log)"
+fi
+b2 log what-ran --format json > "$W/local_what_ran.json" 2>&1 || die "cannot read what-ran of the local build"
+ran=$(python3 - "$W/local_what_ran.json" << 'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1]) if l.startswith("{")]
+execs = [r.get("reproducer", {}).get("executor", "") for r in rows]
+builds = sum(1 for r in rows if r.get("identity", "").endswith("(zig_build_exe)"))
+if not rows or any(e.lower() != "local" for e in execs):
+    print("executors %s, want only local" % sorted(set(execs)))
+elif builds < 2:
+    print("%d zig_build_exe actions ran, want 2" % builds)
+else:
+    print(len(rows))
+PY
+)
+case "$ran" in '' | *[!0-9]*) die "local build: ${ran:-cannot read $W/local_what_ran.json}" ;; esac
+
+echo "PASS  local default: a fresh clone registers only local platforms (exec-mojo, exec-light); $(printf '%s\n' "$want" | grep -c '#') targets resolve to them with the pinned configuration hashes, numa_multi does not configure, forcing remote names [komira_re], a service named without [komira_re] refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH"
