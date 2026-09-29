@@ -22,7 +22,7 @@
 #      deployment target, no zig, no absolute path.
 #   4. The linux actions are the same with and without the darwin key.
 #   5. The osx-arm64 closure, unpacked and cut on the farm (linux `light`
-#      workers): tools/build/checks/darwin/macho.py over its Mach-O load commands, and the
+#      workers): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
 #      DYLD scripts are the shared scripts behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
 #      (applets only from /bin and /usr/bin, anything else refused), the cc
@@ -46,9 +46,188 @@
 set -u
 mkdir -p "$1" && LOG=$(cd "$1" && pwd) || { echo "usage: $0 <log_dir>" >&2; exit 2; }
 BUCK2=${BUCK2:-buck2}
+export INSPECT_LOG="$LOG/inspect_build.log"
+# shellcheck source=tools/build/checks/tool_lib.sh
+. tools/build/checks/tool_lib.sh
 fails=0
 pass() { echo "PASS  darwin: $1"; }
 fail() { echo "FAIL  darwin: $1"; fails=$((fails + 1)); }
+
+# ---- readers: JSON and Mach-O through tools/build/inspect (tool_lib.sh) --------
+TAB=$(printf '\t')
+
+version_gt() { # a.b.c x.y.z: whether the first is the newer (missing parts are 0)
+    awk -v a="$1" -v b="$2" 'BEGIN {
+        split(a, x, "."); split(b, y, ".")
+        for (i = 1; i <= 3; i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 }
+        exit 1 }'
+}
+
+compile_verdict() { # aquery --json: the Mojo compile commands use the macOS toolchain
+    local rows bad
+    rows=$(inspect_tool json "$1" | awk -F '\t' '
+        $2 == "category" && NF == 3 { cat[$1] = $3 }
+        $2 == "cmd" && NF == 3 { cmd[$1] = $3 }
+        $2 == "cmd" && NF == 4 { if ($1 in cmd) cmd[$1] = cmd[$1] " " $4; else cmd[$1] = $4 }
+        END {
+            for (a in cat)
+                if (cat[a] == "mojo_build" || cat[a] == "mojo_build_test" || cat[a] == "mojo_precompile")
+                    print cat[a] "\t" cmd[a]
+        }') || { echo "cannot read $1"; return 1; }
+    bad=$(printf '%s\n' "$rows" | awk -F '\t' '
+        NF < 2 { next }
+        {
+            n = split("darwin/__busybox.sh__/busybox.sh|darwin/__mojo_wrapper.sh__/mojo_wrapper.sh|toolchains/darwin/__mojo_compiler__/|toolchains/darwin/__link__/| 11.0, ", need, "|")
+            for (i = 1; i <= n; i++) if (index($2, need[i]) == 0) print $1 " lacks \047" need[i] "\047"
+            if (index($2, "zig") > 0) print $1 " names zig"
+            if ($1 != "mojo_precompile" && index($2, "--target-cpu, apple-m1") == 0) print $1 " does not target apple-m1"
+        }' | LC_ALL=C sort -u)
+    if ! printf '%s\n' "$rows" | grep -q "^mojo_build$TAB"; then
+        bad="no mojo_build action${bad:+
+$bad}"
+    fi
+    if [ -n "$bad" ]; then
+        printf '%s\n' "$bad" | paste -sd ';' - | sed 's/;/; /g'
+        return 1
+    fi
+    echo "$(printf '%s\n' "$rows" | grep -c .) compile actions"
+}
+
+macho_closure() { # compiler_dir runtime_dir deployment_target
+    # The Mach-O files of the osx-arm64 closure: arm64, in CLOSURE_MANIFEST,
+    # loading only @rpath/<a runtime library> or the system, @loader_path run
+    # paths, @rpath install names, no newer macOS than the target; and the
+    # runtime directory is exactly the compiler's lib/*.dylib, byte for byte.
+    local compiler=$1 runtime=$2 target=$3 p libs carried name rel want listing kind value extra count=0
+    p=$(mktemp "${TMPDIR:-/tmp}/komira_macho.XXXXXX") || return 1
+    libs=$(for name in "$compiler"/lib/*.dylib; do [ -e "$name" ] && echo "${name##*/}"; done | LC_ALL=C sort)
+    [ -n "$libs" ] || echo "compiler lib/ holds no .dylib" >> "$p"
+    carried=$(ls "$runtime" 2> /dev/null | LC_ALL=C sort)
+    [ "$carried" = "$libs" ] ||
+        echo "runtime directory holds [$(printf '%s\n' "$carried" | paste -sd ' ' -)], the compiler's lib/ [$(printf '%s\n' "$libs" | paste -sd ' ' -)]" >> "$p"
+    for name in $libs; do
+        if [ -f "$runtime/$name" ] && ! cmp -s "$runtime/$name" "$compiler/lib/$name"; then
+            echo "runtime $name differs from the compiler's lib/$name" >> "$p"
+        fi
+    done
+    for rel in bin/mojo $(printf 'lib/%s\n' $libs); do
+        count=$((count + 1))
+        want=6
+        [ "$rel" = bin/mojo ] && want=2
+        tr -s ' \t' '\n\n' < "$compiler/CLOSURE_MANIFEST" | grep -qxF "$rel" || echo "$rel is not in CLOSURE_MANIFEST" >> "$p"
+        if ! listing=$(inspect_tool macho "$compiler/$rel" 2>&1); then
+            echo "$rel: $listing" >> "$p"
+            continue
+        fi
+        while IFS="$TAB" read -r kind value extra; do
+            case "$kind" in
+            header)
+                [ "$value" = 0x100000c ] && [ "$extra" = "$want" ] ||
+                    echo "$rel: cputype $value filetype $extra, want arm64 filetype $want" >> "$p" ;;
+            load)
+                case "$value" in
+                /usr/lib/* | /System/Library/*) ;;
+                @rpath/*) printf '%s\n' "$libs" | grep -qxF "${value#@rpath/}" ||
+                    echo "$rel loads $value: neither a runtime library nor a system library" >> "$p" ;;
+                *) echo "$rel loads $value: neither a runtime library nor a system library" >> "$p" ;;
+                esac ;;
+            id)
+                [ "$value" = "@rpath/${rel##*/}" ] || echo "$rel: install name $value, want @rpath/${rel##*/}" >> "$p" ;;
+            rpath)
+                case "$value" in @loader_path*) ;; *) echo "$rel: run path $value is not @loader_path-relative" >> "$p" ;; esac ;;
+            minos)
+                if version_gt "$value" "$target"; then
+                    echo "$rel requires macOS $value, newer than the deployment target $target" >> "$p"
+                fi ;;
+            esac
+        done <<< "$listing"
+    done
+    if [ -s "$p" ]; then
+        cat "$p"
+        rm -f "$p"
+        return 1
+    fi
+    rm -f "$p"
+    echo "$count Mach-O files: arm64, loading only @rpath runtime libraries and the system; $(printf '%s\n' "$libs" | grep -c .) runtime libraries carried"
+}
+
+report_outputs() { # build report json [sub-target]: the project root, then each output path
+    inspect_tool json "$1" | awk -F '\t' -v sub_target="${2:-}" '
+        $1 == "project_root" && NF == 2 { root = $2 }
+        $1 == "results" && $3 == "configured" && $5 == "outputs" && NF == 8 && (sub_target == "" || $6 == sub_target) { out[++n] = $8 }
+        END { print root; for (i = 1; i <= n; i++) print out[i] }'
+}
+
+census_verdict() { # build report json, listed host identities
+    local rows root seen unlisted never
+    rows=$(report_outputs "$1" DEFAULT) || { echo "cannot read $1"; return 1; }
+    root=$(printf '%s\n' "$rows" | head -n 1)
+    seen=$(printf '%s\n' "$rows" | tail -n +2 | while IFS= read -r path; do
+        sed 's/^[[:space:]]*//; s/[[:space:]]*$//' "$root/$path" | paste -sd ' ' -
+    done)
+    if [ -z "$seen" ]; then
+        echo "no census output"
+        return 1
+    fi
+    unlisted=$(comm -23 <(printf '%s\n' "$seen" | LC_ALL=C sort -u) <(printf '%s\n' $2 | LC_ALL=C sort -u) | paste -sd ' ' -)
+    if [ -n "$unlisted" ]; then
+        echo "workers report host identities not in darwin_macos_hosts: $unlisted"
+        return 1
+    fi
+    never=$(comm -13 <(printf '%s\n' "$seen" | LC_ALL=C sort -u) <(printf '%s\n' $2 | LC_ALL=C sort -u) | paste -sd ' ' -)
+    echo "$(printf '%s\n' "$seen" | grep -c .) actions on $(printf '%s\n' "$seen" | LC_ALL=C sort -u | grep -c .) listed host(s) $(printf '%s\n' "$seen" | LC_ALL=C sort -u | paste -sd ' ' -)${never:+; listed but not seen this run: $never}"
+}
+
+hello_verdict() { # what-ran json, build report json: hello built and run-checked on macOS
+    local mac acts bad rows root exe stdout listing rpaths
+    mac=$(props_norm "$MAC_PROPS")
+    acts=$(whatran_actions "$1") || { echo "cannot read $1"; return 1; }
+    bad=$(printf '%s\n' "$acts" | awk -F '\t' -v M="$mac" '
+        $1 == "mojo_build" || $1 == "mojo_run_check" {
+            seen[$1] = 1
+            if ($2 != "Re" || $3 != M) print $1 " ran as " $2 " with " $3 ", not on " M
+        }
+        END {
+            if (!("mojo_build" in seen)) print "mojo_build did not execute"
+            if (!("mojo_run_check" in seen)) print "mojo_run_check did not execute"
+        }')
+    rows=$(report_outputs "$2") || { echo "cannot read $2"; return 1; }
+    root=$(printf '%s\n' "$rows" | head -n 1)
+    exe=$(printf '%s\n' "$rows" | tail -n +2 | grep '/hello$')
+    stdout=$(printf '%s\n' "$rows" | tail -n +2 | grep '/hello\.stdout$')
+    if [ "$(printf '%s\n' "$exe" | grep -c .)" != 1 ] || [ "$(printf '%s\n' "$stdout" | grep -c .)" != 1 ]; then
+        bad="$bad
+outputs: $(printf '%s\n' "$rows" | tail -n +2 | paste -sd ' ' -)"
+    else
+        cmp -s "$root/$stdout" <(printf 'hello from mojo\n') || bad="$bad
+run check stdout differs"
+        if ! listing=$(inspect_tool macho "$root/$exe" 2>&1); then
+            bad="$bad
+hello: $listing"
+        else
+            printf '%s\n' "$listing" | grep -qx "header${TAB}0x100000c${TAB}2" ||
+                bad="$bad
+hello: $(printf '%s\n' "$listing" | grep '^header' | tr '\t' ' ')"
+            rpaths=$(printf '%s\n' "$listing" | awk -F '\t' '$1 == "rpath" { print $2 }' | paste -sd ' ' -)
+            [ "$rpaths" = "@loader_path/lib" ] || bad="$bad
+hello: run paths [$rpaths]"
+            bad="$bad
+$(printf '%s\n' "$listing" | awk -F '\t' '
+                $1 == "load" && $2 !~ /^(\/usr\/lib\/|\/System\/Library\/)/ && $2 != "@rpath/libKGENCompilerRTShared.dylib" { print "hello loads " $2 }
+                $1 == "minos" && $2 != "11.0.0" { print "hello: minos " $2 }')"
+        fi
+        if grep -aqF '/.bbworker/' "$root/$exe" || grep -aqF '.komira_action' "$root/$exe"; then
+            bad="$bad
+hello names a worker path"
+        fi
+    fi
+    bad=$(printf '%s\n' "$bad" | grep .)
+    if [ -n "$bad" ]; then
+        printf '%s\n' "$bad" | paste -sd ';' - | sed 's/;/; /g'
+        return 1
+    fi
+    echo "mojo_build and mojo_run_check ran remotely with $MAC_PROPS; arm64, macOS 11.0, run path @loader_path/lib"
+}
 
 DARWIN=(--target-platforms komira//tools/build/platforms:darwin-arm64)
 KEY=komira_re.darwin_mojo_compile_properties
@@ -100,8 +279,7 @@ if "$BUCK2" audit execution-platform-resolution -c "$KEY=pool=mac-only-no-hosts"
     fail "load: a macOS property set without darwin_macos_hosts was accepted"
 elif ! grep -qF 'names no macOS host' "$LOG/darwin_no_hosts.txt"; then
     fail "load: the missing-hosts refusal failed for another reason (see $LOG/darwin_no_hosts.txt)"
-elif MC=$("$BUCK2" audit config komira_re.mojo_compile_properties --style json 2> /dev/null |
-        python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2> /dev/null) && [ -n "$MC" ] &&
+elif MC=$(cfg_value komira_re.mojo_compile_properties) && [ -n "$MC" ] &&
     "$BUCK2" audit execution-platform-resolution -c "$HOSTS_KEY=0.0-check" \
         -c "$KEY=$MC" //tools/build/examples:hello > "$LOG/darwin_linux_set.txt" 2>&1; then
     fail "load: a macOS property set equal to the linux mojo_compile set was accepted"
@@ -112,7 +290,7 @@ else
 fi
 if ! "$BUCK2" targets checks//darwin: > "$LOG/darwin_cases.txt" 2>&1; then
     fail "load: a darwin_properties_refusal case failed (see $LOG/darwin_cases.txt)"
-elif ! grep -qx 'checks//darwin:macho.py' "$LOG/darwin_cases.txt"; then
+elif ! grep -qx 'checks//darwin:shell_lint' "$LOG/darwin_cases.txt"; then
     fail "load: checks//darwin was not loaded (see $LOG/darwin_cases.txt)"
 else
     pass "load: an empty property set and malformed host identities are refused (cases.bzl)"
@@ -132,27 +310,7 @@ if ! "$BUCK2" aquery "${PLACEHOLDER[@]}" "${DARWIN[@]}" 'deps(set(//tools/build/
         --output-attribute cmd --output-attribute env --output-attribute category --json \
         > "$LOG/darwin_aquery.json" 2> "$LOG/darwin_aquery.err"; then
     fail "commands: aquery failed (see $LOG/darwin_aquery.err)"
-elif ! verdict=$(python3 - "$LOG/darwin_aquery.json" << 'PY'
-import json, sys
-actions = json.load(open(sys.argv[1])).values()
-compiles = [a for a in actions if a.get("category") in ("mojo_build", "mojo_build_test", "mojo_precompile")]
-bad = []
-if len([a for a in compiles if a["category"] == "mojo_build"]) < 1:
-    bad.append("no mojo_build action")
-for a in compiles:
-    cmd = a["cmd"] if isinstance(a["cmd"], str) else " ".join(a["cmd"])
-    for need in ("darwin/__busybox.sh__/busybox.sh", "darwin/__mojo_wrapper.sh__/mojo_wrapper.sh",
-                 "toolchains/darwin/__mojo_compiler__/", "toolchains/darwin/__link__/", " 11.0, "):
-        if need not in cmd:
-            bad.append("%s lacks %r" % (a["category"], need))
-    if "zig" in cmd:
-        bad.append("%s names zig" % a["category"])
-    if a["category"] != "mojo_precompile" and "--target-cpu, apple-m1" not in cmd:
-        bad.append("%s does not target apple-m1" % a["category"])
-print("; ".join(sorted(set(bad))) if bad else "%d compile actions" % len(compiles))
-sys.exit(1 if bad else 0)
-PY
-); then
+elif ! verdict=$(compile_verdict "$LOG/darwin_aquery.json"); then
     fail "commands: ${verdict:-no verdict} (see $LOG/darwin_aquery.json)"
 elif grep -oE "$abs_path_re" "$LOG/darwin_aquery.json" > "$LOG/darwin_abs_paths.txt"; then
     fail "commands: absolute paths in darwin action commands: $(sort -u "$LOG/darwin_abs_paths.txt" | tr '\n' ' ')"
@@ -180,7 +338,7 @@ if ! "$BUCK2" build "${DARWIN[@]}" komira//tools/build/toolchains/darwin:mojo_co
     fail "closure: build failed (see $LOG/darwin_closure.log)"
 else
     out() { grep "^komira//tools/build/toolchains/darwin:$1 " "$LOG/darwin_closure.txt" | awk '{print $2}'; }
-    if ! verdict=$(python3 tools/build/checks/darwin/macho.py "$(out mojo_compiler)" "$(out mojo_runtime)" 11.0 2>&1); then
+    if ! verdict=$(macho_closure "$(out mojo_compiler)" "$(out mojo_runtime)" 11.0 2>&1); then
         fail "closure: $(printf '%s' "$verdict" | tr '\n' ' ')"
     else
         pass "closure: $verdict"
@@ -357,10 +515,6 @@ else
 fi
 
 # ---- 7. live, on the macOS workers ----------------------------------------------
-cfg_value() {
-    "$BUCK2" audit config "$1" --style json 2> /dev/null |
-        python3 -c 'import json, sys; v = list(json.load(sys.stdin).values()); print(v[0] if v else "")' 2> /dev/null
-}
 MAC_PROPS=$(cfg_value "$KEY")
 MAC_HOSTS=$(cfg_value "$HOSTS_KEY")
 if [ -z "$MAC_PROPS" ] || [ -z "$MAC_HOSTS" ]; then
@@ -374,27 +528,7 @@ else
     elif ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" checks//darwin:host_census \
             --build-report "$LOG/darwin_census.json" > "$LOG/darwin_census.log" 2>&1; then
         fail "live: host census failed (see $LOG/darwin_census.log)"
-    elif ! verdict=$(HOSTS="$MAC_HOSTS" python3 - "$LOG/darwin_census.json" << 'PY'
-import json, os, sys
-listed = set(os.environ["HOSTS"].split())
-report = json.load(open(sys.argv[1]))
-seen = []
-for target in report["results"].values():
-    for cfg in target["configured"].values():
-        for path in cfg["outputs"]["DEFAULT"]:
-            seen.append(open(os.path.join(report["project_root"], path)).read().strip())
-if not seen:
-    print("no census output")
-    sys.exit(1)
-unlisted = sorted(set(seen) - listed)
-if unlisted:
-    print("workers report host identities not in darwin_macos_hosts: " + " ".join(unlisted))
-    sys.exit(1)
-never = sorted(listed - set(seen))
-print("%d actions on %d listed host(s) %s%s" % (len(seen), len(set(seen)), " ".join(sorted(set(seen))),
-      "; listed but not seen this run: " + " ".join(never) if never else ""))
-PY
-); then
+    elif ! verdict=$(census_verdict "$LOG/darwin_census.json" "$MAC_HOSTS"); then
         fail "live: $verdict"
     else
         pass "live: host census: $verdict"
@@ -404,62 +538,7 @@ PY
         fail "live: //tools/build/examples:hello or its run check failed on macOS (see $LOG/darwin_hello.log)"
     elif ! "$BUCK2" --isolation-dir "$ISO" log what-ran --format json > "$LOG/darwin_hello.what_ran.json" 2>&1; then
         fail "live: cannot read what-ran"
-    elif ! verdict=$(MAC="$MAC_PROPS" python3 -B - "$LOG/darwin_hello.what_ran.json" "$LOG/darwin_hello.json" << 'PY'
-import json, os, struct, sys
-sys.path.insert(0, "tools/build/checks/darwin")
-import macho
-
-mac = dict(p.strip().split("=", 1) for p in os.environ["MAC"].split(",") if p.strip())
-bad, seen = [], {}
-for line in open(sys.argv[1]):
-    if not line.startswith("{"):
-        continue
-    d = json.loads(line)
-    category = d["identity"].rsplit(" (", 1)[-1].rstrip(")")
-    if category not in ("mojo_build", "mojo_run_check"):
-        continue
-    rep = d["reproducer"]
-    seen[category] = seen.get(category, 0) + 1
-    got = rep.get("details", {}).get("platform_properties")
-    if rep.get("executor") != "Re" or got != mac:
-        bad.append("%s ran as %s with %s, not on %s" % (category, rep.get("executor"), got, mac))
-for c in ("mojo_build", "mojo_run_check"):
-    if c not in seen:
-        bad.append(c + " did not execute")
-report = json.load(open(sys.argv[2]))
-outs = []
-for target in report["results"].values():
-    for cfg in target["configured"].values():
-        for sub in cfg["outputs"].values():
-            outs += sub
-root = report["project_root"]
-exe = [o for o in outs if o.endswith("/hello")]
-stdout = [o for o in outs if o.endswith("/hello.stdout")]
-if len(exe) != 1 or len(stdout) != 1:
-    bad.append("outputs: %s" % outs)
-else:
-    if open(os.path.join(root, stdout[0])).read() != "hello from mojo\n":
-        bad.append("run check stdout differs")
-    path = os.path.join(root, exe[0])
-    filetype, cputype, cmds = macho.load_commands(path)
-    if cputype != macho.CPU_TYPE_ARM64 or filetype != 2:
-        bad.append("hello: cputype %#x filetype %d" % (cputype, filetype))
-    rpaths = [v for k, v in cmds if k == "rpath"]
-    if rpaths != ["@loader_path/lib"]:
-        bad.append("hello: run paths %s" % rpaths)
-    for k, v in cmds:
-        if k == "load" and not (v.startswith(macho.SYSTEM_PREFIXES) or v == "@rpath/libKGENCompilerRTShared.dylib"):
-            bad.append("hello loads " + v)
-        if k == "minos" and v != (11, 0, 0):
-            bad.append("hello: minos %s" % (v,))
-    if b"/.bbworker/" in open(path, "rb").read() or b".komira_action" in open(path, "rb").read():
-        bad.append("hello names a worker path")
-if bad:
-    print("; ".join(bad))
-    sys.exit(1)
-print("mojo_build and mojo_run_check ran remotely with %s; arm64, macOS 11.0, run path @loader_path/lib" % os.environ["MAC"])
-PY
-); then
+    elif ! verdict=$(hello_verdict "$LOG/darwin_hello.what_ran.json" "$LOG/darwin_hello.json"); then
         fail "live: $verdict (see $LOG/darwin_hello.what_ran.json)"
     else
         pass "live: $verdict"

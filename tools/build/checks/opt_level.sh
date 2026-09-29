@@ -6,7 +6,10 @@
 #
 # usage: tools/build/checks/opt_level.sh [LOG_DIR]   (from the repo root; BUCK2 overrides the binary)
 set -uo pipefail
-BUCK2=${BUCK2:-$(cd "$(dirname "$0")/../../.." && pwd)/buck2}
+ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
+BUCK2=${BUCK2:-$ROOT/buck2}
+# shellcheck source=tools/build/checks/tool_lib.sh
+. "$ROOT/tools/build/checks/tool_lib.sh"
 LOG=${1:-${TMPDIR:-/tmp}}
 out="$LOG/opt_level.json"
 
@@ -35,36 +38,47 @@ if ! "$BUCK2" aquery "$query" --output-attribute cmd --output-attribute category
     echo "FAIL  optimization levels: aquery failed (see $out.err)"
     exit 1
 fi
-EXPECT="$EXPECT" BUNDLE="$BUNDLE" python3 - "$out" <<'PY'
-import json, os, re, sys
-got = {}  # (label, category) -> set of levels
-for key, a in json.load(open(sys.argv[1])).items():
-    cat = a.get("category", "")
-    if not cat.startswith("mojo_build"):
-        continue
-    label = re.match(r"\(target: `([^ `]+)", key).group(1)
-    m = re.search(r", --optimization-level, ([^,\]]*)[,\]]", a.get("cmd", ""))
-    got.setdefault((label, cat), set()).add(m.group(1) if m else "<none>")
-bad, n = [], 0
-for line in os.environ["EXPECT"].split("\n"):
-    if not line.strip():
-        continue
-    label, cat, want = line.split()
-    levels = got.get((label, cat))
-    if not levels:
-        bad.append("{} has no {} action".format(label, cat))
-    elif levels != {want}:
-        bad.append("{} {} at -O{}, expected -O{}".format(label, cat, "/".join(sorted(levels)), want))
-    else:
-        n += 1
-shared = {k: v for k, v in got.items() if k[1] == "mojo_build_shared"}
-if not shared:
-    bad.append("{} reaches no mojo_build_shared action".format(os.environ["BUNDLE"]))
-for (label, cat), levels in sorted(shared.items()):
-    if levels != {"3"}:
-        bad.append("{} {} at -O{}, expected -O3 (shared library)".format(label, cat, "/".join(sorted(levels))))
-if bad:
-    print("FAIL  optimization levels: " + "; ".join(bad))
-    sys.exit(1)
-print("PASS  optimization levels: {} compile commands as declared (tests -O1; binaries and the bundle's {} shared library action(s) -O3; overrides honoured)".format(n, len(shared)))
-PY
+if ! inspect_tool json "$out" > "$out.tsv"; then
+    echo "FAIL  optimization levels: inspect cannot read the aquery output (see $out.tsv)"
+    exit 1
+fi
+awk -F '\t' -v EXPECT="$EXPECT" -v BUNDLE="$BUNDLE" '
+    $2 == "category" { cat[$1] = $3 }
+    $2 == "cmd" { cmd[$1] = $3 }
+    function add(k, lv,    s) { # got[k]: the distinct levels, sorted, "/"-joined
+        if (!(k in got)) { got[k] = lv; return }
+        s = "/" got[k] "/"
+        if (index(s, "/" lv "/")) return
+        got[k] = got[k] "/" lv
+        n = split(got[k], a, "/"); for (i = 2; i <= n; i++) for (j = i; j > 1 && a[j - 1] > a[j]; j--) { t = a[j]; a[j] = a[j - 1]; a[j - 1] = t }
+        got[k] = a[1]; for (i = 2; i <= n; i++) got[k] = got[k] "/" a[i]
+    }
+    END {
+        for (k in cat) {
+            c = cat[k]
+            if (c !~ /^mojo_build/ || !match(k, /\(target: `[^ `]+/)) continue
+            label = substr(k, RSTART + 10, RLENGTH - 10)
+            lv = "<none>"
+            if (match(cmd[k], /, --optimization-level, [^,\]]*[,\]]/)) lv = substr(cmd[k], RSTART + 24, RLENGTH - 25)
+            add(label SUBSEP c, lv)
+        }
+        bad = ""; ok = 0
+        m = split(EXPECT, lines, "\n")
+        for (i = 1; i <= m; i++) {
+            if (split(lines[i], f, " ") != 3) continue
+            k = f[1] SUBSEP f[2]
+            if (!(k in got)) bad = bad "; " f[1] " has no " f[2] " action"
+            else if (got[k] != f[3]) bad = bad "; " f[1] " " f[2] " at -O" got[k] ", expected -O" f[3]
+            else ok++
+        }
+        shared = 0
+        for (k in got) {
+            split(k, p, SUBSEP)
+            if (p[2] != "mojo_build_shared") continue
+            shared++
+            if (got[k] != "3") bad = bad "; " p[1] " " p[2] " at -O" got[k] ", expected -O3 (shared library)"
+        }
+        if (!shared) bad = bad "; " BUNDLE " reaches no mojo_build_shared action"
+        if (bad != "") { print "FAIL  optimization levels: " substr(bad, 3); exit 1 }
+        print "PASS  optimization levels: " ok " compile commands as declared (tests -O1; binaries and the bundle'"'"'s " shared " shared library action(s) -O3; overrides honoured)"
+    }' "$out.tsv"

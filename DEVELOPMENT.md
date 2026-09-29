@@ -194,9 +194,10 @@ the undeclared package in the checkout. Check 25, that a fresh clone with no
 `.buckconfig.local` resolves to local execution, runs in both.
 
 `run_checks.sh` runs `./buck2`; `BUCK2=...` overrides it. Besides buck2 it
-runs `git`, `python3` (the doc link check and a few JSON reads), `readelf`,
-`objdump`, `curl` and `zstd` on the client. Logs and the scratch checkouts of
-the umbrella and `./buck2 run`
+runs `git`, `readelf`, `objdump`, `curl` and `zstd` on the client, and no
+Python: the JSON, tar and Mach-O reads and the doc link check are a Mojo tool
+([tools/build/inspect](tools/build/inspect/inspect.mojo)) the checks build on
+the farm like any other target. Logs and the scratch checkouts of the umbrella and `./buck2 run`
 checks go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk
 directory. The scratch checkouts are deleted on exit,
 pass or fail (`KEEP_SCRATCH=1` keeps them); logs are kept, and the last line

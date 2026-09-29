@@ -194,6 +194,8 @@ fi
 # /tmp is memory, point TMPDIR at a disk directory. The checkouts are deleted
 # on exit, pass or fail (KEEP_SCRATCH=1 keeps them); logs are kept.
 LOG=$(mktemp -d "${TMPDIR:-/tmp}/komira_checks.XXXXXX")
+export INSPECT_LOG="$LOG/inspect_build.log"
+. "$ROOT/tools/build/checks/tool_lib.sh"
 fails=0
 
 pass() { echo "PASS  $1"; }
@@ -202,8 +204,7 @@ needs_remote() { echo "SKIP  $1: needs a remote-execution service; this run is l
 
 # Local or remote: read from the executor of every execution platform buck2
 # registers, so `-c`, a user buckconfig and `.buckconfig.local` all count.
-EP=$("$BUCK2" audit config build.execution_platforms --style json 2> "$LOG/mode.err" |
-    python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2>> "$LOG/mode.err")
+EP=$(cfg_value build.execution_platforms)
 if [ -z "$EP" ] || ! "$BUCK2" audit providers "$EP" > "$LOG/mode.txt" 2>> "$LOG/mode.err"; then
     echo "FAIL  mode: cannot read the registered execution platforms (see $LOG/mode.err)"
     exit 1
@@ -484,8 +485,37 @@ else
     fi
 fi
 re_value() { # key: prints [komira_re] <key> of the root cell
-    "$BUCK2" audit config "komira_re.$1" --style json 2> /dev/null |
-        python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2> /dev/null
+    cfg_value "komira_re.$1"
+}
+action_platforms() { # what-ran json: every category ran remotely, with its platform's set
+    local light mojo acts
+    light=$(props_norm "$LIGHT_PROPS")
+    mojo=$(props_norm "$MC_PROPS")
+    if [ "$light" = "$mojo" ]; then
+        echo "light and mojo_compile property sets are equal; nothing to tell apart"
+        return 1
+    fi
+    acts=$(whatran_actions "$1") || { echo "cannot read $1"; return 1; }
+    printf '%s\n' "$acts" | awk -F '\t' -v L="$light" -v M="$mojo" '
+        BEGIN {
+            n = split("conda_unpack mojo_build mojo_runtime zig_build_exe zig_unpack", order, " ")
+            for (i = 1; i <= n; i++) want[order[i]] = L
+            want["mojo_build"] = M
+        }
+        !($1 in want) { next }
+        {
+            seen[$1]++; total++
+            if ($2 != "Re" || $3 == "-") msg = $1 " ran as " $2 ", not a remote execution"
+            else if ($3 != want[$1]) msg = $1 " ran with the " ($3 == M ? "mojo_compile" : ($3 == L ? "light" : "an unknown")) " set"
+            else next
+            bad = bad (bad == "" ? "" : "; ") msg
+        }
+        END {
+            for (i = 1; i <= n; i++) if (!(order[i] in seen)) missing = missing " " order[i]
+            if (missing != "") bad = bad (bad == "" ? "" : "; ") "not executed:" missing
+            if (bad != "") { print bad; exit 1 }
+            printf "%d actions: conda_unpack/mojo_runtime/zig_build_exe/zig_unpack on light, mojo_build on mojo_compile\n", total
+        }'
 }
 MC_PROPS=$(re_value mojo_compile_properties)
 LIGHT_PROPS=$(re_value light_properties)
@@ -548,42 +578,7 @@ elif ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache //too
     fail "action platforms: uncached build failed (see $LOG/uncached.log)"
 elif ! "$BUCK2" --isolation-dir "$ISO" log what-ran --format json > "$LOG/uncached.what_ran.json" 2>&1; then
     fail "action platforms: cannot read what-ran"
-elif ! verdict=$(LIGHT="$LIGHT_PROPS" MOJO="$MC_PROPS" python3 - "$LOG/uncached.what_ran.json" << 'PY'
-import json, os, sys
-
-def props(raw):
-    return dict(p.strip().split("=", 1) for p in raw.split(",") if p.strip())
-
-light, mojo = props(os.environ["LIGHT"]), props(os.environ["MOJO"])
-if light == mojo:
-    print("light and mojo_compile property sets are equal; nothing to tell apart")
-    sys.exit(1)
-want = {c: light for c in ("zig_unpack", "zig_build_exe", "conda_unpack", "mojo_runtime")}
-want["mojo_build"] = mojo
-seen, bad = {}, []
-for line in open(sys.argv[1]):
-    if not line.startswith("{"):
-        continue
-    d = json.loads(line)
-    category = d["identity"].rsplit(" (", 1)[-1].rstrip(")")
-    rep = d["reproducer"]
-    if category not in want:
-        continue
-    seen[category] = seen.get(category, 0) + 1
-    got = rep.get("details", {}).get("platform_properties")
-    if rep.get("executor") != "Re" or got is None:
-        bad.append("%s ran as %s, not a remote execution" % (category, rep.get("executor")))
-    elif got != want[category]:
-        bad.append("%s ran with the %s set" % (category, "mojo_compile" if got == mojo else "light" if got == light else "an unknown"))
-missing = sorted(set(want) - set(seen))
-if missing:
-    bad.append("not executed: " + " ".join(missing))
-if bad:
-    print("; ".join(bad))
-    sys.exit(1)
-print("%d actions: %s on light, mojo_build on mojo_compile" % (sum(seen.values()), "/".join(sorted(c for c in want if c != "mojo_build"))))
-PY
-); then
+elif ! verdict=$(action_platforms "$LOG/uncached.what_ran.json"); then
     fail "action platforms: ${verdict:-no verdict} (see $LOG/uncached.what_ran.json)"
 else
     pass "action platforms: $verdict"

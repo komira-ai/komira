@@ -282,9 +282,11 @@ Every relative link in the repository's Markdown resolves: the target is a
 file tracked by git, or a directory holding one (a link to an ignored file
 such as `.buckconfig.local` resolves in a working tree and is dead in a fresh
 clone), it stays inside the repository, and a `#fragment` names a heading of
-the target file. [`doc_links.sh`](doc_links.sh) runs on its own and needs no
-build farm, but needs `git` and `python3` on the client and a git work tree
-to read. `run_checks.sh` first runs it on a planted git tree and requires it
+the target file. [`doc_links.sh`](doc_links.sh) runs on its own. It needs
+the build farm only to build the Mojo tool that reads the links
+([`//tools/build/inspect:inspect`](../inspect/inspect.mojo)), plus `git` on
+the client and a git work tree to read. `run_checks.sh` first runs it on a
+planted git tree and requires it
 to name each of a missing file, a bad anchor, a link leaving the tree and a
 link to an untracked file, and nothing else.
 

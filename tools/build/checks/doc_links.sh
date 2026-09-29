@@ -4,7 +4,9 @@
 # usage: tools/build/checks/doc_links.sh [<root>]    (default: the repo root)
 #
 # <root> must be a git work tree (or a directory inside one); the check needs
-# `git` and `python3` on the client. Reads every tracked *.md under <root> and
+# `git` on the client, and builds the Mojo tool that reads the links
+# (inspect doc-links, tools/build/inspect) on the farm from this checkout,
+# whatever <root> is. Reads every tracked *.md under <root> and
 # checks each inline link `[text](target)` and reference definition
 # `[id]: target` whose target is relative (not `scheme:`, not `//host`):
 #   - the target is a file tracked by git, or a directory holding one,
@@ -23,110 +25,17 @@ set -euo pipefail
 
 root=${1:-"$(cd "$(dirname "$0")/../../.." && pwd)"}
 [ -d "$root" ] || { echo "doc_links: no directory $root" >&2; exit 2; }
-for tool in git python3; do
-    command -v "$tool" > /dev/null || { echo "FAIL  doc links: needs \`$tool\` on the client" >&2; exit 2; }
-done
+command -v git > /dev/null || { echo "FAIL  doc links: needs \`git\` on the client" >&2; exit 2; }
 git -C "$root" rev-parse --is-inside-work-tree > /dev/null 2>&1 \
     || { echo "FAIL  doc links: $root is not inside a git work tree (links are resolved against tracked files)" >&2; exit 2; }
+# shellcheck source=tools/build/checks/tool_lib.sh
+. "$(dirname "$0")/tool_lib.sh"
+inspect_init || { echo "FAIL  doc links: cannot build the link reader" >&2; exit 2; }
 
-python3 - "$root" << 'PY'
-import os, re, subprocess, sys
-
-root = os.path.realpath(sys.argv[1])
-# Paths tracked by git under root (relative to root), and every directory
-# that holds one. A tracked file deleted in the working tree is not counted.
-tracked, tracked_dirs = set(), {root}
-out = subprocess.run(["git", "-C", root, "ls-files", "-z", "--cached", "--", "."],
-                     check=True, capture_output=True).stdout
-for rel in out.decode("utf-8").split("\0"):
-    if not rel:
-        continue
-    full = os.path.join(root, rel)
-    if not os.path.lexists(full):
-        continue
-    tracked.add(full)
-    d = os.path.dirname(full)
-    while d.startswith(root) and d not in tracked_dirs:
-        tracked_dirs.add(d)
-        d = os.path.dirname(d)
-FENCE = re.compile(r"^\s*(```|~~~)")
-INLINE = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
-REFDEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(\S+?)>?(?:\s+.*)?$")
-HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
-EXTERNAL = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*:|//)")
-
-def md_files():
-    return sorted(p for p in tracked if p.endswith(".md"))
-
-def prose_lines(path):
-    fenced = False
-    with open(path, encoding="utf-8") as fh:
-        for n, line in enumerate(fh, 1):
-            if FENCE.match(line):
-                fenced = not fenced
-                continue
-            if not fenced:
-                yield n, re.sub(r"`[^`]*`", "``", line.rstrip("\n"))
-
-def slug(text):
-    text = re.sub(r"`([^`]*)`", r"\1", text)
-    text = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", text)
-    text = re.sub(r"[^\w\- ]", "", text.lower())
-    return text.replace(" ", "-")
-
-# Anchors come from the raw heading text (inline code kept, unlike the
-# masked lines links are read from).
-def headings(path):
-    seen, out, fenced = {}, set(), False
-    with open(path, encoding="utf-8") as fh:
-        for line in fh:
-            if FENCE.match(line):
-                fenced = not fenced
-                continue
-            m = None if fenced else HEADING.match(line.rstrip("\n"))
-            if m:
-                s = slug(m.group(2))
-                k = seen.get(s, 0)
-                seen[s] = k + 1
-                out.add(s if k == 0 else "%s-%d" % (s, k))
-    return out
-anchor_cache = {}
-def anchors(path):
-    if path not in anchor_cache:
-        anchor_cache[path] = headings(path)
-    return anchor_cache[path]
-
-checked, dead = 0, []
-for md in md_files():
-    rel_md = os.path.relpath(md, root)
-    for n, line in prose_lines(md):
-        targets = [m.group(1) for m in INLINE.finditer(line)]
-        m = REFDEF.match(line)
-        if m:
-            targets.append(m.group(1))
-        for t in targets:
-            if EXTERNAL.match(t):
-                continue
-            checked += 1
-            path, _, frag = t.partition("#")
-            dest = md if path == "" else os.path.normpath(os.path.join(os.path.dirname(md), path))
-            where = "%s:%d: %s" % (rel_md, n, t)
-            if os.path.commonpath([root, os.path.realpath(dest)]) != root:
-                dead.append(where + " (leaves the repository)")
-            elif not os.path.exists(dest):
-                dead.append(where + " (no such file)")
-            elif dest not in tracked and dest not in tracked_dirs:
-                dead.append(where + " (not tracked by git)")
-            elif frag and dest.endswith(".md") and os.path.isfile(dest) and frag not in anchors(dest):
-                dead.append(where + " (no heading #%s)" % frag)
-
-if dead:
-    for d in dead:
-        print("dead link: " + d)
-    print("FAIL  doc links: %d of %d relative links do not resolve" % (len(dead), checked))
-    sys.exit(1)
-if checked == 0:
-    print("FAIL  doc links: no relative link found under %s; the scan saw nothing" % root)
-    sys.exit(1)
-print("PASS  doc links: all %d relative links resolve" % checked)
-PY
+real=$(cd "$root" && pwd -P)
+# Paths tracked by git under <root>, relative to it (NUL-separated); the tool
+# drops those deleted in the working tree.
+list=$(mktemp "${TMPDIR:-/tmp}/komira_doc_links.XXXXXX")
+trap 'rm -f "$list"' EXIT
+git -C "$real" ls-files -z --cached -- . > "$list"
+inspect_tool doc-links "$real" "$list"

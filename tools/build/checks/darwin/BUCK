@@ -5,8 +5,6 @@ load(":cases.bzl", "darwin_properties_cases")
 # cases.bzl wrong (checks/darwin/check.sh runs `buck2 targets checks//darwin:`).
 darwin_properties_cases()
 
-export_file(name = "macho.py", visibility = ["PUBLIC"])
-
 load(":census.bzl", "darwin_host_census")
 
 # The host identities the macOS workers report (see census.bzl). Only for

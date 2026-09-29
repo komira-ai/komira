@@ -60,9 +60,11 @@ step after these, on pushes to `main` only, of artifacts the same job built.
   one job per container and discarding it afterwards (an ephemeral runner).
   Nothing from one job, including a fork's, survives into the next.
 - It holds `git`, and what [`./buck2`](../buck2) needs: `sh`, `curl`, `zstd`
-  and `sha256sum`. `run_checks.sh` still needs `python3` (the doc link check
-  and a few JSON reads), `readelf` and `objdump`, and `docker` for the image
-  run leg of the format check (skipped without it).
+  and `sha256sum`. `run_checks.sh` also needs `readelf` and `objdump`, and
+  `docker` for the image run leg of the format check (skipped without it).
+  Its JSON, tar and Mach-O reads and the doc link check are a Mojo tool,
+  [`//tools/build/inspect:inspect`](../tools/build/inspect/inspect.mojo),
+  built on the farm like any other target.
 - The farm connection is **machine configuration**, not repository
   configuration: the runner image carries a machine-wide buckconfig (buck2
   reads `/etc/buckconfig.d/` and `~/.buckconfig.d/`) with the

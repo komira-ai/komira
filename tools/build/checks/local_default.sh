@@ -40,7 +40,8 @@
 # Only (5) executes anything, and only on Linux x86_64.
 #
 # Scratch goes under $TMPDIR (a disk directory where /tmp is memory); it is
-# deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Needs git and python3.
+# deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Needs git; what-ran is
+# read by //tools/build/inspect:inspect, built from this checkout.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
@@ -48,6 +49,8 @@ if [ -z "${BUCK2:-}" ]; then
     BUCK2="$ROOT/buck2"
 fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; *) BUCK2=$(command -v "$BUCK2") ;; esac
+# shellcheck source=tools/build/checks/tool_lib.sh
+. "$ROOT/tools/build/checks/tool_lib.sh"
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_local.XXXXXX")
 GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main)
 C="$W/clone"
@@ -72,8 +75,8 @@ mkdir "$W/src" "$W/home"
 [ ! -e "$C/.buckconfig.local" ] || die "the fresh clone has a .buckconfig.local; .gitignore no longer covers it"
 
 EP=komira//tools/build/platforms/default:default
-got_ep=$(b2 audit config build.execution_platforms --style json 2> "$W/ep.err" |
-    python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2>> "$W/ep.err")
+got_ep=$(b2 audit config build.execution_platforms --style simple 2> "$W/ep.err" |
+    sed -n "s/^    execution_platforms = //p" | head -n 1)
 [ "$got_ep" = "$EP" ] || die "[build] execution_platforms is '$got_ep', not $EP (see $W/ep.err)"
 
 if [ "$(uname -s)/$(uname -m)" != Linux/x86_64 ]; then
@@ -175,19 +178,16 @@ if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=t
     die "the local toolchain build failed with an empty PATH (see $W/local_build.log)"
 fi
 b2 log what-ran --format json > "$W/local_what_ran.json" 2>&1 || die "cannot read what-ran of the local build"
-ran=$(python3 - "$W/local_what_ran.json" << 'PY'
-import json, sys
-rows = [json.loads(l) for l in open(sys.argv[1]) if l.startswith("{")]
-execs = [r.get("reproducer", {}).get("executor", "") for r in rows]
-builds = sum(1 for r in rows if r.get("identity", "").endswith("(zig_build_exe)"))
-if not rows or any(e.lower() != "local" for e in execs):
-    print("executors %s, want only local" % sorted(set(execs)))
-elif builds < 2:
-    print("%d zig_build_exe actions ran, want 2" % builds)
-else:
-    print(len(rows))
-PY
-)
+acts=$(whatran_actions "$W/local_what_ran.json") || die "cannot read $W/local_what_ran.json"
+execs=$(printf '%s\n' "$acts" | awk -F '\t' 'NF { print tolower($2) }' | LC_ALL=C sort -u | paste -sd, -)
+builds=$(printf '%s\n' "$acts" | awk -F '\t' '$1 == "zig_build_exe"' | grep -c .)
+if [ -z "$acts" ] || [ "$execs" != local ]; then
+    ran="executors ${execs:-none}, want only local"
+elif [ "$builds" -lt 2 ]; then
+    ran="$builds zig_build_exe actions ran, want 2"
+else
+    ran=$(printf '%s\n' "$acts" | grep -c .)
+fi
 case "$ran" in '' | *[!0-9]*) die "local build: ${ran:-cannot read $W/local_what_ran.json}" ;; esac
 
 echo "PASS  local default: a fresh clone registers only local platforms (exec-mojo, exec-light); $(printf '%s\n' "$want" | grep -c '#') targets resolve to them with the pinned configuration hashes, numa_multi does not configure, forcing remote names [komira_re], a service named without [komira_re] refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH"
