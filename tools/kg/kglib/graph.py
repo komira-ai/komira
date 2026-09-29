@@ -224,7 +224,8 @@ def stale_reason(tree, cfg):
         return None
     bad = uncovered_cells(tree, cfg)
     if bad:
-        return "the graph does not index every cell: %s" % "; ".join(bad)
+        return ("the graph does not index every cell: %s (name each cell in docs/kg.toml [graph] universe or "
+                "exclude first)" % "; ".join(bad))
     doc = load(tree, cfg)
     if doc is None:
         return "%s is missing" % cfg.graph_out
