@@ -97,7 +97,7 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   docker run --rm komira/hello:0.1.0
   ```
 
-The base image is `toolchains//:distroless_base` (distroless base-debian12,
+The base image is `komira//tools/build/toolchains:distroless_base` (distroless base-debian12,
 which has glibc, CA certificates and no shell), declared with `oci_base`: the
 digest of its linux/amd64 manifest, that manifest's bytes checked in, and one
 pinned download per blob. The packing action does not use the network: it

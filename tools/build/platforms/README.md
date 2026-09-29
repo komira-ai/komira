@@ -25,11 +25,11 @@ workers.
 | configuration | constraints | runs |
 |---|---|---|
 | `exec-mojo` | `mojo_compile`, `numa_single` | Mojo compiles, gated library tests, run checks, `buck2 test` of a `mojo_test`; also any target that states no constraint |
-| `exec-light` | `light` | unpacking and copying toolchain files (`toolchains//:zig`, `:conda_unpack`, `:mojo_compiler`, `:mojo_runtime`) |
+| `exec-light` | `light` | unpacking and copying toolchain files (`komira//tools/build/toolchains:zig`, `:conda_unpack`, `:mojo_compiler`, `:mojo_runtime`) |
 | `exec-mojo-multi-numa` | `mojo_compile`, `numa_multi` | `mojo_multi_numa_test` only |
 
 The Mojo rules get their constraints from their toolchain
-([`toolchains/BUCK`](../toolchains/BUCK)): `toolchains//:mojo` states
+([`toolchains/defs.bzl`](../toolchains/defs.bzl)): `toolchains//:mojo` states
 `mojo_compile` + `numa_single`, and `toolchains//:mojo_multi_numa` (the
 private toolchain of `mojo_multi_numa_test`) states `mojo_compile` +
 `numa_multi`. A toolchain's `exec_compatible_with` binds every target that
@@ -67,8 +67,8 @@ A standalone checkout reads those sets from `[komira_re]` in
 Each value is comma-separated `key=value` pairs matching the properties your
 workers advertise, e.g. `pool=light`. Two keys may name the same set if you
 have one kind of worker (except the multi-NUMA one, below). A repository
-mounting komira calls the same macro with its own sets, written inline or read
-the same way ([tools/build/README.md](../README.md#mounting-komira-in-another-repository)).
+using komira calls the same macro with its own sets, written inline or read
+the same way ([tools/build/README.md](../README.md#using-komira-from-another-repository)).
 
 Two details keep action digests portable:
 

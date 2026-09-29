@@ -3,7 +3,7 @@ in a remote action. Nothing here needs a multi-NUMA worker: the guard reads its 
 from `--root`, so every verdict (run or refuse) is checked on any worker.
 """
 
-load("@mojo//:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
 
 def _impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]

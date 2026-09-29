@@ -20,16 +20,17 @@
 #      directory. (Inside every compile action the
 #      wrapper also refuses an output containing that action's working
 #      directory, exit 4.)
-#   7. A repository mounting komira as a git submodule (at ./komira and at
-#      ./third_party/komira) gets remote cache hits with the same action
-#      digests as a standalone checkout (tools/build/checks/umbrella_cache.sh;
-#      two scratch checkouts and daemons, skipped with --no-umbrella).
+#   7. A repository using komira as a cell -- a git submodule at ./komira or
+#      ./third_party/komira, or a git external cell -- gets remote cache hits
+#      with the same action digests as a standalone checkout
+#      (tools/build/checks/umbrella_cache.sh; four scratch checkouts and
+#      daemons, skipped with --no-umbrella).
 #   8. The host floor: during a real compile, and a run of the binary it
 #      built, the loader maps libstdc++.so.6 and libgcc_s.so.1 from the
 #      toolchain, and nothing from the worker except glibc's own objects
 #      (checks//runtime_libs:loader_trace, read from LD_DEBUG). The
 #      toolchain libraries the run loaded are exactly the ones a runnable
-#      directory carries in lib/ (toolchains//:mojo_runtime), no more, no
+#      directory carries in lib/ (komira//tools/build/toolchains:mojo_runtime), no more, no
 #      fewer, and every run path those libraries carry is $ORIGIN-relative.
 #   9. `buck2 run //tools/build/examples:hello` prints the greeting on this
 #      machine from a fresh clone, downloads only the binary and its runtime libraries, and
@@ -85,6 +86,10 @@
 #      untracked file.
 #  18. The configuration hashes of exec-light, exec-mojo and linux-x86_64 equal
 #      their pins: they are in the digest of every configured action.
+#  19. What a repository using komira as a cell loads names no cell but
+#      komira, prelude and toolchains: every label outside a comment in the
+#      BUCK and .bzl files of tools/build/{mojo,toolchains,platforms,package,
+#      examples,cells}. A label naming `checks` (standalone-only) fails to load there.
 set -uo pipefail
 
 umbrella=1
@@ -289,10 +294,10 @@ komira//tools/build/examples:hellopkg komira//tools/build/platforms:exec-mojo
 komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/platforms:exec-mojo
 komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:exec-mojo
 checks//numa:hello komira//tools/build/platforms:exec-mojo
-toolchains//:zig komira//tools/build/platforms:exec-light
-toolchains//:conda_unpack komira//tools/build/platforms:exec-light
-toolchains//:mojo_compiler komira//tools/build/platforms:exec-light
-toolchains//:mojo_runtime komira//tools/build/platforms:exec-light
+komira//tools/build/toolchains:zig komira//tools/build/platforms:exec-light
+komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:exec-light
+komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:exec-light
+komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:exec-light
 checks//numa:hello_multi_numa FAILED"
 want=$(printf '%s\n' "$EXPECT_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
 if ! got=$(resolve platforms "${NO_MULTI[@]}" $(printf '%s\n' "$want" | cut -d' ' -f1)); then
@@ -529,6 +534,26 @@ elif got=$(grep -oE '\([^ ()]*:(exec-light|exec-mojo|linux-x86_64)#[0-9a-f]+\)' 
     fail "configuration hashes moved, so every action digest did: got $(printf '%s' "$got" | tr '\n' ' '); if deliberate, update EXPECT_CFGS (see $LOG/cfg_hashes.txt)"
 else
     pass "configuration hashes: exec-light, exec-mojo and linux-x86_64 keep their pinned hashes"
+fi
+
+# 19
+EXPORTED="mojo toolchains platforms package examples cells"
+missing=""
+for d in $EXPORTED; do [ -d "$ROOT/tools/build/$d" ] || missing="$missing tools/build/$d"; done
+labels=$(cd "$ROOT" && git ls-files -z $(for d in $EXPORTED; do printf 'tools/build/%s ' "$d"; done) |
+    grep -zE '(^|/)(BUCK|[^/]*\.bzl)$' | xargs -0 grep -nE '[a-z_]+//' |
+    awk -F: '{ line = $0; sub(/^[^:]*:[^:]*:/, "", line) } line !~ /^[ \t]*#/ { print }' |
+    grep -oE '^[^:]*:[0-9]+:|(^|[^a-z_])[a-z_]+//' | tr -d '"(' )
+n=$(printf '%s\n' "$labels" | grep -cE '[a-z_]+//$')
+foreign=$(printf '%s\n' "$labels" | awk '/:[0-9]+:$/ { at = $0; next } /\/\/$/ { c = $0; sub(/^[^a-z_]*/, "", c); sub(/\/\/$/, "", c); if (c != "komira" && c != "prelude" && c != "toolchains") print at c "//" }')
+if [ -n "$missing" ]; then
+    fail "exported cells: searched directories missing:$missing"
+elif [ "$n" -lt 20 ]; then
+    fail "exported cells: only $n cell-qualified labels found, the scan is not reading the rules"
+elif [ -n "$foreign" ]; then
+    fail "exported cells: labels naming a cell a consuming repository lacks: $(printf '%s' "$foreign" | head -n 5 | tr '\n' ' ')"
+else
+    pass "exported cells: $n cell-qualified labels in the exported packages name only komira, prelude and toolchains"
 fi
 
 # 9

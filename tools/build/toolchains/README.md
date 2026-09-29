@@ -1,6 +1,6 @@
 # Toolchain
 
-The `toolchains` cell ([`BUCK`](BUCK)) builds the hermetic Mojo toolchain
+The package `komira//tools/build/toolchains` ([`BUCK`](BUCK)) builds the hermetic Mojo toolchain
 from sha256-pinned downloads, using the rules in
 [`mojo/toolchain.bzl`](../mojo/toolchain.bzl) and
 [`mojo/download.bzl`](../mojo/download.bzl).
@@ -20,7 +20,7 @@ The buck2 binary, and with it the bundled prelude, is pinned separately by
 ## How it is built
 
 Remote actions unpack the pinned files: busybox extracts zig
-(`toolchains//:zig`), zig compiles [`mojo/tools/conda_unpack.zig`](../mojo/tools/conda_unpack.zig)
+(`komira//tools/build/toolchains:zig`), zig compiles [`mojo/tools/conda_unpack.zig`](../mojo/tools/conda_unpack.zig)
 (`:conda_unpack`), and that static tool extracts the compiler closure from the
 `.conda`, placing the pinned C++ runtime in its `lib/` (`:mojo_compiler`).
 `:mojo_runtime` copies the libraries a built binary loads out of that closure,
@@ -28,11 +28,15 @@ and refuses (`mojo_runtime: REFUSING: lib/<name> is missing or empty`) a name
 the closure lacks. All of these run on `light` workers
 ([platforms/README.md](../platforms/README.md#execution-classes)).
 
-`toolchains//:mojo` bundles them for `mojo_library`, `mojo_binary` and
-`mojo_test` (on `mojo_compile` + `numa_single` workers), and
-`toolchains//:mojo_multi_numa` for `mojo_multi_numa_test` (on `mojo_compile` +
-`numa_multi` workers). Both link for `x86_64-linux-gnu.2.34` and compile for
-`target_cpu = "x86-64-v3"`.
+`komira_mojo_toolchains` ([`defs.bzl`](defs.bzl)) bundles them into
+`toolchains//:mojo` for `mojo_library`, `mojo_binary` and `mojo_test` (on
+`mojo_compile` + `numa_single` workers), and `toolchains//:mojo_multi_numa`
+for `mojo_multi_numa_test` (on `mojo_compile` + `numa_multi` workers). Both
+link for `x86_64-linux-gnu.2.34` and compile for `target_cpu = "x86-64-v3"`.
+It is called from the `toolchains` cell of the repository at the project
+root ([`cells/toolchains/BUCK`](../cells/toolchains/BUCK) in a standalone
+checkout), so a repository using komira can pass its own compiler
+([tools/build/README.md](../README.md#using-komira-from-another-repository)).
 
 Every tool an action runs is one of its inputs; actions never search the
 worker's `PATH`. The client's only work is downloading the pinned files
@@ -67,7 +71,7 @@ and fails if either maps the C++ runtime from the worker, or any object from
 the worker that is not glibc's. `buck2 build checks//re_probe:probe`
 ([`checks/re_probe`](../checks/re_probe/BUCK)) records what a worker provides.
 
-That check, together with `toolchains//:mojo_runtime` (which refuses a
+That check, together with `komira//tools/build/toolchains:mojo_runtime` (which refuses a
 library name missing from the toolchain), is what guards the C++ runtime pin.
 The wrapper's exit-2 refusal does not: it checks the members listed in
 `CLOSURE_MANIFEST`, and `conda_unpack` writes that list from what it

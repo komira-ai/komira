@@ -4,8 +4,8 @@ Everything it inspects outside its own inputs is host state; the report is
 the evidence behind the host floor documented in tools/build/toolchains/README.md.
 """
 
-load("@mojo//:providers.bzl", "MojoToolchainInfo")
-load("@mojo//:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 
 _SCRIPT = """
 BB="$1"; TC="$2"; OUT="$3"

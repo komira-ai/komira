@@ -1,4 +1,4 @@
-load("@mojo//:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
@@ -7,8 +7,11 @@ mojo_binary(
     name = "hello",
     srcs = ["hello.mojo"],
     expected_stdout = "hello from mojo\n",
-    # checks//formats bundles it with a long file path.
-    visibility = ["checks//formats:"],
+    # checks//formats bundles it with a long file path. PUBLIC rather than
+    # naming that package: the `checks` cell exists only in a standalone
+    # checkout, and a label naming it fails to load in a repository that uses
+    # komira as a cell.
+    visibility = ["PUBLIC"],
 )
 
 # The same program as a bundle: bin/hello (the launcher) and

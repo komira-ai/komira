@@ -1,5 +1,5 @@
 load("@komira//tools/build/package:defs.bzl", "mojo_bundle")
-load("@mojo//:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load(":defs.bzl", "bundle_parity")
 
 mojo_binary(

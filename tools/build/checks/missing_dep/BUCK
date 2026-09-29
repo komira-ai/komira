@@ -1,4 +1,4 @@
-load("@mojo//:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 
 # Imports hellopkg but declares no dependency on it. Must fail to compile:
 # proves packages reach the compiler only through `deps`.

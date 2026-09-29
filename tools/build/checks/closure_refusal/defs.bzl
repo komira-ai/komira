@@ -1,7 +1,7 @@
 """A copy of the compiler closure with one member deleted."""
 
-load("@mojo//:providers.bzl", "MojoToolchainInfo")
-load("@mojo//:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 
 def _impl(ctx):
     tc = ctx.attrs.toolchain[MojoToolchainInfo]

@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
-# umbrella_cache.sh -- building komira inside a repository that mounts it as a
-# git submodule reuses a standalone checkout's remote cache entries.
+# umbrella_cache.sh -- a repository using komira as a cell, mounted as a git
+# submodule or fetched as a git external cell, builds komira's targets with
+# the same action digests as a standalone checkout, and so from its remote
+# cache entries.
 #
 # usage: tools/build/checks/umbrella_cache.sh        (from the repo root; BUCK2 overrides the binary)
 #
 # The check snapshots the working tree into a scratch git repository, then:
 #   1. clones it (the standalone checkout) and builds the examples and their
 #      run checks there, with a fresh daemon;
-#   2. creates two umbrella repositories whose root cell is `umbrella`, mounts
-#      the snapshot with `git submodule add` at ./komira in one and at
-#      ./third_party/komira in the other, configures each with
-#      tools/build/umbrella_buckconfig.sh plus an execution platform of its own, and
-#      builds the same targets in each with a fresh daemon.
-# It passes only if every umbrella command is a remote cache hit
-# ("Commands: N (cached: N, remote: 0, local: 0)", N > 0) and the two builds
-# ran the same actions with the same action digests (`buck2 log what-ran`).
+#   2. creates three consuming repositories, configured as
+#      tools/build/consumer.buckconfig says (root cell `app`, its own
+#      `toolchains` cell and execution platforms): two mount the snapshot
+#      with `git submodule add`, at ./komira and at ./third_party/komira, and
+#      one fetches it as a git external cell from a bare clone (file://,
+#      pinned to the snapshot's commit). It builds the same targets in each,
+#      with a fresh daemon.
+# It passes only if every consumer command is a remote cache hit
+# ("Commands: N (cached: N, remote: 0, local: 0)", N > 0) and every consumer
+# ran the same actions with the same action digests as the standalone
+# checkout (`buck2 log what-ran`).
 #
 # Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
 # copied into every scratch checkout. Scratch goes under $TMPDIR (set it to a
@@ -32,7 +37,7 @@ GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init
 
 die() { echo "FAIL  umbrella cache: $1"; echo "logs: $W"; exit 1; }
 
-CHECKOUTS=(standalone umbrella umbrella_deep)
+CHECKOUTS=(standalone umbrella umbrella_deep external)
 
 stop_daemons() {
     local d
@@ -44,7 +49,7 @@ cleanup() {
     stop_daemons
     if [ "${KEEP_SCRATCH:-0}" != 1 ]; then
         local d
-        for d in src "${CHECKOUTS[@]}"; do rm -rf "${W:?}/$d"; done
+        for d in src komira.git "${CHECKOUTS[@]}"; do rm -rf "${W:?}/$d"; done
     fi
 }
 trap cleanup EXIT
@@ -63,33 +68,41 @@ mkdir "$W/src"
 "${GIT[@]}" clone -q "$W/src" "$W/standalone" || die "cannot clone the snapshot"
 cp "$ROOT/.buckconfig.local" "$W/standalone/"
 
-# Umbrella repositories with komira as a submodule, at depth 1 and depth 2.
-make_umbrella() { # checkout, mount path
-    local d=$1 m=$2
+# Repositories that use komira: two mount it with `git submodule add`, at
+# depth 1 and 2, and one fetches it as a git external cell from a bare clone.
+# Each is configured as tools/build/consumer.buckconfig says: that file as its
+# .buckconfig, and its own toolchains/BUCK and platforms/BUCK copied from
+# tools/build/cells/toolchains/BUCK and tools/build/platforms/remote/BUCK.
+"${GIT[@]}" clone -q --bare "$W/src" "$W/komira.git" || die "cannot make the bare clone"
+SHA=$("${GIT[@]}" -C "$W/src" rev-parse HEAD)
+make_consumer() { # checkout, mount path (empty: git external cell)
+    local d=$1 m=$2 cfg
     mkdir "$W/$d"
-    ("${GIT[@]}" -C "$W/$d" init -q &&
-        "${GIT[@]}" -C "$W/$d" -c protocol.file.allow=always submodule add -q "$W/src" "$m") ||
-        die "$d: cannot add the submodule at $m"
-    "$W/$d/$m/tools/build/umbrella_buckconfig.sh" "$m" > "$W/$d/.buckconfig" ||
-        die "$d: tools/build/umbrella_buckconfig.sh $m failed"
-    printf '\n[cells]\n  umbrella = .\n\n[build]\n  execution_platforms = umbrella//platforms:remote\n\n[project]\n  ignore = buck-out, .git\n' \
-        >> "$W/$d/.buckconfig"
+    "${GIT[@]}" -C "$W/$d" init -q || die "$d: git init failed"
+    cfg="$W/src/tools/build/consumer.buckconfig"
+    if [ -n "$m" ]; then
+        "${GIT[@]}" -C "$W/$d" -c protocol.file.allow=always submodule add -q "$W/src" "$m" ||
+            die "$d: cannot add the submodule at $m"
+        awk -v m="$m" '
+            /^\[/ { skip = ($0 == "[external_cell_komira]") }
+            skip { next }
+            $0 == "  komira = git" { next }
+            $0 == "  komira = komira-ext" { print "  komira = " m; next }
+            { print }' "$cfg" > "$W/$d/.buckconfig"
+    else
+        sed -e "s|^  git_origin = .*|  git_origin = file://$W/komira.git|" \
+            -e "s|^  commit_hash = .*|  commit_hash = $SHA|" "$cfg" > "$W/$d/.buckconfig"
+    fi
+    grep -q "^  komira = ${m:-komira-ext}\$" "$W/$d/.buckconfig" ||
+        die "$d: tools/build/consumer.buckconfig no longer has the lines this check edits"
     cp "$ROOT/.buckconfig.local" "$W/$d/"
-    mkdir "$W/$d/platforms"
-    cat > "$W/$d/platforms/BUCK" << 'EOF'
-load("@komira//tools/build/platforms:defs.bzl", "komira_execution_platforms", "re_properties")
-
-komira_execution_platforms(
-    name = "remote",
-    light = re_properties("light_properties"),
-    mojo_compile = re_properties("mojo_compile_properties"),
-    visibility = ["PUBLIC"],
-)
-EOF
+    mkdir "$W/$d/toolchains" "$W/$d/platforms"
+    cp "$W/src/tools/build/cells/toolchains/BUCK" "$W/$d/toolchains/BUCK"
+    cp "$W/src/tools/build/platforms/remote/BUCK" "$W/$d/platforms/BUCK"
 }
-make_umbrella umbrella komira
-make_umbrella umbrella_deep third_party/komira
-
+make_consumer umbrella komira
+make_consumer umbrella_deep third_party/komira
+make_consumer external ""
 TARGETS=(
     komira//tools/build/examples:hello komira//tools/build/examples:hellopkg komira//tools/build/examples:hello_pkg_user
     komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/examples:test_hellopkg
@@ -114,10 +127,13 @@ for d in "${CHECKOUTS[@]}"; do
     (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
 done
 
+# The external consumer built from buck2's own fetch of the pinned commit.
+[ -d "$W/external/buck-out/v2/external_cells/git/$SHA" ] ||
+    die "external: buck2 fetched no external cell at $SHA"
 cut -f1,2 "$W/standalone.actions" | LC_ALL=C sort > "$W/standalone.digests"
 n=$(wc -l < "$W/standalone.digests" | tr -d ' ')
 [ "$n" != 0 ] || die "what-ran recorded no action digests"
-for d in umbrella umbrella_deep; do
+for d in umbrella umbrella_deep external; do
     for i in 1 2; do
         line=$(grep -o 'Commands: .*' "$W/$d.build$i.log" | tail -n 1)
         [[ "$line" =~ ^Commands:\ ([0-9]+)\ \(cached:\ ([0-9]+),\ remote:\ 0,\ local:\ 0\)$ ]] &&
@@ -131,4 +147,4 @@ for d in umbrella umbrella_deep; do
         die "action digests differ between the standalone checkout and $d"
     fi
 done
-echo "PASS  umbrella cache: $n actions, identical digests at mount depths 1 and 2, every umbrella command a cache hit"
+echo "PASS  umbrella cache: $n actions, identical digests as a submodule at depths 1 and 2 and as a git external cell, every consumer command a cache hit"

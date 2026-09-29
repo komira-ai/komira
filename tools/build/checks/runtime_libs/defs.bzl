@@ -7,8 +7,8 @@ loader mapped and initialized in each (`compile init <file>`, `run init
 tools/build/checks/run_checks.sh reads the report; it is a diagnostic output, not part of any build.
 """
 
-load("@mojo//:providers.bzl", "MojoToolchainInfo")
-load("@mojo//:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 
 _SCRIPT = """
 BB="$1"; WRAPPER="$2"; LAUNCHER="$3"; TC="$4"; ZIG="$5"; CCT="$6"; CPU="$7"; SRC="$8"; OUT="$9"; REPORT="${10}"

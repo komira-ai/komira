@@ -6,7 +6,7 @@ prove that something is refused. Run it from the repository root:
 
 ```sh
 tools/build/checks/run_checks.sh                 # all checks
-tools/build/checks/run_checks.sh --no-umbrella   # skip check 7 (two scratch checkouts)
+tools/build/checks/run_checks.sh --no-umbrella   # skip check 7 (four scratch checkouts)
 tools/build/checks/run_checks.sh --no-run        # skip check 9 (a scratch clone)
 tools/build/checks/run_checks.sh --no-uncached   # skip the uncached half of check 15
 ```
@@ -94,16 +94,18 @@ buck2 build //tools/build/examples:hello --materializations all --show-full-simp
 
 ## 7. Umbrella cache
 
-A repository mounting komira as a git submodule, at `./komira` and at
-`./third_party/komira`, gets remote cache hits with the same action digests
-as a standalone checkout. [`umbrella_cache.sh`](umbrella_cache.sh) snapshots
-the working tree, builds the examples in a fresh standalone clone, then in two
-scratch umbrella repositories configured with
-[`umbrella_buckconfig.sh`](../umbrella_buckconfig.sh), each with a fresh
-daemon; it fails unless every umbrella command is a cache hit
-(`Commands: N (cached: N, remote: 0, local: 0)`, N > 0) and the digests are
-identical. Skipped with `--no-umbrella`. See
-[Mounting komira in another repository](../README.md#mounting-komira-in-another-repository).
+A repository using komira as its `komira` cell -- mounted as a git submodule
+at `./komira` or `./third_party/komira`, or fetched as a git external cell --
+gets remote cache hits with the same action digests as a standalone checkout.
+[`umbrella_cache.sh`](umbrella_cache.sh) snapshots the working tree, builds
+the examples in a fresh standalone clone, then in three scratch repositories
+configured from [`consumer.buckconfig`](../consumer.buckconfig) (the external
+one from a `file://` bare clone pinned to the snapshot's commit), each with a
+fresh daemon; it fails unless every consumer command is a cache hit
+(`Commands: N (cached: N, remote: 0, local: 0)`, N > 0), buck2 fetched the
+external cell at that commit, and the digests are identical. Skipped with
+`--no-umbrella`. See
+[Using komira from another repository](../README.md#using-komira-from-another-repository).
 
 ```sh
 tools/build/checks/umbrella_cache.sh
@@ -115,7 +117,7 @@ During a real compile, and a run of the binary it built, the loader maps
 `libstdc++.so.6` and `libgcc_s.so.1` from the toolchain, and nothing from the
 worker except glibc's own objects ([`runtime_libs`](runtime_libs/BUCK),
 read from `LD_DEBUG`). The toolchain libraries the run loaded are exactly the
-ones a runnable directory carries in `lib/` (`toolchains//:mojo_runtime`), no
+ones a runnable directory carries in `lib/` (`komira//tools/build/toolchains:mojo_runtime`), no
 more, no fewer, and every run path those libraries carry is
 `$ORIGIN`-relative. See the
 [host floor](../toolchains/README.md#host-floor).
@@ -240,9 +242,20 @@ equal the pins in `run_checks.sh`. A configuration's hash is keyed by its
 platform's label and constraints and appears in the output paths, and so in
 the digest, of every configured action, product code included. Moving the
 `platforms` package, renaming a platform or changing a constraint therefore
-invalidates every cached action here and in every repository mounting
+invalidates every cached action here and in every repository using
 komira; the pins make that a deliberate edit. Upgrading buck2 may change the
 hashes too.
+
+## 19. Exported cells
+
+Every label outside a comment in the BUCK and `.bzl` files a repository
+using komira loads or copies -- those under `tools/build/{mojo,toolchains,platforms,package,examples,cells}`
+-- names the `komira`, `prelude` or `toolchains` cell, the only cells such a
+repository has. A label naming `checks`, which exists only in a standalone
+checkout, would load here and fail to load there (as `visibility =
+["checks//formats:"]` on `examples:hello` once did). The check fails if a
+searched directory is missing, or if it finds fewer than 20 labels, so a scan
+that reads nothing cannot pass.
 
 ## Diagnostics
 

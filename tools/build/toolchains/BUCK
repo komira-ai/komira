@@ -1,6 +1,6 @@
 load("@komira//tools/build/package:defs.bzl", "oci_base")
-load("@mojo//:download.bzl", "pinned_file")
-load("@mojo//:toolchain.bzl", "conda_closure", "mojo_runtime", "mojo_toolchain", "zig_dist", "zig_exe")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 
@@ -93,7 +93,7 @@ zig_dist(
 zig_exe(
     name = "conda_unpack",
     exec_compatible_with = ["komira//tools/build/platforms:light"],
-    src = "mojo//:conda_unpack.zig",
+    src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
     zig = ":zig",
 )
@@ -128,41 +128,7 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
-_MOJO_TOOLCHAIN = dict(
-    busybox = ":busybox",
-    cc_target = "x86_64-linux-gnu.2.34",
-    compiler = ":mojo_compiler",
-    runtime = ":mojo_runtime",
-    # Every compile targets this CPU, whatever worker runs it. x86-64-v3
-    # (AVX2, BMI2, FMA): built binaries and gated tests need a worker, and a
-    # deployment host, that implements it.
-    target_cpu = "x86-64-v3",
-    zig = ":zig",
-    visibility = ["PUBLIC"],
-)
-
-# The toolchain of mojo_library, mojo_binary and mojo_test: compiles, gated
-# tests and run checks on one NUMA node.
-mojo_toolchain(
-    name = "mojo",
-    exec_compatible_with = [
-        "komira//tools/build/platforms:mojo_compile",
-        "komira//tools/build/platforms:numa_single",
-    ],
-    **_MOJO_TOOLCHAIN
-)
-
-# The toolchain of mojo_multi_numa_test: runs a built binary on a worker
-# spanning more than one NUMA node. Only an execution platform realizing
-# `komira//tools/build/platforms:exec-mojo-multi-numa` satisfies it; with none
-# registered, its users fail to configure. The constraint is only a claim:
-# the rule's runs also start through numa_guard.sh, which refuses a worker
-# where the action can use fewer than two NUMA nodes.
-mojo_toolchain(
-    name = "mojo_multi_numa",
-    exec_compatible_with = [
-        "komira//tools/build/platforms:mojo_compile",
-        "komira//tools/build/platforms:numa_multi",
-    ],
-    **_MOJO_TOOLCHAIN
-)
+# The Mojo toolchains built from these (`toolchains//:mojo` and
+# `toolchains//:mojo_multi_numa`) are declared by `komira_mojo_toolchains` in
+# defs.bzl, called from the `toolchains` cell of the repository at the
+# project root: tools/build/cells/toolchains/BUCK in a standalone checkout.

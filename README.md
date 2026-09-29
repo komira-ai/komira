@@ -26,7 +26,7 @@ tools/buck2 run //tools/build/examples:hello     # build remotely, run here
 | read | for |
 |---|---|
 | [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: the pinned buck2, `.buckconfig.local` and your build farm, running the checks, the host floor, caching, troubleshooting |
-| [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository mounts komira as a submodule |
+| [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository uses komira, as a git external cell or a submodule |
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test` |
 | [tools/build/platforms/README.md](tools/build/platforms/README.md) | execution classes, single- and multi-NUMA workers, mapping them to your own worker pools |
 | [tools/build/package/README.md](tools/build/package/README.md) | packaging: `mojo_bundle`, a relocatable bundle with a CPU-level launcher; `bundle_tarball` and `oci_image` |

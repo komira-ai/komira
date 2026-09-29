@@ -5,8 +5,12 @@
 [cells]
   komira = .
   prelude = prelude
-  mojo = tools/build/mojo
-  toolchains = tools/build/toolchains
+  # The prelude's toolchains cell belongs to the root repository. Standalone,
+  # that is komira; it holds the Mojo toolchains the rules default to
+  # (toolchains//:mojo, toolchains//:mojo_multi_numa).
+  toolchains = tools/build/cells/toolchains
+  # The checks of this repository, a cell of their own so that `komira//...`
+  # holds no target that fails by design. Not needed by a consuming repository.
   checks = tools/build/checks
   # `none` has no directory: it is the target of the prelude's unused aliases below.
   none = none
@@ -26,7 +30,7 @@
   name = BUCK
 
 [parser]
-  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:mojo//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:checks//...->komira//tools/build/platforms:linux-x86_64
+  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:checks//...->komira//tools/build/platforms:linux-x86_64
 
 [build]
   execution_platforms = komira//tools/build/platforms/remote:remote

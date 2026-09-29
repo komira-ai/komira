@@ -67,7 +67,7 @@ action digest.
 ## 3. Build
 
 ```sh
-buck2 build //...                                                # every target in the root cell (examples, platforms)
+buck2 build //...                                                # every target in the komira cell (rules, toolchains, examples)
 buck2 build '//tools/build/examples:hello_pkg_user[run_check]'   # run a binary remotely, compare its stdout
 buck2 run //tools/build/examples:hello                           # build remotely, run here (Linux x86_64)
 buck2 test //tools/build/examples:test_hellopkg                  # a standalone Mojo test, run remotely
@@ -119,8 +119,9 @@ not share a remote cache.
 - **What an action digest covers:** its command, its inputs and the worker
   property set. Two checkouts at the same revision, with the same buck2
   release and the same property sets, have the same digests and share cache
-  entries -- including a repository that mounts komira as a submodule
-  ([tools/build/README.md](tools/build/README.md#mounting-komira-in-another-repository)).
+  entries -- including a repository that uses komira as a cell, as a git
+  external cell or a submodule
+  ([tools/build/README.md](tools/build/README.md#using-komira-from-another-repository)).
   The host floor is not in the key (see above).
 - **Outputs stay remote until needed.** `[buck2] materializations = deferred`
   in [`.buckconfig`](.buckconfig): a build downloads nothing it does not
@@ -146,8 +147,8 @@ not share a remote cache.
 - **Actions sit queued and never start.** The property set names a key or
   value no worker advertises.
 - **`.buckconfig.local` seems ignored in a non-root cell.** It configures the
-  root cell only; the other cells (`mojo`, `toolchains`, `checks`) do not read
-  it. Pass a cell-scoped override instead, e.g.
+  root cell (`komira`, which holds the rules and toolchains) only; the
+  standalone-only `toolchains` and `checks` cells do not read it. Pass a cell-scoped override instead, e.g.
   `-c checks//komira_re.light_properties=...`.
 - **`Can't find toolchain_dep execution platform`** for a
   `mojo_multi_numa_test`. No multi-NUMA workers are configured; that is the

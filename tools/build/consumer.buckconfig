@@ -1,0 +1,58 @@
+# The .buckconfig of a repository that builds Mojo with komira's rules, with
+# komira fetched as a git external cell. Copy it to your repository's root as
+# `.buckconfig`, set `git_origin` and `commit_hash`, and put your
+# remote-execution endpoints and `[komira_re]` worker properties in
+# `.buckconfig.local` (see komira's .buckconfig.local.example).
+#
+# To mount komira as a git submodule instead, set `komira` in `[cells]` to the
+# submodule's path, and delete the `komira = git` line and the
+# `[external_cell_komira]` section.
+#
+# The whole komira repository is one cell, `komira`: the rules load from
+# komira//tools/build/mojo, the platforms from komira//tools/build/platforms.
+# Two directories are yours, copied from komira:
+#   toolchains/BUCK  from tools/build/cells/toolchains/BUCK. The `toolchains`
+#                    cell belongs to the root repository (the prelude requires
+#                    one); the Mojo rules take their toolchain from its `mojo`
+#                    and `mojo_multi_numa` targets.
+#   platforms/BUCK   from tools/build/platforms/remote/BUCK: your execution
+#                    platforms, from `[komira_re]` in your .buckconfig.local.
+
+[cells]
+  app = .
+  prelude = prelude
+  toolchains = toolchains
+  # A git external cell needs no directory here; nothing is checked out at this path.
+  komira = komira-ext
+  none = none
+
+[cell_aliases]
+  config = prelude
+  ovr_config = prelude
+  fbcode = none
+  fbsource = none
+  fbcode_macros = none
+  buck = none
+
+[external_cells]
+  prelude = bundled
+  komira = git
+
+[external_cell_komira]
+  git_origin = https://github.com/komira-ai/komira.git
+  commit_hash = 0000000000000000000000000000000000000000
+
+[buildfile]
+  name = BUCK
+
+[parser]
+  target_platform_detector_spec = target:app//...->komira//tools/build/platforms:linux-x86_64 target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64
+
+[build]
+  execution_platforms = app//platforms:remote
+
+[buck2_re_client]
+  max_total_batch_size = 1048576
+
+[project]
+  ignore = buck-out, .git

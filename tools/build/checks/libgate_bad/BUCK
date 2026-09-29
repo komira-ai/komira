@@ -1,4 +1,4 @@
-load("@mojo//:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 mojo_library(
     name = "libgate_bad",

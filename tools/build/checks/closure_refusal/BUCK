@@ -1,5 +1,5 @@
-load("@mojo//:defs.bzl", "mojo_binary")
-load("@mojo//:toolchain.bzl", "mojo_toolchain")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/mojo:toolchain.bzl", "mojo_toolchain")
 load(":defs.bzl", "compiler_without_member")
 
 # The compiler closure minus one runtime library it needs.
@@ -10,12 +10,12 @@ compiler_without_member(
 
 mojo_toolchain(
     name = "incomplete_toolchain",
-    busybox = "toolchains//:busybox",
+    busybox = "komira//tools/build/toolchains:busybox",
     cc_target = "x86_64-linux-gnu.2.34",
     compiler = ":compiler_missing_member",
-    runtime = "toolchains//:mojo_runtime",
+    runtime = "komira//tools/build/toolchains:mojo_runtime",
     target_cpu = "x86-64-v3",
-    zig = "toolchains//:zig",
+    zig = "komira//tools/build/toolchains:zig",
 )
 
 # Must FAIL: the wrapper refuses (exit 2) before running the compiler,

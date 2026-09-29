@@ -1,4 +1,4 @@
-load("@mojo//:defs.bzl", "mojo_binary", "mojo_multi_numa_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_multi_numa_test")
 load(":defs.bzl", "numa_guard_cases")
 
 # Requires an execution platform providing

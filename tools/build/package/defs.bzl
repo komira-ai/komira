@@ -27,9 +27,9 @@ Sub-targets: `[test_launcher]` is the same launcher built with the test hook
 the bundle. `[launcher]` is the shipped one.
 """
 
-load("@mojo//:download.bzl", "pinned_file")
-load("@mojo//:providers.bzl", "MojoProgramInfo")
-load("@mojo//:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
+load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 
 # x86-64 levels: target_cpu -> the level the launcher requires.
 _LEVELS = {
@@ -154,9 +154,9 @@ _mojo_bundle = rule(
         # bundle path under share/ -> file
         "data": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "version": attrs.string(),
-        "_busybox": attrs.exec_dep(default = "toolchains//:busybox"),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_launcher_sources": attrs.dep(default = "komira//tools/build/package/launcher:sources"),
-        "_zig": attrs.exec_dep(default = "toolchains//:zig"),
+        "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
     },
 )
 
@@ -195,9 +195,9 @@ exit "$rc"
 launcher_level_test = rule(
     impl = _level_test_impl,
     attrs = {
-        "_busybox": attrs.exec_dep(default = "toolchains//:busybox"),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_launcher_sources": attrs.dep(default = "komira//tools/build/package/launcher:sources"),
-        "_zig": attrs.exec_dep(default = "toolchains//:zig"),
+        "_zig": attrs.exec_dep(default = "komira//tools/build/toolchains:zig"),
     },
 )
 
@@ -363,7 +363,7 @@ def _oci_image_impl(ctx):
 _oci_image = rule(
     impl = _oci_image_impl,
     attrs = {
-        "base": attrs.dep(providers = [OciBaseInfo], default = "toolchains//:distroless_base"),
+        "base": attrs.dep(providers = [OciBaseInfo], default = "komira//tools/build/toolchains:distroless_base"),
         "bundle": attrs.dep(providers = [BundleInfo]),
         "repository": attrs.string(),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),

@@ -1,7 +1,7 @@
 # Mojo rules
 
 ```python
-load("@mojo//:defs.bzl", "mojo_library", "mojo_binary", "mojo_test", "mojo_multi_numa_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_test", "mojo_multi_numa_test")
 ```
 
 The rules are in [`defs.bzl`](defs.bzl); their providers in
@@ -90,7 +90,7 @@ locations); they are recorded relative to the package (`hello.mojo`), not as
 paths inside the action.
 
 A built binary loads a few shared libraries from the toolchain
-(`toolchains//:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
+(`komira//tools/build/toolchains:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
 about 24 MB). The runnable directory of a binary (`[runnable]`) holds the
 binary and a copy of those libraries in `lib/`, where its run path finds them,
 so it starts from anywhere with no environment. `RunInfo` points at it.
@@ -101,7 +101,7 @@ libraries is checked against what the loader actually maps during a run
 
 **Two runtime surfaces.** `buck2 run`, `[run_check]` and
 `mojo_multi_numa_test` start a binary from its runnable directory, whose
-`lib/` holds only the libraries a run loads (`toolchains//:mojo_runtime`).
+`lib/` holds only the libraries a run loads (`komira//tools/build/toolchains:mojo_runtime`).
 Gated library tests and `buck2 test` of a `mojo_test` still run the binary
 with `LD_LIBRARY_PATH` set to the compiler's `lib/`, a superset. A test that
 passes there can therefore load a library the runnable directory lacks; the

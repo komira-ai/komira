@@ -7,108 +7,129 @@ Everything the build needs besides the project configuration
 
 | directory | Buck2 name | what it holds |
 |---|---|---|
-| [`mojo/`](mojo/) | cell `mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
-| [`toolchains/`](toolchains/) | cell `toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
+| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
+| [`toolchains/`](toolchains/) | package `komira//tools/build/toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/remote/`](platforms/remote/) registers a standalone checkout's remote platforms. [Reference](platforms/README.md). |
-| [`checks/`](checks/) | cell `checks` | end-to-end checks, including fixtures that must fail. Outside `//...`. [Reference](checks/README.md). |
+| [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
-| [`umbrella_buckconfig.sh`](umbrella_buckconfig.sh) | | prints the `.buckconfig` block a repository needs to mount komira ([below](#mounting-komira-in-another-repository)). |
+| [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains` ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
+| [`checks/`](checks/) | cell `checks` | end-to-end checks, including fixtures that must fail. A standalone checkout's only, and outside `//...`. [Reference](checks/README.md). |
+| [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
 
-The root cell is `komira` (the repository root). `mojo`, `toolchains` and
-`checks` are cells of their own, declared in `[cells]` of `.buckconfig`; the
-platforms and examples are packages of the root cell. `.buckconfig` maps every
-one of these to the target platform `komira//tools/build/platforms:linux-x86_64`
+The repository is one cell, `komira`: the rules, toolchains, platforms and
+packaging rules are packages of it, so a repository using komira names one
+cell. `.buckconfig` adds two cells a standalone checkout needs and a consuming
+repository does not take: `toolchains`, which the prelude requires of the
+repository at the project root and which the Mojo rules take their toolchain
+from, and `checks`, kept apart so that `//...` holds no target that fails by
+design. The Mojo toolchains are in the `toolchains` cell rather than in
+`komira//tools/build/toolchains` for the same reason: `mojo_multi_numa`
+configures only where multi-NUMA workers are registered. `.buckconfig` maps each cell to the target platform
+`komira//tools/build/platforms:linux-x86_64`
 (`[parser] target_platform_detector_spec`) and registers
 `komira//tools/build/platforms/remote:remote` as the execution platforms.
 
 Rules are loaded from one cell: a `.bzl` file's providers are distinct per
 loading cell, so a Mojo target in one cell cannot depend on a Mojo library in
-another. The `checks` cell therefore has its own fixtures rather than reusing
+another. Every file loads the rules as `@komira//tools/build/mojo:...`, and the
+`checks` cell has its own fixtures rather than reusing
 [`examples/`](examples/).
 
-## Mounting komira in another repository
+## Using komira from another repository
 
-A larger repository can include komira as a git submodule and build it as a
-set of cells, sharing remote cache entries with standalone checkouts: the same
-targets, built at the same revision with the same buck2 release and worker
-property set, have the same action digests in both.
+A repository builds Mojo with komira's rules by naming komira as its `komira`
+cell, either fetched by buck2 as a git external cell or mounted as a git
+submodule. Either way it shares remote cache entries with standalone
+checkouts: the same targets, built at the same revision with the same buck2
+release and worker property set, have the same action digests.
 
-```sh
-git submodule add <komira-url> komira
-komira/tools/build/umbrella_buckconfig.sh komira > .buckconfig
-```
+Start from [`consumer.buckconfig`](consumer.buckconfig), copied to the
+repository's root as `.buckconfig`, and two files copied from komira:
 
-[`umbrella_buckconfig.sh`](umbrella_buckconfig.sh) prints the cells komira
-declares, moved under the mount point with their names unchanged, and copies
-`[cell_aliases]`, `[external_cells]`, `[buildfile]`, `[parser]` and
-`[buck2_re_client]`. Buck2 registers cells only from the project root's
-`.buckconfig` (and does not follow `<file:...>` includes there), so the outer
-repository has to restate them; regenerate the output whenever the submodule
-moves. The mount path may be nested
-([`checks/umbrella_cache.sh`](checks/umbrella_cache.sh) builds at `komira`
-and at `third_party/komira`). Then add the outer repository's own root cell
-and execution platform. Buck2 merges repeated sections, so these can follow
-the generated block in the same file as a second `[cells]` (the recipe above
-overwrites `.buckconfig`; keep the outer repository's own part in a file you
-append, or paste the generated block into a hand-maintained `.buckconfig`):
+| your file | copied from | what it does |
+|---|---|---|
+| `toolchains/BUCK` | [`cells/toolchains/BUCK`](cells/toolchains/BUCK) | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchains from its `mojo` and `mojo_multi_numa` targets, which one call of `komira_mojo_toolchains` declares. |
+| `platforms/BUCK` | [`platforms/remote/BUCK`](platforms/remote/BUCK) | the execution platforms, named by `[build] execution_platforms = app//platforms:remote`. |
+
+Put the remote-execution endpoints and the `[komira_re]` worker property sets
+in `.buckconfig.local`, as in a standalone checkout
+([`.buckconfig.local.example`](../../.buckconfig.local.example)). Buck2 reads
+configuration only from the project root, so the execution platforms and
+their properties always belong to the consuming repository. Then build komira
+targets by name, e.g. `buck2 build komira//tools/build/examples:hello`, and
+load the rules in your own BUCK files with
+`load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")`. Do not build
+`komira//...` from a consuming repository: every directory of komira with a
+BUCK file is a package there, including the standalone-only `checks`.
+
+**As a git external cell** (buck2 fetches the commit into
+`buck-out/v2/external_cells/git/<sha>/`, once per commit):
 
 ```
 [cells]
-  umbrella = .
-
-[build]
-  execution_platforms = umbrella//platforms:remote
+  komira = komira-ext          # no directory; nothing is checked out here
+[external_cells]
+  komira = git
+[external_cell_komira]
+  git_origin = <komira url>
+  commit_hash = <40-hex commit>
 ```
 
-```python
-# platforms/BUCK in the outer repository
-load("@komira//tools/build/platforms:defs.bzl", "komira_execution_platforms")
+Upgrading komira is one change, `commit_hash`. The cell is always the whole
+repository: buck2 has no key for a subdirectory, and refuses a cell nested
+inside an external cell, which is why komira is one cell. Buck2 runs `git` to
+fetch, so a private URL needs the credentials `git fetch` would.
 
-komira_execution_platforms(
-    name = "remote",
-    light = {...},         # property set of the workers for `exec-light`
-    mojo_compile = {...},  # ... for `exec-mojo`
-    # mojo_compile_multi_numa = {...},  # only for workers spanning >1 NUMA node
-    visibility = ["PUBLIC"],
-)
+**As a git submodule:**
+
+```sh
+git submodule add <komira-url> third_party/komira
 ```
 
-The property sets may be written inline or read with
-`re_properties("<key>")` from a `[komira_re]` section, as
-[`platforms/remote/BUCK`](platforms/remote/BUCK) does
-([platforms/README.md](platforms/README.md#your-own-worker-pools) explains the
-classes). The generated `[buck2_re_client]` already carries
-`max_total_batch_size = 1048576`; the outer repository adds only its
-endpoints (in `.buckconfig` or `.buckconfig.local`) and must not raise that
-value, since a server whose message limit is below buck2's default batch size
-then fails `BatchReadBlobs`. Build komira targets as
-`buck2 build komira//tools/build/examples/...`.
+and in `.buckconfig`, `komira = third_party/komira` in `[cells]`, without the
+`komira = git` line and the `[external_cell_komira]` section. The mount path
+may be nested.
 
-**The outer repository's own targets need a target platform too.**
-`target_platform_detector_spec` is a single key: an outer `[parser]` section
-that sets it replaces komira's value, dropping komira's mappings, which
-changes the configurations and so the action digests. Append the outer
-repository's cells to the one generated line instead, leaving komira's
-entries unchanged, e.g.
-`... target:umbrella//...->komira//tools/build/platforms:linux-x86_64`.
+**Overriding the toolchain.** The rules' `toolchain` attribute defaults to
+`toolchains//:mojo` (`mojo_multi_numa_test` uses
+`toolchains//:mojo_multi_numa`), which is the consuming repository's cell.
+Passing an attribute of `mojo_toolchain` to `komira_mojo_toolchains`, e.g.
+`komira_mojo_toolchains(compiler = "//third_party/mojo:compiler")`, changes it
+for every Mojo target; declaring `mojo_toolchain` targets yourself replaces
+the macro altogether. A single target other than a `mojo_multi_numa_test` can
+also set `toolchain =` itself. Leaving the call unchanged keeps the digests
+of a standalone checkout.
+
+**Your own targets need a target platform too.**
+`target_platform_detector_spec` is a single key; `consumer.buckconfig` maps
+the root cell (`app`), `komira` and `toolchains` to
+`komira//tools/build/platforms:linux-x86_64`. Keep komira's entry unchanged
+when you add your own cells to it: a different target platform for komira's
+targets is a different configuration, and so different digests. Keep
+`[buck2_re_client] max_total_batch_size = 1048576` too, and do not raise it:
+a server whose message limit is below buck2's default batch size fails
+`BatchReadBlobs`.
 
 What keeps the digests equal:
 
-- **Cell names.** Output paths contain the cell name (`buck-out/v2/.../komira/...`),
-  so every komira cell keeps its name in the outer repository. The mount path
-  itself never reaches a command: sources enter actions through copies under
-  `buck-out`.
+- **Cell name.** Output paths contain the cell name (`buck-out/v2/.../komira/...`),
+  so the consuming repository names the cell `komira`. The mount path, or the
+  external cell's fetch directory, never reaches a command: sources enter
+  actions through copies under `buck-out`.
 - **Execution platform name.** `komira_execution_platforms` names each
   platform after the abstract configuration it realizes
   (`komira//tools/build/platforms:exec-mojo`, ...), not after the target that
   declares it. That name keys the configuration of the toolchain, and so the
   toolchain's output paths. An execution platform declared some other way must
   do the same.
-- **Target platform.** Every komira cell maps to
-  `komira//tools/build/platforms:linux-x86_64` in `[parser]`, copied
-  unchanged. `komira//tools/build/platforms` holds only abstract constraints;
-  the standalone remote platform lives in its `remote` subpackage, which the
-  outer repository never loads.
+- **Target platform.** The `komira` cell maps to
+  `komira//tools/build/platforms:linux-x86_64` in `[parser]`.
+  `komira//tools/build/platforms` holds only abstract constraints; the
+  standalone remote platform lives in its `remote` subpackage, which the
+  consuming repository never loads (it copies the file instead).
+- **Toolchains.** `komira_mojo_toolchains` declares the same toolchains in
+  every repository, at the same label: the root package of the `toolchains`
+  cell.
 - **Worker properties.** They are part of every action digest, so the outer
   repository must give each configuration the same property set as the
   checkouts it wants to share a cache with.
@@ -125,7 +146,10 @@ configuration hashes the platform package keys move, so such a re-key is
 always a deliberate, reviewed change.
 
 [`checks/umbrella_cache.sh`](checks/umbrella_cache.sh) builds the examples
-in a fresh standalone clone and then in scratch umbrella repositories mounting
-the working tree as a submodule, each with a fresh daemon, and fails unless
-every umbrella command is a cache hit and both builds report the same action
-digests ([check 7](checks/README.md#7-umbrella-cache)).
+in a fresh standalone clone and then in three scratch repositories set up as
+above (a submodule at `komira` and at `third_party/komira`, and a git
+external cell), each with a fresh daemon, and fails unless every consumer
+command is a cache hit and every build reports the same action digests
+([check 7](checks/README.md#7-umbrella-cache)).
+[Check 19](checks/README.md#19-exported-cells) fails if a file a consuming
+repository loads names the `checks` cell or any other it lacks.

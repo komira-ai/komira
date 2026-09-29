@@ -1,4 +1,4 @@
-load("@mojo//:providers.bzl", "MojoRunnableInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
 
 def _parity_impl(ctx):
     r = ctx.attrs.binary[MojoRunnableInfo]
@@ -17,7 +17,7 @@ bundle_parity = rule(
     attrs = {
         "binary": attrs.dep(providers = [MojoRunnableInfo]),
         "bundle": attrs.dep(),
-        "_busybox": attrs.exec_dep(default = "toolchains//:busybox"),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_script": attrs.dep(default = "checks//bundle_parity:parity.sh"),
     },
 )
