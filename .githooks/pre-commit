@@ -1,0 +1,4 @@
+#!/bin/sh
+# kg pre-commit hook: rebuilds every library page and the map from the commit's index and stages the changed ones.
+# Enabled by `python3 tools/kg/kg.py setup` (core.hooksPath=.githooks). Git runs it at the work-tree root.
+exec python3 -B tools/kg/kg.py hook pre-commit "$@"

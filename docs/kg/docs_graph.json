@@ -1,0 +1,50 @@
+{
+ "canonical": "docs/index.md",
+ "docs": {
+  "README.md": {
+   "canonical_for": [
+    "Building, the Buck2 Mojo rules, remote execution"
+   ],
+   "refs": [
+    "checks/run_checks.sh",
+    "checks/umbrella_cache.sh",
+    "mojo/numa_guard.sh",
+    "mojo/tools/conda_unpack.zig",
+    "tools/buck2",
+    "tools/umbrella_buckconfig.sh"
+   ],
+   "title": "komira"
+  },
+  "docs/index.md": {
+   "refs": [
+    "README.md",
+    "docs/kg/docs_graph.json",
+    "docs/knowledge_graph.md",
+    "tools/kg",
+    "tools/kg/README.md"
+   ],
+   "title": "Documentation index"
+  },
+  "docs/knowledge_graph.md": {
+   "canonical_for": [
+    "The knowledge graph: what is indexed, the hooks, the CI check"
+   ],
+   "refs": [
+    "checks",
+    "docs",
+    "docs/index.md",
+    "docs/kg.toml",
+    "docs/kg/buck_graph.json",
+    "docs/kg/docs_graph.json",
+    "docs/libraries/README.md",
+    "mojo",
+    "toolchains",
+    "tools/kg",
+    "tools/kg/README.md"
+   ],
+   "title": "The knowledge graph"
+  }
+ },
+ "format": 1,
+ "generated_by": "python3 tools/kg/kg.py build --all"
+}

@@ -1,0 +1,4 @@
+#!/bin/sh
+# kg pre-push hook: checks each new branch tip's pages with that tip's own generator; refuses a stale tip, naming the fix.
+# Enabled by `python3 tools/kg/kg.py setup` (core.hooksPath=.githooks). Git runs it at the work-tree root.
+exec python3 -B tools/kg/kg.py hook pre-push "$@"

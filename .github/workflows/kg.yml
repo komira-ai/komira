@@ -1,0 +1,116 @@
+# kg -- is the committed knowledge graph (docs/libraries/, docs/kg/) fresh at this commit?
+#
+# Every pull request and every push to main: the kg test suites, then
+# `kg check --graph` at the pull request's HEAD commit (not GitHub's merge ref) with that
+# commit's own generator. The check rebuilds the library pages and the docs graph, refuses a
+# dead doc reference, and re-runs the one `buck2 uquery` behind docs/kg/buck_graph.json,
+# comparing bytes. The query is loading only: no build, no remote execution, no
+# .buckconfig.local (docs/kg.toml [graph] config passes placeholders), so this job needs no
+# secrets and no remote-execution service. It writes nothing to the repository and never commits.
+#
+# On a push to main it also renders the generated files into a scratch directory and uploads
+# them as the `kg-graph` artifact.
+#
+# Landing: branch protection must require this check AND "require branches to be up to date
+# before merging" (or a merge queue that runs it). GitHub does not re-run a pull request's
+# checks when main moves.
+#
+# Safe for pull requests from forks: `pull_request` (never `pull_request_target`), read-only
+# contents, no secrets, and the checkout does not keep a token. Separate from ci.yml on
+# purpose: neither needs the other's steps.
+name: kg
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kg-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  kg-check:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: kg test suites
+        run: |
+          set -eu
+          git --version
+          python3 --version
+          python3 -B tools/kg/tests/test_layer1.py
+          python3 -B tools/kg/tests/test_git.py
+          python3 -B tools/kg/tests/test_graph.py
+
+      - name: Install the pinned buck2 (tools/buck2)
+        run: |
+          set -eu
+          dest="$RUNNER_TEMP/bin"
+          mkdir -p "$dest"
+          # tools/buck2 is a DotSlash file: JSON after a shebang, with `//` comment lines.
+          read -r url size digest < <(python3 - <<'PY'
+          import json
+          lines = [l for l in open("tools/buck2") if not l.lstrip().startswith(("#!", "//"))]
+          s = json.loads("".join(lines))["platforms"]["linux-x86_64"]
+          assert s["hash"] == "sha256" and s["format"] == "zst", s
+          print(s["providers"][0]["url"], s["size"], s["digest"])
+          PY
+          )
+          curl -fsSL --retry 3 -o "$dest/buck2.zst" "$url"
+          [ "$(stat -c %s "$dest/buck2.zst")" = "$size" ] || { echo "buck2: size does not match tools/buck2" >&2; exit 1; }
+          echo "$digest  $dest/buck2.zst" | sha256sum -c --quiet -
+          zstd -q -d -f "$dest/buck2.zst" -o "$dest/buck2"
+          rm -f "$dest/buck2.zst"
+          chmod +x "$dest/buck2"
+          echo "BUCK2=$dest/buck2" >> "$GITHUB_ENV"
+
+      - name: kg check --graph
+        env:
+          TIP: ${{ github.event.pull_request.head.sha || github.sha }}
+          TARGET: ${{ github.event.pull_request.base.sha || github.event.before }}
+        run: |
+          set -eu
+          test ! -e .buckconfig.local
+          BASE=""
+          if [ -n "$TARGET" ] && git cat-file -e "$TARGET^{commit}" 2>/dev/null; then
+            BASE=$(git merge-base "$TARGET" "$TIP" || true)
+          fi
+          if [ -n "$BASE" ]; then
+            python3 -B tools/kg/kg.py check --commit "$TIP" --base "$BASE" --graph
+          else
+            echo "kg: no base commit (a new branch or a first push); problems are counted, not refused"
+            python3 -B tools/kg/kg.py check --commit "$TIP" --graph
+          fi
+
+      - name: Render the graph for upload
+        if: github.event_name == 'push'
+        run: |
+          set -eu
+          out="$RUNNER_TEMP/kg-graph"
+          python3 -B tools/kg/kg.py build --all --out "$out"
+          python3 -B tools/kg/kg.py graph --out "$out/docs/kg/buck_graph.json"
+          git rev-parse HEAD > "$out/COMMIT"
+
+      - name: Upload the graph
+        if: github.event_name == 'push'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: kg-graph-${{ github.sha }}
+          path: ${{ runner.temp }}/kg-graph
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Stop buck2
+        if: always()
+        run: |
+          if [ -n "${BUCK2:-}" ]; then "$BUCK2" --isolation-dir kg kill || true; fi

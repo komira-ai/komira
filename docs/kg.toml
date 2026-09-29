@@ -1,0 +1,39 @@
+# docs/kg.toml -- the knowledge graph's configuration. Read by tools/kg's own parser (a
+# strict TOML subset: strings, integers, booleans, arrays, [tables]); anything else is refused.
+# What each generated file holds, and the hook/CI split: docs/knowledge_graph.md.
+
+# The page format this tree's pages are rendered in. A kg that renders another format refuses.
+format = 2
+
+# THE GENERATOR: the paths whose bytes decide what a generated file says. The pre-commit hook
+# refuses a commit while any of them has changes the commit would not hold, and `kg check`
+# runs the checked commit's own copy of them.
+generator = ["tools/kg", "docs/kg.toml"]
+entry = "tools/kg/kg.py"
+
+# Where the generated library pages and the map live, and the tree whose front matter is read.
+pages = "docs/libraries"
+docs = "docs"
+
+# The docs graph: every Markdown doc under `docs` and at the top level, the paths each one
+# references, and the table of what each canonical doc is the authority for.
+canonical = "docs/index.md"
+docs_graph = "docs/kg/docs_graph.json"
+
+[libraries]
+# A library is a rule of one of these kinds in a build file named in `build_files`; its welded
+# tests are the attributes in `test_attrs`. A directory in `dirs` is a library described by
+# the front matter of its README.md.
+rules = ["mojo_library"]
+build_files = ["BUCK"]
+test_attrs = ["test_srcs"]
+dirs = ["tools/kg"]
+
+[graph]
+# The Buck2 code graph: `buck2 uquery 'kind(".*", <universe>)'`, loading only. The `checks`
+# cell is outside `//...`, so it is named. `config` lets a checkout with no .buckconfig.local
+# load //platforms/remote and checks//numa/standin; the placeholder values appear nowhere in
+# the output.
+out = "docs/kg/buck_graph.json"
+universe = ["//...", "checks//...", "mojo//...", "toolchains//..."]
+config = ["komira_re.light_properties=kg=unset", "komira_re.mojo_compile_properties=kg=unset"]

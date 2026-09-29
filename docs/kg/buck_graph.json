@@ -1,0 +1,336 @@
+{
+ "format": 1,
+ "generated_by": "python3 tools/kg/kg.py graph",
+ "inputs": "a01eac49d93db9933dda86aa80aaa247707852bcb289c7fcc1290d18b3bcfc44",
+ "query": "kind(\".*\", //... + checks//... + mojo//... + toolchains//...)",
+ "targets": {
+  "checks//closure_refusal:compiler_missing_member": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "compiler_without_member"
+  },
+  "checks//closure_refusal:hello_incomplete_toolchain": {
+   "deps": [
+    "checks//closure_refusal:incomplete_toolchain"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "checks/closure_refusal/hello.mojo"
+   ]
+  },
+  "checks//closure_refusal:incomplete_toolchain": {
+   "deps": [
+    "checks//closure_refusal:compiler_missing_member",
+    "mojo//:gate_runner.sh",
+    "mojo//:launch.sh",
+    "mojo//:mojo_wrapper.sh",
+    "mojo//:numa_guard.sh",
+    "mojo//:run_check.sh",
+    "toolchains//:busybox",
+    "toolchains//:mojo_runtime",
+    "toolchains//:zig"
+   ],
+   "kind": "mojo_toolchain"
+  },
+  "checks//libgate_bad:bypass_consumer": {
+   "deps": [
+    "checks//libgate_bad:libgate_bad",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "checks/libgate_bad/consumer.mojo"
+   ]
+  },
+  "checks//libgate_bad:gated_consumer": {
+   "deps": [
+    "checks//libgate_bad:libgate_bad",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "checks/libgate_bad/consumer.mojo"
+   ]
+  },
+  "checks//libgate_bad:libgate_bad": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "checks/libgate_bad/__init__.mojo",
+    "checks/libgate_bad/payload.mojo"
+   ],
+   "test_srcs": [
+    "checks/libgate_bad/tests/test_payload_deliberate_failure.mojo"
+   ]
+  },
+  "checks//missing_dep:missing_dep": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "checks/missing_dep/main.mojo"
+   ]
+  },
+  "checks//numa/standin:single_numa_standin": {
+   "deps": [
+    "komira//platforms:exec-light",
+    "komira//platforms:exec-mojo",
+    "komira//platforms:exec-mojo-multi-numa"
+   ],
+   "kind": "remote_execution_platforms"
+  },
+  "checks//numa:guard_cases": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "numa_guard_cases"
+  },
+  "checks//numa:hello": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "checks/numa/hello.mojo"
+   ]
+  },
+  "checks//numa:hello_multi_numa": {
+   "deps": [
+    "checks//numa:hello",
+    "toolchains//:mojo_multi_numa"
+   ],
+   "kind": "mojo_multi_numa_test"
+  },
+  "checks//re_probe:probe": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "re_probe"
+  },
+  "checks//runtime_libs:loader_trace": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "compiler_loader_trace"
+  },
+  "komira//examples/libgate_ok:libgate_ok": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "examples/libgate_ok/__init__.mojo",
+    "examples/libgate_ok/payload.mojo"
+   ],
+   "test_srcs": [
+    "examples/libgate_ok/tests/test_payload_passes.mojo"
+   ]
+  },
+  "komira//examples:hello": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "examples/hello.mojo"
+   ]
+  },
+  "komira//examples:hello_pkg_user": {
+   "deps": [
+    "komira//examples:hellopkg",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "examples/hello_pkg_user.mojo"
+   ]
+  },
+  "komira//examples:hellopkg": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "examples/hellopkg/__init__.mojo",
+    "examples/hellopkg/greet.mojo"
+   ]
+  },
+  "komira//examples:test_hellopkg": {
+   "deps": [
+    "komira//examples:hellopkg",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "examples/test_hellopkg.mojo"
+   ]
+  },
+  "komira//platforms/remote:remote": {
+   "deps": [
+    "komira//platforms:exec-light",
+    "komira//platforms:exec-mojo"
+   ],
+   "kind": "remote_execution_platforms"
+  },
+  "komira//platforms:exec-light": {
+   "deps": [
+    "komira//platforms:light",
+    "komira//platforms:linux-x86_64"
+   ],
+   "kind": "platform"
+  },
+  "komira//platforms:exec-mojo": {
+   "deps": [
+    "komira//platforms:linux-x86_64",
+    "komira//platforms:mojo_compile",
+    "komira//platforms:numa_single"
+   ],
+   "kind": "platform"
+  },
+  "komira//platforms:exec-mojo-multi-numa": {
+   "deps": [
+    "komira//platforms:linux-x86_64",
+    "komira//platforms:mojo_compile",
+    "komira//platforms:numa_multi"
+   ],
+   "kind": "platform"
+  },
+  "komira//platforms:exec_class": {
+   "kind": "constraint_setting"
+  },
+  "komira//platforms:light": {
+   "deps": [
+    "komira//platforms:exec_class",
+    "prelude//cfg/exec_platform/marker:is_exec_platform"
+   ],
+   "kind": "constraint_value"
+  },
+  "komira//platforms:linux-x86_64": {
+   "deps": [
+    "prelude//cpu/constraints:x86_64",
+    "prelude//os/constraints:linux"
+   ],
+   "kind": "platform"
+  },
+  "komira//platforms:mojo_compile": {
+   "deps": [
+    "komira//platforms:exec_class",
+    "prelude//cfg/exec_platform/marker:is_exec_platform"
+   ],
+   "kind": "constraint_value"
+  },
+  "komira//platforms:numa": {
+   "kind": "constraint_setting"
+  },
+  "komira//platforms:numa_multi": {
+   "deps": [
+    "komira//platforms:numa",
+    "prelude//cfg/exec_platform/marker:is_exec_platform"
+   ],
+   "kind": "constraint_value"
+  },
+  "komira//platforms:numa_single": {
+   "deps": [
+    "komira//platforms:numa",
+    "prelude//cfg/exec_platform/marker:is_exec_platform"
+   ],
+   "kind": "constraint_value"
+  },
+  "mojo//:conda_unpack.zig": {
+   "kind": "export_file"
+  },
+  "mojo//:gate_runner.sh": {
+   "kind": "export_file"
+  },
+  "mojo//:launch.sh": {
+   "kind": "export_file"
+  },
+  "mojo//:mojo_wrapper.sh": {
+   "kind": "export_file"
+  },
+  "mojo//:numa_guard.sh": {
+   "kind": "export_file"
+  },
+  "mojo//:run_check.sh": {
+   "kind": "export_file"
+  },
+  "toolchains//:busybox": {
+   "kind": "pinned_file"
+  },
+  "toolchains//:conda_unpack": {
+   "deps": [
+    "mojo//:conda_unpack.zig",
+    "toolchains//:busybox",
+    "toolchains//:zig"
+   ],
+   "kind": "zig_exe"
+  },
+  "toolchains//:libgcc_15.3.0_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "toolchains//:libstdcxx_15.3.0_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "toolchains//:mojo": {
+   "deps": [
+    "mojo//:gate_runner.sh",
+    "mojo//:launch.sh",
+    "mojo//:mojo_wrapper.sh",
+    "mojo//:numa_guard.sh",
+    "mojo//:run_check.sh",
+    "toolchains//:busybox",
+    "toolchains//:mojo_compiler",
+    "toolchains//:mojo_runtime",
+    "toolchains//:zig"
+   ],
+   "kind": "mojo_toolchain"
+  },
+  "toolchains//:mojo_compiler": {
+   "deps": [
+    "toolchains//:conda_unpack",
+    "toolchains//:libgcc_15.3.0_linux-64.conda",
+    "toolchains//:libstdcxx_15.3.0_linux-64.conda",
+    "toolchains//:mojo_compiler_1.0.0_linux-64.conda"
+   ],
+   "kind": "conda_closure"
+  },
+  "toolchains//:mojo_compiler_1.0.0_linux-64.conda": {
+   "kind": "pinned_file"
+  },
+  "toolchains//:mojo_multi_numa": {
+   "deps": [
+    "mojo//:gate_runner.sh",
+    "mojo//:launch.sh",
+    "mojo//:mojo_wrapper.sh",
+    "mojo//:numa_guard.sh",
+    "mojo//:run_check.sh",
+    "toolchains//:busybox",
+    "toolchains//:mojo_compiler",
+    "toolchains//:mojo_runtime",
+    "toolchains//:zig"
+   ],
+   "kind": "mojo_toolchain"
+  },
+  "toolchains//:mojo_runtime": {
+   "deps": [
+    "toolchains//:busybox",
+    "toolchains//:mojo_compiler"
+   ],
+   "kind": "mojo_runtime"
+  },
+  "toolchains//:zig": {
+   "deps": [
+    "toolchains//:busybox",
+    "toolchains//:zig_linux_x86_64.tar.xz"
+   ],
+   "kind": "zig_dist"
+  },
+  "toolchains//:zig_linux_x86_64.tar.xz": {
+   "kind": "pinned_file"
+  }
+ }
+}
