@@ -1,0 +1,18 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# RFC 5545 calendar semantics with no transport attached: the iCalendar
+# reader and writer, RRULE expansion, VTIMEZONE / TZID resolution with an
+# embedded IANA fallback table, the busy-interval algebra and VFREEBUSY
+# emitter, and the RFC 5546 (iTIP) scheduling state machine. A zero-dependency
+# leaf, so a consumer that reads an `.ics` pays for an `.ics` parser only.
+mojo_library(
+    name = "komira_icalendar",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_icalendar_recurrence.mojo",
+        "tests/test_icalendar_scheduling.mojo",
+        "tests/test_icalendar_emit.mojo",
+        "tests/test_itip_state_machine.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
