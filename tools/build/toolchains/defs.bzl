@@ -184,3 +184,39 @@ def komira_proto_toolchains(**overrides):
         visibility = ["PUBLIC"],
         **attrs
     )
+
+# The toolchain families komira_toolchains declares, each by its own macro.
+_FAMILIES = {
+    "cxx": komira_cxx_toolchains,
+    "mojo": komira_mojo_toolchains,
+    "proto": komira_proto_toolchains,
+    "rust": komira_rust_toolchains,
+}
+
+def komira_toolchains(mojo = None, cxx = None, rust = None, proto = None, omit = []):
+    """Declare every komira toolchain in the calling package: the whole `toolchains/BUCK` of a repository.
+
+    A standalone checkout, and a repository using komira as a cell, calls
+    this and nothing else, so a family komira adds later is declared without
+    editing the copied file. Each family keyword is a dict of overrides for
+    that family's macro, e.g. `mojo = {"compiler": "//third_party/mojo:compiler"}`
+    or `mojo = {"darwin": ...}` for komira_mojo_toolchains, `cxx = {...}` for
+    komira_cxx_toolchains, `rust = {...}`, `proto = {...}`. `omit` names the
+    families the repository declares itself, e.g. `omit = ["cxx"]` to keep
+    its own `:cxx` and `:python_bootstrap`. `proto` builds its plugin with
+    `:rust`, so omitting `rust` needs a `:rust` of the repository's own.
+    Calling it with no arguments gives the same action digests as a
+    standalone checkout.
+    """
+    overrides = {"cxx": cxx, "mojo": mojo, "proto": proto, "rust": rust}
+    for family in omit:
+        if family not in _FAMILIES:
+            fail("komira_toolchains: omit names {}, which is not a toolchain family ({})".format(
+                repr(family),
+                ", ".join(sorted(_FAMILIES)),
+            ))
+        if overrides[family] != None:
+            fail("komira_toolchains: {} is both omitted and given overrides".format(family))
+    for family in sorted(_FAMILIES):
+        if family not in omit:
+            _FAMILIES[family](**(overrides[family] or {}))

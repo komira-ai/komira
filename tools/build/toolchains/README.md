@@ -33,8 +33,8 @@ the closure lacks. All of these run on `light` workers
 `mojo_compile` + `numa_single` workers), and `toolchains//:mojo_multi_numa`
 for `mojo_multi_numa_test` (on `mojo_compile` + `numa_multi` workers). Both
 link for `x86_64-linux-gnu.2.34` and compile for `target_cpu = "x86-64-v3"`.
-It is called from the `toolchains` cell of the repository at the project
-root ([`cells/toolchains/BUCK`](../cells/toolchains/BUCK) in a standalone
+`komira_toolchains` calls it from the `toolchains` cell of the repository at
+the project root ([`cells/toolchains/BUCK`](../cells/toolchains/BUCK) in a standalone
 checkout), so a repository using komira can pass its own compiler
 ([tools/build/README.md](../README.md#using-komira-from-another-repository)).
 

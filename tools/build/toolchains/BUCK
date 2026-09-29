@@ -132,8 +132,8 @@ mojo_runtime(
 
 # The Mojo toolchains built from these (`toolchains//:mojo` and
 # `toolchains//:mojo_multi_numa`) are declared by `komira_mojo_toolchains` in
-# defs.bzl, called from the `toolchains` cell of the repository at the
-# project root: tools/build/cells/toolchains/BUCK in a standalone checkout.
+# defs.bzl, which komira_toolchains calls from the `toolchains` cell of the
+# repository at the project root: tools/build/cells/toolchains/BUCK in a standalone checkout.
 
 # ---- C/C++ -----------------------------------------------------------------
 

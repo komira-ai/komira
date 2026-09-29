@@ -23,7 +23,9 @@
 #      directory, exit 4.)
 #   7. A repository using komira as a cell -- a git submodule at ./komira or
 #      ./third_party/komira, or a git external cell -- gets remote cache hits
-#      with the same action digests as a standalone checkout
+#      with the same action digests as a standalone checkout, one of them
+#      with a frozen copy of the toolchains cell, and an override in a
+#      consumer's toolchains cell reaches the compile command
 #      (tools/build/checks/umbrella_cache.sh; four scratch checkouts and
 #      daemons, skipped with --no-umbrella).
 #   8. The host floor: during a real compile, and a run of the binary it

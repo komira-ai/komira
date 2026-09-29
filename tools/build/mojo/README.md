@@ -195,7 +195,7 @@ tools, `nm`, `objcopy` and `strip` are not provided; the features using them
 fails with `cxx toolchain: <tool> is not provided`.
 `toolchains//:python_bootstrap` exists only because configuring a
 `cxx_library` names it; it has no interpreter. A repository with its own
-C/C++ toolchain keeps it and does not call `komira_cxx_toolchains`.
+C/C++ toolchain keeps it and passes `omit = ["cxx"]` to `komira_toolchains`.
 
 A Mojo target lists C/C++ libraries in `deps` next to Mojo packages. A dep
 providing `MergedLinkInfo` (any `cxx_library`) is linked, statically, into

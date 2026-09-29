@@ -1,3 +1,8 @@
+# FROZEN: a consumer's toolchains/BUCK exactly as tools/build/cells/toolchains/BUCK
+# read when komira was first published. Do not edit it: umbrella_cache.sh builds
+# one consumer (third_party/komira) with this copy, so a komira change that
+# needs every consumer to edit its copied file fails there.
+#
 # The `toolchains` cell of a standalone komira checkout.
 #
 # The Mojo rules take their toolchain from `toolchains//:mojo` and

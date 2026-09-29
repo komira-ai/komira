@@ -105,7 +105,22 @@ one from a `file://` bare clone pinned to the snapshot's commit), each with a
 fresh daemon; it fails unless every consumer command is a cache hit
 (`Commands: N (cached: N, remote: 0, local: 0)`, N > 0), buck2 fetched the
 external cell at that commit, and the digests are identical. Skipped with
-`--no-umbrella`. The examples include C and C++ (`cshim:cadd_user`,
+`--no-umbrella`.
+
+It also holds the consumer's `toolchains` cell to its contract. The consumer
+at `./third_party/komira` builds with
+[`umbrella/toolchains.BUCK.frozen`](umbrella/toolchains.BUCK.frozen), the
+copy a consumer made when komira was first published, not a fresh one, so a
+change that needs every consumer to edit its copy fails. Every checkout's
+`buck2 targets toolchains//:` must equal
+[`umbrella/toolchains_targets.txt`](umbrella/toolchains_targets.txt). And
+before building, the `./komira` submodule consumer and the external consumer
+each plant `komira_toolchains(mojo = {"target_cpu": "x86-64-v2"})`: `buck2
+aquery` of the hello example's `mojo_build` must show `--target-cpu
+x86-64-v2` there and `x86-64-v3` standalone. Digest equality alone passes
+whichever `toolchains` cell the rules read; this fails if a rule default
+stops naming the consumer's cell, e.g. a `komira//` toolchain label, which
+would silently ignore every consumer override. The examples include C and C++ (`cshim:cadd_user`,
 `snappy:test_snappy`): a C source read from the project tree is an action
 input at a path that depends on the mount point, so komira's `cxx_library`
 targets take their sources through `staged_files` (the first run of this check

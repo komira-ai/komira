@@ -21,6 +21,19 @@
 # ran the same actions with the same action digests as the standalone
 # checkout (`buck2 log what-ran`).
 #
+# The consumer at ./third_party/komira uses the toolchains/BUCK frozen in
+# tools/build/checks/umbrella/toolchains.BUCK.frozen instead of a fresh copy,
+# so a komira change that needs consumers to edit their copy fails here. In
+# every checkout `buck2 targets toolchains//:` must list exactly
+# tools/build/checks/umbrella/toolchains_targets.txt. Before building, the
+# submodule consumer at ./komira and the external consumer each plant an
+# override, `komira_toolchains(mojo = {"target_cpu": "x86-64-v2"})`, and
+# `buck2 aquery` of the hello example's mojo_build action must show
+# `--target-cpu x86-64-v2` there and `x86-64-v3` in the standalone checkout:
+# the override reaches the rules, so the rules take their toolchain from the
+# consumer's own `toolchains` cell (analysis only; nothing runs). Then the
+# consumer's copy is restored for the digest comparison.
+#
 # Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
 # copied into every scratch checkout. Scratch goes under $TMPDIR (set it to a
 # disk directory where /tmp is memory); the checkouts, and their buck-out, are
@@ -97,7 +110,11 @@ make_consumer() { # checkout, mount path (empty: git external cell)
         die "$d: tools/build/consumer.buckconfig no longer has the lines this check edits"
     cp "$ROOT/.buckconfig.local" "$W/$d/"
     mkdir "$W/$d/toolchains" "$W/$d/platforms"
-    cp "$W/src/tools/build/cells/toolchains/BUCK" "$W/$d/toolchains/BUCK"
+    if [ "$d" = umbrella_deep ]; then
+        cp "$W/src/tools/build/checks/umbrella/toolchains.BUCK.frozen" "$W/$d/toolchains/BUCK"
+    else
+        cp "$W/src/tools/build/cells/toolchains/BUCK" "$W/$d/toolchains/BUCK"
+    fi
     cp "$W/src/tools/build/platforms/remote/BUCK" "$W/$d/platforms/BUCK"
 }
 make_consumer umbrella komira
@@ -111,6 +128,38 @@ TARGETS=(
 )
 RUN_CHECKS=("komira//tools/build/examples:hello[run_check]" "komira//tools/build/examples:hello_pkg_user[run_check]"
     "komira//tools/build/examples/cshim:cadd_user[run_check]")
+
+# Analysis only. The toolchains cell of every checkout declares the expected
+# targets; a planted override in a consumer's toolchains cell reaches hello's
+# compile command.
+aquery_cpu() { # checkout, log name -> the --target-cpu value of hello's mojo_build
+    (cd "$W/$1" && "$BUCK2" aquery 'attrfilter(category, mojo_build, komira//tools/build/examples:hello)' \
+        --output-attribute cmd) > "$W/$1.$2.json" 2>&1 || { echo "aquery failed: $W/$1.$2.json"; return; }
+    grep -o -- '--target-cpu, [^,]*,' "$W/$1.$2.json" | sed -e 's/^--target-cpu, //' -e 's/,$//' | LC_ALL=C sort -u | tr '\n' ' '
+}
+EXPECTED_TOOLCHAINS="$W/src/tools/build/checks/umbrella/toolchains_targets.txt"
+for d in "${CHECKOUTS[@]}"; do
+    (cd "$W/$d" && "$BUCK2" targets toolchains//:) > "$W/$d.toolchains" 2> "$W/$d.toolchains.err" ||
+        die "$d: buck2 targets toolchains//: failed (see $W/$d.toolchains.err)"
+    if ! LC_ALL=C sort "$W/$d.toolchains" | cmp -s - "$EXPECTED_TOOLCHAINS"; then
+        LC_ALL=C sort "$W/$d.toolchains" | diff "$EXPECTED_TOOLCHAINS" - | head -n 8
+        die "$d: the toolchains cell does not declare tools/build/checks/umbrella/toolchains_targets.txt"
+    fi
+done
+cpu=$(aquery_cpu standalone aquery)
+[ "$cpu" = "x86-64-v3 " ] || die "standalone: hello's mojo_build has --target-cpu '${cpu}', expected x86-64-v3"
+(cd "$W/standalone" && "$BUCK2" kill > /dev/null 2>&1)
+for d in umbrella external; do
+    cp "$W/$d/toolchains/BUCK" "$W/$d.toolchains.BUCK"
+    sed -i 's/^komira_toolchains()$/komira_toolchains(mojo = {"target_cpu": "x86-64-v2"})/' "$W/$d/toolchains/BUCK"
+    grep -q 'x86-64-v2' "$W/$d/toolchains/BUCK" || die "$d: cannot plant the override (no komira_toolchains() line)"
+    cpu=$(aquery_cpu "$d" aquery_override)
+    [ "$cpu" = "x86-64-v2 " ] ||
+        die "$d: an override in its toolchains cell did not reach hello's mojo_build (--target-cpu '${cpu}', expected x86-64-v2)"
+    cp "$W/$d.toolchains.BUCK" "$W/$d/toolchains/BUCK"
+    (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
+done
+echo "      toolchains cell: the expected targets in every checkout; a consumer override reaches the compile command (submodule and external cell)"
 
 build() { # checkout, invocation number, targets...
     local d=$1 i=$2; shift 2
@@ -150,4 +199,4 @@ for d in umbrella umbrella_deep external; do
         die "action digests differ between the standalone checkout and $d"
     fi
 done
-echo "PASS  umbrella cache: $n actions, identical digests as a submodule at depths 1 and 2 and as a git external cell, every consumer command a cache hit"
+echo "PASS  umbrella cache: $n actions, identical digests as a submodule at depths 1 and 2 (one with a frozen toolchains copy) and as a git external cell, every consumer command a cache hit; consumer toolchain overrides take effect"

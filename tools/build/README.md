@@ -14,7 +14,7 @@ Everything the build needs besides the project configuration
 | [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo`, the protoc plugin of `mojo_proto_library` (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)). |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
-| [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains` ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
+| [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
 | [`checks/`](checks/) | cell `checks` | end-to-end checks, including fixtures that must fail. A standalone checkout's only, and outside `//...`. [Reference](checks/README.md). |
 | [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
 | [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
@@ -51,7 +51,7 @@ repository's root as `.buckconfig`, and two files copied from komira:
 
 | your file | copied from | what it does |
 |---|---|---|
-| `toolchains/BUCK` | [`cells/toolchains/BUCK`](cells/toolchains/BUCK) | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchains from its `mojo` and `mojo_multi_numa` targets, which one call of `komira_mojo_toolchains` declares. The call of `komira_cxx_toolchains` declares `toolchains//:cxx` for C and C++ deps; drop it to keep a C/C++ toolchain of your own. The calls of `komira_rust_toolchains` and `komira_proto_toolchains` declare `toolchains//:rust` (the Rust rules) and `toolchains//:mojo_proto` (`mojo_proto_library`, whose plugin is built with `:rust`). |
+| `toolchains/BUCK` | [`cells/toolchains/BUCK`](cells/toolchains/BUCK) | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchains from its `mojo` and `mojo_multi_numa` targets, The file is one call, `komira_toolchains()`, which declares those, `toolchains//:cxx` for C and C++ deps, `toolchains//:rust` (the Rust rules) and `toolchains//:mojo_proto` (`mojo_proto_library`, whose plugin is built with `:rust`). Because it is one call, a toolchain family komira adds later needs no edit to your copy. `omit = ["cxx"]` keeps a C/C++ toolchain of your own. |
 | `platforms/BUCK` | [`platforms/remote/BUCK`](platforms/remote/BUCK) | the execution platforms, named by `[build] execution_platforms = app//platforms:remote`. |
 
 Put the remote-execution endpoints and the `[komira_re]` worker property sets
@@ -96,10 +96,10 @@ may be nested.
 **Overriding the toolchain.** The rules' `toolchain` attribute defaults to
 `toolchains//:mojo` (`mojo_multi_numa_test` uses
 `toolchains//:mojo_multi_numa`), which is the consuming repository's cell.
-Passing an attribute of `mojo_toolchain` to `komira_mojo_toolchains`, e.g.
-`komira_mojo_toolchains(compiler = "//third_party/mojo:compiler")`, changes it
-for every Mojo target; declaring `mojo_toolchain` targets yourself replaces
-the macro altogether. A single target other than a `mojo_multi_numa_test` can
+Passing an attribute of `mojo_toolchain` to `komira_toolchains`, e.g.
+`komira_toolchains(mojo = {"compiler": "//third_party/mojo:compiler"})`,
+changes it for every Mojo target; `omit = ["mojo"]` and declaring
+`mojo_toolchain` targets yourself replaces them altogether. A single target other than a `mojo_multi_numa_test` can
 also set `toolchain =` itself. Leaving the call unchanged keeps the digests
 of a standalone checkout.
 
@@ -130,7 +130,7 @@ What keeps the digests equal:
   `komira//tools/build/platforms` holds only abstract constraints; the
   standalone remote platform lives in its `remote` subpackage, which the
   consuming repository never loads (it copies the file instead).
-- **Toolchains.** `komira_mojo_toolchains` declares the same toolchains in
+- **Toolchains.** `komira_toolchains` declares the same toolchains in
   every repository, at the same label: the root package of the `toolchains`
   cell.
 - **Worker properties.** They are part of every action digest, so the outer

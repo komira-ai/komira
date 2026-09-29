@@ -19,4 +19,4 @@ protoc_dist(
 
 # The toolchain of mojo_proto_library, `toolchains//:mojo_proto` (protoc and
 # the plugin), is declared by komira_proto_toolchains() in ../defs.bzl,
-# called from the root repository's `toolchains` cell.
+# which komira_toolchains() calls in the root repository's `toolchains` cell.

@@ -55,5 +55,5 @@ rust_sysroot(
 )
 
 # The toolchain itself, `toolchains//:rust`, is declared by
-# komira_rust_toolchains() in ../defs.bzl, called from the root repository's
-# `toolchains` cell.
+# komira_rust_toolchains() in ../defs.bzl, which komira_toolchains() calls in
+# the root repository's `toolchains` cell.
