@@ -75,6 +75,8 @@
 #      base layers are checked; the base is fetched only by pinned
 #      downloads; `docker run` of the loaded image prints the greeting (SKIP
 #      without docker).
+#  17. Every relative link in the repository's Markdown resolves (doc_links.sh),
+#      and the link checker itself fails on a planted dead link.
 #   9. `buck2 run //tools/build/examples:hello` prints the greeting on this machine from a
 #      fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
@@ -470,6 +472,19 @@ while IFS= read -r line; do
     esac
 done < "$LOG/formats.log"
 grep -qE '^(PASS|FAIL)  formats ' "$LOG/formats.log" || fail "formats: tools/build/checks/formats.sh reported nothing (see $LOG/formats.log)"
+
+# 17
+mkdir -p "$LOG/doc_links_planted/sub"
+printf '# planted\n\n[ok](sub/)\n[dead](sub/missing.md)\n' > "$LOG/doc_links_planted/README.md"
+if "$ROOT/tools/build/checks/doc_links.sh" "$LOG/doc_links_planted" > "$LOG/doc_links_planted.log" 2>&1; then
+    fail "doc links: the checker passed a planted dead link (see $LOG/doc_links_planted.log)"
+elif ! grep -qF 'README.md:4: sub/missing.md' "$LOG/doc_links_planted.log"; then
+    fail "doc links: the checker failed the planted tree without naming its dead link (see $LOG/doc_links_planted.log)"
+elif "$ROOT/tools/build/checks/doc_links.sh" > "$LOG/doc_links.log" 2>&1; then
+    pass "doc links: $(grep -o 'all [0-9]* relative links resolve' "$LOG/doc_links.log"); a planted dead link is caught"
+else
+    fail "doc links: $(grep -c '^dead link' "$LOG/doc_links.log") dead: $(grep '^dead link' "$LOG/doc_links.log" | head -n 3 | cut -c 12- | tr '\n' ' ')(see $LOG/doc_links.log)"
+fi
 
 # 9
 if [ "$run" = 1 ]; then
