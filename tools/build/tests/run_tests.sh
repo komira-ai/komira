@@ -57,8 +57,9 @@
 #      the runnable directory still starts after it is moved
 #      (tools/build/tests/functional/buck2_run.sh; skipped with --no-run).
 #  10. Execution platforms: Mojo compiles, gated tests and run checks resolve
-#      to `exec-mojo` (mojo_compile, numa_single) and toolchain unpack/copy
-#      targets to `exec-light`. A target requiring numa_multi, with no
+#      to `exec-mojo` (mojo_compile, numa_single); toolchain unpack/copy
+#      targets, and third_party_srcs generation, drift test and fixture
+#      archive, to `exec-light`. A target requiring numa_multi, with no
 #      platform providing it, fails to configure and runs nothing; given one
 #      (resolution only, nothing is built), it resolves to it.
 #  11. The multi-NUMA run checks the hardware it got, not only the label:
@@ -72,12 +73,13 @@
 #      (tests//functional/numa:gate_run) passes through the gate runner, which is how
 #      a multi-NUMA worker would run it.
 #  12. Actions run with their platform's property set, read per action: an
-#      uncached build of //tools/build/examples:hello (its own daemon under a
+#      uncached build of //tools/build/examples:hello and
+#      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really executes)
-#      must record the light set for zig_unpack, zig_build_exe, conda_unpack
-#      and mojo_runtime, and the mojo_compile set for mojo_build (`buck2 log
+#      must record the light set for zig_unpack, zig_build_exe, conda_unpack,
+#      mojo_runtime, fixture_archive and third_party_srcs, and the mojo_compile set for mojo_build (`buck2 log
 #      what-ran`; a cache hit records no properties, so a warm build cannot
-#      answer this). Costs about 80 s of remote execution; the isolated
+#      answer this). Costs about 3 minutes of remote execution; the isolated
 #      daemon's buck-out/komira_tests_uncached (~50 MB) is reused per run.
 #  13. A program built as a bundle behaves as its executable: stdout, stderr
 #      and exit status agree byte for byte across argv, environment, exit(),
@@ -460,6 +462,10 @@ komira//tools/build/toolchains:zig komira//tools/build/platforms:exec-light
 komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:exec-light
 komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:exec-light
 komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:exec-light
+komira//tools/build/third_party_srcs:aws-lc-mini.tar.gz komira//tools/build/platforms:exec-light
+komira//tools/build/third_party_srcs:aws_lc_mini_gen komira//tools/build/platforms:exec-light
+komira//tools/build/third_party_srcs:aws_lc_mini_drift komira//tools/build/platforms:exec-light
+komira//third_party/aws-lc:srcs_gen komira//tools/build/platforms:exec-light
 tests//functional/numa:hello_multi_numa FAILED"
 want=$(printf '%s\n' "$EXPECT_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
 if ! got=$(resolve platforms "${NO_MULTI[@]}" $(printf '%s\n' "$want" | cut -d' ' -f1)); then
@@ -528,7 +534,7 @@ action_platforms() { # what-ran json: every category ran remotely, with its plat
     acts=$(whatran_actions "$1") || { echo "cannot read $1"; return 1; }
     printf '%s\n' "$acts" | awk -F '\t' -v L="$light" -v M="$mojo" '
         BEGIN {
-            n = split("conda_unpack mojo_build mojo_runtime zig_build_exe zig_unpack", order, " ")
+            n = split("conda_unpack fixture_archive mojo_build mojo_runtime third_party_srcs zig_build_exe zig_unpack", order, " ")
             for (i = 1; i <= n; i++) want[order[i]] = L
             want["mojo_build"] = M
         }
@@ -544,7 +550,7 @@ action_platforms() { # what-ran json: every category ran remotely, with its plat
             for (i = 1; i <= n; i++) if (!(order[i] in seen)) missing = missing " " order[i]
             if (missing != "") bad = bad (bad == "" ? "" : "; ") "not executed:" missing
             if (bad != "") { print bad; exit 1 }
-            printf "%d actions: conda_unpack/mojo_runtime/zig_build_exe/zig_unpack on light, mojo_build on mojo_compile\n", total
+            printf "%d actions: conda_unpack/fixture_archive/mojo_runtime/third_party_srcs/zig_build_exe/zig_unpack on light, mojo_build on mojo_compile\n", total
         }'
 }
 MC_PROPS=$(re_value mojo_compile_properties)
@@ -604,7 +610,7 @@ elif [ -z "${MC_PROPS:-}" ] || [ -z "${LIGHT_PROPS:-}" ]; then
 # a second run of these tests in the same checkout executes nothing.
 elif ! "$BUCK2" --isolation-dir "$ISO" clean > "$LOG/uncached_clean.log" 2>&1; then
     fail "action platforms: cannot clean the isolated buck-out (see $LOG/uncached_clean.log)"
-elif ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache //tools/build/examples:hello > "$LOG/uncached.log" 2>&1; then
+elif ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache //tools/build/examples:hello //tools/build/third_party_srcs:aws_lc_mini_gen > "$LOG/uncached.log" 2>&1; then
     fail "action platforms: uncached build failed (see $LOG/uncached.log)"
 elif ! "$BUCK2" --isolation-dir "$ISO" log what-ran --format json > "$LOG/uncached.what_ran.json" 2>&1; then
     fail "action platforms: cannot read what-ran"

@@ -14,7 +14,11 @@ declares `:srcs_gen`, the generated file (regenerate the committed copy with
 committed copy and the archive disagree. Both run on the farm.
 """
 
-load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo", "MojoToolchainInfo")
+load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
+
+# Generating, comparing and packing run on the light workers: they read and
+# write a few files and compile nothing.
+_LIGHT = ["komira//tools/build/platforms:light"]
 
 _GEN_SCRIPT = """
 BB="$1"; shift
@@ -33,17 +37,17 @@ exit "$rc"
 """
 
 def _gen_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     gen = ctx.attrs._gen[MojoRunnableInfo]
     out = ctx.actions.declare_output("srcs.bzl")
     ctx.actions.run(
         cmd_args(
-            tc.busybox,
+            bb,
             "sh",
             "-euc",
             _GEN_SCRIPT,
             "sh",
-            tc.busybox,
+            bb,
             ctx.attrs.archive,
             out.as_output(),
             gen.run_dir.project(gen.binary),
@@ -57,7 +61,7 @@ def _gen_impl(ctx):
     )
     return [DefaultInfo(default_output = out)]
 
-third_party_srcs_gen = rule(
+_third_party_srcs_gen = rule(
     impl = _gen_impl,
     doc = "Runs :gen over a .tar.gz release archive. The three strings only fill in the generated file's header.",
     attrs = {
@@ -67,7 +71,7 @@ third_party_srcs_gen = rule(
         "gen_label": attrs.string(),
         "library": attrs.enum(["aws-lc", "s2n-tls"]),
         "_gen": attrs.dep(default = "komira//tools/build/third_party_srcs:gen", providers = [MojoRunnableInfo]),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
     },
 )
 
@@ -84,15 +88,15 @@ exit 1
 """
 
 def _drift_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     generated = ctx.attrs.generated[DefaultInfo].default_outputs[0]
-    command = cmd_args(tc.busybox, "sh", "-c", _DRIFT_SCRIPT, "sh", tc.busybox, generated, ctx.attrs.committed, ctx.attrs.regenerate)
+    command = cmd_args(bb, "sh", "-c", _DRIFT_SCRIPT, "sh", bb, generated, ctx.attrs.committed, ctx.attrs.regenerate)
     return [
         DefaultInfo(default_output = generated),
         ExternalRunnerTestInfo(type = "custom", command = [command], labels = ctx.attrs.labels),
     ]
 
-third_party_srcs_drift_test = rule(
+_third_party_srcs_drift_test = rule(
     impl = _drift_impl,
     doc = "Fails while `committed` differs from `generated`, naming the first differing lines.",
     attrs = {
@@ -100,7 +104,7 @@ third_party_srcs_drift_test = rule(
         "generated": attrs.dep(),
         "labels": attrs.list(attrs.string(), default = []),
         "regenerate": attrs.string(),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
     },
 )
 
@@ -108,8 +112,9 @@ def third_party_srcs(name, library, archive, committed, visibility = None):
     package = package_name()
     gen_label = "//{}:{}_gen".format(package, name)
     committed_path = "{}/{}".format(package, committed) if package else committed
-    third_party_srcs_gen(
+    _third_party_srcs_gen(
         name = name + "_gen",
+        exec_compatible_with = _LIGHT,
         library = library,
         archive = archive,
         gen_label = gen_label,
@@ -117,15 +122,16 @@ def third_party_srcs(name, library, archive, committed, visibility = None):
         committed_path = committed_path,
         visibility = visibility,
     )
-    third_party_srcs_drift_test(
+    _third_party_srcs_drift_test(
         name = name + "_drift",
+        exec_compatible_with = _LIGHT,
         generated = ":" + name + "_gen",
         committed = committed,
         regenerate = "./buck2 build {} --out {}".format(gen_label, committed_path),
     )
 
 def _fixture_archive_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
     prefix = ctx.attrs.strip_prefix + "/"
     files = {}
     for f in ctx.attrs.srcs:
@@ -135,7 +141,7 @@ def _fixture_archive_impl(ctx):
     tree = ctx.actions.copied_dir("tree", files)
     out = ctx.actions.declare_output(ctx.attrs.top + ".tar.gz")
     ctx.actions.run(
-        cmd_args(tc.busybox, "sh", "-euc", '"$1" tar -czf "$2" -C "$3" "$4"', "sh", tc.busybox, out.as_output(), tree, ctx.attrs.top),
+        cmd_args(bb, "sh", "-euc", '"$1" tar -czf "$2" -C "$3" "$4"', "sh", bb, out.as_output(), tree, ctx.attrs.top),
         category = "fixture_archive",
     )
     return [DefaultInfo(default_output = out)]
@@ -145,12 +151,16 @@ def _fixture_archive_impl(ctx):
 # file whose bytes equal an earlier one as a hard link when the worker's
 # materializer linked them, and a hard link is not a regular file to :gen (nor
 # to tarfile), so every fixture file has its own bytes.
-fixture_archive = rule(
+_fixture_archive = rule(
     impl = _fixture_archive_impl,
     attrs = {
         "srcs": attrs.list(attrs.source()),
         "strip_prefix": attrs.string(),
         "top": attrs.string(),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
     },
 )
+
+def fixture_archive(**kwargs):
+    kwargs.setdefault("exec_compatible_with", _LIGHT)
+    _fixture_archive(**kwargs)

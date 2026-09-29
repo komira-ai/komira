@@ -221,9 +221,12 @@ tools/build/tests/functional/buck2_run.sh
 ## 10. Execution platforms
 
 Mojo compiles, gated tests and run checks resolve to `exec-mojo`
-(`mojo_compile`, `numa_single`), and the toolchain unpack and copy targets to
-`exec-light`. A target requiring `numa_multi` ([`numa`](functional/numa/BUCK)), with no
-platform providing it, fails to configure and runs no action; given one
+(`mojo_compile`, `numa_single`); the toolchain unpack and copy targets, and
+the `third_party_srcs` generation, drift test and fixture archive, to
+`exec-light`: none of them compiles, and a rule that takes the Mojo toolchain
+for its busybox would inherit that toolchain's `mojo_compile` class. A target
+requiring `numa_multi` ([`numa`](functional/numa/BUCK)), with no platform
+providing it, fails to configure and runs no action; given one
 (resolution only, nothing is built), it resolves to it. See
 [platforms/README.md](../platforms/README.md).
 
@@ -257,12 +260,13 @@ buck2 build tests//functional/numa:guard_cases --show-full-simple-output
 ## 12. Action platforms
 
 Actions run with their platform's property set, read per action: an uncached
-build of `//tools/build/examples:hello` (its own daemon under a fixed
+build of `//tools/build/examples:hello` and
+`//tools/build/third_party_srcs:aws_lc_mini_gen` (its own daemon under a fixed
 `--isolation-dir`, `--no-remote-cache`, so every action really executes) must
-record the `light` set for `zig_unpack`, `zig_build_exe`, `conda_unpack` and
-`mojo_runtime`, and the `mojo_compile` set for `mojo_build` (`buck2 log
+record the `light` set for `zig_unpack`, `zig_build_exe`, `conda_unpack`,
+`mojo_runtime`, `fixture_archive` and `third_party_srcs`, and the `mojo_compile` set for `mojo_build` (`buck2 log
 what-ran`; a cache hit records no properties, so a warm build cannot answer
-this). Costs about 80 s of remote execution; the isolated daemon's
+this). Costs about 3 minutes of remote execution; the isolated daemon's
 `buck-out/komira_tests_uncached` (~50 MB) is reused per run.
 
 ## 13. Bundle parity
