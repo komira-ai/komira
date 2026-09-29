@@ -15,6 +15,9 @@
 #   4. No committed file configures remote execution: the committed .buckconfig
 #      names no endpoint or instance, and .buckconfig.local is gitignored and
 #      untracked (CI writes it from a secret at run time).
+#   5. Secrets and uploads are fenced (.github/ci/workflow_fences.py): a job
+#      that reads a secret names an `environment:`, nothing outside a job
+#      reads one, and an artifact upload requires a successful `redact` step.
 #
 # The linters are downloaded into <tools-dir> and refused unless their sha256
 # matches the pins below. SHELLCHECK / ACTIONLINT override the binaries.
@@ -109,6 +112,13 @@ elif ! git check-ignore -q .buckconfig.local; then
     fail "remote execution: .buckconfig.local is not gitignored"
 else
     pass "remote execution: no committed file names an endpoint"
+fi
+
+# 5
+if python3 .github/ci/workflow_fences.py .github/workflows/*.yml; then
+    pass "fences: secrets only in jobs that name an environment; uploads only after redaction"
+else
+    fail "fences: a secret or an upload is not fenced"
 fi
 
 [ "$fails" = 0 ] || { echo "$fails static check(s) failed"; exit 1; }

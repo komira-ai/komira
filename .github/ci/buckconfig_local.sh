@@ -5,15 +5,23 @@
 # usage: .github/ci/buckconfig_local.sh write          (reads $BUCKCONFIG_LOCAL)
 #        .github/ci/buckconfig_local.sh redact <dir>...
 #
-# write   writes .buckconfig.local in the repo root from the secret, refuses
-#         one that sets no engine_address, and registers every address it
-#         names (the whole value, host:port and host) with the runner's log
-#         masking, one string at a time: GitHub masks a multi-line secret
-#         unreliably, and masks nothing in uploaded artifacts.
-# redact  replaces those same strings in every file under each <dir> with
-#         <redacted> and deletes any copy of .buckconfig.local there, so a
-#         failure's uploaded logs do not name the farm. (Artifacts of a
-#         public repository can be downloaded by anyone.)
+# write   writes .buckconfig.local in the repo root from the secret. It
+#         refuses one that sets no engine_address, and one whose
+#         instance_name is not a CI sub-instance: the last `/`-separated
+#         component must be `ci` (for example `<prefix>/ci`). The remote
+#         action cache keys entries by instance name, so CI's entries then
+#         live apart from those of the people who use the same service.
+#         It registers every address it names (the whole value, host:port
+#         and host) with the runner's log masking, one string at a time:
+#         GitHub masks a multi-line secret unreliably, and masks nothing in
+#         uploaded artifacts.
+# redact  replaces those same strings, and as a backstop every IPv4 address
+#         in a private or shared (CGNAT) range, in every file under each
+#         <dir> with <redacted>, and deletes any copy of .buckconfig.local
+#         there. It then re-reads every file and fails if any of those
+#         strings is still present. CI uploads the logs only if this step
+#         succeeded, because artifacts of a public repository can be
+#         downloaded by anyone.
 set -euo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -49,19 +57,31 @@ case "${1:-}" in
         umask 077
         printf '%s\n' "$BUCKCONFIG_LOCAL" > "$CONF"
         grep -qE '^\s*engine_address\s*=' "$CONF" || { echo ".buckconfig.local from the secret sets no engine_address" >&2; exit 1; }
+        inst=$(sed -nE 's/^[[:space:]]*instance_name[[:space:]]*=[[:space:]]*([^[:space:]]*)[[:space:]]*$/\1/p' "$CONF" | tail -1)
+        [[ "$inst" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/ci$ ]] || {
+            echo ".buckconfig.local from the secret must set instance_name to a CI sub-instance, <prefix>/ci;" >&2
+            echo "  CI must not share the action-cache namespace of developers' builds (see docs/ci.md)" >&2
+            rm -f "$CONF"; exit 1; }
         while IFS= read -r s; do echo "::add-mask::$s"; done < <(secrets_of "$CONF")
         echo "wrote .buckconfig.local ($(grep -c . "$CONF") lines)"
         ;;
     redact)
         shift
-        [ -f "$CONF" ] || exit 0
-        mapfile -t hide < <(secrets_of "$CONF")
+        hide=()
+        [ -f "$CONF" ] && mapfile -t hide < <(secrets_of "$CONF")
         for d in "$@"; do
             [ -d "$d" ] || continue
             find "$d" -name .buckconfig.local -type f -delete
             find "$d" -type f -print0 | python3 -c '
-import sys
-hide = sys.argv[1:]
+import re, sys
+hide = [s.encode() for s in sys.argv[1:]]
+# Backstop for strings the config does not name (error statuses can carry
+# other hosts): 10/8, 172.16/12, 192.168/16 and 100.64/10.
+ip = re.compile(rb"(?<![0-9.])(?:10\.(?:[0-9]{1,3}\.){2}[0-9]{1,3}"
+                rb"|172\.(?:1[6-9]|2[0-9]|3[01])\.[0-9]{1,3}\.[0-9]{1,3}"
+                rb"|192\.168\.[0-9]{1,3}\.[0-9]{1,3}"
+                rb"|100\.(?:6[4-9]|[7-9][0-9]|1[01][0-9]|12[0-7])\.[0-9]{1,3}\.[0-9]{1,3})(?![0-9])")
+left = 0
 for path in sys.stdin.buffer.read().split(b"\0"):
     if not path:
         continue
@@ -69,10 +89,17 @@ for path in sys.stdin.buffer.read().split(b"\0"):
         data = f.read()
     new = data
     for s in hide:
-        new = new.replace(s.encode(), b"<redacted>")
+        new = new.replace(s, b"<redacted>")
+    new = ip.sub(b"<redacted>", new)
     if new != data:
         with open(path, "wb") as f:
             f.write(new)
+    with open(path, "rb") as f:
+        again = f.read()
+    if any(s in again for s in hide) or ip.search(again):
+        print("redact: still present after rewrite: %s" % path.decode(errors="replace"), file=sys.stderr)
+        left += 1
+sys.exit(1 if left else 0)
 ' "${hide[@]}"
         done
         ;;

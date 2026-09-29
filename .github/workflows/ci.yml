@@ -2,14 +2,25 @@
 #
 #   static  every event, including pull requests from forks. Lints only, with
 #           no secret and a read-only token; nothing reaches the build farm.
-#   farm    pushes to main, the nightly schedule, manual runs, and pull
-#           requests whose branch lives in this repository (only people with
-#           write access can push one). Joins the tailnet as an ephemeral
-#           node and runs tools/build/checks/run_checks.sh on remote execution.
+#   farm    pushes to main, the nightly schedule, manual runs of main, and
+#           pull requests whose branch lives in this repository, once a
+#           maintainer approves the run. Joins the tailnet as an ephemeral
+#           node and runs tools/build/checks/run_checks.sh on remote execution, which
+#           can run any command on the shared workers: see "What farm access
+#           means" in docs/ci.md.
 #
 # A pull request from a fork never runs the farm job: its `if:` excludes it,
 # and independently GitHub gives a fork's `pull_request` run no secrets, so
-# even a fork that edits this file cannot join the tailnet. There is no
+# even a fork that edits this file cannot join the tailnet.
+#
+# The secrets are not repository secrets. They live in two GitHub
+# Environments, and the farm job names one:
+#   farm     deployment branches: main only. Pushes to main, the nightly run
+#            and manual runs of main. A branch that rewrites this file to
+#            name `farm` is refused by the branch policy before any step runs.
+#   farm-pr  required reviewers. A pull request from a branch of this
+#            repository waits until a maintainer approves that run, after
+#            reading the change, .github/ included. There is no
 # pull_request_target workflow here, on purpose: it runs with the base
 # repository's secrets, and checking out the fork's code under it hands them
 # to that code.
@@ -57,8 +68,11 @@ jobs:
     needs: static
     if: >-
       github.repository == 'komira-ai/komira' &&
+      github.actor != 'dependabot[bot]' &&
       (github.event_name != 'pull_request' ||
        github.event.pull_request.head.repo.full_name == github.repository)
+    environment:
+      name: ${{ github.event_name == 'pull_request' && 'farm-pr' || 'farm' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     permissions:
@@ -76,7 +90,7 @@ jobs:
           version: 1.94.2
           sha256sum: c6f99a5d774c7783b56902188d69e9756fc3dddfb08ac6be4cb2585f3fecdc32
           use-cache: "false"
-      - name: Write .buckconfig.local from the repository secret
+      - name: Write .buckconfig.local from the environment secret
         env:
           BUCKCONFIG_LOCAL: ${{ secrets.BUCKCONFIG_LOCAL }}
         run: .github/ci/buckconfig_local.sh write
@@ -94,10 +108,13 @@ jobs:
           [ "$UMBRELLA" = true ] || args+=(--no-umbrella)
           tools/build/checks/run_checks.sh "${args[@]}"
       - name: Redact check logs
+        id: redact
         if: failure()
         run: .github/ci/buckconfig_local.sh redact "$RUNNER_TEMP/checks"
       - name: Upload check logs
-        if: failure()
+        # Only logs the redact step verified clean. If redaction failed, or
+        # never ran, nothing is uploaded.
+        if: failure() && steps.redact.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: check-logs-${{ github.run_id }}-${{ github.run_attempt }}
