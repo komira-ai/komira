@@ -1,0 +1,23 @@
+load("@komira//package:defs.bzl", "mojo_bundle")
+load("@mojo//:defs.bzl", "mojo_binary")
+load(":defs.bzl", "bundle_parity")
+
+mojo_binary(
+    name = "probe",
+    srcs = ["probe.mojo"],
+)
+
+mojo_bundle(
+    name = "probe_bundle",
+    binary = ":probe",
+    data = {"share/probe.txt": "probe.txt"},
+    version = "0.0.0",
+)
+
+bundle_parity(
+    name = "parity",
+    binary = ":probe",
+    bundle = ":probe_bundle",
+)
+
+export_file(name = "parity.sh")

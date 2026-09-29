@@ -1,0 +1,9 @@
+SHA256SUMS
+VERSION
+bin/hello
+lib/glibc-hwcaps/x86-64-v3/libhello.so
+lib/libAsyncRTRuntimeGlobals.so
+lib/libKGENCompilerRTShared.so
+lib/libMSupportGlobals.so
+lib/libgcc_s.so.1
+lib/libstdc++.so.6

@@ -1,0 +1,5 @@
+cpu_levels=x86-64-v3
+min_cpu=x86-64-v3
+name=hello
+platform=linux-x86_64
+version=0.1.0

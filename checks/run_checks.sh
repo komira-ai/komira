@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_checks.sh -- end-to-end checks of the Mojo rules. Each check can fail.
 #
-# usage: checks/run_checks.sh [--no-umbrella] [--no-run]
+# usage: checks/run_checks.sh [--no-umbrella] [--no-run] [--no-uncached]
 #        (from the repo root; BUCK2 overrides the binary)
 #
 #   1. The examples build and their run checks pass (stdout compared byte for
@@ -52,6 +52,17 @@
 #      what-ran`; a cache hit records no properties, so a warm build cannot
 #      answer this). Costs about 80 s of remote execution; the isolated
 #      daemon's buck-out/komira_checks_uncached (~50 MB) is reused per run.
+#  13. A program built as a bundle behaves as its executable: stdout, stderr
+#      and exit status agree byte for byte across argv, environment, exit(),
+#      an unhandled error, buffered output and a data file found through
+#      /proc/self/exe (checks//bundle_parity:parity, a remote action).
+#  14. The launcher's CPU level function gives glibc's level for 13 made-up
+#      CPUs (//package:level_test, a remote action).
+#  15. The bundle of //examples:hello (checks/bundle.sh): layout, run paths
+#      and SHA256SUMS; it runs from a relocated copy and through a symlink on
+#      PATH; a CPU below x86-64-v3 gets the one-line refusal (test launcher);
+#      two uncached builds give byte-identical bundles (skipped with
+#      --no-uncached; about 3 minutes of remote execution).
 #   9. `buck2 run //examples:hello` prints the greeting on this machine from a
 #      fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
@@ -60,11 +71,13 @@ set -uo pipefail
 
 umbrella=1
 run=1
+uncached=1
 for a in "$@"; do
     case "$a" in
         --no-umbrella) umbrella=0 ;;
         --no-run) run=0 ;;
-        *) echo "usage: $0 [--no-umbrella] [--no-run]" >&2; exit 2 ;;
+        --no-uncached) uncached=0 ;;
+        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached]" >&2; exit 2 ;;
     esac
 done
 
@@ -100,6 +113,7 @@ expect_red() { # name, required text, target
 EXAMPLES=(
     //examples:hello //examples:hellopkg //examples:hello_pkg_user
     //examples/libgate_ok:libgate_ok //examples:test_hellopkg
+    //examples:hello_bundle //package:level_test
 )
 # Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
 # was observed to skip the sub-target, so never rely on combining them with a
@@ -400,6 +414,33 @@ else
     pass "action platforms: $verdict"
 fi
 "$BUCK2" --isolation-dir "$ISO" kill > /dev/null 2>&1
+
+# 13
+if "$BUCK2" build checks//bundle_parity:parity --show-full-simple-output > "$LOG/parity.txt" 2> "$LOG/parity.log"; then
+    pass "bundle parity: $(tail -n 1 "$(tail -n 1 "$LOG/parity.txt")") between executable and bundle"
+else
+    fail "bundle parity: $(grep -m1 -E '^[0-9]+ cases' "$LOG/parity.log") (see $LOG/parity.log)"
+fi
+
+# 14
+if "$BUCK2" build //package:level_test --show-full-simple-output > "$LOG/level.txt" 2> "$LOG/level.log"; then
+    pass "launcher levels: $(grep -c '^ok ' "$(tail -n 1 "$LOG/level.txt")") made-up CPUs judged as glibc does"
+else
+    fail "launcher levels: $(grep -m3 '^BAD' "$LOG/level.log" | tr '\n' ' ')(see $LOG/level.log)"
+fi
+
+# 15
+bundle_args=()
+[ "$uncached" = 1 ] || bundle_args+=(--no-uncached)
+BUCK2="$BUCK2" "$ROOT/checks/bundle.sh" ${bundle_args[@]+"${bundle_args[@]}"} > "$LOG/bundle.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  bundle "*) pass "${line#PASS  }" ;;
+        "FAIL  bundle "*) fail "${line#FAIL  } (see $LOG/bundle.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/bundle.log"
+grep -qE '^(PASS|FAIL)  bundle ' "$LOG/bundle.log" || fail "bundle: checks/bundle.sh reported nothing (see $LOG/bundle.log)"
 
 # 9
 if [ "$run" = 1 ]; then
