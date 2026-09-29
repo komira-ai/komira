@@ -45,12 +45,22 @@ buck2.** `setup` refuses to replace a `core.hooksPath` you already set.
 | `kg` workflow, push to `main` | yes, loading only | the same check, then uploads the three generated files as a workflow artifact | the same |
 
 The Buck2 half is a split on purpose. The query is loading only (`uquery`: no configuration,
-no actions, no remote execution) and takes about half a second warm, but it starts a buck2
-daemon, and a hook that needs a daemon or a download is a hook people disable. So the hook
-checks a fingerprint (the build files, every `.bzl`, `.buckconfig`, the buck2 pin, and the
-paths of the files inside packages), and CI proves the bytes. `[graph] config` in
-`docs/kg.toml` passes placeholder `-c komira_re.*` values so the query loads every package
-without a `.buckconfig.local`; the placeholders appear nowhere in the output.
+no actions, no remote execution), but it starts a buck2 daemon, and a hook that needs a
+daemon or a download is a hook people disable. So the hook checks a fingerprint (the build
+files, every `.bzl`, `.buckconfig`, the buck2 pin, and the paths of the files inside
+packages), and CI proves the bytes.
+
+`kg graph` and `kg check --graph` never query the working tree. They check the tree being
+graphed (the index, or the commit) out into a scratch directory and run buck2 there, with a
+daemon of its own that is stopped afterwards. So a `.buckconfig.local`, an untracked or
+ignored file, or an unstaged edit cannot change the bytes, and a contributor renders exactly
+what a clean CI checkout renders. `[graph] config` in `docs/kg.toml` passes placeholder
+`-c komira_re.*` values so that clean tree loads every package; the placeholders appear
+nowhere in the output.
+
+Every cell in `.buckconfig` `[cells]` is either queried whole (`<cell>//...` in `[graph]
+universe`) or named in `[graph] exclude`. A cell in neither makes the graph stale and
+`kg graph` refuses, so a new cell cannot go unindexed while the check reads fresh.
 
 **When a check is red**, it names the fix:
 

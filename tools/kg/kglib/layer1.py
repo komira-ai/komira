@@ -60,13 +60,15 @@ class Config:
         self.canonical = data.get("canonical", "")
         self.docs_graph = data.get("docs_graph", "")
         # The Buck2 code graph (graph.py): the committed file, the query universe, and the
-        # `-c section.key=value` overrides that let a checkout without `.buckconfig.local` load it.
+        # `-c section.key=value` overrides that let a checkout without `.buckconfig.local` load it,
+        # and the cells deliberately left out of the universe (every other cell must be in it).
         g = data.get("graph", {})
-        if not isinstance(g, dict) or set(g) - {"out", "universe", "config"}:
-            raise KgError("%s: [graph] takes only out, universe and config" % name)
+        if not isinstance(g, dict) or set(g) - {"out", "universe", "config", "exclude"}:
+            raise KgError("%s: [graph] takes only out, universe, config and exclude" % name)
         self.graph_out = g.get("out", "")
         self.graph_universe = self._strs(g, "universe", name)
         self.graph_config = self._strs(g, "config", name)
+        self.graph_exclude = self._strs(g, "exclude", name)
         for k in ("canonical", "docs_graph"):
             if not isinstance(getattr(self, k), str):
                 raise KgError("%s: `%s` must be a string" % (name, k))

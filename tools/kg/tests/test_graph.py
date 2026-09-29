@@ -40,10 +40,21 @@ UQUERY = {
     "komira//src:use": {"buck.type": "mojo_test", "buck.deps": ["komira//src:alpha", "toolchains//:mojo"],
                         "srcs": ["komira//src/use.mojo"]},
 }
+# The stub answers like buck2 would in its cwd: a `.buckconfig.local` there adds the target a
+# machine-local key would add, and a stray (untracked) source adds a target that globs it.
 STUB = '''#!/usr/bin/env python3
-import os, sys
+import json, os, sys
+if "kill" in sys.argv:
+    sys.exit(0)
 assert "uquery" in sys.argv and "--json" in sys.argv, sys.argv
-sys.stdout.write(open(os.environ["KG_STUB_ANSWER"]).read())
+ans = json.load(open(os.environ["KG_STUB_ANSWER"]))
+if os.path.exists(".buckconfig.local"):
+    ans["komira//platforms:local-only"] = {"buck.type": "platform"}
+if os.path.exists("src/alpha/stray.mojo"):
+    ans["komira//src:stray"] = {"buck.type": "mojo_library", "srcs": ["komira//src/alpha/stray.mojo"]}
+with open(os.environ["KG_STUB_CWDS"], "a") as f:
+    f.write(os.getcwd() + "\\n")
+sys.stdout.write(json.dumps(ans))
 '''
 
 
@@ -131,7 +142,8 @@ class Repo(test_git.Base):
         os.chmod(stub, 0o755)
         self.answer = os.path.join(self.tmp, "answer.json")
         self.set_answer(UQUERY)
-        r.env.update(BUCK2=stub, KG_STUB_ANSWER=self.answer)
+        self.cwds = os.path.join(self.tmp, "cwds")
+        r.env.update(BUCK2=stub, KG_STUB_ANSWER=self.answer, KG_STUB_CWDS=self.cwds)
         r.write("docs/kg.toml", TOML)
         r.write(".buckconfig", BUCKCONFIG)
         r.write("src/BUCK", BUCK)
@@ -202,12 +214,61 @@ class Repo(test_git.Base):
         self.assertEqual(c.returncode, 1, c.stdout + c.stderr)
         self.assertIn("buck2 renders different bytes", c.stdout)
 
-    def test_graph_refuses_untracked_files_in_a_package(self):
+    def test_working_tree_state_never_reaches_the_graph(self):
         r = self.make()
+        committed = r.git("show", "HEAD:docs/kg/buck_graph.json").stdout
+        r.write(".buckconfig.local", "[komira_re]\n  mojo_compile_multi_numa_properties = a=b\n")
         r.write("src/alpha/stray.mojo", "s\n")
+        r.kg("graph")
+        self.assertEqual(r.git("diff", "--cached", "--name-only").stdout, "")
+        with open(os.path.join(r.dir, "docs/kg/buck_graph.json")) as f:
+            self.assertEqual(f.read(), committed)
+        c = r.fresh("HEAD", "--graph")
+        self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+        with open(self.cwds) as f:
+            cwds = f.read().split()
+        self.assertTrue(cwds and all(os.path.realpath(d) != os.path.realpath(r.dir) for d in cwds), cwds)
+        self.assertFalse([d for d in cwds if os.path.exists(d)], "scratch checkouts are removed")
+
+    def test_check_graph_judges_the_named_commit_not_the_checkout(self):
+        r = self.make()
+        tip = r.head()
+        r.write("src/BUCK", BUCK + b"\n")
+        r.git("commit", "-q", "--no-verify", "-am", "a build edit, graph not refreshed")
+        c = r.fresh(tip, "--graph")
+        self.assertEqual(c.returncode, 0, c.stdout + c.stderr)
+
+    def test_a_cell_outside_the_universe_is_refused(self):
+        r = self.make()
+        r.write(".buckconfig", BUCKCONFIG + b"  extra = extra\n")
+        r.write("extra/BUCK", 'export_file(name = "x")\n')
+        r.git("add", ".buckconfig", "extra/BUCK")
+        r.git("commit", "-q", "-m", "a new cell")
+        c = r.fresh()
+        self.assertEqual(c.returncode, 1, c.stdout)
+        self.assertIn("cell `extra` is in .buckconfig [cells] but neither in [graph] universe", c.stdout)
         c = r.kg("graph", ok=False)
         self.assertEqual(c.returncode, 2, c.stdout + c.stderr)
-        self.assertIn("src/alpha/stray.mojo", c.stderr)
+        self.assertIn("cell `extra`", c.stderr)
+        r.write("docs/kg.toml", TOML.replace(b'universe = ["//..."]', b'universe = ["//..."]\nexclude = ["extra"]'))
+        r.git("add", "docs/kg.toml")
+        r.git("commit", "-q", "-m", "exclude it")
+        r.kg("graph")
+        r.git("commit", "-q", "-m", "kg: graph")
+        self.assertFresh(r)
+
+    def test_a_pathspec_commit_leaves_no_revert_for_the_next_unhooked_commit(self):
+        r = self.make()
+        r.write("docs/foo.md", "# Foo\n")
+        r.git("add", "docs/foo.md")
+        r.git("commit", "-q", "-m", "a doc, pathspec", "docs/foo.md")
+        self.assertIn("docs/foo.md", r.git("show", "HEAD:docs/kg/docs_graph.json").stdout)
+        self.assertEqual(r.git("diff", "--cached", "--name-only").stdout, "")
+        self.assertEqual(r.git("status", "--porcelain").stdout, "")
+        r.write("docs/alpha.md", ALPHA_DOC + b"More.\n")
+        r.git("commit", "-q", "--no-verify", "-m", "no hook", "docs/alpha.md")
+        self.assertIn("docs/foo.md", r.git("show", "HEAD:docs/kg/docs_graph.json").stdout)
+        self.assertFresh(r)
 
     def test_an_empty_answer_is_refused_not_written(self):
         r = self.make()

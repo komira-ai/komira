@@ -77,31 +77,15 @@ def render_tree(tree, cfg):
     return model, pages
 
 
-def inputs_dirty(root, tree, cfg):
-    """Why the working tree cannot stand in for `tree` in a buck2 query: build inputs whose
-    working-tree state differs, and untracked files inside a package (a glob would see them)."""
-    paths = graph.input_paths(tree, cfg)
-    bad = generator_dirty(root, paths) if paths else []
-    pkgs = sorted({posixpath.dirname(p) for p in paths if posixpath.basename(p) in cfg.build_files})
-    if pkgs:
-        extra = out(["ls-files", "--others", "--exclude-standard", "--", *[p or "." for p in pkgs]], root,
-                    read_only=True).splitlines()
-        bad += extra
-    return sorted(set(bad))
-
-
-def graph_export(root, tree, cfg, buck2=None):
+def graph_export(root, tree, cfg, buck2=None, treeish=None):
+    """The Buck2 graph of `tree`: the index, or the commit `treeish`. buck2 runs in a scratch
+    checkout of that tree, so the working tree's state never reaches the bytes."""
     if not cfg.graph_out:
         raise KgError("%s has no [graph] out, so the Buck2 graph is not configured" % CONFIG)
     buck2 = buck2 or graph.find_buck2(root)
     if not buck2:
         raise KgError("no buck2: put one on PATH or set BUCK2=/path/to/buck2 (tools/buck2 is a dotslash pin)")
-    dirty = inputs_dirty(root, tree, cfg)
-    if dirty:
-        raise KgError("buck2 reads the working tree, and it differs from the tree being graphed: %s. "
-                      "Stage or stash them (and add or ignore untracked files in a package), then rerun"
-                      % short(dirty))
-    return graph.export(root, tree, cfg, buck2)
+    return graph.export(root, tree, cfg, buck2, treeish)
 
 
 def write_pages(root, pages, changed, removed, stage):
@@ -117,10 +101,40 @@ def write_pages(root, pages, changed, removed, stage):
             pass
     if not stage:
         return
-    for i in range(0, len(changed), 200):
-        git(["add", "--", *changed[i:i + 200]], root)
-    for i in range(0, len(removed), 200):
-        git(["rm", "-q", "--cached", "--ignore-unmatch", "--", *removed[i:i + 200]], root)
+    _stage(root, changed, removed, os.environ)
+    real = partial_commit_index(root)
+    if real:
+        _stage(root, changed, removed, dict(os.environ, GIT_INDEX_FILE=real))
+
+
+def _stage(root, changed, removed, env):
+    for args, paths in ((["add", "--"], changed), (["rm", "-q", "--cached", "--ignore-unmatch", "--"], removed)):
+        for i in range(0, len(paths), 200):
+            r = subprocess.run(["git", *args, *paths[i:i + 200]], cwd=root, capture_output=True, env=env)
+            if r.returncode != 0:
+                err = r.stderr.decode("utf-8", "replace").strip().splitlines()
+                raise KgError("git %s failed: %s" % (args[0], err[0] if err else "exit %d" % r.returncode))
+
+
+def partial_commit_index(root):
+    """Under `git commit <paths>`, the hook's $GIT_INDEX_FILE is a temporary index holding only
+    the commit, and git has already written the real index -- HEAD plus those paths -- to
+    `<index>.lock`, which becomes the index when the commit completes. Staging only into the
+    temporary index would leave the real index one generated file behind the new HEAD: a
+    staged revert of the hook's own output, which the next commit made without the hook
+    would record. Returns `<index>.lock` in exactly that case, else None."""
+    idx = os.environ.get("GIT_INDEX_FILE")
+    if not idx:
+        return None
+    env = {k: v for k, v in os.environ.items() if k != "GIT_INDEX_FILE"}
+    r = subprocess.run(["git", "rev-parse", "--git-path", "index"], cwd=root, capture_output=True, env=env)
+    if r.returncode != 0:
+        return None
+    real = os.path.realpath(os.path.join(root, r.stdout.decode().strip()))
+    lock = real + ".lock"
+    if os.path.realpath(os.path.join(root, idx)) in (real, lock) or not os.path.isfile(lock):
+        return None
+    return lock
 
 
 def build(root, out_dir=None, config=None):
@@ -207,7 +221,7 @@ def pinned_generator(root, sha, cfg):
 def check(root, commit="HEAD", base=None, pinned=False, stream=sys.stdout, with_graph=False):
     """0 fresh; 1 refused (stale pages or docs graph, dead doc references, a Buck2 graph
     rendered from other inputs, shims, caps in this change). `with_graph` also re-runs the
-    buck2 query and compares bytes; it needs buck2 and a clean checkout of `commit`. Raises
+    buck2 query (in a scratch checkout of `commit`) and compares bytes; it needs buck2. Raises
     KgError on a tree kg cannot judge."""
     sha = _rev(root, commit + "^{commit}")
     if not sha:
@@ -247,9 +261,7 @@ def check(root, commit="HEAD", base=None, pinned=False, stream=sys.stdout, with_
         stream.write("kg check %s: STALE Buck2 graph: %s\n  fix (needs buck2): %s\n" % (s12, why, GRAPH_FIX))
     gnote = "graph inputs match"
     if with_graph and cfg.graph_out and not why:
-        if _rev(root, "HEAD") != sha:
-            raise KgError("--graph runs buck2 in this checkout, which is not %s; check it out first" % s12)
-        fresh = graph_export(root, tree, cfg)
+        fresh = graph_export(root, tree, cfg, treeish=sha)
         if fresh != tree.read([cfg.graph_out]).get(cfg.graph_out):
             rc = 1
             stream.write("kg check %s: STALE Buck2 graph: buck2 renders different bytes than %s\n"

@@ -15,8 +15,8 @@ key_files: [kg.py, kglib/layer1.py, kglib/docsgraph.py, kglib/graph.py, kglib/op
 | `status` | Versions, the hooks path, each hook, and a dry pre-commit with its wall time. |
 | `build --all` | Rebuilds every page under `docs/libraries/`, the map and `docs/kg/docs_graph.json` from the index, and stages the changed ones. `--out DIR` writes them under a scratch directory instead. |
 | `fix` | A merge or rebase stopped on a generated file: rebuilds them from the merged inputs and stages them. |
-| `check [--commit C] [--base B] [--graph]` | Are C's generated files byte-identical to what C's own generator renders, with no dead doc reference, and was C's Buck2 graph rendered from C's inputs? `--graph` also re-runs buck2 and compares bytes (a clean checkout of C). |
-| `graph [--out FILE]` | Runs one `buck2 uquery` and writes `docs/kg/buck_graph.json` (staged), or FILE. |
+| `check [--commit C] [--base B] [--graph]` | Are C's generated files byte-identical to what C's own generator renders, with no dead doc reference, and was C's Buck2 graph rendered from C's inputs? `--graph` also re-runs buck2, in a scratch checkout of C, and compares bytes. |
+| `graph [--out FILE]` | Runs one `buck2 uquery` in a scratch checkout of the index (never the working tree) and writes `docs/kg/buck_graph.json` (staged), or FILE. |
 | `deps`, `rdeps <target> [--depth N]` | Transitive dependencies or dependents, from the committed graph. |
 | `tests <target or path>` | Its welded `test_srcs`, the test targets that reach it, and the gated libraries that depend on it. |
 | `owner <path>` | The targets whose `srcs` or `test_srcs` list a file. |

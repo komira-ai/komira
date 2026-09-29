@@ -30,10 +30,14 @@ test_attrs = ["test_srcs"]
 dirs = ["tools/kg"]
 
 [graph]
-# The Buck2 code graph: `buck2 uquery 'kind(".*", <universe>)'`, loading only. The `checks`
-# cell is outside `//...`, so it is named. `config` lets a checkout with no .buckconfig.local
-# load //platforms/remote and checks//numa/standin; the placeholder values appear nowhere in
-# the output.
+# The Buck2 code graph: `buck2 uquery 'kind(".*", <universe>)'`, loading only, run in a
+# scratch checkout of the tree being graphed. Every cell in .buckconfig [cells] is in
+# `universe` (as `<cell>//...`; the root cell is `//...`) or in `exclude`; a cell in neither
+# is refused. `config` lets that clean tree, which has no .buckconfig.local, load
+# //platforms/remote and checks//numa/standin; the placeholder values appear nowhere in the
+# output.
 out = "docs/kg/buck_graph.json"
 universe = ["//...", "checks//...", "mojo//...", "toolchains//..."]
 config = ["komira_re.light_properties=kg=unset", "komira_re.mojo_compile_properties=kg=unset"]
+# `prelude` is buck2's bundled rule library and `none` is a directory-less alias target.
+exclude = ["prelude", "none"]

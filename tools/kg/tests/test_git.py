@@ -159,6 +159,10 @@ class PreCommit(Base):
         r.write("src/alpha/__init__.mojo", '"""Alpha, version three."""\n')
         r.git("commit", "-q", "-m", "pathspec", "src/alpha/__init__.mojo")
         self.assertFresh(r)
+        # The pathspec form commits from a temporary index; the hook's output must reach the
+        # real index too, or it holds a staged revert of that output.
+        self.assertEqual(r.git("diff", "--cached", "--name-only").stdout, "")
+        self.assertEqual(r.git("status", "--porcelain").stdout, "")
         r.write("src/beta/__init__.mojo", '"""Beta, two."""\n')
         r.git("commit", "-q", "-a", "-m", "all")
         self.assertFresh(r)
@@ -239,8 +243,8 @@ class PrePush(Base):
         self.assertIn("refs/heads/other skipped (a delete)", p.stdout + p.stderr)
 
     def test_a_tip_without_kg_toml_is_skipped_not_refused(self):
-        # A branch cut before kg existed (komira-internal's pre-cutover branches): kg cannot
-        # judge its tree, so refusing it would deadlock the push forever (design 5.2).
+        # A branch cut before kg was configured: kg cannot judge its tree, so refusing it would
+        # block that push forever.
         r = make(self.tmp)
         r.remote()
         r.git("push", "-q", "origin", "main")

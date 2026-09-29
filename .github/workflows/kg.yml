@@ -4,9 +4,9 @@
 # `kg check --graph` at the pull request's HEAD commit (not GitHub's merge ref) with that
 # commit's own generator. The check rebuilds the library pages and the docs graph, refuses a
 # dead doc reference, and re-runs the one `buck2 uquery` behind docs/kg/buck_graph.json,
-# comparing bytes. The query is loading only: no build, no remote execution, no
-# .buckconfig.local (docs/kg.toml [graph] config passes placeholders), so this job needs no
-# secrets and no remote-execution service. It writes nothing to the repository and never commits.
+# comparing bytes. The query is loading only and runs in a scratch checkout of the commit:
+# no build, no remote execution, no .buckconfig.local (docs/kg.toml [graph] config passes
+# placeholders), so this job needs no secrets and no remote-execution service. It writes nothing to the repository and never commits.
 #
 # On a push to main it also renders the generated files into a scratch directory and uploads
 # them as the `kg-graph` artifact.
@@ -109,8 +109,3 @@ jobs:
           path: ${{ runner.temp }}/kg-graph
           if-no-files-found: error
           retention-days: 30
-
-      - name: Stop buck2
-        if: always()
-        run: |
-          if [ -n "${BUCK2:-}" ]; then "$BUCK2" --isolation-dir kg kill || true; fi
