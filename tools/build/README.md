@@ -116,9 +116,13 @@ What keeps the digests equal:
 Labels reach digests the same way: the target platform's label keys the
 configuration, whose hash appears in the output paths of configured copies
 such as the rules' scripts, and a target's package path appears in the paths
-of its sources and outputs. Moving `platforms/` or a package of examples to
-another directory therefore changes the digests of the actions that read
-those paths, although no command changes meaning.
+of its sources and outputs. Moving `komira//tools/build/platforms` to another
+package therefore changes the digest of every configured action in the
+repository, product code included, although no command changes meaning;
+moving a package of examples changes only the digests of that package's
+actions. [Check 18](checks/README.md#18-configuration-hashes) fails if the
+configuration hashes the platform package keys move, so such a re-key is
+always a deliberate, reviewed change.
 
 [`checks/umbrella_cache.sh`](checks/umbrella_cache.sh) builds the examples
 in a fresh standalone clone and then in scratch umbrella repositories mounting

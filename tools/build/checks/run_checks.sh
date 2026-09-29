@@ -31,6 +31,10 @@
 #      toolchain libraries the run loaded are exactly the ones a runnable
 #      directory carries in lib/ (toolchains//:mojo_runtime), no more, no
 #      fewer, and every run path those libraries carry is $ORIGIN-relative.
+#   9. `buck2 run //tools/build/examples:hello` prints the greeting on this
+#      machine from a fresh clone, downloads only the binary and its runtime libraries, and
+#      the runnable directory still starts after it is moved
+#      (tools/build/checks/buck2_run.sh; skipped with --no-run).
 #  10. Execution platforms: Mojo compiles, gated tests and run checks resolve
 #      to `exec-mojo` (mojo_compile, numa_single) and toolchain unpack/copy
 #      targets to `exec-light`. A target requiring numa_multi, with no
@@ -75,12 +79,12 @@
 #      base layers are checked; the base is fetched only by pinned
 #      downloads; `docker run` of the loaded image prints the greeting (SKIP
 #      without docker).
-#  17. Every relative link in the repository's Markdown resolves (doc_links.sh),
-#      and the link checker itself fails on a planted dead link.
-#   9. `buck2 run //tools/build/examples:hello` prints the greeting on this machine from a
-#      fresh clone, downloads only the binary and its runtime libraries, and
-#      the runnable directory still starts after it is moved
-#      (tools/build/checks/buck2_run.sh; skipped with --no-run).
+#  17. Every relative link in the repository's Markdown resolves to a tracked
+#      file (doc_links.sh), and on a planted git tree the link checker names
+#      a missing file, a bad #anchor, a link leaving the tree and a link to an
+#      untracked file.
+#  18. The configuration hashes of exec-light, exec-mojo and linux-x86_64 equal
+#      their pins: they are in the digest of every configured action.
 set -uo pipefail
 
 umbrella=1
@@ -474,16 +478,57 @@ done < "$LOG/formats.log"
 grep -qE '^(PASS|FAIL)  formats ' "$LOG/formats.log" || fail "formats: tools/build/checks/formats.sh reported nothing (see $LOG/formats.log)"
 
 # 17
-mkdir -p "$LOG/doc_links_planted/sub"
-printf '# planted\n\n[ok](sub/)\n[dead](sub/missing.md)\n' > "$LOG/doc_links_planted/README.md"
-if "$ROOT/tools/build/checks/doc_links.sh" "$LOG/doc_links_planted" > "$LOG/doc_links_planted.log" 2>&1; then
-    fail "doc links: the checker passed a planted dead link (see $LOG/doc_links_planted.log)"
-elif ! grep -qF 'README.md:4: sub/missing.md' "$LOG/doc_links_planted.log"; then
-    fail "doc links: the checker failed the planted tree without naming its dead link (see $LOG/doc_links_planted.log)"
-elif "$ROOT/tools/build/checks/doc_links.sh" > "$LOG/doc_links.log" 2>&1; then
-    pass "doc links: $(grep -o 'all [0-9]* relative links resolve' "$LOG/doc_links.log"); a planted dead link is caught"
+# The planted tree is a git repository with one link per diagnostic, plus two
+# links that must resolve (a tracked directory, a real heading): the checker
+# must name each dead link with its reason, and only those.
+P="$LOG/doc_links_planted"
+mkdir -p "$P/sub"
+printf '# planted\n\n[ok](sub/)\n[dead](sub/missing.md)\n[anchor](sub/a.md#nope)\n[escape](../outside.md)\n[untracked](sub/untracked.md)\n[heading](sub/a.md#a)\n' > "$P/README.md"
+printf '# A\n' > "$P/sub/a.md"
+printf '# untracked\n' > "$P/sub/untracked.md"
+git -C "$P" init -q && git -C "$P" add README.md sub/a.md
+PLANTED=(
+    'README.md:4: sub/missing.md (no such file)'
+    'README.md:5: sub/a.md#nope (no heading #nope)'
+    'README.md:6: ../outside.md (leaves the repository)'
+    'README.md:7: sub/untracked.md (not tracked by git)'
+    'FAIL  doc links: 4 of 6 relative links do not resolve'
+)
+missed=""
+if "$ROOT/tools/build/checks/doc_links.sh" "$P" > "$LOG/doc_links_planted.log" 2>&1; then
+    missed="(it passed)"
 else
-    fail "doc links: $(grep -c '^dead link' "$LOG/doc_links.log") dead: $(grep '^dead link' "$LOG/doc_links.log" | head -n 3 | cut -c 12- | tr '\n' ' ')(see $LOG/doc_links.log)"
+    for want in "${PLANTED[@]}"; do
+        grep -qF "$want" "$LOG/doc_links_planted.log" || missed="$missed [$want]"
+    done
+fi
+if [ -n "$missed" ]; then
+    fail "doc links: on the planted tree the checker missed $missed (see $LOG/doc_links_planted.log)"
+elif "$ROOT/tools/build/checks/doc_links.sh" > "$LOG/doc_links.log" 2>&1; then
+    pass "doc links: $(grep -o 'all [0-9]* relative links resolve' "$LOG/doc_links.log"); planted missing, bad-anchor, escaping and untracked links are each caught"
+else
+    fail "$(grep -m1 '^FAIL' "$LOG/doc_links.log" | cut -c 7-) $(grep '^dead link' "$LOG/doc_links.log" | head -n 3 | cut -c 12- | tr '\n' ' ')(see $LOG/doc_links.log)"
+fi
+
+# 18
+# The configuration hashes. The target platform's label and constraints key
+# every configuration, and the hash appears in the output paths, and so in
+# the digest, of every configured action: moving or renaming
+# komira//tools/build/platforms, or changing a constraint, changes every action digest in
+# the repository and every repository mounting it (a buck2 upgrade may too).
+# The pins make such a change a deliberate edit of this list.
+EXPECT_CFGS="
+komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
+komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
+komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be"
+want=$(printf '%s\n' "$EXPECT_CFGS" | sed '/^$/d')
+if ! "$BUCK2" cquery 'deps(komira//tools/build/examples:hello)' > "$LOG/cfg_hashes.txt" 2>&1; then
+    fail "configuration hashes: cquery failed (see $LOG/cfg_hashes.txt)"
+elif got=$(grep -oE '\([^ ()]*:(exec-light|exec-mojo|linux-x86_64)#[0-9a-f]+\)' "$LOG/cfg_hashes.txt" | tr -d '()' | LC_ALL=C sort -u) \
+        && [ "$got" != "$want" ]; then
+    fail "configuration hashes moved, so every action digest did: got $(printf '%s' "$got" | tr '\n' ' '); if deliberate, update EXPECT_CFGS (see $LOG/cfg_hashes.txt)"
+else
+    pass "configuration hashes: exec-light, exec-mojo and linux-x86_64 keep their pinned hashes"
 fi
 
 # 9

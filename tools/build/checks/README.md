@@ -217,16 +217,32 @@ of the loaded image prints the greeting (SKIP without docker). See
 
 ## 17. Doc links
 
-Every relative link in the repository's Markdown resolves: the file or
-directory exists, stays inside the repository, and a `#fragment` names a
-heading of the target file. [`doc_links.sh`](doc_links.sh) runs on its own
-and needs no build farm; `run_checks.sh` first requires it to fail on a
-planted dead link.
+Every relative link in the repository's Markdown resolves: the target is a
+file tracked by git, or a directory holding one (a link to an ignored file
+such as `.buckconfig.local` resolves in a working tree and is dead in a fresh
+clone), it stays inside the repository, and a `#fragment` names a heading of
+the target file. [`doc_links.sh`](doc_links.sh) runs on its own and needs no
+build farm, but needs `git` and `python3` on the client and a git work tree
+to read. `run_checks.sh` first runs it on a planted git tree and requires it
+to name each of a missing file, a bad anchor, a link leaving the tree and a
+link to an untracked file, and nothing else.
 
 ```sh
 tools/build/checks/doc_links.sh            # the repository
-tools/build/checks/doc_links.sh <dir>      # any other tree
+tools/build/checks/doc_links.sh <dir>      # any other git work tree
 ```
+
+## 18. Configuration hashes
+
+The configuration hashes of `komira//tools/build/platforms:exec-light`, `:exec-mojo` and
+`:linux-x86_64`, read with `buck2 cquery 'deps(komira//tools/build/examples:hello)'`,
+equal the pins in `run_checks.sh`. A configuration's hash is keyed by its
+platform's label and constraints and appears in the output paths, and so in
+the digest, of every configured action, product code included. Moving the
+`platforms` package, renaming a platform or changing a constraint therefore
+invalidates every cached action here and in every repository mounting
+komira; the pins make that a deliberate edit. Upgrading buck2 may change the
+hashes too.
 
 ## Diagnostics
 

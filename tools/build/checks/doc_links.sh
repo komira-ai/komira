@@ -3,11 +3,14 @@
 #
 # usage: tools/build/checks/doc_links.sh [<root>]    (default: the repo root)
 #
-# Reads every *.md under <root> (skipping .git and buck-out) and checks each
-# inline link `[text](target)` and reference definition `[id]: target` whose
-# target is relative (not `scheme:`, not `//host`):
-#   - the target file or directory exists, resolved against the linking
-#     file's directory;
+# <root> must be a git work tree (or a directory inside one); the check needs
+# `git` and `python3` on the client. Reads every tracked *.md under <root> and
+# checks each inline link `[text](target)` and reference definition
+# `[id]: target` whose target is relative (not `scheme:`, not `//host`):
+#   - the target is a file tracked by git, or a directory holding one,
+#     resolved against the linking file's directory: a link to an ignored or
+#     untracked file (buck-out/, .buckconfig.local) resolves here and is dead
+#     in a fresh clone;
 #   - it stays inside <root>, so it also resolves in a fresh clone or on a
 #     code host;
 #   - a `#fragment` on a Markdown target (or a bare `#fragment`) names a
@@ -20,11 +23,32 @@ set -euo pipefail
 
 root=${1:-"$(cd "$(dirname "$0")/../../.." && pwd)"}
 [ -d "$root" ] || { echo "doc_links: no directory $root" >&2; exit 2; }
+for tool in git python3; do
+    command -v "$tool" > /dev/null || { echo "FAIL  doc links: needs \`$tool\` on the client" >&2; exit 2; }
+done
+git -C "$root" rev-parse --is-inside-work-tree > /dev/null 2>&1 \
+    || { echo "FAIL  doc links: $root is not inside a git work tree (links are resolved against tracked files)" >&2; exit 2; }
 
 python3 - "$root" << 'PY'
-import os, re, sys
+import os, re, subprocess, sys
 
 root = os.path.realpath(sys.argv[1])
+# Paths tracked by git under root (relative to root), and every directory
+# that holds one. A tracked file deleted in the working tree is not counted.
+tracked, tracked_dirs = set(), {root}
+out = subprocess.run(["git", "-C", root, "ls-files", "-z", "--cached", "--", "."],
+                     check=True, capture_output=True).stdout
+for rel in out.decode("utf-8").split("\0"):
+    if not rel:
+        continue
+    full = os.path.join(root, rel)
+    if not os.path.lexists(full):
+        continue
+    tracked.add(full)
+    d = os.path.dirname(full)
+    while d.startswith(root) and d not in tracked_dirs:
+        tracked_dirs.add(d)
+        d = os.path.dirname(d)
 FENCE = re.compile(r"^\s*(```|~~~)")
 INLINE = re.compile(r"!?\[(?:[^\[\]]|\[[^\]]*\])*\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"]*\")?\s*\)")
 REFDEF = re.compile(r"^\s{0,3}\[[^\]]+\]:\s*<?(\S+?)>?(?:\s+.*)?$")
@@ -32,11 +56,7 @@ HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.*?)\s*#*\s*$")
 EXTERNAL = re.compile(r"^([A-Za-z][A-Za-z0-9+.-]*:|//)")
 
 def md_files():
-    for d, dirs, files in os.walk(root):
-        dirs[:] = sorted(x for x in dirs if x not in (".git", "buck-out"))
-        for f in sorted(files):
-            if f.endswith(".md"):
-                yield os.path.join(d, f)
+    return sorted(p for p in tracked if p.endswith(".md"))
 
 def prose_lines(path):
     fenced = False
@@ -95,6 +115,8 @@ for md in md_files():
                 dead.append(where + " (leaves the repository)")
             elif not os.path.exists(dest):
                 dead.append(where + " (no such file)")
+            elif dest not in tracked and dest not in tracked_dirs:
+                dead.append(where + " (not tracked by git)")
             elif frag and dest.endswith(".md") and os.path.isfile(dest) and frag not in anchors(dest):
                 dead.append(where + " (no heading #%s)" % frag)
 

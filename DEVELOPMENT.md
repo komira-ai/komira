@@ -87,9 +87,11 @@ tools/build/checks/run_checks.sh --no-uncached   # skip the two uncached bundle 
 ```
 
 `run_checks.sh` uses `buck2` from your `PATH`, falls back to `tools/buck2`,
-and takes `BUCK2=...` over both. Logs and the scratch checkouts of the
-umbrella and `buck2 run` checks go under `$TMPDIR`; where `/tmp` is memory,
-point `TMPDIR` at a disk directory. The scratch checkouts are deleted on exit,
+and takes `BUCK2=...` over both. Besides `buck2` it runs `git`, `python3`
+(the doc link check) and `readelf` (the output and runtime-library checks) on
+the client. Logs and the scratch checkouts of the umbrella and `buck2 run`
+checks go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk
+directory. The scratch checkouts are deleted on exit,
 pass or fail (`KEEP_SCRATCH=1` keeps them); logs are kept, and the last line
 of output names their directory. It exits non-zero if any check failed.
 Each check is described, with how to run it on its own, in
