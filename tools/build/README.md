@@ -7,10 +7,11 @@ Everything the build needs besides the project configuration
 
 | directory | Buck2 name | what it holds |
 |---|---|---|
-| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
+| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test`, `mojo_proto_library`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
 | [`toolchains/`](toolchains/) | package `komira//tools/build/toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/remote/`](platforms/remote/) registers a standalone checkout's remote platforms. [Reference](platforms/README.md). |
 | [`rust/`](rust/) | package `komira//tools/build/rust` | the Rust rules (`rust_library`, `rust_binary`, `crates_io_library`) and the rustc toolchain rule. [Reference](rust/README.md). |
+| [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo`, the protoc plugin of `mojo_proto_library` (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)). |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
 | [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains`, and the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains` ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |

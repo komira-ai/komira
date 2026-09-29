@@ -1,0 +1,77 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# Mojo generated from .proto files, used by tests. The plugin is built from
+# komira//tools/build/proto-codegen; exercised by run_checks.sh (check 23).
+
+mojo_library(
+    name = "komira_serde",
+    srcs = ["komira_serde/__init__.mojo"],
+)
+
+mojo_proto_library(
+    name = "person_proto",
+    srcs = ["v1/person.proto"],
+    import_prefix = "example",
+    deps = [":komira_serde"],
+)
+
+mojo_test(
+    name = "test_person",
+    srcs = ["test_person.mojo"],
+    deps = [
+        ":komira_serde",
+        ":person_proto",
+    ],
+)
+
+# The same test against a .proto whose field 2 is named `ident`: the
+# generated struct has no `id`, so the test must fail to compile.
+mojo_proto_library(
+    name = "person_renamed_proto",
+    srcs = ["renamed/person.proto"],
+    import_name = "person_proto",
+    import_prefix = "example",
+    deps = [":komira_serde"],
+)
+
+mojo_test(
+    name = "test_person_renamed",
+    srcs = ["test_person.mojo"],
+    deps = [
+        ":komira_serde",
+        ":person_renamed_proto",
+    ],
+)
+
+# team.proto imports example/v1/person.proto from person_proto, whose .proto
+# protoc finds through `proto_deps`. The generated Team refers to Person in
+# its own package, so person.mojo is generated into this package as well.
+mojo_proto_library(
+    name = "team_proto",
+    srcs = ["team/team.proto"],
+    bundle_proto_deps = True,
+    import_prefix = "example",
+    proto_deps = [":person_proto"],
+    deps = [":komira_serde"],
+)
+
+mojo_test(
+    name = "test_team",
+    srcs = ["test_team.mojo"],
+    deps = [
+        ":komira_serde",
+        ":team_proto",
+    ],
+)
+
+# Without bundling, the Person that team.mojo imports is not in the package:
+# the package must fail to compile.
+mojo_proto_library(
+    name = "team_unbundled_proto",
+    srcs = ["team/team.proto"],
+    import_name = "team_proto",
+    import_prefix = "example",
+    proto_deps = [":person_proto"],
+    deps = [":komira_serde"],
+)

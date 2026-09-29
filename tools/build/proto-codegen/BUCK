@@ -1,0 +1,40 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library")
+
+# The protoc plugins that generate Mojo, from the `komira_proto_codegen`
+# crate. The Mojo proto rules name these binaries through the toolchain
+# `komira//tools/build/toolchains/proto:mojo_proto`.
+
+_DEPS = [
+    "komira//third_party/rust:prost",
+    "komira//third_party/rust:prost-types",
+]
+
+rust_library(
+    name = "komira_proto_codegen",
+    srcs = glob(
+        ["src/**/*.rs"],
+        exclude = ["src/main.rs", "src/main_*.rs"],
+    ),
+    crate_root = "src/lib.rs",
+    deps = _DEPS,
+)
+
+# Reads a CodeGeneratorRequest on stdin, writes one `<stem>.mojo` per input
+# `.proto` in the CodeGeneratorResponse on stdout.
+rust_binary(
+    name = "protoc-gen-mojo",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    visibility = ["PUBLIC"],
+)
+
+# The same, emitting `<stem>_db.mojo` (a DbStorable implementation) for each
+# input `.proto` that declares a table message.
+rust_binary(
+    name = "protoc-gen-mojo-db",
+    srcs = ["src/main_db.rs"],
+    crate_root = "src/main_db.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    visibility = ["PUBLIC"],
+)

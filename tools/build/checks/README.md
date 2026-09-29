@@ -253,7 +253,7 @@ hashes too.
 ## 19. Exported cells
 
 Every label outside a comment in the BUCK and `.bzl` files a repository
-using komira loads or copies -- those under `tools/build/{mojo,rust,toolchains,platforms,package,examples,cells}`
+using komira loads or copies -- those under `tools/build/{mojo,rust,proto-codegen,toolchains,platforms,package,examples,cells}`
 and `third_party` -- names the `komira`, `prelude` or `toolchains` cell, the only cells such a
 repository has. A label naming `checks`, which exists only in a standalone
 checkout, would load here and fail to load there (as `visibility =
@@ -294,6 +294,17 @@ macro, so it compiles registry crates, a proc-macro and the zig link; its run
 check compares stdout exactly, and must have run remotely. A binary using
 prost without depending on it fails to compile
 (`checks//rust_missing_dep:main`): crates reach rustc only through `deps`.
+
+## 23. Protobuf
+
+[`proto_checks.sh`](proto_checks.sh), sourced by `run_checks.sh`, over
+[`proto/`](proto/BUCK). Generated packages pass tests that encode and decode
+through a minimal runtime (the bytes prost produces), and must have run
+remotely. The generated struct follows a field rename in the `.proto`, and
+the test written for the old name fails to compile
+(`checks//proto:test_person_renamed`). A `.proto` using an imported file's
+message compiles only with that file bundled
+(`checks//proto:team_unbundled_proto` must fail).
 
 ## Diagnostics
 

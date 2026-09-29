@@ -1,0 +1,59 @@
+# The Buck2 build (BUCK) compiles this crate with the pinned rustc; this
+# manifest lets it build with Cargo too. The empty `[workspace]` table makes
+# the crate its own workspace root.
+[workspace]
+
+[package]
+name = "komira-proto-codegen"
+version = "0.1.0"
+edition = "2021"
+description = "protoc-gen-mojo: protoc plugins that generate Mojo from .proto files."
+publish = false
+
+[lib]
+name = "komira_proto_codegen"
+path = "src/lib.rs"
+
+# Mojo messages, enums and service clients, one `<stem>.mojo` per `.proto`.
+[[bin]]
+name = "protoc-gen-mojo"
+path = "src/main.rs"
+
+# DbStorable implementations, one `<stem>_db.mojo` per `.proto` with a table.
+[[bin]]
+name = "protoc-gen-mojo-db"
+path = "src/main_db.rs"
+
+# Composite-index Terraform and manifests.
+[[bin]]
+name = "protoc-gen-mojo-index"
+path = "src/main_index.rs"
+
+# One OpenAPI v3 document per request.
+[[bin]]
+name = "protoc-gen-openapi"
+path = "src/main_openapi.rs"
+
+# A Mojo client from an OpenAPI v3 document.
+[[bin]]
+name = "mojo-gen-openapi"
+path = "src/main_openapi_in.rs"
+
+# The Mojo driver for botocore's protocol conformance corpus.
+[[bin]]
+name = "aws-conformance-gen"
+path = "src/main_aws_conformance_gen.rs"
+
+# A Mojo AWS client from a botocore model.
+[[bin]]
+name = "aws-client-gen"
+path = "src/main_aws_client.rs"
+
+# Validates a botocore model before it is used as generator input.
+[[bin]]
+name = "aws-model-check"
+path = "src/main_aws_model_check.rs"
+
+[dependencies]
+prost = "0.13"
+prost-types = "0.13"

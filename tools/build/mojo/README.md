@@ -146,6 +146,36 @@ welded into the library's package, since that would need a platform per
 action. A gate that publishes a package only after such a run would take the
 run's output as an input of a separate publishing target.
 
+## Protobuf: mojo_proto_library
+
+```python
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+```
+
+`mojo_proto_library(name, srcs, deps, proto_deps, import_prefix, bundle_proto_deps)`
+runs protoc with the `protoc-gen-mojo` plugin over `srcs` (`.proto` files)
+and precompiles the generated directory, one `<stem>.mojo` per `.proto` plus
+an `__init__.mojo`, into `<name>.mojoc`. Other Mojo targets name it in `deps`
+like a `mojo_library`. `deps` are the Mojo libraries the generated code
+imports (its runtime). A `.proto` is imported by other `.proto` files at
+`import_prefix` joined with its path in the package; `proto_deps` names the
+`mojo_proto_library` targets whose files these import. The generated package
+is flat, and a reference to a message of another file is generated as a
+module of the same package: with `bundle_proto_deps = True` the whole
+`proto_deps` closure is generated into this package too. Sub-targets:
+`[gen]` (the generated directory), `[<stem>.mojo]`, `[proto]` (the staged
+`.proto` files). A generated package has no tests of its own (no
+`test_srcs`): it is gated only through the tests of the libraries and
+binaries that depend on it.
+
+The toolchain, `komira//tools/build/toolchains/proto:mojo_proto`, is protoc
+29.1 (the sha256-pinned static release build, with its well-known-type
+`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo`,
+built from source with the [Rust rules](../rust/README.md) against the
+crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
+in [`../proto-codegen/`](../proto-codegen/);
+[`checks//proto`](../checks/proto/BUCK) holds the example protos and tests.
+
 ## C and C++
 
 C and C++ code is built with the prelude's own `cxx_library` rule, using

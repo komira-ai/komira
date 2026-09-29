@@ -88,8 +88,8 @@
 #      their pins: they are in the digest of every configured action.
 #  19. What a repository using komira as a cell loads names no cell but
 #      komira, prelude and toolchains: every label outside a comment in the
-#      BUCK and .bzl files of tools/build/{mojo,rust,toolchains,platforms,package,
-#      examples,cells} and third_party. A label naming `checks`
+#      BUCK and .bzl files of tools/build/{mojo,rust,proto-codegen,toolchains,
+#      platforms,package,examples,cells} and third_party. A label naming `checks`
 #      (standalone-only) fails to load there.
 #  20. C/C++ dependencies of Mojo targets: see tools/build/checks/cxx_checks.sh.
 #  21. A Mojo binary whose own code records a source location (a List
@@ -97,6 +97,7 @@
 #      directory from recorded paths, so its exit-4 refusal does not fire
 #      (checks//location_path).
 #  22. Rust rules: see tools/build/checks/rust_checks.sh.
+#  23. mojo_proto_library: see tools/build/checks/proto_checks.sh.
 set -uo pipefail
 
 umbrella=1
@@ -553,7 +554,7 @@ else
 fi
 
 # 19
-EXPORTED="tools/build/mojo tools/build/rust tools/build/toolchains tools/build/platforms tools/build/package tools/build/examples
+EXPORTED="tools/build/mojo tools/build/rust tools/build/proto-codegen tools/build/toolchains tools/build/platforms tools/build/package tools/build/examples
     tools/build/cells third_party"
 missing=""
 for d in $EXPORTED; do [ -d "$ROOT/$d" ] || missing="$missing $d"; done
@@ -582,6 +583,10 @@ expect_green location_path "checks//location_path:main[run_check]"
 # 22
 # shellcheck source=tools/build/checks/rust_checks.sh
 . "$ROOT/tools/build/checks/rust_checks.sh"
+
+# 23
+# shellcheck source=tools/build/checks/proto_checks.sh
+. "$ROOT/tools/build/checks/proto_checks.sh"
 
 # 9
 if [ "$run" = 1 ]; then
