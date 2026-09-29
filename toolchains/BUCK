@@ -1,3 +1,4 @@
+load("@komira//package:defs.bzl", "oci_base")
 load("@mojo//:download.bzl", "pinned_file")
 load("@mojo//:toolchain.bzl", "conda_closure", "mojo_runtime", "mojo_toolchain", "zig_dist", "zig_exe")
 
@@ -40,6 +41,37 @@ pinned_file(
     name = "libgcc_15.3.0_linux-64.conda",
     url = "https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.3.0-h3363355_7.conda",
     sha256 = "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
+)
+
+# The base of oci_image: distroless base-debian12 (glibc, CA certificates,
+# tzdata, a nonroot user, no shell), tag `nonroot`, its linux/amd64 image
+# manifest. The manifest is checked in (a registry serves one only to a
+# client sending an Accept header); every blob is one pinned download. The
+# digests are the pin.
+oci_base(
+    name = "distroless_base",
+    registry = "gcr.io",
+    repository = "distroless/base-debian12",
+    manifest_file = "distroless_base_debian12.manifest.json",
+    manifest = "sha256:5883c320d81f76c764e114c9ab14054f037bb040907816fc9028d80d9602a7c3",
+    config = "sha256:c31423653c22931f970322b39ef0b1a9395efefa45e4e8d16fc409c286443c0b",
+    layers = [
+        "sha256:a5789fc40e828c4e7467626e3f69ec5dea8e5da22fe660db8ae6d16f777b0bbf",
+        "sha256:990a9c434e5e0f11549a8d4a41a1991e621b04e30cd63269adbc97b1dc38fd7e",
+        "sha256:39dc083afc39bd8dc43d456fe7ff7d39292e593bb2769972c11bb2e5f9119386",
+        "sha256:bf7a4185f01524837d19abde915ffde84e64368b250f5b5e9f6f75aea62a11d4",
+        "sha256:2780920e5dbfbe103d03a583ed75345306e572ec5a48cb10361f046767d9f29a",
+        "sha256:7c12895b777bcaa8ccae0605b4de635b68fc32d60fa08f421dc3818bf55ee212",
+        "sha256:3214acf345c0cc6bbdb56b698a41ccdefc624a09d6beb0d38b5de0b2303ecaf4",
+        "sha256:52630fc75a18675c530ed9eba5f55eca09b03e91bd5bc15307918bbc1a7e7296",
+        "sha256:dd64bf2dd177757451a98fcdc999a339c35dee5d9872d8f4dc69c8f3c4dd0112",
+        "sha256:b839dfae01f66e15c6a8b63520557ed315bdfe036342fa7a0c537259f10d7a9a",
+        "sha256:dcaa5a89b0ccda4b283e16d0b4d0891cd93d5fe05c6798f7806781a6a2d84354",
+        "sha256:96ed2737ae312e0bc637b40783f7c2f23416cb72ca957aa01855f1614278e64b",
+        "sha256:235c3625d753c5b8a741210c2e7fb26b47a0d02cf49acc631a38dcf847eedf89",
+        "sha256:dc0fb75e565a59a5824baedc9645656d17bc91c4b31332ee179580fa9f60eacd",
+    ],
+    visibility = ["PUBLIC"],
 )
 
 # ---- Unpacked by remote actions ---------------------------------------------

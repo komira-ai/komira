@@ -61,8 +61,15 @@
 #  15. The bundle of //examples:hello (checks/bundle.sh): layout, run paths
 #      and SHA256SUMS; it runs from a relocated copy and through a symlink on
 #      PATH; a CPU below x86-64-v3 gets the one-line refusal (test launcher);
-#      two uncached builds give byte-identical bundles (skipped with
-#      --no-uncached; about 3 minutes of remote execution).
+#      two uncached builds give byte-identical bundles, tarballs and docker
+#      archives and the same image digest (skipped with --no-uncached; about
+#      3 minutes of remote execution).
+#  16. The package formats of //examples:hello (checks/formats.sh): the
+#      tarball and the OCI image follow the determinism rules and hold the
+#      bundle; the image's blobs, config (entrypoint, linux/amd64) and pinned
+#      base layers are checked; the base is fetched only by pinned
+#      downloads; `docker run` of the loaded image prints the greeting (SKIP
+#      without docker).
 #   9. `buck2 run //examples:hello` prints the greeting on this machine from a
 #      fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
@@ -441,6 +448,17 @@ while IFS= read -r line; do
     esac
 done < "$LOG/bundle.log"
 grep -qE '^(PASS|FAIL)  bundle ' "$LOG/bundle.log" || fail "bundle: checks/bundle.sh reported nothing (see $LOG/bundle.log)"
+
+# 16
+BUCK2="$BUCK2" "$ROOT/checks/formats.sh" > "$LOG/formats.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  formats "*) pass "${line#PASS  }" ;;
+        "FAIL  formats "*) fail "${line#FAIL  } (see $LOG/formats.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/formats.log"
+grep -qE '^(PASS|FAIL)  formats ' "$LOG/formats.log" || fail "formats: checks/formats.sh reported nothing (see $LOG/formats.log)"
 
 # 9
 if [ "$run" = 1 ]; then

@@ -169,6 +169,42 @@ A program built as `[shared]` is compiled from a generated file next to its
 main module, which imports `main` from it; the main module's file name must
 therefore be a Mojo identifier. Only linux x86_64 bundles are built today.
 
+### Package formats
+
+Each format is a rule over a bundle that produces files; nothing is pushed
+or published by the build.
+
+```python
+load("@komira//package:defs.bzl", "bundle_tarball", "oci_image")
+
+bundle_tarball(name = "hello_tarball", bundle = ":hello_bundle")
+oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/hello")
+```
+
+- `bundle_tarball` writes `hello-0.1.0-linux-x86_64.tar.gz`, the bundle under
+  `hello-0.1.0/`.
+- `oci_image` writes an OCI image layout directory (`hello_image.oci/`): the
+  layers of a base image, then one layer holding the bundle at `/opt/hello/`,
+  with entrypoint `/opt/hello/bin/hello` and platform linux/amd64.
+  `[docker_archive]` is the same image as one tar for `docker load`, and
+  `[digest]` a file holding the image manifest digest.
+
+The base image is `toolchains//:distroless_base` (distroless base-debian12,
+which has glibc, CA certificates and no shell), declared with `oci_base`: the
+digest of its linux/amd64 manifest, that manifest's bytes checked in, and one
+pinned download per blob. The packing action has no network access to need:
+it reads only those files and refuses unless the manifest hashes to its
+digest and names exactly the downloaded blobs.
+
+Both formats are written by `komira_pack` (`package/pack/komira_pack.zig`), a
+static executable built by the pinned zig and run with no shell. The bytes
+depend only on the bundle and the base: tar entries are sorted, with
+directories listed, mtime and uid/gid 0 and modes 0755/0644; gzip headers
+carry no time; JSON keys are sorted and every timestamp is
+1970-01-01T00:00:00Z. Two uncached builds give the same tarball and the same
+image digest (checks/bundle.sh), and `docker run` of the loaded image prints
+the greeting (checks/formats.sh).
+
 ## Execution platforms
 
 `//platforms` declares two abstract execution constraints, and three

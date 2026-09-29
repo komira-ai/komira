@@ -27,6 +27,7 @@ Sub-targets: `[test_launcher]` is the same launcher built with the test hook
 the bundle. `[launcher]` is the shipped one.
 """
 
+load("@mojo//:download.bzl", "pinned_file")
 load("@mojo//:providers.bzl", "MojoProgramInfo")
 load("@mojo//:toolchain.bzl", "busybox_sh")
 
@@ -38,6 +39,11 @@ _LEVELS = {
 }
 
 _CC_TARGET = "x86_64-linux-gnu.2.34"
+
+# What every package format reads from a bundle.
+# dir: the bundle directory; name: the program (bin/<name>); platform: e.g.
+# linux-x86_64; version: the package version.
+BundleInfo = provider(fields = ["dir", "name", "platform", "version"])
 
 _PRELUDE = """
 BB="$1"; shift
@@ -138,6 +144,7 @@ rm -rf "$T"
                 "test_launcher": [DefaultInfo(default_output = test_launcher)],
             },
         ),
+        BundleInfo(dir = out, name = name, platform = "linux-x86_64", version = ctx.attrs.version),
     ]
 
 _mojo_bundle = rule(
@@ -188,3 +195,182 @@ launcher_level_test = rule(
         "_zig": attrs.exec_dep(default = "toolchains//:zig"),
     },
 )
+
+# ---- package formats over a bundle ------------------------------------------
+#
+# Each format is a file (or directory) made from the bundle by komira_pack
+# (package/pack/komira_pack.zig), a static tool run remotely with no shell and
+# no network. The rules only produce files; publishing them is someone else's
+# job.
+
+def _bundle_tarball_impl(ctx):
+    b = ctx.attrs.bundle[BundleInfo]
+    out = ctx.actions.declare_output("{}-{}-{}.tar.gz".format(b.name, b.version, b.platform))
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._pack[RunInfo],
+            "tar",
+            "--bundle",
+            b.dir,
+            "--prefix",
+            "{}-{}/".format(b.name, b.version),
+            "--out",
+            out.as_output(),
+        ),
+        category = "komira_pack_tar",
+    )
+    return [DefaultInfo(default_output = out)]
+
+_bundle_tarball = rule(
+    impl = _bundle_tarball_impl,
+    attrs = {
+        "bundle": attrs.dep(providers = [BundleInfo]),
+        "_pack": attrs.exec_dep(default = "komira//package:komira_pack", providers = [RunInfo]),
+    },
+)
+
+def bundle_tarball(**kwargs):
+    """`<name>-<version>-<platform>.tar.gz`: the bundle under `<name>-<version>/`.
+
+    Entries sorted, mtime 0, uid/gid 0, modes 0755/0644; the same bundle
+    gives the same bytes.
+    """
+    _bundle_tarball(exec_compatible_with = ["komira//platforms:light"], **kwargs)
+
+# manifest: the base image manifest (linux/amd64); manifest_digest: its pinned
+# digest (komira_pack checks it); config: its config blob; layers: its layer
+# blobs, in manifest order.
+OciBaseInfo = provider(fields = ["config", "layers", "manifest", "manifest_digest"])
+
+def _oci_base_impl(ctx):
+    def one(d):
+        return d[DefaultInfo].default_outputs[0]
+    return [
+        DefaultInfo(),
+        OciBaseInfo(
+            config = one(ctx.attrs.config),
+            layers = [one(d) for d in ctx.attrs.layers],
+            manifest = ctx.attrs.manifest,
+            manifest_digest = ctx.attrs.manifest_digest,
+        ),
+    ]
+
+_oci_base = rule(
+    impl = _oci_base_impl,
+    attrs = {
+        "config": attrs.dep(),
+        "layers": attrs.list(attrs.dep()),
+        "manifest": attrs.source(),
+        "manifest_digest": attrs.string(),
+    },
+)
+
+def _sha256_of(digest):
+    if not regex_match("^sha256:[0-9a-f]{64}$", digest):
+        fail("`{}` is not a sha256:<64 hex> digest".format(digest))
+    return digest[len("sha256:"):]
+
+def oci_base(name, registry, repository, manifest, manifest_file, config, layers, visibility = None):
+    """A base image pinned by digest: the manifest in the repo, one pinned download per blob.
+
+    `manifest` is the digest of the single-platform (linux/amd64) image
+    manifest and `manifest_file` its bytes, checked in: a registry serves a
+    manifest only to a client that sends an Accept header, and the build's
+    downloader sends none. komira_pack refuses unless the file hashes to
+    `manifest`. `config` and `layers` are the digests the manifest names, in
+    order; each URL names its digest and each download is checked against it,
+    so the base cannot change without this declaration changing. komira_pack
+    also refuses unless the manifest names exactly these blobs.
+    """
+    base_url = "https://{}/v2/{}/".format(registry, repository)
+    _sha256_of(manifest)
+    pinned_file(
+        name = name + "_config",
+        url = base_url + "blobs/" + config,
+        sha256 = _sha256_of(config),
+    )
+    layer_targets = []
+    for i, d in enumerate(layers):
+        pinned_file(
+            name = "{}_layer_{}".format(name, i),
+            url = base_url + "blobs/" + d,
+            sha256 = _sha256_of(d),
+        )
+        layer_targets.append(":{}_layer_{}".format(name, i))
+    _oci_base(
+        name = name,
+        config = ":" + name + "_config",
+        layers = layer_targets,
+        manifest = manifest_file,
+        manifest_digest = manifest,
+        visibility = visibility,
+    )
+
+def _oci_image_impl(ctx):
+    b = ctx.attrs.bundle[BundleInfo]
+    if b.platform != "linux-x86_64":
+        fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
+    if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):
+        fail("{}: repository `{}` is not an image repository name".format(ctx.label, ctx.attrs.repository))
+    base = ctx.attrs.base[OciBaseInfo]
+    layout = ctx.actions.declare_output(ctx.label.name + ".oci", dir = True)
+    archive = ctx.actions.declare_output(ctx.label.name + ".docker.tar")
+    digest = ctx.actions.declare_output(ctx.label.name + ".digest")
+    layer_args = []
+    for layer in base.layers:
+        layer_args.extend(["--layer", layer])
+    ctx.actions.run(
+        cmd_args(
+            ctx.attrs._pack[RunInfo],
+            "oci",
+            "--bundle",
+            b.dir,
+            "--name",
+            b.name,
+            "--version",
+            b.version,
+            "--repo",
+            ctx.attrs.repository,
+            "--manifest",
+            base.manifest,
+            "--manifest-digest",
+            base.manifest_digest,
+            "--config",
+            base.config,
+            layer_args,
+            "--out",
+            layout.as_output(),
+            "--archive",
+            archive.as_output(),
+            "--digest",
+            digest.as_output(),
+        ),
+        category = "komira_pack_oci",
+    )
+    return [DefaultInfo(
+        default_output = layout,
+        sub_targets = {
+            "digest": [DefaultInfo(default_output = digest)],
+            "docker_archive": [DefaultInfo(default_output = archive)],
+        },
+    )]
+
+_oci_image = rule(
+    impl = _oci_image_impl,
+    attrs = {
+        "base": attrs.dep(providers = [OciBaseInfo], default = "toolchains//:distroless_base"),
+        "bundle": attrs.dep(providers = [BundleInfo]),
+        "repository": attrs.string(),
+        "_pack": attrs.exec_dep(default = "komira//package:komira_pack", providers = [RunInfo]),
+    },
+)
+
+def oci_image(**kwargs):
+    """An OCI image of a bundle: the base's layers plus the bundle at /opt/<name>/.
+
+    The default output is an OCI image layout directory (`index.json` names
+    it `<repository>:<version>`). `[docker_archive]` is the same as one tar
+    plus a Docker `manifest.json`, which `docker load` reads; `[digest]`
+    holds the manifest digest. Nothing is pushed.
+    """
+    _oci_image(exec_compatible_with = ["komira//platforms:light"], **kwargs)

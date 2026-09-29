@@ -21,9 +21,11 @@
 #               check); told Haswell, it runs the program. The shipped
 #               launcher carries no hook: it ignores $KOMIRA_TEST_CPU and holds
 #               no such string.
-#   uncached    two builds of the bundle in two fresh daemons with
-#               --no-remote-cache (every action, the compiles included, runs
-#               again) give byte-identical bundles, modes included.
+#   uncached    two builds in two fresh daemons with --no-remote-cache
+#               (every action, the compiles included, runs again) give
+#               byte-identical bundles (modes included), tarballs and docker
+#               archives, and the same image digest (checks/formats.sh checks
+#               what those files hold).
 #
 # Local runs are of the small built programs only, under `ulimit -v`.
 set -uo pipefail
@@ -149,7 +151,8 @@ if [ -n "$problems" ]; then fail "refusal:$problems"; else pass "refusal: below 
 if [ "$uncached" = 1 ]; then
     for side in a b; do
         (timeout 900 "$BUCK2" --isolation-dir "komira_checks_bundle_$side" build --no-remote-cache \
-            //examples:hello_bundle --materializations all --show-full-simple-output \
+            //examples:hello_bundle //examples:hello_tarball "//examples:hello_image[digest]" \
+            "//examples:hello_image[docker_archive]" --materializations all --show-full-output \
             > "$W/uncached_$side.out" 2> "$W/uncached_$side.log"; echo "$?" > "$W/uncached_$side.rc") &
     done
     wait
@@ -158,7 +161,17 @@ if [ "$uncached" = 1 ]; then
         if [ "$(cat "$W/uncached_$side.rc")" != 0 ]; then
             problems="$problems build-$side-failed"
         else
-            listing "$(tail -n 1 "$W/uncached_$side.out")" > "$W/listing_$side.txt"
+            out_of() { sed -n "s|^komira//examples:$1 ||p" "$W/uncached_$side.out"; }
+            {
+                listing "$(out_of hello_bundle)"
+                echo "tarball $(sha256sum < "$(out_of hello_tarball)" | cut -c1-64)"
+                echo "image $(cat "$(out_of 'hello_image\[digest\]')")"
+                echo "docker_archive $(sha256sum < "$(out_of 'hello_image\[docker_archive\]')" | cut -c1-64)"
+            } > "$W/listing_$side.txt"
+            for t in hello_bundle hello_tarball 'hello_image\[digest\]' 'hello_image\[docker_archive\]'; do
+                o=$(out_of "$t")
+                [ -n "$o" ] && [ -s "$o" ] || [ -d "$o" ] || problems="$problems build-$side-has-no-${t%%\\*}"
+            done
             grep -qE 'Commands: [0-9]+ \(cached: 0, remote: [1-9]' "$W/uncached_$side.log" || problems="$problems build-$side-did-not-execute"
         fi
     done
@@ -169,7 +182,7 @@ if [ "$uncached" = 1 ]; then
     if [ -n "$problems" ]; then
         fail "uncached:$problems (see $W)"
     else
-        pass "uncached: two uncached builds give identical bundles ($(wc -l < "$W/listing_a.txt") files, $(grep -oE 'Commands: [0-9]+' "$W/uncached_a.log" | tail -n 1))"
+        pass "uncached: two uncached builds give identical bundles ($(($(wc -l < "$W/listing_a.txt") - 3)) files), tarballs, docker archives and image digest $(sed -n 's/^image //p' "$W/listing_a.txt" | cut -c1-19) ($(grep -oE 'Commands: [0-9]+' "$W/uncached_a.log" | tail -n 1))"
     fi
 else
     echo "SKIP  bundle uncached (--no-uncached)"

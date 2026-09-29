@@ -1,7 +1,18 @@
+load("@mojo//:toolchain.bzl", "zig_exe")
 load(":defs.bzl", "launcher_level_test")
 
 # The launcher's CPU level function against made-up CPUs (package/launcher).
 launcher_level_test(
     name = "level_test",
     exec_compatible_with = ["komira//platforms:light"],
+)
+
+# The package-format writer (tar, OCI), a static executable.
+zig_exe(
+    name = "komira_pack",
+    exec_compatible_with = ["komira//platforms:light"],
+    src = "pack/komira_pack.zig",
+    busybox = "toolchains//:busybox",
+    zig = "toolchains//:zig",
+    visibility = ["PUBLIC"],
 )

@@ -1,5 +1,5 @@
 load("@mojo//:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
-load("//package:defs.bzl", "mojo_bundle")
+load("//package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
 # its stdout byte for byte.
@@ -15,6 +15,20 @@ mojo_bundle(
     name = "hello_bundle",
     binary = ":hello",
     version = "0.1.0",
+)
+
+# hello-0.1.0-linux-x86_64.tar.gz: the bundle under hello-0.1.0/.
+bundle_tarball(
+    name = "hello_tarball",
+    bundle = ":hello_bundle",
+)
+
+# An OCI image: distroless base plus the bundle at /opt/hello/, entrypoint
+# /opt/hello/bin/hello. `[docker_archive]` is for `docker load`.
+oci_image(
+    name = "hello_image",
+    bundle = ":hello_bundle",
+    repository = "komira/hello",
 )
 
 # A package: `buck2 build` produces hellopkg.mojoc.
