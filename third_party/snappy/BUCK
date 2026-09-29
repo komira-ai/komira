@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 
 # google/snappy 1.2.2, BSD-3-Clause (COPYING in the archive).
@@ -37,6 +38,13 @@ archive_files(
 
 # The library and its C API (snappy-c.h). C++, so it carries zig's libc++
 # (komira//tools/build/toolchains:libcxx) into every link that includes it.
+# config.h, copied into buck-out so that the compiles including it have one
+# digest wherever komira is mounted (see staged_files).
+staged_files(
+    name = "config",
+    srcs = ["config.h"],
+)
+
 cxx_library(
     name = "snappy",
     srcs = [
@@ -46,7 +54,7 @@ cxx_library(
         ":src[snappy.cc]",
     ],
     headers = {
-        "config.h": "config.h",
+        "config.h": ":config[config.h]",
         "snappy-internal.h": ":src[snappy-internal.h]",
         "snappy-stubs-internal.h": ":src[snappy-stubs-internal.h]",
     },

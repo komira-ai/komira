@@ -104,7 +104,11 @@ one from a `file://` bare clone pinned to the snapshot's commit), each with a
 fresh daemon; it fails unless every consumer command is a cache hit
 (`Commands: N (cached: N, remote: 0, local: 0)`, N > 0), buck2 fetched the
 external cell at that commit, and the digests are identical. Skipped with
-`--no-umbrella`. See
+`--no-umbrella`. The examples include C and C++ (`cshim:cadd_user`,
+`snappy:test_snappy`): a C source read from the project tree is an action
+input at a path that depends on the mount point, so komira's `cxx_library`
+targets take their sources through `staged_files` (the first run of this check
+with C targets had 8 of 28 actions re-run in a submodule). See
 [Using komira from another repository](../README.md#using-komira-from-another-repository).
 
 ```sh

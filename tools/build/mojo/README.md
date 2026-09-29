@@ -172,6 +172,14 @@ C deps on to its consumers and to its own gated tests. A dep providing neither
 the link line, after the compiler's own objects. C++ code links zig's libc++
 statically: its `cxx_library` lists
 `komira//tools/build/toolchains:libcxx` in `exported_deps`.
+A C or C++ source read from the project tree is an input of the remote
+compile at its project path, which depends on where a repository mounts the
+komira cell, and the compiler records that path in the object. komira's own
+`cxx_library` targets therefore name their sources, and headers not produced
+by an action, through `staged_files` ([`cxx.bzl`](cxx.bzl)), which copies
+them into buck-out, so the C actions and the Mojo links using them keep one
+digest in every consumer (check 7). A repository's own C code, mounted at one
+place, does not need it.
 [`../examples/cshim`](../examples/cshim) calls C from Mojo.
 
 zig's libc++ and libc++abi are linked statically. The Mojo runtime itself

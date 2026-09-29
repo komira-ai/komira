@@ -1,10 +1,19 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# The C sources, copied into buck-out so that their compile has one digest
+# wherever komira is mounted (see staged_files).
+staged_files(
+    name = "add_files",
+    srcs = ["add.c", "add.h"],
+)
 
 # A C library, built by the prelude's cxx_library with toolchains//:cxx.
 cxx_library(
     name = "add",
-    srcs = ["add.c"],
-    exported_headers = ["add.h"],
+    srcs = [":add_files[add.c]"],
+    exported_headers = {"add.h": ":add_files[add.h]"},
+    header_namespace = "",
     visibility = ["PUBLIC"],
 )
 

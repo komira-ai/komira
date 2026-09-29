@@ -201,3 +201,30 @@ no_python_bootstrap_toolchain = rule(
     is_toolchain_rule = True,
     attrs = {"busybox": attrs.exec_dep()},
 )
+
+def _staged_files_impl(ctx):
+    outs = []
+    sub_targets = {}
+    for src in ctx.attrs.srcs:
+        # Keyed by the path in the package, like a source file of the package.
+        path = src.short_path
+        pkg = ctx.label.package
+        if pkg and path.startswith(pkg + "/"):
+            path = path[len(pkg) + 1:]
+        out = ctx.actions.copy_file(ctx.label.name + "/" + path, src)
+        outs.append(out)
+        sub_targets[path] = [DefaultInfo(default_output = out)]
+    return [DefaultInfo(default_outputs = outs, sub_targets = sub_targets)]
+
+# Source files of a C/C++ library, copied into buck-out; `:<target>[add.c]`
+# names one. A source file is an input of a remote action at its path in the
+# project, which depends on where the repository mounts the komira cell
+# (`tools/...` standalone, `komira/tools/...` as a submodule), and the
+# compiler records that path in the object. A copy's path in buck-out names
+# the cell, not its mount point, so the compile and archive actions, and every
+# Mojo link using them, keep one digest wherever komira is mounted. The
+# `cxx_library` targets of komira name their sources this way (check 7).
+staged_files = rule(
+    impl = _staged_files_impl,
+    attrs = {"srcs": attrs.list(attrs.source(), default = [])},
+)
