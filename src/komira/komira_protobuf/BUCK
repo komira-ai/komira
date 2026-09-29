@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A general-purpose Protocol Buffers wire codec: wire-type constants and
+# zigzag transforms, a bounds-checked decoder with a tag-driven field cursor,
+# and the symmetric encoder. It has no deps; the ORC metadata codec and the
+# protobuf-binary serde backend depend on it.
+mojo_library(
+    name = "komira_protobuf",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_protobuf_prost_crosscheck.mojo",
+        "tests/test_protobuf_roundtrip.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
