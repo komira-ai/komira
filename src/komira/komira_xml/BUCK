@@ -1,0 +1,13 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A general XML codec: escaping, a forward-only pull parser, a streaming
+# writer, and an owned tree with a namespace-aware canonical form. It has no
+# deps. The rest-xml binding (flattened lists, xmlAttribute, xmlNamespace)
+# lives in `komira_restxml`, which depends on this package, never the other
+# way round.
+mojo_library(
+    name = "komira_xml",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_xml_codec.mojo"],
+    visibility = ["PUBLIC"],
+)
