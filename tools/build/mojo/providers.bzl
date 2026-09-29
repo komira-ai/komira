@@ -37,6 +37,11 @@ MojoToolchainInfo = provider(fields = {
     # action key.
     "target_cpu": provider_field(str),
     "wrapper": provider_field(typing.Any),
+    # The compile watchdog of the wrapper (mojo_wrapper.sh): kill a compile
+    # whose process tree used no CPU for this long (0: off), sampling every
+    # `watchdog_sample_secs`. None where the wrapper has no watchdog.
+    "watchdog_idle_secs": provider_field(typing.Any, default = None),
+    "watchdog_sample_secs": provider_field(typing.Any, default = None),
     "gate_runner": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
     # Runs a command only if the action can use enough NUMA nodes

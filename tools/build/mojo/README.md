@@ -48,6 +48,17 @@ mojo_library(
   ([`checks/libgate_bad`](../checks/libgate_bad/BUCK): the library and its
   consumer go red, `[ungated]` builds, and a binary naming `[ungated]` in
   `deps` fails analysis).
+- **Holding a known-failing test: `tests_known_failing`.** A red test that
+  must not block the library's closure is held by a row
+  `{"<test_srcs path>": {"issue": "<n>, #<n> or its GitHub issue URL", "reason": "..."}}`.
+  The hold inverts rather than mutes: the held test still builds and runs in
+  the gate, and its marker (`HELD <label>`) is produced only if it FAILS. A
+  held test that passes is red, `LEDGER STALE`, naming the row to delete; an
+  unheld failing test is still `GATED TEST FAILED`. Refused at analysis: a key
+  that is not a `test_srcs` entry, any field besides `issue` and `reason`, a
+  missing or malformed issue (a GitHub issue number or URL, nothing else), an
+  empty reason, two rows with byte-identical reasons, and holding every test
+  ([`checks/known_failing`](../checks/known_failing/BUCK)).
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
@@ -60,6 +71,25 @@ L/pkg/I.mojoc       the public package, gated on every test's PASS marker
 L/src/I/...         the staged package sources
 L/tests/<t>/...     one binary and one PASS marker per test
 ```
+
+### The compile watchdog
+
+The compiler can deadlock (every thread parked, the process tree using no
+CPU) and then never exits, which would hold a remote worker until the
+executor's action timeout. [`mojo_wrapper.sh`](mojo_wrapper.sh) runs it in a
+session of its own and samples the CPU time of that session and the
+compiler's whole process tree from `/proc` (a helper reparented away from the
+compiler is still in the session, and counts; what is sampled is what is
+killed) every `watchdog_sample_secs` (default 30); after `watchdog_idle_secs`
+(default 300) of samples each gaining less than 1% of one CPU, it kills the
+session and the tree and fails the action with exit 124:
+`mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree
+CPU`. Such an action is safe to retry. There is no wall-clock limit; a slow
+compile uses CPU throughout and is never killed. Both knobs are
+`mojo_toolchain` attributes (`komira_mojo_toolchains(watchdog_idle_secs = ...)`
+in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off. Linux
+only for now: the macOS wrapper has none
+([`checks/watchdog`](../checks/watchdog/cases.sh)).
 
 ## Binaries and tests
 
@@ -268,7 +298,9 @@ assembly lists are generated but not built yet.
 
 | message | from | meaning |
 |---|---|---|
-| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed, and it is not held by `tests_known_failing` |
+| `LEDGER STALE: <label> PASSED, but it is held as known-failing.` | [`gate_runner.sh`](gate_runner.sh) | a test held by `tests_known_failing` passed; delete its row |
+| `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
 | `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([check 4](../checks/README.md#4-closure-refusal)) |
 | `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
@@ -282,8 +314,7 @@ assembly lists are generated but not built yet.
 
 A `data` attribute for test fixtures (a gated test runs with the action root
 as its working directory); test helper modules or test-only deps (each gated
-test is built from its one file against the library); holding a known-failing
-test; extra compile flags, defines, or include roots; shared C libraries (C
-deps link statically); a compile watchdog; choosing the package root (the shallowest `__init__.mojo`
+test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
+deps link statically); a compile watchdog on macOS; choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root); a gated library test that needs more than one NUMA
 node (see [Multi-NUMA tests](#multi-numa-tests)).

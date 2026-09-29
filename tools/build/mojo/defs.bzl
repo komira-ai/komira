@@ -22,6 +22,18 @@ load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnab
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
 
+def _watchdog_flags(tc):
+    # The compile watchdog's knobs, for a wrapper that has one (the toolchain
+    # sets them; see mojo_toolchain's watchdog_idle_secs).
+    if tc.watchdog_idle_secs == None:
+        return []
+    if tc.watchdog_idle_secs < 0 or tc.watchdog_sample_secs < 1:
+        fail("mojo toolchain: watchdog_idle_secs must be >= 0 and watchdog_sample_secs >= 1")
+    return [
+        "--watchdog-idle-secs={}".format(tc.watchdog_idle_secs),
+        "--watchdog-sample-secs={}".format(tc.watchdog_sample_secs),
+    ]
+
 def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None):
     return cmd_args(
         tc.busybox,
@@ -36,6 +48,7 @@ def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None):
         # Appended by the wrapper's `cc` shim to the END of the link line, after
         # the compiler's own objects and archive (see mojo_wrapper.sh).
         [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else [],
+        _watchdog_flags(tc),
         "--",
         args,
     )
@@ -184,6 +197,61 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
 # ---- mojo_library ----------------------------------------------------------
 
+# `tests_known_failing` -- a hold on a red test, which INVERTS rather than
+# mutes. A held test still builds and runs as an action of the library's gate;
+# its marker is produced only if it FAILS. So:
+#   an unheld test that fails   -> the gate is red (GATED TEST FAILED)
+#   a held test that fails      -> satisfied (marker `HELD <label>`)
+#   a held test that passes     -> red (LEDGER STALE), naming its row: delete it
+# A hold therefore silences nothing: the red is asserted on every build, and
+# the fix is reported as a build failure until the row goes.
+#
+# A row is `{"issue": ..., "reason": ...}`. `issue` is the GitHub issue that
+# will remove the hold (`123`, `#123` or its https://github.com/<o>/<r>/issues/
+# URL); `reason` says why THIS test fails. Refused at analysis, before any
+# action: a key that is not a `test_srcs` entry, another field, a missing or
+# malformed issue, an empty reason, two rows with byte-identical reasons (one
+# investigation pasted over a second test), and holding every test (a gate
+# that asserts nothing passes).
+_KNOWN_FAILING_FIELDS = ["issue", "reason"]
+_ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
+
+def _test_key(ctx, t):
+    """The package-relative path of test source `t`: its tests_known_failing key."""
+    p = t.short_path
+    pkg = ctx.label.package
+    if pkg and p.startswith(pkg + "/"):
+        p = p[len(pkg) + 1:]
+    return p
+
+def _admit_known_failing(ctx):
+    held = ctx.attrs.tests_known_failing
+    if not held:
+        return {}
+    keys = [_test_key(ctx, t) for t in ctx.attrs.test_srcs]
+    where = "{}: tests_known_failing".format(ctx.label.raw_target())
+    seen = {}
+    for entry, row in held.items():
+        if entry not in keys:
+            fail("{}[{}]: not a test_srcs entry (entries: {}). A hold that matches no test reads as applied and is not; fix the path, or delete the row if the test is gone.".format(where, repr(entry), ", ".join(keys)))
+        for field in row:
+            if field not in _KNOWN_FAILING_FIELDS:
+                fail("{}[{}]: unknown field `{}`; a row has exactly `issue` and `reason`.".format(where, repr(entry), field))
+        issue = row.get("issue", "")
+        reason = row.get("reason", "")
+        if not issue:
+            fail("{}[{}]: no `issue`. A hold is debt; name the GitHub issue that will remove it (`123`, `#123` or its URL).".format(where, repr(entry)))
+        if not regex_match(_ISSUE_REF, issue):
+            fail("{}[{}]: issue {} is not a GitHub issue number (`123`, `#123`) or https://github.com/<owner>/<repo>/issues/<n> URL.".format(where, repr(entry), repr(issue)))
+        if not reason.strip():
+            fail("{}[{}]: empty `reason`. Say what this test shows is broken; a reader deciding whether the hold is still honest has nothing else to go on.".format(where, repr(entry)))
+        if reason in seen:
+            fail("{}[{}] and [{}] carry byte-identical reasons. If they share a cause, say what each test shows; otherwise the second test was never examined.".format(where, repr(seen[reason]), repr(entry)))
+        seen[reason] = entry
+    if len(held) >= len(keys):
+        fail("{}: holds all {} tests. That gate asserts nothing passes; a library whose whole suite is red has a defect, not a debt.".format(where, len(keys)))
+    return held
+
 def _check_import_name(ctx, name):
     # The `.mojoc` basename is the import name. A name that is not a Mojo
     # identifier (a dot, a dash) yields a package that cannot be imported and
@@ -218,6 +286,8 @@ def _library_impl(ctx):
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
 
+    held = _admit_known_failing(ctx)
+
     # The gate: one build + one run per test, against the UNGATED package.
     markers = []
     test_subtargets = {}
@@ -238,6 +308,8 @@ def _library_impl(ctx):
             c_link,
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
+        key = _test_key(ctx, t)
+        hold = [key, held[key]["issue"], held[key]["reason"]] if key in held else []
         ctx.actions.run(
             cmd_args(
                 tc.busybox,
@@ -248,6 +320,7 @@ def _library_impl(ctx):
                 "{}:{}".format(ctx.label.raw_target(), t.short_path),
                 exe,
                 marker.as_output(),
+                hold,
             ),
             category = "mojo_gated_test",
             identifier = stem,
@@ -303,6 +376,8 @@ mojo_library = rule(
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = "3"),
         "test_srcs": attrs.list(attrs.source(), default = []),
+        # {test_srcs path: {"issue": ..., "reason": ...}}; see _admit_known_failing.
+        "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
     } | _TOOLCHAIN_ATTR,
 )
 

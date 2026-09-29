@@ -133,6 +133,20 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/checks/c_libs_checks.sh.
+#  27. mojo_library's tests_known_failing inverts rather than mutes
+#      (checks//known_failing): a held test that fails is satisfied (marker
+#      `HELD`), a held test that passes is red (LEDGER STALE, naming its row),
+#      an unheld red beside a hold is still red, and every inadmissible row
+#      (no issue, an issue that is not a GitHub issue reference, an empty
+#      reason, an entry that is not a test, an unknown field, byte-identical
+#      reasons, every test held) is refused at analysis.
+#  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
+#      (checks//watchdog:cases, a remote action): a process tree using no CPU
+#      is killed with exit 124 and the message, its children and an orphaned
+#      grandchild with it; a tree using CPU (itself, through a child, or
+#      through an orphaned member of its session while it waits), a
+#      short idle and a disabled watchdog are not killed; a compiler error
+#      keeps its exit status; malformed knobs are refused (exit 2).
 set -uo pipefail
 
 umbrella=1
@@ -697,6 +711,42 @@ if BUCK2="$BUCK2" "$ROOT/tools/build/checks/local_default.sh" > "$LOG/local_defa
     pass "local default: $(grep -o 'PASS  local default: .*' "$LOG/local_default.log" | cut -c 22-)"
 else
     fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
+fi
+
+# 27
+if "$BUCK2" build checks//known_failing:held_ok --show-full-simple-output > "$LOG/kf_held_ok.log" 2>&1; then
+    "$BUCK2" build 'checks//known_failing:held_ok[tests][test_fails]' --show-full-simple-output > "$LOG/kf_marker.log" 2>&1
+    kf_marker=$(tail -n 1 "$LOG/kf_marker.log")
+    if [ "$(cat "$kf_marker" 2> /dev/null)" = "HELD checks//known_failing:held_ok:tests/test_fails.mojo" ]; then
+        pass "known_failing: a held test that fails satisfies the gate (HELD marker)"
+    else
+        fail "known_failing: held_ok built, but its held marker is '$(cat "$kf_marker" 2> /dev/null)' (see $LOG/kf_marker.log)"
+    fi
+else
+    fail "known_failing: held_ok must build (see $LOG/kf_held_ok.log)"
+fi
+expect_red kf_held_passing 'tests_known_failing["tests/test_passes_too.mojo"]' checks//known_failing:held_passing
+expect_red kf_held_passing_stale "LEDGER STALE" checks//known_failing:held_passing
+expect_red kf_unheld_red "GATED TEST FAILED: checks//known_failing:unheld_red:tests/test_fails_too.mojo" checks//known_failing:unheld_red
+expect_red kf_no_issue "no \`issue\`" checks//known_failing:bad_no_issue
+expect_red kf_issue_ref "is not a GitHub issue number" checks//known_failing:bad_issue_ref
+expect_red kf_empty_reason "empty \`reason\`" checks//known_failing:bad_empty_reason
+expect_red kf_entry "not a test_srcs entry" checks//known_failing:bad_entry
+expect_red kf_field "unknown field \`card\`" checks//known_failing:bad_field
+expect_red kf_same_reason "byte-identical reasons" checks//known_failing:bad_same_reason
+expect_red kf_all_held "holds all 2 tests" checks//known_failing:bad_all_held
+
+# 28
+if ! "$BUCK2" build checks//watchdog:cases --show-full-simple-output > "$LOG/watchdog_cases.txt" 2> "$LOG/watchdog_cases.log"; then
+    fail "compile watchdog cases: $(grep '^BAD ' "$LOG/watchdog_cases.log" | sort -u | tr '\n' ' ')(see $LOG/watchdog_cases.log)"
+else
+    report=$(tail -n 1 "$LOG/watchdog_cases.txt")
+    ok=$(grep -c '^ok ' "$report" || true)
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 13 ]; then
+        fail "compile watchdog cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
+    else
+        pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
+    fi
 fi
 
 # 9
