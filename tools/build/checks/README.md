@@ -253,7 +253,7 @@ hashes too.
 ## 19. Exported cells
 
 Every label outside a comment in the BUCK and `.bzl` files a repository
-using komira loads or copies -- those under `tools/build/{mojo,toolchains,platforms,package,examples,cells}`
+using komira loads or copies -- those under `tools/build/{mojo,rust,toolchains,platforms,package,examples,cells}`
 and `third_party` -- names the `komira`, `prelude` or `toolchains` cell, the only cells such a
 repository has. A label naming `checks`, which exists only in a standalone
 checkout, would load here and fail to load there (as `visibility =
@@ -285,6 +285,15 @@ indexes a `List`, so the binary records the main file's source location. It
 builds only because the wrapper strips the staging directory from recorded
 paths, and its run check compares stdout exactly. Check 20 covers the same
 for tests with a C dependency; this one is a plain binary.
+
+## 22. Rust rules
+
+[`rust_checks.sh`](rust_checks.sh), sourced by `run_checks.sh`. The example
+binary `//tools/build/examples/rust:prost_roundtrip` uses prost's derive
+macro, so it compiles registry crates, a proc-macro and the zig link; its run
+check compares stdout exactly, and must have run remotely. A binary using
+prost without depending on it fails to compile
+(`checks//rust_missing_dep:main`): crates reach rustc only through `deps`.
 
 ## Diagnostics
 

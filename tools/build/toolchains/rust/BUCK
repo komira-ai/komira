@@ -1,0 +1,48 @@
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/rust:defs.bzl", "rust_sysroot", "rust_toolchain")
+
+# ---- Pinned inputs (linux x86_64 execution platform) -----------------------
+
+# The Rust 1.85.0 release: the compiler, and the standard library for the
+# one target it builds for.
+pinned_file(
+    name = "rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    url = "https://static.rust-lang.org/dist/rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    sha256 = "7436f13797475082cd87aa65547449e01659d6a810b4cd5f8aedc48bb9f89dfb",
+)
+
+pinned_file(
+    name = "rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    url = "https://static.rust-lang.org/dist/rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    sha256 = "285e105d25ebdf501341238d4c0594ecdda50ec9078f45095f793a736b1f1ac2",
+)
+
+# ---- Unpacked by a remote action --------------------------------------------
+
+rust_sysroot(
+    name = "sysroot",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    busybox = "komira//tools/build/toolchains:busybox",
+    rust_std = ":rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    rustc = ":rustc-1.85.0-x86_64-unknown-linux-gnu.tar.xz",
+    triple = "x86_64-unknown-linux-gnu",
+    version = "1.85.0",
+    visibility = ["PUBLIC"],
+)
+
+# The toolchain of rust_library and rust_binary. Compiles run on the compile
+# workers (the `mojo_compile` class, one NUMA node), like Mojo compiles.
+# rustc loads the worker's glibc; links target glibc 2.34 through zig, so
+# the binaries run on any worker with glibc 2.34 or newer.
+rust_toolchain(
+    name = "rust",
+    exec_compatible_with = [
+        "komira//tools/build/platforms:mojo_compile",
+        "komira//tools/build/platforms:numa_single",
+    ],
+    busybox = "komira//tools/build/toolchains:busybox",
+    cc_target = "x86_64-linux-gnu.2.34",
+    sysroot = ":sysroot",
+    zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)

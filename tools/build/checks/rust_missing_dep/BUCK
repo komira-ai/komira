@@ -1,0 +1,9 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary")
+
+# Uses prost but does not depend on it. Must fail to compile: crates reach
+# rustc only through `deps`.
+rust_binary(
+    name = "main",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+)

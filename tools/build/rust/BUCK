@@ -1,0 +1,2 @@
+# Scripts used by the Rust rules.
+export_file(name = "rustc_wrapper.sh", visibility = ["PUBLIC"])
