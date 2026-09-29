@@ -49,7 +49,7 @@ and does not guarantee (Buck2 does not sandbox local actions), what to put in
 | [tools/build/toolchains/README.md](tools/build/toolchains/README.md) | the hermetic toolchain: what is pinned, the host floor, updating a pin |
 | [tools/build/checks/README.md](tools/build/checks/README.md) | the end-to-end checks: what each one proves and how to run it |
 | [docs/ci.md](docs/ci.md) | continuous integration: one job on a runner on the build farm, approving a fork's run, what a contributor runs locally |
-| [docs/knowledge_graph.md](docs/knowledge_graph.md) | the committed knowledge graph (library pages, docs graph, Buck2 graph) and its git hooks |
+| [docs/knowledge_graph.md](docs/knowledge_graph.md) | the knowledge graph: not here yet (it returns as a Mojo tool) |
 | [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
 | [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |

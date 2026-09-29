@@ -207,17 +207,6 @@ Each check is described, with how to run it on its own, in
 script, after `./buck2 build //...` and `./buck2 test //...`; see
 [docs/ci.md](docs/ci.md).
 
-## 5. Enable the knowledge-graph hooks
-
-```sh
-python3 tools/kg/kg.py setup   # once per clone: core.hooksPath = .githooks
-```
-
-The pre-commit hook keeps the generated library pages and docs graph in
-step with the tree; the Buck2 graph is re-rendered with
-`python3 tools/kg/kg.py graph`. See
-[docs/knowledge_graph.md](docs/knowledge_graph.md).
-
 ## Host floor
 
 An action takes a small, fixed set of things from the worker: a Linux x86_64

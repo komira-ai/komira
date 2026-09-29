@@ -2,8 +2,6 @@
 
 The canonical docs: each row names what one doc is the authority FOR. When a doc and the code
 disagree, the code is what runs; when two docs disagree, the one listed here wins for its row.
-`tools/kg` indexes this table into `docs/kg/docs_graph.json` and refuses a row whose link is
-dead.
 
 | Authority for | Doc |
 |---|---|
@@ -13,5 +11,4 @@ dead.
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
 | The end-to-end checks | [tools/build/checks/README.md](../tools/build/checks/README.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
-| The knowledge graph: what is indexed, the hooks | [knowledge_graph.md](knowledge_graph.md) |
-| The `kg` command and the library-page contract | [tools/kg/README.md](../tools/kg/README.md) |
+| The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |

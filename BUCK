@@ -5,7 +5,7 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "no_endpoint", "shell_
 
 shell_lint(
     name = "shell_lint",
-    srcs = ["buck2"] + glob([".githooks/*", ".github/ci/*.sh"]),
+    srcs = ["buck2"] + glob([".github/ci/*.sh"]),
 )
 
 WORKFLOWS = glob([".github/workflows/*.yml"])
