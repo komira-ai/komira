@@ -1,4 +1,5 @@
 load("@mojo//:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("//package:defs.bzl", "mojo_bundle")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
 # its stdout byte for byte.
@@ -6,6 +7,14 @@ mojo_binary(
     name = "hello",
     srcs = ["hello.mojo"],
     expected_stdout = "hello from mojo\n",
+)
+
+# The same program as a bundle: bin/hello (the launcher) and
+# lib/glibc-hwcaps/x86-64-v3/libhello.so, plus its runtime libraries.
+mojo_bundle(
+    name = "hello_bundle",
+    binary = ":hello",
+    version = "0.1.0",
 )
 
 # A package: `buck2 build` produces hellopkg.mojoc.

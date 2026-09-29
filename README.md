@@ -66,7 +66,7 @@ binary missing a dependency, an incomplete toolchain). They are outside
 | rule | produces |
 |---|---|
 | `mojo_library(srcs, deps, test_srcs)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. |
-| `mojo_binary(srcs, deps, main, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. |
+| `mojo_binary(srcs, deps, main, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see Packaging). |
 | `mojo_test(srcs, deps)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. |
 | `mojo_multi_numa_test(binary, expected_stdout)` | runs `binary` (a `mojo_binary` or `mojo_test`, compiled by its own target) on a worker spanning more than one NUMA node. Building it runs the binary like `[run_check]`; `buck2 test` runs it like a `mojo_test`. Fails to configure when no execution platform provides `numa_multi`. |
 
@@ -82,7 +82,9 @@ run when the library (or anything depending on it) is built.
 (`x86-64-v3`), not the CPU of the worker that ran it. Linked binaries carry
 one run path, DT_RUNPATH `$ORIGIN/lib`, and no debug sections, and every
 compile action fails (exit 4) if its output contains the action's working
-directory.
+directory. The compiler records source file names in a linked program (for
+error locations); they are recorded relative to the package (`hello.mojo`),
+not as paths inside the action.
 
 **Running.** A built binary loads a few shared libraries from the toolchain
 (`toolchains//:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
@@ -106,6 +108,66 @@ Rules are loaded from one cell: a `.bzl` file's providers are distinct per
 loading cell, so a Mojo target in one cell cannot depend on a Mojo library in
 another. The `checks` cell therefore has its own fixtures rather than reusing
 `examples`.
+
+## Packaging
+
+`load("@komira//package:defs.bzl", "mojo_bundle")`
+
+```python
+mojo_bundle(
+    name = "hello_bundle",
+    binary = ":hello",              # a mojo_binary
+    version = "0.1.0",
+    data = {"share/greeting.txt": "greeting.txt"},
+)
+```
+
+A bundle is a directory holding a program and everything it needs besides
+glibc (2.34 or later) and the kernel. Package formats are built from it.
+
+```
+bin/hello                                 launcher
+lib/glibc-hwcaps/x86-64-v3/libhello.so    the program
+lib/                                      Mojo runtime, C++ runtime
+share/                                    data
+VERSION                                   name, version, platform, CPU level
+SHA256SUMS                                every other file
+```
+
+`bin/hello` is a small C launcher built for the baseline x86-64 ISA, so it
+starts on any x86-64 CPU. It reads the CPU's x86-64 level the way glibc's
+loader does (cpuid, and whether the OS saves the AVX and AVX-512 registers).
+Below the level the program was compiled for (the toolchain's `target_cpu`)
+it prints one line and exits 1, before loading anything:
+
+```
+hello requires an x86-64-v3 CPU (Haswell or newer)
+```
+
+Otherwise it loads `libhello.so` by name. The loader looks in the launcher's
+run path, `$ORIGIN/../lib`, and in the `glibc-hwcaps/x86-64-v<N>/`
+directories under it that the CPU supports, so builds for other levels can
+sit next to this one. The launcher then calls the program's C entry point
+`komira_main`, which runs `main` through the same standard-library function a
+Mojo executable uses: arguments, environment, output and exit status are
+those of the executable (checks//bundle_parity compares the two).
+`lib<name>.so` has run path `$ORIGIN/../..`, the bundle's `lib/`. Every run
+path is relative to its file, so the bundle runs from wherever it is copied
+and through a symlink. A program finds its data through `/proc/self/exe`:
+`<its directory>/../share`.
+
+The bundle is built by copying files with fixed modes (0755 for `bin/`,
+0644 otherwise); `VERSION` holds no time or revision, so the same sources
+give the same bytes (checked across two uncached builds).
+
+`[test_launcher]` is the launcher built with a test hook: it judges the
+made-up CPU named by `$KOMIRA_TEST_CPU` (see `package/launcher/cpu_models.h`)
+instead of the real one. It exists for checks and is never part of a
+bundle; the shipped launcher has no override.
+
+A program built as `[shared]` is compiled from a generated file next to its
+main module, which imports `main` from it; the main module's file name must
+therefore be a Mojo identifier. Only linux x86_64 bundles are built today.
 
 ## Execution platforms
 

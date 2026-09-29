@@ -1,7 +1,13 @@
 # mojo_wrapper.sh -- runs the hermetic Mojo compiler inside one build action.
 #
 # usage: busybox sh mojo_wrapper.sh <busybox> <compiler_dir> <zig_dir> \
-#            <cc_target> -- <mojo arguments...>
+#            <cc_target> [--runpath=<path>] [--source-root=<dir>] \
+#            -- <mojo arguments...>
+#
+# --source-root names the directory the sources were staged in. The compiler
+# records source file names in what it builds (for error locations); for a
+# `build`, the wrapper strips "<that directory's absolute path>/" from them, so
+# the output names the file by its path in the package.
 #
 # Interpreted by the declared busybox shell; every tool it runs is an input of
 # the action. It never consults the worker's PATH, and it refuses (exit 2)
@@ -21,7 +27,8 @@
 #
 # Link steps (through the `cc` shim below) drop every run path the compiler
 # asks for, since it would name this action's sandbox, and set exactly one:
-# DT_RUNPATH `$ORIGIN/lib`, which names no path of this action. They also
+# DT_RUNPATH `$ORIGIN/lib` (or the `--runpath=` value, which must start
+# with `$ORIGIN`), which names no path of this action. They also
 # strip debug sections, since zig's C runtime objects record the sandbox as
 # their compilation directory. A binary finds the toolchain's runtime
 # libraries in the lib/ directory next to it (the rules' runnable output), or
@@ -48,6 +55,22 @@ TC=$(abspath "$2")
 ZIG=$(abspath "$3")
 CC_TARGET=$4
 shift 4
+RUNPATH='$ORIGIN/lib'
+SRCROOT=""
+while :; do
+    case "$1" in
+        --runpath=*)
+            RUNPATH=${1#--runpath=}
+            case "$RUNPATH" in
+                '$ORIGIN' | '$ORIGIN/'*) ;;
+                *) echo "mojo_wrapper: REFUSING: --runpath=$RUNPATH is not \$ORIGIN-relative" >&2; exit 2 ;;
+            esac
+            ;;
+        --source-root=*) SRCROOT=$(abspath "${1#--source-root=}") ;;
+        *) break ;;
+    esac
+    shift
+done
 [ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
 shift
 
@@ -95,7 +118,7 @@ fi
 # Rewrites `-Xlinker -L<dir>` / `-Xlinker -l<lib>` into plain driver flags and
 # `-Xlinker --opt` into `-Wl,--opt`; other `-Xlinker` pairs pass through.
 # Drops every run path (`-rpath <p>` in any spelling), then adds the one run
-# path `$ORIGIN/lib` (as DT_RUNPATH) and `-Wl,--strip-debug`; see the header.
+# path $RUNPATH (as DT_RUNPATH) and `-Wl,--strip-debug`; see the header.
 cat > "$T/cc/cc" <<EOF
 #!$BB sh
 set -u
@@ -134,7 +157,7 @@ while [ "\$_argc" -gt 0 ]; do
   esac
   set -- "\$@" "\$_a"
 done
-exec "$ZIG/zig" cc -target "$CC_TARGET" -Wl,--strip-debug -Wl,--enable-new-dtags '-Wl,-rpath,\$ORIGIN/lib' "\$@"
+exec "$ZIG/zig" cc -target "$CC_TARGET" -Wl,--strip-debug -Wl,--enable-new-dtags '-Wl,-rpath,$RUNPATH' "\$@"
 EOF
 chmod +x "$T/cc/cc"
 for n in c++ gcc g++ clang clang++; do ln -sf cc "$T/cc/$n"; done
@@ -156,13 +179,24 @@ export PATH MODULAR_HOME LD_LIBRARY_PATH CC CXX MODULAR_CACHE_DIR TMPDIR HOME \
     XDG_CACHE_HOME ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR \
     KGEN_CompilerRT_AsyncRT_ParallelismLevel MODULAR_CRASH_REPORTING_ENABLED
 
+STRIP=""
+if [ -n "$SRCROOT" ] && [ "$1" = "build" ]; then
+    STRIP="-strip-file-prefix=$SRCROOT/"
+fi
 rc=0
-"$TC/bin/mojo" "$@" || rc=$?
+if [ -n "$STRIP" ]; then
+    SUB=$1
+    shift
+    "$TC/bin/mojo" "$SUB" "$STRIP" "$@" || rc=$?
+else
+    "$TC/bin/mojo" "$@" || rc=$?
+fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2
     rc=3
 elif [ "$rc" = 0 ] && grep -qF "$PWD" "$EXPECT"; then
-    echo "mojo_wrapper: $EXPECT contains this action's working directory ($PWD)" >&2
+    echo "mojo_wrapper: $EXPECT contains this action's working directory ($PWD):" >&2
+    strings -n 4 "$EXPECT" | grep -F "$PWD" | head -n 5 >&2
     rc=4
 fi
 rm -rf "$T"

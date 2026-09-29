@@ -1,0 +1,11 @@
+# Sources of the bundle launcher (see launcher.c) and of its level test.
+filegroup(
+    name = "sources",
+    srcs = [
+        "cpu_level.h",
+        "cpu_models.h",
+        "launcher.c",
+        "level_test.c",
+    ],
+    visibility = ["PUBLIC"],
+)

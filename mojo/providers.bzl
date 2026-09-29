@@ -47,3 +47,11 @@ MojoRunnableInfo = provider(fields = {
     "command": provider_field(typing.Any),  # cmd_args
     "run_dir": provider_field(typing.Any),  # artifact (directory)
 })
+
+# A mojo_binary's program as a shared library, for packaging (komira//package).
+MojoProgramInfo = provider(fields = {
+    "name": provider_field(str),  # the program's name: bin/<name>, lib<name>.so
+    "shared": provider_field(typing.Any),  # artifact lib<name>.so
+    "runtime": provider_field(typing.Any),  # artifact: directory of runtime libraries
+    "target_cpu": provider_field(str),  # the CPU the program was compiled for
+})

@@ -16,12 +16,12 @@ Each `-I` directory given to the compiler holds exactly one `.mojoc`, so a
 staged source directory can never shadow a package.
 """
 
-load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoRunnableInfo", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
 
-def _mojo_cmd(tc, args):
+def _mojo_cmd(tc, args, runpath = None, source_root = None):
     return cmd_args(
         tc.busybox,
         "sh",
@@ -30,6 +30,8 @@ def _mojo_cmd(tc, args):
         tc.compiler,
         tc.zig,
         tc.cc_target,
+        ["--runpath=" + runpath] if runpath else [],
+        [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
         "--",
         args,
     )
@@ -60,23 +62,81 @@ def _stem(src):
     b = src.basename
     return b[:-len(".mojo")] if b.endswith(".mojo") else b
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier):
-    """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets."""
-    staged = ctx.actions.copied_dir(out_path + ".src", {s.short_path: s for s in srcs})
+def _dirname(p):
+    i = p.rfind("/")
+    return p[:i] if i >= 0 else ""
+
+def _join(d, f):
+    return d + "/" + f if d else f
+
+# The entry file of a program built as a shared library. The launcher calls
+# `komira_main(argc, argv)`, which runs the program's `main` through the same
+# standard-library function a Mojo executable's own `main` runs it through:
+# it starts the runtime, records argv, installs the fault handler, reports an
+# unhandled error the way an executable does (exit status 1), and destroys
+# the runtime's globals.
+_ENTRY = """from std.builtin._startup import __wrap_and_execute_raising_main
+from {module} import main as _komira_program_main
+
+
+@export
+def komira_main(
+    argc: Int32,
+    argv: __mlir_type[`!kgen.pointer<!kgen.pointer<scalar<ui8>>>`],
+) abi("C") -> Int32:
+    return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
+"""
+
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, shared = False):
+    """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets.
+
+    With `shared`, emits a shared library instead: DT_SONAME is the output's
+    file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
+    seen from lib/glibc-hwcaps/<level>/.
+    """
+    mapping = {s.short_path: s for s in srcs}
+    entry = main.short_path
+    if shared:
+        # `mojo build --emit shared-lib` refuses a file defining `main`, so the
+        # library is built from a generated entry file next to it, which
+        # exports the C-ABI entry point `komira_main` (see _ENTRY).
+        stem = _stem(main)
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", stem):
+            fail("{}: {} is not importable as a Mojo module".format(ctx.label, main.short_path))
+        entry = _join(_dirname(main.short_path), "_komira_entry.mojo")
+        if entry in mapping:
+            fail("{}: srcs may not contain {}".format(ctx.label, entry))
+        mapping[entry] = ctx.actions.write(out_path + ".entry.mojo", _ENTRY.format(module = stem))
+    staged = ctx.actions.copied_dir(out_path + ".src", mapping)
     exe = ctx.actions.declare_output(out_path)
     closure = ctx.actions.tset(MojoPkgTSet, children = closure_tsets)
+    emit = []
+    if shared:
+        # The entry imports the program's main module from its own directory,
+        # which the compiler does not search unless named with -I.
+        entry_dir = _dirname(entry)
+        emit = [
+            "--emit",
+            "shared-lib",
+            "-Xlinker",
+            "-soname",
+            "-Xlinker",
+            exe.basename,
+            cmd_args(staged.project(entry_dir) if entry_dir else staged, format = "-I{}"),
+        ]
     ctx.actions.run(
         _mojo_cmd(tc, [
             "build",
+            emit,
             "--optimization-level",
             opt_level,
             "--target-cpu",
             tc.target_cpu,
             closure.project_as_args("include"),
-            staged.project(main.short_path),
+            staged.project(entry),
             "-o",
             exe.as_output(),
-        ]),
+        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged),
         category = category,
         identifier = identifier,
     )
@@ -247,19 +307,27 @@ def _run_check(ctx, tc, command, guard = []):
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
     return out
 
+def _shared(ctx, tc):
+    main = _main_src(ctx)
+    srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
+    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, shared = True)
+
 def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
     run_dir, command = _runnable(ctx, tc, exe)
+    shared = _shared(ctx, tc)
     return [
         DefaultInfo(
             default_output = exe,
             sub_targets = {
+                "shared": [DefaultInfo(default_output = shared)],
                 "run_check": [DefaultInfo(default_output = _run_check(ctx, tc, command))],
                 "runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = command)],
             },
         ),
         RunInfo(args = command),
         MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
+        MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
     ]
 
 _EXECUTABLE_ATTRS = {
