@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The libz FFI shim: one-shot inflate / deflate / deflateBound and a bounded
+# stream skipper, over libz loaded at RUNTIME via dlopen (`libz.so.1` /
+# `libz.dylib`), so there is no static archive to link and no link deps for
+# consumers.
+#
+# No `deps`, on purpose: this is a foundational FFI leaf. Whatever is added
+# here lands in the build closure of every zlib consumer, including ones that
+# must not depend on the query engine. It welds no test of its own.
+mojo_library(
+    name = "komira_zlib",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["PUBLIC"],
+)
