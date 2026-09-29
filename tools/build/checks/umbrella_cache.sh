@@ -34,6 +34,16 @@
 # consumer's own `toolchains` cell (analysis only; nothing runs). Then the
 # consumer's copy is restored for the digest comparison.
 #
+# A fifth consumer, a git external cell like the third, has no
+# `.buckconfig.local`: the remote-execution settings are appended to its root
+# `.buckconfig` instead, and it runs with no user or system buckconfig
+# (BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG) and HOME in the scratch directory.
+# Its `app//platforms:default` must register only remote platforms, and the
+# same targets must resolve to the same execution configurations as check 18
+# pins; with `[komira] execution = remote`, a `[komira_re]` missing
+# light_properties, or mojo_compile_properties, must refuse, naming the key
+# (analysis only; nothing runs).
+#
 # Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
 # copied into every scratch checkout. Scratch goes under $TMPDIR (set it to a
 # disk directory where /tmp is memory); the checkouts, and their buck-out, are
@@ -57,12 +67,13 @@ stop_daemons() {
     for d in "${CHECKOUTS[@]}"; do
         [ -d "$W/$d" ] && (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
     done
+    [ -d "$W/rootcfg" ] && b2_rootcfg kill > /dev/null 2>&1
 }
 cleanup() {
     stop_daemons
     if [ "${KEEP_SCRATCH:-0}" != 1 ]; then
         local d
-        for d in src komira.git "${CHECKOUTS[@]}"; do rm -rf "${W:?}/$d"; done
+        for d in src komira.git "${CHECKOUTS[@]}" rootcfg rootcfg_home; do rm -rf "${W:?}/$d"; done
     fi
 }
 trap cleanup EXIT
@@ -120,6 +131,13 @@ make_consumer() { # checkout, mount path (empty: git external cell)
 make_consumer umbrella komira
 make_consumer umbrella_deep third_party/komira
 make_consumer external ""
+make_consumer rootcfg ""
+rm "$W/rootcfg/.buckconfig.local"
+{ echo; cat "$ROOT/.buckconfig.local"; } >> "$W/rootcfg/.buckconfig"
+mkdir "$W/rootcfg_home"
+b2_rootcfg() { # buck2 in the rootcfg consumer, configured by its own .buckconfig alone
+    (cd "$W/rootcfg" && env HOME="$W/rootcfg_home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true "$BUCK2" "$@")
+}
 TARGETS=(
     komira//tools/build/examples:hello komira//tools/build/examples:hellopkg komira//tools/build/examples:hello_pkg_user
     komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/examples:test_hellopkg
@@ -161,6 +179,45 @@ for d in umbrella external; do
     (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
 done
 echo "      toolchains cell: the expected targets in every checkout; a consumer override reaches the compile command (submodule and external cell)"
+
+# Analysis only. Remote-execution settings in a consumer's root .buckconfig
+# select the remote platforms, with the configurations check 18 pins.
+EP=app//platforms:default
+b2_rootcfg audit providers "$EP" > "$W/rootcfg.providers.txt" 2>&1 ||
+    die "rootcfg: cannot read the providers of $EP (see $W/rootcfg.providers.txt)"
+n_platforms=$(grep -c 'executor_config=' "$W/rootcfg.providers.txt")
+n_local=$(grep -c 'executor: Local(' "$W/rootcfg.providers.txt")
+labels=$(grep -oE '^ +label=komira//tools/build/platforms:exec-[a-z0-9-]+' "$W/rootcfg.providers.txt" | sed 's/.*://' | tr '\n' ' ')
+[ "$n_platforms" -gt 0 ] && [ "$n_local" = 0 ] ||
+    die "rootcfg: $EP registers $n_platforms platforms, $n_local of them local-only; want >0 and 0 (see $W/rootcfg.providers.txt)"
+for p in exec-mojo exec-light; do
+    case " $labels" in *" $p "*) ;;
+        *) die "rootcfg: registered platforms are [$labels], want $p among them (see $W/rootcfg.providers.txt)" ;; esac
+done
+EXPECT_RESOLUTION="
+komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
+komira//tools/build/examples:hellopkg komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
+komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
+toolchains//:mojo komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
+komira//tools/build/toolchains:zig komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
+komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4"
+want=$(printf '%s\n' "$EXPECT_RESOLUTION" | sed '/^$/d' | LC_ALL=C sort)
+mapfile -t targets < <(printf '%s\n' "$want" | cut -d' ' -f1)
+b2_rootcfg audit execution-platform-resolution "${targets[@]}" > "$W/rootcfg.resolution.txt" 2>&1 ||
+    die "rootcfg: execution-platform-resolution failed (see $W/rootcfg.resolution.txt)"
+got=$(awk '/^[^ ].* \(.*\):$/ { t = $1; next }
+    t != "" && /^    Execution platform configuration: / { print t, $4; t = "" }' "$W/rootcfg.resolution.txt" | LC_ALL=C sort)
+[ "$got" = "$want" ] ||
+    die "rootcfg: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ') (see $W/rootcfg.resolution.txt)"
+for key in light_properties mojo_compile_properties; do
+    if b2_rootcfg audit providers -c komira.execution=remote -c "komira_re.$key=" "$EP" > "$W/rootcfg.no_$key.txt" 2>&1; then
+        die "rootcfg: [komira] execution = remote without [komira_re] $key registered platforms (see $W/rootcfg.no_$key.txt)"
+    elif ! grep -qF "\`[komira_re] $key\` is not set" "$W/rootcfg.no_$key.txt"; then
+        die "rootcfg: [komira] execution = remote without [komira_re] $key failed without naming it (see $W/rootcfg.no_$key.txt)"
+    fi
+done
+b2_rootcfg kill > /dev/null 2>&1
+echo "      root .buckconfig: a consumer with the remote settings in its root .buckconfig registers $n_platforms remote platforms, resolves $(printf '%s\n' "$want" | wc -l) targets to the pinned configurations, and refuses execution = remote without light_properties or mojo_compile_properties"
 
 build() { # checkout, invocation number, targets...
     local d=$1 i=$2; shift 2

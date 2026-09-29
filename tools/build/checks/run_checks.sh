@@ -35,9 +35,11 @@
 #      ./third_party/komira, or a git external cell -- gets remote cache hits
 #      with the same action digests as a standalone checkout, one of them
 #      with a frozen copy of the toolchains cell, and an override in a
-#      consumer's toolchains cell reaches the compile command
-#      (tools/build/checks/umbrella_cache.sh; four scratch checkouts and
-#      daemons, skipped with --no-umbrella).
+#      consumer's toolchains cell reaches the compile command; a consumer
+#      with the remote settings in its root .buckconfig resolves to the
+#      remote platforms, and refuses execution = remote with an incomplete
+#      [komira_re] (tools/build/checks/umbrella_cache.sh; five scratch
+#      checkouts and daemons, skipped with --no-umbrella).
 #   8. The host floor: during a real compile, and a run of the binary it
 #      built, the loader maps libstdc++.so.6 and libgcc_s.so.1 from the
 #      toolchain, and nothing from the worker except glibc's own objects

@@ -147,7 +147,18 @@ targets take their sources through `staged_files` (the first run of this check
 with C targets had 8 of 28 actions re-run in a submodule). They also include
 Rust (`rust:prost_roundtrip` and the protobuf plugin,
 `proto-codegen:protoc-gen-mojo`), whose compiles copy their sources into
-buck-out for the same reason (without it, 3 of 55 actions re-ran). See
+buck-out for the same reason (without it, 3 of 55 actions re-ran).
+
+A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
+the remote-execution settings are appended to its root `.buckconfig`, and it
+runs with no user or system buckconfig and `HOME` in the scratch directory.
+Its `app//platforms:default` must register only remote platforms, including
+`exec-mojo` and `exec-light`; hello, hellopkg, test_hellopkg and
+`toolchains//:mojo` must resolve to `exec-mojo` and the zig and conda_unpack
+targets to `exec-light`, with the configuration hashes check 18 pins; and
+with `-c komira.execution=remote`, clearing `[komira_re] light_properties`,
+or `mojo_compile_properties`, must refuse, naming the key. Analysis only.
+See
 [Using komira from another repository](../README.md#using-komira-from-another-repository).
 
 ```sh
