@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # run_checks.sh -- end-to-end checks of the Mojo rules. Each check can fail.
 #
-# usage: checks/run_checks.sh [--no-umbrella]   (from the repo root; BUCK2 overrides the binary)
+# usage: checks/run_checks.sh [--no-umbrella] [--no-run]
+#        (from the repo root; BUCK2 overrides the binary)
 #
 #   1. The examples build and their run checks pass (stdout compared byte for
 #      byte), and every action that executed ran remotely.
@@ -14,8 +15,9 @@
 #   4. The toolchain refuses an incomplete closure (exit 2) instead of falling
 #      back to anything on the worker.
 #   5. No action argv or env names an absolute host path.
-#   6. Built outputs are path-free: the linked binary has no run path and no
-#      string naming a buck-out directory. (Inside every compile action the
+#   6. Built outputs are path-free: the linked binary's only run path is
+#      DT_RUNPATH `$ORIGIN/lib`, and no string in it names a buck-out
+#      directory. (Inside every compile action the
 #      wrapper also refuses an output containing that action's working
 #      directory, exit 4.)
 #   7. A repository mounting komira as a git submodule gets remote cache hits
@@ -25,15 +27,24 @@
 #   8. The host floor: during a real compile, and a run of the binary it
 #      built, the loader maps libstdc++.so.6 and libgcc_s.so.1 from the
 #      toolchain, and nothing from the worker except glibc's own objects
-#      (checks//runtime_libs:loader_trace, read from LD_DEBUG).
+#      (checks//runtime_libs:loader_trace, read from LD_DEBUG). The
+#      toolchain libraries the run loaded are exactly the ones a runnable
+#      directory carries in lib/ (toolchains//:mojo_runtime), no more, no fewer.
+#   9. `buck2 run //examples:hello` prints the greeting on this machine from a
+#      fresh clone, downloads only the binary and its runtime libraries, and
+#      the runnable directory still starts after it is moved
+#      (checks/buck2_run.sh; skipped with --no-run).
 set -uo pipefail
 
 umbrella=1
-case "${1:-}" in
-    "") ;;
-    --no-umbrella) umbrella=0 ;;
-    *) echo "usage: $0 [--no-umbrella]" >&2; exit 2 ;;
-esac
+run=1
+for a in "$@"; do
+    case "$a" in
+        --no-umbrella) umbrella=0 ;;
+        --no-run) run=0 ;;
+        *) echo "usage: $0 [--no-umbrella] [--no-run]" >&2; exit 2 ;;
+    esac
+done
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
@@ -132,12 +143,14 @@ else
         fail "outputs: no binary at '$bin'"
     elif ! grep -qa 'libKGENCompilerRTShared' "$bin"; then
         fail "outputs: scan cannot see the binary's dynamic section (no NEEDED name found)"
-    elif command -v readelf > /dev/null && readelf -d "$bin" | grep -qE 'RPATH|RUNPATH'; then
-        fail "outputs: $bin has a run path: $(readelf -d "$bin" | grep -E 'RPATH|RUNPATH')"
+    elif ! command -v readelf > /dev/null; then
+        fail "outputs: readelf is not installed; cannot read the run path"
+    elif [ "$(readelf -d "$bin" | grep -E 'RPATH|RUNPATH' | sed -E 's/.*\((RPATH|RUNPATH)\).*\[(.*)\]$/\1 \2/')" != 'RUNPATH $ORIGIN/lib' ]; then
+        fail "outputs: $bin run path is not exactly RUNPATH \$ORIGIN/lib: $(readelf -d "$bin" | grep -E 'RPATH|RUNPATH' | tr -s ' ')"
     elif grep -qa 'buck-out/' "$bin"; then
         fail "outputs: $bin names a buck-out path: $(grep -ao '[^[:cntrl:]]*buck-out/[^[:cntrl:]]*' "$bin" | head -n 1)"
     else
-        pass "outputs: $bin has no run path and names no buck-out path"
+        pass "outputs: $bin has run path \$ORIGIN/lib only and names no buck-out path"
     fi
 fi
 
@@ -168,6 +181,30 @@ else
     else
         pass "host floor: libstdc++/libgcc_s from the toolchain in compile and run; host objects only glibc ($(grep -c ' init ' "$report") mapped)"
     fi
+    # What the run loaded from the toolchain must be what a runnable directory ships.
+    sed -n 's|^run init <toolchain>/lib/||p' "$report" | LC_ALL=C sort > "$LOG/runtime_loaded.txt"
+    if ! "$BUCK2" build "//examples:hello[runnable]" --show-full-simple-output > "$LOG/runnable.txt" 2> "$LOG/runnable.log"; then
+        fail "runtime libs: cannot build //examples:hello[runnable] (see $LOG/runnable.log)"
+    elif ! (cd "$(tail -n 1 "$LOG/runnable.txt")/lib" && ls -1) 2> /dev/null | LC_ALL=C sort > "$LOG/runtime_shipped.txt"; then
+        fail "runtime libs: no lib/ in $(tail -n 1 "$LOG/runnable.txt")"
+    elif [ ! -s "$LOG/runtime_loaded.txt" ]; then
+        fail "runtime libs: the loader trace records no toolchain library for the run"
+    elif ! cmp -s "$LOG/runtime_loaded.txt" "$LOG/runtime_shipped.txt"; then
+        fail "runtime libs: loaded [$(tr '\n' ' ' < "$LOG/runtime_loaded.txt")] but lib/ ships [$(tr '\n' ' ' < "$LOG/runtime_shipped.txt")]"
+    else
+        pass "runtime libs: lib/ ships exactly the $(wc -l < "$LOG/runtime_shipped.txt" | tr -d ' ') toolchain libraries a run loads"
+    fi
+fi
+
+# 9
+if [ "$run" = 1 ]; then
+    if BUCK2="$BUCK2" "$ROOT/checks/buck2_run.sh" > "$LOG/buck2_run.log" 2>&1; then
+        pass "buck2 run: $(grep -o 'PASS  buck2 run: .*' "$LOG/buck2_run.log" | cut -c 18-)"
+    else
+        fail "buck2 run: $(grep -o 'FAIL  buck2 run: .*' "$LOG/buck2_run.log" | cut -c 18-) (see $LOG/buck2_run.log)"
+    fi
+else
+    echo "SKIP  buck2 run (--no-run)"
 fi
 
 # 7
