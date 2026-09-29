@@ -1,0 +1,9 @@
+load(":defs.bzl", "compiler_loader_trace")
+
+# Which libstdc++.so.6 / libgcc_s.so.1 the compiler really loads, recorded by
+# the loader during a real compile. tools/build/checks/run_checks.sh requires
+# both to come from the toolchain, not from the worker.
+compiler_loader_trace(
+    name = "loader_trace",
+    src = "hello.mojo",
+)

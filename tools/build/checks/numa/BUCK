@@ -1,0 +1,25 @@
+load("@mojo//:defs.bzl", "mojo_binary", "mojo_multi_numa_test")
+load(":defs.bzl", "numa_guard_cases")
+
+# Requires an execution platform providing
+# komira//tools/build/platforms:numa_multi. A standalone checkout registers
+# none unless `[komira_re] mojo_compile_multi_numa_properties` is set, so
+# building this must fail to configure (tools/build/checks/run_checks.sh,
+# check 10). Given a platform whose workers
+# span only one NUMA node, the run refuses to start (check 11).
+mojo_binary(
+    name = "hello",
+    srcs = ["hello.mojo"],
+)
+
+mojo_multi_numa_test(
+    name = "hello_multi_numa",
+    binary = ":hello",
+    expected_stdout = "hello from mojo\n",
+)
+
+# Every verdict of the multi-NUMA run guard, on made-up topologies (check 11).
+numa_guard_cases(
+    name = "guard_cases",
+    script = "guard_cases.sh",
+)

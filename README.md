@@ -44,20 +44,20 @@ effect when the buck2 daemon starts; run `buck2 kill` after changing it.
 ### 3. Build
 
 `buck2` below is either a `buck2` on your `PATH` or `tools/buck2`;
-`checks/run_checks.sh` falls back to `tools/buck2` when none is on `PATH`
+`tools/build/checks/run_checks.sh` falls back to `tools/buck2` when none is on `PATH`
 (`BUCK2=...` overrides both).
 
 ```sh
 buck2 build //...                                  # examples: packages, binaries, gated library
-buck2 build '//examples:hello_pkg_user[run_check]' # run a binary remotely, compare its stdout
-buck2 run //examples:hello                         # build remotely, run here (Linux x86_64)
-buck2 test //examples:test_hellopkg                # a standalone Mojo test, run remotely
-checks/run_checks.sh                               # end-to-end checks, including the negative ones
+buck2 build '//tools/build/examples:hello_pkg_user[run_check]' # run a binary remotely, compare its stdout
+buck2 run //tools/build/examples:hello                         # build remotely, run here (Linux x86_64)
+buck2 test //tools/build/examples:test_hellopkg                # a standalone Mojo test, run remotely
+tools/build/checks/run_checks.sh                               # end-to-end checks, including the negative ones
 ```
 
 The `checks` cell holds fixtures that must fail (a library whose test fails, a
 binary missing a dependency, an incomplete toolchain). They are outside
-`//...` and are exercised by `checks/run_checks.sh`.
+`//...` and are exercised by `tools/build/checks/run_checks.sh`.
 
 ## Mojo rules
 
@@ -111,7 +111,7 @@ another. The `checks` cell therefore has its own fixtures rather than reusing
 
 ## Packaging
 
-`load("@komira//package:defs.bzl", "mojo_bundle")`
+`load("@komira//tools/build/package:defs.bzl", "mojo_bundle")`
 
 ```python
 mojo_bundle(
@@ -154,7 +154,7 @@ loader did not search its `glibc-hwcaps/x86-64-v<N>/` directory (glibc older
 than 2.33, or hwcaps masked with `GLIBC_TUNABLES` or `--glibc-hwcaps-mask`),
 it says so. The run paths are `DT_RUNPATH`, so `LD_LIBRARY_PATH`, which the
 loader searches first, can put a different `libhello.so` or runtime library
-in place of the bundle's; that is accepted and checked (checks/bundle.sh
+in place of the bundle's; that is accepted and checked (tools/build/checks/bundle.sh
 `loader`). The launcher then calls the program's C entry point
 `komira_main`, which runs `main` through the same standard-library function a
 Mojo executable uses: arguments, environment, output and exit status are
@@ -163,7 +163,7 @@ those of the executable (checks//bundle_parity compares the two).
 path is relative to its file, so the bundle runs from wherever it is copied
 and through a symlink. A program finds its data through `/proc/self/exe`:
 `<its directory>/../share`. The runtime libraries in `lib/` are the vendor's
-files, unchanged, and keep the vendor's run paths; checks/bundle_expected
+files, unchanged, and keep the vendor's run paths; tools/build/checks/bundle_expected
 lists every run path in the bundle.
 
 The bundle is built by copying files with fixed modes (0755 for `bin/`,
@@ -171,7 +171,7 @@ The bundle is built by copying files with fixed modes (0755 for `bin/`,
 give the same bytes (checked across two uncached builds).
 
 `[test_launcher]` is the launcher built with a test hook: it judges the
-made-up CPU named by `$KOMIRA_TEST_CPU` (see `package/launcher/cpu_models.h`)
+made-up CPU named by `$KOMIRA_TEST_CPU` (see `tools/build/package/launcher/cpu_models.h`)
 instead of the real one. It exists for checks and is never part of a
 bundle; the shipped launcher has no override.
 
@@ -185,7 +185,7 @@ Each format is a rule over a bundle that produces files; nothing is pushed
 or published by the build.
 
 ```python
-load("@komira//package:defs.bzl", "bundle_tarball", "oci_image")
+load("@komira//tools/build/package:defs.bzl", "bundle_tarball", "oci_image")
 
 bundle_tarball(name = "hello_tarball", bundle = ":hello_bundle")
 oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/hello")
@@ -201,7 +201,7 @@ oci_image(name = "hello_image", bundle = ":hello_bundle", repository = "komira/h
   `<repository>:<bundle version>`, so
 
   ```sh
-  docker load < "$(buck2 build '//examples:hello_image[docker_archive]' --show-full-simple-output)"
+  docker load < "$(buck2 build '//tools/build/examples:hello_image[docker_archive]' --show-full-simple-output)"
   docker run --rm komira/hello:0.1.0
   ```
 
@@ -212,7 +212,7 @@ pinned download per blob. The packing action does not use the network: it
 takes no URLs, reads only those files and refuses unless the manifest hashes to its
 digest and names exactly the downloaded blobs.
 
-Both formats are written by `komira_pack` (`package/pack/komira_pack.zig`), a
+Both formats are written by `komira_pack` (`tools/build/package/pack/komira_pack.zig`), a
 static executable built by the pinned zig and run with no shell. It holds
 its output in memory until it exits, up to about three times the bundle's
 size at peak, which sets the size of bundle a `light` worker can pack. The
@@ -221,12 +221,12 @@ depend only on the bundle and the base: tar entries are sorted, with
 directories listed, mtime and uid/gid 0 and modes 0755/0644; gzip headers
 carry no time; JSON keys are sorted and every timestamp is
 1970-01-01T00:00:00Z. Two uncached builds give the same tarball and the same
-image digest (checks/bundle.sh), and `docker run` of the loaded image prints
-the greeting (checks/formats.sh).
+image digest (tools/build/checks/bundle.sh), and `docker run` of the loaded image prints
+the greeting (tools/build/checks/formats.sh).
 
 ## Execution platforms
 
-`//platforms` declares two abstract execution constraints, and three
+`//tools/build/platforms` declares two abstract execution constraints, and three
 execution configurations built from them:
 
 | configuration | constraints | runs |
@@ -241,10 +241,10 @@ The Mojo rules get their constraints from their toolchain:
 `mojo_multi_numa_test`) states `mojo_compile` + `numa_multi`. A toolchain's
 `exec_compatible_with` binds every target that uses it.
 
-`komira_execution_platforms` (`//platforms:defs.bzl`) registers one remote
+`komira_execution_platforms` (`//tools/build/platforms:defs.bzl`) registers one remote
 execution platform per configuration, given the worker property set of each.
 A standalone checkout reads those sets from `[komira_re]` in
-`.buckconfig.local` (`//platforms/remote`); a repository mounting komira calls
+`.buckconfig.local` (`//tools/build/platforms/remote`); a repository mounting komira calls
 the same macro with its own sets. Nothing committed here names a worker pool.
 `buck2 audit execution-platform-resolution <target>` shows which
 configuration a target got and why the others were skipped.
@@ -262,7 +262,7 @@ as the `mojo_compile` workers, since the binary it runs was built there.
 The constraint is only a claim about those workers, so the hardware is
 checked too. `komira_execution_platforms` fails if the multi-NUMA property
 set equals the `mojo_compile` one. And every multi-NUMA run (the build's run
-check and the `buck2 test` command) starts through `mojo/numa_guard.sh`,
+check and the `buck2 test` command) starts through `tools/build/mojo/numa_guard.sh`,
 which exits 3 with `numa_guard: REFUSING to run` unless the action can use
 at least `numa_nodes` (default 2) NUMA nodes: online and with memory
 (`/sys/devices/system/node`), in its own `Mems_allowed_list`, and holding a
@@ -289,7 +289,7 @@ input of a separate publishing target.
 Gated library tests and `buck2 test` of a `mojo_test` still run the binary
 with `LD_LIBRARY_PATH` set to the compiler's `lib/`, a superset. A test that
 passes there can therefore load a library the runnable directory lacks; the
-runtime-library check (`checks/run_checks.sh`) keeps the subset equal to what
+runtime-library check (`tools/build/checks/run_checks.sh`) keeps the subset equal to what
 a real run loads. Moving the gated tests onto the runnable directory would
 change the command of every gated test action, and so their cache keys.
 
@@ -298,7 +298,7 @@ change the command of every gated test action, and so their cache keys.
 `toolchains//:mojo` is built from three sha256-pinned downloads: the Mojo
 compiler `.conda` package (1.0.0, linux-64), a static busybox, and zig 0.12.0.
 Remote actions unpack them: busybox extracts zig, zig compiles
-`mojo/tools/conda_unpack.zig`, and that static tool extracts the compiler
+`tools/build/mojo/tools/conda_unpack.zig`, and that static tool extracts the compiler
 closure from the `.conda`. Every tool an action runs is one of its inputs;
 actions never search the worker's `PATH`. The client's only work is
 downloading the pinned files and uploading them to the remote cache.
@@ -315,7 +315,7 @@ toolchain's `lib/`; the compiler finds it through its own `$ORIGIN/../lib`
 run path, built binaries through their `$ORIGIN/lib` run path (or
 `LD_LIBRARY_PATH`, which gated tests set). None of the floor is part of an
 action key, so workers that differ in it must not share a remote cache.
-`checks/run_checks.sh` enforces the floor: it reads the loader's own record
+`tools/build/checks/run_checks.sh` enforces the floor: it reads the loader's own record
 (`LD_DEBUG`) of a real compile and a run, and fails if either maps the C++
 runtime from the worker, or any object from the worker that is not glibc's.
 
@@ -328,10 +328,10 @@ those names, and a worker's own `libstdc++.so.6` would satisfy the compiler.
 The floor is measured on the compile and run of a hello-world program only;
 a library the compiler loads lazily on another path (for example its Python
 interop) is not traced. The runtime libraries keep their vendor `DT_RPATH`
-entries; `checks/run_checks.sh` requires every run path in a runnable
+entries; `tools/build/checks/run_checks.sh` requires every run path in a runnable
 directory's `lib/` to be `$ORIGIN`-relative, so an absolute one arriving with
 an upstream update fails the checks.
-`buck2 build checks//re_probe:probe` records what a worker provides.
+`buck2 build tools/build/checks//re_probe:probe` records what a worker provides.
 
 The client only downloads the pinned files and uploads them; on macOS
 (`tools/buck2` has a macos-aarch64 entry) buck2 works as a client, and every
@@ -346,16 +346,16 @@ property set, have the same action digests in both.
 
 ```sh
 git submodule add <komira-url> komira
-komira/tools/umbrella_buckconfig.sh komira > .buckconfig
+komira/tools/build/umbrella_buckconfig.sh komira > .buckconfig
 ```
 
-`tools/umbrella_buckconfig.sh` prints the cells komira declares, moved under
+`tools/build/umbrella_buckconfig.sh` prints the cells komira declares, moved under
 the mount point with their names unchanged, and copies `[cell_aliases]`,
 `[external_cells]`, `[buildfile]`, `[parser]` and `[buck2_re_client]`. Buck2
 registers cells only from the project root's `.buckconfig` (and does not
 follow `<file:...>` includes there), so the outer repository has to restate
 them; regenerate the output whenever the submodule moves. The mount path may
-be nested (`checks/umbrella_cache.sh` builds at `komira` and at
+be nested (`tools/build/checks/umbrella_cache.sh` builds at `komira` and at
 `third_party/komira`). Then add the outer repository's own root cell and
 execution platform. Buck2 merges repeated sections, so these can follow the
 generated block in the same file as a second `[cells]` (the recipe above
@@ -371,8 +371,8 @@ append, or paste the generated block into a hand-maintained `.buckconfig`):
 ```
 
 ```python
-# platforms/BUCK in the outer repository
-load("@komira//platforms:defs.bzl", "komira_execution_platforms")
+# tools/build/platforms/BUCK in the outer repository
+load("@komira//tools/build/platforms:defs.bzl", "komira_execution_platforms")
 
 komira_execution_platforms(
     name = "remote",
@@ -384,20 +384,20 @@ komira_execution_platforms(
 ```
 
 The property sets may be written inline or read with
-`re_properties("<key>")` from a `[komira_re]` section, as //platforms/remote
+`re_properties("<key>")` from a `[komira_re]` section, as //tools/build/platforms/remote
 does. The generated `[buck2_re_client]` already carries
 `max_total_batch_size = 1048576`; the outer repository adds only its
 endpoints (in `.buckconfig` or `.buckconfig.local`) and must not raise that
 value, since a server whose message limit is below buck2's default batch size
 then fails `BatchReadBlobs`. Build komira targets as
-`buck2 build komira//examples/...`.
+`buck2 build komira//tools/build/examples/...`.
 
 **The outer repository's own targets need a target platform too.**
 `target_platform_detector_spec` is a single key: an outer `[parser]` section
 that sets it replaces komira's value, dropping komira's mappings, which
 changes the configurations and so the action digests. Append the outer
 repository's cells to the one generated line instead, leaving komira's
-entries unchanged, e.g. `... target:umbrella//...->komira//platforms:linux-x86_64`.
+entries unchanged, e.g. `... target:umbrella//...->komira//tools/build/platforms:linux-x86_64`.
 
 What keeps the digests equal:
 
@@ -407,20 +407,20 @@ What keeps the digests equal:
   `buck-out`.
 - **Execution platform name.** `komira_execution_platforms` names each
   platform after the abstract configuration it realizes
-  (`komira//platforms:exec-mojo`, ...), not after the target that declares it.
+  (`komira//tools/build/platforms:exec-mojo`, ...), not after the target that declares it.
   That name keys the configuration of the toolchain, and so the toolchain's
   output paths. An execution platform declared some other way must do the
   same.
 - **Target platform.** Every komira cell maps to
-  `komira//platforms:linux-x86_64` in `[parser]`, copied unchanged.
-  `//platforms` holds only abstract constraints; the standalone remote
-  platform lives in `//platforms/remote`, which the outer repository never
+  `komira//tools/build/platforms:linux-x86_64` in `[parser]`, copied unchanged.
+  `//tools/build/platforms` holds only abstract constraints; the standalone remote
+  platform lives in `//tools/build/platforms/remote`, which the outer repository never
   loads.
 - **Worker properties.** They are part of every action digest, so the outer
   repository must give each configuration the same property set as the
   checkouts it wants to share a cache with.
 
-`checks/umbrella_cache.sh` builds the examples in a fresh standalone clone and
+`tools/build/checks/umbrella_cache.sh` builds the examples in a fresh standalone clone and
 then in a scratch umbrella repository mounting the working tree as a
 submodule, each with a fresh daemon, and fails unless every umbrella command
 is a cache hit and both builds report the same action digests.

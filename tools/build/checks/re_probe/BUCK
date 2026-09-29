@@ -1,0 +1,9 @@
+load(":probe.bzl", "re_probe")
+
+# Diagnostic: reports what a remote worker provides to an action. Its output
+# is the evidence for the host floor stated in tools/build/toolchains/README.md.
+# Not part of any build; build it explicitly: `buck2 build checks//re_probe:probe`.
+re_probe(
+    name = "probe",
+    toolchain = "toolchains//:mojo",
+)

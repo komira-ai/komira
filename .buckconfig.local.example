@@ -12,7 +12,8 @@
 
 [komira_re]
   # Exact REAPI platform property sets of your workers, as comma-separated
-  # key=value pairs, one per execution configuration (see platforms/BUCK).
+  # key=value pairs, one per execution configuration (see
+  # tools/build/platforms/BUCK).
   # Workers match a set exactly: a key the workers do not advertise leaves
   # actions queued until the scheduler gives up. Two keys may name the same
   # set if you have one kind of worker.
