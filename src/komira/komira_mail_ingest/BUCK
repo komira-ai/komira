@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The provider-neutral inbound-mail ingestion seam: exact-match recipients, the
+# account's single active route table, drop targets, and DKIM rotation — as pure
+# decisions over values, with no provider named.
+#
+# THE DEPS LIST IS EMPTY, AND THAT IS THE DESIGN. `mail_ingest.mojo` imports
+# nothing at all, so the neutrality is a build-graph fact: a package with no
+# edges cannot reach an AWS client. Provider implementations depend on THIS;
+# the edge points that way and never back. Do not add deps.
+#
+# The two welded tests are the falsifiers for the three hazards and for the one
+# receipt-rule name derivation. They assert on the refusal message's content,
+# not merely that something raised. Pure value transforms over in-code
+# fixtures: no socket, no credential, no clock.
+mojo_library(
+    name = "komira_mail_ingest",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_mail_ingest_hazards.mojo",
+        "tests/test_receipt_rule_name_one_derivation.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
