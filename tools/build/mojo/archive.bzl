@@ -16,7 +16,14 @@ load(":toolchain.bzl", "busybox_sh")
 _SCRIPT = """
 BB="$1"; shift
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-T="$PWD/.komira_action"
+# Private scratch. A remote action has its working directory to itself; a
+# local one runs in the checkout root next to every other local action, so
+# it takes the per-action scratch directory buck2 names in BUCK_SCRATCH_PATH.
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_action" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
+esac
 "$BB" mkdir -p "$T/bin" "$T/x"
 "$BB" --install -s "$T/bin"
 PATH="$T/bin"; export PATH

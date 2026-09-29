@@ -1,7 +1,7 @@
 {
  "format": 1,
  "generated_by": "python3 tools/kg/kg.py graph",
- "inputs": "e0fdb41bbb0e21837f4ccbea6b4324a7bc7678e8e9e33ceefed3c2edbb65521a",
+ "inputs": "214cfbd45b71fa697f4d730d2bb457cf10c18d801075d5e35d14feace79622df",
  "query": "kind(\".*\", //... + checks//... + toolchains//...)",
  "targets": {
   "checks//bundle_parity:parity": {

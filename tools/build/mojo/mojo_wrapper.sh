@@ -94,7 +94,14 @@ for a in "$@"; do
 done
 [ -n "$EXPECT" ] || { echo "mojo_wrapper: no -o <output> in compiler arguments" >&2; exit 2; }
 
-T="$PWD/.komira_action"
+# Private scratch. A remote action has its working directory to itself; a
+# local one runs in the checkout root next to every other local action, so
+# it takes the per-action scratch directory buck2 names in BUCK_SCRATCH_PATH.
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_action" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
+esac
 "$BB" mkdir -p "$T/bin" "$T/cc" "$T/home" "$T/tmp" "$T/cache" "$T/modular"
 "$BB" --install -s "$T/bin"
 PATH="$T/bin"
