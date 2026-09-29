@@ -1,7 +1,7 @@
 # lint.sh -- the action behind the lint rules in defs.bzl.
 # shellcheck shell=busybox
 #
-# usage: busybox sh lint.sh <busybox> <result.json> <kind> [tools...] -- <args...>
+# usage: busybox sh lint.sh <busybox> <result.json> <kind> <stage> <prefix> [tools...] -- <args...>
 #
 # Runs one lint over its inputs and writes <result.json>, the validation
 # result Buck2 reads (ValidationInfo): status
@@ -9,6 +9,9 @@
 # otherwise. The action itself succeeds either way; Buck2 fails any build or
 # test whose graph holds the target. Only the pinned busybox, and the pinned
 # tools passed in, run: PATH is busybox's applets and nothing else.
+# The files linted are copies under <stage> (a buck-out directory; see _stage
+# in defs.bzl); findings name them as <prefix><path in the package> instead,
+# e.g. komira//tools/build/mojo/run_check.sh.
 #
 # kinds:
 #   kind "shellcheck", tools <shellcheck>, args <file> <codes>...
@@ -28,8 +31,8 @@
 #       grpc:// or grpcs:// address outside the example.* domains.
 set -eu
 
-BB=$1 RESULT=$2 KIND=$3
-shift 3
+BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
+shift 5
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
 T="$PWD/.komira_action"
 "$BB" mkdir -p "$T/bin"
@@ -94,6 +97,10 @@ no_endpoint)
     ;;
 esac
 
+if [ -s "$REPORT" ]; then
+    sed "s#$STAGE/#$PREFIX#g" "$REPORT" > "$REPORT.named"
+    mv "$REPORT.named" "$REPORT"
+fi
 [ "$checked" -gt 0 ] || echo "$KIND: checked nothing (no inputs, or no lines to check)" >> "$REPORT"
 
 message() { # the report, as a JSON string body: at most 200 lines, escaped

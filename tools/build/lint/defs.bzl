@@ -24,11 +24,25 @@ _COMMON = {
     "_script": attrs.source(default = "komira//tools/build/lint:lint.sh"),
 }
 
-def _lint(ctx, kind, tools, args):
+def _stage(ctx, files):
+    """Copies source files into one output directory, keyed by their path in
+    the package, and returns {path: the copy}.
+
+    A source file's path in an action is relative to the project root, so it
+    differs between a standalone checkout and a repository mounting komira as
+    a cell (`komira/tools/...`), and so would the action digest. The copies
+    live under buck-out at the same path in both, so the lint actions share
+    cache entries across checkouts, as every other action here does.
+    """
+    staged = ctx.actions.copied_dir("lint_srcs", {f.short_path: f for f in files})
+    return staged, {f.short_path: staged.project(f.short_path) for f in files}
+
+def _lint(ctx, kind, tools, args, staged):
     result = ctx.actions.declare_output("validation.json")
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    package = ctx.label.package + "/" if ctx.label.package else ""
     ctx.actions.run(
-        cmd_args(bb, "sh", ctx.attrs._script, bb, result.as_output(), kind, tools, "--", args),
+        cmd_args(bb, "sh", ctx.attrs._script, bb, result.as_output(), kind, staged, "{}//{}".format(ctx.label.cell, package), tools, "--", args),
         category = "lint_" + kind,
     )
     return [
@@ -42,15 +56,16 @@ def _tool(dep):
 def _shell_lint_impl(ctx):
     if not ctx.attrs.srcs:
         fail("shell_lint {}: srcs is empty, so it would check nothing".format(ctx.label))
+    staged, copy = _stage(ctx, ctx.attrs.srcs)
     excludes = dict(ctx.attrs.excludes)
     pairs = []
     for src in ctx.attrs.srcs:
-        pairs.append(src)
+        pairs.append(copy[src.short_path])
         pairs.append(excludes.pop(src.short_path, "-"))
     if excludes:
         # An exclusion must not outlive the file it was written for.
         fail("shell_lint {}: excludes name {}, which is not in srcs; delete the entry".format(ctx.label, ", ".join(excludes.keys())))
-    return _lint(ctx, "shellcheck", [_tool(ctx.attrs._shellcheck)], pairs)
+    return _lint(ctx, "shellcheck", [_tool(ctx.attrs._shellcheck)], pairs, staged)
 
 shell_lint_rule = rule(
     impl = _shell_lint_impl,
@@ -65,7 +80,9 @@ shell_lint_rule = rule(
 def _workflow_lint_impl(ctx):
     if not ctx.attrs.srcs:
         fail("workflow_lint {}: srcs is empty, so it would check nothing".format(ctx.label))
-    return _lint(ctx, "actionlint", [_tool(ctx.attrs._actionlint), _tool(ctx.attrs._shellcheck), ctx.attrs.config], ctx.attrs.srcs)
+    staged, copy = _stage(ctx, [ctx.attrs.config] + ctx.attrs.srcs)
+    tools = [_tool(ctx.attrs._actionlint), _tool(ctx.attrs._shellcheck), copy[ctx.attrs.config.short_path]]
+    return _lint(ctx, "actionlint", tools, [copy[s.short_path] for s in ctx.attrs.srcs], staged)
 
 workflow_lint_rule = rule(
     impl = _workflow_lint_impl,
@@ -79,7 +96,8 @@ workflow_lint_rule = rule(
 )
 
 def _action_pins_impl(ctx):
-    return _lint(ctx, "action_pins", [], ctx.attrs.srcs)
+    staged, copy = _stage(ctx, ctx.attrs.srcs)
+    return _lint(ctx, "action_pins", [], [copy[s.short_path] for s in ctx.attrs.srcs], staged)
 
 action_pins_rule = rule(
     impl = _action_pins_impl,
@@ -88,7 +106,9 @@ action_pins_rule = rule(
 )
 
 def _no_endpoint_impl(ctx):
-    return _lint(ctx, "no_endpoint", [], [ctx.attrs.buckconfig, ctx.attrs.gitignore] + ctx.attrs.srcs)
+    files = [ctx.attrs.buckconfig, ctx.attrs.gitignore] + ctx.attrs.srcs
+    staged, copy = _stage(ctx, files)
+    return _lint(ctx, "no_endpoint", [], [copy[f.short_path] for f in files], staged)
 
 no_endpoint_rule = rule(
     impl = _no_endpoint_impl,
