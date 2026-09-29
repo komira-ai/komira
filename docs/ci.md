@@ -97,6 +97,10 @@ git push origin FETCH_HEAD:refs/heads/ci/pr-<N>
 
 The run tests exactly the commit the maintainer pushed.
 
+A skipped job satisfies a required status check, so a fork's pull request
+shows `farm` as passed without having run it. Merge a fork's change only
+after its commit has a `farm` run from a branch of this repository.
+
 Pull requests opened by Dependabot also receive no repository secrets, so
 their `farm` job fails at the tailnet step. Push the change to a branch of
 this repository to test it on the farm.
