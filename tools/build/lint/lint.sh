@@ -35,6 +35,12 @@
 #       group and cancels it for a newer one, so a group shared by pushes
 #       loses the middle push's run. Checks nothing, so fails, when no
 #       workflow is push-triggered.
+#   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
+#       Every relative link and #anchor in every .md file under <tree> resolves
+#       to a file, directory or heading under <tree>, with each further tree
+#       (another cell's) placed at its <path>. <unchecked> is `-` or a
+#       comma-separated list of .md paths left out (planted dead links).
+#       The reader is `inspect doc-links` (tools/build/inspect).
 set -eu
 
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
@@ -130,6 +136,36 @@ push_verdicts)
             sed 1d "$T/pv.txt" >> "$REPORT"
         fi
     done
+    ;;
+doc_links)
+    INSPECT=$(abs "$1"); shift
+    [ "$1" = -- ] && shift
+    tree=$(cd "$1" && pwd -P)
+    unchecked=$2
+    shift 2
+    if [ $# -gt 0 ]; then
+        # Other cells' trees, each at its path: merge them into one copy.
+        "$BB" cp -R "$tree" "$T/merged"
+        "$BB" chmod -R u+w "$T/merged"
+        while [ $# -ge 2 ]; do
+            "$BB" mkdir -p "$T/merged/$1"
+            "$BB" cp -R "$2/." "$T/merged/$1/"
+            shift 2
+        done
+        tree=$(cd "$T/merged" && pwd -P)
+    fi
+    # Every file and link staged under the tree, as `git ls-files -z` lists
+    # a checkout: the Markdown reader checks each .md among them.
+    (cd "$tree" && find . \( -type f -o -type l \) -print) | sed 's#^\./##' |
+        awk -v u="$unchecked" 'BEGIN { n = split(u, a, ","); for (i = 1; i <= n; i++) skip[a[i]] = 1 } !($0 in skip)' | tr '\n' '\000' > "$T/tree.list"
+    if "$INSPECT/inspect" doc-links "$tree" "$T/tree.list" > "$T/doc_links.txt" 2>&1; then
+        checked=$(sed -n 's/^PASS  doc links: all \([0-9]*\) relative links resolve$/\1/p' "$T/doc_links.txt")
+    else
+        checked=$(sed -n 's/^FAIL  doc links: [0-9]* of \([0-9]*\) .*/\1/p' "$T/doc_links.txt")
+        grep -v '^PASS' "$T/doc_links.txt" >> "$REPORT" || true
+        [ -s "$REPORT" ] || echo "inspect doc-links failed without a finding" >> "$REPORT"
+    fi
+    checked=${checked:-0}
     ;;
 *)
     echo "lint.sh: unknown kind $KIND" >&2

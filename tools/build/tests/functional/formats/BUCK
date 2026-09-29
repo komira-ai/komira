@@ -1,4 +1,5 @@
 load("@komira//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # A bundle holding a file whose path in the tarball and the image is over 100
 # bytes, which a ustar header cannot hold: komira_pack writes a PAX header for
@@ -19,4 +20,12 @@ oci_image(
     name = "long_image",
     bundle = ":long_bundle",
     repository = "komira/hello-long",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

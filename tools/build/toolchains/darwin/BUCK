@@ -2,6 +2,7 @@ load("@komira//tools/build/platforms:defs.bzl", "darwin_macos_hosts")
 load("@komira//tools/build/mojo:darwin.bzl", "dyld_script", "mojo_darwin_link", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Every target below except the pinned download exists for darwin-arm64 only,
 # so each states it: a wildcard (`buck2 build toolchains//...`) on a checkout
@@ -114,4 +115,12 @@ mojo_darwin_toolchain(
     # silicon generation, so a built binary runs on every Apple silicon Mac.
     target_cpu = "apple-m1",
     visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

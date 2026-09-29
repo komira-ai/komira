@@ -1,4 +1,4 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree", "shell_lint")
 
 # Scripts and tool sources used by the Mojo rules.
 export_file(name = "mojo_wrapper.sh", visibility = ["PUBLIC"])
@@ -19,4 +19,12 @@ shell_lint(
     name = "shell_lint",
     srcs = glob(["*.sh"]),
     visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

@@ -5,10 +5,10 @@
 # build every target, and a target cannot build unless the tests welded to
 # it, and to each of its dependencies, pass and every lint that guards it is
 # clean (lints are validations, tools/build/lint). `./buck2 test //...` runs
-# the standalone tests. The last step checks what a build of //... does not:
-# buck2's own behaviour (where actions ran, cache identity, refusals), and
-# the repository's file list, which no build action sees (Markdown links). A contributor runs the same commands
-# locally; the last one needs a Linux x86_64 client.
+# the standalone tests. The last step tests what a build of //... does not:
+# buck2's own behaviour (where actions ran, cache identity, refusals). A
+# contributor runs the same commands locally; the last one needs a Linux
+# x86_64 client.
 #
 # The farm connection comes from the runner's machine-wide buckconfig, not
 # from this repository: the job reads no secret and names no environment.

@@ -36,8 +36,10 @@ tools/build/tests/run_tests.sh
      [tools/build/tests](../tools/build/tests/README.md) included (their
      own cell, reached through `//:tests_lints`); actionlint over the
      workflows; every `uses:` pinned to a commit SHA; every push to `main`
-     in a concurrency group of its own; and no remote-execution endpoint in
-     a committed file. The lint of the scripts the Mojo and Rust rules run
+     in a concurrency group of its own; no remote-execution endpoint in a
+     committed file; and every relative link and anchor in the repository's
+     Markdown resolving (`//:docs`, a `markdown_docs` target). The lint of
+     the scripts the Mojo and Rust rules run
      is reached through their toolchains, so no Mojo or Rust target builds
      while one of those scripts has a finding. The linters are pinned
      downloads, run on the farm like any other action.
@@ -47,18 +49,14 @@ tools/build/tests/run_tests.sh
    tests what a build of `//...` does not: where actions ran, cache
    identity across checkouts, analysis-time refusals, a `buck2 run` from a
    fresh clone, targets that must fail by design (the `tests` cell), and
-   the `./buck2` bootstrap. One of its tests reads the repository's file
-   list, which no build action can see (an action sees only the inputs its
-   target declares): every Markdown link resolves to a tracked file
-   (`doc_links.sh`). It needs a Linux x86_64 client, and refuses any
+   the `./buck2` bootstrap. It needs a Linux x86_64 client, and refuses any
    other (exit 2), because it runs binaries the farm built for Linux x86_64,
    and `readelf`/`objdump`, on the client.
 
 A contributor on Linux x86_64 runs the same three commands; on another
 client (macOS arm64) the first two. A green local
 `./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
-prove; it does not prove the file-list test above, so a dead Markdown
-link is found by `run_tests.sh`, not by the build.
+prove, dead Markdown links included (`//:docs`).
 
 There is no publish step yet. When release targets exist, publishing is a
 step after these, on pushes to `main` only, of artifacts the same job built.
@@ -72,7 +70,7 @@ step after these, on pushes to `main` only, of artifacts the same job built.
 - It holds `git`, and what [`./buck2`](../buck2) needs: `sh`, `curl`, `zstd`
   and `sha256sum`. `run_tests.sh` also needs `readelf` and `objdump`, and
   `docker` for the image run leg of the format test (skipped without it).
-  Its JSON, tar and Mach-O reads and the doc link test are a Mojo tool,
+  Its JSON, tar and Mach-O reads are a Mojo tool,
   [`//tools/build/inspect:inspect`](../tools/build/inspect/inspect.mojo),
   built on the farm like any other target.
 - The farm connection is **machine configuration**, not repository

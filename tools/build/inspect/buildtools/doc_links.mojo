@@ -1,7 +1,12 @@
 """Every relative link in the tracked Markdown resolves.
 
-The rules are the ones tools/build/tests/functional/doc_links.sh documents. The input is
-the root (a real path) and the list of paths git tracks under it.
+A link resolves when its target, relative to the Markdown file, is a listed
+file or a directory holding one, stays inside the root, and a `#fragment`
+names a heading of the target Markdown file (GitHub's slugs). Links in code
+spans and fenced blocks, and URLs with a scheme, are not checked. The input
+is the root (a real path) and the list of paths under it that count as
+present: `git ls-files -z` output, or every file of a staged tree (the
+markdown_docs validation, tools/build/lint).
 """
 
 from std.os.path import exists, isfile, lexists, realpath

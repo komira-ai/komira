@@ -1,6 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load("@komira//tools/build/mojo:toolchain.bzl", "mojo_toolchain")
 load(":defs.bzl", "compiler_without_member")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The compiler closure minus one runtime library it needs.
 compiler_without_member(
@@ -24,4 +25,12 @@ mojo_binary(
     name = "hello_incomplete_toolchain",
     srcs = ["hello.mojo"],
     toolchain = ":incomplete_toolchain",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

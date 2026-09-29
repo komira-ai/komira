@@ -62,12 +62,17 @@ The rules, their attributes and sub-targets are described in
 [tools/build/mojo/README.md](tools/build/mojo/README.md), with the
 [examples](tools/build/examples/) that use each one.
 
-A build is also the lint: shellcheck, actionlint and the repository checks
-are validations ([tools/build/lint/defs.bzl](tools/build/lint/defs.bzl)), and
+A build is also the lint: shellcheck, actionlint, the repository checks and
+the Markdown link check (`//:docs`: every relative link and `#anchor`
+resolves) are validations ([tools/build/lint/defs.bzl](tools/build/lint/defs.bzl)), and
 the scripts the Mojo and Rust rules run are linted through their toolchains,
 so `./buck2 build //...` fails with `Validation for <target> failed:` and the
 findings. A new shell script belongs in the `srcs` of the `shell_lint` target
-of the rule or package that runs it.
+of the rule or package that runs it. A new package declares
+`doc_tree(name = "doc_tree", srcs = glob(["**"]))` and is added to the
+`packages` of `//:docs` (of `tests//:doc_tree` in the tests cell), so the
+link check reads its files; test 17 of `tools/build/tests/run_tests.sh`
+fails on a package that is not there.
 
 Mojo compiles take a lot of memory. Buck2 runs as many local actions at once
 as the machine has cores; on a machine with less than a few GB of memory per
@@ -198,7 +203,7 @@ the undeclared package in the checkout. Test 25, that a fresh clone with no
 
 `run_tests.sh` runs `./buck2`; `BUCK2=...` overrides it. Besides buck2 it
 runs `git`, `readelf`, `objdump`, `curl` and `zstd` on the client, and no
-Python: the JSON, tar and Mach-O reads and the doc link test are a Mojo tool
+Python: the JSON, tar and Mach-O reads are a Mojo tool
 ([tools/build/inspect](tools/build/inspect/inspect.mojo)) the tests build on
 the farm like any other target. Logs and the scratch checkouts of the umbrella and `./buck2 run`
 tests go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk

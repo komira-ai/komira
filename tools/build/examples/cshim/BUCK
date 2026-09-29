@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The C sources, copied into buck-out so that their compile has one digest
 # wherever komira is mounted (see staged_files).
@@ -41,4 +42,12 @@ mojo_test(
     name = "test_add_direct",
     srcs = ["test_add_direct.mojo"],
     deps = [":add"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

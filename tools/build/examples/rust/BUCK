@@ -1,4 +1,5 @@
 load("@komira//tools/build/rust:defs.bzl", "rust_binary")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # A Rust binary using a derive macro from a registry crate: exercises the
 # pinned toolchain, a proc-macro, the rlib closure and the zig link.
@@ -9,4 +10,12 @@ rust_binary(
     deps = ["//third_party/rust:prost"],
     # field 1 (string "hi"), field 2 (varint 300).
     expected_stdout = "0a 02 68 69 10 ac 02\nhi 300\n",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Indexing a List records the source location of the index, so the binary
 # holds the path of main.mojo. It must be a path that is the same in every
@@ -8,4 +9,12 @@ mojo_binary(
     name = "main",
     srcs = ["main.mojo"],
     expected_stdout = "7\n",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

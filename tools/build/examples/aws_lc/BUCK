@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # aws-lc's libcrypto called from Mojo: its own self tests, then SHA-256,
 # AES-128 and ChaCha20 known-answer vectors. Building `[run_check]` runs it
@@ -10,4 +11,12 @@ mojo_binary(
     # A test program, not shipped: tests compile at -O1.
     optimization_level = "1",
     expected_stdout = "BORINGSSL_self_test: ok\nSHA-256: ok\nAES-128: ok\nChaCha20: ok\n",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

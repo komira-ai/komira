@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:proto.bzl", "protoc_dist")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # protoc 29.1, the release build for linux x86_64 (a static executable),
 # with the well-known-type .proto files under include/.
@@ -20,3 +21,11 @@ protoc_dist(
 # The toolchain of mojo_proto_library, `toolchains//:mojo_proto` (protoc and
 # the plugin), is declared by komira_proto_toolchains() in ../defs.bzl,
 # which komira_toolchains() calls in the root repository's `toolchains` cell.
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
+)

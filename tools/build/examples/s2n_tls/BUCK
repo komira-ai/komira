@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 staged_files(
     name = "c_srcs",
@@ -24,4 +25,12 @@ mojo_binary(
     # A test program, not shipped: tests compile at -O1.
     optimization_level = "1",
     expected_stdout = "s2n_init: ok\nhandshake: TLS 1.3, certificate verified, ping/pong exchanged\n",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

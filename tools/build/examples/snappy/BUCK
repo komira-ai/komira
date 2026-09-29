@@ -1,8 +1,17 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # snappy (C++, with zig's libc++) called from Mojo through its C API.
 mojo_test(
     name = "test_snappy",
     srcs = ["test_snappy.mojo"],
     deps = ["//third_party/snappy:snappy"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

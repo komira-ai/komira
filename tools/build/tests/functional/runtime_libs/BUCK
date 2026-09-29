@@ -1,4 +1,5 @@
 load(":defs.bzl", "compiler_loader_trace")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Which libstdc++.so.6 / libgcc_s.so.1 the compiler really loads, recorded by
 # the loader during a real compile. tools/build/tests/run_tests.sh requires
@@ -6,4 +7,12 @@ load(":defs.bzl", "compiler_loader_trace")
 compiler_loader_trace(
     name = "loader_trace",
     src = "hello.mojo",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

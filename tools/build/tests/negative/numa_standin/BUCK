@@ -1,4 +1,5 @@
 load("@komira//tools/build/platforms:defs.bzl", "re_properties", "remote_execution_platforms")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # A deliberately misconfigured set of execution platforms, for test 11 only:
 # `exec-mojo-multi-numa` is realized by the SAME single-NUMA workers as
@@ -10,7 +11,13 @@ load("@komira//tools/build/platforms:defs.bzl", "re_properties", "remote_executi
 # passes the two property sets into this cell (`-c tests//komira_re.<key>=`,
 # since `.buckconfig.local` configures the root cell only), and requires the
 # multi-NUMA run to refuse to start.
-remote_execution_platforms(
+#
+# Declared only when this cell is given both property sets, as run_tests.sh
+# does: without them re_properties fails at load, and the package must load
+# for its doc_tree (//:docs).
+_PROPS = [read_config("komira_re", "mojo_compile_properties"), read_config("komira_re", "light_properties")]
+
+[remote_execution_platforms(
     name = "single_numa_standin",
     names = ["mojo_compile", "light", "mojo_compile_multi_numa"],
     constraints = [
@@ -23,4 +30,12 @@ remote_execution_platforms(
         re_properties("light_properties"),
         re_properties("mojo_compile_properties"),
     ],
+) for _ in ([1] if all(_PROPS) else [])]
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

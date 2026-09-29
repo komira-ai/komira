@@ -32,9 +32,10 @@ do:
 
 A test with both halves keeps one package name in each, for example
 `tests//functional/known_failing` (a hold that works) and
-`tests//negative/known_failing` (the holds that must be refused). The
-directory's own scripts are linted by `shell_lint` targets that the root
-`//:tests_lints` names. At the top of this directory are the driver,
+`tests//negative/known_failing` (the holds that must be refused).
+`functional/` and `negative/` are not packages themselves: their
+scripts belong to the root package of the cell, and are linted by `tests//:shell_lint`, which the root `//:tests_lints`
+names. At the top of this directory are the driver,
 [`tool_lib.sh`](tool_lib.sh), and the sections the driver sources
 ([`cxx_tests.sh`](cxx_tests.sh), [`rust_tests.sh`](rust_tests.sh),
 [`proto_tests.sh`](proto_tests.sh), [`c_libs_tests.sh`](c_libs_tests.sh)).
@@ -302,21 +303,30 @@ of the loaded image prints the greeting (SKIP without docker). See
 
 ## 17. Doc links
 
-Every relative link in the repository's Markdown resolves: the target is a
-file tracked by git, or a directory holding one (a link to an ignored file
-such as `.buckconfig.local` resolves in a working tree and is dead in a fresh
-clone), it stays inside the repository, and a `#fragment` names a heading of
-the target file. [`doc_links.sh`](functional/doc_links.sh) runs on its own. It needs
-the build farm only to build the Mojo tool that reads the links
-([`//tools/build/inspect:inspect`](../inspect/inspect.mojo)), plus `git` on
-the client and a git work tree to read. `run_tests.sh` first runs it on a
-planted git tree and requires it
-to name each of a missing file, a bad anchor, a link leaving the tree and a
-link to an untracked file, and nothing else.
+Markdown links are a validation of the build.
+[`markdown_docs`](../lint/defs.bzl) builds nothing; its validation stages the
+files it names and requires every relative link and `#fragment` in every
+Markdown file among them to resolve to a staged file, directory or heading,
+without leaving the staged tree (the Markdown reader of
+[`//tools/build/inspect`](../inspect/inspect.mojo)). `//:docs` in the root
+[`BUCK`](../../../BUCK) stages the whole repository and so checks every
+Markdown file in it: `./buck2 build //...` fails on a dead link, naming it.
+It collects the `doc_tree` target of every package, which names that
+package's own files (a glob stops at a subpackage), and this cell's through
+`tests//:doc_tree`.
+The test builds `//:docs` and
+[`functional/doc_links`](functional/doc_links/BUCK) (a directory, headings and
+a file of `tree`, which must resolve), and requires
+[`negative/doc_links`](negative/doc_links/BUCK) to fail naming each of its
+planted links: a missing file, a bad anchor and a link leaving the tree, and
+nothing else. It also requires every package of the komira and tests cells
+to be in `//:docs`, and neither cell to set
+`[project] package_boundary_exceptions`: an exception is a path prefix, so
+one that covers the root package covers every package, and any target could
+then name a file of another package.
 
 ```sh
-tools/build/tests/functional/doc_links.sh            # the repository
-tools/build/tests/functional/doc_links.sh <dir>      # any other git work tree
+./buck2 build //:docs
 ```
 
 ## 18. Configuration hashes

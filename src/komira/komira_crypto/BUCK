@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,
 # AES-GCM and ChaCha20-Poly1305, X25519, Ed25519, ECDSA P-256 / P-384, RSA
@@ -73,4 +74,12 @@ mojo_library(
         "tests/test_zeroize_on_drop.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

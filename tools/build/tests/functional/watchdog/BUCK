@@ -1,4 +1,4 @@
-load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree", "shell_lint")
 load(":defs.bzl", "mojo_watchdog_cases")
 
 # Every verdict of the compile watchdog in mojo_wrapper.sh, on stand-in
@@ -12,4 +12,12 @@ shell_lint(
     name = "shell_lint",
     srcs = ["cases.sh"],
     visibility = ["komira//:tests_lints"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

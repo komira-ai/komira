@@ -103,10 +103,14 @@
 #      base layers are checked; the base is fetched only by pinned
 #      downloads; `docker run` of the loaded image prints the greeting (SKIP
 #      without docker).
-#  17. Every relative link in the repository's Markdown resolves to a tracked
-#      file (doc_links.sh), and on a planted git tree the link checker names
-#      a missing file, a bad #anchor, a link leaving the tree and a link to an
-#      untracked file.
+#  17. Markdown links are a validation of the build: //:docs (every Markdown
+#      file of the repository) and tests//functional/doc_links:ok build, and
+#      tests//negative/doc_links:dead fails naming a missing file, a bad
+#      #anchor and a link leaving the tree. Every package of the komira and
+#      tests cells is in //:docs through its doc_tree, and neither cell sets
+#      `[project] package_boundary_exceptions` (a prefix covering one package
+#      covers every package under it, so a target could own another
+#      package's files).
 #  18. The configuration hashes of exec-light, exec-mojo and linux-x86_64 equal
 #      their pins: they are in the digest of every configured action.
 #  19. What a repository using komira as a cell loads names no cell but
@@ -656,36 +660,58 @@ done < "$LOG/formats.log"
 grep -qE '^(PASS|FAIL)  formats ' "$LOG/formats.log" || fail "formats: tools/build/tests/functional/formats.sh reported nothing (see $LOG/formats.log)"
 
 # 17
-# The planted tree is a git repository with one link per diagnostic, plus two
-# links that must resolve (a tracked directory, a real heading): the checker
-# must name each dead link with its reason, and only those.
-P="$LOG/doc_links_planted"
-mkdir -p "$P/sub"
-printf '# planted\n\n[ok](sub/)\n[dead](sub/missing.md)\n[anchor](sub/a.md#nope)\n[escape](../outside.md)\n[untracked](sub/untracked.md)\n[heading](sub/a.md#a)\n' > "$P/README.md"
-printf '# A\n' > "$P/sub/a.md"
-printf '# untracked\n' > "$P/sub/untracked.md"
-git -C "$P" init -q && git -C "$P" add README.md sub/a.md
-PLANTED=(
-    'README.md:4: sub/missing.md (no such file)'
-    'README.md:5: sub/a.md#nope (no heading #nope)'
-    'README.md:6: ../outside.md (leaves the repository)'
-    'README.md:7: sub/untracked.md (not tracked by git)'
-    'FAIL  doc links: 4 of 6 relative links do not resolve'
+# //:docs is the repository's Markdown: its validation fails on a dead link.
+# The negative fixture plants one link per diagnostic beside two that
+# resolve; the validation must name each dead one with its reason, and only
+# those.
+expect_green docs //:docs tests//functional/doc_links:ok
+DEAD=(
+    'dead.md:4: sub/missing.md (no such file)'
+    'dead.md:5: sub/a.md#nope (no heading #nope)'
+    'dead.md:6: ../outside.md (leaves the repository)'
+    'doc links: 3 of 5 relative links do not resolve'
 )
 missed=""
-if "$ROOT/tools/build/tests/functional/doc_links.sh" "$P" > "$LOG/doc_links_planted.log" 2>&1; then
-    missed="(it passed)"
+if "$BUCK2" build tests//negative/doc_links:dead > "$LOG/doc_links_dead.log" 2>&1; then
+    missed="(it built)"
 else
-    for want in "${PLANTED[@]}"; do
-        grep -qF "$want" "$LOG/doc_links_planted.log" || missed="$missed [$want]"
+    for want in "${DEAD[@]}"; do
+        grep -qF "$want" "$LOG/doc_links_dead.log" || missed="$missed [$want]"
     done
 fi
 if [ -n "$missed" ]; then
-    fail "doc links: on the planted tree the checker missed $missed (see $LOG/doc_links_planted.log)"
-elif "$ROOT/tools/build/tests/functional/doc_links.sh" > "$LOG/doc_links.log" 2>&1; then
-    pass "doc links: $(grep -o 'all [0-9]* relative links resolve' "$LOG/doc_links.log"); planted missing, bad-anchor, escaping and untracked links are each caught"
+    fail "doc links: tests//negative/doc_links:dead must fail naming each planted link; missed $missed (see $LOG/doc_links_dead.log)"
 else
-    fail "$(grep -m1 '^FAIL' "$LOG/doc_links.log" | cut -c 7-) $(grep '^dead link' "$LOG/doc_links.log" | head -n 3 | cut -c 12- | tr '\n' ' ')(see $LOG/doc_links.log)"
+    pass "doc links: tests//negative/doc_links:dead fails naming its missing file, bad anchor and escaping link"
+fi
+# Each package names its own files (a glob stops at a subpackage), and
+# //:docs collects every package's doc_tree: a package left out would drop
+# its Markdown from the check without a word.
+pkgs() { sed -e 's/:[^:]*$//' | LC_ALL=C sort -u; }
+if "$BUCK2" uquery '//... + tests//...' > "$LOG/doc_pkgs_all.txt" 2> "$LOG/doc_pkgs.log" &&
+   "$BUCK2" uquery 'kind(doc_tree, deps(//:docs))' > "$LOG/doc_pkgs_docs.txt" 2>> "$LOG/doc_pkgs.log"; then
+    missing=$(LC_ALL=C comm -23 <(pkgs < "$LOG/doc_pkgs_all.txt") <( (pkgs < "$LOG/doc_pkgs_docs.txt"; echo komira//) | LC_ALL=C sort -u) | tr '\n' ' ')
+    n=$(pkgs < "$LOG/doc_pkgs_all.txt" | wc -l)
+    if [ "$n" -lt 2 ]; then
+        fail "doc links: \`uquery //... + tests//...\` found $n packages (see $LOG/doc_pkgs_all.txt)"
+    elif [ -n "$missing" ]; then
+        fail "doc links: packages with no doc_tree in //:docs: $missing"
+    else
+        pass "doc links: all $n packages of the komira and tests cells are in //:docs, each through its own doc_tree"
+    fi
+else
+    fail "doc links: the package queries failed (see $LOG/doc_pkgs.log)"
+fi
+exc=""
+for cell in komira tests; do
+    v=$("$BUCK2" audit config --cell "$cell" project.package_boundary_exceptions 2>> "$LOG/doc_pkgs.log") || { exc="$exc $cell:(audit failed)"; continue; }
+    v=$(printf '%s\n' "$v" | grep -v '^\[' | grep -v '^ *$' || true)
+    [ -z "$v" ] || exc="$exc $cell:[$v]"
+done
+if [ -n "$exc" ]; then
+    fail "package boundaries: [project] package_boundary_exceptions is set:$exc (see $LOG/doc_pkgs.log)"
+else
+    pass "package boundaries: neither cell sets [project] package_boundary_exceptions"
 fi
 
 # 18

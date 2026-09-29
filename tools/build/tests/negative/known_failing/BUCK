@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Planted defects for mojo_library's `tests_known_failing` (test 27): a hold
 # whose test passes, a red test beside a hold, and every inadmissible ledger
@@ -108,4 +109,12 @@ mojo_library(
         "tests/test_fails.mojo": {"issue": "1", "reason": "fixture: held, one."},
         "tests/test_fails_too.mojo": {"issue": "2", "reason": "fixture: held, two."},
     },
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

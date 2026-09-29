@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Readers the tests and generators share: bytes and paths, SHA-256, JSON
 # (flattened, and Python's canonical form), tar members, Mach-O load
@@ -26,4 +27,12 @@ mojo_binary(
     srcs = ["inspect.mojo"],
     deps = [":buildtools"],
     visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

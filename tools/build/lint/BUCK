@@ -2,6 +2,7 @@
 # lint action script. linux x86_64 static binaries, run on the light workers.
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load(":defs.bzl", "shell_lint", "tar_member")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
@@ -36,4 +37,12 @@ shell_lint(
     name = "shell_lint",
     srcs = ["lint.sh"],
     visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

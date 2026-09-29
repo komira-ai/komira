@@ -145,6 +145,59 @@ lint_suite = rule(
     attrs = {"lints": attrs.list(attrs.dep())},
 )
 
+
+DocTreeInfo = provider(
+    doc = "The files of a doc_tree target and of the doc_tree targets it collects, keyed by their path in the cell.",
+    fields = {"files": provider_field(dict[str, Artifact])},
+)
+
+def _collect(prefix, srcs, packages):
+    # A source's short_path is relative to its package.
+    files = {prefix + f.short_path: f for f in srcs}
+    for p in packages:
+        files.update(p[DocTreeInfo].files)
+    return files
+
+def _markdown_docs_impl(ctx):
+    if not [f for f in ctx.attrs.srcs if f.short_path.endswith(".md")]:
+        fail("markdown_docs {}: no Markdown in `srcs`".format(ctx.label))
+    if ctx.attrs.packages and ctx.label.package:
+        fail("markdown_docs {}: `packages` stages files at their paths in the cell, so it is for a target of the cell's root package".format(ctx.label))
+    staged = ctx.actions.copied_dir("doc_tree", _collect("", ctx.attrs.srcs + ctx.attrs.tree, ctx.attrs.packages))
+    inspect = ctx.attrs._inspect[DefaultInfo].default_outputs[0]
+    args = [staged, ",".join(ctx.attrs.unchecked) or "-"]
+    for prefix, tree in sorted(ctx.attrs.cells.items()):
+        args += [prefix, tree[DefaultInfo].default_outputs[0]]
+    return _lint(ctx, "doc_links", [inspect], args, staged)
+
+def _doc_tree_impl(ctx):
+    files = _collect(ctx.label.package + "/" if ctx.label.package else "", ctx.attrs.srcs, ctx.attrs.packages)
+    return [
+        DefaultInfo(default_output = ctx.actions.copied_dir("tree", files)),
+        DocTreeInfo(files = files),
+    ]
+
+doc_tree = rule(
+    impl = _doc_tree_impl,
+    doc = "The files of one package (`srcs`, normally `glob([\"**\"])`, which stops at a subpackage), and those of the doc_tree targets in `packages`, staged at their paths in the cell (package path, then the path in the package). A markdown_docs target collects them through `packages`, or, for another cell, through `cells`. Each package names only its own files, so no target owns a file of another package.",
+    attrs = {
+        "srcs": attrs.list(attrs.source()),
+        "packages": attrs.list(attrs.dep(providers = [DocTreeInfo]), default = []),
+    },
+)
+
+markdown_docs_rule = rule(
+    impl = _markdown_docs_impl,
+    doc = "Markdown whose relative links must resolve. Building it does nothing; its validation stages `srcs` and `tree` at their paths in the package, and the files of the doc_tree targets in `packages` at their paths in the cell (so only a target of the cell's root package may name `packages`), and requires every relative link and `#anchor` in every Markdown file there to resolve to a staged file, directory or heading (the Markdown reader of //tools/build/inspect). `cells` places the tree of another cell (a doc_tree target there) at that cell's path. A link leaving the staged tree, or to a file none of them holds, is dead. `unchecked` names Markdown files (paths in the tree) whose links are not read: planted dead links of a negative test.",
+    attrs = _COMMON | {
+        "srcs": attrs.list(attrs.source()),
+        "cells": attrs.dict(attrs.string(), attrs.dep(), default = {}),
+        "packages": attrs.list(attrs.dep(providers = [DocTreeInfo]), default = []),
+        "tree": attrs.list(attrs.source(), default = []),
+        "unchecked": attrs.list(attrs.string(), default = []),
+        "_inspect": attrs.exec_dep(default = "komira//tools/build/inspect:inspect[runnable]"),
+    },
+)
 def _tar_member_impl(ctx):
     out = ctx.actions.declare_output(ctx.label.name)
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
@@ -196,3 +249,8 @@ def push_verdicts(**kwargs):
 
 def tar_member(**kwargs):
     tar_member_rule(**_light(kwargs))
+
+# Markdown: see markdown_docs_rule. The root BUCK applies it to the
+# repository's documentation (//:docs).
+def markdown_docs(**kwargs):
+    markdown_docs_rule(**_light(kwargs))

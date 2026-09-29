@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
 load("//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # A binary with no dependencies. `[run_check]` runs it remotely and compares
 # its stdout byte for byte.
@@ -59,4 +60,12 @@ mojo_test(
     name = "test_hellopkg",
     srcs = ["test_hellopkg.mojo"],
     deps = [":hellopkg"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

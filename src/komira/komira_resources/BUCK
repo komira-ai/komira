@@ -1,4 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Files a program reads at run time, found under its own share/ directory;
 # see resources.mojo. The test declares its fixtures as data, and one fixture
@@ -32,4 +33,12 @@ mojo_binary(
     name = "resources_probe",
     srcs = ["tests/resources_probe.mojo"],
     deps = ["//tools/build/mojo/runtime_paths:komira_runtime_paths"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )

@@ -1,4 +1,5 @@
 load(":probe.bzl", "re_probe")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Diagnostic: reports what a remote worker provides to an action. Its output
 # is the evidence for the host floor stated in tools/build/toolchains/README.md.
@@ -6,4 +7,12 @@ load(":probe.bzl", "re_probe")
 re_probe(
     name = "probe",
     toolchain = "toolchains//:mojo",
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["tests//:doc_tree"],
 )

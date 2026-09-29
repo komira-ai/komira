@@ -1,6 +1,7 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # google/snappy 1.2.2, BSD-3-Clause (COPYING in the archive).
 pinned_file(
@@ -75,4 +76,12 @@ cxx_library(
     header_namespace = "",
     preprocessor_flags = ["-DHAVE_CONFIG_H"],
     visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
 )
