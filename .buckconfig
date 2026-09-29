@@ -1,6 +1,6 @@
-# Buck2 project configuration. Remote-execution endpoints and the worker
-# property set are machine-specific and live in `.buckconfig.local`
-# (gitignored); see `.buckconfig.local.example`.
+# Buck2 project configuration. Every action runs on this machine unless
+# `.buckconfig.local` (gitignored) names a remote-execution service and its
+# worker property sets; see `.buckconfig.local.example`.
 
 [cells]
   komira = .
@@ -33,7 +33,9 @@
   target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:checks//...->komira//tools/build/platforms:linux-x86_64
 
 [build]
-  execution_platforms = komira//tools/build/platforms/remote:remote
+  # Local unless .buckconfig.local names a remote-execution service; see
+  # tools/build/platforms/default/BUCK.
+  execution_platforms = komira//tools/build/platforms/default:default
 
 [buck2_re_client]
   # Upper bound, in bytes, on the blobs buck2 packs into one BatchReadBlobs

@@ -85,7 +85,7 @@ cp "$ROOT/.buckconfig.local" "$W/standalone/"
 # depth 1 and 2, and one fetches it as a git external cell from a bare clone.
 # Each is configured as tools/build/consumer.buckconfig says: that file as its
 # .buckconfig, and its own toolchains/BUCK and platforms/BUCK copied from
-# tools/build/cells/toolchains/BUCK and tools/build/platforms/remote/BUCK.
+# tools/build/cells/toolchains/BUCK and tools/build/platforms/default/BUCK.
 "${GIT[@]}" clone -q --bare "$W/src" "$W/komira.git" || die "cannot make the bare clone"
 SHA=$("${GIT[@]}" -C "$W/src" rev-parse HEAD)
 make_consumer() { # checkout, mount path (empty: git external cell)
@@ -115,7 +115,7 @@ make_consumer() { # checkout, mount path (empty: git external cell)
     else
         cp "$W/src/tools/build/cells/toolchains/BUCK" "$W/$d/toolchains/BUCK"
     fi
-    cp "$W/src/tools/build/platforms/remote/BUCK" "$W/$d/platforms/BUCK"
+    cp "$W/src/tools/build/platforms/default/BUCK" "$W/$d/platforms/BUCK"
 }
 make_consumer umbrella komira
 make_consumer umbrella_deep third_party/komira

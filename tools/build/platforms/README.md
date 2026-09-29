@@ -4,9 +4,9 @@
 declares the target platform, two abstract execution constraints, and three
 execution configurations built from them. Nothing here names a service, a
 worker pool or a property set: the platforms that realize these
-configurations are registered by [`remote/BUCK`](remote/BUCK) for a
-standalone checkout, and by any repository that mounts komira for its own
-workers.
+configurations are registered by [`default/BUCK`](default/BUCK) for a
+standalone checkout (on this machine, or on a remote-execution service when
+`.buckconfig.local` names one), and by any repository that mounts komira.
 
 ## Target platform
 
@@ -45,6 +45,30 @@ the examples and the toolchain targets, and
 [check 12](../checks/README.md#12-action-platforms) that each action really
 ran with its platform's property set.
 
+## Local or remote
+
+[`default/BUCK`](default/BUCK) calls `komira_default_execution_platforms`
+([`defs.bzl`](defs.bzl)), which registers one of two sets:
+
+- **Local (the default).** When `[komira_re]` names no `light_properties` or
+  `mojo_compile_properties`, `komira_local_execution_platforms` registers
+  `exec-mojo` and `exec-light` with a local executor only: every action runs
+  on this machine, with no remote cache. It refuses a host that is not Linux
+  x86_64, since every toolchain action is a Linux x86_64 binary. It registers
+  no `exec-mojo-multi-numa` (nothing knows how many NUMA nodes the host has,
+  so a `mojo_multi_numa_test` fails to configure) and no macOS platform.
+- **Remote.** When `.buckconfig.local` names those property sets, it
+  registers exactly what `komira_execution_platforms` registers from them
+  (below).
+
+`[komira] execution = local | remote` (or `-c komira.execution=...` on one
+command) overrides the choice; the default is `auto`. Both sets register each
+platform under the label of the configuration it realizes, so a target's
+configuration, its output paths and its commands are the same either way: a
+remote action's digest does not depend on whether local execution exists.
+What a local action does and does not guarantee is in
+[DEVELOPMENT.md](../../../DEVELOPMENT.md#what-a-local-build-guarantees).
+
 ## Your own worker pools
 
 `komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None)`
@@ -56,7 +80,7 @@ own.
 
 A standalone checkout reads those sets from `[komira_re]` in
 `.buckconfig.local`, via `re_properties("<key>")`
-([`remote/BUCK`](remote/BUCK)):
+([`default/BUCK`](default/BUCK), through `komira_default_execution_platforms`):
 
 | `[komira_re]` key | configuration | required |
 |---|---|---|

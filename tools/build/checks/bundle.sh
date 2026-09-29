@@ -210,7 +210,9 @@ if [ "$uncached" = 1 ]; then
                 o=$(out_of "$t")
                 [ -n "$o" ] && [ -s "$o" ] || [ -d "$o" ] || problems="$problems build-$side-has-no-${t%%\\*}"
             done
-            grep -qE 'Commands: [0-9]+ \(cached: 0, remote: [1-9]' "$W/uncached_$side.log" || problems="$problems build-$side-did-not-execute"
+            # Remote runs, or local ones in a local-only run (KOMIRA_CHECKS_MODE).
+            if [ "${KOMIRA_CHECKS_MODE:-remote}" = local ]; then ran='Commands: [0-9]+ \(cached: 0, remote: 0, local: [1-9]'; else ran='Commands: [0-9]+ \(cached: 0, remote: [1-9]'; fi
+            grep -qE "$ran" "$W/uncached_$side.log" || problems="$problems build-$side-did-not-execute"
         fi
     done
     if [ -z "$problems" ] && ! cmp -s "$W/listing_a.txt" "$W/listing_b.txt"; then

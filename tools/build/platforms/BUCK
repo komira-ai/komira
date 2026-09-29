@@ -1,7 +1,8 @@
 # Abstract constraints and platforms only. Nothing here names a service, a
 # worker pool or a property set: the execution platforms that realize these
-# configurations are declared in //tools/build/platforms/remote for a standalone
-# checkout, and by any repository that mounts komira for its own workers.
+# configurations are declared in //tools/build/platforms/default for a
+# standalone checkout (local, or remote when `.buckconfig.local` names a
+# service), and by any repository that mounts komira.
 
 # Target platform for everything in this repo (see `[parser]` in .buckconfig).
 platform(

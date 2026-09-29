@@ -4,8 +4,18 @@
 # usage: tools/build/checks/run_checks.sh [--no-umbrella] [--no-run] [--no-uncached]
 #        (from the repo root; BUCK2 overrides the binary)
 #
+# Where the checks run is where this checkout builds: read from the execution
+# platforms buck2 registers (tools/build/platforms/default). With a
+# `.buckconfig.local` naming a remote-execution service (`[komira_re]`), every
+# action runs there and every check below runs. Without one, every action
+# runs on this machine: the script says so on its first line, and skips,
+# each with its own SKIP line, the checks that need a remote-execution service
+# (7, 9, 10's registered multi-NUMA platform, 11's hardware stand-in, 12 and
+# 24), and check 3, whose red needs the remote executor's input isolation. The remote and local executors are never mixed in one run.
+#
 #   1. The examples build and their run checks pass (stdout compared byte for
-#      byte), and every action that executed ran remotely.
+#      byte), and every action that executed ran on this checkout's executor
+#      (remotely, or locally in a local-only run).
 #   2. The gate: checks//libgate_bad fails with GATED TEST FAILED, while its
 #      [ungated] package builds -- the red comes from the test, not the compile.
 #      A binary depending on it fails the same way, and a binary naming its
@@ -110,6 +120,12 @@
 #      the farm), the macOS scripts against stand-ins, and, when the macOS
 #      workers are configured, a build and run check of
 #      //tools/build/examples:hello on them (tools/build/checks/darwin/check.sh).
+#  25. A fresh clone with no `.buckconfig.local` builds locally: in a scratch
+#      clone of the working tree, with no user or system buckconfig, every
+#      registered execution platform is local-only, Mojo and toolchain
+#      targets resolve to them, and forcing remote execution there refuses,
+#      naming `[komira_re]` (tools/build/checks/local_default.sh; resolution
+#      only, nothing is built). Runs in both modes.
 set -uo pipefail
 
 umbrella=1
@@ -136,6 +152,35 @@ fails=0
 
 pass() { echo "PASS  $1"; }
 fail() { echo "FAIL  $1"; fails=$((fails + 1)); }
+needs_remote() { echo "SKIP  $1: needs a remote-execution service; this run is local-only (DEVELOPMENT.md, step 3)"; }
+
+# Local or remote: read from the executor of every execution platform buck2
+# registers, so `-c`, a user buckconfig and `.buckconfig.local` all count.
+EP=$("$BUCK2" audit config build.execution_platforms --style json 2> "$LOG/mode.err" |
+    python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2>> "$LOG/mode.err")
+if [ -z "$EP" ] || ! "$BUCK2" audit providers "$EP" > "$LOG/mode.txt" 2>> "$LOG/mode.err"; then
+    echo "FAIL  mode: cannot read the registered execution platforms (see $LOG/mode.err)"
+    exit 1
+fi
+n_platforms=$(grep -c 'executor_config=' "$LOG/mode.txt")
+n_local=$(grep -c 'executor: Local(' "$LOG/mode.txt")
+if [ "$n_platforms" = 0 ]; then
+    echo "FAIL  mode: $EP registers no execution platform (see $LOG/mode.txt)"
+    exit 1
+elif [ "$n_local" = "$n_platforms" ]; then
+    MODE=local
+    EXEC_RE='^local'
+    echo "MODE  local: no remote-execution service is configured, so every action of these checks runs on this machine ($n_platforms local execution platforms from $EP)."
+    echo "      Skipped here, they need one: 7 umbrella cache, 9 buck2 run, 10 registered multi-NUMA platform, 11 multi-NUMA hardware, 12 action platforms, 24 macOS. To run them, configure .buckconfig.local (DEVELOPMENT.md, step 3)."
+elif [ "$n_local" = 0 ]; then
+    MODE=remote
+    EXEC_RE='^(re\(|cache)'
+    echo "MODE  remote: every action runs on the remote-execution service in .buckconfig.local ($n_platforms remote execution platforms from $EP)."
+else
+    echo "FAIL  mode: $EP mixes $n_local local and $((n_platforms - n_local)) remote execution platforms; these checks expect one kind (see $LOG/mode.txt)"
+    exit 1
+fi
+export KOMIRA_CHECKS_MODE=$MODE
 
 expect_green() { # name, targets...
     local name=$1; shift
@@ -167,21 +212,23 @@ EXAMPLES=(
 RUN_CHECKS=("//tools/build/examples:hello[run_check]" "//tools/build/examples:hello_pkg_user[run_check]"
     "//tools/build/examples/cshim:cadd_user[run_check]")
 
-# The execution platform disables local execution outright; this reads the
-# build log to confirm it. Only meaningful when something executed (a remote
-# run or a remote cache hit): an invocation with nothing to do proves
-# nothing, and says so.
-check_remote() { # name
+# Each execution platform enables one executor, remote or local; this reads
+# the build log to confirm every action used it. Only meaningful when
+# something executed: an invocation with nothing to do proves nothing, and
+# says so.
+check_executor() { # name
     local name=$1 executed
     if ! "$BUCK2" log what-ran > "$LOG/$name.what_ran.txt" 2>&1; then
         fail "$name: cannot read what-ran"
         return
     fi
     executed=$(awk -F'\t' 'NF >= 3' "$LOG/$name.what_ran.txt" | wc -l)
-    if awk -F'\t' 'NF >= 3 && $3 !~ /^(re\(|cache)/' "$LOG/$name.what_ran.txt" | grep -q .; then
-        fail "$name: an action ran outside remote execution (see $LOG/$name.what_ran.txt)"
+    if awk -F'\t' -v re="$EXEC_RE" 'NF >= 3 && $3 !~ re' "$LOG/$name.what_ran.txt" | grep -q .; then
+        fail "$name: an action ran outside $MODE execution (see $LOG/$name.what_ran.txt)"
     elif [ "$executed" = 0 ]; then
-        echo "SKIP  $name: nothing executed in this invocation, remote-only not re-observed"
+        echo "SKIP  $name: nothing executed in this invocation, $MODE-only not re-observed"
+    elif [ "$MODE" = local ]; then
+        pass "$name: all $executed executed actions ran locally"
     else
         pass "$name: all $executed executed actions were remote runs or remote cache hits"
     fi
@@ -189,9 +236,9 @@ check_remote() { # name
 
 # 1
 expect_green examples "${EXAMPLES[@]}"
-check_remote examples
+check_executor examples
 expect_green run_checks "${RUN_CHECKS[@]}"
-check_remote run_checks
+check_executor run_checks
 
 # 2
 expect_red gate_red "GATED TEST FAILED" checks//libgate_bad:libgate_bad
@@ -200,7 +247,15 @@ expect_red gate_consumer_red "GATED TEST FAILED" checks//libgate_bad:gated_consu
 expect_red gate_bypass_refused "MojoInfo" checks//libgate_bad:bypass_consumer
 
 # 3
-expect_red missing_dep "unable to locate module 'hellopkg'" checks//missing_dep:missing_dep
+# Its red depends on the executor staging only declared inputs. A local action
+# is not sandboxed and runs in the checkout root, where the compiler might find
+# hellopkg's source without the dep; nobody has measured whether it does, so a
+# local run does not quote this check as a gate.
+if [ "$MODE" = local ]; then
+    echo "SKIP  missing_dep: needs remote input isolation; a local action is not sandboxed and may see the undeclared package in the checkout (DEVELOPMENT.md, step 4)"
+else
+    expect_red missing_dep "unable to locate module 'hellopkg'" checks//missing_dep:missing_dep
+fi
 
 # 4
 expect_red closure_refusal "REFUSING: toolchain member" checks//closure_refusal:hello_incomplete_toolchain
@@ -357,7 +412,9 @@ if printf '%s\n' "${got:-}" | grep -qx 'checks//numa:hello_multi_numa FAILED'; t
 else
     fail "multi-NUMA refusal: not attempted, the audit resolved checks//numa:hello_multi_numa"
 fi
-if ! got=$(resolve platforms_multi -c komira_re.mojo_compile_multi_numa_properties=pool=unreachable-check-only \
+if [ "$MODE" = local ]; then
+    needs_remote "multi-NUMA platform (registered only from [komira_re])"
+elif ! got=$(resolve platforms_multi -c komira_re.mojo_compile_multi_numa_properties=pool=unreachable-check-only \
         checks//numa:hello_multi_numa komira//tools/build/examples:hello); then
     fail "multi-NUMA platform: audit failed (see $LOG/platforms_multi.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$(printf '%s\n' 'checks//numa:hello_multi_numa komira//tools/build/platforms:exec-mojo-multi-numa' 'komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo' | LC_ALL=C sort)" ]; then
@@ -384,7 +441,9 @@ re_value() { # key: prints [komira_re] <key> of the root cell
 }
 MC_PROPS=$(re_value mojo_compile_properties)
 LIGHT_PROPS=$(re_value light_properties)
-if [ -z "$MC_PROPS" ] || [ -z "$LIGHT_PROPS" ]; then
+if [ "$MODE" = local ]; then
+    needs_remote "multi-NUMA hardware (the stand-in reuses the [komira_re] worker sets)"
+elif [ -z "$MC_PROPS" ] || [ -z "$LIGHT_PROPS" ]; then
     fail "multi-NUMA hardware: cannot read [komira_re] mojo_compile_properties / light_properties"
 else
     if "$BUCK2" audit execution-platform-resolution -c "komira_re.mojo_compile_multi_numa_properties=$MC_PROPS" \
@@ -418,7 +477,9 @@ fi
 
 # 12
 ISO=komira_checks_uncached
-if [ -z "${MC_PROPS:-}" ] || [ -z "${LIGHT_PROPS:-}" ]; then
+if [ "$MODE" = local ]; then
+    needs_remote "action platforms (per-action worker property sets)"
+elif [ -z "${MC_PROPS:-}" ] || [ -z "${LIGHT_PROPS:-}" ]; then
     fail "action platforms: cannot read [komira_re] mojo_compile_properties / light_properties"
 # The isolated daemon keeps its outputs between runs, and --no-remote-cache
 # does not rerun an action whose output is already on disk: clean first, or
@@ -469,7 +530,7 @@ PY
 else
     pass "action platforms: $verdict"
 fi
-"$BUCK2" --isolation-dir "$ISO" kill > /dev/null 2>&1
+[ "$MODE" = local ] || "$BUCK2" --isolation-dir "$ISO" kill > /dev/null 2>&1
 
 # 13
 if "$BUCK2" build checks//bundle_parity:parity --show-full-simple-output > "$LOG/parity.txt" 2> "$LOG/parity.log"; then
@@ -605,6 +666,9 @@ expect_green location_path "checks//location_path:main[run_check]"
 . "$ROOT/tools/build/checks/proto_checks.sh"
 
 # 24
+if [ "$MODE" = local ]; then
+    needs_remote "darwin (macOS arm64 builds run on macOS workers of a remote service)"
+else
 darwin_rc=0
 darwin_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/checks/darwin/check.sh "$LOG" 2>&1) || darwin_rc=$?
 printf '%s\n' "$darwin_out" > "$LOG/darwin.log"
@@ -614,9 +678,19 @@ if [ "$darwin_rc" != 0 ] && [ "$darwin_fails" = 0 ]; then
     fail "darwin: tools/build/checks/darwin/check.sh exited $darwin_rc without a FAIL line (see $LOG/darwin.log)"
 fi
 fails=$((fails + darwin_fails))
+fi
+
+# 25
+if BUCK2="$BUCK2" "$ROOT/tools/build/checks/local_default.sh" > "$LOG/local_default.log" 2>&1; then
+    pass "local default: $(grep -o 'PASS  local default: .*' "$LOG/local_default.log" | cut -c 22-)"
+else
+    fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
+fi
 
 # 9
-if [ "$run" = 1 ]; then
+if [ "$MODE" = local ]; then
+    needs_remote "buck2 run (measures what a remote build downloads)"
+elif [ "$run" = 1 ]; then
     if BUCK2="$BUCK2" "$ROOT/tools/build/checks/buck2_run.sh" > "$LOG/buck2_run.log" 2>&1; then
         pass "buck2 run: $(grep -o 'PASS  buck2 run: .*' "$LOG/buck2_run.log" | cut -c 18-)"
     else
@@ -627,7 +701,9 @@ else
 fi
 
 # 7
-if [ "$umbrella" = 1 ]; then
+if [ "$MODE" = local ]; then
+    needs_remote "umbrella cache (remote cache hits across checkouts)"
+elif [ "$umbrella" = 1 ]; then
     if BUCK2="$BUCK2" "$ROOT/tools/build/checks/umbrella_cache.sh" > "$LOG/umbrella.log" 2>&1; then
         pass "umbrella cache: $(grep -o 'PASS  umbrella cache: .*' "$LOG/umbrella.log" | cut -c 23-)"
     else

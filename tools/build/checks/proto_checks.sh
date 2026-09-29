@@ -15,7 +15,7 @@ if "$BUCK2" test checks//proto:test_person checks//proto:test_team > "$LOG/proto
 else
     fail "proto: generated package tests (see $LOG/proto_tests.log)"
 fi
-check_remote proto_tests
+check_executor proto_tests
 if ! "$BUCK2" build 'checks//proto:person_proto[person.mojo]' --out "$LOG/person.mojo" > "$LOG/proto_gen.log" 2>&1 ||
     ! "$BUCK2" build 'checks//proto:person_renamed_proto[person.mojo]' --out "$LOG/person_renamed.mojo" >> "$LOG/proto_gen.log" 2>&1; then
     fail "proto: generating person.mojo (see $LOG/proto_gen.log)"
@@ -32,9 +32,12 @@ expect_red proto_unbundled "unable to locate module 'person'" checks//proto:team
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin
 #     is compiled and run again) produce the same bytes for the plugin, the
 #     generated sources and the compiled package. Each build must have run
-#     the plugin's rustc and the generation remotely, or the comparison
+#     the plugin's rustc and the generation (remotely, or locally in a
+#     local-only run), or the comparison
 #     proves nothing. About 16 minutes; skipped with --no-uncached.
 DET=komira_checks_det
+# An action that really ran, not a cache hit: `re(...)` remotely, `local` in a local-only run.
+if [ "${MODE:?set by run_checks.sh}" = local ]; then EXEC_RAN_RE='^local'; else EXEC_RAN_RE='^re\('; fi
 DET_TARGETS=(komira//tools/build/proto-codegen:protoc-gen-mojo 'checks//proto:person_proto[gen]'
     'checks//proto:team_proto[gen]' checks//proto:person_proto)
 det_build() { # run number; prints a reason on failure
@@ -45,9 +48,9 @@ det_build() { # run number; prints a reason on failure
         echo "uncached build $1 failed (see $LOG/det$1.log)"
     elif ! "$BUCK2" --isolation-dir "$DET" log what-ran > "$LOG/det$1.what_ran.txt" 2>&1; then
         echo "cannot read what-ran of build $1"
-    elif [ "$(awk -F'\t' '$3 ~ /^re\(/ && $2 ~ /\(rustc protoc_gen_mojo\)$/' "$LOG/det$1.what_ran.txt" | wc -l)" = 0 ] ||
-        [ "$(awk -F'\t' '$3 ~ /^re\(/ && $2 ~ /\(mojo_proto_gen\)$/' "$LOG/det$1.what_ran.txt" | wc -l)" -lt 2 ]; then
-        echo "build $1 did not run the plugin compile and both generations remotely (see $LOG/det$1.what_ran.txt)"
+    elif [ "$(awk -F'\t' -v re="${EXEC_RAN_RE:?}" '$3 ~ re && $2 ~ /\(rustc protoc_gen_mojo\)$/' "$LOG/det$1.what_ran.txt" | wc -l)" = 0 ] ||
+        [ "$(awk -F'\t' -v re="$EXEC_RAN_RE" '$3 ~ re && $2 ~ /\(mojo_proto_gen\)$/' "$LOG/det$1.what_ran.txt" | wc -l)" -lt 2 ]; then
+        echo "build $1 did not run the plugin compile and both generations (${MODE:?} execution; see $LOG/det$1.what_ran.txt)"
     else
         awk '{print $2}' "$LOG/det$1.out" | while read -r p; do find -L "$p" -type f; done |
             sort | xargs sha256sum > "$LOG/det$1.sha"

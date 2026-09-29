@@ -1,7 +1,7 @@
 {
  "format": 1,
  "generated_by": "python3 tools/kg/kg.py graph",
- "inputs": "ff37e8a2e9cbc658c667683d09a0f905c490fbf0edb0b823cda4f7120890a12c",
+ "inputs": "e0fdb41bbb0e21837f4ccbea6b4324a7bc7678e8e9e33ceefed3c2edbb65521a",
  "query": "kind(\".*\", //... + checks//... + toolchains//...)",
  "targets": {
   "checks//bundle_parity:parity": {
@@ -762,7 +762,7 @@
    ],
    "kind": "launcher_level_test"
   },
-  "komira//tools/build/platforms/remote:remote": {
+  "komira//tools/build/platforms/default:default": {
    "deps": [
     "komira//tools/build/platforms:exec-light",
     "komira//tools/build/platforms:exec-mojo"

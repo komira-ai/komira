@@ -14,8 +14,28 @@ tools/build/checks/run_checks.sh --no-uncached   # skip the uncached half of che
 It prints one `PASS`, `FAIL` or `SKIP` line per check, then the directory
 holding every log, and exits 1 if any check failed. `BUCK2=...`, `TMPDIR` and
 `KEEP_SCRATCH=1` are described in
-[DEVELOPMENT.md](../../../DEVELOPMENT.md#4-run-the-checks). The checks assume
-a configured `.buckconfig.local` ([DEVELOPMENT.md](../../../DEVELOPMENT.md#2-point-it-at-your-build-farm)).
+[DEVELOPMENT.md](../../../DEVELOPMENT.md#4-run-the-checks).
+
+The checks run where the checkout builds, read from the execution platforms
+buck2 registers, and the first line of output names it:
+
+- `MODE  remote`: `.buckconfig.local` names a remote-execution service
+  ([DEVELOPMENT.md](../../../DEVELOPMENT.md#3-optional-build-on-a-remote-execution-service)).
+  Every action runs there, and every check runs. CI runs this way.
+- `MODE  local`: no service is configured; every action runs on this
+  machine. These need a service and print `SKIP ... needs a remote-execution
+  service` instead: 7 (remote cache hits across checkouts), 9 (what a remote
+  build downloads), the registered-platform half of 10 and the stand-in half
+  of 11 (both built from the `[komira_re]` worker sets), 12 (per-action
+  worker property sets) and 24 (macOS workers). Check 3 prints `SKIP ...
+  needs remote input isolation`: its red relies on the executor staging only
+  declared inputs, and an unsandboxed local action may find the undeclared
+  package in the checkout. Checks 1, 22 and 23 require every action to have
+  run locally instead of remotely. **The local branch of this script has not
+  yet run end to end** (it would compile Mojo locally); until it has, a
+  local-mode PASS line is unmeasured.
+
+A mix of local and remote platforms is refused before any check runs.
 
 This directory is the `checks` cell. Its fixtures, several of which must fail
 to build, are outside `//...`; they use the rules through their own cell
@@ -27,8 +47,8 @@ rather than reusing the [examples](../examples/) (see
 
 The [examples](../examples/BUCK) build, their run checks pass (stdout
 compared byte for byte), and every action that executed ran remotely or was a
-remote cache hit (read from `buck2 log what-ran`; an invocation that executed
-nothing says so instead of passing).
+remote cache hit -- or, in a local-only run, ran locally (read from `buck2 log
+what-ran`; an invocation that executed nothing says so instead of passing).
 
 ```sh
 buck2 build //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user \
@@ -335,6 +355,32 @@ plugin, the generated sources of two packages and one compiled package give
 the same bytes. Each build must have run the plugin's rustc and both
 generations remotely, or the comparison proves nothing. About 16 minutes;
 skipped with `--no-uncached`.
+
+## 25. Local default
+
+[`local_default.sh`](local_default.sh): a fresh clone with no
+`.buckconfig.local` builds on this machine. It snapshots the working tree
+into a scratch clone (`.buckconfig.local` is gitignored, so it is never
+copied) and runs buck2 there with its own daemon, no user or system
+buckconfig and `HOME` in the scratch directory. On Linux x86_64, every
+platform `[build] execution_platforms` registers is local-only (exactly
+`exec-mojo`, `exec-light`); Mojo targets and the toolchain targets resolve to
+them with the configuration hashes check 18 pins, so a local and a remote
+build configure every target identically; a `numa_multi` target does not
+configure; `-c komira.execution=remote` refuses, naming `[komira_re]`; a
+`[buck2_re_client]` `address`, `engine_address`, `cas_address` or
+`action_cache_address` with no `[komira_re]`
+refuses instead of building locally (a missing or misspelled `[komira_re]`
+fails closed), as does a `[komira_re]` without `light_properties`, while
+`-c komira.execution=local` still registers the local platforms;
+`[komira] execution = remote` in a user `~/.buckconfig.local` refuses; and an
+unknown mode refuses. On any other host the clone must refuse local
+execution, naming the host and `.buckconfig.local`. Resolution only: nothing
+is built, so it runs in a few seconds in both modes.
+
+```sh
+tools/build/checks/local_default.sh
+```
 
 ## Diagnostics
 
