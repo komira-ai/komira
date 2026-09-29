@@ -1,0 +1,12 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The typed table-cell value model (`RowCell`, its six type tags, typed
+# constructors, value equality). A zero-dependency leaf: the empty `deps` is
+# load-bearing, because every CDC provider client and the Iceberg writer depend
+# on this library, and anything added here lands in all of their closures.
+# It welds no test of its own; its consumers' tests exercise it.
+mojo_library(
+    name = "komira_rowcell",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["PUBLIC"],
+)
