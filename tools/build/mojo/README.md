@@ -40,7 +40,7 @@ mojo_library(
   compiler only through `deps`
   ([`checks/missing_dep`](../checks/missing_dep/BUCK) fails to compile).
 - **The gate.** Each file in `test_srcs` is built from that one file against
-  the ungated package (at `test_optimization_level`, default `-O3`) and run;
+  the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public
   package `L/pkg/<I>.mojoc` is a copy of the ungated one that takes every
   test's PASS marker as an input, so it cannot exist unless every test passed,
@@ -95,7 +95,8 @@ only for now: the macOS wrapper has none
 
 - **`main`**: the file holding `main()`. It defaults to the only file in
   `srcs`; with several, name it.
-- **`optimization_level`**: default `3`.
+- **`optimization_level`**: `mojo_binary` default `3`, `mojo_test` default `1`;
+  see [Optimization levels](#optimization-levels).
 - **`[run_check]`** (`mojo_binary`): runs the binary remotely from its
   runnable directory, with no library path set, and with `expected_stdout`
   compares its stdout byte for byte
@@ -138,6 +139,37 @@ passes there can therefore load a library the runnable directory lacks; the
 runtime-library check keeps the subset equal to what a real run loads. Moving
 the gated tests onto the runnable directory would change the command of every
 gated test action, and so their cache keys.
+
+
+## Optimization levels
+
+Tests compile at `-O1`; what ships compiles at `-O3`. A test is built, run
+once and thrown away, so its compile is most of what it costs, while a binary
+or shared library runs in production.
+
+| what | level | override |
+|---|---|---|
+| `mojo_test` | `-O1` | `optimization_level` |
+| each `test_srcs` file of a `mojo_library` (the gate) | `-O1` | `test_optimization_level` |
+| `mojo_binary`, and its `[shared]` library | `-O3` | `optimization_level` |
+| the shared libraries a bundle packs (a binary's `[shared]`) | `-O3` | the binary's `optimization_level` |
+| `mojo_multi_numa_test` | none of its own: it compiles nothing and runs `binary` as that target built it (`mojo_test` `-O1`, `mojo_binary` `-O3`) | the `binary` target's `optimization_level` |
+
+The level belongs to the target that compiles: nothing a consumer declares
+changes it. A test linking a shared library or a C/C++ library links it as
+that library's own target built it (a `.so` at `-O3`, a C library at its own
+`compiler_flags`); a `.mojoc` holds no machine code, so a package has no
+level of its own and is compiled into each binary at that binary's level. A
+`[run_check]` runs the binary its target built. A test program declared as a
+`mojo_binary` (for `expected_stdout`, or as the `binary` of a
+`mojo_multi_numa_test`) states `optimization_level = "1"` itself, as
+[`examples/aws_lc`](../examples/aws_lc/BUCK),
+[`examples/s2n_tls`](../examples/s2n_tls/BUCK) and
+[`checks/numa`](../checks/numa/BUCK) do; a `mojo_multi_numa_test` over a
+shipped `mojo_binary` runs it at `-O3`, the bytes that ship. Levels are `0` to `3`;
+anything else is refused at analysis. Check 30
+([`checks/opt_level.sh`](../checks/opt_level.sh)) reads the levels from the
+compile commands.
 
 ## Test data, environment and scratch
 
@@ -356,7 +388,7 @@ FIPS, linux x86_64) and [`third_party/s2n-tls`](../../../third_party/s2n-tls)
 builds. Their source and header lists (`srcs.bzl`) are generated from the
 archive's CMake lists by
 [`third_party/gen_srcs.py`](../../../third_party/gen_srcs.py); s2n-tls's
-feature defines are `features.bzl`, the probes that pass. Check 25 holds
+feature defines are `features.bzl`, the probes that pass. Check 26 holds
 both to the archives and to a compile of every probe, and runs known-answer
 tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64

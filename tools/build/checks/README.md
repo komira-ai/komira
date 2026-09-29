@@ -465,6 +465,23 @@ runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
 
+## 30. Optimization levels
+
+[`opt_level.sh`](opt_level.sh) reads the `mojo build` command of each target
+it names from `buck2 aquery` (analysis only) and requires its
+`--optimization-level`: `-O1` for `mojo_test`
+(`komira//tools/build/examples:test_hellopkg`), for a library's gated tests
+(`libgate_ok`) and for the aws-lc and s2n-tls test programs, which override
+the binary default; `-O3` for `mojo_binary` (`hello`, `hello_pkg_user`) and
+for every shared library the `hello_bundle` bundle builds; and each override
+in [`opt_level/`](opt_level/BUCK) (a test and a library's gated test at
+`-O3`, a binary at `-O1`). `checks//opt_level:bad_level` must fail analysis:
+`fast` is not a level.
+
+```sh
+tools/build/checks/opt_level.sh
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build checks//re_probe:probe`

@@ -161,6 +161,11 @@
 #      TEST_TMPDIR under that directory and removes it, and no --env reaches
 #      the verdict; five inadmissible data/env declarations are refused at
 #      analysis.
+#  30. Optimization levels, read from each compile command (buck2 aquery,
+#      analysis only): mojo_test and a mojo_library's gated tests at -O1,
+#      mojo_binary and the shared libraries of a bundle at -O3, a per-target
+#      override honoured either way; a level mojo build does not accept is
+#      refused at analysis (tools/build/checks/opt_level.sh).
 set -uo pipefail
 
 umbrella=1
@@ -807,6 +812,14 @@ expect_red td_bad_dest_clash "is both a file and the directory of" checks//test_
 expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" checks//test_data:bad_data_entry
 expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" checks//test_data:bad_env_owned
 expect_red td_bad_env_name "is not a shell variable name" checks//test_data:bad_env_name
+
+# 30
+if BUCK2="$BUCK2" "$ROOT/tools/build/checks/opt_level.sh" "$LOG" > "$LOG/opt_level.log" 2>&1; then
+    pass "$(grep -o 'PASS  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-)"
+else
+    fail "$(grep -o 'FAIL  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-) (see $LOG/opt_level.log)"
+fi
+expect_red opt_bad_level "optimization level \`fast\` is not one of 0, 1, 2, 3" checks//opt_level:bad_level
 
 # 9
 if [ "$MODE" = local ]; then

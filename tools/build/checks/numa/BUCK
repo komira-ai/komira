@@ -7,9 +7,11 @@ load(":defs.bzl", "numa_gate_run", "numa_guard_cases")
 # building this must fail to configure (tools/build/checks/run_checks.sh,
 # check 10). Given a platform whose workers
 # span only one NUMA node, the run refuses to start (check 11).
+# A test program, not a shipped binary: -O1, like a mojo_test.
 mojo_binary(
     name = "hello",
     srcs = ["hello.mojo"],
+    optimization_level = "1",
 )
 
 mojo_multi_numa_test(

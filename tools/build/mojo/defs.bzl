@@ -141,6 +141,16 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
+# `mojo build --optimization-level`. Tests compile at 1 and shipped code at 3:
+# a test is built, run once and thrown away, so its compile time is most of
+# its cost, while a binary or shared library runs in production. Each rule
+# states its default below; `optimization_level` / `test_optimization_level`
+# override it per target. The level is the compiling target's own: a test
+# linking a shared library links that library as its own target built it.
+_OPT_LEVELS = ["0", "1", "2", "3"]
+TEST_OPT_LEVEL = "1"
+SHIPPED_OPT_LEVEL = "3"
+
 def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
@@ -148,6 +158,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
     file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
     seen from lib/glibc-hwcaps/<level>/.
     """
+    if opt_level not in _OPT_LEVELS:
+        fail("{}: optimization level `{}` is not one of {}".format(ctx.label, opt_level, ", ".join(_OPT_LEVELS)))
     mapping = {s.short_path: s for s in srcs}
     entry = main.short_path
     if shared:
@@ -454,7 +466,7 @@ mojo_library = rule(
         "deps": attrs.list(attrs.dep(), default = []),
         "import_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
-        "test_optimization_level": attrs.string(default = "3"),
+        "test_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
         "test_srcs": attrs.list(attrs.source(), default = []),
         # {test_srcs path: data}, data as in mojo_test's `data`; see _admit_test_data.
         "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
@@ -541,13 +553,13 @@ _EXECUTABLE_ATTRS = {
     # Mojo packages and C/C++ libraries; see _check_deps.
     "deps": attrs.list(attrs.dep(), default = []),
     "main": attrs.option(attrs.source(), default = None),
-    "optimization_level": attrs.string(default = "3"),
     "srcs": attrs.list(attrs.source()),
 } | _TOOLCHAIN_ATTR
 
 mojo_binary = rule(
     impl = _binary_impl,
     attrs = _EXECUTABLE_ATTRS | {
+        "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
         # When set, `[run_check]` fails unless the binary's stdout equals this.
         "expected_stdout": attrs.option(attrs.string(), default = None),
     },
@@ -594,6 +606,7 @@ def _test_impl(ctx):
 mojo_test = rule(
     impl = _test_impl,
     attrs = _EXECUTABLE_ATTRS | {
+        "optimization_level": attrs.string(default = TEST_OPT_LEVEL),
         # Files staged under the test's share/, its current directory: a list
         # of sources (each at its path from the cell root) or {dest: source}.
         "data": attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source()), default = []),
