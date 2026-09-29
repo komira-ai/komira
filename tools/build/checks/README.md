@@ -263,7 +263,12 @@ that reads nothing cannot pass.
 calling a C function links and prints the C result when the `cxx_library` is
 in `deps` (`checks//c_deps:c_linked`), and its link fails on the undefined
 symbol when it is not (`c_missing`); `deps` refuses a target that is neither
-a Mojo package nor a C/C++ library (`bad_dep`). C compiles and archives
+a Mojo package nor a C/C++ library (`bad_dep`). The two cshim tests, a gated library
+test and a `mojo_test`, use `assert_equal` on `Int32` and index a `List`,
+which record the test file's source location in the binary; they build only
+because the wrapper strips the staging directory from it
+(`-strip-file-prefix`), and fail with exit 4 on the worker's absolute path
+without it (`test_source_paths`). C compiles and archives
 resolve to `exec-light`, the Mojo targets using them to `exec-mojo`. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose

@@ -9,6 +9,8 @@
 #        when it is not (checks//c_deps);
 #      - `deps` refuses a target that is neither a Mojo package nor a C/C++
 #        library;
+#      - gated library tests and mojo_tests recording source locations build
+#        (the staging directory is stripped from them);
 #      - C compiles and archives resolve to `exec-light`, the Mojo targets
 #        depending on them to `exec-mojo`;
 #      - a binary linking C++ (snappy, with zig's static libc++) exports no
@@ -19,6 +21,12 @@
 expect_green c_dep_linked "checks//c_deps:c_linked" "checks//c_deps:c_linked[run_check]"
 expect_red c_dep_missing "undefined symbol: komira_example_add" checks//c_deps:c_missing
 expect_red c_dep_kind "provides neither MojoInfo" checks//c_deps:bad_dep
+# Test builds strip the staging directory from the source locations they
+# record: test_cadd (a gated library test) and test_add_direct (a mojo_test)
+# use assert_equal on Int32 and index a List, which record them. Without
+# -strip-file-prefix in mojo_wrapper.sh both fail with exit 4 on the worker's
+# absolute path (test_hellopkg does not record one).
+expect_green test_source_paths //tools/build/examples/cshim:cadd //tools/build/examples/cshim:test_add_direct
 
 C_PLATFORMS="
 komira//tools/build/examples/cshim:add komira//tools/build/platforms:exec-light
