@@ -96,7 +96,9 @@ What that gives you, and what it does not:
   undeclared input that goes unnoticed locally fails on a remote service,
   where an action sees only its declared inputs. A variable that changes how
   the loader or a compiler behaves (for example `LD_PRELOAD`) reaches every
-  local action.
+  local action. Each action keeps its own scratch in the per-action directory
+  buck2 gives it, except C and C++ compiles, which share zig's cache in
+  `.zig-cache/` at the checkout root (gitignored; zig locks its own cache).
 - **Not guaranteed: a shared cache.** Local results are kept in `buck-out`
   of this checkout only; nothing is uploaded or downloaded.
 

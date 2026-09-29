@@ -53,4 +53,5 @@
   defer_write_actions = true
 
 [project]
-  ignore = buck-out, .git
+  # .zig-cache: written by local C/C++ compiles, which run in the checkout root.
+  ignore = buck-out, .git, .zig-cache
