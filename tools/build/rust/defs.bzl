@@ -165,7 +165,17 @@ def _root(ctx):
     roots = [s for s in ctx.attrs.srcs if s.short_path == ctx.attrs.crate_root or s.short_path.endswith("/" + ctx.attrs.crate_root)]
     if len(roots) != 1:
         fail("{}: crate_root `{}` must name exactly one of srcs".format(ctx.label, ctx.attrs.crate_root))
-    return roots[0], ctx.attrs.srcs, []
+
+    # Sources are copied into buck-out, keyed by their path in the package.
+    # Read in place, their path would start with where the cell is mounted
+    # (`tools/...` standalone, `komira/tools/...` in a repository that has
+    # komira as a submodule), and every compile of komira's own crates would
+    # get a different action digest in each. The copy's path has the cell's
+    # name, not its location. Paths recorded in the output (panic locations,
+    # file!()) read <cell>/<package>/<file>, not the copy's path.
+    d = ctx.actions.copied_dir("__srcs__", {s.short_path: s for s in ctx.attrs.srcs})
+    remap = [cmd_args(d, format = "--remap-path-prefix={}=" + ctx.label.cell + "/" + ctx.label.package)]
+    return d.project(roots[0].short_path), [d], remap
 
 def _compile(ctx, crate_type, out):
     tc = ctx.attrs.toolchain[RustToolchainInfo]

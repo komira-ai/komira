@@ -109,7 +109,10 @@ external cell at that commit, and the digests are identical. Skipped with
 `snappy:test_snappy`): a C source read from the project tree is an action
 input at a path that depends on the mount point, so komira's `cxx_library`
 targets take their sources through `staged_files` (the first run of this check
-with C targets had 8 of 28 actions re-run in a submodule). See
+with C targets had 8 of 28 actions re-run in a submodule). They also include
+Rust (`rust:prost_roundtrip` and the protobuf plugin,
+`proto-codegen:protoc-gen-mojo`), whose compiles copy their sources into
+buck-out for the same reason (without it, 3 of 55 actions re-ran). See
 [Using komira from another repository](../README.md#using-komira-from-another-repository).
 
 ```sh
