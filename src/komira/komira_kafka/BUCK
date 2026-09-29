@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Kafka wire-protocol codec: primitive types, request/response headers and
+# framing, the v2 RecordBatch with CRC-32C, and the message schemas for the
+# handshake, data, consumer-group, topic-admin, idempotent-producer and
+# transactional APIs. Pure bytes with no deps, so the broker core and the Kafka
+# server depend on it and it depends on neither.
+mojo_library(
+    name = "komira_kafka",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_kafka_record_batch_v2.mojo",
+        "tests/test_kafka_wire_codec.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
