@@ -22,6 +22,10 @@
 #      with the same action digests as a standalone checkout
 #      (checks/umbrella_cache.sh; two scratch checkouts and daemons, skipped
 #      with --no-umbrella).
+#   8. The host floor: during a real compile, and a run of the binary it
+#      built, the loader maps libstdc++.so.6 and libgcc_s.so.1 from the
+#      toolchain, and nothing from the worker except glibc's own objects
+#      (checks//runtime_libs:loader_trace, read from LD_DEBUG).
 set -uo pipefail
 
 umbrella=1
@@ -134,6 +138,35 @@ else
         fail "outputs: $bin names a buck-out path: $(grep -ao '[^[:cntrl:]]*buck-out/[^[:cntrl:]]*' "$bin" | head -n 1)"
     else
         pass "outputs: $bin has no run path and names no buck-out path"
+    fi
+fi
+
+# 8
+GLIBC_FLOOR="/lib64/ld-linux-x86-64.so.2 libc.so.6 libm.so.6 libdl.so.2 libpthread.so.0"
+if ! "$BUCK2" build checks//runtime_libs:loader_trace --show-full-simple-output > "$LOG/loader.txt" 2> "$LOG/loader.log"; then
+    fail "host floor: loader trace failed (see $LOG/loader.log)"
+else
+    report=$(tail -n 1 "$LOG/loader.txt")
+    problems=""
+    for phase in compile run; do
+        grep -qx "$phase rc=0" "$report" || problems="$problems $phase-did-not-succeed"
+        for lib in libstdc++.so.6 libgcc_s.so.1; do
+            grep -q "^$phase init <toolchain>/.*/$lib\$" "$report" || problems="$problems $phase:$lib-not-from-toolchain"
+        done
+    done
+    # Every object mapped from outside the toolchain must be glibc's.
+    while read -r _ _ path; do
+        case "$path" in "<toolchain>/"*) continue ;; esac
+        ok=0
+        for g in $GLIBC_FLOOR; do
+            case "$path" in "$g" | */"$g") ok=1 ;; esac
+        done
+        [ "$ok" = 1 ] || problems="$problems host:$path"
+    done < <(grep ' init ' "$report")
+    if [ -n "$problems" ]; then
+        fail "host floor:$problems (see $report)"
+    else
+        pass "host floor: libstdc++/libgcc_s from the toolchain in compile and run; host objects only glibc ($(grep -c ' init ' "$report") mapped)"
     fi
 fi
 
