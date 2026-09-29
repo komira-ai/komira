@@ -7,5 +7,7 @@ mojo_binary(
     name = "test_aws_lc",
     srcs = ["test_aws_lc.mojo"],
     deps = ["//third_party/aws-lc:crypto"],
+    # A test program, not shipped: tests compile at -O1.
+    optimization_level = "1",
     expected_stdout = "BORINGSSL_self_test: ok\nSHA-256: ok\nAES-128: ok\nChaCha20: ok\n",
 )

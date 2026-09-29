@@ -218,7 +218,11 @@ The multi-NUMA run checks the hardware it got, not only its label:
 - on a stand-in platform whose multi-NUMA workers are the single-NUMA
   `mojo_compile` workers ([`numa/standin`](numa/standin/BUCK)), both the
   build's run check and `buck2 test` refuse to start
-  (`numa_guard: REFUSING to run`).
+  (`numa_guard: REFUSING to run`);
+- on that stand-in, the `buck2 test` command minus the guard
+  (`checks//numa:gate_run`, [`numa/defs.bzl`](numa/defs.bzl)) exits 0
+  through the gate runner: the runner accepts the arguments this rule gives
+  it, which the guard's refusal would otherwise hide.
 
 ```sh
 buck2 build checks//numa:guard_cases --show-full-simple-output
@@ -421,6 +425,62 @@ check on a worker. Every probe named in `third_party/s2n-tls/features.bzl`
 compiles (`checks//s2n_probes`) and every other probe fails to, so a feature
 define cannot be added or dropped without its probe agreeing. Neither test
 binary exports a dynamic symbol.
+
+## 27. Known-failing tests
+
+[`known_failing/`](known_failing/BUCK): `held_ok` holds its failing test and
+builds, and that test's marker reads `HELD <label>`; `held_passing` holds a
+test that passes and must fail with `LEDGER STALE`, naming the row;
+`unheld_red` holds one failing test and must still fail with
+`GATED TEST FAILED` on the other. Each `bad_*` target must fail at analysis
+with its own refusal: no issue, an issue that is not a GitHub issue
+reference, an empty reason, a key that is not a test, an unknown field,
+byte-identical reasons, every test held.
+
+## 28. Compile watchdog
+
+[`watchdog/cases.sh`](watchdog/cases.sh), a remote action
+(`checks//watchdog:cases`), runs [`mojo_wrapper.sh`](../mojo/mojo_wrapper.sh)
+on a stand-in toolchain whose `mojo` sleeps, spins, or spawns children. A
+tree using no CPU is killed with exit 124 and the message, and so are its
+child and an orphaned grandchild (a child left in any state but zombie fails
+the case); a tree spinning itself or through a child, a short idle and a
+disabled watchdog run to completion; a compiler error keeps its status;
+malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
+that never fires is a failed case, not a hung action.
+
+## 29. Test data, environment and scratch
+
+[`test_data/`](test_data/BUCK): `declared` builds, its test opening a
+declared fixture by its repository path from the staged `share/`, and two
+further tests each finding `TEST_TMPDIR` set, not under `/tmp`, empty at the
+start, equal to `TMPDIR`, and the library's `test_env` value present;
+`undeclared` must fail with `GATED TEST FAILED` and the test's
+`No such file or directory` for a fixture that exists in the repository but
+was not declared. `buck2 test checks//test_data:mojo_test_data` must pass: a
+`mojo_test` with dict `data` and `env`. Five `bad_*` targets must each fail
+at analysis with their own refusal: a `..` destination, a destination that
+is also another's directory, a `test_data` key that is not a test, a
+runner-owned env name, an env name that is not a variable name. The gate test
+of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
+the examples) covers the executable-relative helpers.
+
+## 30. Optimization levels
+
+[`opt_level.sh`](opt_level.sh) reads the `mojo build` command of each target
+it names from `buck2 aquery` (analysis only) and requires its
+`--optimization-level`: `-O1` for `mojo_test`
+(`komira//tools/build/examples:test_hellopkg`), for a library's gated tests
+(`libgate_ok`) and for the aws-lc and s2n-tls test programs, which override
+the binary default; `-O3` for `mojo_binary` (`hello`, `hello_pkg_user`) and
+for every shared library the `hello_bundle` bundle builds; and each override
+in [`opt_level/`](opt_level/BUCK) (a test and a library's gated test at
+`-O3`, a binary at `-O1`). `checks//opt_level:bad_level` must fail analysis:
+`fast` is not a level.
+
+```sh
+tools/build/checks/opt_level.sh
+```
 
 ## Diagnostics
 

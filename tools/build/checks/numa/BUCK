@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_multi_numa_test")
-load(":defs.bzl", "numa_guard_cases")
+load(":defs.bzl", "numa_gate_run", "numa_guard_cases")
 
 # Requires an execution platform providing
 # komira//tools/build/platforms:numa_multi. A standalone checkout registers
@@ -7,9 +7,11 @@ load(":defs.bzl", "numa_guard_cases")
 # building this must fail to configure (tools/build/checks/run_checks.sh,
 # check 10). Given a platform whose workers
 # span only one NUMA node, the run refuses to start (check 11).
+# A test program, not a shipped binary: -O1, like a mojo_test.
 mojo_binary(
     name = "hello",
     srcs = ["hello.mojo"],
+    optimization_level = "1",
 )
 
 mojo_multi_numa_test(
@@ -22,4 +24,12 @@ mojo_multi_numa_test(
 numa_guard_cases(
     name = "guard_cases",
     script = "guard_cases.sh",
+)
+
+# hello_multi_numa's `buck2 test` command without the NUMA guard, run in one
+# action: the gate runner must accept the rule's own arguments and pass.
+# Needs a numa_multi platform to configure (run_checks.sh uses the stand-in).
+numa_gate_run(
+    name = "gate_run",
+    test = ":hello_multi_numa",
 )

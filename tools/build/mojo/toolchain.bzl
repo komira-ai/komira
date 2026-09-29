@@ -183,6 +183,8 @@ def _mojo_toolchain_impl(ctx):
             cc_target = ctx.attrs.cc_target,
             target_cpu = ctx.attrs.target_cpu,
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
+            watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
+            watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate_runner = ctx.attrs._gate_runner[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
             numa_guard = ctx.attrs._numa_guard[DefaultInfo].default_outputs[0],
@@ -203,6 +205,13 @@ mojo_toolchain = rule(
         # its own os and cpu, so the compiler's runtime is the target's.
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
+        # The compile watchdog (mojo_wrapper.sh): a compile whose whole process
+        # tree uses no CPU for `watchdog_idle_secs` is a deadlocked compiler; it
+        # is killed and the action fails with exit 124 instead of holding a
+        # worker until the executor's action timeout. 0 turns it off. A slow
+        # compile uses CPU throughout and is never killed.
+        "watchdog_idle_secs": attrs.int(default = 300),
+        "watchdog_sample_secs": attrs.int(default = 30),
         "zig": attrs.exec_dep(),
         "_gate_runner": attrs.dep(default = "komira//tools/build/mojo:gate_runner.sh"),
         "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),

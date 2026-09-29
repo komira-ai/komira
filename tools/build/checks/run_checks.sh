@@ -62,7 +62,10 @@
 #      refuses a multi-NUMA property set equal to the mojo_compile one; and on
 #      a stand-in platform whose multi-NUMA workers are the single-NUMA
 #      mojo_compile workers (checks//numa/standin), both the build's run
-#      check and `buck2 test` refuse to start (numa_guard: REFUSING to run).
+#      check and `buck2 test` refuse to start (numa_guard: REFUSING to run);
+#      there, the same `buck2 test` command minus the guard
+#      (checks//numa:gate_run) passes through the gate runner, which is how
+#      a multi-NUMA worker would run it.
 #  12. Actions run with their platform's property set, read per action: an
 #      uncached build of //tools/build/examples:hello (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really executes)
@@ -133,6 +136,36 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/checks/c_libs_checks.sh.
+#  27. mojo_library's tests_known_failing inverts rather than mutes
+#      (checks//known_failing): a held test that fails is satisfied (marker
+#      `HELD`), a held test that passes is red (LEDGER STALE, naming its row),
+#      an unheld red beside a hold is still red, and every inadmissible row
+#      (no issue, an issue that is not a GitHub issue reference, an empty
+#      reason, an entry that is not a test, an unknown field, byte-identical
+#      reasons, every test held) is refused at analysis.
+#  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
+#      (checks//watchdog:cases, a remote action): a process tree using no CPU
+#      is killed with exit 124 and the message, its children and an orphaned
+#      grandchild with it; a tree using CPU (itself, through a child, or
+#      through an orphaned member of its session while it waits), a
+#      short idle and a disabled watchdog are not killed; a compiler error
+#      keeps its exit status; malformed knobs are refused (exit 2).
+#  29. The test runtime contract (checks//test_data): a gated test opens a
+#      declared fixture by its repository path from its staged share/, and a
+#      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
+#      is private, empty and not /tmp in each of two actions; test_env and a
+#      mojo_test's data and env arrive under `buck2 test`; a red test stays
+#      red with test_env {HELD: 1} (library) and env {BIN: true} (mojo_test);
+#      the runner itself, run twice in ONE action directory
+#      (checks//test_data:runner_cases), gives each run its own empty
+#      TEST_TMPDIR under that directory and removes it, and no --env reaches
+#      the verdict; five inadmissible data/env declarations are refused at
+#      analysis.
+#  30. Optimization levels, read from each compile command (buck2 aquery,
+#      analysis only): mojo_test and a mojo_library's gated tests at -O1,
+#      mojo_binary and the shared libraries of a bundle at -O3, a per-target
+#      override honoured either way; a level mojo build does not accept is
+#      refused at analysis (tools/build/checks/opt_level.sh).
 set -uo pipefail
 
 umbrella=1
@@ -208,6 +241,7 @@ expect_red() { # name, required text, target
 EXAMPLES=(
     //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user
     //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
+    //tools/build/mojo/runtime_paths:komira_runtime_paths
     //tools/build/examples:hello_bundle //tools/build/package:level_test
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
@@ -481,6 +515,16 @@ else
     else
         pass "multi-NUMA hardware: buck2 test refused on single-NUMA workers"
     fi
+    if ! timeout 600 "$BUCK2" build "${STANDIN[@]}" checks//numa:gate_run --show-full-simple-output > "$LOG/numa_gate_run.txt" 2> "$LOG/numa_gate_run.log"; then
+        fail "multi-NUMA gate run: checks//numa:gate_run failed to build (see $LOG/numa_gate_run.log)"
+    else
+        report=$(tail -n 1 "$LOG/numa_gate_run.txt")
+        if [ "$(head -n 1 "$report")" = "rc 0" ]; then
+            pass "multi-NUMA gate run: the rule's buck2 test command, minus the guard, passes the gate runner"
+        else
+            fail "multi-NUMA gate run: $(head -n 4 "$report" | tr '\n' ' ')(see $report)"
+        fi
+    fi
 fi
 
 # 12
@@ -698,6 +742,84 @@ if BUCK2="$BUCK2" "$ROOT/tools/build/checks/local_default.sh" > "$LOG/local_defa
 else
     fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
 fi
+
+# 27
+if "$BUCK2" build checks//known_failing:held_ok --show-full-simple-output > "$LOG/kf_held_ok.log" 2>&1; then
+    "$BUCK2" build 'checks//known_failing:held_ok[tests][test_fails]' --show-full-simple-output > "$LOG/kf_marker.log" 2>&1
+    kf_marker=$(tail -n 1 "$LOG/kf_marker.log")
+    if [ "$(cat "$kf_marker" 2> /dev/null)" = "HELD checks//known_failing:held_ok:tests/test_fails.mojo" ]; then
+        pass "known_failing: a held test that fails satisfies the gate (HELD marker)"
+    else
+        fail "known_failing: held_ok built, but its held marker is '$(cat "$kf_marker" 2> /dev/null)' (see $LOG/kf_marker.log)"
+    fi
+else
+    fail "known_failing: held_ok must build (see $LOG/kf_held_ok.log)"
+fi
+expect_red kf_held_passing 'tests_known_failing["tests/test_passes_too.mojo"]' checks//known_failing:held_passing
+expect_red kf_held_passing_stale "LEDGER STALE" checks//known_failing:held_passing
+expect_red kf_unheld_red "GATED TEST FAILED: checks//known_failing:unheld_red:tests/test_fails_too.mojo" checks//known_failing:unheld_red
+expect_red kf_no_issue "no \`issue\`" checks//known_failing:bad_no_issue
+expect_red kf_issue_ref "is not a GitHub issue number" checks//known_failing:bad_issue_ref
+expect_red kf_empty_reason "empty \`reason\`" checks//known_failing:bad_empty_reason
+expect_red kf_entry "not a test_srcs entry" checks//known_failing:bad_entry
+expect_red kf_field "unknown field \`card\`" checks//known_failing:bad_field
+expect_red kf_same_reason "byte-identical reasons" checks//known_failing:bad_same_reason
+expect_red kf_all_held "holds all 2 tests" checks//known_failing:bad_all_held
+
+# 28
+if ! "$BUCK2" build checks//watchdog:cases --show-full-simple-output > "$LOG/watchdog_cases.txt" 2> "$LOG/watchdog_cases.log"; then
+    fail "compile watchdog cases: $(grep '^BAD ' "$LOG/watchdog_cases.log" | sort -u | tr '\n' ' ')(see $LOG/watchdog_cases.log)"
+else
+    report=$(tail -n 1 "$LOG/watchdog_cases.txt")
+    ok=$(grep -c '^ok ' "$report" || true)
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 13 ]; then
+        fail "compile watchdog cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
+    else
+        pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
+    fi
+fi
+
+# 29
+expect_green td_declared checks//test_data:declared
+expect_red td_undeclared "No such file or directory" checks//test_data:undeclared
+expect_red td_undeclared_gate "GATED TEST FAILED: checks//test_data:undeclared:" checks//test_data:undeclared
+if timeout 900 "$BUCK2" test checks//test_data:mojo_test_data > "$LOG/td_mojo_test.log" 2>&1; then
+    pass "td_mojo_test: buck2 test of a mojo_test with data and env"
+else
+    fail "td_mojo_test: buck2 test checks//test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
+fi
+expect_red td_env_held "GATED TEST FAILED: checks//test_data:env_held:tests/test_red.mojo" checks//test_data:env_held
+if timeout 900 "$BUCK2" test checks//test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then
+    fail "td_env_bin: buck2 test checks//test_data:env_bin passed, but its test is red (env BIN reached the runner; see $LOG/td_env_bin.log)"
+elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
+    pass "td_env_bin: env {BIN: true} does not replace a red mojo_test"
+else
+    fail "td_env_bin: failed without the test's own failure (see $LOG/td_env_bin.log)"
+fi
+if ! "$BUCK2" build checks//test_data:runner_cases --show-full-simple-output > "$LOG/runner_cases.txt" 2> "$LOG/runner_cases.log"; then
+    fail "gate runner cases: $(grep '^BAD ' "$LOG/runner_cases.log" | sort -u | tr '\n' ' ')(see $LOG/runner_cases.log)"
+else
+    report=$(tail -n 1 "$LOG/runner_cases.txt")
+    ok=$(grep -c '^ok ' "$report" || true)
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 5 ]; then
+        fail "gate runner cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
+    else
+        pass "gate runner: $ok cases in one action (private TEST_TMPDIR per run; env cannot reach the verdict)"
+    fi
+fi
+expect_red td_bad_dest "holds an empty, \`.\` or \`..\` segment" checks//test_data:bad_dest
+expect_red td_bad_dest_clash "is both a file and the directory of" checks//test_data:bad_dest_clash
+expect_red td_bad_data_entry "test_data[\"tests/test_nope.mojo\"]: not a test_srcs entry" checks//test_data:bad_data_entry
+expect_red td_bad_env_owned "env sets TEST_TMPDIR, which the test runner sets itself" checks//test_data:bad_env_owned
+expect_red td_bad_env_name "is not a shell variable name" checks//test_data:bad_env_name
+
+# 30
+if BUCK2="$BUCK2" "$ROOT/tools/build/checks/opt_level.sh" "$LOG" > "$LOG/opt_level.log" 2>&1; then
+    pass "$(grep -o 'PASS  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-)"
+else
+    fail "$(grep -o 'FAIL  optimization levels: .*' "$LOG/opt_level.log" | cut -c 7-) (see $LOG/opt_level.log)"
+fi
+expect_red opt_bad_level "optimization level \`fast\` is not one of 0, 1, 2, 3" checks//opt_level:bad_level
 
 # 9
 if [ "$MODE" = local ]; then

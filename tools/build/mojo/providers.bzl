@@ -37,6 +37,11 @@ MojoToolchainInfo = provider(fields = {
     # action key.
     "target_cpu": provider_field(str),
     "wrapper": provider_field(typing.Any),
+    # The compile watchdog of the wrapper (mojo_wrapper.sh): kill a compile
+    # whose process tree used no CPU for this long (0: off), sampling every
+    # `watchdog_sample_secs`. None where the wrapper has no watchdog.
+    "watchdog_idle_secs": provider_field(typing.Any, default = None),
+    "watchdog_sample_secs": provider_field(typing.Any, default = None),
     "gate_runner": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
     # Runs a command only if the action can use enough NUMA nodes
@@ -50,10 +55,22 @@ MojoToolchainInfo = provider(fields = {
 
 # A built binary that starts on its own: `run_dir` holds the binary and lib/,
 # its runtime libraries, and `command` runs it from there with no launcher.
+# `test_root` is the binary's staged test tree (bin/<binary> and share/, see
+# defs.bzl _test_root), `test_binary` the binary inside it and `test_env` its
+# `--env` runner arguments: what gate_runner.sh needs to run it as a test.
 MojoRunnableInfo = provider(fields = {
     "binary": provider_field(str),  # the binary's file name inside run_dir
     "command": provider_field(typing.Any),  # cmd_args
     "run_dir": provider_field(typing.Any),  # artifact (directory)
+    "test_root": provider_field(typing.Any),  # artifact (directory)
+    "test_binary": provider_field(typing.Any),  # artifact: test_root/bin/<binary>
+    "test_env": provider_field(list),  # ["--env", "NAME=VALUE", ...]
+})
+
+# The gate-runner command of a mojo_multi_numa_test without its NUMA guard, so
+# a check can run it on a single-NUMA worker (checks//numa:gate_run).
+MojoGateRunInfo = provider(fields = {
+    "command": provider_field(typing.Any),  # cmd_args
 })
 
 # A mojo_binary's program as a shared library, for packaging (komira//tools/build/package).

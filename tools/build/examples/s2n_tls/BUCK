@@ -21,5 +21,7 @@ mojo_binary(
     name = "test_s2n_handshake",
     srcs = ["handshake_test.mojo"],
     deps = [":handshake"],
+    # A test program, not shipped: tests compile at -O1.
+    optimization_level = "1",
     expected_stdout = "s2n_init: ok\nhandshake: TLS 1.3, certificate verified, ping/pong exchanged\n",
 )

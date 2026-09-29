@@ -1,19 +1,39 @@
 # gate_runner.sh -- runs one gated test inside a build action.
 #
-# usage: busybox sh gate_runner.sh <busybox> <compiler_dir> <label> <test_binary> <marker>
+# usage: busybox sh gate_runner.sh <busybox> <compiler_dir> <label> <test_binary> <marker> \
+#            [--env NAME=VALUE]... [--hold <held entry> <issue> <reason>]
 #
 # On success writes `PASS <label>` to <marker>. The library's public package is
 # produced by an action that takes every marker as an input, so the package
 # cannot exist unless each of its tests passed.
 #
-# The test runs with a fixed environment: PATH holds only busybox applets,
-# LD_LIBRARY_PATH points at the toolchain's runtime libraries (built binaries
-# carry no run path), and TMPDIR, TEST_TMPDIR and HOME are a private directory
-# made for this run.
+# <test_binary> is `<root>/bin/<name>` in the test's staged tree (defs.bzl,
+# _test_root): <root>/share holds exactly the test's declared data. The test
+# runs with <root>/share as its current directory (an empty directory when
+# nothing is declared), so a relative path reaches a declared file and nothing
+# else -- not the action's other inputs, not the repository.
 #
-# Exit status: 0 on PASS; otherwise the test's own exit status (so a signal
-# death, 128+N, stays distinguishable from an assertion failure); 2 for a
-# usage error.
+# The environment is fixed: PATH holds only busybox applets, LD_LIBRARY_PATH
+# points at the toolchain's runtime libraries (built binaries carry no run
+# path that reaches them from bin/), and TMPDIR = TEST_TMPDIR and HOME are two
+# empty directories made for this run under the action's own working
+# directory, so no two runs share them. Each --env adds one variable; the rule
+# refuses the names above and this script refuses them again. A --env variable
+# is given to the TEST PROCESS ONLY (`busybox env NAME=VALUE ... <test>`), never
+# to this script's own shell: exported here it would reach the variables the
+# verdict is computed from (HELD, BIN, rc, ...), so `test_env = {"HELD": "1"}`
+# would mute an unheld red and `env = {"BIN": "true"}` would run `true` in
+# place of the test.
+#
+# With --hold the test is HELD (mojo_library's `tests_known_failing` row
+# <held entry>) and the verdict inverts: the test still runs, a FAILURE (any
+# non-zero exit, a signal death included) writes `HELD <label>` and exits 0,
+# and a PASS is red (exit 1, LEDGER STALE), naming the row to delete. The
+# marker's bytes never depend on the run.
+#
+# Exit status: 0 on PASS (or a held test's failure); otherwise the test's own
+# exit status (so a signal death, 128+N, stays distinguishable from an
+# assertion failure); 2 for a usage error.
 set -eu
 
 abspath() {
@@ -23,17 +43,54 @@ abspath() {
     esac
 }
 
-[ "$#" = 5 ] || { echo "gate_runner: usage error" >&2; exit 2; }
+[ "$#" -ge 5 ] || { echo "gate_runner: usage error" >&2; exit 2; }
 BB=$(abspath "$1")
 TC=$(abspath "$2")
 LABEL=$3
 BIN=$(abspath "$4")
 MARKER=$5
+shift 5
+ROOT=${BIN%/bin/*}
+[ "$ROOT" != "$BIN" ] || { echo "gate_runner: $BIN is not <root>/bin/<name>" >&2; exit 2; }
 
 T=$("$BB" mktemp -d "$PWD/.komira_test.XXXXXX")
 trap '"$BB" rm -rf "$T"' EXIT
-"$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home"
+"$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home" "$T/share"
 "$BB" --install -s "$T/bin"
+
+HELD=""
+# Each --env NAME=VALUE is moved to the end of "$@"; once the loop has consumed
+# the other options, "$@" holds exactly the test's variables.
+n=$#
+while [ "$n" -gt 0 ]; do
+    case "$1" in
+        --env)
+            [ "$n" -ge 2 ] || { echo "gate_runner: --env needs NAME=VALUE" >&2; exit 2; }
+            name=${2%%=*}
+            case "$name" in
+                "$2" | "" | [0-9]* | *[!A-Za-z0-9_]*)
+                    echo "gate_runner: --env $2 is not NAME=VALUE" >&2; exit 2 ;;
+                PATH | LD_LIBRARY_PATH | LD_PRELOAD | DYLD_LIBRARY_PATH | DYLD_FALLBACK_LIBRARY_PATH | DYLD_INSERT_LIBRARIES | TMPDIR | TEST_TMPDIR | HOME | PWD)
+                    echo "gate_runner: --env may not set $name; the runner sets it" >&2; exit 2 ;;
+            esac
+            set -- "$@" "$2"
+            shift 2
+            n=$((n - 2))
+            ;;
+        --hold)
+            [ "$n" -ge 4 ] || { echo "gate_runner: --hold needs <entry> <issue> <reason>" >&2; exit 2; }
+            HELD=1 HOLD_ENTRY=$2 HOLD_ISSUE=$3 HOLD_REASON=$4
+            shift 4
+            n=$((n - 4))
+            ;;
+        *) echo "gate_runner: unknown argument $1" >&2; exit 2 ;;
+    esac
+done
+
+# The staged share/, or an empty one: never the action's own directory.
+CWD="$T/share"
+[ -d "$ROOT/share" ] && CWD="$ROOT/share"
+
 PATH="$T/bin"
 LD_LIBRARY_PATH="$TC/lib"
 TMPDIR="$T/tmp"
@@ -42,7 +99,27 @@ HOME="$T/home"
 export PATH LD_LIBRARY_PATH TMPDIR TEST_TMPDIR HOME
 
 rc=0
-"$BIN" > "$T/log" 2>&1 < /dev/null || rc=$?
+(cd "$CWD" && exec "$BB" env "$@" "$BIN") > "$T/log" 2>&1 < /dev/null || rc=$?
+if [ -n "$HELD" ]; then
+    if [ "$rc" != 0 ]; then
+        printf 'HELD %s\n' "$LABEL" > "$MARKER"
+        exit 0
+    fi
+    {
+        echo "=================================================================="
+        echo "LEDGER STALE: $LABEL PASSED, but it is held as known-failing."
+        echo "  row:    tests_known_failing[\"$HOLD_ENTRY\"]"
+        echo "  issue:  $HOLD_ISSUE"
+        echo "  reason: $HOLD_REASON"
+        echo "Delete that row from the library's tests_known_failing (and close"
+        echo "or update the issue). A held test must fail; one that passes is"
+        echo "good news the ledger has to record by shrinking."
+        echo "------------------------------------------------------------------ output"
+        tail -n 50 "$T/log"
+        echo "=================================================================="
+    } >&2
+    exit 1
+fi
 if [ "$rc" = 0 ]; then
     printf 'PASS %s\n' "$LABEL" > "$MARKER"
     exit 0

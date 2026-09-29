@@ -2,7 +2,8 @@
 #
 # usage: busybox sh mojo_wrapper.sh <busybox> <compiler_dir> <zig_dir> \
 #            <cc_target> [--runpath=<path>] [--source-root=<dir>] \
-#            [--link-tail=<arg>...] -- <mojo arguments...>
+#            [--link-tail=<arg>...] [--watchdog-idle-secs=<n>] \
+#            [--watchdog-sample-secs=<n>] -- <mojo arguments...>
 #
 # Each --link-tail argument (a static library, or a driver flag such as
 # -lc++) is appended, in order, to the END of every link line, after the
@@ -41,7 +42,24 @@
 # libraries in the lib/ directory next to it (the rules' runnable output), or
 # through `launch.sh` / LD_LIBRARY_PATH, which the loader searches first.
 #
-# Exit status: the compiler's; 2 for a toolchain or wrapper refusal; 3 when
+# The compile watchdog. The compiler can deadlock inside its own runtime (every
+# thread parked, the process tree using no CPU) and then never exits; a remote
+# action has no other bound than the executor's action timeout, so one wedge
+# holds a worker slot for all of it. The compiler therefore runs in a session
+# of its own, and every --watchdog-sample-secs (default 30) the wrapper reads
+# the CPU time of its whole process tree from /proc (utime+stime+cutime+cstime
+# of each live process in the compiler's session or below it by parent links,
+# so a link step's children count, so does a helper reparented away from the
+# compiler, and so do children already reaped). A sample in which the tree gained less than 1% of
+# one CPU is idle; after --watchdog-idle-secs (default 300) of consecutive
+# idle samples the wrapper kills the session and every process of the tree
+# and exits 124, saying so. There is no wall-clock limit: a slow compile uses
+# CPU the whole time and is never killed. --watchdog-idle-secs=0 turns the
+# watchdog off. The toolchain passes both (mojo_toolchain's
+# watchdog_idle_secs and watchdog_sample_secs).
+#
+# Exit status: the compiler's; 124 when the watchdog killed it; 2 for a
+# toolchain or wrapper refusal; 3 when
 # the compiler exits 0 but the `-o` output is missing or empty (a zero-byte
 # package is a silent failure); 4 when the output contains this action's
 # working directory (the output would differ on every run and name a path
@@ -65,6 +83,8 @@ shift 4
 RUNPATH='$ORIGIN/lib'
 SRCROOT=""
 LINK_TAIL=""
+WD_IDLE=300
+WD_SAMPLE=30
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --runpath=*)
@@ -79,10 +99,16 @@ while [ "$#" -gt 0 ]; do
             LINK_TAIL="$LINK_TAIL${1#--link-tail=}
 "
             ;;
+        --watchdog-idle-secs=*) WD_IDLE=${1#--watchdog-idle-secs=} ;;
+        --watchdog-sample-secs=*) WD_SAMPLE=${1#--watchdog-sample-secs=} ;;
         *) break ;;
     esac
     shift
 done
+case "$WD_IDLE:$WD_SAMPLE" in
+    *[!0-9:]* | :* | *:) echo "mojo_wrapper: REFUSING: watchdog seconds must be whole numbers (idle '$WD_IDLE', sample '$WD_SAMPLE')" >&2; exit 2 ;;
+esac
+[ "$WD_SAMPLE" -ge 1 ] || { echo "mojo_wrapper: REFUSING: --watchdog-sample-secs must be at least 1" >&2; exit 2; }
 [ "$#" -gt 0 ] && [ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
 shift
 
@@ -202,17 +228,106 @@ export PATH MODULAR_HOME LD_LIBRARY_PATH CC CXX MODULAR_CACHE_DIR TMPDIR HOME \
     XDG_CACHE_HOME ZIG_GLOBAL_CACHE_DIR ZIG_LOCAL_CACHE_DIR \
     KGEN_CompilerRT_AsyncRT_ParallelismLevel MODULAR_CRASH_REPORTING_ENABLED
 
+SUBCMD=$1
 STRIP=""
 if [ -n "$SRCROOT" ] && [ "$1" = "build" ]; then
     STRIP="-strip-file-prefix=$SRCROOT/"
 fi
-rc=0
 if [ -n "$STRIP" ]; then
     SUB=$1
     shift
-    "$TC/bin/mojo" "$SUB" "$STRIP" "$@" || rc=$?
-else
+    set -- "$SUB" "$STRIP" "$@"
+fi
+
+# ---- compile, under the watchdog (see the header) ---------------------------
+# tree <root>: prints "<state of root> <CPU ticks of root's live process tree>"
+# (root's session plus root's descendants by ppid),
+# or "gone 0" once root has exited (a zombie counts as exited). Ticks are
+# USER_HZ (100 per second on linux).
+tree() {
+    "$BB" cat /proc/[0-9]*/stat 2> /dev/null | "$BB" awk -v root="$1" -v mode="${2:-}" '
+        {
+            # comm (field 2) may hold spaces and parentheses: the fields
+            # after it start past the last ")".
+            i = 0
+            while ((j = index(substr($0, i + 1), ")")) > 0) i += j
+            split(substr($0, i + 2), f, " ")
+            n++; pid[n] = $1; par[$1] = f[2]; st[$1] = f[1]; sid[$1] = f[4]
+            t[$1] = f[12] + f[13] + f[14] + f[15]
+        }
+        END {
+            if (mode == "pids") {
+                if (!(root in st)) exit
+            } else if (!(root in st) || st[root] == "Z") {
+                print "gone 0"
+                exit
+            }
+            # The tree is the session of root (the compiler leads one; a helper
+            # that was reparented away, to init or a subreaper, is still in
+            # it) plus the ppid descendants of root. What is sampled is exactly
+            # what kill_tree kills, so a helper doing the work while root
+            # waits is never read as idle.
+            in_[root] = 1
+            for (k = 1; k <= n; k++) if (sid[pid[k]] == root) in_[pid[k]] = 1
+            do {
+                grew = 0
+                for (k = 1; k <= n; k++)
+                    if (!(pid[k] in in_) && (par[pid[k]] in in_)) { in_[pid[k]] = 1; grew = 1 }
+            } while (grew)
+            if (mode == "pids") { for (p in in_) if (p + 0 > 1) print p; exit }
+            tot = 0
+            for (p in in_) tot += t[p]
+            print st[root], tot
+        }'
+}
+
+kill_tree() {
+    # Stop the session and every process of the tree, so none can start
+    # another; list the (now frozen) tree; kill the session and that list.
+    # `tree ... pids` prints only pids above 1 (never 0, which `kill` would
+    # read as this script's own process group).
+    kill -s STOP "-$1" 2> /dev/null || true
+    for p in $(tree "$1" pids); do kill -s STOP "$p" 2> /dev/null || true; done
+    frozen=$(tree "$1" pids)
+    kill -s KILL "-$1" 2> /dev/null || true
+    for p in $frozen; do kill -s KILL "$p" 2> /dev/null || true; done
+}
+
+rc=0
+if [ "$WD_IDLE" = 0 ]; then
     "$TC/bin/mojo" "$@" || rc=$?
+else
+    # setsid: the compiler leads a session of its own, so killing the session
+    # also reaches a descendant whose parent has already exited.
+    "$BB" setsid "$TC/bin/mojo" "$@" &
+    pid=$!
+    need=$(((WD_IDLE + WD_SAMPLE - 1) / WD_SAMPLE))
+    set -- $(tree "$pid")
+    last=$2
+    idle=0
+    waited=0
+    while [ "$1" != gone ]; do
+        "$BB" sleep 1
+        waited=$((waited + 1))
+        set -- $(tree "$pid")
+        [ "$1" != gone ] || break
+        [ "$waited" -ge "$WD_SAMPLE" ] || continue
+        waited=0
+        if [ $(($2 - last)) -lt "$WD_SAMPLE" ]; then
+            idle=$((idle + 1))
+        else
+            idle=0
+        fi
+        last=$2
+        if [ "$idle" -ge "$need" ]; then
+            kill_tree "$pid"
+            wait "$pid" 2> /dev/null || true
+            echo "mojo-watchdog: killed deadlocked compiler after $((idle * WD_SAMPLE))s of zero process-tree CPU (mojo $SUBCMD, output $EXPECT); the action is safe to retry. Knobs: watchdog_idle_secs / watchdog_sample_secs of the Mojo toolchain." >&2
+            rm -rf "$T"
+            exit 124
+        fi
+    done
+    wait "$pid" || rc=$?
 fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2

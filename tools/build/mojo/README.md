@@ -40,7 +40,7 @@ mojo_library(
   compiler only through `deps`
   ([`checks/missing_dep`](../checks/missing_dep/BUCK) fails to compile).
 - **The gate.** Each file in `test_srcs` is built from that one file against
-  the ungated package (at `test_optimization_level`, default `-O3`) and run;
+  the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public
   package `L/pkg/<I>.mojoc` is a copy of the ungated one that takes every
   test's PASS marker as an input, so it cannot exist unless every test passed,
@@ -48,6 +48,17 @@ mojo_library(
   ([`checks/libgate_bad`](../checks/libgate_bad/BUCK): the library and its
   consumer go red, `[ungated]` builds, and a binary naming `[ungated]` in
   `deps` fails analysis).
+- **Holding a known-failing test: `tests_known_failing`.** A red test that
+  must not block the library's closure is held by a row
+  `{"<test_srcs path>": {"issue": "<n>, #<n> or its GitHub issue URL", "reason": "..."}}`.
+  The hold inverts rather than mutes: the held test still builds and runs in
+  the gate, and its marker (`HELD <label>`) is produced only if it FAILS. A
+  held test that passes is red, `LEDGER STALE`, naming the row to delete; an
+  unheld failing test is still `GATED TEST FAILED`. Refused at analysis: a key
+  that is not a `test_srcs` entry, any field besides `issue` and `reason`, a
+  missing or malformed issue (a GitHub issue number or URL, nothing else), an
+  empty reason, two rows with byte-identical reasons, and holding every test
+  ([`checks/known_failing`](../checks/known_failing/BUCK)).
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
@@ -61,11 +72,31 @@ L/src/I/...         the staged package sources
 L/tests/<t>/...     one binary and one PASS marker per test
 ```
 
+### The compile watchdog
+
+The compiler can deadlock (every thread parked, the process tree using no
+CPU) and then never exits, which would hold a remote worker until the
+executor's action timeout. [`mojo_wrapper.sh`](mojo_wrapper.sh) runs it in a
+session of its own and samples the CPU time of that session and the
+compiler's whole process tree from `/proc` (a helper reparented away from the
+compiler is still in the session, and counts; what is sampled is what is
+killed) every `watchdog_sample_secs` (default 30); after `watchdog_idle_secs`
+(default 300) of samples each gaining less than 1% of one CPU, it kills the
+session and the tree and fails the action with exit 124:
+`mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree
+CPU`. Such an action is safe to retry. There is no wall-clock limit; a slow
+compile uses CPU throughout and is never killed. Both knobs are
+`mojo_toolchain` attributes (`komira_mojo_toolchains(watchdog_idle_secs = ...)`
+in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off. Linux
+only for now: the macOS wrapper has none
+([`checks/watchdog`](../checks/watchdog/cases.sh)).
+
 ## Binaries and tests
 
 - **`main`**: the file holding `main()`. It defaults to the only file in
   `srcs`; with several, name it.
-- **`optimization_level`**: default `3`.
+- **`optimization_level`**: `mojo_binary` default `3`, `mojo_test` default `1`;
+  see [Optimization levels](#optimization-levels).
 - **`[run_check]`** (`mojo_binary`): runs the binary remotely from its
   runnable directory, with no library path set, and with `expected_stdout`
   compares its stdout byte for byte
@@ -109,6 +140,97 @@ runtime-library check keeps the subset equal to what a real run loads. Moving
 the gated tests onto the runnable directory would change the command of every
 gated test action, and so their cache keys.
 
+
+## Optimization levels
+
+Tests compile at `-O1`; what ships compiles at `-O3`. A test is built, run
+once and thrown away, so its compile is most of what it costs, while a binary
+or shared library runs in production.
+
+| what | level | override |
+|---|---|---|
+| `mojo_test` | `-O1` | `optimization_level` |
+| each `test_srcs` file of a `mojo_library` (the gate) | `-O1` | `test_optimization_level` |
+| `mojo_binary`, and its `[shared]` library | `-O3` | `optimization_level` |
+| the shared libraries a bundle packs (a binary's `[shared]`) | `-O3` | the binary's `optimization_level` |
+| `mojo_multi_numa_test` | none of its own: it compiles nothing and runs `binary` as that target built it (`mojo_test` `-O1`, `mojo_binary` `-O3`) | the `binary` target's `optimization_level` |
+
+The level belongs to the target that compiles: nothing a consumer declares
+changes it. A test linking a shared library or a C/C++ library links it as
+that library's own target built it (a `.so` at `-O3`, a C library at its own
+`compiler_flags`); a `.mojoc` holds no machine code, so a package has no
+level of its own and is compiled into each binary at that binary's level. A
+`[run_check]` runs the binary its target built. A test program declared as a
+`mojo_binary` (for `expected_stdout`, or as the `binary` of a
+`mojo_multi_numa_test`) states `optimization_level = "1"` itself, as
+[`examples/aws_lc`](../examples/aws_lc/BUCK),
+[`examples/s2n_tls`](../examples/s2n_tls/BUCK) and
+[`checks/numa`](../checks/numa/BUCK) do; a `mojo_multi_numa_test` over a
+shipped `mojo_binary` runs it at `-O3`, the bytes that ship. Levels are `0` to `3`;
+anything else is refused at analysis. Check 30
+([`checks/opt_level.sh`](../checks/opt_level.sh)) reads the levels from the
+compile commands.
+
+## Test data, environment and scratch
+
+Every test, a `test_srcs` test of a `mojo_library` or a `mojo_test` run by
+`buck2 test`, runs from a tree staged for that test alone:
+
+```
+root/bin/<test>       the test binary
+root/share/<dest>     each declared data file
+```
+
+```python
+mojo_library(
+    ...
+    test_srcs = ["tests/test_reader.mojo"],
+    test_data = {
+        # A list: each source is staged at its path from the cell root.
+        "tests/test_reader.mojo": ["fixtures/a.parquet"],
+    },
+    test_env = {"READER_MODE": "strict"},
+)
+
+mojo_test(
+    ...
+    data = {"golden/out.txt": "fixtures/expected.txt"},  # a dict: {dest: source}
+    env = {"READER_MODE": "strict"},
+)
+```
+
+- **Current directory.** [`gate_runner.sh`](gate_runner.sh) starts the test
+  in `root/share` (an empty directory when nothing is declared). A test in
+  package `pkg` that declares `fixtures/a.parquet` opens it as
+  `pkg/fixtures/a.parquet`, the path it has in the repository. A file the
+  test did not declare is absent, whether or not it exists in the repository,
+  and so are the action's other inputs.
+- **`test_data`** is keyed by `test_srcs` entry, so a fixture edit re-runs
+  only the tests that declared it. A value is a list of sources, or a dict
+  `{dest: source}` (a build output must use the dict form). A destination
+  must be a relative file path with no empty, `.` or `..` segment, and may
+  not also be the directory of another destination. `mojo_test` takes the
+  same value as `data`.
+- **`test_env`** (`env` on `mojo_test`) adds variables. The runner owns
+  `PATH`, `LD_LIBRARY_PATH`, `LD_PRELOAD`, `DYLD_LIBRARY_PATH`,
+  `DYLD_FALLBACK_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `TMPDIR`,
+  `TEST_TMPDIR`, `HOME` and `PWD`; setting one is refused at analysis.
+  The variables are given to the test process only, never to the runner's
+  own shell, so a name the runner uses internally (`HELD`, `BIN`, `rc`)
+  reaches the test and cannot change the verdict
+  ([`checks//test_data:runner_cases`](../checks/test_data/runner_cases.sh)).
+- **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
+  directories the runner makes for this run inside the action's working
+  directory, so no two runs share them, and they are removed afterwards.
+- **Finding data from the executable.**
+  [`komira//tools/build/mojo/runtime_paths:komira_runtime_paths`](runtime_paths/__init__.mojo)
+  gives `executable_path()`, `install_root()` (the parent of the binary's
+  directory), `share_dir()`, `data_path(rel)`, `read_data(rel)` and
+  `test_tmpdir()` (which raises rather than fall back to `/tmp`). A bundle
+  has the same layout (`bin/<name>`, `share/`), so the same call finds a
+  bundle's `data` and a test's declared data; nothing reads a runfiles tree
+  or an environment variable.
+
 ## Multi-NUMA tests
 
 ```python
@@ -130,6 +252,12 @@ not one of its inputs. Its toolchain (`toolchains//:mojo_multi_numa`) is
 private and states `numa_multi`, so the requirement cannot be dropped from a
 BUCK file.
 
+`buck2 test` runs the binary through the gate runner as a `mojo_test` is run:
+from its staged tree (`bin/<name>`, plus the `data` of a `mojo_test`, which is
+also its current directory), with its `env` and a private `TEST_TMPDIR` and
+`HOME` (see "Test data, environment and scratch"). The runtime libraries come
+from the binary's runnable directory.
+
 Every run (the build's run check and the `buck2 test` command) starts through
 [`numa_guard.sh`](numa_guard.sh), which exits 3 with
 `numa_guard: REFUSING to run` unless the action can use at least `numa_nodes`
@@ -138,6 +266,8 @@ configured, is in
 [platforms/README.md](../platforms/README.md#multi-numa-runs); the fixtures
 are in [`checks/numa`](../checks/numa/BUCK)
 ([checks 10 and 11](../checks/README.md#10-execution-platforms)).
+`checks//numa:gate_run` runs the `buck2 test` command minus the guard, so the
+gate runner is reached with this rule's own arguments on any worker.
 
 A gated library test (`test_srcs`) runs inside the library's target and so
 always on `exec-mojo`. A library test that needs several NUMA nodes is
@@ -258,7 +388,7 @@ FIPS, linux x86_64) and [`third_party/s2n-tls`](../../../third_party/s2n-tls)
 builds. Their source and header lists (`srcs.bzl`) are generated from the
 archive's CMake lists by
 [`third_party/gen_srcs.py`](../../../third_party/gen_srcs.py); s2n-tls's
-feature defines are `features.bzl`, the probes that pass. Check 25 holds
+feature defines are `features.bzl`, the probes that pass. Check 26 holds
 both to the archives and to a compile of every probe, and runs known-answer
 tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
@@ -268,7 +398,12 @@ assembly lists are generated but not built yet.
 
 | message | from | meaning |
 |---|---|---|
-| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed, and it is not held by `tests_known_failing` |
+| `LEDGER STALE: <label> PASSED, but it is held as known-failing.` | [`gate_runner.sh`](gate_runner.sh) | a test held by `tests_known_failing` passed; delete its row |
+| `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
+| `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
+| `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |
+| `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
 | `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([check 4](../checks/README.md#4-closure-refusal)) |
 | `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
@@ -280,10 +415,8 @@ assembly lists are generated but not built yet.
 
 ## Not yet supported
 
-A `data` attribute for test fixtures (a gated test runs with the action root
-as its working directory); test helper modules or test-only deps (each gated
-test is built from its one file against the library); holding a known-failing
-test; extra compile flags, defines, or include roots; shared C libraries (C
-deps link statically); a compile watchdog; choosing the package root (the shallowest `__init__.mojo`
+Test helper modules or test-only deps (each gated
+test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
+deps link statically); a compile watchdog on macOS; choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root); a gated library test that needs more than one NUMA
 node (see [Multi-NUMA tests](#multi-numa-tests)).
