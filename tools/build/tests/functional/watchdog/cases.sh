@@ -29,6 +29,7 @@ spin() {
 }
 case "\$1" in
     hang) sleep 600 ;;
+    hangpid) echo \$\$ > compiler.pid; sleep 600 & echo \$! > child.pid; wait ;;
     treehang) sleep 600 & echo \$! > child.pid; wait ;;
     orphan) sh -c 'sleep 600 & echo \$! > child.pid'; sleep 600 ;;
     orphanspin) (spin 7 & echo \$! > child.pid); sleep 8 ;;
@@ -94,5 +95,60 @@ expect enabled 124 "$KILLED" nap5 --watchdog-idle-secs=2 --watchdog-sample-secs=
 expect default_knobs 0 - nap2
 expect bad_sample 2 "watchdog-sample-secs must be at least 1" nap2 --watchdog-sample-secs=0
 expect bad_idle 2 "whole numbers" nap2 --watchdog-idle-secs=5m
+
+# killed <case> <signal> <want rc>: the wrapper is signalled while its
+# compiler (and the compiler's child) hang with the watchdog far from firing.
+# Within 5 s of the signal both must be gone: a caught signal kills the tree
+# before the wrapper exits (rc 128 + signal); SIGKILL cannot be caught, and
+# the tether in the compiler's session must kill it (rc 137, from the shell).
+alive() { # pid: running, stopped or sleeping, not a zombie
+    st=$("$BB" sed -n 's/.*) \([A-Za-z]\).*/\1/p' "/proc/$1/stat" 2> /dev/null || true)
+    case "$st" in "" | Z | X) return 1 ;; *) return 0 ;; esac
+}
+killed() {
+    name=$1 sig=$2 want=$3
+    c=$D/$name
+    "$BB" mkdir -p "$c"
+    echo "watchdog case: $name" >&2
+    (cd "$c" && exec "$BB" sh "$WRAPPER" "$BB" "$D/tc" "$D/zig" x86_64-linux-gnu \
+        --watchdog-idle-secs=600 --watchdog-sample-secs=1 -- hangpid -o out.mojoc) > "$c/log" 2>&1 &
+    w=$!
+    n=0
+    while [ ! -s "$c/child.pid" ] && [ "$n" -lt 20 ]; do "$BB" sleep 1; n=$((n + 1)); done
+    why=""
+    if [ ! -s "$c/child.pid" ] || [ ! -s "$c/compiler.pid" ]; then
+        why="the stand-in compiler did not start"
+        "$BB" kill -s KILL "$w" 2> /dev/null || true
+    fi
+    rc=0
+    if [ -z "$why" ]; then
+        "$BB" kill -s "$sig" "$w"
+        wait "$w" || rc=$?
+        [ "$rc" = "$want" ] || why="the wrapper exited $rc, want $want"
+    fi
+    left=""
+    n=0
+    while [ -z "$why" ] && [ "$n" -lt 5 ]; do
+        left=""
+        for p in "$("$BB" cat "$c/compiler.pid")" "$("$BB" cat "$c/child.pid")"; do
+            if alive "$p"; then left="$left $p"; fi
+        done
+        [ -n "$left" ] || break
+        "$BB" sleep 1
+        n=$((n + 1))
+    done
+    [ -z "$left" ] || why="${why:+$why; }still alive 5 s after SIG$sig to the wrapper:$left"
+    for p in "$("$BB" cat "$c/compiler.pid" 2> /dev/null)" "$("$BB" cat "$c/child.pid" 2> /dev/null)"; do
+        [ -z "$p" ] || "$BB" kill -9 "$p" 2> /dev/null || true
+    done
+    if [ -z "$why" ]; then
+        echo "ok $name" >> "$REPORT"
+    else
+        echo "BAD $name: $why: $("$BB" tail -n 3 "$c/log" | "$BB" tr '\n' ' ')" | "$BB" tee -a "$REPORT" >&2
+        bad=1
+    fi
+}
+killed wrapper_term TERM 143
+killed wrapper_kill KILL 137
 "$BB" rm -rf "$D"
 exit "$bad"

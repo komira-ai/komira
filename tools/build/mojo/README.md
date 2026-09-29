@@ -90,9 +90,18 @@ session and the tree and fails the action with exit 124:
 CPU`. Such an action is safe to retry. There is no wall-clock limit; a slow
 compile uses CPU throughout and is never killed. Both knobs are
 `mojo_toolchain` attributes (`komira_mojo_toolchains(watchdog_idle_secs = ...)`
-in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off. Linux
-only for now: the macOS wrapper has none
-([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh)).
+in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off.
+
+The compiler dies with the wrapper. A HUP, INT or TERM to the wrapper kills
+the tree before the wrapper exits (129, 130, 143). A KILL cannot be caught,
+so a tether in the compiler's session blocks reading a FIFO whose only
+writer is the wrapper; when the wrapper dies the read returns and the tether
+kills the session. The macOS wrapper
+([`darwin/mojo_wrapper.sh`](darwin/mojo_wrapper.sh)) has the same watchdog
+and knobs (`mojo_darwin_toolchain`), sampling `ps` instead of `/proc` and,
+with no `setsid` on macOS, the compiler's tree by parent pid instead of a
+session ([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh),
+[`tests/functional/darwin`](../tests/functional/darwin/check.sh)).
 
 ## Binaries and tests
 
@@ -433,6 +442,6 @@ assembly lists are generated but not built yet.
 
 Test helper modules or test-only deps (each gated
 test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
-deps link statically); a compile watchdog on macOS; choosing the package root (the shallowest `__init__.mojo`
+deps link statically); choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root); a gated library test that needs more than one NUMA
 node (see [Multi-NUMA tests](#multi-numa-tests)).

@@ -77,7 +77,7 @@ compile_verdict() { # aquery --json: the Mojo compile commands use the macOS too
     bad=$(printf '%s\n' "$rows" | awk -F '\t' '
         NF < 2 { next }
         {
-            n = split("darwin/__busybox.sh__/busybox.sh|darwin/__mojo_wrapper.sh__/mojo_wrapper.sh|toolchains/darwin/__mojo_compiler__/|toolchains/darwin/__link__/| 11.0, ", need, "|")
+            n = split("darwin/__busybox.sh__/busybox.sh|darwin/__mojo_wrapper.sh__/mojo_wrapper.sh|toolchains/darwin/__mojo_compiler__/|toolchains/darwin/__link__/| 11.0, |--watchdog-idle-secs=300, --watchdog-sample-secs=30, ", need, "|")
             for (i = 1; i <= n; i++) if (index($2, need[i]) == 0) print $1 " lacks \047" need[i] "\047"
             if (index($2, "zig") > 0) print $1 " names zig"
             if ($1 != "mojo_precompile" && index($2, "--target-cpu, apple-m1") == 0) print $1 " does not target apple-m1"
@@ -500,6 +500,72 @@ else
             fi
         fi
     fi
+fi
+
+# The compile watchdog, on this client (ps(1) here is procps, on the workers
+# macOS's; the wrapper reads only fields both print). The stand-in compiler
+# reads its behaviour from run/mode: `hang` parks itself and a child for 30 s
+# (a watchdog that does not fire fails the case, it does not hang it), `spin`
+# uses CPU for 5 s.
+printf 'x' > "$TC/lib/libKGENCompilerRTShared.dylib"
+printf "$cfg" > "$TC/share/max/modular.cfg"
+printf '%s\n' "$host_want" > "$U/link/macos_hosts"
+cat > "$TC/bin/mojo" <<'MOJO'
+#!/bin/sh
+out=""; prev=""
+for a in "$@"; do [ "$prev" = -o ] && out=$a; prev=$a; done
+case "$(cat mode)" in
+    hang) echo $$ > compiler.pid; /bin/sleep 30 & echo $! > child.pid; wait ;;
+    spin) end=$(($(/bin/date +%s) + 5)); while [ "$(/bin/date +%s)" -lt "$end" ]; do :; done ;;
+esac
+echo compiled > "$out"
+MOJO
+chmod +x "$TC/bin/mojo"
+alive() { # pid: a live process, not a zombie
+    case "$(sed -n 's/.*) \([A-Za-z]\).*/\1/p' "/proc/$1/stat" 2> /dev/null)" in "" | Z | X) return 1 ;; *) return 0 ;; esac
+}
+survivors() { # the stand-in compiler and its child, if still alive
+    for p in $(cat "$U/run/compiler.pid" "$U/run/child.pid" 2> /dev/null); do alive "$p" && printf ' %s' "$p"; done
+}
+reap() { for p in $(cat "$U/run/compiler.pid" "$U/run/child.pid" 2> /dev/null); do kill -9 "$p" 2> /dev/null; done; rm -f "$U/run/compiler.pid" "$U/run/child.pid"; }
+KNOBS="--watchdog-idle-secs=3 --watchdog-sample-secs=1"
+echo hang > "$U/run/mode"
+# shellcheck disable=SC2086 # KNOBS is two flags
+wrap $KNOBS
+wd_hang=$?
+sleep 1
+wd_hang_left=$(survivors)
+grep -q 'mojo-watchdog: killed deadlocked compiler' "$U/wrap.txt" || wd_hang="$wd_hang(no message)"
+reap
+echo spin > "$U/run/mode"
+# shellcheck disable=SC2086 # KNOBS is two flags
+wrap $KNOBS
+wd_spin=$?
+echo hang > "$U/run/mode"
+(cd "$U/run" && rm -rf .komira_action && exec sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 \
+    --watchdog-idle-secs=600 --watchdog-sample-secs=1 -- build x.mojo -o out > "$U/wrap_killed.txt" 2>&1) &
+w=$!
+n=0
+while [ ! -s "$U/run/child.pid" ] && [ "$n" -lt 20 ]; do sleep 1; n=$((n + 1)); done
+kill -s KILL "$w"
+wait "$w" 2> /dev/null
+n=0
+while [ -n "$(survivors)" ] && [ "$n" -lt 5 ]; do sleep 1; n=$((n + 1)); done
+wd_kill_left=$(survivors)
+[ -s "$U/run/child.pid" ] || wd_kill_left=" (the stand-in did not start)"
+reap
+wrap --watchdog-idle-secs=5m
+wd_bad=$?
+if [ "$wd_hang" != 124 ] || [ -n "$wd_hang_left" ]; then
+    fail "wrapper watchdog: a hung compile was not killed with 124 and the message (rc=$wd_hang, alive:${wd_hang_left:- none}; see $U/wrap.txt)"
+elif [ "$wd_spin" != 0 ]; then
+    fail "wrapper watchdog: a compile using CPU for 5 s did not finish (rc=$wd_spin, see $U/wrap.txt)"
+elif [ -n "$wd_kill_left" ]; then
+    fail "wrapper watchdog: SIGKILL to the wrapper left its compiler running:$wd_kill_left (see $U/wrap_killed.txt)"
+elif [ "$wd_bad" != 2 ]; then
+    fail "wrapper watchdog: a malformed knob was not refused (rc=$wd_bad)"
+else
+    pass "wrapper watchdog: a hung compile is killed (124), one using CPU is not, a killed wrapper takes its compiler with it, a malformed knob is refused"
 fi
 
 # run_check.sh starts the binary with no library path of any loader.

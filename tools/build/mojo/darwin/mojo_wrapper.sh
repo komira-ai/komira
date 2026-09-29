@@ -3,7 +3,8 @@
 #
 # usage: sh mojo_wrapper.sh <busybox> <compiler_dir> <link_dir> \
 #            <deployment_target> [--runpath=<path>] [--source-root=<dir>] \
-#            [--link-tail=<arg>...] -- <mojo arguments...>
+#            [--link-tail=<arg>...] [--watchdog-idle-secs=<n>] \
+#            [--watchdog-sample-secs=<n>] -- <mojo arguments...>
 #
 # The same contract as ../mojo_wrapper.sh, with what differs on macOS:
 #
@@ -23,7 +24,9 @@
 #   <deployment_target>  MACOSX_DEPLOYMENT_TARGET for every link.
 #   --runpath, --source-root, --link-tail   as in ../mojo_wrapper.sh; a
 #                  `$ORIGIN` run path becomes `@loader_path`.
-#
+#   --watchdog-idle-secs, --watchdog-sample-secs   the compile watchdog of
+#                  ../mojo_wrapper.sh, sampling ps(1) rather than /proc; see
+#                  the compile step below.#
 # `--emit shared-lib` (the bundle's library) is refused: bundles are linux
 # only.
 #
@@ -38,7 +41,9 @@
 # package whose `shared_libs` says anything else is refused (exit 2) rather
 # than guessed at.
 #
-# Exit status: the compiler's; 2 for a toolchain or wrapper refusal; 3 when
+# Exit status: the compiler's; 124 when the watchdog killed it; 129, 130 or
+# 143 when the wrapper was signalled (the compiler killed first); 2 for a
+# toolchain or wrapper refusal; 3 when
 # the compiler exits 0 but the `-o` output is missing or empty; 4 when the
 # output contains this action's working directory.
 
@@ -60,6 +65,8 @@ shift 4
 RUNPATH='@loader_path/lib'
 SRCROOT=""
 LINK_TAIL=""
+WD_IDLE=300
+WD_SAMPLE=30
 while [ "$#" -gt 0 ]; do
     case "$1" in
         --runpath=*)
@@ -75,10 +82,16 @@ while [ "$#" -gt 0 ]; do
             LINK_TAIL="$LINK_TAIL${1#--link-tail=}
 "
             ;;
+        --watchdog-idle-secs=*) WD_IDLE=${1#--watchdog-idle-secs=} ;;
+        --watchdog-sample-secs=*) WD_SAMPLE=${1#--watchdog-sample-secs=} ;;
         *) break ;;
     esac
     shift
 done
+case "$WD_IDLE:$WD_SAMPLE" in
+    *[!0-9:]* | :* | *:) echo "mojo_wrapper: REFUSING: watchdog seconds must be whole numbers (idle '$WD_IDLE', sample '$WD_SAMPLE')" >&2; exit 2 ;;
+esac
+[ "$WD_SAMPLE" -ge 1 ] || { echo "mojo_wrapper: REFUSING: --watchdog-sample-secs must be at least 1" >&2; exit 2; }
 [ "$#" -gt 0 ] && [ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
 shift
 for a in "$@"; do
@@ -175,13 +188,119 @@ STRIP=""
 if [ -n "$SRCROOT" ] && [ "$1" = "build" ]; then
     STRIP="-strip-file-prefix=$SRCROOT/"
 fi
-rc=0
+SUBCMD=$1
 if [ -n "$STRIP" ]; then
-    SUB=$1
     shift
-    "$TC/bin/mojo" "$SUB" "$STRIP" "$@" || rc=$?
-else
+    set -- "$SUBCMD" "$STRIP" "$@"
+fi
+
+# ---- compile, under the watchdog (see the header) ---------------------------
+# The same watchdog as ../mojo_wrapper.sh, read through ps(1) instead of
+# /proc, and without a session (macOS has no setsid(1)): the tree is the root
+# and its descendants by parent pid, each process's own CPU time (a child
+# already reaped no longer counts; one that ran through a sample did).
+cat > "$T/tree.sh" <<'TREE'
+# tree <root> [pids]: "<state of root> <CPU ticks of root's live tree>", or
+# "gone 0" once root has exited; with `pids`, the tree's pids (above 1).
+tree() {
+    ps -A -o pid= -o ppid= -o stat= -o time= 2> /dev/null | awk -v root="$1" -v mode="${2:-}" '
+        function ticks(s,   d, i, n, a, v) {
+            d = 0
+            if ((i = index(s, "-")) > 0) { d = substr(s, 1, i - 1); s = substr(s, i + 1) }
+            n = split(s, a, ":"); v = 0
+            for (i = 1; i <= n; i++) v = v * 60 + a[i]
+            return int((d * 86400 + v) * 100)
+        }
+        { n++; pid[n] = $1; par[$1] = $2; st[$1] = substr($3, 1, 1); t[$1] = ticks($4) }
+        END {
+            if (mode == "pids") {
+                if (!(root in st)) exit
+            } else if (!(root in st) || st[root] == "Z") {
+                print "gone 0"
+                exit
+            }
+            in_[root] = 1
+            do {
+                grew = 0
+                for (k = 1; k <= n; k++)
+                    if (!(pid[k] in in_) && (par[pid[k]] in in_)) { in_[pid[k]] = 1; grew = 1 }
+            } while (grew)
+            if (mode == "pids") { for (p in in_) if (p + 0 > 1) print p; exit }
+            tot = 0
+            for (p in in_) tot += t[p]
+            print st[root], tot
+        }'
+}
+# tether_kill <root>: from a process inside the tree (the tether, after
+# exec, so $$ is its own pid): kill the rest of it.
+tether_kill() {
+    for p in $(tree "$1" pids); do [ "$p" = "$$" ] || kill -s KILL "$p" 2> /dev/null || true; done
+}
+# kill_tree <root>: stop the tree, so none of it can start another process,
+# list it again, and kill that list.
+kill_tree() {
+    for p in $(tree "$1" pids); do kill -s STOP "$p" 2> /dev/null || true; done
+    for p in $(tree "$1" pids); do kill -s KILL "$p" 2> /dev/null || true; done
+}
+TREE
+. "$T/tree.sh"
+
+rc=0
+if [ "$WD_IDLE" = 0 ]; then
     "$TC/bin/mojo" "$@" || rc=$?
+else
+    # The compiler runs under a small shell (the root) that also holds a
+    # tether: a read of a FIFO whose only writer is this wrapper (fd 9). The
+    # traps below kill the tree when the wrapper is signalled; if it is killed
+    # outright, the kernel closes its end, the read returns, and the tether
+    # kills the tree it belongs to.
+    mkfifo "$T/tether"
+    exec 9<> "$T/tether"
+    sh -c '
+        lib=$1 fifo=$2
+        shift 2
+        "$@" &
+        c=$!
+        { cat "$fifo" > /dev/null; exec sh -c ". \"\$0\"; tether_kill \"\$1\"" "$lib" "$$"; } &
+        t=$!
+        rc=0
+        wait "$c" || rc=$?
+        kill "$t" 2> /dev/null || true
+        exit "$rc"
+    ' tether "$T/tree.sh" "$T/tether" "$TC/bin/mojo" "$@" 9>&- &
+    pid=$!
+    on_signal() { kill_tree "$pid"; rm -rf "$T"; exit "$1"; }
+    trap 'on_signal 129' HUP
+    trap 'on_signal 130' INT
+    trap 'on_signal 143' TERM
+    need=$(((WD_IDLE + WD_SAMPLE - 1) / WD_SAMPLE))
+    s=$(tree "$pid")
+    last=${s#* }
+    idle=0
+    waited=0
+    while [ "${s% *}" != gone ]; do
+        sleep 1 9>&-
+        waited=$((waited + 1))
+        s=$(tree "$pid")
+        [ "${s% *}" != gone ] || break
+        [ "$waited" -ge "$WD_SAMPLE" ] || continue
+        waited=0
+        if [ $((${s#* } - last)) -lt "$WD_SAMPLE" ]; then
+            idle=$((idle + 1))
+        else
+            idle=0
+        fi
+        last=${s#* }
+        if [ "$idle" -ge "$need" ]; then
+            kill_tree "$pid"
+            wait "$pid" 2> /dev/null || true
+            echo "mojo-watchdog: killed deadlocked compiler after $((idle * WD_SAMPLE))s of zero process-tree CPU (mojo $SUBCMD, output $EXPECT); the action is safe to retry. Knobs: watchdog_idle_secs / watchdog_sample_secs of the Mojo toolchain." >&2
+            rm -rf "$T"
+            exit 124
+        fi
+    done
+    wait "$pid" || rc=$?
+    trap - HUP INT TERM
 fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2

@@ -17,7 +17,7 @@
 
 set -eu
 
-APPLETS="basename cat chmod cmp cp cut dirname env expr find grep head ln ls mkdir mktemp mv printf readlink rm rmdir sed sh sort tail tee test touch tr uname wc"
+APPLETS="awk basename cat chmod cmp cp cut dirname env expr find grep head ln ls mkdir mkfifo mktemp mv printf ps readlink rm rmdir sed sh sleep sort tail tee test touch tr uname wc"
 
 self=$0
 case "$self" in /*) ;; *) self="$PWD/$self" ;; esac

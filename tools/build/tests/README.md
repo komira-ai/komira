@@ -490,7 +490,15 @@ child and an orphaned grandchild (a child left in any state but zombie fails
 the case); a tree spinning itself or through a child, a short idle and a
 disabled watchdog run to completion; a compiler error keeps its status;
 malformed knobs exit 2. Every case runs under `timeout 60`, so a watchdog
-that never fires is a failed case, not a hung action.
+that never fires is a failed case, not a hung action. Two more signal the
+wrapper while its compiler and the compiler's child hang: after TERM the
+wrapper must exit 143 with both gone, and after KILL, which it cannot catch,
+both must be gone within 5 s (the tether in the compiler's session, a read
+of a FIFO only the wrapper holds open, returns when the wrapper dies and
+kills the session). The macOS wrapper has the same watchdog, sampling
+`ps` rather than `/proc`; test 24 ([`darwin/check.sh`](functional/darwin/check.sh)) runs it on this client
+against a stand-in compiler: a hang is killed (124), a spin is not, a killed
+wrapper takes its compiler with it, a malformed knob is refused.
 
 ## 29. Test data, environment and scratch
 

@@ -134,7 +134,8 @@
 #  24. The macOS arm64 target and execution platform: registration only when
 #      configured, resolution, compile command lines, linux actions
 #      unchanged, the osx-arm64 closure's Mach-O load commands (unpacked on
-#      the farm), the macOS scripts against stand-ins, and, when the macOS
+#      the farm), the macOS scripts against stand-ins (the wrapper's compile
+#      watchdog included), and, when the macOS
 #      workers are configured, a build and run check of
 #      //tools/build/examples:hello on them (tools/build/tests/functional/darwin/check.sh).
 #  25. A fresh clone with no `.buckconfig.local` builds locally: in a scratch
@@ -160,7 +161,11 @@
 #      grandchild with it; a tree using CPU (itself, through a child, or
 #      through an orphaned member of its session while it waits), a
 #      short idle and a disabled watchdog are not killed; a compiler error
-#      keeps its exit status; malformed knobs are refused (exit 2).
+#      keeps its exit status; malformed knobs are refused (exit 2); and the
+#      compiler dies with the wrapper: TERM to the wrapper kills compiler and
+#      child before it exits 143, and after a KILL the tether in the
+#      compiler's session kills them within 5 s. The macOS wrapper's
+#      watchdog (ps rather than /proc) is part of test 24.
 #  29. The test runtime contract (tests//functional/test_data): a gated test opens a
 #      declared fixture by its repository path from its staged share/, and a
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
@@ -831,7 +836,7 @@ if ! "$BUCK2" build tests//functional/watchdog:cases --show-full-simple-output >
 else
     report=$(tail -n 1 "$LOG/watchdog_cases.txt")
     ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 13 ]; then
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 15 ]; then
         fail "compile watchdog cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
     else
         pass "compile watchdog: $ok stand-in compilers, each killed (124) or left alone as required"
