@@ -250,12 +250,24 @@ hashes too.
 
 Every label outside a comment in the BUCK and `.bzl` files a repository
 using komira loads or copies -- those under `tools/build/{mojo,toolchains,platforms,package,examples,cells}`
--- names the `komira`, `prelude` or `toolchains` cell, the only cells such a
+and `third_party` -- names the `komira`, `prelude` or `toolchains` cell, the only cells such a
 repository has. A label naming `checks`, which exists only in a standalone
 checkout, would load here and fail to load there (as `visibility =
 ["checks//formats:"]` on `examples:hello` once did). The check fails if a
 searched directory is missing, or if it finds fewer than 20 labels, so a scan
 that reads nothing cannot pass.
+
+## 20. C and C++ dependencies
+
+[`cxx_checks.sh`](cxx_checks.sh), sourced by `run_checks.sh`. A Mojo binary
+calling a C function links and prints the C result when the `cxx_library` is
+in `deps` (`checks//c_deps:c_linked`), and its link fails on the undefined
+symbol when it is not (`c_missing`); `deps` refuses a target that is neither
+a Mojo package nor a C/C++ library (`bad_dep`). C compiles and archives
+resolve to `exec-light`, the Mojo targets using them to `exec-mojo`. The
+snappy test binary, which links C++ with zig's static libc++, carries
+libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
+on the `libstdc++.so.6` the Mojo runtime loads.
 
 ## Diagnostics
 

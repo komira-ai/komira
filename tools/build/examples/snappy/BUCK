@@ -1,0 +1,8 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+
+# snappy (C++, with zig's libc++) called from Mojo through its C API.
+mojo_test(
+    name = "test_snappy",
+    srcs = ["test_snappy.mojo"],
+    deps = ["//third_party/snappy:snappy"],
+)

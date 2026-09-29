@@ -1,0 +1,70 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# google/snappy 1.2.2, BSD-3-Clause (COPYING in the archive).
+pinned_file(
+    name = "snappy-1.2.2.tar.gz",
+    url = "https://github.com/google/snappy/archive/refs/tags/1.2.2.tar.gz",
+    sha256 = "90f74bc1fbf78a6c56b3c4a082a05103b3a56bb17bca1a27e052ea11723292dc",
+)
+
+archive_files(
+    name = "src",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    archive = ":snappy-1.2.2.tar.gz",
+    files = [
+        "COPYING",
+        "snappy-c.cc",
+        "snappy-c.h",
+        "snappy-internal.h",
+        "snappy-sinksource.cc",
+        "snappy-sinksource.h",
+        "snappy-stubs-internal.cc",
+        "snappy-stubs-internal.h",
+        "snappy.cc",
+        "snappy.h",
+    ],
+    strip_prefix = "snappy-1.2.2",
+    # What CMake's configure_file writes for this platform.
+    substitutions = {
+        "${HAVE_SYS_UIO_H_01}": "1",
+        "${PROJECT_VERSION_MAJOR}": "1",
+        "${PROJECT_VERSION_MINOR}": "2",
+        "${PROJECT_VERSION_PATCH}": "2",
+    },
+    templates = {"snappy-stubs-public.h": "snappy-stubs-public.h.in"},
+)
+
+# The library and its C API (snappy-c.h). C++, so it carries zig's libc++
+# (komira//tools/build/toolchains:libcxx) into every link that includes it.
+cxx_library(
+    name = "snappy",
+    srcs = [
+        ":src[snappy-c.cc]",
+        ":src[snappy-sinksource.cc]",
+        ":src[snappy-stubs-internal.cc]",
+        ":src[snappy.cc]",
+    ],
+    headers = {
+        "config.h": "config.h",
+        "snappy-internal.h": ":src[snappy-internal.h]",
+        "snappy-stubs-internal.h": ":src[snappy-stubs-internal.h]",
+    },
+    compiler_flags = [
+        "-O2",
+        "-DNDEBUG",
+        "-fno-exceptions",
+        "-fno-rtti",
+        "-Wno-sign-compare",
+    ],
+    exported_deps = ["komira//tools/build/toolchains:libcxx"],
+    exported_headers = {
+        "snappy-c.h": ":src[snappy-c.h]",
+        "snappy-sinksource.h": ":src[snappy-sinksource.h]",
+        "snappy-stubs-public.h": ":src[snappy-stubs-public.h]",
+        "snappy.h": ":src[snappy.h]",
+    },
+    header_namespace = "",
+    preprocessor_flags = ["-DHAVE_CONFIG_H"],
+    visibility = ["PUBLIC"],
+)

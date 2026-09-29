@@ -174,6 +174,18 @@ statically: its `cxx_library` lists
 `komira//tools/build/toolchains:libcxx` in `exported_deps`.
 [`../examples/cshim`](../examples/cshim) calls C from Mojo.
 
+zig's libc++ and libc++abi are linked statically. The Mojo runtime itself
+loads `libstdc++.so.6`, so a binary may hold both runtimes; it exports no
+dynamic symbol, so neither can interpose on the other (check 20, on the snappy
+example). Memory or exceptions must not cross between C++ code and the Mojo
+runtime's C++ internals.
+
+`archive_files` ([`archive.bzl`](archive.bzl)) takes named files out of a
+pinned source archive, with CMake-style template substitution, for
+third-party code built from source: see
+[`third_party/snappy`](../../../third_party/snappy) (snappy 1.2.2, called from
+Mojo in [`../examples/snappy`](../examples/snappy)).
+
 ## Errors
 
 | message | from | meaning |

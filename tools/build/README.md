@@ -12,8 +12,9 @@ Everything the build needs besides the project configuration
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/remote/`](platforms/remote/) registers a standalone checkout's remote platforms. [Reference](platforms/README.md). |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
-| [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains` ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
+| [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains`, and the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains` ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
 | [`checks/`](checks/) | cell `checks` | end-to-end checks, including fixtures that must fail. A standalone checkout's only, and outside `//...`. [Reference](checks/README.md). |
+| [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy); see [C and C++](mojo/README.md#c-and-c). |
 | [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
 
 The repository is one cell, `komira`: the rules, toolchains, platforms and
@@ -48,7 +49,7 @@ repository's root as `.buckconfig`, and two files copied from komira:
 
 | your file | copied from | what it does |
 |---|---|---|
-| `toolchains/BUCK` | [`cells/toolchains/BUCK`](cells/toolchains/BUCK) | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchains from its `mojo` and `mojo_multi_numa` targets, which one call of `komira_mojo_toolchains` declares. |
+| `toolchains/BUCK` | [`cells/toolchains/BUCK`](cells/toolchains/BUCK) | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchains from its `mojo` and `mojo_multi_numa` targets, which one call of `komira_mojo_toolchains` declares. The call of `komira_cxx_toolchains` declares `toolchains//:cxx` for C and C++ deps; drop it to keep a C/C++ toolchain of your own. |
 | `platforms/BUCK` | [`platforms/remote/BUCK`](platforms/remote/BUCK) | the execution platforms, named by `[build] execution_platforms = app//platforms:remote`. |
 
 Put the remote-execution endpoints and the `[komira_re]` worker property sets

@@ -141,6 +141,7 @@ EXAMPLES=(
     //tools/build/examples:hello_bundle //tools/build/package:level_test
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
+    //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
 )
 # Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
 # was observed to skip the sub-target, so never rely on combining them with a

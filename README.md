@@ -33,6 +33,7 @@ tools/buck2 run //tools/build/examples:hello     # build remotely, run here
 | [tools/build/toolchains/README.md](tools/build/toolchains/README.md) | the hermetic toolchain: what is pinned, the host floor, updating a pin |
 | [tools/build/checks/README.md](tools/build/checks/README.md) | the end-to-end checks: what each one proves and how to run it |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
+| [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |
 
 ## License
 
