@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Generic managed-app parameter declarations: a managed app declares the
+# parameters it takes, the deploy renders them onto argv, the app parses them
+# at one site at startup, and the control plane stores the map opaquely. Also
+# the per-name two-engine transport rule. Zero deps by design: three sides that
+# must not depend on each other consume it.
+mojo_library(
+    name = "komira_app_params",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_two_engine_transport_rule_is_stronger.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
