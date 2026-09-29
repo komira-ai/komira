@@ -33,6 +33,10 @@ workers advertise (for example `pool=mojo`).
 
 ### 3. Build
 
+`buck2` below is either a `buck2` on your `PATH` or `tools/buck2`;
+`checks/run_checks.sh` falls back to `tools/buck2` when none is on `PATH`
+(`BUCK2=...` overrides both).
+
 ```sh
 buck2 build //...                                  # examples: packages, binaries, gated library
 buck2 build '//examples:hello_pkg_user[run_check]' # run a binary remotely, compare its stdout
@@ -50,12 +54,39 @@ binary missing a dependency, an incomplete toolchain). They are outside
 
 | rule | produces |
 |---|---|
-| `mojo_library(srcs, deps, test_srcs)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package before its tests. |
+| `mojo_library(srcs, deps, test_srcs)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. |
 | `mojo_binary(srcs, deps, main, expected_stdout)` | an executable via `mojo build`. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. |
 | `mojo_test(srcs, deps)` | a test executable for `buck2 test`. |
 
 `deps` carries the full transitive closure of packages to the compiler, one
-`-I` directory per package.
+`-I` directory per package. The import name (the label name, or
+`import_name`) must be a Mojo identifier.
+
+Gated tests are declared with `test_srcs`, not `tests`: Buck2 reserves
+`tests`. `buck2 test` on a `mojo_library` therefore runs nothing; its tests
+run when the library (or anything depending on it) is built.
+
+**Outputs.** Every compile targets the toolchain's `target_cpu`
+(`x86-64-v3`), not the CPU of the worker that ran it. Linked binaries carry no
+run path and no debug sections, and every compile action fails (exit 4) if
+its output contains the action's working directory. The rules publish no
+`RunInfo`: a built binary needs the toolchain's runtime libraries on its
+library path, and `mojo/launch.sh` is the command that provides them
+(`[run_check]` runs binaries through it, remotely).
+
+**Not yet supported.** `buck2 run`; a `data` attribute for test fixtures (a
+gated test runs with the action root as its working directory); test helper
+modules or test-only deps (each gated test is built from its one file against
+the library); holding a known-failing test; extra compile flags, defines,
+include roots, or C libraries to link; a compile watchdog; choosing the
+package root (the shallowest `__init__.mojo` in `srcs` is the root); a
+separate worker pool for non-compile actions. Gated tests build at `-O3` by
+default (`test_optimization_level`).
+
+Rules are loaded from one cell: a `.bzl` file's providers are distinct per
+loading cell, so a Mojo target in one cell cannot depend on a Mojo library in
+another. The `checks` cell therefore has its own fixtures rather than reusing
+`examples`.
 
 ## Toolchain
 
@@ -67,10 +98,17 @@ closure from the `.conda`. Every tool an action runs is one of its inputs;
 actions never search the worker's `PATH`. The client's only work is
 downloading the pinned files and uploading them to the remote cache.
 
-**Host floor.** What an action still takes from the worker: the Linux kernel
-(including `/proc` and `/dev/null`), the glibc dynamic loader
-`/lib64/ld-linux-x86-64.so.2` with `libc.so.6` and `libm.so.6`, and
-`libstdc++.so.6` and `libgcc_s.so.1`, which the `mojo` compiler binary links
-against. Built Mojo binaries need only glibc and the toolchain's own runtime
-libraries. `buck2 build checks//re_probe:probe` records what a worker
-provides.
+**Host floor.** What an action still takes from the worker: a Linux x86_64
+kernel (including `/proc` and `/dev/null`); a CPU implementing `x86-64-v3`
+(AVX2, BMI2, FMA), since gated tests and run checks execute the code they
+compile; the glibc dynamic loader `/lib64/ld-linux-x86-64.so.2` with
+`libc.so.6` and `libm.so.6`, glibc 2.34 or newer (link steps target
+`x86_64-linux-gnu.2.34`); and `libstdc++.so.6` and `libgcc_s.so.1`, which the
+`mojo` compiler binary links against. None of these is part of an action key,
+so workers that differ in them must not share a remote cache. Built Mojo
+binaries need glibc and the toolchain's own runtime libraries.
+`buck2 build checks//re_probe:probe` records what a worker provides.
+
+The client only downloads the pinned files and uploads them; on macOS
+(`tools/buck2` has a macos-aarch64 entry) buck2 works as a client, and every
+action still runs on the Linux workers.

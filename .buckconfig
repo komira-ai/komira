@@ -8,6 +8,7 @@
   mojo = mojo
   toolchains = toolchains
   checks = checks
+  # `none` has no directory: it is the target of the prelude's unused aliases below.
   none = none
 
 [cell_aliases]

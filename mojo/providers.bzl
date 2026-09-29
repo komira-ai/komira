@@ -24,7 +24,12 @@ MojoToolchainInfo = provider(fields = {
     "zig": provider_field(typing.Any),
     # zig -target triple for link steps.
     "cc_target": provider_field(str),
+    # `--target-cpu` for every compile. Pinned, because the compiler's default
+    # is the CPU of the machine the action runs on, which is not part of the
+    # action key.
+    "target_cpu": provider_field(str),
     "wrapper": provider_field(typing.Any),
     "gate_runner": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
+    "launcher": provider_field(typing.Any),
 })

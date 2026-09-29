@@ -5,7 +5,8 @@ Every action runs the hermetic toolchain from `toolchains//:mojo` through
 
 Output layout of a library `L` with import name `I`:
 
-    L/ungated/I.mojoc      the compiler's output (sub-target `[ungated]`)
+    L/ungated/I.mojoc      the compiler's output (sub-target `[ungated]`: files
+                           only, no MojoInfo, so it cannot be named in `deps`)
     L/pkg/I.mojoc          the public package: a copy of the ungated one that
                            takes every test's PASS marker as an input
     L/src/I/...            the staged package sources
@@ -69,6 +70,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             "build",
             "--optimization-level",
             opt_level,
+            "--target-cpu",
+            tc.target_cpu,
             closure.project_as_args("include"),
             staged.project(main.short_path),
             "-o",
@@ -81,9 +84,17 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
 # ---- mojo_library ----------------------------------------------------------
 
+def _check_import_name(ctx, name):
+    # The `.mojoc` basename is the import name. A name that is not a Mojo
+    # identifier (a dot, a dash) yields a package that cannot be imported and
+    # no error, so refuse it here.
+    if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
+        fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
+
 def _library_impl(ctx):
     tc = _toolchain(ctx)
     import_name = ctx.attrs.import_name or ctx.label.name
+    _check_import_name(ctx, import_name)
     root = _package_root(ctx, ctx.attrs.srcs)
     src_dir = _stage(ctx, "src/" + import_name, ctx.attrs.srcs, root)
     deps = _dep_closure(ctx)
@@ -92,6 +103,9 @@ def _library_impl(ctx):
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
     ctx.actions.run(
         _mojo_cmd(tc, [
+            # No `--target-cpu`: `mojo precompile` rejects it ("unrecognized
+            # argument"). A `.mojoc` holds no machine code; the CPU is fixed
+            # where code is generated, in `mojo build`.
             "precompile",
             dep_closure.project_as_args("include"),
             src_dir,
@@ -107,6 +121,8 @@ def _library_impl(ctx):
     test_subtargets = {}
     for t in ctx.attrs.test_srcs:
         stem = _stem(t)
+        if stem in test_subtargets:
+            fail("{}: two test_srcs share the file name `{}`".format(ctx.label, t.basename))
         exe = _build_executable(
             ctx,
             tc,
@@ -133,8 +149,8 @@ def _library_impl(ctx):
             category = "mojo_gated_test",
             identifier = stem,
         )
-        markers.append(marker)
         test_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [exe])]
+        markers.append(marker)
 
     if markers:
         public = ctx.actions.declare_output("pkg/" + import_name + ".mojoc")
@@ -157,10 +173,11 @@ def _library_impl(ctx):
             sub_targets = {
                 "src": [DefaultInfo(default_output = src_dir)],
                 "tests": [DefaultInfo(default_outputs = markers, sub_targets = test_subtargets)],
-                "ungated": [
-                    DefaultInfo(default_output = ungated),
-                    MojoInfo(import_name = import_name, pkgs = ungated_tset),
-                ],
+                # Files only. It carries no MojoInfo, so `deps` rejects it:
+                # the only way to compile against this library is through the
+                # gated package. The tests above use the ungated package
+                # in-rule, never through a label.
+                "ungated": [DefaultInfo(default_output = ungated)],
             },
         ),
         MojoInfo(
@@ -202,11 +219,23 @@ def _executable(ctx, category):
 
 def _run_check(ctx, tc, exe):
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
-    args = [tc.busybox, "sh", tc.run_check, tc.busybox, tc.compiler, exe, out.as_output()]
+    args = [tc.busybox, "sh", tc.run_check, _launch_args(tc, exe), out.as_output()]
     if ctx.attrs.expected_stdout != None:
         args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
     return out
+
+def _launch_args(tc, exe):
+    # A linked binary carries no run path (the link step drops it, see
+    # mojo_wrapper.sh), so it is started through `launch.sh`, which points
+    # the loader at the toolchain's runtime libraries.
+    #
+    # The rules publish no RunInfo. A RunInfo carrying this command would make
+    # every `buck2 build` of a binary materialize the whole compiler closure
+    # on the client (buck2 builds and materializes RunInfo inputs by
+    # default), and a bare executable cannot start outside an action. Run a
+    # binary remotely with `[run_check]`, which uses this command.
+    return cmd_args(tc.busybox, "sh", tc.launcher, tc.busybox, tc.compiler, exe)
 
 def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
@@ -215,7 +244,6 @@ def _binary_impl(ctx):
             default_output = exe,
             sub_targets = {"run_check": [DefaultInfo(default_output = _run_check(ctx, tc, exe))]},
         ),
-        RunInfo(args = cmd_args(exe)),
     ]
 
 _EXECUTABLE_ATTRS = {
@@ -247,7 +275,6 @@ def _test_impl(ctx):
     )
     return [
         DefaultInfo(default_output = exe),
-        RunInfo(args = cmd_args(exe)),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],

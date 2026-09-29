@@ -1,4 +1,4 @@
-load("@mojo//:defs.bzl", "mojo_library")
+load("@mojo//:defs.bzl", "mojo_binary", "mojo_library")
 
 mojo_library(
     name = "libgate_bad",
@@ -7,4 +7,20 @@ mojo_library(
         "payload.mojo",
     ],
     test_srcs = ["tests/test_payload_deliberate_failure.mojo"],
+)
+
+# Must FAIL with GATED TEST FAILED: a consumer of the library waits on the
+# library's gate, so it cannot be built while the library's test fails.
+mojo_binary(
+    name = "gated_consumer",
+    srcs = ["consumer.mojo"],
+    deps = [":libgate_bad"],
+)
+
+# Must FAIL at analysis: `[ungated]` carries no MojoInfo, so naming it in
+# `deps` cannot be used to compile against a library whose tests fail.
+mojo_binary(
+    name = "bypass_consumer",
+    srcs = ["consumer.mojo"],
+    deps = [":libgate_bad[ungated]"],
 )

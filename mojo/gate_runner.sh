@@ -7,9 +7,13 @@
 # cannot exist unless each of its tests passed.
 #
 # The test runs with a fixed environment: PATH holds only busybox applets,
-# LD_LIBRARY_PATH points at the toolchain's runtime libraries (a linked
-# binary's run path names the sandbox of the action that linked it, so it
-# does not resolve here), and TMPDIR, TEST_TMPDIR and HOME are private.
+# LD_LIBRARY_PATH points at the toolchain's runtime libraries (built binaries
+# carry no run path), and TMPDIR, TEST_TMPDIR and HOME are a private directory
+# made for this run.
+#
+# Exit status: 0 on PASS; otherwise the test's own exit status (so a signal
+# death, 128+N, stays distinguishable from an assertion failure); 2 for a
+# usage error.
 set -eu
 
 abspath() {
@@ -26,7 +30,8 @@ LABEL=$3
 BIN=$(abspath "$4")
 MARKER=$5
 
-T="$PWD/.komira_action"
+T=$("$BB" mktemp -d "$PWD/.komira_test.XXXXXX")
+trap '"$BB" rm -rf "$T"' EXIT
 "$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home"
 "$BB" --install -s "$T/bin"
 PATH="$T/bin"
@@ -40,7 +45,6 @@ rc=0
 "$BIN" > "$T/log" 2>&1 < /dev/null || rc=$?
 if [ "$rc" = 0 ]; then
     printf 'PASS %s\n' "$LABEL" > "$MARKER"
-    rm -rf "$T"
     exit 0
 fi
 {
@@ -51,5 +55,4 @@ fi
     tail -n 200 "$T/log"
     echo "=================================================================="
 } >&2
-rm -rf "$T"
-exit 1
+exit "$rc"

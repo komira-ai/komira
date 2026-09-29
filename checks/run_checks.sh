@@ -7,14 +7,23 @@
 #      byte), and every action that executed ran remotely.
 #   2. The gate: checks//libgate_bad fails with GATED TEST FAILED, while its
 #      [ungated] package builds -- the red comes from the test, not the compile.
+#      A binary depending on it fails the same way, and a binary naming its
+#      [ungated] sub-target in `deps` fails analysis (no gate bypass).
 #   3. Packages reach the compiler only through `deps`: a binary importing
 #      hellopkg without depending on it fails to compile.
 #   4. The toolchain refuses an incomplete closure (exit 2) instead of falling
 #      back to anything on the worker.
 #   5. No action argv or env names an absolute host path.
+#   6. Built outputs are path-free: the linked binary has no run path and no
+#      string naming a buck-out directory. (Inside every compile action the
+#      wrapper also refuses an output containing that action's working
+#      directory, exit 4.)
 set -uo pipefail
 
-BUCK2=${BUCK2:-buck2}
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+if [ -z "${BUCK2:-}" ]; then
+    if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
+fi
 LOG=$(mktemp -d "${TMPDIR:-/tmp}/komira_checks.XXXXXX")
 fails=0
 
@@ -75,6 +84,8 @@ check_remote run_checks
 # 2
 expect_red gate_red "GATED TEST FAILED" checks//libgate_bad:libgate_bad
 expect_green gate_ungated_green "checks//libgate_bad:libgate_bad[ungated]"
+expect_red gate_consumer_red "GATED TEST FAILED" checks//libgate_bad:gated_consumer
+expect_red gate_bypass_refused "MojoInfo" checks//libgate_bad:bypass_consumer
 
 # 3
 expect_red missing_dep "unable to locate module 'hellopkg'" checks//missing_dep:missing_dep
@@ -95,6 +106,24 @@ elif grep -oE "$abs_path_re" "$LOG/aquery.json" > "$LOG/abs_paths.txt"; then
     fail "host paths: absolute paths in action commands: $(sort -u "$LOG/abs_paths.txt" | tr '\n' ' ')"
 else
     pass "host paths: no absolute path in $(grep -c '"cmd"' "$LOG/aquery.json") action commands"
+fi
+
+# 6
+if ! "$BUCK2" build //examples:hello --materializations all --show-full-simple-output > "$LOG/outputs.txt" 2> "$LOG/outputs.log"; then
+    fail "outputs: cannot materialize //examples:hello (see $LOG/outputs.log)"
+else
+    bin=$(tail -n 1 "$LOG/outputs.txt")
+    if [ ! -s "$bin" ]; then
+        fail "outputs: no binary at '$bin'"
+    elif ! grep -qa 'libKGENCompilerRTShared' "$bin"; then
+        fail "outputs: scan cannot see the binary's dynamic section (no NEEDED name found)"
+    elif command -v readelf > /dev/null && readelf -d "$bin" | grep -qE 'RPATH|RUNPATH'; then
+        fail "outputs: $bin has a run path: $(readelf -d "$bin" | grep -E 'RPATH|RUNPATH')"
+    elif grep -qa 'buck-out/' "$bin"; then
+        fail "outputs: $bin names a buck-out path: $(grep -ao '[^[:cntrl:]]*buck-out/[^[:cntrl:]]*' "$bin" | head -n 1)"
+    else
+        pass "outputs: $bin has no run path and names no buck-out path"
+    fi
 fi
 
 echo "logs: $LOG"

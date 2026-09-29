@@ -101,9 +101,11 @@ def _mojo_toolchain_impl(ctx):
             compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0],
             zig = ctx.attrs.zig[DefaultInfo].default_outputs[0],
             cc_target = ctx.attrs.cc_target,
+            target_cpu = ctx.attrs.target_cpu,
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
             gate_runner = ctx.attrs._gate_runner[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
+            launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
         ),
     ]
 
@@ -114,8 +116,10 @@ mojo_toolchain = rule(
         "busybox": attrs.exec_dep(),
         "cc_target": attrs.string(),
         "compiler": attrs.exec_dep(),
+        "target_cpu": attrs.string(),
         "zig": attrs.exec_dep(),
         "_gate_runner": attrs.dep(default = "mojo//:gate_runner.sh"),
+        "_launcher": attrs.dep(default = "mojo//:launch.sh"),
         "_run_check": attrs.dep(default = "mojo//:run_check.sh"),
         "_wrapper": attrs.dep(default = "mojo//:mojo_wrapper.sh"),
     },
