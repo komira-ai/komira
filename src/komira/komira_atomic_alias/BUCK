@@ -1,0 +1,13 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The single spelling of every `Atomic` width, with zero deps. The welded test
+# names all six rows (a `comptime` alias is elaborated lazily, so a row nothing
+# imports is never checked) and pins each one's width, signedness and
+# read-modify-write round trip. It must stay green across the Mojo 1.1 cutover
+# edit: the two spellings are the same type.
+mojo_library(
+    name = "komira_atomic_alias",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_atomic_alias_widths.mojo"],
+    visibility = ["PUBLIC"],
+)
