@@ -68,13 +68,43 @@ remote_execution_platforms = rule(
 # lands on a worker able to run anything komira runs). Mojo targets state
 # `mojo_compile` + `numa_single` through their toolchain; toolchain unpack and
 # copy targets state `light`.
+#
+# The macOS arm64 platform comes LAST: a platform added later must never become
+# the first match of an action that states no os. (Every komira target states
+# its os through its toolchain; the order keeps it so for anything that does
+# not.)
 _EXEC_PLATFORMS = [
     ("mojo_compile", "komira//tools/build/platforms:exec-mojo"),
     ("light", "komira//tools/build/platforms:exec-light"),
     ("mojo_compile_multi_numa", "komira//tools/build/platforms:exec-mojo-multi-numa"),
+    ("mojo_compile_darwin", "komira//tools/build/platforms:exec-mojo-darwin-arm64"),
 ]
 
-def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None, visibility = None):
+# The property every macOS execution platform must carry: the version of the
+# host SDK (`xcrun --show-sdk-version`) its workers link against. The SDK and
+# the system linker are the host's, not inputs of the action, so the version
+# must be part of the action key some other way; REAPI platform properties
+# are part of the action digest, and workers match them exactly. The macOS
+# toolchain also writes the version into every compile's inputs, and the
+# compile refuses a host whose SDK differs.
+DARWIN_SDK_PROPERTY = "macos_sdk"
+
+# `[komira_re]` key of the macOS arm64 execution platform's property set.
+DARWIN_PROPERTIES_KEY = "darwin_mojo_compile_properties"
+
+def darwin_macos_sdk():
+    """The SDK version the root cell's macOS property set promises, or "".
+
+    Read from the ROOT cell's config: the toolchain lives in another cell, and
+    the property set is configured where the execution platforms are.
+    """
+    for pair in read_root_config("komira_re", DARWIN_PROPERTIES_KEY, "").split(","):
+        kv = pair.split("=", 1)
+        if len(kv) == 2 and kv[0].strip() == DARWIN_SDK_PROPERTY:
+            return kv[1].strip()
+    return ""
+
+def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None, mojo_compile_darwin = None, visibility = None):
     """Registers komira's execution platforms, given their worker property sets.
 
     Each argument is the exact REAPI platform property dict of the workers that
@@ -82,7 +112,10 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
     is None no platform provides `numa_multi`, and a target that requires it
     fails to configure ("no compatible execution platform") instead of running
     on a single-NUMA worker. Give it only for workers that span more than one
-    NUMA node.
+    NUMA node. `mojo_compile_darwin` is optional too: macOS arm64 workers
+    that build darwin-arm64 targets. It must carry `macos_sdk` (see
+    DARWIN_SDK_PROPERTY), and without it no darwin-arm64 Mojo target can
+    configure.
     """
     if mojo_compile_multi_numa != None and mojo_compile_multi_numa == mojo_compile:
         # The same property set routes to the same workers: a numa_multi run
@@ -90,9 +123,21 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
         # worker it finds with fewer nodes; this catches the mistake at load.)
         fail("komira_execution_platforms: `mojo_compile_multi_numa` must name workers " +
              "spanning more than one NUMA node, but it equals `mojo_compile` ({})".format(mojo_compile))
+    if mojo_compile_darwin != None:
+        # A macOS action must never match a linux worker, nor the reverse.
+        if mojo_compile_darwin in (light, mojo_compile, mojo_compile_multi_numa):
+            fail("komira_execution_platforms: `mojo_compile_darwin` must name macOS workers, " +
+                 "but it equals a linux property set ({})".format(mojo_compile_darwin))
+        if not mojo_compile_darwin.get(DARWIN_SDK_PROPERTY, ""):
+            fail(("komira_execution_platforms: `mojo_compile_darwin` must carry `{}=<version>`, " +
+                  "the SDK version of its workers (`xcrun --show-sdk-version`); got {}").format(
+                DARWIN_SDK_PROPERTY,
+                mojo_compile_darwin,
+            ))
     props = {
         "light": light,
         "mojo_compile": mojo_compile,
+        "mojo_compile_darwin": mojo_compile_darwin,
         "mojo_compile_multi_numa": mojo_compile_multi_numa,
     }
     names = []
@@ -100,7 +145,7 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
     properties = []
     for key, platform in _EXEC_PLATFORMS:
         if props[key] == None:
-            if key == "mojo_compile_multi_numa":
+            if key in ("mojo_compile_multi_numa", "mojo_compile_darwin"):
                 continue
             fail("komira_execution_platforms: `{}` is required".format(key))
         names.append(key)

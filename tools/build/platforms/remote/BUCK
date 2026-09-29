@@ -1,4 +1,4 @@
-load("@komira//tools/build/platforms:defs.bzl", "komira_execution_platforms", "re_properties")
+load("@komira//tools/build/platforms:defs.bzl", "DARWIN_PROPERTIES_KEY", "komira_execution_platforms", "re_properties")
 
 # The execution platforms of a standalone checkout: every action runs
 # remotely, on workers with the property sets named in `.buckconfig.local`.
@@ -14,5 +14,7 @@ komira_execution_platforms(
     mojo_compile = re_properties("mojo_compile_properties"),
     # Unset unless your service has workers spanning more than one NUMA node.
     mojo_compile_multi_numa = re_properties("mojo_compile_multi_numa_properties", required = False),
+    # Unset unless your service has macOS arm64 workers (see README.md, "macOS").
+    mojo_compile_darwin = re_properties(DARWIN_PROPERTIES_KEY, required = False),
     visibility = ["PUBLIC"],
 )

@@ -13,6 +13,19 @@ platform(
     visibility = ["PUBLIC"],
 )
 
+# Target platform for macOS on Apple silicon: `--target-platforms
+# komira//tools/build/platforms:darwin-arm64`. Its Mojo targets build on a macOS arm64
+# execution platform (`exec-mojo-darwin-arm64`), registered only when one is
+# configured; see README.md, "macOS".
+platform(
+    name = "darwin-arm64",
+    constraint_values = [
+        "prelude//os/constraints:macos",
+        "prelude//cpu/constraints:arm64",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 # ---- Execution constraints ---------------------------------------------------
 
 # What kind of worker an action needs.
@@ -90,5 +103,16 @@ platform(
         ":numa_multi",
     ],
     deps = [":linux-x86_64"],
+    visibility = ["PUBLIC"],
+)
+
+# macOS arm64 workers: Mojo compiles, gated tests and run checks of
+# darwin-arm64 targets. No `light` and no NUMA value: toolchain unpacking for
+# darwin runs on linux `light` workers (it only moves bytes), and these hosts
+# are one memory domain.
+platform(
+    name = "exec-mojo-darwin-arm64",
+    constraint_values = [":mojo_compile"],
+    deps = [":darwin-arm64"],
     visibility = ["PUBLIC"],
 )

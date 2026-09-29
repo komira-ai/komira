@@ -26,3 +26,7 @@
   # you have them; targets that require them then fail to configure instead
   # of running on single-node workers.
   # mojo_compile_multi_numa_properties = pool=mojo-multi-numa
+  # Optional: macOS arm64 workers, for `--target-platforms
+  # komira//tools/build/platforms:darwin-arm64`. Must carry macos_sdk=<the workers'
+  # `xcrun --show-sdk-version`>; see README.md, "macOS".
+  # darwin_mojo_compile_properties = pool=macos-arm64,macos_sdk=26.5
