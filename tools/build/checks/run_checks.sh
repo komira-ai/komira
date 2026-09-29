@@ -398,6 +398,11 @@ fi
 ISO=komira_checks_uncached
 if [ -z "${MC_PROPS:-}" ] || [ -z "${LIGHT_PROPS:-}" ]; then
     fail "action platforms: cannot read [komira_re] mojo_compile_properties / light_properties"
+# The isolated daemon keeps its outputs between runs, and --no-remote-cache
+# does not rerun an action whose output is already on disk: clean first, or
+# a second run of these checks in the same checkout executes nothing.
+elif ! "$BUCK2" --isolation-dir "$ISO" clean > "$LOG/uncached_clean.log" 2>&1; then
+    fail "action platforms: cannot clean the isolated buck-out (see $LOG/uncached_clean.log)"
 elif ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache //tools/build/examples:hello > "$LOG/uncached.log" 2>&1; then
     fail "action platforms: uncached build failed (see $LOG/uncached.log)"
 elif ! "$BUCK2" --isolation-dir "$ISO" log what-ran --format json > "$LOG/uncached.what_ran.json" 2>&1; then
