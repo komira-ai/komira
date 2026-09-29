@@ -1,0 +1,17 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The closed release-channel set. It has no deps, and that is load-bearing:
+# both the deploy tool (which places a package repository per channel) and a
+# control plane (which keeps the per-channel ledger) import this set. A leaf is
+# the only home both may depend on, because neither may import the other. Do
+# not add deps.
+#
+# Only the channel names, their enumeration and the membership test live here.
+# Where each channel's images are stored names the operator's own registry, so
+# it stays with the control plane.
+mojo_library(
+    name = "komira_release_channels",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_release_channels.mojo"],
+    visibility = ["PUBLIC"],
+)
