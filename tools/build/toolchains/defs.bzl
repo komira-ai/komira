@@ -161,6 +161,7 @@ def komira_rust_toolchains(**overrides):
 
 PROTO_TOOLCHAIN_ATTRS = dict(
     busybox = _TOOLCHAINS + "busybox",
+    db_plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo-db",
     plugin = "komira//tools/build/proto-codegen:protoc-gen-mojo",
     protoc = "komira//tools/build/toolchains/proto:protoc",
 )
@@ -168,7 +169,7 @@ PROTO_TOOLCHAIN_ATTRS = dict(
 def komira_proto_toolchains(**overrides):
     """Declare `:mojo_proto`, the toolchain of mojo_proto_library, in the calling package.
 
-    protoc 29.1 and protoc-gen-mojo, built from source with `:rust`. It
+    protoc 29.1, protoc-gen-mojo and protoc-gen-mojo-db, built from source with `:rust`. It
     states no execution constraint: a mojo_proto_library also precompiles the
     generated package, and one target has one execution platform, so code
     generation runs where the Mojo toolchain puts that target (the compile

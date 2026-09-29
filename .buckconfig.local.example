@@ -1,6 +1,8 @@
 # Copy to `.buckconfig.local` (gitignored) and fill in your remote-execution
-# service. Every action in this repo runs remotely; there is no local
-# execution platform.
+# service to build there instead of on your machine. Without this file every
+# action runs locally; with `[komira_re]` below set, every action runs
+# remotely (tools/build/platforms/default). `-c komira.execution=local`
+# builds one command locally anyway.
 
 [buck2_re_client]
   engine_address = grpc://re.example.internal:8980

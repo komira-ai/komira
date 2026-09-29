@@ -1,7 +1,7 @@
 {
  "format": 1,
  "generated_by": "python3 tools/kg/kg.py graph",
- "inputs": "ff37e8a2e9cbc658c667683d09a0f905c490fbf0edb0b823cda4f7120890a12c",
+ "inputs": "a65c970df8fe95d10b9f261159a96061b2338ce7ddbb37e843073fc9d4812565",
  "query": "kind(\".*\", //... + checks//... + toolchains//...)",
  "targets": {
   "checks//bundle_parity:parity": {
@@ -209,6 +209,15 @@
    ],
    "kind": "mojo_multi_numa_test"
   },
+  "checks//proto:komira_db": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "tools/build/checks/proto/db/komira_db/__init__.mojo"
+   ]
+  },
   "checks//proto:komira_serde": {
    "deps": [
     "toolchains//:mojo"
@@ -238,6 +247,71 @@
    "kind": "mojo_proto_library",
    "srcs": [
     "tools/build/checks/proto/renamed/person.proto"
+   ]
+  },
+  "checks//proto:roster_bad_selection": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/roster/roster.proto"
+   ]
+  },
+  "checks//proto:roster_full_bundle": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/roster/roster.proto"
+   ]
+  },
+  "checks//proto:roster_proto": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/roster/roster.proto"
+   ]
+  },
+  "checks//proto:tasks_db": {
+   "deps": [
+    "checks//proto:komira_db",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_db_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/db/note.proto",
+    "tools/build/checks/proto/db/tasks.proto"
+   ]
+  },
+  "checks//proto:tasks_db_wrong_outs": {
+   "deps": [
+    "checks//proto:komira_db",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_db_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/db/note.proto",
+    "tools/build/checks/proto/db/tasks.proto"
    ]
   },
   "checks//proto:team_proto": {
@@ -286,6 +360,17 @@
     "tools/build/checks/proto/test_person.mojo"
    ]
   },
+  "checks//proto:test_tasks_db": {
+   "deps": [
+    "checks//proto:komira_db",
+    "checks//proto:tasks_db",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/checks/proto/test_tasks_db.mojo"
+   ]
+  },
   "checks//proto:test_team": {
    "deps": [
     "checks//proto:komira_serde",
@@ -317,6 +402,658 @@
    "srcs": [
     "tools/build/checks/rust_missing_dep/src/main.rs"
    ]
+  },
+  "checks//s2n_probes:probe_S2N_ATOMIC_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_ATOMIC_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_CLOEXEC_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_CLOEXEC_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_CLOEXEC_XOPEN_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_CLOEXEC_XOPEN_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_CLONE_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_CLONE_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_CPUID_AVAILABLE": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_CPUID_AVAILABLE.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_DIAGNOSTICS_POP_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_DIAGNOSTICS_POP_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_DIAGNOSTICS_PUSH_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_DIAGNOSTICS_PUSH_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_EXECINFO_AVAILABLE": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_EXECINFO_AVAILABLE.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_FALL_THROUGH_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_FALL_THROUGH_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_FEATURES_AVAILABLE": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_FEATURES_AVAILABLE.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_KTLS_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_KTLS_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_EC_KEY_CHECK_FIPS": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_EC_KEY_CHECK_FIPS.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_EVP_AEAD_TLS": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_EVP_AEAD_TLS.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_EVP_KEM": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_EVP_KEM.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_EVP_MD5_SHA1_HASH": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_EVP_MD5_SHA1_HASH.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_EVP_MD_CTX_SET_PKEY_CTX": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_EVP_MD_CTX_SET_PKEY_CTX.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_EVP_RC4": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_EVP_RC4.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_FLAG_NO_CHECK_TIME": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_FLAG_NO_CHECK_TIME.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_HKDF": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_HKDF.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_MLKEM": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_MLKEM.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_RSA_PSS_SIGNING": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_RSA_PSS_SIGNING.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LIBCRYPTO_SUPPORTS_X509_STORE_LIST": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LIBCRYPTO_SUPPORTS_X509_STORE_LIST.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_LINUX_SENDFILE": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_LINUX_SENDFILE.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_MADVISE_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_MADVISE_SUPPORTED.c]"
+   ]
+  },
+  "checks//s2n_probes:probe_S2N_MINHERIT_SUPPORTED": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[tests/features/S2N_MINHERIT_SUPPORTED.c]"
+   ]
+  },
+  "komira//third_party/aws-lc:aws-lc-1.39.0.tar.gz": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/aws-lc:builtins": {
+   "kind": "staged_files",
+   "srcs": [
+    "third_party/aws-lc/umodti3.c"
+   ]
+  },
+  "komira//third_party/aws-lc:crypto": {
+   "deps": [
+    "komira//third_party/aws-lc:builtins",
+    "komira//third_party/aws-lc:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/aws-lc:builtins[umodti3.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_bitstr.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_bool.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_d2i_fp.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_dup.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_gentm.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_i2d_fp.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_int.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_mbstr.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_object.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_octet.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_strex.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_strnid.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_time.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_type.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_utctm.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/a_utf8.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/asn1_lib.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/asn1_par.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/asn_pack.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/f_int.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/f_string.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/posix_time.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/tasn_dec.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/tasn_enc.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/tasn_fre.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/tasn_new.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/tasn_typ.c]",
+    "komira//third_party/aws-lc:src[crypto/asn1/tasn_utl.c]",
+    "komira//third_party/aws-lc:src[crypto/base64/base64.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/bio.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/bio_mem.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/connect.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/errno.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/fd.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/file.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/hexdump.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/pair.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/printf.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/socket.c]",
+    "komira//third_party/aws-lc:src[crypto/bio/socket_helper.c]",
+    "komira//third_party/aws-lc:src[crypto/blake2/blake2.c]",
+    "komira//third_party/aws-lc:src[crypto/bn_extra/bn_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/bn_extra/convert.c]",
+    "komira//third_party/aws-lc:src[crypto/buf/buf.c]",
+    "komira//third_party/aws-lc:src[crypto/bytestring/asn1_compat.c]",
+    "komira//third_party/aws-lc:src[crypto/bytestring/ber.c]",
+    "komira//third_party/aws-lc:src[crypto/bytestring/cbb.c]",
+    "komira//third_party/aws-lc:src[crypto/bytestring/cbs.c]",
+    "komira//third_party/aws-lc:src[crypto/bytestring/unicode.c]",
+    "komira//third_party/aws-lc:src[crypto/chacha/chacha.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/cipher_extra.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/derive_key.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_aes_cbc_hmac_sha1.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_aes_cbc_hmac_sha256.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_aesctrhmac.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_aesgcmsiv.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_chacha20poly1305.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_des.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_null.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_rc2.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_rc4.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/e_tls.c]",
+    "komira//third_party/aws-lc:src[crypto/cipher_extra/tls_cbc.c]",
+    "komira//third_party/aws-lc:src[crypto/conf/conf.c]",
+    "komira//third_party/aws-lc:src[crypto/crypto.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/bio/base64_bio.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/blowfish/blowfish.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/cast/cast.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/cast/cast_tables.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/cfb/cfb.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/dh/dh_decrepit.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/evp/evp_do_all.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/obj/obj_decrepit.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/ripemd/ripemd.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/rsa/rsa_decrepit.c]",
+    "komira//third_party/aws-lc:src[crypto/decrepit/x509/x509_decrepit.c]",
+    "komira//third_party/aws-lc:src[crypto/des/des.c]",
+    "komira//third_party/aws-lc:src[crypto/dh_extra/dh_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/dh_extra/params.c]",
+    "komira//third_party/aws-lc:src[crypto/digest_extra/digest_extra.c]",
+    "komira//third_party/aws-lc:src[crypto/dsa/dsa.c]",
+    "komira//third_party/aws-lc:src[crypto/dsa/dsa_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/ec_extra/ec_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/ec_extra/ec_derive.c]",
+    "komira//third_party/aws-lc:src[crypto/ec_extra/hash_to_curve.c]",
+    "komira//third_party/aws-lc:src[crypto/ecdh_extra/ecdh_extra.c]",
+    "komira//third_party/aws-lc:src[crypto/ecdsa_extra/ecdsa_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/engine/engine.c]",
+    "komira//third_party/aws-lc:src[crypto/err/err.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/evp_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_dh.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_dh_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_dsa.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_dsa_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_ec_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_ed25519_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_hmac_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_kem_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_methods.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_rsa_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_x25519.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/p_x25519_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/print.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/scrypt.c]",
+    "komira//third_party/aws-lc:src[crypto/evp_extra/sign.c]",
+    "komira//third_party/aws-lc:src[crypto/ex_data.c]",
+    "komira//third_party/aws-lc:src[crypto/fipsmodule/bcm.c]",
+    "komira//third_party/aws-lc:src[crypto/fipsmodule/cpucap/cpucap.c]",
+    "komira//third_party/aws-lc:src[crypto/fipsmodule/fips_shared_support.c]",
+    "komira//third_party/aws-lc:src[crypto/hpke/hpke.c]",
+    "komira//third_party/aws-lc:src[crypto/hrss/asm/poly_rq_mul.S]",
+    "komira//third_party/aws-lc:src[crypto/hrss/hrss.c]",
+    "komira//third_party/aws-lc:src[crypto/kyber/kem_kyber.c]",
+    "komira//third_party/aws-lc:src[crypto/kyber/kyber1024r3_ref.c]",
+    "komira//third_party/aws-lc:src[crypto/kyber/kyber512r3_ref.c]",
+    "komira//third_party/aws-lc:src[crypto/kyber/kyber768r3_ref.c]",
+    "komira//third_party/aws-lc:src[crypto/kyber/pqcrystals_kyber_ref_common/fips202.c]",
+    "komira//third_party/aws-lc:src[crypto/lhash/lhash.c]",
+    "komira//third_party/aws-lc:src[crypto/mem.c]",
+    "komira//third_party/aws-lc:src[crypto/obj/obj.c]",
+    "komira//third_party/aws-lc:src[crypto/obj/obj_xref.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_asn.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_client.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_extension.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_http.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_lib.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_print.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_server.c]",
+    "komira//third_party/aws-lc:src[crypto/ocsp/ocsp_verify.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_all.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_info.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_lib.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_oth.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_pk8.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_pkey.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_x509.c]",
+    "komira//third_party/aws-lc:src[crypto/pem/pem_xaux.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs7/bio/cipher.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs7/bio/md.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs7/pkcs7.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs7/pkcs7_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs7/pkcs7_x509.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs8/p5_pbev2.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs8/pkcs8.c]",
+    "komira//third_party/aws-lc:src[crypto/pkcs8/pkcs8_x509.c]",
+    "komira//third_party/aws-lc:src[crypto/poly1305/poly1305.c]",
+    "komira//third_party/aws-lc:src[crypto/poly1305/poly1305_arm.c]",
+    "komira//third_party/aws-lc:src[crypto/poly1305/poly1305_vec.c]",
+    "komira//third_party/aws-lc:src[crypto/pool/pool.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/deterministic.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/entropy_passive.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/forkunsafe.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/fuchsia.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/pq_custom_randombytes.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/rand_extra.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/trusty.c]",
+    "komira//third_party/aws-lc:src[crypto/rand_extra/windows.c]",
+    "komira//third_party/aws-lc:src[crypto/rc4/rc4.c]",
+    "komira//third_party/aws-lc:src[crypto/refcount_c11.c]",
+    "komira//third_party/aws-lc:src[crypto/refcount_lock.c]",
+    "komira//third_party/aws-lc:src[crypto/refcount_win.c]",
+    "komira//third_party/aws-lc:src[crypto/rsa_extra/rsa_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/rsa_extra/rsa_crypt.c]",
+    "komira//third_party/aws-lc:src[crypto/rsa_extra/rsa_print.c]",
+    "komira//third_party/aws-lc:src[crypto/rsa_extra/rsassa_pss_asn1.c]",
+    "komira//third_party/aws-lc:src[crypto/siphash/siphash.c]",
+    "komira//third_party/aws-lc:src[crypto/spake25519/spake25519.c]",
+    "komira//third_party/aws-lc:src[crypto/stack/stack.c]",
+    "komira//third_party/aws-lc:src[crypto/thread.c]",
+    "komira//third_party/aws-lc:src[crypto/thread_none.c]",
+    "komira//third_party/aws-lc:src[crypto/thread_pthread.c]",
+    "komira//third_party/aws-lc:src[crypto/thread_win.c]",
+    "komira//third_party/aws-lc:src[crypto/trust_token/pmbtoken.c]",
+    "komira//third_party/aws-lc:src[crypto/trust_token/trust_token.c]",
+    "komira//third_party/aws-lc:src[crypto/trust_token/voprf.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/a_digest.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/a_sign.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/a_verify.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/algorithm.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/asn1_gen.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/by_dir.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/by_file.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/i2d_pr.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/name_print.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/policy.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/rsa_pss.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/t_crl.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/t_req.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/t_x509.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/t_x509a.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_akey.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_akeya.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_alt.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_bcons.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_bitst.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_conf.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_cpols.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_crld.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_enum.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_extku.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_genn.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_ia5.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_info.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_int.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_lib.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_ncons.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_ocsp.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_pcons.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_pmaps.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_prn.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_purp.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_skey.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/v3_utl.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_att.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_cmp.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_d2.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_def.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_ext.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_lu.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_obj.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_req.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_set.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_trs.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_txt.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_v3.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_vfy.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509_vpm.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509cset.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509name.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509rset.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x509spki.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_algor.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_all.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_attrib.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_crl.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_exten.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_name.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_pubkey.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_req.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_sig.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_spki.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_val.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_x509.c]",
+    "komira//third_party/aws-lc:src[crypto/x509/x_x509a.c]",
+    "komira//third_party/aws-lc:src[generated-src/err_data.c]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/chacha/chacha-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/cipher_extra/aes128gcmsiv-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/cipher_extra/aesni-sha1-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/cipher_extra/aesni-sha256-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/cipher_extra/chacha20_poly1305_x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/aesni-gcm-avx512.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/aesni-gcm-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/aesni-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/aesni-xts-avx512.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/ghash-ssse3-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/ghash-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/md5-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/p256-x86_64-asm.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/p256_beeu-x86_64-asm.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/rdrand-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/rsaz-2k-avx512.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/rsaz-3k-avx512.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/rsaz-4k-avx512.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/rsaz-avx2.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/sha1-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/sha256-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/sha512-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/vpaes-x86_64.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/x86_64-mont.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/fipsmodule/x86_64-mont5.S]",
+    "komira//third_party/aws-lc:src[generated-src/linux-x86_64/crypto/test/trampoline-x86_64.S]"
+   ]
+  },
+  "komira//third_party/aws-lc:src": {
+   "deps": [
+    "komira//third_party/aws-lc:aws-lc-1.39.0.tar.gz",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "archive_files"
   },
   "komira//third_party/rust:anyhow": {
    "deps": [
@@ -519,6 +1256,205 @@
    ],
    "kind": "crate_source"
   },
+  "komira//third_party/s2n-tls:s2n": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "komira//third_party/s2n-tls:src",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//third_party/s2n-tls:src[crypto/s2n_aead_cipher_aes_gcm.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_aead_cipher_chacha20_poly1305.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_cbc_cipher_3des.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_cbc_cipher_aes.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_certificate.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_cipher.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_composite_cipher_aes_sha.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_crypto.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_dhe.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_drbg.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_ecc_evp.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_ecdsa.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_evp.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_evp_kem.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_evp_signing.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_fips.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_fips_rules.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_hash.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_hkdf.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_hmac.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_libcrypto.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_locking.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_openssl_x509.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_pkey.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_pq.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_rsa.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_rsa_pss.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_rsa_signing.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_sequence.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_stream_cipher_null.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_stream_cipher_rc4.c]",
+    "komira//third_party/s2n-tls:src[crypto/s2n_tls13_keys.c]",
+    "komira//third_party/s2n-tls:src[error/s2n_errno.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer_base64.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer_file.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer_hex.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer_network_order.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer_pem.c]",
+    "komira//third_party/s2n-tls:src[stuffer/s2n_stuffer_text.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_cert_authorities.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_cert_status.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_cert_status_response.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_alpn.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_cert_status_request.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_cookie.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_early_data_indication.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_ems.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_key_share.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_max_frag_len.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_pq_kem.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_psk.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_renegotiation_info.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_sct_list.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_server_name.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_session_ticket.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_signature_algorithms.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_supported_groups.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_client_supported_versions.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_ec_point_format.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_extension_list.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_extension_type.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_extension_type_lists.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_key_share.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_npn.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_nst_early_data_indication.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_psk_key_exchange_modes.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_quic_transport_params.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_alpn.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_cert_status_request.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_cookie.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_early_data_indication.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_ems.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_key_share.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_max_fragment_length.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_psk.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_renegotiation_info.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_sct_list.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_server_name.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_session_ticket.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_signature_algorithms.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_server_supported_versions.c]",
+    "komira//third_party/s2n-tls:src[tls/extensions/s2n_supported_versions.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_aead.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_alerts.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_async_pkey.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_auth_selection.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_cbc.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_certificate_keys.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_change_cipher_spec.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_cipher_preferences.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_cipher_suites.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_client_cert.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_client_cert_verify.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_client_finished.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_client_hello.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_client_hello_request.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_client_key_exchange.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_config.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_connection.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_connection_serialize.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_crl.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_crypto.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_early_data.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_early_data_io.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_ecc_preferences.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_encrypted_extensions.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_establish_session.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_fingerprint.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_fingerprint_ja3.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_fingerprint_ja4.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_handshake.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_handshake_hashes.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_handshake_io.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_handshake_transcript.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_handshake_type.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_kem.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_kem_preferences.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_kex.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_key_log.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_key_update.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_ktls.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_ktls_io.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_next_protocol.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_ocsp_stapling.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_post_handshake.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_prf.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_protocol_preferences.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_psk.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_quic_support.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_record_read.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_record_read_aead.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_record_read_cbc.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_record_read_composite.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_record_read_stream.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_record_write.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_recv.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_renegotiate.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_resume.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_security_policies.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_security_rules.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_send.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_cert.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_cert_request.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_done.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_extensions.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_finished.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_hello.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_hello_retry.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_key_exchange.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_server_new_session_ticket.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_shutdown.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_signature_algorithms.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_signature_scheme.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_tls.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_tls13.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_tls13_certificate_verify.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_tls13_handshake.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_tls13_key_schedule.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_tls13_secrets.c]",
+    "komira//third_party/s2n-tls:src[tls/s2n_x509_validator.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_array.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_atomic.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_blob.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_ensure.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_fork_detection.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_init.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_io.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_map.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_mem.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_random.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_rfc5952.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_safety.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_set.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_socket.c]",
+    "komira//third_party/s2n-tls:src[utils/s2n_timer.c]"
+   ]
+  },
+  "komira//third_party/s2n-tls:s2n-tls-1.5.6.tar.gz": {
+   "kind": "pinned_file"
+  },
+  "komira//third_party/s2n-tls:src": {
+   "deps": [
+    "komira//third_party/s2n-tls:s2n-tls-1.5.6.tar.gz",
+    "komira//tools/build/toolchains:busybox"
+   ],
+   "kind": "archive_files"
+  },
   "komira//third_party/snappy:config": {
    "kind": "staged_files",
    "srcs": [
@@ -552,6 +1488,16 @@
     "komira//tools/build/toolchains:busybox"
    ],
    "kind": "archive_files"
+  },
+  "komira//tools/build/examples/aws_lc:test_aws_lc": {
+   "deps": [
+    "komira//third_party/aws-lc:crypto",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/examples/aws_lc/test_aws_lc.mojo"
+   ]
   },
   "komira//tools/build/examples/cshim:add": {
    "deps": [
@@ -627,6 +1573,36 @@
    "kind": "rust_binary",
    "srcs": [
     "tools/build/examples/rust/src/main.rs"
+   ]
+  },
+  "komira//tools/build/examples/s2n_tls:c_srcs": {
+   "kind": "staged_files",
+   "srcs": [
+    "tools/build/examples/s2n_tls/handshake.c"
+   ]
+  },
+  "komira//tools/build/examples/s2n_tls:handshake": {
+   "deps": [
+    "komira//third_party/s2n-tls:s2n",
+    "komira//tools/build/examples/s2n_tls:c_srcs",
+    "prelude//cxx/tools:cxx_hacks",
+    "prelude//third-party/tools:create_build",
+    "toolchains//:cxx",
+    "toolchains//:cxx_no_default_deps"
+   ],
+   "kind": "cxx_library",
+   "srcs": [
+    "komira//tools/build/examples/s2n_tls:c_srcs[handshake.c]"
+   ]
+  },
+  "komira//tools/build/examples/s2n_tls:test_s2n_handshake": {
+   "deps": [
+    "komira//tools/build/examples/s2n_tls:handshake",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_binary",
+   "srcs": [
+    "tools/build/examples/s2n_tls/handshake_test.mojo"
    ]
   },
   "komira//tools/build/examples/snappy:test_snappy": {
@@ -762,7 +1738,7 @@
    ],
    "kind": "launcher_level_test"
   },
-  "komira//tools/build/platforms/remote:remote": {
+  "komira//tools/build/platforms/default:default": {
    "deps": [
     "komira//tools/build/platforms:exec-light",
     "komira//tools/build/platforms:exec-mojo"
@@ -846,6 +1822,12 @@
     "prelude//cfg/exec_platform/marker:is_exec_platform"
    ],
    "kind": "constraint_value"
+  },
+  "komira//tools/build/proto-codegen:db_options": {
+   "kind": "proto_srcs",
+   "srcs": [
+    "tools/build/proto-codegen/db/options.proto"
+   ]
   },
   "komira//tools/build/proto-codegen:komira_proto_codegen": {
    "deps": [
@@ -1170,6 +2152,7 @@
   "toolchains//:mojo_proto": {
    "deps": [
     "komira//tools/build/proto-codegen:protoc-gen-mojo",
+    "komira//tools/build/proto-codegen:protoc-gen-mojo-db",
     "komira//tools/build/toolchains/proto:protoc",
     "komira//tools/build/toolchains:busybox"
    ],

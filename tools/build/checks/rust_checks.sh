@@ -7,7 +7,7 @@
 #     byte for byte. A binary using prost without depending on it fails to
 #     compile: crates reach rustc only through `deps`.
 expect_green rust_example "//tools/build/examples/rust:prost_roundtrip[run_check]"
-check_remote rust_example
+check_executor rust_example
 expect_red rust_missing_dep "unresolved import \`prost\`" checks//rust_missing_dep:main
 
 # 22, host floor. rustc's host floor. Every NEEDED entry of bin/rustc and of each shared

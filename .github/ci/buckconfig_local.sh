@@ -6,7 +6,9 @@
 #        .github/ci/buckconfig_local.sh redact <dir>...
 #
 # write   writes .buckconfig.local in the repo root from the secret. It
-#         refuses one that sets no engine_address, and one whose
+#         refuses one that sets no engine_address, one that names no
+#         `[komira_re]` light and mojo_compile property sets or forces
+#         `execution = local` (either builds on the runner), and one whose
 #         instance_name is not a CI sub-instance: the last `/`-separated
 #         component must be `ci` (for example `<prefix>/ci`). The remote
 #         action cache keys entries by instance name, so CI's entries then
@@ -57,6 +59,12 @@ case "${1:-}" in
         umask 077
         printf '%s\n' "$BUCKCONFIG_LOCAL" > "$CONF"
         grep -qE '^\s*engine_address\s*=' "$CONF" || { echo ".buckconfig.local from the secret sets no engine_address" >&2; exit 1; }
+        # Without both worker property sets a checkout builds locally, on the CI
+        # runner itself (tools/build/platforms/default); refuse rather than do that.
+        for key in light_properties mojo_compile_properties; do
+            grep -qE "^\s*$key\s*=\s*\S" "$CONF" || { echo ".buckconfig.local from the secret sets no [komira_re] $key: CI would build locally" >&2; rm -f "$CONF"; exit 1; }
+        done
+        ! grep -qE '^\s*execution\s*=\s*local\s*$' "$CONF" || { echo ".buckconfig.local from the secret forces local execution" >&2; rm -f "$CONF"; exit 1; }
         inst=$(sed -nE 's/^[[:space:]]*instance_name[[:space:]]*=[[:space:]]*([^[:space:]]*)[[:space:]]*$/\1/p' "$CONF" | tail -1)
         [[ "$inst" =~ ^[A-Za-z0-9._-]+(/[A-Za-z0-9._-]+)*/ci$ ]] || {
             echo ".buckconfig.local from the secret must set instance_name to a CI sub-instance, <prefix>/ci;" >&2

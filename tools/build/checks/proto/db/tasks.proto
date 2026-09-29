@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package example.tasks.v1;
+
+import "komira/db/options.proto";
+
+// A table: protoc-gen-mojo-db writes a DbStorable implementation for it.
+message Task {
+  option (komira.db.table) = "tasks";
+  option (komira.db.pk) = "id";
+  option (komira.db.index) = "owner";
+
+  string id = 1 [(komira.db.col_type) = "uuid"];
+  string owner = 2;
+  string title = 3;
+  int64 priority = 4;
+  bool done = 5;
+}

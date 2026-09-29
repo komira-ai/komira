@@ -1,2 +1,4 @@
 /buck-out/
 /.buckconfig.local
+# zig's cache of a local C/C++ compile (tools/build/mojo/tools/zig_cc_launcher.zig).
+/.zig-cache/

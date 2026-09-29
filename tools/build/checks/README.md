@@ -14,8 +14,28 @@ tools/build/checks/run_checks.sh --no-uncached   # skip the uncached half of che
 It prints one `PASS`, `FAIL` or `SKIP` line per check, then the directory
 holding every log, and exits 1 if any check failed. `BUCK2=...`, `TMPDIR` and
 `KEEP_SCRATCH=1` are described in
-[DEVELOPMENT.md](../../../DEVELOPMENT.md#4-run-the-checks). The checks assume
-a configured `.buckconfig.local` ([DEVELOPMENT.md](../../../DEVELOPMENT.md#2-point-it-at-your-build-farm)).
+[DEVELOPMENT.md](../../../DEVELOPMENT.md#4-run-the-checks).
+
+The checks run where the checkout builds, read from the execution platforms
+buck2 registers, and the first line of output names it:
+
+- `MODE  remote`: `.buckconfig.local` names a remote-execution service
+  ([DEVELOPMENT.md](../../../DEVELOPMENT.md#3-optional-build-on-a-remote-execution-service)).
+  Every action runs there, and every check runs. CI runs this way.
+- `MODE  local`: no service is configured; every action runs on this
+  machine. These need a service and print `SKIP ... needs a remote-execution
+  service` instead: 7 (remote cache hits across checkouts), 9 (what a remote
+  build downloads), the registered-platform half of 10 and the stand-in half
+  of 11 (both built from the `[komira_re]` worker sets), 12 (per-action
+  worker property sets) and 24 (macOS workers). Check 3 prints `SKIP ...
+  needs remote input isolation`: its red relies on the executor staging only
+  declared inputs, and an unsandboxed local action may find the undeclared
+  package in the checkout. Checks 1, 22 and 23 require every action to have
+  run locally instead of remotely. **The local branch of this script has not
+  yet run end to end** (it would compile Mojo locally); until it has, a
+  local-mode PASS line is unmeasured.
+
+A mix of local and remote platforms is refused before any check runs.
 
 This directory is the `checks` cell. Its fixtures, several of which must fail
 to build, are outside `//...`; they use the rules through their own cell
@@ -27,8 +47,8 @@ rather than reusing the [examples](../examples/) (see
 
 The [examples](../examples/BUCK) build, their run checks pass (stdout
 compared byte for byte), and every action that executed ran remotely or was a
-remote cache hit (read from `buck2 log what-ran`; an invocation that executed
-nothing says so instead of passing).
+remote cache hit -- or, in a local-only run, ran locally (read from `buck2 log
+what-ran`; an invocation that executed nothing says so instead of passing).
 
 ```sh
 buck2 build //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user \
@@ -127,7 +147,18 @@ targets take their sources through `staged_files` (the first run of this check
 with C targets had 8 of 28 actions re-run in a submodule). They also include
 Rust (`rust:prost_roundtrip` and the protobuf plugin,
 `proto-codegen:protoc-gen-mojo`), whose compiles copy their sources into
-buck-out for the same reason (without it, 3 of 55 actions re-ran). See
+buck-out for the same reason (without it, 3 of 55 actions re-ran).
+
+A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
+the remote-execution settings are appended to its root `.buckconfig`, and it
+runs with no user or system buckconfig and `HOME` in the scratch directory.
+Its `app//platforms:default` must register only remote platforms, including
+`exec-mojo` and `exec-light`; hello, hellopkg, test_hellopkg and
+`toolchains//:mojo` must resolve to `exec-mojo` and the zig and conda_unpack
+targets to `exec-light`, with the configuration hashes check 18 pins; and
+with `-c komira.execution=remote`, clearing `[komira_re] light_properties`,
+or `mojo_compile_properties`, must refuse, naming the key. Analysis only.
+See
 [Using komira from another repository](../README.md#using-komira-from-another-repository).
 
 ```sh
@@ -327,14 +358,69 @@ remotely. The generated struct follows a field rename in the `.proto`, and
 the test written for the old name fails to compile
 (`checks//proto:test_person_renamed`). A `.proto` using an imported file's
 message compiles only with that file bundled
-(`checks//proto:team_unbundled_proto` must fail).
+(`checks//proto:team_unbundled_proto` must fail). `bundle_only` generates part
+of the bundled closure: `checks//proto:roster_proto` holds exactly
+`roster.mojo` and `person.mojo`, while bundling all of it also generates the
+options file its runtime cannot compile (`roster_full_bundle` must fail), and
+a selection outside the closure is refused (`roster_bad_selection`).
+`mojo_db_proto_library`: the DbStorable code generated for the table of
+`db/tasks.proto` passes `checks//proto:test_tasks_db` against a minimal
+`komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
+without a table) fails the generation (`tasks_db_wrong_outs`).
 
 Generation is deterministic: two uncached builds (an isolated daemon,
-`komira_checks_det`, its buck-out cleaned, `--no-remote-cache`) of the
-plugin, the generated sources of two packages and one compiled package give
-the same bytes. Each build must have run the plugin's rustc and both
-generations remotely, or the comparison proves nothing. About 16 minutes;
+`komira_checks_det`, its buck-out cleaned, `--no-remote-cache`) of both
+plugins, the generated sources of three packages (one of them
+`mojo_db_proto_library`) and two compiled packages give the same bytes. Each
+build must have run both plugins' rustc and every generation (remotely, or
+locally in a local-only run), or the comparison proves nothing. About 16 minutes;
 skipped with `--no-uncached`.
+
+## 25. Local default
+
+[`local_default.sh`](local_default.sh): a fresh clone with no
+`.buckconfig.local` builds on this machine. It snapshots the working tree
+into a scratch clone (`.buckconfig.local` is gitignored, so it is never
+copied) and runs buck2 there with its own daemon, no user or system
+buckconfig and `HOME` in the scratch directory. On Linux x86_64, every
+platform `[build] execution_platforms` registers is local-only (exactly
+`exec-mojo`, `exec-light`); Mojo targets and the toolchain targets resolve to
+them with the configuration hashes check 18 pins, so a local and a remote
+build configure every target identically; a `numa_multi` target does not
+configure; `-c komira.execution=remote` refuses, naming `[komira_re]`; a
+`[buck2_re_client]` `address`, `engine_address`, `cas_address` or
+`action_cache_address` with no `[komira_re]`
+refuses instead of building locally (a missing or misspelled `[komira_re]`
+fails closed), as does a `[komira_re]` without `light_properties`, while
+`-c komira.execution=local` still registers the local platforms;
+`[komira] execution = remote` in a user `~/.buckconfig.local` refuses; and an
+unknown mode refuses. On any other host the clone must refuse local
+execution, naming the host and `.buckconfig.local`. Last, on Linux x86_64,
+it builds `komira//tools/build/toolchains:conda_unpack` and `:zig_cc_launcher`
+locally, from a daemon started with an empty environment and `PATH`: zig is
+unpacked, then the two zig programs are built at once, and every action must
+have run locally. Local actions share the checkout root as their working
+directory, so this is what fails if two of them share scratch space. It
+downloads about 45 MB, compiles no Mojo, and runs in both modes.
+
+```sh
+tools/build/checks/local_default.sh
+```
+
+## 26. aws-lc and s2n-tls
+
+[`c_libs_checks.sh`](c_libs_checks.sh), sourced by `run_checks.sh`.
+Drift: `third_party/<lib>/srcs.bzl` must equal what
+[`third_party/gen_srcs.py`](../../../third_party/gen_srcs.py) reads out of
+the pinned archive's CMake lists (the archive is fetched through its
+`pinned_file` target; the generator runs on the machine running the checks).
+libcrypto passes aws-lc's own self tests and SHA-256, AES-128 and ChaCha20
+known-answer vectors, and an s2n-tls client and server complete a TLS 1.3
+handshake with certificate verification, both driven from Mojo in a run
+check on a worker. Every probe named in `third_party/s2n-tls/features.bzl`
+compiles (`checks//s2n_probes`) and every other probe fails to, so a feature
+define cannot be added or dropped without its probe agreeing. Neither test
+binary exports a dynamic symbol.
 
 ## Diagnostics
 

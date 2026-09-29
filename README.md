@@ -1,31 +1,44 @@
 # komira
 
 komira is written in [Mojo](https://www.modular.com/mojo) and built with
-[Buck2](https://buck2.build) on remote execution: every action (unpacking the
-toolchain, compiling, running tests) runs on a remote-execution service that
-speaks the Bazel Remote Execution API, such as Buildbarn. Nothing is compiled
-on your machine. The build tooling (Mojo rules, a hermetic toolchain, execution
-platforms, examples and end-to-end checks) lives in [`tools/build/`](tools/build/).
+[Buck2](https://buck2.build) and a hermetic toolchain: the Mojo compiler, zig
+and the file utilities every action uses are pinned downloads. A fresh clone
+builds on your own Linux x86_64 machine by default (see
+[DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees) for what has
+been checked locally so far).
+If you have a remote-execution service that speaks the Bazel Remote Execution
+API, such as Buildbarn, you can opt in to building there instead.
+
+The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
+examples and end-to-end checks) lives in [`tools/build/`](tools/build/).
 
 ## Quickstart
 
-On Linux x86_64, with [dotslash](https://dotslash-cli.com) installed and a
-remote-execution service to point at:
+On Linux x86_64, with [dotslash](https://dotslash-cli.com) installed:
 
 ```sh
-cp .buckconfig.local.example .buckconfig.local   # then fill in your service and worker properties
-tools/buck2 build //...                          # build every target, remotely
-tools/buck2 run //tools/build/examples:hello     # build remotely, run here
+tools/buck2 run //tools/build/examples:hello     # build on this machine, run here
+tools/buck2 build //...                          # build every target, on this machine
 ```
 
-[DEVELOPMENT.md](DEVELOPMENT.md) explains each step, what to put in
+A local Mojo compile has not yet been measured: so far these commands have
+run only against a remote-execution service
+([DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees)).
+
+To build on a remote-execution service instead (from any machine buck2 runs
+on), copy `.buckconfig.local.example` to `.buckconfig.local` and fill in your
+service and its worker properties; the same commands then run every action
+there.
+
+[DEVELOPMENT.md](DEVELOPMENT.md) explains each step, what a local build does
+and does not guarantee (Buck2 does not sandbox local actions), what to put in
 `.buckconfig.local`, and what to do when something goes wrong.
 
 ## Documentation
 
 | read | for |
 |---|---|
-| [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: the pinned buck2, `.buckconfig.local` and your build farm, running the checks, the host floor, caching, troubleshooting |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: the pinned buck2, local builds and what they guarantee, `.buckconfig.local` and a remote-execution service, running the checks, the host floor, caching, troubleshooting |
 | [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository uses komira, as a git external cell or a submodule |
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test` |
 | [tools/build/platforms/README.md](tools/build/platforms/README.md) | execution classes, single- and multi-NUMA workers, mapping them to your own worker pools |
