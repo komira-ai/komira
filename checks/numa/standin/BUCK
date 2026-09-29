@@ -1,0 +1,26 @@
+load("@komira//platforms:defs.bzl", "re_properties", "remote_execution_platforms")
+
+# A deliberately misconfigured set of execution platforms, for check 11 only:
+# `exec-mojo-multi-numa` is realized by the SAME single-NUMA workers as
+# `exec-mojo`. komira_execution_platforms refuses that at load, so this calls
+# the underlying rule directly, standing in for any platform whose workers turn
+# out to expose one NUMA node (a wrong pool, a cpuset, a memory binding).
+# checks/run_checks.sh selects it with
+# `-c build.execution_platforms=checks//numa/standin:single_numa_standin`,
+# passes the two property sets into this cell (`-c checks//komira_re.<key>=`,
+# since `.buckconfig.local` configures the root cell only), and requires the
+# multi-NUMA run to refuse to start.
+remote_execution_platforms(
+    name = "single_numa_standin",
+    names = ["mojo_compile", "light", "mojo_compile_multi_numa"],
+    constraints = [
+        "komira//platforms:exec-mojo",
+        "komira//platforms:exec-light",
+        "komira//platforms:exec-mojo-multi-numa",
+    ],
+    properties = [
+        re_properties("mojo_compile_properties"),
+        re_properties("light_properties"),
+        re_properties("mojo_compile_properties"),
+    ],
+)

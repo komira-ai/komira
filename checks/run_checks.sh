@@ -20,8 +20,9 @@
 #      directory. (Inside every compile action the
 #      wrapper also refuses an output containing that action's working
 #      directory, exit 4.)
-#   7. A repository mounting komira as a git submodule gets remote cache hits
-#      with the same action digests as a standalone checkout
+#   7. A repository mounting komira as a git submodule (at ./komira and at
+#      ./third_party/komira) gets remote cache hits with the same action
+#      digests as a standalone checkout
 #      (checks/umbrella_cache.sh; two scratch checkouts and daemons, skipped
 #      with --no-umbrella).
 #   8. The host floor: during a real compile, and a run of the binary it
@@ -29,12 +30,28 @@
 #      toolchain, and nothing from the worker except glibc's own objects
 #      (checks//runtime_libs:loader_trace, read from LD_DEBUG). The
 #      toolchain libraries the run loaded are exactly the ones a runnable
-#      directory carries in lib/ (toolchains//:mojo_runtime), no more, no fewer.
+#      directory carries in lib/ (toolchains//:mojo_runtime), no more, no
+#      fewer, and every run path those libraries carry is $ORIGIN-relative.
 #  10. Execution platforms: Mojo compiles, gated tests and run checks resolve
 #      to `exec-mojo` (mojo_compile, numa_single) and toolchain unpack/copy
 #      targets to `exec-light`. A target requiring numa_multi, with no
 #      platform providing it, fails to configure and runs nothing; given one
 #      (resolution only, nothing is built), it resolves to it.
+#  11. The multi-NUMA run checks the hardware it got, not only the label:
+#      numa_guard.sh gives the right verdict on 12 made-up topologies
+#      (checks//numa:guard_cases, a remote action); komira_execution_platforms
+#      refuses a multi-NUMA property set equal to the mojo_compile one; and on
+#      a stand-in platform whose multi-NUMA workers are the single-NUMA
+#      mojo_compile workers (checks//numa/standin), both the build's run
+#      check and `buck2 test` refuse to start (numa_guard: REFUSING to run).
+#  12. Actions run with their platform's property set, read per action: an
+#      uncached build of //examples:hello (its own daemon under a fixed
+#      --isolation-dir, --no-remote-cache, so every action really executes)
+#      must record the light set for zig_unpack, zig_build_exe, conda_unpack
+#      and mojo_runtime, and the mojo_compile set for mojo_build (`buck2 log
+#      what-ran`; a cache hit records no properties, so a warm build cannot
+#      answer this). Costs about 80 s of remote execution; the isolated
+#      daemon's buck-out/komira_checks_uncached (~50 MB) is reused per run.
 #   9. `buck2 run //examples:hello` prints the greeting on this machine from a
 #      fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
@@ -55,6 +72,9 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
     if command -v buck2 > /dev/null; then BUCK2=buck2; else BUCK2="$ROOT/tools/buck2"; fi
 fi
+# Logs, and the scratch checkouts of checks 7 and 9, go under $TMPDIR. Where
+# /tmp is memory, point TMPDIR at a disk directory. The checkouts are deleted
+# on exit, pass or fail (KEEP_SCRATCH=1 keeps them); logs are kept.
 LOG=$(mktemp -d "${TMPDIR:-/tmp}/komira_checks.XXXXXX")
 fails=0
 
@@ -199,6 +219,23 @@ else
     else
         pass "runtime libs: lib/ ships exactly the $(wc -l < "$LOG/runtime_shipped.txt" | tr -d ' ') toolchain libraries a run loads"
     fi
+    # Every run path a shipped library carries (vendor DT_RPATH included) must
+    # be relative to the library itself, or it names a directory on the
+    # machine that built it.
+    libdir="$(tail -n 1 "$LOG/runnable.txt")/lib"
+    : > "$LOG/runtime_runpaths.txt"
+    for so in "$libdir"/*; do
+        [ -f "$so" ] || continue
+        readelf -d "$so" 2> /dev/null | sed -nE 's/.*\((RPATH|RUNPATH)\).*\[(.*)\]$/\2/p' | tr ':' '\n' |
+            sed "s|^|$(basename "$so") |" >> "$LOG/runtime_runpaths.txt"
+    done
+    if [ ! -s "$LOG/runtime_runpaths.txt" ]; then
+        fail "runtime run paths: read none from $libdir; the scan saw nothing"
+    elif grep -v -E '^[^ ]+ \$ORIGIN(/|$)' "$LOG/runtime_runpaths.txt" > "$LOG/runtime_runpaths_bad.txt"; then
+        fail "runtime run paths: not \$ORIGIN-relative: $(head -n 3 "$LOG/runtime_runpaths_bad.txt" | tr '\n' ' ')"
+    else
+        pass "runtime run paths: all $(wc -l < "$LOG/runtime_runpaths.txt" | tr -d ' ') run path entries in lib/ are \$ORIGIN-relative"
+    fi
 fi
 
 # 10
@@ -241,6 +278,8 @@ fi
 if printf '%s\n' "${got:-}" | grep -qx 'checks//numa:hello_multi_numa FAILED'; then
     if "$BUCK2" build "${NO_MULTI[@]}" checks//numa:hello_multi_numa > "$LOG/numa_refusal.log" 2>&1; then
         fail "multi-NUMA refusal: checks//numa:hello_multi_numa built with no numa_multi platform"
+    # Literal wording of buck2 2026-09-15 (tools/buck2). A buck2 release that
+    # rewords it turns this check red, not green; update it with the pin.
     elif ! grep -qF "Can't find toolchain_dep execution platform" "$LOG/numa_refusal.log"; then
         fail "multi-NUMA refusal: failed for another reason (see $LOG/numa_refusal.log)"
     elif ! "$BUCK2" log what-ran > "$LOG/numa_refusal.what_ran.txt" 2>&1; then
@@ -261,6 +300,106 @@ elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$(printf '%s\n' 'checks//nu
 else
     pass "multi-NUMA platform: when registered, only the multi-NUMA run resolves to it"
 fi
+
+# 11
+if ! "$BUCK2" build checks//numa:guard_cases --show-full-simple-output > "$LOG/guard_cases.txt" 2> "$LOG/guard_cases.log"; then
+    fail "NUMA guard cases: failed (see $LOG/guard_cases.log)"
+else
+    report=$(tail -n 1 "$LOG/guard_cases.txt")
+    ok=$(grep -c '^ok ' "$report" || true)
+    if grep -q '^BAD ' "$report" || [ "$ok" -lt 12 ] || ! grep -q ' run$' "$report" || ! grep -q ' refuse$' "$report"; then
+        fail "NUMA guard cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
+    else
+        pass "NUMA guard cases: $ok topologies, each run or refused as required"
+    fi
+fi
+re_value() { # key: prints [komira_re] <key> of the root cell
+    "$BUCK2" audit config "komira_re.$1" --style json 2> /dev/null |
+        python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2> /dev/null
+}
+MC_PROPS=$(re_value mojo_compile_properties)
+LIGHT_PROPS=$(re_value light_properties)
+if [ -z "$MC_PROPS" ] || [ -z "$LIGHT_PROPS" ]; then
+    fail "multi-NUMA hardware: cannot read [komira_re] mojo_compile_properties / light_properties"
+else
+    if "$BUCK2" audit execution-platform-resolution -c "komira_re.mojo_compile_multi_numa_properties=$MC_PROPS" \
+            checks//numa:hello_multi_numa > "$LOG/numa_same_set.log" 2>&1; then
+        fail "multi-NUMA hardware: a multi-NUMA property set equal to mojo_compile was accepted"
+    elif ! grep -qF 'but it equals `mojo_compile`' "$LOG/numa_same_set.log"; then
+        fail "multi-NUMA hardware: the equal-set refusal failed for another reason (see $LOG/numa_same_set.log)"
+    else
+        pass "multi-NUMA hardware: a multi-NUMA property set equal to mojo_compile is refused at load"
+    fi
+    # The stand-in routes numa_multi to the single-NUMA workers. A timeout
+    # bounds each invocation: an unknown property set queues forever.
+    STANDIN=(-c build.execution_platforms=checks//numa/standin:single_numa_standin
+             -c "checks//komira_re.mojo_compile_properties=$MC_PROPS"
+             -c "checks//komira_re.light_properties=$LIGHT_PROPS")
+    if timeout 600 "$BUCK2" build "${STANDIN[@]}" checks//numa:hello_multi_numa > "$LOG/numa_standin.log" 2>&1; then
+        fail "multi-NUMA hardware: the run check went green on single-NUMA workers"
+    elif ! grep -qF 'numa_guard: REFUSING to run' "$LOG/numa_standin.log"; then
+        fail "multi-NUMA hardware: the stand-in build failed without the guard's refusal (see $LOG/numa_standin.log)"
+    else
+        pass "multi-NUMA hardware: run check refused on single-NUMA workers ($(grep -o -m1 'usable NUMA nodes \[[^]]*\]' "$LOG/numa_standin.log"))"
+    fi
+    if timeout 600 "$BUCK2" test "${STANDIN[@]}" checks//numa:hello_multi_numa > "$LOG/numa_standin_test.log" 2>&1; then
+        fail "multi-NUMA hardware: buck2 test passed on single-NUMA workers"
+    elif ! grep -qF 'numa_guard: REFUSING to run' "$LOG/numa_standin_test.log"; then
+        fail "multi-NUMA hardware: buck2 test failed without the guard's refusal (see $LOG/numa_standin_test.log)"
+    else
+        pass "multi-NUMA hardware: buck2 test refused on single-NUMA workers"
+    fi
+fi
+
+# 12
+ISO=komira_checks_uncached
+if [ -z "${MC_PROPS:-}" ] || [ -z "${LIGHT_PROPS:-}" ]; then
+    fail "action platforms: cannot read [komira_re] mojo_compile_properties / light_properties"
+elif ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache //examples:hello > "$LOG/uncached.log" 2>&1; then
+    fail "action platforms: uncached build failed (see $LOG/uncached.log)"
+elif ! "$BUCK2" --isolation-dir "$ISO" log what-ran --format json > "$LOG/uncached.what_ran.json" 2>&1; then
+    fail "action platforms: cannot read what-ran"
+elif ! verdict=$(LIGHT="$LIGHT_PROPS" MOJO="$MC_PROPS" python3 - "$LOG/uncached.what_ran.json" << 'PY'
+import json, os, sys
+
+def props(raw):
+    return dict(p.strip().split("=", 1) for p in raw.split(",") if p.strip())
+
+light, mojo = props(os.environ["LIGHT"]), props(os.environ["MOJO"])
+if light == mojo:
+    print("light and mojo_compile property sets are equal; nothing to tell apart")
+    sys.exit(1)
+want = {c: light for c in ("zig_unpack", "zig_build_exe", "conda_unpack", "mojo_runtime")}
+want["mojo_build"] = mojo
+seen, bad = {}, []
+for line in open(sys.argv[1]):
+    if not line.startswith("{"):
+        continue
+    d = json.loads(line)
+    category = d["identity"].rsplit(" (", 1)[-1].rstrip(")")
+    rep = d["reproducer"]
+    if category not in want:
+        continue
+    seen[category] = seen.get(category, 0) + 1
+    got = rep.get("details", {}).get("platform_properties")
+    if rep.get("executor") != "Re" or got is None:
+        bad.append("%s ran as %s, not a remote execution" % (category, rep.get("executor")))
+    elif got != want[category]:
+        bad.append("%s ran with the %s set" % (category, "mojo_compile" if got == mojo else "light" if got == light else "an unknown"))
+missing = sorted(set(want) - set(seen))
+if missing:
+    bad.append("not executed: " + " ".join(missing))
+if bad:
+    print("; ".join(bad))
+    sys.exit(1)
+print("%d actions: %s on light, mojo_build on mojo_compile" % (sum(seen.values()), "/".join(sorted(c for c in want if c != "mojo_build"))))
+PY
+); then
+    fail "action platforms: ${verdict:-no verdict} (see $LOG/uncached.what_ran.json)"
+else
+    pass "action platforms: $verdict"
+fi
+"$BUCK2" --isolation-dir "$ISO" kill > /dev/null 2>&1
 
 # 9
 if [ "$run" = 1 ]; then

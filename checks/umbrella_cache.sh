@@ -7,16 +7,19 @@
 # The check snapshots the working tree into a scratch git repository, then:
 #   1. clones it (the standalone checkout) and builds the examples and their
 #      run checks there, with a fresh daemon;
-#   2. creates an umbrella repository whose root cell is `umbrella`, mounts the
-#      snapshot at ./komira with `git submodule add`, configures it with
+#   2. creates two umbrella repositories whose root cell is `umbrella`, mounts
+#      the snapshot with `git submodule add` at ./komira in one and at
+#      ./third_party/komira in the other, configures each with
 #      tools/umbrella_buckconfig.sh plus an execution platform of its own, and
-#      builds the same targets with a fresh daemon.
+#      builds the same targets in each with a fresh daemon.
 # It passes only if every umbrella command is a remote cache hit
 # ("Commands: N (cached: N, remote: 0, local: 0)", N > 0) and the two builds
 # ran the same actions with the same action digests (`buck2 log what-ran`).
 #
 # Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
-# copied into both scratch checkouts. Scratch goes under $TMPDIR.
+# copied into every scratch checkout. Scratch goes under $TMPDIR (set it to a
+# disk directory where /tmp is memory); the checkouts, and their buck-out, are
+# deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Logs are kept.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -29,13 +32,22 @@ GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init
 
 die() { echo "FAIL  umbrella cache: $1"; echo "logs: $W"; exit 1; }
 
+CHECKOUTS=(standalone umbrella umbrella_deep)
+
 stop_daemons() {
     local d
-    for d in "$W/standalone" "$W/umbrella"; do
-        [ -d "$d" ] && (cd "$d" && "$BUCK2" kill > /dev/null 2>&1)
+    for d in "${CHECKOUTS[@]}"; do
+        [ -d "$W/$d" ] && (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
     done
 }
-trap stop_daemons EXIT
+cleanup() {
+    stop_daemons
+    if [ "${KEEP_SCRATCH:-0}" != 1 ]; then
+        local d
+        for d in src "${CHECKOUTS[@]}"; do rm -rf "${W:?}/$d"; done
+    fi
+}
+trap cleanup EXIT
 
 [ -f "$ROOT/.buckconfig.local" ] || die "no .buckconfig.local in $ROOT (remote-execution settings)"
 
@@ -51,18 +63,20 @@ mkdir "$W/src"
 "${GIT[@]}" clone -q "$W/src" "$W/standalone" || die "cannot clone the snapshot"
 cp "$ROOT/.buckconfig.local" "$W/standalone/"
 
-# Umbrella repository with komira as a submodule.
-mkdir "$W/umbrella"
-("${GIT[@]}" -C "$W/umbrella" init -q &&
-    "${GIT[@]}" -C "$W/umbrella" -c protocol.file.allow=always submodule add -q "$W/src" komira) ||
-    die "cannot add the submodule"
-"$W/umbrella/komira/tools/umbrella_buckconfig.sh" komira > "$W/umbrella/.buckconfig" ||
-    die "tools/umbrella_buckconfig.sh failed"
-printf '\n[cells]\n  umbrella = .\n\n[build]\n  execution_platforms = umbrella//platforms:remote\n\n[project]\n  ignore = buck-out, .git\n' \
-    >> "$W/umbrella/.buckconfig"
-cp "$ROOT/.buckconfig.local" "$W/umbrella/"
-mkdir "$W/umbrella/platforms"
-cat > "$W/umbrella/platforms/BUCK" << 'EOF'
+# Umbrella repositories with komira as a submodule, at depth 1 and depth 2.
+make_umbrella() { # checkout, mount path
+    local d=$1 m=$2
+    mkdir "$W/$d"
+    ("${GIT[@]}" -C "$W/$d" init -q &&
+        "${GIT[@]}" -C "$W/$d" -c protocol.file.allow=always submodule add -q "$W/src" "$m") ||
+        die "$d: cannot add the submodule at $m"
+    "$W/$d/$m/tools/umbrella_buckconfig.sh" "$m" > "$W/$d/.buckconfig" ||
+        die "$d: tools/umbrella_buckconfig.sh $m failed"
+    printf '\n[cells]\n  umbrella = .\n\n[build]\n  execution_platforms = umbrella//platforms:remote\n\n[project]\n  ignore = buck-out, .git\n' \
+        >> "$W/$d/.buckconfig"
+    cp "$ROOT/.buckconfig.local" "$W/$d/"
+    mkdir "$W/$d/platforms"
+    cat > "$W/$d/platforms/BUCK" << 'EOF'
 load("@komira//platforms:defs.bzl", "komira_execution_platforms", "re_properties")
 
 komira_execution_platforms(
@@ -72,6 +86,9 @@ komira_execution_platforms(
     visibility = ["PUBLIC"],
 )
 EOF
+}
+make_umbrella umbrella komira
+make_umbrella umbrella_deep third_party/komira
 
 TARGETS=(
     komira//examples:hello komira//examples:hellopkg komira//examples:hello_pkg_user
@@ -90,29 +107,28 @@ build() { # checkout, invocation number, targets...
         >> "$W/$d.actions"
 }
 
-for d in standalone umbrella; do
+for d in "${CHECKOUTS[@]}"; do
     : > "$W/$d.actions"
     build "$d" 1 "${TARGETS[@]}"
     build "$d" 2 "${RUN_CHECKS[@]}"
     (cd "$W/$d" && "$BUCK2" kill > /dev/null 2>&1)
 done
 
-for i in 1 2; do
-    line=$(grep -o 'Commands: .*' "$W/umbrella.build$i.log" | tail -n 1)
-    [[ "$line" =~ ^Commands:\ ([0-9]+)\ \(cached:\ ([0-9]+),\ remote:\ 0,\ local:\ 0\)$ ]] &&
-        [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ] && [ "${BASH_REMATCH[1]}" != 0 ] ||
-        die "umbrella build $i was not all remote cache hits: '${line:-no Commands line}'"
-    echo "      umbrella build $i: $line"
-done
-
 cut -f1,2 "$W/standalone.actions" | LC_ALL=C sort > "$W/standalone.digests"
-cut -f1,2 "$W/umbrella.actions" | LC_ALL=C sort > "$W/umbrella.digests"
-n=$(wc -l < "$W/umbrella.digests" | tr -d ' ')
+n=$(wc -l < "$W/standalone.digests" | tr -d ' ')
 [ "$n" != 0 ] || die "what-ran recorded no action digests"
-if ! cmp -s "$W/standalone.digests" "$W/umbrella.digests"; then
-    diff "$W/standalone.digests" "$W/umbrella.digests" | head -n 8
-    die "action digests differ between the standalone checkout and the umbrella"
-fi
-stop_daemons
-echo "PASS  umbrella cache: $n actions, identical digests, every umbrella command a cache hit"
-rm -rf "$W/src" "$W/standalone" "$W/umbrella"
+for d in umbrella umbrella_deep; do
+    for i in 1 2; do
+        line=$(grep -o 'Commands: .*' "$W/$d.build$i.log" | tail -n 1)
+        [[ "$line" =~ ^Commands:\ ([0-9]+)\ \(cached:\ ([0-9]+),\ remote:\ 0,\ local:\ 0\)$ ]] &&
+            [ "${BASH_REMATCH[1]}" = "${BASH_REMATCH[2]}" ] && [ "${BASH_REMATCH[1]}" != 0 ] ||
+            die "$d build $i was not all remote cache hits: '${line:-no Commands line}'"
+        echo "      $d build $i: $line"
+    done
+    cut -f1,2 "$W/$d.actions" | LC_ALL=C sort > "$W/$d.digests"
+    if ! cmp -s "$W/standalone.digests" "$W/$d.digests"; then
+        diff "$W/standalone.digests" "$W/$d.digests" | head -n 8
+        die "action digests differ between the standalone checkout and $d"
+    fi
+done
+echo "PASS  umbrella cache: $n actions, identical digests at mount depths 1 and 2, every umbrella command a cache hit"

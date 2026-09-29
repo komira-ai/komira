@@ -17,7 +17,9 @@
 #      its run path is relative to the binary, not to buck-out.
 #
 # Needs `.buckconfig.local` (remote-execution settings) in the repo root; it is
-# copied into the scratch clone. Scratch goes under $TMPDIR.
+# copied into the scratch clone. Scratch goes under $TMPDIR (set it to a disk
+# directory where /tmp is memory); the clone, its buck-out and the moved copy
+# are deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Logs are kept.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
@@ -27,13 +29,20 @@ fi
 case "$BUCK2" in /*) ;; */*) BUCK2="$PWD/$BUCK2" ;; esac
 EXPECTED='hello from mojo'
 MAX_DOWNLOAD_BYTES=${MAX_DOWNLOAD_BYTES:-67108864}
+# buck-out on this machine after the run. The runtime lands on disk twice: the
+# toolchain's runtime directory and the runnable directory's lib/ copy.
+MAX_DISK_BYTES=${MAX_DISK_BYTES:-100663296}
 MEM_CAP_KB=${MEM_CAP_KB:-8388608}
 W=$(mktemp -d "${TMPDIR:-/tmp}/komira_run.XXXXXX")
 GIT=(git -c user.name=komira-checks -c user.email=checks@example.invalid -c init.defaultBranch=main)
 
 die() { echo "FAIL  buck2 run: $1"; echo "logs: $W"; exit 1; }
 stop_daemon() { [ -d "$W/clone" ] && (cd "$W/clone" && "$BUCK2" kill > /dev/null 2>&1); }
-trap stop_daemon EXIT
+cleanup() {
+    stop_daemon
+    [ "${KEEP_SCRATCH:-0}" = 1 ] || rm -rf "${W:?}/src" "${W:?}/clone" "${W:?}/moved"
+}
+trap cleanup EXIT
 
 [ -f "$ROOT/.buckconfig.local" ] || die "no .buckconfig.local in $ROOT (remote-execution settings)"
 
@@ -69,6 +78,11 @@ if awk -F'\t' '$2 == "cas" { print $1 }' "$W/materialized.tsv" | grep -E 'mojo_c
     die "the compiler was downloaded: $(head -n 1 "$W/compiler_paths")"
 fi
 
+disk=$(du -sb "$W/clone/buck-out" 2> /dev/null | cut -f1)
+[ -n "$disk" ] || die "cannot measure $W/clone/buck-out"
+[ "$disk" -le "$MAX_DISK_BYTES" ] ||
+    die "buck-out holds $disk bytes on disk, over the $MAX_DISK_BYTES budget"
+
 # 3
 runnable=$(awk -F'\t' '$2 == "copy" && $1 ~ /hello\.runnable$/ && $4 > 0 { print $1 }' "$W/materialized.tsv" | head -n 1)
 [ -n "$runnable" ] && [ -x "$W/clone/$runnable/hello" ] || die "no runnable directory in what-materialized"
@@ -78,6 +92,4 @@ rc=0
 [ "$rc" = 0 ] && cmp -s "$W/moved.stdout" "$W/expected" ||
     die "the runnable directory does not start after a move (rc=$rc): $(head -c 200 "$W/moved.err")"
 
-stop_daemon
-echo "PASS  buck2 run: printed the greeting; downloaded $fetched bytes in $files files, no compiler; runs after a move"
-rm -rf "$W"
+echo "PASS  buck2 run: printed the greeting; downloaded $fetched bytes in $files files, no compiler; buck-out $disk bytes on disk; runs after a move"
