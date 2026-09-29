@@ -51,10 +51,10 @@ if "kill" in sys.argv:
 assert "uquery" in sys.argv and "--json" in sys.argv, sys.argv
 ans = json.load(open(os.environ["KG_STUB_ANSWER"]))
 if os.path.exists(".buckconfig.local"):
-    ans["komira//platforms:local-only"] = {"buck.type": "platform"}
+    ans["komira//tools/build/platforms:local-only"] = {"buck.type": "platform"}
 if os.environ.get("BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG") != "true" and \\
         os.path.isdir(os.path.expanduser("~/.buckconfig.d")):
-    ans["komira//platforms:machine-wide"] = {"buck.type": "platform"}
+    ans["komira//tools/build/platforms:machine-wide"] = {"buck.type": "platform"}
 if os.path.exists("src/alpha/stray.mojo"):
     ans["komira//src:stray"] = {"buck.type": "mojo_library", "srcs": ["komira//src/alpha/stray.mojo"]}
 with open(os.environ["KG_STUB_CWDS"], "a") as f:

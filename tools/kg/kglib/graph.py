@@ -267,7 +267,7 @@ def _resolve(targets, name):
     if len(hits) == 1:
         return hits[0]
     if not hits:
-        raise KgError("no target %r in the graph; labels look like komira//examples:hellopkg" % name)
+        raise KgError("no target %r in the graph; labels look like komira//tools/build/examples:hellopkg" % name)
     raise KgError("%r is ambiguous: %s" % (name, ", ".join(hits[:8])))
 
 
