@@ -1,0 +1,109 @@
+# CI for komira. See docs/ci.md for the trust model; in short:
+#
+#   static  every event, including pull requests from forks. Lints only, with
+#           no secret and a read-only token; nothing reaches the build farm.
+#   farm    pushes to main, the nightly schedule, manual runs, and pull
+#           requests whose branch lives in this repository (only people with
+#           write access can push one). Joins the tailnet as an ephemeral
+#           node and runs tools/build/checks/run_checks.sh on remote execution.
+#
+# A pull request from a fork never runs the farm job: its `if:` excludes it,
+# and independently GitHub gives a fork's `pull_request` run no secrets, so
+# even a fork that edits this file cannot join the tailnet. There is no
+# pull_request_target workflow here, on purpose: it runs with the base
+# repository's secrets, and checking out the fork's code under it hands them
+# to that code.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Nightly: re-checks main against the farm when nothing was pushed
+    # (cache eviction, worker or toolchain drift).
+    - cron: "23 7 * * *"
+  workflow_dispatch:
+    inputs:
+      umbrella:
+        description: Run the umbrella-mount cache check (check 7)
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  # One run per pull request, per event, cancelling a superseded one. Runs on
+  # main queue instead, so every push to main gets a verdict.
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Static checks
+        run: .github/ci/static_checks.sh "$RUNNER_TEMP/tools"
+      - name: The buck2 pin resolves and verifies
+        run: .github/ci/fetch_buck2.sh "$RUNNER_TEMP/bin"
+
+  farm:
+    needs: static
+    if: >-
+      github.repository == 'komira-ai/komira' &&
+      (github.event_name != 'pull_request' ||
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Join the tailnet (ephemeral, tag:ci)
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          version: 1.94.2
+          sha256sum: c6f99a5d774c7783b56902188d69e9756fc3dddfb08ac6be4cb2585f3fecdc32
+          use-cache: "false"
+      - name: Write .buckconfig.local from the repository secret
+        env:
+          BUCKCONFIG_LOCAL: ${{ secrets.BUCKCONFIG_LOCAL }}
+        run: .github/ci/buckconfig_local.sh write
+      - name: Install the pinned buck2
+        run: |
+          .github/ci/fetch_buck2.sh "$RUNNER_TEMP/bin"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      - name: tools/build/checks/run_checks.sh
+        env:
+          UMBRELLA: ${{ github.event_name != 'workflow_dispatch' || inputs.umbrella }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/checks"
+          export TMPDIR="$RUNNER_TEMP/checks"
+          args=()
+          [ "$UMBRELLA" = true ] || args+=(--no-umbrella)
+          tools/build/checks/run_checks.sh "${args[@]}"
+      - name: Redact check logs
+        if: failure()
+        run: .github/ci/buckconfig_local.sh redact "$RUNNER_TEMP/checks"
+      - name: Upload check logs
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: check-logs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/checks
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: buck2 kill || true
