@@ -136,12 +136,22 @@ configuration a target got and why the others were skipped.
 `mojo_compile_multi_numa_properties` is set. Without it, a target requiring
 `numa_multi` fails to configure (`Can't find toolchain_dep execution
 platform`, with `exec-mojo` skipped because `numa_multi` is not satisfied),
-before any action runs; it never falls back to a single-NUMA worker. A
-repository that sets it must point it at workers that can each place a
-process across more than one NUMA node: every CPU and all memory of at least
-two nodes visible to the action (no cpuset or memory binding narrowing it to
-one node), with the same OS image and runtime floor as the `mojo_compile`
-workers, since the binary it runs was built there.
+before any action runs. A repository that sets it must point it at workers
+that can each place a process across more than one NUMA node: every CPU and
+all memory of at least two nodes visible to the action (no cpuset or memory
+binding narrowing it to one node), with the same OS image and runtime floor
+as the `mojo_compile` workers, since the binary it runs was built there.
+
+The constraint is only a claim about those workers, so the hardware is
+checked too. `komira_execution_platforms` fails if the multi-NUMA property
+set equals the `mojo_compile` one. And every multi-NUMA run (the build's run
+check and the `buck2 test` command) starts through `mojo/numa_guard.sh`,
+which exits 3 with `numa_guard: REFUSING to run` unless the action can use
+at least `numa_nodes` (default 2) NUMA nodes: online and with memory
+(`/sys/devices/system/node`), in its own `Mems_allowed_list`, and holding a
+CPU in its own `Cpus_allowed_list` (`/proc/<pid>/status`). A property set
+that routes to a single-NUMA worker, or a worker narrowed to one node by a
+cpuset, affinity mask or memory binding, goes red instead of green.
 
 **One platform per target.** Buck2 chooses the execution platform per
 target, not per action: a target's compiles, gated tests and run checks all
@@ -155,6 +165,16 @@ worker, and the compiler is not one of its inputs. A gated library test
 library's package, since that would need a platform per action. A gate that
 publishes a package only after such a run would take the run's output as an
 input of a separate publishing target.
+
+**Two runtime surfaces.** `buck2 run`, `[run_check]` and
+`mojo_multi_numa_test` start a binary from its runnable directory, whose
+`lib/` holds only the libraries a run loads (`toolchains//:mojo_runtime`).
+Gated library tests and `buck2 test` of a `mojo_test` still run the binary
+with `LD_LIBRARY_PATH` set to the compiler's `lib/`, a superset. A test that
+passes there can therefore load a library the runnable directory lacks; the
+runtime-library check (`checks/run_checks.sh`) keeps the subset equal to what
+a real run loads. Moving the gated tests onto the runnable directory would
+change the command of every gated test action, and so their cache keys.
 
 ## Toolchain
 
@@ -181,6 +201,19 @@ action key, so workers that differ in it must not share a remote cache.
 `checks/run_checks.sh` enforces the floor: it reads the loader's own record
 (`LD_DEBUG`) of a real compile and a run, and fails if either maps the C++
 runtime from the worker, or any object from the worker that is not glibc's.
+
+That check, together with `toolchains//:mojo_runtime` (which refuses a
+library name missing from the toolchain), is what guards the C++ runtime pin.
+The wrapper's exit-2 refusal does not: it checks the members listed in
+`CLOSURE_MANIFEST`, and `conda_unpack` writes that list from what it
+unpacked, so a toolchain built without the pin carries a manifest without
+those names, and a worker's own `libstdc++.so.6` would satisfy the compiler.
+The floor is measured on the compile and run of a hello-world program only;
+a library the compiler loads lazily on another path (for example its Python
+interop) is not traced. The runtime libraries keep their vendor `DT_RPATH`
+entries; `checks/run_checks.sh` requires every run path in a runnable
+directory's `lib/` to be `$ORIGIN`-relative, so an absolute one arriving with
+an upstream update fails the checks.
 `buck2 build checks//re_probe:probe` records what a worker provides.
 
 The client only downloads the pinned files and uploads them; on macOS
@@ -201,11 +234,16 @@ komira/tools/umbrella_buckconfig.sh komira > .buckconfig
 
 `tools/umbrella_buckconfig.sh` prints the cells komira declares, moved under
 the mount point with their names unchanged, and copies `[cell_aliases]`,
-`[external_cells]`, `[buildfile]` and `[parser]`. Buck2 registers cells only
-from the project root's `.buckconfig` (and does not follow `<file:...>`
-includes there), so the outer repository has to restate them; regenerate the
-output whenever the submodule moves. Then add the outer repository's own root
-cell and execution platform:
+`[external_cells]`, `[buildfile]`, `[parser]` and `[buck2_re_client]`. Buck2
+registers cells only from the project root's `.buckconfig` (and does not
+follow `<file:...>` includes there), so the outer repository has to restate
+them; regenerate the output whenever the submodule moves. The mount path may
+be nested (`checks/umbrella_cache.sh` builds at `komira` and at
+`third_party/komira`). Then add the outer repository's own root cell and
+execution platform. Buck2 merges repeated sections, so these can follow the
+generated block in the same file as a second `[cells]` (the recipe above
+overwrites `.buckconfig`; keep the outer repository's own part in a file you
+append, or paste the generated block into a hand-maintained `.buckconfig`):
 
 ```
 [cells]
@@ -230,9 +268,19 @@ komira_execution_platforms(
 
 The property sets may be written inline or read with
 `re_properties("<key>")` from a `[komira_re]` section, as //platforms/remote
-does. Add `[buck2_re_client]` in the outer repository's own `.buckconfig` or
-`.buckconfig.local`. Build komira targets as
+does. The generated `[buck2_re_client]` already carries
+`max_total_batch_size = 1048576`; the outer repository adds only its
+endpoints (in `.buckconfig` or `.buckconfig.local`) and must not raise that
+value, since a server whose message limit is below buck2's default batch size
+then fails `BatchReadBlobs`. Build komira targets as
 `buck2 build komira//examples/...`.
+
+**The outer repository's own targets need a target platform too.**
+`target_platform_detector_spec` is a single key: an outer `[parser]` section
+that sets it replaces komira's value, dropping komira's mappings, which
+changes the configurations and so the action digests. Append the outer
+repository's cells to the one generated line instead, leaving komira's
+entries unchanged, e.g. `... target:umbrella//...->komira//platforms:linux-x86_64`.
 
 What keeps the digests equal:
 

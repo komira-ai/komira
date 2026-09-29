@@ -123,7 +123,9 @@ mojo_toolchain(
 # The toolchain of mojo_multi_numa_test: runs a built binary on a worker
 # spanning more than one NUMA node. Only an execution platform realizing
 # `komira//platforms:exec-mojo-multi-numa` satisfies it; with none
-# registered, its users fail to configure.
+# registered, its users fail to configure. The constraint is only a claim:
+# the rule's runs also start through numa_guard.sh, which refuses a worker
+# where the action can use fewer than two NUMA nodes.
 mojo_toolchain(
     name = "mojo_multi_numa",
     exec_compatible_with = [

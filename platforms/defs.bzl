@@ -16,8 +16,8 @@ def re_properties(key, required = True):
     if not raw.strip():
         if not required:
             return None
-        fail("`[komira_re] {}` is not set. Copy .buckconfig.local.example to " +
-             ".buckconfig.local and fill in your remote-execution worker properties.".format(key))
+        fail(("`[komira_re] {}` is not set. Copy .buckconfig.local.example to " +
+              ".buckconfig.local and fill in your remote-execution worker properties.").format(key))
     props = {}
     for pair in raw.split(","):
         pair = pair.strip()
@@ -84,6 +84,12 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
     on a single-NUMA worker. Give it only for workers that span more than one
     NUMA node.
     """
+    if mojo_compile_multi_numa != None and mojo_compile_multi_numa == mojo_compile:
+        # The same property set routes to the same workers: a numa_multi run
+        # would land on the single-NUMA pool. (The run itself also refuses a
+        # worker it finds with fewer nodes; this catches the mistake at load.)
+        fail("komira_execution_platforms: `mojo_compile_multi_numa` must name workers " +
+             "spanning more than one NUMA node, but it equals `mojo_compile` ({})".format(mojo_compile))
     props = {
         "light": light,
         "mojo_compile": mojo_compile,

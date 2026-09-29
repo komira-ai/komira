@@ -235,12 +235,13 @@ def _runnable(ctx, tc, exe):
     # downloads the binary and its runtime libraries only.
     return run_dir, cmd_args(run_dir.project(name), hidden = run_dir)
 
-def _run_check(ctx, tc, command):
+def _run_check(ctx, tc, command, guard = []):
     # Runs the RunInfo command itself, in a remote action with no library
     # path, so a runnable directory that cannot start on its own fails here.
-    # The action runs on this target's execution platform.
+    # The action runs on this target's execution platform. `guard` is an
+    # argv prefix that must let the run start (mojo_multi_numa_test).
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
-    args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
+    args = guard + [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout != None:
         args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
@@ -321,19 +322,28 @@ mojo_test = rule(
 # by its own target on the default single-NUMA platform, and this target only
 # RUNS it, on a platform providing `komira//platforms:numa_multi`.
 #
-# The toolchain is private and states `numa_multi`, so the requirement cannot
-# be dropped from a BUCK file. When no registered execution platform provides
-# `numa_multi`, the target fails to configure; it never falls back to a
-# single-NUMA worker.
+# Two refusals, because the constraint alone is only a claim:
+#   - The toolchain is private and states `numa_multi`, so the requirement
+#     cannot be dropped from a BUCK file. When no registered execution
+#     platform provides `numa_multi`, the target fails to configure.
+#   - Every run (the build's run check and the `buck2 test` command) starts
+#     through numa_guard.sh, which exits 3 unless the action can use at least
+#     `numa_nodes` NUMA nodes -- online, with memory, and allowed by its own
+#     cpuset, affinity mask and memory binding. A platform whose property set
+#     routes to a single-NUMA worker therefore goes red, not green.
 
 def _multi_numa_test_impl(ctx):
     tc = ctx.attrs._toolchain[MojoToolchainInfo]
     runnable = ctx.attrs.binary[MojoRunnableInfo]
+    if ctx.attrs.numa_nodes < 2:
+        fail("mojo_multi_numa_test: numa_nodes must be at least 2, got {}".format(ctx.attrs.numa_nodes))
+    guard = [tc.busybox, "sh", tc.numa_guard, tc.busybox, str(ctx.attrs.numa_nodes), "--"]
     # Building the target runs the binary (a build action on the multi-NUMA
     # platform): it must start with no library path, exit 0, and print
     # `expected_stdout` when that is set.
-    stdout = _run_check(ctx, tc, runnable.command)
+    stdout = _run_check(ctx, tc, runnable.command, guard)
     test_command = cmd_args(
+        guard,
         tc.busybox,
         "sh",
         tc.gate_runner,
@@ -362,6 +372,8 @@ mojo_multi_numa_test = rule(
         # When set, building this target fails unless the run's stdout equals it.
         "expected_stdout": attrs.option(attrs.string(), default = None),
         "labels": attrs.list(attrs.string(), default = []),
+        # The run refuses to start on a worker where it can use fewer nodes.
+        "numa_nodes": attrs.int(default = 2),
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_multi_numa", providers = [MojoToolchainInfo]),
     },
 )

@@ -31,6 +31,9 @@ MojoToolchainInfo = provider(fields = {
     "wrapper": provider_field(typing.Any),
     "gate_runner": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
+    # Runs a command only if the action can use enough NUMA nodes
+    # (mojo_multi_numa_test).
+    "numa_guard": provider_field(typing.Any),
     "launcher": provider_field(typing.Any),
     # Directory: only the shared libraries a built binary loads (a
     # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
