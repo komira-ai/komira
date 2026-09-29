@@ -101,6 +101,42 @@ conda_closure = rule(
     },
 )
 
+def _mojo_runtime_impl(ctx):
+    bb = ctx.attrs.busybox[DefaultInfo].default_outputs[0]
+    compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output("lib", dir = True)
+    # Copies each named library out of the unpacked compiler's lib/ into one
+    # flat directory, and refuses a name that is missing or empty there.
+    script = _PRELUDE + """
+SRC="$1"; OUT="$2"; shift 2
+mkdir -p "$OUT"
+for lib in "$@"; do
+    if [ ! -s "$SRC/lib/$lib" ]; then
+        echo "mojo_runtime: REFUSING: lib/$lib is missing or empty in the compiler closure" >&2
+        exit 2
+    fi
+    cp "$SRC/lib/$lib" "$OUT/$lib"
+done
+rm -rf "$T"
+"""
+    ctx.actions.run(
+        busybox_sh(bb, script, compiler, out.as_output(), ctx.attrs.libs),
+        category = "mojo_runtime",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# The shared libraries a built Mojo binary loads at run time, and nothing
+# else: `buck2 run` downloads these next to the binary, never the compiler.
+mojo_runtime = rule(
+    impl = _mojo_runtime_impl,
+    attrs = {
+        "busybox": attrs.exec_dep(),
+        "compiler": attrs.dep(),
+        # File names under the compiler's lib/.
+        "libs": attrs.list(attrs.string()),
+    },
+)
+
 def _mojo_toolchain_impl(ctx):
     return [
         DefaultInfo(),
@@ -114,6 +150,7 @@ def _mojo_toolchain_impl(ctx):
             gate_runner = ctx.attrs._gate_runner[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
             launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
+            runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0],
         ),
     ]
 
@@ -124,6 +161,10 @@ mojo_toolchain = rule(
         "busybox": attrs.exec_dep(),
         "cc_target": attrs.string(),
         "compiler": attrs.exec_dep(),
+        # A `mojo_runtime` over `compiler`. An exec dep like the compiler it
+        # is cut from: every Mojo target builds on an execution platform with
+        # its own os and cpu, so the compiler's runtime is the target's.
+        "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
         "zig": attrs.exec_dep(),
         "_gate_runner": attrs.dep(default = "mojo//:gate_runner.sh"),

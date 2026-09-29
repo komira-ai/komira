@@ -1,5 +1,5 @@
 load("@mojo//:download.bzl", "pinned_file")
-load("@mojo//:toolchain.bzl", "conda_closure", "mojo_toolchain", "zig_dist", "zig_exe")
+load("@mojo//:toolchain.bzl", "conda_closure", "mojo_runtime", "mojo_toolchain", "zig_dist", "zig_exe")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 
@@ -70,11 +70,29 @@ conda_closure(
     visibility = ["PUBLIC"],
 )
 
+# What a built binary loads, read from the loader's own record of a run
+# (checks//runtime_libs:loader_trace, `run init <toolchain>/lib/...` lines).
+# checks/run_checks.sh fails if this list and that record disagree.
+mojo_runtime(
+    name = "mojo_runtime",
+    busybox = ":busybox",
+    compiler = ":mojo_compiler",
+    libs = [
+        "libAsyncRTRuntimeGlobals.so",
+        "libKGENCompilerRTShared.so",
+        "libMSupportGlobals.so",
+        "libgcc_s.so.1",
+        "libstdc++.so.6",
+    ],
+    visibility = ["PUBLIC"],
+)
+
 mojo_toolchain(
     name = "mojo",
     busybox = ":busybox",
     cc_target = "x86_64-linux-gnu.2.34",
     compiler = ":mojo_compiler",
+    runtime = ":mojo_runtime",
     # Every compile targets this CPU, whatever worker runs it. x86-64-v3
     # (AVX2, BMI2, FMA): built binaries and gated tests need a worker, and a
     # deployment host, that implements it.

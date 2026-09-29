@@ -13,7 +13,9 @@
 # repository has to restate every cell this one declares. This script derives
 # that restatement from this repository's .buckconfig, so it cannot drift from
 # it: every cell keeps its name and moves under <mount>, and `[cell_aliases]`,
-# `[external_cells]`, `[buildfile]` and `[parser]` are copied unchanged.
+# `[external_cells]`, `[buildfile]`, `[parser]` and `[buck2_re_client]` (the
+# client-side batch size limit; endpoints are never in .buckconfig) are
+# copied unchanged.
 #
 # Paste the output into the mounting repository's .buckconfig, then add that
 # repository's own root cell, its `[build] execution_platforms`, and its
@@ -39,7 +41,7 @@ awk -v mount="$mount" '
         flush()
         name = $0; gsub(/^\[|\][ \t]*$/, "", name)
         keep = (name == "cells" || name == "cell_aliases" || name == "external_cells" ||
-                name == "buildfile" || name == "parser")
+                name == "buildfile" || name == "parser" || name == "buck2_re_client")
         section = keep ? name : ""
         next
     }

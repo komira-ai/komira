@@ -2,8 +2,9 @@
 #
 # usage: busybox sh launch.sh <busybox> <compiler_dir> <binary> [args...]
 #
-# Built binaries carry no run path, so the loader is pointed at the
-# toolchain's runtime libraries (<compiler_dir>/lib) here. Everything else in
+# A built binary's only run path is $ORIGIN/lib, which resolves inside its
+# runnable directory. Started from anywhere else, it needs the loader pointed
+# at the toolchain's runtime libraries (<compiler_dir>/lib), which this does. Everything else in
 # the caller's environment is passed through unchanged.
 set -eu
 

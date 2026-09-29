@@ -20,10 +20,12 @@
 #   KGEN_CompilerRT_AsyncRT_ParallelismLevel=1, MODULAR_CRASH_REPORTING_ENABLED=false
 #
 # Link steps (through the `cc` shim below) drop every run path the compiler
-# asks for, since it would name this action's sandbox, and strip debug
-# sections, since zig's C runtime objects record the sandbox as their
-# compilation directory. A built binary finds the toolchain's runtime
-# libraries through `launch.sh`.
+# asks for, since it would name this action's sandbox, and set exactly one:
+# DT_RUNPATH `$ORIGIN/lib`, which names no path of this action. They also
+# strip debug sections, since zig's C runtime objects record the sandbox as
+# their compilation directory. A binary finds the toolchain's runtime
+# libraries in the lib/ directory next to it (the rules' runnable output), or
+# through `launch.sh` / LD_LIBRARY_PATH, which the loader searches first.
 #
 # Exit status: the compiler's; 2 for a toolchain or wrapper refusal; 3 when
 # the compiler exits 0 but the `-o` output is missing or empty (a zero-byte
@@ -92,8 +94,8 @@ fi
 # ---- cc shim: `mojo build` links through `cc` on PATH ---------------------
 # Rewrites `-Xlinker -L<dir>` / `-Xlinker -l<lib>` into plain driver flags and
 # `-Xlinker --opt` into `-Wl,--opt`; other `-Xlinker` pairs pass through.
-# Drops every run path (`-rpath <p>` in any spelling) and adds
-# `-Wl,--strip-debug`; see the header.
+# Drops every run path (`-rpath <p>` in any spelling), then adds the one run
+# path `$ORIGIN/lib` (as DT_RUNPATH) and `-Wl,--strip-debug`; see the header.
 cat > "$T/cc/cc" <<EOF
 #!$BB sh
 set -u
@@ -132,7 +134,7 @@ while [ "\$_argc" -gt 0 ]; do
   esac
   set -- "\$@" "\$_a"
 done
-exec "$ZIG/zig" cc -target "$CC_TARGET" -Wl,--strip-debug "\$@"
+exec "$ZIG/zig" cc -target "$CC_TARGET" -Wl,--strip-debug -Wl,--enable-new-dtags '-Wl,-rpath,\$ORIGIN/lib' "\$@"
 EOF
 chmod +x "$T/cc/cc"
 for n in c++ gcc g++ clang clang++; do ln -sf cc "$T/cc/$n"; done

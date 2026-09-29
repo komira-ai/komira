@@ -31,6 +31,14 @@ Fill in the `[buck2_re_client]` addresses and `[komira_re]
 linux_x86_64_properties`, the exact platform property set your Linux x86_64
 workers advertise (for example `pool=mojo`).
 
+`.buckconfig` caps each batched CAS request at 1 MiB
+(`[buck2_re_client] max_total_batch_size`); larger blobs use ByteStream.
+Without it buck2 packs up to 4000000 bytes into one BatchReadBlobs request
+when the server does not advertise a lower limit, which a server with a
+2 MiB gRPC message limit rejects ("Attempted to read a total of at least N
+bytes, while a maximum of 2097152 bytes is permitted"). The setting takes
+effect when the buck2 daemon starts; run `buck2 kill` after changing it.
+
 ### 3. Build
 
 `buck2` below is either a `buck2` on your `PATH` or `tools/buck2`;
@@ -40,6 +48,7 @@ workers advertise (for example `pool=mojo`).
 ```sh
 buck2 build //...                                  # examples: packages, binaries, gated library
 buck2 build '//examples:hello_pkg_user[run_check]' # run a binary remotely, compare its stdout
+buck2 run //examples:hello                         # build remotely, run here (Linux x86_64)
 buck2 test //examples:test_hellopkg                # a standalone Mojo test, run remotely
 checks/run_checks.sh                               # end-to-end checks, including the negative ones
 ```
@@ -55,8 +64,8 @@ binary missing a dependency, an incomplete toolchain). They are outside
 | rule | produces |
 |---|---|
 | `mojo_library(srcs, deps, test_srcs)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. |
-| `mojo_binary(srcs, deps, main, expected_stdout)` | an executable via `mojo build`. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. |
-| `mojo_test(srcs, deps)` | a test executable for `buck2 test`. |
+| `mojo_binary(srcs, deps, main, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. |
+| `mojo_test(srcs, deps)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. |
 
 `deps` carries the full transitive closure of packages to the compiler, one
 `-I` directory per package. The import name (the label name, or
@@ -67,14 +76,21 @@ Gated tests are declared with `test_srcs`, not `tests`: Buck2 reserves
 run when the library (or anything depending on it) is built.
 
 **Outputs.** Every compile targets the toolchain's `target_cpu`
-(`x86-64-v3`), not the CPU of the worker that ran it. Linked binaries carry no
-run path and no debug sections, and every compile action fails (exit 4) if
-its output contains the action's working directory. The rules publish no
-`RunInfo`: a built binary needs the toolchain's runtime libraries on its
-library path, and `mojo/launch.sh` is the command that provides them
-(`[run_check]` runs binaries through it, remotely).
+(`x86-64-v3`), not the CPU of the worker that ran it. Linked binaries carry
+one run path, DT_RUNPATH `$ORIGIN/lib`, and no debug sections, and every
+compile action fails (exit 4) if its output contains the action's working
+directory.
 
-**Not yet supported.** `buck2 run`; a `data` attribute for test fixtures (a
+**Running.** A built binary loads a few shared libraries from the toolchain
+(`toolchains//:mojo_runtime`: the Mojo runtime and the pinned C++ runtime,
+about 24 MB). The runnable directory of a binary holds the binary and a copy
+of those libraries in `lib/`, where its run path finds them, so it starts
+from anywhere with no environment. `RunInfo` points at it, so `buck2 run`
+downloads the binary and those libraries, never the compiler. `[run_check]`
+runs the same command remotely with no library path set. The list of
+libraries is checked against what the loader actually maps during a run.
+
+**Not yet supported.** a `data` attribute for test fixtures (a
 gated test runs with the action root as its working directory); test helper
 modules or test-only deps (each gated test is built from its one file against
 the library); holding a known-failing test; extra compile flags, defines,
@@ -107,7 +123,8 @@ the dynamic loader `/lib64/ld-linux-x86-64.so.2` with `libc.so.6`,
 runtime the compiler and built binaries link against (`libstdc++.so.6`,
 `libgcc_s.so.1`) is pinned by sha256 from conda-forge and unpacked into the
 toolchain's `lib/`; the compiler finds it through its own `$ORIGIN/../lib`
-run path, built binaries through `launch.sh`. None of the floor is part of an
+run path, built binaries through their `$ORIGIN/lib` run path (or
+`LD_LIBRARY_PATH`, which gated tests set). None of the floor is part of an
 action key, so workers that differ in it must not share a remote cache.
 `checks/run_checks.sh` enforces the floor: it reads the loader's own record
 (`LD_DEBUG`) of a real compile and a run, and fails if either maps the C++

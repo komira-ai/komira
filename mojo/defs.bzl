@@ -217,33 +217,46 @@ def _executable(ctx, category):
     exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None)
     return tc, exe
 
-def _run_check(ctx, tc, exe):
+def _runnable(ctx, tc, exe):
+    """A directory holding the binary and lib/, the runtime libraries it loads.
+
+    The binary's run path is `$ORIGIN/lib`, so it starts from this directory
+    wherever the directory is, with no launcher and no environment. Copies,
+    not links: the loader expands `$ORIGIN` from the binary's resolved path.
+    Returns (directory, command running the binary).
+    """
+    name = exe.basename
+    run_dir = ctx.actions.copied_dir(ctx.label.name + ".runnable", {
+        "lib": tc.runtime,
+        name: exe,
+    })
+    # The projection alone would fetch only the binary; the hidden directory
+    # brings lib/ along. Nothing here names the compiler, so `buck2 run`
+    # downloads the binary and its runtime libraries only.
+    return run_dir, cmd_args(run_dir.project(name), hidden = run_dir)
+
+def _run_check(ctx, tc, command):
+    # Runs the RunInfo command itself, in a remote action with no library
+    # path, so a runnable directory that cannot start on its own fails here.
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
-    args = [tc.busybox, "sh", tc.run_check, _launch_args(tc, exe), out.as_output()]
+    args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout != None:
         args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
     return out
 
-def _launch_args(tc, exe):
-    # A linked binary carries no run path (the link step drops it, see
-    # mojo_wrapper.sh), so it is started through `launch.sh`, which points
-    # the loader at the toolchain's runtime libraries.
-    #
-    # The rules publish no RunInfo. A RunInfo carrying this command would make
-    # every `buck2 build` of a binary materialize the whole compiler closure
-    # on the client (buck2 builds and materializes RunInfo inputs by
-    # default), and a bare executable cannot start outside an action. Run a
-    # binary remotely with `[run_check]`, which uses this command.
-    return cmd_args(tc.busybox, "sh", tc.launcher, tc.busybox, tc.compiler, exe)
-
 def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
+    run_dir, command = _runnable(ctx, tc, exe)
     return [
         DefaultInfo(
             default_output = exe,
-            sub_targets = {"run_check": [DefaultInfo(default_output = _run_check(ctx, tc, exe))]},
+            sub_targets = {
+                "run_check": [DefaultInfo(default_output = _run_check(ctx, tc, command))],
+                "runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = command)],
+            },
         ),
+        RunInfo(args = command),
     ]
 
 _EXECUTABLE_ATTRS = {
@@ -273,8 +286,15 @@ def _test_impl(ctx):
         exe,
         "/dev/null",
     )
+    run_dir, run_command = _runnable(ctx, tc, exe)
     return [
-        DefaultInfo(default_output = exe),
+        DefaultInfo(
+            default_output = exe,
+            sub_targets = {"runnable": [DefaultInfo(default_output = run_dir), RunInfo(args = run_command)]},
+        ),
+        # `buck2 run` of a test runs its binary directly, from the runnable
+        # directory; `buck2 test` runs it through the gate runner on RE.
+        RunInfo(args = run_command),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],

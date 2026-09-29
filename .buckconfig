@@ -31,6 +31,16 @@
 [build]
   execution_platforms = komira//platforms/remote:remote
 
+[buck2_re_client]
+  # Upper bound, in bytes, on the blobs buck2 packs into one BatchReadBlobs
+  # or BatchUpdateBlobs request; a blob at least this large goes through
+  # ByteStream instead. Buck2 uses the smaller of this and the limit the
+  # server advertises, and 4000000 when the server advertises none, which
+  # is larger than the gRPC message limit many servers are configured with.
+  # 1 MiB keeps each request well under a 2 MiB server limit. It changes no
+  # action digest. Endpoints stay in `.buckconfig.local`.
+  max_total_batch_size = 1048576
+
 [buck2]
   materializations = deferred
   sqlite_materializer_state = true

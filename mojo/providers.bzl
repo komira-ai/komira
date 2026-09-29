@@ -32,4 +32,7 @@ MojoToolchainInfo = provider(fields = {
     "gate_runner": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
     "launcher": provider_field(typing.Any),
+    # Directory: only the shared libraries a built binary loads (a
+    # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
+    "runtime": provider_field(typing.Any),
 })
