@@ -92,6 +92,10 @@
 #      examples,cells} and third_party. A label naming `checks`
 #      (standalone-only) fails to load there.
 #  20. C/C++ dependencies of Mojo targets: see tools/build/checks/cxx_checks.sh.
+#  21. A Mojo binary whose own code records a source location (a List
+#      index) builds and runs: the compile wrapper strips the staging
+#      directory from recorded paths, so its exit-4 refusal does not fire
+#      (checks//location_path).
 set -uo pipefail
 
 umbrella=1
@@ -570,6 +574,9 @@ fi
 
 # 20
 . "$ROOT/tools/build/checks/cxx_checks.sh"
+
+# 21
+expect_green location_path "checks//location_path:main[run_check]"
 
 # 9
 if [ "$run" = 1 ]; then

@@ -278,6 +278,14 @@ snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
 on the `libstdc++.so.6` the Mojo runtime loads.
 
+## 21. Location path
+
+`checks//location_path:main[run_check]`: a `mojo_binary` whose main file
+indexes a `List`, so the binary records the main file's source location. It
+builds only because the wrapper strips the staging directory from recorded
+paths, and its run check compares stdout exactly. Check 20 covers the same
+for tests with a C dependency; this one is a plain binary.
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build checks//re_probe:probe`

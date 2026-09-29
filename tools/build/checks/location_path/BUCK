@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+
+# Indexing a List records the source location of the index, so the binary
+# holds the path of main.mojo. It must be a path that is the same in every
+# action (the compile wrapper refuses, exit 4, one naming the action's
+# working directory), and the binary must still run.
+mojo_binary(
+    name = "main",
+    srcs = ["main.mojo"],
+    expected_stdout = "7\n",
+)
