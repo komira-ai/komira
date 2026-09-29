@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/third_party_srcs:defs.bzl", "third_party_srcs")
 load(":features.bzl", "S2N_FEATURES")
 load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
 
@@ -9,14 +10,22 @@ load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
 #   BUILD_TESTING=OFF BUILD_SHARED_LIBS=OFF S2N_INTERN_LIBCRYPTO=OFF
 #   CMAKE_BUILD_TYPE=Release
 # against //third_party/aws-lc:crypto, without CMake: the source lists are
-# srcs.bzl (generated from the archive by third_party/gen_srcs.py and held to
-# it by tools/build/checks/c_libs_checks.sh), and the results of its feature
-# probes are features.bzl (held to a compile of every probe by the same
-# checks).
+# srcs.bzl (generated from the archive by :srcs_gen and held to it by the
+# test :srcs_drift), and the results of its feature probes are features.bzl
+# (held to a compile of every probe by tools/build/checks/c_libs_checks.sh).
 pinned_file(
     name = "s2n-tls-1.5.6.tar.gz",
     url = "https://github.com/aws/s2n-tls/archive/refs/tags/v1.5.6.tar.gz",
     sha256 = "85602d0ad672cb233052504624dec23b47fc6d324bb82bd6eaff13b8f652dec3",
+)
+
+# srcs.bzl against the archive: :srcs_gen writes it, :srcs_drift (a test)
+# fails when the committed file differs.
+third_party_srcs(
+    name = "srcs",
+    library = "s2n-tls",
+    archive = ":s2n-tls-1.5.6.tar.gz",
+    committed = "srcs.bzl",
 )
 
 archive_files(

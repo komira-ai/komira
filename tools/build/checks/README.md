@@ -417,10 +417,10 @@ tools/build/checks/local_default.sh
 ## 26. aws-lc and s2n-tls
 
 [`c_libs_checks.sh`](c_libs_checks.sh), sourced by `run_checks.sh`.
-Drift: `third_party/<lib>/srcs.bzl` must equal what
-[`third_party/gen_srcs.py`](../../../third_party/gen_srcs.py) reads out of
-the pinned archive's CMake lists (the archive is fetched through its
-`pinned_file` target; the generator runs on the machine running the checks).
+Drift: `//third_party/<lib>:srcs_drift`, the test that holds
+`third_party/<lib>/srcs.bzl` to what the Mojo tool
+[`third_party_srcs`](../third_party_srcs/) reads out of the pinned archive's
+CMake lists, passes.
 libcrypto passes aws-lc's own self tests and SHA-256, AES-128 and ChaCha20
 known-answer vectors, and an s2n-tls client and server complete a TLS 1.3
 handshake with certificate verification, both driven from Mojo in a run

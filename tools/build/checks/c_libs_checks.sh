@@ -5,10 +5,10 @@
 # expect_green and expect_red); not run on its own.
 #
 #  26. aws-lc and s2n-tls:
-#      - drift: third_party/<lib>/srcs.bzl is what third_party/gen_srcs.py
-#        reads out of the pinned archive's CMake lists today (the archive is
-#        fetched by its pinned_file target; the generator runs here, on the
-#        machine running the checks, with python3);
+#      - drift: third_party/<lib>/srcs.bzl is what //third_party/<lib>:srcs_gen
+#        (tools/build/third_party_srcs, a Mojo tool) reads out of the pinned
+#        archive's CMake lists today (the test //third_party/<lib>:srcs_drift,
+#        which `./buck2 test //...` also runs);
 #      - libcrypto passes aws-lc's own self tests and SHA-256, AES-128 and
 #        ChaCha20 known-answer vectors, called from Mojo on a worker
 #        (//tools/build/examples/aws_lc:test_aws_lc[run_check]);
@@ -23,16 +23,10 @@
 #        a library the Mojo runtime loads).
 
 for lib in aws-lc s2n-tls; do
-    if ! archive_target=$(cd "$ROOT" && "$BUCK2" uquery "kind(pinned_file, //third_party/$lib:)" 2> "$LOG/drift_$lib.log" | head -n 1) ||
-        [ -z "$archive_target" ]; then
-        fail "drift $lib: no pinned_file in //third_party/$lib (see $LOG/drift_$lib.log)"
-    elif ! (cd "$ROOT" && "$BUCK2" build "$archive_target" --materializations all --show-full-simple-output) \
-        > "$LOG/drift_$lib.txt" 2>> "$LOG/drift_$lib.log"; then
-        fail "drift $lib: cannot fetch $archive_target (see $LOG/drift_$lib.log)"
-    elif out=$(cd "$ROOT" && python3 third_party/gen_srcs.py "$lib" "$(tail -n 1 "$LOG/drift_$lib.txt")" --check 2>&1); then
-        pass "drift $lib: $out"
+    if (cd "$ROOT" && timeout 900 "$BUCK2" test "//third_party/$lib:srcs_drift") > "$LOG/drift_$lib.log" 2>&1; then
+        pass "drift $lib: third_party/$lib/srcs.bzl is what //third_party/$lib:srcs_gen reads out of the pinned archive"
     else
-        fail "drift $lib: $out"
+        fail "drift $lib: //third_party/$lib:srcs_drift failed (see $LOG/drift_$lib.log)"
     fi
 done
 

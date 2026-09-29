@@ -401,8 +401,9 @@ of it for `-I$(location ...)`.
 FIPS, linux x86_64) and [`third_party/s2n-tls`](../../../third_party/s2n-tls)
 (1.5.6, over that libcrypto) are built from their archives without their CMake
 builds. Their source and header lists (`srcs.bzl`) are generated from the
-archive's CMake lists by
-[`third_party/gen_srcs.py`](../../../third_party/gen_srcs.py); s2n-tls's
+archive's CMake lists by the Mojo tool
+[`third_party_srcs`](../third_party_srcs/) (`//third_party/<lib>:srcs_gen`; the
+test `:srcs_drift` fails when they differ); s2n-tls's
 feature defines are `features.bzl`, the probes that pass. Check 26 holds
 both to the archives and to a compile of every probe, and runs known-answer
 tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake

@@ -1,0 +1,45 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load(":defs.bzl", "fixture_archive", "third_party_srcs")
+
+# Reads a vendored C library's source lists out of its release archive; see
+# gen.mojo and defs.bzl.
+mojo_binary(
+    name = "gen",
+    srcs = ["gen.mojo"],
+    deps = ["//tools/build/inspect:buildtools"],
+    visibility = ["PUBLIC"],
+)
+
+# Its tests: two made-up archives, each built from testdata/, and the file
+# :gen must give for each (a drift test apiece). Every rule of both
+# libraries' readers is exercised: the CMake patterns, comments inside a
+# list, the generated-src fallback, the #include closure through quoted,
+# relative and -I includes, the s2n-bignum key, non-recursive and recursive
+# GLOBs, and the feature probes with their flags.
+fixture_archive(
+    name = "aws-lc-mini.tar.gz",
+    srcs = glob(["testdata/aws-lc-mini/**"]),
+    strip_prefix = "testdata/aws-lc-mini",
+    top = "aws-lc-mini-0.0.0",
+)
+
+third_party_srcs(
+    name = "aws_lc_mini",
+    library = "aws-lc",
+    archive = ":aws-lc-mini.tar.gz",
+    committed = "testdata/aws_lc_mini_srcs.bzl",
+)
+
+fixture_archive(
+    name = "s2n-mini.tar.gz",
+    srcs = glob(["testdata/s2n-mini/**"]),
+    strip_prefix = "testdata/s2n-mini",
+    top = "s2n-mini-0.0.0",
+)
+
+third_party_srcs(
+    name = "s2n_mini",
+    library = "s2n-tls",
+    archive = ":s2n-mini.tar.gz",
+    committed = "testdata/s2n_mini_srcs.bzl",
+)
