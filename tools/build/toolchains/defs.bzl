@@ -14,6 +14,7 @@ in a cell of its own it is analyzed only when a `mojo_multi_numa_test` uses
 it, which is the intended refusal.
 """
 
+load("@komira//tools/build/mojo:cxx.bzl", "no_python_bootstrap_toolchain", "zig_cxx_toolchain")
 load("@komira//tools/build/mojo:toolchain.bzl", "mojo_toolchain")
 
 _TOOLCHAINS = "komira//tools/build/toolchains:"
@@ -61,4 +62,40 @@ def komira_mojo_toolchains(**overrides):
         exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_multi"],
         visibility = ["PUBLIC"],
         **attrs
+    )
+
+CXX_TOOLCHAIN_ATTRS = dict(
+    busybox = _TOOLCHAINS + "busybox",
+    launcher = _TOOLCHAINS + "zig_cc_launcher",
+    # The same target and CPU as the Mojo link steps, so C objects link into
+    # Mojo binaries.
+    target = MOJO_TOOLCHAIN_ATTRS["cc_target"],
+    target_cpu = MOJO_TOOLCHAIN_ATTRS["target_cpu"],
+    zig = _TOOLCHAINS + "zig",
+)
+
+def komira_cxx_toolchains(**overrides):
+    """Declare `:cxx` and `:python_bootstrap` in the calling package.
+
+    The prelude's `cxx_library` looks its toolchain up as `toolchains//:cxx`,
+    and configures a tool that needs `toolchains//:python_bootstrap`. This
+    declares both: a C/C++ toolchain on zig's clang, and a Python bootstrap
+    toolchain that refuses when run (workers have no Python; nothing komira
+    builds runs it). A repository that already has its own `:cxx` does not
+    call this. Each keyword in `overrides` replaces the `zig_cxx_toolchain`
+    attribute of that name (see CXX_TOOLCHAIN_ATTRS).
+    """
+    attrs = dict(CXX_TOOLCHAIN_ATTRS)
+    attrs.update(overrides)
+    zig_cxx_toolchain(
+        name = "cxx",
+        exec_compatible_with = [_PLATFORMS + "light"],
+        visibility = ["PUBLIC"],
+        **attrs
+    )
+    no_python_bootstrap_toolchain(
+        name = "python_bootstrap",
+        exec_compatible_with = [_PLATFORMS + "light"],
+        busybox = attrs["busybox"],
+        visibility = ["PUBLIC"],
     )

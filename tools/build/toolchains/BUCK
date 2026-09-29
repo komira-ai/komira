@@ -132,3 +132,27 @@ mojo_runtime(
 # `toolchains//:mojo_multi_numa`) are declared by `komira_mojo_toolchains` in
 # defs.bzl, called from the `toolchains` cell of the repository at the
 # project root: tools/build/cells/toolchains/BUCK in a standalone checkout.
+
+# ---- C/C++ -----------------------------------------------------------------
+
+# The compiler driver of the C/C++ toolchain (komira_cxx_toolchains in
+# defs.bzl): runs zig's clang, flattening nested response files, which zig
+# refuses. Built on `light` workers.
+zig_exe(
+    name = "zig_cc_launcher",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    src = "komira//tools/build/mojo:zig_cc_launcher.zig",
+    busybox = ":busybox",
+    zig = ":zig",
+    visibility = ["PUBLIC"],
+)
+
+# The C++ standard library for C++ code linked into a Mojo binary: zig's
+# libc++ and libc++abi, built by zig for the link's target and linked
+# statically. A `cxx_library` with C++ sources lists this in
+# `exported_deps`; the Mojo rules then pass `-lc++` to the link.
+cxx_library(
+    name = "libcxx",
+    exported_linker_flags = ["-lc++"],
+    visibility = ["PUBLIC"],
+)
