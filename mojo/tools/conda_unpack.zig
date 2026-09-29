@@ -1,6 +1,6 @@
 //! conda_unpack: extract the Mojo compiler closure out of a `.conda` package.
 //!
-//! usage: conda_unpack <package.conda> <out_dir>
+//! usage: conda_unpack <package.conda> <out_dir> [--lib <library.conda> <member>]...
 //!
 //! A `.conda` file is a zip holding `pkg-*.tar.zst` (the payload) and
 //! `info-*.tar.zst` (metadata). This tool needs nothing from the host: it is a
@@ -14,6 +14,14 @@
 //!   * `share/max/modular.cfg` with the package's install-prefix placeholder
 //!     replaced by `@@MOJO_TOOLCHAIN_ROOT@@`. The wrapper renders it at run
 //!     time, so no absolute path enters an action key.
+//!   * for each `--lib <library.conda> <member>`: that one member of another
+//!     package (e.g. `lib/libstdc++.so.6` from a C++ runtime package), so the
+//!     compiler's own dependencies come from pinned bytes rather than from
+//!     the worker. A member that is a symbolic link in the package (a
+//!     library's SONAME usually is) is written as a regular file holding the
+//!     bytes of the file it resolves to; outputs contain no links. A member
+//!     must live under `lib/`, must not collide with a compiler member, and
+//!     must not carry an install-prefix placeholder.
 //!   * `CLOSURE_MANIFEST`: the sorted list of members, one per line. The
 //!     wrapper refuses to run (exit 2) if any member is missing or empty.
 //!
@@ -107,13 +115,133 @@ fn stringValue(obj: []const u8, key: []const u8) ?[]const u8 {
     return obj[open + 1 .. close];
 }
 
+/// The `pkg-*.tar.zst` and `info-*.tar.zst` bodies of a `.conda` file.
+const CondaParts = struct { pkg: []const u8, info: []const u8 };
+
+fn condaParts(data: []const u8, path: []const u8) CondaParts {
+    var pkg: ?[]const u8 = null;
+    var info: ?[]const u8 = null;
+    var off: usize = 0;
+    while (off + 30 <= data.len and le32(data, off) == 0x04034b50) {
+        const flags = le16(data, off + 6);
+        const method = le16(data, off + 8);
+        var csize: u64 = le32(data, off + 18);
+        const usize32 = le32(data, off + 22);
+        const nlen = le16(data, off + 26);
+        const xlen = le16(data, off + 28);
+        const start = off + 30 + nlen + xlen;
+        if (start > data.len) fail("{s}: truncated zip local header at offset {d}", .{ path, off });
+        const name = data[off + 30 .. off + 30 + nlen];
+        const extra = data[off + 30 + nlen .. start];
+        if (flags & 0x8 != 0) fail("{s}: zip data descriptors are not supported", .{name});
+        if (method != 0) fail("{s}: zip compression method {d}; only stored (0) is supported", .{ name, method });
+        if (csize == 0xffffffff) {
+            csize = zip64CompressedSize(extra, usize32 == 0xffffffff) orelse
+                fail("{s}: zip64 size field missing", .{name});
+        }
+        if (start + csize > data.len) fail("{s}: entry runs past end of file", .{name});
+        const body = data[start .. start + csize];
+        off = start + @as(usize, @intCast(csize));
+        if (std.mem.startsWith(u8, name, "pkg-") and std.mem.endsWith(u8, name, ".tar.zst")) pkg = body;
+        if (std.mem.startsWith(u8, name, "info-") and std.mem.endsWith(u8, name, ".tar.zst")) info = body;
+    }
+    return .{
+        .pkg = pkg orelse fail("{s}: no pkg-*.tar.zst member", .{path}),
+        .info = info orelse fail("{s}: no info-*.tar.zst member", .{path}),
+    };
+}
+
+const LibEntry = struct { link: ?[]const u8, bytes: []const u8, mode: u32 };
+
+/// Writes `member` of the library package at `path` into `out` as a regular
+/// file, following symbolic links within the member's own directory.
+fn extractLib(
+    a: std.mem.Allocator,
+    out: std.fs.Dir,
+    path: []const u8,
+    member: []const u8,
+    window: []u8,
+    name_buf: *[std.fs.MAX_PATH_BYTES]u8,
+    link_buf: *[std.fs.MAX_PATH_BYTES]u8,
+) !void {
+    if (!std.mem.startsWith(u8, member, "lib/") or std.mem.indexOf(u8, member, "..") != null)
+        fail("--lib member {s}: must be a path under lib/", .{member});
+    const data = std.fs.cwd().readFileAlloc(a, path, 1 << 31) catch |e|
+        fail("cannot read {s}: {s}", .{ path, @errorName(e) });
+    const parts = condaParts(data, path);
+
+    // Every entry under lib/: links are resolved after the whole payload is read.
+    var entries = std.StringHashMap(LibEntry).init(a);
+    {
+        var fbs = std.io.fixedBufferStream(parts.pkg);
+        var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
+        var it = std.tar.iterator(dz.reader(), .{ .file_name_buffer = name_buf, .link_name_buffer = link_buf });
+        while (try it.next()) |f| {
+            if (!std.mem.startsWith(u8, f.name, "lib/")) continue;
+            const name = try a.dupe(u8, f.name);
+            switch (f.kind) {
+                .file => try entries.put(name, .{ .link = null, .bytes = try f.reader().readAllAlloc(a, 1 << 30), .mode = f.mode }),
+                .sym_link => try entries.put(name, .{ .link = try a.dupe(u8, f.link_name), .bytes = "", .mode = 0 }),
+                else => {},
+            }
+        }
+    }
+
+    var name: []const u8 = member;
+    var hops: usize = 0;
+    var entry = entries.get(name) orelse fail("{s} has no member {s}", .{ path, member });
+    while (entry.link) |target| {
+        if (std.mem.indexOfScalar(u8, target, '/') != null)
+            fail("{s}: link {s} -> {s} leaves its directory", .{ path, name, target });
+        hops += 1;
+        if (hops > 8) fail("{s}: too many links resolving {s}", .{ path, member });
+        name = try std.fs.path.join(a, &.{ std.fs.path.dirname(name).?, target });
+        entry = entries.get(name) orelse fail("{s}: link target {s} of {s} is not in the package", .{ path, name, member });
+    }
+    if (entry.bytes.len == 0) fail("{s}: {s} is empty", .{ path, name });
+
+    // The bytes are copied verbatim, so neither name may carry a placeholder.
+    var fbs = std.io.fixedBufferStream(parts.info);
+    var dz = std.compress.zstd.decompressor(fbs.reader(), .{ .window_buffer = window });
+    var it = std.tar.iterator(dz.reader(), .{ .file_name_buffer = name_buf, .link_name_buffer = link_buf });
+    var saw_paths = false;
+    while (try it.next()) |f| {
+        if (f.kind != .file or !std.mem.eql(u8, f.name, "info/paths.json")) continue;
+        saw_paths = true;
+        const pj = try f.reader().readAllAlloc(a, 1 << 26);
+        const path_key = "\"_path\"";
+        var pos: usize = 0;
+        while (std.mem.indexOfPos(u8, pj, pos, path_key)) |p| {
+            const next = std.mem.indexOfPos(u8, pj, p + path_key.len, path_key) orelse pj.len;
+            const obj = pj[p..next];
+            const n = stringValue(obj, path_key) orelse fail("{s}: paths.json: unreadable _path", .{path});
+            if ((std.mem.eql(u8, n, member) or std.mem.eql(u8, n, name)) and stringValue(obj, "\"prefix_placeholder\"") != null)
+                fail("{s}: {s} carries an install-prefix placeholder", .{ path, n });
+            pos = next;
+        }
+    }
+    if (!saw_paths) fail("{s}: no info/paths.json", .{path});
+
+    if (std.fs.path.dirname(member)) |d| try out.makePath(d);
+    const mode: std.fs.File.Mode = if (entry.mode & 0o111 != 0) 0o755 else 0o644;
+    const file = out.createFile(member, .{ .exclusive = true, .mode = mode }) catch |e|
+        fail("cannot create {s} (a compiler member of the same name?): {s}", .{ member, @errorName(e) });
+    defer file.close();
+    try file.writeAll(entry.bytes);
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const a = arena.allocator();
 
     const args = try std.process.argsAlloc(a);
-    if (args.len != 3) fail("usage: conda_unpack <package.conda> <out_dir>", .{});
+    if (args.len < 3 or (args.len - 3) % 3 != 0)
+        fail("usage: conda_unpack <package.conda> <out_dir> [--lib <library.conda> <member>]...", .{});
+    var li: usize = 3;
+    while (li < args.len) : (li += 3) {
+        if (!std.mem.eql(u8, args[li], "--lib")) fail("expected --lib, got {s}", .{args[li]});
+    }
     const data = std.fs.cwd().readFileAlloc(a, args[1], 1 << 31) catch |e|
         fail("cannot read {s}: {s}", .{ args[1], @errorName(e) });
     std.fs.cwd().makePath(args[2]) catch |e| fail("cannot create {s}: {s}", .{ args[2], @errorName(e) });
@@ -196,6 +324,12 @@ pub fn main() !void {
     const tokenized = try std.mem.replaceOwned(u8, a, cfg, ph, token);
     if (std.mem.indexOf(u8, tokenized, "= /") != null) fail("{s} still holds an absolute path after tokenizing", .{cfg_path});
     try out.writeFile(cfg_path, tokenized);
+
+    li = 3;
+    while (li < args.len) : (li += 3) {
+        try extractLib(a, out, args[li + 1], args[li + 2], window, &name_buf, &link_buf);
+        try kept.append(args[li + 2]);
+    }
 
     std.mem.sort([]const u8, kept.items, {}, lessThan);
     var manifest = std.ArrayList(u8).init(a);

@@ -101,12 +101,17 @@ downloading the pinned files and uploading them to the remote cache.
 **Host floor.** What an action still takes from the worker: a Linux x86_64
 kernel (including `/proc` and `/dev/null`); a CPU implementing `x86-64-v3`
 (AVX2, BMI2, FMA), since gated tests and run checks execute the code they
-compile; the glibc dynamic loader `/lib64/ld-linux-x86-64.so.2` with
-`libc.so.6` and `libm.so.6`, glibc 2.34 or newer (link steps target
-`x86_64-linux-gnu.2.34`); and `libstdc++.so.6` and `libgcc_s.so.1`, which the
-`mojo` compiler binary links against. None of these is part of an action key,
-so workers that differ in them must not share a remote cache. Built Mojo
-binaries need glibc and the toolchain's own runtime libraries.
+compile; and glibc 2.34 or newer (link steps target `x86_64-linux-gnu.2.34`):
+the dynamic loader `/lib64/ld-linux-x86-64.so.2` with `libc.so.6`,
+`libm.so.6`, `libdl.so.2` and `libpthread.so.0`. Nothing else. The C++
+runtime the compiler and built binaries link against (`libstdc++.so.6`,
+`libgcc_s.so.1`) is pinned by sha256 from conda-forge and unpacked into the
+toolchain's `lib/`; the compiler finds it through its own `$ORIGIN/../lib`
+run path, built binaries through `launch.sh`. None of the floor is part of an
+action key, so workers that differ in it must not share a remote cache.
+`checks/run_checks.sh` enforces the floor: it reads the loader's own record
+(`LD_DEBUG`) of a real compile and a run, and fails if either maps the C++
+runtime from the worker, or any object from the worker that is not glibc's.
 `buck2 build checks//re_probe:probe` records what a worker provides.
 
 The client only downloads the pinned files and uploads them; on macOS

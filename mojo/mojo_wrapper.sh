@@ -12,7 +12,10 @@
 #   MODULAR_HOME       private dir holding modular.cfg rendered against the
 #                      action's own toolchain path (computed at run time, so no
 #                      absolute path is part of the action key)
-#   LD_LIBRARY_PATH    <compiler_dir>/lib
+#   LD_LIBRARY_PATH    <compiler_dir>/lib, which also holds the pinned C++
+#                      runtime (libstdc++.so.6, libgcc_s.so.1). The compiler
+#                      binary finds it first through its own run path
+#                      ($ORIGIN/../lib); this covers what it starts.
 #   MODULAR_CACHE_DIR, TMPDIR, HOME, XDG_CACHE_HOME   private, per action
 #   KGEN_CompilerRT_AsyncRT_ParallelismLevel=1, MODULAR_CRASH_REPORTING_ENABLED=false
 #

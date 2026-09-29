@@ -26,6 +26,22 @@ pinned_file(
     sha256 = "4394c6146d47ec7794a9a3ed5775ae158f59f83f8e1aed59408b17c4909821b3",
 )
 
+# The C++ runtime the compiler links against (NEEDED libstdc++.so.6 and
+# libgcc_s.so.1; newest symbol versions GLIBCXX_3.4.30, CXXABI_1.3.13,
+# GCC_3.3, i.e. GCC 12 or newer). conda-forge, one matched pair: this
+# libstdcxx build depends on exactly this libgcc build.
+pinned_file(
+    name = "libstdcxx_15.3.0_linux-64.conda",
+    url = "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.3.0-h934c35e_7.conda",
+    sha256 = "0c3dc08bf43357a77297b4449abd0ce1d40a140989f004071e69c04ed13e36bb",
+)
+
+pinned_file(
+    name = "libgcc_15.3.0_linux-64.conda",
+    url = "https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.3.0-h3363355_7.conda",
+    sha256 = "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
+)
+
 # ---- Unpacked by remote actions ---------------------------------------------
 
 zig_dist(
@@ -45,6 +61,10 @@ zig_exe(
 
 conda_closure(
     name = "mojo_compiler",
+    libs = {
+        "lib/libgcc_s.so.1": ":libgcc_15.3.0_linux-64.conda",
+        "lib/libstdc++.so.6": ":libstdcxx_15.3.0_linux-64.conda",
+    },
     package = ":mojo_compiler_1.0.0_linux-64.conda",
     unpacker = ":conda_unpack",
     visibility = ["PUBLIC"],

@@ -79,8 +79,11 @@ def _conda_closure_impl(ctx):
     tool = ctx.attrs.unpacker[DefaultInfo].default_outputs[0]
     out = ctx.actions.declare_output("compiler", dir = True)
     # The unpacker is a static executable: it runs with no shell and no PATH.
+    libs = []
+    for member, package in sorted(ctx.attrs.libs.items()):
+        libs.extend(["--lib", package[DefaultInfo].default_outputs[0], member])
     ctx.actions.run(
-        cmd_args(tool, ctx.attrs.package[DefaultInfo].default_outputs[0], out.as_output()),
+        cmd_args(tool, ctx.attrs.package[DefaultInfo].default_outputs[0], out.as_output(), libs),
         category = "conda_unpack",
     )
     return [DefaultInfo(default_output = out)]
@@ -88,6 +91,11 @@ def _conda_closure_impl(ctx):
 conda_closure = rule(
     impl = _conda_closure_impl,
     attrs = {
+        # member path under lib/ -> the pinned package it is taken from. These
+        # land next to the compiler's own libraries, so the loader resolves
+        # them from the toolchain (LD_LIBRARY_PATH, and the compiler's
+        # $ORIGIN/../lib run path) instead of from the worker.
+        "libs": attrs.dict(attrs.string(), attrs.dep(), default = {}),
         "package": attrs.dep(),
         "unpacker": attrs.dep(),
     },
