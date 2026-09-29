@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
 load(":runner_cases.bzl", "mojo_gate_runner_cases")
 
@@ -117,4 +118,10 @@ mojo_test(
     name = "bad_env_name",
     srcs = ["tests/test_mojo_test_data.mojo"],
     env = {"NOT-A-NAME": "x"},
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["runner_cases.sh"],
+    visibility = ["komira//:checks_lints"],
 )

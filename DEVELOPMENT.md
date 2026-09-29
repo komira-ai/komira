@@ -33,8 +33,11 @@ pin fixes the prelude too.
 `tools/buck2` has entries for Linux x86_64 and macOS aarch64. Local builds
 need a Linux x86_64 machine: every toolchain action is a Linux x86_64 binary.
 On macOS buck2 works as a client of a remote-execution service (step 3); a
-local build there refuses, naming `.buckconfig.local`. `buck2 run` (which
-starts the binary on your machine) needs Linux x86_64 either way.
+local build there refuses, naming `.buckconfig.local`; remotely,
+`./buck2 build //...` and `./buck2 test //...` work as on Linux. Two things
+need a Linux x86_64 client either way, because they run Linux binaries on
+your machine: `./buck2 run`, and `tools/build/checks/run_checks.sh` (section
+4), which refuses any other client.
 
 Commands below use `./buck2`; a `buck2` on your `PATH` at the same version
 works the same.
@@ -205,7 +208,9 @@ of output names their directory. It exits non-zero if any check failed.
 Each check is described, with how to run it on its own, in
 [tools/build/checks/README.md](tools/build/checks/README.md). CI runs the same
 script, after `./buck2 build //...` and `./buck2 test //...`; see
-[docs/ci.md](docs/ci.md).
+[docs/ci.md](docs/ci.md). It needs a Linux x86_64 client (it runs Linux
+binaries the farm built, and `readelf`/`objdump`, on your machine) and
+refuses any other with exit 2.
 
 ## Host floor
 

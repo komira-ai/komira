@@ -17,4 +17,5 @@ darwin_host_census(
 shell_lint(
     name = "shell_lint",
     srcs = ["check.sh"],
+    visibility = ["komira//:checks_lints"],
 )

@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load(":defs.bzl", "mojo_watchdog_cases")
 
 # Every verdict of the compile watchdog in mojo_wrapper.sh, on stand-in
@@ -5,4 +6,10 @@ load(":defs.bzl", "mojo_watchdog_cases")
 mojo_watchdog_cases(
     name = "cases",
     script = "cases.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["cases.sh"],
+    visibility = ["komira//:checks_lints"],
 )

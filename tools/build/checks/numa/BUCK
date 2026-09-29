@@ -38,4 +38,5 @@ numa_gate_run(
 shell_lint(
     name = "shell_lint",
     srcs = ["guard_cases.sh"],
+    visibility = ["komira//:checks_lints"],
 )

@@ -32,23 +32,33 @@ tools/build/checks/run_checks.sh
      target itself.
    - The lints are validations of the targets they guard
      ([tools/build/lint/defs.bzl](../tools/build/lint/defs.bzl)): shellcheck
-     over every shell script, actionlint over the workflows, every `uses:`
-     pinned to a commit SHA, and no remote-execution endpoint in a committed
-     file. The lint of the scripts the Mojo and Rust rules run is reached
-     through their toolchains, so no Mojo or Rust target builds while one of
-     those scripts has a finding. The linters are pinned downloads, run on
-     the farm like any other action.
+     over every shell script, the check scripts of
+     [tools/build/checks](../tools/build/checks/README.md) included (their
+     own cell, reached through `//:checks_lints`); actionlint over the
+     workflows; every `uses:` pinned to a commit SHA; every push to `main`
+     in a concurrency group of its own; and no remote-execution endpoint in
+     a committed file. The lint of the scripts the Mojo and Rust rules run
+     is reached through their toolchains, so no Mojo or Rust target builds
+     while one of those scripts has a finding. The linters are pinned
+     downloads, run on the farm like any other action.
 2. **`./buck2 test //...`** runs the standalone tests (`mojo_test` and
    friends).
 3. **[`tools/build/checks/run_checks.sh`](../tools/build/checks/README.md)**
-   checks what no build action can observe: where actions ran, cache
+   checks what a build of `//...` does not: where actions ran, cache
    identity across checkouts, analysis-time refusals, a `buck2 run` from a
-   fresh clone, targets that must fail by design, the lint coverage of the
-   tree, and the `./buck2` bootstrap.
+   fresh clone, targets that must fail by design (the `checks` cell), and
+   the `./buck2` bootstrap. One of its checks reads the repository's file
+   list, which no build action can see (an action sees only the inputs its
+   target declares): every Markdown link resolves to a tracked file
+   (`doc_links.sh`). It needs a Linux x86_64 client, and refuses any
+   other (exit 2), because it runs binaries the farm built for Linux x86_64,
+   and `readelf`/`objdump`, on the client.
 
-A contributor runs the same three commands. A green local
+A contributor on Linux x86_64 runs the same three commands; on another
+client (macOS arm64) the first two. A green local
 `./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
-prove.
+prove; it does not prove the file-list check above, so a dead Markdown
+link is found by `run_checks.sh`, not by the build.
 
 There is no publish step yet. When release targets exist, publishing is a
 step after these, on pushes to `main` only, of artifacts the same job built.

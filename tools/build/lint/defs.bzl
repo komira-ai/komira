@@ -106,18 +106,43 @@ action_pins_rule = rule(
 )
 
 def _no_endpoint_impl(ctx):
-    files = [ctx.attrs.buckconfig, ctx.attrs.gitignore] + ctx.attrs.srcs
+    if not ctx.attrs.buckconfigs:
+        fail("no_endpoint {}: buckconfigs is empty, so it would check nothing".format(ctx.label))
+    files = [ctx.attrs.gitignore] + ctx.attrs.buckconfigs + ctx.attrs.srcs
     staged, copy = _stage(ctx, files)
-    return _lint(ctx, "no_endpoint", [], [copy[f.short_path] for f in files], staged)
+    args = [copy[ctx.attrs.gitignore.short_path], str(len(ctx.attrs.buckconfigs))]
+    args += [copy[f.short_path] for f in ctx.attrs.buckconfigs + ctx.attrs.srcs]
+    return _lint(ctx, "no_endpoint", [], args, staged)
 
 no_endpoint_rule = rule(
     impl = _no_endpoint_impl,
-    doc = "No committed file configures remote execution: `buckconfig` names no endpoint or instance, `gitignore` ignores /.buckconfig.local, and no file in `srcs` names a grpc address outside example.* domains.",
+    doc = "No committed file configures remote execution: no file in `buckconfigs` (every committed buckconfig) sets an endpoint or instance key, `gitignore` ignores /.buckconfig.local, and no file in `buckconfigs` or `srcs` names a grpc address outside example.* domains.",
     attrs = _COMMON | {
-        "buckconfig": attrs.source(),
+        "buckconfigs": attrs.list(attrs.source()),
         "gitignore": attrs.source(),
         "srcs": attrs.list(attrs.source(), default = []),
     },
+)
+
+def _push_verdicts_impl(ctx):
+    staged, copy = _stage(ctx, ctx.attrs.srcs)
+    return _lint(ctx, "push_verdicts", [], [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+
+push_verdicts_rule = rule(
+    impl = _push_verdicts_impl,
+    doc = "Every workflow triggered by `push` whose top-level `concurrency` group can hold more than one push keys that group on `github.sha`, so no push loses its run: GitHub keeps one pending run per group and a newer one cancels it. Refuses a set with no push-triggered workflow.",
+    attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
+)
+
+def _lint_suite_impl(ctx):
+    if not ctx.attrs.lints:
+        fail("lint_suite {}: lints is empty".format(ctx.label))
+    return [DefaultInfo(default_outputs = [d[DefaultInfo].default_outputs[0] for d in ctx.attrs.lints])]
+
+lint_suite = rule(
+    impl = _lint_suite_impl,
+    doc = "Depends on lint targets another build graph does not reach, so their validations run in any build holding this target. Its outputs are their results.",
+    attrs = {"lints": attrs.list(attrs.dep())},
 )
 
 def _tar_member_impl(ctx):
@@ -165,6 +190,9 @@ def action_pins(**kwargs):
 
 def no_endpoint(**kwargs):
     no_endpoint_rule(**_light(kwargs))
+
+def push_verdicts(**kwargs):
+    push_verdicts_rule(**_light(kwargs))
 
 def tar_member(**kwargs):
     tar_member_rule(**_light(kwargs))

@@ -36,7 +36,8 @@ buck2 registers, and the first line of output names it:
   yet run end to end** (it would compile Mojo locally); until it has, a
   local-mode PASS line is unmeasured.
 
-A mix of local and remote platforms is refused before any check runs.
+A mix of local and remote platforms is refused before any check runs, and so
+is a client other than Linux x86_64 (check 33).
 
 This directory is the `checks` cell. Its fixtures, several of which must fail
 to build, are outside `//...`; they use the rules through their own cell
@@ -491,13 +492,20 @@ tools/build/checks/opt_level.sh
 
 ## 31. Lint weld
 
-The lints are validations ([`lint/defs.bzl`](../lint/defs.bzl)), so
-`./buck2 build //...` runs them. [`lint_weld.sh`](lint_weld.sh) plants an
-unused variable (SC2034) in `tools/build/mojo/run_check.sh` in a snapshot of
-the tree and requires the builds of `//tools/build/examples:hello` and
-`//tools/build/examples/rust:prost_roundtrip` to fail naming the validation
-of `komira//tools/build/mojo:shell_lint`: the lint reaches every Mojo and Rust
-target through its toolchain, not only the lint target itself.
+The lints are validations ([`lint/defs.bzl`](../lint/defs.bzl)), so they are
+checked by `buck2 build //...`: the komira cell's directly, and this cell's
+shell lints through `//:checks_lints` in the root [`BUCK`](../../../BUCK),
+because `//...` does not reach into another cell.
+[`lint_weld.sh`](lint_weld.sh) requires the `_script_lint` lists of the Mojo
+and Rust toolchains ([`mojo/toolchain.bzl`](../mojo/toolchain.bzl),
+[`rust/defs.bzl`](../rust/defs.bzl)) to equal the lists it pins, so a lint
+dropped from a toolchain fails it; for each lint target on them it plants
+an unused variable (SC2034) in one of that target's scripts, alone, in a
+snapshot of the tree, and requires the build of
+`//tools/build/examples:hello` (for the Mojo list) and of
+`//tools/build/examples/rust:prost_roundtrip` (for the Rust list) to fail
+naming that validation: each lint reaches every Mojo or Rust target through
+its toolchain, not only the lint target itself.
 
 ```sh
 tools/build/checks/lint_weld.sh
@@ -515,6 +523,20 @@ sha256 and `.zst` URL for both platforms. No network.
 
 ```sh
 tools/build/checks/bootstrap.sh "$(mktemp -d)/bootstrap"
+```
+
+## 33. Client
+
+`run_checks.sh` runs binaries the farm built for Linux x86_64 (the inspect
+tool, the examples, their bundles) and `readelf`/`objdump` on the client, so
+it needs a Linux x86_64 client and refuses any other before it builds
+anything (exit 2); `./buck2 build //...` and `./buck2 test //...` work from
+any client `tools/buck2` supports. The check runs `run_checks.sh
+--host-check-only` with a `uname` reporting macOS arm64, which must refuse,
+and with one reporting this machine, which must pass.
+
+```sh
+tools/build/checks/run_checks.sh --host-check-only
 ```
 
 ## Diagnostics

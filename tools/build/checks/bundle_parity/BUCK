@@ -26,4 +26,5 @@ export_file(name = "parity.sh")
 shell_lint(
     name = "shell_lint",
     srcs = ["parity.sh"],
+    visibility = ["komira//:checks_lints"],
 )

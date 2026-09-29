@@ -25,10 +25,16 @@
 #       over their `run:` steps.
 #   kind "action_pins", args <workflow>...
 #       Every `uses:` names an action by a full 40-hex commit SHA, not a tag.
-#   kind "no_endpoint", args <.buckconfig> <.gitignore> <file>...
-#       The committed .buckconfig configures no remote-execution endpoint or
-#       instance, .gitignore ignores /.buckconfig.local, and no <file> names a
-#       grpc:// or grpcs:// address outside the example.* domains.
+#   kind "no_endpoint", args <.gitignore> <n> <buckconfig>*n <file>...
+#       No committed buckconfig sets a remote-execution endpoint or instance
+#       key, .gitignore ignores /.buckconfig.local, and no buckconfig or <file>
+#       names a grpc:// or grpcs:// address outside the example.* domains.
+#   kind "push_verdicts", args <workflow>...
+#       A push-triggered workflow with a top-level `concurrency` group names
+#       github.sha in it (read as text): GitHub keeps one pending run per
+#       group and cancels it for a newer one, so a group shared by pushes
+#       loses the middle push's run. Checks nothing, so fails, when no
+#       workflow is push-triggered.
 set -eu
 
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
@@ -80,15 +86,49 @@ action_pins)
     ;;
 no_endpoint)
     [ "$1" = -- ] && shift
-    buckconfig=$1 gitignore=$2
+    gitignore=$1 n=$2
+    shift 2
     checked=$#
-    grep -nE '^[[:space:]]*(engine_address|action_cache_address|cas_address|address|instance_name|tls_ca_certs|http_headers)[[:space:]]*=' "$buckconfig" |
-        sed "s#^#$buckconfig:#;s#\$# -- an endpoint belongs in .buckconfig.local or the machine's buckconfig#" >> "$REPORT" || true
+    i=0
+    for buckconfig in "$@"; do
+        i=$((i + 1))
+        [ "$i" -le "$n" ] || break
+        grep -nE '^[[:space:]]*(engine_address|action_cache_address|cas_address|address|instance_name|tls_ca_certs|http_headers)[[:space:]]*=' "$buckconfig" |
+            sed "s#^#$buckconfig:#;s#\$# -- an endpoint belongs in .buckconfig.local or the machine's buckconfig#" >> "$REPORT" || true
+    done
     grep -qxF /.buckconfig.local "$gitignore" ||
         echo "$gitignore: does not ignore /.buckconfig.local" >> "$REPORT"
     for f in "$@"; do
         grep -noE 'grpcs?://[^[:space:]"'"'"'/]+' "$f" | grep -vE '://[^:]*example\.[a-z]+(:[0-9]+)?$' |
             sed "s#^#$f:#;s#\$# -- a remote-execution address is committed#" >> "$REPORT" || true
+    done
+    ;;
+push_verdicts)
+    [ "$1" = -- ] && shift
+    for f in "$@"; do
+        # First line "push" when the workflow is push-triggered; then a finding
+        # when its top-level concurrency group does not name github.sha.
+        awk -v F="$f" '
+            /^[^[:space:]#]/ {
+                top = $0; sub(/[[:space:]]*:.*/, "", top); gsub(/"/, "", top)
+                rest = $0; sub(/^[^:]*:[[:space:]]*/, "", rest)
+                blk = top
+                if (top == "on" && rest ~ /(^|[^a-z_])push([^a-z_]|$)/) push = 1
+                if (top == "concurrency" && rest != "" && rest !~ /^#/) { group = rest; gline = NR; conc = 1 }
+                next
+            }
+            blk == "on" && /^[[:space:]]+(-[[:space:]]+)?push[[:space:]]*(:|$)/ { push = 1 }
+            blk == "concurrency" && /^[[:space:]]+group[[:space:]]*:/ { group = $0; gline = NR; conc = 1 }
+            END {
+                if (!push) exit
+                print "push"
+                if (conc && group !~ /github\.sha/)
+                    print F ":" gline ": the concurrency group of a push-triggered workflow does not name github.sha, so a push can lose its run to a newer one"
+            }' "$f" > "$T/pv.txt"
+        if [ -s "$T/pv.txt" ]; then
+            checked=$((checked + 1))
+            sed 1d "$T/pv.txt" >> "$REPORT"
+        fi
     done
     ;;
 *)

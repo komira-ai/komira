@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # run_checks.sh -- end-to-end checks of the Mojo rules. Each check can fail.
 #
-# usage: tools/build/checks/run_checks.sh [--no-umbrella] [--no-run] [--no-uncached]
+# usage: tools/build/checks/run_checks.sh [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]
 #        (from the repo root; BUCK2 overrides the binary)
 #
 # Where the checks run is where this checkout builds: read from the execution
@@ -172,19 +172,40 @@
 #      (tools/build/checks/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/checks/bootstrap.sh; a made-up release, no network).
+#  33. The client is Linux x86_64: several checks run binaries built for the
+#      farm, and ELF tools, on this machine, so on any other client this
+#      script stops before it builds anything (exit 2). `--host-check-only`
+#      stops after that test; run with a `uname` reporting macOS arm64 it must
+#      refuse, and with this machine's, pass.
 set -uo pipefail
 
 umbrella=1
 run=1
 uncached=1
+host_only=0
 for a in "$@"; do
     case "$a" in
         --no-umbrella) umbrella=0 ;;
         --no-run) run=0 ;;
         --no-uncached) uncached=0 ;;
-        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached]" >&2; exit 2 ;;
+        --host-check-only) host_only=1 ;;
+        *) echo "usage: $0 [--no-umbrella] [--no-run] [--no-uncached] [--host-check-only]" >&2; exit 2 ;;
     esac
 done
+
+# Several checks run what the farm built for Linux x86_64 (the inspect tool,
+# the example binaries and bundles) and readelf/objdump on this machine. On
+# another client they would fail one by one, looking like defects; stop here
+# instead. `./buck2 build //...` and `./buck2 test //...` work from any client.
+client=$(uname -s) arch=$(uname -m)
+if [ "$client $arch" != "Linux x86_64" ]; then
+    echo "run_checks.sh: needs a Linux x86_64 client, this is $client $arch: the checks run Linux x86_64 binaries and ELF tools here. ./buck2 build //... and ./buck2 test //... run from any client." >&2
+    exit 2
+fi
+if [ "$host_only" = 1 ]; then
+    echo "run_checks.sh: client $client $arch"
+    exit 0
+fi
 
 ROOT=$(cd "$(dirname "$0")/../../.." && pwd)
 if [ -z "${BUCK2:-}" ]; then
@@ -834,6 +855,24 @@ if "$ROOT/tools/build/checks/bootstrap.sh" "$LOG/bootstrap" > "$LOG/bootstrap.lo
     pass "./buck2 bootstrap: $(grep -c '^PASS' "$LOG/bootstrap.log") cases: installs and caches a matching pin, refuses a wrong sha256 or size leaving the cache empty, reads tools/buck2"
 else
     fail "./buck2 bootstrap: $(grep '^FAIL' "$LOG/bootstrap.log" | cut -c 18- | tr '\n' ' ')(see $LOG/bootstrap.log)"
+fi
+
+# 33
+S="$LOG/uname_shim"
+mkdir -p "$S/mac" "$S/here"
+printf '#!/bin/sh\ncase "$1" in -s) echo Darwin ;; -m) echo arm64 ;; *) echo Darwin ;; esac\n' > "$S/mac/uname"
+printf '#!/bin/sh\ncase "$1" in -s) echo %s ;; -m) echo %s ;; *) echo %s ;; esac\n' "$(uname -s)" "$(uname -m)" "$(uname -s)" > "$S/here/uname"
+chmod +x "$S/mac/uname" "$S/here/uname"
+PATH="$S/mac:$PATH" "$ROOT/tools/build/checks/run_checks.sh" --host-check-only > "$LOG/client_mac.log" 2>&1
+mac_rc=$?
+PATH="$S/here:$PATH" "$ROOT/tools/build/checks/run_checks.sh" --host-check-only > "$LOG/client_here.log" 2>&1
+here_rc=$?
+if [ "$mac_rc" != 2 ] || ! grep -qF 'needs a Linux x86_64 client, this is Darwin arm64' "$LOG/client_mac.log"; then
+    fail "client: on a macOS arm64 client run_checks.sh did not refuse (exit $mac_rc, see $LOG/client_mac.log)"
+elif [ "$here_rc" != 0 ]; then
+    fail "client: on this client run_checks.sh --host-check-only exited $here_rc (see $LOG/client_here.log)"
+else
+    pass "client: run_checks.sh refuses a macOS arm64 client (exit 2) and accepts $(uname -s) $(uname -m)"
 fi
 
 # 9

@@ -5,8 +5,10 @@
 # build every target, and a target cannot build unless the tests welded to
 # it, and to each of its dependencies, pass and every lint that guards it is
 # clean (lints are validations, tools/build/lint). `./buck2 test //...` runs
-# the standalone tests. The last step checks buck2's own behaviour, which no
-# build action can observe. A contributor runs the same commands locally.
+# the standalone tests. The last step checks what a build of //... does not:
+# buck2's own behaviour (where actions ran, cache identity, refusals), and
+# the repository's file list, which no build action sees (Markdown links). A contributor runs the same commands
+# locally; the last one needs a Linux x86_64 client.
 #
 # The farm connection comes from the runner's machine-wide buckconfig, not
 # from this repository: the job reads no secret and names no environment.
@@ -29,9 +31,12 @@ on:
 permissions: {}
 
 concurrency:
-  # One run per pull request, cancelling a superseded one. Runs on main queue
-  # instead, so every push to main gets a verdict.
-  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # One run per pull request, cancelling a superseded one. Every other run
+  # (a push to main, a manual run) has a group of its own commit, so each
+  # push to main gets a verdict: GitHub keeps only one pending run per group
+  # and cancels it when a newer one queues, so a group shared by pushes would
+  # drop the middle one of three quick pushes (checked by //:push_verdicts).
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
