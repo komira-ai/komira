@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The mail addressing grammar as a leaf: the strict addr-spec parser, the
+# envelope-recipient decoder, and the domain -> registry-key normalizer.
+#
+# DO NOT ADD A `deps` ENTRY. An empty closure is the whole point: it keeps the
+# grammar affordable in a cold-start-sensitive mail router, and the first
+# dependency silently re-creates the problem this package exists to solve.
+# It welds no test of its own.
+mojo_library(
+    name = "komira_mail_addr",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["PUBLIC"],
+)
