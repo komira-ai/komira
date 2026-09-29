@@ -12,7 +12,10 @@
 #   2. Set (a placeholder, resolution only, nothing is built): darwin-arm64
 #      Mojo targets resolve to exec-mojo-darwin-arm64, the darwin toolchain's
 #      unpacking to linux exec-light, linux targets are unchanged; a property
-#      set without `macos_sdk`, or equal to a linux set, is refused at load.
+#      set without `macos_host`, or equal to a linux set, is refused at load,
+#      and so (checks//darwin:BUCK, cases.bzl) is one whose `macos_host`
+#      differs from the value the toolchain promises. Unset, a wildcard over
+#      toolchains//darwin skips the darwin-only targets instead of failing.
 #   3. The darwin compile command lines (aquery): the macOS wrapper and
 #      busybox, the osx-arm64 compiler closure, --target-cpu apple-m1, the
 #      deployment target, no zig, no absolute path.
@@ -22,13 +25,19 @@
 #      DYLD scripts are the shared scripts behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
 #      (applets only from /bin and /usr/bin, anything else refused), the cc
-#      shim (run paths replaced by @loader_path/lib), and the wrapper
-#      (incomplete closure, unexpected shared_libs and a host whose SDK is not
-#      the promised one are refused; modular.cfg is rendered with the one run
-#      path @loader_path/lib).
+#      shim (run paths replaced by @loader_path/lib), host_identity.sh (every
+#      field in the digest; an unreadable field refused), the wrapper
+#      (incomplete closure, unexpected shared_libs and a host whose identity
+#      is not the promised one are refused, the promised host is accepted;
+#      modular.cfg is rendered with the one run path @loader_path/lib), and
+#      run_check.sh (clears DYLD_* as well as LD_*).
+#
+# Not covered, because only a macOS worker can answer: which linker a macOS
+# link really runs (the cc on PATH is what is wired; bin/lld is kept as a
+# hedge), and whether the compiler execs a tool by name that PATH lacks.
 
 set -u
-LOG=$1
+mkdir -p "$1" && LOG=$(cd "$1" && pwd) || { echo "usage: $0 <log_dir>" >&2; exit 2; }
 BUCK2=${BUCK2:-buck2}
 fails=0
 pass() { echo "PASS  darwin: $1"; }
@@ -36,7 +45,7 @@ fail() { echo "FAIL  darwin: $1"; fails=$((fails + 1)); }
 
 DARWIN=(--target-platforms komira//tools/build/platforms:darwin-arm64)
 KEY=komira_re.darwin_mojo_compile_properties
-PLACEHOLDER=(-c "$KEY=pool=unreachable-check-only,macos_sdk=0.0-check")
+PLACEHOLDER=(-c "$KEY=pool=unreachable-check-only,macos_host=0.0-check")
 UNSET=(-c "$KEY=")
 MOJO_TARGETS=(//tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:test_hellopkg //tools/build/examples/libgate_ok:libgate_ok)
 
@@ -80,18 +89,33 @@ else
 fi
 if "$BUCK2" audit execution-platform-resolution -c "$KEY=pool=mac-only-no-sdk" "${DARWIN[@]}" //tools/build/examples:hello \
         > "$LOG/darwin_no_sdk.txt" 2>&1; then
-    fail "load: a macOS property set without macos_sdk was accepted"
-elif ! grep -qF 'must carry `macos_sdk=<version>`' "$LOG/darwin_no_sdk.txt"; then
-    fail "load: the missing-macos_sdk refusal failed for another reason (see $LOG/darwin_no_sdk.txt)"
+    fail "load: a macOS property set without macos_host was accepted"
+elif ! grep -qF 'must carry `macos_host=<value>`' "$LOG/darwin_no_sdk.txt"; then
+    fail "load: the missing-macos_host refusal failed for another reason (see $LOG/darwin_no_sdk.txt)"
 elif MC=$("$BUCK2" audit config komira_re.mojo_compile_properties --style json 2> /dev/null |
         python3 -c 'import json, sys; print(list(json.load(sys.stdin).values())[0])' 2> /dev/null) && [ -n "$MC" ] &&
-    "$BUCK2" audit execution-platform-resolution -c "komira_re.mojo_compile_properties=$MC,macos_sdk=1" \
-        -c "$KEY=$MC,macos_sdk=1" //tools/build/examples:hello > "$LOG/darwin_linux_set.txt" 2>&1; then
+    "$BUCK2" audit execution-platform-resolution -c "komira_re.mojo_compile_properties=$MC,macos_host=1" \
+        -c "$KEY=$MC,macos_host=1" //tools/build/examples:hello > "$LOG/darwin_linux_set.txt" 2>&1; then
     fail "load: a macOS property set equal to the linux mojo_compile set was accepted"
 elif ! grep -qF 'must name macOS workers' "$LOG/darwin_linux_set.txt"; then
     fail "load: the linux-set refusal failed for another reason (see $LOG/darwin_linux_set.txt)"
 else
-    pass "load: a macOS property set without macos_sdk, or equal to a linux set, is refused"
+    pass "load: a macOS property set without macos_host, or equal to a linux set, is refused"
+fi
+if ! "$BUCK2" targets checks//darwin: > "$LOG/darwin_cases.txt" 2>&1; then
+    fail "load: a darwin_properties_refusal case failed (see $LOG/darwin_cases.txt)"
+elif ! grep -qx 'checks//darwin:macho.py' "$LOG/darwin_cases.txt"; then
+    fail "load: checks//darwin was not loaded (see $LOG/darwin_cases.txt)"
+else
+    pass "load: a property set whose macos_host differs from the toolchain's is refused (cases.bzl)"
+fi
+if ! "$BUCK2" build "${UNSET[@]}" 'toolchains//darwin/...' > "$LOG/darwin_wildcard.txt" 2>&1; then
+    fail "unset: a wildcard over toolchains//darwin fails without a macOS platform (see $LOG/darwin_wildcard.txt)"
+elif ! grep -q 'komira//tools/build/toolchains/darwin:link ' "$LOG/darwin_wildcard.txt" ||
+    ! grep -q 'komira//tools/build/toolchains/darwin:mojo ' "$LOG/darwin_wildcard.txt"; then
+    fail "unset: the wildcard did not report the darwin-only targets as skipped (see $LOG/darwin_wildcard.txt)"
+else
+    pass "unset: a wildcard over toolchains//darwin skips the darwin-only targets"
 fi
 
 # ---- 3. darwin compile command lines ------------------------------------------
@@ -142,7 +166,7 @@ else
 fi
 
 # ---- 5. the osx-arm64 closure, built on the farm --------------------------------
-if ! "$BUCK2" build komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/toolchains/darwin:gate_runner \
+if ! "$BUCK2" build "${DARWIN[@]}" komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime komira//tools/build/toolchains/darwin:gate_runner \
         komira//tools/build/toolchains/darwin:launcher --materializations all --show-full-output \
         > "$LOG/darwin_closure.txt" 2> "$LOG/darwin_closure.log"; then
     fail "closure: build failed (see $LOG/darwin_closure.log)"
@@ -158,7 +182,7 @@ else
         ! grep -qxF 'lld_path = @@MOJO_TOOLCHAIN_ROOT@@/bin/lld;' "$cfg"; then
         fail "closure: modular.cfg's shared_libs or lld_path is not what mojo/darwin/mojo_wrapper.sh expects (see $cfg)"
     else
-        pass "closure: modular.cfg asks for the one run path the wrapper rewrites, and links with the kept bin/lld"
+        pass "closure: modular.cfg asks for the one run path the wrapper rewrites; its lld_path names the bin/lld kept as a hedge"
     fi
     bad=""
     for s in gate_runner:gate_runner.sh launcher:launch.sh; do
@@ -194,6 +218,52 @@ elif [ "$got" != "[-Wl,-S][-Wl,-rpath,@loader_path/lib][-o][out][x.o][-Xlinker][
 else
     pass "cc shim: every run path replaced by @loader_path/lib"
 fi
+# host_identity.sh against stand-ins for the host tools it runs: every tool is
+# named by absolute path, so a copy with those paths rewritten runs here.
+H="$U/host"
+mkdir -p "$H"
+stub() { printf '#!/bin/sh\n%s\n' "$2" > "$H/$1"; chmod +x "$H/$1"; }
+stub xcode-select 'echo /Library/Developer/CommandLineTools'
+stub xcrun 'case "$1" in --show-sdk-version) echo 26.5 ;; --show-sdk-build-version) echo 25F71 ;; *) exit 1 ;; esac'
+stub cc 'echo "Apple clang version 17.0.0 (clang-1700.3.19.1)"; echo "Target: arm64-apple-darwin25.5.0"'
+stub ld 'echo "@(#)PROGRAM:ld PROJECT:ld-1167.5" >&2; echo "BUILD 08:00:00 Jan  1 2026" >&2'
+stub sw_vers '[ "$1" = -buildVersion ] && echo 25F80'
+stub md5 '[ "$1" = -q ] && /usr/bin/md5sum | /usr/bin/cut -c1-32'
+sed -e "s|/usr/bin/xcode-select|$H/xcode-select|; s|/usr/bin/xcrun|$H/xcrun|g; s|/usr/bin/cc|$H/cc|" \
+    -e "s|/usr/bin/ld|$H/ld|; s|/usr/bin/sw_vers|$H/sw_vers|; s|/sbin/md5|$H/md5|" \
+    mojo/darwin/host_identity.sh > "$U/host_identity.sh"
+hid() { (PATH="$U/bin" sh "$U/host_identity.sh" "$@"); }
+fields_want=$(printf '%s\n' developer_dir=/Library/Developer/CommandLineTools sdk_version=26.5 sdk_build=25F71 \
+    'cc=Apple clang version 17.0.0 (clang-1700.3.19.1)' 'ld=@(#)PROGRAM:ld PROJECT:ld-1167.5' os_build=25F80)
+host_want="26.5-$(printf '%s\n' "$fields_want" | md5sum | cut -c1-16)"
+if grep -E '/(usr/)?s?bin/' "$U/host_identity.sh" | grep -v "$H/" | grep -vq '^#'; then
+    fail "host_identity.sh: it runs a host tool this check does not stand in for: $(grep -nE '/(usr/)?s?bin/' "$U/host_identity.sh" | grep -v "$H/" | grep -v ':#' | tr '\n' ' ')"
+elif [ "$(hid --fields)" != "$fields_want" ]; then
+    fail "host_identity.sh: --fields printed $(hid --fields | tr '\n' '|')"
+elif [ "$(hid)" != "$host_want" ]; then
+    fail "host_identity.sh: printed '$(hid)', expected '$host_want'"
+else
+    bad=""
+    for f in xcode-select xcrun cc ld sw_vers; do
+        cp "$H/$f" "$H/$f.good"
+        stub "$f" 'echo other-build-99 ; echo other-build-99 >&2'
+        [ "$(hid 2> /dev/null)" != "$host_want" ] || bad="$bad $f"
+        mv "$H/$f.good" "$H/$f"
+    done
+    cp "$H/sw_vers" "$H/sw_vers.good"
+    stub sw_vers 'exit 1'
+    hid > /dev/null 2> "$U/hid_err.txt"
+    rc=$?
+    mv "$H/sw_vers.good" "$H/sw_vers"
+    if [ -n "$bad" ]; then
+        fail "host_identity.sh: the value does not change with the output of:$bad"
+    elif [ "$rc" != 2 ] || ! grep -q "cannot read 'os_build'" "$U/hid_err.txt"; then
+        fail "host_identity.sh: an unreadable field was not refused (rc=$rc)"
+    else
+        pass "host_identity.sh: the value covers developer dir, SDK version and build, cc, ld and OS build; an unreadable field is refused"
+    fi
+fi
+
 TC="$U/tc"
 mkdir -p "$TC/bin" "$TC/lib" "$TC/share/max" "$U/link" "$U/run"
 printf '#!/bin/sh\nexit 0\n' > "$TC/bin/mojo"
@@ -203,33 +273,62 @@ printf 'bin/mojo\nlib/libKGENCompilerRTShared.dylib\nshare/max/modular.cfg\n' > 
 cfg='[mojo-max]\ndriver_path = @@MOJO_TOOLCHAIN_ROOT@@/bin/mojo\nshared_libs = -Xlinker,-rpath,-Xlinker,@@MOJO_TOOLCHAIN_ROOT@@/lib;\n'
 printf "$cfg" > "$TC/share/max/modular.cfg"
 cp mojo/darwin/cc "$U/link/cc"
-printf '0.0-check' > "$U/link/macos_sdk"
+cp "$U/host_identity.sh" "$U/link/host_identity.sh"
+printf '0.0-check' > "$U/link/macos_host"
 wrap() { (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- build x.mojo -o out > "$U/wrap.txt" 2>&1); }
 wrap
 rc=$?
 rendered="$U/run/.komira_action/modular/modular.cfg"
-if [ "$rc" != 2 ] || ! grep -q "this host's macOS SDK is '.*', the execution platform promises '0.0-check'" "$U/wrap.txt"; then
-    fail "wrapper: a host without the promised SDK was not refused (rc=$rc, see $U/wrap.txt)"
+if [ "$rc" != 2 ] || ! grep -q "this host's identity is '$host_want', the execution platform promises '0.0-check'" "$U/wrap.txt" ||
+    ! grep -qxF 'sdk_build=25F71' "$U/wrap.txt"; then
+    fail "wrapper: a host without the promised identity was not refused with its fields (rc=$rc, see $U/wrap.txt)"
 elif ! grep -qxF 'shared_libs = -Xlinker,-rpath,-Xlinker,@loader_path/lib,-Xlinker,-S;' "$rendered" ||
     grep -qF '@@MOJO' "$rendered" || ! grep -qxF "driver_path = $TC/bin/mojo" "$rendered"; then
     fail "wrapper: modular.cfg rendered wrongly (see $rendered)"
 else
-    printf "$cfg" | sed 's|@@MOJO_TOOLCHAIN_ROOT@@/lib;|/opt/lib;|' > "$TC/share/max/modular.cfg"
+    # Same SDK version, another toolchain: refused, not matched on the version.
+    printf '26.5-ffffffffffffffff' > "$U/link/macos_host"
+    wrap
+    rc_same_sdk=$?
+    printf '%s' "$host_want" > "$U/link/macos_host"
     wrap
     rc=$?
-    if [ "$rc" != 2 ] || ! grep -q "shared_libs is not the one run path" "$U/wrap.txt"; then
-        fail "wrapper: an unexpected shared_libs was not refused (rc=$rc, see $U/wrap.txt)"
+    # The stand-in compiler writes nothing, so a host that passes the identity
+    # check reaches the output check (exit 3).
+    if [ "$rc_same_sdk" != 2 ]; then
+        fail "wrapper: a host with the promised SDK version but another toolchain digest was accepted (rc=$rc_same_sdk)"
+    elif [ "$rc" != 3 ] || ! grep -q "compiler exited 0 but out is missing" "$U/wrap.txt"; then
+        fail "wrapper: the promised host was not accepted (rc=$rc, see $U/wrap.txt)"
     else
-        printf "$cfg" > "$TC/share/max/modular.cfg"
-        : > "$TC/lib/libKGENCompilerRTShared.dylib"
+        printf "$cfg" | sed 's|@@MOJO_TOOLCHAIN_ROOT@@/lib;|/opt/lib;|' > "$TC/share/max/modular.cfg"
         wrap
         rc=$?
-        if [ "$rc" != 2 ] || ! grep -q "REFUSING: toolchain member 'lib/libKGENCompilerRTShared.dylib'" "$U/wrap.txt"; then
-            fail "wrapper: an incomplete closure was not refused (rc=$rc, see $U/wrap.txt)"
+        if [ "$rc" != 2 ] || ! grep -q "shared_libs is not the one run path" "$U/wrap.txt"; then
+            fail "wrapper: an unexpected shared_libs was not refused (rc=$rc, see $U/wrap.txt)"
         else
-            pass "wrapper: refuses an incomplete closure, an unexpected shared_libs and an unpromised SDK; renders @loader_path/lib"
+            printf "$cfg" > "$TC/share/max/modular.cfg"
+            : > "$TC/lib/libKGENCompilerRTShared.dylib"
+            wrap
+            rc=$?
+            if [ "$rc" != 2 ] || ! grep -q "REFUSING: toolchain member 'lib/libKGENCompilerRTShared.dylib'" "$U/wrap.txt"; then
+                fail "wrapper: an incomplete closure was not refused (rc=$rc, see $U/wrap.txt)"
+            else
+                pass "wrapper: refuses an incomplete closure, an unexpected shared_libs and an unpromised host; accepts the promised one; renders @loader_path/lib"
+            fi
         fi
     fi
+fi
+
+# run_check.sh starts the binary with no library path of any loader.
+printf '#!/bin/sh\necho "[${LD_LIBRARY_PATH-}${LD_PRELOAD-}${DYLD_LIBRARY_PATH-}${DYLD_FALLBACK_LIBRARY_PATH-}${DYLD_INSERT_LIBRARIES-}]"\n' > "$U/envbin"
+chmod +x "$U/envbin"
+if ! (cd "$U" && LD_LIBRARY_PATH=/a LD_PRELOAD=/b DYLD_LIBRARY_PATH=/c DYLD_FALLBACK_LIBRARY_PATH=/d DYLD_INSERT_LIBRARIES=/e \
+        sh "$OLDPWD/mojo/run_check.sh" "$BB" envbin env_out.txt) > "$U/run_check.txt" 2>&1; then
+    fail "run_check.sh: the stand-in binary did not run (see $U/run_check.txt)"
+elif [ "$(cat "$U/env_out.txt")" != "[]" ]; then
+    fail "run_check.sh: the binary inherited a library path: $(cat "$U/env_out.txt")"
+else
+    pass "run_check.sh: the binary starts with no LD_* or DYLD_* library path"
 fi
 
 [ "$fails" = 0 ]

@@ -6,3 +6,5 @@ export_file(name = "cc", visibility = ["PUBLIC"])
 export_file(name = "mojo_wrapper.sh", visibility = ["PUBLIC"])
 
 export_file(name = "dyld_prelude.sh", visibility = ["PUBLIC"])
+
+export_file(name = "host_identity.sh", visibility = ["PUBLIC"])

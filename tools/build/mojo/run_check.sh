@@ -31,7 +31,7 @@ PATH="$T/bin"
 TMPDIR="$T/tmp"
 HOME="$T/home"
 export PATH TMPDIR HOME
-unset LD_LIBRARY_PATH LD_PRELOAD || true
+unset LD_LIBRARY_PATH LD_PRELOAD DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES || true
 
 rc=0
 "$BIN" > "$OUT" 2> "$T/err" < /dev/null || rc=$?

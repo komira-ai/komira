@@ -172,7 +172,7 @@ def _mojo_toolchain_impl(ctx):
         MojoToolchainInfo(
             busybox = ctx.attrs.busybox[DefaultInfo].default_outputs[0],
             compiler = ctx.attrs.compiler[DefaultInfo].default_outputs[0],
-            zig = ctx.attrs.zig[DefaultInfo].default_outputs[0],
+            link = ctx.attrs.zig[DefaultInfo].default_outputs[0],
             cc_target = ctx.attrs.cc_target,
             target_cpu = ctx.attrs.target_cpu,
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],

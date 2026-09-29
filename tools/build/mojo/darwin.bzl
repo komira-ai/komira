@@ -7,33 +7,46 @@ mojo_binary and mojo_test are unchanged; what differs is what each field holds:
             operating system's /bin and /usr/bin (there is no static busybox
             for macOS).
   compiler  the osx-arm64 compiler closure, unpacked on a linux `light`
-            worker like the linux one, with bin/lld kept.
-  zig       a `mojo_darwin_link` directory: the `cc` the compiler finds on
-            PATH, and the SDK version the execution platform promises.
+            worker like the linux one, with bin/lld kept (see below).
+  link      a `mojo_darwin_link` directory: the `cc` the compiler finds on
+            PATH, host_identity.sh, and the host identity the execution
+            platform promises.
   cc_target the deployment target (MACOSX_DEPLOYMENT_TARGET).
   wrapper   mojo/darwin/mojo_wrapper.sh.
   gate_runner, launcher
             the shared scripts with mojo/darwin/dyld_prelude.sh prepended
-            (a `dyld_script`), so they set DYLD_LIBRARY_PATH.
+            (a `dyld_script`), so they set DYLD_LIBRARY_PATH. (No rule reads
+            `launcher` yet, on either platform; it is the field's macOS form.)
 
-Link story: a built binary names its runtime libraries as @rpath/..., and
-carries one run path, `@loader_path/lib` (the runnable directory's lib/).
-System libraries (/usr/lib, /System) and the SDK are the host's; the SDK
-version is part of the execution platform's property set, so it is part of
-every action key, and the wrapper refuses a host whose SDK differs.
+Link story, as wired: the compiler links through the `cc` on PATH, as it
+does on linux (where the closure has no bin/lld and every link goes through
+the zig cc shim, although modular.cfg carries the same `lld_path` key). Here
+that is mojo/darwin/cc, the host's /usr/bin/cc, which runs the host's ld.
+bin/lld is kept only as a hedge, in case the osx-arm64 compiler links through
+`lld_path` instead; which of the two it uses is unverified until the first
+compile on a macOS worker.
+
+A built binary names its runtime libraries as @rpath/..., and carries one run
+path, `@loader_path/lib` (the runnable directory's lib/). System libraries
+(/usr/lib, /System), the SDK, the C driver and the linker are the host's; a
+digest of them (host_identity.sh) is the `macos_host` property of the
+execution platform, so it is part of every action key, and the wrapper
+refuses a host whose identity differs.
 """
 
 load(":providers.bzl", "MojoToolchainInfo")
 load(":toolchain.bzl", "busybox_sh")
 
 def _mojo_darwin_link_impl(ctx):
-    sdk = ctx.attrs.macos_sdk.strip()
-    if not sdk:
-        fail(("{}: no macOS SDK version. Set `macos_sdk=<version>` in the root cell's " +
+    host = ctx.attrs.macos_host.strip()
+    if not host:
+        fail(("{}: no macOS host identity. Set `macos_host=<value>` (what " +
+              "mojo/darwin/host_identity.sh prints on the workers) in the root cell's " +
               "`[komira_re] darwin_mojo_compile_properties` to build for darwin-arm64.").format(ctx.label))
     out = ctx.actions.copied_dir(ctx.label.name, {
         "cc": ctx.attrs.cc,
-        "macos_sdk": ctx.actions.write(ctx.label.name + ".macos_sdk", sdk),
+        "host_identity.sh": ctx.attrs.host_identity,
+        "macos_host": ctx.actions.write(ctx.label.name + ".macos_host", host),
     })
     return [DefaultInfo(default_output = out)]
 
@@ -41,8 +54,9 @@ mojo_darwin_link = rule(
     impl = _mojo_darwin_link_impl,
     attrs = {
         "cc": attrs.source(),
-        # The host SDK version (`xcrun --show-sdk-version`) the platform promises.
-        "macos_sdk": attrs.string(),
+        "host_identity": attrs.source(),
+        # The host identity (what host_identity.sh prints) the platform promises.
+        "macos_host": attrs.string(),
     },
 )
 
@@ -73,7 +87,7 @@ def _mojo_darwin_toolchain_impl(ctx):
         MojoToolchainInfo(
             busybox = one(ctx.attrs.busybox),
             compiler = one(ctx.attrs.compiler),
-            zig = one(ctx.attrs.link),
+            link = one(ctx.attrs.link),
             cc_target = ctx.attrs.deployment_target,
             target_cpu = ctx.attrs.target_cpu,
             wrapper = one(ctx.attrs._wrapper),

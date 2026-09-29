@@ -8,14 +8,16 @@
 #
 #   <busybox>      mojo/darwin/busybox.sh: the busybox calling convention over
 #                  /bin and /usr/bin of the operating system.
-#   <compiler_dir> the unpacked osx-arm64 compiler closure. The compiler and
-#                  its bin/lld find lib/ through their own run path
-#                  (@loader_path/../lib); nothing is set for the loader.
+#   <compiler_dir> the unpacked osx-arm64 compiler closure. The compiler
+#                  finds lib/ through its own run path (@loader_path/../lib);
+#                  nothing is set for the loader.
 #   <link_dir>     holds `cc` (mojo/darwin/cc: the host's /usr/bin/cc, with
-#                  run paths rewritten) and `macos_sdk`, the SDK version the
-#                  execution platform promises. The action refuses (exit 2) to
-#                  run on a host whose SDK is another version, so a result is
-#                  never filed under the wrong SDK.
+#                  run paths rewritten), `host_identity.sh`, and `macos_host`,
+#                  the host identity the execution platform promises. The
+#                  action refuses (exit 2) to run on a host whose identity
+#                  (developer dir, SDK version and build, cc and ld builds, OS
+#                  build; see host_identity.sh) is another, so a result is
+#                  never filed under the wrong host toolchain.
 #   <deployment_target>  MACOSX_DEPLOYMENT_TARGET for every link.
 #
 # The system libraries and the SDK are the host's: /usr/lib, /System and the
@@ -79,8 +81,8 @@ while IFS= read -r member; do
     fi
 done < "$TC/CLOSURE_MANIFEST"
 [ "$missing" = 0 ] || exit 2
-if [ ! -x "$LINK/cc" ] || [ ! -s "$LINK/macos_sdk" ]; then
-    echo "mojo_wrapper: REFUSING: $3 must hold an executable cc and a non-empty macos_sdk" >&2
+if [ ! -x "$LINK/cc" ] || [ ! -s "$LINK/macos_host" ] || [ ! -s "$LINK/host_identity.sh" ]; then
+    echo "mojo_wrapper: REFUSING: $3 must hold an executable cc, host_identity.sh and a non-empty macos_host" >&2
     exit 2
 fi
 
@@ -99,11 +101,12 @@ sed 's|^shared_libs = .*|shared_libs = -Xlinker,-rpath,-Xlinker,@loader_path/lib
     "$T/modular/modular.cfg.in" > "$T/modular/modular.cfg"
 rm -f "$T/modular/modular.cfg.in"
 
-# ---- the host SDK is the one the platform promised -------------------------
-want_sdk=$(cat "$LINK/macos_sdk")
-have_sdk=$(/usr/bin/xcrun --show-sdk-version 2> /dev/null) || have_sdk=""
-if [ "$have_sdk" != "$want_sdk" ]; then
-    echo "mojo_wrapper: REFUSING: this host's macOS SDK is '${have_sdk:-none}', the execution platform promises '$want_sdk'" >&2
+# ---- the host is the one the platform promised -----------------------------
+want_host=$(cat "$LINK/macos_host")
+have_host=$(sh "$LINK/host_identity.sh") || have_host=""
+if [ "$have_host" != "$want_host" ]; then
+    echo "mojo_wrapper: REFUSING: this host's identity is '${have_host:-unreadable}', the execution platform promises '$want_host'. This host:" >&2
+    sh "$LINK/host_identity.sh" --fields >&2 || true
     exit 2
 fi
 

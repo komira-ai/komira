@@ -229,7 +229,7 @@ def _mojo_proto_library_impl(ctx):
             tc.wrapper,
             tc.busybox,
             tc.compiler,
-            tc.zig,
+            tc.link,
             tc.cc_target,
             "--",
             "precompile",

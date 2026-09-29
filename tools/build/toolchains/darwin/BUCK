@@ -1,7 +1,15 @@
-load("@komira//tools/build/platforms:defs.bzl", "darwin_macos_sdk")
+load("@komira//tools/build/platforms:defs.bzl", "darwin_macos_host")
 load("@komira//tools/build/mojo:darwin.bzl", "dyld_script", "mojo_darwin_link", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
+
+# Every target below except the pinned download exists for darwin-arm64 only,
+# so each states it: a wildcard (`buck2 build toolchains//...`) on a checkout
+# with no macOS platform configured skips them instead of analysing them.
+_DARWIN = [
+    "prelude//os/constraints:macos",
+    "prelude//cpu/constraints:arm64",
+]
 
 # ---- Pinned inputs (macOS arm64 execution platform) --------------------------
 
@@ -17,11 +25,15 @@ pinned_file(
 # ---- Unpacked by remote actions (on linux `light` workers) ------------------
 
 # Unpacking moves bytes only, so it runs on the same linux workers, with the
-# same static unpacker, as the linux toolchain. bin/lld is kept: the macOS
-# compiler links with it (modular.cfg `lld_path`).
+# same static unpacker, as the linux toolchain. bin/lld is kept as a hedge
+# only: links go through the cc on PATH (komira//tools/build/mojo/darwin:cc, the host's cc and
+# ld), as they do on linux, where the closure has no bin/lld although
+# modular.cfg names one in `lld_path`. Whether the osx-arm64 compiler ever
+# uses `lld_path` is unverified until the first compile on a macOS worker.
 conda_closure(
     name = "mojo_compiler",
     exec_compatible_with = ["komira//tools/build/platforms:light"],
+    target_compatible_with = _DARWIN,
     keep = ["bin/lld"],
     package = ":mojo_compiler_1.0.0_osx-arm64.conda",
     unpacker = "komira//tools/build/toolchains:conda_unpack",
@@ -35,6 +47,7 @@ mojo_runtime(
     exec_compatible_with = ["komira//tools/build/platforms:light"],
     busybox = "komira//tools/build/toolchains:busybox",
     compiler = ":mojo_compiler",
+    target_compatible_with = _DARWIN,
     libs = [
         "libAsyncRTRuntimeGlobals.dylib",
         "libKGENCompilerRTShared.dylib",
@@ -49,25 +62,36 @@ dyld_script(
     busybox = "komira//tools/build/toolchains:busybox",
     prelude = "komira//tools/build/mojo/darwin:dyld_prelude.sh",
     src = "komira//tools/build/mojo:gate_runner.sh",
+    target_compatible_with = _DARWIN,
 )
 
+# MojoToolchainInfo requires a `launcher` (launch.sh: starts a built binary
+# from outside its runnable directory, pointing the loader at the compiler's
+# lib/). No rule in this repository consumes it yet, on either platform; the
+# macOS toolchain carries the macOS form, DYLD_LIBRARY_PATH instead of
+# LD_LIBRARY_PATH, so that the field is right wherever it is read. Nothing
+# builds it unless asked (checks/darwin/check.sh does).
 dyld_script(
     name = "launcher",
     exec_compatible_with = ["komira//tools/build/platforms:light"],
     busybox = "komira//tools/build/toolchains:busybox",
     prelude = "komira//tools/build/mojo/darwin:dyld_prelude.sh",
     src = "komira//tools/build/mojo:launch.sh",
+    target_compatible_with = _DARWIN,
 )
 
-# The `cc` a compile finds on PATH, and the SDK version the macOS execution
-# platform promises (`macos_sdk` in `[komira_re] darwin_mojo_compile_properties`
-# of the root cell). Unset, analysing this target fails naming that key; nothing
-# needs it then, since no macOS execution platform is registered either.
+# The `cc` a compile finds on PATH, host_identity.sh, and the host identity the
+# macOS execution platform promises (`macos_host` in `[komira_re]
+# darwin_mojo_compile_properties` of the root cell). Unset, analysing this
+# target for darwin-arm64 fails naming that key; nothing needs it then, since
+# no macOS execution platform is registered either.
 mojo_darwin_link(
     name = "link",
     exec_compatible_with = ["komira//tools/build/platforms:light"],
+    target_compatible_with = _DARWIN,
     cc = "komira//tools/build/mojo/darwin:cc",
-    macos_sdk = darwin_macos_sdk(),
+    host_identity = "komira//tools/build/mojo/darwin:host_identity.sh",
+    macos_host = darwin_macos_host(),
 )
 
 # The toolchain of darwin-arm64 targets (selected by toolchains//:mojo).
@@ -78,10 +102,7 @@ mojo_darwin_toolchain(
         "prelude//os/constraints:macos",
         "prelude//cpu/constraints:arm64",
     ],
-    target_compatible_with = [
-        "prelude//os/constraints:macos",
-        "prelude//cpu/constraints:arm64",
-    ],
+    target_compatible_with = _DARWIN,
     busybox = "komira//tools/build/mojo/darwin:busybox.sh",
     compiler = ":mojo_compiler",
     # Matches the compiler's own minimum OS.

@@ -50,7 +50,7 @@ def _impl(ctx):
             tc.wrapper,
             tc.launcher,
             tc.compiler,
-            tc.zig,
+            tc.link,
             tc.cc_target,
             tc.target_cpu,
             ctx.attrs.src,

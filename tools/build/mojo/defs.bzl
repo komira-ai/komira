@@ -29,7 +29,7 @@ def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None):
         tc.wrapper,
         tc.busybox,
         tc.compiler,
-        tc.zig,
+        tc.link,
         tc.cc_target,
         ["--runpath=" + runpath] if runpath else [],
         [cmd_args(source_root, format = "--source-root={}")] if source_root else [],

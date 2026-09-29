@@ -25,9 +25,12 @@ MojoToolchainInfo = provider(fields = {
     # Directory: the unpacked compiler closure (bin/mojo, lib/, share/max,
     # CLOSURE_MANIFEST).
     "compiler": provider_field(typing.Any),
-    # Directory: the unpacked zig distribution, used as the C link driver.
-    "zig": provider_field(typing.Any),
-    # zig -target triple for link steps.
+    # Directory: what the compile's link step runs. On linux, the unpacked
+    # zig distribution (the C link driver); on macOS, a `mojo_darwin_link`
+    # (the cc shim and the host identity the execution platform promises).
+    "link": provider_field(typing.Any),
+    # The link target: a zig -target triple on linux, the deployment target
+    # (MACOSX_DEPLOYMENT_TARGET) on macOS.
     "cc_target": provider_field(str),
     # `--target-cpu` for every compile. Pinned, because the compiler's default
     # is the CPU of the machine the action runs on, which is not part of the

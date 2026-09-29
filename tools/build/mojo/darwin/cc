@@ -2,8 +2,9 @@
 # cc -- the C driver a Mojo compile finds on PATH on a macOS execution host.
 #
 # Runs the host's /usr/bin/cc (Apple clang from the Command Line Tools or
-# Xcode). Which SDK and linker that is, is a property of the host, so the
-# execution platform names it: see `macos_sdk` in platforms/defs.bzl.
+# Xcode), which links with the host's ld. Which driver, linker and SDK those
+# are is a property of the host, so the execution platform names it: see
+# `macos_host` in platforms/defs.bzl and host_identity.sh.
 #
 # The command line is the compiler's, with every run path removed (it would
 # name the action's sandbox) and exactly one added: `@loader_path/lib`, the

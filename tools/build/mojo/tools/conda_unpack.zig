@@ -17,9 +17,11 @@
 //!   * the closure members only: `bin/mojo`, everything under `lib/`, and
 //!     `share/max/modular.cfg`. (`bin/lld`, the crash handler and man pages
 //!     are not needed to compile and are left out of every action's inputs,
-//!     unless named with `--keep <member>`: the osx-arm64 compiler links
-//!     through its own `bin/lld`.) The compiler's runtime library is
-//!     `lib/libKGENCompilerRTShared.so` or, in an osx-arm64 package, `.dylib`.
+//!     unless named with `--keep <member>`; the osx-arm64 toolchain keeps
+//!     `bin/lld` as a hedge, in case its compiler links through
+//!     modular.cfg's `lld_path` rather than the cc on PATH.) The compiler's
+//!     runtime library is `lib/libKGENCompilerRTShared.so` or, in an
+//!     osx-arm64 package, `.dylib`.
 //!   * `share/max/modular.cfg` with the package's install-prefix placeholder
 //!     replaced by `@@MOJO_TOOLCHAIN_ROOT@@`. The wrapper renders it at run
 //!     time, so no absolute path enters an action key.
