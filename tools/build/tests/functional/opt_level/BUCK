@@ -1,0 +1,32 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# The tests of per-target optimization levels. tools/build/tests/functional/opt_level.sh
+# reads each target's compile command (buck2 aquery, analysis only) and
+# requires the level written above it; run_tests.sh requires bad_level to
+# fail analysis.
+
+# -O3: a test overriding the test default.
+mojo_test(
+    name = "test_o3",
+    srcs = ["main.mojo"],
+    optimization_level = "3",
+)
+
+# -O3: a library whose gated test overrides the test default.
+mojo_library(
+    name = "lib_o3",
+    srcs = [
+        "__init__.mojo",
+        "value.mojo",
+    ],
+    import_name = "optlib",
+    test_optimization_level = "3",
+    test_srcs = ["tests/test_value.mojo"],
+)
+
+# -O1: a binary overriding the shipped default.
+mojo_binary(
+    name = "bin_o1",
+    srcs = ["main.mojo"],
+    optimization_level = "1",
+)

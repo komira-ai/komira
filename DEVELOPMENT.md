@@ -36,7 +36,7 @@ On macOS buck2 works as a client of a remote-execution service (step 3); a
 local build there refuses, naming `.buckconfig.local`; remotely,
 `./buck2 build //...` and `./buck2 test //...` work as on Linux. Two things
 need a Linux x86_64 client either way, because they run Linux binaries on
-your machine: `./buck2 run`, and `tools/build/checks/run_checks.sh` (section
+your machine: `./buck2 run`, and `tools/build/tests/run_tests.sh` (section
 4), which refuses any other client.
 
 Commands below use `./buck2`; a `buck2` on your `PATH` at the same version
@@ -91,11 +91,11 @@ What that gives you, and what it does not:
   the C++ runtime it needs -- is a download pinned by sha256, unpacked by
   build actions. An action sets `PATH` to a private directory of busybox
   applets and its own `HOME`, `TMPDIR` and caches; no command line names a
-  host path ([check 5](tools/build/checks/README.md)).
+  host path ([test 5](tools/build/tests/README.md)).
 - **Measured locally so far: toolchain, zig and C actions only.** With an
   empty host `PATH`, unpacking zig and the conda packages, building the zig
   programs, assembling the Mojo runtime, and one C compile and archive run
-  locally and succeed; [check 25](tools/build/checks/README.md) repeats the
+  locally and succeed; [test 25](tools/build/tests/README.md) repeats the
   zig unpack and two concurrent zig builds on every run. **A local
   Mojo compile has not yet been measured**: `mojo_build`, `mojo_precompile`,
   gated tests, run checks and bundles have so far run only on a
@@ -175,38 +175,38 @@ when the server does not advertise a lower limit, which a server with a
 bytes, while a maximum of 2097152 bytes is permitted"). The setting changes no
 action digest.
 
-## 4. Run the checks
+## 4. Run the tests
 
 ```sh
-tools/build/checks/run_checks.sh                 # everything
-tools/build/checks/run_checks.sh --no-umbrella   # skip the umbrella cache check (two scratch checkouts)
-tools/build/checks/run_checks.sh --no-run        # skip the `./buck2 run` check (a scratch clone)
-tools/build/checks/run_checks.sh --no-uncached   # skip the two uncached bundle builds (check 15)
+tools/build/tests/run_tests.sh                 # everything
+tools/build/tests/run_tests.sh --no-umbrella   # skip the umbrella cache check (two scratch checkouts)
+tools/build/tests/run_tests.sh --no-run        # skip the `./buck2 run` test (a scratch clone)
+tools/build/tests/run_tests.sh --no-uncached   # skip the two uncached bundle builds (test 15)
 ```
 
 The checks run where your checkout builds. The first line of output says
 which: `MODE  remote` with a `.buckconfig.local` (or, as on the CI runner, a
 machine-wide buckconfig) naming a service, when every
-check runs; `MODE  local` without one, when every action runs on this machine
-and the checks that need a remote service (the umbrella cache, `buck2 run`'s
-download budget, the multi-NUMA and per-action property-set checks, macOS)
-each print a `SKIP` line saying so. Check 3 (a missing `deps` edge fails to
+test runs; `MODE  local` without one, when every action runs on this machine
+and the tests that need a remote service (the umbrella cache, `buck2 run`'s
+download budget, the multi-NUMA and per-action property-set tests, macOS)
+each print a `SKIP` line saying so. Test 3 (a missing `deps` edge fails to
 compile) is also skipped locally: it relies on the remote executor staging
 only declared inputs, and a local action, which is not sandboxed, may find
-the undeclared package in the checkout. Check 25, that a fresh clone with no
+the undeclared package in the checkout. Test 25, that a fresh clone with no
 `.buckconfig.local` resolves to local execution, runs in both.
 
-`run_checks.sh` runs `./buck2`; `BUCK2=...` overrides it. Besides buck2 it
+`run_tests.sh` runs `./buck2`; `BUCK2=...` overrides it. Besides buck2 it
 runs `git`, `readelf`, `objdump`, `curl` and `zstd` on the client, and no
-Python: the JSON, tar and Mach-O reads and the doc link check are a Mojo tool
-([tools/build/inspect](tools/build/inspect/inspect.mojo)) the checks build on
+Python: the JSON, tar and Mach-O reads and the doc link test are a Mojo tool
+([tools/build/inspect](tools/build/inspect/inspect.mojo)) the tests build on
 the farm like any other target. Logs and the scratch checkouts of the umbrella and `./buck2 run`
-checks go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk
+tests go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk
 directory. The scratch checkouts are deleted on exit,
 pass or fail (`KEEP_SCRATCH=1` keeps them); logs are kept, and the last line
-of output names their directory. It exits non-zero if any check failed.
-Each check is described, with how to run it on its own, in
-[tools/build/checks/README.md](tools/build/checks/README.md). CI runs the same
+of output names their directory. It exits non-zero if any test failed.
+Each test is described, with how to run it on its own, in
+[tools/build/tests/README.md](tools/build/tests/README.md). CI runs the same
 script, after `./buck2 build //...` and `./buck2 test //...`; see
 [docs/ci.md](docs/ci.md). It needs a Linux x86_64 client (it runs Linux
 binaries the farm built, and `readelf`/`objdump`, on your machine) and
@@ -244,12 +244,12 @@ not share a remote cache.
 - **Remote outputs stay remote until needed.** `[buck2] materializations = deferred`
   in [`.buckconfig`](.buckconfig): a build downloads nothing it does not
   have to. Pass `--materializations all` to fetch a target's outputs, as the
-  output check does. `./buck2 run` downloads the binary and its runtime
+  output test does. `./buck2 run` downloads the binary and its runtime
   libraries only, never the compiler.
 - **Forcing real execution.** A cache hit records no worker properties and
   runs nothing. To make every action execute, build with
   `--no-remote-cache`, ideally under its own `--isolation-dir` so your normal
-  daemon's state is untouched (the action-platform check does this).
+  daemon's state is untouched (the action-platform test does this).
 
 ## Troubleshooting
 
@@ -279,8 +279,8 @@ not share a remote cache.
   value no worker advertises.
 - **`.buckconfig.local` seems ignored in a non-root cell.** It configures the
   root cell (`komira`, which holds the rules and toolchains) only; the
-  standalone-only `toolchains` and `checks` cells do not read it. Pass a cell-scoped override instead, e.g.
-  `-c checks//komira_re.light_properties=...`.
+  standalone-only `toolchains` and `tests` cells do not read it. Pass a cell-scoped override instead, e.g.
+  `-c tests//komira_re.light_properties=...`.
 - **`Can't find toolchain_dep execution platform`** for a
   `mojo_multi_numa_test`. No multi-NUMA workers are configured; that is the
   intended refusal

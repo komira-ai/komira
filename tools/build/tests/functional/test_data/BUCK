@@ -1,0 +1,56 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load(":runner_cases.bzl", "mojo_gate_runner_cases")
+
+# The tests of the test runtime contract. They use only the standard library:
+# komira_runtime_paths is exercised by its own gate test in the komira cell,
+# because a tests-cell target cannot depend on a komira-cell mojo_library
+# (Buck2 gives the MojoPkgTSet a distinct identity per loading cell).
+# The contract is in tools/build/mojo/README.md ("Test data, environment and
+# scratch"). tools/build/tests/run_tests.sh builds each target and requires
+# the verdict written above it.
+
+_SRCS = [
+    "__init__.mojo",
+    "value.mojo",
+]
+
+# GREEN: a list entry is staged at its path from the cell root and opens by
+# that relative path; two tests each get a private, empty TEST_TMPDIR; the
+# library's test_env reaches both.
+mojo_library(
+    name = "declared",
+    srcs = _SRCS,
+    import_name = "tdlib",
+    test_srcs = [
+        "tests/test_reads_declared.mojo",
+        "tests/test_env_and_tmp.mojo",
+        "tests/test_env_and_tmp_twin.mojo",
+    ],
+    test_data = {
+        "tests/test_reads_declared.mojo": ["fixtures/declared.txt"],
+    },
+    test_env = {"TD_MODE": "tests"},
+)
+
+# GREEN under `buck2 test`: a mojo_test with dict data and env.
+mojo_test(
+    name = "mojo_test_data",
+    srcs = ["tests/test_mojo_test_data.mojo"],
+    data = {"staged/as.txt": "fixtures/declared.txt"},
+    env = {"TD_MODE": "mojo_test"},
+)
+
+# The runner itself, in one action directory (runner_cases.sh): two runs get
+# two TEST_TMPDIRs, each empty, under the action directory and gone after the
+# run; --env HELD / BIN / rc cannot turn a red test green; a held red is HELD.
+mojo_gate_runner_cases(
+    name = "runner_cases",
+    script = "runner_cases.sh",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["runner_cases.sh"],
+    visibility = ["komira//:tests_lints"],
+)

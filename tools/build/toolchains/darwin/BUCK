@@ -69,7 +69,7 @@ dyld_script(
 # lib/). No rule in this repository consumes it yet, on either platform; the
 # macOS toolchain carries the macOS form, DYLD_LIBRARY_PATH instead of
 # LD_LIBRARY_PATH, so that the field is right wherever it is read. Nothing
-# builds it unless asked (checks/darwin/check.sh does).
+# builds it unless asked (functional/darwin/check.sh does).
 dyld_script(
     name = "launcher",
     exec_compatible_with = ["komira//tools/build/platforms:light"],

@@ -1,0 +1,15 @@
+# The client-side scripts of this cell at its top: run_tests.sh, tool_lib.sh
+# and the sections run_tests.sh sources. `//...` does not reach into this
+# cell, so //:tests_lints (the root BUCK) names this lint and the other
+# shell lints of the cell, and `./buck2 build //...` runs them.
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["*.sh"]),
+    excludes = {
+        # The audited target list is split into arguments on purpose.
+        "run_tests.sh": "SC2046",
+    },
+    visibility = ["komira//:tests_lints"],
+)

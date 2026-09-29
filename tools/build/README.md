@@ -13,12 +13,12 @@ Everything the build needs besides the project configuration
 | [`rust/`](rust/) | package `komira//tools/build/rust` | the Rust rules (`rust_library`, `rust_binary`, `crates_io_library`) and the rustc toolchain rule. [Reference](rust/README.md). |
 | [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo` and `protoc-gen-mojo-db`, the protoc plugins of `mojo_proto_library` and `mojo_db_proto_library`, and `:db_options`, the `(komira.db.*)` options (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)). |
 | [`lint/`](lint/) | package `komira//tools/build/lint` | lints that are part of the build: `shell_lint`, `workflow_lint`, `action_pins` and `no_endpoint` return their verdict as a Buck2 validation, and the pinned shellcheck and actionlint. The Mojo and Rust toolchains depend on the lint of the scripts their rules run; the root [`BUCK`](../../BUCK) lints the top-level scripts and the workflows. |
-| [`inspect/`](inspect/) | package `komira//tools/build/inspect` | `buildtools`, a Mojo package of readers the tools share (SHA-256, JSON, tar members, Mach-O load commands, Markdown links; its unit tests are welded), and `inspect`, the Mojo tool the [checks](checks/README.md) run for every structured read ([`inspect.mojo`](inspect/inspect.mojo)). |
+| [`inspect/`](inspect/) | package `komira//tools/build/inspect` | `buildtools`, a Mojo package of readers the tools share (SHA-256, JSON, tar members, Mach-O load commands, Markdown links; its unit tests are welded), and `inspect`, the Mojo tool the [checks](tests/README.md) run for every structured read ([`inspect.mojo`](inspect/inspect.mojo)). |
 | [`third_party_srcs/`](third_party_srcs/) | package `komira//tools/build/third_party_srcs` | `gen`, which reads a vendored C library's source lists out of its pinned release archive, and `third_party_srcs`, which declares the generated file and the drift test holding the committed copy to it ([`defs.bzl`](third_party_srcs/defs.bzl)); tested on two made-up archives. |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
 | [`cells/toolchains/`](cells/toolchains/) | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
-| [`checks/`](checks/) | cell `checks` | end-to-end checks, including fixtures that must fail. A standalone checkout's only, and outside `//...`. [Reference](checks/README.md). |
+| [`tests/`](tests/) | cell `tests` | end-to-end tests: `functional/` (behaviour that must work) and `negative/` (planted defects that must go red). A standalone checkout's only, and outside `//...`. [Reference](tests/README.md). |
 | [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy, aws-lc, s2n-tls), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
 | [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
 
@@ -27,7 +27,7 @@ packaging rules are packages of it, so a repository using komira names one
 cell. `.buckconfig` adds two cells a standalone checkout needs and a consuming
 repository does not take: `toolchains`, which the prelude requires of the
 repository at the project root and which the Mojo rules take their toolchain
-from, and `checks`, kept apart so that `//...` holds no target that fails by
+from, and `tests`, kept apart so that `//...` holds no target that fails by
 design. The Mojo toolchains are in the `toolchains` cell rather than in
 `komira//tools/build/toolchains` for the same reason: `mojo_multi_numa`
 configures only where multi-NUMA workers are registered. `.buckconfig` maps each cell to the target platform
@@ -38,7 +38,7 @@ configures only where multi-NUMA workers are registered. `.buckconfig` maps each
 Rules are loaded from one cell: a `.bzl` file's providers are distinct per
 loading cell, so a Mojo target in one cell cannot depend on a Mojo library in
 another. Every file loads the rules as `@komira//tools/build/mojo:...`, and the
-`checks` cell has its own fixtures rather than reusing
+`tests` cell has its own fixtures rather than reusing
 [`examples/`](examples/).
 
 ## Using komira from another repository
@@ -67,7 +67,7 @@ targets by name, e.g. `buck2 build komira//tools/build/examples:hello`, and
 load the rules in your own BUCK files with
 `load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")`. Do not build
 `komira//...` from a consuming repository: every directory of komira with a
-BUCK file is a package there, including the standalone-only `checks`.
+BUCK file is a package there, including the standalone-only `tests`.
 
 **As a git external cell** (buck2 fetches the commit into
 `buck-out/v2/external_cells/git/<sha>/`, once per commit):
@@ -150,15 +150,15 @@ of its sources and outputs. Moving `komira//tools/build/platforms` to another
 package therefore changes the digest of every configured action in the
 repository, product code included, although no command changes meaning;
 moving a package of examples changes only the digests of that package's
-actions. [Check 18](checks/README.md#18-configuration-hashes) fails if the
+actions. [Test 18](tests/README.md#18-configuration-hashes) fails if the
 configuration hashes the platform package keys move, so such a re-key is
 always a deliberate, reviewed change.
 
-[`checks/umbrella_cache.sh`](checks/umbrella_cache.sh) builds the examples
+[`tests/functional/umbrella_cache.sh`](tests/functional/umbrella_cache.sh) builds the examples
 in a fresh standalone clone and then in three scratch repositories set up as
 above (a submodule at `komira` and at `third_party/komira`, and a git
 external cell), each with a fresh daemon, and fails unless every consumer
 command is a cache hit and every build reports the same action digests
-([check 7](checks/README.md#7-umbrella-cache)).
-[Check 19](checks/README.md#19-exported-cells) fails if a file a consuming
-repository loads names the `checks` cell or any other it lacks.
+([test 7](tests/README.md#7-umbrella-cache)).
+[Test 19](tests/README.md#19-exported-cells) fails if a file a consuming
+repository loads names the `tests` cell or any other it lacks.

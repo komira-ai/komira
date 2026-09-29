@@ -19,7 +19,7 @@ There is no nightly run, and no separate static or lint job.
 ```sh
 ./buck2 build //...
 ./buck2 test //...
-tools/build/checks/run_checks.sh
+tools/build/tests/run_tests.sh
 ```
 
 1. **`./buck2 build //...`** builds every target of the komira cell on the
@@ -32,9 +32,9 @@ tools/build/checks/run_checks.sh
      target itself.
    - The lints are validations of the targets they guard
      ([tools/build/lint/defs.bzl](../tools/build/lint/defs.bzl)): shellcheck
-     over every shell script, the check scripts of
-     [tools/build/checks](../tools/build/checks/README.md) included (their
-     own cell, reached through `//:checks_lints`); actionlint over the
+     over every shell script, the test scripts of
+     [tools/build/tests](../tools/build/tests/README.md) included (their
+     own cell, reached through `//:tests_lints`); actionlint over the
      workflows; every `uses:` pinned to a commit SHA; every push to `main`
      in a concurrency group of its own; and no remote-execution endpoint in
      a committed file. The lint of the scripts the Mojo and Rust rules run
@@ -43,11 +43,11 @@ tools/build/checks/run_checks.sh
      downloads, run on the farm like any other action.
 2. **`./buck2 test //...`** runs the standalone tests (`mojo_test` and
    friends).
-3. **[`tools/build/checks/run_checks.sh`](../tools/build/checks/README.md)**
-   checks what a build of `//...` does not: where actions ran, cache
+3. **[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md)**
+   tests what a build of `//...` does not: where actions ran, cache
    identity across checkouts, analysis-time refusals, a `buck2 run` from a
-   fresh clone, targets that must fail by design (the `checks` cell), and
-   the `./buck2` bootstrap. One of its checks reads the repository's file
+   fresh clone, targets that must fail by design (the `tests` cell), and
+   the `./buck2` bootstrap. One of its tests reads the repository's file
    list, which no build action can see (an action sees only the inputs its
    target declares): every Markdown link resolves to a tracked file
    (`doc_links.sh`). It needs a Linux x86_64 client, and refuses any
@@ -57,8 +57,8 @@ tools/build/checks/run_checks.sh
 A contributor on Linux x86_64 runs the same three commands; on another
 client (macOS arm64) the first two. A green local
 `./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
-prove; it does not prove the file-list check above, so a dead Markdown
-link is found by `run_checks.sh`, not by the build.
+prove; it does not prove the file-list test above, so a dead Markdown
+link is found by `run_tests.sh`, not by the build.
 
 There is no publish step yet. When release targets exist, publishing is a
 step after these, on pushes to `main` only, of artifacts the same job built.
@@ -70,9 +70,9 @@ step after these, on pushes to `main` only, of artifacts the same job built.
   one job per container and discarding it afterwards (an ephemeral runner).
   Nothing from one job, including a fork's, survives into the next.
 - It holds `git`, and what [`./buck2`](../buck2) needs: `sh`, `curl`, `zstd`
-  and `sha256sum`. `run_checks.sh` also needs `readelf` and `objdump`, and
-  `docker` for the image run leg of the format check (skipped without it).
-  Its JSON, tar and Mach-O reads and the doc link check are a Mojo tool,
+  and `sha256sum`. `run_tests.sh` also needs `readelf` and `objdump`, and
+  `docker` for the image run leg of the format test (skipped without it).
+  Its JSON, tar and Mach-O reads and the doc link test are a Mojo tool,
   [`//tools/build/inspect:inspect`](../tools/build/inspect/inspect.mojo),
   built on the farm like any other target.
 - The farm connection is **machine configuration**, not repository
@@ -142,7 +142,7 @@ pull requests.
 
 ```sh
 ./buck2 build //... && ./buck2 test //...
-tools/build/checks/run_checks.sh
+tools/build/tests/run_tests.sh
 ```
 
 The lints alone, without building the rest:

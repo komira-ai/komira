@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
-# Readers the checks and generators share: bytes and paths, SHA-256, JSON
+# Readers the tests and generators share: bytes and paths, SHA-256, JSON
 # (flattened, and Python's canonical form), tar members, Mach-O load
 # commands, Markdown links. The unit tests are welded: nothing builds against
 # the package while one fails.
@@ -19,7 +19,7 @@ mojo_library(
     visibility = ["PUBLIC"],
 )
 
-# The structured reads of tools/build/checks (see inspect.mojo). The checks
+# The structured reads of tools/build/tests (see inspect.mojo). The tests
 # build `[runnable]` once and run it on the client.
 mojo_binary(
     name = "inspect",

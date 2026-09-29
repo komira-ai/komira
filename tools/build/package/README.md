@@ -46,16 +46,16 @@ loader did not search its `glibc-hwcaps/x86-64-v<N>/` directory (glibc older
 than 2.33, or hwcaps masked with `GLIBC_TUNABLES` or `--glibc-hwcaps-mask`),
 it says so. The run paths are `DT_RUNPATH`, so `LD_LIBRARY_PATH`, which the
 loader searches first, can put a different `libhello.so` or runtime library
-in place of the bundle's; that is accepted and checked ([bundle.sh](../checks/bundle.sh)
+in place of the bundle's; that is accepted and checked ([bundle.sh](../tests/functional/bundle.sh)
 `loader`). The launcher then calls the program's C entry point
 `komira_main`, which runs `main` through the same standard-library function a
 Mojo executable uses: arguments, environment, output and exit status are
-those of the executable (checks//bundle_parity compares the two).
+those of the executable (tests//functional/bundle_parity compares the two).
 `lib<name>.so` has run path `$ORIGIN/../..`, the bundle's `lib/`. Every run
 path is relative to its file, so the bundle runs from wherever it is copied
 and through a symlink. A program finds its data through `/proc/self/exe`:
 `<its directory>/../share`. The runtime libraries in `lib/` are the vendor's
-files, unchanged, and keep the vendor's run paths; [bundle_expected](../checks/bundle_expected)
+files, unchanged, and keep the vendor's run paths; [bundle_expected](../tests/functional/bundle_expected)
 lists every run path in the bundle.
 
 The bundle is built by copying files with fixed modes (0755 for `bin/`,
@@ -113,5 +113,5 @@ depend only on the bundle and the base: tar entries are sorted, with
 directories listed, mtime and uid/gid 0 and modes 0755/0644; gzip headers
 carry no time; JSON keys are sorted and every timestamp is
 1970-01-01T00:00:00Z. Two uncached builds give the same tarball and the same
-image digest ([bundle.sh](../checks/bundle.sh)), and `docker run` of the loaded image prints
-the greeting ([formats.sh](../checks/formats.sh)).
+image digest ([bundle.sh](../tests/functional/bundle.sh)), and `docker run` of the loaded image prints
+the greeting ([formats.sh](../tests/functional/formats.sh)).

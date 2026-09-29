@@ -10,7 +10,7 @@ If you have a remote-execution service that speaks the Bazel Remote Execution
 API, such as Buildbarn, you can opt in to building there instead.
 
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
-examples and end-to-end checks) lives in [`tools/build/`](tools/build/).
+examples and end-to-end tests) lives in [`tools/build/`](tools/build/).
 
 ## Quickstart
 
@@ -47,7 +47,7 @@ and does not guarantee (Buck2 does not sandbox local actions), what to put in
 | [tools/build/platforms/README.md](tools/build/platforms/README.md) | execution classes, single- and multi-NUMA workers, mapping them to your own worker pools |
 | [tools/build/package/README.md](tools/build/package/README.md) | packaging: `mojo_bundle`, a relocatable bundle with a CPU-level launcher; `bundle_tarball` and `oci_image` |
 | [tools/build/toolchains/README.md](tools/build/toolchains/README.md) | the hermetic toolchain: what is pinned, the host floor, updating a pin |
-| [tools/build/checks/README.md](tools/build/checks/README.md) | the end-to-end checks: what each one proves and how to run it |
+| [tools/build/tests/README.md](tools/build/tests/README.md) | the end-to-end tests: what each one proves and how to run it |
 | [docs/ci.md](docs/ci.md) | continuous integration: one job on a runner on the build farm, approving a fork's run, what a contributor runs locally |
 | [docs/knowledge_graph.md](docs/knowledge_graph.md) | the knowledge graph: not here yet (it returns as a Mojo tool) |
 | [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |

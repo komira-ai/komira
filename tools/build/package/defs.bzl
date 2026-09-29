@@ -195,7 +195,7 @@ exit "$rc"
 
 # Builds and runs level_test.c (remotely): the launcher's level function
 # against made-up CPUs. Building it fails on any wrong level. [bin] is the
-# static test program: tools/build/checks/glibc_level.sh runs it on a host and compares
+# static test program: tools/build/tests/functional/glibc_level.sh runs it on a host and compares
 # its level for the host's CPU with the host's glibc loader. (Not done here: a
 # build action must not read the worker's /lib64, and its cached result would
 # not measure the next worker anyway.)

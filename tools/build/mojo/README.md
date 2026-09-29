@@ -10,14 +10,14 @@ The rules are in [`defs.bzl`](defs.bzl); their providers in
 [`mojo_wrapper.sh`](mojo_wrapper.sh), which is where to read the environment
 the compiler sees. Worked uses of each rule are in
 [`../examples/BUCK`](../examples/BUCK), and fixtures that must fail are in
-[`../checks/`](../checks/README.md).
+[`../tests/`](../tests/README.md).
 
 | rule | produces | example |
 |---|---|---|
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
-| `mojo_multi_numa_test(binary, expected_stdout, numa_nodes, labels)` | runs `binary` (a `mojo_binary` or `mojo_test`, compiled by its own target) on a worker spanning more than one NUMA node. Building it runs the binary like `[run_check]`; `buck2 test` runs it like a `mojo_test`. Fails to configure when no execution platform provides `numa_multi`. | [`checks//numa:hello_multi_numa`](../checks/numa/BUCK) |
+| `mojo_multi_numa_test(binary, expected_stdout, numa_nodes, labels)` | runs `binary` (a `mojo_binary` or `mojo_test`, compiled by its own target) on a worker spanning more than one NUMA node. Building it runs the binary like `[run_check]`; `buck2 test` runs it like a `mojo_test`. Fails to configure when no execution platform provides `numa_multi`. | [`tests//functional/numa:hello_multi_numa`](../tests/functional/numa/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -38,14 +38,14 @@ mojo_library(
   one `-I` directory per package, each holding exactly one `.mojoc`, so a
   staged source directory can never shadow a package. A package reaches the
   compiler only through `deps`
-  ([`checks/missing_dep`](../checks/missing_dep/BUCK) fails to compile).
+  ([`tests/negative/missing_dep`](../tests/negative/missing_dep/BUCK) fails to compile).
 - **The gate.** Each file in `test_srcs` is built from that one file against
   the ungated package (at `test_optimization_level`, default `-O1`; see [Optimization levels](#optimization-levels)) and run;
   a failing test prints `GATED TEST FAILED: <label> (exit N)`. The public
   package `L/pkg/<I>.mojoc` is a copy of the ungated one that takes every
   test's PASS marker as an input, so it cannot exist unless every test passed,
   and neither can anything depending on it
-  ([`checks/libgate_bad`](../checks/libgate_bad/BUCK): the library and its
+  ([`tests/negative/libgate_bad`](../tests/negative/libgate_bad/BUCK): the library and its
   consumer go red, `[ungated]` builds, and a binary naming `[ungated]` in
   `deps` fails analysis).
 - **Holding a known-failing test: `tests_known_failing`.** A red test that
@@ -61,7 +61,7 @@ mojo_library(
   at analysis: a key that is not a `test_srcs` entry, any field besides
   `issue` and `reason`, a missing or malformed issue (a GitHub issue number or
   URL, nothing else), an empty reason, two rows with byte-identical reasons, and holding every test
-  ([`checks/known_failing`](../checks/known_failing/BUCK)).
+  ([`tests/functional/known_failing`](../tests/functional/known_failing/BUCK)).
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
@@ -92,7 +92,7 @@ compile uses CPU throughout and is never killed. Both knobs are
 `mojo_toolchain` attributes (`komira_mojo_toolchains(watchdog_idle_secs = ...)`
 in a toolchains cell); `watchdog_idle_secs = 0` turns the watchdog off. Linux
 only for now: the macOS wrapper has none
-([`checks/watchdog`](../checks/watchdog/cases.sh)).
+([`tests/functional/watchdog`](../tests/functional/watchdog/cases.sh)).
 
 ## Binaries and tests
 
@@ -107,7 +107,7 @@ only for now: the macOS wrapper has none
 - **`buck2 run <target>`**: builds remotely and runs the binary on your
   machine (Linux x86_64) from its runnable directory, downloading the binary
   and its runtime libraries, never the compiler
-  ([check 9](../checks/README.md#9-buck2-run)).
+  ([test 9](../tests/README.md#9-buck2-run)).
 - **`buck2 test <mojo_test>`**: runs the test binary remotely through
   [`gate_runner.sh`](gate_runner.sh). `buck2 run` of a `mojo_test` runs its
   binary directly, from the runnable directory.
@@ -118,7 +118,7 @@ Every compile targets the toolchain's `target_cpu` (`x86-64-v3`), not the CPU
 of the worker that ran it. Linked binaries carry one run path, DT_RUNPATH
 `$ORIGIN/lib`, and no debug sections, and every compile action fails (exit 4)
 if its output contains the action's working directory
-([check 6](../checks/README.md#6-outputs)).
+([test 6](../tests/README.md#6-outputs)).
 The compiler records source file names in a linked program (for error
 locations); they are recorded relative to the package (`hello.mojo`), not as
 paths inside the action.
@@ -131,7 +131,7 @@ so it starts from anywhere with no environment. `RunInfo` points at it.
 ([`launch.sh`](launch.sh) starts a binary from outside its runnable
 directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run
-([check 8](../checks/README.md#8-host-floor-and-runtime-libraries)).
+([test 8](../tests/README.md#8-host-floor-and-runtime-libraries)).
 
 **Two runtime surfaces.** `buck2 run`, `[run_check]` and
 `mojo_multi_numa_test` start a binary from its runnable directory, whose
@@ -168,10 +168,10 @@ level of its own and is compiled into each binary at that binary's level. A
 `mojo_multi_numa_test`) states `optimization_level = "1"` itself, as
 [`examples/aws_lc`](../examples/aws_lc/BUCK),
 [`examples/s2n_tls`](../examples/s2n_tls/BUCK) and
-[`checks/numa`](../checks/numa/BUCK) do; a `mojo_multi_numa_test` over a
+[`tests/functional/numa`](../tests/functional/numa/BUCK) do; a `mojo_multi_numa_test` over a
 shipped `mojo_binary` runs it at `-O3`, the bytes that ship. Levels are `0` to `3`;
-anything else is refused at analysis. Check 30
-([`checks/opt_level.sh`](../checks/opt_level.sh)) reads the levels from the
+anything else is refused at analysis. Test 30
+([`tests/functional/opt_level.sh`](../tests/functional/opt_level.sh)) reads the levels from the
 compile commands.
 
 ## Test data, environment and scratch
@@ -221,7 +221,7 @@ mojo_test(
   The variables are given to the test process only, never to the runner's
   own shell, so a name the runner uses internally (`HELD`, `BIN`, `rc`)
   reaches the test and cannot change the verdict
-  ([`checks//test_data:runner_cases`](../checks/test_data/runner_cases.sh)).
+  ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
   directories the runner makes for this run inside the action's working
   directory, so no two runs share them, and they are removed afterwards.
@@ -279,9 +279,9 @@ Every run (the build's run check and the `buck2 test` command) starts through
 (default 2, minimum 2) NUMA nodes. What that means, and how the workers are
 configured, is in
 [platforms/README.md](../platforms/README.md#multi-numa-runs); the fixtures
-are in [`checks/numa`](../checks/numa/BUCK)
-([checks 10 and 11](../checks/README.md#10-execution-platforms)).
-`checks//numa:gate_run` runs the `buck2 test` command minus the guard, so the
+are in [`tests/functional/numa`](../tests/functional/numa/BUCK)
+([tests 10 and 11](../tests/README.md#10-execution-platforms)).
+`tests//functional/numa:gate_run` runs the `buck2 test` command minus the guard, so the
 gate runner is reached with this rule's own arguments on any worker.
 
 A gated library test (`test_srcs`) runs inside the library's target and so
@@ -315,7 +315,7 @@ holds files that only declare options, which need no Mojo). Sub-targets:
 `test_srcs`): it is gated only through the tests of the libraries and
 binaries that depend on it. Generation is deterministic, checked by
 comparing two uncached builds
-([check 23](../checks/README.md#23-protobuf)).
+([test 23](../tests/README.md#23-protobuf)).
 
 ```python
 load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "proto_srcs")
@@ -344,7 +344,7 @@ The toolchain, `toolchains//:mojo_proto` (declared by
 `:protoc-gen-mojo-db`, built from source with the [Rust rules](../rust/README.md) against the
 crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
 in [`../proto-codegen/`](../proto-codegen/);
-[`checks//proto`](../checks/proto/BUCK) holds the example protos and tests.
+[`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
 
 ## C and C++
 
@@ -378,13 +378,13 @@ komira cell, and the compiler records that path in the object. komira's own
 `cxx_library` targets therefore name their sources, and headers not produced
 by an action, through `staged_files` ([`cxx.bzl`](cxx.bzl)), which copies
 them into buck-out, so the C actions and the Mojo links using them keep one
-digest in every consumer (check 7). A repository's own C code, mounted at one
+digest in every consumer (test 7). A repository's own C code, mounted at one
 place, does not need it.
 [`../examples/cshim`](../examples/cshim) calls C from Mojo.
 
 zig's libc++ and libc++abi are linked statically. The Mojo runtime itself
 loads `libstdc++.so.6`, so a binary may hold both runtimes; it exports no
-dynamic symbol, so neither can interpose on the other (check 20, on the snappy
+dynamic symbol, so neither can interpose on the other (test 20, on the snappy
 example). Memory or exceptions must not cross between C++ code and the Mojo
 runtime's C++ internals.
 
@@ -404,7 +404,7 @@ builds. Their source and header lists (`srcs.bzl`) are generated from the
 archive's CMake lists by the Mojo tool
 [`third_party_srcs`](../third_party_srcs/) (`//third_party/<lib>:srcs_gen`; the
 test `:srcs_drift` fails when they differ); s2n-tls's
-feature defines are `features.bzl`, the probes that pass. Check 26 holds
+feature defines are `features.bzl`, the probes that pass. Test 26 holds
 both to the archives and to a compile of every probe, and runs known-answer
 tests ([`../examples/aws_lc`](../examples/aws_lc)) and a TLS 1.3 handshake
 ([`../examples/s2n_tls`](../examples/s2n_tls)) from Mojo. The aarch64
@@ -420,7 +420,7 @@ assembly lists are generated but not built yet.
 | `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |
 | `mojo-watchdog: killed deadlocked compiler after <n>s of zero process-tree CPU` (exit 124) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compile's process tree used no CPU for `watchdog_idle_secs`; retry the action |
-| `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([check 4](../checks/README.md#4-closure-refusal)) |
+| `mojo_wrapper: REFUSING: toolchain member '<m>' is missing or empty` (exit 2) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the unpacked toolchain lacks a file its `CLOSURE_MANIFEST` lists; nothing falls back to the worker ([test 4](../tests/README.md#4-closure-refusal)) |
 | `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
 | `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |

@@ -68,7 +68,7 @@ MojoRunnableInfo = provider(fields = {
 })
 
 # The gate-runner command of a mojo_multi_numa_test without its NUMA guard, so
-# a check can run it on a single-NUMA worker (checks//numa:gate_run).
+# a check can run it on a single-NUMA worker (tests//functional/numa:gate_run).
 MojoGateRunInfo = provider(fields = {
     "command": provider_field(typing.Any),  # cmd_args
 })

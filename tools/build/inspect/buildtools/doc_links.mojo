@@ -1,6 +1,6 @@
 """Every relative link in the tracked Markdown resolves.
 
-The rules are the ones tools/build/checks/doc_links.sh documents. The input is
+The rules are the ones tools/build/tests/functional/doc_links.sh documents. The input is
 the root (a real path) and the list of paths git tracks under it.
 """
 

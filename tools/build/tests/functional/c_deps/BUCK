@@ -1,0 +1,9 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+
+# Calls komira_example_add (C) with the C library in `deps`: links.
+mojo_binary(
+    name = "c_linked",
+    srcs = ["main.mojo"],
+    deps = ["komira//tools/build/examples/cshim:add"],
+    expected_stdout = "42\n",
+)

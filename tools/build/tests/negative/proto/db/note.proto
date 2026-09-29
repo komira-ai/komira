@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package example.tasks.v1;
+
+// No table here: protoc-gen-mojo-db writes nothing for this file.
+message Note {
+  string text = 1;
+}

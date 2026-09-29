@@ -44,7 +44,7 @@ worker's `PATH`. The client's only work is downloading the pinned files
 remote cache. The Mojo wrapper ([`mojo/mojo_wrapper.sh`](../mojo/mojo_wrapper.sh))
 refuses (exit 2) to run a toolchain missing a member listed in its
 `CLOSURE_MANIFEST` instead of falling back to anything on the worker
-([check 4](../checks/README.md#4-closure-refusal)).
+([test 4](../tests/README.md#4-closure-refusal)).
 
 ## Host floor
 
@@ -64,12 +64,12 @@ unpacked into the toolchain's `lib/`; the compiler finds it through its own
 path (or `LD_LIBRARY_PATH`, which gated tests set). None of the floor is part
 of an action key, so workers that differ in it must not share a remote cache.
 
-[Check 8](../checks/README.md#8-host-floor-and-runtime-libraries) enforces
+[Test 8](../tests/README.md#8-host-floor-and-runtime-libraries) enforces
 the floor: it reads the loader's own record (`LD_DEBUG`) of a real compile and
-a run ([`checks//runtime_libs:loader_trace`](../checks/runtime_libs/BUCK)),
+a run ([`tests//functional/runtime_libs:loader_trace`](../tests/functional/runtime_libs/BUCK)),
 and fails if either maps the C++ runtime from the worker, or any object from
-the worker that is not glibc's. `buck2 build checks//re_probe:probe`
-([`checks/re_probe`](../checks/re_probe/BUCK)) records what a worker provides.
+the worker that is not glibc's. `buck2 build tests//re_probe:probe`
+([`tests/re_probe`](../tests/re_probe/BUCK)) records what a worker provides.
 
 That check, together with `komira//tools/build/toolchains:mojo_runtime` (which refuses a
 library name missing from the toolchain), is what guards the C++ runtime pin.
@@ -80,7 +80,7 @@ those names, and a worker's own `libstdc++.so.6` would satisfy the compiler.
 The floor is measured on the compile and run of a hello-world program only;
 a library the compiler loads lazily on another path (for example its Python
 interop) is not traced. The runtime libraries keep their vendor `DT_RPATH`
-entries; check 8 requires every run path in a runnable directory's `lib/` to
+entries; test 8 requires every run path in a runnable directory's `lib/` to
 be `$ORIGIN`-relative, so an absolute one arriving with an upstream update
 fails the checks.
 
@@ -99,13 +99,13 @@ bytes match. To move to a new release:
    need newer symbol versions (today `GLIBCXX_3.4.30`, `CXXABI_1.3.13`,
    `GCC_3.3`, i.e. GCC 12 or newer).
 4. If a new compiler loads a different set of runtime libraries, update the
-   `libs` list of `:mojo_runtime`; check 8 fails until it matches what a run
+   `libs` list of `:mojo_runtime`; test 8 fails until it matches what a run
    loads.
-5. Run the full [checks](../checks/README.md). A toolchain change changes the
+5. Run the full [checks](../tests/README.md). A toolchain change changes the
    digest of every action downstream of it, so expect a cold remote cache.
 
 To update buck2, change each platform's `size`, `digest` and release URL in
-[`tools/buck2`](../../buck2). Check 10 matches buck2's literal wording of the
+[`tools/buck2`](../../buck2). Test 10 matches buck2's literal wording of the
 multi-NUMA configuration refusal, so a release that rewords it turns that
 check red until the check is updated with the pin.
 
@@ -166,7 +166,7 @@ on one host, give each its own worker property (e.g. `macos_host=<its
 identity>`) and each its own property set. A host outside the list, or one
 whose SDK, Xcode, Command Line Tools or OS is updated, is refused until the
 list is updated, which re-keys every macOS action.
-`checks//darwin:host_census` reports the identities the workers print.
+`tests//functional/darwin:host_census` reports the identities the workers print.
 
 A built binary names its runtime libraries `@rpath/...` and carries one run
 path, `@loader_path/lib`, the `lib/` of its runnable directory; it targets
@@ -174,6 +174,6 @@ path, `@loader_path/lib`, the `lib/` of its runnable directory; it targets
 minimum. Gated tests set `DYLD_LIBRARY_PATH` to the compiler's `lib/`, and
 run checks start the binary with no `DYLD_*` variable. Bundles
 (`mojo_bundle`, the `[shared]` sub-target) are linux only: the macOS wrapper
-refuses `--emit shared-lib`. `tools/build/checks/darwin/check.sh` checks all
+refuses `--emit shared-lib`. `tools/build/tests/functional/darwin/check.sh` checks all
 of this, most of it without a macOS worker; with the keys above set, it also
 builds and runs `//tools/build/examples:hello` on the workers.

@@ -61,10 +61,10 @@ jobs:
         run: ./buck2 build //...
       - name: ./buck2 test //...
         run: ./buck2 test //...
-      - name: tools/build/checks/run_checks.sh
+      - name: tools/build/tests/run_tests.sh
         run: |
-          mkdir -p "$RUNNER_TEMP/checks"
-          TMPDIR="$RUNNER_TEMP/checks" tools/build/checks/run_checks.sh
+          mkdir -p "$RUNNER_TEMP/tests"
+          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
