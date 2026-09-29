@@ -86,12 +86,16 @@ So CI gives farm access only to code that someone trusted has pushed or
 approved, and it narrows what an accident or a leaked credential can reach:
 
 - CI uses its own instance name, a sub-instance ending in `/ci` (for example
-  `<prefix>/ci`). Buildbarn keys the action cache by instance name, so CI's
-  entries live apart from those of developers' builds, while its actions
-  still reach the same workers (a scheduler routes a sub-instance to workers
-  registered for its prefix). This keeps CI from writing developers' entries
-  through the service's front door. It does not stop an action that talks to
-  storage directly.
+  `<prefix>/ci`). Its actions still reach the same workers: the Buildbarn
+  scheduler routes a sub-instance to workers registered for its prefix
+  (matching whole `/`-separated components, so `<prefix>-ci` would not
+  route). Buildbarn's own storage keys the action cache by instance name, so
+  there CI's entries are kept apart from developers'. A cache tier that
+  ignores instance names does not keep them apart: bazel-remote, for
+  example, merges them unless it runs with
+  `--enable_ac_key_instance_mangling`. So the separate instance is necessary
+  but, on its own, not sufficient; and it does not stop an action that talks
+  to storage directly.
 - The farm credentials live in GitHub Environments with branch and reviewer
   rules (below), not in repository secrets.
 - The tailnet policy lets `tag:ci` reach the remote-execution endpoint on one
