@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # cxx_checks.sh -- checks of C/C++ libraries in Mojo builds. Sourced by
 # tools/build/checks/run_checks.sh (uses its BUCK2, LOG, pass, fail, expect_green,
 # expect_red and resolve); not run on its own.
@@ -35,6 +36,7 @@ komira//third_party/snappy:src komira//tools/build/platforms:exec-light
 komira//tools/build/examples/cshim:cadd komira//tools/build/platforms:exec-mojo
 komira//tools/build/examples/snappy:test_snappy komira//tools/build/platforms:exec-mojo"
 want=$(printf '%s\n' "$C_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
+# shellcheck disable=SC2046 # one target label per line, split into arguments on purpose
 if ! got=$(resolve c_platforms $(printf '%s\n' "$want" | cut -d' ' -f1)); then
     fail "C exec platforms: audit failed (see $LOG/c_platforms.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then

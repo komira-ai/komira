@@ -17,7 +17,9 @@ text to lint:
 
 1. shellcheck, severity warning, over every tracked shell script. Scripts the
    rules run as `busybox sh <script>` have no shebang and are checked as
-   busybox. A per-file exclusion must name a file that exists.
+   busybox; a file sourced by a bash script names its shell with a
+   `# shellcheck shell=bash` directive instead. A per-file exclusion must
+   name a file that exists.
 2. actionlint over the workflows.
 3. Every `uses:` names a full commit SHA, never a tag or branch.
 4. No committed file configures remote execution: `.buckconfig` names no
@@ -208,5 +210,5 @@ it on the farm.
 
 ```sh
 .github/ci/static_checks.sh "$(mktemp -d)"   # linux x86_64; no farm needed
-checks/run_checks.sh                         # needs .buckconfig.local
+tools/build/checks/run_checks.sh             # needs .buckconfig.local
 ```

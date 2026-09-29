@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # proto_checks.sh -- check 23, mojo_proto_library. Sourced by run_checks.sh,
 # whose pass/fail/expect_* helpers and $BUCK2, $LOG, $ROOT and $uncached it
 # uses.
@@ -52,7 +53,7 @@ det_build() { # run number; prints a reason on failure
             sort | xargs sha256sum > "$LOG/det$1.sha"
     fi
 }
-if [ "$uncached" != 1 ]; then
+if [ "${uncached:?set by run_checks.sh}" != 1 ]; then
     echo "SKIP  proto determinism (--no-uncached)"
 elif ! why=$(det_build 1) || [ -n "$why" ]; then
     fail "proto determinism: $why"

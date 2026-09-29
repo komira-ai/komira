@@ -13,6 +13,7 @@ BB=$(abspath "$1"); RUN=$(abspath "$2"); BIN=$3; BUNDLE=$(abspath "$4"); OUT=$(a
 T="$PWD/.komira_parity"
 "$BB" mkdir -p "$T/tools"
 "$BB" --install -s "$T/tools"
+# shellcheck disable=SC2123 # the busybox applets are the whole search path, on purpose
 PATH="$T/tools"; export PATH
 mkdir -p "$T/E"
 cp -r "$RUN" "$T/E/bin"

@@ -8,8 +8,10 @@
 # change except the scripts' own text as data: it lints, it does not run.
 #
 #   1. Every tracked shell script passes shellcheck at severity warning.
-#      Scripts with a shebang are checked as their shebang says; scripts the
-#      rules run as `busybox sh <script>` have none and are checked as busybox.
+#      Scripts with a shebang are checked as their shebang says; a file with
+#      none that names its shell in a `# shellcheck shell=` directive (one
+#      sourced by a bash script) as that shell; the rest, which the rules run
+#      as `busybox sh <script>`, as busybox.
 #   2. The workflows pass actionlint (with shellcheck over their `run:` blocks).
 #   3. Every `uses:` in a workflow names a full 40-hex commit SHA, not a tag.
 #   4. No committed file configures remote execution: the committed .buckconfig
@@ -73,7 +75,9 @@ while IFS= read -r -d '' f; do
     scripts=$((scripts + 1))
     args=(-S warning -f gcc)
     [ -n "${exclude[$f]:-}" ] && args+=(-e "${exclude[$f]}")
-    head -1 "$f" | grep -q '^#!' || args+=(-s busybox)
+    # No shebang: a script the rules run as `busybox sh`, unless it names its
+    # shell in a directive (a file sourced by a bash script does).
+    head -1 "$f" | grep -q '^#!' || head -5 "$f" | grep -q '^# shellcheck shell=' || args+=(-s busybox)
     "$SHELLCHECK" "${args[@]}" "$f" >> "$sc_out" || true
 done < <(git ls-files -z)
 if [ "$scripts" = 0 ]; then

@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # rust_checks.sh -- check 22, the Rust rules. Sourced by run_checks.sh,
 # whose pass/fail/expect_* helpers and $BUCK2, $LOG, $ROOT it uses.
 
