@@ -1,0 +1,18 @@
+# Copy to `.buckconfig.local` (gitignored) and fill in your remote-execution
+# service. Every action in this repo runs remotely; there is no local
+# execution platform.
+
+[buck2_re_client]
+  engine_address = grpc://re.example.internal:8980
+  action_cache_address = grpc://re.example.internal:8980
+  cas_address = grpc://re.example.internal:8980
+  instance_name = default
+  tls = false
+  execution_concurrency_limit = 64
+
+[komira_re]
+  # Exact REAPI platform property set of the workers that run Mojo actions,
+  # as comma-separated key=value pairs. Workers match this set exactly: a key
+  # the workers do not advertise leaves actions queued until the scheduler
+  # gives up.
+  linux_x86_64_properties = pool=mojo
