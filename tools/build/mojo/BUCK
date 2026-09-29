@@ -1,3 +1,5 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
 # Scripts and tool sources used by the Mojo rules.
 export_file(name = "mojo_wrapper.sh", visibility = ["PUBLIC"])
 
@@ -11,3 +13,10 @@ export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibilit
 
 export_file(name = "launch.sh", visibility = ["PUBLIC"])
 export_file(name = "zig_cc_launcher.zig", src = "tools/zig_cc_launcher.zig", visibility = ["PUBLIC"])
+
+# Every script above; a validation of the Mojo toolchain (toolchain.bzl).
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["*.sh"]),
+    visibility = ["PUBLIC"],
+)

@@ -1,0 +1,13 @@
+# The client-side check scripts of this cell (run_checks.sh and the scripts it
+# runs). They are not inputs of any target, so run_checks.sh builds every
+# shell_lint target of this cell first (its check 0).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["*.sh"]),
+    excludes = {
+        # The audited target list is split into arguments on purpose.
+        "run_checks.sh": "SC2046",
+    },
+)

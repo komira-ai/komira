@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_multi_numa_test")
 load(":defs.bzl", "numa_gate_run", "numa_guard_cases")
 
@@ -32,4 +33,9 @@ numa_guard_cases(
 numa_gate_run(
     name = "gate_run",
     test = ":hello_multi_numa",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["guard_cases.sh"],
 )

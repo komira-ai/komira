@@ -1,8 +1,9 @@
+| [`lint/`](lint/) | package `komira//tools/build/lint` | lints that are part of the build: `shell_lint`, `workflow_lint`, `action_pins` and `no_endpoint` return their verdict as a Buck2 validation, and the pinned shellcheck and actionlint. The Mojo and Rust toolchains depend on the lint of the scripts their rules run; the root [`BUCK`](../../BUCK) lints the top-level scripts and the workflows. |
 # Build tooling
 
 Everything the build needs besides the project configuration
 ([`.buckconfig`](../../.buckconfig)) and the pinned buck2
-([`tools/buck2`](../buck2)) lives here. Setup and day-to-day use are in
+([`tools/buck2`](../buck2), run through [`./buck2`](../../buck2)) lives here. Setup and day-to-day use are in
 [DEVELOPMENT.md](../../DEVELOPMENT.md).
 
 | directory | Buck2 name | what it holds |

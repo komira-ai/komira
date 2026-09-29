@@ -147,6 +147,13 @@ rust_toolchain = rule(
         "sysroot": attrs.exec_dep(),
         "zig": attrs.exec_dep(),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
+        # The lint of the scripts the Rust rules run: a validation (see
+        # tools/build/lint/defs.bzl), not an input of any action.
+        "_script_lint": attrs.list(attrs.dep(), default = [
+            "komira//tools/build/lint:shell_lint",
+            "komira//tools/build/mojo:shell_lint",
+            "komira//tools/build/rust:shell_lint",
+        ]),
         "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
     },
 )

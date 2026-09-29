@@ -1,0 +1,5 @@
+# actionlint configuration (read by //:workflow_lint).
+self-hosted-runner:
+  # The CI runner that lives on the build farm (docs/ci.md).
+  labels:
+    - komira-farm

@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/package:defs.bzl", "mojo_bundle")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load(":defs.bzl", "bundle_parity")
@@ -21,3 +22,8 @@ bundle_parity(
 )
 
 export_file(name = "parity.sh")
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["parity.sh"],
+)

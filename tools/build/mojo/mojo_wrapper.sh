@@ -302,23 +302,23 @@ else
     "$BB" setsid "$TC/bin/mojo" "$@" &
     pid=$!
     need=$(((WD_IDLE + WD_SAMPLE - 1) / WD_SAMPLE))
-    set -- $(tree "$pid")
-    last=$2
+    s=$(tree "$pid")
+    last=${s#* }
     idle=0
     waited=0
-    while [ "$1" != gone ]; do
+    while [ "${s% *}" != gone ]; do
         "$BB" sleep 1
         waited=$((waited + 1))
-        set -- $(tree "$pid")
-        [ "$1" != gone ] || break
+        s=$(tree "$pid")
+        [ "${s% *}" != gone ] || break
         [ "$waited" -ge "$WD_SAMPLE" ] || continue
         waited=0
-        if [ $(($2 - last)) -lt "$WD_SAMPLE" ]; then
+        if [ $((${s#* } - last)) -lt "$WD_SAMPLE" ]; then
             idle=$((idle + 1))
         else
             idle=0
         fi
-        last=$2
+        last=${s#* }
         if [ "$idle" -ge "$need" ]; then
             kill_tree "$pid"
             wait "$pid" 2> /dev/null || true

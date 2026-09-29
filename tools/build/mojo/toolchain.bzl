@@ -217,6 +217,14 @@ mojo_toolchain = rule(
         "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),
         "_numa_guard": attrs.dep(default = "komira//tools/build/mojo:numa_guard.sh"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
+        # The lint of every script the Mojo rules run (tools/build/lint): a
+        # validation, so no Mojo target builds while one of them has a
+        # finding. Not an input of any action.
+        "_script_lint": attrs.list(attrs.dep(), default = [
+            "komira//tools/build/lint:shell_lint",
+            "komira//tools/build/mojo:shell_lint",
+            "komira//tools/build/mojo/darwin:shell_lint",
+        ]),
         "_wrapper": attrs.dep(default = "komira//tools/build/mojo:mojo_wrapper.sh"),
     },
 )

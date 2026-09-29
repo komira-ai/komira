@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load(":cases.bzl", "darwin_properties_cases")
 
 # Fails loading this package if `darwin_properties_refusal` gets any case in
@@ -13,4 +14,9 @@ load(":census.bzl", "darwin_host_census")
 darwin_host_census(
     name = "host_census",
     target_compatible_with = ["prelude//os/constraints:macos"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["check.sh"],
 )

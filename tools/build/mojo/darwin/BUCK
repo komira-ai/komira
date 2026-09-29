@@ -1,3 +1,5 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
 # Scripts of the macOS arm64 Mojo toolchain (see darwin.bzl).
 export_file(name = "busybox.sh", visibility = ["PUBLIC"])
 
@@ -8,3 +10,10 @@ export_file(name = "mojo_wrapper.sh", visibility = ["PUBLIC"])
 export_file(name = "dyld_prelude.sh", visibility = ["PUBLIC"])
 
 export_file(name = "host_identity.sh", visibility = ["PUBLIC"])
+
+# Every script above; a validation of the Mojo toolchain (toolchain.bzl).
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["*.sh"]) + ["cc"],
+    visibility = ["PUBLIC"],
+)
