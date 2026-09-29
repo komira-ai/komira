@@ -5,3 +5,12 @@ load(":cases.bzl", "darwin_properties_cases")
 darwin_properties_cases()
 
 export_file(name = "macho.py", visibility = ["PUBLIC"])
+
+load(":census.bzl", "darwin_host_census")
+
+# The host identities the macOS workers report (see census.bzl). Only for
+# `--target-platforms komira//tools/build/platforms:darwin-arm64`.
+darwin_host_census(
+    name = "host_census",
+    target_compatible_with = ["prelude//os/constraints:macos"],
+)

@@ -1,4 +1,4 @@
-load("@komira//tools/build/platforms:defs.bzl", "darwin_macos_host")
+load("@komira//tools/build/platforms:defs.bzl", "darwin_macos_hosts")
 load("@komira//tools/build/mojo:darwin.bzl", "dyld_script", "mojo_darwin_link", "mojo_darwin_toolchain")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime")
@@ -25,16 +25,15 @@ pinned_file(
 # ---- Unpacked by remote actions (on linux `light` workers) ------------------
 
 # Unpacking moves bytes only, so it runs on the same linux workers, with the
-# same static unpacker, as the linux toolchain. bin/lld is kept as a hedge
-# only: links go through the cc on PATH (komira//tools/build/mojo/darwin:cc, the host's cc and
-# ld), as they do on linux, where the closure has no bin/lld although
-# modular.cfg names one in `lld_path`. Whether the osx-arm64 compiler ever
-# uses `lld_path` is unverified until the first compile on a macOS worker.
+# same static unpacker, as the linux toolchain. bin/lld is not kept: links
+# go through the cc on PATH (komira//tools/build/mojo/darwin:cc, the host's
+# cc and ld), as they do on linux, although modular.cfg names bin/lld in
+# `lld_path`. Measured on the macOS workers (2026-09-29): a cc that exits 7
+# fails the link of //tools/build/examples:hello.
 conda_closure(
     name = "mojo_compiler",
     exec_compatible_with = ["komira//tools/build/platforms:light"],
     target_compatible_with = _DARWIN,
-    keep = ["bin/lld"],
     package = ":mojo_compiler_1.0.0_osx-arm64.conda",
     unpacker = "komira//tools/build/toolchains:conda_unpack",
     visibility = ["PUBLIC"],
@@ -80,9 +79,9 @@ dyld_script(
     target_compatible_with = _DARWIN,
 )
 
-# The `cc` a compile finds on PATH, host_identity.sh, and the host identity the
-# macOS execution platform promises (`macos_host` in `[komira_re]
-# darwin_mojo_compile_properties` of the root cell). Unset, analysing this
+# The `cc` a compile finds on PATH, host_identity.sh, and the host identities
+# a compile may run on (`[komira_re] darwin_macos_hosts` of the root cell;
+# see DARWIN_HOSTS_KEY in platforms/defs.bzl). Unset, analysing this
 # target for darwin-arm64 fails naming that key; nothing needs it then, since
 # no macOS execution platform is registered either.
 mojo_darwin_link(
@@ -91,7 +90,7 @@ mojo_darwin_link(
     target_compatible_with = _DARWIN,
     cc = "komira//tools/build/mojo/darwin:cc",
     host_identity = "komira//tools/build/mojo/darwin:host_identity.sh",
-    macos_host = darwin_macos_host(),
+    macos_hosts = darwin_macos_hosts(),
 )
 
 # The toolchain of darwin-arm64 targets (selected by toolchains//:mojo).

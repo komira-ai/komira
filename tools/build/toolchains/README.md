@@ -111,43 +111,69 @@ check red until the check is updated with the pin.
 
 ## macOS
 
-`--target-platforms komira//tools/build/platforms:darwin-arm64` builds Mojo targets for
-macOS on Apple silicon. `toolchains//:mojo` selects the toolchain by the
-target platform's os: `komira//tools/build/toolchains/darwin:mojo` for macos, built from the
-sha256-pinned osx-arm64 compiler package of the same release.
+`--target-platforms komira//tools/build/platforms:darwin-arm64` builds Mojo
+targets for macOS on Apple silicon. `toolchains//:mojo` selects the toolchain
+by the target platform's os: `komira//tools/build/toolchains/darwin:mojo` for
+macos, built from the sha256-pinned osx-arm64 compiler package of the same
+release. The C/C++, Rust and protobuf toolchains are linux x86_64 only, so a
+darwin-arm64 target that needs one is incompatible rather than built for
+linux.
 
 Its compiles, gated tests and run checks run on macOS arm64 workers, the
-execution platform `komira//tools/build/platforms:exec-mojo-darwin-arm64`. It is
-registered only when `.buckconfig.local` names their property set:
+execution platform `komira//tools/build/platforms:exec-mojo-darwin-arm64`.
+It is registered only when `.buckconfig.local` names their property set and
+their hosts:
 
 ```ini
 [komira_re]
-  darwin_mojo_compile_properties = pool=macos-arm64,macos_sdk=26.5
+  darwin_mojo_compile_properties = pool=macos
+  darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210
 ```
 
+`darwin_mojo_compile_properties` is the exact property set the workers
+advertise, like the linux sets, and must differ from each of them.
+`darwin_macos_hosts` lists what `sh tools/build/mojo/darwin/host_identity.sh`
+prints on each worker host: the SDK version, then a digest of the developer
+dir, the SDK version and build, `cc --version`, `ld -v` and the OS build.
 Unset, no macOS platform exists, a darwin-arm64 Mojo target fails to
-configure, and the linux build is unchanged (its actions are the same with
-and without the key). The set must differ from every linux set and must carry
-`macos_sdk`, the version the workers' `xcrun --show-sdk-version` prints. The
-macOS platform is registered last, so an action that states no os never lands
-on it. Unpacking the osx-arm64 toolchain moves bytes only and runs on the
-linux `light` workers.
+configure, a wildcard over `tools/build/toolchains/darwin` skips its targets,
+and the linux build is unchanged (its actions are the same with and without
+the keys). The macOS platform is registered last, so an action that states
+no os never lands on it. Unpacking the osx-arm64 toolchain moves bytes only
+and runs on the linux `light` workers.
 
-What a macOS action takes from the worker, and why each is safe to cache:
+What a macOS action takes from the worker, and what keys it:
 
 * `/bin/sh` and the file utilities in `/bin` and `/usr/bin`, through
-  `tools/build/mojo/darwin/busybox.sh` (a fixed applet list; anything else is refused).
-  They belong to the sealed operating-system volume.
-* The Command Line Tools (or Xcode): `/usr/bin/xcrun`, the SDK, and
-  `/usr/bin/cc` through `tools/build/mojo/darwin/cc`. The SDK version is part of every
-  action key through the `macos_sdk` platform property, and the wrapper
-  refuses a host whose SDK is not the promised version.
-* The system libraries a built binary loads (`/usr/lib`, `/System`).
+  `tools/build/mojo/darwin/busybox.sh` (a fixed applet list; anything else is
+  refused). They belong to the sealed operating-system volume, whose build
+  is part of the host identity.
+* The Command Line Tools or Xcode: `/usr/bin/xcrun`, the SDK, and
+  `/usr/bin/cc` through `tools/build/mojo/darwin/cc`, which links with the
+  host's `ld`. Every compile links this way, measured on the workers: the
+  compiler does not use the `lld_path` its `modular.cfg` names, and the
+  closure has no `bin/lld`.
+* The system libraries a built binary loads (`/usr/lib`, `/System`),
+  covered by the OS build in the host identity.
 
-The compiler links with its own `bin/lld`. A built binary names its runtime
-libraries `@rpath/...` and carries one run path, `@loader_path/lib`, the
-`lib/` of its runnable directory; it targets `apple-m1` (every Apple silicon
-Mac) and macOS 11.0, the compiler's own minimum. Gated tests set
-`DYLD_LIBRARY_PATH` to the compiler's `lib/`. `tools/build/checks/darwin/check.sh` checks
-all of this without a macOS worker, from the load commands of the unpacked
-closure.
+The host list is written into every compile's inputs, so it is part of every
+action key, and a compile refuses (exit 2) a host whose identity is not
+listed, printing that host's fields. The key names the list, not the host:
+a worker pool advertises one property set for all its hosts, so which listed
+host ran an action is not part of its key. That is the residual: results
+are shared between the listed hosts, which must be interchangeable. To key
+on one host, give each its own worker property (e.g. `macos_host=<its
+identity>`) and each its own property set. A host outside the list, or one
+whose SDK, Xcode, Command Line Tools or OS is updated, is refused until the
+list is updated, which re-keys every macOS action.
+`checks//darwin:host_census` reports the identities the workers print.
+
+A built binary names its runtime libraries `@rpath/...` and carries one run
+path, `@loader_path/lib`, the `lib/` of its runnable directory; it targets
+`apple-m1` (every Apple silicon Mac) and macOS 11.0, the compiler's own
+minimum. Gated tests set `DYLD_LIBRARY_PATH` to the compiler's `lib/`, and
+run checks start the binary with no `DYLD_*` variable. Bundles
+(`mojo_bundle`, the `[shared]` sub-target) are linux only: the macOS wrapper
+refuses `--emit shared-lib`. `tools/build/checks/darwin/check.sh` checks all
+of this, most of it without a macOS worker; with the keys above set, it also
+builds and runs `//tools/build/examples:hello` on the workers.

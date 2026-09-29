@@ -80,55 +80,52 @@ _EXEC_PLATFORMS = [
     ("mojo_compile_darwin", "komira//tools/build/platforms:exec-mojo-darwin-arm64"),
 ]
 
-# The property every macOS execution platform must carry: the identity of its
-# workers' host toolchain, as mojo/darwin/host_identity.sh prints it on them
-# (the SDK version, then a digest of the developer dir, the SDK version and
-# build, the cc and ld builds, and the OS build). Those are the host's, not
-# inputs of the action, so they must be part of the action key some other
-# way; REAPI platform properties are part of the action digest, and workers
-# match them exactly. The macOS toolchain also writes the value into every
-# compile's inputs, and the compile refuses a host whose identity differs.
-DARWIN_HOST_PROPERTY = "macos_host"
-
-# `[komira_re]` key of the macOS arm64 execution platform's property set.
+# `[komira_re]` key of the macOS arm64 execution platform's property set: the
+# exact REAPI properties its workers advertise (e.g. `pool=macos`), like
+# every other set.
 DARWIN_PROPERTIES_KEY = "darwin_mojo_compile_properties"
 
-def darwin_macos_host():
-    """The host identity the root cell's macOS property set promises, or "".
+# `[komira_re]` key naming the macOS hosts those workers run on: the value
+# tools/build/mojo/darwin/host_identity.sh prints on each (the SDK version,
+# then a digest of the developer dir, the SDK version and build, the cc and
+# ld builds, and the OS build), separated by spaces.
+#
+# Those are the host's, not inputs of the action, so they must reach the
+# action key some other way. The workers advertise no property that tells
+# them apart (a worker's property set is its operator's; a pool of macOS
+# hosts is typically one set), so the key cannot come from the platform. The
+# macOS toolchain writes this list into every compile's inputs instead, and
+# the compile refuses (exit 2) a host whose identity is not in it. A cached
+# result is therefore keyed on the SET of hosts: it was built by one of
+# them, which one is not part of the key. To key on one host, give each its
+# own worker property and property set.
+DARWIN_HOSTS_KEY = "darwin_macos_hosts"
 
-    Read from the ROOT cell's config: the toolchain lives in another cell, and
-    the property set is configured where the execution platforms are. This is
-    the value the macOS toolchain writes into every compile; the execution
-    platform's property is whatever dict its caller passes, and
-    `komira_execution_platforms` refuses the two when they disagree.
+def darwin_macos_hosts():
+    """The host identities the root cell names for its macOS workers, sorted.
+
+    Read from the ROOT cell's config, where the execution platforms are
+    configured (`.buckconfig.local` belongs to the root cell only).
     """
-    for pair in read_root_config("komira_re", DARWIN_PROPERTIES_KEY, "").split(","):
-        kv = pair.split("=", 1)
-        if len(kv) == 2 and kv[0].strip() == DARWIN_HOST_PROPERTY:
-            return kv[1].strip()
-    return ""
+    return sorted([h for h in read_root_config("komira_re", DARWIN_HOSTS_KEY, "").split(" ") if h])
 
-def darwin_properties_refusal(props, toolchain_host):
+def darwin_properties_refusal(props, hosts):
     """Why a macOS property set cannot be registered, or None.
 
-    `props` is the property dict of the macOS execution platform,
-    `toolchain_host` the value the toolchain promises (`darwin_macos_host()`).
-    They come from two places when a repository passes the dict itself, and a
-    platform whose property differs from the toolchain's would file results
-    under one host identity while the compile checks another.
+    `props` is the property dict of the macOS execution platform, `hosts` the
+    host identities the toolchain accepts (`darwin_macos_hosts()`). Without
+    hosts every compile would refuse its worker, and a property set naming no
+    property would match any worker.
     """
-    host = props.get(DARWIN_HOST_PROPERTY, "")
-    if not host:
-        return ("`mojo_compile_darwin` must carry `{}=<value>`, what mojo/darwin/host_identity.sh " +
-                "prints on its workers; got {}").format(DARWIN_HOST_PROPERTY, props)
-    if host != toolchain_host:
-        return ("`mojo_compile_darwin` carries `{}={}`, but the macOS toolchain promises `{}` " +
-                "(read from `[komira_re] {}` of the root cell). Set both to the same value.").format(
-            DARWIN_HOST_PROPERTY,
-            host,
-            toolchain_host or "<unset>",
-            DARWIN_PROPERTIES_KEY,
-        )
+    if not props:
+        return "`mojo_compile_darwin` must name at least one worker property; got {}".format(props)
+    if not hosts:
+        return ("`mojo_compile_darwin` is set ({}), but `[komira_re] {}` of the root cell names no " +
+                "macOS host. Set it to what tools/build/mojo/darwin/host_identity.sh prints on each " +
+                "worker, separated by spaces.").format(props, DARWIN_HOSTS_KEY)
+    for h in hosts:
+        if "-" not in h or h.startswith("-") or h.endswith("-"):
+            return "`[komira_re] {}`: `{}` is not a host identity (<sdk version>-<digest>)".format(DARWIN_HOSTS_KEY, h)
     return None
 
 def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None, mojo_compile_darwin = None, visibility = None):
@@ -140,10 +137,9 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
     fails to configure ("no compatible execution platform") instead of running
     on a single-NUMA worker. Give it only for workers that span more than one
     NUMA node. `mojo_compile_darwin` is optional too: macOS arm64 workers
-    that build darwin-arm64 targets. It must carry `macos_host` (see
-    DARWIN_HOST_PROPERTY), equal to the one in the root cell's
-    `[komira_re] darwin_mojo_compile_properties`, and without it no
-    darwin-arm64 Mojo target can configure.
+    that build darwin-arm64 targets; it needs the root cell's
+    `[komira_re] darwin_macos_hosts` (see DARWIN_HOSTS_KEY), and without it
+    no darwin-arm64 Mojo target can configure.
     """
     if mojo_compile_multi_numa != None and mojo_compile_multi_numa == mojo_compile:
         # The same property set routes to the same workers: a numa_multi run
@@ -156,7 +152,7 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
         if mojo_compile_darwin in (light, mojo_compile, mojo_compile_multi_numa):
             fail("komira_execution_platforms: `mojo_compile_darwin` must name macOS workers, " +
                  "but it equals a linux property set ({})".format(mojo_compile_darwin))
-        refusal = darwin_properties_refusal(mojo_compile_darwin, darwin_macos_host())
+        refusal = darwin_properties_refusal(mojo_compile_darwin, darwin_macos_hosts())
         if refusal:
             fail("komira_execution_platforms: " + refusal)
     props = {

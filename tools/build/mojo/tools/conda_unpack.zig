@@ -17,9 +17,9 @@
 //!   * the closure members only: `bin/mojo`, everything under `lib/`, and
 //!     `share/max/modular.cfg`. (`bin/lld`, the crash handler and man pages
 //!     are not needed to compile and are left out of every action's inputs,
-//!     unless named with `--keep <member>`; the osx-arm64 toolchain keeps
-//!     `bin/lld` as a hedge, in case its compiler links through
-//!     modular.cfg's `lld_path` rather than the cc on PATH.) The compiler's
+//!     unless named with `--keep <member>`. Neither toolchain keeps one: a
+//!     macOS compile links through the cc on PATH, measured on a macOS
+//!     worker, not through modular.cfg's `lld_path`.) The compiler's
 //!     runtime library is `lib/libKGENCompilerRTShared.so` or, in an
 //!     osx-arm64 package, `.dylib`.
 //!   * `share/max/modular.cfg` with the package's install-prefix placeholder
@@ -291,7 +291,7 @@ pub fn main() !void {
     if (args.len >= 2 and std.mem.eql(u8, args[1], "--only-libs")) return onlyLibs(a, args);
     const usage = "usage: conda_unpack <package.conda> <out_dir> [--keep <member>]... [--lib <library.conda> <member>]...";
     if (args.len < 3) fail(usage, .{});
-    // `--keep <member>`: one more package member to extract (e.g. bin/lld).
+    // `--keep <member>`: one more package member to extract.
     // `--lib <library.conda> <member>`: one member of another package.
     var keep_members = std.ArrayList([]const u8).init(a);
     var libs = std.ArrayList([2][]const u8).init(a);

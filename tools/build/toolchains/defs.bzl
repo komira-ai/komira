@@ -116,6 +116,8 @@ def komira_cxx_toolchains(**overrides):
     attrs.update(overrides)
     zig_cxx_toolchain(
         name = "cxx",
+        # It builds for linux x86_64 only (see _LINUX_X86_64).
+        target_compatible_with = _LINUX_X86_64,
         exec_compatible_with = [_PLATFORMS + "light"],
         visibility = ["PUBLIC"],
         **attrs
@@ -150,7 +152,9 @@ def komira_rust_toolchains(**overrides):
     attrs.update(overrides)
     rust_toolchain(
         name = "rust",
-        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"],
+        # It builds for linux x86_64 only (see _LINUX_X86_64).
+        target_compatible_with = _LINUX_X86_64,
+        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"] + _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )
@@ -175,6 +179,8 @@ def komira_proto_toolchains(**overrides):
     attrs.update(overrides)
     mojo_proto_toolchain(
         name = "mojo_proto",
+        # It builds for linux x86_64 only (see _LINUX_X86_64).
+        target_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )

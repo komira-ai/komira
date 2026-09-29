@@ -2,7 +2,8 @@
 # a macOS arm64 execution host.
 #
 # usage: sh mojo_wrapper.sh <busybox> <compiler_dir> <link_dir> \
-#            <deployment_target> -- <mojo arguments...>
+#            <deployment_target> [--runpath=<path>] [--source-root=<dir>] \
+#            [--link-tail=<arg>...] -- <mojo arguments...>
 #
 # The same contract as ../mojo_wrapper.sh, with what differs on macOS:
 #
@@ -12,13 +13,19 @@
 #                  finds lib/ through its own run path (@loader_path/../lib);
 #                  nothing is set for the loader.
 #   <link_dir>     holds `cc` (mojo/darwin/cc: the host's /usr/bin/cc, with
-#                  run paths rewritten), `host_identity.sh`, and `macos_host`,
-#                  the host identity the execution platform promises. The
+#                  run paths rewritten), `host_identity.sh`, and
+#                  `macos_hosts`, the host identities a compile may run on
+#                  (`[komira_re] darwin_macos_hosts`), one per line. The
 #                  action refuses (exit 2) to run on a host whose identity
 #                  (developer dir, SDK version and build, cc and ld builds, OS
-#                  build; see host_identity.sh) is another, so a result is
-#                  never filed under the wrong host toolchain.
+#                  build; see host_identity.sh) is not listed, so a result is
+#                  never filed under a host toolchain the key does not name.
 #   <deployment_target>  MACOSX_DEPLOYMENT_TARGET for every link.
+#   --runpath, --source-root, --link-tail   as in ../mojo_wrapper.sh; a
+#                  `$ORIGIN` run path becomes `@loader_path`.
+#
+# `--emit shared-lib` (the bundle's library) is refused: bundles are linux
+# only.
 #
 # The system libraries and the SDK are the host's: /usr/lib, /System and the
 # Command Line Tools (found by the compiler through /usr/bin/xcrun). No other
@@ -50,8 +57,36 @@ TC=$(abspath "$2")
 LINK=$(abspath "$3")
 DEPLOYMENT_TARGET=$4
 shift 4
-[ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
+RUNPATH='@loader_path/lib'
+SRCROOT=""
+LINK_TAIL=""
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --runpath=*)
+            RUNPATH=${1#--runpath=}
+            case "$RUNPATH" in
+                '$ORIGIN') RUNPATH='@loader_path' ;;
+                '$ORIGIN/'*) RUNPATH="@loader_path/${RUNPATH#\$ORIGIN/}" ;;
+                *) echo "mojo_wrapper: REFUSING: --runpath=$RUNPATH is not \$ORIGIN-relative" >&2; exit 2 ;;
+            esac
+            ;;
+        --source-root=*) SRCROOT=$(abspath "${1#--source-root=}") ;;
+        --link-tail=*)
+            LINK_TAIL="$LINK_TAIL${1#--link-tail=}
+"
+            ;;
+        *) break ;;
+    esac
+    shift
+done
+[ "$#" -gt 0 ] && [ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
 shift
+for a in "$@"; do
+    if [ "$a" = "shared-lib" ]; then
+        echo "mojo_wrapper: REFUSING: --emit shared-lib on macOS; bundles are linux only" >&2
+        exit 2
+    fi
+done
 
 EXPECT=""
 prev=""
@@ -81,8 +116,8 @@ while IFS= read -r member; do
     fi
 done < "$TC/CLOSURE_MANIFEST"
 [ "$missing" = 0 ] || exit 2
-if [ ! -x "$LINK/cc" ] || [ ! -s "$LINK/macos_host" ] || [ ! -s "$LINK/host_identity.sh" ]; then
-    echo "mojo_wrapper: REFUSING: $3 must hold an executable cc, host_identity.sh and a non-empty macos_host" >&2
+if [ ! -x "$LINK/cc" ] || [ ! -s "$LINK/macos_hosts" ] || [ ! -s "$LINK/host_identity.sh" ]; then
+    echo "mojo_wrapper: REFUSING: $3 must hold an executable cc, host_identity.sh and a non-empty macos_hosts" >&2
     exit 2
 fi
 
@@ -101,14 +136,19 @@ sed 's|^shared_libs = .*|shared_libs = -Xlinker,-rpath,-Xlinker,@loader_path/lib
     "$T/modular/modular.cfg.in" > "$T/modular/modular.cfg"
 rm -f "$T/modular/modular.cfg.in"
 
-# ---- the host is the one the platform promised -----------------------------
-want_host=$(cat "$LINK/macos_host")
+# ---- the host is one the action key names ----------------------------------
 have_host=$(sh "$LINK/host_identity.sh") || have_host=""
-if [ "$have_host" != "$want_host" ]; then
-    echo "mojo_wrapper: REFUSING: this host's identity is '${have_host:-unreadable}', the execution platform promises '$want_host'. This host:" >&2
+if [ -z "$have_host" ] || ! grep -qxF "$have_host" "$LINK/macos_hosts"; then
+    echo "mojo_wrapper: REFUSING: this host's identity is '${have_host:-unreadable}', not one of [$(tr '\n' ' ' < "$LINK/macos_hosts")] ([komira_re] darwin_macos_hosts). This host:" >&2
     sh "$LINK/host_identity.sh" --fields >&2 || true
     exit 2
 fi
+
+# ---- what the `cc` shim adds to every link ---------------------------------
+printf '%s' "$LINK_TAIL" > "$T/cc.link_tail"
+KOMIRA_CC_RUNPATH=$RUNPATH
+KOMIRA_CC_LINK_TAIL="$T/cc.link_tail"
+export KOMIRA_CC_RUNPATH KOMIRA_CC_LINK_TAIL
 
 PATH="$LINK:$TC/bin:$T/bin"
 MODULAR_HOME="$T/modular"
@@ -124,13 +164,24 @@ export PATH MODULAR_HOME CC MACOSX_DEPLOYMENT_TARGET MODULAR_CACHE_DIR TMPDIR \
     HOME XDG_CACHE_HOME KGEN_CompilerRT_AsyncRT_ParallelismLevel \
     MODULAR_CRASH_REPORTING_ENABLED
 
+STRIP=""
+if [ -n "$SRCROOT" ] && [ "$1" = "build" ]; then
+    STRIP="-strip-file-prefix=$SRCROOT/"
+fi
 rc=0
-"$TC/bin/mojo" "$@" || rc=$?
+if [ -n "$STRIP" ]; then
+    SUB=$1
+    shift
+    "$TC/bin/mojo" "$SUB" "$STRIP" "$@" || rc=$?
+else
+    "$TC/bin/mojo" "$@" || rc=$?
+fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2
     rc=3
 elif [ "$rc" = 0 ] && grep -qF "$PWD" "$EXPECT"; then
-    echo "mojo_wrapper: $EXPECT contains this action's working directory ($PWD)" >&2
+    echo "mojo_wrapper: $EXPECT contains this action's working directory ($PWD):" >&2
+    grep -aoF "$PWD" "$EXPECT" | head -n 5 >&2 || true
     rc=4
 fi
 rm -rf "$T"

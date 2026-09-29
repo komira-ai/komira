@@ -1,12 +1,12 @@
-# host_identity.sh -- the identity of a macOS execution host, as the value of
-# its `macos_host` platform property.
+# host_identity.sh -- the identity of a macOS execution host, as listed in
+# `[komira_re] darwin_macos_hosts` (tools/build/platforms/defs.bzl).
 #
 # usage: sh host_identity.sh            prints the value: <sdk version>-<digest>
 #        sh host_identity.sh --fields   prints the fields the digest covers
 #
-# Run it on each macOS worker to get the value its property set must carry;
-# every macOS compile runs it again and refuses (exit 2 in the wrapper) a host
-# whose value differs from the one the execution platform promises.
+# Run it on each macOS worker to get the value to list; every macOS compile
+# runs it again and refuses (exit 2 in the wrapper) a host whose value is not
+# listed.
 #
 # A compile on macOS uses more of the host than its inputs name: the C driver
 # and the linker it runs, the SDK, and the operating system whose libraries a
@@ -53,9 +53,9 @@ if [ "${1:-}" = "--fields" ]; then
 fi
 [ "$#" = 0 ] || { echo "host_identity: usage: sh host_identity.sh [--fields]" >&2; exit 2; }
 digest=$(printf '%s\n' "$text" | /sbin/md5 -q)
-sdk=$(printf '%s\n' "$text" | while IFS= read -r line; do
-    case "$line" in sdk_version=*) printf '%s' "${line#sdk_version=}" ;; esac
-done)
+# (No `case` inside `$(...)`: macOS /bin/sh is bash 3.2, which reads the
+# pattern's `)` as the end of the command substitution.)
+sdk=$(printf '%s\n' "$text" | /usr/bin/sed -n 's/^sdk_version=//p')
 case "$digest" in
     [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]*) ;;
     *) echo "host_identity: REFUSING: md5 printed '$digest', not a digest" >&2; exit 2 ;;

@@ -3,14 +3,17 @@
 #
 # Runs the host's /usr/bin/cc (Apple clang from the Command Line Tools or
 # Xcode), which links with the host's ld. Which driver, linker and SDK those
-# are is a property of the host, so the execution platform names it: see
-# `macos_host` in platforms/defs.bzl and host_identity.sh.
+# are is a property of the host, so the action key names the hosts a compile
+# may run on: see DARWIN_HOSTS_KEY in tools/build/platforms/defs.bzl and
+# host_identity.sh.
 #
 # The command line is the compiler's, with every run path removed (it would
-# name the action's sandbox) and exactly one added: `@loader_path/lib`, the
+# name the action's sandbox) and exactly one added: $KOMIRA_CC_RUNPATH, set by
+# mojo_wrapper.sh (`@loader_path/lib` unless the rule asks for another), the
 # lib/ directory next to the binary in a runnable directory. `-Wl,-S` keeps
 # debug-map entries (which name the object files, inside the sandbox) out of
-# the output.
+# the output. The lines of $KOMIRA_CC_LINK_TAIL (the rule's C libraries) are
+# appended to the end of the command line.
 
 set -u
 _argc=$#
@@ -34,4 +37,9 @@ while [ "$_argc" -gt 0 ]; do
   esac
   set -- "$@" "$_a"
 done
-exec /usr/bin/cc -Wl,-S -Wl,-rpath,@loader_path/lib "$@"
+if [ -n "${KOMIRA_CC_LINK_TAIL:-}" ]; then
+  while IFS= read -r _l; do
+    set -- "$@" "$_l"
+  done < "$KOMIRA_CC_LINK_TAIL"
+fi
+exec /usr/bin/cc -Wl,-S "-Wl,-rpath,${KOMIRA_CC_RUNPATH:-@loader_path/lib}" "$@"

@@ -67,7 +67,7 @@ def main(compiler, runtime, deployment_target):
     for name in set(carried) & set(libs):
         if open(os.path.join(runtime, name), "rb").read() != open(os.path.join(compiler, "lib", name), "rb").read():
             problems.append("runtime %s differs from the compiler's lib/%s" % (name, name))
-    binaries = [("bin/mojo", 2), ("bin/lld", 2)] + [("lib/" + n, 6) for n in libs]
+    binaries = [("bin/mojo", 2)] + [("lib/" + n, 6) for n in libs]
     for rel, want_type in binaries:
         if rel not in manifest:
             problems.append("%s is not in CLOSURE_MANIFEST" % rel)

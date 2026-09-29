@@ -27,7 +27,9 @@
   # of running on single-node workers.
   # mojo_compile_multi_numa_properties = pool=mojo-multi-numa
   # Optional: macOS arm64 workers, for `--target-platforms
-  # komira//tools/build/platforms:darwin-arm64`. Must carry macos_host=<what
-  # `sh mojo/darwin/host_identity.sh` prints on the workers>; see README.md,
-  # "macOS".
-  # darwin_mojo_compile_properties = pool=macos-arm64,macos_host=26.5-0123456789abcdef
+  # komira//tools/build/platforms:darwin-arm64`: their exact property set,
+  # and the host identity each prints for `sh
+  # tools/build/mojo/darwin/host_identity.sh`, separated by spaces. See
+  # tools/build/toolchains/README.md, "macOS".
+  # darwin_mojo_compile_properties = pool=macos
+  # darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210

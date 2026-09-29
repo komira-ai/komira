@@ -105,8 +105,9 @@
 #  24. The macOS arm64 target and execution platform: registration only when
 #      configured, resolution, compile command lines, linux actions
 #      unchanged, the osx-arm64 closure's Mach-O load commands (unpacked on
-#      the farm) and the macOS scripts against stand-ins
-#      (tools/build/checks/darwin/check.sh).
+#      the farm), the macOS scripts against stand-ins, and, when the macOS
+#      workers are configured, a build and run check of
+#      //tools/build/examples:hello on them (tools/build/checks/darwin/check.sh).
 set -uo pipefail
 
 umbrella=1
@@ -605,7 +606,7 @@ expect_green location_path "checks//location_path:main[run_check]"
 darwin_rc=0
 darwin_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/checks/darwin/check.sh "$LOG" 2>&1) || darwin_rc=$?
 printf '%s\n' "$darwin_out" > "$LOG/darwin.log"
-grep -E '^(PASS|FAIL)  ' "$LOG/darwin.log"
+grep -E '^(PASS|FAIL|SKIP)  ' "$LOG/darwin.log"
 darwin_fails=$(grep -c '^FAIL  ' "$LOG/darwin.log" || true)
 if [ "$darwin_rc" != 0 ] && [ "$darwin_fails" = 0 ]; then
     fail "darwin: tools/build/checks/darwin/check.sh exited $darwin_rc without a FAIL line (see $LOG/darwin.log)"

@@ -80,6 +80,10 @@ Two details keep action digests portable:
   not after the target that registers it. The name keys the configuration of
   every exec dep, and so appears in their output paths; naming it this way
   keeps the digests of a mounting repository equal to a standalone checkout's.
+- **macOS workers.** `darwin_mojo_compile_properties` registers
+  `exec-mojo-darwin-arm64` for the `darwin-arm64` target platform; it needs
+  `darwin_macos_hosts` as well. See [the toolchain README](../toolchains/README.md),
+  "macOS".
 
 ## Multi-NUMA runs
 
