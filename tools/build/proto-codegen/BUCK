@@ -1,3 +1,4 @@
+load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
 load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library")
 
 # The protoc plugins that generate Mojo, from the `komira_proto_codegen`
@@ -36,5 +37,15 @@ rust_binary(
     srcs = ["src/main_db.rs"],
     crate_root = "src/main_db.rs",
     deps = _DEPS + [":komira_proto_codegen"],
+    visibility = ["PUBLIC"],
+)
+
+# The `(komira.db.*)` options protoc-gen-mojo-db reads, imported as
+# "komira/db/options.proto": a `proto_deps` entry of every
+# mojo_db_proto_library.
+proto_srcs(
+    name = "db_options",
+    srcs = ["db/options.proto"],
+    import_prefix = "komira",
     visibility = ["PUBLIC"],
 )

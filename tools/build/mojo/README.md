@@ -162,7 +162,9 @@ imports (its runtime). A `.proto` is imported by other `.proto` files at
 `mojo_proto_library` targets whose files these import. The generated package
 is flat, and a reference to a message of another file is generated as a
 module of the same package: with `bundle_proto_deps = True` the whole
-`proto_deps` closure is generated into this package too. Sub-targets:
+`proto_deps` closure is generated into this package too, or, with
+`bundle_only = [<import path>, ...]`, only those files of it (a closure often
+holds files that only declare options, which need no Mojo). Sub-targets:
 `[gen]` (the generated directory), `[<stem>.mojo]`, `[proto]` (the staged
 `.proto` files). A generated package has no tests of its own (no
 `test_srcs`): it is gated only through the tests of the libraries and
@@ -170,11 +172,31 @@ binaries that depend on it. Generation is deterministic, checked by
 comparing two uncached builds
 ([check 23](../checks/README.md#23-protobuf)).
 
+```python
+load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "proto_srcs")
+```
+
+`mojo_db_proto_library(name, srcs, outs, deps, proto_deps, import_prefix)`
+runs protoc with `protoc-gen-mojo-db` instead, and precompiles its output the
+same way. For each message of `srcs` annotated `(komira.db.table)` the plugin
+writes a struct implementing `komira_db.DbStorable` (column names and
+logical types, `to_row`/`from_row`, `insert_sql`, CREATE TABLE statements)
+into `<stem>_db.mojo`; a `.proto` with no table gets no file, so `outs` states
+the files, and a stated file the plugin does not write fails the generation.
+The options are defined in `proto-codegen/db/options.proto`, imported as
+`komira/db/options.proto` through the `proto_srcs` target
+`komira//tools/build/proto-codegen:db_options` in `proto_deps`. protoc hands
+a plugin the descriptors of the whole import closure with their custom
+options, which the plugin decodes from the raw request bytes; no
+descriptor-set flag is passed. `deps` holds the `komira_db` runtime the
+generated code imports. `proto_srcs(name, srcs, import_prefix, proto_deps)`
+names `.proto` files that others import but no Mojo is generated from.
+
 The toolchain, `toolchains//:mojo_proto` (declared by
 `komira_proto_toolchains()`, see [toolchains](../toolchains/README.md)), is protoc
 29.1 (the sha256-pinned static release build, with its well-known-type
-`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo`,
-built from source with the [Rust rules](../rust/README.md) against the
+`.proto` files) and `komira//tools/build/proto-codegen:protoc-gen-mojo` and
+`:protoc-gen-mojo-db`, built from source with the [Rust rules](../rust/README.md) against the
 crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
 in [`../proto-codegen/`](../proto-codegen/);
 [`checks//proto`](../checks/proto/BUCK) holds the example protos and tests.

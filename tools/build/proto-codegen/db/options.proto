@@ -1,0 +1,68 @@
+// The `(komira.db.*)` options read by protoc-gen-mojo-db. A message carrying
+// `(komira.db.table)` is a table: the plugin writes a `DbStorable`
+// implementation for it (column names and types, row conversion, INSERT and
+// CREATE TABLE statements) into `<stem>_db.mojo`. Imported by `.proto` files
+// as "komira/db/options.proto".
+//
+// The extension numbers are the plugin's contract (db_options.rs decodes them
+// from the raw descriptors): change them in both places or neither.
+
+syntax = "proto3";
+
+package komira.db;
+
+import "google/protobuf/descriptor.proto";
+
+// A composite index: its columns in order, each with a direction.
+message DbCompositeIndex {
+  repeated DbIndexField fields = 1;
+  // A UNIQUE index.
+  bool unique = 2;
+  // A partial-index predicate (SQL backends only).
+  string partial_where = 3;
+  DbQueryScope scope = 4;
+}
+
+message DbIndexField {
+  // The column name, after any `(komira.db.column)` override.
+  string col = 1;
+  // Descending when true.
+  bool desc = 2;
+}
+
+// The scope of an index on a document backend.
+enum DbQueryScope {
+  SCOPE_COLLECTION = 0;
+  SCOPE_COLLECTION_GROUP = 1;
+}
+
+extend google.protobuf.MessageOptions {
+  // Marks the message a table and names it.
+  optional string table = 50001;
+  // The primary-key column(s), comma separated; default "id".
+  optional string pk = 50002;
+  // A secondary index over one column; repeatable.
+  repeated string index = 50003;
+  // Emit only the CREATE TABLE statements (the `DbSchema` trait), not the
+  // row conversion.
+  optional bool schema_only = 50004;
+  // A composite UNIQUE constraint over these columns, comma separated;
+  // repeatable.
+  repeated string unique_together = 50005;
+  // A composite index; repeatable.
+  repeated DbCompositeIndex composite_index = 50006;
+}
+
+extend google.protobuf.FieldOptions {
+  // The logical column type, overriding the one derived from the field type
+  // (for example "uuid", "timestamptz", "jsonb").
+  optional string col_type = 50101;
+  // The column name, when it differs from the field name.
+  optional string column = 50102;
+  // The column's SQL DEFAULT expression.
+  optional string default = 50103;
+  // A foreign key, for example "teams(id)".
+  optional string references = 50104;
+  // A column-level UNIQUE constraint.
+  optional bool unique = 50105;
+}

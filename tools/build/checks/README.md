@@ -347,13 +347,22 @@ remotely. The generated struct follows a field rename in the `.proto`, and
 the test written for the old name fails to compile
 (`checks//proto:test_person_renamed`). A `.proto` using an imported file's
 message compiles only with that file bundled
-(`checks//proto:team_unbundled_proto` must fail).
+(`checks//proto:team_unbundled_proto` must fail). `bundle_only` generates part
+of the bundled closure: `checks//proto:roster_proto` holds exactly
+`roster.mojo` and `person.mojo`, while bundling all of it also generates the
+options file its runtime cannot compile (`roster_full_bundle` must fail), and
+a selection outside the closure is refused (`roster_bad_selection`).
+`mojo_db_proto_library`: the DbStorable code generated for the table of
+`db/tasks.proto` passes `checks//proto:test_tasks_db` against a minimal
+`komira_db`, and a declared `outs` file the plugin does not write (a `.proto`
+without a table) fails the generation (`tasks_db_wrong_outs`).
 
 Generation is deterministic: two uncached builds (an isolated daemon,
-`komira_checks_det`, its buck-out cleaned, `--no-remote-cache`) of the
-plugin, the generated sources of two packages and one compiled package give
-the same bytes. Each build must have run the plugin's rustc and both
-generations remotely, or the comparison proves nothing. About 16 minutes;
+`komira_checks_det`, its buck-out cleaned, `--no-remote-cache`) of both
+plugins, the generated sources of three packages (one of them
+`mojo_db_proto_library`) and two compiled packages give the same bytes. Each
+build must have run both plugins' rustc and every generation (remotely, or
+locally in a local-only run), or the comparison proves nothing. About 16 minutes;
 skipped with `--no-uncached`.
 
 ## 25. Local default

@@ -1,7 +1,7 @@
 {
  "format": 1,
  "generated_by": "python3 tools/kg/kg.py graph",
- "inputs": "f299994251554b08b1a7a20b5f38e356b2e24df277c60d718edef601d9d267f8",
+ "inputs": "a65c970df8fe95d10b9f261159a96061b2338ce7ddbb37e843073fc9d4812565",
  "query": "kind(\".*\", //... + checks//... + toolchains//...)",
  "targets": {
   "checks//bundle_parity:parity": {
@@ -209,6 +209,15 @@
    ],
    "kind": "mojo_multi_numa_test"
   },
+  "checks//proto:komira_db": {
+   "deps": [
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_library",
+   "srcs": [
+    "tools/build/checks/proto/db/komira_db/__init__.mojo"
+   ]
+  },
   "checks//proto:komira_serde": {
    "deps": [
     "toolchains//:mojo"
@@ -238,6 +247,71 @@
    "kind": "mojo_proto_library",
    "srcs": [
     "tools/build/checks/proto/renamed/person.proto"
+   ]
+  },
+  "checks//proto:roster_bad_selection": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/roster/roster.proto"
+   ]
+  },
+  "checks//proto:roster_full_bundle": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/roster/roster.proto"
+   ]
+  },
+  "checks//proto:roster_proto": {
+   "deps": [
+    "checks//proto:komira_serde",
+    "checks//proto:person_proto",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/roster/roster.proto"
+   ]
+  },
+  "checks//proto:tasks_db": {
+   "deps": [
+    "checks//proto:komira_db",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_db_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/db/note.proto",
+    "tools/build/checks/proto/db/tasks.proto"
+   ]
+  },
+  "checks//proto:tasks_db_wrong_outs": {
+   "deps": [
+    "checks//proto:komira_db",
+    "komira//tools/build/proto-codegen:db_options",
+    "toolchains//:mojo",
+    "toolchains//:mojo_proto"
+   ],
+   "kind": "mojo_db_proto_library",
+   "srcs": [
+    "tools/build/checks/proto/db/note.proto",
+    "tools/build/checks/proto/db/tasks.proto"
    ]
   },
   "checks//proto:team_proto": {
@@ -284,6 +358,17 @@
    "kind": "mojo_test",
    "srcs": [
     "tools/build/checks/proto/test_person.mojo"
+   ]
+  },
+  "checks//proto:test_tasks_db": {
+   "deps": [
+    "checks//proto:komira_db",
+    "checks//proto:tasks_db",
+    "toolchains//:mojo"
+   ],
+   "kind": "mojo_test",
+   "srcs": [
+    "tools/build/checks/proto/test_tasks_db.mojo"
    ]
   },
   "checks//proto:test_team": {
@@ -1738,6 +1823,12 @@
    ],
    "kind": "constraint_value"
   },
+  "komira//tools/build/proto-codegen:db_options": {
+   "kind": "proto_srcs",
+   "srcs": [
+    "tools/build/proto-codegen/db/options.proto"
+   ]
+  },
   "komira//tools/build/proto-codegen:komira_proto_codegen": {
    "deps": [
     "komira//third_party/rust:prost",
@@ -2061,6 +2152,7 @@
   "toolchains//:mojo_proto": {
    "deps": [
     "komira//tools/build/proto-codegen:protoc-gen-mojo",
+    "komira//tools/build/proto-codegen:protoc-gen-mojo-db",
     "komira//tools/build/toolchains/proto:protoc",
     "komira//tools/build/toolchains:busybox"
    ],
