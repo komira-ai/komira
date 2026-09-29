@@ -2,7 +2,14 @@
 #
 # usage: busybox sh mojo_wrapper.sh <busybox> <compiler_dir> <zig_dir> \
 #            <cc_target> [--runpath=<path>] [--source-root=<dir>] \
-#            -- <mojo arguments...>
+#            [--link-tail=<arg>...] -- <mojo arguments...>
+#
+# Each --link-tail argument (a static library, or a driver flag such as
+# -lc++) is appended, in order, to the END of every link line, after the
+# compiler's own objects and archive. That is the position a single-pass
+# linker needs for a library the Mojo code references (zig's lld does not
+# depend on it). Paths stay relative to the action's working directory, where
+# the compiler runs the link.
 #
 # --source-root names the directory the sources were staged in. The compiler
 # records source file names in what it builds (for error locations); for a
@@ -57,7 +64,8 @@ CC_TARGET=$4
 shift 4
 RUNPATH='$ORIGIN/lib'
 SRCROOT=""
-while :; do
+LINK_TAIL=""
+while [ "$#" -gt 0 ]; do
     case "$1" in
         --runpath=*)
             RUNPATH=${1#--runpath=}
@@ -67,11 +75,15 @@ while :; do
             esac
             ;;
         --source-root=*) SRCROOT=$(abspath "${1#--source-root=}") ;;
+        --link-tail=*)
+            LINK_TAIL="$LINK_TAIL${1#--link-tail=}
+"
+            ;;
         *) break ;;
     esac
     shift
 done
-[ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
+[ "$#" -gt 0 ] && [ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
 shift
 
 EXPECT=""
@@ -115,6 +127,7 @@ if grep -q '@@MOJO_TOOLCHAIN_ROOT@@' "$T/modular/modular.cfg"; then
 fi
 
 # ---- cc shim: `mojo build` links through `cc` on PATH ---------------------
+printf '%s' "$LINK_TAIL" > "$T/cc.link_tail"
 # Rewrites `-Xlinker -L<dir>` / `-Xlinker -l<lib>` into plain driver flags and
 # `-Xlinker --opt` into `-Wl,--opt`; other `-Xlinker` pairs pass through.
 # Drops every run path (`-rpath <p>` in any spelling), then adds the one run
@@ -157,6 +170,9 @@ while [ "\$_argc" -gt 0 ]; do
   esac
   set -- "\$@" "\$_a"
 done
+while IFS= read -r _l; do
+  set -- "\$@" "\$_l"
+done < "$T/cc.link_tail"
 exec "$ZIG/zig" cc -target "$CC_TARGET" -Wl,--strip-debug -Wl,--enable-new-dtags '-Wl,-rpath,$RUNPATH' "\$@"
 EOF
 chmod +x "$T/cc/cc"

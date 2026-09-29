@@ -48,7 +48,7 @@ def _refusal(bb, what):
         bb,
         "sh",
         "-c",
-        "echo \"cxx toolchain: {} is not provided (see mojo/cxx.bzl)\" >&2; exit 2".format(what),
+        "echo \"cxx toolchain: {} is not provided (see tools/build/mojo/cxx.bzl)\" >&2; exit 2".format(what),
     ))
 
 def _zig_tool(launcher, zig, sub):
@@ -186,7 +186,7 @@ def _no_python_bootstrap_toolchain_impl(ctx):
             bb,
             "sh",
             "-c",
-            "echo 'python bootstrap toolchain: no Python interpreter is provided (see mojo/cxx.bzl)' >&2; exit 2",
+            "echo 'python bootstrap toolchain: no Python interpreter is provided (see tools/build/mojo/cxx.bzl)' >&2; exit 2",
             "sh",
         )),
     ]

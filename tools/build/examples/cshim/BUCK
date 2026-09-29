@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library", "mojo_test")
+
+# A C library, built by the prelude's cxx_library with toolchains//:cxx.
+cxx_library(
+    name = "add",
+    srcs = ["add.c"],
+    exported_headers = ["add.h"],
+    visibility = ["PUBLIC"],
+)
+
+# A Mojo package calling into it. The C library is in `deps` like a Mojo
+# package; it is linked into every executable that has this package in its
+# closure, including the package's own gated test.
+mojo_library(
+    name = "cadd",
+    srcs = ["cadd/__init__.mojo"],
+    test_srcs = ["tests/test_cadd.mojo"],
+    deps = [":add"],
+    visibility = ["PUBLIC"],
+)
+
+# A binary reaching the C library only through the package.
+mojo_binary(
+    name = "cadd_user",
+    srcs = ["cadd_user.mojo"],
+    deps = [":cadd"],
+    expected_stdout = "2 + 3 = 5\n",
+)
+
+# A test calling the C library directly.
+mojo_test(
+    name = "test_add_direct",
+    srcs = ["test_add_direct.mojo"],
+    deps = [":add"],
+)

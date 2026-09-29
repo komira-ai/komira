@@ -146,6 +146,34 @@ welded into the library's package, since that would need a platform per
 action. A gate that publishes a package only after such a run would take the
 run's output as an input of a separate publishing target.
 
+## C and C++
+
+C and C++ code is built with the prelude's own `cxx_library` rule, using
+`toolchains//:cxx` (declared by `komira_cxx_toolchains` in
+[`../toolchains/defs.bzl`](../toolchains/defs.bzl)): zig's clang (from the
+pinned zig) for `x86_64-linux-gnu.2.34`, `x86-64-v3`, every object
+position-independent and compiled with `-g0`. Compiles and archives run on
+`exec-light`. The toolchain names no host tool: `zig_cc_launcher`
+([`tools/zig_cc_launcher.zig`](tools/zig_cc_launcher.zig), built by a remote
+action like `conda_unpack`) runs zig after expanding the nested argument files
+the prelude writes, which zig itself refuses. The prelude's Python helper
+tools, `nm`, `objcopy` and `strip` are not provided; the features using them
+(dependency files, header maps, thin LTO, stripping) are off, and reaching one
+fails with `cxx toolchain: <tool> is not provided`.
+`toolchains//:python_bootstrap` exists only because configuring a
+`cxx_library` names it; it has no interpreter. A repository with its own
+C/C++ toolchain keeps it and does not call `komira_cxx_toolchains`.
+
+A Mojo target lists C/C++ libraries in `deps` next to Mojo packages. A dep
+providing `MergedLinkInfo` (any `cxx_library`) is linked, statically, into
+every executable with that target in its closure: a `mojo_library` passes its
+C deps on to its consumers and to its own gated tests. A dep providing neither
+`MojoInfo` nor `MergedLinkInfo` is refused. The link arguments go at the end of
+the link line, after the compiler's own objects. C++ code links zig's libc++
+statically: its `cxx_library` lists
+`komira//tools/build/toolchains:libcxx` in `exported_deps`.
+[`../examples/cshim`](../examples/cshim) calls C from Mojo.
+
 ## Errors
 
 | message | from | meaning |
@@ -156,6 +184,8 @@ run's output as an input of a separate publishing target.
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
 | `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |
 | `numa_guard: REFUSING to run: ...` (exit 3) | [`numa_guard.sh`](numa_guard.sh) | a multi-NUMA run landed on a worker it can use fewer than `numa_nodes` NUMA nodes of |
+| `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
+| `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
 | `unable to locate module '<pkg>'` | the compiler | the importing target does not list that package in `deps` |
 
 ## Not yet supported
@@ -163,7 +193,7 @@ run's output as an input of a separate publishing target.
 A `data` attribute for test fixtures (a gated test runs with the action root
 as its working directory); test helper modules or test-only deps (each gated
 test is built from its one file against the library); holding a known-failing
-test; extra compile flags, defines, include roots, or C libraries to link; a
-compile watchdog; choosing the package root (the shallowest `__init__.mojo`
+test; extra compile flags, defines, or include roots; shared C libraries (C
+deps link statically); a compile watchdog; choosing the package root (the shallowest `__init__.mojo`
 in `srcs` is the root); a gated library test that needs more than one NUMA
 node (see [Multi-NUMA tests](#multi-numa-tests)).

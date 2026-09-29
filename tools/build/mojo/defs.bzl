@@ -16,12 +16,13 @@ Each `-I` directory given to the compiler holds exactly one `.mojoc`, so a
 staged source directory can never shadow a package.
 """
 
+load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
 
-def _mojo_cmd(tc, args, runpath = None, source_root = None):
+def _mojo_cmd(tc, args, runpath = None, source_root = None, link_tail = None):
     return cmd_args(
         tc.busybox,
         "sh",
@@ -32,12 +33,51 @@ def _mojo_cmd(tc, args, runpath = None, source_root = None):
         tc.cc_target,
         ["--runpath=" + runpath] if runpath else [],
         [cmd_args(source_root, format = "--source-root={}")] if source_root else [],
+        # Appended by the wrapper's `cc` shim to the END of the link line, after
+        # the compiler's own objects and archive (see mojo_wrapper.sh).
+        [cmd_args(link_tail, format = "--link-tail={}")] if link_tail else [],
         "--",
         args,
     )
 
+# `deps` takes two kinds of target, told apart by provider:
+#   MojoInfo        a Mojo package (mojo_library): its closure goes on `-I`.
+#   MergedLinkInfo  a C/C++ library (the prelude's cxx_library, or anything
+#                   else providing it): linked, statically and PIC, into every
+#                   executable built with this target in its closure.
+# Anything else is refused.
+def _check_deps(ctx):
+    for d in ctx.attrs.deps:
+        if MojoInfo not in d and MergedLinkInfo not in d:
+            fail("{}: dep {} provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)".format(ctx.label, d.label))
+
 def _dep_closure(ctx):
-    return [d[MojoInfo].pkgs for d in ctx.attrs.deps]
+    return [d[MojoInfo].pkgs for d in ctx.attrs.deps if MojoInfo in d]
+
+def _c_link(ctx):
+    """MergedLinkInfo of every C/C++ library this target's code may call, or None."""
+    infos = []
+    for d in ctx.attrs.deps:
+        if MojoInfo in d:
+            if d[MojoInfo].c_link != None:
+                infos.append(d[MojoInfo].c_link)
+        elif MergedLinkInfo in d:
+            infos.append(d[MergedLinkInfo])
+    if not infos:
+        return None
+    return create_merged_link_info_for_propagation(ctx, infos)
+
+def _link_tail(c_link):
+    """The link arguments of `c_link` in dependency order (dependents first)."""
+    if c_link == None:
+        return None
+
+    # The prelude's own link steps read the per-strategy link infos the same
+    # way (link_info.bzl, get_link_args_for_strategy).
+    infos = c_link._infos.get(LinkStrategy("static_pic"))
+    if infos == None:
+        return None
+    return infos.project_as_args("default", ordering = "preorder")
 
 def _package_root(ctx, srcs):
     """Package-relative directory holding the shallowest `__init__.mojo`."""
@@ -87,8 +127,8 @@ def komira_main(
     return __wrap_and_execute_raising_main[_komira_program_main](argc, argv)
 """
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, shared = False):
-    """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets.
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False):
+    """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     With `shared`, emits a shared library instead: DT_SONAME is the output's
     file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
@@ -136,7 +176,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             staged.project(entry),
             "-o",
             exe.as_output(),
-        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged),
+        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = _link_tail(c_link)),
         category = category,
         identifier = identifier,
     )
@@ -157,7 +197,9 @@ def _library_impl(ctx):
     _check_import_name(ctx, import_name)
     root = _package_root(ctx, ctx.attrs.srcs)
     src_dir = _stage(ctx, "src/" + import_name, ctx.attrs.srcs, root)
+    _check_deps(ctx)
     deps = _dep_closure(ctx)
+    c_link = _c_link(ctx)
 
     ungated = ctx.actions.declare_output("ungated/" + import_name + ".mojoc")
     dep_closure = ctx.actions.tset(MojoPkgTSet, children = deps)
@@ -193,6 +235,7 @@ def _library_impl(ctx):
             ctx.attrs.test_optimization_level,
             "mojo_build_test",
             stem,
+            c_link,
         )
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         ctx.actions.run(
@@ -241,6 +284,7 @@ def _library_impl(ctx):
             },
         ),
         MojoInfo(
+            c_link = c_link,
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
         ),
@@ -253,7 +297,8 @@ _TOOLCHAIN_ATTR = {
 mojo_library = rule(
     impl = _library_impl,
     attrs = {
-        "deps": attrs.list(attrs.dep(providers = [MojoInfo]), default = []),
+        # Mojo packages and C/C++ libraries; see _check_deps.
+        "deps": attrs.list(attrs.dep(), default = []),
         "import_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = "3"),
@@ -274,7 +319,8 @@ def _executable(ctx, category):
     tc = _toolchain(ctx)
     main = _main_src(ctx)
     srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
-    exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None)
+    _check_deps(ctx)
+    exe = _build_executable(ctx, tc, ctx.label.name, srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, category, None, _c_link(ctx))
     return tc, exe
 
 def _runnable(ctx, tc, exe):
@@ -310,7 +356,7 @@ def _run_check(ctx, tc, command, guard = []):
 def _shared(ctx, tc):
     main = _main_src(ctx)
     srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
-    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, shared = True)
+    return _build_executable(ctx, tc, "shared/lib{}.so".format(ctx.label.name), srcs, main, _dep_closure(ctx), ctx.attrs.optimization_level, "mojo_build_shared", None, _c_link(ctx), shared = True)
 
 def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
@@ -331,7 +377,8 @@ def _binary_impl(ctx):
     ]
 
 _EXECUTABLE_ATTRS = {
-    "deps": attrs.list(attrs.dep(providers = [MojoInfo]), default = []),
+    # Mojo packages and C/C++ libraries; see _check_deps.
+    "deps": attrs.list(attrs.dep(), default = []),
     "main": attrs.option(attrs.source(), default = None),
     "optimization_level": attrs.string(default = "3"),
     "srcs": attrs.list(attrs.source()),

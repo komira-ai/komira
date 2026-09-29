@@ -10,6 +10,11 @@ def _include_arg(pkg):
 MojoPkgTSet = transitive_set(args_projections = {"include": _include_arg})
 
 MojoInfo = provider(fields = {
+    # C/C++ libraries (the prelude's MergedLinkInfo, e.g. from `cxx_library`)
+    # that code in this package calls, with those of every package it depends
+    # on: what a binary linking this package must also link. None when there
+    # are none.
+    "c_link": provider_field(typing.Any, default = None),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
 })

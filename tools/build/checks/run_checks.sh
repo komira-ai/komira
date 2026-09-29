@@ -89,7 +89,9 @@
 #  19. What a repository using komira as a cell loads names no cell but
 #      komira, prelude and toolchains: every label outside a comment in the
 #      BUCK and .bzl files of tools/build/{mojo,toolchains,platforms,package,
-#      examples,cells}. A label naming `checks` (standalone-only) fails to load there.
+#      examples,cells} and third_party. A label naming `checks`
+#      (standalone-only) fails to load there.
+#  20. C/C++ dependencies of Mojo targets: see tools/build/checks/cxx_checks.sh.
 set -uo pipefail
 
 umbrella=1
@@ -137,11 +139,14 @@ EXAMPLES=(
     //tools/build/examples:hello //tools/build/examples:hellopkg //tools/build/examples:hello_pkg_user
     //tools/build/examples/libgate_ok:libgate_ok //tools/build/examples:test_hellopkg
     //tools/build/examples:hello_bundle //tools/build/package:level_test
+    //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
+    //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
 )
 # Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
 # was observed to skip the sub-target, so never rely on combining them with a
 # recursive pattern.)
-RUN_CHECKS=("//tools/build/examples:hello[run_check]" "//tools/build/examples:hello_pkg_user[run_check]")
+RUN_CHECKS=("//tools/build/examples:hello[run_check]" "//tools/build/examples:hello_pkg_user[run_check]"
+    "//tools/build/examples/cshim:cadd_user[run_check]")
 
 # The execution platform disables local execution outright; this reads the
 # build log to confirm it. Only meaningful when something executed (a remote
@@ -537,10 +542,11 @@ else
 fi
 
 # 19
-EXPORTED="mojo toolchains platforms package examples cells"
+EXPORTED="tools/build/mojo tools/build/toolchains tools/build/platforms tools/build/package tools/build/examples
+    tools/build/cells third_party"
 missing=""
-for d in $EXPORTED; do [ -d "$ROOT/tools/build/$d" ] || missing="$missing tools/build/$d"; done
-labels=$(cd "$ROOT" && git ls-files -z $(for d in $EXPORTED; do printf 'tools/build/%s ' "$d"; done) |
+for d in $EXPORTED; do [ -d "$ROOT/$d" ] || missing="$missing $d"; done
+labels=$(cd "$ROOT" && git ls-files -z $EXPORTED |
     grep -zE '(^|/)(BUCK|[^/]*\.bzl)$' | xargs -0 grep -nE '[a-z_]+//' |
     awk -F: '{ line = $0; sub(/^[^:]*:[^:]*:/, "", line) } line !~ /^[ \t]*#/ { print }' |
     grep -oE '^[^:]*:[0-9]+:|(^|[^a-z_])[a-z_]+//' | tr -d '"(' )
@@ -555,6 +561,9 @@ elif [ -n "$foreign" ]; then
 else
     pass "exported cells: $n cell-qualified labels in the exported packages name only komira, prelude and toolchains"
 fi
+
+# 20
+. "$ROOT/tools/build/checks/cxx_checks.sh"
 
 # 9
 if [ "$run" = 1 ]; then
