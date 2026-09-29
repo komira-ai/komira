@@ -108,3 +108,46 @@ To update buck2, change each platform's `size`, `digest` and release URL in
 [`tools/buck2`](../../buck2). Check 10 matches buck2's literal wording of the
 multi-NUMA configuration refusal, so a release that rewords it turns that
 check red until the check is updated with the pin.
+
+## macOS
+
+`--target-platforms komira//tools/build/platforms:darwin-arm64` builds Mojo targets for
+macOS on Apple silicon. `toolchains//:mojo` selects the toolchain by the
+target platform's os: `komira//tools/build/toolchains/darwin:mojo` for macos, built from the
+sha256-pinned osx-arm64 compiler package of the same release.
+
+Its compiles, gated tests and run checks run on macOS arm64 workers, the
+execution platform `komira//tools/build/platforms:exec-mojo-darwin-arm64`. It is
+registered only when `.buckconfig.local` names their property set:
+
+```ini
+[komira_re]
+  darwin_mojo_compile_properties = pool=macos-arm64,macos_sdk=26.5
+```
+
+Unset, no macOS platform exists, a darwin-arm64 Mojo target fails to
+configure, and the linux build is unchanged (its actions are the same with
+and without the key). The set must differ from every linux set and must carry
+`macos_sdk`, the version the workers' `xcrun --show-sdk-version` prints. The
+macOS platform is registered last, so an action that states no os never lands
+on it. Unpacking the osx-arm64 toolchain moves bytes only and runs on the
+linux `light` workers.
+
+What a macOS action takes from the worker, and why each is safe to cache:
+
+* `/bin/sh` and the file utilities in `/bin` and `/usr/bin`, through
+  `tools/build/mojo/darwin/busybox.sh` (a fixed applet list; anything else is refused).
+  They belong to the sealed operating-system volume.
+* The Command Line Tools (or Xcode): `/usr/bin/xcrun`, the SDK, and
+  `/usr/bin/cc` through `tools/build/mojo/darwin/cc`. The SDK version is part of every
+  action key through the `macos_sdk` platform property, and the wrapper
+  refuses a host whose SDK is not the promised version.
+* The system libraries a built binary loads (`/usr/lib`, `/System`).
+
+The compiler links with its own `bin/lld`. A built binary names its runtime
+libraries `@rpath/...` and carries one run path, `@loader_path/lib`, the
+`lib/` of its runnable directory; it targets `apple-m1` (every Apple silicon
+Mac) and macOS 11.0, the compiler's own minimum. Gated tests set
+`DYLD_LIBRARY_PATH` to the compiler's `lib/`. `tools/build/checks/darwin/check.sh` checks
+all of this without a macOS worker, from the load commands of the unpacked
+closure.

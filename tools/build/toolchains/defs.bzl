@@ -35,21 +35,43 @@ MOJO_TOOLCHAIN_ATTRS = dict(
     zig = _TOOLCHAINS + "zig",
 )
 
-def komira_mojo_toolchains(**overrides):
+# What a linux x86_64 toolchain compiles for, and where its actions run: a
+# target for any other platform that reaches it is incompatible rather than
+# built for the wrong one.
+_LINUX_X86_64 = [
+    "prelude//os/constraints:linux",
+    "prelude//cpu/constraints:x86_64",
+]
+
+def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo", **overrides):
     """Declare `:mojo` and `:mojo_multi_numa` in the calling package.
 
     Each keyword in `overrides` replaces the `mojo_toolchain` attribute of that
     name (see MOJO_TOOLCHAIN_ATTRS), e.g. `compiler = ...` to pin a different
-    compiler for every Mojo target of the repository.
+    compiler for every Mojo target of the repository. They apply to the linux
+    x86_64 toolchain; `darwin` names the toolchain `:mojo` selects for a macOS
+    target platform.
     """
     attrs = dict(MOJO_TOOLCHAIN_ATTRS)
     attrs.update(overrides)
 
-    # The toolchain of mojo_library, mojo_binary and mojo_test: compiles,
-    # gated tests and run checks on one NUMA node.
-    mojo_toolchain(
+    # The toolchain of mojo_library, mojo_binary and mojo_test, chosen by the
+    # target platform's os. A target platform with neither os fails to
+    # configure.
+    native.toolchain_alias(
         name = "mojo",
-        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"],
+        actual = select({
+            "prelude//os/constraints:linux": ":mojo_linux_x86_64",
+            "prelude//os/constraints:macos": darwin,
+        }),
+        visibility = ["PUBLIC"],
+    )
+
+    # linux x86_64: compiles, gated tests and run checks on one NUMA node.
+    mojo_toolchain(
+        name = "mojo_linux_x86_64",
+        target_compatible_with = _LINUX_X86_64,
+        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"] + _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )
@@ -59,10 +81,12 @@ def komira_mojo_toolchains(**overrides):
     # `komira//tools/build/platforms:exec-mojo-multi-numa` satisfies it; with
     # none registered, its users fail to configure. The constraint is only a
     # claim: the rule's runs also start through numa_guard.sh, which refuses
-    # a worker where the action can use fewer than two NUMA nodes.
+    # a worker where the action can use fewer than two NUMA nodes. linux
+    # x86_64 only.
     mojo_toolchain(
         name = "mojo_multi_numa",
-        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_multi"],
+        target_compatible_with = _LINUX_X86_64,
+        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_multi"] + _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )

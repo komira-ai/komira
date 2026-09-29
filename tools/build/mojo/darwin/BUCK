@@ -1,0 +1,8 @@
+# Scripts of the macOS arm64 Mojo toolchain (see darwin.bzl).
+export_file(name = "busybox.sh", visibility = ["PUBLIC"])
+
+export_file(name = "cc", visibility = ["PUBLIC"])
+
+export_file(name = "mojo_wrapper.sh", visibility = ["PUBLIC"])
+
+export_file(name = "dyld_prelude.sh", visibility = ["PUBLIC"])

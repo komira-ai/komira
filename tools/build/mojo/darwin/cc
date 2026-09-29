@@ -1,0 +1,36 @@
+#!/bin/sh
+# cc -- the C driver a Mojo compile finds on PATH on a macOS execution host.
+#
+# Runs the host's /usr/bin/cc (Apple clang from the Command Line Tools or
+# Xcode). Which SDK and linker that is, is a property of the host, so the
+# execution platform names it: see `macos_sdk` in platforms/defs.bzl.
+#
+# The command line is the compiler's, with every run path removed (it would
+# name the action's sandbox) and exactly one added: `@loader_path/lib`, the
+# lib/ directory next to the binary in a runnable directory. `-Wl,-S` keeps
+# debug-map entries (which name the object files, inside the sandbox) out of
+# the output.
+
+set -u
+_argc=$#
+while [ "$_argc" -gt 0 ]; do
+  _a=$1; shift; _argc=$((_argc - 1))
+  case "$_a" in
+    -Xlinker)
+      if [ "$_argc" -gt 0 ] && [ "$1" = "-rpath" ]; then
+        # `-Xlinker -rpath -Xlinker <path>`: drop all four.
+        shift; _argc=$((_argc - 1))
+        if [ "$_argc" -ge 2 ] && [ "$1" = "-Xlinker" ]; then shift 2; _argc=$((_argc - 2)); fi
+        continue
+      fi
+      if [ "$_argc" -gt 0 ]; then
+        set -- "$@" "$_a" "$1"; shift; _argc=$((_argc - 1)); continue
+      fi ;;
+    -Wl,-rpath,*) continue ;;
+    -rpath)
+      if [ "$_argc" -gt 0 ]; then shift; _argc=$((_argc - 1)); fi
+      continue ;;
+  esac
+  set -- "$@" "$_a"
+done
+exec /usr/bin/cc -Wl,-S -Wl,-rpath,@loader_path/lib "$@"
