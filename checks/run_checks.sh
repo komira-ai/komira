@@ -30,6 +30,11 @@
 #      (checks//runtime_libs:loader_trace, read from LD_DEBUG). The
 #      toolchain libraries the run loaded are exactly the ones a runnable
 #      directory carries in lib/ (toolchains//:mojo_runtime), no more, no fewer.
+#  10. Execution platforms: Mojo compiles, gated tests and run checks resolve
+#      to `exec-mojo` (mojo_compile, numa_single) and toolchain unpack/copy
+#      targets to `exec-light`. A target requiring numa_multi, with no
+#      platform providing it, fails to configure and runs nothing; given one
+#      (resolution only, nothing is built), it resolves to it.
 #   9. `buck2 run //examples:hello` prints the greeting on this machine from a
 #      fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
@@ -194,6 +199,67 @@ else
     else
         pass "runtime libs: lib/ ships exactly the $(wc -l < "$LOG/runtime_shipped.txt" | tr -d ' ') toolchain libraries a run loads"
     fi
+fi
+
+# 10
+# `buck2 audit execution-platform-resolution` prints, per target, either
+# "Execution platform: <label>" or "Failed to configure: ...". The
+# multi-NUMA key is set explicitly both ways so the result does not depend on
+# .buckconfig.local.
+resolve() { # log name, extra args..., targets...: prints "<target> <platform|FAILED>"
+    local name=$1; shift
+    "$BUCK2" audit execution-platform-resolution "$@" > "$LOG/$name.txt" 2>&1 || return 1
+    awk '/^[^ ].* \(.*\):$/ { t = $1; next }
+         t != "" && /^  Execution platform: / { print t, $3; t = "" }
+         t != "" && /^  Failed to configure/ { print t, "FAILED"; t = "" }' "$LOG/$name.txt"
+}
+NO_MULTI=(-c komira_re.mojo_compile_multi_numa_properties=)
+EXPECT_PLATFORMS="
+komira//examples:hello komira//platforms:exec-mojo
+komira//examples:hellopkg komira//platforms:exec-mojo
+komira//examples/libgate_ok:libgate_ok komira//platforms:exec-mojo
+komira//examples:test_hellopkg komira//platforms:exec-mojo
+checks//numa:hello komira//platforms:exec-mojo
+toolchains//:zig komira//platforms:exec-light
+toolchains//:conda_unpack komira//platforms:exec-light
+toolchains//:mojo_compiler komira//platforms:exec-light
+toolchains//:mojo_runtime komira//platforms:exec-light
+checks//numa:hello_multi_numa FAILED"
+want=$(printf '%s\n' "$EXPECT_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
+if ! got=$(resolve platforms "${NO_MULTI[@]}" $(printf '%s\n' "$want" | cut -d' ' -f1)); then
+    fail "exec platforms: audit failed (see $LOG/platforms.txt)"
+elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
+    fail "exec platforms: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^>' | tr '\n' ' ') (see $LOG/platforms.txt)"
+elif ! grep -qF 'exec_compatible_with requires `komira//platforms:numa_multi` but it was not satisfied' "$LOG/platforms.txt"; then
+    fail "exec platforms: the multi-NUMA refusal does not name numa_multi (see $LOG/platforms.txt)"
+else
+    pass "exec platforms: $(printf '%s\n' "$want" | grep -c exec-mojo) Mojo targets on exec-mojo, $(printf '%s\n' "$want" | grep -c exec-light) toolchain targets on exec-light, numa_multi unresolvable"
+fi
+# The refusal holds for a real build too, and nothing runs. (Skipped if the
+# audit above did not refuse, so a broken constraint never runs the binary on
+# a single-NUMA worker here.)
+if printf '%s\n' "${got:-}" | grep -qx 'checks//numa:hello_multi_numa FAILED'; then
+    if "$BUCK2" build "${NO_MULTI[@]}" checks//numa:hello_multi_numa > "$LOG/numa_refusal.log" 2>&1; then
+        fail "multi-NUMA refusal: checks//numa:hello_multi_numa built with no numa_multi platform"
+    elif ! grep -qF "Can't find toolchain_dep execution platform" "$LOG/numa_refusal.log"; then
+        fail "multi-NUMA refusal: failed for another reason (see $LOG/numa_refusal.log)"
+    elif ! "$BUCK2" log what-ran > "$LOG/numa_refusal.what_ran.txt" 2>&1; then
+        fail "multi-NUMA refusal: cannot read what-ran"
+    elif awk -F'\t' 'NF >= 3' "$LOG/numa_refusal.what_ran.txt" | grep -q .; then
+        fail "multi-NUMA refusal: actions ran before the refusal (see $LOG/numa_refusal.what_ran.txt)"
+    else
+        pass "multi-NUMA refusal: the build fails to configure and runs no action"
+    fi
+else
+    fail "multi-NUMA refusal: not attempted, the audit resolved checks//numa:hello_multi_numa"
+fi
+if ! got=$(resolve platforms_multi -c komira_re.mojo_compile_multi_numa_properties=pool=unreachable-check-only \
+        checks//numa:hello_multi_numa komira//examples:hello); then
+    fail "multi-NUMA platform: audit failed (see $LOG/platforms_multi.txt)"
+elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$(printf '%s\n' 'checks//numa:hello_multi_numa komira//platforms:exec-mojo-multi-numa' 'komira//examples:hello komira//platforms:exec-mojo' | LC_ALL=C sort)" ]; then
+    fail "multi-NUMA platform: with one registered, got [$(printf '%s\n' "$got" | tr '\n' ' ')] (see $LOG/platforms_multi.txt)"
+else
+    pass "multi-NUMA platform: when registered, only the multi-NUMA run resolves to it"
 fi
 
 # 9
