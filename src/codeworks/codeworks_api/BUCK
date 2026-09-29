@@ -1,0 +1,17 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The CodeWorks API-surface declaration: which routes are the CONTROL plane
+# (repo CRUD + review + coordinator), which are the git WIRE dataplane, which
+# ARM of the one `codeworks` service owns each, and (declared, not implemented)
+# where the RBAC gates attach.
+#
+# The thinnest leaf of the CodeWorks open-core packages: no deps, pure
+# `String` -> `Int`/`Bool`/`String` path classification, no transport types, no
+# store. Every dispatcher that implements the surface consults it, which is what
+# keeps the declaration and the routing from drifting.
+mojo_library(
+    name = "codeworks_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_codeworks_api_surface.mojo"],
+    visibility = ["PUBLIC"],
+)
