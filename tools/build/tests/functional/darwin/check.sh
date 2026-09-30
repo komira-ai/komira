@@ -506,7 +506,8 @@ fi
 # macOS's; the wrapper reads only fields both print). The stand-in compiler
 # reads its behaviour from run/mode: `hang` parks itself and a child for 30 s
 # (a watchdog that does not fire fails the case, it does not hang it), `spin`
-# uses CPU for 5 s.
+# uses CPU for 5 s in the shell itself (a loop of forks would put its CPU in
+# children reaped between samples, which ps(1) does not count).
 printf 'x' > "$TC/lib/libKGENCompilerRTShared.dylib"
 printf "$cfg" > "$TC/share/max/modular.cfg"
 printf '%s\n' "$host_want" > "$U/link/macos_hosts"
@@ -516,7 +517,7 @@ out=""; prev=""
 for a in "$@"; do [ "$prev" = -o ] && out=$a; prev=$a; done
 case "$(cat mode)" in
     hang) echo $$ > compiler.pid; /bin/sleep 30 & echo $! > child.pid; wait ;;
-    spin) end=$(($(/bin/date +%s) + 5)); while [ "$(/bin/date +%s)" -lt "$end" ]; do :; done ;;
+    spin) end=$(($(/bin/date +%s) + 5)); while [ "$(/bin/date +%s)" -lt "$end" ]; do i=0; while [ $i -lt 20000 ]; do i=$((i + 1)); done; done ;;
 esac
 echo compiled > "$out"
 MOJO
@@ -533,6 +534,7 @@ echo hang > "$U/run/mode"
 # shellcheck disable=SC2086 # KNOBS is two flags
 wrap $KNOBS
 wd_hang=$?
+cp "$U/wrap.txt" "$U/wrap_hang.txt"
 sleep 1
 wd_hang_left=$(survivors)
 grep -q 'mojo-watchdog: killed deadlocked compiler' "$U/wrap.txt" || wd_hang="$wd_hang(no message)"
@@ -541,6 +543,7 @@ echo spin > "$U/run/mode"
 # shellcheck disable=SC2086 # KNOBS is two flags
 wrap $KNOBS
 wd_spin=$?
+cp "$U/wrap.txt" "$U/wrap_spin.txt"
 echo hang > "$U/run/mode"
 (cd "$U/run" && rm -rf .komira_action && exec sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 \
     --watchdog-idle-secs=600 --watchdog-sample-secs=1 -- build x.mojo -o out > "$U/wrap_killed.txt" 2>&1) &
@@ -557,9 +560,9 @@ reap
 wrap --watchdog-idle-secs=5m
 wd_bad=$?
 if [ "$wd_hang" != 124 ] || [ -n "$wd_hang_left" ]; then
-    fail "wrapper watchdog: a hung compile was not killed with 124 and the message (rc=$wd_hang, alive:${wd_hang_left:- none}; see $U/wrap.txt)"
+    fail "wrapper watchdog: a hung compile was not killed with 124 and the message (rc=$wd_hang, alive:${wd_hang_left:- none}; see $U/wrap_hang.txt)"
 elif [ "$wd_spin" != 0 ]; then
-    fail "wrapper watchdog: a compile using CPU for 5 s did not finish (rc=$wd_spin, see $U/wrap.txt)"
+    fail "wrapper watchdog: a compile using CPU for 5 s did not finish (rc=$wd_spin, see $U/wrap_spin.txt)"
 elif [ -n "$wd_kill_left" ]; then
     fail "wrapper watchdog: SIGKILL to the wrapper left its compiler running:$wd_kill_left (see $U/wrap_killed.txt)"
 elif [ "$wd_bad" != 2 ]; then
