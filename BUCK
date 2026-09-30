@@ -73,6 +73,7 @@ _TESTS_LINTS = [
         ".gitignore",
     ] + glob([".github/**"]),
     packages = [
+        "//src/kci_params:doc_tree",
         "//src/kci_validator_rows:doc_tree",
         "//src/komira_atomic_alias:doc_tree",
         "//src/komira_core_ffi:doc_tree",
