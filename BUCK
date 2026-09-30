@@ -82,6 +82,7 @@ _TESTS_LINTS = [
         "//src/komira_resources:doc_tree",
         "//src/komira_rowcell:doc_tree",
         "//src/komira_snapshotter:doc_tree",
+        "//src/komira_uuid:doc_tree",
         "//src/komira_validation_run:doc_tree",
         "//src/komira_xml:doc_tree",
         "//src/komira_zlib:doc_tree",
