@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The provider-agnostic CDC change-stream seam: `ChangeRecord`, `ChangeBatch`
+# and the `ChangeStreamListener` / `MultiShardChangeStreamListener` traits.
+# It depends on exactly one library, the zero-dep `komira_rowcell` leaf, for
+# the cell model a record carries. It names none of the provider clients (they
+# depend on this seam) and not `komira_iceberg` (a consumer of the seam, whose
+# closure is the whole query engine); do not add either edge.
+mojo_library(
+    name = "komira_snapshotter",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira/komira_rowcell:komira_rowcell"],
+    test_srcs = ["tests/test_change_stream_seam.mojo"],
+    visibility = ["PUBLIC"],
+)
