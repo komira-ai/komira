@@ -54,10 +54,13 @@ mojo_library(
   The hold inverts rather than mutes: the held test still builds and runs in
   the gate, and its marker (`HELD <label>`) is produced only if it FAILS. A
   held test that passes is red, `LEDGER STALE`, naming the row to delete; an
-  unheld failing test is still `GATED TEST FAILED`. Refused at analysis: a key
-  that is not a `test_srcs` entry, any field besides `issue` and `reason`, a
-  missing or malformed issue (a GitHub issue number or URL, nothing else), an
-  empty reason, two rows with byte-identical reasons, and holding every test
+  unheld failing test is still `GATED TEST FAILED`. A held test killed by
+  SIGKILL (exit 137, what a memory limit delivers) has NO VERDICT: its action
+  fails without a marker, so an executor can retry it with more memory
+  instead of caching a too-small machine's kill as the held failure. Refused
+  at analysis: a key that is not a `test_srcs` entry, any field besides
+  `issue` and `reason`, a missing or malformed issue (a GitHub issue number or
+  URL, nothing else), an empty reason, two rows with byte-identical reasons, and holding every test
   ([`checks/known_failing`](../checks/known_failing/BUCK)).
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or

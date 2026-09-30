@@ -21,6 +21,8 @@ cat > "$D/root/bin/probe" <<PROBE
 #!$BB sh
 case "\${PROBE_MODE:-}" in
     red) exit 1 ;;
+    killed) kill -KILL \$\$ ;;
+    aborted) kill -ABRT \$\$ ;;
     tmp)
         [ -n "\${TEST_TMPDIR:-}" ] || { echo "probe: TEST_TMPDIR unset"; exit 11; }
         [ -d "\$TEST_TMPDIR" ] || { echo "probe: \$TEST_TMPDIR is not a directory"; exit 12; }
@@ -89,6 +91,22 @@ if [ "$rc" = 0 ] || [ -e "$D/m5" ]; then bad env_rc "a red test with --env rc=0 
 # The inversion itself still works: a held red is satisfied.
 run held_red "$D/m6" --env PROBE_MODE=red --hold e 1 reason
 if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m6" 2> /dev/null)" = "HELD //x:held_red" ]; then ok held_red; else bad held_red "rc $rc, marker '$("$BB" cat "$D/m6" 2> /dev/null)'"; fi
+# SIGKILL is what a memory limit delivers: a held test killed by it has no
+# verdict. It must fail (137) with no marker, so the action is not cached as a
+# held failure and can be retried with more memory; taken as HELD, a fixed
+# test would be reported held forever on a too-small machine.
+run held_killed "$D/m7" --env PROBE_MODE=killed --hold e 1 reason
+if [ "$rc" = 137 ] && [ ! -e "$D/m7" ] && "$BB" grep -q '^NO VERDICT: held test //x:held_killed' "$D/held_killed.log"; then
+    ok held_killed
+else
+    bad held_killed "a SIGKILLed held test gave rc $rc, marker '$("$BB" cat "$D/m7" 2> /dev/null)'"
+fi
+# Every other signal death is still the held test's own failure.
+run held_aborted "$D/m8" --env PROBE_MODE=aborted --hold e 1 reason
+if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m8" 2> /dev/null)" = "HELD //x:held_aborted" ]; then ok held_aborted; else bad held_aborted "rc $rc, marker '$("$BB" cat "$D/m8" 2> /dev/null)'"; fi
+# An unheld test killed by SIGKILL stays red with its own status.
+run unheld_killed "$D/m9" --env PROBE_MODE=killed
+if [ "$rc" = 137 ] && [ ! -e "$D/m9" ]; then ok unheld_killed; else bad unheld_killed "rc $rc, marker '$("$BB" cat "$D/m9" 2> /dev/null)'"; fi
 
 "$BB" rm -rf "$D"
 exit "$bad"

@@ -464,6 +464,10 @@ is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
+`runner_cases` also runs the runner on a held stand-in that kills itself:
+with SIGKILL (a memory limit's kill) it must exit 137 with `NO VERDICT` and
+no marker, so an executor retries it with more memory rather than caching
+`HELD`; with SIGABRT it is still `HELD`; unheld and SIGKILLed it is red, 137.
 
 ## 30. Optimization levels
 
