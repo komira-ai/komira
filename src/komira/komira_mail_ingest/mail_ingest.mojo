@@ -42,10 +42,11 @@
 #   function here is a PURE decision over values a caller already read. That is
 #   what makes the refusals testable with zero sockets and zero mocks.
 #
-# ── ENCAPSULATION + GAP6 ─────────────────────────────────────────────────────
+# ── ENCAPSULATION ────────────────────────────────────────────────────────────
 # Value-typed surface only; ZERO UnsafePointer anywhere; NO wildcard origin; NO
 # unsafe_from_address; NO byte-slab. Flat-String / List value PODs throughout
-# (gap6-trivial). Mojo 1.0.0b2 (def-only).
+# (no pointer fields, so no stale-pointer hazard across destroy and recreate).
+# Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
 
@@ -142,7 +143,7 @@ struct MailRecipient(Copyable, Movable, Deinitable):
     a domain gets reported covered while its mail is 550'd at RCPT.
 
     Construct with `parse` (which refuses the forms that would silently mis-
-    match); compare with `equals`. Flat-String value POD (gap6-trivial)."""
+    match); compare with `equals`. Flat-String value POD (no pointer fields)."""
 
     var value: String
     """The parsed, case-folded recipient. Never empty (parse refuses)."""
@@ -285,16 +286,19 @@ def recipients_for_domain(domain: String, inbound_label: String) raises -> List[
 #   CREATE/DELETE sites, which are already raising. It is not a second
 #   derivation: it builds no name, it judges one.
 # =============================================================================
-comptime RECEIPT_RULE_NAME_PREFIX: String = "komira-inbound-"
-"""The prefix every rule this product owns carries, and the ONE place the string
-is written. It is what separates OUR accept-list entries from the hand-made ones
-sharing the account's single active table — a bare, unprefixed name is
-indistinguishable from a rule somebody added in the console, so nothing could
-safely delete it.
+comptime DEFAULT_RECEIPT_RULE_PREFIX: String = "komira-inbound-"
+"""The prefix used when a caller names none. Every rule this library derives
+carries a prefix; it is what separates OUR accept-list entries from the
+hand-made ones sharing the account's single active table — a bare, unprefixed
+name is indistinguishable from a rule somebody added in the console, so nothing
+could safely delete it.
 
-It is this library's own resource-naming namespace, not deployment
-configuration: create and delete must derive the SAME name, so it is a single
-constant rather than a per-caller setting."""
+The prefix is a PARAMETER of the derivation, so two deployments can share one
+account's table under distinct namespaces. ⚠ Create, delete and the re-read must
+be given the SAME prefix: a rule created under one prefix and deleted under
+another is the silent no-op delete this section exists to prevent. A caller that
+persists the derived name (`<rule_set>|<rule_name>`) addresses the rule by that
+stored name, not by re-deriving it."""
 
 comptime RECEIPT_RULE_NAME_MAX_BYTES: Int = 64
 """The provider's own ceiling on a rule name. SES `ReceiptRule.Name`: at most 64
@@ -303,9 +307,22 @@ Checked HERE so an over-long domain is a refusal naming the domain, rather than 
 provider-side validation error surfacing at create time with no mention of it."""
 
 
-def receipt_rule_name_for(recipient: String) -> String:
-    """THE name of the provider rule that accepts `recipient` — `komira-inbound-`
-    prepended verbatim.
+def _is_ascii_alnum(c: Int) -> Bool:
+    return (
+        (c >= 97 and c <= 122) or (c >= 65 and c <= 90) or (c >= 48 and c <= 57)
+    )
+
+
+def _is_rule_name_byte(c: Int) -> Bool:
+    """ASCII letters, digits, '_', '-', '.' — the SES rule-name charset."""
+    return _is_ascii_alnum(c) or c == 45 or c == 46 or c == 95
+
+
+def receipt_rule_name_for(
+    recipient: String, prefix: String = DEFAULT_RECEIPT_RULE_PREFIX
+) -> String:
+    """THE name of the provider rule that accepts `recipient` — `prefix`
+    (default `komira-inbound-`) prepended verbatim.
 
     ★ ONE DERIVATION, CALLED BY EVERY SIDE — create, delete, the re-read that
     proves a delete happened, and the descriptors that name the resource for an
@@ -313,15 +330,66 @@ def receipt_rule_name_for(recipient: String) -> String:
     what a second spelling costs.
 
     TOTAL AND PURE ON PURPOSE — it never raises, so a non-raising descriptor or
-    matcher can call it. Whether the result is a name the provider will ACCEPT is
-    a separate question, asked by `assert_receipt_rule_name_legal` at the sites
-    that mutate."""
-    return RECEIPT_RULE_NAME_PREFIX + recipient
+    matcher can call it. Whether the result is a name the provider will ACCEPT
+    (prefix and recipient both) is a separate question, asked by
+    `assert_receipt_rule_name_legal` at the sites that mutate."""
+    return prefix + recipient
 
 
-def assert_receipt_rule_name_legal(recipient: String) raises:
-    """REFUSE, before a rule is CREATED, a recipient whose derived name the
-    provider will not accept — naming the byte and the reason.
+def assert_receipt_rule_prefix_legal(prefix: String) raises:
+    """REFUSE a prefix that cannot begin a legal rule name: empty, not starting
+    with a letter or digit, holding a byte outside the rule-name charset, or so
+    long that no recipient byte fits under `RECEIPT_RULE_NAME_MAX_BYTES`.
+
+    An empty prefix is refused because the prefix is what makes our rules
+    recognisable among hand-made ones; see `DEFAULT_RECEIPT_RULE_PREFIX`."""
+    var n = prefix.byte_length()
+    if n == 0:
+        raise Error(
+            "assert_receipt_rule_prefix_legal: REFUSED an EMPTY prefix. Without"
+            " one, our rules are indistinguishable from rules added by hand in"
+            " the same table, so none of them could safely be deleted."
+        )
+    var b = prefix.as_bytes()
+    if not _is_ascii_alnum(Int(b[0])):
+        raise Error(
+            "assert_receipt_rule_prefix_legal: REFUSED the prefix '"
+            + prefix
+            + "' because it does not START with a letter or digit. The prefix"
+            " is the start of every rule name, and a rule name must start"
+            " alphanumeric."
+        )
+    for i in range(n):
+        var c = Int(b[i])
+        if not _is_rule_name_byte(c):
+            raise Error(
+                "assert_receipt_rule_prefix_legal: REFUSED the prefix '"
+                + prefix
+                + "' — byte "
+                + String(c)
+                + " at offset "
+                + String(i)
+                + " is outside the rule-name charset (ASCII letters, digits,"
+                " '_', '-', '.')."
+            )
+    if n >= RECEIPT_RULE_NAME_MAX_BYTES:
+        raise Error(
+            "assert_receipt_rule_prefix_legal: REFUSED the prefix '"
+            + prefix
+            + "' — it is "
+            + String(n)
+            + " bytes, leaving no room for a recipient under the provider's "
+            + String(RECEIPT_RULE_NAME_MAX_BYTES)
+            + "-byte ceiling on a rule name."
+        )
+
+
+def assert_receipt_rule_name_legal(
+    recipient: String, prefix: String = DEFAULT_RECEIPT_RULE_PREFIX
+) raises:
+    """REFUSE, before a rule is CREATED, a prefix or recipient whose derived
+    name the provider will not accept — naming the byte and the reason. The
+    prefix is judged first, by `assert_receipt_rule_prefix_legal`.
 
     ⛔ IT REFUSES RATHER THAN REPAIRS, AND THAT IS THE WHOLE POINT. Every repair
     available here is a character substitution, and a substitution is what maps
@@ -335,26 +403,19 @@ def assert_receipt_rule_name_legal(recipient: String) raises:
     older, looser reading must still be REACHABLE — a teardown that refuses to
     derive the name of a rule it created is a rule that can never be removed,
     which is the leak a single derivation exists to close."""
+    assert_receipt_rule_prefix_legal(prefix)
     if recipient.byte_length() == 0:
         raise Error(
             "assert_receipt_rule_name_legal: REFUSED an EMPTY recipient. The"
             " derived name would be the bare prefix `"
-            + RECEIPT_RULE_NAME_PREFIX
+            + prefix
             + "`, which is a rule for nobody and which EVERY domain's teardown"
             " would then try to delete. Name the exact domain this rule is for."
         )
     var b = recipient.as_bytes()
     for i in range(len(b)):
         var c = Int(b[i])
-        var legal = (
-            (c >= 97 and c <= 122)
-            or (c >= 65 and c <= 90)
-            or (c >= 48 and c <= 57)
-            or c == 45
-            or c == 46
-            or c == 95
-        )
-        if legal:
+        if _is_rule_name_byte(c):
             continue
         if c == 64:
             raise Error(
@@ -380,13 +441,7 @@ def assert_receipt_rule_name_legal(recipient: String) raises:
             " '-', '.'). The provider rejects the create, and it does so far from"
             " here; refusing at the mint is what makes the reason readable."
         )
-    var last = Int(b[len(b) - 1])
-    var last_alnum = (
-        (last >= 97 and last <= 122)
-        or (last >= 65 and last <= 90)
-        or (last >= 48 and last <= 57)
-    )
-    if not last_alnum:
+    if not _is_ascii_alnum(Int(b[len(b) - 1])):
         raise Error(
             "assert_receipt_rule_name_legal: REFUSED the recipient '"
             + recipient
@@ -395,7 +450,7 @@ def assert_receipt_rule_name_legal(recipient: String) raises:
             " recipient decides the end. A trailing '.' or '-' is a malformed"
             " domain in any case."
         )
-    var derived = receipt_rule_name_for(recipient)
+    var derived = receipt_rule_name_for(recipient, prefix)
     if derived.byte_length() > RECEIPT_RULE_NAME_MAX_BYTES:
         raise Error(
             "assert_receipt_rule_name_legal: REFUSED '"

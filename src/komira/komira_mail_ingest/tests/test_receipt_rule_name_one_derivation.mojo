@@ -27,6 +27,10 @@
 # concatenation. It is the reason for the concatenation, stated as an executable
 # fact rather than an opinion in a comment.
 #
+# THE PREFIX IS A PARAMETER (default `DEFAULT_RECEIPT_RULE_PREFIX`). The tests
+# after `test_a_trailing_non_alphanumeric_is_refused` cover the default, a custom
+# prefix, the ceiling counting the prefix, and each prefix refusal.
+#
 # PURE — no socket, no credential, no mock. Every function under test is a
 # decision over values, so these run on the farm with nothing host-bound.
 # =============================================================================
@@ -40,10 +44,11 @@ from std.testing import (
 
 from komira_mail_ingest.mail_ingest import (
     MailRecipient,
-    RECEIPT_RULE_NAME_PREFIX,
+    DEFAULT_RECEIPT_RULE_PREFIX,
     RECEIPT_RULE_NAME_MAX_BYTES,
     receipt_rule_name_for,
     assert_receipt_rule_name_legal,
+    assert_receipt_rule_prefix_legal,
 )
 
 
@@ -56,6 +61,22 @@ comptime _RULE_NAME: String = "komira-inbound-example.com"
 # length is readable at the point it is used.
 comptime _OVERLONG_DOMAIN: String = (
     "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.dev"
+)
+
+# A caller-chosen prefix, and the name it must derive for `_DOMAIN`.
+comptime _CUSTOM_PREFIX: String = "acme-mail-"
+comptime _CUSTOM_RULE_NAME: String = "acme-mail-example.com"
+
+# 45 'b' + ".dev" = 49 bytes: exactly 64 under the 15-byte default prefix, and
+# over the ceiling under a 20-byte prefix. The ceiling is on the WHOLE name.
+comptime _CEILING_DOMAIN: String = (
+    "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb.dev"
+)
+comptime _LONG_PREFIX: String = "acme-inbound-mail-x-"
+
+# 63 bytes: the longest prefix that still leaves room for one recipient byte.
+comptime _MAX_PREFIX: String = (
+    "ppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppppp"
 )
 
 
@@ -138,13 +159,13 @@ def test_every_name_carries_the_prefix() raises:
     something added in the console — so nothing could safely delete it."""
     assert_true(
         receipt_rule_name_for(String("acme.dev")).startswith(
-            String(RECEIPT_RULE_NAME_PREFIX)
+            String(DEFAULT_RECEIPT_RULE_PREFIX)
         ),
         "a derived rule name must be recognisably ours",
     )
     assert_false(
         _substitution_fold(String("acme.dev")).startswith(
-            String(RECEIPT_RULE_NAME_PREFIX)
+            String(DEFAULT_RECEIPT_RULE_PREFIX)
         ),
         "the fold produces an UNPREFIXED name",
     )
@@ -234,6 +255,99 @@ def test_a_trailing_non_alphanumeric_is_refused() raises:
     print("  test_a_trailing_non_alphanumeric_is_refused: PASS")
 
 
+def _prefix_refusal(prefix: String) raises -> String:
+    """The refusal message for `prefix`, or raise if it was NOT refused."""
+    try:
+        assert_receipt_rule_prefix_legal(prefix)
+    except e:
+        return String(e)
+    raise Error("prefix '" + prefix + "' was NOT refused")
+
+
+def test_the_default_prefix_is_pinned() raises:
+    """The default is part of every existing rule's address, so it is pinned
+    like the name itself — and omitting the prefix IS passing the default."""
+    assert_equal(String(DEFAULT_RECEIPT_RULE_PREFIX), String("komira-inbound-"))
+    assert_equal(
+        receipt_rule_name_for(String(_DOMAIN)),
+        receipt_rule_name_for(
+            String(_DOMAIN), String(DEFAULT_RECEIPT_RULE_PREFIX)
+        ),
+        "omitting the prefix must derive the same name as passing the default",
+    )
+    assert_receipt_rule_prefix_legal(String(DEFAULT_RECEIPT_RULE_PREFIX))
+    print("  test_the_default_prefix_is_pinned: PASS")
+
+
+def test_a_custom_prefix_is_prepended_verbatim() raises:
+    """A caller-chosen prefix is a distinct namespace in the same table: the
+    derived name is that prefix plus the recipient, and it is NOT the default's
+    name for the same recipient."""
+    var prefix = String(_CUSTOM_PREFIX)
+    assert_equal(
+        receipt_rule_name_for(String(_DOMAIN), prefix),
+        String(_CUSTOM_RULE_NAME),
+        "a custom prefix must be prepended verbatim",
+    )
+    assert_not_equal(
+        receipt_rule_name_for(String(_DOMAIN), prefix),
+        receipt_rule_name_for(String(_DOMAIN)),
+        "two prefixes must derive two names for one recipient",
+    )
+    assert_receipt_rule_name_legal(String(_DOMAIN), prefix)
+    print("  test_a_custom_prefix_is_prepended_verbatim: PASS")
+
+
+def test_the_ceiling_counts_the_prefix() raises:
+    """The 64-byte ceiling is on the WHOLE name, so a recipient legal under the
+    default prefix can be refused under a longer one."""
+    assert_receipt_rule_name_legal(String(_CEILING_DOMAIN))
+    var raised = False
+    var msg = String("")
+    try:
+        assert_receipt_rule_name_legal(
+            String(_CEILING_DOMAIN), String(_LONG_PREFIX)
+        )
+    except e:
+        raised = True
+        msg = String(e)
+    assert_true(raised, "a longer prefix must push the name over the ceiling")
+    assert_true(String("64") in msg, "the refusal must name the ceiling")
+    # The boundary: a 63-byte prefix is legal and leaves exactly one byte.
+    assert_receipt_rule_name_legal(String("a"), String(_MAX_PREFIX))
+    print("  test_the_ceiling_counts_the_prefix: PASS")
+
+
+def test_an_illegal_prefix_is_refused() raises:
+    """Each prefix refusal names its reason. An empty prefix makes our rules
+    indistinguishable from hand-made ones; the prefix is the START of the name,
+    so it must start alphanumeric; its bytes must be in the rule-name charset;
+    and it must leave room for a recipient."""
+    assert_true(String("EMPTY") in _prefix_refusal(String("")))
+    assert_true(String("START") in _prefix_refusal(String("-komira-")))
+    assert_true(String("offset 6") in _prefix_refusal(String("komira/in-")))
+    assert_true(String("offset 6") in _prefix_refusal(String("komira@in-")))
+    assert_true(
+        String("no room") in _prefix_refusal(String(_MAX_PREFIX) + "p"),
+        "a 64-byte prefix leaves no room for a recipient",
+    )
+    # The name check judges the prefix FIRST: a legal recipient does not rescue
+    # an illegal prefix, and the refusal comes from the prefix check.
+    var raised = False
+    var msg = String("")
+    try:
+        assert_receipt_rule_name_legal(String(_DOMAIN), String(""))
+    except e:
+        raised = True
+        msg = String(e)
+    assert_true(raised, "an empty prefix must be REFUSED by the name check")
+    assert_true(
+        String("assert_receipt_rule_prefix_legal") in msg,
+        "the refusal must come from the prefix check",
+    )
+    print("  test_an_illegal_prefix_is_refused: PASS")
+
+
 def main() raises:
     print("test_receipt_rule_name_one_derivation:")
     test_the_rule_name_is_pinned()
@@ -245,4 +359,8 @@ def main() raises:
     test_a_name_over_the_provider_ceiling_is_refused()
     test_a_legal_domain_is_not_refused()
     test_a_trailing_non_alphanumeric_is_refused()
+    test_the_default_prefix_is_pinned()
+    test_a_custom_prefix_is_prepended_verbatim()
+    test_the_ceiling_counts_the_prefix()
+    test_an_illegal_prefix_is_refused()
     print("test_receipt_rule_name_one_derivation: ALL PASS")

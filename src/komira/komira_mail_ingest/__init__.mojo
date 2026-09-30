@@ -41,8 +41,11 @@ WHAT IS IN IT:
                      `assert_table_covers`, `assert_route_deliverable`), the
                      rotation predicate (`dkim_republish_required`), the ONE
                      derivation of a route rule's NAME
-                     (`receipt_rule_name_for` + its legality refusal
-                     `assert_receipt_rule_name_legal` — see §1b for why there
+                     (`receipt_rule_name_for` + its legality refusals
+                     `assert_receipt_rule_name_legal` and
+                     `assert_receipt_rule_prefix_legal`; the prefix is a
+                     parameter defaulting to `DEFAULT_RECEIPT_RULE_PREFIX` —
+                     see §1b for why there
                      is exactly one), and the
                      `MailIngestProvider` trait itself.
 
@@ -60,9 +63,10 @@ from .mail_ingest import (
     IDENTITY_FAILED,
     MailRecipient,
     recipients_for_domain,
-    RECEIPT_RULE_NAME_PREFIX,
+    DEFAULT_RECEIPT_RULE_PREFIX,
     RECEIPT_RULE_NAME_MAX_BYTES,
     receipt_rule_name_for,
+    assert_receipt_rule_prefix_legal,
     assert_receipt_rule_name_legal,
     MailDropTarget,
     MailIngestRoute,

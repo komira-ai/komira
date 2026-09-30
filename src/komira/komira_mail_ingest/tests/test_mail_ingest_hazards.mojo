@@ -448,7 +448,7 @@ def test_comparing_two_different_domains_is_refused() raises:
         String(_DOMAIN), _tokens(String("aaa"), String("bbb"), String("ccc"))
     )
     var b = _identity(
-        String("spoolr.com"),
+        String("example.net"),
         _tokens(String("aaa"), String("bbb"), String("ccc")),
     )
     var refused = False
@@ -462,7 +462,7 @@ def test_comparing_two_different_domains_is_refused() raises:
         refused, "comparing identities for DIFFERENT domains must refuse"
     )
     assert_true(
-        String("spoolr.com") in msg and String(_DOMAIN) in msg,
+        String("example.net") in msg and String(_DOMAIN) in msg,
         "the refusal must name BOTH domains; got: " + msg,
     )
     print("  test_comparing_two_different_domains_is_refused: PASS")
