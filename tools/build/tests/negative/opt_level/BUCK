@@ -1,0 +1,10 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+
+# A level `mojo build` does not accept must fail analysis (test 30).
+
+# RED at analysis: not a level `mojo build` accepts.
+mojo_binary(
+    name = "bad_level",
+    srcs = ["main.mojo"],
+    optimization_level = "fast",
+)

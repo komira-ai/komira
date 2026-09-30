@@ -40,9 +40,9 @@ target's actions run on one class of worker
 ([mojo/README.md](../mojo/README.md#multi-numa-tests) shows what that means
 for multi-NUMA tests). `buck2 audit execution-platform-resolution <target>`
 shows which configuration a target got and why the others were skipped.
-[Check 10](../checks/README.md#10-execution-platforms) pins the resolution of
+[Test 10](../tests/README.md#10-execution-platforms) pins the resolution of
 the examples and the toolchain targets, and
-[check 12](../checks/README.md#12-action-platforms) that each action really
+[test 12](../tests/README.md#12-action-platforms) that each action really
 ran with its platform's property set.
 
 ## Local or remote
@@ -132,6 +132,6 @@ check and the `buck2 test` command) starts through
 CPU in its own `Cpus_allowed_list` (`/proc/<pid>/status`). A property set
 that routes to a single-NUMA worker, or a worker narrowed to one node by a
 cpuset, affinity mask or memory binding, goes red instead of green.
-[Check 11](../checks/README.md#11-multi-numa-hardware) exercises each of
+[Test 11](../tests/README.md#11-multi-numa-hardware) exercises each of
 these refusals, using the stand-in platform in
-[`checks/numa/standin`](../checks/numa/standin/BUCK).
+[`tests/negative/numa_standin`](../tests/negative/numa_standin/BUCK).

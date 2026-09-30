@@ -1,0 +1,10 @@
+syntax = "proto3";
+
+package example.team.v1;
+
+import "example/v1/person.proto";
+
+message Team {
+  string title = 1;
+  example.v1.Person lead = 2;
+}

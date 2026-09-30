@@ -20,6 +20,8 @@ executor differs, and a remote action's digest (command, inputs, property
 set) is the one a remote-only checkout computes.
 """
 
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+
 def re_properties(key, required = True):
     """Parse `[komira_re] <key>` into a dict.
 
@@ -315,3 +317,7 @@ def komira_default_execution_platforms(name, visibility = None):
         mojo_compile_darwin = re_properties(DARWIN_PROPERTIES_KEY, required = False),
         visibility = visibility,
     )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+komira_default_execution_platforms = declares_docs(komira_default_execution_platforms)

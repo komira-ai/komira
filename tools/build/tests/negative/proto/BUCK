@@ -1,0 +1,82 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "mojo_proto_library")
+
+# Protobuf targets that must fail (test 23), over the protos and libraries of
+# ../../functional/proto.
+
+# The same test against a .proto whose field 2 is named `ident`: the
+# generated struct has no `id`, so the test must fail to compile.
+mojo_proto_library(
+    name = "person_renamed_proto",
+    srcs = ["renamed/person.proto"],
+    import_name = "person_proto",
+    import_prefix = "example",
+    deps = ["//functional/proto:komira_serde"],
+)
+
+mojo_test(
+    name = "test_person_renamed",
+    srcs = ["test_person.mojo"],
+    deps = [
+        "//functional/proto:komira_serde",
+        ":person_renamed_proto",
+    ],
+)
+
+# Without bundling, the Person that team.mojo imports is not in the package:
+# the package must fail to compile.
+mojo_proto_library(
+    name = "team_unbundled_proto",
+    srcs = ["team/team.proto"],
+    import_name = "team_proto",
+    import_prefix = "example",
+    proto_deps = ["//functional/proto:person_proto"],
+    deps = ["//functional/proto:komira_serde"],
+)
+
+# note.proto declares no table, so the plugin writes no note_db.mojo: the
+# generation must fail rather than publish a package without it.
+mojo_db_proto_library(
+    name = "tasks_db_wrong_outs",
+    srcs = [
+        "db/note.proto",
+        "db/tasks.proto",
+    ],
+    outs = [
+        "note_db.mojo",
+        "tasks_db.mojo",
+    ],
+    import_name = "tasks_db",
+    import_prefix = "example",
+    proto_deps = ["komira//tools/build/proto-codegen:db_options"],
+    deps = ["//functional/proto:komira_db"],
+)
+
+# A bundle_only entry outside the closure is refused.
+mojo_proto_library(
+    name = "roster_bad_selection",
+    srcs = ["roster/roster.proto"],
+    bundle_only = ["example/v1/persons.proto"],
+    bundle_proto_deps = True,
+    import_name = "roster_proto",
+    import_prefix = "example",
+    proto_deps = [
+        "//functional/proto:person_proto",
+        "komira//tools/build/proto-codegen:db_options",
+    ],
+    deps = ["//functional/proto:komira_serde"],
+)
+
+# Without the selection, the options file is generated into the package too.
+mojo_proto_library(
+    name = "roster_full_bundle",
+    srcs = ["roster/roster.proto"],
+    bundle_proto_deps = True,
+    import_name = "roster_proto",
+    import_prefix = "example",
+    proto_deps = [
+        "//functional/proto:person_proto",
+        "komira//tools/build/proto-codegen:db_options",
+    ],
+    deps = ["//functional/proto:komira_serde"],
+)

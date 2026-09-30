@@ -1,0 +1,22 @@
+load("@komira//tools/build/package:defs.bzl", "bundle_tarball", "mojo_bundle", "oci_image")
+
+# A bundle holding a file whose path in the tarball and the image is over 100
+# bytes, which a ustar header cannot hold: komira_pack writes a PAX header for
+# it (tools/build/tests/functional/formats.sh).
+mojo_bundle(
+    name = "long_bundle",
+    binary = "komira//tools/build/examples:hello",
+    data = {"share/a-directory-name-long-enough-that/the-path-of-this-file-inside-a-tar-archive/is-over-one-hundred-bytes/long.txt": "long.txt"},
+    version = "0.1.0",
+)
+
+bundle_tarball(
+    name = "long_tarball",
+    bundle = ":long_bundle",
+)
+
+oci_image(
+    name = "long_image",
+    bundle = ":long_bundle",
+    repository = "komira/hello-long",
+)

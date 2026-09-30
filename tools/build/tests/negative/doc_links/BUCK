@@ -1,0 +1,12 @@
+load("@komira//tools/build/lint:defs.bzl", "markdown_docs")
+
+# Planted dead links (test 17): a missing file, a heading that does not
+# exist, a link leaving the staged tree. The validation must fail naming each
+# with its reason, and pass the two links beside them that resolve.
+markdown_docs(
+    name = "dead",
+    srcs = [
+        "dead.md",
+        "sub/a.md",
+    ],
+)

@@ -32,6 +32,7 @@ the action key.
 """
 
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 MojoProtoToolchainInfo = provider(fields = {
     "busybox": provider_field(typing.Any),
@@ -89,7 +90,7 @@ rm -rf "$T"
     )
     return [DefaultInfo(default_output = out)]
 
-protoc_dist = rule(
+protoc_dist_rule = rule(
     impl = _protoc_dist_impl,
     attrs = {
         "archive": attrs.dep(),
@@ -160,7 +161,7 @@ def _proto_srcs_impl(ctx):
 # `.proto` files that other `.proto` files import but no Mojo is generated
 # from, for example a file declaring custom options: a `proto_deps` entry
 # of the proto rules.
-proto_srcs = rule(
+proto_srcs_rule = rule(
     impl = _proto_srcs_impl,
     attrs = {
         "import_prefix": attrs.string(default = ""),
@@ -356,7 +357,7 @@ def _mojo_proto_library_impl(ctx):
         ProtoSrcsInfo(trees = trees, import_paths = own_paths + dep_paths),
     ]
 
-mojo_proto_library = rule(
+mojo_proto_library_rule = rule(
     impl = _mojo_proto_library_impl,
     attrs = _COMMON_ATTRS | {
         # Generate code for the proto_deps closure into this package too.
@@ -398,7 +399,7 @@ def _mojo_db_proto_library_impl(ctx):
     opt = "package_prefix=" + (ctx.attrs.package_name or import_name)
     return _generate_package(ctx, ptc.db_plugin, "mojo_db", opt, tree, trees, own_paths, ctx.attrs.outs)
 
-mojo_db_proto_library = rule(
+mojo_db_proto_library_rule = rule(
     impl = _mojo_db_proto_library_impl,
     attrs = _COMMON_ATTRS | {
         # The generated files: `<stem>_db.mojo` for each .proto of `srcs`
@@ -406,3 +407,10 @@ mojo_db_proto_library = rule(
         "outs": attrs.list(attrs.string()),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+mojo_db_proto_library = declares_docs(mojo_db_proto_library_rule)
+mojo_proto_library = declares_docs(mojo_proto_library_rule)
+proto_srcs = declares_docs(proto_srcs_rule)
+protoc_dist = declares_docs(protoc_dist_rule)

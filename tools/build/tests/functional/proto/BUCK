@@ -1,0 +1,99 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "mojo_proto_library")
+
+# Mojo generated from .proto files, used by tests. The plugin is built from
+# komira//tools/build/proto-codegen; exercised by run_tests.sh (test 23).
+
+mojo_library(
+    name = "komira_serde",
+    visibility = ["//negative/proto:"],
+    srcs = ["komira_serde/__init__.mojo"],
+)
+
+mojo_proto_library(
+    name = "person_proto",
+    visibility = ["//negative/proto:"],
+    srcs = ["v1/person.proto"],
+    import_prefix = "example",
+    deps = [":komira_serde"],
+)
+
+mojo_test(
+    name = "test_person",
+    srcs = ["test_person.mojo"],
+    deps = [
+        ":komira_serde",
+        ":person_proto",
+    ],
+)
+
+# team.proto imports example/v1/person.proto from person_proto, whose .proto
+# protoc finds through `proto_deps`. The generated Team refers to Person in
+# its own package, so person.mojo is generated into this package as well.
+mojo_proto_library(
+    name = "team_proto",
+    srcs = ["team/team.proto"],
+    bundle_proto_deps = True,
+    import_prefix = "example",
+    proto_deps = [":person_proto"],
+    deps = [":komira_serde"],
+)
+
+mojo_test(
+    name = "test_team",
+    srcs = ["test_team.mojo"],
+    deps = [
+        ":komira_serde",
+        ":team_proto",
+    ],
+)
+
+# ---- mojo_db_proto_library ----
+
+# A minimal `komira_db`, the runtime the generated DbStorable code imports.
+mojo_library(
+    name = "komira_db",
+    visibility = ["//negative/proto:"],
+    srcs = ["db/komira_db/__init__.mojo"],
+)
+
+# tasks.proto declares a table and note.proto none: the plugin writes only
+# tasks_db.mojo, which is what `outs` states.
+mojo_db_proto_library(
+    name = "tasks_db",
+    srcs = [
+        "db/note.proto",
+        "db/tasks.proto",
+    ],
+    outs = ["tasks_db.mojo"],
+    import_prefix = "example",
+    proto_deps = ["komira//tools/build/proto-codegen:db_options"],
+    deps = [":komira_db"],
+)
+
+mojo_test(
+    name = "test_tasks_db",
+    srcs = ["test_tasks_db.mojo"],
+    deps = [
+        ":komira_db",
+        ":tasks_db",
+    ],
+)
+
+# ---- bundle_only: generating part of the proto_deps closure ----
+
+# roster.proto imports person.proto (whose Person it uses) and the db
+# options (which it only annotates with). The package holds roster.mojo and
+# person.mojo, not options.mojo.
+mojo_proto_library(
+    name = "roster_proto",
+    srcs = ["roster/roster.proto"],
+    bundle_only = ["example/v1/person.proto"],
+    bundle_proto_deps = True,
+    import_prefix = "example",
+    proto_deps = [
+        ":person_proto",
+        "komira//tools/build/proto-codegen:db_options",
+    ],
+    deps = [":komira_serde"],
+)

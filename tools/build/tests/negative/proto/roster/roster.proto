@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package example.roster.v1;
+
+import "example/v1/person.proto";
+import "komira/db/options.proto";
+
+// Imports a file whose messages it uses (person.proto) and one that only
+// declares options (options.proto): only the first belongs in the package.
+message Roster {
+  option (komira.db.table) = "rosters";
+
+  string name = 1;
+  example.v1.Person captain = 2;
+}

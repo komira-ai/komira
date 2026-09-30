@@ -4,6 +4,8 @@ The download runs on the client and the bytes are uploaded to the remote CAS
 like any other input; it is the only client-side operation in this repo.
 """
 
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+
 def _pinned_file_impl(ctx):
     # A fixed path, stated: buck2 may otherwise give a download a
     # content-based path, which it can only compute before downloading from a
@@ -18,7 +20,7 @@ def _pinned_file_impl(ctx):
     )
     return [DefaultInfo(default_output = out)]
 
-pinned_file = rule(
+pinned_file_rule = rule(
     impl = _pinned_file_impl,
     attrs = {
         "executable": attrs.bool(default = False),
@@ -27,3 +29,7 @@ pinned_file = rule(
         "url": attrs.string(),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+pinned_file = declares_docs(pinned_file_rule)

@@ -9,9 +9,9 @@
   # that is komira; it holds the Mojo toolchains the rules default to
   # (toolchains//:mojo, toolchains//:mojo_multi_numa).
   toolchains = tools/build/cells/toolchains
-  # The checks of this repository, a cell of their own so that `komira//...`
+  # The tests of this repository, a cell of their own so that `komira//...`
   # holds no target that fails by design. Not needed by a consuming repository.
-  checks = tools/build/checks
+  tests = tools/build/tests
   # `none` has no directory: it is the target of the prelude's unused aliases below.
   none = none
 
@@ -28,9 +28,13 @@
 
 [buildfile]
   name = BUCK
+  # Globals of every BUCK file of this cell: the prelude rules the BUCK files
+  # call, each declaring its package's files for the Markdown link check
+  # (tools/build/lint/includes.bzl). The tests cell's .buckconfig names it too.
+  includes = komira//tools/build/lint/includes.bzl
 
 [parser]
-  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:checks//...->komira//tools/build/platforms:linux-x86_64
+  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:tests//...->komira//tools/build/platforms:linux-x86_64
 
 [build]
   # Local unless .buckconfig.local names a remote-execution service; see

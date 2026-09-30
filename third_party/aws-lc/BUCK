@@ -1,6 +1,7 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/third_party_srcs:defs.bzl", "third_party_srcs")
 load(
     ":srcs.bzl",
     "BCM_ASM_X86_64",
@@ -18,14 +19,23 @@ load(
 #   BUILD_LIBSSL=OFF BUILD_TOOL=OFF DISABLE_PERL=ON DISABLE_GO=ON
 #   CMAKE_BUILD_TYPE=Release BUILD_SHARED_LIBS=OFF (and FIPS off)
 # for linux x86_64, without CMake: the source lists are srcs.bzl, generated
-# from the archive's CMakeLists.txt by third_party/gen_srcs.py (and held to
-# it by the drift check of tools/build/checks/c_libs_checks.sh). Without Perl
-# and Go the build uses the assembly and err_data.c the archive ships under
-# generated-src/, so nothing is generated here.
+# from the archive's CMakeLists.txt by :srcs_gen (and held to it by the test
+# :srcs_drift, below). Without Perl and Go the build uses the assembly and
+# err_data.c the archive ships under generated-src/, so nothing is generated
+# here.
 pinned_file(
     name = "aws-lc-1.39.0.tar.gz",
     url = "https://github.com/aws/aws-lc/archive/refs/tags/v1.39.0.tar.gz",
     sha256 = "37f5a379081b97adba3e1316017e09484d6c4ed6dc336d57fae6f0b7b27472fc",
+)
+
+# srcs.bzl against the archive: :srcs_gen writes it, :srcs_drift (a test)
+# fails when the committed file differs.
+third_party_srcs(
+    name = "srcs",
+    library = "aws-lc",
+    archive = ":aws-lc-1.39.0.tar.gz",
+    committed = "srcs.bzl",
 )
 
 _SRCS = CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64 + S2N_BIGNUM_ASM_X86_64

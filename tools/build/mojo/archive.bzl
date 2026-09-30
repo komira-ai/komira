@@ -15,6 +15,7 @@ configure step of a CMake `configure_file`, without CMake).
 """
 
 load(":toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 _SCRIPT = """
 BB="$1"; shift
@@ -100,7 +101,7 @@ def _archive_files_impl(ctx):
     )
     return [DefaultInfo(default_outputs = outs, sub_targets = sub_targets)]
 
-archive_files = rule(
+archive_files_rule = rule(
     impl = _archive_files_impl,
     attrs = {
         # A pinned_file holding the archive; its name must end in the format.
@@ -120,3 +121,7 @@ archive_files = rule(
         "tree_dirs": attrs.list(attrs.string(), default = []),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+archive_files = declares_docs(archive_files_rule)

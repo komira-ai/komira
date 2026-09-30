@@ -22,6 +22,7 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 """
 
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 RustToolchainInfo = provider(fields = {
     "busybox": provider_field(typing.Any),
@@ -111,7 +112,7 @@ rm -rf "$T"
     )
     return [DefaultInfo(default_output = out)]
 
-rust_sysroot = rule(
+rust_sysroot_rule = rule(
     impl = _rust_sysroot_impl,
     attrs = {
         "busybox": attrs.dep(),
@@ -147,6 +148,13 @@ rust_toolchain = rule(
         "sysroot": attrs.exec_dep(),
         "zig": attrs.exec_dep(),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
+        # The lint of the scripts the Rust rules run: a validation (see
+        # tools/build/lint/defs.bzl), not an input of any action.
+        "_script_lint": attrs.list(attrs.dep(), default = [
+            "komira//tools/build/lint:shell_lint",
+            "komira//tools/build/mojo:shell_lint",
+            "komira//tools/build/rust:shell_lint",
+        ]),
         "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
     },
 )
@@ -272,7 +280,7 @@ def _library_impl(ctx):
         ),
     ]
 
-rust_library = rule(
+rust_library_rule = rule(
     impl = _library_impl,
     attrs = _COMMON_ATTRS | {
         "proc_macro": attrs.bool(default = False),
@@ -299,7 +307,7 @@ def _binary_impl(ctx):
         RunInfo(args = cmd_args(exe)),
     ]
 
-rust_binary = rule(
+rust_binary_rule = rule(
     impl = _binary_impl,
     attrs = _COMMON_ATTRS | {
         "expected_stdout": attrs.option(attrs.string(), default = None),
@@ -373,3 +381,10 @@ def crates_io_library(
         visibility = visibility,
         **kwargs
     )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+crates_io_library = declares_docs(crates_io_library)
+rust_binary = declares_docs(rust_binary_rule)
+rust_library = declares_docs(rust_library_rule)
+rust_sysroot = declares_docs(rust_sysroot_rule)

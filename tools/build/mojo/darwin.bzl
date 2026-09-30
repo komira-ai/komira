@@ -36,6 +36,7 @@ whose identity is not among them.
 
 load(":providers.bzl", "MojoToolchainInfo")
 load(":toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _mojo_darwin_link_impl(ctx):
     hosts = sorted([h.strip() for h in ctx.attrs.macos_hosts if h.strip()])
@@ -50,7 +51,7 @@ def _mojo_darwin_link_impl(ctx):
     })
     return [DefaultInfo(default_output = out)]
 
-mojo_darwin_link = rule(
+mojo_darwin_link_rule = rule(
     impl = _mojo_darwin_link_impl,
     attrs = {
         "cc": attrs.source(),
@@ -71,7 +72,7 @@ def _dyld_script_impl(ctx):
     return [DefaultInfo(default_output = out)]
 
 # `prelude` followed by `src`, as one script.
-dyld_script = rule(
+dyld_script_rule = rule(
     impl = _dyld_script_impl,
     attrs = {
         "busybox": attrs.exec_dep(),
@@ -92,6 +93,8 @@ def _mojo_darwin_toolchain_impl(ctx):
             cc_target = ctx.attrs.deployment_target,
             target_cpu = ctx.attrs.target_cpu,
             wrapper = one(ctx.attrs._wrapper),
+            watchdog_idle_secs = ctx.attrs.watchdog_idle_secs,
+            watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate_runner = one(ctx.attrs.gate_runner),
             run_check = one(ctx.attrs._run_check),
             numa_guard = one(ctx.attrs._numa_guard),
@@ -100,7 +103,7 @@ def _mojo_darwin_toolchain_impl(ctx):
         ),
     ]
 
-mojo_darwin_toolchain = rule(
+mojo_darwin_toolchain_rule = rule(
     impl = _mojo_darwin_toolchain_impl,
     is_toolchain_rule = True,
     attrs = {
@@ -114,8 +117,17 @@ mojo_darwin_toolchain = rule(
         "link": attrs.exec_dep(),
         "runtime": attrs.exec_dep(),
         "target_cpu": attrs.string(),
+        # The compile watchdog of darwin/mojo_wrapper.sh, as mojo_toolchain's.
+        "watchdog_idle_secs": attrs.int(default = 300),
+        "watchdog_sample_secs": attrs.int(default = 30),
         "_numa_guard": attrs.dep(default = "komira//tools/build/mojo:numa_guard.sh"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         "_wrapper": attrs.dep(default = "komira//tools/build/mojo/darwin:mojo_wrapper.sh"),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+dyld_script = declares_docs(dyld_script_rule)
+mojo_darwin_link = declares_docs(mojo_darwin_link_rule)
+mojo_darwin_toolchain = declares_docs(mojo_darwin_toolchain_rule)

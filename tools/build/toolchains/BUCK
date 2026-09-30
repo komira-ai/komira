@@ -113,8 +113,8 @@ conda_closure(
 )
 
 # What a built binary loads, read from the loader's own record of a run
-# (checks//runtime_libs:loader_trace, `run init <toolchain>/lib/...` lines).
-# tools/build/checks/run_checks.sh fails if this list and that record disagree.
+# (tests//functional/runtime_libs:loader_trace, `run init <toolchain>/lib/...` lines).
+# tools/build/tests/run_tests.sh fails if this list and that record disagree.
 mojo_runtime(
     name = "mojo_runtime",
     exec_compatible_with = ["komira//tools/build/platforms:light"],

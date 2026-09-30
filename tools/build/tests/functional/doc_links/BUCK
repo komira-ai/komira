@@ -1,0 +1,12 @@
+load("@komira//tools/build/lint:defs.bzl", "markdown_docs")
+
+# Links that resolve (test 17): a directory, a heading of another file and of
+# the same file, a file in `tree`. The target must build.
+markdown_docs(
+    name = "ok",
+    srcs = [
+        "ok.md",
+        "sub/a.md",
+    ],
+    tree = ["sub/data.txt"],
+)

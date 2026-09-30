@@ -1,0 +1,13 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The shared LZ4 raw-block codec: compress, decompress and the compress bound,
+# over liblz4. liblz4 is loaded at run time with dlopen and kept in one
+# process-lifetime `_Global` slot, so there is no link dep, and there are no
+# first-party deps: the Parquet page codecs and the document store's `_source`
+# compression both depend on this leaf and on nothing of each other.
+mojo_library(
+    name = "komira_lz4",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_codec.mojo"],
+    visibility = ["PUBLIC"],
+)

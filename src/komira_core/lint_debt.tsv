@@ -1,0 +1,21 @@
+# LINT DEBT — one unit, and it SHRINKS.
+#
+#   predicate<TAB>tracking<TAB>reason
+#
+# A row says: THIS predicate is expected to FAIL for THIS unit, today. It
+# ratchets BOTH ways and the second direction is the load-bearing one:
+#
+#   the predicate fails and has NO row      -> RED (the anti-pile-on)
+#   the predicate PASSES and HAS a row      -> RED, naming this line. Good news
+#                                              reported as a build failure ON
+#                                              PURPOSE — it is what makes the
+#                                              file only ever shrink.
+#
+# An EMPTY file is a REFUSAL: "no debt" is spelled by DELETING this file, not by
+# emptying it, because an empty ledger reads as "checked and clean" while being
+# indistinguishable from "nobody wrote the rows". An empty reason and an unknown
+# predicate name are refusals too.
+#
+# THE ONLY CORRECT LIFECYCLE FOR A ROW IS DELETION. Fix the violation, watch
+# the build go red for the opposite reason, delete the line.
+partial_move_via_unsafeptr	slab-move-out-primitive	The canonical carve-out class: the sites are in collections/slab.mojo, inside the Slab's OWN storage. Encapsulating the unsafe partial move inside a primitive is the entire point of the encapsulation rule (primitive-internal). Retiring it needs a Mojo-level move-out-of-slot primitive that Slab can call; there is no caller-side change that removes it.

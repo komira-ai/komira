@@ -5,7 +5,7 @@
  *    each base model at or above that level: the model with just that bit
  *    cleared must get the level just under the feature's.
  * Then prints "this cpu: level N" for the CPU running it, which the callers
- * compare with glibc's own view (tools/build/checks/glibc_level.sh).
+ * compare with glibc's own view (tools/build/tests/functional/glibc_level.sh).
  * Exit 1 on any mismatch. */
 #include <stdio.h>
 #include "cpu_models.h"

@@ -1,126 +1,70 @@
-# CI for komira. See docs/ci.md for the trust model; in short:
+# CI for komira: one job, on a runner that lives on the build farm. See
+# docs/ci.md; in short:
 #
-#   static  every event, including pull requests from forks. Lints only, with
-#           no secret and a read-only token; nothing reaches the build farm.
-#   farm    pushes to main, the nightly schedule, manual runs of main, and
-#           pull requests whose branch lives in this repository, once a
-#           maintainer approves the run. Joins the tailnet as an ephemeral
-#           node and runs tools/build/checks/run_checks.sh on remote execution, which
-#           can run any command on the shared workers: see "What farm access
-#           means" in docs/ci.md.
+# The runner is a thin buck2 client. `./buck2 build //...` asks the farm to
+# build every target, and a target cannot build unless the tests welded to
+# it, and to each of its dependencies, pass and every lint that guards it is
+# clean (lints are validations, tools/build/lint). `./buck2 test //...` runs
+# the standalone tests. The last step tests what a build of //... does not:
+# buck2's own behaviour (where actions ran, cache identity, refusals). A
+# contributor runs the same commands locally; the last one needs a Linux
+# x86_64 client.
 #
-# A pull request from a fork never runs the farm job: its `if:` excludes it,
-# and independently GitHub gives a fork's `pull_request` run no secrets, so
-# even a fork that edits this file cannot join the tailnet.
+# The farm connection comes from the runner's machine-wide buckconfig, not
+# from this repository: the job reads no secret and names no environment.
+# The runner is registered to this repository only, with the label
+# `komira-farm`, and runs each job in a fresh container.
 #
-# The secrets are not repository secrets. They live in two GitHub
-# Environments, and the farm job names one:
-#   farm     deployment branches: main only. Pushes to main, the nightly run
-#            and manual runs of main. A branch that rewrites this file to
-#            name `farm` is refused by the branch policy before any step runs.
-#   farm-pr  required reviewers. A pull request from a branch of this
-#            repository waits until a maintainer approves that run, after
-#            reading the change, .github/ included. There is no
-# pull_request_target workflow here, on purpose: it runs with the base
-# repository's secrets, and checking out the fork's code under it hands them
-# to that code.
+# Pull requests from forks run only after a maintainer approves the run
+# (repository setting: Actions > General > "Require approval for all
+# external contributors"). Approving runs the fork's code on the farm
+# runner, so read the change, .github/ and tools/ included, first. There is
+# no pull_request_target workflow here, on purpose.
 name: ci
 
 on:
   push:
     branches: [main]
   pull_request:
-  schedule:
-    # Nightly: re-checks main against the farm when nothing was pushed
-    # (cache eviction, worker or toolchain drift).
-    - cron: "23 7 * * *"
   workflow_dispatch:
-    inputs:
-      umbrella:
-        description: Run the umbrella-mount cache check (check 7)
-        type: boolean
-        default: true
 
 permissions: {}
 
 concurrency:
-  # One run per pull request, per event, cancelling a superseded one. Runs on
-  # main queue instead, so every push to main gets a verdict.
-  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  # One run per pull request, cancelling a superseded one. Every other run
+  # (a push to main, a manual run) has a group of its own commit, so each
+  # push to main gets a verdict: GitHub keeps only one pending run per group
+  # and cancels it when a newer one queues, so a group shared by pushes would
+  # drop the middle one of three quick pushes (checked by //:push_verdicts).
+  group: ci-${{ github.event_name }}-${{ github.event.pull_request.number || github.sha }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
-  static:
-    runs-on: ubuntu-24.04
-    timeout-minutes: 10
+  build:
+    runs-on: [self-hosted, komira-farm]
+    timeout-minutes: 120
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - name: Static checks
-        run: .github/ci/static_checks.sh "$RUNNER_TEMP/tools"
-      - name: The buck2 pin resolves and verifies
-        run: .github/ci/fetch_buck2.sh "$RUNNER_TEMP/bin"
-
-  farm:
-    needs: static
-    if: >-
-      github.repository == 'komira-ai/komira' &&
-      github.actor != 'dependabot[bot]' &&
-      (github.event_name != 'pull_request' ||
-       github.event.pull_request.head.repo.full_name == github.repository)
-    environment:
-      name: ${{ github.event_name == 'pull_request' && 'farm-pr' || 'farm' }}
-    runs-on: ubuntu-24.04
-    timeout-minutes: 60
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Join the tailnet (ephemeral, tag:ci)
-        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
-        with:
-          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
-          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
-          tags: tag:ci
-          version: 1.94.2
-          sha256sum: c6f99a5d774c7783b56902188d69e9756fc3dddfb08ac6be4cb2585f3fecdc32
-          use-cache: "false"
-      - name: Write .buckconfig.local from the environment secret
-        env:
-          BUCKCONFIG_LOCAL: ${{ secrets.BUCKCONFIG_LOCAL }}
-        run: .github/ci/buckconfig_local.sh write
-      - name: Install the pinned buck2
+      # Without both worker property sets a checkout builds locally, on this
+      # runner (tools/build/platforms/default); refuse rather than do that.
+      - name: the runner's buckconfig names the farm
         run: |
-          .github/ci/fetch_buck2.sh "$RUNNER_TEMP/bin"
-          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      - name: tools/build/checks/run_checks.sh
-        env:
-          UMBRELLA: ${{ github.event_name != 'workflow_dispatch' || inputs.umbrella }}
+          for key in light_properties mojo_compile_properties; do
+            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+              { echo "the runner's buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
+          done
+      - name: ./buck2 build //...
+        run: ./buck2 build //...
+      - name: ./buck2 test //...
+        run: ./buck2 test //...
+      - name: tools/build/tests/run_tests.sh
         run: |
-          mkdir -p "$RUNNER_TEMP/checks"
-          export TMPDIR="$RUNNER_TEMP/checks"
-          args=()
-          [ "$UMBRELLA" = true ] || args+=(--no-umbrella)
-          tools/build/checks/run_checks.sh "${args[@]}"
-      - name: Redact check logs
-        id: redact
-        if: failure()
-        run: .github/ci/buckconfig_local.sh redact "$RUNNER_TEMP/checks"
-      - name: Upload check logs
-        # Only logs the redact step verified clean. If redaction failed, or
-        # never ran, nothing is uploaded.
-        if: failure() && steps.redact.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: check-logs-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/checks
-          if-no-files-found: warn
-          retention-days: 14
+          mkdir -p "$RUNNER_TEMP/tests"
+          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh
       - name: Stop buck2
         if: always()
-        run: buck2 kill || true
+        run: ./buck2 kill || true

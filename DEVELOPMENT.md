@@ -10,28 +10,52 @@ a remote-execution service that speaks the Bazel Remote Execution API (for
 example Buildbarn), you can build there instead (step 3). Remote execution is
 opt-in: it is configured only by a `.buckconfig.local` you write.
 
+## Repository layout
+
+| directory | holds |
+|---|---|
+| `src/<module>/` | one Mojo library per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
+| `src/proto/` | `.proto` sources |
+| `src/mojo_sdk/`, `src/python_sdk/`, `src/typescript_sdk/` | the user-facing SDKs |
+| `tools/` | the build rules, toolchains and platforms, the lints, and the end-to-end tests cell (`tools/build/tests`) |
+| `docs/` | the repository's documentation |
+| `third_party/` | C and C++ libraries built from pinned source archives |
+
+A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
+the Markdown link check reads its files with nothing more ([step 2](#2-build-locally-by-default)).
+A library kci (komira_ci) owns is named `kci_<x>`.
+
 ## 1. Get buck2
 
-The pinned release is **2026-09-15**. [`tools/buck2`](tools/buck2) is a
-[dotslash](https://dotslash-cli.com) file that fetches and verifies it:
+Run buck2 through [`./buck2`](buck2), at the repository root:
 
 ```sh
-tools/buck2 --version
+./buck2 --version
 ```
 
-Without dotslash, download the release asset for your platform from
-<https://github.com/facebook/buck2/releases/tag/2026-09-15>, check it against
-the sha256 in `tools/buck2`, and decompress it with `zstd -d`. The prelude is
-the one bundled with that binary (`[external_cells] prelude = bundled` in
-[`.buckconfig`](.buckconfig)), so the pin fixes the prelude too.
+The first run downloads the release pinned in [`tools/buck2`](tools/buck2)
+(**2026-09-15**), refuses it unless its size and sha256 match the pin,
+decompresses it and caches it at
+`~/.cache/komira/buck2/<sha256>/buck2` (under `$XDG_CACHE_HOME` when set);
+later runs start the cached binary directly. It needs `sh`, `curl`, `zstd`
+(`brew install zstd` on macOS) and `sha256sum` or `shasum`. `tools/buck2` is
+the only place the version is written; it is also a
+[dotslash](https://dotslash-cli.com) file, so `tools/buck2 ...` works the same
+where dotslash is installed. The prelude is the one bundled with that binary
+(`[external_cells] prelude = bundled` in [`.buckconfig`](.buckconfig)), so the
+pin fixes the prelude too.
 
 `tools/buck2` has entries for Linux x86_64 and macOS aarch64. Local builds
 need a Linux x86_64 machine: every toolchain action is a Linux x86_64 binary.
 On macOS buck2 works as a client of a remote-execution service (step 3); a
-local build there refuses, naming `.buckconfig.local`. `buck2 run` (which
-starts the binary on your machine) needs Linux x86_64 either way.
+local build there refuses, naming `.buckconfig.local`; remotely,
+`./buck2 build //...` and `./buck2 test //...` work as on Linux. Two things
+need a Linux x86_64 client either way, because they run Linux binaries on
+your machine: `./buck2 run`, and `tools/build/tests/run_tests.sh` (section
+4), which refuses any other client.
 
-`buck2` below is either a `buck2` on your `PATH` or `tools/buck2`.
+Commands below use `./buck2`; a `buck2` on your `PATH` at the same version
+works the same.
 
 ## 2. Build (locally, by default)
 
@@ -42,16 +66,39 @@ commands build on a remote-execution service once `.buckconfig.local` names
 one (step 3):
 
 ```sh
-buck2 build //tools/build/examples:hello                         # one binary
-buck2 build '//tools/build/examples:hello_pkg_user[run_check]'   # run a binary, compare its stdout
-buck2 run //tools/build/examples:hello                           # build and run it
-buck2 test //tools/build/examples:test_hellopkg                  # a standalone Mojo test
-buck2 build //...                                                # every target in the komira cell (rules, toolchains, examples)
+./buck2 build //tools/build/examples:hello                         # one binary
+./buck2 build '//tools/build/examples:hello_pkg_user[run_check]'   # run a binary, compare its stdout
+./buck2 run //tools/build/examples:hello                           # build and run it
+./buck2 test //tools/build/examples:test_hellopkg                  # a standalone Mojo test
+./buck2 build //...                                                  # every target in the komira cell (rules, toolchains, examples, lints)
 ```
 
 The rules, their attributes and sub-targets are described in
 [tools/build/mojo/README.md](tools/build/mojo/README.md), with the
 [examples](tools/build/examples/) that use each one.
+
+A build is also the lint: shellcheck, actionlint, the repository checks and
+the Markdown link check (`//:docs`: every relative link and `#anchor`
+resolves) are validations ([tools/build/lint/defs.bzl](tools/build/lint/defs.bzl)), and
+the scripts the Mojo and Rust rules run are linted through their toolchains,
+so `./buck2 build //...` fails with `Validation for <target> failed:` and the
+findings. A new shell script belongs in the `srcs` of the `shell_lint` target
+of the rule or package that runs it. A new package needs nothing for the
+link check: the first rule its BUCK file calls declares the package's
+`doc_tree` (its files, and its subpackages' `doc_tree`s, which Buck2 lists),
+so `//:docs` reaches every package with no list
+([tools/build/lint/doc_tree.bzl](tools/build/lint/doc_tree.bzl)). The komira
+rules do this where they are defined; the prelude rules the repository's
+BUCK files call (`cxx_library`, `export_file`, `filegroup`,
+`platform`, `constraint_setting`, `constraint_value`) do it through
+`[buildfile] includes` in `.buckconfig`
+([tools/build/lint/includes.bzl](tools/build/lint/includes.bzl)). A BUCK
+file that calls none of them is an analysis error of `//:docs`
+(`Unknown target \`doc_tree\` from package ...`), never a package left out;
+such a file calls `package_docs()` from `doc_tree.bzl`. A new rule a BUCK
+file calls is exported through `declares_docs`. Test 17 of
+`tools/build/tests/run_tests.sh` requires every package in `//:docs` and no
+BUCK file naming its own `doc_tree`.
 
 Mojo compiles take a lot of memory. Buck2 runs as many local actions at once
 as the machine has cores; on a machine with less than a few GB of memory per
@@ -60,8 +107,8 @@ locally (nothing knows how many NUMA nodes this machine has); it needs a
 remote service with multi-NUMA workers
 ([tools/build/platforms/README.md](tools/build/platforms/README.md#multi-numa-runs)).
 
-`buck2 audit execution-platform-resolution <target>` shows where a target
-builds; `buck2 log what-ran` shows `local` for each action that ran here.
+`./buck2 audit execution-platform-resolution <target>` shows where a target
+builds; `./buck2 log what-ran` shows `local` for each action that ran here.
 
 ### What a local build guarantees
 
@@ -75,11 +122,11 @@ What that gives you, and what it does not:
   the C++ runtime it needs -- is a download pinned by sha256, unpacked by
   build actions. An action sets `PATH` to a private directory of busybox
   applets and its own `HOME`, `TMPDIR` and caches; no command line names a
-  host path ([check 5](tools/build/checks/README.md)).
+  host path ([test 5](tools/build/tests/README.md)).
 - **Measured locally so far: toolchain, zig and C actions only.** With an
   empty host `PATH`, unpacking zig and the conda packages, building the zig
   programs, assembling the Mojo runtime, and one C compile and archive run
-  locally and succeed; [check 25](tools/build/checks/README.md) repeats the
+  locally and succeed; [test 25](tools/build/tests/README.md) repeats the
   zig unpack and two concurrent zig builds on every run. **A local
   Mojo compile has not yet been measured**: `mojo_build`, `mojo_precompile`,
   gated tests, run checks and bundles have so far run only on a
@@ -105,7 +152,7 @@ What that gives you, and what it does not:
 When a result matters (a release, a bug report about the build), build it on
 a remote-execution service, or at least from a shell with a minimal
 environment (`env -i HOME="$HOME" PATH=/usr/bin:/bin buck2 ...` after
-`buck2 kill`, so the daemon restarts with it).
+`./buck2 kill`, so the daemon restarts with it).
 
 ## 3. Optional: build on a remote-execution service
 
@@ -115,7 +162,7 @@ fresh clone builds locally. To build remotely instead, put your service in
 
 ```sh
 cp .buckconfig.local.example .buckconfig.local
-buck2 kill                                        # the daemon reads remote settings when it starts
+./buck2 kill                                      # the daemon reads remote settings when it starts
 ```
 
 Fill in:
@@ -159,49 +206,42 @@ when the server does not advertise a lower limit, which a server with a
 bytes, while a maximum of 2097152 bytes is permitted"). The setting changes no
 action digest.
 
-## 4. Run the checks
+## 4. Run the tests
 
 ```sh
-tools/build/checks/run_checks.sh                 # everything
-tools/build/checks/run_checks.sh --no-umbrella   # skip the umbrella cache check (two scratch checkouts)
-tools/build/checks/run_checks.sh --no-run        # skip the `buck2 run` check (a scratch clone)
-tools/build/checks/run_checks.sh --no-uncached   # skip the two uncached bundle builds (check 15)
+tools/build/tests/run_tests.sh                 # everything
+tools/build/tests/run_tests.sh --no-umbrella   # skip the umbrella cache check (two scratch checkouts)
+tools/build/tests/run_tests.sh --no-run        # skip the `./buck2 run` test (a scratch clone)
+tools/build/tests/run_tests.sh --no-uncached   # skip the two uncached bundle builds (test 15)
 ```
 
 The checks run where your checkout builds. The first line of output says
-which: `MODE  remote` with a `.buckconfig.local` naming a service, when every
-check runs; `MODE  local` without one, when every action runs on this machine
-and the checks that need a remote service (the umbrella cache, `buck2 run`'s
-download budget, the multi-NUMA and per-action property-set checks, macOS)
-each print a `SKIP` line saying so. Check 3 (a missing `deps` edge fails to
+which: `MODE  remote` with a `.buckconfig.local` (or, as on the CI runner, a
+machine-wide buckconfig) naming a service, when every
+test runs; `MODE  local` without one, when every action runs on this machine
+and the tests that need a remote service (the umbrella cache, `buck2 run`'s
+download budget, the multi-NUMA and per-action property-set tests, macOS)
+each print a `SKIP` line saying so. Test 3 (a missing `deps` edge fails to
 compile) is also skipped locally: it relies on the remote executor staging
 only declared inputs, and a local action, which is not sandboxed, may find
-the undeclared package in the checkout. Check 25, that a fresh clone with no
+the undeclared package in the checkout. Test 25, that a fresh clone with no
 `.buckconfig.local` resolves to local execution, runs in both.
 
-`run_checks.sh` uses `buck2` from your `PATH`, falls back to `tools/buck2`,
-and takes `BUCK2=...` over both. Besides `buck2` it runs `git`, `python3`
-(the doc link check) and `readelf` (the output and runtime-library checks) on
-the client. Logs and the scratch checkouts of the umbrella and `buck2 run`
-checks go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk
+`run_tests.sh` runs `./buck2`; `BUCK2=...` overrides it. Besides buck2 it
+runs `git`, `readelf`, `objdump`, `curl` and `zstd` on the client, and no
+Python: the JSON, tar and Mach-O reads are a Mojo tool
+([tools/build/inspect](tools/build/inspect/inspect.mojo)) the tests build on
+the farm like any other target. Logs and the scratch checkouts of the umbrella and `./buck2 run`
+tests go under `$TMPDIR`; where `/tmp` is memory, point `TMPDIR` at a disk
 directory. The scratch checkouts are deleted on exit,
 pass or fail (`KEEP_SCRATCH=1` keeps them); logs are kept, and the last line
-of output names their directory. It exits non-zero if any check failed.
-Each check is described, with how to run it on its own, in
-[tools/build/checks/README.md](tools/build/checks/README.md). CI runs the same
-script on the farm, after static checks you can also run yourself
-(`.github/ci/static_checks.sh`); see [docs/ci.md](docs/ci.md).
-
-## 5. Enable the knowledge-graph hooks
-
-```sh
-python3 tools/kg/kg.py setup   # once per clone: core.hooksPath = .githooks
-```
-
-The pre-commit hook keeps the generated library pages and docs graph in
-step with the tree; the Buck2 graph is re-rendered with
-`python3 tools/kg/kg.py graph`. See
-[docs/knowledge_graph.md](docs/knowledge_graph.md).
+of output names their directory. It exits non-zero if any test failed.
+Each test is described, with how to run it on its own, in
+[tools/build/tests/README.md](tools/build/tests/README.md). CI runs the same
+script, after `./buck2 build //...` and `./buck2 test //...`; see
+[docs/ci.md](docs/ci.md). It needs a Linux x86_64 client (it runs Linux
+binaries the farm built, and `readelf`/`objdump`, on your machine) and
+refuses any other with exit 2.
 
 ## Host floor
 
@@ -235,12 +275,12 @@ not share a remote cache.
 - **Remote outputs stay remote until needed.** `[buck2] materializations = deferred`
   in [`.buckconfig`](.buckconfig): a build downloads nothing it does not
   have to. Pass `--materializations all` to fetch a target's outputs, as the
-  output check does. `buck2 run` downloads the binary and its runtime
+  output test does. `./buck2 run` downloads the binary and its runtime
   libraries only, never the compiler.
 - **Forcing real execution.** A cache hit records no worker properties and
   runs nothing. To make every action execute, build with
   `--no-remote-cache`, ideally under its own `--isolation-dir` so your normal
-  daemon's state is untouched (the action-platform check does this).
+  daemon's state is untouched (the action-platform test does this).
 
 ## Troubleshooting
 
@@ -254,11 +294,11 @@ not share a remote cache.
   or found on the service.
 - **You changed `[buck2_re_client]` (endpoints, batch size) and nothing
   changed.** These settings take effect when the buck2 daemon starts. Run
-  `buck2 kill`, then build again.
+  `./buck2 kill`, then build again.
 - **`BatchReadBlobs` fails with "Attempted to read a total of at least N
   bytes, while a maximum of 2097152 bytes is permitted".** The batch size
   limit is missing or was raised above your server's message limit; keep
-  `max_total_batch_size = 1048576`, then `buck2 kill`.
+  `max_total_batch_size = 1048576`, then `./buck2 kill`.
 - **``[buck2_re_client] <key>` names a remote-execution service, but
   `[komira_re]` names no worker property set``.** Your `.buckconfig.local`
   has the service addresses but no (or a misspelled) `[komira_re]`; fill it
@@ -270,14 +310,14 @@ not share a remote cache.
   value no worker advertises.
 - **`.buckconfig.local` seems ignored in a non-root cell.** It configures the
   root cell (`komira`, which holds the rules and toolchains) only; the
-  standalone-only `toolchains` and `checks` cells do not read it. Pass a cell-scoped override instead, e.g.
-  `-c checks//komira_re.light_properties=...`.
+  standalone-only `toolchains` and `tests` cells do not read it. Pass a cell-scoped override instead, e.g.
+  `-c tests//komira_re.light_properties=...`.
 - **`Can't find toolchain_dep execution platform`** for a
   `mojo_multi_numa_test`. No multi-NUMA workers are configured; that is the
   intended refusal
   ([tools/build/platforms/README.md](tools/build/platforms/README.md#multi-numa-runs)).
 - **Which worker class did a target get?**
-  `buck2 audit execution-platform-resolution <target>` shows the platform and
+  `./buck2 audit execution-platform-resolution <target>` shows the platform and
   why the others were skipped.
 - **Errors from inside the Mojo rules**: `GATED TEST FAILED`, `REFUSING:
   toolchain member ...` (exit 2), an output containing the action's working

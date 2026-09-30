@@ -1,0 +1,2 @@
+-Wall
+  -Werror   -std=c99

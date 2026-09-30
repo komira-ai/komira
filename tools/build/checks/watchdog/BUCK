@@ -1,8 +1,0 @@
-load(":defs.bzl", "mojo_watchdog_cases")
-
-# Every verdict of the compile watchdog in mojo_wrapper.sh, on stand-in
-# compilers (tools/build/checks/run_checks.sh).
-mojo_watchdog_cases(
-    name = "cases",
-    script = "cases.sh",
-)

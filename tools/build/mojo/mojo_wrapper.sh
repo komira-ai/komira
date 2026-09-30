@@ -53,12 +53,16 @@
 # compiler, and so do children already reaped). A sample in which the tree gained less than 1% of
 # one CPU is idle; after --watchdog-idle-secs (default 300) of consecutive
 # idle samples the wrapper kills the session and every process of the tree
-# and exits 124, saying so. There is no wall-clock limit: a slow compile uses
-# CPU the whole time and is never killed. --watchdog-idle-secs=0 turns the
+# and exits 124, saying so. The compiler dies with the wrapper: a HUP, INT or
+# TERM to the wrapper kills the tree before it exits (129, 130, 143), and if
+# the wrapper is killed outright a tether in the compiler's session kills the
+# session (see the compile step below). There is no wall-clock limit: a slow
+# compile uses CPU the whole time and is never killed. --watchdog-idle-secs=0 turns the
 # watchdog off. The toolchain passes both (mojo_toolchain's
 # watchdog_idle_secs and watchdog_sample_secs).
 #
-# Exit status: the compiler's; 124 when the watchdog killed it; 2 for a
+# Exit status: the compiler's; 124 when the watchdog killed it; 129, 130 or
+# 143 when the wrapper was signalled (the compiler killed first); 2 for a
 # toolchain or wrapper refusal; 3 when
 # the compiler exits 0 but the `-o` output is missing or empty (a zero-byte
 # package is a silent failure); 4 when the output contains this action's
@@ -298,27 +302,51 @@ if [ "$WD_IDLE" = 0 ]; then
     "$TC/bin/mojo" "$@" || rc=$?
 else
     # setsid: the compiler leads a session of its own, so killing the session
-    # also reaches a descendant whose parent has already exited.
-    "$BB" setsid "$TC/bin/mojo" "$@" &
+    # also reaches a descendant whose parent has already exited. That also
+    # takes it out of this wrapper's process group, so two things tie it to
+    # the wrapper. A signal the wrapper can catch kills the tree at once (the
+    # traps below). SIGKILL cannot be caught: a tether in the compiler's
+    # session blocks reading a FIFO whose only writer is this wrapper (fd 9;
+    # the session is started without it), and when the wrapper dies, however
+    # it dies, the kernel closes that end, the read returns, and the tether
+    # kills the session's process group. Nothing polls for it.
+    "$BB" mkfifo "$T/tether"
+    exec 9<> "$T/tether"
+    "$BB" setsid "$BB" sh -c '
+        bb=$1 fifo=$2
+        shift 2
+        "$@" &
+        c=$!
+        { "$bb" cat "$fifo" > /dev/null; "$bb" kill -s KILL 0; } &
+        t=$!
+        rc=0
+        wait "$c" || rc=$?
+        "$bb" kill "$t" 2> /dev/null
+        exit "$rc"
+    ' tether "$BB" "$T/tether" "$TC/bin/mojo" "$@" 9>&- &
     pid=$!
+    on_signal() { kill_tree "$pid"; rm -rf "$T"; exit "$1"; }
+    trap 'on_signal 129' HUP
+    trap 'on_signal 130' INT
+    trap 'on_signal 143' TERM
     need=$(((WD_IDLE + WD_SAMPLE - 1) / WD_SAMPLE))
-    set -- $(tree "$pid")
-    last=$2
+    s=$(tree "$pid")
+    last=${s#* }
     idle=0
     waited=0
-    while [ "$1" != gone ]; do
-        "$BB" sleep 1
+    while [ "${s% *}" != gone ]; do
+        "$BB" sleep 1 9>&-
         waited=$((waited + 1))
-        set -- $(tree "$pid")
-        [ "$1" != gone ] || break
+        s=$(tree "$pid")
+        [ "${s% *}" != gone ] || break
         [ "$waited" -ge "$WD_SAMPLE" ] || continue
         waited=0
-        if [ $(($2 - last)) -lt "$WD_SAMPLE" ]; then
+        if [ $((${s#* } - last)) -lt "$WD_SAMPLE" ]; then
             idle=$((idle + 1))
         else
             idle=0
         fi
-        last=$2
+        last=${s#* }
         if [ "$idle" -ge "$need" ]; then
             kill_tree "$pid"
             wait "$pid" 2> /dev/null || true
@@ -328,6 +356,7 @@ else
         fi
     done
     wait "$pid" || rc=$?
+    trap - HUP INT TERM
 fi
 if [ "$rc" = 0 ] && [ ! -s "$EXPECT" ]; then
     echo "mojo_wrapper: compiler exited 0 but $EXPECT is missing or empty" >&2

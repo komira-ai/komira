@@ -7,8 +7,8 @@ mojo_binary(
     name = "hello",
     srcs = ["hello.mojo"],
     expected_stdout = "hello from mojo\n",
-    # checks//formats bundles it with a long file path. PUBLIC rather than
-    # naming that package: the `checks` cell exists only in a standalone
+    # tests//functional/formats bundles it with a long file path. PUBLIC rather than
+    # naming that package: the `tests` cell exists only in a standalone
     # checkout, and a label naming it fails to load in a repository that uses
     # komira as a cell.
     visibility = ["PUBLIC"],

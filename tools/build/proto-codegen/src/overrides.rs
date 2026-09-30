@@ -261,7 +261,7 @@ mod tests {
         .unwrap();
         let err = m
             .check_symbols(&[(
-                "src/komira/komira_aws_relay/sm_overrides.mojo".into(),
+                "src/komira_aws_relay/sm_overrides.mojo".into(),
                 "def something_else(x: Int):\n    pass\n".into(),
             )])
             .unwrap_err();
@@ -276,7 +276,7 @@ mod tests {
         )))
         .unwrap();
         m.check_symbols(&[(
-            "src/komira/komira_aws_relay/sm_overrides.mojo".into(),
+            "src/komira_aws_relay/sm_overrides.mojo".into(),
             "def delete_secret(mut c: X) raises -> Y:\n    pass\n".into(),
         )])
         .expect("accepts");

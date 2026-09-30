@@ -39,6 +39,7 @@ load(
 load("@prelude//cxx:headers.bzl", "HeaderMode")
 load("@prelude//linking:link_info.bzl", "LinkStyle")
 load("@prelude//python_bootstrap:python_bootstrap.bzl", "PythonBootstrapToolchainInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _refusal(bb, what):
     # A tool the toolchain does not provide. It is still a declared input (the
@@ -223,8 +224,12 @@ def _staged_files_impl(ctx):
 # compiler records that path in the object. A copy's path in buck-out names
 # the cell, not its mount point, so the compile and archive actions, and every
 # Mojo link using them, keep one digest wherever komira is mounted. The
-# `cxx_library` targets of komira name their sources this way (check 7).
-staged_files = rule(
+# `cxx_library` targets of komira name their sources this way (test 7).
+staged_files_rule = rule(
     impl = _staged_files_impl,
     attrs = {"srcs": attrs.list(attrs.source(), default = [])},
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+staged_files = declares_docs(staged_files_rule)
