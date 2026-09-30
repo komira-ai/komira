@@ -1,0 +1,32 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
+
+# Read the logs behind a failed step, for the release tool and its validators.
+# Two families share one bounded, redacting renderer (`RunLogTail`):
+#   * run logs: compose a pipeline run's log-route URL, drain its
+#     `?after=&limit=` cursor over a transport trait, and parse each page
+#     through a field allow-list;
+#   * cloud logs: read a terminated cloud unit's container output (a Cloud Run
+#     Job execution or an ECS task) behind a cloud-neutral `CloudLogSource`
+#     trait, with the pure Cloud Logging / CloudWatch Logs request and parse
+#     halves and the bounded paging and settle loops.
+# It has no deps and never raises: it is an enrichment on a failure path. No
+# socket: the transport is a trait, so every branch is tested with no network.
+mojo_library(
+    name = "kci_logs",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_cloud_log_source.mojo",
+        "tests/test_empty_stream_speaks_its_own_stream.mojo",
+        "tests/test_run_log_reader.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
+)
