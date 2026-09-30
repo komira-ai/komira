@@ -216,6 +216,8 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 #   an unheld test that fails   -> the gate is red (GATED TEST FAILED)
 #   a held test that fails      -> satisfied (marker `HELD <label>`)
 #   a held test that passes     -> red (LEDGER STALE), naming its row: delete it
+#   a held test SIGKILLed (137) -> red (NO VERDICT): a memory limit's kill is
+#                                  not the test's failure (gate_runner.sh)
 # A hold therefore silences nothing: the red is asserted on every build, and
 # the fix is reported as a build failure until the row goes.
 #

@@ -158,9 +158,10 @@
 #      red with test_env {HELD: 1} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
 #      (checks//test_data:runner_cases), gives each run its own empty
-#      TEST_TMPDIR under that directory and removes it, and no --env reaches
-#      the verdict; five inadmissible data/env declarations are refused at
-#      analysis.
+#      TEST_TMPDIR under that directory and removes it, no --env reaches
+#      the verdict, and a held test killed by SIGKILL fails (137, NO VERDICT)
+#      with no marker while other signal deaths stay HELD; five inadmissible
+#      data/env declarations are refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
 #      analysis only): mojo_test and a mojo_library's gated tests at -O1,
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target

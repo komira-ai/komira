@@ -26,10 +26,22 @@
 # place of the test.
 #
 # With --hold the test is HELD (mojo_library's `tests_known_failing` row
-# <held entry>) and the verdict inverts: the test still runs, a FAILURE (any
-# non-zero exit, a signal death included) writes `HELD <label>` and exits 0,
-# and a PASS is red (exit 1, LEDGER STALE), naming the row to delete. The
-# marker's bytes never depend on the run.
+# <held entry>) and the verdict inverts: the test still runs, a FAILURE (a
+# non-zero exit, or a death by any signal but SIGKILL) writes `HELD <label>`
+# and exits 0, and a PASS is red (exit 1, LEDGER STALE), naming the row to
+# delete. The marker's bytes never depend on the run.
+#
+# A held test killed by SIGKILL (exit 137) has NO VERDICT: the runner says so
+# and exits 137 without writing the marker. SIGKILL is what a memory limit
+# delivers, so the kill says the machine was too small, not that the test is
+# still red. Taken as a failure it would make the held test's action SUCCEED,
+# be cached, and be run again on the same too-small machine: a test fixed
+# since would then be reported HELD forever and never go LEDGER STALE. A
+# non-zero exit lets the executor retry on a larger one, where the real
+# verdict is computed. (A held test that kills ITSELF with SIGKILL is
+# therefore red; it cannot be held.) An unheld test killed by SIGKILL is
+# already red. The compile watchdog's 124 is the compiler's action
+# (mojo_wrapper.sh), not this one; a test's own exit 124 is its own verdict.
 #
 # Exit status: 0 on PASS (or a held test's failure); otherwise the test's own
 # exit status (so a signal death, 128+N, stays distinguishable from an
@@ -101,6 +113,20 @@ export PATH LD_LIBRARY_PATH TMPDIR TEST_TMPDIR HOME
 rc=0
 (cd "$CWD" && exec "$BB" env "$@" "$BIN") > "$T/log" 2>&1 < /dev/null || rc=$?
 if [ -n "$HELD" ]; then
+    if [ "$rc" = 137 ]; then
+        {
+            echo "=================================================================="
+            echo "NO VERDICT: held test $LABEL was killed by SIGKILL (exit 137)."
+            echo "  row:    tests_known_failing[\"$HOLD_ENTRY\"]"
+            echo "A memory limit kills with SIGKILL, so this says the machine was too"
+            echo "small, not that the test still fails. No HELD marker is written;"
+            echo "the action fails so it can be run again with more memory."
+            echo "------------------------------------------------------------------ output"
+            tail -n 50 "$T/log"
+            echo "=================================================================="
+        } >&2
+        exit 137
+    fi
     if [ "$rc" != 0 ]; then
         printf 'HELD %s\n' "$LABEL" > "$MARKER"
         exit 0
