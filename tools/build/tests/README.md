@@ -315,16 +315,22 @@ without leaving the staged tree (the Markdown reader of
 [`//tools/build/inspect`](../inspect/inspect.mojo)). `//:docs` in the root
 [`BUCK`](../../../BUCK) stages the whole repository and so checks every
 Markdown file in it: `./buck2 build //...` fails on a dead link, naming it.
-It collects the `doc_tree` target of every package, which names that
-package's own files (a glob stops at a subpackage), and this cell's through
-`tests//:doc_tree`.
+No BUCK file lists its files for it: the rules a package's BUCK file calls
+declare that package's `doc_tree`, which names the package's own files (a
+glob stops at a subpackage) and collects the `doc_tree` of each subpackage
+Buck2 finds ([`doc_tree.bzl`](../lint/doc_tree.bzl)); `//:docs` takes the
+root package's, and this cell's through `tests//:doc_tree`. The toolchains
+cell is not read: it is one BUCK file, the template a consuming repository
+copies, whose targets test 7 pins equal to a consumer's.
 The test builds `//:docs` and
 [`functional/doc_links`](functional/doc_links/BUCK) (a directory, headings and
 a file of `tree`, which must resolve), and requires
 [`negative/doc_links`](negative/doc_links/BUCK) to fail naming each of its
 planted links: a missing file, a bad anchor and a link leaving the tree, and
 nothing else. It also requires every package of the komira and tests cells
-to be in `//:docs`, and neither cell to set
+to be in `//:docs`, the toolchains cell to hold no Markdown, no BUCK file but
+[`negative/numa_standin`](negative/numa_standin/BUCK) (which may call no
+rule) to declare a `doc_tree` itself, and neither cell to set
 `[project] package_boundary_exceptions`: an exception is a path prefix, so
 one that covers the root package covers every package, and any target could
 then name a file of another package.

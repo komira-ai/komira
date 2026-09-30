@@ -21,8 +21,8 @@ opt-in: it is configured only by a `.buckconfig.local` you write.
 | `docs/` | the repository's documentation |
 | `third_party/` | C and C++ libraries built from pinned source archives |
 
-A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`,
-its `doc_tree`, and a row for that `doc_tree` in the `packages` of `//:docs`.
+A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
+the Markdown link check reads its files with nothing more ([step 2](#2-build-locally-by-default)).
 A library kci (komira_ci) owns is named `kci_<x>`.
 
 ## 1. Get buck2
@@ -83,11 +83,22 @@ resolves) are validations ([tools/build/lint/defs.bzl](tools/build/lint/defs.bzl
 the scripts the Mojo and Rust rules run are linted through their toolchains,
 so `./buck2 build //...` fails with `Validation for <target> failed:` and the
 findings. A new shell script belongs in the `srcs` of the `shell_lint` target
-of the rule or package that runs it. A new package declares
-`doc_tree(name = "doc_tree", srcs = glob(["**"]))` and is added to the
-`packages` of `//:docs` (of `tests//:doc_tree` in the tests cell), so the
-link check reads its files; test 17 of `tools/build/tests/run_tests.sh`
-fails on a package that is not there.
+of the rule or package that runs it. A new package needs nothing for the
+link check: the first rule its BUCK file calls declares the package's
+`doc_tree` (its files, and its subpackages' `doc_tree`s, which Buck2 lists),
+so `//:docs` reaches every package with no list
+([tools/build/lint/doc_tree.bzl](tools/build/lint/doc_tree.bzl)). The komira
+rules do this where they are defined; the prelude rules the repository's
+BUCK files call (`cxx_library`, `export_file`, `filegroup`,
+`platform`, `constraint_setting`, `constraint_value`) do it through
+`[buildfile] includes` in `.buckconfig`
+([tools/build/lint/includes.bzl](tools/build/lint/includes.bzl)). A BUCK
+file that calls none of them is an analysis error of `//:docs`
+(`Unknown target \`doc_tree\` from package ...`), never a package left out;
+such a file calls `package_docs()` from `doc_tree.bzl`. A new rule a BUCK
+file calls is exported through `declares_docs`. Test 17 of
+`tools/build/tests/run_tests.sh` requires every package in `//:docs` and no
+BUCK file naming its own `doc_tree`.
 
 Mojo compiles take a lot of memory. Buck2 runs as many local actions at once
 as the machine has cores; on a machine with less than a few GB of memory per

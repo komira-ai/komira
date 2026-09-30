@@ -109,10 +109,11 @@
 #      file of the repository) and tests//functional/doc_links:ok build, and
 #      tests//negative/doc_links:dead fails naming a missing file, a bad
 #      #anchor and a link leaving the tree. Every package of the komira and
-#      tests cells is in //:docs through its doc_tree, and neither cell sets
-#      `[project] package_boundary_exceptions` (a prefix covering one package
-#      covers every package under it, so a target could own another
-#      package's files).
+#      tests cells is in //:docs through the doc_tree its rules declare, the
+#      toolchains cell (not in it) holds no Markdown, no BUCK file but one
+#      names a doc_tree (the rules do), and neither cell sets `[project] package_boundary_exceptions` (a
+#      prefix covering one package covers every package under it, so a
+#      target could own another package's files).
 #  18. The configuration hashes of exec-light, exec-mojo and linux-x86_64 equal
 #      their pins: they are in the digest of every configured action.
 #  19. What a repository using komira as a cell loads names no cell but
@@ -695,23 +696,41 @@ if [ -n "$missed" ]; then
 else
     pass "doc links: tests//negative/doc_links:dead fails naming its missing file, bad anchor and escaping link"
 fi
-# Each package names its own files (a glob stops at a subpackage), and
-# //:docs collects every package's doc_tree: a package left out would drop
-# its Markdown from the check without a word.
+# Each package's rules declare its doc_tree, which names its own files (a
+# glob stops at a subpackage) and collects its subpackages' doc_trees, so
+# //:docs holds every package with no list. A package left out would drop
+# its Markdown from the check without a word, and a BUCK file naming its
+# doc_tree is the boilerplate the rules replace.
 pkgs() { sed -e 's/:[^:]*$//' | LC_ALL=C sort -u; }
 if "$BUCK2" uquery '//... + tests//...' > "$LOG/doc_pkgs_all.txt" 2> "$LOG/doc_pkgs.log" &&
    "$BUCK2" uquery 'kind(doc_tree, deps(//:docs))' > "$LOG/doc_pkgs_docs.txt" 2>> "$LOG/doc_pkgs.log"; then
-    missing=$(LC_ALL=C comm -23 <(pkgs < "$LOG/doc_pkgs_all.txt") <( (pkgs < "$LOG/doc_pkgs_docs.txt"; echo komira//) | LC_ALL=C sort -u) | tr '\n' ' ')
+    missing=$(LC_ALL=C comm -23 <(pkgs < "$LOG/doc_pkgs_all.txt") <(pkgs < "$LOG/doc_pkgs_docs.txt") | tr '\n' ' ')
     n=$(pkgs < "$LOG/doc_pkgs_all.txt" | wc -l)
     if [ "$n" -lt 2 ]; then
         fail "doc links: \`uquery //... + tests//...\` found $n packages (see $LOG/doc_pkgs_all.txt)"
     elif [ -n "$missing" ]; then
         fail "doc links: packages with no doc_tree in //:docs: $missing"
     else
-        pass "doc links: all $n packages of the komira and tests cells are in //:docs, each through its own doc_tree"
+        pass "doc links: all $n packages of the komira and tests cells are in //:docs, each through the doc_tree its rules declare"
     fi
 else
     fail "doc links: the package queries failed (see $LOG/doc_pkgs.log)"
+fi
+# The toolchains cell is not in //:docs (the root BUCK says why), so it may
+# hold no Markdown.
+tc_md=$(cd "$ROOT" && git ls-files -- 'tools/build/cells/*.md' | tr '\n' ' ')
+if [ -n "$tc_md" ]; then
+    fail "doc links: the toolchains cell, which //:docs does not read, holds Markdown: $tc_md"
+else
+    pass "doc links: the toolchains cell, which //:docs does not read, holds no Markdown"
+fi
+# The one BUCK file that calls package_docs() itself declares a target only
+# when configured (tools/build/lint/doc_tree.bzl).
+named=$(cd "$ROOT" && git ls-files -- BUCK '*/BUCK' | xargs grep -lE '^[[:space:]]*(doc_tree|package_docs)[(]' | grep -vxF tools/build/tests/negative/numa_standin/BUCK | tr '\n' ' ' || true)
+if [ -n "$named" ]; then
+    fail "doc links: BUCK files name a doc_tree or call package_docs, which the rules declare: $named"
+else
+    pass "doc links: no BUCK file names a doc_tree; the rules declare each package's"
 fi
 exc=""
 for cell in komira tests; do
