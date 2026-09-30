@@ -77,6 +77,7 @@ _TESTS_LINTS = [
         "//src/komira_atomic_alias:doc_tree",
         "//src/komira_core_ffi:doc_tree",
         "//src/komira_crypto:doc_tree",
+        "//src/komira_lz4:doc_tree",
         "//src/komira_protobuf:doc_tree",
         "//src/komira_resources:doc_tree",
         "//src/komira_rowcell:doc_tree",
