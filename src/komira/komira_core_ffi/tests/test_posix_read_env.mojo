@@ -75,8 +75,7 @@ def test_read_env_long_value() raises:
     _setenv("KOMIRA_TEST_POSIX_VAR_LONG", long_value)
     var v = _read_env("KOMIRA_TEST_POSIX_VAR_LONG")
     assert_equal(v.byte_length(), 1000)
-    # spot-check a few bytes via byte projection (Mojo 1.0.0b1 String
-    # indexing requires byte= kwarg)
+    # spot-check a few bytes via the byte projection
     var bs = v.as_bytes()
     assert_equal(Int(bs[0]), Int(ord("0")))
     assert_equal(Int(bs[9]), Int(ord("9")))
@@ -119,9 +118,9 @@ def _hex(imm b: List[UInt8]) raises -> String:
 def _non_ascii_value() raises -> String:
     """`/tmp/données-ok` + one character from EACH multi-byte UTF-8 class.
 
-    Widths on purpose: 2-byte (C3), 3-byte (E6), 4-byte (F0). The old decode
-    doubled EVERY byte >= 0x80, so a fixture with only 2-byte sequences
-    cannot tell a real fix from a two-byte special case.
+    Widths on purpose: 2-byte (C3), 3-byte (E6), 4-byte (F0). A per-byte
+    `chr` decode doubles EVERY byte >= 0x80, so a fixture with only 2-byte
+    sequences cannot tell a correct copy from a two-byte special case.
     """
     return String("/tmp/donn") + "é" + "es-ok" + "é" + "日" + "𐍈"
 
@@ -157,8 +156,8 @@ def test_read_env_value_is_not_ascii_only() raises:
             saw_4b = True
     if n_high == 0:
         raise Error(
-            "the fixture is ALL-ASCII — the old `chr()` decode is the identity"
-            " on ASCII, so the non-ASCII test below is vacuous"
+            "the fixture is ALL-ASCII — a per-byte `chr` decode is the"
+            " identity on ASCII, so the non-ASCII test below is vacuous"
         )
     if not saw_2b or not saw_3b or not saw_4b:
         raise Error(

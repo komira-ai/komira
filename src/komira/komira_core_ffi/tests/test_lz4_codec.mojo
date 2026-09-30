@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/test_lz4_codec.mojo
+# src/komira/komira_core_ffi/tests/test_lz4_codec.mojo
 #   Round-trip tests for the shared LZ4 raw-block codec
 #   (komira_core_ffi.lz4_codec).
 # =============================================================================

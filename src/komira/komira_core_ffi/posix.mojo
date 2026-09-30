@@ -50,7 +50,7 @@ def _env_getenv_owned(var name: String) -> UnsafePointer[UInt8, MutUntrackedOrig
     """Raw `getenv(3)` over a heap `String` (guarantees NUL termination).
 
     SAFETY: the untracked-origin pointer IS the FFI boundary. The returned
-    pointer is environ-managed memory; it never escapes this FILE, which is the module boundary the pointer rules name.
+    pointer is environ-managed memory; it never escapes this file.
     """
     var name_ptr = name.as_c_string_slice().unsafe_ptr()
     return external_call["getenv", UnsafePointer[UInt8, MutUntrackedOrigin]](
@@ -79,7 +79,8 @@ def _read_env(name: StaticString) -> String:
 
     SAFETY: The untracked-origin `getenv` result IS the FFI boundary.
     The returned pointer is environ-managed memory read transiently and
-    never escapes this function; the wildcard is bounded.
+    never escapes this function, so the untracked origin is bounded to this
+    call.
     """
     var env_ptr = _env_getenv_owned(String(name))
     if Int(env_ptr) == 0:

@@ -1,5 +1,5 @@
 # =============================================================================
-# tests/test_thread_self_discriminates.mojo
+# src/komira/komira_core_ffi/tests/test_thread_self_discriminates.mojo
 #
 # Guards `komira_core_ffi.posix._thread_self()` — the driver-vs-pool-worker
 # attribution primitive behind tid-stamped phase traces.
@@ -8,9 +8,9 @@
 #
 # The whole point of `_thread_self()` is to settle "is this region on the serial
 # driver or on the pool?" from a RUN, because a profile SHARE can mis-attribute
-# work (an inlined worker body reads as overhead on its caller). A trace built on a broken tid primitive would be
-# WORSE than no trace: it would look like evidence and read like a profile
-# share.
+# work (an inlined worker body reads as overhead on its caller). A trace built
+# on a broken tid primitive would be WORSE than no trace: it would look like
+# evidence and read like a profile share.
 #
 # The failure mode that matters is therefore NOT "returns 0" — it is
 # "returns THE SAME VALUE on every thread", which would make every region look
@@ -27,10 +27,11 @@
 #
 # ⚠ MOJO 1.0.0 ships no threading module (`std.algorithm.parallelize` is
 # gone), so the fork-join below is raw `pthread_create` + `pthread_join` over
-# `std.ffi.external_call`. A SERIAL LOOP IS NOT AN OPTION: this test's entire claim is
-# that `_thread_self()` returns DIFFERENT values on DIFFERENT threads. Run the
-# worker body serially and `distinct` collapses to 1 on a CORRECT primitive —
-# the test would not merely prove less, it would report the mutant's answer.
+# `std.ffi.external_call`. A SERIAL LOOP IS NOT AN OPTION: this test's entire
+# claim is that `_thread_self()` returns DIFFERENT values on DIFFERENT threads.
+# Run the worker body serially and `distinct` collapses to 1 on a CORRECT
+# primitive — the test would not merely prove less, it would report the
+# mutant's answer.
 # Real OS threads are the only faithful replacement.
 #
 # WHY `>= 2` AND NOT `== N+1`: `pthread_create` guarantees N NEW threads, so
@@ -39,9 +40,9 @@
 #
 # MUTANT THAT DISCRIMINATES:
 #   `return external_call["pthread_self", UInt64]()` -> `return UInt64(0xDEADBEEF)`
-#   A NON-ZERO constant is deliberately chosen over `UInt64(0)`: a zero mutant is
-#   also caught by the `a != 0` assertion in the stability test, so it would not
-#   prove the cross-thread check is load-bearing. `0xDEADBEEF` passes BOTH the
+#   A NON-ZERO constant is deliberately chosen over `UInt64(0)`: a zero mutant
+#   is also caught by the `a != 0` assertion in the stability test, so it would
+#   not prove the cross-thread check is load-bearing. `0xDEADBEEF` passes BOTH the
 #   stability assertion AND the non-zero assertion, and is killed ONLY by
 #   `distinct >= 2` collapsing to `distinct == 1`. That is what makes the
 #   discriminator non-vacuous.
