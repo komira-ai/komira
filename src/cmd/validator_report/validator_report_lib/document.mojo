@@ -56,9 +56,7 @@ comptime VALIDATION_SCHEMA: String = "komira_ci.validation.v1"
 """The `schema` field — the STABILITY handle the UI and any query tool script
 against. Versioning follows the deploy-outputs record's `OUTPUTS_SCHEMA`
 (`komira_deploy_outputs`): a backward-incompatible SHAPE change gets a new token (`…v2`);
-additive fields do NOT bump it. Records stored under an earlier token of the
-same shape stay as they are; a reader over such a store accepts both tokens
-rather than treating the older one as a different shape."""
+additive fields do NOT bump it."""
 
 comptime DOC_KIND_STEP: String = "step"
 """Written by the VALIDATOR. One per validate step."""
@@ -468,8 +466,8 @@ def render_step_document(
 # and it is the one thing this document exists to make unrenderable. It is a
 # CALLER error, so it RAISES.
 #
-# ⛔ AND THE EVIDENCE TOKEN IS CARRIED, NEVER DERIVED HERE. `deploy_evidence_
-# verdict` (`komira_ci_cli_lib`) is the ONE function that
+# ⛔ AND THE EVIDENCE TOKEN IS CARRIED, NEVER DERIVED HERE. The release CLI's
+# evidence verdict is the ONE function that
 # decides which of the six words a run earned, and it lives on the other side of
 # a package boundary this leaf may not cross. Re-deriving it here would produce a
 # SECOND answer to a question the deploy already answered out loud, and the two

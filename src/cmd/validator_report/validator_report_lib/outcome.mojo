@@ -28,7 +28,7 @@
 #
 # ⛔ 3 OUTRANKS 1 ON PURPOSE. A run that cannot say what it ran cannot support
 # ANY claim about the deployment — including a negative one. It mirrors the
-# release CLI's wave accounting exit code (`komira_ci_cli_lib`) and a test
+# release CLI's wave accounting exit code and a test
 # runner's split between "accounting violated" and "a test failed".
 #
 # Deps: `validator_rows_lib` (the ONE positional accounting model) + this

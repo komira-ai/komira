@@ -39,10 +39,10 @@
 # no store.
 # =============================================================================
 
-# ── MUTATION-CHECKED, THE VERSION-HALF CASES ────────────────────
-# Each mutation applied to `target.mojo` turns this test RED (the test is welded
-# to the `.mojoc`, so a red test is a red BUILD). A falsifier nobody falsified is
-# a green light.
+# ── MUTATION TO CHECK, THE VERSION-HALF CASE ────────────────────
+# The mutation below, applied to `target.mojo`, is expected to turn this test RED
+# (the test is welded to the `.mojoc`, so a red test is a red BUILD). A falsifier
+# nobody falsified is a green light.
 #
 #   MUTATION                                          RED IN
 #   `digest_pinned_by` returns the value with       -> `test_a_tag_is_not_a_
@@ -123,7 +123,7 @@ def _one_target() -> List[ReportTarget]:
     var t = List[ReportTarget]()
     t.append(
         served_target(
-            String("example-mail-gcp-us-central1"),
+            String("example-mail-region-a"),
             String("sha256:7c11aa"),
             String("https://example-mail-x.run.app"),
         )
@@ -320,12 +320,12 @@ def test_staged_ledger_and_live_serving_are_different_claims() raises:
     digests. Both are well-formed targets;
     the LABEL is what makes them distinguishable, so it is required."""
     var live = ReportTarget(
-        String("example-api-gcp-us-central1"), String(TARGET_KIND_SERVICE),
+        String("example-api-region-a"), String(TARGET_KIND_SERVICE),
         String("sha256:0aa1"), String(VERSION_SOURCE_LIVE_SERVING),
         String(""), String("https://example-api-x.run.app"),
     )
     var staged = ReportTarget(
-        String("example-api-gcp-us-central1"), String(TARGET_KIND_SERVICE),
+        String("example-api-region-a"), String(TARGET_KIND_SERVICE),
         String("sha256:0bb2"), String(VERSION_SOURCE_STAGED_LEDGER),
         String(""), String(""),
     )
@@ -388,15 +388,15 @@ def test_a_live_read_that_pins_a_digest_becomes_the_version() raises:
     """★ A LIVE read of what the service is serving answers "what did I
     validate", and it is the ONLY source that can make a stale green detectable."""
     var t = live_serving_target(
-        String("example-api-gcp-us-central1"),
+        String("example-api-region-a"),
         String(
-            "us-south1-docker.pkg.dev/example-project/example/example-api@sha256:0aa1"
+            "registry.example/example-project/example/example-api@sha256:0aa1"
         ),
         String("https://example-api-x.run.app"),
     )
     assert_equal(t.version, String("sha256:0aa1"))
     assert_equal(t.version_source, VERSION_SOURCE_LIVE_SERVING)
-    assert_equal(t.name, String("example-api-gcp-us-central1"))
+    assert_equal(t.name, String("example-api-region-a"))
     assert_equal(t.endpoint, String("https://example-api-x.run.app"))
     # A well-formed target: a NAMED source with a real version and no note owed.
     assert_equal(t.fault(), String(""))
@@ -421,7 +421,7 @@ def test_a_tag_is_not_a_version_and_renders_none_not_a_guess() raises:
     plus the ref we actually saw."""
     var t = live_serving_target(
         String("example-api"),
-        String("us-south1-docker.pkg.dev/example-project/example/example-api:latest"),
+        String("registry.example/example-project/example/example-api:latest"),
         String("https://example-api-x.run.app"),
     )
     assert_equal(t.version, String(""))
@@ -510,8 +510,8 @@ def test_the_key_is_env_scoped_and_refuses_a_separator() raises:
     # ★ `env -> bucket` is NOT injective: two environments can share one
     # bootstrap bucket, so the <env> component is load-bearing.
     assert_equal(
-        validation_step_key(String("staging-us-central1"), String("01JC8Q"), String("s")),
-        String("raw/staging-us-central1/01JC8Q/s.json"),
+        validation_step_key(String("staging-region-a"), String("01JC8Q"), String("s")),
+        String("raw/staging-region-a/01JC8Q/s.json"),
     )
     var raised = False
     try:
@@ -633,9 +633,9 @@ def test_one_step_can_attribute_rows_to_targets_at_different_digests() raises:
     different digests of one logical image. A single top-level target field
     can only be right for one."""
     var ts = List[ReportTarget]()
-    ts.append(served_target(String("example-api-gcp-us-central1"),
+    ts.append(served_target(String("example-api-region-a"),
                             String("sha256:0aa1"), String("u1")))
-    ts.append(served_target(String("example-worker-gcp-us-central1"),
+    ts.append(served_target(String("example-worker-region-a"),
                             String("sha256:0cc3"), String("u2")))
     var spec = List[ExpectedRow]()
     spec.append(expected_row(String("api_livez"), String("the API answers")))
