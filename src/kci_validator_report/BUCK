@@ -1,0 +1,34 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
+
+# The one report library every validator shares, and its falsifier.
+#
+# It produces EVIDENCE, not authorization: the record it renders is written by
+# the party being gated, into a bucket that party can write. The gate stays the
+# EXIT CODE (`report_exit_code`) and the build graph (a test's pass marker is an
+# input to the package).
+#
+# The one dep is `kci_validator_rows`, and that is the whole design. A report
+# model that lives in a package linking an HTTP client and an async runtime is
+# never adopted, because copying forty lines is cheaper; `kci_validator_rows` is
+# dep-free, so this closure is pure `String`/`List` work: no HTTP, no async, no
+# clock, no store, no FFI, no cloud SDK. A dep added here is a dep every
+# validator pays. Do not add deps.
+#
+# A consumer gets both packages on its compile closure through `deps`; the
+# re-exports in `__init__.mojo` buy it one import line.
+mojo_library(
+    name = "kci_validator_report",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/kci_validator_rows:kci_validator_rows"],
+    test_srcs = ["tests/test_validator_report.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
+)
