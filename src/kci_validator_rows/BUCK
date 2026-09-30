@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
+
+# The one shared positional row-accounting model every managed-app validator
+# uses, and its falsifier.
+#
+# A validator whose verdict is `passed_count() == total() and total() > 0`,
+# where `total()` is the length of what the run EMITTED, prints PASS for a
+# matrix that emitted a prefix of its rows and returned. This package accounts
+# for rows POSITIONALLY, by name, against an authored list.
+#
+# It has no deps on purpose: pure `String` / `List` work, no runtime library,
+# no FFI, no transport, no clock. (`live.mojo` adds one flushed `print` to
+# fd 1, and that is all it adds.) That is what lets every validator take this
+# dep for one line without dragging a closure in, and what makes the falsifier
+# runnable with no process. Do not add deps.
+mojo_library(
+    name = "kci_validator_rows",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_validator_rows.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
+)

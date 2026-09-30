@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
+
+# The single home of each shared libc/POSIX `external_call` declaration
+# (`getenv`, `access`, `pthread_self`). It has no first-party deps by design:
+# every other package may depend on it. The LZ4 raw-block codec is its own
+# module, //src/komira_lz4.
+mojo_library(
+    name = "komira_core_ffi",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_posix_read_env.mojo",
+        "tests/test_thread_self_discriminates.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
+)

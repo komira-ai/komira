@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/lint:defs.bzl", "doc_tree")
+
+# Generic managed-app parameter declarations: a managed app declares the
+# parameters it takes, the deploy renders them onto argv, the app parses them
+# at one site at startup, and the control plane stores the map opaquely. Zero
+# deps by design: three sides that must not depend on each other consume it.
+#
+# The welded test hands what the renderers emit to the parser unchanged and
+# reads the same values back, and asserts each refusal by its message: a
+# missing required parameter, an unknown one at either end, a literal for a
+# secret parameter, and an empty value.
+mojo_library(
+    name = "kci_params",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_param_round_trip.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+# This package's files, for the link check of the repository's Markdown
+# (//:docs). The glob stops at a subpackage, which names its own.
+doc_tree(
+    name = "doc_tree",
+    srcs = glob(["**"]),
+    visibility = ["komira//:docs"],
+)
