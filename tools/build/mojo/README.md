@@ -230,6 +230,18 @@ mojo_test(
   has the same layout (`bin/<name>`, `share/`), so the same call finds a
   bundle's `data` and a test's declared data; nothing reads a runfiles tree
   or an environment variable.
+- **Reading a resource.** Library code uses
+  [`komira_resources`](../../../src/komira/komira_resources/resources.mojo):
+  `read_resource(name)` and `resource_path(name)`, where `name` is the file's
+  path under `share/` (its repository path, for a list entry). A test declares
+  the file in `test_data` / `data`; a shipped program's `mojo_bundle` lists it
+  in `data` as `share/<name>`, so both use the same name. An undeclared name
+  raises an error naming the file and where to declare it.
+  A program finds `share/` as `<exe>/../../share`, so a built program that is
+  a test's data is staged the way a bundle lays it out: its `[runnable]`
+  directory at `<tool>/bin` and its resources at `<tool>/share/<name>`.
+  `mojo_bundle` ships `data` files mode 0644, so a shipped script is run
+  through its interpreter (`bash <path>`), not executed directly.
 
 ## Multi-NUMA tests
 
