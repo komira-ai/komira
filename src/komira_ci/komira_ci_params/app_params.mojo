@@ -58,7 +58,7 @@
 # This module therefore has NO API that can put a secret value into a rendered
 # surface: `PARAM_KIND_SECRET_REFERENCE` is enforced (`_reject_literal_on_injected`)
 # to be reachable only through the reference channel, and the residency of the
-# reference itself is checked by `komira_ci_cli_lib`'s typed references, which
+# reference itself is checked by the deploy renderer's typed references, which
 # are the ONE reference concept for deploys. This module deliberately does NOT
 # define a second one — see §5.
 #
@@ -169,13 +169,8 @@ comptime PARAM_KIND_REFERENCE: Int = 1
 an image. The value is RESOLVED ONCE at render time from the item it names, not
 copied into every bundle that needs it.
 
-★ THE DUPLICATED-LITERAL DAMAGE THIS EXISTS FOR: two bundles that each hardcode
-the same key-set literal, derived from ONE environment's key, in bundles that
-also deploy to another environment. A wrong-environment key set boots healthy,
-answers `/healthz` 200, passes every deploy wave, and rejects every request
-forever with no later signal. The same shape covers a service URL hardcoded in
-every gateway rule, and a control-plane project id defaulted in as a customer's
-runtime project."""
+A literal copied into several bundles drifts from the item it names;
+resolving it once, from that item, removes the copies."""
 
 comptime PARAM_KIND_SECRET_REFERENCE: Int = 2
 """A SECRET's resource NAME. The value NEVER travels; the app resolves it at boot
@@ -214,7 +209,7 @@ struct AppParamDecl(Copyable, Movable, Deinitable):
     the deploy path holds no per-app knowledge, only this record."""
 
     var name: String
-    """The FLAG name WITHOUT the leading `--` (e.g. `git-app-name`). Rendered as
+    """The FLAG name WITHOUT the leading `--` (e.g. `example-name`). Rendered as
     `--<name>=<value>`; parsed from either `--<name>=<value>` or `--<name> <value>`
     (both spellings, because a hand-written flag arm that handles only one of
     them — or neither — makes the flag unpassable)."""
@@ -465,7 +460,7 @@ def find_param_decl(
 # ⚠ AND THERE IS NO SECOND REFERENCE CONCEPT HERE. The RESIDENCY of a reference —
 # a secret ref must be EXTERNAL (it points into a separate project that holds
 # the secret), an image ref must be LOCAL (a customer account
-# can only pull from its own registry) — is decided by `komira_ci_cli_lib`'s
+# can only pull from its own registry) — is decided by the deploy renderer's
 # typed references, which carry those rules and their tests. This module carries
 # the KIND; that one carries the RESIDENCY. A third concept is exactly what the
 # design forbids.
@@ -877,7 +872,7 @@ def param_map_is_storable(values: List[AppParamValue]) raises:
     can check about that is that it is not obviously a value. A Secret Manager
     resource name always begins `projects/`; a raw seed does not. This is a
     coarse check and says so — the STRUCTURAL guarantee is
-    `komira_ci_cli_lib`'s `require_external_secret_ref` at render time. This is
+    the deploy renderer's external-secret-reference check at render time. This is
     the last net, at the persistence boundary, for a caller that bypassed the
     renderer."""
     for i in range(len(values)):
