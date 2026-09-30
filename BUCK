@@ -75,6 +75,7 @@ _TESTS_LINTS = [
     packages = [
         "//src/kci_validator_rows:doc_tree",
         "//src/komira_atomic_alias:doc_tree",
+        "//src/komira_core_ffi:doc_tree",
         "//src/komira_crypto:doc_tree",
         "//src/komira_protobuf:doc_tree",
         "//src/komira_resources:doc_tree",
