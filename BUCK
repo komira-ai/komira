@@ -78,6 +78,7 @@ _TESTS_LINTS = [
         "//src/kci_validator_report:doc_tree",
         "//src/kci_validator_rows:doc_tree",
         "//src/komira_atomic_alias:doc_tree",
+        "//src/komira_core:doc_tree",
         "//src/komira_core_ffi:doc_tree",
         "//src/komira_crypto:doc_tree",
         "//src/komira_lz4:doc_tree",
