@@ -1,0 +1,7 @@
+# The tests cell's own configuration. The rest of its configuration is the
+# root cell's (.buckconfig at the repository root).
+
+[buildfile]
+  # As in the root cell: the prelude rules its BUCK files call declare their
+  # package's files for the Markdown link check (tools/build/lint/includes.bzl).
+  includes = komira//tools/build/lint/includes.bzl

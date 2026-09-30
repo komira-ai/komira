@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Planted defects for the test runtime contract (test 29): a test reading a
 # file it did not declare, env that tries to mute a red test, and every
@@ -81,12 +80,4 @@ mojo_test(
     name = "bad_env_name",
     srcs = ["tests/test_mojo_test_data.mojo"],
     env = {"NOT-A-NAME": "x"},
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

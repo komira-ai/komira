@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # UUIDv7 (RFC 9562): the `Uuid` value type, a stateless generator and a
 # monotonic one, with the package's own wall clock and CSPRNG declaration.
@@ -14,12 +13,4 @@ mojo_library(
     ],
     test_srcs = ["tests/test_uuid_v7.mojo"],
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

@@ -15,6 +15,7 @@ committed copy and the archive disagree. Both run on the farm.
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 # Generating, comparing and packing run on the light workers: they read and
 # write a few files and compile nothing.
@@ -164,3 +165,8 @@ _fixture_archive = rule(
 def fixture_archive(**kwargs):
     kwargs.setdefault("exec_compatible_with", _LIGHT)
     _fixture_archive(**kwargs)
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+fixture_archive = declares_docs(fixture_archive)
+third_party_srcs = declares_docs(third_party_srcs)

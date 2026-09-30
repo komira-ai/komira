@@ -1,4 +1,4 @@
-load("@komira//tools/build/lint:defs.bzl", "doc_tree", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_multi_numa_test")
 load(":defs.bzl", "numa_gate_run", "numa_guard_cases")
 
@@ -39,12 +39,4 @@ shell_lint(
     name = "shell_lint",
     srcs = ["guard_cases.sh"],
     visibility = ["komira//:tests_lints"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

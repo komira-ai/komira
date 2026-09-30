@@ -36,6 +36,7 @@ whose identity is not among them.
 
 load(":providers.bzl", "MojoToolchainInfo")
 load(":toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _mojo_darwin_link_impl(ctx):
     hosts = sorted([h.strip() for h in ctx.attrs.macos_hosts if h.strip()])
@@ -50,7 +51,7 @@ def _mojo_darwin_link_impl(ctx):
     })
     return [DefaultInfo(default_output = out)]
 
-mojo_darwin_link = rule(
+mojo_darwin_link_rule = rule(
     impl = _mojo_darwin_link_impl,
     attrs = {
         "cc": attrs.source(),
@@ -71,7 +72,7 @@ def _dyld_script_impl(ctx):
     return [DefaultInfo(default_output = out)]
 
 # `prelude` followed by `src`, as one script.
-dyld_script = rule(
+dyld_script_rule = rule(
     impl = _dyld_script_impl,
     attrs = {
         "busybox": attrs.exec_dep(),
@@ -102,7 +103,7 @@ def _mojo_darwin_toolchain_impl(ctx):
         ),
     ]
 
-mojo_darwin_toolchain = rule(
+mojo_darwin_toolchain_rule = rule(
     impl = _mojo_darwin_toolchain_impl,
     is_toolchain_rule = True,
     attrs = {
@@ -124,3 +125,9 @@ mojo_darwin_toolchain = rule(
         "_wrapper": attrs.dep(default = "komira//tools/build/mojo/darwin:mojo_wrapper.sh"),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+dyld_script = declares_docs(dyld_script_rule)
+mojo_darwin_link = declares_docs(mojo_darwin_link_rule)
+mojo_darwin_toolchain = declares_docs(mojo_darwin_toolchain_rule)

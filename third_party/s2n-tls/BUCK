@@ -3,7 +3,6 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/third_party_srcs:defs.bzl", "third_party_srcs")
 load(":features.bzl", "S2N_FEATURES")
 load(":srcs.bzl", "PRIVATE_HEADERS", "PROBES", "PUBLIC_HEADERS", "SRCS")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # aws/s2n-tls 1.5.6, Apache-2.0 (LICENSE in the archive).
 #
@@ -81,12 +80,4 @@ cxx_library(
     exported_deps = ["//third_party/aws-lc:crypto"],
     target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

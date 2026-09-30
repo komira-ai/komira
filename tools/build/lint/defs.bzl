@@ -17,6 +17,8 @@ downloads (tools/build/lint/BUCK). Each rule's default output is the validation
 result, a JSON file whose message holds the findings.
 """
 
+load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
+
 _LIGHT = ["komira//tools/build/platforms:light"]
 
 _COMMON = {
@@ -139,52 +141,24 @@ def _lint_suite_impl(ctx):
         fail("lint_suite {}: lints is empty".format(ctx.label))
     return [DefaultInfo(default_outputs = [d[DefaultInfo].default_outputs[0] for d in ctx.attrs.lints])]
 
-lint_suite = rule(
+lint_suite_rule = rule(
     impl = _lint_suite_impl,
     doc = "Depends on lint targets another build graph does not reach, so their validations run in any build holding this target. Its outputs are their results.",
     attrs = {"lints": attrs.list(attrs.dep())},
 )
 
 
-DocTreeInfo = provider(
-    doc = "The files of a doc_tree target and of the doc_tree targets it collects, keyed by their path in the cell.",
-    fields = {"files": provider_field(dict[str, Artifact])},
-)
-
-def _collect(prefix, srcs, packages):
-    # A source's short_path is relative to its package.
-    files = {prefix + f.short_path: f for f in srcs}
-    for p in packages:
-        files.update(p[DocTreeInfo].files)
-    return files
-
 def _markdown_docs_impl(ctx):
     if not [f for f in ctx.attrs.srcs if f.short_path.endswith(".md")]:
         fail("markdown_docs {}: no Markdown in `srcs`".format(ctx.label))
     if ctx.attrs.packages and ctx.label.package:
         fail("markdown_docs {}: `packages` stages files at their paths in the cell, so it is for a target of the cell's root package".format(ctx.label))
-    staged = ctx.actions.copied_dir("doc_tree", _collect("", ctx.attrs.srcs + ctx.attrs.tree, ctx.attrs.packages))
+    staged = ctx.actions.copied_dir("doc_tree", collect_docs("", ctx.attrs.srcs + ctx.attrs.tree, ctx.attrs.packages))
     inspect = ctx.attrs._inspect[DefaultInfo].default_outputs[0]
     args = [staged, ",".join(ctx.attrs.unchecked) or "-"]
     for prefix, tree in sorted(ctx.attrs.cells.items()):
         args += [prefix, tree[DefaultInfo].default_outputs[0]]
     return _lint(ctx, "doc_links", [inspect], args, staged)
-
-def _doc_tree_impl(ctx):
-    files = _collect(ctx.label.package + "/" if ctx.label.package else "", ctx.attrs.srcs, ctx.attrs.packages)
-    return [
-        DefaultInfo(default_output = ctx.actions.copied_dir("tree", files)),
-        DocTreeInfo(files = files),
-    ]
-
-doc_tree = rule(
-    impl = _doc_tree_impl,
-    doc = "The files of one package (`srcs`, normally `glob([\"**\"])`, which stops at a subpackage), and those of the doc_tree targets in `packages`, staged at their paths in the cell (package path, then the path in the package). A markdown_docs target collects them through `packages`, or, for another cell, through `cells`. Each package names only its own files, so no target owns a file of another package.",
-    attrs = {
-        "srcs": attrs.list(attrs.source()),
-        "packages": attrs.list(attrs.dep(providers = [DocTreeInfo]), default = []),
-    },
-)
 
 markdown_docs_rule = rule(
     impl = _markdown_docs_impl,
@@ -254,3 +228,14 @@ def tar_member(**kwargs):
 # repository's documentation (//:docs).
 def markdown_docs(**kwargs):
     markdown_docs_rule(**_light(kwargs))
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (doc_tree.bzl), so no BUCK file names one.
+action_pins = declares_docs(action_pins)
+lint_suite = declares_docs(lint_suite_rule)
+markdown_docs = declares_docs(markdown_docs)
+no_endpoint = declares_docs(no_endpoint)
+push_verdicts = declares_docs(push_verdicts)
+shell_lint = declares_docs(shell_lint)
+tar_member = declares_docs(tar_member)
+workflow_lint = declares_docs(workflow_lint)

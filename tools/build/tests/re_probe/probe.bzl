@@ -5,6 +5,7 @@ the evidence behind the host floor documented in tools/build/toolchains/README.m
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 
 _SCRIPT = """
@@ -32,4 +33,7 @@ def _impl(ctx):
     ctx.actions.run(busybox_sh(tc.busybox, _SCRIPT, tc.compiler, out.as_output()), category = "re_probe")
     return [DefaultInfo(default_output = out)]
 
-re_probe = rule(impl = _impl, attrs = {"toolchain": attrs.toolchain_dep(providers = [MojoToolchainInfo])})
+re_probe_rule = rule(impl = _impl, attrs = {"toolchain": attrs.toolchain_dep(providers = [MojoToolchainInfo])})
+
+# Declares this package's doc_tree too (tools/build/lint/doc_tree.bzl).
+re_probe = declares_docs(re_probe_rule)

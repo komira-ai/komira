@@ -1,7 +1,6 @@
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
 
@@ -158,12 +157,4 @@ cxx_library(
     name = "libcxx",
     exported_linker_flags = ["-lc++"],
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

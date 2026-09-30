@@ -30,6 +30,7 @@ the bundle. `[launcher]` is the shipped one.
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 # x86-64 levels: target_cpu -> the level the launcher requires.
 _LEVELS = {
@@ -199,7 +200,7 @@ exit "$rc"
 # its level for the host's CPU with the host's glibc loader. (Not done here: a
 # build action must not read the worker's /lib64, and its cached result would
 # not measure the next worker anyway.)
-launcher_level_test = rule(
+launcher_level_test_rule = rule(
     impl = _level_test_impl,
     attrs = {
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
@@ -386,3 +387,11 @@ def oci_image(**kwargs):
     holds the manifest digest. Nothing is pushed.
     """
     _oci_image(exec_compatible_with = ["komira//tools/build/platforms:light"], **kwargs)
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+bundle_tarball = declares_docs(bundle_tarball)
+launcher_level_test = declares_docs(launcher_level_test_rule)
+mojo_bundle = declares_docs(mojo_bundle)
+oci_base = declares_docs(oci_base)
+oci_image = declares_docs(oci_image)

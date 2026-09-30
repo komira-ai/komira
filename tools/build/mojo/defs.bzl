@@ -19,6 +19,7 @@ staged source directory can never shadow a package.
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load(":providers.bzl", "MojoGateRunInfo", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -461,7 +462,7 @@ _TOOLCHAIN_ATTR = {
     "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
 }
 
-mojo_library = rule(
+mojo_library_rule = rule(
     impl = _library_impl,
     attrs = {
         # Mojo packages and C/C++ libraries; see _check_deps.
@@ -558,7 +559,7 @@ _EXECUTABLE_ATTRS = {
     "srcs": attrs.list(attrs.source()),
 } | _TOOLCHAIN_ATTR
 
-mojo_binary = rule(
+mojo_binary_rule = rule(
     impl = _binary_impl,
     attrs = _EXECUTABLE_ATTRS | {
         "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
@@ -605,7 +606,7 @@ def _test_impl(ctx):
         ),
     ]
 
-mojo_test = rule(
+mojo_test_rule = rule(
     impl = _test_impl,
     attrs = _EXECUTABLE_ATTRS | {
         "optimization_level": attrs.string(default = TEST_OPT_LEVEL),
@@ -675,7 +676,7 @@ def _multi_numa_test_impl(ctx):
         ),
     ]
 
-mojo_multi_numa_test = rule(
+mojo_multi_numa_test_rule = rule(
     impl = _multi_numa_test_impl,
     attrs = {
         "binary": attrs.dep(providers = [MojoRunnableInfo]),
@@ -687,3 +688,10 @@ mojo_multi_numa_test = rule(
         "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_multi_numa", providers = [MojoToolchainInfo]),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+mojo_binary = declares_docs(mojo_binary_rule)
+mojo_library = declares_docs(mojo_library_rule)
+mojo_multi_numa_test = declares_docs(mojo_multi_numa_test_rule)
+mojo_test = declares_docs(mojo_test_rule)

@@ -3,7 +3,7 @@
 # `//...` does not reach into this cell, so //:tests_lints (the root BUCK)
 # names this lint and the other shell lints of the cell, and
 # `./buck2 build //...` runs them.
-load("@komira//tools/build/lint:defs.bzl", "doc_tree", "shell_lint")
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 
 shell_lint(
     name = "shell_lint",
@@ -17,41 +17,4 @@ shell_lint(
         "run_tests.sh": "SC2046",
     },
     visibility = ["komira//:tests_lints"],
-)
-
-# Every file of this cell, for //:docs: the repository's Markdown links into
-# it, and its README links out. This package's files, and the doc_tree
-# target of every other package of the cell.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    packages = [
-        "//functional/bundle_parity:doc_tree",
-        "//functional/c_deps:doc_tree",
-        "//functional/darwin:doc_tree",
-        "//functional/doc_links:doc_tree",
-        "//functional/formats:doc_tree",
-        "//functional/known_failing:doc_tree",
-        "//functional/location_path:doc_tree",
-        "//functional/numa:doc_tree",
-        "//functional/opt_level:doc_tree",
-        "//functional/proto:doc_tree",
-        "//functional/runtime_libs:doc_tree",
-        "//functional/s2n_probes:doc_tree",
-        "//functional/test_data:doc_tree",
-        "//functional/watchdog:doc_tree",
-        "//negative/c_deps:doc_tree",
-        "//negative/closure_refusal:doc_tree",
-        "//negative/doc_links:doc_tree",
-        "//negative/known_failing:doc_tree",
-        "//negative/libgate_bad:doc_tree",
-        "//negative/missing_dep:doc_tree",
-        "//negative/numa_standin:doc_tree",
-        "//negative/opt_level:doc_tree",
-        "//negative/proto:doc_tree",
-        "//negative/rust_missing_dep:doc_tree",
-        "//negative/test_data:doc_tree",
-        "//re_probe:doc_tree",
-    ],
-    visibility = ["komira//:docs"],
 )

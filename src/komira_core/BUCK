@@ -1,6 +1,5 @@
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The engine's core types: Arrow arrays and IPC, the logical plan and its
 # expressions, SIMD kernels, scan sources, runtime topology and the shared
@@ -254,12 +253,4 @@ mojo_binary(
     name = "large_writes_check",
     srcs = ["tests/test_large_writes.mojo"],
     deps = [":komira_core"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

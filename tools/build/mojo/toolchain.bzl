@@ -7,6 +7,7 @@ Actions never search the worker's PATH.
 """
 
 load(":providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def busybox_sh(busybox, script, *args):
     """argv running `script` under the declared busybox shell.
@@ -48,7 +49,7 @@ test -x "$2/zig"
     )
     return [DefaultInfo(default_output = out)]
 
-zig_dist = rule(
+zig_dist_rule = rule(
     impl = _zig_dist_impl,
     attrs = {
         "archive": attrs.dep(),
@@ -73,7 +74,7 @@ rm -rf "$T"
     )
     return [DefaultInfo(default_output = out), RunInfo(args = cmd_args(out))]
 
-zig_exe = rule(
+zig_exe_rule = rule(
     impl = _zig_exe_impl,
     attrs = {
         "busybox": attrs.dep(),
@@ -97,7 +98,7 @@ def _conda_closure_impl(ctx):
     )
     return [DefaultInfo(default_output = out)]
 
-conda_closure = rule(
+conda_closure_rule = rule(
     impl = _conda_closure_impl,
     attrs = {
         # More package members to extract, beyond bin/mojo, lib/ and
@@ -128,7 +129,7 @@ def _conda_libs_impl(ctx):
 # Shared libraries taken out of pinned conda packages, for a tool that is not
 # the Mojo compiler: `<out>/lib/<name>`, each a regular file (a library's
 # SONAME link is resolved to the bytes it names).
-conda_libs = rule(
+conda_libs_rule = rule(
     impl = _conda_libs_impl,
     attrs = {
         # member path under lib/ -> the pinned package it is taken from.
@@ -163,7 +164,7 @@ rm -rf "$T"
 
 # The shared libraries a built Mojo binary loads at run time, and nothing
 # else: `buck2 run` downloads these next to the binary, never the compiler.
-mojo_runtime = rule(
+mojo_runtime_rule = rule(
     impl = _mojo_runtime_impl,
     attrs = {
         "busybox": attrs.exec_dep(),
@@ -193,7 +194,7 @@ def _mojo_toolchain_impl(ctx):
         ),
     ]
 
-mojo_toolchain = rule(
+mojo_toolchain_rule = rule(
     impl = _mojo_toolchain_impl,
     is_toolchain_rule = True,
     attrs = {
@@ -228,3 +229,12 @@ mojo_toolchain = rule(
         "_wrapper": attrs.dep(default = "komira//tools/build/mojo:mojo_wrapper.sh"),
     },
 )
+
+# Each rule and macro a BUCK file calls declares its package's doc_tree
+# (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
+conda_closure = declares_docs(conda_closure_rule)
+conda_libs = declares_docs(conda_libs_rule)
+mojo_runtime = declares_docs(mojo_runtime_rule)
+mojo_toolchain = declares_docs(mojo_toolchain_rule)
+zig_dist = declares_docs(zig_dist_rule)
+zig_exe = declares_docs(zig_exe_rule)

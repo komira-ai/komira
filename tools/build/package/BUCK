@@ -1,6 +1,5 @@
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":defs.bzl", "launcher_level_test")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The launcher's CPU level function against made-up CPUs (tools/build/package/launcher).
 launcher_level_test(
@@ -16,12 +15,4 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

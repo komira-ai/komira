@@ -1,5 +1,4 @@
 load("@komira//third_party/s2n-tls:srcs.bzl", "PROBE_GLOBAL_FLAGS", "PROBES")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # One target per s2n-tls feature probe (tests/features/<name>.c), compiled as
 # s2n-tls's CMake feature_probe compiles it: with GLOBAL.flags, the probe's
@@ -17,11 +16,3 @@ load("@komira//tools/build/lint:defs.bzl", "doc_tree")
     )
     for name, flags in PROBES.items()
 ]
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
-)

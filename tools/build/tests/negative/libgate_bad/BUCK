@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 mojo_library(
     name = "libgate_bad",
@@ -24,12 +23,4 @@ mojo_binary(
     name = "bypass_consumer",
     srcs = ["consumer.mojo"],
     deps = [":libgate_bad[ungated]"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

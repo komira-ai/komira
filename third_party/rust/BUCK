@@ -1,5 +1,4 @@
 load("@komira//tools/build/rust:defs.bzl", "crates_io_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The crates.io closure of the protobuf codec (prost) and its derive macro,
 # each pinned by the sha256 of its `.crate` file. Features are the ones Cargo
@@ -103,12 +102,4 @@ crates_io_library(
     name = "unicode-ident",
     version = "1.0.24",
     sha256 = "e6e4313cd5fcd3dad5cafa179702e2b244f760991f45397d14d4ebf38247da75",
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

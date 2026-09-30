@@ -8,6 +8,7 @@ tools/build/tests/run_tests.sh reads the report; it is a diagnostic output, not 
 """
 
 load("@komira//tools/build/mojo:providers.bzl", "MojoToolchainInfo")
+load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 
 _SCRIPT = """
@@ -61,7 +62,10 @@ def _impl(ctx):
     )
     return [DefaultInfo(default_output = report)]
 
-compiler_loader_trace = rule(impl = _impl, attrs = {
+compiler_loader_trace_rule = rule(impl = _impl, attrs = {
     "src": attrs.source(),
     "toolchain": attrs.toolchain_dep(default = "toolchains//:mojo", providers = [MojoToolchainInfo]),
 })
+
+# Declares this package's doc_tree too (tools/build/lint/doc_tree.bzl).
+compiler_loader_trace = declares_docs(compiler_loader_trace_rule)

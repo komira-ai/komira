@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The tests of mojo_library's `tests_known_failing` (a hold that inverts: the
 # held test still runs and must FAIL). tools/build/tests/run_tests.sh builds
@@ -25,12 +24,4 @@ mojo_library(
             "reason": "fixture: test_fails raises whenever answer() is 42, which it always is.",
         },
     },
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

@@ -3,7 +3,6 @@
 # configurations are declared in //tools/build/platforms/default for a
 # standalone checkout (local, or remote when `.buckconfig.local` names a
 # service), and by any repository that mounts komira.
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Target platform for everything in this repo (see `[parser]` in .buckconfig).
 platform(
@@ -117,12 +116,4 @@ platform(
     constraint_values = [":mojo_compile"],
     deps = [":darwin-arm64"],
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

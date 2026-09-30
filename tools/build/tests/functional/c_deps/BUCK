@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Calls komira_example_add (C) with the C library in `deps`: links.
 mojo_binary(
@@ -7,12 +6,4 @@ mojo_binary(
     srcs = ["main.mojo"],
     deps = ["komira//tools/build/examples/cshim:add"],
     expected_stdout = "42\n",
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

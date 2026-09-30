@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The one report library every validator shares, and its falsifier.
 #
@@ -23,12 +22,4 @@ mojo_library(
     deps = ["//src/kci_validator_rows:kci_validator_rows"],
     test_srcs = ["tests/test_validator_report.mojo"],
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

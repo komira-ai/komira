@@ -1,5 +1,4 @@
 load("@komira//tools/build/rust:defs.bzl", "rust_binary")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Uses prost but does not depend on it. Must fail to compile: crates reach
 # rustc only through `deps`.
@@ -7,12 +6,4 @@ rust_binary(
     name = "main",
     srcs = ["src/main.rs"],
     crate_root = "src/main.rs",
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

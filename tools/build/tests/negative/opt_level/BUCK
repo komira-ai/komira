@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # A level `mojo build` does not accept must fail analysis (test 30).
 
@@ -8,12 +7,4 @@ mojo_binary(
     name = "bad_level",
     srcs = ["main.mojo"],
     optimization_level = "fast",
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )

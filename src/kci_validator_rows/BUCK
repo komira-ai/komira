@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # The one shared positional row-accounting model every managed-app validator
 # uses, and its falsifier.
@@ -19,12 +18,4 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = ["tests/test_validator_rows.mojo"],
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

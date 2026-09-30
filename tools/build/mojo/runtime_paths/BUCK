@@ -1,5 +1,4 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/lint:defs.bzl", "doc_tree")
 
 # Where a running program finds its files, from its own executable path; see
 # __init__.mojo. The gate test also exercises the test runtime contract
@@ -19,12 +18,4 @@ mojo_library(
     },
     test_env = {"KOMIRA_TEST_GREETING": "hello, env"},
     visibility = ["PUBLIC"],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["komira//:docs"],
 )

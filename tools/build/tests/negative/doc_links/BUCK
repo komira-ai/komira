@@ -1,4 +1,4 @@
-load("@komira//tools/build/lint:defs.bzl", "doc_tree", "markdown_docs")
+load("@komira//tools/build/lint:defs.bzl", "markdown_docs")
 
 # Planted dead links (test 17): a missing file, a heading that does not
 # exist, a link leaving the staged tree. The validation must fail naming each
@@ -9,12 +9,4 @@ markdown_docs(
         "dead.md",
         "sub/a.md",
     ],
-)
-
-# This package's files, for the link check of the repository's Markdown
-# (//:docs). The glob stops at a subpackage, which names its own.
-doc_tree(
-    name = "doc_tree",
-    srcs = glob(["**"]),
-    visibility = ["tests//:doc_tree"],
 )
