@@ -1,6 +1,6 @@
 # =============================================================================
 # tests/test_validator_rows.mojo — THE FALSIFIER for the shared positional
-#   row-accounting model (`validator_rows_lib`).
+#   row-accounting model (`kci_validator_rows`).
 # =============================================================================
 #
 # WHAT THIS PINS, AND WHY EACH ASSERTION EXISTS.
@@ -35,7 +35,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from validator_rows_lib.spec import (
+from kci_validator_rows.spec import (
     ExpectedRow,
     expected_row,
     expected_names,
@@ -43,7 +43,7 @@ from validator_rows_lib.spec import (
     spec_fault,
     plan_lines,
 )
-from validator_rows_lib.accounting import (
+from kci_validator_rows.accounting import (
     first_name_divergence,
     row_accounting_fault,
     validator_exit_code,

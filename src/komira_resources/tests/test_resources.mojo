@@ -7,7 +7,7 @@ from std.os import getenv, listdir
 from std.os.path import isdir, isfile
 from std.testing import assert_equal, assert_false, assert_true
 
-comptime _PKG = "src/komira/komira_resources/tests/fixtures/"
+comptime _PKG = "src/komira_resources/tests/fixtures/"
 comptime _DECLARED = _PKG + "declared.txt"
 # Present in the repository beside the declared fixture, never declared.
 comptime _UNDECLARED = _PKG + "undeclared.txt"

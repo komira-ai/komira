@@ -1,5 +1,5 @@
 # =============================================================================
-# validator_rows_lib/accounting.mojo — ★ THE POSITIONAL ROW ACCOUNTING. Did the
+# kci_validator_rows/accounting.mojo — ★ THE POSITIONAL ROW ACCOUNTING. Did the
 #   matrix emit the rows it authored, in the order it authored them?
 # =============================================================================
 #
@@ -26,7 +26,7 @@
 # No deps beyond `spec.mojo` — pure `String` work.
 # =============================================================================
 
-from validator_rows_lib.spec import ExpectedRow, expected_names, spec_fault
+from kci_validator_rows.spec import ExpectedRow, expected_names, spec_fault
 
 
 # =============================================================================

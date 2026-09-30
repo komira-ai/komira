@@ -1,5 +1,5 @@
 # =============================================================================
-# validator_rows_lib/live.mojo — ★ EMIT THE ROW WHEN IT COMPLETES, NOT WHEN THE
+# kci_validator_rows/live.mojo — ★ EMIT THE ROW WHEN IT COMPLETES, NOT WHEN THE
 #   RUN DOES. The one spelling every managed-app validator's `MatrixOutcome`
 #   streams through.
 # =============================================================================
@@ -75,7 +75,7 @@ def live_row_line(ordinal: Int, var formatted: String) -> String:
     nothing can test.
 
     `formatted` is whatever the caller's `RowResult.format()` produced. This
-    function does not know the row model and must not: `validator_rows_lib`'s
+    function does not know the row model and must not: `kci_validator_rows`'s
     consumers each own their own `RowResult`, and the thing they share is a
     rendered line."""
     return (

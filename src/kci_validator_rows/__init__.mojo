@@ -1,5 +1,5 @@
 # =============================================================================
-# validator_rows_lib — ★ THE ONE POSITIONAL ROW-ACCOUNTING MODEL every managed-
+# kci_validator_rows — ★ THE ONE POSITIONAL ROW-ACCOUNTING MODEL every managed-
 #   app validator shares.
 # =============================================================================
 #
@@ -37,7 +37,7 @@
 # closure in, and every function here is falsifiable with no process.
 # =============================================================================
 
-from validator_rows_lib.spec import (
+from kci_validator_rows.spec import (
     ExpectedRow,
     expected_row,
     expected_names,
@@ -46,13 +46,13 @@ from validator_rows_lib.spec import (
     plan_lines,
 )
 
-from validator_rows_lib.accounting import (
+from kci_validator_rows.accounting import (
     first_name_divergence,
     row_accounting_fault,
     validator_exit_code,
 )
 
-from validator_rows_lib.live import (
+from kci_validator_rows.live import (
     LIVE_ROW_MARKER,
     emit_live_row,
     live_row_line,

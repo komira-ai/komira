@@ -243,7 +243,7 @@ mojo_test(
   bundle's `data` and a test's declared data; nothing reads a runfiles tree
   or an environment variable.
 - **Reading a resource.** Library code uses
-  [`komira_resources`](../../../src/komira/komira_resources/resources.mojo):
+  [`komira_resources`](../../../src/komira_resources/resources.mojo):
   `read_resource(name)` and `resource_path(name)`, where `name` is the file's
   path under `share/` (its repository path, for a list entry). A test declares
   the file in `test_data` / `data`; a shipped program's `mojo_bundle` lists it

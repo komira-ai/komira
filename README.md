@@ -52,6 +52,7 @@ and does not guarantee (Buck2 does not sandbox local actions), what to put in
 | [docs/knowledge_graph.md](docs/knowledge_graph.md) | the knowledge graph: not here yet (it returns as a Mojo tool) |
 | [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
+| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module directly under `src/`, protos in `src/proto/`, the SDKs in `src/*_sdk/`, tooling in `tools/` |
 | [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |
 
 ## License

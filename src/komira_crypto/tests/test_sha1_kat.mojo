@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira/komira_crypto/tests/test_sha1_kat.mojo — the known-answer gate for
+# src/komira_crypto/tests/test_sha1_kat.mojo — the known-answer gate for
 #   the EVP-backed `Sha1` / `sha1` (`hash.mojo`).
 # =============================================================================
 #

@@ -1,5 +1,5 @@
 # =============================================================================
-# validator_rows_lib/spec.mojo — ★ THE EXPECTED-ROW SPEC. What a validator's
+# kci_validator_rows/spec.mojo — ★ THE EXPECTED-ROW SPEC. What a validator's
 #   matrix PROMISES to emit, in emission order, and what each row asserts.
 # =============================================================================
 #

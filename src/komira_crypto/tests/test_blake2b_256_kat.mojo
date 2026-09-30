@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira/komira_crypto/tests/test_blake2b_256_kat.mojo — the known-answer
+# src/komira_crypto/tests/test_blake2b_256_kat.mojo — the known-answer
 #   gate for the AWS-LC-backed one-shot `blake2b_256` (`hash.mojo`).
 # =============================================================================
 #

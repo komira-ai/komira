@@ -10,6 +10,21 @@ a remote-execution service that speaks the Bazel Remote Execution API (for
 example Buildbarn), you can build there instead (step 3). Remote execution is
 opt-in: it is configured only by a `.buckconfig.local` you write.
 
+## Repository layout
+
+| directory | holds |
+|---|---|
+| `src/<module>/` | one Mojo library per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
+| `src/proto/` | `.proto` sources |
+| `src/mojo_sdk/`, `src/python_sdk/`, `src/typescript_sdk/` | the user-facing SDKs |
+| `tools/` | the build rules, toolchains and platforms, the lints, and the end-to-end tests cell (`tools/build/tests`) |
+| `docs/` | the repository's documentation |
+| `third_party/` | C and C++ libraries built from pinned source archives |
+
+A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`,
+its `doc_tree`, and a row for that `doc_tree` in the `packages` of `//:docs`.
+A library kci (komira_ci) owns is named `kci_<x>`.
+
 ## 1. Get buck2
 
 Run buck2 through [`./buck2`](buck2), at the repository root:

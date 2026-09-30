@@ -18,9 +18,9 @@ mojo_library(
     test_data = {
         "tests/test_resources.mojo": {
             "renamed/shipped.txt": "tests/fixtures/declared.txt",
-            "src/komira/komira_resources/tests/fixtures/declared.txt": "tests/fixtures/declared.txt",
-            "src/komira/komira_resources/tests/fixtures/dir/a.txt": "tests/fixtures/dir/a.txt",
-            "src/komira/komira_resources/tests/fixtures/dir/b.txt": "tests/fixtures/dir/b.txt",
+            "src/komira_resources/tests/fixtures/declared.txt": "tests/fixtures/declared.txt",
+            "src/komira_resources/tests/fixtures/dir/a.txt": "tests/fixtures/dir/a.txt",
+            "src/komira_resources/tests/fixtures/dir/b.txt": "tests/fixtures/dir/b.txt",
             "tool/bin": ":resources_probe[runnable]",
             "tool/share/probe/value.txt": "tests/fixtures/declared.txt",
             "flat": ":resources_probe[runnable]",
