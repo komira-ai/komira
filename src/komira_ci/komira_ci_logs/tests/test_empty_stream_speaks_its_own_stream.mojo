@@ -70,9 +70,9 @@ def _empty(kind: Int, pages: Int, done: Bool, next_cursor: Int) -> RunLogTail:
 
 def _settled(pages: Int, done: Bool, settles: Int) -> RunLogTail:
     """A CONTAINER tail that spent `settles` bounded waits. ⚠ A separate builder
-    rather than a fifth parameter on `_empty`: every pre-existing case in this
-    file is about the vocabulary defect and must keep asserting over
-    the shape it was written for."""
+    rather than a fifth parameter on `_empty`: the cases built by `_empty` are
+    about the stream vocabulary and assert over a tail that spent no settle
+    waits."""
     var t = _empty(RUN_LOG_STREAM_CONTAINER_STDOUT, pages, done, 0)
     t.settles = settles
     return t^
@@ -120,7 +120,7 @@ def test_the_stage_stream_keeps_its_own_sentence_unchanged() raises:
     that simply replaced one sentence with the other would pass §1 and would have
     broken the stream this library was WRITTEN for — where "nothing wrote a stage
     record" IS the diagnosis. The default kind is the stage stream precisely so
-    every pre-existing producer keeps this sentence."""
+    every producer that does not set `stream_kind` gets this sentence."""
     var out = render_run_log_tail(
         _empty(RUN_LOG_STREAM_STAGE_RECORDS, 1, False, 0)
     )
@@ -139,11 +139,11 @@ def test_the_stage_stream_keeps_its_own_sentence_unchanged() raises:
 
 
 def test_a_tail_that_claims_no_kind_is_the_stage_stream() raises:
-    """⚠ THE DEFAULT IS A COMPATIBILITY CLAIM, not a convenience. Every producer
-    in the tree that predates `stream_kind` builds its tail through
-    `RunLogTail.empty()` / `.failed()`, and all of them are the pipeline stream.
-    A default of "container" would have silently re-vocabularised the ONE stream
-    that was already correct."""
+    """⚠ THE DEFAULT IS A COMPATIBILITY CLAIM, not a convenience. A producer
+    that does not set `stream_kind` builds its tail through
+    `RunLogTail.empty()` / `.failed()` and is reading the pipeline stream. A
+    default of "container" would silently give that stream the container
+    stream's words."""
     var t = RunLogTail.empty()
     assert_equal(
         t.stream_kind,
@@ -419,11 +419,10 @@ def test_a_done_false_empty_read_is_not_told_to_wait() raises:
 def test_an_empty_container_read_names_what_to_do_next() raises:
     """★★ AN ABSENCE WITH NO NEXT ACTION IS A DEAD END.
 
-    ⛔ AND THE NEXT ACTION MAY NOT BE A RAW CLOUD COMMAND. The standing rule is
-    that only `komira_ci` commands should be needed, and
-    `render_validator_output_read_by_the_tool` exists so that the tool prints
-    no `gcloud` lines. Introducing one here, one package over, would undo that
-    on the same path."""
+    ⛔ AND THE NEXT ACTION MAY NOT BE A RAW CLOUD COMMAND. The remedy is a
+    `komira_ci` command: this read is the tool that replaces a raw `gcloud` or
+    `aws` log query, so printing one here would send the reader back to the
+    thing it replaces."""
     var out = render_run_log_tail(_settled(1, True, 0))
     assert_true(
         _contains(out, String("NEXT:")),

@@ -833,7 +833,7 @@ def _next_action_lead(tail: RunLogTail) -> String:
         # caught up — and TIME is the only thing that distinguishes them.
         return String(
             " ⇒ NEXT: re-run THIS gate alone ONCE INGESTION HAS CAUGHT UP —"
-            " the validate step with `--only-validate=step:<step>`"
+            " re-run the validate step with `--only-validate=step:<step>`"
             " (the step name is on the line above) — which re-reads this same"
             " stream at a LATER T. ⛔ A raw cloud CLI is neither the remedy nor"
             " needed here: THIS read is the tool that replaces one."
@@ -871,9 +871,10 @@ def _next_action_sentence(tail: RunLogTail) -> String:
     this renderer exists to avoid.
 
     ⚠ IT IS DELIBERATELY SHAPE-ONLY. This library knows the STREAM; it does not
-    know the app, the env or the step name, and inventing plausible values for
-    them would print a command that does not run. The caller's own report names
-    all three, on the lines above this block."""
+    know the step name, and inventing a plausible one would print a command
+    that does not run. It names only the `--only-validate=step:<step>`
+    selector; the caller's own report names the step on the line above this
+    block."""
     if tail.stream_kind != RUN_LOG_STREAM_CONTAINER_STDOUT:
         return String("")
     # ★★ THE REMEDY BRANCHES ON `done`. Without that, this block contradicts

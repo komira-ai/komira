@@ -67,13 +67,10 @@
 #   is why that is configuration and not a lossy re-encoding. See
 #   `LiveEcsTaskLogs`' header.
 #
-# ⚠ METRICS ARE **NOT** HERE, AND THE SIBLING PACKAGE IS `komira_cloud_metrics`.
-#   It carries the seam and both clouds' pure request/parse halves and has NO
-#   live conformer and NO caller ON PURPOSE — see its `__init__` header for the
-#   argued case (a deploy gate's questions all have direct, synchronous answers;
-#   a metric is a lagging sampled proxy; and `timeSeries.list` can stall on
-#   large responses in exactly the Cloud Run Job environment an in-cloud
-#   validate step runs in).
+# ⚠ METRICS ARE **NOT** HERE. A deploy gate's questions all have direct,
+#   synchronous answers; a metric is a lagging sampled proxy, and
+#   `timeSeries.list` can stall on large responses in exactly the Cloud Run Job
+#   environment an in-cloud validate step runs in.
 #
 # ZERO deps. Nothing here names a socket, a cloud SDK, or a proto — the
 # transport is a trait, which is why every request shape and every failure

@@ -869,7 +869,7 @@ def test_a_page_token_rides_the_request_and_is_ESCAPED() raises:
         first.find(String("pageToken")) < 0,
         String(
             "⛔ BYTE-IDENTICAL FOR THE FIRST READ: a caller with no token emits"
-            " no key, so every pre-existing request is unchanged. Got: "
+            " no key, so a first-page request carries no token field. Got: "
         )
         + first,
     )
@@ -1530,7 +1530,7 @@ def test_the_AWS_request_carries_the_FORWARD_TOKEN_and_escapes_it() raises:
         first.find(String("nextToken")) < 0,
         String(
             "⛔ BYTE-IDENTICAL FOR THE FIRST READ: no token, no key, so every"
-            " pre-existing request is unchanged. Got: "
+            " first-page request carries no token field. Got: "
         )
         + first,
     )
