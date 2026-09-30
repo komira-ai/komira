@@ -21,6 +21,7 @@ rustc as one `-Ldependency=<dir>` per crate, and direct dependencies as
 `--extern <crate>=<file>`.
 """
 
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
@@ -369,7 +370,7 @@ def crates_io_library(
         archive = ":{}.crate".format(name),
         busybox = busybox,
         prefix = prefix,
-        exec_compatible_with = ["komira//tools/build/platforms:light"],
+        exec_compatible_with = LINUX_X86_64,
     )
     rust_library(
         name = name,
