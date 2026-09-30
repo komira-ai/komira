@@ -56,7 +56,9 @@ comptime VALIDATION_SCHEMA: String = "komira_ci.validation.v1"
 """The `schema` field — the STABILITY handle the UI and any query tool script
 against. Versioning follows the deploy-outputs record's `OUTPUTS_SCHEMA`
 (`komira_deploy_outputs`): a backward-incompatible SHAPE change gets a new token (`…v2`);
-additive fields do NOT bump it."""
+additive fields do NOT bump it. Records stored under an earlier token of the
+same shape stay as they are; a reader over such a store accepts both tokens
+rather than treating the older one as a different shape."""
 
 comptime DOC_KIND_STEP: String = "step"
 """Written by the VALIDATOR. One per validate step."""
