@@ -13,7 +13,7 @@
 #
 # THREE DEFECTS IN ONE BRANCH:
 #
-#   1. IT USES MANAGED-APP PIPELINE VOCABULARY FOR A STREAM THAT IS NOT THE
+#   1. IT USES PIPELINE-RUN STAGE VOCABULARY FOR A STREAM THAT IS NOT THE
 #      STAGE STREAM. Nothing writes a "stage record" to a container's stdout, so
 #      the sentence names a failure that cannot occur — a FINDING-SHAPED
 #      NON-FINDING. A reader believes it even about a job that demonstrably
@@ -452,7 +452,7 @@ def test_an_empty_container_read_names_what_to_do_next() raises:
 
 
 def test_the_next_action_is_NOT_printed_on_the_stage_stream() raises:
-    """⛔ THE NEGATIVE TWIN. The managed-app stage stream has no ingestion lag,
+    """⛔ THE NEGATIVE TWIN. The pipeline-run stage stream has no ingestion lag,
     no settle, and no `--only-validate` remedy — an empty one means nobody wrote
     a stage record, which is a different diagnosis with a different next step.
     A renderer that printed the cloud advice on both streams would be the

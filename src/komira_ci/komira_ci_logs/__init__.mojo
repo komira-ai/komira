@@ -8,7 +8,7 @@
 #
 # A validator that only prints
 #
-#     Read the run's own log stream (.../apps/runs/{r}/logs?after=&limit=)
+#     Read the run's own log stream (.../runs/{r}/logs?after=&limit=)
 #     for the failing stage.
 #
 # or a report that ends with "read it with: gcloud logging read ..." points at
@@ -54,7 +54,7 @@
 # BOTH CLOUDS HAVE A LIVE CONFORMER. GCP:
 #   `komira_gcp_bridge.LiveCloudRunExecutionLogs`, driven by
 #   `CloudRunJobValidator`. AWS: `komira_aws_iac_live.LiveEcsTaskLogs`, driven
-#   by `FargateTaskValidator`. A red step on EITHER cloud reports its own
+#   by whichever validator runs the ECS task. A red step on EITHER cloud reports its own
 #   container output.
 #
 #   ⚠ THE ONE ASYMMETRY, AND IT IS THE PROVIDERS', NOT OURS. A GCP

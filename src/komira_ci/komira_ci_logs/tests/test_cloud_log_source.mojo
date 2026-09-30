@@ -368,7 +368,7 @@ def test_a_malformed_body_is_reported_WITHOUT_echoing_it() raises:
 def test_a_page_renders_through_the_EXISTING_report_renderer() raises:
     """★ THE REASON NO SECOND PRINTER EXISTS. A page becomes the `RunLogTail`
     `run_validation_dag` already prints, so a cloud container stream reaches the
-    operator through the exact path a managed-app run stream does."""
+    operator through the exact path a pipeline run stream does."""
     var page = CloudLogPage.empty(200)
     page.entries.append(
         CloudLogEntry(
@@ -714,7 +714,7 @@ def test_a_stream_that_ENDED_is_not_re_read() raises:
     """⛔ NO TOKEN IS THE ONLY `False` THAT MEANS COMPLETE. The provider said the
     stream ends here; asking again is a POLL, not paging, and a poll inside a
     failure report costs wall time exactly where wall time is a SIGKILL on the
-    managed-app runner this sits inside."""
+    host process this sits inside."""
     assert_false(
         container_log_should_continue(
             1, 1, 0, 200, String(""), String("")

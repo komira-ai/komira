@@ -6,7 +6,7 @@
 # A failing validate step should return the relevant logs. The alternative is
 # a validator that prints
 #
-#     Read the run's own log stream (.../apps/runs/{r}/logs?after=&limit=)
+#     Read the run's own log stream (.../runs/{r}/logs?after=&limit=)
 #     for the failing stage.
 #
 # — advice for a route that EXISTS, is asserted served, and that no tool called.

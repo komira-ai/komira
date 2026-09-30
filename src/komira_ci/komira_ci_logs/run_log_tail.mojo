@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # THE WIRE SHAPE, from the pipeline manager's run-log handler (and forwarded
-# VERBATIM by the api passthrough at `.../apps/runs/{runId}/logs?after=&limit=`):
+# VERBATIM by any proxy in front of `/pipelines/runs/{runId}/logs?after=&limit=`):
 #
 #     {"run_id":"<uuid>",
 #      "lines":[{"seq":1,"ts":1789200000000000,"level":"info",
@@ -66,7 +66,7 @@ starts appearing in an operator's terminal on its own."""
 #     run-log: NO STAGE RECORDS for run <exec> — the stream is empty (read 1
 #     page(s)). Nothing wrote a stage record for this run.
 #
-# Every noun in that sentence belongs to the MANAGED-APP PIPELINE stream. Nothing
+# Every noun in that sentence belongs to the PIPELINE-RUN stage stream. Nothing
 # writes a "stage record" to a container's stdout and nothing was ever going to,
 # so the sentence describes a failure that cannot occur — a FINDING-SHAPED
 # NON-FINDING, and it sends the reader to look for a missing pipeline writer
@@ -83,7 +83,7 @@ starts appearing in an operator's terminal on its own."""
 # a producer that makes none is the one this library was written for.
 # =============================================================================
 comptime RUN_LOG_STREAM_STAGE_RECORDS: Int = 0
-"""A managed-app RUN's stage-record stream (`.../apps/runs/{r}/logs`). Records
+"""A pipeline RUN's stage-record stream (`/pipelines/runs/{r}/logs`). Records
 are written by the pipeline manager, `next_cursor` is a real `?after=` cursor,
 and "nothing wrote a stage record" IS the diagnosis when it is empty."""
 
@@ -843,7 +843,7 @@ def _next_action_lead(tail: RunLogTail) -> String:
     # already there.
     return String(
         " ⇒ NEXT: RE-READ this stream NOW —"
-        " the validate step with `--only-validate=step:<step>`"
+        " re-run the validate step with `--only-validate=step:<step>`"
         " (the step name is on the line above). ⛔ NOT 'wait for ingestion':"
         " this read stopped on its OWN bound with the provider still holding"
         " stream, so a LATER T is not what is missing — a SECOND READ is. ⛔ A"
@@ -977,7 +977,7 @@ def _empty_stream_sentence(tail: RunLogTail) -> String:
         run-log: NO STAGE RECORDS for run <exec> — the stream is empty (read 1
         page(s)). Nothing wrote a stage record for this run.
 
-    Every noun there belongs to the managed-app PIPELINE stream. Nothing writes
+    Every noun there belongs to the PIPELINE-RUN stage stream. Nothing writes
     a "stage record" to a container's stdout, so the sentence names a failure
     that cannot occur — and a reader will believe it, even about a job that
     demonstrably printed rows. A finding-shaped non-finding is worse than

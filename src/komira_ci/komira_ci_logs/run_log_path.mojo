@@ -6,7 +6,7 @@
 # ⛔ WHY THIS FILE EXISTS: a failing validate step should return the relevant
 # logs. A validator that can only print
 #
-#     Read the run's own log stream (.../apps/runs/{r}/logs?after=&limit=)
+#     Read the run's own log stream (.../runs/{r}/logs?after=&limit=)
 #     for the failing stage.
 #
 # leaves every diagnosis of that class to a hand-rolled curl. The path

@@ -223,8 +223,8 @@ present a short first page as the container's whole output.
 
 ── ⛔ AND THE PROBLEM THE **BOUND** EXISTS FOR, WHICH IS THE BIGGER ONE ────
 An unbounded drain is an enrichment that can take longer than the failure it is
-annotating, on a path a validation DAG walks once per red step — and the managed-app
-runner it sits inside gets SIGKILLed on its own deadline, which runs no teardown
+annotating, on a path a validation DAG walks once per red step — and the host
+process it runs inside may be SIGKILLed on its own deadline, which runs no teardown
 and leaves a live cloud service behind. Three is a generous ceiling on "a
 validator printed more rows than one page holds"; whatever remains is REPORTED as
 remaining rather than silently dropped.
@@ -517,7 +517,7 @@ def walk_container_log_pages[
 #
 # ── ⛔ THE COST, STATED, BECAUSE IT IS REAL ─────────────────────────────────
 # Every second of settle is a second added to an ALREADY-FAILING wave, and the
-# managed-app runner that this sits inside is SIGKILLed on its own deadline —
+# host process this runs inside may be SIGKILLed on its own deadline —
 # which runs no teardown and leaves live cloud resources behind. So:
 #
 #   * ZERO on a green step. The settle lives inside `read_container_output`,
@@ -909,7 +909,7 @@ def cloud_log_page_to_run_log_tail(
 ) -> RunLogTail:
     """Turn ONE `CloudLogPage` into the `RunLogTail` `render_run_log_tail`
     already prints, so a cloud container stream reaches the operator through the
-    EXACT path a managed-app run stream does — same bound, same redaction, same
+    EXACT path a pipeline run stream does — same bound, same redaction, same
     three states (COULD NOT READ / NO RECORDS / records).
 
     ⛔ AN ADAPTER, NOT A SECOND RENDERER, AND THAT IS THE POINT. The obvious
