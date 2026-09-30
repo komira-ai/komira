@@ -27,16 +27,16 @@
 #
 # # ⚠ SECOND DECLARATION SITE — keep in sync
 #
-# The `komira_core_id` package declares this SAME `RAND_bytes` symbol with
-# this SAME signature, for UUIDv7's random bits. It is not a second RNG — both
-# call this one AWS-LC implementation — but it IS a second declaration, and it
-# exists so that `komira_core` does not import `komira_crypto`, which would
-# put crypto upstream of nearly everything and invalidate most builds on any
-# crypto edit. Read that package's entropy module before changing anything
-# here.
+# The `komira_uuid` package declares this SAME `RAND_bytes` symbol with this
+# SAME signature, for UUIDv7's random bits (`src/komira_uuid/entropy.mojo`).
+# It is not a second RNG — both call this one AWS-LC implementation — but it
+# IS a second declaration, and it exists so that `komira_uuid` does not import
+# `komira_crypto`: every package that mints an id would otherwise have crypto
+# upstream of it, and any crypto edit would invalidate all of their builds.
+# Read that entropy module before changing anything here.
 #
 # If you change WHICH AWS-LC entrypoint this file calls (e.g. to a FIPS-mode
-# `RAND_priv_bytes`), or its signature, change `komira_core_id`'s entropy
+# `RAND_priv_bytes`), or its signature, change `komira_uuid`'s entropy
 # module TOO. A silent divergence leaves UUIDv7 on the old entrypoint.
 # =============================================================================
 
