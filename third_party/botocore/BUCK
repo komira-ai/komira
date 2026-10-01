@@ -1,0 +1,38 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load(":defs.bzl", "botocore_model")
+load(":models.bzl", "BOTOCORE_MODELS", "botocore_model_path")
+
+# boto/botocore 1.43.70, Apache-2.0 (LICENSE.txt and NOTICE in the archive).
+#
+# The AWS service models the Mojo AWS clients are generated from
+# (komira//tools/build/proto-codegen:aws-client-gen), read from botocore's
+# release archive at build time: no model is committed to this repository.
+# The services are models.bzl's; a newer botocore is this url and sha256 plus
+# that file's entries. tools/build/third_party_srcs/upstream_versions.sh
+# reports whether a newer release exists; it gates nothing.
+pinned_file(
+    name = "botocore-1.43.70.tar.gz",
+    url = "https://github.com/boto/botocore/archive/refs/tags/1.43.70.tar.gz",
+    sha256 = "f045625da1309eff88a2631d9e449d1d03cfa7af14a81aec22d57987b41c3a27",
+)
+
+archive_files(
+    name = "files",
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    archive = ":botocore-1.43.70.tar.gz",
+    files = ["LICENSE.txt", "NOTICE"] + [botocore_model_path(s) for s in sorted(BOTOCORE_MODELS)],
+    strip_prefix = "botocore-1.43.70",
+    visibility = ["PUBLIC"],
+)
+
+# One target per service, named for it: its model, held to models.bzl's
+# sha256.
+[botocore_model(
+    name = service,
+    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    path = "{}/{}/service-2.json".format(service, BOTOCORE_MODELS[service].api_version),
+    sha256 = BOTOCORE_MODELS[service].sha256,
+    src = ":files[{}]".format(botocore_model_path(service)),
+    visibility = ["PUBLIC"],
+) for service in sorted(BOTOCORE_MODELS)]
