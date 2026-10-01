@@ -203,6 +203,18 @@
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
 #      go red (tests//negative/aws_codegen).
+#  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
+#      inline tests of komira_proto_codegen run as a build action and pass,
+#      every one counted. In tests//negative/rust_test a failing #[test]
+#      makes the test, a binary welded to it, and a binary linking a library
+#      welded to it unbuildable (GATED TEST FAILED, with the harness's
+#      `1 passed; 1 failed`: the panic unwound), while the test executable
+#      itself compiles; a held failing test builds and its welded binary runs;
+#      a held test that passes, holding every test, a hold naming no test,
+#      a target with no tests, an #[ignore]d test, and, at analysis, a row
+#      with no issue, a malformed issue, an empty reason, an unknown row
+#      field, a key that is not a libtest test name, and two byte-identical
+#      reasons are each refused.
 set -uo pipefail
 
 umbrella=1
@@ -949,6 +961,36 @@ fi
 expect_green aws_codegen tests//functional/aws_codegen:
 expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
 expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
+
+# 35
+RT=tests//negative/rust_test
+if "$BUCK2" build //tools/build/proto-codegen:komira_proto_codegen_unit --show-full-simple-output > "$LOG/rust_test_unit.txt" 2> "$LOG/rust_test_unit.log"; then
+    rt_marker=$(tail -n 1 "$LOG/rust_test_unit.txt")
+    if grep -qE '^PASS komira//tools/build/proto-codegen:komira_proto_codegen_unit: [1-9][0-9]* passed$' "$rt_marker"; then
+        pass "rust_test_unit: $(cut -d' ' -f3- "$rt_marker")"
+    else
+        fail "rust_test_unit: marker $rt_marker does not record a passing run: $(cat "$rt_marker")"
+    fi
+else
+    fail "rust_test_unit (see $LOG/rust_test_unit.log)"
+fi
+expect_green rust_test_compiles "$RT:red[bin]"
+expect_red rust_test_red "GATED TEST FAILED: tests//negative/rust_test:red" "$RT:red"
+expect_red rust_test_unwinds "1 passed; 1 failed" "$RT:red"
+expect_red rust_test_bin_red "GATED TEST FAILED" "$RT:bin"
+expect_red rust_test_lib_consumer_red "GATED TEST FAILED" "$RT:lib_consumer"
+expect_green rust_test_held_green "$RT:held_red" "$RT:bin_held[run_check]"
+expect_red rust_test_held_passing "LEDGER STALE: held test tests::passes" "$RT:held_passing"
+expect_red rust_test_all_held "holds all 2 tests" "$RT:all_held"
+expect_red rust_test_held_unknown 'tests_known_failing["tests::gone"] names no test' "$RT:held_unknown"
+expect_red rust_test_empty "EMPTY GATE" "$RT:empty"
+expect_red rust_test_ignored "#[ignore]d test(s) did not run" "$RT:ignored"
+expect_red rust_test_bad_issue "is not a GitHub issue number" "$RT:bad_issue"
+expect_red rust_test_bad_empty_reason "empty \`reason\`" "$RT:bad_empty_reason"
+expect_red rust_test_missing_issue "no \`issue\`" "$RT:missing_issue"
+expect_red rust_test_unknown_field "unknown field \`card\`" "$RT:unknown_field"
+expect_red rust_test_bad_name "not a libtest test name" "$RT:bad_name"
+expect_red rust_test_dup_reason "byte-identical reasons" "$RT:dup_reason"
 
 # 9
 if [ "$MODE" = local ]; then

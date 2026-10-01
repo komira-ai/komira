@@ -626,6 +626,38 @@ cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/l
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
 
+## 35. Rust tests are part of the build
+
+`rust_test` ([`../rust/README.md`](../rust/README.md#tests-are-part-of-the-build))
+compiles a crate with `rustc --test` and runs it as a build action, and
+`tests = [...]` on `rust_library` and `rust_binary` makes the published
+artifact wait on every test's `.passed` marker.
+`//tools/build/proto-codegen:komira_proto_codegen_unit` (the inline tests of
+`komira_proto_codegen`, which gate the library and so every generator binary)
+must build, and its marker must record a non-zero passed count.
+
+In [`negative/rust_test`](negative/rust_test/BUCK), `red` holds one passing
+and one failing test. It must fail with `GATED TEST FAILED` and the harness's
+`1 passed; 1 failed` (the panic unwound through the zig-linked harness, so
+the run continued), while `red[bin]`, the test executable, builds: the red is
+the run, not the compile. `bin` (welded to `red`) and `lib_consumer` (linking
+`red_lib`, which is welded to `red`) must fail the same way. `held_red`
+holds the failing test and must build, and `bin_held`, welded to it, must
+build and run (`[run_check]`). Each of these must fail, naming its cause: a
+held test that passes (`held_passing`, `LEDGER STALE`), holding every test
+(`all_held`), a hold naming no test (`held_unknown`), no tests (`empty`,
+`EMPTY GATE`), an `#[ignore]`d test (`ignored`), and, at analysis, a row
+with no issue (`missing_issue`), a malformed issue (`bad_issue`), an empty
+reason (`bad_empty_reason`), an unknown row field (`unknown_field`), a key
+that is not a libtest test name (`bad_name`), and two rows with
+byte-identical reasons (`dup_reason`).
+
+```sh
+buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
+buck2 build tests//negative/rust_test:held_red 'tests//negative/rust_test:bin_held[run_check]'
+buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

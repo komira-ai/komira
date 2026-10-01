@@ -1,4 +1,4 @@
-"""Rust rules for Buck2: rust_library, rust_binary, crates_io_library.
+"""Rust rules for Buck2: rust_library, rust_binary, rust_test, crates_io_library.
 
 Every compile runs the pinned rustc from `toolchains//:rust` through
 `rustc_wrapper.sh`, which links through zig (see that file). Nothing is
@@ -35,6 +35,8 @@ RustToolchainInfo = provider(fields = {
     "cc_target": provider_field(str),
     "wrapper": provider_field(typing.Any),
     "run_check": provider_field(typing.Any),
+    # Runs one rust_test in a build action (test_runner.sh).
+    "test_runner": provider_field(typing.Any),
 })
 
 RustCrateInfo = provider(fields = {
@@ -45,6 +47,13 @@ RustCrateInfo = provider(fields = {
     # duplicates. A list, not a transitive set: a transitive set's type is
     # per loading cell, and crates are used across cells.
     "closure": provider_field(list),
+})
+
+# A rust_test: the `.passed` marker its run writes. Only a passing run (or a
+# held test's recorded failure) writes it; `tests = [...]` on rust_library and
+# rust_binary takes these markers as inputs of the published artifact.
+RustTestInfo = provider(fields = {
+    "marker": provider_field(typing.Any),
 })
 
 _PRELUDE = """
@@ -136,6 +145,7 @@ def _rust_toolchain_impl(ctx):
             cc_target = ctx.attrs.cc_target,
             wrapper = ctx.attrs._wrapper[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
+            test_runner = ctx.attrs._test_runner[DefaultInfo].default_outputs[0],
         ),
     ]
 
@@ -155,6 +165,7 @@ rust_toolchain = rule(
             "komira//tools/build/mojo:shell_lint",
             "komira//tools/build/rust:shell_lint",
         ]),
+        "_test_runner": attrs.dep(default = "komira//tools/build/rust:test_runner.sh"),
         "_wrapper": attrs.dep(default = "komira//tools/build/rust:rustc_wrapper.sh"),
     },
 )
@@ -208,7 +219,8 @@ def _compile(ctx, crate_type, out):
                 closure.append(lib)
     rustc_args = cmd_args(
         "--crate-name=" + crate,
-        "--crate-type=" + crate_type,
+        # `test`: a libtest harness over the crate's #[test] functions.
+        "--test" if crate_type == "test" else "--crate-type=" + crate_type,
         "--edition=" + ctx.attrs.edition,
         "-Copt-level=" + ctx.attrs.opt_level,
         "-Cdebuginfo=0",
@@ -266,13 +278,129 @@ _COMMON_ATTRS = {
     "toolchain": attrs.toolchain_dep(default = "toolchains//:rust", providers = [RustToolchainInfo]),
 }
 
+# ---- the test weld -----------------------------------------------------------
+#
+# The same weld mojo_library makes (tools/build/mojo/defs.bzl): a rust_test is
+# compiled with `rustc --test` and RUN as a build action that writes a `.passed`
+# marker. `tests = [...]` on rust_library or rust_binary compiles the artifact
+# UNGATED, then publishes it through one copy action that takes every marker
+# as a hidden input. The compile and the tests run in parallel; the published
+# library (what `deps` links against) or binary (what RunInfo runs) cannot
+# exist unless each test passed. With no `tests`, nothing changes: the compile
+# writes the published path directly, as before.
+#
+# A crate's inline #[test]s are its unit tests: a rust_test over the SAME
+# `srcs` and `crate_root`, which does not depend on the library, gates it. A
+# test that depends on the library cannot gate that library (buck2 refuses the
+# cycle); it gates a binary that depends on it.
+
+def _gate(ctx, tc, ungated, public):
+    """Publishes `ungated` as `public` once every marker of `tests` exists."""
+    markers = [t[RustTestInfo].marker for t in ctx.attrs.welded_tests]
+    ctx.actions.run(
+        cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
+        category = "rust_gate_join",
+    )
+    return markers
+
+def _tests_sub_target(markers):
+    return {"tests": [DefaultInfo(default_outputs = markers)]}
+
+# `tests_known_failing` on rust_test -- a hold on a red test, which INVERTS
+# rather than mutes, exactly as mojo_library's does. Keyed by the libtest name
+# (`module::tests::name`). A held test still runs, alone, and must FAIL; a
+# held test that passes is red (LEDGER STALE) naming its row. A row is
+# `{"issue": ..., "reason": ...}`, refused at analysis when the issue is
+# missing or malformed, the reason is empty, or two rows carry byte-identical
+# reasons. Whether the name is a test of the binary, and whether every test is
+# held, is known only from the harness's own list: test_runner.sh refuses
+# both at run time.
+_KNOWN_FAILING_FIELDS = ["issue", "reason"]
+_ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
+_TEST_NAME = "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$"
+
+def _admit_known_failing(ctx):
+    held = ctx.attrs.tests_known_failing
+    where = "{}: tests_known_failing".format(ctx.label.raw_target())
+    seen = {}
+    for name, row in held.items():
+        if not regex_match(_TEST_NAME, name):
+            fail("{}[{}]: not a libtest test name (`module::tests::name`, as `--list` prints it).".format(where, repr(name)))
+        for field in row:
+            if field not in _KNOWN_FAILING_FIELDS:
+                fail("{}[{}]: unknown field `{}`; a row has exactly `issue` and `reason`.".format(where, repr(name), field))
+        issue = row.get("issue", "")
+        reason = row.get("reason", "")
+        if not issue:
+            fail("{}[{}]: no `issue`. A hold is debt; name the GitHub issue that will remove it (`123`, `#123` or its URL).".format(where, repr(name)))
+        if not regex_match(_ISSUE_REF, issue):
+            fail("{}[{}]: issue {} is not a GitHub issue number (`123`, `#123`) or https://github.com/<owner>/<repo>/issues/<n> URL.".format(where, repr(name), repr(issue)))
+        if not reason.strip():
+            fail("{}[{}]: empty `reason`. Say what this test shows is broken; a reader deciding whether the hold is still honest has nothing else to go on.".format(where, repr(name)))
+        if reason in seen:
+            fail("{}[{}] and [{}] carry byte-identical reasons. If they share a cause, say what each test shows; otherwise the second test was never examined.".format(where, repr(seen[reason]), repr(name)))
+        seen[reason] = name
+    return held
+
+def _test_impl(ctx):
+    tc = ctx.attrs.toolchain[RustToolchainInfo]
+    held = _admit_known_failing(ctx)
+    exe = ctx.actions.declare_output("bin/" + ctx.label.name)
+    _compile(ctx, "test", exe)
+    marker = ctx.actions.declare_output(ctx.label.name + ".passed")
+    holds = []
+    for name in sorted(held):
+        holds += ["--hold", name, held[name]["issue"], held[name]["reason"]]
+    ctx.actions.run(
+        cmd_args(
+            tc.busybox,
+            "sh",
+            tc.test_runner,
+            tc.busybox,
+            str(ctx.label.raw_target()),
+            exe,
+            marker.as_output(),
+            holds,
+        ),
+        category = "rust_gated_test",
+        identifier = ctx.label.name,
+    )
+    return [
+        # Building the target runs the tests. `[bin]` is the harness itself
+        # (a test executable, not a shippable artifact).
+        DefaultInfo(default_output = marker, sub_targets = {"bin": [DefaultInfo(default_output = exe)]}),
+        RustTestInfo(marker = marker),
+    ]
+
+rust_test_rule = rule(
+    impl = _test_impl,
+    attrs = _COMMON_ATTRS | {
+        # {libtest name: {"issue": ..., "reason": ...}}; see _admit_known_failing.
+        "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
+    },
+)
+
+_WELD_ATTRS = {
+    # rust_test targets whose passing runs this artifact is published behind.
+    "welded_tests": attrs.list(attrs.dep(providers = [RustTestInfo]), default = []),
+}
+
 def _library_impl(ctx):
+    tc = ctx.attrs.toolchain[RustToolchainInfo]
     crate = _crate_name(ctx)
     ext = "so" if ctx.attrs.proc_macro else "rlib"
-    lib = ctx.actions.declare_output("{}/lib{}.{}".format(crate, crate, ext))
-    deps_closure = _compile(ctx, "proc-macro" if ctx.attrs.proc_macro else "rlib", lib)
+    path = "{}/lib{}.{}".format(crate, crate, ext)
+    lib = ctx.actions.declare_output(path)
+    sub_targets = {}
+    if ctx.attrs.welded_tests:
+        # Alone in its own directory too: -Ldependency names a library's directory.
+        ungated = ctx.actions.declare_output("ungated/" + path)
+        deps_closure = _compile(ctx, "proc-macro" if ctx.attrs.proc_macro else "rlib", ungated)
+        sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, lib))
+    else:
+        deps_closure = _compile(ctx, "proc-macro" if ctx.attrs.proc_macro else "rlib", lib)
     return [
-        DefaultInfo(default_output = lib),
+        DefaultInfo(default_output = lib, sub_targets = sub_targets),
         RustCrateInfo(
             crate_name = crate,
             lib = lib,
@@ -282,7 +410,7 @@ def _library_impl(ctx):
 
 rust_library_rule = rule(
     impl = _library_impl,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
         "proc_macro": attrs.bool(default = False),
     },
 )
@@ -290,8 +418,13 @@ rust_library_rule = rule(
 def _binary_impl(ctx):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
     exe = ctx.actions.declare_output(ctx.label.name)
-    _compile(ctx, "bin", exe)
     sub_targets = {}
+    if ctx.attrs.welded_tests:
+        ungated = ctx.actions.declare_output("ungated/" + ctx.label.name)
+        _compile(ctx, "bin", ungated)
+        sub_targets = _tests_sub_target(_gate(ctx, tc, ungated, exe))
+    else:
+        _compile(ctx, "bin", exe)
     if ctx.attrs.expected_stdout != None:
         # Runs the binary in a remote action and fails unless its stdout is
         # exactly `expected_stdout`.
@@ -309,7 +442,7 @@ def _binary_impl(ctx):
 
 rust_binary_rule = rule(
     impl = _binary_impl,
-    attrs = _COMMON_ATTRS | {
+    attrs = _COMMON_ATTRS | _WELD_ATTRS | {
         "expected_stdout": attrs.option(attrs.string(), default = None),
     },
 )
@@ -382,9 +515,23 @@ def crates_io_library(
         **kwargs
     )
 
+def _welded(rule_fn):
+    """`rule_fn`, taking `tests = [...]`: rust_test targets it is published behind.
+
+    `tests` is buck2's own attribute (the targets `buck2 test` runs for this
+    one), which carries labels only; the weld needs their markers, so the
+    same list also reaches the rule as `welded_tests`.
+    """
+    def call(tests = [], **kwargs):
+        if "welded_tests" in kwargs:
+            fail("{}: pass `tests = [...]`, not `welded_tests`".format(kwargs.get("name", "")))
+        return rule_fn(tests = tests, welded_tests = tests, **kwargs)
+    return call
+
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 crates_io_library = declares_docs(crates_io_library)
-rust_binary = declares_docs(rust_binary_rule)
-rust_library = declares_docs(rust_library_rule)
+rust_binary = declares_docs(_welded(rust_binary_rule))
+rust_library = declares_docs(_welded(rust_library_rule))
 rust_sysroot = declares_docs(rust_sysroot_rule)
+rust_test = declares_docs(rust_test_rule)

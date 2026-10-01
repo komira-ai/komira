@@ -1,0 +1,165 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+# Planted defects for the Rust test weld; each `must fail` target must fail
+# its build, and the two `green` ones must build (run_tests.sh, test 35).
+
+# One test passes, one fails: red.
+rust_test(
+    name = "red",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+)
+
+# must fail: a binary welded to a red test cannot be built, though it compiles
+# (its `[ungated]` compile is not a target; `:red[bin]` shows the test
+# compiles too, so the red is the test's run).
+rust_binary(
+    name = "bin",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    tests = [":red"],
+)
+
+# must fail: a library welded to a red test cannot be built, so neither can a
+# binary that links it.
+rust_library(
+    name = "red_lib",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests = [":red"],
+)
+
+rust_binary(
+    name = "lib_consumer",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = [":red_lib"],
+)
+
+# green: the failing test is held, and fails as its row records.
+rust_test(
+    name = "held_red",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+    },
+)
+
+# green: a binary welded to that test builds, and runs (`[run_check]`).
+rust_binary(
+    name = "bin_held",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    tests = [":held_red"],
+    expected_stdout = "hello\n",
+)
+
+# must fail: LEDGER STALE, a held test passes.
+rust_test(
+    name = "held_passing",
+    srcs = ["src/held.rs"],
+    crate_root = "src/held.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+        "tests::passes": {"issue": "2", "reason": "planted: this test passes"},
+    },
+)
+
+# must fail: every test is held.
+rust_test(
+    name = "all_held",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+        "tests::passes": {"issue": "2", "reason": "planted: held although it passes"},
+    },
+)
+
+# must fail: the hold names no test of the binary.
+rust_test(
+    name = "held_unknown",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+        "tests::gone": {"issue": "2", "reason": "planted: no such test"},
+    },
+)
+
+# must fail: EMPTY GATE, nothing to run.
+rust_test(
+    name = "empty",
+    srcs = ["src/empty.rs"],
+    crate_root = "src/empty.rs",
+)
+
+# must fail: an #[ignore]d test is a mute.
+rust_test(
+    name = "ignored",
+    srcs = ["src/ignored.rs"],
+    crate_root = "src/ignored.rs",
+)
+
+# must fail at analysis: the issue is not an issue reference.
+rust_test(
+    name = "bad_issue",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "someday", "reason": "planted: asserts 2 + 2 == 5"},
+    },
+)
+
+# must fail at analysis: an empty reason.
+rust_test(
+    name = "bad_empty_reason",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "1", "reason": " "},
+    },
+)
+
+# must fail at analysis: a row with no issue.
+rust_test(
+    name = "missing_issue",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"reason": "planted: asserts 2 + 2 == 5"},
+    },
+)
+
+# must fail at analysis: a row field other than issue and reason.
+rust_test(
+    name = "unknown_field",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "tests::fails": {"card": "x", "issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+    },
+)
+
+# must fail at analysis: a key that is not a libtest test name.
+rust_test(
+    name = "bad_name",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests_known_failing = {
+        "src/red.rs": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+    },
+)
+
+# must fail at analysis: two rows with byte-identical reasons (the
+# anti-copy-paste rule, as on mojo_library).
+rust_test(
+    name = "dup_reason",
+    srcs = ["src/held.rs"],
+    crate_root = "src/held.rs",
+    tests_known_failing = {
+        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
+        "tests::passes": {"issue": "2", "reason": "planted: asserts 2 + 2 == 5"},
+    },
+)
