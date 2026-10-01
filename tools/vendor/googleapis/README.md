@@ -1,42 +1,55 @@
-# Vendored googleapis protos
+# googleapis protos, referenced at a pinned commit
 
-The `.proto` files komira generates Google Cloud clients from, and nothing
-else: for each set of roots, exactly their import closure, at one pinned
-googleapis commit. The generated clients are built from these at build time;
-no generated code is checked in. The well-known types (`google/protobuf/*`)
-are not vendored: protoc provides them.
+The `.proto` files komira generates Google Cloud clients from come from
+[googleapis](https://github.com/googleapis/googleapis) (Apache-2.0) and are
+**not committed here**. [BUCK](BUCK) fetches googleapis's GitHub archive at
+one pinned commit (`_COMMIT`), checked against its sha256 (`_SHA256`), and
+extracts at build time exactly the files a client needs. No generated code is
+checked in either. The well-known types (`google/protobuf/*`) are not taken
+from googleapis: protoc provides them.
 
-| file | what it is |
+googleapis's license is the archive's own `LICENSE`, extracted unmodified as
+`//tools/vendor/googleapis:googleapis[LICENSE]`; googleapis ships no NOTICE
+file at the pinned commit.
+
+| target | what it is |
 |---|---|
-| [PIN.tsv](PIN.tsv) | the googleapis commit, the roots, and the sha256 of LICENSE and of every vendored file |
-| `google/...` | the files, as googleapis has them at that commit |
-| [LICENSE](LICENSE) | googleapis's (Apache-2.0), unmodified |
-| [NOTICE](NOTICE) | where the files come from |
-| [vendor.sh](vendor.sh) | how the tree and PIN.tsv are made: fetches the closure over HTTPS |
-| [proto_check.bzl](proto_check.bzl), [proto_check.sh](proto_check.sh) | the check, and its fixtures in `testdata/` |
+| `:googleapis.tar.gz` | the archive at the pin (`pinned_file`) |
+| `:googleapis` | the files extracted from it, each a sub-target named by its path (`:googleapis[google/rpc/status.proto]`, `:googleapis[LICENSE]`) |
+| `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
 
-Each set of roots is a `proto_check` target of [BUCK](BUCK) that refuses the
-tree unless its files, LICENSE and roots are exactly PIN.tsv's, and protoc
-parses the roots from the tree alone into a descriptor set that names every
-vendored file. A file the closure needs and the tree lacks fails there, and so
-does a vendored file nothing imports. The build never fetches.
+## Using the protos
 
-| target | roots | for |
-|---|---|---|
-| `logging_v2_check` | `google/logging/v2/{logging,log_entry}.proto` | Cloud Logging v2 `ListLogEntries` |
+Depend on `//tools/vendor/googleapis:logging_v2`. Its `ProtoSrcsInfo` is the
+checked tree, so a `mojo_proto_library` names it in `proto_deps`;
+`:logging_v2[tree]` is that tree as a directory (the files at their import
+paths), and the default output is protoc's descriptor set for the roots
+(`--include_imports`).
 
-A target's `[tree]` output, and the `ProtoSrcsInfo` it provides, is the
-checked copy of the tree, so a `mojo_proto_library` that names it in
-`proto_deps` reads only checked files.
+`:logging_v2` is a `proto_check` ([proto_check.bzl](proto_check.bzl),
+[proto_check.sh](proto_check.sh)): protoc must parse the roots from the
+extracted files alone, into a descriptor set naming every one of them. A file
+the closure needs and the list lacks fails the build, and so does a listed
+file nothing imports. Its fixtures in `testdata/` hold the check to refusing
+both; every `proto_check` target depends on them.
 
-## Adding roots or bumping the commit
+## Bumping the pin
 
-1. Pick the commit: a full sha of googleapis's default branch.
-2. From the repository root, run `tools/vendor/googleapis/vendor.sh <commit>`
-   with every root of every target in BUCK. It replaces `google/`, LICENSE
-   and PIN.tsv; run again at the same commit, it reproduces them byte for
-   byte.
-3. Name the roots in BUCK (one `proto_check` per set of roots) and build the
-   package. Today one PIN.tsv covers the one target, so its roots are the
-   target's; a second target needs its own pin, or the check taught to take
-   the union.
+The pin changes only by an edit here: an upstream change never reaches a
+build on its own.
+
+1. `tools/vendor/googleapis/upstream_version.sh` prints the pin, the head of
+   googleapis's default branch, and which extracted files differ between the
+   two. It is a report; nothing runs it in the build. If no file differs,
+   there is nothing to bump for.
+2. Set `_COMMIT` in BUCK to the new full commit sha, and `_SHA256` to the
+   sha256 of `https://github.com/googleapis/googleapis/archive/<commit>.tar.gz`.
+3. Build `//tools/vendor/googleapis:logging_v2`. If the new commit changed the
+   import closure, the check names the file to add to (or drop from)
+   `_LOGGING_V2_CLOSURE`.
+
+## Adding a client
+
+Add its roots and their closure as a list in BUCK, add the closure to
+`:googleapis`'s `files`, and declare a `proto_check` over them as
+`:logging_v2` is declared.

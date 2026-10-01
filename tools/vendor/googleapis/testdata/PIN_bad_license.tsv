@@ -1,7 +1,0 @@
-# A proto_check fixture (BUCK, proto_check_case): the sha256 of LICENSE is wrong
-repository	https://example.com/fixture
-commit	0123456789abcdef0123456789abcdef01234567
-root	fix/root.proto
-license	LICENSE	1111111111111111111111111111111111111111111111111111111111111111
-file	fix/dep.proto	dd39c06fc9b6c0cd4a16460ae9129c999c33d73c3539283416f215935e725f7d
-file	fix/root.proto	3c9bf7e4e6ff47864c49c9ee552194ab23727f8ad476e5478c720f42016e6e34
