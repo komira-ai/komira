@@ -1,0 +1,20 @@
+<AssumeRoleWithWebIdentityResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <AssumeRoleWithWebIdentityResult>
+    <SubjectFromWebIdentityToken>system:serviceaccount:example:example</SubjectFromWebIdentityToken>
+    <AssumedRoleUser>
+      <Arn>arn:aws:sts::123456789012:assumed-role/example-web-role/komira-test</Arn>
+      <AssumedRoleId>AROAEXAMPLEROLEID:komira-test</AssumedRoleId>
+    </AssumedRoleUser>
+    <Credentials>
+      <SessionToken>FAKE-WEB-IDENTITY-SESSION-TOKEN</SessionToken>
+      <SecretAccessKey>FAKEwebIdentitySecretKeyEXAMPLEKEY000000</SecretAccessKey>
+      <Expiration>2026-09-15T13:00:00Z</Expiration>
+      <AccessKeyId>ASIAWEBIDENTITYEXAMPL</AccessKeyId>
+    </Credentials>
+    <Provider>arn:aws:iam::123456789012:oidc-provider/oidc.example.com</Provider>
+    <Audience>sts.amazonaws.com</Audience>
+  </AssumeRoleWithWebIdentityResult>
+  <ResponseMetadata>
+    <RequestId>00000000-0000-4000-8000-000000000001</RequestId>
+  </ResponseMetadata>
+</AssumeRoleWithWebIdentityResponse>
