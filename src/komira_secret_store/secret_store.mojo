@@ -5,8 +5,8 @@
 #
 # The trait is a SEAM, not an implementation: a `String` handle in, a
 # `SecretValue` out, `raises` on an unresolvable ref. It names no provider, no
-# endpoint and no credential. Every PARTICULAR store — a cloud secret manager,
-# Vault, Conjur, the OS keychain — lives outside this package and conforms to
+# endpoint and no credential. Every PARTICULAR store — a remote secret service,
+# the OS keychain — lives outside this package and conforms to
 # the trait.
 #
 # `StaticSecretStore` lives beside the trait because a trait whose only

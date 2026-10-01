@@ -1,0 +1,15 @@
+// Imported by shop.proto, as a googleapis file such as monitored_resource is
+// by an API: generated into the client's package through `bundle_only`.
+syntax = "proto3";
+
+package example.shop.v1;
+
+message Item {
+  string name = 1;
+  int64 price_cents = 2;
+}
+
+// Reached only through DeleteItem.
+message ItemTombstone {
+  string name = 1;
+}
