@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The job supervisor <-> job manager / broker coordinator wire contract
+# (`komira/engine/v1/engine.proto`, package `komira.engine.v1`), generated into
+# the Mojo package `engine_rpc`:
+#
+#   from engine_rpc.engine import SupervisorHeartbeat, HeartbeatResponse
+#
+# The `.proto` sits at its import path, `komira/engine/v1/`, so the path
+# matches the proto package. The generated message structs conform to the
+# `komira_serde` codec runtime, the only Mojo dependency. A generated package
+# has no tests of its own; it is exercised by the tests of the libraries that
+# depend on it.
+mojo_proto_library(
+    name = "engine_rpc",
+    srcs = ["komira/engine/v1/engine.proto"],
+    deps = ["//src/komira_serde:komira_serde"],
+    visibility = ["PUBLIC"],
+)
