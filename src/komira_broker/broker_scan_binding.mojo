@@ -31,11 +31,11 @@
 # ---------------------------------------------------------------------------
 #
 # A plan can be BUILT, TYPED, PUSHDOWN-QUERIED, EXPLAINED, CLONED, CACHE-KEYED
-# and RESOLVED against a registry owned by this package. It cannot be
-# EXECUTED through THIS file alone: execution is tier 2 (`ScanMorselResolver`,
-# `komira_morsel`), where the kind's morsel resolver re-resolves the LIVE token
-# and drains the partitions the binding names. There is no eager drain into an
-# in-memory source; a topic is read through the plan, resolved per execution.
+# and RESOLVED against a registry owned by this package. It cannot
+# yet be EXECUTED through this file alone: execution is tier 2
+# (`ScanMorselResolver`, `komira_morsel`) and needs a morsel resolver for this
+# kind there, which re-resolves the LIVE token and drains the partitions the
+# binding names. No eager drain into an in-memory source is provided.
 #
 # ---------------------------------------------------------------------------
 # WHY THE SNAPSHOT POLICY IS `LIVE` — the interesting half
