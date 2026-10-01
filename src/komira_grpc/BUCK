@@ -1,0 +1,42 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The gRPC and Connect-RPC client runtime: the comptime wire-protocol axis
+# (classic gRPC, Connect proto, Connect JSON), the transport-free unary and
+# streaming wire codecs, request header construction (deadlines, metadata,
+# `x-goog-request-params` routing), typed `[grpc:N]` errors, the AIP-194
+# status-code retry policy, and `GrpcClient`, which drives all of it over a
+# komira_http HttpClient with a bounded re-issue on a peer's not-processed
+# proof. The envelope, status and codec primitives come from komira_connect,
+# the server side; komira_obs supplies the monotonic clock behind the re-issue
+# wall budget.
+#
+# Every test is hermetic: a scripted connector stands in for the network.
+mojo_library(
+    name = "komira_grpc",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_connect:komira_connect",
+        "//src/komira_http:komira_http",
+        "//src/komira_obs:komira_obs",
+    ],
+    test_srcs = [
+        "tests/test_L5_error.mojo",
+        "tests/test_L5_framing.mojo",
+        "tests/test_L5_headers.mojo",
+        "tests/test_L5_metadata.mojo",
+        "tests/test_L5_routing.mojo",
+        "tests/test_L5_stream.mojo",
+        "tests/test_L5_unary_wire.mojo",
+        "tests/test_client_stream_goaway_reissue.mojo",
+        "tests/test_e2e_full_loop.mojo",
+        "tests/test_e2e_grpc_client.mojo",
+        "tests/test_goaway_unprocessed_retry.mojo",
+        "tests/test_grpc_client_trailers_only_and_streams.mojo",
+        "tests/test_grpc_status_metadata_conformance.mojo",
+        "tests/test_grpc_truncation_and_terminal.mojo",
+        "tests/test_retryable_transport_reissue.mojo",
+        "tests/test_unary_status_retry.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
