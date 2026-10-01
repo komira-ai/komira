@@ -1,0 +1,32 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The AppBundle textproto authoring surface: parse, validate, scaffold, emit and
+# comment-preserving patch of a `komira.deploy.textproto` intent bundle, all
+# coded against the generated `kci_bundle_proto.app_bundle.AppBundle` schema
+# (no parallel model). Pure and zero-I/O; its only dependencies are the
+# generated schema and the `komira_serde` runtime that schema imports.
+mojo_library(
+    name = "kci_bundle",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_bundle_proto:kci_bundle_proto",
+        "//src/komira_serde:komira_serde",
+    ],
+    test_srcs = [
+        "tests/test_bundle_tenancy_field.mojo",
+        "tests/test_emit_completeness.mojo",
+        "tests/test_enum_alias.mojo",
+        "tests/test_internal_origin_marker.mojo",
+        "tests/test_job_vm_s0_fields_refused.mojo",
+        "tests/test_matrix.mojo",
+        "tests/test_outputs.mojo",
+        "tests/test_parse_errors.mojo",
+        "tests/test_parser_roundtrip.mojo",
+        "tests/test_patch.mojo",
+        "tests/test_scaffold.mojo",
+        "tests/test_test_role.mojo",
+        "tests/test_validate.mojo",
+        "tests/test_validation_set_env_restriction.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
