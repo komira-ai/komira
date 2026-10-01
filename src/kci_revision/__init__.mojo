@@ -73,7 +73,7 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import WritePrecondition
 
-from komira_serde import JsonValue, parse_json_value
+from komira_json import JsonValue, parse_json_value
 
 
 # =============================================================================
@@ -1312,7 +1312,7 @@ def merge_artifacts(
 
 
 # =============================================================================
-# §4 — the codec (JSON via komira_serde).
+# §4 — the codec (JSON via komira_json).
 # =============================================================================
 #
 # WHY JSON AND NOT `komira_objectstore`'s CAS-MANIFEST LE-BINARY FRAMING. That

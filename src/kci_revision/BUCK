@@ -17,7 +17,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_json:komira_json",
     ],
     test_srcs = [
         "tests/test_kci_revision_artifact_types.mojo",
