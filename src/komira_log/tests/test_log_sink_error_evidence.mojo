@@ -6,7 +6,7 @@
 # CASES 1, 2, 3 — three sites that swallow a sink error.
 #
 #   shared_engine.drain_worker      a fully decoded record
-#   shared_engine.emit_fallback_line the MIRROR's write; every unbound-thread
+#   shared_engine.emit_fallback_line a log-mirroring thread's write; every unbound-thread
 #                                    log in a service takes this path
 #   shared_engine.escalate_line      the "ERROR is never dropped" path itself
 #
@@ -103,8 +103,8 @@ def _cleanup(tag: String):
 
 
 # ---------------------------------------------------------------------------
-# CASE 2 — emit_fallback_line. The mirror's write, and the path every
-# unbound-thread log in the control plane takes.
+# CASE 2 — emit_fallback_line. A log-mirroring thread's write, and the path every
+# unbound-thread log in a service takes.
 # ---------------------------------------------------------------------------
 
 
