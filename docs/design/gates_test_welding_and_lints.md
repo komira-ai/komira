@@ -81,7 +81,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 **Decision.** A lint's result is a `ValidationInfo`. Buck2 runs a target's validations whenever a build or test resolves a graph holding that target and fails the command if one reports failure. No lint is an input of the targets it guards.
 
-**Because.** Adding a lint, or fixing a finding, then changes no other action's digest, so a lint never invalidates the build cache. A target that must not build while a script has a finding names that script's lint as a validation instead. The Mojo and Rust toolchains do this with `_script_lint`, so no Mojo or Rust target builds while a script the rules run has a finding. [Test 31](../../tools/build/tests/README.md#31-lint-weld) pins the lists and plants a finding in each linted script to prove that every Mojo or Rust target goes red through its toolchain.
+**Because.** Adding a lint, or fixing a finding, then changes no other action's digest, so a lint never invalidates the build cache. A target that must not build while a script has a finding names that script's lint as a validation instead. The Mojo and Rust toolchains do this with `_script_lint`, so no Mojo or Rust target builds while a script the rules run has a finding. [Test 31](../../tools/build/tests/README.md#31-lint-weld) pins the lists, then plants one finding in a script of each lint target on the Mojo and Rust lists to prove that the Mojo or Rust build goes red through its toolchain.
 
 **Alternatives weighed.**
 
@@ -92,7 +92,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 ### Why does a lint refuse to check nothing?
 
-**Decision.** `shell_lint` with no `srcs`, `no_endpoint` with no `buckconfigs`, `markdown_docs` with no Markdown and `lint_suite` with no `lints` fail at analysis. `action_pins` and `push_verdicts` fail when the set holds no `uses:` or no push-triggered workflow. A `shell_lint` exclusion that names a file not in `srcs` fails too.
+**Decision.** At analysis, `shell_lint` with no `srcs`, `no_endpoint` with no `buckconfigs`, `markdown_docs` with no Markdown and `lint_suite` with no `lints` fail. `action_pins` and `push_verdicts` have no analysis check: when the set holds no `uses:` or no push-triggered workflow, the report says `checked nothing` and the validation fails when the action runs. A `shell_lint` exclusion that names a file not in `srcs` fails too.
 
 **Because.** A lint over an empty set is green by construction. A glob that matched nothing, or a file that was renamed, would turn the lint off while the build stayed green. An exclusion that outlives its file is the same failure in smaller form, so it has to be deleted along with the file.
 
@@ -120,8 +120,8 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 - **A passing test edit does not move the package.** Marker bytes do not depend on the run.
 - **A test sees only its declared data.** It runs from `root/share`, in a fixed environment.
 - **A package reaches the compiler only through `deps`.** `[ungated]` carries no `MojoInfo`.
-- **No lint is empty.** Each lint rule refuses an empty set at analysis.
-- **A script the Mojo or Rust rules run is linted before any Mojo or Rust target builds.** Test 31.
+- **No lint is empty.** `shell_lint`, `workflow_lint`, `no_endpoint`, `lint_suite` and `markdown_docs` refuse an empty set at analysis. `action_pins` and `push_verdicts` have no analysis check; they write `checked nothing` to the report, so the validation fails when the action runs.
+- **A script the Mojo or Rust rules run is linted before any Mojo or Rust target builds.** Test 31 plants a finding in one script of each lint target on those lists and requires the build to fail.
 - **Every relative link in the Markdown resolves.** `//:docs`, test 17.
 
 ## Where is the code?
@@ -149,7 +149,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 ## How is it tested?
 
-[Test 2](../../tools/build/tests/README.md#2-gate) builds a library whose test fails on purpose and checks that the library and its consumer go red while `[ungated]` builds. [Test 17](../../tools/build/tests/README.md#17-doc-links) plants dead links, and test 31 plants a shellcheck finding in each script behind a toolchain.
+[Test 2](../../tools/build/tests/README.md#2-gate) builds a library whose test fails on purpose and checks that the library and its consumer go red while `[ungated]` builds. [Test 17](../../tools/build/tests/README.md#17-doc-links) plants dead links, and test 31 plants one unused variable (SC2034) in one script of each lint target on the Mojo and Rust toolchains' lists, alone in a snapshot of the tree. It requires the build of `//tools/build/examples:hello` (Mojo list) or `//tools/build/examples/rust:prost_roundtrip` (Rust list) to fail naming that validation, and requires the lists to equal the pinned ones.
 
 ## What are its limits and open questions?
 
