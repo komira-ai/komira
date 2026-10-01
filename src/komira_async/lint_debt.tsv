@@ -1,0 +1,22 @@
+# LINT DEBT — one unit, and it SHRINKS.
+#
+#   predicate<TAB>tracking<TAB>reason
+#
+# A row says: THIS predicate is expected to FAIL for THIS unit, today. It
+# ratchets BOTH ways and the second direction is the load-bearing one:
+#
+#   the predicate fails and has NO row      -> RED (the anti-pile-on)
+#   the predicate PASSES and HAS a row      -> RED, naming this line. Good news
+#                                              reported as a build failure ON
+#                                              PURPOSE — it is what makes the
+#                                              file only ever shrink.
+#
+# An EMPTY file is a REFUSAL: "no debt" is spelled by DELETING this file, not by
+# emptying it, because an empty ledger reads as "checked and clean" while being
+# indistinguishable from "nobody wrote the rows". An empty reason and an unknown
+# predicate name are refusals too.
+#
+# THE ONLY CORRECT LIFECYCLE FOR A ROW IS DELETION. Fix the violation, watch
+# the build go red for the opposite reason, delete the line.
+unsafe_from_address	ffi-address-recovery	The worker pthread launch (runtime/pthread_worker.mojo) and the epoll / futex FFI (reactor/epoll_subsystem.mojo, runtime/wake_primitives.mojo) recover a typed pointer from an FFI-POD address with unsafe_from_address. Retiring a site means an origin-tied return (or the per-call byte-ptr + bitcast in runtime/shared_erasure.mojo), then deleting this row.
+partial_move_via_unsafeptr	erased-frame-ownership	The dispatcher reclaims an erased frame's payload out of its own pool slot (runtime/local_dispatcher.mojo). Retiring it is the erased-frame ownership redesign, not a call-site edit -- the same shared_erasure work the unsafe_from_address row names.
