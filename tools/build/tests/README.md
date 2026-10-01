@@ -429,8 +429,11 @@ it builds `komira//tools/build/toolchains:conda_unpack` and `:zig_cc_launcher`
 locally, from a daemon started with an empty environment and `PATH`: zig is
 unpacked, then the two zig programs are built at once, and every action must
 have run locally. Local actions share the checkout root as their working
-directory, so this is what fails if two of them share scratch space. It
-downloads about 45 MB, compiles no Mojo, and runs in both modes.
+directory, so this is what fails if two of them share scratch space.
+Then, with an empty `.buckconfig.local`, it builds and runs
+`komira//tools/build/examples:hello` the same way (the newcomer's first
+command), every action local, lint validations included. It downloads about
+45 MB plus the Mojo toolchain, and runs in both modes.
 
 ```sh
 tools/build/tests/functional/local_default.sh
