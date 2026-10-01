@@ -587,6 +587,14 @@ struct QueryIR(Copyable, Movable, Deinitable):
     """The leaf agg specs (empty = no aggs). A `List[AggSpec]` of all-
     ImplicitlyCopyable PODs keeps QueryIR SYNTHESIZED-Copyable — like the
     sort PODs, NO explicit copy()."""
+    # ---- the no-query scan ----
+    var match_all: Bool
+    """True = a query with NO search term matches EVERY live doc of the split
+    (score 0.0), through the same no-term arm the match-all-for-aggs request
+    uses. Set by a caller that reads a whole index with no query, whose rows
+    are every live document. Default False: a `match` whose text analyzes to
+    no terms (all stopwords, empty) still matches NOTHING, exactly as before
+    -- OpenSearch semantics for `match`, which this flag must not change."""
 
     def __init__(
         out self,
@@ -601,6 +609,7 @@ struct QueryIR(Copyable, Movable, Deinitable):
         missing_order: UInt8 = MISSING_LAST,
         from_offset: Int = 0,
         var aggs: List[AggSpec] = List[AggSpec](),
+        match_all: Bool = False,
     ):
         """Defaults: generation = 0 (no metastore wired into the in-memory
         SearchCore path), filter = None (no pushed-down predicate). The
@@ -630,6 +639,7 @@ struct QueryIR(Copyable, Movable, Deinitable):
         self.missing_order = missing_order
         self.from_offset = from_offset
         self._aggs = aggs^
+        self.match_all = match_all
 
     @always_inline
     def has_filter(self) -> Bool:
@@ -2397,7 +2407,14 @@ struct SearchCore(Movable, Deinitable):
         # when the term walk produced no candidates AND no filter is restricting —
         # an aggs request WITH a `match` term aggregates over the matched (and
         # optionally filtered) survivors, unchanged.
-        if query.has_aggs() and len(terms) == 0 and len(touched) == 0:
+        # The same arm serves the no-query scan (`query.match_all`): every
+        # live doc (filter-respecting) becomes a 0.0-scored hit, and the
+        # heap/page logic below emits it like any other.
+        if (
+            (query.has_aggs() or query.match_all)
+            and len(terms) == 0
+            and len(touched) == 0
+        ):
             for slot in range(big_n):
                 var did = slot + min_id
                 if query.has_filter():

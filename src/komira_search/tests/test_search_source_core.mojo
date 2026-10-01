@@ -23,6 +23,10 @@
 #       via the SAME _analyze_bytes funnel.
 #   7.  dedup query terms: a repeated query term does NOT double-count IDF.
 #   8.  HitBatch schema: _score Float64 / _id Int64 / _source STRING.
+#   10. no-term scan: `match_all` with no query text returns EVERY doc of the
+#       split as a 0.0-scored row carrying its own _source.
+#   11. the default is unchanged: no query text (or text that analyzes to no
+#       terms) WITHOUT `match_all` still matches nothing.
 # =============================================================================
 
 from std.testing import (
@@ -491,6 +495,71 @@ def test_09_corrupt_split_raises() raises:
     bad[0] = UInt8(0)
     with assert_raises():
         var _c = SearchCore(bad^)
+
+
+# =============================================================================
+# Case 10 — the no-term scan: match_all returns every doc of the split.
+# =============================================================================
+
+
+def test_10_match_all_no_term_returns_every_doc() raises:
+    var doc_terms = List[List[String]]()
+    doc_terms.append([String("alpha")])
+    doc_terms.append([String("beta"), String("gamma")])
+    doc_terms.append([String("delta")])
+    var doc_sources: List[String] = [String("d0"), String("d1"), String("d2")]
+    var bytes = _build_split(doc_terms, doc_sources, 10)
+    var core = SearchCore(bytes^)
+
+    var q = QueryIR(
+        String("body"), String(""), 10, _text_cfg(), match_all=True
+    )
+    var _res_hits = core.search(q)
+    var hits = _res_hits.take_batch()
+    assert_equal(hits.num_columns(), 3)
+    assert_equal(hits.num_rows(), 3)
+    # Every doc appears exactly once, unscored, with its own _source. Equal
+    # scores leave the row order unspecified, so check membership, not order.
+    var seen = List[Bool]()
+    for _ in range(3):
+        seen.append(False)
+    for r in range(hits.num_rows()):
+        var did = Int(_id_at(hits, r))
+        assert_true(did >= 0 and did < 3)
+        assert_false(seen[did])
+        seen[did] = True
+        assert_almost_equal(_score_at(hits, r), 0.0)
+        assert_equal(_source_at(hits, r), doc_sources[did])
+    for i in range(3):
+        assert_true(seen[i])
+
+
+# =============================================================================
+# Case 11 — without match_all, a query with no terms still matches nothing.
+# =============================================================================
+
+
+def test_11_no_term_without_match_all_matches_nothing() raises:
+    var doc_terms = List[List[String]]()
+    doc_terms.append([String("alpha")])
+    doc_terms.append([String("beta")])
+    var doc_sources: List[String] = [String("d0"), String("d1")]
+    var bytes = _build_split(doc_terms, doc_sources, 11)
+    var core = SearchCore(bytes^)
+
+    # Empty text, default match_all = False.
+    var q = QueryIR(String("body"), String(""), 10, _text_cfg())
+    var _res_hits = core.search(q)
+    var hits = _res_hits.take_batch()
+    assert_equal(hits.num_rows(), 0)
+    assert_equal(hits.num_columns(), 3)
+
+    # Text that analyzes to no terms (English stopwords only) also matches
+    # nothing: `match` semantics are unchanged by the flag's existence.
+    var q2 = QueryIR(String("body"), String("the and of"), 10, _text_cfg())
+    var _res_hits2 = core.search(q2)
+    var hits2 = _res_hits2.take_batch()
+    assert_equal(hits2.num_rows(), 0)
 
 
 def main() raises:
