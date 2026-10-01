@@ -1,0 +1,84 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load(":proto_check.bzl", "proto_check", "proto_check_case")
+
+# The vendored googleapis files, one proto_check target per set of roots. Each
+# refuses its tree unless it is exactly PIN.tsv and exactly the import closure
+# protoc parses for the roots (proto_check.bzl). README.md says how to add or
+# bump one.
+
+# Cloud Logging v2: ListLogEntries, for the generated komira_gcp_logging.
+# Its `[tree]` (and ProtoSrcsInfo) is the checked copy of the closure.
+proto_check(
+    name = "logging_v2_check",
+    roots = [
+        "google/logging/v2/log_entry.proto",
+        "google/logging/v2/logging.proto",
+    ],
+    srcs = glob(["google/**/*.proto"]),
+    pin = "PIN.tsv",
+    license = "LICENSE",
+    visibility = ["PUBLIC"],
+)
+
+# A validation of every proto_check target (proto_check.bzl, `_script_lint`).
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "proto_check.sh",
+        "vendor.sh",
+    ],
+)
+
+# The check proto_check runs (proto_check.bzl, `_script`).
+export_file(name = "proto_check.sh")
+
+# The self-test of proto_check's check, over the fixtures in testdata/: one
+# tree it must accept, and one change per case that it must refuse, each with
+# the message it must give. Every proto_check target depends on it, so the
+# check cannot stop refusing while any vendored tree builds.
+_OK = ["testdata/ok/fix/dep.proto", "testdata/ok/fix/root.proto"]
+
+_CASES = {
+    # The control: the fixture every refusal below varies in one place.
+    "accepts": {},
+    "refuses_missing_import": {
+        "expect": "fix/dep.proto: File not found",
+        "srcs": ["testdata/missing/fix/root.proto"],
+        "strip_prefix": "testdata/missing",
+        "pin": "testdata/PIN_missing.tsv",
+    },
+    "refuses_unused_file": {
+        "expect": "fix/unused.proto is vendored but not in the import closure of the roots",
+        "srcs": ["testdata/extra/fix/dep.proto", "testdata/extra/fix/root.proto", "testdata/extra/fix/unused.proto"],
+        "strip_prefix": "testdata/extra",
+        "pin": "testdata/PIN_extra.tsv",
+    },
+    "refuses_vendored_wkt": {
+        "expect": "google/protobuf/timestamp.proto is vendored, but google/protobuf/ is protoc's own",
+        "srcs": ["testdata/wkt/fix/dep.proto", "testdata/wkt/fix/root.proto", "testdata/wkt/google/protobuf/timestamp.proto"],
+        "strip_prefix": "testdata/wkt",
+        "pin": "testdata/PIN_wkt.tsv",
+    },
+    "refuses_sha256": {"expect": "sha256 of fix/dep.proto is dd39c06f", "pin": "testdata/PIN_bad_sha.tsv"},
+    "refuses_unpinned": {"expect": "fix/dep.proto is vendored but not pinned in PIN.tsv", "pin": "testdata/PIN_no_dep.tsv"},
+    "refuses_unvendored": {"expect": "fix/ghost.proto is pinned in PIN.tsv but not vendored", "pin": "testdata/PIN_ghost.tsv"},
+    "refuses_commit": {"expect": "PIN.tsv commit not-a-sha is not a 40-hex sha", "pin": "testdata/PIN_bad_commit.tsv"},
+    "refuses_two_commits": {"expect": "PIN.tsv has 2 commit rows, not 1", "pin": "testdata/PIN_two_commits.tsv"},
+    "refuses_license": {"expect": "sha256 of LICENSE is 2e0c7506", "pin": "testdata/PIN_bad_license.tsv"},
+    "refuses_roots": {"expect": "PIN.tsv roots (fix/root.proto ) are not the target's (fix/dep.proto )", "roots": ["fix/dep.proto"]},
+}
+
+[proto_check_case(
+    name = "proto_check_" + name,
+    roots = case.get("roots", ["fix/root.proto"]),
+    srcs = case.get("srcs", _OK),
+    strip_prefix = case.get("strip_prefix", "testdata/ok"),
+    pin = case.get("pin", "testdata/PIN_ok.tsv"),
+    license = "testdata/LICENSE",
+    expect = case.get("expect", ""),
+) for name, case in _CASES.items()]
+
+filegroup(
+    name = "proto_check_selftest",
+    srcs = [":proto_check_" + name for name in _CASES],
+)
