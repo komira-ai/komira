@@ -12,4 +12,3 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
-| Logging, spans and metrics: the record rings, the drains and sinks, and the read seam over a service's own log | [design/logging_and_telemetry.md](design/logging_and_telemetry.md) |
