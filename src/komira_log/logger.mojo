@@ -26,7 +26,7 @@
 #   ctx.logger.info[fmt, module](*args)      # TYPED, primary.
 #                                            #   concrete-origin field ref,
 #                                            #   dispatch inlines.
-#   service.logger.info[fmt, module](*args)  # TYPED, control-plane — same path,
+#   service.logger.info[fmt, module](*args)  # TYPED, service-owned — same path,
 #                                            #   the service owns its engine.
 #   log.info[fmt, module](*args)             # AMBIENT fallback. The
 #                                            #   no-ctx/no-service reach via the
