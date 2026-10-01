@@ -88,7 +88,7 @@
 # no wildcard origin.
 # =============================================================================
 
-from komira_serde.json_value import parse_json_value, JsonValue
+from komira_json import parse_json_value, JsonValue
 from komira_http.codec.types import (
     HTTP_METHOD_GET,
     HTTP_METHOD_HEAD,

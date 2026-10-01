@@ -31,7 +31,7 @@
 # build-action output rather than a directory.
 # =============================================================================
 
-from komira_serde.json_value import parse_json_value
+from komira_json import parse_json_value
 
 from .oci_digest import validate_digest_format
 

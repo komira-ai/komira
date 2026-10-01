@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # A native OCI distribution client: a registry-to-registry, digest-preserving
 # image copy over HTTPS. The transport and the redirect policy are komira_http's,
 # the sha256 that content-addresses every manifest and blob is komira_crypto's,
-# the JSON DOM used to discover manifest descriptors is komira_serde's, and the
+# the JSON DOM used to discover manifest descriptors is komira_json's, and the
 # synchronous per-call request runs on komira_async's BlockingRuntime. The tests
 # drive the copier over a scripted transport: no network and no sockets.
 mojo_library(
@@ -13,7 +13,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_http:komira_http",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_json:komira_json",
     ],
     test_srcs = [
         "tests/test_oci_copy_blob_redirect.mojo",

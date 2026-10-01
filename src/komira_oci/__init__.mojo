@@ -49,7 +49,7 @@ OUT OF SCOPE (deliberately, and not accidentally omitted):
 
 A self-contained, flat package (import name `komira_oci`). Depends on
 komira_http (the transport, and the shared redirect policy), komira_crypto
-(sha256), komira_serde (the JSON DOM, used only to DISCOVER descriptors, never
+(sha256), komira_json (the JSON DOM, used only to DISCOVER descriptors, never
 to re-serialize a manifest) and komira_async (BlockingRuntime).
 
 Encapsulation: the public API exposes only typed values, owned
