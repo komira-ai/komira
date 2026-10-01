@@ -1,9 +1,11 @@
 """`komira_crypto` — cryptographic primitives for Mojo.
 
 Hashes, MACs, KDFs, AEADs, key agreement, signatures, a health-tested
-entropy source and DRBG, the hex / base64 / base32 codecs, and X.509 chain
-validation. The heavy primitives call AWS-LC's `libcrypto` through
-`internal/asm/`; the traits, the codecs and the DER / X.509 layer are Mojo.
+entropy source and DRBG, hex encoding, and X.509 chain validation. The
+heavy primitives call AWS-LC's `libcrypto` through `internal/asm/`; the
+traits, the hex codec and the DER / X.509 layer are Mojo. Base64, base64url
+and base32 live in `komira_encoding`; this package uses them and does not
+re-export them.
 
 Layout:
   - traits.mojo          Hash / Aead / KeySchedule trait surface
@@ -93,7 +95,7 @@ from .x25519 import x25519, x25519_base_mult
 # `x25519` calls.
 from .x25519_simd import x25519_4way
 
-# SHA-256 / HMAC-SHA256 / hex / base64 free functions consumed by request
+# SHA-256 / HMAC-SHA256 / hex free functions consumed by request
 # signing (SigV4, Azure Shared Key, GCS OAuth). These are the STABLE-CONTRACT
 # public surface: a faster implementation can be swapped in behind the
 # identical free-function signatures.
@@ -105,18 +107,6 @@ from .hmac import hmac_sha256, hmac_sha256_string, constant_time_eq_32
 # KDF. Validated against the RFC 7677 §3 4096-iteration vector.
 from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha256_32
 from .hex import hex_lower, hex_lower_array_32, hex_upper
-from .base64 import (
-    base64_encode,
-    base64_decode,
-    base64_url_encode,
-    base64_url_encode_nopad,
-    base64_url_decode,
-)
-
-# RFC 4648 base32 (no padding) encode + decode, for rendering TOTP shared
-# secrets in the form authenticator apps require. A deterministic encoding,
-# not cryptography.
-from .base32 import base32_encode_nopad, base32_decode
 from .rsa import rsa_sha256_sign, rsa_pkcs1_sha256_verify
 
 # RSASSA-PKCS1-v1_5-SHA-256 VERIFY (RFC 7518 §3.3 `RS256`) + the third-party
