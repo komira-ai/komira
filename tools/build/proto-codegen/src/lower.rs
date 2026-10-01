@@ -126,6 +126,242 @@ pub fn lower_with_http_and_routing_rules(
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
 ) -> Result<IrModel, String> {
+    lower_all(proto_file, file_to_generate, package_prefix, http_rules, routing_rules)
+        .map(|(_, model)| model)
+}
+
+/// Which of the request's types and methods to emit.
+///
+/// The default emits everything in `file_to_generate`. `roots` and `methods`
+/// PRUNE: only the types reachable from the named messages / enums and from
+/// the request and response types of the named methods are emitted, and a
+/// service keeps only its named methods (a service with none is dropped).
+/// `messages_only` drops every service, keeping the messages its methods
+/// reach.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Scope {
+    /// Messages or enums, each named by its fully-qualified proto name
+    /// (`pkg.Outer.Inner`) or by a suffix of it that names exactly one type
+    /// (`Inner`, `Outer.Inner`). A leading `.` (`.pkg.Outer.Inner`) makes the
+    /// name exact: it names that type alone, never one it is a suffix of.
+    pub roots: Vec<String>,
+    /// Methods, each named `Service.Method`, `pkg.Service.Method` or a bare
+    /// `Method` that names exactly one method; a leading `.` makes the name
+    /// exact, as for `roots`.
+    pub methods: Vec<String>,
+    pub messages_only: bool,
+}
+
+impl Scope {
+    /// True when nothing is pruned or dropped.
+    pub fn is_everything(&self) -> bool {
+        !self.prunes() && !self.messages_only
+    }
+
+    fn prunes(&self) -> bool {
+        !self.roots.is_empty() || !self.methods.is_empty()
+    }
+}
+
+/// [`lower_with_http_and_routing_rules`], then restricted to `scope`.
+///
+/// When `scope` prunes, a type reachable from it must be declared in a file
+/// of `file_to_generate` (or be a well-known type of `komira_wkt`), and every
+/// file of `file_to_generate` must keep at least one type or service: the
+/// set of generated files is then exactly the closure, so a rule's
+/// `bundle_only` cannot carry a file nothing uses.
+pub fn lower_scoped(
+    proto_file: &[FileDescriptorProto],
+    file_to_generate: &[String],
+    package_prefix: &str,
+    http_rules: HttpRuleTable,
+    routing_rules: RoutingRuleTable,
+    scope: &Scope,
+) -> Result<IrModel, String> {
+    let (lowerer, mut model) = lower_all(
+        proto_file,
+        file_to_generate,
+        package_prefix,
+        http_rules,
+        routing_rules,
+    )?;
+    if scope.is_everything() {
+        return Ok(model);
+    }
+    if scope.prunes() {
+        prune(&lowerer, &mut model, scope)?;
+    }
+    if scope.messages_only {
+        for file in &mut model.files {
+            file.services.clear();
+        }
+    }
+    for file in &mut model.files {
+        if file.messages.iter().all(|m| m.is_map_entry)
+            && file.enums.is_empty()
+            && file.services.is_empty()
+        {
+            return Err(format!(
+                "{} emits nothing under roots={:?} methods={:?} messages_only={}: \
+                 drop it from the files to generate",
+                file.proto_path, scope.roots, scope.methods, scope.messages_only
+            ));
+        }
+        file.imports =
+            lowerer.cross_file_imports(&file.proto_path, &file.messages, &file.services);
+    }
+    Ok(model)
+}
+
+/// Whether `fq` (`.pkg.A.B`) is named by `name`. A name with a leading `.`
+/// (`.pkg.A.B`) is already fully qualified and names exactly that `fq`;
+/// any other (`pkg.A.B`, `A.B`, `B`) names every `fq` it is a suffix of at
+/// a `.` boundary. Matching a dotted name as a suffix would make
+/// `.a.LogEntry` also name `.b.a.LogEntry`, an ambiguity its user could not
+/// qualify away.
+fn names(fq: &str, name: &str) -> bool {
+    if name.starts_with('.') {
+        return fq == name;
+    }
+    fq.strip_suffix(name)
+        .is_some_and(|head| head.ends_with('.'))
+}
+
+/// The one candidate `name` selects, or an error naming the ambiguity.
+fn select_one<'a>(
+    what: &str,
+    name: &str,
+    candidates: impl Iterator<Item = &'a str>,
+) -> Result<&'a str, String> {
+    let hits: Vec<&str> = candidates.filter(|fq| names(fq, name)).collect();
+    match hits.as_slice() {
+        [one] => Ok(one),
+        [] => Err(format!("{what} `{name}` is not declared in the files to generate")),
+        many => Err(format!(
+            "{what} `{name}` is ambiguous: it names {}; qualify it",
+            many.join(", ")
+        )),
+    }
+}
+
+/// Restrict `model` to the closure of `scope.roots` and `scope.methods`.
+fn prune(lowerer: &Lowerer, model: &mut IrModel, scope: &Scope) -> Result<(), String> {
+    // Every emittable type of the files to generate, by fq-name. Map
+    // entries are not types a user names; their key and value are reached
+    // through `IrType::Map`.
+    let mut declared: BTreeMap<&str, &IrMessage> = BTreeMap::new();
+    let mut declared_enums: BTreeSet<&str> = BTreeSet::new();
+    let mut methods: Vec<(String, &IrMethod)> = Vec::new();
+    for file in &model.files {
+        for m in file.messages.iter().filter(|m| !m.is_map_entry) {
+            declared.insert(&m.fq_name, m);
+        }
+        for e in &file.enums {
+            declared_enums.insert(&e.fq_name);
+        }
+        for svc in &file.services {
+            for m in &svc.methods {
+                let pkg = &file.proto_package;
+                let fq = if pkg.is_empty() {
+                    format!(".{}.{}", svc.name, m.name)
+                } else {
+                    format!(".{pkg}.{}.{}", svc.name, m.name)
+                };
+                methods.push((fq, m));
+            }
+        }
+    }
+
+    let mut pending: Vec<String> = Vec::new();
+    for root in &scope.roots {
+        let types = declared.keys().chain(declared_enums.iter()).copied();
+        pending.push(select_one("root", root, types)?.to_string());
+    }
+    let mut kept_methods: BTreeSet<String> = BTreeSet::new();
+    for name in &scope.methods {
+        let fq = select_one("method", name, methods.iter().map(|(fq, _)| fq.as_str()))?;
+        let (_, m) = methods.iter().find(|(f, _)| f == fq).expect("selected above");
+        pending.push(m.input.fq_name.clone());
+        pending.push(m.output.fq_name.clone());
+        kept_methods.insert(fq.to_string());
+    }
+
+    // The closure, through message fields (map keys and values included).
+    let mut reached: BTreeSet<String> = BTreeSet::new();
+    while let Some(fq) = pending.pop() {
+        if !reached.insert(fq.clone()) {
+            continue;
+        }
+        if let Some(msg) = declared.get(fq.as_str()) {
+            for field in &msg.fields {
+                field_targets(&field.ty, &mut pending);
+            }
+        } else if !declared_enums.contains(fq.as_str()) && wkt_symbol(&fq).is_none() {
+            let file = lowerer
+                .types
+                .get(&fq)
+                .map(|t| t.proto_path().to_string())
+                .unwrap_or_else(|| "a file not in the request".to_string());
+            return Err(format!(
+                "`{fq}` is reachable from roots={:?} methods={:?} but its file \
+                 {file} is not generated: add it to the files to generate",
+                scope.roots, scope.methods
+            ));
+        }
+    }
+
+    for file in &mut model.files {
+        let pkg = file.proto_package.clone();
+        // A map entry stays only when its own message, its DIRECT parent, is
+        // reached: a reached `Outer` does not keep the entries of a pruned
+        // `Outer.Inner`. The emitter skips entries, but the imports are
+        // computed over them, so an orphaned one would import its value.
+        file.messages.retain(|m| {
+            if m.is_map_entry {
+                m.fq_name
+                    .rsplit_once('.')
+                    .is_some_and(|(parent, _)| reached.contains(parent))
+            } else {
+                reached.contains(&m.fq_name)
+            }
+        });
+        file.enums.retain(|e| reached.contains(&e.fq_name));
+        for svc in &mut file.services {
+            let prefix = if pkg.is_empty() {
+                format!(".{}.", svc.name)
+            } else {
+                format!(".{pkg}.{}.", svc.name)
+            };
+            svc.methods
+                .retain(|m| kept_methods.contains(&format!("{prefix}{}", m.name)));
+        }
+        file.services.retain(|s| !s.methods.is_empty());
+    }
+    Ok(())
+}
+
+/// Push the fq-names of the messages and enums `ty` refers to.
+fn field_targets(ty: &IrType, out: &mut Vec<String>) {
+    match ty {
+        IrType::Message(t) | IrType::Enum(t) => out.push(t.fq_name.clone()),
+        IrType::Map(k, v) => {
+            field_targets(k, out);
+            field_targets(v, out);
+        }
+        IrType::Scalar(_) => {}
+        IrType::List(_) => unreachable!("{}", crate::ir::LIST_IS_AWS_FRONT_END_ONLY),
+    }
+}
+
+/// Lower every file of `file_to_generate`, returning the lowerer too (its
+/// type table resolves the imports of a pruned model).
+fn lower_all(
+    proto_file: &[FileDescriptorProto],
+    file_to_generate: &[String],
+    package_prefix: &str,
+    http_rules: HttpRuleTable,
+    routing_rules: RoutingRuleTable,
+) -> Result<(Lowerer, IrModel), String> {
     let mut lowerer = Lowerer {
         types: BTreeMap::new(),
         mojo_package: package_prefix.to_string(),
@@ -158,7 +394,7 @@ pub fn lower_with_http_and_routing_rules(
             .ok_or_else(|| format!("file_to_generate {path:?} not in proto_file"))?;
         model.files.push(lowerer.lower_file(file)?);
     }
-    Ok(model)
+    Ok((lowerer, model))
 }
 
 /// Register a message (and recursively its nested types) in the type table.
@@ -694,6 +930,7 @@ impl Lowerer {
 
 fn wkt_symbol(fq_name: &str) -> Option<&'static str> {
     match fq_name {
+        ".google.protobuf.Any" => Some("Any"),
         ".google.protobuf.Timestamp" => Some("Timestamp"),
         ".google.protobuf.Duration" => Some("Duration"),
         ".google.protobuf.Empty" => Some("Empty"),
