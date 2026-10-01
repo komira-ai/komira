@@ -390,6 +390,40 @@ target whole, sub-targets included, as that sub-target; nothing checks that
 [`tests//functional/gcp_client`](../tests/functional/gcp_client/BUCK) and
 [`tests//negative/gcp_client`](../tests/negative/gcp_client/BUCK) exercise it.
 
+### Generated AWS clients: aws_client
+
+```python
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+```
+
+`aws_client(name, model, model_sha256, operations, deps, mode, service,
+overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
+`test_env`, passed to the `mojo_library`) generates an AWS client from one
+botocore service model at build time; no generated code is checked in.
+`<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
+writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
+(imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
+ordinary `mojo_library` over them, welded like gcp_client's: the probe is
+its first `test_srcs` entry, followed by the caller's. `model` and
+`model_sha256` are normally `botocore_model("<service>").model` and
+`.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);
+the service id is read from the model's botocore path unless `service`
+names it. `operations` is required and non-empty: only the closure of the
+operations named is emitted, and one the model lacks is refused by the
+generator. `mode = "pure"` (the default) emits shapes and
+`build_<op>_request` / `parse_<op>_response` with no transport; `"client"`
+adds the signed-send surface. `overrides` (the generator's hand-override
+manifest) and `hand_srcs` (the hand-written modules owning the operations
+it names, copied into the package) each require the other. `deps` is
+required and non-empty, and nothing is added to it. Every refusal of the
+rule is at analysis. The module docstring of
+[`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
+[`tests//functional/aws_client`](../tests/functional/aws_client/BUCK),
+[`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
+(client mode, at generation only) and
+[`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) exercise it.
+
 ## C and C++
 
 C and C++ code is built with the prelude's own `cxx_library` rule, using
