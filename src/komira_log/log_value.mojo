@@ -16,7 +16,7 @@
 # a straight-line store sequence with no branch, and the body is inlined into
 # the caller. That is the ~1ns emit the data plane is measured on. `LogValue`
 # trades those branches back in — one switch per arg — to buy a shared body.
-# The trade is right where sites are many and lines are few (a control plane
+# The trade is right where sites are many and lines are few (a long-lived service
 # emitting hundreds of lines over minutes) and wrong where sites are few and
 # lines are billions (the engine). See logger_erased.mojo for both sides of that
 # trade.
