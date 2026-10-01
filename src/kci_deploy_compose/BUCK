@@ -1,0 +1,42 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The API-composition tier of the deploy tool: the built-in Compositions that
+# expand an authored intent bundle (`app_bundle.proto`) into the resolved
+# resource graph (`full_manifest.proto`) for one environment, plus the pure
+# helpers around that graph (content address, grant scope, run scoping, the
+# shared-resource teardown guard, the operator-supplied manifest reader and the
+# no-spend plan sink).
+#
+# A pure proto -> proto value transform: no cloud call, no clock, no I/O. The
+# deps are the two schemas it reads and writes, the encoder and hash behind the
+# content address, the parameter renderer, and the regional service-name
+# composer.
+#
+# The welded tests compose real bundles and assert node shapes, refusals and
+# wire bytes; none needs data files or a network.
+mojo_library(
+    name = "kci_deploy_compose",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/full_manifest_rpc:full_manifest_rpc",
+        "//src/kci_params:kci_params",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_rpc_bundle:komira_rpc_bundle",
+        "//src/komira_serde:komira_serde",
+        "//src/komira_svcref:komira_svcref",
+    ],
+    test_srcs = [
+        "tests/test_app_declares_its_compute_allocation.mojo",
+        "tests/test_app_declares_its_healthcheck.mojo",
+        "tests/test_compose_crons.mojo",
+        "tests/test_compose_jobs.mojo",
+        "tests/test_compose_network_nodes.mojo",
+        "tests/test_compose_triggers.mojo",
+        "tests/test_estate_policy_is_declared.mojo",
+        "tests/test_run_scope.mojo",
+        "tests/test_run_scope_id_prefix_collision.mojo",
+        "tests/test_shared_resource_guard.mojo",
+        "tests/test_unpinned_plan.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
