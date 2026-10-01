@@ -20,7 +20,7 @@
 //     boundary rather than importing them.
 //
 // STANDALONE. This schema imports no other proto, so it is generated as its
-// own package (`provider_rpc`).
+// own package (`kci_provider_proto`).
 //
 // Plain proto3 (no `(komira.db.*)` options): the struct generator
 // (`mojo_proto_library`) emits the messages with proto3-JSON and binary serde.
@@ -30,7 +30,7 @@
 
 syntax = "proto3";
 
-package komira.deploy.v1;
+package kci.deploy.v1;
 
 // ─── The provider CLASS: the outer, authored layer ────────────────────────────────
 //
@@ -123,5 +123,5 @@ message Provider {
   int32 priority                      = 6;  // router tie-break; higher = preferred
   int32 relative_cost                 = 7;  // router cheapest-covering input (relative units)
   bool spot_eligible                  = 8;  // CLOUD_VM(false) vs CLOUD_SPOT_VM(true)
-  string trust_scope                  = 9;  // a NAME/token: the tenancy scope (e.g. device_owner_customer)
+  string trust_scope                  = 9;  // a NAME/token: the trust scope (e.g. device_owner_customer)
 }
