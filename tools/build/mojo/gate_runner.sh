@@ -127,6 +127,7 @@ rc=0
 # without PATH.) The variables the verdict is computed from (HELD, rc, MARKER,
 # LABEL, T, BIN, CWD, ...) are read only by this shell, which exports nothing.
 set -- "$@" "$BIN"
+# shellcheck disable=SC2163 # each "$1" is NAME=VALUE: the value is exported, not a variable named by it
 (cd "$CWD" && while [ "$#" -gt 1 ]; do export "$1" && shift; done && exec "$1") > "$T/log" 2>&1 < /dev/null || rc=$?
 if [ -n "$HELD" ]; then
     if [ "$rc" = 137 ]; then
