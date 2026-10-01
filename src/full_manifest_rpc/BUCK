@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The deployment resource graph (`komira.manifest.v1`): the FullManifest a
+# composition synthesizes and a deployer applies, generated to Mojo structs
+# with proto3-JSON and binary serde. Standalone by design: the deployer's only
+# desired-state input needs no intent schema, so the proto imports nothing.
+#
+# Reach the surface via
+#   from full_manifest_rpc.full_manifest import FullManifest, ResourceNode, ResourceKind, ...
+#
+# The `.proto` is staged at its import path `komira/deploy/v1/full_manifest.proto`,
+# which is also its descriptor name.
+mojo_proto_library(
+    name = "full_manifest_rpc",
+    srcs = ["full_manifest.proto"],
+    import_prefix = "komira/deploy/v1",
+    deps = ["//src/komira_serde:komira_serde"],
+    visibility = ["PUBLIC"],
+)
+
+# The ResourceKind ordinal census. A generated package has no `test_srcs` of
+# its own, so its test is a `mojo_test` beside it.
+mojo_test(
+    name = "test_resource_kind_ordinals",
+    srcs = ["tests/test_resource_kind_ordinals.mojo"],
+    deps = [":full_manifest_rpc"],
+)

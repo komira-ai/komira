@@ -1,0 +1,2090 @@
+// full_manifest.proto — the synthesized resource-graph schema of a deployment.
+//
+// WHAT THIS IS. A FullManifest is the fully expanded, typed, machine-diffable
+// resource graph for ONE environment: the equivalent of a CloudFormation
+// template, but typed end to end with no lossy synthesis boundary. It is never
+// hand-authored. A composition (a plain Mojo function) expands the authored
+// intent bundle (`app_bundle.proto`) into this graph; the planner diffs it, and
+// the applier walks it in topological order, one node at a time, recording a
+// write-ahead intent row per node. The plan's diff is the changeset review.
+//
+// The manifest is synthesized once per run, content-addressed and pinned, so a
+// redeploy of the control plane mid-run cannot change the desired state. The
+// deployer's ONLY desired-state input is this pinned manifest, never the
+// bundle, which is why this schema is STANDALONE: it imports no intent schema.
+//
+// VOCABULARY DISCIPLINE. The node-kind vocabulary (`ResourceKind`) is GENERIC
+// only: ServerlessCompute, RunToCompletionJob, Datastore, Queue, Bucket,
+// Grant, and so on (it grows additively). A vendor product name (a cloud's
+// serverless-container product, its object store, its queue) appears only
+// inside a conformer's implementation, never in this schema.
+//
+// `ResourceNode.config` is a `oneof` over small typed per-kind config messages
+// (`<Kind>Spec`). It is additive-safe: a new kind adds a new enum value and a
+// new oneof arm; retired arms and numbers become `reserved`.
+//
+// PLAIN proto3 (no `(komira.db.*)` options): the struct emitter
+// (`mojo_proto_library`) generates proto3-JSON and binary serde. The binary
+// encoding of a pinned manifest is its content-address preimage.
+
+syntax = "proto3";
+
+package komira.manifest.v1;
+
+// ─── The generic resource-node kind ──────────────────────────────────────────
+//
+// The cloud-agnostic node kind. The mapper picks a per-cloud conformer for each
+// kind; the below-the-line selector is the (kind, cloud) pair, not a provider
+// enum. No vendor product name is a valid kind. Grows ADDITIVELY.
+//
+// ⛔ ORDINALS ARE APPEND-ONLY. The NUMBER is what a stored manifest carries, so
+// renumbering a kind is protoc-legal and silently re-points every stored node
+// to a different kind. `tests/test_resource_kind_ordinals.mojo` restates the
+// whole enum as values and pins each ordinal by name in both directions; a new
+// kind extends that census.
+enum ResourceKind {
+  // Proto3 zero default. UNSPECIFIED is an invalid node: every synthesized
+  // node must carry a concrete kind (fail-fast).
+  RESOURCE_KIND_UNSPECIFIED = 0;
+  // A scale-to-zero, pay-per-use served container (a cloud's serverless
+  // container product; on-prem: systemd plus a reverse proxy).
+  RESOURCE_KIND_SERVERLESS_COMPUTE = 1;
+  // A short-lived run-to-completion container job (a cloud's job product;
+  // Kubernetes: a bare pod with restartPolicy=Never; local: compose run). The
+  // deployer container itself is placed as one of these.
+  RESOURCE_KIND_RUN_TO_COMPLETION_JOB = 2;
+  // ⛔ CONSOLIDATED INTO `RESOURCE_KIND_BUCKET` (13); never emitted on any
+  // cloud. The ordinal and its `object_store` oneof arm are retained and never
+  // renumbered so the wire contract stays append-only.
+  //
+  // An "object store" and a "bucket" differ only by intent role, and the graph
+  // already carries that distinction on a different axis of the kind-13 node:
+  // `Retention` (a state bucket is RETAIN_KEEP; an app data bucket is
+  // RETENTION_DELETE with an object expiry). `ObjectStoreSpec` is a strict
+  // subset of `ResolvedBucketSpec`, so there is nothing a kind-3 node can ask
+  // for that a kind-13 node cannot.
+  //
+  // Building both would be harmful, not just redundant: the graph dedupes
+  // LOGICAL ids, not physical ones, so naming one bucket as kind 3 and as kind
+  // 13 would put two conformers on one bucket, and a teardown of one would
+  // delete data out from under the other.
+  RESOURCE_KIND_OBJECT_STORE = 3;
+  // An OLTP datastore. The implementation is resolved per cloud (a serverless
+  // database) or on-prem (object-store-backed SQL); the resolved token rides in
+  // the config.
+  RESOURCE_KIND_DATASTORE = 4;
+  // A message queue.
+  RESOURCE_KIND_QUEUE = 5;
+  // A load balancer / ingress fronting a served node.
+  RESOURCE_KIND_LOAD_BALANCER = 6;
+  // A DNS record.
+  RESOURCE_KIND_DNS_RECORD = 7;
+  // An IAM role / policy binding.
+  RESOURCE_KIND_IAM_ROLE = 8;
+  // A managed secret (the durable authorization record; the VALUE never rides
+  // in the manifest).
+  RESOURCE_KIND_SECRET = 9;
+  // A non-secret configuration resource (key/value config data).
+  RESOURCE_KIND_CONFIG = 10;
+  // A service account / workload identity the compute RUNS AS.
+  RESOURCE_KIND_SERVICE_ACCOUNT = 11;
+  // A workload-identity-federation provider (the bootstrap trust seam).
+  RESOURCE_KIND_WIF_PROVIDER = 12;
+  // A bucket: the bootstrap state/artifact bucket (RETAIN_KEEP by default) and
+  // app-authored data buckets alike; retention distinguishes the roles.
+  RESOURCE_KIND_BUCKET = 13;
+  // An artifact repository (OCI image registry, conda channel, ...).
+  RESOURCE_KIND_ARTIFACT_REPOSITORY = 14;
+  // A continuous-deployment source trigger (a source -> pipeline binding). Its
+  // PRESENCE in the graph is what makes a deployment continuous rather than
+  // one-shot; N Trigger nodes may fan into one pipeline.
+  RESOURCE_KIND_TRIGGER = 15;
+  // A CROSS-SERVICE invoke grant: a caller service's runtime identity is
+  // authorized to invoke a callee served node, as a binding ON the callee's own
+  // policy. A separate, ordered node that must apply AFTER the callee exists
+  // (`depends_on` the callee). Superseded by `RESOURCE_KIND_GRANT`.
+  RESOURCE_KIND_INVOKE_GRANT = 16;
+  // A GENERIC capability grant: a principal's runtime identity is authorized a
+  // named `Capability` (invoke a service, read a secret, write an object
+  // store, ...) on a target resource. A separate, ordered node that applies
+  // after its target exists. No cloud role string rides on this node; the
+  // capability resolves to a concrete role only inside the conformer.
+  RESOURCE_KIND_GRANT = 17;
+  // A static-website FRONT DOOR: ONE composite node whose implementation fans
+  // out a content bucket, a CDN-fronted backend and a global L7 load balancer
+  // (an SPA default route, a 404 -> SPA fallback policy, and api path rules to
+  // a served backend). Distinct from LOAD_BALANCER (a single primitive fronting
+  // one backend). The vendor primitives are named only in the conformer.
+  // RETAIN_KEEP by default: a stray destroy must not take down the domain,
+  // certificate and content.
+  RESOURCE_KIND_WEB_FRONTEND = 18;
+  // A managed API EDGE: ONE composite node giving exactly ONE served node a
+  // client-facing entry. Per app, never shared; realized per target by that
+  // target's conformer as its native gateway resources, or as ZERO resources
+  // on direct/on-prem targets, where the published edge URL is the backend
+  // URL. The edge URL is a post-apply discovered OUTPUT, never authored. The
+  // edge is a reachability bridge, not a security boundary, unless an
+  // enforcing `EdgeAuthMode` is selected.
+  RESOURCE_KIND_API_EDGE = 19;
+  // A PROJECT-SERVICE enable: turn on a cloud service API in the project.
+  // Every later resource fails until its API is on, so bootstrap composes one
+  // enable node per required API. The node's `logical_id` IS the API service
+  // name (e.g. "run.googleapis.com"); enabling is idempotent. RETAIN_KEEP:
+  // never disabled on teardown, since other workloads in the project may
+  // depend on it. No oneof arm: the identity is the name.
+  RESOURCE_KIND_PROJECT_SERVICE = 20;
+  // A SCHEDULED CALL: a wall-clock timer that calls one served node in this
+  // graph on a cron cadence (a cloud's managed scheduler; on-prem: a systemd
+  // timer or crontab entry). The resolved form of an authored cron.
+  //
+  // ⛔ IT IS NOT A TRIGGER (kind 15). A Trigger's schedule arm is a cadence the
+  // control plane reads; a ScheduledCall is a real scheduler object in the
+  // target project that fires at the named instant.
+  //
+  // ⛔ THE ADDRESS IS NOT ON THE NODE. The target is named by LOGICAL ID: a
+  // serving URL is assigned by the cloud at service creation, so an authored
+  // one would be a guess. The URL and the OIDC audience are both derived from
+  // the observed backend address at apply time.
+  //
+  // RETENTION_DELETE: a cron holds no data and is deterministically
+  // recreatable.
+  RESOURCE_KIND_SCHEDULED_CALL = 21;
+  // A MAIL DOMAIN IDENTITY: a domain proved to a mail provider as one this
+  // deployment may send as and receive for (for example an Amazon SES email
+  // identity, or any DNS-verified equivalent).
+  //
+  // No oneof arm: its entire identity is its `logical_id` (the domain name).
+  //
+  // ⛔ ITS RETENTION IS AUTHORED INPUT, NOT A DEFAULT. A domain identity may be
+  // one this deployment mints or one verified out of band by someone else, and
+  // the two fail in opposite, destructive directions:
+  //   * RETENTION_RETAIN_KEEP -> externally owned. Adopt and observe; create,
+  //     update and delete all REFUSE. Deleting an identity someone else
+  //     verified stops their mail, and the provider's delete call succeeds.
+  //   * RETENTION_DELETE      -> owned end to end. Create, converge, delete.
+  // RETENTION_UNSPECIFIED is REFUSED rather than defaulted: there is no safe
+  // answer to guess. Enforced by whichever conformer implements the kind.
+  RESOURCE_KIND_MAIL_DOMAIN_IDENTITY = 22;
+
+  // ⛔ 23 AND 24 ARE RESERVED for RESOURCE_KIND_TOPIC = 23 and
+  // RESOURCE_KIND_TOPIC_SUBSCRIPTION = 24 (a pub/sub pair). They are not
+  // declared yet. protoc cannot express a reservation for an undeclared value
+  // that the intended declaration may still use (`reserved 23, 24;` would
+  // forbid it too), so the ordinal census test is what enforces it. A new
+  // kind takes the next free number after the highest declared one.
+
+  // A cloud-agnostic ISOLATED NETWORK: the VPC, its subnets and its egress
+  // posture, realized per cloud as whatever native primitives the chosen
+  // `EgressMode` needs. ENVIRONMENT-scoped: composed once per environment, not
+  // once per app.
+  //
+  // There is no Kubernetes conformer for this kind and there is not meant to
+  // be: Kubernetes core has no VPC, subnet, route table or NAT. A (kind, cloud)
+  // pair with no conformer is refused by name, like every other unimplemented
+  // pair. Vendor primitives are named only inside conformers.
+  RESOURCE_KIND_NETWORK = 25;
+
+  // A per-workload INGRESS POLICY: the peer/port/protocol allow-list for
+  // exactly ONE placed workload (for example one Security Group on AWS, or one
+  // tag-selected VPC firewall rule on GCP).
+  //
+  // It deliberately does not model AWS network ACLs: a NACL is subnet-scoped,
+  // stateless and ordered-with-deny, with no analogue on the other targets, so
+  // NACLs stay at their permissive default.
+  //
+  // A SECOND kind rather than a field on kind 25 because the lifecycles differ:
+  // a network is created once per environment and shared; an ingress policy
+  // changes once per workload.
+  RESOURCE_KIND_INGRESS_POLICY = 26;
+
+  // A CUSTOM IAM ROLE DEFINITION: a named, project-scoped role holding an
+  // EXACT permission list, created so a grant can bind an authority that no
+  // predefined role expresses without also conveying far more.
+  //
+  // ⛔ IT IS THE ROLE OBJECT, NOT A BINDING. `RESOURCE_KIND_GRANT` (17) binds a
+  // principal to a role on a target; this kind is the role's own existence.
+  // A role definition is created once per project and may be held by several
+  // principals; a binding is per (principal, target).
+  //
+  // Its entire identity is its `logical_id` (the role id), so it adds no oneof
+  // arm. The permission list is vendor vocabulary and therefore lives in the
+  // conformer, keyed on the role id.
+  //
+  // The role id is a persistent key on a live graph: renaming it renames
+  // nothing in the cloud and leaves an unreconciled role behind.
+  //
+  // RETENTION_RETAIN_KEEP by default: some clouds soft-delete a custom role
+  // and hold its id in a tombstone, so a delete-then-recreate cycle fails the
+  // recreate.
+  RESOURCE_KIND_IAM_CUSTOM_ROLE = 27;
+}
+
+// ─── The per-node retention policy ───────────────────────────────────────────
+//
+// What a rollback, a destroy or an un-bootstrap does to this node on a reverse
+// walk: destroy it, or keep it (state/data protection).
+enum Retention {
+  // Proto3 zero default. UNSPECIFIED is treated as DELETE by the engine
+  // (destroy on reverse walk), the safe default for ephemeral nodes.
+  RETENTION_UNSPECIFIED = 0;
+  // Destroy this node on a rollback / destroy / un-bootstrap reverse walk.
+  RETENTION_DELETE = 1;
+  // KEEP this node on destroy (e.g. the state/artifact bucket); only an
+  // explicit delete-data override removes it.
+  RETENTION_RETAIN_KEEP = 2;
+}
+
+// ─── The network EGRESS POSTURE: the one operator-facing network dial ───────
+//
+// "How does this workload reach the internet, and how does the internet reach
+// it" is the whole operator-facing network question. Everything else (route
+// table targets, public-IP-on-launch, NAT wiring, which subnets are picked) is
+// derived from the answer by the conformer and is never authored.
+//
+// The names state INTENT, not mechanism: "NAT" names one cloud's mechanism,
+// while another cloud realizes the same intent without a NAT gateway resource.
+enum EgressMode {
+  // Proto3 zero default. A network node that states no posture is REFUSED by
+  // its conformer rather than defaulted: "expose it" and "isolate it" fail in
+  // opposite, equally expensive directions, so there is no safe guess.
+  EGRESS_MODE_UNSPECIFIED = 0;
+  // PUBLIC: the workload is placed on a subnet with a route to the internet
+  // and carries a public address. AWS: a public subnet, an internet gateway
+  // route and public-IP assignment. GCP: an external IP or Private Google
+  // Access.
+  EGRESS_MODE_PUBLIC = 1;
+  // PRIVATE_WITH_PUBLIC_EGRESS: no inbound public address, but outbound
+  // internet access through managed address translation. AWS: a private
+  // subnet and one NAT gateway per AZ in use. GCP: a Cloud NAT config on a
+  // router the conformer owns. Not yet wired to a conformer.
+  EGRESS_MODE_PRIVATE_WITH_PUBLIC_EGRESS = 2;
+  // PRIVATE: fully isolated, with no inbound public address and no outbound
+  // internet path. Not yet wired to a conformer: it requires a private
+  // endpoint for every cloud control-plane service the workload calls.
+  EGRESS_MODE_PRIVATE = 3;
+}
+
+// ─── The artifact-repository format ──────────────────────────────────────────
+//
+// The structural format of an ArtifactRepository node. Drives which publish
+// conformer targets it (an OCI image push vs a conda channel upload).
+//
+// ⛔ NO VENDOR TOKEN RIDES HERE. Each value is a package-ecosystem noun; each
+// cloud's artifact-repository conformer maps it to that cloud's repository
+// format and REFUSES an ordinal it has no mapping for rather than defaulting
+// one (a defaulted format is a repository of the wrong kind that reads as
+// converged).
+enum ArtifactFormat {
+  ARTIFACT_FORMAT_UNSPECIFIED = 0;
+  // An OCI image registry (image push).
+  ARTIFACT_FORMAT_OCI = 1;
+  // A conda channel (a `.conda` upload). Served per subdir
+  // (`<subdir>/repodata.json`), which is why it resolves to a conda repository
+  // and never to a generic blob store.
+  ARTIFACT_FORMAT_CONDA_CHANNEL = 2;
+  // A Python package index (PEP 503 simple API; wheels and sdists), what
+  // `pip install --index-url` reads.
+  ARTIFACT_FORMAT_PYTHON = 3;
+  // An npm registry (package documents and tarballs), what `npm install` reads.
+  ARTIFACT_FORMAT_NPM = 4;
+}
+
+// ─── The artifact-repository visibility / ACL ────────────────────────────────
+//
+// Drives the repository's read policy and retention, which is not cosmetic: a
+// base image other accounts build `FROM` must be broadly readable and
+// long-lived, while an application deploy image stays private and
+// garbage-collectable. This enum is the vocabulary the resolved policy binds
+// to.
+enum ArtifactVisibility {
+  ARTIFACT_VISIBILITY_UNSPECIFIED = 0;
+  // Private: only the pushing identity and explicitly granted readers (an
+  // application deploy image; GC-eligible).
+  ARTIFACT_VISIBILITY_PRIVATE = 1;
+  // Org-wide read (cross-account within the org).
+  ARTIFACT_VISIBILITY_ORG_READ = 2;
+  // Public / broad cross-account read (a base image others build `FROM`;
+  // long-lived).
+  ARTIFACT_VISIBILITY_PUBLIC_READ = 3;
+}
+
+// ─── The trigger source host class ───────────────────────────────────────────
+//
+// The GENERIC host class of a continuous-deployment source, not a vendor token.
+// A conformer resolves the class to a concrete host, and the vendor product
+// name terminates there. Grows ADDITIVELY.
+enum SourceKind {
+  // Proto3 zero default. UNSPECIFIED is an invalid source (fail-fast).
+  SOURCE_KIND_UNSPECIFIED = 0;
+  // A repository on the platform's own self-hosted git service.
+  SOURCE_KIND_GIT_SELFHOSTED = 1;
+  // A repository on an EXTERNAL third-party git host, reached over a webhook.
+  SOURCE_KIND_GIT_EXTERNAL = 2;
+}
+
+// ─── The package-registry class ──────────────────────────────────────────────
+//
+// The GENERIC registry class a package-published Trigger watches. A conformer
+// resolves the class to a concrete registry host. Grows ADDITIVELY.
+//
+// The resolved trigger tier mirrors the intent tier's oneof: the oneof ARM is
+// the event, so there is no separate event enum to cross with `SourceKind`.
+enum RegistryKind {
+  // Proto3 zero default. UNSPECIFIED is an invalid registry (fail-fast).
+  REGISTRY_KIND_UNSPECIFIED = 0;
+  // A package published to an EXTERNAL third-party package registry.
+  REGISTRY_KIND_GITHUB_PACKAGES = 1;
+  // A package published to the platform's own package registry.
+  REGISTRY_KIND_CODEWORKS = 2;
+}
+
+// ─── The generic capability vocabulary (the Grant model) ─────────────────────
+//
+// The cloud-agnostic VERBS a `GrantSpec` authorizes a principal's runtime
+// identity to perform on a target. A `Capability` names WHAT the principal may
+// do ("invoke a service", "read a secret", "read an object store"), never the
+// cloud role that realizes it. The conformer holds the one capability -> role
+// table and forms the provider's member expression, so no vendor role string
+// appears above the conformer tier. Grows ADDITIVELY.
+//
+// Choosing the role for a capability follows one criterion: the role must not
+// be able to do more than the capability says (no unrelated writes). The
+// smallest role by permission count is not automatically the right one; a
+// small role that also carries a destructive permission is wrong.
+//
+// Scope conventions used below: PROJECT-SCOPED means `target == ""` binds on
+// the whole project (needed when the resource does not exist yet and has no
+// policy to bind on); SA-SCOPED or REPOSITORY-SCOPED means the target is that
+// one resource. A capability with no mapping on a given cloud is REFUSED BY
+// NAME by that cloud's conformer, never rendered as nothing.
+enum Capability {
+  // Proto3 zero default. UNSPECIFIED is invalid: every Grant node must carry
+  // a concrete capability (fail-fast; the conformer raises).
+  CAPABILITY_UNSPECIFIED = 0;
+  // Invoke a served node (the caller's identity may call the callee service).
+  CAPABILITY_INVOKE_SERVICE = 1;
+  // Read a managed secret's value (mount / access one specific secret).
+  CAPABILITY_READ_SECRET = 2;
+  // Read an object store (list/get blobs).
+  CAPABILITY_READ_OBJECT_STORE = 3;
+  // Write an object store (put/delete blobs).
+  CAPABILITY_WRITE_OBJECT_STORE = 4;
+  // Read an artifact repository (pull images / download channel artifacts).
+  CAPABILITY_READ_ARTIFACTS = 5;
+  // Write an artifact repository (push images / upload channel artifacts).
+  CAPABILITY_WRITE_ARTIFACTS = 6;
+  // Impersonate a service account (mint tokens AS another identity).
+  CAPABILITY_IMPERSONATE = 7;
+  // Administer IAM policy on a resource or project (set-policy; the
+  // highest-privilege grant, used by bootstrap / project admin).
+  CAPABILITY_ADMIN_SET_IAM = 8;
+  // Use the project's OLTP datastore (read and write documents): a runtime
+  // identity's base grant. PROJECT-SCOPED.
+  CAPABILITY_READ_WRITE_DATASTORE = 9;
+  // Write application logs to the project's log sink: a runtime identity's
+  // base grant. PROJECT-SCOPED.
+  CAPABILITY_LOG_WRITE = 10;
+  // Call the project's already-enabled service APIs (the service-usage
+  // consumer role). PROJECT-SCOPED.
+  CAPABILITY_SERVICE_USAGE = 11;
+  // Deploy and administer serverless compute services and jobs in the
+  // project. A deployer's grant. PROJECT-SCOPED.
+  CAPABILITY_ADMIN_SERVERLESS_COMPUTE = 12;
+  // Send push messages through the cloud messaging API. PROJECT-SCOPED. The
+  // conformer maps it to a project-independent predefined role carrying the
+  // send permission; a tighter custom role would be project-relative.
+  CAPABILITY_PUSH_MESSAGING = 13;
+  // Act AS a service account: the principal may attach or run as the target
+  // service account. Distinct from IMPERSONATE (token minting): deploying a
+  // service that RUNS AS an identity requires this on that identity.
+  // SA-SCOPED (target == the service account).
+  CAPABILITY_SERVICE_ACCOUNT_USER = 14;
+  // ADD a new version to a NAMED, pre-existing secret, without creating or
+  // deleting the secret container and without reading any secret. The
+  // least-privilege write companion of READ_SECRET: a connect flow can write a
+  // customer-supplied credential into a pre-defined slot, and the runtime
+  // reads it with READ_SECRET. SECRET-SCOPED (target == the secret handle).
+  CAPABILITY_ADD_SECRET_VERSION = 15;
+  // PROVISION secret containers: create a secret and set IAM policy on
+  // secrets, so a provisioning step can define empty secret slots and bind
+  // least-privilege accessor/version-adder grants on them. Distinct from
+  // READ_SECRET and ADD_SECRET_VERSION: this is the container-lifecycle and
+  // policy-admin capability. PROJECT-SCOPED.
+  CAPABILITY_PROVISION_SECRETS = 16;
+  // ENABLE service APIs on a project (the service-usage admin role). Distinct
+  // from SERVICE_USAGE (11, call an enabled API): this turns an API on.
+  // PROJECT-SCOPED.
+  CAPABILITY_ENABLE_SERVICES = 17;
+  // ADMINISTER the project's object store: create, delete and list buckets
+  // and set IAM policy on them, so a deploy that declares a bucket can create
+  // it and then bind per-bucket grants on it. Distinct from READ/WRITE_OBJECT_
+  // STORE (3/4, blobs inside an existing bucket). Also what a full-erasure
+  // sweep needs to enumerate residual buckets. PROJECT-SCOPED, because a
+  // bucket that does not exist yet has no policy to bind on.
+  CAPABILITY_ADMIN_OBJECT_STORE = 18;
+  // ADMINISTER the project's datastore INDEXES: create and list composite
+  // indexes and get the database, WITHOUT creating databases and WITHOUT
+  // document read/write. The deploy-time ensure-indexes capability; distinct
+  // from READ_WRITE_DATASTORE (9, runtime document access). PROJECT-SCOPED.
+  CAPABILITY_DATASTORE_INDEX_ADMIN = 19;
+  // READ the project's datastore on BOTH planes and write neither: database
+  // metadata and composite-index listing (admin plane) plus document listing
+  // (data plane). What a read-only validator needs. A new ordinal rather than
+  // a reuse of 19, because index-admin carries no data-plane read, and an
+  // admin plane that answers proves nothing about a data plane that does not.
+  // READ_WRITE_DATASTORE (9) would add writes the caller never makes.
+  // PROJECT-SCOPED: a database is resolved by name at run time.
+  CAPABILITY_DATASTORE_READ = 20;
+  // READ the project's LOGS (list log entries) and nothing that writes,
+  // deletes or configures. What an observability validator needs to check
+  // that a request produced the log entry it should have. A separate ordinal
+  // from LOG_WRITE (10): emitting logs and reading them are different
+  // authorities usually held by different principals. PROJECT-SCOPED.
+  CAPABILITY_READ_LOGS = 21;
+  // READ the project's METRICS (list time series and metric descriptors) and
+  // nothing that writes a point or edits alerting. A separate ordinal from
+  // READ_LOGS because the two are independently grantable and independently
+  // refused: a partial grant ("logs readable, metrics not") must be
+  // expressible. PROJECT-SCOPED.
+  CAPABILITY_READ_MONITORING = 22;
+  // CREATE the datastore DATABASE an application owns. A separate ordinal
+  // from 19: an environment-level database may be pre-created by a project
+  // admin, but an application that names its own database in its bundle is
+  // deployed long after bootstrap, so the deploy identity must be able to
+  // create it. The conformer maps it to a role that can also delete what the
+  // deploy tool created. PROJECT-SCOPED, and it must be: a create cannot be
+  // conditioned on the identity of the resource it creates.
+  CAPABILITY_DATASTORE_CREATE_DATABASE = 23;
+  // MANAGE the API GATEWAY an inbound-facing app composes: create, read,
+  // update and delete the gateway, its API and its API configs, plus the
+  // operation poll each long-running mutation needs, and nothing beyond (no
+  // set-IAM-policy on gateway objects). PROJECT-SCOPED: a gateway that does
+  // not exist yet has no policy to bind on.
+  CAPABILITY_ADMIN_API_EDGE = 24;
+
+  // BIND the MANAGED SERVICE a customer-produced API is enabled through.
+  // ENABLE_SERVICES (17) authorizes the enable against the consumer project;
+  // when the service being enabled has a non-provider producer, the platform
+  // runs a second check on the service itself. An API-gateway managed service
+  // is produced by the deploying project, so every inbound-facing app needs
+  // this. PROJECT-SCOPED: the managed service does not exist until the API
+  // config create mints it.
+  CAPABILITY_BIND_MANAGED_SERVICE = 25;
+
+  // READ the IAM policy OF A SERVICE ACCOUNT: the read half of the
+  // read-modify-write every SA-scoped grant performs. A conformer cannot
+  // choose "already bound, do nothing" over "bind it" without reading the
+  // live binding, and that read is checked on the service account itself,
+  // not on the project, so project-level authority does not convey it.
+  //
+  // ⛔ THE WRITE HALF IS DELIBERATELY ABSENT. Every role that can set an SA's
+  // policy can also create, delete and update every service account in the
+  // project. So the principal that CREATES the deploy identity performs the
+  // first grant, and the deploy identity can afterwards VERIFY it but never
+  // MINT one: an identity must not be able to grant itself act-as.
+  //
+  // SA-SCOPED (target == the service account).
+  CAPABILITY_READ_SERVICE_ACCOUNT_IAM = 26;
+
+  // READ the IAM policy OF AN ARTIFACT REPOSITORY: the same read half, on a
+  // second resource type. A grant's reconcile opens with a get-policy on ITS
+  // OWN TARGET, and the permission for that read lives on that resource, so
+  // each resource type the graph binds on needs its own read capability.
+  //
+  // ⛔ THE WRITE HALF IS DELIBERATELY ABSENT, for the same reason as 26:
+  // every role that can set a repository's policy can also create or delete
+  // repositories. REPOSITORY-SCOPED (target == the repository).
+  CAPABILITY_READ_ARTIFACT_REPOSITORY_IAM = 27;
+
+  // BIND_RESOURCE_TAGS: attach a resource-manager TAG to a resource this
+  // deploy creates.
+  //
+  // WHY IT EXISTS. A deploy identity's delete authority can be fenced BY TAG:
+  // a delete conditioned on a tag is evaluated fail-closed, so a resource that
+  // is not tagged is one that identity can never delete. The tag therefore has
+  // to be attached by the deploy itself, in the create request, and attaching
+  // one needs both the tag-value binding permission and the per-resource
+  // create-tag-binding permission.
+  //
+  // The conformer maps it to the tag-user role: wide in resource TYPE and
+  // narrow in VERB (attach, detach and read tags, nothing that reads or writes
+  // any resource's content). A smaller datastore-admin role would also carry
+  // an unconditional database delete, which would make the tag fence
+  // decorative.
+  //
+  // Residual, stated: holding this AND a tag-conditioned delete makes a
+  // deliberate tag-then-delete of a pre-existing resource reachable. Tag scope
+  // stops the accident (a rollback deleting what it never tagged), not the
+  // intent; tags are attached only on the create branch.
+  //
+  // PROJECT-SCOPED: the authority is needed at create time.
+  CAPABILITY_BIND_RESOURCE_TAGS = 28;
+
+  // A job runner's authority to PLACE A JOB ON A VIRTUAL MACHINE: create it,
+  // observe it, tear it down, and nothing else. The compute-plane twin of
+  // ADMIN_SERVERLESS_COMPUTE (12).
+  //
+  // ⛔ REALIZED BY A PROJECT-RELATIVE CUSTOM ROLE, not a predefined one: the
+  // narrowest predefined role carrying these permissions also carries image,
+  // snapshot and set-IAM-policy authority across the whole project.
+  //
+  // ⛔ IT DOES NOT CARRY act-as. Attaching a service account to the VM is
+  // authorized on the SERVICE ACCOUNT, and a project-scoped act-as would
+  // extend to every identity in the project. That half is
+  // CAPABILITY_SERVICE_ACCOUNT_USER (14), targeted at the VM's own runtime
+  // identity as a second, SA-scoped grant composed beside this one.
+  //
+  // PROJECT-SCOPED: needed at insert time, before the instance exists.
+  CAPABILITY_PLACE_JOB_VM = 29;
+
+  // READ a deployed SERVERLESS COMPUTE service's own configuration (e.g. the
+  // run-viewer role): the read-only companion of ADMIN_SERVERLESS_COMPUTE
+  // (12), and the smallest authority that answers "what is actually deployed
+  // here?".
+  //
+  // WHY IT EXISTS. A behavioural check (does a request reach code, does it
+  // answer 200) cannot see a deployment running as the WRONG PRINCIPAL or
+  // carrying undeclared configuration. Catching that needs a read of the
+  // service's configuration through the admin API, and that read needs this.
+  // A validator must not hold ADMIN_SERVERLESS_COMPUTE instead: a gate
+  // authorized to delete what it validates is a standing mutate capability.
+  //
+  // PROJECT-SCOPED today (the authoring surface composes project-scoped extra
+  // capabilities only); the holder can read every service in the project.
+  // Mapped on GCP only; on AWS the equivalent read is part of the function
+  // read a validator already holds, and the AWS conformer refuses this
+  // ordinal by name.
+  CAPABILITY_READ_SERVERLESS_COMPUTE = 30;
+
+  // READ IAM POLICY across the resource types a grant read-back probe checks
+  // (project, secret, bucket, artifact repository, service account and
+  // serverless service), so the probe can compare a member's COMPLETE role
+  // set per target in both directions (a missing grant and an undeclared one).
+  //
+  // The conformer maps it to a security-reviewer role: read-only (no create,
+  // delete, update or set permissions anywhere) and the narrowest predefined
+  // role carrying all six get-policy reads.
+  //
+  // ⛔ WHAT IT WIDENS, STATED: besides policy reads, that role can list
+  // resources across the project and read the project's logs (including
+  // private ones). It cannot impersonate, read object bodies or read secret
+  // payloads. A project custom role holding exactly the six permissions is
+  // narrower and buildable with RESOURCE_KIND_IAM_CUSTOM_ROLE; it is the
+  // right trade if log access becomes the objection.
+  //
+  // It does not subsume 30: this reads a service's POLICY, 30 reads its
+  // CONFIGURATION, and a bundle needing both authors both.
+  //
+  // PROJECT-SCOPED: the probe fans out over many targets of several kinds,
+  // which a per-target binding would have to track on every deploy. Mapped on
+  // GCP only; refused by name on AWS, which has no single get-policy plane.
+  CAPABILITY_READ_IAM_POLICY = 31;
+
+  // READ SECRET METADATA and secret IAM policy WITHOUT the payload: what a
+  // read-back asserter needs to check a SECRET node. READ_SECRET (2) is wrong
+  // in both directions at once: it carries the payload, which an asserter
+  // must never hold, and it lacks the metadata and policy reads. The
+  // conformer maps it to the secret-viewer role (no payload access, no
+  // writes).
+  //
+  // PROJECT-SCOPED: the asserter fans out over whatever secrets a deployment
+  // declares. Mapped on GCP only; refused by name on AWS, because a capability
+  // that rendered NOTHING would plan and apply clean and grant nothing.
+  CAPABILITY_READ_SECRET_METADATA = 32;
+
+  // The deploy identity's authority over an application's OWN runtime
+  // SERVICE ACCOUNT: get, create and delete service accounts, which is what
+  // the service-account conformer calls. Runtime identities are created at
+  // deploy time, not at bootstrap, and a self-provisioned runtime identity
+  // is the root of its application's graph, so without this the deploy
+  // identity cannot apply it.
+  //
+  // ⛔ A PROJECT-RELATIVE CUSTOM ROLE, BECAUSE THE PREDEFINED ALTERNATIVE IS
+  // FORBIDDEN. The only predefined role carrying both create and delete also
+  // carries set-IAM-policy on service accounts, which the deploy identity
+  // must never hold (see 26). The next-tightest predefined role lacks delete,
+  // so a RETENTION_DELETE runtime identity would leak.
+  //
+  // PROJECT-SCOPED: an SA-scoped binding cannot be written on a resource that
+  // does not exist yet. Mapped on GCP only today; on AWS the equivalent
+  // authority is an inline policy minted with the role.
+  CAPABILITY_MANAGE_SERVICE_ACCOUNT_LIFECYCLE = 33;
+
+  // OBSERVE A JOB'S VM: read the instance a job placed (instance get, disk
+  // get, serial-port output, zone-operation get) and nothing else: no
+  // instance listing, no metadata beyond what a field-masked instance get
+  // returns, no mutation. A project-relative custom role.
+  //
+  // ⛔ GRANTED BY THE PROJECT OWNER, IN THEIR PROJECT, AND ONLY WHERE THEY
+  // ADMIT IT. Serial output can carry customer data, so the control plane's
+  // own graph composes NO grant for this ordinal.
+  //
+  // Declared only: the conformers refuse it by name until the composition
+  // that grants it exists.
+  CAPABILITY_OBSERVE_JOB_VM = 34;
+}
+
+// ─── Per-kind config messages (the `oneof config` arms, `<Kind>Spec`) ────────
+//
+// Small, typed, RESOLVED desired state per node kind. Each grows ADDITIVELY
+// (new field numbers only; retired numbers -> `reserved`).
+//
+// ⚠ PRESENCE AND THE CONTENT ADDRESS. The generated binary encoder writes
+// every PLAIN scalar unconditionally (it does not skip proto3 defaults), so
+// adding a plain scalar to a message changes the encoding, and therefore the
+// content address, of every existing node of that kind. Fields added after a
+// message is in use are `optional`, `repeated` or a submessage, all of which
+// write NOTHING when unset, so a manifest that does not use the new field
+// encodes byte-identically.
+
+// SERVERLESS_COMPUTE resolved desired state.
+message ServerlessComputeSpec {
+  // The pinned content digest (sha256:...) of the image this node serves: the
+  // single-digest invariant (the only thing that changes between a deploy and
+  // a rollback).
+  string image_digest = 1;
+  // The served container port.
+  int32 port = 2;
+  // The minimum replica count (0 = scale to zero, the frugal default).
+  int32 min_scale = 3;
+  // The maximum replica count (autoscale ceiling).
+  int32 max_scale = 4;
+  // The runtime identity (service-account ref) the compute RUNS AS.
+  string runtime_identity = 5;
+  // The platform-injected supervisor, synthesized by the composer onto the
+  // resolved node and read-only in the plan. A served app gets a supervisor
+  // exactly like a finite job does.
+  SupervisorSpec supervisor = 6;
+  // The retention bound: keep the newest N revisions on a forward deploy
+  // (pruned lazily at deploy time). UNSET means "apply the tool's default".
+  optional int32 keep_last_n = 7;
+
+  // ─── The resolved parameter argv ──────────────────────────────────────────
+  // The container's command-line arguments: the resolved application
+  // parameters, one `--<flag>=<value>` token per parameter, in BUNDLE
+  // DECLARATION ORDER.
+  //
+  // ⚠ ORDER IS LOAD-BEARING. A revision's argv is part of the revision, so a
+  // reordering between two otherwise identical deploys creates a new revision
+  // for no change. The composer emits in authored order and never sorts.
+  //
+  // ⚠ A SECRET PARAMETER'S TOKEN CARRIES A REFERENCE, NEVER PLAINTEXT (for
+  // example a secret-store name: `--api-key-secret=<secret name>`). A live
+  // credential in argv would be readable from the process table, the service
+  // description and deploy audit logs; the application fetches the secret
+  // from the secret store by that name at startup.
+  //
+  // EMPTY (the default) renders no args.
+  repeated string args = 8;
+
+  // ─── The resolved network reach ───────────────────────────────────────────
+  // The `NetworkIngress` ORDINAL (deploy_model.proto) the bundle authored.
+  // UNSET means the bundle authored no reach: nothing is stamped, the service
+  // body carries no ingress value, and no ingress path enters the update mask.
+  //
+  // `optional` for the content-address reason above. Carried as a raw ordinal
+  // because this file imports nothing, so the typed enum from the intent
+  // tier's vocabulary cannot be named here.
+  optional int32 network_ingress = 9;
+
+  // ─── The resolved outbound path ───────────────────────────────────────────
+  // The direct VPC egress attachment the bundle authored. UNSET means none:
+  // the service body carries no VPC access and the revision egresses over the
+  // public internet.
+  //
+  // A locally declared message rather than four parallel scalars: this file
+  // imports nothing, so the intent tier's message cannot be named, but a
+  // message can be declared here and keeps the four values together. A
+  // submessage field also writes nothing when unset (see the note above).
+  NetworkEgressSpec network_egress = 10;
+
+  // ─── The latency contract the composer withheld ───────────────────────────
+  // The `min_scale` the BUNDLE AUTHORED, on a target where the composer
+  // decided the cloud cannot carry it: `min_scale` (field 3) goes out as 0
+  // and the authored number is recorded here.
+  //
+  // ⛔ A WITHHOLD MUST NOT BE SILENT. Writing `min_scale: 0` alone would
+  // compose, map, apply and report green while dropping a contract the bundle
+  // wrote down, an omission no scanner of what IS present can see.
+  //
+  // ⚠ IT IS A RECORD, NEVER AN INSTRUCTION. No arm reads it to decide what to
+  // build; its only consumers are the plan's notice channel and tests.
+  //
+  // UNSET (every node for a cloud that CAN carry the value) means nothing was
+  // withheld.
+  optional int32 withheld_min_scale = 11;
+
+  // ─── The app's declared compute allocation ────────────────────────────────
+  // The CPU and memory the BUNDLE AUTHORED, carried verbatim as Kubernetes
+  // quantity strings ("1000m" / "512Mi"), the same vocabulary the job and
+  // container specs use, so there is no conversion and no second parser.
+  //
+  // ⛔ UNSET IS THE HONEST ANSWER, NOT A HOLE TO FILL. The composer never
+  // invents an allocation: a fabricated one is an amount nobody asked for,
+  // billed. A reader that needs it refuses absence rather than substituting a
+  // default.
+  optional string cpu = 12;
+  optional string memory = 13;
+  // The app's HEALTHCHECK path: probed from OUTSIDE the container, across the
+  // ingress, to decide whether a provisioning resource may become active.
+  //
+  // Presence is also the semantics: UNSET means "this app declared no
+  // healthcheck", so the resource is adopted on cloud existence and the
+  // verdict says so, rather than reporting a health pass nobody observed.
+  optional string health_check_path = 14;
+}
+
+// ─── The resolved direct VPC egress attachment ──────────────────────────────
+//
+// `ServerlessComputeSpec.network_egress`: the resolved-tier twin of the intent
+// tier's VPC-egress message, field for field. Declared here because this file
+// imports nothing; the composer copies the values across without interpreting
+// them.
+//
+// ⛔ SELECTS, NEVER CREATES. Every value NAMES a resource that must already
+// exist. No conformer provisions a network, subnetwork, connector, router or
+// NAT from it; a name that does not resolve fails closed at the service
+// create/update call.
+message NetworkEgressSpec {
+  // The VPC network the revision's interface attaches to: a bare name
+  // (`default`) or a full resource URI. REQUIRED alongside `subnetwork`; the
+  // render drops the whole attachment rather than emit one the API refuses.
+  string network = 1;
+  // The subnetwork, IN THE SERVICE'S OWN REGION (direct VPC egress is
+  // region-coupled). REQUIRED alongside `network`.
+  string subnetwork = 2;
+  // Network tags applied to the revision's interface (what selector firewall
+  // rules match on). EMPTY (the default) means no tags.
+  repeated string network_tags = 3;
+  // Which traffic takes the VPC path.
+  //
+  // FALSE (the proto3 default) means ALL traffic, which is the only setting
+  // that reaches a private-ingress peer whose hostname resolves to a public
+  // address. TRUE means private ranges only: only RFC 1918 destinations take
+  // the VPC path, which suits a service that talks to an internal IP and
+  // needs no NAT. Carried in the intent tier's polarity so the two protos
+  // cannot drift into meaning opposite things; the one inversion to the
+  // cloud's own enum happens at render time.
+  bool private_ranges_only = 4;
+}
+
+// RUN_TO_COMPLETION_JOB resolved desired state (e.g. the deployer container).
+message RunToCompletionJobSpec {
+  // The pinned content digest (sha256:...) of the job image.
+  string image_digest = 1;
+  // The job args (e.g. `mode=apply`, the FullManifest content address).
+  repeated string args = 2;
+  // The runtime identity (service-account ref) the job RUNS AS.
+  string runtime_identity = 3;
+  // The platform-injected supervisor, synthesized by the composer onto the
+  // resolved node and read-only in the plan.
+  SupervisorSpec supervisor = 4;
+
+  // ─── Authored jobs ────────────────────────────────────────────────────────
+  //
+  // Fields 5-9 are what an authored bundle job resolves to: it carries its
+  // own env, bound secrets, retry/timeout policy and possibly its own region.
+  // Every one of them is additive and zero-defaulted to the deployer
+  // container's behaviour (empty env, no secrets, unset retries, timeout 0,
+  // empty region).
+
+  // The job container's literal env (the `ConfigSpec.values` shape). The
+  // service-reference URL marker (`<VAR>__SVCREF -> <sibling>`) rides here
+  // with the same encoding the composer puts on a service's Config node, so a
+  // job and a service resolve a sibling's URL through one mechanism. A typed
+  // reference cannot silently resolve to an empty string the way scraping a
+  // live service's env would.
+  map<string, string> env = 5;
+
+  // The NAME-ONLY secret handles the job resolves at run time. Never a value:
+  // the applier renders each as a secret reference in the job's env, so the
+  // secret never appears as a literal in a job spec any reader can fetch.
+  repeated string secret_handles = 6;
+
+  // The per-task retry budget. `optional` because 0 is a meaningful demand
+  // ("a failure is the verdict") that is also the proto3 zero. UNSET means the
+  // platform default.
+  optional int32 max_retries = 7;
+
+  // The per-attempt wall budget in SECONDS. 0 means the platform default.
+  int32 task_timeout_seconds = 8;
+
+  // The region this job is placed in. EMPTY means the mapper's effective
+  // deploy region; NON-EMPTY overrides it. The composer leaves it empty unless
+  // the author stated one: it has no environment binding and never invents a
+  // region.
+  string region = 9;
+}
+
+// ─── The supervisor mode (WRAPPER | SIDECAR) ─────────────────────────────────
+enum SupervisorMode {
+  // Proto3 zero default; the applier treats UNSPECIFIED as WRAPPER.
+  SUPERVISOR_MODE_UNSPECIFIED = 0;
+  // The build step re-layers the image with an injected ENTRYPOINT: the
+  // supervisor is PID 1 and execs the original entrypoint and command as a
+  // CHILD. One container is deployed. The default wherever the entrypoint can
+  // be set.
+  SUPERVISOR_MODE_WRAPPER = 1;
+  // A SEPARATE supervisor container co-located with the unmodified
+  // application container (shared task/pod), for platforms where entrypoint
+  // injection is unavailable; the supervisor reaches the child over the
+  // shared localhost.
+  SUPERVISOR_MODE_SIDECAR = 2;
+}
+
+// ─── SupervisorSpec: the platform-injected per-attempt liveness harness ─────
+//
+// PLATFORM-OWNED. Synthesized by the composer onto the resolved
+// ServerlessCompute / RunToCompletionJob node and never authored on the bundle
+// (an application cannot set or unset it). The application may HINT app-level
+// knobs (child health path, sidecar cpu/memory), which the composer merges in;
+// the composer owns the platform fields (supervisor digest, mode, lease and
+// heartbeat timing, report target). Read-only in the plan.
+//
+// Per-attempt runtime binding (attempt id, epoch, lease token) is NOT here: it
+// is minted by the job runner at placement and injected at start. This message
+// is the static shape only.
+message SupervisorSpec {
+  // The pinned content digest (sha256:...) of the supervisor artifact.
+  // WRAPPER: the layer the build step copies the supervisor binary from.
+  // SIDECAR: the supervisor container image.
+  string supervisor_image_digest = 1;
+  // WRAPPER (default) | SIDECAR.
+  SupervisorMode mode = 2;
+  // The lease TTL (seconds). A renewal not seen within ttl + grace fences the
+  // attempt.
+  int32 lease_ttl_seconds = 3;
+  // The supervisor's push cadence (seconds); MUST be < lease_ttl_seconds.
+  int32 heartbeat_interval_seconds = 4;
+  // Extra slack past the TTL before the lease check declares the lease
+  // expired (absorbs a transient network stall or a cold start).
+  int32 grace_seconds = 5;
+  // The report target as a LOGICAL registry name, never a literal URL;
+  // resolved to a concrete endpoint by the conformer at render time. Also the
+  // supervisor's OIDC audience.
+  string report_target = 6;
+  // Merged hint: the HTTP liveness path the supervisor probes on the child
+  // ("" = process liveness only, the default).
+  string child_health_path = 7;
+  // Merged hint: the child health port (0 = the node's served port).
+  int32 child_health_port = 8;
+  // Merged hint: supervisor container cpu (SIDECAR only; "" = default).
+  string cpu = 9;
+  // Merged hint: supervisor container memory (SIDECAR only; "" = default).
+  string memory = 10;
+}
+
+// OBJECT_STORE resolved desired state. ⛔ RETAINED, NEVER EMITTED: see
+// `RESOURCE_KIND_OBJECT_STORE`, consolidated into `ResolvedBucketSpec` (kind
+// 13). This message is a strict subset of `ResolvedBucketSpec`; do NOT add a
+// field here, since a field the consolidated kind lacks would make the
+// consolidation false.
+message ObjectStoreSpec {
+  // The store location / region.
+  string location = 1;
+}
+
+// DATASTORE resolved desired state.
+message DatastoreSpec {
+  // The RESOLVED implementation token the mapper picked for this cloud (a
+  // serverless database vs on-prem object-store SQL). It names the mapper's
+  // choice, not a user-facing type.
+  string impl = 1;
+  // Whether an analytics replica of this OLTP datastore is provisioned (an
+  // orthogonal axis, meaningful only where the implementation is OLTP-only).
+  bool analytics_replica = 2;
+
+  // ─── REFERENCED, NOT OWNED: the ownership axis of a datastore node ──────
+  //
+  // false (the proto3 default): this deploy OWNS the datastore; the node's
+  // create ensures it (create-if-absent plus every composite index).
+  //
+  // true: this deploy only OPENS a datastore another deployment declares. The
+  // node becomes read-only: read-status probes it, plan no-ops when it is
+  // present and raises when it is not, and create, update and delete refuse.
+  //
+  // An axis of the existing node rather than a new kind, because the ordering
+  // is the point: the served compute node already `depends_on` the datastore
+  // node, so the existence check runs BEFORE the container that reads the
+  // database comes up.
+  bool referenced = 3;
+
+  // ─── The keyed collections this datastore holds ──────────────────────────
+  //
+  // A key schema is the one thing that must never be guessed. Some datastores
+  // (DynamoDB, for one) have an IMMUTABLE key schema: the only path between
+  // two key designs is delete-and-recreate, which destroys every item. A
+  // defaulted key is therefore a permanent, silent, uncorrectable wrong
+  // answer, so every field below is authored or the derivation refuses, and a
+  // key change plans as REPLACE and performs nothing.
+  //
+  // The shape is NEUTRAL, not one vendor's field set. It states an ACCESS
+  // PATH ("queries on this collection are answered by a partition field and
+  // an optional ordered field"), and each cloud materializes it its own way:
+  //
+  //   DynamoDB  primary   -> the table's key schema and attribute definitions
+  //             secondary -> one global secondary index each
+  //   Firestore primary   -> nothing to create (a collection is implicit in
+  //                          the document path); the path is the check that
+  //                          the document id written is the one declared
+  //             secondary -> one composite index each
+  //
+  // EMPTY (the default) means the datastore declares no collection shape: an
+  // arm that needs one refuses by name rather than inventing one.
+  repeated DatastoreCollectionSpec collections = 4;
+}
+
+// ─── One keyed collection inside a datastore ────────────────────────────────
+//
+// ⚠ ONE COLLECTION IS NOT ONE DATABASE, which is why this is `repeated`. A
+// document database holds N collection groups in one database; a datastore
+// with no database object materializes the same node as N TABLES. Collapsing
+// N collections into one table is a single-table design, a key schema nobody
+// authored, and must not be invented here or below.
+message DatastoreCollectionSpec {
+  // The collection's name. On Firestore the collection-group id; on DynamoDB
+  // the TABLE NAME, verbatim and never derived (a table name is unique per
+  // account and region, and a derived one could silently adopt or collide
+  // with an existing table).
+  string name = 1;
+
+  // How this collection is addressed. REQUIRED for a materialization: a
+  // collection with no primary access path is a table with no key.
+  DatastoreAccessPath primary_access_path = 2;
+
+  // Additional query shapes this collection must answer. EMPTY is the
+  // ordinary case and creates nothing.
+  repeated DatastoreAccessPath secondary_access_paths = 3;
+
+  // The field whose value is the row's expiry instant, or EMPTY for "this
+  // collection makes NO expiry claim". ⚠ EMPTY is "not stated", not "no
+  // expiry": an arm must stamp nothing rather than turn expiry OFF on a live
+  // collection that has it.
+  string expiry_field = 4;
+
+  // true: this collection is owned OUTSIDE this graph. ADOPT it, never create
+  // it: the materializing node becomes a probe that agrees with the live
+  // shape or REFUSES, and its create/update/delete all raise.
+  //
+  // ⛔ This is the only safe way to model a table that already exists. An
+  // adopt path that silently recreates is the same data loss as a key change:
+  // the name is taken over, the items are gone, and every reader gets an
+  // empty table that answers successfully.
+  bool referenced = 5;
+}
+
+// ─── One access path over a collection ──────────────────────────────────────
+//
+// The PRIMARY path identifies a row; a SECONDARY path is an additional query
+// shape. Both have the same shape because on every target they are the same
+// concept materialized twice (a table key and an index key; a document path
+// and a composite index).
+message DatastoreAccessPath {
+  // The path's name. EMPTY for the primary path; REQUIRED for a secondary
+  // one, where it is the index name.
+  string name = 1;
+
+  // The field the collection is PARTITIONED by (the equality half of the
+  // query). REQUIRED.
+  string partition_field = 2;
+  // Its type, as a NEUTRAL token: `string` / `number` / `bytes`; each arm
+  // maps it to its own vocabulary (DynamoDB's S/N/B). ⚠ REQUIRED and never
+  // defaulted: tables keyed by the same field with different types accept
+  // different items and neither can become the other.
+  string partition_field_type = 3;
+
+  // The field rows are ORDERED by within a partition (the range half). EMPTY
+  // when this path has none (one row per partition value).
+  string ordered_field = 4;
+  // Its type, same vocabulary. Must be EMPTY when `ordered_field` is empty; a
+  // half-authored pair is refused rather than half-honoured.
+  string ordered_field_type = 5;
+}
+
+// QUEUE resolved desired state.
+message QueueSpec {
+  // The queue name.
+  string name = 1;
+}
+
+// LOAD_BALANCER resolved desired state.
+message LoadBalancerSpec {
+  // The frontend port the load balancer listens on.
+  int32 port = 1;
+  // The `logical_id` of the backend node this load balancer fronts (a graph
+  // edge target, also expressed via `depends_on`).
+  string backend_logical_id = 2;
+}
+
+// DNS_RECORD resolved desired state.
+message DnsRecordSpec {
+  // The fully qualified record name.
+  string record_name = 1;
+  // The record type (e.g. "A" / "CNAME").
+  string record_type = 2;
+  // The record target / value.
+  string target = 3;
+}
+
+// IAM_ROLE resolved desired state.
+message IamRoleSpec {
+  // The former flat permission-token list is retired: cross-resource
+  // authorizations are SEPARATE, ordered Grant nodes (a policy on the TARGET
+  // with the principal as member), not tokens on this node. IamRoleSpec is
+  // now an empty desired-state message (the node identity itself).
+  reserved 1;
+  reserved "permissions";
+}
+
+// SECRET resolved desired state (the durable authorization record, never the
+// value).
+message SecretSpec {
+  // The secret handle the application's code references (a name, never a
+  // value).
+  string handle = 1;
+  // The capability node the injected secret registry keys on.
+  string capability_node = 2;
+  // WHOSE CREDENTIAL this is, carried verbatim from the authored secret
+  // binding so the applier can answer "may this deploy write a value here?"
+  // without re-reading the bundle. The ordinal contract is
+  // `deploy_model.proto`'s `SecretCustody` (0 = UNSPECIFIED, read as
+  // CUSTOMER; 1 = CUSTOMER; 2 = OPERATOR), typed `int32` because this proto
+  // imports no other proto. 0 is the fail-closed do-not-write reading.
+  int32 custody = 3;
+}
+
+// CONFIG resolved desired state (non-secret key/value config data).
+message ConfigSpec {
+  // The config key/value entries.
+  map<string, string> values = 1;
+}
+
+// ONE release machine, and the ONE federated identity allowed to assume the
+// day-0 deploy identity on its behalf. Carried on the manifest so a composer
+// can STATE a trust set that the AWS arm renders into an
+// `sts:AssumeRoleWithWebIdentity` trust document.
+//
+// ⛔ THE PAIRING IS THE POINT: a bare list of subject ids renders a trust
+// policy that is correct and unreviewable, since nobody reading it can say
+// which machine an id belongs to, so nobody can revoke one.
+//
+// ⚠ IT IS A STATED INPUT AND CANNOT BE DERIVED: nothing at apply time can
+// look these ids up. The operator states them.
+message FederatedAssumePrincipal {
+  // The release machine this pin is FOR (the bundle basename). It names the
+  // trust statement's Sid, which makes revoking ONE machine a one-statement
+  // diff a reviewer can read.
+  string release_machine = 1;
+  // The NUMERIC GCP service-account uniqueId. Both the `aud` and the `sub`
+  // conditions of the trust statement are pinned to this one value.
+  string subject = 2;
+}
+
+// ONE in-account IAM role allowed to assume the day-0 deploy identity: the
+// PER-ENVIRONMENT trust anchor (an environment's own job runner, composed by
+// that environment's bootstrap).
+//
+// ⛔ A DIFFERENT STATEMENT FROM `FederatedAssumePrincipal`, NOT A VARIANT OF
+// IT. All three parts of the rendered statement differ: `Principal` is `AWS`
+// (a role ARN) rather than `Federated`; the action is `sts:AssumeRole` rather
+// than `sts:AssumeRoleWithWebIdentity`; and there is NO condition, because an
+// ARN names one principal outright where a web identity names a token that
+// must then be pinned. Folding this onto the federated message as an optional
+// field would make that message's validation rules conditional.
+//
+// It needs no OIDC provider and no federation: for a same-account assume, a
+// trust policy naming the principal is sufficient on its own.
+message InAccountAssumePrincipal {
+  // What this pin is FOR. It names the trust statement's Sid, for the same
+  // reviewability reason as `FederatedAssumePrincipal.release_machine`.
+  string name = 1;
+  // The in-account IAM role name as the GRAPH knows it: the `account_id` of
+  // the SERVICE_ACCOUNT node this same graph composes.
+  //
+  // ⚠ THE BARE NAME, not a path-qualified name and not an ARN. The graph is
+  // cloud-neutral and holds neither the account id, the partition nor the IAM
+  // path; the AWS arm qualifies it and builds the ARN, as it does for a
+  // grant's target.
+  string role_name = 2;
+}
+
+// SERVICE_ACCOUNT resolved desired state.
+message ServiceAccountSpec {
+  // The account id / short name.
+  string account_id = 1;
+  // The human-readable display name.
+  string display_name = 2;
+  // TRUE iff this identity ALREADY EXISTS and is owned OUTSIDE this graph: the
+  // graph NAMES it so grants can address it, and creates, mutates and deletes
+  // nothing about it.
+  //
+  // ⛔ THE DEFAULT (false) IS "WE CREATE IT", the only safe zero. A node
+  // nobody thought about must not silently claim a principal somebody else
+  // owns; a claim of ownership is falsified by the first create that reports
+  // the identity already exists.
+  //
+  // ⚠ A PROPERTY OF (NODE x CLOUD), NOT OF THE NODE: the same logical identity
+  // may be created by bootstrap on one cloud and created out of band on
+  // another. It is therefore authored at the composer's cloud-gated site.
+  //
+  // ⚠ The field is named for the ownership fact, not for one cloud's
+  // packaging: "created by an out-of-band step" implies externally owned, but
+  // not the converse (a Kubernetes role reconciled by another team's tooling
+  // is externally owned and rendered by nobody).
+  //
+  // Residual: only the AWS arm reads this today, so its conformer refuses
+  // create/update/delete; a GCP node set TRUE would still be created. No
+  // composer sets one for GCP; a GCP refusal belongs with the first GCP node
+  // that needs it.
+  //
+  // It is NOT the same question as fields 4 and 5. "Can this credential
+  // create it" is this field; "may a per-capability grant add an inline
+  // policy to it" is decided by field 4.
+  bool externally_owned = 3;
+
+  // TRUE iff this node IS the day-0 deploy identity: the one identity a
+  // deploy runs AS. Cloud- and credential-independent: it says WHICH identity
+  // this is, never who may create it.
+  //
+  // ⛔ IT IS TRUE EVEN WHEN `assume_principals` IS EMPTY, which is why it is a
+  // separate field: the day-0 grant refusal keys on this, so day-0 grants
+  // stay reported-and-not-written in the bring-your-own-account posture too.
+  //
+  // It is why the discriminator is not a match on `account_id`: the graph
+  // SAYS which node is the deploy identity rather than leaving a reader to
+  // match a name.
+  bool is_day0_deploy_identity = 4;
+
+  // The federated identities allowed to assume this identity: the STATED
+  // input that keys `externally_owned` on the CREDENTIAL rather than on the
+  // cloud.
+  //
+  // ⛔ EMPTY IS THE BRING-YOUR-OWN-ACCOUNT POSTURE AND MUST STAY REFUSING. A
+  // bootstrap running AS the deploy identity inside an account cannot create
+  // that same identity, so nobody has a trust set to hand the composer, the
+  // list is empty, `externally_owned` stays TRUE and the conformer refuses.
+  //
+  // ⛔ NON-EMPTY IS AN OPERATOR RUN. The trust-policy renderer refuses an
+  // empty principal list, so there is no "create it with some default trust"
+  // branch to get wrong.
+  repeated FederatedAssumePrincipal assume_principals = 5;
+
+  // The IN-ACCOUNT identities allowed to assume this identity: the
+  // per-environment trust anchor the environment's own bootstrap composes.
+  //
+  // ⛔ THE SECOND HALF OF ONE KEY, NEVER A SECOND KEY. `externally_owned` is
+  // authored as "this graph names NO principal that may assume this
+  // identity", i.e. `len(assume_principals) +
+  // len(in_account_assume_principals) == 0`, so a role created with no
+  // principals stays unrepresentable. Empty on both fields is still the
+  // bring-your-own-account posture and still refuses.
+  repeated InAccountAssumePrincipal in_account_assume_principals = 6;
+}
+
+// The federation protocol a WIF provider speaks. The `AWS` arm is what an AWS
+// IAM role federates through; the `OIDC` arm is the deployer trust.
+enum WifProviderKind {
+  // Proto3 zero default, treated as OIDC so a node composed before this field
+  // existed is unchanged.
+  WIF_PROVIDER_KIND_UNSPECIFIED = 0;
+  // An OIDC provider (issuer URI plus allowed audiences).
+  WIF_PROVIDER_KIND_OIDC = 1;
+  // An AWS provider (an AWS account id plus an attribute condition over the
+  // SigV4-signed GetCallerIdentity assertion).
+  WIF_PROVIDER_KIND_AWS = 2;
+}
+
+// One `attribute_mapping` entry on a WIF provider: the target attribute path
+// (`google.subject`, `attribute.aws_role`, ...) and the CEL expression over
+// the incoming assertion that produces it. A repeated key/value rather than a
+// `map` so the authored order is stable and diffable.
+message WifAttributeMapping {
+  // The attribute this mapping populates (e.g. "google.subject").
+  string attribute = 1;
+  // The CEL expression over the incoming assertion (e.g.
+  // "assertion.arn.extract('assumed-role/{role}/')").
+  string expression = 2;
+}
+
+// WIF_PROVIDER resolved desired state: the bootstrap trust seam, and also a
+// per-project federation trust through which a workload in another cloud
+// federates into a project with no key material.
+//
+// Fields 3-7 are additive and their defaults are the OIDC bootstrap shape.
+//
+// ⛔ `attribute_condition` IS THE SECURITY CONTROL ON AN AWS PROVIDER, NOT
+// METADATA. An AWS provider names an ACCOUNT, and every principal in that
+// account satisfies the account check on its own; the condition is the only
+// thing that narrows it to one role. A provider created without one is a
+// standing grant to a whole AWS account, so the conformer REFUSES an AWS
+// provider with an empty condition rather than letting the API default it to
+// `true`.
+message WifProviderSpec {
+  // The workload-identity pool id.
+  string pool_id = 1;
+  // The workload-identity provider id.
+  string provider_id = 2;
+  // Which federation protocol the provider speaks. UNSPECIFIED == OIDC.
+  WifProviderKind provider_kind = 3;
+  // AWS providers ONLY: the 12-digit AWS account id whose identities this
+  // provider federates. REQUIRED when `provider_kind` is AWS.
+  string aws_account_id = 4;
+  // The CEL attribute condition every incoming assertion must satisfy.
+  // REQUIRED (non-empty) for an AWS provider; see the message comment.
+  string attribute_condition = 5;
+  // The provider's attribute mappings. `google.subject` is required for every
+  // provider kind; a spec that omits it is refused by the conformer, so the
+  // failure names the missing mapping.
+  repeated WifAttributeMapping attribute_mapping = 6;
+  // The human-readable provider display name (diagnostics only).
+  string display_name = 7;
+}
+
+// BUCKET resolved desired state: the bootstrap state/artifact bucket and
+// app-authored buckets alike. The policy fields (storage class, uniform
+// bucket-level access, public access prevention) are empty/false by default,
+// so a bucket node that sets only `location` takes the cloud's defaults.
+//
+// WHY `Resolved` IS IN THE NAME. The intent tier (`komira.bundle.v1`) also has
+// a `BucketSpec`: they are the AUTHORED and RESOLVED tiers of one concept (the
+// authored tier carries the literal `name`; here the bucket is identified by
+// its node `logical_id`). The package split makes the shared name legal, but
+// a Mojo consumer imports both into one flat namespace, so the resolved tier
+// carries a `Resolved` prefix, as `ResolvedGitPush`, `ResolvedSchedule` and
+// `ResolvedPackagePublished` do. The prefix is source-level only: no encoder
+// puts a message name on the wire.
+message ResolvedBucketSpec {
+  // The bucket location / region.
+  string location = 1;
+  // The storage class ("STANDARD" / "NEARLINE" / ...). EMPTY -> the
+  // conformer's STANDARD default.
+  string storage_class = 2;
+  // Whether uniform bucket-level access is enforced. Default false (the
+  // cloud's default for a bucket inserted without an explicit IAM
+  // configuration).
+  bool uniform_bucket_level_access = 3;
+  // The public-access-prevention policy ("enforced" / "inherited"). EMPTY ->
+  // the cloud default (no explicit policy stamped).
+  string public_access_prevention = 4;
+
+  // How long an object may live here, in DAYS: the resolved mirror of the
+  // intent tier's `BucketSpec.object_expiry_days`. 0 = not authored (no
+  // lifecycle block on create, no read-back comparison, no converge); N > 0 =
+  // one object lifecycle rule deleting objects older than N days, stamped on
+  // create and converged on adopt; N < 0 = refused by the conformer.
+  //
+  // Not redundant with the intent tier: bootstrap composes a bucket node
+  // directly with no bundle above it, so a field that stopped at the intent
+  // tier would reach the conformer only for app-authored buckets.
+  int32 object_expiry_days = 5;
+}
+
+// ARTIFACT_REPOSITORY resolved desired state (publish targets).
+message ArtifactRepositorySpec {
+  // The repository name / path.
+  string repository = 1;
+  // The structural format (OCI image registry | conda channel | Python index |
+  // npm registry); drives which publish conformer targets it.
+  ArtifactFormat format = 2;
+  // The read policy / ACL (PRIVATE | ORG_READ | PUBLIC_READ). Not cosmetic: it
+  // governs cross-account readability and retention.
+  ArtifactVisibility visibility = 3;
+  // WHERE the repository lives, when that is NOT the deploy region. EMPTY
+  // means the mapper's region. NON-EMPTY pins the repository to this
+  // location, and with it every artifact read/write (or repository-policy
+  // read) grant IN THE SAME MANIFEST that targets it: a repository's location
+  // is part of its resource name, so a grant addressed to the deploy region
+  // would bind a repository that does not exist.
+  //
+  // ⚠ SAME MANIFEST ONLY. The mapper finds a grant's location by looking up
+  // the repository node in the graph it is mapping. A grant composed in
+  // ANOTHER graph finds no node and keeps that graph's region, so a grant on
+  // a relocated repository must be composed beside it.
+  //
+  // It lets a deployment place a new repository in a different region from
+  // its environment's (whose existing repositories cannot move, since the
+  // location is part of the name).
+  string location = 4;
+}
+
+// ─── The resolved trigger arms: a mirror of the intent tier, arm for arm ─────
+//
+// TRIGGER resolved desired state is a continuous-deployment source binding.
+// The PRESENCE of at least one Trigger node in the graph is what makes a
+// deployment continuous. N Trigger nodes may share one `pipeline_ref` (fan-in:
+// any bound source firing runs the same pipeline). The HMAC webhook secret's
+// value never rides in the manifest, only its handle.
+//
+// The arms are declared independently here, not imported (this file imports
+// nothing). The composition translates arm for arm when it emits a Trigger
+// node.
+
+// A push to a tracked git ref fires the pipeline.
+message ResolvedGitPush {
+  // The GENERIC source host class (resolved to a concrete host by the
+  // conformer; no vendor token rides here).
+  SourceKind source_kind = 1;
+  // The repository handle this Trigger binds (a symbolic ref the conformer
+  // resolves to a concrete repository).
+  string repo_ref = 2;
+  // The git ref (branch/tag) tracked for the firing event (e.g. "main").
+  // (Mojo field name: `ref_`, because `ref` is a Mojo keyword the codegen
+  // escapes with a trailing underscore; the wire/JSON name stays `ref`.)
+  string ref = 3;
+}
+
+// A wall-clock cadence fires the pipeline.
+//
+// ⚠ NO CONFORMER PROVISIONS A TIMER FOR THIS. A resolved schedule is declared
+// desired state that the control plane reads, deliberately not a cloud
+// resource: a per-deployment cloud timer would be one scheduler job per
+// application per organization. The trigger reconciler skips this arm.
+message ResolvedSchedule {
+  // The 5-field cron CADENCE (`m h dom mon dow`).
+  string cron = 1;
+  // The IANA timezone the cron is interpreted in. EMPTY means UTC.
+  string timezone = 2;
+}
+
+// A package published to a watched registry fires the pipeline.
+message ResolvedPackagePublished {
+  // The GENERIC registry class (no vendor token rides here).
+  RegistryKind registry_kind = 1;
+  // The package handle watched.
+  string package_ref = 2;
+  // The version range that fires. EMPTY means any published version.
+  string version_range = 3;
+}
+
+message TriggerSpec {
+  reserved 1, 2, 3, 4;
+  reserved "source_kind", "repo_ref", "ref", "event";
+
+  // The pipeline this source drives: the application SYMBOL (== the bundle
+  // name), resolved by the control plane to a pipeline definition at apply
+  // time (NOT an in-manifest logical_id). N Triggers sharing this value are
+  // the fan-in.
+  //
+  // At the message level, not on an arm: `pipeline_ref` and
+  // `webhook_secret_ref` are properties of any trigger; only the firing
+  // condition varies by arm.
+  string pipeline_ref = 5;
+  // A HANDLE of the per-repository HMAC webhook Secret node (the value never
+  // rides in the manifest). EMPTY for an arm with no inbound webhook (a
+  // schedule).
+  string webhook_secret_ref = 6;
+
+  // The trigger's SYMBOL, carried down from the authored trigger name.
+  string name = 7;
+
+  // ── The open set (mirrors the intent tier arm for arm) ─────────────────────
+  oneof on {
+    // A push to a tracked git ref.
+    ResolvedGitPush git_push = 8;
+    // A wall-clock cadence.
+    ResolvedSchedule schedule = 9;
+    // A package published to a watched registry.
+    ResolvedPackagePublished package_published = 10;
+  }
+}
+
+// INVOKE_GRANT resolved desired state: a CROSS-SERVICE invoke grant. Authorizes
+// a CALLER service's runtime identity to invoke a CALLEE served node, as an
+// invoker binding ON THE CALLEE's OWN policy (a policy on B's resource with A's
+// identity as member, which must apply after B exists). A separate, ordered
+// node that `depends_on` the callee. No cloud role string rides here.
+//
+// SUPERSEDED by the generic `GrantSpec` (`CAPABILITY_INVOKE_SERVICE` is its
+// exact invoke arm). The oneof arm (`invoke_grant = 20`) is retained and never
+// renumbered, so a manifest pinned with it still decodes; composition emits
+// `RESOURCE_KIND_GRANT` / `GrantSpec` nodes.
+message InvokeGrantSpec {
+  // The CALLER's runtime identity: the member the grant authorizes (a
+  // service-account handle the conformer forms into the provider's member
+  // expression).
+  string member_identity_ref = 1;
+  // The `logical_id` of the CALLEE served node whose policy this grant binds.
+  // An in-manifest graph reference: the grant node `depends_on` it, and the
+  // conformer resolves it to the callee's physical service at apply time.
+  string target_service_logical_id = 2;
+}
+
+// ─── The grant scope vocabulary ──────────────────────────────────────────────
+//
+// WHICH resources a `GrantSpec` binds on: the typed replacement for the `""`
+// convention on `GrantSpec.target_resource_logical_id`. That convention had
+// several distinct meanings across its readers, and it is unimplementable on a
+// target with no ambient container (Kubernetes has no project and no
+// account).
+//
+// ⛔ THE DISCRIMINANT IS THE POINT. `""` had to be INTERPRETED; a
+// `scope_class` makes "empty" a state the type refuses rather than a
+// convention each reader re-derives.
+enum GrantScopeClass {
+  // Proto3 zero default. Fail-fast: a composed grant node must state its
+  // class. Also read as the legacy `""` convention until every composer
+  // writes a concrete class.
+  GRANT_SCOPE_UNSPECIFIED = 0;
+  // Exactly ONE named resource in this graph. `target_logical_id` is REQUIRED
+  // (an in-manifest graph reference the grant node `depends_on`).
+  GRANT_SCOPE_RESOURCE = 1;
+  // A SELECTOR over one `ResourceKind` within `boundary_ref`.
+  //
+  // ⛔ IT DOES NOT MEAN "OWNS", and the weaker promise is deliberate: no target
+  // has an ownership primitive. AWS matches by NAME PREFIX (a prefix ARN also
+  // authorizes a bucket an unrelated principal creates later, and S3's
+  // namespace is global); GCP matches by CONTAINMENT (a project or folder
+  // binding); Kubernetes RBAC has no globs at all, only "all of type T" or
+  // "these exact names". Its blast radius therefore differs by orders of
+  // magnitude per target.
+  //
+  // ⛔ A RESOURCE_CLASS OVER A KIND THAT CAN CONTAIN THE GRANT'S OWN PRINCIPAL
+  // IS REFUSED AT COMPOSE TIME (today kinds 8 IAM_ROLE and 11
+  // SERVICE_ACCOUNT): making it safe needs "every resource of kind K except
+  // the principal itself", which needs a deny/condition primitive this
+  // message does not have.
+  GRANT_SCOPE_RESOURCE_CLASS = 2;
+  // The deployment's whole boundary, ACROSS kinds. `resource_kind` MUST be
+  // unset. LOG_WRITE (10) is its one legitimate user.
+  GRANT_SCOPE_DEPLOYMENT = 3;
+  // ONE resource whose NAME only the target arm can form, for example a
+  // bootstrap bucket named after a project on one cloud and after an account
+  // on another, which a cloud-neutral composer cannot spell. It is NOT
+  // RESOURCE_CLASS, which would be strictly wider than the one resource.
+  // `well_known_id` is REQUIRED.
+  GRANT_SCOPE_WELL_KNOWN_RESOURCE = 4;
+}
+
+// The typed scope of a `GrantSpec`: the `(kind, target)` pair `ResourceKind`
+// already uses, plus a discriminant that makes "empty" unrepresentable by
+// accident.
+message GrantScope {
+  // WHICH of the four shapes this scope is. UNSPECIFIED is a fail-fast.
+  GrantScopeClass scope_class = 1;
+  // REQUIRED for RESOURCE_CLASS and WELL_KNOWN_RESOURCE; derivable for
+  // RESOURCE; MUST be unset for DEPLOYMENT.
+  ResourceKind resource_kind = 2;
+  // REQUIRED for RESOURCE; MUST be empty for the others. The `logical_id` of
+  // the target node.
+  string target_logical_id = 3;
+  // The account / project / namespace / resource group this scope is
+  // RELATIVE TO. EMPTY = the deployment's own.
+  //
+  // ⚠ IT DESCRIBES THE TARGET's BOUNDARY ONLY. The principal's boundary is a
+  // property of the principal. Without this field the type would assume
+  // principal and target share one boundary, which is false on every target
+  // (cross-account bucket policies, cross-project bindings, and a Kubernetes
+  // RoleBinding naming a subject in another namespace are all ordinary).
+  string boundary_ref = 4;
+  // REQUIRED for WELL_KNOWN_RESOURCE: a SYMBOLIC name the target arm resolves
+  // ("bootstrap-state-bucket"), never a physical one.
+  string well_known_id = 5;
+}
+
+// GRANT resolved desired state: the UNIFIED generic capability grant.
+// Authorizes a principal's runtime identity a named generic `Capability` on a
+// target resource: a per-resource set-policy on the TARGET (member = the
+// principal), as a separate ordered node that `depends_on` the target. The
+// superset of `InvokeGrantSpec` (an InvokeGrant is exactly
+// `GrantSpec{capability: CAPABILITY_INVOKE_SERVICE}`).
+//
+// This message carries ONLY the generic `Capability`: never a cloud role
+// string and never a provider member expression. The capability -> role table
+// and the member form live only in the conformer; the manifest tier is
+// capability-typed, the conformer tier is role-typed.
+message GrantSpec {
+  // The principal's runtime identity: the member the grant authorizes (a
+  // service-account handle the conformer forms into the provider's member
+  // expression). A NAME, never a role.
+  string principal_identity_ref = 1;
+  // The GENERIC capability this grant authorizes. The conformer resolves it to
+  // the concrete cloud role; UNSPECIFIED is a fail-fast.
+  Capability capability = 2;
+  // The `logical_id` of the TARGET resource this grant binds ON (the served
+  // node for INVOKE_SERVICE, the secret for READ_SECRET, ...). An in-manifest
+  // graph reference the grant node `depends_on`; the conformer derives the
+  // physical target. EMPTY (`""`) has meant a project-scoped binding.
+  //
+  // ⚠ The `""` convention is being retired: read `scope` (field 4). This field
+  // keeps carrying the RESOURCE case's logical id; what moves to `scope` is
+  // the interpretation of an empty one.
+  string target_resource_logical_id = 3;
+  // The TYPED SCOPE. Unset only while composers migrate to writing it.
+  //
+  // ⚠ It is `Optional[GrantScope]` in Mojo (a singular proto3 message field
+  // has explicit presence), so an UNSET scope emits zero bytes and the
+  // manifest's content address is unchanged by the field's existence.
+  GrantScope scope = 4;
+}
+
+// One PER-ENVIRONMENT runtime-config key/value the conformer stamps into the
+// serving bucket's `config.json` at publish time. The environment-neutral SPA
+// build carries no per-environment client values; each environment's bundle
+// authors them, the composer projects them into this field, and the conformer
+// renders them into the `config.json` the SPA fetches at boot. A repeated
+// key/value rather than a `map` so the authored order is stable and diffable.
+// Only public client-side identifiers ride here, never a secret.
+message WebRuntimeConfigEntry {
+  // The runtime-config key (e.g. "VITE_FIREBASE_PROJECT_ID"). The conformer
+  // maps it to the config.json path.
+  string key = 1;
+  // The literal per-environment value (e.g. "example-project"). A public
+  // client-side identifier, never a secret (secrets ride the SecretSpec /
+  // Grant path).
+  string value = 2;
+}
+
+// WEB_FRONTEND resolved desired state: the static-website front-door composite
+// (a content bucket, a CDN-fronted backend and a global HTTPS load balancer).
+// ONE node config; the vendor L7 primitives are derived from `web_slug` inside
+// the conformer, deterministically, so an existing front door built with the
+// same names is read as MATCHED and adopted. No vendor primitive name rides
+// here.
+message WebFrontendSpec {
+  // The stable name prefix every derived resource name is built from
+  // (`<slug>-lb` / `<slug>-cert` / `<slug>-web-ip` / ...). Decoupled from
+  // `domain`: a blue-green parallel front door uses a NEW slug while `domain`
+  // is unchanged, and DNS is repointed once.
+  string web_slug = 1;
+  // The primary domain the managed certificate is issued for (e.g.
+  // "example.com"). DNS is managed outside the graph (a one-time A-record
+  // pointed at the reserved global IP); there is no DNS_RECORD node.
+  string domain = 2;
+  // Additional certificate domains (e.g. "www.example.com").
+  repeated string additional_domains = 3;
+  // The SPA CONTENT bucket: the one name NOT derived from the slug (bucket
+  // names are globally unique). EMPTY -> the conformer derives
+  // `<project>-web-static`; NON-EMPTY -> this explicit value.
+  string content_bucket = 4;
+  // The SPA deep-link fallback document the url-map error policy serves for
+  // unmatched paths (e.g. "/index.html"), so a client-side-routed deep link
+  // serves the app shell.
+  string spa_fallback_document = 5;
+  // The path prefixes the load balancer routes to the api backend (e.g.
+  // "/api", "/v1"); the rest is served from the content bucket.
+  repeated string api_path_prefixes = 6;
+  // The served node the api path rules target: the LOGICAL service the
+  // conformer derives the backend from. The `depends_on` edge to it is
+  // ordering-only.
+  string api_service_logical_id = 7;
+  // Whether a CDN fronts the SPA backend bucket (content-hash freshness, no
+  // invalidation verb).
+  bool cdn_enabled = 8;
+  // The (optional) pinned SPA content digest, the `image_digest` analogue: a
+  // `content-sha256:<hex>` address. The environment-neutral build is produced
+  // once and content-addressed, and every environment promotes the same
+  // digest; the conformer's publish verb mirrors that immutable content into
+  // the serving bucket. EMPTY = provision the bucket and load balancer but
+  // publish no content.
+  string content_digest = 9;
+  // The PER-ENVIRONMENT runtime config the conformer stamps into
+  // `config.json` at publish time. Each environment's own bundle carries its
+  // own values, which is what lets one shared, content-addressed artifact
+  // serve every environment.
+  repeated WebRuntimeConfigEntry runtime_config = 10;
+  // The FULL url-map route table, authored verbatim. When NON-EMPTY it is the
+  // authoritative routing table the conformer renders as written (multiple
+  // backend roles, per-rule 404 policies, no prefix expansion), superseding
+  // `api_path_prefixes`. EMPTY => the conformer falls back to the uniform
+  // `api_path_prefixes` expansion.
+  repeated WebRouteRule route_rules = 11;
+}
+
+// ─── One verbatim url-map path rule ──────────────────────────────────────────
+//
+// A single load-balancer path rule projected 1:1 from the authored route rule:
+// a verbatim path list -> a derived backend (by role), plus an OPTIONAL
+// per-rule 404 policy. Only the ROLE token rides, never a vendor backend name;
+// the conformer derives the concrete backend from `web_slug`.
+message WebRouteRule {
+  // The verbatim path list this rule matches (bare, wildcard or exact; no
+  // expansion).
+  repeated string paths = 1;
+  // The backend ROLE: "spa" (the SPA backend bucket) or a served-backend role
+  // such as "api". Empty defaults to "api"; unknown roles fail fast in the
+  // conformer.
+  string backend_role = 2;
+  // OPTIONAL per-rule 404 custom-error path (e.g. "/help/index.html"): a
+  // 404 under these paths serves this object with `error_404_code`. Empty = no
+  // per-rule policy.
+  string error_404_path = 3;
+  // The response code the per-rule 404 policy overrides to (e.g. 404). 0 =
+  // none.
+  int32 error_404_code = 4;
+  // The rule's ROUTING DISPOSITION. The zero value is ROUTE, so a manifest
+  // composed before this field existed projects byte-identically.
+  WebRouteDisposition disposition = 5;
+  // WHY a DENY exists, carried into the manifest so the containment's reason
+  // is visible in the synthesized graph, not only in the authored bundle.
+  string deny_reason = 6;
+}
+
+// ─── The routing disposition of one WebRouteRule ─────────────────────────────
+//
+// Mirrors `app_bundle.proto`'s enum of the same name (this schema imports no
+// intent schema, so the vocabulary is restated). ROUTE = route the paths; DENY
+// = the paths MUST NOT be routed to any backend (a negative route: no path
+// rule is emitted, and a live map that routes one is drift); DEFAULT = the
+// rule configures the path matcher's default arm and its custom error policy
+// (the SPA deep-link fallback), not a path rule.
+enum WebRouteDisposition {
+  // Route `paths` -> `backend_role`. The additive-safe zero value.
+  WEB_ROUTE_DISPOSITION_ROUTE = 0;
+  // `paths` MUST NOT be routed to any backend (security containment).
+  WEB_ROUTE_DISPOSITION_DENY = 1;
+  // The path matcher's DEFAULT arm (default service and default 404 policy).
+  WEB_ROUTE_DISPOSITION_DEFAULT = 2;
+}
+
+// ─── The API_EDGE route mode ─────────────────────────────────────────────────
+//
+// How client paths map onto the edge. Declared top-level, like every enum in
+// this file.
+enum RouteMode {
+  // Proto3 zero default. UNSPECIFIED is a fail-fast invalid value.
+  ROUTE_MODE_UNSPECIFIED = 0;
+  // One route at `route_path` (an inbound webhook). The method set is
+  // conformer render policy; a method-bearing single route would be an
+  // additive enum value, not a rename.
+  ROUTE_MODE_SINGLE_PATH = 1;
+  // All paths, with a minimum verb set, forwarded verbatim.
+  ROUTE_MODE_CATCH_ALL = 2;
+}
+
+// ─── The API_EDGE edge-auth intent ───────────────────────────────────────────
+//
+// Mirrors the code-level edge auth policy (vendor-neutral vocabulary).
+// Proto -> Mojo translation: 1 -> EdgeAuthPolicy 0, 2 -> EdgeAuthPolicy 2,
+// 3 -> 3, 4 -> 4, raise on 0. Modes 1 and 2 are behaviourally identical pure
+// bridges at the edge (the application is the sole authorizer);
+// WEBHOOK_SECRET is an intent marker that conformers MAY surface as a
+// documentation marker, never as enforcement. Modes 3 and 4 ARE enforcement.
+//
+// ⚠ A secured route whose security definition is not served is worse than an
+// honest pass-through: the managed gateway accepts a document whose
+// requirement names a definition nobody serves and leaves the route OPEN. Each
+// enforcing mode is therefore validated at map time, before anything is
+// rendered.
+enum EdgeAuthMode {
+  // Proto3 zero default. Fail-fast invalid.
+  EDGE_AUTH_MODE_UNSPECIFIED = 0;
+  // Intent: the application checks a shared-secret header (a relay webhook).
+  EDGE_AUTH_MODE_WEBHOOK_SECRET = 1;
+  // The edge is a pure reachability bridge (the only portable mode).
+  EDGE_AUTH_MODE_CLIENT_PASSTHROUGH = 2;
+  // The FEDERATED-CALLER mode, which IS enforcement: the edge validates a
+  // SELF-SIGNED service-account JWT against that account's own published key
+  // set, which pins WHICH PRINCIPAL called. Legal ONLY on a `SecuredEdgeRoute`,
+  // never as the edge-wide `ApiEdgeSpec.edge_auth_mode`: an edge-wide
+  // federated policy would also cover the pass-through route, whose caller (a
+  // third-party relay) cannot mint such a token.
+  EDGE_AUTH_MODE_FEDERATED_SA_JWT = 3;
+
+  // The IDENTITY-TOKEN mode: the edge validates the control plane's
+  // short-lived, identity-only ES256 JWT against the control plane's published
+  // EC key set. The token says WHO is calling and has no field that can
+  // express a permission: authorization is a live call the application makes
+  // on every request, so a permission change takes effect immediately.
+  //
+  // ⛔ IT IS THE EDGE-WIDE MODE, AND IT IS REFUSED ON A `SecuredEdgeRoute`.
+  // FEDERATED_SA_JWT is the mirror image (per-route only, refused edge-wide),
+  // and both refusals are one rule: a route must never require a credential
+  // its caller cannot mint.
+  //
+  // ⛔ AND IT IS LEGAL ONLY UNDER `ROUTE_MODE_CATCH_ALL`. SINGLE_PATH is the
+  // relay shape, where edge-wide enforcement is precisely the trap, and
+  // CATCH_ALL already refuses `secured_routes`, so under this mode an edge has
+  // exactly one caller class. The mapper enforces both halves.
+  //
+  // Selecting it requires the issuer's key set to be served; see the warning
+  // on this enum.
+  EDGE_AUTH_MODE_IDENTITY_JWT = 4;
+}
+
+// ─── One additional, edge-secured route on an API_EDGE (resolved tier) ───────
+//
+// The resolved-tier mirror of `app_bundle.proto:SecuredInboundRoute`: one path
+// plus the edge auth THAT ROUTE enforces. The policy travels with the route
+// because an edge-wide policy cannot describe an edge whose callers hold
+// different kinds of credential.
+//
+// ⛔ ANYTHING OTHER THAN `EDGE_AUTH_MODE_FEDERATED_SA_JWT` HERE IS REFUSED by
+// the mapper: a secured route whose policy has no rendered security definition
+// would be served OPEN (see `EdgeAuthMode`), so "the policy I asked for was not
+// rendered" must be a map-time error.
+message SecuredEdgeRoute {
+  // The path the edge serves and secures. Non-empty, and distinct from the
+  // owning edge's `route_path` (the mapper validates both).
+  string route_path = 1;
+  // The edge auth THIS route enforces. Only FEDERATED_SA_JWT is legal.
+  EdgeAuthMode edge_auth_mode = 2;
+  // ONE FIELD, BOTH HALVES OF THE PIN: the caller's service-account email is
+  // both the issuer the edge matches and the account whose published key set
+  // the edge fetches. Two fields could name two accounts, and the edge would
+  // then verify signatures against A while claiming to pin B. The JWKS URL is
+  // derived in the conformer, never carried here.
+  string sa_email = 3;
+
+  // Field 4 (`repeated string audience`) is retired. The accepted `aud` must
+  // equal the origin of the edge that serves this route, and a gateway
+  // hostname is assigned by the cloud when the gateway is created, after the
+  // config that would carry it. Nothing upstream of the apply can know it, so
+  // nothing upstream may state it: the conformer binds it from the live
+  // gateway hostname, and until that read succeeds the route is not rendered
+  // (a 404 rather than a 401 on a guess).
+  reserved 4;
+  reserved "audience";
+}
+
+// API_EDGE resolved desired state. Anything hostname- or URL-shaped is an
+// OUTPUT, never authored; quotas, certificates and edge identities are
+// conformer-internal.
+message ApiEdgeSpec {
+  // LOGICAL id of the served node this edge fronts: any node that publishes a
+  // resolvable URL (the mapper does not kind-check it). The `depends_on` edge
+  // to it is ordering-only; the live backend address flows at apply time
+  // through the output -> input seam, never authored.
+  string backend_logical_id = 1;
+  // How client paths map onto the edge.
+  RouteMode route_mode = 2;
+  // Required iff SINGLE_PATH (e.g. "/mail/inbound"); MUST be authored by the
+  // bundle, with no baked-in default. Must be empty under CATCH_ALL (the
+  // mapper validates both directions).
+  string route_path = 3;
+  // The edge-auth INTENT (see EdgeAuthMode).
+  EdgeAuthMode edge_auth_mode = 4;
+  // ADDITIONAL routes on this same edge, each carrying its OWN edge auth.
+  // EMPTY (the default) renders nothing extra. Legal only under
+  // ROUTE_MODE_SINGLE_PATH: a CATCH_ALL edge already serves `/**`, so a
+  // "secured" path beside it would be one matcher-precedence rule away from
+  // being served unsecured by the catch-all, and the mapper refuses that
+  // combination.
+  repeated SecuredEdgeRoute secured_routes = 5;
+
+  // ─── The three realization inputs (fields 6-8) ─────────────────────────────
+  //
+  // The resolved-tier mirror of the intent tier's ingress fields. EMPTY /
+  // default means the conformer's own defaults.
+
+  // THE EDGE'S BACKEND-AUTH IDENTITY, AND THE SCOPED-INVOKER MEMBER. One
+  // field for both halves: two fields could name two accounts, and the edge
+  // would mint its backend-hop token as A while B holds the invoker binding,
+  // a 403 indistinguishable from a missing binding that no offline check can
+  // catch.
+  //
+  // ⛔ NEVER `allUsers`. The mapper refuses the literal (as the bundle
+  // validator does; a manifest can be produced by something other than the
+  // bundle parser). Admitting it would grant public invoke on the backend
+  // itself, the condition an edge-fronted private backend exists to avoid.
+  //
+  // EMPTY (the default) means the mapper's project-wide gateway identity,
+  // which the composer provisions. NON-EMPTY means this account is used and
+  // assumed to exist already: the composer emits no create node and no act-as
+  // grant for it.
+  string gateway_service_account = 6;
+  // THE REGION THE EDGE OBJECT IS PLACED IN, decoupled from the backend's and
+  // not derivable from the environment binding. The managed edge product is
+  // not offered in every region the backend may run in; the edge routes
+  // cross-region to the backend by its full HTTPS URL.
+  //
+  // EMPTY (the default) means the conformer's own placement policy. This
+  // field is the OVERRIDE for an operator who must pin the placement.
+  string gateway_region = 7;
+  // The inbound SOURCE ALLOW-LIST the conformer stamps on the served document.
+  //
+  // ⚠ THIS IS NOT AUTHENTICATION. It narrows reachability; what decides
+  // whether a caller is authorized is `edge_auth_mode` / `secured_routes`. A
+  // route with an allow-list and no policy is an unauthenticated route with a
+  // filter in front of it.
+  repeated string allowed_sources = 8;
+  // Whether the realization ALSO composes, ordered before this node, whatever
+  // platform services it requires to exist at all.
+  //
+  // ⚠ A BOOL, DELIBERATELY NOT A LIST OF SERVICES. Which services an edge
+  // needs is the conformer's knowledge; naming them here would put vendor API
+  // names in the neutral tier and create a hand-maintained list that drifts
+  // from what the implementation calls. This field asks; the realization
+  // answers.
+  //
+  // FALSE (the default) means those services are a bootstrap prerequisite.
+  // TRUE means the graph enables them, so a deploy into a fresh project does
+  // not fail at edge creation.
+  bool enable_required_services = 9;
+
+  // ─── The identity-token inputs (fields 10-11) ──────────────────────────────
+  //
+  // Required iff `edge_auth_mode` is EDGE_AUTH_MODE_IDENTITY_JWT, and REFUSED
+  // by the mapper under every other mode: a manifest carrying an issuer no
+  // mode reads is a manifest whose author believed the edge was checking
+  // something.
+
+  // THE CONTROL PLANE'S ISSUER URL. One field, and the JWKS URL is DERIVED
+  // from it, for the reason `SecuredEdgeRoute.sa_email` is one field: a
+  // separate key-set field would let an edge verify signatures against key
+  // set A while its issuer claims B. There is deliberately no field to author
+  // the key-set URL.
+  //
+  // This is also the `iss` the application's own offline verifier requires,
+  // so the edge and the application cannot point at different issuers.
+  string identity_issuer = 10;
+  // THE ACCEPTED AUDIENCE: this application's DEPLOYMENT ID, the per-app
+  // containment fence. A token minted for deployment X is worthless at
+  // deployment Y, and the edge enforces that itself so a mis-audienced token
+  // never reaches the application.
+  //
+  // ⚠ SINGULAR, NOT `repeated`. One edge fronts one deployment; a second
+  // accepted audience is a second application's tokens being admitted here.
+  // Unlike the federated mode there is no origin-binding problem: a
+  // deployment id is known before any cloud call, so it is authored.
+  string identity_audience = 11;
+
+  // ─── The developer-access principal (field 12) ─────────────────────────────
+  //
+  // A SECOND accepted credential on this peer-only edge: the email of a
+  // service account whose self-signed JWT the edge also accepts, verified
+  // against that account's own published key set (one field, for the
+  // `SecuredEdgeRoute.sa_email` reason). The JWKS URL is derived, never
+  // carried here.
+  //
+  // WHAT IT RELAXES: the peer-only restriction, so a named operator can call
+  // an internal service directly. WHAT IT DOES NOT RELAX: authentication.
+  // Only a holder of token-creator authority on the named account can mint a
+  // token this edge accepts.
+  //
+  // ⛔ REQUIRED-EMPTY unless `edge_auth_mode` is EDGE_AUTH_MODE_IDENTITY_JWT
+  // (the mapper refuses it otherwise).
+  //
+  // ⛔ AND IT IS NON-PRODUCTION ONLY, enforced where it is authored: the
+  // refusal lives in the intent tier, the only tier that knows which
+  // environment it is composing for (a resolved manifest carries its
+  // environment as a label, and a label is not a gate).
+  //
+  // EMPTY (the default) renders nothing.
+  string developer_access_principal = 12;
+}
+
+// SCHEDULED_CALL resolved desired state: the wall-clock cron that calls one
+// served node in THIS graph (the resolved form of an authored cron).
+//
+// ⛔ NO `uri` AND NO `audience`, deliberately. Both are the target's serving
+// URL, which the cloud assigns at service creation. The target is named by
+// `target_logical_id` and its address is resolved from the live backend at
+// apply time, through the same output -> input seam API_EDGE uses.
+message ScheduledCallSpec {
+  // LOGICAL id of the served node this cron calls: a node in THIS manifest
+  // that publishes a resolvable URL. The `depends_on` edge to it is
+  // ordering-only.
+  string target_logical_id = 1;
+  // The 5-field cron expression (`m h dom mon dow`), fired at the named
+  // instant.
+  string cron = 2;
+  // The IANA timezone `cron` is interpreted in. EMPTY means UTC. A cron with
+  // no stated zone is a cron that moves twice a year.
+  string timezone = 3;
+  // The path appended to the target's discovered serving URL (e.g.
+  // "/reconcile"). EMPTY means the service root. Starts with "/".
+  string path = 4;
+  // The HTTP method. EMPTY means POST: a scheduled tick that mutates is the
+  // norm, and a GET default would make the safe-looking spelling the wrong
+  // one.
+  string http_method = 5;
+  // The identity the scheduler authenticates AS (the OIDC token's subject).
+  // It is also the member of the scoped invoke grant on the target, composed
+  // as a separate `RESOURCE_KIND_GRANT` node: one value, so the account that
+  // mints the token and the account the target authorizes cannot differ.
+  //
+  // ⚠ A FLAT ACCOUNT ID in the neutral tier (e.g. "scheduler-invoker"),
+  // expanded to the concrete cloud principal inside the conformer, the same
+  // shape `GrantSpec.principal_identity_ref` carries.
+  string invoker_identity = 6;
+  // How long ONE attempt may run before the scheduler gives up, in SECONDS. 0
+  // means the platform default (the field is left unset on the wire).
+  int32 attempt_deadline_seconds = 7;
+}
+
+// NETWORK resolved desired state (kind 25): the INTENT tier of a network, and
+// deliberately nothing below it.
+//
+// ⛔ THERE IS NO CIDR FIELD, by decision. Every cloud-specific dial (the route
+// table's default-route target, public-IP-on-launch, NAT configuration, which
+// subnets a placement lands on) is DERIVED from `egress` by the conformer, per
+// cloud. An operator-authored CIDR would make this a mechanism surface rather
+// than an intent one; it can be added additively when a real need forces it.
+message NetworkSpec {
+  // ADOPT OR CREATE; genuinely different lifecycles. EMPTY means the
+  // conformer CREATES the network and owns it (deleted on a reverse walk).
+  // NON-EMPTY means the conformer ADOPTS this cloud-native id: it observes
+  // it, manages subnets and egress posture WITHIN it, and REFUSES to delete
+  // it, because deleting a VPC somebody else created takes down every
+  // workload in it, and the API call succeeds.
+  string adopt_existing_id = 1;
+
+  // THE ONE OPERATOR-FACING DIAL. See `EgressMode`. UNSPECIFIED is refused by
+  // the conformer, never defaulted.
+  EgressMode egress = 2;
+
+  // How many zones to spread subnets across. 0 means EVERY zone the region
+  // has, which mirrors the clouds' own "spread for HA" convention.
+  //
+  // ⚠ IT MEANS DIFFERENT PRIMITIVES ON DIFFERENT CLOUDS, which is why it is
+  // intent. AWS subnets are AZ-scoped, so N zones is N subnets; GCP subnets
+  // are region-scoped and span every zone, so N zones is still one subnet.
+  int32 zone_count = 3;
+}
+
+// One peer/port/protocol allow rule inside an `IngressPolicySpec`.
+message IngressRule {
+  // WHO may reach the workload. A oneof rather than two strings because
+  // absent and empty are the same bytes to a plain string field, and a rule
+  // whose peer silently read as "" would open or close the wrong thing
+  // without ever being unparseable.
+  oneof peer {
+    // Another node in THIS graph (a load balancer, another workload). The
+    // conformer resolves it to that node's realized network identity (a peer
+    // security group on AWS, a target tag on GCP) at apply time. Never an
+    // address: the address does not exist until the peer is created.
+    string peer_logical_id = 1;
+    // An EXTERNAL CIDR, operator-authored: the one place raw networking is
+    // exposed, because an external peer has no logical id. `0.0.0.0/0` is a
+    // legal and meaningful value.
+    string peer_cidr = 2;
+  }
+  // The destination port. ⚠ ONE PORT, NOT A RANGE: a caller wanting 80 and 443
+  // emits two rules. A range end can be added additively when needed.
+  int32 port = 3;
+  // "tcp" | "udp". EMPTY means the conformer REFUSES: a protocol-less rule is
+  // one whose author did not say what they were opening.
+  string protocol = 4;
+}
+
+// INGRESS_POLICY resolved desired state (kind 26): the peer/port/protocol
+// allow-list protecting exactly ONE placed workload.
+//
+// ⛔ EMITTED ALONGSIDE ITS WORKLOAD, NEVER SEPARATELY AUTHORED (the API_EDGE
+// relationship to a served node): a policy whose workload was deleted is a
+// policy nothing removes, and a workload whose policy was never emitted has no
+// fence.
+message IngressPolicySpec {
+  // The ONE workload this policy protects, by LOGICAL id. Mirrors
+  // `ApiEdgeSpec.backend_logical_id`.
+  string backend_logical_id = 1;
+
+  // The allow rules. An EMPTY list is MEANINGFUL: "no peer may reach this
+  // workload inbound", the correct posture for an egress-only worker. It is
+  // not the same as having no policy node at all, which leaves the
+  // substrate's default in force.
+  repeated IngressRule rules = 2;
+
+  // The `RESOURCE_KIND_NETWORK` node this policy is scoped to, by LOGICAL id.
+  //
+  // ⛔ STATED, NOT INFERRED FROM `depends_on`. A security group or firewall
+  // rule is network-scoped, so the network is an INPUT to creating one, while
+  // `depends_on` is an ordering edge that may carry any number of unrelated
+  // predecessors. Reading the network off the edge list would silently pick
+  // an arbitrary one once an environment has more than one network.
+  string network_logical_id = 3;
+}
+
+// ─── One synthesized resource node ───────────────────────────────────────────
+//
+// One typed node in the expanded graph. The applier creates one node at a time
+// in topological order (on `depends_on`), records a write-ahead intent row
+// BEFORE the cloud create, and does not confirm a node until its health gate
+// reports it healthy and serving the desired digest.
+message ResourceNode {
+  // The stable logical identity of this node WITHIN the manifest: the
+  // `depends_on` edge target other nodes reference. NOT a cloud resource id.
+  string logical_id = 1;
+  // The generic node kind. MUST agree with the set `config` oneof arm.
+  ResourceKind kind = 2;
+  // The `logical_id`s of this node's predecessors: the edges the applier
+  // walks (create predecessors first) and a rollback walks in reverse.
+  repeated string depends_on = 3;
+  // The reverse-walk retention policy (destroy vs keep on rollback/destroy).
+  Retention retention = 4;
+  // The typed per-kind resolved desired state. Exactly one arm is set, and it
+  // MUST correspond to `kind`. Grows additively: a new kind adds a new arm
+  // number. (The CONFIG-kind arm is named `config_data` to avoid clashing
+  // with the oneof's own name `config`.)
+  //
+  // ⚠ APPENDING AN ARM CHANGES EVERY `ResourceNode(` CONSTRUCTION SITE. The
+  // generated struct has no defaults, so every positional construction grows
+  // one trailing `None`. A site with the wrong arity fails to compile, but a
+  // site that shifts an argument by one does not (every arm is
+  // `Optional[...]`), so the arm comments below give each arm's index.
+  oneof config {
+    // SERVERLESS_COMPUTE.
+    ServerlessComputeSpec serverless_compute = 5;
+    // RUN_TO_COMPLETION_JOB.
+    RunToCompletionJobSpec run_to_completion_job = 6;
+    // OBJECT_STORE. Consolidated into `bucket` (arm 17, kind 13); retained,
+    // never emitted, never renumbered.
+    ObjectStoreSpec object_store = 7;
+    // DATASTORE.
+    DatastoreSpec datastore = 8;
+    // QUEUE.
+    QueueSpec queue = 9;
+    // LOAD_BALANCER.
+    LoadBalancerSpec load_balancer = 10;
+    // DNS_RECORD.
+    DnsRecordSpec dns_record = 11;
+    // IAM_ROLE.
+    IamRoleSpec iam_role = 12;
+    // SECRET.
+    SecretSpec secret = 13;
+    // CONFIG (arm named `config_data`, not `config`, to avoid the oneof-name
+    // clash).
+    ConfigSpec config_data = 14;
+    // SERVICE_ACCOUNT.
+    ServiceAccountSpec service_account = 15;
+    // WIF_PROVIDER.
+    WifProviderSpec wif_provider = 16;
+    // BUCKET. (`ResolvedBucketSpec`, not `BucketSpec`; see that message.)
+    ResolvedBucketSpec bucket = 17;
+    // ARTIFACT_REPOSITORY.
+    ArtifactRepositorySpec artifact_repository = 18;
+    // TRIGGER (continuous-deployment source binding). Arm index 15
+    // (`_oneof0_case == 15`); field number 19.
+    TriggerSpec trigger = 19;
+    // INVOKE_GRANT. Superseded by `grant`; retained, never renumbered. Arm
+    // index 16 (`_oneof0_case == 16`); field number 20.
+    InvokeGrantSpec invoke_grant = 20;
+    // GRANT (the unified generic capability grant). Arm index 17
+    // (`_oneof0_case == 17`); field number 21.
+    GrantSpec grant = 21;
+    // WEB_FRONTEND (the static-website front door). Arm index 18
+    // (`_oneof0_case == 18`); field number 22.
+    WebFrontendSpec web_frontend = 22;
+    // API_EDGE. Arm index 19 (`_oneof0_case == 19`); field number 23.
+    ApiEdgeSpec api_edge = 23;
+    // SCHEDULED_CALL (the wall-clock cron). Arm index 20
+    // (`_oneof0_case == 20`); field number 24.
+    ScheduledCallSpec scheduled_call = 24;
+    // NETWORK (kind 25). Arm index 21 (`_oneof0_case == 21`); field number 25.
+    NetworkSpec network = 25;
+    // INGRESS_POLICY (kind 26). Arm index 22 (`_oneof0_case == 22`); field
+    // number 26.
+    IngressPolicySpec ingress_policy = 26;
+  }
+}
+
+// ─── The full synthesized manifest for ONE environment ───────────────────────
+//
+// The complete per-environment resource graph. Synthesized once at create or
+// plan time, content-addressed, and pinned into the run. The deployer consumes
+// THIS (the pinned copy), never the bundle.
+message FullManifest {
+  // The logical environment symbol this manifest targets (e.g. "staging"):
+  // the environment name this graph was synthesized for. The resolved
+  // concrete binding (cloud / account / region) is a separate deployer input,
+  // so it is not duplicated here.
+  string environment = 1;
+  // The SHA-256 content address of this pinned manifest. Empty in a freshly
+  // synthesized (not yet pinned) manifest; set when it is pinned. The binary
+  // encoding of this message is the content-address preimage.
+  string content_address = 2;
+  // The synthesized nodes, in no required order (edges are carried by each
+  // node's `depends_on`; the engine sorts topologically). Every node's
+  // `logical_id` is unique within the manifest.
+  repeated ResourceNode nodes = 3;
+}
