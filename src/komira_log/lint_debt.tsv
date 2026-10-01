@@ -1,0 +1,21 @@
+# LINT DEBT — one unit, and it SHRINKS.
+#
+#   predicate<TAB>tracking<TAB>reason
+#
+# A row says: THIS predicate is expected to FAIL for THIS unit, today. It
+# ratchets BOTH ways and the second direction is the load-bearing one:
+#
+#   the predicate fails and has NO row      -> RED (the anti-pile-on)
+#   the predicate PASSES and HAS a row      -> RED, naming this line. Good news
+#                                              reported as a build failure ON
+#                                              PURPOSE — it is what makes the
+#                                              file only ever shrink.
+#
+# An EMPTY file is a REFUSAL: "no debt" is spelled by DELETING this file, not by
+# emptying it, because an empty ledger reads as "checked and clean" while being
+# indistinguishable from "nobody wrote the rows". An empty reason and an unknown
+# predicate name are refusals too.
+#
+# THE ONLY CORRECT LIFECYCLE FOR A ROW IS DELETION. Fix the violation, watch
+# the build go red for the opposite reason, delete the line.
+unsafe_from_address	process-global-holder-origin	Three sites rebuild a pointer from an integer address: the two process-global holders (config.mojo `_resolve_config`, engine/log_manager.mojo `LogManager._resolve`, each over an immortal leaked heap slot parked in the C cell) and the pthread TLS read in engine/worker_id_tls.mojo. Retiring them needs an origin-tied return per site, then DELETING this row.
