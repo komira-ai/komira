@@ -31,10 +31,11 @@
 # ---------------------------------------------------------------------------
 #
 # A plan can be BUILT, TYPED, PUSHDOWN-QUERIED, EXPLAINED, CLONED, CACHE-KEYED
-# and RESOLVED against a registry owned by this package. EXECUTING it
-# end-to-end (pulling morsels) needs a morsel resolver for the kind in
-# `komira_morsel`; without one, `MessageBrokerConsumer` drains eagerly and
-# roots the DataFrame at an `InMemorySource`.
+# and RESOLVED against a registry owned by this package. It cannot be
+# EXECUTED through THIS file alone: execution is tier 2 (`ScanMorselResolver`,
+# `komira_morsel`), where the kind's morsel resolver re-resolves the LIVE token
+# and drains the partitions the binding names. There is no eager drain into an
+# in-memory source; a topic is read through the plan, resolved per execution.
 #
 # ---------------------------------------------------------------------------
 # WHY THE SNAPSHOT POLICY IS `LIVE` — the interesting half
@@ -67,7 +68,7 @@ from komira_core.source.scan_params import ScanParams, param_hash_string
 from komira_core.source.scan_resolver import ScanResolver
 
 
-comptime BROKER_SCAN_KIND_NAME: String = "komira.broker.consume"
+comptime BROKER_SCAN_KIND_NAME: String = "komira.broker.topic"
 """Reverse-DNS kind name. NO CENTRAL TABLE ALLOCATES THIS — `kind_id` is its
 FNV-1a/32 hash, which is exactly why claiming a kind costs no core edit."""
 
@@ -199,7 +200,7 @@ def broker_scan_identity_corpus(var schema: Schema) -> ScanIdentityCorpus:
 
 @fieldwise_init
 struct BrokerScanResolver(ScanResolver, Movable, Deinitable):
-    """Execution-time resolution for `komira.broker.consume`, TIER 1.
+    """Execution-time resolution for `komira.broker.topic`, TIER 1.
 
     Lives here, not in core, because a high-watermark is a broker concept. Core
     calls `resolve_snapshot` through the `ScanResolver` trait and never learns

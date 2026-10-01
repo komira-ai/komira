@@ -120,7 +120,7 @@ def test_kind_id_needs_no_central_allocation_table() raises:
     """`kind_id` is the FNV-1a/32 hash of a reverse-DNS name. There is no table
     in core to add a row to — which is exactly why claiming a kind costs no
     core edit. Cross-checked against an independent Python reference."""
-    assert_equal(broker_scan_kind_id(), UInt32(2702211559))
+    assert_equal(broker_scan_kind_id(), UInt32(2705777722))
 
 
 def test_registry_validates_the_broker_binding() raises:
@@ -202,7 +202,7 @@ def test_explain_names_a_kind_core_never_registered() raises:
     assert_equal(
         _binding().render(),
         String(
-            "komira.broker.consume(orders, partition=3, start_offset=1000,"
+            "komira.broker.topic(orders, partition=3, start_offset=1000,"
             " topic=orders)"
         ),
     )
@@ -583,7 +583,7 @@ def test_explain_labels_the_binding_scan_and_shows_its_params() raises:
     # incidentally makes EXPLAIN able to describe a kind this build never
     # registered.
     assert_true(
-        "komira.broker.consume(orders, partition=3, start_offset=1000,"
+        "komira.broker.topic(orders, partition=3, start_offset=1000,"
         " topic=orders)" in rendered,
         "binding params missing from EXPLAIN; got: " + rendered,
     )

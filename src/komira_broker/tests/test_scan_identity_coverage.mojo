@@ -44,7 +44,7 @@
 #     `PushdownGate.hash_into` transcribed from their definitions), not lifted
 #     from our own output. The reference reproduces three existing goldens —
 #     `scan_kind_id("komira.arrow.ipc") == 2587754919`,
-#     `broker_scan_kind_id() == 2702211559`, and both `GOLDEN_FP_MTIME_*`
+#     `broker_scan_kind_id() == 2705777722`, and both `GOLDEN_FP_MTIME_*`
 #     values in `test_scan_binding_arrow_arm.mojo`.
 #   * The rendered SCAN LINE is pinned as a whole, ASSEMBLED from those
 #     independently-derived literals plus the declared field order — so a
@@ -434,7 +434,7 @@ codec=zstd, estimated_rows=-1, empty schema), from the independent reference.
 It includes the snapshot token, which is what makes a rewritten file a
 different scan."""
 
-comptime BROKER_BID_ORDERS_P3_OFF1000: UInt64 = 9317247970190965391
+comptime BROKER_BID_ORDERS_P3_OFF1000: UInt64 = 5576424882752574727
 """`identity_hash()` of `broker_scan_binding("orders", 3, 1000, Schema())`.
 `SNAPSHOT_LIVE`, so the token is NOT folded — that exclusion is the
 identity/freshness split, and this literal is what pins it."""
@@ -507,9 +507,9 @@ def test_golden_rendered_plan_text_broker() raises:
     means "consult `kind_id`"; the reverse-DNS name and the sorted param map are
     what make EXPLAIN readable for it."""
     var expected = String('Scan(path="orders", type=BINDING')
-    expected += String(", binding=komira.broker.consume(orders")
+    expected += String(", binding=komira.broker.topic(orders")
     expected += String(", partition=3, start_offset=1000, topic=orders)")
-    expected += String(", bsid=11859306529427890215")
+    expected += String(", bsid=17762514713362705584")
     expected += String(", bid=") + String(BROKER_BID_ORDERS_P3_OFF1000)
     expected += String(", source_kind=COLUMNAR)")
 
