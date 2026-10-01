@@ -117,8 +117,17 @@ rc=0
 # the environment of such a process, so a test started through it never sees
 # DYLD_LIBRARY_PATH and cannot find its runtime library. Nothing between this
 # shell and the test may be such a binary. (The names were checked above.)
-# shellcheck disable=SC2163 # each $kv is NAME=VALUE: the value is exported, not a variable named by it
-(cd "$CWD" && for kv in "$@"; do export "$kv"; done && exec "$BIN") > "$T/log" 2>&1 < /dev/null || rc=$?
+#
+# Nothing the subshell does after its first export may expand a variable: an
+# exported NAME=VALUE replaces a shell variable of that name, so `--env BIN=x`
+# would run x in place of the test. The subshell reads only its positional
+# parameters, which no environment variable can set: the test is appended to
+# "$@", each leading NAME=VALUE is exported and shifted off, and what is left
+# is the test, exec'd as "$1". (export, shift, exec and [ are builtins, found
+# without PATH.) The variables the verdict is computed from (HELD, rc, MARKER,
+# LABEL, T, BIN, CWD, ...) are read only by this shell, which exports nothing.
+set -- "$@" "$BIN"
+(cd "$CWD" && while [ "$#" -gt 1 ]; do export "$1" && shift; done && exec "$1") > "$T/log" 2>&1 < /dev/null || rc=$?
 if [ -n "$HELD" ]; then
     if [ "$rc" = 137 ]; then
         {

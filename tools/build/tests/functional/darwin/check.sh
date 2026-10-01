@@ -607,14 +607,19 @@ cat > "$U/gate/root/bin/seen" <<SEEN
 printf '%s|%s\n' "\${DYLD_LIBRARY_PATH-}" "\${GATE_FOO-}" > "$U/gate/seen.txt"
 SEEN
 chmod +x "$U/gate/root/bin/seen"
+# A --env BIN naming another program must not replace the test.
+printf '#!/bin/sh\n: > "%s/gate/other_ran"\n' "$U" > "$U/gate/root/bin/other"
+chmod +x "$U/gate/root/bin/other"
 cat tools/build/mojo/darwin/dyld_prelude.sh tools/build/mojo/gate_runner.sh > "$U/gate/gate_runner.sh"
-rm -f "$U/gate/seen.txt" "$U/gate/marker"
-if ! (cd "$U/gate/tmp" && sh "$U/gate/gate_runner.sh" "$U/sip_busybox.sh" "$TC" //stand:in "$U/gate/root/bin/seen" "$U/gate/marker" --env GATE_FOO=bar) > "$U/gate/run.txt" 2>&1; then
+rm -f "$U/gate/seen.txt" "$U/gate/marker" "$U/gate/other_ran"
+if ! (cd "$U/gate/tmp" && sh "$U/gate/gate_runner.sh" "$U/sip_busybox.sh" "$TC" //stand:in "$U/gate/root/bin/seen" "$U/gate/marker" --env GATE_FOO=bar --env "BIN=$U/gate/root/bin/other") > "$U/gate/run.txt" 2>&1; then
     fail "gate_runner.sh: the stand-in test failed (see $U/gate/run.txt)"
 elif [ "$(cat "$U/gate/seen.txt")" != "$TC/lib|bar" ]; then
     fail "gate_runner.sh: the test saw [$(cat "$U/gate/seen.txt")], not [$TC/lib|bar]: DYLD_LIBRARY_PATH did not reach it (an SIP binary between the runner and the test prunes it)"
+elif [ -e "$U/gate/other_ran" ]; then
+    fail "gate_runner.sh: --env BIN=<other program> ran that program in place of the test"
 else
-    pass "gate_runner.sh: the test starts with DYLD_LIBRARY_PATH at the toolchain's lib/ although env prunes DYLD_*, and with its --env variables"
+    pass "gate_runner.sh: the test starts with DYLD_LIBRARY_PATH at the toolchain's lib/ although env prunes DYLD_*, and with its --env variables, and --env BIN does not replace it"
 fi
 
 # ---- 7. live, on the macOS workers ----------------------------------------------
