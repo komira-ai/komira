@@ -14,7 +14,7 @@ Out of scope:
 - Drivers for backends other than SQLite and Postgres. The traits are written so that a document or key-value backend can conform, but no such driver is in this tree.
 - The async runtime that supplies the reactor every I/O method takes, and the HTTP client that supplies the s2n TLS wrapper `komira_pg` uses: `komira_async` and `komira_http`.
 - The primitives behind SCRAM: [crypto and TLS](crypto_and_tls.md#which-primitives-does-komira_crypto-provide).
-- Code generation of row types. A row type implements `DbStorable` by hand here; nothing in this tree conforms to it.
+- Code generation of row types. The generator lives under `tools/build/proto-codegen` (`emit_dbstorable.rs`), not in `komira_db`. No checked-in `src/` type conforms to `DbStorable` yet, and no `komira_db` test exercises a conformer.
 
 ## How does it work?
 
