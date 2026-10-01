@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The VM-boot contract between a placement conformer and the on-VM pod loader:
+# the environment variable names a boot script exports, GCE's metadata-key
+# transport of them, the heartbeat target resolver and its writer, the loader's
+# install path, the boot-bundle bucket / key / URL derivation, and the pod-spec
+# JSON wire codec. It names no cloud API and depends on no bridge; both cloud
+# bridges and the pod loader import it.
+#
+# The welded tests assert the SHAPE of the agreement (names non-empty and
+# pairwise distinct, install path absolute, the boot-bundle bucket carrying its
+# placement region and the key its content digest) and the round trips of the
+# wire forms (the pod spec with every container, the heartbeat target through
+# its writer and reader). Pure String in / String out: no socket, no process,
+# no cloud.
+
+mojo_library(
+    name = "komira_pod_boot",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_k8s:komira_k8s",
+        "//src/komira_placement:komira_placement",
+    ],
+    test_srcs = [
+        "tests/test_boot_bundle_location.mojo",
+        "tests/test_pod_boot_contract.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
