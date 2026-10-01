@@ -24,7 +24,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "1";
+pub const AWS_GENERATOR_VERSION: &str = "2";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -100,6 +100,11 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         module: "komira_serde.json_value",
         names: &["JsonValue", "parse_json_value"],
         mode: AwsImportMode::Always,
+    },
+    AwsImport {
+        module: "komira_http.client",
+        names: &["HttpClientConfig"],
+        mode: AwsImportMode::ClientOnly,
     },
     AwsImport {
         module: "komira_http.transport.io_stream",
@@ -1986,9 +1991,20 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
         self.line("    The connector factory is a `def () raises thin -> C` function");
         self.line("    pointer (a code pointer, no heap); the credential source is moved");
-        self.line("    in. No field is an `UnsafePointer`.\"\"\"");
+        self.line("    in. No field is an `UnsafePointer`.");
+        self.blank();
+        self.line("    ⛔ `http_config` IS THE CALLER'S OBLIGATION, AND IT HAS NO DEFAULT.");
+        self.line("    This client builds its `HttpClient` inside the core, so the config");
+        self.line("    is the only way a caller can bound it. A process serving requests");
+        self.line("    under a platform deadline (Cloud Run, Lambda) MUST pass");
+        self.line("    `HttpClientConfig.for_serving_ceiling(ceiling)`; only a process with");
+        self.line("    no containing deadline (a job, a CLI, a test) passes");
+        self.line("    `HttpClientConfig.defaults()`, whose budget is 600s. A default here");
+        self.line("    would silently exceed the serving ceiling, so there is none.\"\"\"");
         self.blank();
         self.line("var _mk_connector: def () raises thin -> Self.C");
+        self.line("# Handed to `send_sigv4_signed_request` on every send, unchanged.");
+        self.line("var _http_config: HttpClientConfig");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
         self.line("# WHERE this client sends. `None` = real AWS (the host derived from");
@@ -2004,6 +2020,7 @@ impl<'a> AwsEmitter<'a> {
         self.push();
         self.line("out self,");
         self.line("mk_connector: def () raises thin -> Self.C,");
+        self.line("http_config: HttpClientConfig,");
         self.line("var creds_source: Self.T,");
         self.line("region: String,");
         self.line("endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),");
@@ -2011,6 +2028,7 @@ impl<'a> AwsEmitter<'a> {
         self.line("):");
         self.push();
         self.line("self._mk_connector = mk_connector");
+        self.line("self._http_config = http_config.copy()");
         self.line("self._creds_source = creds_source^");
         self.line("self._region = region");
         self.line("self._endpoint_override = endpoint_override.copy()");
@@ -2067,17 +2085,26 @@ impl<'a> AwsEmitter<'a> {
         self.line("extra.append(Header(n^, req.header_values[_i].copy()))");
         self.pop();
         self.pop();
+        self.line("# The operation's `endpoint.hostPrefix` (\"\" for most) goes on the host");
+        self.line("# of the endpoint this send resolves, override or not, as the AWS SDKs");
+        self.line("# inject it; the core refuses it on an IP-literal host.");
+        self.line("var endpoint = resolve_endpoint(");
+        self.push();
+        self.line(&format!(
+            "self._endpoint_override, {}_host(self._region.copy())",
+            self.module_name
+        ));
+        self.pop();
+        self.line(").with_host_prefix(req.host_prefix)");
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
+        self.line("self._http_config.copy(),");
         self.line("req.method.copy(),");
         self.line("cred,");
         self.line("self._region.copy(),");
         self.line(&format!("String({p}_SERVICE),"));
-        self.line(&format!(
-            "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
-            self.module_name
-        ));
+        self.line("endpoint^,");
         self.line("req.uri.copy(),");
         self.line("content_type^,");
         self.line("req.body.copy(),");

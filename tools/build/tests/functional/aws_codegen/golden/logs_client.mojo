@@ -13,7 +13,7 @@
 #   model sha256 : 24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 1
+#   generator    : aws-client-gen version 2
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -83,6 +83,7 @@ from komira_serde.json_value import (
     JsonValue,
     parse_json_value,
 )
+from komira_http.client import HttpClientConfig
 from komira_http.transport.io_stream import Connector
 
 
@@ -713,9 +714,20 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
 
         The connector factory is a `def () raises thin -> C` function
         pointer (a code pointer, no heap); the credential source is moved
-        in. No field is an `UnsafePointer`."""
+        in. No field is an `UnsafePointer`.
+
+        ⛔ `http_config` IS THE CALLER'S OBLIGATION, AND IT HAS NO DEFAULT.
+        This client builds its `HttpClient` inside the core, so the config
+        is the only way a caller can bound it. A process serving requests
+        under a platform deadline (Cloud Run, Lambda) MUST pass
+        `HttpClientConfig.for_serving_ceiling(ceiling)`; only a process with
+        no containing deadline (a job, a CLI, a test) passes
+        `HttpClientConfig.defaults()`, whose budget is 600s. A default here
+        would silently exceed the serving ceiling, so there is none."""
 
     var _mk_connector: def () raises thin -> Self.C
+    # Handed to `send_sigv4_signed_request` on every send, unchanged.
+    var _http_config: HttpClientConfig
     var _creds_source: Self.T
     var _region: String
     # WHERE this client sends. `None` = real AWS (the host derived from
@@ -727,11 +739,13 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
     def __init__(
         out self,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds_source: Self.T,
         region: String,
         endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),
     ):
         self._mk_connector = mk_connector
+        self._http_config = http_config.copy()
         self._creds_source = creds_source^
         self._region = region
         self._endpoint_override = endpoint_override.copy()
@@ -769,13 +783,20 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
                 content_type = req.header_values[_i].copy()
             else:
                 extra.append(Header(n^, req.header_values[_i].copy()))
+        # The operation's `endpoint.hostPrefix` ("" for most) goes on the host
+        # of the endpoint this send resolves, override or not, as the AWS SDKs
+        # inject it; the core refuses it on an IP-literal host.
+        var endpoint = resolve_endpoint(
+            self._endpoint_override, komira_aws_logs_host(self._region.copy())
+        ).with_host_prefix(req.host_prefix)
         return send_sigv4_signed_request[Self.C](
             self._mk_connector,
+            self._http_config.copy(),
             req.method.copy(),
             cred,
             self._region.copy(),
             String(CLOUDWATCHLOGS_SERVICE),
-            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())),
+            endpoint^,
             req.uri.copy(),
             content_type^,
             req.body.copy(),

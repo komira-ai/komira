@@ -21,6 +21,20 @@ aws_codegen_golden(
     module = "komira_aws_logs",
 )
 
+# The client module equals its golden, and every line of this must_contain is
+# in it, in this order, but the config line is split mid-token, so the lines
+# are not adjacent as written: the check goes red. A matcher that dropped the
+# line separators, matched each line anywhere, or matched the lines in order
+# but not adjacently would find it, and this build would wrongly pass.
+aws_codegen_golden(
+    name = "missing_contains",
+    gen_args = _LOGS,
+    golden = "//functional/aws_codegen:logs_client_golden",
+    model = "//functional/aws_codegen:logs_model",
+    module = "komira_aws_logs",
+    must_contain = ["return send_sigv4_signed_request[Self.C](\nself._mk_connector,\nself._http_config.copy\n(),"],
+)
+
 # A refusal check over inputs the generator accepts goes red.
 aws_codegen_refusal(
     name = "accepted",

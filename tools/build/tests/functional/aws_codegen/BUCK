@@ -20,6 +20,13 @@ _LOGS = [
     "logs",
 ]
 
+# The send call of the generated client, from its opening line to the config.
+_CONFIG_REACHES_SEND = "\n".join([
+    "return send_sigv4_signed_request[Self.C](",
+    "self._mk_connector,",
+    "self._http_config.copy(),",
+])
+
 # The module kci_logs needs first: GetLogEvents, without transport.
 aws_codegen_golden(
     name = "logs_pure",
@@ -36,8 +43,8 @@ aws_codegen_golden(
     module = "komira_aws_logs",
 )
 
-# The same operation as a client: it adds the komira_aws_core transport names
-# and komira_http.transport.io_stream.Connector.
+# The same operation as a client: it adds the komira_aws_core transport names,
+# komira_http.client.HttpClientConfig and komira_http.transport.io_stream.Connector.
 aws_codegen_golden(
     name = "logs_client",
     gen_args = _LOGS + [
@@ -50,6 +57,25 @@ aws_codegen_golden(
     golden_probe = "golden/logs_client_probe.mojo",
     model = _LOGS_MODEL,
     module = "komira_aws_logs",
+    # The caller's HttpClientConfig reaches the signed send. The client builds
+    # its HttpClient inside the core, so a serving process can bound its
+    # outbound budget (HttpClientConfig.for_serving_ceiling) only through this
+    # argument. Three links, each pinned: the constructor takes it with no
+    # default (`= ...` cannot match the trailing comma), stores the caller's
+    # value rather than one of its own, and the send passes that field.
+    must_contain = [
+        "http_config: HttpClientConfig,",
+        "self._http_config = http_config.copy()",
+        _CONFIG_REACHES_SEND,
+        # The operation's host prefix reaches the endpoint of every send. Two
+        # links, each pinned: the prefixed endpoint is the last thing computed
+        # before the send opens, and the send passes that variable in the
+        # endpoint position (after the service name), not a fresh
+        # resolve_endpoint(...) that drops the prefix. Nothing compiles this
+        # module, so an unused `endpoint` would not even warn.
+        ").with_host_prefix(req.host_prefix)\nreturn send_sigv4_signed_request[Self.C](",
+        "String(CLOUDWATCHLOGS_SERVICE),\nendpoint^,",
+    ],
 )
 
 aws_codegen_refusal(
@@ -198,7 +224,8 @@ shell_lint(
     visibility = ["komira//:tests_lints"],
 )
 
-# For tests//negative/aws_codegen, which plants a golden that differs.
+# For tests//negative/aws_codegen, which plants a golden that differs, and a
+# must_contain whose lines the module holds but not adjacently.
 export_file(
     name = "logs_client_golden",
     src = "golden/logs_client.mojo",

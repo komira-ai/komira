@@ -2,7 +2,10 @@
 
 `aws_codegen_golden` generates a module (and optionally its layout probe) in
 one action, whose directory is the `[gen]` sub-target, and compares it with
-the checked-in goldens in a second action, the default output. To update a
+the checked-in goldens in a second action, the default output. The second
+action also requires each `must_contain` string in the GENERATED module (lines
+compared with leading spaces removed, so a string may span lines): a property
+that holds even when someone re-copies the golden over a regression. To update a
 golden after a deliberate change to the emitter, build `[gen]` and copy the
 file over the golden.
 
@@ -57,6 +60,7 @@ def _golden_impl(ctx):
             ctx.attrs.module,
             ctx.attrs.golden,
             ctx.attrs.golden_probe if ctx.attrs.golden_probe else "-",
+            ctx.attrs.must_contain,
         ),
         category = "aws_codegen_cmp",
     )
@@ -104,6 +108,8 @@ aws_codegen_golden_rule = rule(
         "golden_probe": attrs.option(attrs.source(), default = None),
         "model": attrs.source(),
         "module": attrs.string(),
+        # Strings the generated module must contain, beside the golden match.
+        "must_contain": attrs.list(attrs.string(), default = []),
     } | _TOOLS,
 )
 

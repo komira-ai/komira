@@ -202,7 +202,10 @@
 #      or wrong --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen).
+#      go red (tests//negative/aws_codegen). The client module must also
+#      contain the strings its must_contain names (the caller's
+#      HttpClientConfig reaching the send), and a must_contain whose lines
+#      the module holds only non-adjacently goes red.
 set -uo pipefail
 
 umbrella=1
@@ -949,6 +952,7 @@ fi
 expect_green aws_codegen tests//functional/aws_codegen:
 expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
 expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
+expect_red aws_codegen_missing_contains "does not contain" tests//negative/aws_codegen:missing_contains
 
 # 9
 if [ "$MODE" = local ]; then

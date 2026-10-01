@@ -606,14 +606,23 @@ missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
 or one digit short), one that is not the model's, a zero-byte model, and
 `--probe-import` without `--probe-out`.
 
-Two negatives in [`negative/aws_codegen`](negative/aws_codegen/BUCK) must fail
+The client module must also contain each `must_contain` string, matched
+against the GENERATED module with leading spaces dropped, so a string may span
+lines: the constructor's `http_config: HttpClientConfig,` (no default), its
+`self._http_config = http_config.copy()`, and the send call passing that field.
+This holds even if someone re-copies the golden over a regression.
+
+Three negatives in [`negative/aws_codegen`](negative/aws_codegen/BUCK) must fail
 their builds: a golden that differs from the generated module (`golden_differs`),
-and a refusal check given inputs the generator accepts (`accepted`).
+a refusal check given inputs the generator accepts (`accepted`), and a
+`must_contain` whose lines the module holds in order but not adjacently
+(`missing_contains`).
 
 ```sh
 buck2 build tests//functional/aws_codegen:
 buck2 build tests//negative/aws_codegen:golden_differs   # must fail: differs from the golden
 buck2 build tests//negative/aws_codegen:accepted         # must fail: expected a refusal
+buck2 build tests//negative/aws_codegen:missing_contains # must fail: does not contain
 ```
 
 To update a golden after a deliberate change to the emitter, build the
