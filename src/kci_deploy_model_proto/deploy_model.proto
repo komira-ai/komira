@@ -38,7 +38,7 @@
 
 syntax = "proto3";
 
-package komira.deploy.v1;
+package kci.deploy.v1;
 
 // ─── The compute INTENT (`compute`) ──────────────────────────────────────────
 //

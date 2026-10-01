@@ -4,19 +4,19 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # reuse (`ComputeIntent`, `DatastoreNeed`, `SecretBinding`, `InboundNeed`,
 # `BundleIndexTable`, ...): plain proto3 messages, generated with proto3-JSON
 # and binary serde. Reach the surface via
-#   from deploy_model_rpc.deploy_model import DeploymentSpec, ContainerSpec, ...
+#   from kci_deploy_model_proto.deploy_model import DeploymentSpec, ContainerSpec, ...
 #
 # The `.proto` is imported by other protos as
-# `komira/deploy/v1/deploy_model.proto` (package `komira.deploy.v1`); a proto
+# `kci/deploy/v1/deploy_model.proto` (package `kci.deploy.v1`); a proto
 # that imports it names this target in `proto_deps`. It imports no other
 # proto, so the generated code's only runtime is `komira_serde`.
 #
 # A generated package has no tests of its own: it is gated through the tests
 # of the libraries that depend on it.
 mojo_proto_library(
-    name = "deploy_model_rpc",
+    name = "kci_deploy_model_proto",
     srcs = ["deploy_model.proto"],
-    import_prefix = "komira/deploy/v1",
+    import_prefix = "kci/deploy/v1",
     deps = ["//src/komira_serde:komira_serde"],
     visibility = ["PUBLIC"],
 )
