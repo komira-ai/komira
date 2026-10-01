@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # The forever-root-owned engine instance. ONE per
-# process, owned by the forever-root (EngineContext / the control-plane
-# services), sized to `num_workers`. It bundles everything the ambient log path
+# process, owned by the forever-root (EngineContext / the long-lived
+# service processes), sized to `num_workers`. It bundles everything the ambient log path
 # touches:
 #
 #   * N per-worker SPSC `LogRecordRing`s (one per substrate worker) — produced
@@ -29,8 +29,8 @@
 #   * Per-worker DATAPLANE rings [0, num_workers): `OVERFLOW_DROP` — a full ring
 #     drops the record (counted in `_overflow_dropped`) rather than blocking a
 #     query worker. Logging must never stall the dataplane.
-#   * The CONTROL-PLANE fallback ring [num_workers]: `OVERFLOW_BLOCK` — the
-#     non-worker producer spins until a slot frees (control-plane logs are rare
+#   * The non-worker FALLBACK ring [num_workers]: `OVERFLOW_BLOCK` — the
+#     non-worker producer spins until a slot frees (non-worker logs are rare
 #     + correctness > throughput there).
 #   * WARN AND ERROR records are NEVER dropped — if a DROP ring rejects such a
 #     push, the emit path escalates to a synchronous render+write via
@@ -263,7 +263,7 @@ struct SharedEngine(Movable):
         for w in range(n_rings):
             # Per-ring-class backpressure: the per-worker
             # DATAPLANE rings DROP (never stall query work); the [num_workers]
-            # CONTROL-PLANE fallback ring BLOCKs (control-plane logs are rare +
+            # non-worker FALLBACK ring BLOCKs (non-worker logs are rare +
             # correctness > throughput). ERROR records bypass DROP via the
             # facade's `escalate_line` slow-path (never-dropped).
             var policy = OVERFLOW_DROP if w < num_workers else OVERFLOW_BLOCK
@@ -760,7 +760,7 @@ struct SharedEngine(Movable):
     def unknown_kind_dropped_count(mut self) -> Int64:
         """Drain-side: records REFUSED across every ring this engine owns
         because no drain arm recognised their `kind`. Summed over the dataplane
-        rings AND the control-plane fallback ring — `_num_workers + 1` slots, the
+        rings AND the non-worker fallback ring — `_num_workers + 1` slots, the
         same span `__init__` constructs.
 
         NON-ZERO MEANS A PRODUCER IS AHEAD OF THE DRAINS. The records were
@@ -776,7 +776,7 @@ struct SharedEngine(Movable):
     def overflow_dropped_count(mut self) -> Int64:
         """Records LOST because a ring was full when the producer pushed.
 
-        Summed over the dataplane rings AND the control-plane fallback ring.
+        Summed over the dataplane rings AND the non-worker fallback ring.
         The dataplane rings are `OVERFLOW_DROP` by policy — a full ring must
         never stall query work — so this is the price of that policy, and it is
         the ONLY record of it.
@@ -855,7 +855,7 @@ struct SharedEngine(Movable):
           * `drain_worker` -- a fully decoded record whose sink write raised.
             The ring did its job; the disk did not.
           * `emit_fallback_line` -- an unbound-thread log (an HTTP handler, the
-            agent heartbeat, a CLI tool, the control-plane mirror). This is the
+            agent heartbeat, a CLI tool, a log-mirroring thread). This is the
             path every log from a thread with no worker_id takes.
           * `escalate_line` -- an ERROR or WARN the ring already rejected once.
             A non-zero count here means the never-drop guarantee did not hold,
@@ -1289,8 +1289,8 @@ struct SharedEngine(Movable):
         the single append fd.
 
         ⚠ THIS IS THE PATH EVERY UNBOUND-THREAD LOG TAKES — an HTTP handler,
-        the agent heartbeat, a CLI tool with no runtime, and the control-plane
-        mirror's own write. A transient sink error is still swallowed (the
+        the agent heartbeat, a CLI tool with no runtime, and a log-mirroring
+        thread's own write. A transient sink error is still swallowed (the
         logger must never wedge its caller) but it is now COUNTED:
         `sink_dropped_line_count`. Uncounted, it would be the widest silent-loss
         channel in the engine."""
