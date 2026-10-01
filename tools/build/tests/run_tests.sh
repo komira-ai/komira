@@ -996,6 +996,7 @@ expect_red rust_test_unknown_field "unknown field \`card\`" "$RT:unknown_field"
 expect_red rust_test_bad_name "not a libtest test name" "$RT:bad_name"
 expect_red rust_test_dup_reason "byte-identical reasons" "$RT:dup_reason"
 expect_green rust_test_held_ignored "$RT:held_ignored"
+expect_red rust_test_held_abort "without a \`test result: FAILED" "$RT:held_abort"
 expect_green rust_test_env_scrubbed "$RT:env_scrubbed"
 expect_red rust_test_hang "timed out after 3s (exit 142)" "$RT:hang"
 if "$BUCK2" test //tools/build/proto-codegen:komira_proto_codegen > "$LOG/rust_test_buck2_test.log" 2>&1 &&

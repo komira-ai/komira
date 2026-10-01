@@ -648,8 +648,9 @@ test and must build: a held test runs with `--include-ignored`, and its run
 must report `0 passed; 1 failed`. `env_scrubbed` must build: its test asserts
 the harness's environment is exactly `HOME`, `PATH` and `TMPDIR`. Each of
 these must fail, naming its cause: a held test that passes (`held_passing`,
-`LEDGER STALE`), holding every test (`all_held`), a hold naming no test
-(`held_unknown`), no tests (`empty`, `EMPTY GATE`), an unheld `#[ignore]`d
+`LEDGER STALE`), a held test that aborts (`held_abort`, exit 134 with no
+`test result: FAILED. 0 passed; 1 failed` summary), holding every test
+(`all_held`), a hold naming no test (`held_unknown`), no tests (`empty`, `EMPTY GATE`), an unheld `#[ignore]`d
 test (`ignored`), a test that hangs (`hang`, NO VERDICT at its 3 s
 `test_timeout_s`, exit 142), and, at analysis, a row
 with no issue (`missing_issue`), a malformed issue (`bad_issue`), an empty

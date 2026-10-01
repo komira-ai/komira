@@ -175,6 +175,18 @@ rust_test(
     },
 )
 
+# must fail: the held test aborts (exit 134, not a NO VERDICT code) and
+# prints no `test result: FAILED. 0 passed; 1 failed` summary, so the hold
+# is not measured.
+rust_test(
+    name = "held_abort",
+    srcs = ["src/abort.rs"],
+    crate_root = "src/abort.rs",
+    tests_known_failing = {
+        "tests::aborts": {"issue": "1", "reason": "planted: calls std::process::abort()"},
+    },
+)
+
 # green: the harness sees only HOME, PATH and TMPDIR.
 rust_test(
     name = "env_scrubbed",
