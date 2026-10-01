@@ -1,0 +1,20 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The execution-time half of a scan kind: the `ScanMorselResolver` trait, its
+# type-erased facade, and the per-context resolver set keyed by kind id. It
+# sits on komira_core's scan substrate (bindings, params, kind descriptors,
+# the tier-1 `ScanResolver`) and nothing else, so a package that implements a
+# kind does not depend on the engine that executes it.
+#
+# The welded test drives a stub kind with no executor: erasing and dropping a
+# conformer destroys it exactly once, a duplicate or unregistered kind is
+# refused by name, a foreign binding is refused on resolve, open and build, a
+# missing required param is refused before the kind runs, and the resolved
+# side channel round-trips through the erased `open_scan`.
+mojo_library(
+    name = "komira_scan_resolver",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_core:komira_core"],
+    test_srcs = ["tests/test_scan_morsel_resolver.mojo"],
+    visibility = ["PUBLIC"],
+)
