@@ -1,0 +1,28 @@
+// A REST service whose response and whose `body:` field are well-known
+// types: the generated client must read and write their canonical JSON
+// through komira_serde's codec, not the binary-shaped message form.
+syntax = "proto3";
+
+package example.rest;
+
+import "google/api/annotations.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+message GetDocRequest {
+  string name = 1;
+}
+
+message PutDocRequest {
+  string name = 1;
+  google.protobuf.Struct doc = 2;
+}
+
+service Docs {
+  rpc GetDoc(GetDocRequest) returns (google.protobuf.Struct) {
+    option (google.api.http) = { get: "/v1/docs/{name}" };
+  }
+  rpc PutDoc(PutDocRequest) returns (google.protobuf.Timestamp) {
+    option (google.api.http) = { put: "/v1/docs/{name}" body: "doc" };
+  }
+}

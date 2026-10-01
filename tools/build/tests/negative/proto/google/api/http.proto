@@ -1,0 +1,18 @@
+// The subset of google.api.HttpRule that protoc-gen-mojo reads: the verb
+// oneof and `body`, at their published field numbers. Enough for protoc to
+// accept a `(google.api.http)` method option in a test .proto.
+syntax = "proto3";
+
+package google.api;
+
+message HttpRule {
+  string selector = 1;
+  oneof pattern {
+    string get = 2;
+    string put = 3;
+    string post = 4;
+    string delete = 5;
+    string patch = 6;
+  }
+  string body = 7;
+}

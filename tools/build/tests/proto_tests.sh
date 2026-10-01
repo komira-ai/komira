@@ -29,6 +29,23 @@ elif grep -q 'var id: Int64' "$LOG/person.mojo" && ! grep -q 'var ident:' "$LOG/
 else
     fail "proto: generated person.mojo does not follow its .proto (see $LOG/person.mojo, $LOG/person_renamed.mojo)"
 fi
+# A REST client whose response and whose `body:` field are well-known types
+# reads and writes them through komira_serde's codec (decode_json /
+# encode_json), whose comptime branch gives a WKT its canonical JSON form; a
+# direct `T.decode(JsonDecoder)` or `.encode(JsonEncoder)` would read and
+# write the binary-shaped message instead (a Struct response decoding as an
+# empty Struct). Only the generated file is built: the package imports
+# komira_http, which this repository does not ship.
+if ! "$BUCK2" build 'tests//negative/proto:wkt_rest_proto[wkt_rest.mojo]' --out "$LOG/wkt_rest.mojo" > "$LOG/proto_rest.log" 2>&1; then
+    fail "proto: generating wkt_rest.mojo (see $LOG/proto_rest.log)"
+elif grep -q 'return decode_json\[Struct\](resp_text)' "$LOG/wkt_rest.mojo" &&
+    grep -q 'return decode_json\[Timestamp\](resp_text)' "$LOG/wkt_rest.mojo" &&
+    grep -q 'body_text = encode_json(req.doc.value())' "$LOG/wkt_rest.mojo" &&
+    ! grep -qE 'JsonDecoder|JsonEncoder|\.decode\(dec\)|\.encode\(benc\)' "$LOG/wkt_rest.mojo"; then
+    pass "proto: a REST client reads and writes well-known types through the codec"
+else
+    fail "proto: the REST client bypasses the codec for a well-known type (see $LOG/wkt_rest.mojo)"
+fi
 expect_red proto_mismatch "'Person' value has no attribute 'id'" tests//negative/proto:test_person_renamed
 expect_red proto_unbundled "unable to locate module 'person'" tests//negative/proto:team_unbundled_proto
 expect_red proto_db_undeclared "protoc-gen-mojo_db wrote no code (or an empty file) for the expected note_db.mojo" \
