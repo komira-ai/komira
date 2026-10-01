@@ -314,7 +314,8 @@ def _tests_sub_target(markers):
 # missing or malformed, the reason is empty, or two rows carry byte-identical
 # reasons. Whether the name is a test of the binary, and whether every test is
 # held, is known only from the harness's own list: test_runner.sh refuses
-# both at run time.
+# both at RUN time, when the marker action runs, so a mistyped row passes
+# analysis (`buck2 targets`) and reds only the build that runs the test.
 _KNOWN_FAILING_FIELDS = ["issue", "reason"]
 _ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
 _TEST_NAME = "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$"
@@ -348,28 +349,36 @@ def _test_impl(ctx):
     exe = ctx.actions.declare_output("bin/" + ctx.label.name)
     _compile(ctx, "test", exe)
     marker = ctx.actions.declare_output(ctx.label.name + ".passed")
+    if ctx.attrs.test_timeout_s < 1:
+        fail("{}: test_timeout_s must be at least 1, not {}".format(ctx.label.raw_target(), ctx.attrs.test_timeout_s))
     holds = []
     for name in sorted(held):
         holds += ["--hold", name, held[name]["issue"], held[name]["reason"]]
-    ctx.actions.run(
-        cmd_args(
+
+    def runner(marker_arg):
+        return cmd_args(
             tc.busybox,
             "sh",
             tc.test_runner,
             tc.busybox,
             str(ctx.label.raw_target()),
             exe,
-            marker.as_output(),
+            marker_arg,
+            str(ctx.attrs.test_timeout_s),
             holds,
-        ),
-        category = "rust_gated_test",
-        identifier = ctx.label.name,
-    )
+        )
+
+    ctx.actions.run(runner(marker.as_output()), category = "rust_gated_test", identifier = ctx.label.name)
     return [
         # Building the target runs the tests. `[bin]` is the harness itself
         # (a test executable, not a shippable artifact).
         DefaultInfo(default_output = marker, sub_targets = {"bin": [DefaultInfo(default_output = exe)]}),
         RustTestInfo(marker = marker),
+        # `buck2 test` runs the same runner, holds and timeout over the same
+        # harness, outside the build (it writes no marker). So `buck2 test` of
+        # a rust_test, or of a rust_library/rust_binary naming it in `tests`,
+        # runs its tests rather than reporting NO TESTS RAN.
+        ExternalRunnerTestInfo(type = "custom", command = [runner("/dev/null")], labels = ctx.attrs.labels),
     ]
 
 rust_test_rule = rule(
@@ -377,6 +386,10 @@ rust_test_rule = rule(
     attrs = _COMMON_ATTRS | {
         # {libtest name: {"issue": ..., "reason": ...}}; see _admit_known_failing.
         "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
+        "labels": attrs.list(attrs.string(), default = []),
+        # Each harness invocation (the list, the unheld run, each held run) is
+        # killed after this many seconds, and the run is NO VERDICT (exit 142).
+        "test_timeout_s": attrs.int(default = 600),
     },
 )
 

@@ -643,19 +643,31 @@ the run continued), while `red[bin]`, the test executable, builds: the red is
 the run, not the compile. `bin` (welded to `red`) and `lib_consumer` (linking
 `red_lib`, which is welded to `red`) must fail the same way. `held_red`
 holds the failing test and must build, and `bin_held`, welded to it, must
-build and run (`[run_check]`). Each of these must fail, naming its cause: a
-held test that passes (`held_passing`, `LEDGER STALE`), holding every test
-(`all_held`), a hold naming no test (`held_unknown`), no tests (`empty`,
-`EMPTY GATE`), an `#[ignore]`d test (`ignored`), and, at analysis, a row
+build and run (`[run_check]`). `held_ignored` holds a panicking `#[ignore]`d
+test and must build: a held test runs with `--include-ignored`, and its run
+must report `0 passed; 1 failed`. `env_scrubbed` must build: its test asserts
+the harness's environment is exactly `HOME`, `PATH` and `TMPDIR`. Each of
+these must fail, naming its cause: a held test that passes (`held_passing`,
+`LEDGER STALE`), holding every test (`all_held`), a hold naming no test
+(`held_unknown`), no tests (`empty`, `EMPTY GATE`), an unheld `#[ignore]`d
+test (`ignored`), a test that hangs (`hang`, NO VERDICT at its 3 s
+`test_timeout_s`, exit 142), and, at analysis, a row
 with no issue (`missing_issue`), a malformed issue (`bad_issue`), an empty
 reason (`bad_empty_reason`), an unknown row field (`unknown_field`), a key
 that is not a libtest test name (`bad_name`), and two rows with
 byte-identical reasons (`dup_reason`).
 
+`buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
+print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
+gives `buck2 test` the same runner, so the reused `tests` attribute runs what
+it names. `buck2 test tests//negative/rust_test:bin` must fail with `GATED
+TEST FAILED`.
+
 ```sh
 buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
 buck2 build tests//negative/rust_test:held_red 'tests//negative/rust_test:bin_held[run_check]'
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
+buck2 test //tools/build/proto-codegen:komira_proto_codegen
 ```
 
 ## Diagnostics

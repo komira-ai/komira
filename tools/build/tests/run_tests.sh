@@ -210,11 +210,15 @@
 #      welded to it unbuildable (GATED TEST FAILED, with the harness's
 #      `1 passed; 1 failed`: the panic unwound), while the test executable
 #      itself compiles; a held failing test builds and its welded binary runs;
-#      a held test that passes, holding every test, a hold naming no test,
-#      a target with no tests, an #[ignore]d test, and, at analysis, a row
-#      with no issue, a malformed issue, an empty reason, an unknown row
-#      field, a key that is not a libtest test name, and two byte-identical
-#      reasons are each refused.
+#      a held #[ignore]d test that panics builds (held runs include ignored
+#      tests); the harness sees only HOME, PATH and TMPDIR; a held test that
+#      passes, holding every test, a hold naming no test, a target with no
+#      tests, an unheld #[ignore]d test, and, at analysis, a row with no
+#      issue, a malformed issue, an empty reason, an unknown row field, a key
+#      that is not a libtest test name, and two byte-identical reasons are
+#      each refused; a hanging test is NO VERDICT at its timeout. `buck2 test`
+#      of a welded library runs its rust_test (Pass, with the harness's
+#      count), and of a binary welded to a red test fails.
 set -uo pipefail
 
 umbrella=1
@@ -991,6 +995,22 @@ expect_red rust_test_missing_issue "no \`issue\`" "$RT:missing_issue"
 expect_red rust_test_unknown_field "unknown field \`card\`" "$RT:unknown_field"
 expect_red rust_test_bad_name "not a libtest test name" "$RT:bad_name"
 expect_red rust_test_dup_reason "byte-identical reasons" "$RT:dup_reason"
+expect_green rust_test_held_ignored "$RT:held_ignored"
+expect_green rust_test_env_scrubbed "$RT:env_scrubbed"
+expect_red rust_test_hang "timed out after 3s (exit 142)" "$RT:hang"
+if "$BUCK2" test //tools/build/proto-codegen:komira_proto_codegen > "$LOG/rust_test_buck2_test.log" 2>&1 &&
+    grep -qE 'PASS komira//tools/build/proto-codegen:komira_proto_codegen_unit: [1-9][0-9]* passed' "$LOG/rust_test_buck2_test.log"; then
+    pass "rust_test_buck2_test: $(grep -m1 -oE 'komira_proto_codegen_unit: [0-9]+ passed' "$LOG/rust_test_buck2_test.log")"
+else
+    fail "rust_test_buck2_test: buck2 test of the welded library did not run its tests (see $LOG/rust_test_buck2_test.log)"
+fi
+if "$BUCK2" test "$RT:bin" > "$LOG/rust_test_buck2_test_red.log" 2>&1; then
+    fail "rust_test_buck2_test_red: buck2 test $RT:bin passed, but its welded test fails"
+elif grep -qF "GATED TEST FAILED: tests//negative/rust_test:red" "$LOG/rust_test_buck2_test_red.log"; then
+    pass "rust_test_buck2_test_red"
+else
+    fail "rust_test_buck2_test_red: failed without the GATED TEST FAILED line (see $LOG/rust_test_buck2_test_red.log)"
+fi
 
 # 9
 if [ "$MODE" = local ]; then

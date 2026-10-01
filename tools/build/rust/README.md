@@ -29,19 +29,53 @@ A crate's inline `#[test]`s are its unit tests: a `rust_test` over the same
 `srcs` and `crate_root` (it does not depend on the library, so it can gate
 it). See `//tools/build/proto-codegen:komira_proto_codegen_unit`.
 
+The weld runs the tests when the ARTIFACT IS BUILT: `buck2 build` of the
+library, of anything linking it, or of the binary runs each welded test as
+an action (or takes its cached `.passed` marker). `buck2 test` is a second,
+separate way in. `rust_test` also gives buck2 an `ExternalRunnerTestInfo`
+that runs the same runner over the same harness, holds and timeout, writing
+no marker; and the `tests` attribute is buck2's own, the targets `buck2 test`
+runs for a target. So `buck2 test //pkg:lib` runs the `rust_test`s in the
+library's `tests` and reports one result per `rust_test` (stdout carries the
+runner's `PASS <label>: <n> passed` line); it does not build or publish the
+gated artifact. `buck2 test` of the `rust_test` itself does the same for that
+one target.
+
 The runner ([`test_runner.sh`](test_runner.sh)) lists the tests first and
-refuses a target that lists none (`EMPTY GATE`). It refuses an `#[ignore]`d
-test (a test that does not run is a mute), and a harness summary that does
-not count every unheld test as passed.
+refuses a target that lists none (`EMPTY GATE`). It refuses an unheld
+`#[ignore]`d test (a test that does not run is a mute), and a harness
+summary that does not count every unheld test as passed.
 
 `tests_known_failing = {"<module>::tests::<name>": {"issue": ..., "reason": ...}}`
 holds a red test, and INVERTS rather than mutes: the held test still runs,
-alone, and must FAIL; a held test that passes is red (`LEDGER STALE`), naming
-the row to delete, and so is a row naming no listed test. `issue` is a
-GitHub issue (`123`, `#123` or its URL) and `reason` says why THIS test
-fails; both are refused empty at analysis, as are two byte-identical reasons
-and holding every test. The planted defects are in
+alone and with `--include-ignored` (so an `#[ignore]`d test can be held), and
+must FAIL, measured: its run must report `0 passed; 1 failed`. A held test
+that passes is red (`LEDGER STALE`), naming the row to delete; a held run
+that reports anything else (a crash, another count) is refused.
+
+Which refusals happen when:
+
+- At ANALYSIS (`defs.bzl`, so `buck2 targets` and every build refuse them):
+  a row with no `issue`, an `issue` that is not a GitHub issue (`123`,
+  `#123` or its URL), an empty `reason`, a row field other than `issue` and
+  `reason`, a key that is not a libtest test name, two rows with
+  byte-identical reasons, and `test_timeout_s` below 1.
+- At RUN time (`test_runner.sh`, when the test action runs; a mistyped row
+  passes analysis and reds only the build that runs it): a hold naming no
+  listed test (`LEDGER STALE`), holding every listed test, no tests
+  (`EMPTY GATE`), an unheld `#[ignore]`d test, a summary that does not count
+  every unheld test as passed, a held test that passes (`LEDGER STALE`), and
+  a held run that does not report `0 passed; 1 failed`.
+
+The planted defects are in
 [`tests//negative/rust_test`](../tests/negative/rust_test/BUCK) (test 35).
+
+Each harness invocation (the list, the unheld run, each held run) runs under
+`busybox timeout`, `test_timeout_s` seconds (default 600). A test killed at
+its timeout is NO VERDICT, exit 142, as a SIGKILL (exit 137) is: the action
+fails without a verdict, and the executor may retry it. The harness is
+started with `busybox env -i`, so nothing in the action's environment
+(`RUST_TEST_*`, `RUST_MIN_STACK`) reaches it.
 
 A test runs with an empty current directory, `HOME` and `TMPDIR`, so it can
 read only what it compiles in. A file from another package is a label in
