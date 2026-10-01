@@ -49,3 +49,16 @@ proto_srcs(
     import_prefix = "komira",
     visibility = ["PUBLIC"],
 )
+
+# A Mojo AWS client module from a pinned botocore model and an operation
+# list: `--model`, `--model-sha256` (checked against the model bytes),
+# `--service`, `--operations`, `--module`, `--out`, and `--probe-out` for the
+# module's layout probe. Every input is a flag. The text goldens and
+# refusals are check actions in tests//functional/aws_codegen.
+rust_binary(
+    name = "aws-client-gen",
+    srcs = ["src/main_aws_client.rs"],
+    crate_root = "src/main_aws_client.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    visibility = ["PUBLIC"],
+)

@@ -1,68 +1,236 @@
 //! Parsing `(google.api.http)` path templates, and partitioning a request's
 //! fields into path, query and body for one HTTP rule.
+//!
+//! The grammar is the one `google/api/http.proto` states:
+//!
+//! ```text
+//! Template = "/" Segments [ Verb ] ;
+//! Segments = Segment { "/" Segment } ;
+//! Segment  = "*" | "**" | LITERAL | Variable ;
+//! Variable = "{" FieldPath [ "=" Segments ] "}" ;
+//! FieldPath = IDENT { "." IDENT } ;
+//! Verb     = ":" LITERAL ;
+//! ```
+//!
+//! A client fills every variable from a request field, so two parts of the
+//! grammar are refused rather than half-supported: a bare `*`/`**` segment
+//! outside a variable (no field fills it) and a dotted field path (the
+//! generated code reads top-level request fields only).
 
 /// One segment of a parsed path template.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PathSegment {
-    /// A literal path segment, e.g. `v1` or `shelves`.
+    /// A literal path segment, e.g. `v1` or `entries`.
     Literal(String),
-    /// A `{var}` capture — the named scalar request field substituted here.
-    Var(String),
+    /// A `{field}` or `{field=pattern}` capture, filled from the named
+    /// scalar request field.
+    Var(PathVar),
+}
+
+/// A variable of a path template.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct PathVar {
+    /// The request field the variable is filled from.
+    pub field: String,
+    pub pattern: VarPattern,
+    /// The variable was written `{field=...}`, `{field=*}` included. Its
+    /// expansion is decided by `pattern`; this records only the spelling,
+    /// which an OpenAPI path cannot state (see [`PathTemplate::has_patterns`]).
+    pub explicit_pattern: bool,
+}
+
+/// What a variable's value may look like, which decides how it is expanded.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum VarPattern {
+    /// `{field}` or `{field=*}`: one segment. Every byte outside the
+    /// unreserved set is percent-encoded, `/` included.
+    Segment,
+    /// `{field=<segments>}` with more than one segment, a literal or `**`,
+    /// e.g. `projects/*/logs/*` or `operations/**`. The value is checked
+    /// against the pattern and each of its segments percent-encoded, with
+    /// the `/` between them kept (the multi-segment expansion of
+    /// `http.proto`). Held in its canonical text form: segments joined by
+    /// `/`, each `*`, `**` (last only) or an unreserved-only literal.
+    Segments(String),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathTemplate {
     pub segments: Vec<PathSegment>,
-    /// The `{var}` names, in template order — the path-field set.
+    /// The variables' field names, in template order: the path-field set.
     pub vars: Vec<String>,
+    /// The custom verb, e.g. `list` for `/v2/entries:list`.
+    pub verb: Option<String>,
 }
 
 impl PathTemplate {
     pub fn parse(template: &str) -> Result<Self, String> {
-        if !template.starts_with('/') {
+        let Some(rest) = template.strip_prefix('/') else {
             return Err(format!(
                 "path template {template:?} must be absolute (start with `/`)"
             ));
-        }
+        };
+        let (body, verb) = split_verb(template, rest)?;
         let mut segments = Vec::new();
-        let mut vars = Vec::new();
-        // `split('/')` on a leading-slash string yields a leading empty
-        // component; skip it. A trailing slash similarly yields a trailing
-        // empty component — also skipped (no empty literal segments).
-        for raw in template.split('/') {
+        let mut vars: Vec<String> = Vec::new();
+        let raws = split_top_level(template, body)?;
+        let last = raws.len().saturating_sub(1);
+        for (i, raw) in raws.into_iter().enumerate() {
+            // An empty component (a trailing or doubled `/`) is skipped: no
+            // empty literal segments.
             if raw.is_empty() {
                 continue;
             }
-            if let Some(inner) = raw.strip_prefix('{').and_then(|s| s.strip_suffix('}')) {
-                // A `{var}` capture. Reject the richer `{var=...}` form and
-                // any non-identifier var name.
-                if inner.contains('=') {
+            if let Some(inner) = raw.strip_prefix('{') {
+                let inner = inner.strip_suffix('}').ok_or_else(|| {
+                    format!("path template {template:?}: segment {raw:?} is not a whole `{{...}}` variable")
+                })?;
+                let var = parse_var(template, inner)?;
+                if vars.contains(&var.field) {
                     return Err(format!(
-                        "path template {template:?}: nested capture `{{{inner}}}` is \
-                         unsupported (Phase 1 handles only simple `{{var}}`)"
+                        "path template {template:?}: field `{}` is captured twice",
+                        var.field
                     ));
                 }
-                if !is_simple_ident(inner) {
-                    return Err(format!(
-                        "path template {template:?}: `{{{inner}}}` is not a simple \
-                         field identifier"
-                    ));
+                if let VarPattern::Segments(p) = &var.pattern {
+                    if p.ends_with("**") && i != last {
+                        return Err(format!(
+                            "path template {template:?}: `**` matches the rest of the \
+                             path, so its variable `{}` must be the last segment",
+                            var.field
+                        ));
+                    }
                 }
-                vars.push(inner.to_string());
-                segments.push(PathSegment::Var(inner.to_string()));
+                vars.push(var.field.clone());
+                segments.push(PathSegment::Var(var));
+            } else if raw == "*" || raw == "**" {
+                return Err(format!(
+                    "path template {template:?}: a bare `{raw}` segment has no request \
+                     field to fill it; a client can only send a template whose \
+                     wildcards sit inside a `{{field=...}}` variable"
+                ));
             } else {
-                if raw.contains(['{', '}', '*', ':']) {
+                if raw.contains(['{', '}', '*', '=']) {
                     return Err(format!(
                         "path template {template:?}: literal segment {raw:?} carries \
-                         an unsupported template metacharacter (Phase 1 handles only \
-                         literals and simple `{{var}}`)"
+                         a template metacharacter"
                     ));
                 }
                 segments.push(PathSegment::Literal(raw.to_string()));
             }
         }
-        Ok(PathTemplate { segments, vars })
+        Ok(PathTemplate { segments, vars, verb })
     }
+
+    /// True when some variable was written `{field=...}`, i.e. the template
+    /// text is not the plain `{field}` form an OpenAPI path can state as it
+    /// is. Decided by the spelling, not by the pattern: `{field=*}` expands
+    /// like `{field}`, but its text still carries the `=*`, so an OpenAPI
+    /// path key made from it would name no `{field}` parameter.
+    pub fn has_patterns(&self) -> bool {
+        self.segments
+            .iter()
+            .any(|s| matches!(s, PathSegment::Var(PathVar { explicit_pattern: true, .. })))
+    }
+}
+
+/// Split the custom verb off the template body (`rest`, after the leading
+/// `/`). The verb is the text after a `:` outside every `{...}`; it is a
+/// non-empty unreserved literal, because it is emitted into the URL as it is.
+fn split_verb<'a>(template: &str, rest: &'a str) -> Result<(&'a str, Option<String>), String> {
+    let mut depth = 0usize;
+    for (i, c) in rest.char_indices() {
+        match c {
+            '{' => depth += 1,
+            '}' => depth = depth.saturating_sub(1),
+            ':' if depth == 0 => {
+                let verb = &rest[i + 1..];
+                if verb.is_empty() || !verb.bytes().all(is_unreserved) {
+                    return Err(format!(
+                        "path template {template:?}: custom verb {verb:?} must be a \
+                         non-empty literal of [A-Za-z0-9-._~]"
+                    ));
+                }
+                return Ok((&rest[..i], Some(verb.to_string())));
+            }
+            _ => {}
+        }
+    }
+    Ok((rest, None))
+}
+
+/// Split at every `/` outside a `{...}`, refusing unbalanced or nested braces.
+fn split_top_level<'a>(template: &str, body: &'a str) -> Result<Vec<&'a str>, String> {
+    let mut out = Vec::new();
+    let mut depth = 0usize;
+    let mut start = 0;
+    for (i, c) in body.char_indices() {
+        match c {
+            '{' => {
+                if depth > 0 {
+                    return Err(format!("path template {template:?}: nested `{{` in a variable"));
+                }
+                depth = 1;
+            }
+            '}' => {
+                if depth == 0 {
+                    return Err(format!("path template {template:?}: unbalanced `}}`"));
+                }
+                depth = 0;
+            }
+            '/' if depth == 0 => {
+                out.push(&body[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    if depth != 0 {
+        return Err(format!("path template {template:?}: unclosed `{{`"));
+    }
+    out.push(&body[start..]);
+    Ok(out)
+}
+
+/// Parse the inside of `{...}`: `field` or `field=pattern`.
+fn parse_var(template: &str, inner: &str) -> Result<PathVar, String> {
+    let (field, pattern) = match inner.split_once('=') {
+        Some((f, p)) => (f, Some(p)),
+        None => (inner, None),
+    };
+    if field.contains('.') {
+        return Err(format!(
+            "path template {template:?}: `{{{inner}}}` names a nested field path; \
+             only a top-level request field can be captured"
+        ));
+    }
+    if !is_simple_ident(field) {
+        return Err(format!(
+            "path template {template:?}: `{{{inner}}}` does not name a field identifier"
+        ));
+    }
+    let pattern = match pattern {
+        None | Some("*") => VarPattern::Segment,
+        Some(p) => {
+            let segs: Vec<&str> = p.split('/').collect();
+            for (i, s) in segs.iter().enumerate() {
+                let ok = match *s {
+                    "*" => true,
+                    "**" => i + 1 == segs.len(),
+                    lit => !lit.is_empty() && lit.bytes().all(is_unreserved),
+                };
+                if !ok {
+                    return Err(format!(
+                        "path template {template:?}: pattern {p:?} of `{field}` must be \
+                         `/`-separated segments, each `*`, a literal of [A-Za-z0-9-._~], \
+                         or `**` as the last one"
+                    ));
+                }
+            }
+            VarPattern::Segments(p.to_string())
+        }
+    };
+    Ok(PathVar { field: field.to_string(), explicit_pattern: inner.contains('='), pattern })
 }
 
 fn is_simple_ident(s: &str) -> bool {
@@ -73,6 +241,7 @@ fn is_simple_ident(s: &str) -> bool {
     }
     chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
 }
+
 
 pub fn percent_encode_simple(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
@@ -183,6 +352,10 @@ pub fn partition_fields(
 mod tests {
     use super::*;
 
+    fn seg_var(field: &str) -> PathSegment {
+        PathSegment::Var(PathVar { field: field.into(), pattern: VarPattern::Segment, explicit_pattern: false })
+    }
+
     #[test]
     fn parse_simple_template() {
         let t = PathTemplate::parse("/v1/shelves/{shelf}/books/{book}").unwrap();
@@ -191,12 +364,13 @@ mod tests {
             vec![
                 PathSegment::Literal("v1".into()),
                 PathSegment::Literal("shelves".into()),
-                PathSegment::Var("shelf".into()),
+                seg_var("shelf"),
                 PathSegment::Literal("books".into()),
-                PathSegment::Var("book".into()),
+                seg_var("book"),
             ]
         );
         assert_eq!(t.vars, vec!["shelf".to_string(), "book".to_string()]);
+        assert_eq!(t.verb, None);
     }
 
     #[test]
@@ -212,13 +386,72 @@ mod tests {
     }
 
     #[test]
-    fn parse_rejects_nested_capture() {
-        assert!(PathTemplate::parse("/v1/{name=shelves/*}").is_err());
+    fn parse_custom_verb_on_a_literal() {
+        let t = PathTemplate::parse("/v2/entries:list").unwrap();
+        assert_eq!(
+            t.segments,
+            vec![PathSegment::Literal("v2".into()), PathSegment::Literal("entries".into())]
+        );
+        assert_eq!(t.verb.as_deref(), Some("list"));
     }
 
     #[test]
-    fn parse_rejects_wildcard() {
-        assert!(PathTemplate::parse("/v1/**").is_err());
+    fn parse_pattern_capture_keeps_its_slashes_inside_the_braces() {
+        let t = PathTemplate::parse("/v2/{parent=projects/*}/logs").unwrap();
+        assert_eq!(
+            t.segments,
+            vec![
+                PathSegment::Literal("v2".into()),
+                PathSegment::Var(PathVar {
+                    field: "parent".into(),
+                    pattern: VarPattern::Segments("projects/*".into()),
+                    explicit_pattern: true,
+                }),
+                PathSegment::Literal("logs".into()),
+            ]
+        );
+        assert!(t.has_patterns());
+    }
+
+    #[test]
+    fn parse_double_star_capture_then_verb() {
+        let t = PathTemplate::parse("/v1/{name=operations/**}:cancel").unwrap();
+        assert_eq!(t.vars, vec!["name".to_string()]);
+        assert_eq!(t.verb.as_deref(), Some("cancel"));
+    }
+
+    #[test]
+    fn parse_star_pattern_is_one_segment_but_still_a_written_pattern() {
+        // `{name=*}` expands like `{name}` (one segment, `/` encoded), but
+        // its text carries `=*`: an OpenAPI path key made from it would name
+        // no `{name}` parameter, so has_patterns() must say so.
+        let t = PathTemplate::parse("/v1/{name=*}/things").unwrap();
+        let PathSegment::Var(v) = &t.segments[1] else { panic!("not a variable") };
+        assert_eq!(v.pattern, VarPattern::Segment);
+        assert!(v.explicit_pattern);
+        assert!(t.has_patterns());
+        assert!(!PathTemplate::parse("/v1/{name}/things").unwrap().has_patterns());
+    }
+
+    #[test]
+    fn parse_refusals() {
+        for bad in [
+            "/v1/**",                       // bare wildcard: no field fills it
+            "/v1/*/x",                      // the same, one segment
+            "/v1/{a=**/x}",                 // `**` not last in its pattern
+            "/v1/{a=x/**}/y",               // `**` variable not last in the path
+            "/v1/{a.b}",                    // nested field path
+            "/v1/{a={b}}",                  // nested braces
+            "/v1/{a",                       // unclosed
+            "/v1/a}",                       // unbalanced
+            "/v1/x:",                       // empty verb
+            "/v1/x:a/b",                    // verb with a `/`
+            "/v1/{a=x y}",                  // pattern literal outside the unreserved set
+            "/v1/{a}/{a}",                  // captured twice
+            "/v1/{a=x//y}",                 // empty pattern segment
+        ] {
+            assert!(PathTemplate::parse(bad).is_err(), "{bad} was accepted");
+        }
     }
 
     #[test]

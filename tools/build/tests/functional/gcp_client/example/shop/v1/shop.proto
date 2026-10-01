@@ -1,0 +1,31 @@
+// A tiny API shaped like a Google one: a service of two methods, of which a
+// client calls one. GetItem reaches Item in item.proto; DeleteItem reaches
+// ItemTombstone there. A client scoped to GetItem holds neither DeleteItem
+// nor ItemTombstone.
+syntax = "proto3";
+
+package example.shop.v1;
+
+import "example/shop/v1/item.proto";
+
+service ShopService {
+  rpc GetItem(GetItemRequest) returns (GetItemResponse);
+  rpc DeleteItem(DeleteItemRequest) returns (DeleteItemResponse);
+}
+
+message GetItemRequest {
+  string name = 1;
+}
+
+message GetItemResponse {
+  Item item = 1;
+  int64 version = 2;
+}
+
+message DeleteItemRequest {
+  string name = 1;
+}
+
+message DeleteItemResponse {
+  ItemTombstone tombstone = 1;
+}
