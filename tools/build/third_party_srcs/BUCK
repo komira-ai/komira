@@ -1,3 +1,4 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load(":defs.bzl", "fixture_archive", "third_party_srcs")
 
@@ -42,4 +43,11 @@ third_party_srcs(
     library = "s2n-tls",
     archive = ":s2n-mini.tar.gz",
     committed = "testdata/s2n_mini_srcs.bzl",
+)
+
+# The non-gating report of pinned downloads against their newest upstream
+# release (upstream_versions.sh), run by hand; only its lint is a target.
+shell_lint(
+    name = "shell_lint",
+    srcs = ["upstream_versions.sh"],
 )
