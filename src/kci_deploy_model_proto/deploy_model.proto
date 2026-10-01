@@ -398,12 +398,12 @@ message SecretBinding {
 // The scope rule this encodes: **the deploy must never write a CUSTOMER
 // credential.** It is a custody rule, not an anti-clobbering rule: re-writing a
 // value the customer owns is wrong even when the bytes are identical, because
-// the control plane is not that credential's custodian.
+// the deploying system is not that credential's custodian.
 //
-// THE DISTINCTION THIS EXISTS TO MAKE. For an operator's OWN deploy, a webhook
-// secret or a vendor API token are not customer credentials: they are the
-// operator's credentials in the operator's own project, and the rule does not
-// bar minting them. For a CUSTOMER's deploy the very same handles name the
+// THE DISTINCTION THIS EXISTS TO MAKE. When the deploying party deploys into
+// the account it owns, a webhook secret or a vendor API token are not customer
+// credentials: they are that party's own credentials in its own project, and
+// the rule does not bar minting them. For a CUSTOMER's deploy the very same handles name the
 // customer's credentials and the rule does bar it. One bundle, two answers, so
 // neither the bundle alone nor the environment alone can decide it.
 //
@@ -416,15 +416,15 @@ message SecretBinding {
 // The second half is deliberately NOT a new declaration. It reads
 // `ApplyContext.assumable_role_ref`: non-empty means we assumed a role INTO
 // somebody else's account, which is the ground truth of "this is a customer
-// deploy" rather than a label someone can mis-set. A control plane deploying
-// into its own project uses `ApplyContext.self_deploy()` (empty ref).
+// deploy" rather than a label someone can mis-set. A deploying system acting
+// in its own project uses `ApplyContext.self_deploy()` (empty ref).
 //
 // SEEDING FAILS CLOSED ON SILENCE: an undeclared binding is never auto-seeded,
 // because minting a credential is not a thing to do by default.
 //
 // BUT "NOT SEEDABLE" IS NOT "NEVER WRITTEN", AND THE DIFFERENCE IS REAL.
 // Bindings that do not declare custody carry 0, and their contract is an
-// UNCONDITIONAL write of whatever the control plane sourced (an operator who
+// UNCONDITIONAL write of whatever the deploying system sourced (an operator who
 // supplies a value for such a handle does so in order to write it; rotation is
 // the intent). So the WRITE REFUSAL (`must_not_write_secret`) fires only once
 // custody has actually been DECLARED, while the SEED permission
@@ -438,20 +438,21 @@ enum SecretCustody {
   SECRET_CUSTODY_UNSPECIFIED = 0;
 
   // The CUSTOMER owns this credential (their vendor API token, their DKIM key,
-  // their OAuth client secret). NO deploy may write it, not the operator's and
-  // not the customer's own. It reaches the secret store through the customer's
+  // their OAuth client secret). NO deploy may write it, not the deploying
+  // party's and not the customer's own. It reaches the secret store through the customer's
   // own connect/onboard flow, never through a bundle deploy.
   //
   // DECLARING THIS IS NOT THE SAME AS LEAVING IT UNSET. This value is ENFORCED
-  // at the write: the applier refuses even if the control plane somehow holds a
-  // value for the handle. Without it, "the deploy never writes a customer
-  // credential" would be true only because the control-plane secret source
+  // at the write: the applier refuses even if the deploying system somehow
+  // holds a value for the handle. Without it, "the deploy never writes a
+  // customer credential" would be true only because the deploying system's
+  // secret source
   // happens not to know such handles, a property of a config map that any
   // addition to it would void in silence.
   SECRET_CUSTODY_CUSTOMER = 1;
 
-  // The operator's OWN operational credential. A deploy running in the
-  // operator's own account (NOT a customer deploy) MAY create it and seed its
+  // A credential of the deploying party itself, created only when the deploy
+  // acts in the account that owns it. Such a deploy MAY create it and seed its
   // first version.
   //
   // SEED, NOT ROTATE. A seeded handle is written ONLY when it has no version.
@@ -461,7 +462,7 @@ enum SecretCustody {
   // credential that regenerates on every deploy is a silent outage.
   SECRET_CUSTODY_OPERATOR = 2;
 
-  // The operator's OWN MACHINE-MINTED credential, provisioned INTO the
+  // The deploying party's MACHINE-MINTED credential, provisioned INTO the
   // CUSTOMER's project. Seedable in EITHER account, because the deploy generates
   // the value and no one else holds a copy to overwrite.
   //
@@ -644,8 +645,8 @@ message DeploymentSpec {
   // WHY IT TRAVELS ON THE SPEC. An engine that deploys apps into a CUSTOMER
   // project builds its Firestore admin client ONCE at process boot, with its
   // own database id baked in. Ensuring indexes through that client without a
-  // per-deployment database would ensure an app's shapes into the operator's
-  // database: the boundary is the PROJECT. Carried on the SPEC, the id arrives
+  // per-deployment database would ensure an app's shapes into the deploying
+  // system's own database: the boundary is the PROJECT. Carried on the SPEC, the id arrives
   // with the deployment it belongs to and the boot-built client keeps none.
   //
   // EMPTY is legal and means "this deployment states no database": the ensure
@@ -667,7 +668,7 @@ message DeploymentSpec {
   // with that one application's schema; an engine that holds none deploys a
   // stateful app with ZERO composite indexes, and its first list query fails
   // with 400 FAILED_PRECONDITION. This field fixes both, precisely because
-  // nothing in any control-plane binary has to be edited to add a customer's
+  // nothing in any deploy-tool binary has to be edited to add a customer's
   // table.
   //
   // `datastore_database` AND THIS FIELD ARE ONE ANSWER, NOT TWO. They are the
