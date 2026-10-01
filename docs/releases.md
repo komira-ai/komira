@@ -4,12 +4,13 @@ What komira publishes today, and how another repository pins a version of it.
 
 ## What exists today
 
-Komira has no release tags and no version number of its own, and nothing is
-uploaded to a package registry. A version of komira is a commit. What the
-build produces from a program is described in
-[the release train](design/release_train.md): a relocatable bundle, a
-reproducible tarball of it, and an OCI image layout. Nothing in the build
-pushes or publishes any of them.
+Komira has no release tags and no version number of its own, and this
+repository does not yet contain the step that uploads to a package registry.
+A version of komira is a commit. What the build produces from a program is
+described in [release machines](design/release_machine.md): a relocatable
+bundle, a reproducible tarball of it, and an OCI image layout. The build rules
+only write these files; publishing them is the step a release machine runs
+after the build and its gates.
 
 The `version` that a bundle carries is an attribute of that bundle's
 `mojo_bundle` target. It names the program, not komira: two bundles in one
@@ -31,8 +32,9 @@ repository once per commit.
 
 ## Held
 
-These parts of a release story are not described here because the libraries
-that implement them are not part of this repository yet:
+These parts of a release machine's publish step are not described here
+because the libraries that implement them are not part of this repository
+yet:
 
 - Conda packages and Python wheels of the Mojo libraries.
 - Package channels, and the rules for which writers each channel admits.

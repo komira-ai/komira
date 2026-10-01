@@ -1,20 +1,46 @@
-# Release train: from a program to a shippable artifact
+# Release machines: from a program to a shipped artifact
 
-## What is it for, and what is out of scope?
+## What is a release machine, and what does this repository cover?
 
-The packaging rules in `tools/build/package` turn a `mojo_binary` into things a
-machine other than the build machine can run: a bundle (a directory holding the
-program and everything it needs besides glibc and the kernel), a tarball of that
-bundle, and an OCI image of it. The rules write files. Nothing is pushed or
-published by the build.
+A release machine ships one thing. It is one authored description that names
+the targets to build, the gates that must pass before the result may leave,
+and when it fires (a git event or a schedule). What it ships is either a
+deployment of a service or a published artifact (an OCI image, a conda
+package, a Python wheel, an npm package) placed on a release channel. Both
+are release machines. Publishing artifacts is a main part of what they do, not
+something outside them.
 
-Out of scope, and not implemented in this repository:
+A release machine is built before it ships, and the build is its test gate:
+each test the machine declares runs as a build action, and the artifact that
+would be shipped cannot be produced until those tests have passed. A machine
+whose targets do not build completely is blocked.
 
-- Conda packages and Python wheels of Mojo libraries, and the channels they
-  would be placed on.
-- Copying or promoting an image between registries.
-- A version shared by all artifacts, and the steps of cutting a release. See
-  [releases](../releases.md) for what a version of komira is today.
+Two layers produce a shipped artifact, and this document is about the first:
+
+1. **The build rules** (`tools/build/package`) turn a `mojo_binary` into
+   things a machine other than the build machine can run: a bundle (a
+   directory holding the program and everything it needs besides glibc and
+   the kernel), a tarball of that bundle, and an OCI image of it. The rules
+   only write files. They never push, because a build whose result depends on
+   a registry cannot be reproduced; that is a property of the build, not of
+   the release machine.
+2. **The release machine** runs the build, then stages and publishes what it
+   made, deploys it where it is a service, and validates the outcome in the
+   environment. Its driver is `komira_ci`.
+
+Held, because the libraries that implement them are not part of this
+repository yet, and described here only so the build outputs below make
+sense:
+
+- Conda packages and Python wheels of Mojo libraries, derived from the
+  libraries' build dependencies.
+- Release channels: a channel is a publish destination and nothing else, with
+  a name, a visibility, one repository per artifact type, and the one
+  identity allowed to push to each.
+- Copying an image between registries by digest, so that the bytes a later
+  channel serves are the bytes an earlier one validated.
+- A version shared by every artifact of a release, and the steps of cutting
+  it. See [releases](../releases.md) for what a version of komira is today.
 
 The per-rule reference, with every attribute and failure message, is
 [tools/build/package/README.md](../../tools/build/package/README.md); this
@@ -78,6 +104,8 @@ modes (0755 under `bin/`, 0644 otherwise). The tarball has sorted entries,
 mtime and uid/gid 0, and no time in its gzip header. The image's JSON keys are
 sorted and every timestamp is 1970-01-01T00:00:00Z. A digest that changes only
 because a build ran again cannot be used to tell whether the content changed.
+A release machine publishes by digest, so this is what lets it recognise an
+artifact it has already published.
 
 ### Why a launcher instead of linking the program as an executable?
 
