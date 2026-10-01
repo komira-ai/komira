@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_release_channels/tests/test_channel_parse_refusals.mojo
+# src/kci_release_channel/tests/test_channel_parse_refusals.mojo
 #   Every refusal of `parse_channels_file`, one case per message.
 # =============================================================================
 #
@@ -10,7 +10,7 @@
 
 from std.testing import TestSuite, assert_equal
 
-from kci_release_channels import parse_channels_file
+from kci_release_channel import parse_channels_file
 
 comptime _ID = "publisher@example.invalid"
 

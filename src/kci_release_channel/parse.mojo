@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_release_channels/parse.mojo -- read a channels file.
+# kci_release_channel/parse.mojo -- read a channels file.
 # =============================================================================
 #
 # The channels file is textproto, every channel defined once:

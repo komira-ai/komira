@@ -1,11 +1,11 @@
 # =============================================================================
-# src/kci_release_channels/tests/test_channel_declarations.mojo
+# src/kci_release_channel/tests/test_channel_declarations.mojo
 #   A channels file parses into declarations, and the lookups read them back.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_release_channels import (
+from kci_release_channel import (
     ARTIFACT_TYPE_CONDA,
     ARTIFACT_TYPE_NPM,
     ARTIFACT_TYPE_OCI,

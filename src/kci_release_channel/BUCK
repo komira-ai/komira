@@ -10,7 +10,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The one dep is the textproto lexer. The welded tests read declarations back
 # through the lookups, and assert each refusal by its message.
 mojo_library(
-    name = "kci_release_channels",
+    name = "kci_release_channel",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = ["//src/komira_textproto:komira_textproto"],
     test_srcs = [

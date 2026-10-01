@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_release_channels -- release-channel declarations.
+# kci_release_channel -- release-channel declarations.
 # =============================================================================
 #
 # A release channel is a publish destination: a name, a visibility and one
@@ -8,7 +8,7 @@
 # file with `parse_channels_file`.
 # =============================================================================
 
-from kci_release_channels.channel_declaration import (
+from kci_release_channel.channel_declaration import (
     ARTIFACT_TYPE_CONDA,
     ARTIFACT_TYPE_NPM,
     ARTIFACT_TYPE_OCI,
@@ -23,4 +23,4 @@ from kci_release_channels.channel_declaration import (
     is_valid_channel_name,
     validate_channel_declarations,
 )
-from kci_release_channels.parse import parse_channels_file
+from kci_release_channel.parse import parse_channels_file

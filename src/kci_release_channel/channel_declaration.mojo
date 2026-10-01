@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_release_channels/channel_declaration.mojo -- the `channel` declaration.
+# kci_release_channel/channel_declaration.mojo -- the `channel` declaration.
 # =============================================================================
 #
 # A release channel is a publish destination and nothing else:
