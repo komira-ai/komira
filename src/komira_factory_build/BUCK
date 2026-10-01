@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The BUILD-Job spec builder and in-pod build renders: BuildSpecBuilder (a
+# build Job's facts -> a one-container FINITE PlacementSpec), the typed
+# BuildRequest input and its container-env encode/decode, the kaniko / crane /
+# clone / FROM-build command renders, the trust-context build-backend selector,
+# and the build-output marker parser. Pure value transformations; no I/O.
+mojo_library(
+    name = "komira_factory_build",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_db:komira_db",
+        "//src/komira_deploy_bundle:komira_deploy_bundle",
+        "//src/komira_k8s:komira_k8s",
+        "//src/komira_placement:komira_placement",
+    ],
+    test_srcs = [
+        "tests/test_build_request_contract.mojo",
+        "tests/test_build_spec_builder.mojo",
+        "tests/test_kaniko_image_recipe_routing.mojo",
+        "tests/test_marker_convergence.mojo",
+        "tests/test_parse_pushed_digest.mojo",
+        "tests/test_resolve_build_backend.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
