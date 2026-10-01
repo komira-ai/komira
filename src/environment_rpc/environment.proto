@@ -1,0 +1,525 @@
+// environment.proto: the per-installation ENVIRONMENT REGISTRY schema.
+//
+// WHAT THIS IS. An environment named by a deploy bundle's wave is a LOGICAL
+// SYMBOL ONLY: a bare name like "dev" / "staging" / "prod" with no cloud
+// specifics. This registry is the seam that BINDS that symbol to a concrete
+// compute environment: symbol -> {cloud, account, region, governance}. The
+// same byte-identical bundle resolves to GCP for one installation, AWS for
+// another and on-prem Kubernetes for a third; the only thing that differs is
+// this registry. A self-hosted installation reads it from a local
+// `environments.textproto`.
+//
+// VOCABULARY DISCIPLINE. This schema names NO vendor product. `Cloud` is a
+// 5-value coarse posture (GCP/AWS/AZURE/KUBERNETES/LOCAL); the concrete
+// implementation (a serverless-compute node resolving to one cloud's
+// serverless container product vs a VM vs a systemd unit) is chosen BELOW this
+// line, inside a conformer, by the node-kind x `Cloud` matrix. The wire tokens
+// "gcp"/"aws"/"onprem" survive only as `from_str` parse aliases on `Cloud`,
+// documented below.
+//
+// PLAIN proto3 (no `(komira.db.*)` options): `mojo_proto_library` generates
+// the messages with proto3-JSON + binary serde. Standalone: it imports no
+// other proto, so it packages as its own library.
+//
+// ORDINAL CONTRACTS WITHOUT A CROSS-PROTO IMPORT. Three fields reuse an enum
+// declared in another file of the deploy model, and each is typed `int32`
+// here, NOT the imported enum:
+//   * `deploy_provider` (field 7) carries `DeployProvider`'s ordinals
+//     (deploy_model.proto);
+//   * `tenancy` (field 13) carries `Tenancy`'s ordinals (app_bundle.proto);
+//   * `EnvironmentComputeEnvironment.egress` carries `EgressMode`'s ordinals
+//     (full_manifest.proto).
+// Importing the enum would generate the other file into this package (the
+// generated package is flat, and a reference to another file's message is a
+// module of the same package), so every consumer of `environment_rpc` would
+// pull in that schema too. Instead the registry reader mirrors the ordinals as
+// constants at its boundary and a drift-guard test asserts the mirror equals
+// the real enum. Do not "fix" one of these into an import, and do not declare
+// a second copy of the enum here: see `tenancy`'s comment for why a duplicate
+// is the worse of the two mistakes.
+
+syntax = "proto3";
+
+package komira.deploy.v1;
+
+// ─── The cloud posture (the 5-value enum) ────────────────────────────────────
+//
+// The COARSE cloud/on-prem posture of one environment. The below-the-line
+// selector is the node-kind x `Cloud` conformer matrix, not a vendor-product
+// enum. `Cloud` names NO vendor product: serverless compute on GCP happens to
+// be one product, and the user never sees that.
+//
+// FROM_STR WIRE ALIASES (implemented by the environment-registry parser, NOT
+// by proto). Older wire tokens (stored rows, user scripts, an API that answers
+// 422 on an unknown token) MUST keep parsing. The registry's `from_str`
+// accepts, case-insensitively:
+//   "gcp"        -> CLOUD_GCP
+//   "aws"        -> CLOUD_AWS
+//   "onprem"     -> CLOUD_KUBERNETES   (COMPAT mapping: the retired ONPREM(2)
+//                                       ordinal promoted to KUBERNETES default;
+//                                       "onprem" MUST NOT be dropped, it appears
+//                                       in stored rows and user scripts)
+//   "kubernetes" -> CLOUD_KUBERNETES
+//   "local"      -> CLOUD_LOCAL
+//   "azure"      -> CLOUD_AZURE
+// Canonical textproto authoring uses the full enum names below (e.g.
+// `cloud: CLOUD_GCP`); the lowercase tokens are the `from_str` compat surface
+// only. An unknown token is a precise, self-correctable error.
+enum Cloud {
+  // Proto3 zero default. UNSPECIFIED is a hard authoring error at bind time:
+  // an environment MUST name its cloud posture (fail-fast, no silent default).
+  CLOUD_UNSPECIFIED = 0;
+  // A public-cloud GCP posture. Below the line, a serverless-compute node
+  // resolves to GCP's serverless-container implementation inside the GCP
+  // conformer.
+  CLOUD_GCP = 1;
+  // A public-cloud AWS posture. `from_str` alias "aws".
+  CLOUD_AWS = 2;
+  // A public-cloud Azure posture. `from_str` alias "azure".
+  CLOUD_AZURE = 3;
+  // A Kubernetes posture (the successor to the retired ONPREM(2) ordinal, and
+  // the DEFAULT for genuine on-prem / air-gapped). `from_str` accepts BOTH
+  // "kubernetes" and the older "onprem".
+  CLOUD_KUBERNETES = 4;
+  // A single-box local posture (a laptop compose stack with local object
+  // store, broker and proxy), ambient credentials, no assumed role. `from_str`
+  // "local".
+  CLOUD_LOCAL = 5;
+}
+
+// ─── The direct-apply governance policy ──────────────────────────────────────
+//
+// Whether an environment may be mutated OUTSIDE a pipeline run. The governance
+// line lives HERE in the registry, not in tribal knowledge.
+enum DirectApply {
+  // Proto3 zero default. UNSPECIFIED is treated as the safe posture
+  // (PIPELINE_ONLY) by the registry, a fail-safe: an environment is not
+  // directly mutable unless it explicitly opts in.
+  DIRECT_APPLY_UNSPECIFIED = 0;
+  // Dev/personal environments. A CLI `apply --env dev-<user>` deploys through
+  // the direct-library flow with NO pipeline.
+  DIRECT_APPLY_ALLOWED = 1;
+  // Staging/production environments. ONLY a pipeline run may mutate this
+  // environment; a direct `apply` is rejected (the governance gate).
+  DIRECT_APPLY_PIPELINE_ONLY = 2;
+}
+
+// ─── The environment KIND ────────────────────────────────────────────────────
+//
+// A COARSE dev/test posture ORTHOGONAL to `Cloud`: is this a LOCAL emulated
+// environment (emulator-backed services, single-box or local-Kubernetes
+// applier, cheap service-code verification) or a CLOUD environment (real cloud
+// project, real service behavior)? The CLI reads it to route local-vs-cloud
+// behavior. `Cloud` still names the below-the-line conformer selection
+// (GCP/AWS/...); `kind` names the fidelity rung. UNSPECIFIED is treated as
+// CLOUD by the reader, so an entry that omits `kind` resolves as a cloud
+// environment (fail-safe: not local).
+enum EnvironmentKind {
+  // Proto3 zero default. The reader treats UNSPECIFIED as CLOUD (fail-safe: an
+  // environment is not LOCAL unless it explicitly opts in).
+  ENVIRONMENT_KIND_UNSPECIFIED = 0;
+  // A CLOUD environment: real cloud project, real service behavior (staging,
+  // production, a personal cloud environment). `deploy_provider` resolves to
+  // a cloud runner.
+  ENVIRONMENT_KIND_CLOUD = 1;
+  // A LOCAL emulated environment (e.g. `local-gcp`): emulator-backed services;
+  // the single-box or local-Kubernetes applier stands up the emulators and the
+  // workload. Cheap service-code verification; needs Docker.
+  ENVIRONMENT_KIND_LOCAL = 2;
+}
+
+// ─── Per-service datastore binding ───────────────────────────────────────────
+//
+// The datastore (OLTP) provider binding for THIS environment, REAL or
+// EMULATOR, per service. Firestore is the GCP arm and DynamoDB the AWS arm,
+// both resolved by the same `--env` seam.
+message DatastoreBinding {
+  FirestoreBinding firestore = 1;
+  // THE AWS ARM. Without it a `CLOUD_AWS` environment could declare no
+  // datastore at all: `firestore` would be the only arm, and an AWS
+  // environment authoring it would be naming a Google product under an AWS
+  // `cloud:` line. An omitted field would then read as "this environment has
+  // no datastore" when it means "the schema cannot say".
+  //
+  // ONE ARM IS SET, AND WHICH ONE MUST AGREE WITH `cloud`. A GCP-family
+  // environment (CLOUD_GCP / CLOUD_LOCAL) sets `firestore`; an AWS environment
+  // sets `dynamodb`. Authoring the wrong one is REFUSED at bind time by the
+  // environment-registry reader, never ignored: a silently dropped binding is
+  // a service that comes up pointed at nothing and fails at its first read, in
+  // somebody else's account, naming the read.
+  DynamodbBinding dynamodb = 2;
+}
+
+// One DynamoDB binding: the CLOUD (real table) XOR LOCAL (DynamoDB Local)
+// target. The AWS sibling of `FirestoreBinding`.
+//
+// WHAT IT DELIBERATELY DOES NOT CARRY: A KEY SCHEMA. Read this before adding a
+// field. A DynamoDB table's key schema is IMMUTABLE: the only path between two
+// key schemas is DeleteTable+CreateTable, which destroys every item, so a key
+// authored anywhere that can DEFAULT is a permanent, uncorrectable guess. This
+// message is an ENVIRONMENT BINDING ("where does this environment's datastore
+// live"), not a desired-state spec, and widening it into one would put an
+// invented-key path into the registry.
+//
+// AND THERE IS NO `account` OR `region` FIELD, deliberately: a DynamoDB table
+// is addressed by (account, region, table) and the first two are already on
+// the `Environment` (`account_ref`, `region`). A second copy here would be a
+// second source for one address, the defect `FirestoreBinding.database`'s own
+// comment describes, where half the address is derived and half is baked.
+message DynamodbBinding {
+  oneof target {
+    // CLOUD: the real DynamoDB table name (e.g. "example-routes"), in this
+    // environment's own `account_ref` + `region`.
+    string table = 1;
+    // LOCAL: a DynamoDB Local endpoint host:port (e.g. "dynamodb-local:8000").
+    string emulator_endpoint = 2;
+  }
+  // LOCAL: talk to the emulator over plaintext (no TLS). Meaningful only with
+  // `emulator_endpoint`; ignored for a real `table` (which is always TLS).
+  bool insecure = 3;
+}
+
+// One Firestore binding: the CLOUD (real project) XOR LOCAL (emulator) target.
+message FirestoreBinding {
+  // The real-vs-emulator target. A CLOUD environment sets `project`; a LOCAL
+  // environment sets `emulator_endpoint` (+ `insecure`). Exactly one arm is
+  // set (the reader keys `is_local()` off `kind`, and reads whichever arm the
+  // environment authored).
+  oneof target {
+    // CLOUD: the real Firestore project id (e.g. "example-project"). The live
+    // Firestore transport is resolved against it.
+    string project = 1;
+    // LOCAL: the emulator endpoint host:port (e.g. "firestore-emulator:8080").
+    // The emulator transport is resolved against it.
+    string emulator_endpoint = 2;
+  }
+  // LOCAL: talk to the emulator over plaintext (no TLS). Meaningful only with
+  // `emulator_endpoint`; ignored for a real `project` (which is always TLS).
+  bool insecure = 3;
+  // THE OTHER HALF OF THE ADDRESS. A Firestore store is addressed by
+  // `projects/<project>/databases/<database>`: TWO strings. A registry that
+  // binds only the first leaves the second to a compile-time constant
+  // somewhere else, and half a derived address plus half a baked one breaks
+  // silently the day the database is renamed (a Firestore database's LOCATION
+  // IS IMMUTABLE, so a move is a rename): the derived half follows and the
+  // baked half does not, and writes land in a database no deployed service
+  // opens, with every call succeeding.
+  //
+  // WHAT IT NAMES, AND WHAT IT DOES NOT: the database holding the deploy
+  // control plane's OWN operator-side bookkeeping in THIS environment (for
+  // example its deployment-audience rows and its release-channel publish
+  // ledger). It is NOT a default for a DEPLOYED APP's database: an app states
+  // its own, and nothing here substitutes for that.
+  //
+  // EMPTY IS THE ANSWER "this environment holds no control plane", not a
+  // missing input: a user account the tool deploys INTO has no bookkeeping of
+  // the tool's, and the reader REFUSES rather than defaulting (a value that
+  // must never be silently supplied is returned raw, and the fail-loud reading
+  // lives at the consuming edge).
+  string database = 4;
+}
+
+// ─── Per-service objectstore binding ─────────────────────────────────────────
+//
+// The object-store provider binding, REAL or EMULATOR, per service. GCS is the
+// GCP arm and S3 the AWS arm, both resolved by the same `--env` seam.
+message ObjectstoreBinding {
+  GcsBinding gcs = 1;
+  // THE AWS ARM, same gap and same rule as `DatastoreBinding.dynamodb`:
+  // without it a `CLOUD_AWS` environment could declare no object store at
+  // all. One arm is set and it must agree with `cloud`; the wrong one is
+  // REFUSED at bind time, never ignored.
+  //
+  // THE SHAPE IS THE SAME AS GCS ON PURPOSE (bucket XOR endpoint, plus
+  // `insecure`) because S3's addressing genuinely is: a bucket name, or a
+  // MinIO/localstack endpoint. It is NOT the DynamoDB arm's situation: there
+  // is no immutable-schema hazard here, so the parallel is real rather than
+  // assumed.
+  S3Binding s3 = 2;
+}
+
+// One S3 binding: the CLOUD (real bucket) XOR LOCAL (MinIO / emulator) target.
+// The AWS sibling of `GcsBinding`. The bucket's REGION is the environment's
+// own `region`; there is no second copy here, for the reason `DynamodbBinding`
+// states.
+message S3Binding {
+  oneof target {
+    // CLOUD: the real S3 bucket name (e.g. "example-inbound").
+    string bucket = 1;
+    // LOCAL: a MinIO / localstack endpoint host:port (e.g. "minio:9000").
+    string emulator_endpoint = 2;
+  }
+  // LOCAL: talk to the emulator over plaintext (no TLS). Meaningful only with
+  // `emulator_endpoint`; ignored for a real `bucket`.
+  bool insecure = 3;
+}
+
+// One GCS binding: the CLOUD (real bucket) XOR LOCAL (emulator) target.
+message GcsBinding {
+  // The real-vs-emulator target. A CLOUD environment sets `bucket`; a LOCAL
+  // environment sets `emulator_endpoint` (+ `insecure`).
+  oneof target {
+    // CLOUD: the real GCS bucket name (e.g. "example-blobs"). The live
+    // object-store transport is resolved against it.
+    string bucket = 1;
+    // LOCAL: the emulator endpoint host:port (e.g. "gcs-emulator:443"). The
+    // emulator transport is resolved against it.
+    string emulator_endpoint = 2;
+  }
+  // LOCAL: talk to the emulator over plaintext (no TLS). Meaningful only with
+  // `emulator_endpoint`; ignored for a real `bucket`.
+  bool insecure = 3;
+}
+
+// ─── Build behavior as spec data ─────────────────────────────────────────────
+//
+// The build behavior for THIS environment, read by the `build` verb.
+// Local-vs-in-pod build is a parameter of the environment record, not a
+// second verb: `build` reads `in_pod` and dispatches to the local build OR the
+// in-pod build accordingly.
+message BuildSpec {
+  // Run the build INSIDE a pod (an in-cluster image build) vs a LOCAL build
+  // (the operator-side compose-and-pin path). Default false = local build.
+  bool in_pod = 1;
+}
+
+// ─── One registered environment ──────────────────────────────────────────────
+//
+// One symbol -> concrete-environment binding. The binding is PINNED at run
+// creation: a mid-flight environment re-registration cannot redirect an
+// in-flight run. In a hosted installation this row is the user's bootstrapped
+// compute environment; self-hosted, it is a local row resolving to a
+// Kubernetes namespace or a local compose target.
+message Environment {
+  // The logical symbol this binding names: the exact string a bundle's wave
+  // references (e.g. "staging"). The join key between the cloud-agnostic
+  // bundle and this per-installation registry.
+  string name = 1;
+  // The coarse cloud/on-prem posture. Drives the node-kind x `Cloud`
+  // conformer selection below the line. Names no vendor product.
+  Cloud cloud = 2;
+  // The project / account id this environment deploys into (a NAME, never a
+  // credential, e.g. "example-staging"). Empty for a pure-local
+  // (`CLOUD_LOCAL`) environment that has no account.
+  string account_ref = 3;
+  // The cloud region this environment targets (e.g. "us-central1"). Empty
+  // where the posture has no region concept (`CLOUD_LOCAL` / some
+  // `CLOUD_KUBERNETES`).
+  string region = 4;
+  // The direct-apply governance policy: may this environment be mutated
+  // outside a pipeline run? Dev = ALLOWED; staging/production = PIPELINE_ONLY.
+  DirectApply direct_apply = 5;
+
+  // ── The dev/test model ──
+  //
+  // The dev/test posture: LOCAL emulated vs CLOUD (default). UNSPECIFIED =
+  // CLOUD, so an entry that omits it resolves as a cloud environment.
+  EnvironmentKind kind = 6;
+  // WHERE the workload runs, per environment. Carries the `DeployProvider`
+  // ORDINAL CONTRACT (deploy_model.proto): 0=UNSPECIFIED, 1=CLOUD_RUN (the
+  // cloud default), 5=K8S, 7=LOCAL_COMPOSE, ... . Typed `int32`, NOT the
+  // imported enum, to keep this proto standalone (see the file header); the
+  // registry reader mirrors the ordinals as constants, drift-guarded against
+  // the real enum. This makes the Kubernetes-vs-compose choice data: the
+  // applier reads it per environment, not from a global switch. UNSPECIFIED =
+  // the cloud default (CLOUD_RUN) for a CLOUD environment. The registry reader
+  // accepts the enum NAME tokens (`deploy_provider: K8S`) and maps them to
+  // these ordinals.
+  int32 deploy_provider = 7;
+  // The datastore (OLTP) provider binding: real (project) or emulator, per
+  // service.
+  DatastoreBinding datastore = 8;
+  // The object-store provider binding: real (bucket) or emulator, per service.
+  ObjectstoreBinding objectstore = 9;
+  // The build behavior (in_pod vs local): spec data the `build` verb reads.
+  BuildSpec build = 10;
+
+  // ── The GCP project NUMBER ──
+  //
+  // The numeric GCP project id (a decimal string): a STABLE per-PROJECT fact,
+  // distinct from `account_ref` (the project NAME / string id). It is the ONLY
+  // input the Cloud Run SERVICE-AGENT principal needs:
+  // `service-<project_number>@serverless-robot-prod.iam.gserviceaccount.com`
+  // (the identity a Cloud Run revision PULLS its image as). The bootstrap
+  // composer emits a same-project Artifact Registry READER grant for that
+  // service agent so an image staged in the environment's own project pulls
+  // without a cross-project read (a Cloud Run service created through the raw
+  // API gets NO same-project auto-grant; it must be granted EXPLICITLY, and the
+  // grant is idempotent if an auto-grant exists).
+  //
+  // Per-PROJECT, NOT per-region: one region can host several projects, one
+  // number each, so this belongs on the environment, never on a region
+  // record. Empty for a pure-local (`CLOUD_LOCAL`) environment or any
+  // environment that has not published its number; the composer emits the
+  // service-agent grant ONLY when this is set on a GCP environment, so an
+  // empty value is a safe no-op.
+  string project_number = 11;
+
+  // ── THE RELEASE CHANNEL THIS ENVIRONMENT ALIASES ──
+  //
+  // A control plane aliases EXACTLY ONE release channel, and the alias is
+  // DECLARED HERE rather than passed per command. The channel is the lane a
+  // build lands in and the image repository that backs it; registry IAM is
+  // PER-REPOSITORY, so "which principal may write this repository" is
+  // answerable only once an environment NAMES its channel. Without the
+  // declaration, every control plane's writer must hold write on every
+  // channel's repository, and a pre-release build can become what users pull.
+  //
+  // EMPTY IS NOT A DEFAULT CHANNEL. An environment that declares no channel is
+  // NOT a release control plane: a user account the tool deploys INTO, or a
+  // local emulated rung. Defaulting an undeclared environment to the public
+  // channel is precisely how an unvetted build reaches users, so every reader
+  // of this field MUST fail loud on empty rather than substitute a default.
+  // Proto3 gives no way to distinguish "unset" from "", which is exactly why
+  // the ONLY safe reading of "" is REFUSE.
+  //
+  // The value space is the installation's declared channel set, validated at
+  // the consuming edge. It is a string rather than an enum because the channel
+  // set belongs to the installation, and this proto is standalone (see the
+  // file header).
+  string release_channel = 12;
+
+  // ── TENANCY: WHOSE CLOUD ACCOUNT THIS ENVIRONMENT BINDS TO ──
+  //
+  // The point of the deploy model is that user workloads run in the user's own
+  // account, where the operator sees nothing. `AppBundle.tenancy`
+  // (app_bundle.proto field 15) says whose account a WORKLOAD runs in; this
+  // says whose account an ENVIRONMENT is. The placement rule is a TYPE MATCH
+  // between the two, not a special case:
+  //
+  //   A `TENANCY_CUSTOMER` bundle may not name a `TENANCY_CONTROL_PLANE`
+  //   environment.
+  //
+  // Deliberately ASYMMETRIC: a control-plane bundle MAY name a customer
+  // environment (an end-to-end harness does exactly that). Only the direction
+  // that puts customer workloads in the operator's account is refused.
+  //
+  // THE OWNER OF AN ACCOUNT IS A FACT ABOUT THE ACCOUNT, so it is declared
+  // HERE and not derived. Deriving the control-plane account set from "the
+  // projects control-plane bundles deploy into" is wrong in an instructive
+  // way: an end-to-end harness is a control-plane bundle that deploys INTO
+  // customer test accounts, so the derivation would label a test customer
+  // account as control plane and flag every correctly placed workload.
+  //
+  // AND `kind` DOES NOT ALREADY SAY THIS. `EnvironmentKind` is CLOUD/LOCAL, a
+  // fidelity rung, an orthogonal axis.
+  //
+  // ── WHY `int32` AND NOT `komira.bundle.v1.Tenancy`; READ BEFORE "FIXING" ──
+  // This proto is standalone BY DESIGN (see the file header): naming the
+  // `Tenancy` enum would import app_bundle.proto into every consumer of
+  // `environment_rpc`, the same bind that made `deploy_provider` an `int32`.
+  //
+  // AND DUPLICATING THE ENUM HERE WOULD BE WORSE THAN EITHER. This file is
+  // `komira.deploy.v1` and app_bundle.proto is `komira.bundle.v1`, so a second
+  // `Tenancy` would not collide in protoc, and that is exactly the problem:
+  // the whole value of this field is that it is THE SAME ENUM the bundle
+  // declares. The placement rule is a type match, and a type match across two
+  // independently editable enums is a coincidence, not a rule.
+  //
+  // So this carries the `Tenancy` ORDINAL CONTRACT (app_bundle.proto) exactly
+  // as `deploy_provider` carries `DeployProvider`'s: 0=UNSPECIFIED,
+  // 1=CONTROL_PLANE, 2=CUSTOMER, mirrored as constants in the registry parser
+  // and drift-guarded against the real enum. The registry reader accepts the
+  // enum NAME tokens (`tenancy: TENANCY_CUSTOMER`) and RAISES on any token
+  // outside the closed set.
+  //
+  // 0 (UNSPECIFIED) IS NOT "CONTROL PLANE" AND NOT "CUSTOMER". Proto3 cannot
+  // distinguish unset from zero, so the only safe reading of 0 is "this
+  // environment has not declared an owner", and a placement rule cannot be
+  // decided against it. Readers must say which way they fail; the deploy-time
+  // refusal fails CLOSED (an undeclared environment cannot receive a customer
+  // workload) because the opposite default is exactly how a customer workload
+  // reaches the operator's account. A local emulated rung may declare nothing.
+  int32 tenancy = 13;
+
+  // ── THE STAGE THIS ENVIRONMENT BELONGS TO ──
+  //
+  // A STAGE GROUPS ENVIRONMENTS ACROSS CLOUDS. A pre-release stage is
+  // typically not one environment: it can be a GCP environment (and its
+  // second region), an AWS environment holding a shared service, and the
+  // customer test accounts that stage deploys into. ONE cross-cloud SERVICE
+  // REGISTRY serves ONE stage, so a service that needs to resolve
+  // `name -> endpoint` must be able to answer "WHICH REGISTRY SERVES ME" from
+  // its own environment binding. That is a fact about the ENVIRONMENT, so it
+  // is declared here and not derived.
+  //
+  // WHY THIS IS NOT `release_channel` (field 12). That field is a BIJECTION BY
+  // CONSTRUCTION: one control plane per channel, and a lookup of the control
+  // plane for a channel RAISES on two matches, deliberately, because two
+  // control planes on one channel is how a pre-release build becomes what
+  // users pull. The very thing a stage must express (SEVERAL environments, in
+  // SEVERAL clouds, sharing one name) is the thing that field exists to
+  // refuse. A second region of a stage's control plane shows the split: it may
+  // not declare the stage's channel, and it MUST be in the stage.
+  //
+  // SO NOTHING MAY RAISE ON TWO ENVIRONMENTS SHARING A STAGE. That is the
+  // POINT of the axis, not a tolerated ambiguity: a stage lookup returns the
+  // whole set. The only refusals are an environment asked for a stage it does
+  // not have, and a lookup of a stage nobody declares.
+  //
+  // EMPTY IS "NOT IN A STAGE", NEVER "THE DEFAULT STAGE". Proto3 gives no way
+  // to distinguish unset from "" (the same bind `release_channel` and
+  // `tenancy` are in), so the ONLY safe reading of "" is a REFUSAL at the
+  // consuming edge. An environment that silently joined a default stage would
+  // be served by, and discoverable through, a registry nobody chose for it. An
+  // environment legitimately in zero stages (a build project that runs no
+  // service, a single-box emulated rung) says so in its own registry entry.
+  //
+  // AND IT IS NOT `tenancy`, NOT `cloud`, AND NOT `region`. A stage crosses
+  // all three: one stage can hold CONTROL_PLANE and CUSTOMER environments, GCP
+  // and AWS environments, and several regions. Deriving it from any of them
+  // would bind the registry's fleet to an axis that is not the release ring.
+  //
+  // A string, not an enum, for the reason `release_channel` is one: the value
+  // space belongs to the installation, and this proto is standalone (see the
+  // file header).
+  string stage = 14;
+
+  // ── THE CUSTOMER'S COMPUTE ENVIRONMENT: WHERE ITS JOB VMs RUN ──
+  //
+  // The customer defines its network for job VMs with this block. It goes on
+  // the CUSTOMER environment's entry because that is the account the VM lands
+  // in: the customer bootstrap, run under the customer's own day-0
+  // credential, creates the network, the NAT, the VM service account, the
+  // job-image registry and the grants to the job manager from it, then
+  // publishes the compute-environment record the job manager reads.
+  //
+  // ABSENT (the default) = the environment declares no compute environment:
+  // every bootstrap and deploy composes byte-identically, and the job manager
+  // refuses every VM placement into it. An environment that declares none
+  // therefore refuses every VM placement BY CONSTRUCTION; there is no separate
+  // arming switch.
+  //
+  // Readers that do not yet consume the block REFUSE an environment that
+  // states it, by name, rather than ignoring it.
+  EnvironmentComputeEnvironment compute_environment = 15;
+}
+
+// ─── `Environment.compute_environment` (field 15) ────────────────────────────
+//
+// Names only: nothing here is a resource id. Every resource name (the VM
+// service account, the network, the subnet, the router/NAT, the registry, the
+// placer) is DERIVED from the environment entry by one set of naming
+// functions, so the bootstrap that creates them, the job manager's fences that
+// check them and the control plane's expectations cannot disagree.
+message EnvironmentComputeEnvironment {
+  // The GCE ZONE the job VMs are placed in (`us-central1-a`). A ZONE, not a
+  // region: the subnet's region is DERIVED from it and must equal the
+  // environment's own `region`.
+  string zone = 1;
+  // The egress posture of the subnet the VMs join: the ORDINAL CONTRACT of
+  // `komira.manifest.v1.EgressMode` (full_manifest.proto), carried as a bare
+  // `int32` for the reason `deploy_provider` and `tenancy` are (see the file
+  // header). The registry parser accepts the enum NAME tokens (`egress:
+  // EGRESS_MODE_PRIVATE_WITH_PUBLIC_EGRESS`), mirrored as constants and
+  // pinned against the real enum IN BOTH DIRECTIONS by a drift-guard test.
+  // VM placement admits only PRIVATE_WITH_PUBLIC_EGRESS; PUBLIC and PRIVATE
+  // are refused by name at placement.
+  int32 egress = 2;
+  // TRUE MARKS A CONTROL-PLANE-OWNED TEST CUSTOMER, AND NOTHING ELSE MAY SET
+  // IT. It admits the operator's validator observe grant and the probe-image
+  // staging, and it is the kind of environment the job manager places test
+  // VMs into. Refused on a production-stage environment and on the managed
+  // bootstrap path.
+  bool admit_cp_validation = 3;
+}

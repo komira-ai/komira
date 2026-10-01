@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+
+# The environment registry schema (`komira.deploy.v1`): binds a bundle's
+# logical environment name to a concrete cloud, account, region and
+# governance policy. Standalone: environment.proto imports no other proto, so
+# the generated package carries only this schema.
+#
+#   from environment_rpc.environment import Environment, Cloud, DirectApply,
+#       EnvironmentKind, DatastoreBinding, FirestoreBinding, DynamodbBinding,
+#       ObjectstoreBinding, GcsBinding, S3Binding, BuildSpec,
+#       EnvironmentComputeEnvironment
+#
+# Other `.proto` files import it as `komira/deploy/v1/environment.proto`.
+mojo_proto_library(
+    name = "environment_rpc",
+    srcs = ["environment.proto"],
+    import_prefix = "komira/deploy/v1",
+    deps = ["//src/komira_serde:komira_serde"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_test(
+    name = "test_environment_roundtrip",
+    srcs = ["tests/test_environment_roundtrip.mojo"],
+    deps = [
+        ":environment_rpc",
+        "//src/komira_serde:komira_serde",
+    ],
+)
