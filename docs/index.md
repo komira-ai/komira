@@ -15,6 +15,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |
 | Mojo safety: pointers, origins and the Mojo 1.0 spellings | [design/mojo_safety_and_idioms.md](design/mojo_safety_and_idioms.md) |
 | The cryptographic primitives over AWS-LC, and certificate chain validation | [design/crypto_and_tls.md](design/crypto_and_tls.md) |
+| HTTP/1.1 and HTTP/2 client and server on one reactor, the middleware chain, routing, client pooling and budgets, and the s2n-tls layer | [design/http.md](design/http.md) |
 
 ## Design docs
 
@@ -26,7 +27,7 @@ and its limits. A family's doc lands together with the libraries it describes.
 |---|---|
 | core | [columnar memory and Arrow](design/columnar_memory_and_arrow.md) |
 | cross-cutting | [Mojo safety and idioms](design/mojo_safety_and_idioms.md) |
-| connectors | [crypto](design/crypto_and_tls.md); HTTP, databases, object stores, file-system discovery, and protobuf and gRPC: coming with `komira_http`, `komira_db`, `komira_objectstore` and `komira_grpc` |
+| connectors | [crypto](design/crypto_and_tls.md), [HTTP](design/http.md); databases, object stores, file-system discovery, and protobuf and gRPC: coming with `komira_db`, `komira_objectstore` and `komira_grpc` |
 | storage | compression codecs, Parquet, text and row formats, Iceberg and CDC, serverless Postgres: coming with `komira_parquet`, `komira_csv`, `komira_iceberg` and `komira_pgstore` |
 | execution and operators | pipelines and morsel dispatch, aggregation, joins, sort, top-N and window: coming with the engine libraries |
 | plan and optimizer | logical plans and expressions, physical planning, the plan wire format, the query optimizer: coming with `komira_compiler` and `komira_optimizer` |
