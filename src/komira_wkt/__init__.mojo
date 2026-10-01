@@ -16,7 +16,7 @@ packages:
     substrate's namespace;
   - mirrors the proto ecosystem itself: `google.protobuf.*` WKTs are their
     own proto package; `komira_wkt` is the natural Mojo analogue.
-Dependency direction (cycle-free): `komira_wkt -> komira_serde` only.
+Dependency direction (cycle-free): `komira_wkt -> komira_serde`, plus the leaf libraries `komira_json` and `komira_encoding`.
 
 -- The proto3 canonical-JSON special case -----------------------------------
 A WKT does NOT serialize to proto3-canonical-JSON as a `{field: value}`

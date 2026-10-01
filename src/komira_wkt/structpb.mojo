@@ -40,12 +40,12 @@
 # `to_proto3_json()` emits the literal JSON (`null`, a number, a quoted
 # string, `true`/`false`, a `{...}` object, a `[...]` array). This module
 # carries a small self-contained JSON value-emitter + parser for that path so
-# `komira_wkt` keeps its single dependency on `komira_serde`.
+# `komira_wkt` takes its JSON value and parser from `komira_json`.
 # =============================================================================
 
 from komira_serde import Serializable, WireEncoder, WireDecoder
-from komira_serde import JsonValue, parse_json_value
-from komira_serde import (
+from komira_json import JsonValue, parse_json_value
+from komira_json import (
     JSON_NULL,
     JSON_BOOL,
     JSON_NUMBER,

@@ -31,7 +31,7 @@
 # =============================================================================
 
 from komira_serde import Serializable, WireEncoder, WireDecoder
-from komira_serde import base64_encode, base64_decode
+from komira_encoding import base64_encode, base64_decode
 
 
 # =============================================================================
@@ -381,8 +381,8 @@ struct BytesValue(Serializable, Copyable, Movable):
 
 
 # =============================================================================
-# Local scalar parsers — kept self-contained (komira_wkt depends only on
-# komira_serde).
+# Local scalar parsers — kept self-contained (the only library calls are the
+# base64 codecs from komira_encoding).
 # =============================================================================
 
 
