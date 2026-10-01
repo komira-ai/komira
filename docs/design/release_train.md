@@ -1,0 +1,139 @@
+# Release train: from a program to a shippable artifact
+
+## What is it for, and what is out of scope?
+
+The packaging rules in `tools/build/package` turn a `mojo_binary` into things a
+machine other than the build machine can run: a bundle (a directory holding the
+program and everything it needs besides glibc and the kernel), a tarball of that
+bundle, and an OCI image of it. The rules write files. Nothing is pushed or
+published by the build.
+
+Out of scope, and not implemented in this repository:
+
+- Conda packages and Python wheels of Mojo libraries, and the channels they
+  would be placed on.
+- Copying or promoting an image between registries.
+- A version shared by all artifacts, and the steps of cutting a release. See
+  [releases](../releases.md) for what a version of komira is today.
+
+The per-rule reference, with every attribute and failure message, is
+[tools/build/package/README.md](../../tools/build/package/README.md); this
+document explains how the parts fit and why.
+
+## How does it work?
+
+Three rules, each over the output of the one before.
+
+```
+mojo_binary ──► mojo_bundle ──┬─► bundle_tarball   <name>-<version>-linux-x86_64.tar.gz
+                              └─► oci_image        <name>.oci  (+ [docker_archive], [digest])
+```
+
+`mojo_bundle(binary = ..., version = ..., data = {...})` produces a directory:
+
+```
+bin/<name>                                    launcher
+lib/glibc-hwcaps/x86-64-v<N>/lib<name>.so     the program
+lib/                                          Mojo runtime, C++ runtime
+share/                                        data
+VERSION                                       name, version, platform, CPU level
+SHA256SUMS                                    every other file
+```
+
+`bundle_tarball` writes the bundle under `<name>-<version>/`. `oci_image` writes
+an OCI image layout: the layers of a base image, then one layer holding the
+bundle at `/opt/<name>/`, with entrypoint `/opt/<name>/bin/<name>`, platform
+linux/amd64, named `<repository>:<bundle version>`. Its `[docker_archive]`
+sub-target is the same image as one tar for `docker load`, and `[digest]` is a
+file holding the image manifest digest.
+
+### What does the launcher do?
+
+`bin/<name>` is a small C program built for the baseline x86-64 ISA, so it
+starts on any x86-64 CPU. It reads the CPU's x86-64 level, and below the level
+the program was compiled for (the toolchain's `target_cpu`) it prints one line
+and exits 126, before loading anything. Otherwise it loads `lib<name>.so` by
+name, searching `$ORIGIN/../lib` and the `glibc-hwcaps/x86-64-v<N>/`
+directories under it that the CPU supports, then calls the program's
+`komira_main`, which runs `main` through the same standard-library function a
+Mojo executable uses. A library that cannot be loaded exits 127.
+
+### What is the base image?
+
+`oci_image`'s `base` defaults to `komira//tools/build/toolchains:distroless_base`,
+declared with `oci_base`: the digest of its linux/amd64 manifest, that
+manifest's bytes checked in, and one pinned download per blob. The packing
+action does not use the network. It reads only those files and refuses unless
+the manifest hashes to its digest and names exactly the downloaded blobs.
+
+## Why is it built this way?
+
+### Why are the outputs reproducible?
+
+**Decision.** The bundle, the tarball and the image are functions of the bundle
+sources and the base image alone.
+
+**Because.** `VERSION` holds no time or revision. Files are copied with fixed
+modes (0755 under `bin/`, 0644 otherwise). The tarball has sorted entries,
+mtime and uid/gid 0, and no time in its gzip header. The image's JSON keys are
+sorted and every timestamp is 1970-01-01T00:00:00Z. A digest that changes only
+because a build ran again cannot be used to tell whether the content changed.
+
+### Why a launcher instead of linking the program as an executable?
+
+**Decision.** The program is a shared library behind a baseline-ISA launcher.
+
+**Because.** The launcher can run on any x86-64 CPU, so it can check the CPU's
+level before loading the program and say what is needed, exiting 126 so that a
+supervisor can tell a wrong CPU from a failing program. The `glibc-hwcaps`
+directories let builds for other levels sit next to this one.
+
+### Why is `komira_pack` a static executable?
+
+**Decision.** Tar and OCI files are written by `komira_pack`, a static
+executable built by the pinned zig and run with no shell.
+
+**Because.** The bytes it writes depend only on the bundle and the base, and the
+tool that writes them is itself a pinned build output.
+
+## What must always hold?
+
+- Two uncached builds of the same sources give the same tarball and the same
+  image digest.
+- A bundle runs from wherever it is copied, and through a symlink: every run
+  path is relative to its file.
+- The launcher refuses a CPU below the program's level with exit 126, and the
+  shipped launcher has no override. The test launcher, which judges a made-up
+  CPU named by `$KOMIRA_TEST_CPU`, is never part of a bundle.
+- A program run through its bundle behaves as the executable does: arguments,
+  environment, output and exit status.
+- Only linux x86_64 bundles are built.
+
+## Where is the code?
+
+| path | holds |
+|---|---|
+| `tools/build/package/defs.bzl` | `mojo_bundle`, `bundle_tarball`, `oci_base`, `oci_image` |
+| `tools/build/package/launcher/` | the launcher and its CPU-level tables |
+| `tools/build/package/pack/komira_pack.zig` | the tar and OCI writer |
+| `tools/build/examples/BUCK` | `hello_bundle`, `hello_tarball`, `hello_image` |
+
+## How is it tested?
+
+End-to-end tests in `tools/build/tests/functional` build the example targets:
+`bundle.sh` (layout, run paths, relocation, loader behaviour, reproducibility),
+`bundle_parity` (the bundle against the plain executable), and `formats.sh`
+(the tarball, the image, the digest, and `docker run` of the loaded image).
+`tools/build/package:level_test` runs the launcher's level function against
+made-up CPUs. See [tools/build/tests/README.md](../../tools/build/tests/README.md).
+
+## What are its limits and open questions?
+
+- Only linux x86_64.
+- `komira_pack` holds its output in memory until it exits, up to about three
+  times the bundle's size at peak, which sets the largest bundle a `light`
+  worker can pack.
+- A program finds its data through `/proc/self/exe`:
+  `<its directory>/../share`.
+- `LD_LIBRARY_PATH` is searched before the bundle's run paths, so it can put a
+  different library in place of the bundle's.
