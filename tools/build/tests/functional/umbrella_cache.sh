@@ -198,10 +198,8 @@ n_local=$(grep -c 'executor: Local(' "$W/rootcfg.providers.txt")
 labels=$(grep -oE '^ +label=komira//tools/build/platforms:[a-z0-9_-]+' "$W/rootcfg.providers.txt" | sed 's/.*://' | tr '\n' ' ')
 [ "$n_platforms" -gt 0 ] && [ "$n_local" = 0 ] ||
     die "rootcfg: $EP registers $n_platforms platforms, $n_local of them local-only; want >0 and 0 (see $W/rootcfg.providers.txt)"
-for p in linux-x86_64; do
-    case " $labels" in *" $p "*) ;;
-        *) die "rootcfg: registered platforms are [$labels], want $p among them (see $W/rootcfg.providers.txt)" ;; esac
-done
+case " $labels" in *" linux-x86_64 "*) ;;
+    *) die "rootcfg: registered platforms are [$labels], want linux-x86_64 among them (see $W/rootcfg.providers.txt)" ;; esac
 EXPECT_RESOLUTION="
 komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
 komira//tools/build/examples:hellopkg komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
@@ -217,13 +215,12 @@ got=$(awk '/^[^ ].* \(.*\):$/ { t = $1; next }
     t != "" && /^    Execution platform configuration: / { print t, $4; t = "" }' "$W/rootcfg.resolution.txt" | LC_ALL=C sort)
 [ "$got" = "$want" ] ||
     die "rootcfg: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ') (see $W/rootcfg.resolution.txt)"
-for key in linux_properties; do
-    if b2_rootcfg audit providers -c komira.execution=remote -c "komira_re.$key=" "$EP" > "$W/rootcfg.no_$key.txt" 2>&1; then
-        die "rootcfg: [komira] execution = remote without [komira_re] $key registered platforms (see $W/rootcfg.no_$key.txt)"
-    elif ! grep -qF "\`[komira_re] $key\` is not set" "$W/rootcfg.no_$key.txt"; then
-        die "rootcfg: [komira] execution = remote without [komira_re] $key failed without naming it (see $W/rootcfg.no_$key.txt)"
-    fi
-done
+key=linux_properties
+if b2_rootcfg audit providers -c komira.execution=remote -c "komira_re.$key=" "$EP" > "$W/rootcfg.no_$key.txt" 2>&1; then
+    die "rootcfg: [komira] execution = remote without [komira_re] $key registered platforms (see $W/rootcfg.no_$key.txt)"
+elif ! grep -qF "\`[komira_re] $key\` is not set" "$W/rootcfg.no_$key.txt"; then
+    die "rootcfg: [komira] execution = remote without [komira_re] $key failed without naming it (see $W/rootcfg.no_$key.txt)"
+fi
 b2_rootcfg kill > /dev/null 2>&1
 echo "      root .buckconfig: a consumer with the remote settings in its root .buckconfig registers $n_platforms remote platforms, resolves $(printf '%s\n' "$want" | wc -l) targets to the pinned configurations, and refuses execution = remote without linux_properties"
 
