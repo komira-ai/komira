@@ -125,7 +125,7 @@ trait ProtoEnum(Copyable, Movable):
 #
 # Two conformers ship in this package: `ProtoBinaryWire` (protobuf binary,
 # delegating to the `komira_protobuf` primitives) and `Proto3JsonWire`
-# (proto3 canonical JSON, on the direct-byte writers in `json_number`).
+# (proto3 canonical JSON, on the direct-byte writers in `komira_json`).
 #
 # `E` is ALWAYS a comptime parameter on `Serializable.encode[E]` — fully
 # monomorphized at each call site; never a runtime value, never a fn-ptr.
