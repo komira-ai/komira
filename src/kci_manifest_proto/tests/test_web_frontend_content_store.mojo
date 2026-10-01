@@ -23,7 +23,7 @@
 from komira_serde import decode_json, decode_proto, encode_json, encode_proto
 from std.testing import assert_equal, assert_true
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     WebFrontendSpec,
     WebRouteRule,
     WebRuntimeConfigEntry,

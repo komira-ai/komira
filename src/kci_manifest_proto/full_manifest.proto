@@ -29,7 +29,7 @@
 
 syntax = "proto3";
 
-package komira.manifest.v1;
+package kci.manifest.v1;
 
 // ─── The generic resource-node kind ──────────────────────────────────────────
 //
@@ -1245,7 +1245,7 @@ message WifProviderSpec {
 // bucket-level access, public access prevention) are empty/false by default,
 // so a bucket node that sets only `location` takes the cloud's defaults.
 //
-// WHY `Resolved` IS IN THE NAME. The intent tier (`komira.bundle.v1`) also has
+// WHY `Resolved` IS IN THE NAME. The intent tier (`kci.bundle.v1`) also has
 // a `BucketSpec`: they are the AUTHORED and RESOLVED tiers of one concept (the
 // authored tier carries the literal `name`; here the bucket is identified by
 // its node `logical_id`). The package split makes the shared name legal, but
