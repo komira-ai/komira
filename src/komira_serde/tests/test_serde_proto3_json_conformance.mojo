@@ -40,9 +40,8 @@ from komira_serde import (
     JsonDecoder,
     encode_json,
     decode_json,
-    base64_encode,
-    base64_decode,
 )
+from komira_encoding import base64_encode, base64_decode
 
 
 # =============================================================================

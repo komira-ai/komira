@@ -14,21 +14,20 @@ Modules:
                        primitives. Carries the POOLED SCRATCH BUFFER for
                        `write_message_field` framing.
   - proto3_json.mojo : `JsonEncoder` / `JsonDecoder` — the proto3-canonical-
-                       JSON backend (including the map mapping).
-  - json_number.mojo : the direct-byte JSON number writers the JSON encoder
-                       appends with.
-  - json_value.mojo  : a self-contained JSON object scanner for the JSON
-                       decode side.
-  - base64.mojo      : RFC 4648 §4 standard base64 (proto3-JSON `bytes`).
+                       JSON backend (including the map mapping), on
+                       `komira_json` (the JSON value, parser and writers)
+                       and `komira_encoding` (base64 for `bytes`).
   - codec.mojo       : `encode_proto` / `decode_proto` / `encode_json` /
                        `decode_json` — top-level convenience entry points.
 
 Dependency direction (cycle-free):
   komira_serde -> komira_protobuf  (ProtoBinaryWire backend)
+  komira_serde -> komira_json      (Proto3JsonWire backend)
+  komira_serde -> komira_encoding  (base64 for proto3-JSON `bytes`)
   NOT komira_serde -> the gRPC runtime (which consumes this package)
 
-Its only first-party dependency is `komira_protobuf`, so every generated
-client can import it cheaply.
+All three dependencies are small and have no dependencies of their own, so
+every generated client can import this package cheaply.
 
 Encapsulation: the public API exposes only typed values, owned
 `List`/`String`, `Span` views, and the codec handle structs. No
@@ -55,19 +54,6 @@ from .proto_binary import (
 )
 
 from .proto3_json import JsonEncoder, JsonDecoder, UnknownFields
-
-from .json_value import (
-    JsonValue,
-    parse_json_value,
-    JSON_NULL,
-    JSON_BOOL,
-    JSON_NUMBER,
-    JSON_STRING,
-    JSON_ARRAY,
-    JSON_OBJECT,
-)
-
-from .base64 import base64_encode, base64_decode
 
 from .codec import (
     encode_proto,
