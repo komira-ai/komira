@@ -17,7 +17,7 @@ Public surface (what a generated `*_db.mojo` imports):
   LOGICAL_*            — the backend-neutral logical-type tags
   to_proto_json / from_proto_json — the nested-field native-JSON serde
 
-It depends on komira_uuid (Uuid), komira_serde (JSON scanner), komira_pg (the
+It depends on komira_uuid (Uuid), komira_json (JSON scanner), komira_pg (the
 Postgres wire client) and komira_async (the reactor seam), and modifies no
 other package.
 

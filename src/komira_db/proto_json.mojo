@@ -38,7 +38,7 @@
 
 from std.collections.dict import Dict
 
-from komira_serde.json_value import JsonValue, parse_json_value
+from komira_json import JsonValue, parse_json_value
 
 
 # =============================================================================
