@@ -20,10 +20,10 @@
 # forging a token — purely so it could read the public half. This function is
 # that read, without that capability.
 #
-# It is the same TYPE-FIREWALL argument that keeps `SecretWriter` a distinct
-# trait from `SecretStore`: a caller that must not be able to do X should not
-# hold a value that CAN do X, because "it does not call that method" is a
-# convention and "it does not hold that type" is a proof.
+# It is the same TYPE-FIREWALL argument that keeps a write capability a
+# distinct trait from a read capability: a caller that must not be able to
+# do X should not hold a value that CAN do X, because "it does not call that
+# method" is a convention and "it does not hold that type" is a proof.
 #
 # THE COMPOSITION. `ed25519_pubkey_from_seed` -> `kid_for_pubkey` ->
 # `render_jwks_json` over a one-element set, so the rendered JSON and the kid are
