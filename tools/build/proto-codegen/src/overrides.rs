@@ -208,7 +208,7 @@ mod tests {
     #[test]
     fn parses_a_well_formed_manifest() {
         let m = AwsOverrides::parse_manifest(&manifest(&format!(
-            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_relay.sm_overrides",
+            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_secretsmanager_ext.sm_overrides",
                  "hand_symbol":"delete_secret","reason":"{REASON}"}}"#
         )))
         .expect("parses");
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn check_symbols_refuses_a_missing_owner_module() {
         let m = AwsOverrides::parse_manifest(&manifest(&format!(
-            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_relay.sm_overrides",
+            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_secretsmanager_ext.sm_overrides",
                  "hand_symbol":"delete_secret","reason":"{REASON}"}}"#
         )))
         .unwrap();
@@ -255,13 +255,13 @@ mod tests {
     #[test]
     fn check_symbols_refuses_a_missing_owner_symbol() {
         let m = AwsOverrides::parse_manifest(&manifest(&format!(
-            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_relay.sm_overrides",
+            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_secretsmanager_ext.sm_overrides",
                  "hand_symbol":"delete_secret","reason":"{REASON}"}}"#
         )))
         .unwrap();
         let err = m
             .check_symbols(&[(
-                "src/komira_aws_relay/sm_overrides.mojo".into(),
+                "src/komira_aws_secretsmanager_ext/sm_overrides.mojo".into(),
                 "def something_else(x: Int):\n    pass\n".into(),
             )])
             .unwrap_err();
@@ -271,12 +271,12 @@ mod tests {
     #[test]
     fn check_symbols_accepts_a_present_owner() {
         let m = AwsOverrides::parse_manifest(&manifest(&format!(
-            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_relay.sm_overrides",
+            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_secretsmanager_ext.sm_overrides",
                  "hand_symbol":"delete_secret","reason":"{REASON}"}}"#
         )))
         .unwrap();
         m.check_symbols(&[(
-            "src/komira_aws_relay/sm_overrides.mojo".into(),
+            "src/komira_aws_secretsmanager_ext/sm_overrides.mojo".into(),
             "def delete_secret(mut c: X) raises -> Y:\n    pass\n".into(),
         )])
         .expect("accepts");

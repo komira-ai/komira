@@ -24,13 +24,8 @@
 # it has to travel with the trait, or a consumer of the seam cannot hold what
 # the seam returns.
 #
-# The submodules `secret_get_seam`, `secret_put_seam` and `secret_reap_seam`
-# carry three narrow Secret Manager seams (read a version, write a version,
-# delete / list secrets, each acting as a caller-supplied bearer). They are not
-# re-exported here; import them by submodule.
-#
-# WHAT IS NOT HERE. Every PARTICULAR store — a cloud secret manager client, a
-# Vault or Conjur client, an OS-keychain reader, a token cache, an auditing or
+# WHAT IS NOT HERE. Every PARTICULAR store — a remote secret-service client, an
+# OS-keychain reader, a token cache, an auditing or
 # authorizing wrapper — and any names catalog live outside this package and
 # enter through the `SecretStore` trait. The SHAPE is shared; a particular store
 # is not.
