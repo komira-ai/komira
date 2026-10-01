@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# kci's revision substrate: `kci <app> build` mints a per-app monotonic
+# revision id (`<app>-r<N>`) recording the full artifact set of one build
+# (service images, web content, probe images), and every downstream verb takes
+# `--revision <id>`. The ledger lives in any `ConditionalWriteStore` (a bucket,
+# or a directory), so it needs no hosted account. Also holds the deploy-side
+# revision assertion and provenance notice, and the artifact-type table
+# (`artifact_types.mojo`: one row per revision role).
+#
+# The welded tests cover the artifact-type table, the image-ref/digest split,
+# and the allocator over in-memory store doubles: concurrent minting, torn
+# creates, lost or stale HEAD recovery, reuse and reproduction recording, and
+# the record codec.
+mojo_library(
+    name = "kci_revision",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_serde:komira_serde",
+    ],
+    test_srcs = [
+        "tests/test_kci_revision_artifact_types.mojo",
+        "tests/test_kci_revision_ref_split.mojo",
+        "tests/test_kci_revision_store.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
