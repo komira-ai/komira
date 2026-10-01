@@ -1,0 +1,11 @@
+syntax = "proto3";
+
+package fix;
+
+import "fix/dep.proto";
+import "google/protobuf/timestamp.proto";
+
+message Root {
+  Dep dep = 1;
+  google.protobuf.Timestamp at = 2;
+}
