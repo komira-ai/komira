@@ -230,7 +230,7 @@ def test_bug_goaway_above_last_stream_id_is_reissued_on_a_new_conn() raises:
     # Connection 1 drains immediately, having processed NOTHING (last=0 < our
     # stream 1). Connection 2 serves the real answer.
     var conn1 = _h2_stream(_goaway_script(last_stream_id=0))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(_h2_stream(_success_script(String("EXECUTION-OK"))))
 
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
@@ -283,7 +283,7 @@ def test_bug_goaway_at_or_below_last_stream_id_is_not_retried() raises:
     print("  (g2) GOAWAY at-or-below Last-Stream-ID -> NOT retried...")
 
     var conn1 = _h2_stream(_goaway_script(last_stream_id=1))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     # The trap: armed, and must remain unused.
     connector.arm_next(_h2_stream(_success_script(String("MUST-NOT-REACH"))))
 
@@ -351,7 +351,7 @@ def test_bug_goaway_retry_is_bounded_and_says_how_many_over_how_long() raises:
     armed; exactly `_GOAWAY_RETRY_MAX_ATTEMPTS` must be consumed — the extra two
     are what distinguishes "bounded at 4" from "bounded by the fixture"."""
     print("  (g3/g4) retry is bounded + the give-up carries evidence...")
-    var connector = ScriptedConnector.with_stream(
+    var connector = ScriptedConnector.with_stream_tls(
         _h2_stream(_goaway_script(last_stream_id=0))
     )
     var armed = 6
@@ -464,7 +464,7 @@ def test_goaway_retry_budget_is_failsafe() raises:
 
     # The client: the default until the caller sets a budget, then that budget;
     # a rejected value restores the default rather than removing the bound.
-    var connector = ScriptedConnector.with_stream(
+    var connector = ScriptedConnector.with_stream_tls(
         _h2_stream(_goaway_script(last_stream_id=0))
     )
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
@@ -579,7 +579,7 @@ def test_bug_server_stream_goaway_above_last_stream_id_is_reissued() raises:
     print("  (g7) server-stream GOAWAY above Last-Stream-ID -> re-issued...")
 
     var conn1 = _h2_stream(_goaway_script(last_stream_id=0))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(_h2_stream(_success_script(String("REGISTRY-ROW"))))
 
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
@@ -624,7 +624,7 @@ def test_bug_server_stream_goaway_retry_is_bounded_and_names_the_class() raises:
     RED without the streaming re-issue on BOTH halves: one dial, and a raw
     `H2_PROTOCOL` GOAWAY rather than a typed exhaustion."""
     print("  (g8) server-stream retry is bounded + names its class...")
-    var connector = ScriptedConnector.with_stream(
+    var connector = ScriptedConnector.with_stream_tls(
         _h2_stream(_goaway_script(last_stream_id=0))
     )
     var armed = 6
@@ -703,7 +703,7 @@ def test_bug_server_stream_goaway_at_or_below_is_not_retried() raises:
     print("  (g9) server-stream GOAWAY at-or-below -> NOT retried...")
 
     var conn1 = _h2_stream(_goaway_script(last_stream_id=1))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(_h2_stream(_success_script(String("MUST-NOT-REACH"))))
 
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)

@@ -243,7 +243,7 @@ def test_bug_client_stream_goaway_above_last_stream_id_is_reissued() raises:
     # Connection 1 drains immediately, having processed NOTHING (last=0 < our
     # stream 1). Connection 2 serves the real WriteObjectResponse.
     var conn1 = _h2_stream(_goaway_script(last_stream_id=0))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(_h2_stream(_write_object_ok_script(String("GEN-1755"))))
 
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
@@ -298,7 +298,7 @@ def test_bug_client_stream_goaway_at_or_below_is_not_retried() raises:
     print("  (t2) client-stream GOAWAY at-or-below -> NOT retried...")
 
     var conn1 = _h2_stream(_goaway_script(last_stream_id=1))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     # A fully-successful second connection is ARMED and must remain UNUSED.
     # Reaching it is the failure signal.
     connector.arm_next(_h2_stream(_write_object_ok_script(String("GEN-BAD"))))
@@ -365,7 +365,7 @@ def test_bug_client_stream_reissue_resends_the_whole_request_body() raises:
     var cap2 = ArcPointer[List[UInt8]](List[UInt8]())
 
     var conn1 = _h2_stream_capturing(_goaway_script(last_stream_id=0), cap1)
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(
         _h2_stream_capturing(
             _write_object_ok_script(String("GEN-1756")), cap2
@@ -423,7 +423,7 @@ def test_bug_client_stream_goaway_retry_is_bounded() raises:
     print("  (t4) the client-stream re-issue is bounded...")
 
     var conn1 = _h2_stream(_goaway_script(last_stream_id=0))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     for _i in range(5):
         connector.arm_next(_h2_stream(_goaway_script(last_stream_id=0)))
 

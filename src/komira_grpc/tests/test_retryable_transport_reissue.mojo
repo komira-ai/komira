@@ -222,7 +222,7 @@ def test_bug_retryable_transport_is_reissued_on_a_new_conn() raises:
     print("  (t1) RETRYABLE_TRANSPORT -> re-issued on a fresh conn...")
 
     var conn1 = _h2_stream(_rst_script(H2_ERR_REFUSED_STREAM))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(_h2_stream(_success_script(String("OPERATION-DONE"))))
 
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
@@ -274,7 +274,7 @@ def test_bug_stream_reset_without_proof_is_not_retried() raises:
     print("  (t2) RST(CANCEL) carries no proof -> NOT retried...")
 
     var conn1 = _h2_stream(_rst_script(H2_ERR_CANCEL))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     # The trap: armed, and must remain unused.
     connector.arm_next(_h2_stream(_success_script(String("MUST-NOT-REACH"))))
 
@@ -338,7 +338,7 @@ def test_bug_retryable_transport_retry_is_bounded_and_names_its_class() raises:
     print("  (t3/t4) bounded, and the give-up names its own class...")
 
     var conn1 = _h2_stream(_rst_script(H2_ERR_REFUSED_STREAM))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     var armed = 6
     for _i in range(armed - 1):
         connector.arm_next(_h2_stream(_rst_script(H2_ERR_REFUSED_STREAM)))
@@ -419,7 +419,7 @@ def test_bug_server_stream_retryable_transport_is_reissued() raises:
     print("  (t5) server-stream RETRYABLE_TRANSPORT -> re-issued...")
 
     var conn1 = _h2_stream(_rst_script(H2_ERR_REFUSED_STREAM))
-    var connector = ScriptedConnector.with_stream(conn1^)
+    var connector = ScriptedConnector.with_stream_tls(conn1^)
     connector.arm_next(_h2_stream(_success_script(String("REGISTRY-ROW"))))
 
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)

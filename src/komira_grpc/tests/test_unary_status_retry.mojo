@@ -279,7 +279,7 @@ def _run(
     the SAME three observables and the cases differ only in the script and the
     policy — which is exactly the claim under test."""
     var conn = _h2_stream(script^)
-    var connector = ScriptedConnector.with_stream(conn^)
+    var connector = ScriptedConnector.with_stream_tls(conn^)
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
     var grpc = GrpcClient[ScriptedConnector](http^, _cloud_run_base())
     var reactor = _make_reactor()
