@@ -34,7 +34,7 @@ from kci_environment_proto.environment import (
 def test_environment_roundtrips() raises:
     """A cloud Environment binding round-trips: name / cloud / account /
     region / direct_apply with the Cloud and DirectApply enums surviving as
-    their exact ordinals, plus fields 11-15."""
+    their exact ordinals, plus fields 11 and 14-18."""
     var env = Environment(
         String("staging"),
         Cloud(Cloud.CLOUD_GCP),
@@ -49,20 +49,16 @@ def test_environment_roundtrips() raises:
         Optional[ObjectstoreBinding](None),
         Optional[BuildSpec](None),
         String("111122223333"),  # project_number (field 11)
-        # release_channel (field 12): the channel this control plane aliases.
-        String("beta"),
-        # tenancy (field 13): the `Tenancy` ordinal contract carried as an
-        # int32. 1 = CONTROL_PLANE, non-default deliberately.
-        Int32(1),
         # stage (field 14): the cross-cloud stage one service registry serves.
         String("staging"),
         # compute_environment (field 15): every sub-field non-default. egress 2
         # = EGRESS_MODE_PRIVATE_WITH_PUBLIC_EGRESS (the mirrored ordinal).
         Optional[EnvironmentComputeEnvironment](
-            EnvironmentComputeEnvironment(
-                String("us-central1-a"), Int32(2), True
-            )
+            EnvironmentComputeEnvironment(String("us-central1-a"), Int32(2))
         ),
+        True,  # developer_access_allowed (field 16), non-default
+        String("trust-anchor"),  # deploy_trust_anchor_bundle (field 17)
+        String("placement-reports"),  # placement_report_bundle (field 18)
     )
     var bytes = encode_proto[Environment](env)
     var back = decode_proto[Environment](bytes^)
@@ -81,31 +77,16 @@ def test_environment_roundtrips() raises:
         "project_number survives (field 11)",
     )
     assert_equal(
-        back.release_channel,
-        String("beta"),
-        "release_channel survives the wire (field 12): the declared channel"
-        " alias is what gives a channel exactly one control plane",
-    )
-    assert_equal(
-        Int(back.tenancy),
-        1,
-        "tenancy survives the wire (field 13). A dropped field 13 decodes back"
-        " to 0 (UNSPECIFIED), which reads as an environment that declared no"
-        " owner, and the deploy-time placement refusal fails CLOSED on it",
-    )
-    assert_equal(
         back.stage,
         String("staging"),
-        "stage survives the wire (field 14). It is NOT the release channel"
-        " (field 12): a channel is a bijection whose resolver raises on two"
-        " environments declaring it, and a stage is many-to-one by"
-        " construction. Two fields, two cardinalities, one wire record",
+        "stage survives the wire (field 14). A stage is many-to-one by"
+        " construction: several environments may declare the same one",
     )
     assert_true(
         Bool(back.compute_environment),
         "compute_environment survives the wire (field 15). A dropped block"
         " reads as an environment that declares NO compute environment, and"
-        " the job manager then refuses every VM placement into it",
+        " the placement service then refuses every VM placement into it",
     )
     ref ce = back.compute_environment.value()
     assert_equal(
@@ -117,9 +98,20 @@ def test_environment_roundtrips() raises:
         "compute_environment.egress (2): PRIVATE_WITH_PUBLIC_EGRESS",
     )
     assert_true(
-        ce.admit_cp_validation,
-        "compute_environment.admit_cp_validation (3): a dropped TRUE decodes"
-        " as false, which un-admits the control-plane-owned test customer",
+        back.developer_access_allowed,
+        "developer_access_allowed survives the wire (field 16). A dropped TRUE"
+        " decodes as false, which refuses developer access the environment"
+        " allows",
+    )
+    assert_equal(
+        back.deploy_trust_anchor_bundle,
+        String("trust-anchor"),
+        "deploy_trust_anchor_bundle survives the wire (field 17)",
+    )
+    assert_equal(
+        back.placement_report_bundle,
+        String("placement-reports"),
+        "placement_report_bundle survives the wire (field 18)",
     )
     print("  test_environment_roundtrips: PASS")
 
@@ -139,15 +131,14 @@ def test_environment_local_posture_roundtrips() raises:
         Optional[ObjectstoreBinding](None),
         Optional[BuildSpec](None),
         String(""),  # project_number (a pure-local environment has none)
-        String(""),  # release_channel (a dev environment aliases none)
-        # tenancy UNSPECIFIED (0): a laptop rung binds to no cloud account, so
-        # it declares no owner. This arm pins 0 as a legal STORED value.
-        Int32(0),
         # stage "": a laptop rung is in no stage. This arm pins "" as a legal
         # STORED value.
         String(""),
         # compute_environment ABSENT: a laptop rung places no customer VM.
         Optional[EnvironmentComputeEnvironment](None),
+        False,  # developer_access_allowed unset: refused
+        String(""),  # deploy_trust_anchor_bundle: none
+        String(""),  # placement_report_bundle: none
     )
     var bytes = encode_proto[Environment](env)
     var back = decode_proto[Environment](bytes^)
@@ -202,12 +193,11 @@ def test_environment_dev_model_fields_roundtrip() raises:
         ),
         Optional[BuildSpec](BuildSpec(False)),  # in_pod = false (local build)
         String(""),  # project_number (a local environment has none)
-        String(""),  # release_channel (a local rung aliases none)
-        # tenancy CUSTOMER (2): the other non-zero ordinal, so the file
-        # exercises both non-zero values of the closed set.
-        Int32(2),
         String(""),  # stage: a local rung belongs to no stage
         Optional[EnvironmentComputeEnvironment](None),  # no customer VMs
+        True,  # developer_access_allowed: a local rung allows it
+        String(""),
+        String(""),
     )
     var bytes = encode_proto[Environment](env)
     var back = decode_proto[Environment](bytes^)
@@ -246,11 +236,9 @@ def test_environment_dev_model_fields_roundtrip() raises:
     )
     assert_true(Bool(back.build), "build spec present")
     assert_false(back.build.value().in_pod, "build.in_pod=false survives")
-    assert_equal(
-        Int(back.tenancy),
-        2,
-        "tenancy CUSTOMER (2) survives field 13: the second non-zero ordinal,"
-        " so an emitter that hardcoded the first would still fail here",
+    assert_true(
+        back.developer_access_allowed,
+        "developer_access_allowed=true survives on a local rung",
     )
     print("  test_environment_dev_model_fields_roundtrip: PASS")
 
@@ -292,10 +280,11 @@ def test_environment_aws_arms_roundtrip() raises:
         ),
         Optional[BuildSpec](None),
         String(""),
-        String(""),
-        Int32(2),
         String("staging"),
         Optional[EnvironmentComputeEnvironment](None),
+        False,
+        String("trust-anchor"),  # an AWS env may name a trust-anchor bundle
+        String(""),
     )
     var bytes = encode_proto[Environment](env)
     var back = decode_proto[Environment](bytes^)
@@ -322,6 +311,11 @@ def test_environment_aws_arms_roundtrip() raises:
         String("example-inbound"),
         "s3.bucket survives",
     )
+    assert_equal(
+        back.deploy_trust_anchor_bundle,
+        String("trust-anchor"),
+        "deploy_trust_anchor_bundle survives on an AWS environment",
+    )
     print("  test_environment_aws_arms_roundtrip: PASS")
 
 
@@ -340,9 +334,10 @@ def _empty_environment() -> Environment:
         Optional[BuildSpec](None),
         String(""),
         String(""),
-        Int32(0),
-        String(""),
         Optional[EnvironmentComputeEnvironment](None),
+        False,
+        String(""),
+        String(""),
     )
 
 
@@ -522,27 +517,50 @@ def test_environment_field_numbers_on_the_wire() raises:
     var e11 = _empty_environment()
     e11.project_number = String("x")
     _check_bytes(fails, "project_number (11)", base, e11, _b(0x5A, 0x01, 0x78))
-    var e12 = _empty_environment()
-    e12.release_channel = String("x")
-    _check_bytes(fails, "release_channel (12)", base, e12, _b(0x62, 0x01, 0x78))
-    var e13 = _empty_environment()
-    e13.tenancy = Int32(2)
-    _check_bytes(fails, "tenancy (13)", base, e13, _b(0x68, 0x02))
     var e14 = _empty_environment()
     e14.stage = String("x")
     _check_bytes(fails, "stage (14)", base, e14, _b(0x72, 0x01, 0x78))
-    # compute_environment (15) with zone (1) "x", egress (2) = 2 and
-    # admit_cp_validation (3) = true: 3 + 2 + 2 = 7 payload bytes.
+    # compute_environment (15) with zone (1) "x" and egress (2) = 2:
+    # 3 + 2 = 5 payload bytes. Field 3 is reserved, so nothing follows.
     var e15 = _empty_environment()
     e15.compute_environment = Optional[EnvironmentComputeEnvironment](
-        EnvironmentComputeEnvironment(String("x"), Int32(2), True)
+        EnvironmentComputeEnvironment(String("x"), Int32(2))
     )
     _check_bytes(
         fails,
-        "compute_environment (15) / zone (1), egress (2), admit (3)",
+        "compute_environment (15) / zone (1), egress (2)",
         base,
         e15,
-        _b(0x7A, 0x07, 0x0A, 0x01, 0x78, 0x10, 0x02, 0x18, 0x01),
+        _b(0x7A, 0x05, 0x0A, 0x01, 0x78, 0x10, 0x02),
+    )
+    # Fields 16-18 need a two-byte tag: (16 << 3) | 0 = 0x80 = 80 01,
+    # (17 << 3) | 2 = 0x8A = 8A 01, (18 << 3) | 2 = 0x92 = 92 01.
+    var e16 = _empty_environment()
+    e16.developer_access_allowed = True
+    _check_bytes(
+        fails,
+        "developer_access_allowed (16)",
+        base,
+        e16,
+        _b(0x80, 0x01, 0x01),
+    )
+    var e17 = _empty_environment()
+    e17.deploy_trust_anchor_bundle = String("x")
+    _check_bytes(
+        fails,
+        "deploy_trust_anchor_bundle (17)",
+        base,
+        e17,
+        _b(0x8A, 0x01, 0x01, 0x78),
+    )
+    var e18 = _empty_environment()
+    e18.placement_report_bundle = String("x")
+    _check_bytes(
+        fails,
+        "placement_report_bundle (18)",
+        base,
+        e18,
+        _b(0x92, 0x01, 0x01, 0x78),
     )
 
     if len(fails) > 0:

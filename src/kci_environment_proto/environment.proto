@@ -1,7 +1,7 @@
 // environment.proto: the per-installation ENVIRONMENT REGISTRY schema.
 //
 // WHAT THIS IS. An environment named by a deploy bundle's wave is a LOGICAL
-// SYMBOL ONLY: a bare name like "dev" / "staging" / "prod" with no cloud
+// SYMBOL ONLY: a bare name like "dev" / "staging" / "production" with no cloud
 // specifics. This registry is the seam that BINDS that symbol to a concrete
 // compute environment: symbol -> {cloud, account, region, governance}. The
 // same byte-identical bundle resolves to GCP for one installation, AWS for
@@ -21,22 +21,22 @@
 // the messages with proto3-JSON + binary serde. Standalone: it imports no
 // other proto, so it packages as its own library.
 //
-// ORDINAL CONTRACTS WITHOUT A CROSS-PROTO IMPORT. Three fields reuse an enum
+// ORDINAL CONTRACTS WITHOUT A CROSS-PROTO IMPORT. Two fields reuse an enum
 // declared in another file of the deploy model, and each is typed `int32`
 // here, NOT the imported enum:
 //   * `deploy_provider` (field 7) carries `DeployProvider`'s ordinals
 //     (deploy_model.proto);
-//   * `tenancy` (field 13) carries `Tenancy`'s ordinals (app_bundle.proto);
 //   * `EnvironmentComputeEnvironment.egress` carries `EgressMode`'s ordinals
 //     (full_manifest.proto).
 // Importing the enum would generate the other file into this package (the
 // generated package is flat, and a reference to another file's message is a
-// module of the same package), so every consumer of `kci_environment_proto` would
-// pull in that schema too. Instead the registry reader mirrors the ordinals as
-// constants at its boundary and a drift-guard test asserts the mirror equals
-// the real enum. Do not "fix" one of these into an import, and do not declare
-// a second copy of the enum here: see `tenancy`'s comment for why a duplicate
-// is the worse of the two mistakes.
+// module of the same package), so every consumer of `kci_environment_proto`
+// would pull in that schema too. Instead the registry reader mirrors the
+// ordinals as constants at its boundary and a drift-guard test asserts the
+// mirror equals the real enum. Do not "fix" one of these into an import, and
+// do not declare a second copy of the enum here: a copy in another package
+// would not collide in protoc, so two independently editable enums would
+// agree only by coincidence, which is worse than either alternative.
 
 syntax = "proto3";
 
@@ -206,16 +206,15 @@ message FirestoreBinding {
   // opens, with every call succeeding.
   //
   // WHAT IT NAMES, AND WHAT IT DOES NOT: the database holding the deploy
-  // control plane's OWN operator-side bookkeeping in THIS environment (for
-  // example its deployment-audience rows and its release-channel publish
-  // ledger). It is NOT a default for a DEPLOYED APP's database: an app states
+  // tool's own bookkeeping for THIS environment (for example its deployment
+  // rows). It is NOT a default for a DEPLOYED APP's database: an app states
   // its own, and nothing here substitutes for that.
   //
-  // EMPTY IS THE ANSWER "this environment holds no control plane", not a
-  // missing input: a user account the tool deploys INTO has no bookkeeping of
-  // the tool's, and the reader REFUSES rather than defaulting (a value that
-  // must never be silently supplied is returned raw, and the fail-loud reading
-  // lives at the consuming edge).
+  // EMPTY means none: the environment holds no bookkeeping of the deploy
+  // tool's, which is the normal case for an account the tool deploys INTO.
+  // The reader REFUSES rather than defaulting (a value that must never be
+  // silently supplied is returned raw, and the fail-loud reading lives at the
+  // consuming edge).
   string database = 4;
 }
 
@@ -355,102 +354,18 @@ message Environment {
   // empty value is a safe no-op.
   string project_number = 11;
 
-  // ── THE RELEASE CHANNEL THIS ENVIRONMENT ALIASES ──
-  //
-  // A control plane aliases EXACTLY ONE release channel, and the alias is
-  // DECLARED HERE rather than passed per command. The channel is the lane a
-  // build lands in and the image repository that backs it; registry IAM is
-  // PER-REPOSITORY, so "which principal may write this repository" is
-  // answerable only once an environment NAMES its channel. Without the
-  // declaration, every control plane's writer must hold write on every
-  // channel's repository, and a pre-release build can become what users pull.
-  //
-  // EMPTY IS NOT A DEFAULT CHANNEL. An environment that declares no channel is
-  // NOT a release control plane: a user account the tool deploys INTO, or a
-  // local emulated rung. Defaulting an undeclared environment to the public
-  // channel is precisely how an unvetted build reaches users, so every reader
-  // of this field MUST fail loud on empty rather than substitute a default.
-  // Proto3 gives no way to distinguish "unset" from "", which is exactly why
-  // the ONLY safe reading of "" is REFUSE.
-  //
-  // The value space is the installation's declared channel set, validated at
-  // the consuming edge. It is a string rather than an enum because the channel
-  // set belongs to the installation, and this proto is standalone (see the
-  // file header).
-  string release_channel = 12;
-
-  // ── TENANCY: WHOSE CLOUD ACCOUNT THIS ENVIRONMENT BINDS TO ──
-  //
-  // The point of the deploy model is that user workloads run in the user's own
-  // account, where the operator sees nothing. `AppBundle.tenancy`
-  // (app_bundle.proto field 15) says whose account a WORKLOAD runs in; this
-  // says whose account an ENVIRONMENT is. The placement rule is a TYPE MATCH
-  // between the two, not a special case:
-  //
-  //   A `TENANCY_CUSTOMER` bundle may not name a `TENANCY_CONTROL_PLANE`
-  //   environment.
-  //
-  // Deliberately ASYMMETRIC: a control-plane bundle MAY name a customer
-  // environment (an end-to-end harness does exactly that). Only the direction
-  // that puts customer workloads in the operator's account is refused.
-  //
-  // THE OWNER OF AN ACCOUNT IS A FACT ABOUT THE ACCOUNT, so it is declared
-  // HERE and not derived. Deriving the control-plane account set from "the
-  // projects control-plane bundles deploy into" is wrong in an instructive
-  // way: an end-to-end harness is a control-plane bundle that deploys INTO
-  // customer test accounts, so the derivation would label a test customer
-  // account as control plane and flag every correctly placed workload.
-  //
-  // AND `kind` DOES NOT ALREADY SAY THIS. `EnvironmentKind` is CLOUD/LOCAL, a
-  // fidelity rung, an orthogonal axis.
-  //
-  // ── WHY `int32` AND NOT `kci.bundle.v1.Tenancy`; READ BEFORE "FIXING" ──
-  // This proto is standalone BY DESIGN (see the file header): naming the
-  // `Tenancy` enum would import app_bundle.proto into every consumer of
-  // `kci_environment_proto`, the same bind that made `deploy_provider` an `int32`.
-  //
-  // AND DUPLICATING THE ENUM HERE WOULD BE WORSE THAN EITHER. This file is
-  // `kci.deploy.v1` and app_bundle.proto is `kci.bundle.v1`, so a second
-  // `Tenancy` would not collide in protoc, and that is exactly the problem:
-  // the whole value of this field is that it is THE SAME ENUM the bundle
-  // declares. The placement rule is a type match, and a type match across two
-  // independently editable enums is a coincidence, not a rule.
-  //
-  // So this carries the `Tenancy` ORDINAL CONTRACT (app_bundle.proto) exactly
-  // as `deploy_provider` carries `DeployProvider`'s: 0=UNSPECIFIED,
-  // 1=CONTROL_PLANE, 2=CUSTOMER, mirrored as constants in the registry parser
-  // and drift-guarded against the real enum. The registry reader accepts the
-  // enum NAME tokens (`tenancy: TENANCY_CUSTOMER`) and RAISES on any token
-  // outside the closed set.
-  //
-  // 0 (UNSPECIFIED) IS NOT "CONTROL PLANE" AND NOT "CUSTOMER". Proto3 cannot
-  // distinguish unset from zero, so the only safe reading of 0 is "this
-  // environment has not declared an owner", and a placement rule cannot be
-  // decided against it. Readers must say which way they fail; the deploy-time
-  // refusal fails CLOSED (an undeclared environment cannot receive a customer
-  // workload) because the opposite default is exactly how a customer workload
-  // reaches the operator's account. A local emulated rung may declare nothing.
-  int32 tenancy = 13;
+  reserved 12, 13;
+  reserved "release_channel", "tenancy";
 
   // ── THE STAGE THIS ENVIRONMENT BELONGS TO ──
   //
-  // A STAGE GROUPS ENVIRONMENTS ACROSS CLOUDS. A pre-release stage is
-  // typically not one environment: it can be a GCP environment (and its
-  // second region), an AWS environment holding a shared service, and the
-  // customer test accounts that stage deploys into. ONE cross-cloud SERVICE
-  // REGISTRY serves ONE stage, so a service that needs to resolve
-  // `name -> endpoint` must be able to answer "WHICH REGISTRY SERVES ME" from
-  // its own environment binding. That is a fact about the ENVIRONMENT, so it
-  // is declared here and not derived.
-  //
-  // WHY THIS IS NOT `release_channel` (field 12). That field is a BIJECTION BY
-  // CONSTRUCTION: one control plane per channel, and a lookup of the control
-  // plane for a channel RAISES on two matches, deliberately, because two
-  // control planes on one channel is how a pre-release build becomes what
-  // users pull. The very thing a stage must express (SEVERAL environments, in
-  // SEVERAL clouds, sharing one name) is the thing that field exists to
-  // refuse. A second region of a stage's control plane shows the split: it may
-  // not declare the stage's channel, and it MUST be in the stage.
+  // A STAGE GROUPS ENVIRONMENTS ACROSS CLOUDS. A stage is typically not one
+  // environment: it can be a GCP environment (and its second region), an AWS
+  // environment holding a shared service, and further accounts the stage
+  // deploys into. ONE cross-cloud SERVICE REGISTRY serves ONE stage, so a
+  // service that needs to resolve `name -> endpoint` must be able to answer
+  // "WHICH REGISTRY SERVES ME" from its own environment binding. That is a
+  // fact about the ENVIRONMENT, so it is declared here and not derived.
   //
   // SO NOTHING MAY RAISE ON TWO ENVIRONMENTS SHARING A STAGE. That is the
   // POINT of the axis, not a tolerated ambiguity: a stage lookup returns the
@@ -458,21 +373,18 @@ message Environment {
   // not have, and a lookup of a stage nobody declares.
   //
   // EMPTY IS "NOT IN A STAGE", NEVER "THE DEFAULT STAGE". Proto3 gives no way
-  // to distinguish unset from "" (the same bind `release_channel` and
-  // `tenancy` are in), so the ONLY safe reading of "" is a REFUSAL at the
-  // consuming edge. An environment that silently joined a default stage would
-  // be served by, and discoverable through, a registry nobody chose for it. An
-  // environment legitimately in zero stages (a build project that runs no
-  // service, a single-box emulated rung) says so in its own registry entry.
+  // to distinguish unset from "", so the ONLY safe reading of "" is a REFUSAL
+  // at the consuming edge. An environment that silently joined a default stage
+  // would be served by, and discoverable through, a registry nobody chose for
+  // it. An environment legitimately in zero stages (a build project that runs
+  // no service, a single-box emulated rung) says so in its own registry entry.
   //
-  // AND IT IS NOT `tenancy`, NOT `cloud`, AND NOT `region`. A stage crosses
-  // all three: one stage can hold CONTROL_PLANE and CUSTOMER environments, GCP
-  // and AWS environments, and several regions. Deriving it from any of them
-  // would bind the registry's fleet to an axis that is not the release ring.
+  // AND IT IS NOT `cloud` AND NOT `region`. A stage crosses both: one stage can
+  // hold GCP and AWS environments and several regions. Deriving it from either
+  // would bind the registry's fleet to an axis that is not the stage.
   //
-  // A string, not an enum, for the reason `release_channel` is one: the value
-  // space belongs to the installation, and this proto is standalone (see the
-  // file header).
+  // A string, not an enum: the value space belongs to the installation, and
+  // this proto is standalone (see the file header).
   string stage = 14;
 
   // ── THE CUSTOMER'S COMPUTE ENVIRONMENT: WHERE ITS JOB VMs RUN ──
@@ -481,18 +393,46 @@ message Environment {
   // the CUSTOMER environment's entry because that is the account the VM lands
   // in: the customer bootstrap, run under the customer's own day-0
   // credential, creates the network, the NAT, the VM service account, the
-  // job-image registry and the grants to the job manager from it, then
-  // publishes the compute-environment record the job manager reads.
+  // job-image registry and the grants to the placement service from it, then
+  // publishes the compute-environment record the placement service reads.
   //
   // ABSENT (the default) = the environment declares no compute environment:
-  // every bootstrap and deploy composes byte-identically, and the job manager
-  // refuses every VM placement into it. An environment that declares none
+  // every bootstrap and deploy composes byte-identically, and the placement
+  // service refuses every VM placement into it. An environment that declares none
   // therefore refuses every VM placement BY CONSTRUCTION; there is no separate
   // arming switch.
   //
   // Readers that do not yet consume the block REFUSE an environment that
   // states it, by name, rather than ignoring it.
   EnvironmentComputeEnvironment compute_environment = 15;
+
+  // ── WHETHER THIS ENVIRONMENT ALLOWS DEVELOPER ACCESS ──
+  //
+  // What the environment allows: TRUE lets a bundle's developer-access grants
+  // compose into this environment. UNSET (false) means REFUSED: compose
+  // refuses a bundle that asks for developer access in an environment that
+  // does not state it, with "developer_access_allowed is unset". Proto3 cannot
+  // tell unset from false, and both read as refused, so the fail-closed
+  // default needs no separate switch.
+  bool developer_access_allowed = 16;
+
+  // ── THE TRUST-ANCHOR BUNDLE THIS ENVIRONMENT'S DEPLOYS USE ──
+  //
+  // Names ONE bundle: the bundle that provisions the trust anchor the
+  // deploying identity of this environment federates through. EMPTY means
+  // none. A name that does not resolve to a bundle is REFUSED, by name, and so
+  // is a non-empty value on an environment whose cloud is not AWS. Those
+  // refusals are enforced by the environment-registry reader; this schema only
+  // carries the name.
+  string deploy_trust_anchor_bundle = 17;
+
+  // ── THE BUNDLE THAT RECEIVES THIS ENVIRONMENT'S PLACEMENT REPORTS ──
+  //
+  // Names ONE bundle: the bundle that provides the endpoint placement reports
+  // from this environment are sent to. EMPTY means none. A name that does not
+  // resolve to a bundle is REFUSED, by name, by the environment-registry
+  // reader.
+  string placement_report_bundle = 18;
 }
 
 // ─── `Environment.compute_environment` (field 15) ────────────────────────────
@@ -500,8 +440,8 @@ message Environment {
 // Names only: nothing here is a resource id. Every resource name (the VM
 // service account, the network, the subnet, the router/NAT, the registry, the
 // placer) is DERIVED from the environment entry by one set of naming
-// functions, so the bootstrap that creates them, the job manager's fences that
-// check them and the control plane's expectations cannot disagree.
+// functions, so the bootstrap that creates them and the placement service's
+// fences that check them cannot disagree.
 message EnvironmentComputeEnvironment {
   // The GCE ZONE the job VMs are placed in (`us-central1-a`). A ZONE, not a
   // region: the subnet's region is DERIVED from it and must equal the
@@ -509,17 +449,13 @@ message EnvironmentComputeEnvironment {
   string zone = 1;
   // The egress posture of the subnet the VMs join: the ORDINAL CONTRACT of
   // `kci.manifest.v1.EgressMode` (full_manifest.proto), carried as a bare
-  // `int32` for the reason `deploy_provider` and `tenancy` are (see the file
+  // `int32` for the reason `deploy_provider` is (see the file
   // header). The registry parser accepts the enum NAME tokens (`egress:
   // EGRESS_MODE_PRIVATE_WITH_PUBLIC_EGRESS`), mirrored as constants and
   // pinned against the real enum IN BOTH DIRECTIONS by a drift-guard test.
   // VM placement admits only PRIVATE_WITH_PUBLIC_EGRESS; PUBLIC and PRIVATE
   // are refused by name at placement.
   int32 egress = 2;
-  // TRUE MARKS A CONTROL-PLANE-OWNED TEST CUSTOMER, AND NOTHING ELSE MAY SET
-  // IT. It admits the operator's validator observe grant and the probe-image
-  // staging, and it is the kind of environment the job manager places test
-  // VMs into. Refused on a production-stage environment and on the managed
-  // bootstrap path.
-  bool admit_cp_validation = 3;
+  reserved 3;
+  reserved "admit_cp_validation";
 }
