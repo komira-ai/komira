@@ -1,0 +1,71 @@
+// The Cloud Logging v2 calls a log reader makes, with the HTTP rules, field
+// names, field numbers and JSON names of googleapis'
+// google/logging/v2/logging.proto and log_entry.proto. Messages carry only
+// the fields these goldens exercise; the generated client skips the rest of
+// a live response (lenient decode).
+syntax = "proto3";
+
+package google.logging.v2;
+
+import "google/api/annotations.proto";
+
+service LoggingServiceV2 {
+  // A custom-verb literal path, the whole request as the JSON body.
+  rpc ListLogEntries(ListLogEntriesRequest) returns (ListLogEntriesResponse) {
+    option (google.api.http) = {
+      post: "/v2/entries:list"
+      body: "*"
+    };
+  }
+
+  // A `{parent=projects/*}` capture and a repeated query field.
+  rpc ListLogs(ListLogsRequest) returns (ListLogsResponse) {
+    option (google.api.http) = {
+      get: "/v2/{parent=projects/*}/logs"
+    };
+  }
+}
+
+enum LogSeverity {
+  DEFAULT = 0;
+  DEBUG = 100;
+  INFO = 200;
+  NOTICE = 300;
+  WARNING = 400;
+  ERROR = 500;
+  CRITICAL = 600;
+  ALERT = 700;
+  EMERGENCY = 800;
+}
+
+message LogEntry {
+  string log_name = 12;
+  string text_payload = 3;
+  string insert_id = 4;
+  LogSeverity severity = 10;
+}
+
+message ListLogEntriesRequest {
+  repeated string resource_names = 8;
+  string filter = 2;
+  string order_by = 3;
+  int32 page_size = 4;
+  string page_token = 5;
+}
+
+message ListLogEntriesResponse {
+  repeated LogEntry entries = 1;
+  string next_page_token = 2;
+}
+
+message ListLogsRequest {
+  string parent = 1;
+  repeated string resource_names = 8;
+  int32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListLogsResponse {
+  repeated string log_names = 3;
+  string next_page_token = 2;
+}

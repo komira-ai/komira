@@ -503,7 +503,7 @@ def test_grpc_pooled_h2_multiplex_resolves_once() raises:
     stream.set_negotiated_protocol(NEGOTIATED_HTTP_2)
     # One byte per read so each RPC's drive stops at its own END_STREAM.
     stream.set_max_read_per_call(1)
-    var connector = ScriptedConnector.with_stream(stream^)
+    var connector = ScriptedConnector.with_stream_tls(stream^)
     var client = HttpClient[ScriptedConnector].with_defaults(connector^)
     var reactor = _make_reactor()
     var token = CancellationToken.never()
