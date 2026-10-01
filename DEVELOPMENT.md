@@ -45,14 +45,18 @@ where dotslash is installed. The prelude is the one bundled with that binary
 (`[external_cells] prelude = bundled` in [`.buckconfig`](.buckconfig)), so the
 pin fixes the prelude too.
 
-`tools/buck2` has entries for Linux x86_64 and macOS aarch64. Local builds
-need a Linux x86_64 machine: every toolchain action is a Linux x86_64 binary.
-On macOS buck2 works as a client of a remote-execution service (step 3); a
-local build there refuses, naming `.buckconfig.local`; remotely,
-`./buck2 build //...` and `./buck2 test //...` work as on Linux. Two things
-need a Linux x86_64 client either way, because they run Linux binaries on
-your machine: `./buck2 run`, and `tools/build/tests/run_tests.sh` (section
-4), which refuses any other client.
+`tools/buck2` has entries for Linux x86_64 and macOS aarch64, so buck2
+itself runs on a Mac. What a build needs is different: the toolchain is
+unpacked by Linux x86_64 programs (a static busybox, zig) that macOS cannot
+run, so a purely local build works on a Linux x86_64 machine and refuses on a
+Mac, naming `.buckconfig.local`. On a Mac, build through a remote-execution
+service (step 3): the repository has a `darwin-arm64` target platform and a
+macOS Mojo toolchain, and the compile runs on macOS arm64 workers while the
+unpack runs on Linux ones. A local macOS build is a gap in the repository
+rather than a limit of Mojo, and is planned. Two things need a Linux x86_64
+client either way, because they run Linux binaries on your machine:
+`./buck2 run`, and `tools/build/tests/run_tests.sh` (section 4), which
+refuses any other client.
 
 Commands below use `./buck2`; a `buck2` on your `PATH` at the same version
 works the same.
