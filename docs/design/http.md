@@ -41,15 +41,17 @@ A caller drives the loop one poll at a time. Each of the five `serve_one_iterati
 |---|---|---|
 | `serve_one_iteration_dispatch[D, RT]` | `D: RequestDispatcher` | plaintext HTTP/1.1 |
 | `serve_one_iteration_dispatch_chained[D, M, RT]` | `MiddlewareChain`, then `D: CtxRequestDispatcher` | plaintext HTTP/1.1 |
-| `serve_one_iteration_dispatch_suspendable[D, RT]` | `D: SuspendableDispatcher`; handlers may park | plaintext HTTP/1.1 |
-| `serve_one_iteration_dispatch_erased[D, RT]` | `D: ErasedDispatcher` | plaintext HTTP/1.1 |
+| `serve_one_iteration_dispatch_suspendable[SD, RT]` | `SD: SuspendableDispatcher`; handlers may park | plaintext HTTP/1.1 |
+| `serve_one_iteration_dispatch_erased[ED, RT]` | `ED: ErasedDispatcher` | plaintext HTTP/1.1 |
 | `serve_one_iteration` | canned responses, or `G` for gRPC | HTTP/1.1, TLS, HTTP/2 |
+
+The suspendable and erased methods also take a required `driver` argument that the caller supplies: a `SuspendableHandlerDriver[NoopSink, SD.Handler]` or an `ErasedHandlerDriver[NoopSink, ED.Resp]`. Comptime asserts require `SD.Handler.Resp == HttpResponse` and `ED.Resp == HttpResponse`.
 
 The four dispatch methods close any connection that is TLS or HTTP/2. Only `serve_one_iteration` accepts TLS, and it never calls an application handler for plain HTTP: HTTP/1.1 gets a fixed `200 Hello, World!` (through `MiddlewareChain.run_with_canned` if one is installed), and HTTP/2 is described [below](#how-are-http2-and-grpc-served).
 
 The dispatcher is passed to each call, not stored. `RequestDispatcher.dispatch[RT](mut reactor, var req) raises -> HttpResponse` owns routing and error mapping; a raise becomes a 500. `serve_one_iteration_dispatch` requires `RT.Sink == NoopSink` with a `comptime assert`, so the reactor it lends is the one it polls.
 
-`GcpServerlessEntry` (`src/komira_http/serving/serverless_entry.mojo`) is the ready-made loop for a platform that routes requests to a listener. It holds one listen port, which defaults to 8080 and which a binary parses from its own flag with `parse_serve_port`: the library reads no environment. `serve` calls `tls_init()`, binds 0.0.0.0, and calls `serve_one_iteration_over` with a 50 ms poll timeout forever; `serve_chained` does the same through the chained round. Its runtime type is `GcpCloudRunRuntime`, used only as `RT`.
+`GcpServerlessEntry` (`src/komira_http/serving/serverless_entry.mojo`) is the ready-made loop for a platform that routes requests to a listener. It holds one listen port, which defaults to 8080 and which a binary parses from its own flag with `parse_serve_port`: the library reads no environment. `serve` calls `tls_init()`, binds 0.0.0.0, and calls `serve_one_iteration_over` with a 50 ms poll timeout forever; `serve_chained` does the same through the chained round. Its runtime type is `GcpCloudRunRuntime[NoopSink]`, imported from `komira_async` (`komira_async.runtime.gcp_cloud_run_runtime`), which `komira_http` does not define; it is used only as `RT`.
 
 ### How is an HTTP/1.1 request parsed and a response framed?
 
@@ -87,7 +89,7 @@ Each send method is generic over a `Runtime` and takes the caller's reactor. The
 
 The main calls:
 
-- `send_buffered` returns the whole body in a `BufferedResponseBody`; it is the most-called form.
+- `send_buffered` returns the whole body in a `BufferedResponseBody`; like `call` and `call_pooled`, it picks the HTTP/2 or HTTP/1.1 driver from the stream's ALPN result.
 - `send` returns a `RecvRingBody` that the caller pulls with `poll_frame`.
 - `get_range` sends a `Range` GET and raises `HTTP_ERROR_RANGE_NOT_HONORED` if the server answers 200 instead of 206.
 - `send_buffered_batch` sends K requests to one origin as K streams on one HTTP/2 connection.
