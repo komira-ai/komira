@@ -1,0 +1,59 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Observability foundation: per-worker span rings and the JSONL span exporter,
+# the per-operator MetricsSet, attribute-set interning, the per-worker series
+# and histogram tables with their export sweep, the EXPLAIN ANALYZE collector
+# and renderer, one-line structured JSON logging, and the bounded write(2)
+# loop every rendered log line goes through. It depends on komira_core (for
+# `Slab[T]`) and komira_atomic_alias (the atomic counters);
+# komira_runtime_paths is declared because tests/test_jsonl_exporter.mojo takes
+# its scratch directory from `test_tmpdir()`. It must NOT depend on engine
+# packages: the engine takes a borrowed ref on a `Tracer` the embedder
+# constructed.
+
+# The EXPLAIN ANALYZE arm flag: one TU-static read with a relaxed atomic load,
+# so the disarmed check at every collection seam stays a few nanoseconds.
+staged_files(
+    name = "ea_flag_files",
+    srcs = ["native/komira_obs_ea_flag.c"],
+)
+
+cxx_library(
+    name = "komira_obs_ea_flag",
+    srcs = [":ea_flag_files[native/komira_obs_ea_flag.c]"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "komira_obs",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        ":komira_obs_ea_flag",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_core:komira_core",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_drain_throughput.mojo",
+        "tests/test_explain_analyze_disarmed_cost.mojo",
+        "tests/test_explain_analyze.mojo",
+        "tests/test_histogram.mojo",
+        "tests/test_jsonl_exporter.mojo",
+        "tests/test_log_write_retry_and_loss_accounting.mojo",
+        "tests/test_metric_point_and_attr_set.mojo",
+        "tests/test_metrics_set.mojo",
+        "tests/test_metrics_set_owned_factory.mojo",
+        "tests/test_metrics_set_unregistered_lookup_quarantine.mojo",
+        "tests/test_metric_sweep.mojo",
+        "tests/test_name_registry.mojo",
+        "tests/test_ring_buffer.mojo",
+        "tests/test_series_table.mojo",
+        "tests/test_span_microbench.mojo",
+        "tests/test_span_record_pod.mojo",
+        "tests/test_tracer_basic.mojo",
+        "tests/test_tracer_name_bitset_collision.mojo",
+        "tests/test_tracer_parallelize.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
