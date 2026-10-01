@@ -1,137 +1,139 @@
-# Platforms
+# Platforms: what a target is built for, and where its actions run
 
-`komira//tools/build/platforms` ([`BUCK`](BUCK), [`defs.bzl`](defs.bzl))
-declares the target platform, two abstract execution constraints, and three
-execution configurations built from them. Nothing here names a service, a
-worker pool or a property set: the platforms that realize these
-configurations are registered by [`default/BUCK`](default/BUCK) for a
-standalone checkout (on this machine, or on a remote-execution service when
-`.buckconfig.local` names one), and by any repository that mounts komira.
+Three separate questions decide how Buck2 builds a target. Keep them apart
+and the rest of this page follows.
 
-## Target platform
-
-`linux-x86_64` (Linux, x86_64). `[parser] target_platform_detector_spec` in
-[`.buckconfig`](../../../.buckconfig) maps every komira cell to it.
-
-## Execution classes
-
-| constraint setting | values | meaning |
+| question | answered by | in komira |
 |---|---|---|
-| `exec_class` | `light` | unpacking and copying toolchain files: little CPU, memory bounded by the archive being unpacked |
-| | `mojo_compile` | running the Mojo compiler, and running what it built (gated tests, run checks): many cores and a lot of memory |
-| `numa` | `numa_single` | the worker's CPUs and memory lie on one NUMA node; the default for every Mojo action |
-| | `numa_multi` | the worker spans more than one NUMA node, for tests that measure or depend on cross-node placement |
+| What is this target **built for**? | the **target platform** | `linux-x86_64` (the default), or `darwin-arm64` with `--target-platforms` |
+| **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; C/C++, Rust and protobuf are linux x86_64 only |
+| **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per OS: `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
 
-| configuration | constraints | runs |
+## Target platforms
+
+[`BUCK`](BUCK) declares two, each an OS and a CPU and nothing else:
+
+| platform | constraints | used |
 |---|---|---|
-| `exec-mojo` | `mojo_compile`, `numa_single` | Mojo compiles, gated library tests, run checks, `buck2 test` of a `mojo_test`; also any target that states no constraint |
-| `exec-light` | `light` | unpacking and copying toolchain files (`komira//tools/build/toolchains:zig`, `:conda_unpack`, `:mojo_compiler`, `:mojo_runtime`) |
-| `exec-mojo-multi-numa` | `mojo_compile`, `numa_multi` | `mojo_multi_numa_test` only |
+| `linux-x86_64` | `prelude//os/constraints:linux`, `prelude//cpu/constraints:x86_64` | for every target, by default (`[parser]` in `.buckconfig`) |
+| `darwin-arm64` | `prelude//os/constraints:macos`, `prelude//cpu/constraints:arm64` | `buck2 build --target-platforms komira//tools/build/platforms:darwin-arm64 <targets>` |
 
-The Mojo rules get their constraints from their toolchain
-([`toolchains/defs.bzl`](../toolchains/defs.bzl)): `toolchains//:mojo` states
-`mojo_compile` + `numa_single`, and `toolchains//:mojo_multi_numa` (the
-private toolchain of `mojo_multi_numa_test`) states `mojo_compile` +
-`numa_multi`. A toolchain's `exec_compatible_with` binds every target that
-uses it. The toolchain unpack and copy targets state `light` themselves.
+A target that only makes sense on one OS says so with
+`target_compatible_with`; a wildcard build for the other platform skips it
+rather than failing.
 
-Buck2 chooses the execution platform per target, not per action, so all of a
-target's actions run on one class of worker
-([mojo/README.md](../mojo/README.md#multi-numa-tests) shows what that means
-for multi-NUMA tests). `buck2 audit execution-platform-resolution <target>`
-shows which configuration a target got and why the others were skipped.
+## Toolchains
+
+A rule takes its tools from a toolchain target (`toolchains//:mojo`,
+`toolchains//:cxx`, ...; see [the toolchain README](../toolchains/README.md)).
+Each toolchain is hermetic: every tool it runs is a pinned download, never
+something found on the machine running the action. `toolchains//:mojo` is a
+`select` on the target platform's OS, so a linux target gets the linux
+compiler closure and a darwin target the macOS one.
+
+A toolchain also states, in `exec_compatible_with`, the OS and CPU of the
+machine its actions need: the linux toolchains state
+`LINUX_X86_64`, the macOS Mojo toolchain `DARWIN_ARM64` (both in
+[`defs.bzl`](defs.bzl)). That statement binds every target using the
+toolchain, and it is the only thing any rule says about where an action
+runs. Targets that only unpack or copy files, including the macOS
+toolchain's files, state `LINUX_X86_64` themselves: they run linux tools.
+
+## Execution platforms
+
+An execution platform is a place actions can run: a configuration plus an
+executor (this machine, or a remote-execution service with a property set).
+komira registers **one per OS**, under the label and with the configuration
+of the target platform of the same name. A tool built to run inside an
+action is therefore configured exactly like a target built for that OS.
+
+For each target, Buck2 takes the first registered execution platform that
+satisfies the target's `exec_compatible_with` (its own and its toolchains').
+In practice: everything linux runs on `linux-x86_64`; the compiles, gated
+tests and run checks of a darwin target run on `darwin-arm64`.
+
+The build rules say nothing about worker pools, worker sizes or NUMA
+placement. Which machine of a remote service runs an action is the
+service's decision, made from the one property set of the platform (a
+service that learns each action's memory size, for example, places it by
+that). Multi-NUMA and performance runs are not part of the build graph;
+they run on reserved hardware outside it.
+
+To see what a target got, and why the others were skipped:
+
+```sh
+buck2 audit execution-platform-resolution //tools/build/examples:hello
+```
+
 [Test 10](../tests/README.md#10-execution-platforms) pins the resolution of
 the examples and the toolchain targets, and
-[test 12](../tests/README.md#12-action-platforms) that each action really
-ran with its platform's property set.
+[test 12](../tests/README.md#12-action-platforms) that every action really
+ran with the linux property set.
 
 ## Local or remote
 
 [`default/BUCK`](default/BUCK) calls `komira_default_execution_platforms`
 ([`defs.bzl`](defs.bzl)), which registers one of two sets:
 
-- **Local (the default).** When `[komira_re]` names no `light_properties` or
-  `mojo_compile_properties`, `komira_local_execution_platforms` registers
-  `exec-mojo` and `exec-light` with a local executor only: every action runs
-  on this machine, with no remote cache. It refuses a host that is not Linux
-  x86_64, since every toolchain action is a Linux x86_64 binary. It registers
-  no `exec-mojo-multi-numa` (nothing knows how many NUMA nodes the host has,
-  so a `mojo_multi_numa_test` fails to configure) and no macOS platform.
-- **Remote.** When `.buckconfig.local` names those property sets, it
-  registers exactly what `komira_execution_platforms` registers from them
+- **Local (the default).** When `[komira_re]` names no property set,
+  `komira_local_execution_platforms` registers `linux-x86_64` with a local
+  executor only: every action runs on this machine, with no remote cache. It
+  refuses a host that is not Linux x86_64, since every toolchain action is a
+  Linux x86_64 binary, and registers no macOS platform.
+- **Remote.** When `.buckconfig.local` names the linux property set, it
+  registers exactly what `komira_execution_platforms` registers from it
   (below).
 
 `[komira] execution = local | remote` (or `-c komira.execution=...` on one
-command) overrides the choice; the default is `auto`. Both sets register each
-platform under the label of the configuration it realizes, so a target's
-configuration, its output paths and its commands are the same either way: a
-remote action's digest does not depend on whether local execution exists.
-What a local action does and does not guarantee is in
+command) overrides the choice; the default is `auto`, which also refuses a
+checkout whose `[buck2_re_client]` names a service but whose `[komira_re]`
+names no property set. Both sets register the same labels and
+configurations, so a target's output paths and commands are the same either
+way: a remote action's digest does not depend on whether local execution
+exists. What a local action does and does not guarantee is in
 [DEVELOPMENT.md](../../../DEVELOPMENT.md#what-a-local-build-guarantees).
 
-## Your own worker pools
+## Remote workers
 
-`komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None)`
-([`defs.bzl`](defs.bzl)) registers one remote execution platform per
-configuration, given the exact REAPI platform property dict of the workers
-that realize it. Every platform it registers runs remotely only (local
-execution disabled), reads the remote cache, and uploads no results of its
-own.
+`komira_execution_platforms(name, linux, darwin = None)`
+([`defs.bzl`](defs.bzl)) registers one remote execution platform per OS,
+given the exact REAPI platform property dict every action of that OS
+carries. Every platform it registers runs remotely only (local execution
+disabled), reads the remote cache, and uploads no results of its own.
 
 A standalone checkout reads those sets from `[komira_re]` in
-`.buckconfig.local`, via `re_properties("<key>")`
-([`default/BUCK`](default/BUCK), through `komira_default_execution_platforms`):
+`.buckconfig.local` ([`.buckconfig.local.example`](../../../.buckconfig.local.example)):
 
-| `[komira_re]` key | configuration | required |
+| `[komira_re]` key | execution platform | required |
 |---|---|---|
-| `light_properties` | `exec-light` | yes |
-| `mojo_compile_properties` | `exec-mojo` | yes |
-| `mojo_compile_multi_numa_properties` | `exec-mojo-multi-numa` | no |
+| `linux_properties` | `linux-x86_64` | yes, for remote execution |
+| `darwin_properties` | `darwin-arm64` | no; needs `darwin_macos_hosts` as well |
+| `darwin_macos_hosts` | (the macOS hosts a compile may run on) | with `darwin_properties` |
 
-Each value is comma-separated `key=value` pairs matching the properties your
-workers advertise, e.g. `pool=light`. Two keys may name the same set if you
-have one kind of worker (except the multi-NUMA one, below). A repository
-using komira calls the same macro with its own sets, written inline or read
-the same way ([tools/build/README.md](../README.md#using-komira-from-another-repository)).
+Each property value is comma-separated `key=value` pairs matching what the
+service routes on, e.g. `pool=default`. The macOS set must differ from the
+linux one, so a macOS action can never match a linux worker. Keys of the
+earlier per-class layout (`light_properties`, `mojo_compile_properties`,
+`mojo_compile_multi_numa_properties`, `darwin_mojo_compile_properties`) are
+refused at load, naming their replacement. A repository using komira calls
+the same macro with its own sets, written inline or read the same way
+([tools/build/README.md](../README.md#using-komira-from-another-repository)).
 
 Two details keep action digests portable:
 
 - **Registration order.** A target that states no execution constraint gets
-  the first platform, so `exec-mojo` comes first: an unconstrained action lands
-  on a worker able to run anything komira runs.
-- **Platform names.** Each registered platform is named after the abstract
-  configuration it realizes (`komira//tools/build/platforms:exec-mojo`, ...),
+  the first platform, so `linux-x86_64` comes first, and `darwin-arm64`
+  last: a platform added later must never become the first match of an
+  action that states no OS.
+- **Platform names.** Each registered platform is named after the target
+  platform whose configuration it uses (`komira//tools/build/platforms:linux-x86_64`),
   not after the target that registers it. The name keys the configuration of
   every exec dep, and so appears in their output paths; naming it this way
   keeps the digests of a mounting repository equal to a standalone checkout's.
-- **macOS workers.** `darwin_mojo_compile_properties` registers
-  `exec-mojo-darwin-arm64` for the `darwin-arm64` target platform; it needs
-  `darwin_macos_hosts` as well. See [the toolchain README](../toolchains/README.md),
-  "macOS".
 
-## Multi-NUMA runs
+## macOS
 
-`exec-mojo-multi-numa` is registered only when
-`mojo_compile_multi_numa_properties` is set. Without it, a target requiring
-`numa_multi` fails to configure (`Can't find toolchain_dep execution
-platform`, with `exec-mojo` skipped because `numa_multi` is not satisfied),
-before any action runs. A repository that sets it must point it at workers
-that can each place a process across more than one NUMA node: every CPU and
-all memory of at least two nodes visible to the action (no cpuset or memory
-binding narrowing it to one node), with the same OS image and runtime floor
-as the `mojo_compile` workers, since the binary it runs was built there.
-
-The constraint is only a claim about those workers, so the hardware is
-checked too. `komira_execution_platforms` fails if the multi-NUMA property
-set equals the `mojo_compile` one. And every multi-NUMA run (the build's run
-check and the `buck2 test` command) starts through
-[`mojo/numa_guard.sh`](../mojo/numa_guard.sh), which exits 3 with
-`numa_guard: REFUSING to run` unless the action can use at least
-`numa_nodes` (default 2) NUMA nodes: online and with memory
-(`/sys/devices/system/node`), in its own `Mems_allowed_list`, and holding a
-CPU in its own `Cpus_allowed_list` (`/proc/<pid>/status`). A property set
-that routes to a single-NUMA worker, or a worker narrowed to one node by a
-cpuset, affinity mask or memory binding, goes red instead of green.
-[Test 11](../tests/README.md#11-multi-numa-hardware) exercises each of
-these refusals, using the stand-in platform in
-[`tests/negative/numa_standin`](../tests/negative/numa_standin/BUCK).
+`darwin_properties` registers the `darwin-arm64` execution platform; it
+needs `darwin_macos_hosts` too, since a macOS host's SDK and tools are not
+inputs of the action. Setting up the workers is in
+[the toolchain README](../toolchains/README.md), "macOS".
