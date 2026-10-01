@@ -10,7 +10,7 @@ Out of scope:
 
 - Stores for a particular cloud. The traits here are what a cloud's object-store library conforms to, and those libraries are described with the cloud libraries, not here.
 - Parsing the files that file systems read: see the Parquet and text-format docs when they land.
-- The crypto behind signed URLs: see [crypto](crypto_and_tls.md).
+- The crypto behind signed URLs: see the crypto design doc (`crypto_and_tls.md`, on `main`).
 
 ## How does it work?
 
