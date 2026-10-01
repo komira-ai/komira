@@ -1588,6 +1588,13 @@ message WebFrontendSpec {
   // `api_path_prefixes`. EMPTY => the conformer falls back to the uniform
   // `api_path_prefixes` expansion.
   repeated WebRouteRule route_rules = 11;
+  // The shared build-once content store (a bucket) that holds the immutable
+  // tree `content_digest` pins; the conformer's publish verb mirrors from it.
+  // Never authored and never compiled in: it is the store the deploy invoker
+  // states, stamped here by whichever pass pins `content_digest` (the build
+  // pin or the staged-content resolver). EMPTY with a non-empty
+  // `content_digest` is refused at publish rather than defaulted to a bucket.
+  string content_store = 12;
 }
 
 // ─── One verbatim url-map path rule ──────────────────────────────────────────
