@@ -1,0 +1,48 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The vendor-neutral object-storage layer: the Path / URI types, the
+# ObjectStore trait family (metadata, conditional writes, ranged and parkable
+# CAS verbs), the CAS-manifest substrate shared by the broker and the search
+# engine, the in-memory / local-filesystem conformers, the coalescing and
+# compaction windows, the sub-lineage shard kernel, presigned-URL signing seam,
+# and the distributed-shuffle seal. It depends on komira_core, komira_async
+# (the reactor and its C shim, which also carries the CAS-manifest gate lock),
+# komira_atomic_alias and komira_obs (the escalation metrics sink).
+# komira_runtime_paths is declared because several tests take their scratch
+# directory from `test_tmpdir()`.
+
+mojo_library(
+    name = "komira_objectstore",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_core:komira_core",
+        "//src/komira_obs:komira_obs",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_cas_manifest_absence_is_anchored.mojo",
+        "tests/test_cas_manifest_concurrent_offline.mojo",
+        "tests/test_cas_manifest_property.mojo",
+        "tests/test_cas_recovery_log_start_aware_offline.mojo",
+        "tests/test_cas_stale_head_forward_progress_offline.mojo",
+        "tests/test_coalesce.mojo",
+        "tests/test_coalescing_window.mojo",
+        "tests/test_compact_window.mojo",
+        "tests/test_delimiter_listing_byte_faithful.mojo",
+        "tests/test_local_fs_conditional_store.mojo",
+        "tests/test_local_fs_store_list_bytes_non_ascii.mojo",
+        "tests/test_objectstore_bytes_non_ascii.mojo",
+        "tests/test_path_uri.mojo",
+        "tests/test_sharded_lineage_kernel.mojo",
+        "tests/test_shuffle_claim_fail_closed.mojo",
+        "tests/test_shuffle_continuous_epoch_seal.mojo",
+        "tests/test_shuffle_retention_reaper.mojo",
+        "tests/test_shuffle_seal_codec_driver.mojo",
+        "tests/test_shuffle_seal_phase_a.mojo",
+        "tests/test_slow_cas_store_start_412_abi.mojo",
+        "tests/test_sublineage_base_fold.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
