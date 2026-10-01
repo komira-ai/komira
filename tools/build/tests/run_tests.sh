@@ -194,6 +194,15 @@
 #      script stops before it builds anything (exit 2). `--host-check-only`
 #      stops after that test; run with a `uname` reporting macOS arm64 it must
 #      refuse, and with this machine's, pass.
+#  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
+#      GetLogEvents module, pure and client, and the layout probe of each,
+#      equal their text goldens byte for byte; the generator refuses an empty
+#      or missing operation list, an operation the model lacks, a protocol it
+#      does not implement, a missing, malformed (not 64 lowercase hex digits)
+#      or wrong --model-sha256, a zero-byte model, and --probe-import without
+#      --probe-out, and writes no file when it refuses. A golden that
+#      differs, and a refusal check given inputs the generator accepts, both
+#      go red (tests//negative/aws_codegen).
 set -uo pipefail
 
 umbrella=1
@@ -935,6 +944,11 @@ elif [ "$here_rc" != 0 ]; then
 else
     pass "client: run_tests.sh refuses a macOS arm64 client (exit 2) and accepts $(uname -s) $(uname -m)"
 fi
+
+# 34
+expect_green aws_codegen tests//functional/aws_codegen:
+expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
+expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
 
 # 9
 if [ "$MODE" = local ]; then
