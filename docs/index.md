@@ -18,7 +18,7 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Columnar memory: Arrow buffers, columns, batches, IPC and the C Data Interface | [design/columnar_memory_and_arrow.md](design/columnar_memory_and_arrow.md) |
 | Mojo safety: pointers, origins and the Mojo 1.0 spellings | [design/mojo_safety_and_idioms.md](design/mojo_safety_and_idioms.md) |
 | The cryptographic primitives over AWS-LC, and certificate chain validation | [design/crypto_and_tls.md](design/crypto_and_tls.md) |
-| Packaging: bundles, tarballs and OCI images of a Mojo program | [design/release_train.md](design/release_train.md) |
+| Packaging: bundles, tarballs and OCI images of a Mojo program | [design/release_machine.md](design/release_machine.md) |
 | Why the Mojo rules and toolchain are built the way they are: pinned tools, the wrapper, the watchdog, vendored C | [design/mojo_rules_and_toolchain.md](design/mojo_rules_and_toolchain.md) |
 | Why a test gates a published package, and how the lints and the doc-link check are built | [design/gates_test_welding_and_lints.md](design/gates_test_welding_and_lints.md) |
 | The backend-neutral `Database` interface, its SQLite and Postgres drivers, and the Postgres client | [design/databases.md](design/databases.md) |
@@ -50,4 +50,4 @@ and its limits. A family's doc lands together with the libraries it describes.
 | agents | MCP and local models: coming with `komira_mcp_server` and `komira_localmodel` |
 | cloud | AWS clients, cloud credentials, infrastructure providers, secrets and service registry, deploy marks: coming with the cloud SDK libraries |
 | CI and deploy | the bundle model, apply, validate and rollout, the `kci` command line: coming with `kci` |
-| packaging | [bundles, tarballs and OCI images](design/release_train.md); the shared-library ABI: coming with `komira_so` |
+| packaging | [bundles, tarballs and OCI images](design/release_machine.md); the shared-library ABI: coming with `komira_so` |
