@@ -169,7 +169,7 @@ def test_class_and_verifier_names_are_stable_tokens() raises:
 
 
 def _disjoint_facets() -> List[RouteFacet]:
-    """The CHAT / GIT-SERVER shape: the exotic routes sit on their OWN paths, so
+    """The MESSAGING / REPO-HOSTING shape: the exotic routes sit on their OWN paths, so
     the split is a PATH split every edge can express."""
     var f = List[RouteFacet]()
     f.append(RouteFacet(String("GET"), String("/rooms/{room}/timeline")))
@@ -407,12 +407,12 @@ def test_shared_path_on_a_path_only_edge_is_INEXPRESSIBLE() raises:
 
 
 def test_disjoint_split_survives_a_path_only_edge() raises:
-    """The paired control: the CHAT / GIT-SERVER shape has NO shared path, so a
+    """The paired control: the MESSAGING / REPO-HOSTING shape has NO shared path, so a
     path-only edge is not refused for inexpressibility. CloudFront still declines
     it — on the UPGRADE, a different and correctly-named reason."""
     var c = split_census(_disjoint_facets())
     var cf = SplitPlan(
-        String("chat"),
+        String("acme-chat"),
         edge_aws_cloudfront(),
         VERIFIER_APP_MIDDLEWARE,
         VERIFIER_APP_MIDDLEWARE,
@@ -423,7 +423,7 @@ def test_disjoint_split_survives_a_path_only_edge() raises:
         v.code != SPLIT_INEXPRESSIBLE,
         "a disjoint split is expressible at a path-only edge",
     )
-    # CloudFront DOES carry a WebSocket, so the disjoint chat split proceeds
+    # CloudFront DOES carry a WebSocket, so the disjoint messaging split proceeds
     # there — the one place in this file where the AWS row is the permissive one.
     assert_equal(v.code, SPLIT_PROCEED, "CloudFront carries the upgrade")
 
@@ -487,7 +487,7 @@ def test_edge_cannot_carry_is_distinct_from_inexpressible() raises:
 
 
 def _bulk_facets() -> List[RouteFacet]:
-    """The GIT-SERVER shape: standard verbs, one 512 MiB payload route, on its own
+    """The REPO-HOSTING shape: standard verbs, one 512 MiB payload route, on its own
     path. Everything about the ROUTING is easy; the size is the whole problem."""
     var f = List[RouteFacet]()
     f.append(RouteFacet(String("GET"), String("/repos/{repo}")))
@@ -535,7 +535,7 @@ def test_bulk_split_onto_an_http1_cloud_run_backend_is_refused() raises:
     var v = split_verdict(
         c,
         SplitPlan(
-            String("gitserver"),
+            String("acme-git"),
             edge_gcp_global_alb(),
             VERIFIER_APP_MIDDLEWARE,
             VERIFIER_APP_MIDDLEWARE,
@@ -554,12 +554,12 @@ def test_the_same_split_proceeds_on_an_uncapped_backend() raises:
     """The paired control, and the actionable half of the finding: the SAME
     census and the SAME edge PROCEED once the exotic backend has no body cap — an
     h2 Cloud Run hop, an ECS/Fargate task behind an ALB, a Container App. So the
-    git-server fix is a PROTOCOL decision, and the planner points at it."""
+    repo-hosting fix is a PROTOCOL decision, and the planner points at it."""
     var c = split_census(_bulk_facets())
     var v = split_verdict(
         c,
         SplitPlan(
-            String("gitserver"),
+            String("acme-git"),
             edge_gcp_global_alb(),
             VERIFIER_APP_MIDDLEWARE,
             VERIFIER_APP_MIDDLEWARE,
@@ -571,13 +571,13 @@ def test_the_same_split_proceeds_on_an_uncapped_backend() raises:
 
 
 def test_backend_cap_does_not_fire_when_the_app_fits() raises:
-    """A capped backend is fine for an app that never approaches it — chat's
-    /sync upgrade carries no body. The arm must not refuse every capped backend
-    on principle, only one the app actually overruns."""
+    """A capped backend is fine for an app that never approaches it — the
+    messaging app's /sync upgrade carries no body. The arm must not refuse every
+    capped backend on principle, only one the app actually overruns."""
     var v = split_verdict(
         split_census(_disjoint_facets()),
         SplitPlan(
-            String("chat"),
+            String("acme-chat"),
             edge_gcp_global_alb(),
             VERIFIER_APP_MIDDLEWARE,
             VERIFIER_APP_MIDDLEWARE,
@@ -585,7 +585,7 @@ def test_backend_cap_does_not_fire_when_the_app_fits() raises:
             CLOUD_RUN_HTTP1_BODY_CAP_BYTES,
         ),
     )
-    assert_equal(v.code, SPLIT_PROCEED, "chat fits inside 32 MiB")
+    assert_equal(v.code, SPLIT_PROCEED, "the messaging app fits inside 32 MiB")
 
 
 # =============================================================================
@@ -619,7 +619,7 @@ def test_symmetric_passthrough_plan_is_not_flagged() raises:
     var v = split_verdict(
         split_census(_disjoint_facets()),
         SplitPlan(
-            String("chat"),
+            String("acme-chat"),
             edge_gcp_global_alb(),
             VERIFIER_APP_MIDDLEWARE,
             VERIFIER_APP_MIDDLEWARE,
@@ -637,7 +637,7 @@ def test_the_asymmetry_fires_when_the_managed_half_verifies_at_the_edge() raises
     var v = split_verdict(
         split_census(_disjoint_facets()),
         SplitPlan(
-            String("chat"),
+            String("acme-chat"),
             edge_gcp_global_alb(),
             VERIFIER_EDGE_JWT,
             VERIFIER_APP_MIDDLEWARE,
@@ -660,7 +660,7 @@ def test_an_exotic_half_that_keeps_pace_proceeds() raises:
     var v = split_verdict(
         split_census(_disjoint_facets()),
         SplitPlan(
-            String("chat"),
+            String("acme-chat"),
             edge_gcp_global_alb(),
             VERIFIER_EDGE_JWT,
             VERIFIER_EDGE_JWT,
@@ -677,7 +677,7 @@ def test_a_STRONGER_exotic_half_is_not_flagged() raises:
     var v = split_verdict(
         split_census(_disjoint_facets()),
         SplitPlan(
-            String("chat"),
+            String("acme-chat"),
             edge_gcp_global_alb(),
             VERIFIER_APP_MIDDLEWARE,
             VERIFIER_EDGE_JWT,
