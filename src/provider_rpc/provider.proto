@@ -1,0 +1,127 @@
+// provider.proto: the build/test provider registry schema, the config-as-data
+// axis that names the execution backends a build or test cell can run on. A
+// `Provider` is the outer, authored class a cell routes to: the coarse
+// `ProviderKind` that one entry of a provider registry file declares. This
+// file is the data layer only (the schema, its two-layer naming and what a
+// validator checks); the provider interface, its adapters and the router that
+// matches cells to providers are not modelled here.
+//
+// TWO-LAYER NAMING. The provider set is two layers, deliberately not one flat
+// enum:
+//   * OUTER: `ProviderKind` (authored, config-as-data), the coarse class this
+//     file declares (LOCAL_FARM / RBE / CLOUD_BUILD / CLOUD_RUN / CLOUD_VM /
+//     CLOUD_SPOT_VM / DEVICE_POOL / MACSTADIUM / AWS_CODEBUILD).
+//   * INNER: the pod manager's build-backend ordinal, for POD-BACKED kinds
+//     only. `ProviderBackendConfig.pod_manager_backend` carries it; it selects
+//     the backend and is not re-authored. DEVICE_POOL and MACSTADIUM are not
+//     pod-backed: they carry a `coordinator_ref` (the reservation coordinator),
+//     never a pod ordinal. A flat enum would falsely imply a pod placement for
+//     them. A registry parser mirrors the build-backend ordinals at its own
+//     boundary rather than importing them.
+//
+// STANDALONE. This schema imports no other proto, so it is generated as its
+// own package (`provider_rpc`).
+//
+// Plain proto3 (no `(komira.db.*)` options): the struct generator
+// (`mojo_proto_library`) emits the messages with proto3-JSON and binary serde.
+//
+// UNSPECIFIED is a hard bind-time error for `ProviderKind` (fail-closed, no
+// silent default): a registry validator rejects an unnamed kind.
+
+syntax = "proto3";
+
+package komira.deploy.v1;
+
+// ─── The provider CLASS: the outer, authored layer ────────────────────────────────
+//
+// The coarse execution-backend class a registry entry declares. POD-BACKED kinds
+// (LOCAL_FARM..CLOUD_SPOT_VM) carry an inner `pod_manager_backend` ordinal;
+// COORDINATOR-BACKED kinds (DEVICE_POOL / MACSTADIUM) carry a `coordinator_ref`
+// instead. UNSPECIFIED is a hard authoring error at bind time.
+enum ProviderKind {
+  PROVIDER_KIND_UNSPECIFIED   = 0;
+  // POD-BACKED (the pod manager; the inner build-backend ordinal selects the
+  // backend) ────────────────────────────────────────────────────────────────────
+  PROVIDER_KIND_LOCAL_FARM    = 1;  // an on-premises Kubernetes farm -> ON_FARM_K8S=0
+  PROVIDER_KIND_RBE           = 2;  // a remote-build-execution action; ON_FARM_K8S-class (=0)
+  PROVIDER_KIND_CLOUD_BUILD   = 3;  // provider-managed builder     -> CLOUD_BUILD=3
+  PROVIDER_KIND_CLOUD_RUN     = 4;  // Cloud Run Job                -> CLOUD_RUN_JOB=1
+  PROVIDER_KIND_CLOUD_VM      = 5;  // on-demand VM (spot off)      -> SPOT_VM=2
+  PROVIDER_KIND_CLOUD_SPOT_VM = 6;  // preemptible spot VM          -> SPOT_VM=2
+  // COORDINATOR-BACKED (reservation coordinator; coordinator_ref, no pod ordinal) ──
+  PROVIDER_KIND_DEVICE_POOL   = 7;  // a pool of test devices (coordinator)
+  PROVIDER_KIND_MACSTADIUM    = 8;  // hosted Macs (coordinator)
+  // POD-BACKED, no build-backend ordinal assigned yet ─────────────────────────────
+  PROVIDER_KIND_AWS_CODEBUILD = 9;  // AWS CodeBuild
+}
+
+// ─── A provider CAPABILITY: what a provider can fulfil ────────────────────────────
+//
+// The job kind a provider serves. A pod or VM provider builds (and may test
+// headless); a device-pool provider tests on real devices. Repeated on
+// `Provider`.
+enum Capability {
+  CAPABILITY_UNSPECIFIED = 0;
+  CAPABILITY_BUILD       = 1;  // a build job (compile/link/package an artifact)
+  CAPABILITY_TEST        = 2;  // a test/validate job (headless or on-device)
+}
+
+// ─── A supported PLATFORM cell: the (os, arch, os_version-range) predicate ──────────
+//
+// One (os, arch, os_version-range, artifact_kinds) cross-section a provider can
+// fulfil: the covering predicate a router matches a matrix cell against. The
+// version range is dotted-numeric, min <= max (validated); an EMPTY bound is open.
+message ProviderPlatform {
+  string os               = 1;  // "macos" | "ubuntu" | "windows" | "android" | "ios" | "web"
+  string arch             = 2;  // "arm64" | "x86_64" | "universal"
+  string os_version_min   = 3;  // inclusive lower bound, e.g. "13.0" (empty = open)
+  string os_version_max   = 4;  // inclusive upper bound, e.g. "15.0" (empty = open)
+  repeated string artifact_kinds = 5;  // "dmg" | "nsis" | "AppImage" | "oci" | "library" ...
+}
+
+// ─── The backend BINDING: the inner-layer selector ────────────────────────────────
+//
+// A POD-BACKED kind carries `pod_manager_backend` (the pod manager's build-backend
+// ordinal, which selects the backend). A COORDINATOR-BACKED kind (DEVICE_POOL /
+// MACSTADIUM) carries `coordinator_ref` (a NAME resolved against the registry
+// first, or a coordinator deploy's OUTPUT reference). Exactly ONE `binding` arm
+// is set: the `oneof` gives the presence the proto3 scalar `pod_manager_backend`
+// alone would lack (ordinal 0 = ON_FARM_K8S is a VALID value, so "0 means unset"
+// would be wrong; the oneof distinguishes set-to-0 from unset).
+message ProviderBackendConfig {
+  oneof binding {
+    // POD-BACKED: the build-backend ordinal (0=ON_FARM_K8S, 1=CLOUD_RUN_JOB,
+    // 2=SPOT_VM, 3=CLOUD_BUILD). Mirrored at the registry boundary, not imported.
+    int32 pod_manager_backend = 1;
+    // COORDINATOR-BACKED: a NAME of the reservation coordinator (registry-first) or
+    // a `${ref:...outputs.endpoint}` OUTPUT reference (a customer-hosted coordinator).
+    string coordinator_ref    = 2;
+  }
+  // A NAME resolved against the environment registry (the account/region/governance
+  // this provider's placement lands in). Empty = the ambient/default env.
+  string env_ref          = 3;
+  // The cloud region this provider targets (e.g. "us-central1"). Empty where the
+  // posture has no region concept.
+  string region           = 4;
+  // A NAME of a presigned-mint artifact sink (customer-owned by default) the built
+  // artifact lands in. Empty = the ambient/default sink.
+  string artifact_sink_ref = 5;
+}
+
+// ─── One registered PROVIDER ──────────────────────────────────────────────────────
+//
+// One authored provider definition: the config-as-data class a build/test cell
+// routes to. `name` is the unique resolution key (validated unique). The two-layer
+// backend binding and the (os, arch, version-range) platforms are what a router
+// matches a matrix cell against; this file models only the data and its validation.
+message Provider {
+  string name                         = 1;  // unique resolution key
+  ProviderKind kind                   = 2;  // the OUTER class (UNSPECIFIED = hard error)
+  repeated Capability capabilities    = 3;  // BUILD / TEST (what jobs it fulfils)
+  repeated ProviderPlatform platforms = 4;  // the covering (os,arch,version,kinds) cells
+  ProviderBackendConfig backend       = 5;  // the INNER-layer binding (pod ordinal XOR coordinator_ref)
+  int32 priority                      = 6;  // router tie-break; higher = preferred
+  int32 relative_cost                 = 7;  // router cheapest-covering input (relative units)
+  bool spot_eligible                  = 8;  // CLOUD_VM(false) vs CLOUD_SPOT_VM(true)
+  string trust_scope                  = 9;  // a NAME/token: the tenancy scope (e.g. device_owner_customer)
+}

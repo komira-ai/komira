@@ -1,0 +1,20 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The build/test provider registry schema (`provider.proto`, proto package
+# `komira.deploy.v1`). Standalone: it imports no other proto. Reach the
+# surface via
+#   from provider_rpc.provider import (
+#       Provider, ProviderKind, Capability, ProviderPlatform,
+#       ProviderBackendConfig,
+#   )
+# The `.proto` keeps its import path `komira/deploy/v1/provider.proto`, which
+# is the descriptor's file name and the `# Source:` line of the generated
+# `provider.mojo`. The generated code imports `komira_serde`, its only
+# runtime dependency.
+mojo_proto_library(
+    name = "provider_rpc",
+    srcs = ["provider.proto"],
+    import_prefix = "komira/deploy/v1",
+    deps = ["//src/komira_serde:komira_serde"],
+    visibility = ["PUBLIC"],
+)
