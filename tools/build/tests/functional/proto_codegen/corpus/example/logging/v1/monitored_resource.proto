@@ -1,0 +1,22 @@
+// A resource and the description of a resource type, shaped like the
+// googleapis monitored resource: a log query needs the first and never the
+// second.
+syntax = "proto3";
+
+package example.logging.v1;
+
+message MonitoredResource {
+  string type = 1;
+  map<string, string> labels = 2;
+}
+
+message MonitoredResourceDescriptor {
+  string name = 5;
+  string type = 1;
+  repeated LabelDescriptor labels = 4;
+}
+
+message LabelDescriptor {
+  string key = 1;
+  string description = 3;
+}
