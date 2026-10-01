@@ -9,8 +9,6 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Developer setup: buck2, the build farm, running the tests | [DEVELOPMENT.md](../DEVELOPMENT.md) |
 | The build tooling, and using komira from another repository | [tools/build/README.md](../tools/build/README.md) |
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
-| Why the Mojo rules and toolchain are built the way they are: pinned tools, the wrapper, the watchdog, vendored C | [design/mojo_rules_and_toolchain.md](design/mojo_rules_and_toolchain.md) |
-| Why a test gates a published package, and how the lints and the doc-link check are built | [design/gates_test_welding_and_lints.md](design/gates_test_welding_and_lints.md) |
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
@@ -27,7 +25,6 @@ and its limits. A family's doc lands together with the libraries it describes.
 | Family | Docs |
 |---|---|
 | core | [columnar memory and Arrow](design/columnar_memory_and_arrow.md) |
-| build | [Mojo rules and toolchain](design/mojo_rules_and_toolchain.md), [build gates, test welding and lints](design/gates_test_welding_and_lints.md) |
 | cross-cutting | [Mojo safety and idioms](design/mojo_safety_and_idioms.md) |
 | connectors | [crypto](design/crypto_and_tls.md); HTTP, databases, object stores, file-system discovery, and protobuf and gRPC: coming with `komira_http`, `komira_db`, `komira_objectstore` and `komira_grpc` |
 | storage | compression codecs, Parquet, text and row formats, Iceberg and CDC, serverless Postgres: coming with `komira_parquet`, `komira_csv`, `komira_iceberg` and `komira_pgstore` |
