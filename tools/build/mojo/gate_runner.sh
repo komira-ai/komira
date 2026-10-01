@@ -1,7 +1,7 @@
 # gate_runner.sh -- runs one gated test inside a build action.
 #
 # usage: busybox sh gate_runner.sh <busybox> <compiler_dir> <label> <test_binary> <marker> \
-#            [--env NAME=VALUE]... [--hold <held entry> <issue> <reason>]
+#            [--env NAME=VALUE]...
 #
 # On success writes `PASS <label>` to <marker>. The library's public package is
 # produced by an action that takes every marker as an input, so the package
@@ -21,31 +21,13 @@
 # refuses the names above and this script refuses them again. A --env variable
 # is given to the TEST PROCESS ONLY (`busybox env NAME=VALUE ... <test>`), never
 # to this script's own shell: exported here it would reach the variables the
-# verdict is computed from (HELD, BIN, rc, ...), so `test_env = {"HELD": "1"}`
-# would mute an unheld red and `env = {"BIN": "true"}` would run `true` in
-# place of the test.
+# verdict is computed from (BIN, MARKER, LABEL, ...), so
+# `test_env = {"BIN": "true"}` would run `true` in place of the test.
 #
-# With --hold the test is HELD (mojo_library's `tests_known_failing` row
-# <held entry>) and the verdict inverts: the test still runs, a FAILURE (a
-# non-zero exit, or a death by any signal but SIGKILL) writes `HELD <label>`
-# and exits 0, and a PASS is red (exit 1, LEDGER STALE), naming the row to
-# delete. The marker's bytes never depend on the run.
-#
-# A held test killed by SIGKILL (exit 137) has NO VERDICT: the runner says so
-# and exits 137 without writing the marker. SIGKILL is what a memory limit
-# delivers, so the kill says the machine was too small, not that the test is
-# still red. Taken as a failure it would make the held test's action SUCCEED,
-# be cached, and be run again on the same too-small machine: a test fixed
-# since would then be reported HELD forever and never go LEDGER STALE. A
-# non-zero exit lets the executor retry on a larger one, where the real
-# verdict is computed. (A held test that kills ITSELF with SIGKILL is
-# therefore red; it cannot be held.) An unheld test killed by SIGKILL is
-# already red. The compile watchdog's 124 is the compiler's action
+# Exit status: 0 on PASS; otherwise the test's own exit status (so a signal
+# death, 128+N, stays distinguishable from an assertion failure); 2 for a
+# usage error. The compile watchdog's 124 is the compiler's action
 # (mojo_wrapper.sh), not this one; a test's own exit 124 is its own verdict.
-#
-# Exit status: 0 on PASS (or a held test's failure); otherwise the test's own
-# exit status (so a signal death, 128+N, stays distinguishable from an
-# assertion failure); 2 for a usage error.
 set -eu
 
 abspath() {
@@ -70,7 +52,6 @@ trap '"$BB" rm -rf "$T"' EXIT
 "$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home" "$T/share"
 "$BB" --install -s "$T/bin"
 
-HELD=""
 # Each --env NAME=VALUE is moved to the end of "$@"; once the loop has consumed
 # the other options, "$@" holds exactly the test's variables.
 n=$#
@@ -89,12 +70,6 @@ while [ "$n" -gt 0 ]; do
             shift 2
             n=$((n - 2))
             ;;
-        --hold)
-            [ "$n" -ge 4 ] || { echo "gate_runner: --hold needs <entry> <issue> <reason>" >&2; exit 2; }
-            HELD=1 HOLD_ENTRY=$2 HOLD_ISSUE=$3 HOLD_REASON=$4
-            shift 4
-            n=$((n - 4))
-            ;;
         *) echo "gate_runner: unknown argument $1" >&2; exit 2 ;;
     esac
 done
@@ -112,40 +87,6 @@ export PATH LD_LIBRARY_PATH TMPDIR TEST_TMPDIR HOME
 
 rc=0
 (cd "$CWD" && exec "$BB" env "$@" "$BIN") > "$T/log" 2>&1 < /dev/null || rc=$?
-if [ -n "$HELD" ]; then
-    if [ "$rc" = 137 ]; then
-        {
-            echo "=================================================================="
-            echo "NO VERDICT: held test $LABEL was killed by SIGKILL (exit 137)."
-            echo "  row:    tests_known_failing[\"$HOLD_ENTRY\"]"
-            echo "A memory limit kills with SIGKILL, so this says the machine was too"
-            echo "small, not that the test still fails. No HELD marker is written;"
-            echo "the action fails so it can be run again with more memory."
-            echo "------------------------------------------------------------------ output"
-            tail -n 50 "$T/log"
-            echo "=================================================================="
-        } >&2
-        exit 137
-    fi
-    if [ "$rc" != 0 ]; then
-        printf 'HELD %s\n' "$LABEL" > "$MARKER"
-        exit 0
-    fi
-    {
-        echo "=================================================================="
-        echo "LEDGER STALE: $LABEL PASSED, but it is held as known-failing."
-        echo "  row:    tests_known_failing[\"$HOLD_ENTRY\"]"
-        echo "  issue:  $HOLD_ISSUE"
-        echo "  reason: $HOLD_REASON"
-        echo "Delete that row from the library's tests_known_failing (and close"
-        echo "or update the issue). A held test must fail; one that passes is"
-        echo "good news the ledger has to record by shrinking."
-        echo "------------------------------------------------------------------ output"
-        tail -n 50 "$T/log"
-        echo "=================================================================="
-    } >&2
-    exit 1
-fi
 if [ "$rc" = 0 ]; then
     printf 'PASS %s\n' "$LABEL" > "$MARKER"
     exit 0

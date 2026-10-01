@@ -211,62 +211,13 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
 # ---- mojo_library ----------------------------------------------------------
 
-# `tests_known_failing` -- a hold on a red test, which INVERTS rather than
-# mutes. A held test still builds and runs as an action of the library's gate;
-# its marker is produced only if it FAILS. So:
-#   an unheld test that fails   -> the gate is red (GATED TEST FAILED)
-#   a held test that fails      -> satisfied (marker `HELD <label>`)
-#   a held test that passes     -> red (LEDGER STALE), naming its row: delete it
-#   a held test SIGKILLed (137) -> red (NO VERDICT): a memory limit's kill is
-#                                  not the test's failure (gate_runner.sh)
-# A hold therefore silences nothing: the red is asserted on every build, and
-# the fix is reported as a build failure until the row goes.
-#
-# A row is `{"issue": ..., "reason": ...}`. `issue` is the GitHub issue that
-# will remove the hold (`123`, `#123` or its https://github.com/<o>/<r>/issues/
-# URL); `reason` says why THIS test fails. Refused at analysis, before any
-# action: a key that is not a `test_srcs` entry, another field, a missing or
-# malformed issue, an empty reason, two rows with byte-identical reasons (one
-# investigation pasted over a second test), and holding every test (a gate
-# that asserts nothing passes).
-_KNOWN_FAILING_FIELDS = ["issue", "reason"]
-_ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
-
 def _test_key(ctx, t):
-    """The package-relative path of test source `t`: its tests_known_failing key."""
+    """The package-relative path of test source `t`: its test_data key."""
     p = t.short_path
     pkg = ctx.label.package
     if pkg and p.startswith(pkg + "/"):
         p = p[len(pkg) + 1:]
     return p
-
-def _admit_known_failing(ctx):
-    held = ctx.attrs.tests_known_failing
-    if not held:
-        return {}
-    keys = [_test_key(ctx, t) for t in ctx.attrs.test_srcs]
-    where = "{}: tests_known_failing".format(ctx.label.raw_target())
-    seen = {}
-    for entry, row in held.items():
-        if entry not in keys:
-            fail("{}[{}]: not a test_srcs entry (entries: {}). A hold that matches no test reads as applied and is not; fix the path, or delete the row if the test is gone.".format(where, repr(entry), ", ".join(keys)))
-        for field in row:
-            if field not in _KNOWN_FAILING_FIELDS:
-                fail("{}[{}]: unknown field `{}`; a row has exactly `issue` and `reason`.".format(where, repr(entry), field))
-        issue = row.get("issue", "")
-        reason = row.get("reason", "")
-        if not issue:
-            fail("{}[{}]: no `issue`. A hold is debt; name the GitHub issue that will remove it (`123`, `#123` or its URL).".format(where, repr(entry)))
-        if not regex_match(_ISSUE_REF, issue):
-            fail("{}[{}]: issue {} is not a GitHub issue number (`123`, `#123`) or https://github.com/<owner>/<repo>/issues/<n> URL.".format(where, repr(entry), repr(issue)))
-        if not reason.strip():
-            fail("{}[{}]: empty `reason`. Say what this test shows is broken; a reader deciding whether the hold is still honest has nothing else to go on.".format(where, repr(entry)))
-        if reason in seen:
-            fail("{}[{}] and [{}] carry byte-identical reasons. If they share a cause, say what each test shows; otherwise the second test was never examined.".format(where, repr(seen[reason]), repr(entry)))
-        seen[reason] = entry
-    if len(held) >= len(keys):
-        fail("{}: holds all {} tests. That gate asserts nothing passes; a library whose whole suite is red has a defect, not a debt.".format(where, len(keys)))
-    return held
 
 # ---- the test runtime contract ------------------------------------------
 #
@@ -376,7 +327,6 @@ def _library_impl(ctx):
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
 
-    held = _admit_known_failing(ctx)
     test_data = _admit_test_data(ctx)
     env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
 
@@ -402,7 +352,6 @@ def _library_impl(ctx):
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
         root, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
-        hold = ["--hold", key, held[key]["issue"], held[key]["reason"]] if key in held else []
         ctx.actions.run(
             cmd_args(
                 tc.busybox,
@@ -414,7 +363,6 @@ def _library_impl(ctx):
                 staged,
                 marker.as_output(),
                 env_args,
-                hold,
                 hidden = root,
             ),
             category = "mojo_gated_test",
@@ -475,8 +423,6 @@ mojo_library_rule = rule(
         "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
-        # {test_srcs path: {"issue": ..., "reason": ...}}; see _admit_known_failing.
-        "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
     } | _TOOLCHAIN_ATTR,
 )
 
@@ -689,9 +635,16 @@ mojo_multi_numa_test_rule = rule(
     },
 )
 
+def _mojo_library(**kwargs):
+    # Refused by name, so a stale BUCK file says why rather than buck2's
+    # generic "unexpected parameter".
+    if "tests_known_failing" in kwargs:
+        fail("{}: tests_known_failing was removed: every welded test must pass".format(kwargs.get("name", "mojo_library")))
+    return mojo_library_rule(**kwargs)
+
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_binary = declares_docs(mojo_binary_rule)
-mojo_library = declares_docs(mojo_library_rule)
+mojo_library = declares_docs(_mojo_library)
 mojo_multi_numa_test = declares_docs(mojo_multi_numa_test_rule)
 mojo_test = declares_docs(mojo_test_rule)

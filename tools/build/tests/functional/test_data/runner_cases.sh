@@ -74,12 +74,6 @@ else
 fi
 
 # A test's env reaches the test and never the runner's own variables.
-run env_held "$D/m3" --env PROBE_MODE=red --env HELD=1
-if [ "$rc" = 0 ] || [ -e "$D/m3" ]; then
-    bad env_held "a red test with --env HELD=1 gave rc $rc, marker '$("$BB" cat "$D/m3" 2> /dev/null)'"
-else
-    ok env_held
-fi
 run env_bin "$D/m4" --env PROBE_MODE=red --env BIN=true
 if [ "$rc" = 0 ] || [ -e "$D/m4" ]; then
     bad env_bin "a red test with --env BIN=true gave rc $rc, marker '$("$BB" cat "$D/m4" 2> /dev/null)'"
@@ -88,25 +82,12 @@ else
 fi
 run env_rc "$D/m5" --env PROBE_MODE=red --env rc=0 --env MARKER=/dev/null --env LABEL=x
 if [ "$rc" = 0 ] || [ -e "$D/m5" ]; then bad env_rc "a red test with --env rc=0 gave rc $rc"; else ok env_rc; fi
-# The inversion itself still works: a held red is satisfied.
-run held_red "$D/m6" --env PROBE_MODE=red --hold e 1 reason
-if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m6" 2> /dev/null)" = "HELD //x:held_red" ]; then ok held_red; else bad held_red "rc $rc, marker '$("$BB" cat "$D/m6" 2> /dev/null)'"; fi
-# SIGKILL is what a memory limit delivers: a held test killed by it has no
-# verdict. It must fail (137) with no marker, so the action is not cached as a
-# held failure and can be retried with more memory; taken as HELD, a fixed
-# test would be reported held forever on a too-small machine.
-run held_killed "$D/m7" --env PROBE_MODE=killed --hold e 1 reason
-if [ "$rc" = 137 ] && [ ! -e "$D/m7" ] && "$BB" grep -q '^NO VERDICT: held test //x:held_killed' "$D/held_killed.log"; then
-    ok held_killed
-else
-    bad held_killed "a SIGKILLed held test gave rc $rc, marker '$("$BB" cat "$D/m7" 2> /dev/null)'"
-fi
-# Every other signal death is still the held test's own failure.
-run held_aborted "$D/m8" --env PROBE_MODE=aborted --hold e 1 reason
-if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m8" 2> /dev/null)" = "HELD //x:held_aborted" ]; then ok held_aborted; else bad held_aborted "rc $rc, marker '$("$BB" cat "$D/m8" 2> /dev/null)'"; fi
-# An unheld test killed by SIGKILL stays red with its own status.
-run unheld_killed "$D/m9" --env PROBE_MODE=killed
-if [ "$rc" = 137 ] && [ ! -e "$D/m9" ]; then ok unheld_killed; else bad unheld_killed "rc $rc, marker '$("$BB" cat "$D/m9" 2> /dev/null)'"; fi
+# A test killed by a signal is red with its own status (128+N) and no marker:
+# SIGKILL, what a memory limit delivers, and SIGABRT.
+run killed "$D/m6" --env PROBE_MODE=killed
+if [ "$rc" = 137 ] && [ ! -e "$D/m6" ]; then ok killed; else bad killed "rc $rc, marker '$("$BB" cat "$D/m6" 2> /dev/null)'"; fi
+run aborted "$D/m7" --env PROBE_MODE=aborted
+if [ "$rc" = 134 ] && [ ! -e "$D/m7" ]; then ok aborted; else bad aborted "rc $rc, marker '$("$BB" cat "$D/m7" 2> /dev/null)'"; fi
 
 "$BB" rm -rf "$D"
 exit "$bad"

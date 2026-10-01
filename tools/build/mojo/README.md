@@ -48,20 +48,9 @@ mojo_library(
   ([`tests/negative/libgate_bad`](../tests/negative/libgate_bad/BUCK): the library and its
   consumer go red, `[ungated]` builds, and a binary naming `[ungated]` in
   `deps` fails analysis).
-- **Holding a known-failing test: `tests_known_failing`.** A red test that
-  must not block the library's closure is held by a row
-  `{"<test_srcs path>": {"issue": "<n>, #<n> or its GitHub issue URL", "reason": "..."}}`.
-  The hold inverts rather than mutes: the held test still builds and runs in
-  the gate, and its marker (`HELD <label>`) is produced only if it FAILS. A
-  held test that passes is red, `LEDGER STALE`, naming the row to delete; an
-  unheld failing test is still `GATED TEST FAILED`. A held test killed by
-  SIGKILL (exit 137, what a memory limit delivers) has NO VERDICT: its action
-  fails without a marker, so an executor can retry it with more memory
-  instead of caching a too-small machine's kill as the held failure. Refused
-  at analysis: a key that is not a `test_srcs` entry, any field besides
-  `issue` and `reason`, a missing or malformed issue (a GitHub issue number or
-  URL, nothing else), an empty reason, two rows with byte-identical reasons, and holding every test
-  ([`tests/functional/known_failing`](../tests/functional/known_failing/BUCK)).
+- **Every welded test must pass.** There is no way to hold a red test: a
+  `mojo_library` naming `tests_known_failing` is refused when its BUCK file
+  loads.
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
@@ -228,7 +217,7 @@ mojo_test(
   `DYLD_FALLBACK_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `TMPDIR`,
   `TEST_TMPDIR`, `HOME` and `PWD`; setting one is refused at analysis.
   The variables are given to the test process only, never to the runner's
-  own shell, so a name the runner uses internally (`HELD`, `BIN`, `rc`)
+  own shell, so a name the runner uses internally (`BIN`, `rc`, `MARKER`)
   reaches the test and cannot change the verdict
   ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
@@ -423,8 +412,8 @@ assembly lists are generated but not built yet.
 
 | message | from | meaning |
 |---|---|---|
-| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed, and it is not held by `tests_known_failing` |
-| `LEDGER STALE: <label> PASSED, but it is held as known-failing.` | [`gate_runner.sh`](gate_runner.sh) | a test held by `tests_known_failing` passed; delete its row |
+| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |

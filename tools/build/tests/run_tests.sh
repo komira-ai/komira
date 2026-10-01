@@ -149,13 +149,6 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
-#  27. mojo_library's tests_known_failing inverts rather than mutes
-#      (tests//functional/known_failing): a held test that fails is satisfied (marker
-#      `HELD`), a held test that passes is red (LEDGER STALE, naming its row),
-#      an unheld red beside a hold is still red, and every inadmissible row
-#      (no issue, an issue that is not a GitHub issue reference, an empty
-#      reason, an entry that is not a test, an unknown field, byte-identical
-#      reasons, every test held) is refused at analysis.
 #  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
 #      (tests//functional/watchdog:cases, a remote action): a process tree using no CPU
 #      is killed with exit 124 and the message, its children and an orphaned
@@ -172,13 +165,13 @@
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
 #      is private, empty and not /tmp in each of two actions; test_env and a
 #      mojo_test's data and env arrive under `buck2 test`; a red test stays
-#      red with test_env {HELD: 1} (library) and env {BIN: true} (mojo_test);
+#      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
 #      (tests//functional/test_data:runner_cases), gives each run its own empty
 #      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, and a held test killed by SIGKILL fails (137, NO VERDICT)
-#      with no marker while other signal deaths stay HELD; five inadmissible
-#      data/env declarations are refused at analysis.
+#      the verdict, and a test killed by SIGKILL or SIGABRT fails with its
+#      own status (137, 134) and no marker; five inadmissible data/env
+#      declarations are refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
 #      analysis only): mojo_test and a mojo_library's gated tests at -O1,
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target
@@ -835,29 +828,6 @@ else
     fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
 fi
 
-# 27
-if "$BUCK2" build tests//functional/known_failing:held_ok --show-full-simple-output > "$LOG/kf_held_ok.log" 2>&1; then
-    "$BUCK2" build 'tests//functional/known_failing:held_ok[tests][test_fails]' --show-full-simple-output > "$LOG/kf_marker.log" 2>&1
-    kf_marker=$(tail -n 1 "$LOG/kf_marker.log")
-    if [ "$(cat "$kf_marker" 2> /dev/null)" = "HELD tests//functional/known_failing:held_ok:tests/test_fails.mojo" ]; then
-        pass "known_failing: a held test that fails satisfies the gate (HELD marker)"
-    else
-        fail "known_failing: held_ok built, but its held marker is '$(cat "$kf_marker" 2> /dev/null)' (see $LOG/kf_marker.log)"
-    fi
-else
-    fail "known_failing: held_ok must build (see $LOG/kf_held_ok.log)"
-fi
-expect_red kf_held_passing 'tests_known_failing["tests/test_passes_too.mojo"]' tests//negative/known_failing:held_passing
-expect_red kf_held_passing_stale "LEDGER STALE" tests//negative/known_failing:held_passing
-expect_red kf_unheld_red "GATED TEST FAILED: tests//negative/known_failing:unheld_red:tests/test_fails_too.mojo" tests//negative/known_failing:unheld_red
-expect_red kf_no_issue "no \`issue\`" tests//negative/known_failing:bad_no_issue
-expect_red kf_issue_ref "is not a GitHub issue number" tests//negative/known_failing:bad_issue_ref
-expect_red kf_empty_reason "empty \`reason\`" tests//negative/known_failing:bad_empty_reason
-expect_red kf_entry "not a test_srcs entry" tests//negative/known_failing:bad_entry
-expect_red kf_field "unknown field \`card\`" tests//negative/known_failing:bad_field
-expect_red kf_same_reason "byte-identical reasons" tests//negative/known_failing:bad_same_reason
-expect_red kf_all_held "holds all 2 tests" tests//negative/known_failing:bad_all_held
-
 # 28
 if ! "$BUCK2" build tests//functional/watchdog:cases --show-full-simple-output > "$LOG/watchdog_cases.txt" 2> "$LOG/watchdog_cases.log"; then
     fail "compile watchdog cases: $(grep '^BAD ' "$LOG/watchdog_cases.log" | sort -u | tr '\n' ' ')(see $LOG/watchdog_cases.log)"
@@ -880,7 +850,7 @@ if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/
 else
     fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
 fi
-expect_red td_env_held "GATED TEST FAILED: tests//negative/test_data:env_held:tests/test_red.mojo" tests//negative/test_data:env_held
+expect_red td_env_bin_lib "GATED TEST FAILED: tests//negative/test_data:env_bin_lib:tests/test_red.mojo" tests//negative/test_data:env_bin_lib
 if timeout 900 "$BUCK2" test tests//negative/test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then
     fail "td_env_bin: buck2 test tests//negative/test_data:env_bin passed, but its test is red (env BIN reached the runner; see $LOG/td_env_bin.log)"
 elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
