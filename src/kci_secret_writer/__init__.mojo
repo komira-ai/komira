@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_secret_writer — the WRITE-ONLY secret seam: the verb a deployer uses to
+# kci_secret_writer — the WRITE-ONLY secret seam: the verb a deployer uses to
 #   write a managed-app secret value that it is the source of.
 # =============================================================================
 #
@@ -27,7 +27,7 @@
 # following the resolve conformers' shape.
 #
 # Dependency direction (cycle-free; a leaf on the secrets foundation):
-#   komira_secret_writer -> komira_secret_store  (SecretValue — the zeroizing
+#   kci_secret_writer -> komira_secret_store  (SecretValue — the zeroizing
 #                                                 move-only value;
 #                                                 StaticSecretStore — the paired
 #                                                 resolve double for the
@@ -36,7 +36,7 @@
 #   firewall is one-directional: the writer knows about resolve for the test
 #   bridge, but resolve never knows about the writer).
 #
-# A SIBLING package, import name `komira_secret_writer`.
+# A SIBLING package, import name `kci_secret_writer`.
 # =============================================================================
 
 from .secret_writer import (

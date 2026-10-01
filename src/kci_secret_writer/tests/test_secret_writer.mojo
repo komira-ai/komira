@@ -33,7 +33,7 @@ from std.testing import assert_equal, assert_true, assert_false
 from komira_secret_store.secret_store import SecretStore
 from komira_secret_store.secret_value import SecretValue
 
-from komira_secret_writer import SecretWriter, StaticSecretWriter
+from kci_secret_writer import SecretWriter, StaticSecretWriter
 
 
 comptime _SMTP_REF: String = "example/managed/comms/smtp-relay-credential"

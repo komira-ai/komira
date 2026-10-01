@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_secret_writer/secret_writer.mojo — the `SecretWriter` WRITE-ONLY seam +
+# kci_secret_writer/secret_writer.mojo — the `SecretWriter` WRITE-ONLY seam +
 #   the `StaticSecretWriter` in-memory test double.
 # =============================================================================
 #
