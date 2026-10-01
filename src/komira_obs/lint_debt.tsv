@@ -1,0 +1,21 @@
+# LINT DEBT — one unit, and it SHRINKS.
+#
+#   predicate<TAB>tracking<TAB>reason
+#
+# A row says: THIS predicate is expected to FAIL for THIS unit, today. It
+# ratchets BOTH ways and the second direction is the load-bearing one:
+#
+#   the predicate fails and has NO row      -> RED (the anti-pile-on)
+#   the predicate PASSES and HAS a row      -> RED, naming this line. Good news
+#                                              reported as a build failure ON
+#                                              PURPOSE — it is what makes the
+#                                              file only ever shrink.
+#
+# An EMPTY file is a REFUSAL: "no debt" is spelled by DELETING this file, not by
+# emptying it, because an empty ledger reads as "checked and clean" while being
+# indistinguishable from "nobody wrote the rows". An empty reason and an unknown
+# predicate name are refusals too.
+#
+# THE ONLY CORRECT LIFECYCLE FOR A ROW IS DELETION. Fix the violation, watch
+# the build go red for the opposite reason, delete the line.
+unsafe_from_address	clock-timespec-origin	One site in clock.mojo: `_clock_gettime_ns` rebuilds the stack-local timespec pointer with an untracked origin for the clock_gettime FFI call. Retiring it needs an origin-tied out-param pointer for the FFI call, then DELETING this row.
