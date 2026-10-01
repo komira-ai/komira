@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package komira.test.refuse.nested_braces;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = { get: "/v1/{a={b}}" };
+  }
+}
+
+message Req {
+  string a = 1;
+  string b = 2;
+  string x = 3;
+}
