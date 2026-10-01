@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The one hand-written core of the Google Cloud SDK. This part (P18a-1) holds
+# the token-source contract the generated `komira_gcp_<service>` clients call
+# with a token cache on an injected clock, the google.rpc.Status error envelope
+# (never echoes a body), and the PURE paging and retry pieces (`PageCursor`,
+# `next_page_token`, `RetryPolicy.decide`). It never imports a generated module,
+# reads no environment and opens no socket, and owns no transport: the one
+# transport seam is komira_http's `Connector`.
+#
+# Still to come, in order: P18a-2 (pure, no http) - service-account key file
+# parse, the RS256 JWT assertion, the authorized_user refresh form, the
+# metadata/oauth token-response parse, and the STS exchange +
+# generateAccessToken request/response codecs. P18b (needs the transport
+# stack) - the token sources that send those over a `Connector`, plus the
+# send/decide/sleep retry loop. P21b - the paging loop in the generated
+# logging client. P18b depends on P18a-2.
+mojo_library(
+    name = "komira_gcp_core",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_serde:komira_serde"],
+    test_srcs = [
+        "tests/test_gcp_status.mojo",
+        "tests/test_gcp_pagination.mojo",
+        "tests/test_gcp_retry.mojo",
+        "tests/test_gcp_token.mojo",
+        "tests/test_gcp_utf8.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
