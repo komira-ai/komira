@@ -76,12 +76,18 @@ that worker). The identities are pinned: a worker whose identity does not
 match refuses the action. The compile runs on the macOS workers and the
 unpack runs on Linux x86_64 workers of the same service. The checks of this
 setup are in
-[tools/build/tests/functional/darwin/check.sh](../tools/build/tests/functional/darwin/check.sh).
+[tools/build/tests/functional/darwin/check.sh](../tools/build/tests/functional/darwin/check.sh);
+the compile and unpack split is as reported, and that script's section 7 is the
+way to reproduce it.
 
-**Known gap:** a `darwin-arm64` build of a real library currently fails its
-welded test gate (`libKGENCompilerRTShared.dylib` not found, exit 134), so
-step 4 does not yet work for a library on macOS. A target with no gated test,
-`//tools/build/examples:hello`, builds. A fix is a known build task.
+**Known gap, not fixed on main yet and being fixed:** the macOS test gate
+loses the runtime library path (macOS strips `DYLD_*` variables passed through
+`/usr/bin/env`), so a welded test of a `darwin-arm64` library fails because a
+runtime library is not found, and step 4 does not yet work for a library on
+macOS. A target with no gated test, `//tools/build/examples:hello`, is reported
+to build there; section 7 of
+[check.sh](../tools/build/tests/functional/darwin/check.sh) is the reproducible
+check, and it needs macOS workers.
 Libraries that depend on C, C++ or Rust code are Linux x86_64 only.
 
 ## 4. Build one library and its tests

@@ -55,8 +55,8 @@ run, so a purely local build works on a Linux x86_64 machine and refuses on a
 Mac, naming `.buckconfig.local`. On a Mac, build through a remote-execution
 service (step 3): the repository has a `darwin-arm64` target platform and a
 macOS Mojo toolchain, and the compile runs on macOS arm64 workers while the
-unpack runs on Linux ones. A local macOS build is a gap in the repository
-rather than a limit of Mojo, and is a known gap. Two things need a Linux x86_64
+unpack runs on Linux ones. A local macOS build is a known gap in the repository, not a limit of Mojo.
+Two things need a Linux x86_64
 client either way, because they run Linux binaries on your machine:
 `./buck2 run`, and `tools/build/tests/run_tests.sh` (section 4), which
 refuses any other client.
@@ -265,9 +265,13 @@ refuses any other with exit 2.
   `sh tools/build/mojo/darwin/host_identity.sh`; identities are pinned and a
   mismatch makes the worker refuse). Checks:
   [check.sh](tools/build/tests/functional/darwin/check.sh).
-- Known gap: a `darwin-arm64` build of a real library fails its welded test
-  gate (`libKGENCompilerRTShared.dylib` not found, exit 134); a target with
-  no gated test, `//tools/build/examples:hello`, builds.
+- Known gap, not fixed on main yet and being fixed: the macOS test gate loses
+  the runtime library path (macOS strips `DYLD_*` variables passed through
+  `/usr/bin/env`), so a welded test of a `darwin-arm64` library fails because a
+  runtime library is not found. A target with no gated test,
+  `//tools/build/examples:hello`, is reported to build there; section 7 of
+  [check.sh](tools/build/tests/functional/darwin/check.sh) is the check, and it
+  needs macOS workers.
 
 ## Host floor
 
