@@ -1081,6 +1081,7 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         # single-thread-access stream. No cross-worker sharing.
         """
         var is_http = req.url.is_http()
+        _scheme_check_or_raise[Self.C](req.url.is_https(), is_http, connector)
         var max_body = self._config.max_response_body_bytes
         # the drive-loop deadline (0 = the 600s default —
         # unchanged for every existing caller); a positive value (the Cloud Run
@@ -1296,6 +1297,10 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         shared gRPC send path never spuriously fails a caller under burst.
         """
         var is_https = req.url.is_https()
+        # Scheme/connector check UP FRONT, before any dial: a plaintext
+        # connector must never reach the https branch (and a connector that
+        # merely REPORTS NEGOTIATED_HTTP_2 must not skip the check).
+        _scheme_check_or_raise[Self.C](is_https, req.url.is_http(), self._connector)
         if not is_https:
             # Plaintext / non-h2 → identical to the fresh-dial streaming
             # path (no behavioral change for non-h2 gRPC callers). A caller
@@ -1461,6 +1466,12 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         Returns the SAME streaming RecvRingBody response shape the https+h2
         path returns, so the gRPC drain loop slots in unchanged.
         """
+        # h2c prior knowledge is PLAINTEXT-only: refuse https:// on a
+        # plaintext connector (cleartext h2c frames + Authorization header)
+        # and http:// on a TLS connector, before set_dial_host / any dial.
+        _scheme_check_or_raise[Self.C](
+            req.url.is_https(), req.url.is_http(), self._connector
+        )
         var host_str = req.url.host_copy()
         var port = req.url.effective_port()
         var max_body = self._config.max_response_body_bytes
@@ -1633,6 +1644,10 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         var host_str = req.url.host_copy()
         var port = req.url.effective_port()
         var is_http = req.url.is_http()
+        # Refuse a scheme/connector mismatch BEFORE any dial or write: an
+        # `https://` URL on a plaintext connector would otherwise go out in
+        # cleartext, credentials included.
+        _scheme_check_or_raise[Self.C](req.url.is_https(), is_http, connector)
         # ★ PER-REQUEST SNI — the host, not just the address. COSTS NO
         # HANDSHAKE *AND NO RESOLVE*: this writes one field, every pooled-reuse
         # path below returns without reaching `connect` at all, and
@@ -1743,6 +1758,10 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         var host_str = req.url.host_copy()
         var port = req.url.effective_port()
         var is_http = req.url.is_http()
+        # Refuse a scheme/connector mismatch BEFORE any dial or write: an
+        # `https://` URL on a plaintext connector would otherwise go out in
+        # cleartext, credentials included.
+        _scheme_check_or_raise[Self.C](req.url.is_https(), is_http, connector)
         # ★ PER-REQUEST SNI — the host, not just the address. COSTS NO
         # HANDSHAKE *AND NO RESOLVE*: this writes one field, every pooled-reuse
         # path below returns without reaching `connect` at all, and
@@ -1843,6 +1862,10 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         var host_str = req.url.host_copy()
         var port = req.url.effective_port()
         var is_http = req.url.is_http()
+        # Refuse a scheme/connector mismatch BEFORE any dial or write: an
+        # `https://` URL on a plaintext connector would otherwise go out in
+        # cleartext, credentials included.
+        _scheme_check_or_raise[Self.C](req.url.is_https(), is_http, connector)
         # ★ PER-REQUEST SNI — the host, not just the address. COSTS NO
         # HANDSHAKE *AND NO RESOLVE*: this writes one field, every pooled-reuse
         # path below returns without reaching `connect` at all, and
@@ -2400,6 +2423,23 @@ struct HttpClient[C: Connector](HttpService, Movable, Deinitable):
         var is_https = reqs[0].url.is_https()
         var is_http = reqs[0].url.is_http()
         _scheme_check_or_raise[Self.C](is_https, is_http, self._connector)
+        # Every member must carry the same scheme/host/port as reqs[0]: one
+        # pooled conn, one scheme check. A mixed batch is refused, not dialed.
+        var ci = 1
+        while ci < n:
+            _scheme_check_or_raise[Self.C](
+                reqs[ci].url.is_https(), reqs[ci].url.is_http(), self._connector
+            )
+            if (
+                reqs[ci].url.is_https() != is_https
+                or reqs[ci].url.host_copy() != reqs[0].url.host_copy()
+                or reqs[ci].url.effective_port() != reqs[0].url.effective_port()
+            ):
+                raise Error(
+                    "HttpError[URL_INVALID]: send_buffered_batch requires all"
+                    " requests to share one https authority"
+                )
+            ci = ci + 1
         if not is_https:
             raise Error(
                 "HttpError[URL_INVALID]: send_buffered_batch requires https h2"
