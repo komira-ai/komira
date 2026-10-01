@@ -593,6 +593,39 @@ and with one reporting this machine, which must pass.
 tools/build/tests/run_tests.sh --host-check-only
 ```
 
+## 34. AWS client generator
+
+[`functional/aws_codegen`](functional/aws_codegen/BUCK) runs
+`komira//tools/build/proto-codegen:aws-client-gen` over a copy of the
+CloudWatch Logs model as check actions ([`defs.bzl`](functional/aws_codegen/defs.bzl)).
+The GetLogEvents module, pure and client, and the layout probe of each, must
+equal their goldens under `golden/` byte for byte. The generator must refuse,
+naming the reason and writing no file: an empty or missing `--operations`, an
+operation the model lacks, a protocol it does not implement (rest-xml), a
+missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
+or one digit short), one that is not the model's, a zero-byte model, and
+`--probe-import` without `--probe-out`.
+
+Two negatives in [`negative/aws_codegen`](negative/aws_codegen/BUCK) must fail
+their builds: a golden that differs from the generated module (`golden_differs`),
+and a refusal check given inputs the generator accepts (`accepted`).
+
+```sh
+buck2 build tests//functional/aws_codegen:
+buck2 build tests//negative/aws_codegen:golden_differs   # must fail: differs from the golden
+buck2 build tests//negative/aws_codegen:accepted         # must fail: expected a refusal
+```
+
+To update a golden after a deliberate change to the emitter, build the
+golden's `[gen]` sub-target and copy its output over the golden (and
+likewise for `logs_pure`):
+
+```sh
+out=$(buck2 build 'tests//functional/aws_codegen:logs_client[gen]' --show-full-simple-output)
+cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client.mojo
+cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`

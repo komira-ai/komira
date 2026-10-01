@@ -24,7 +24,7 @@ from komira_log.facade import trace, debug, info, warn, error
 from komira_log.facade import get_logger, GlobalLogger
 
 # The process-global immortal logger registry (install-once). The forever-root
-# (a control-plane service) installs a SharedEngine ONCE; the ambient facade +
+# (a long-lived service) installs a SharedEngine ONCE; the ambient facade +
 # get_logger resolve it.
 from komira_log.engine.log_manager import LogManager
 
@@ -86,7 +86,7 @@ from komira_log.env_filter import (
 from komira_log.pattern_layout import select_log_layout, log_layout_is_json
 
 # P2b engine — the binary per-core-ring backend behind the stable facade. The
-# forever-root (EngineContext / a control-plane service) constructs a
+# forever-root (EngineContext / a long-lived service) constructs a
 # SharedEngine and installs it via the process-static handle; the facade then
 # routes every `log.*` call through the per-core rings + drain. Until install,
 # the facade falls back to the P1 synchronous stderr path (so a log before
@@ -114,7 +114,7 @@ from komira_log.engine.drain import render_record_view
 # (~43ns). The bare module-level `log.*` above stays as the no-ctx fallback.
 from komira_log.logger import Logger
 
-# THE ERASED TWIN OF THAT SURFACE — for the CONTROL PLANE only. `Logger.info`'s
+# THE ERASED TWIN OF THAT SURFACE — for long-lived SERVICES only. `Logger.info`'s
 # `fmt` and `*ArgTs` are comptime AND unique per call site, so each site is its
 # own instantiation and (being `@always_inline`) its own expansion. `emit_erased`
 # moves exactly
