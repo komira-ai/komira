@@ -1,0 +1,93 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load(":defs.bzl", "proto_codegen_golden", "proto_codegen_refusal", "proto_codegen_rest_helpers")
+
+# Text goldens and refusals of komira//tools/build/proto-codegen:protoc-gen-mojo
+# in REST mode, as check actions: `buck2 build tests//functional/proto_codegen:`
+# runs them all. protos/google/api/annotations.proto declares the
+# `(google.api.http)` option every fixture imports.
+
+_ANNOTATIONS = "protos/google/api/annotations.proto"
+
+# The Cloud Logging calls a log reader makes: a custom-verb literal path
+# (POST /v2/entries:list), a `{parent=projects/*}` capture and a repeated
+# query field. The REST client imports komira_gcp_core (its token source and
+# its google.rpc.Status error mapper).
+proto_codegen_golden(
+    name = "logging_rest",
+    srcs = [
+        _ANNOTATIONS,
+        "protos/google/logging/v2/logging.proto",
+    ],
+    generate = ["google/logging/v2/logging.proto"],
+    goldens = {"logging.mojo": "golden/logging.mojo"},
+    opt = "default_protocol=rest,package_prefix=komira_gcp_logging",
+)
+
+# `**`, a verb after a capture, `{x=*}`, and repeated, optional and bool
+# query fields.
+proto_codegen_golden(
+    name = "shapes_rest",
+    srcs = [
+        _ANNOTATIONS,
+        "protos/shapes/v1/shapes.proto",
+    ],
+    generate = ["shapes/v1/shapes.proto"],
+    goldens = {"shapes.mojo": "golden/shapes.mojo"},
+    opt = "default_protocol=rest,package_prefix=komira_test_shapes",
+)
+
+# Templates a client cannot fill are refused, each naming the reason.
+[proto_codegen_refusal(
+    name = "refuse_" + name,
+    srcs = [
+        _ANNOTATIONS,
+        "protos/refuse/{}.proto".format(name),
+    ],
+    expect = expect,
+    generate = ["refuse/{}.proto".format(name)],
+    opt = "default_protocol=rest,package_prefix=refused",
+) for name, expect in [
+    ("bare_wildcard", "a bare `*` segment has no request field to fill it"),
+    ("double_star_not_last", "must be the last segment"),
+    ("dotted_field", "names a nested field path"),
+    ("repeated_path_var", "path variable `names` is a `repeated` field"),
+    ("nested_braces", "nested `{` in a variable"),
+    ("unclosed_brace", "unclosed `{`"),
+    ("unbalanced_brace", "unbalanced `}`"),
+    ("empty_verb", "custom verb \"\" must be a non-empty literal"),
+    ("verb_with_slash", "custom verb \"a/b\" must be a non-empty literal"),
+    ("pattern_not_unreserved", "pattern \"x y\" of `a` must be"),
+    ("captured_twice", "field `a` is captured twice"),
+    ("empty_pattern_segment", "pattern \"x//y\" of `a` must be"),
+    ("double_star_not_last_in_pattern", "pattern \"**/x\" of `a` must be"),
+    ("bytes_in_url", "field `blob` is `bytes`, which has no URL"),
+]]
+
+# The URL helpers protoc-gen-mojo emits into every REST client, cut out of
+# the shapes client and compiled on their own (they need nothing outside the
+# standard library). Building the library runs rest_url/test_helpers.mojo
+# over them: matching, refusing and percent-encoding path variables, and
+# errors that name the field and pattern but never the value. The goldens pin
+# the text; this pins what the text does.
+proto_codegen_rest_helpers(
+    name = "rest_url_helpers_src",
+    file = "shapes.mojo",
+    gen = ":shapes_rest[gen]",
+    out = "rest_url/helpers.mojo",
+)
+
+mojo_library(
+    name = "rest_url",
+    srcs = [
+        "rest_url/__init__.mojo",
+        ":rest_url_helpers_src",
+    ],
+    test_srcs = ["rest_url_tests/test_helpers.mojo"],
+)
+
+# Not checked here: the OpenAPI emitter (openapi_emit.rs), including its
+# whole-body fallback for a `{field=...}` template such as shapes'
+# `/v1/{name=*}/things`. Its plugin, protoc-gen-openapi, has no target in
+# proto-codegen/BUCK, and that file's next edit belongs to the rust_test
+# weld, which will run openapi_emit.rs's own #[test]s. TODO(rust_test weld):
+# add the plugin target and an OpenAPI golden over protos/shapes here.

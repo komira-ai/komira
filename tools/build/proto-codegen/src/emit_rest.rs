@@ -6,7 +6,7 @@ use std::fmt::Write as _;
 use crate::ir::*;
 use crate::mojo_names::rpc_method_name;
 use crate::path_template::{
-    percent_encode_simple, BodyDesignator, FieldPartition, PathSegment, PathTemplate,
+    percent_encode_simple, BodyDesignator, FieldPartition, PathSegment, PathTemplate, VarPattern,
 };
 
 const REST_HOST: &str = "localhost";
@@ -22,11 +22,35 @@ pub struct RestServiceEmit {
     pub notes: Vec<String>,
 }
 
+/// The hand-written GCP core the generated REST clients import from (its
+/// package root, never a submodule, so the core may lay its files out freely).
+pub const GCP_CORE: &str = "komira_gcp_core";
+
+/// The token-source trait of [`GCP_CORE`]. Its contract:
+/// `trait GcpTokenSource(Movable): def access_token(mut self) raises -> String`,
+/// the bare token (no `Bearer ` prefix). Acquiring, caching and refreshing the
+/// token (metadata server, service-account JWT, workload-identity exchange) is
+/// the core's; the generated client only asks for one per request.
+pub const GCP_TOKEN_SOURCE: &str = "GcpTokenSource";
+
+/// The error mapper of [`GCP_CORE`]. Its contract:
+/// `def gcp_status_error(verb: String, rpc: String, http_status: Int, body: List[UInt8]) -> Error`
+/// reads the `google.rpc.Status` envelope (`{"error": {"code", "status", ...}}`)
+/// leniently and returns an `Error` naming the verb, the RPC, the HTTP status,
+/// the `error.status` code (when it is an `[A-Z_]+` token) and the body's byte
+/// count. It never copies any other body byte into the message: `error.message`
+/// and `error.details` can carry resource names and request data.
+pub const GCP_STATUS_ERROR: &str = "gcp_status_error";
+
 /// The import block a REST-target file needs (replaces the gRPC import set in
 /// `emit.rs::emit_header` when `ProtocolMode::Rest`). One source line per
 /// emitted entry, no trailing blank — the header owns surrounding blanks.
+///
+/// The `komira_gcp_core` line is the core's contract: [`GCP_TOKEN_SOURCE`] and
+/// [`GCP_STATUS_ERROR`], re-exported from its package root.
 pub fn rest_imports() -> &'static [&'static str] {
     &[
+        "from komira_gcp_core import GcpTokenSource, gcp_status_error",
         "from komira_serde.proto3_json import JsonEncoder, JsonDecoder",
         "from komira_http.client.client import (",
         "    HttpClient,",
@@ -56,30 +80,33 @@ pub fn emit_rest_service(
     let struct_name = format!("{}Client", svc.name);
     w.blank();
     w.line(&format!(
-        "# REST service client for `{}.{}`. (REST-CODEGEN Phase 1)",
+        "# REST/JSON client for `{}.{}`.",
         file.proto_package, svc.name
     ));
     w.line(&format!(
-        "struct {struct_name}[C: Connector](Movable, Deinitable):"
+        "struct {struct_name}[C: Connector, T: {GCP_TOKEN_SOURCE}](Movable, Deinitable):"
     ));
     w.indent();
     w.line(&format!(
-        "\"\"\"Generated REST/JSON client for service `{}`.",
+        "\"\"\"The generated REST/JSON client for `{}`, parametric over the HTTP",
         svc.name
     ));
+    w.line("    connector `C` and the access-token source `T`.");
+    w.blank();
+    w.line("    Every request carries `Authorization: Bearer <token>` from `T` (a");
     w.line(&format!(
-        "    Per rest_codegen_extension_design §1.2. Host: {REST_HOST}."
+        "    `{GCP_CORE}.{GCP_TOKEN_SOURCE}`): the client reads no environment"
     ));
-    w.line("    \"\"\"");
+    w.line("    and holds no credential of its own.\"\"\"");
     w.blank();
     w.line("var _client: HttpClient[Self.C]");
-    w.line("\"\"\"The HTTP transport substrate.\"\"\"");
+    w.line("\"\"\"The HTTP transport.\"\"\"");
+    w.blank();
+    w.line("var _token_source: Self.T");
+    w.line("\"\"\"Where each request's bearer token comes from.\"\"\"");
     w.blank();
     w.line("var _default_headers: HeaderMap");
-    w.line(
-        "\"\"\"Default headers merged into every request (e.g. a private-ingress",
-    );
-    w.line("    `X-Serverless-Authorization` token). Empty unless set.\"\"\"");
+    w.line("\"\"\"Headers merged into every request. Empty unless given.\"\"\"");
     w.blank();
     // The REST base host. Defaults to the offline `localhost` placeholder (the
     // scripted-loopback fast path — no DNS); a LIVE caller re-points it at the
@@ -88,40 +115,40 @@ pub fn emit_rest_service(
     // dial requires the real host HERE (SNI on the TLS connector is not the
     // dial target).
     w.line("var _rest_host: String");
-    w.line("\"\"\"The REST base host the verb URLs target. Defaults to the offline");
+    w.line("\"\"\"The host the request URLs target. Defaults to the offline");
     w.line(&format!(
         "    `{REST_HOST}` placeholder; a live caller sets the real public host via"
     ));
     w.line("    `set_rest_host` (it drives BOTH the dial DNS target and the `Host:`");
     w.line("    header).\"\"\"");
     w.blank();
-    w.line("def __init__(out self, var client: HttpClient[Self.C]):");
+    w.line("def __init__(out self, var client: HttpClient[Self.C], var token_source: Self.T):");
     w.indent();
     w.line("\"\"\"Construct with no default headers.\"\"\"");
     w.line("self._client = client^");
+    w.line("self._token_source = token_source^");
     w.line("self._default_headers = HeaderMap()");
     w.line(&format!("self._rest_host = String(\"{REST_HOST}\")"));
     w.dedent();
     w.blank();
-    w.line(
-        "def __init__(out self, var client: HttpClient[Self.C], var default_headers: HeaderMap):",
-    );
+    w.line("def __init__(");
+    w.line("    out self,");
+    w.line("    var client: HttpClient[Self.C],");
+    w.line("    var token_source: Self.T,");
+    w.line("    var default_headers: HeaderMap,");
+    w.line("):");
     w.indent();
-    w.line(
-        "\"\"\"Construct with per-client DEFAULT headers merged into every request.",
-    );
-    w.line(
-        "        (e.g. `X-Serverless-Authorization` for a private-ingress board).\"\"\"",
-    );
+    w.line("\"\"\"Construct with default headers merged into every request.\"\"\"");
     w.line("self._client = client^");
+    w.line("self._token_source = token_source^");
     w.line("self._default_headers = default_headers^");
     w.line(&format!("self._rest_host = String(\"{REST_HOST}\")"));
     w.dedent();
     w.blank();
     w.line("def set_rest_host(mut self, var host: String):");
     w.indent();
-    w.line("\"\"\"Point the verb URLs at a real public host (e.g.");
-    w.line("    `compute.googleapis.com`) for a LIVE dial. The URL host feeds BOTH");
+    w.line("\"\"\"Point the request URLs at a real public host (e.g.");
+    w.line("    `logging.googleapis.com`) for a LIVE dial. The URL host feeds BOTH");
     w.line("    the dial-target DNS resolution and the injected `Host:` header;");
     w.line(&format!(
         "    the default `{REST_HOST}` is the offline scripted-loopback path.\"\"\""
@@ -218,18 +245,26 @@ fn emit_rest_method(
             .iter()
             .find(|x| &x.name == f)
             .expect("partition field came from the message");
-        if matches!(fld.label, Label::Repeated) {
+        // A repeated scalar is a repeated query key (`?k=a&k=b`); a path
+        // variable is one value, so a repeated one has no expansion.
+        if matches!(fld.label, Label::Repeated) && part.path_fields.contains(f) {
             return Err(format!(
-                "REST method `{}`: field `{}` is used in the path/query but is \
-                 `repeated` (Phase 1 has no RFC 6570 list-expansion; a repeated \
-                 scalar path/query field is unsupported)",
+                "REST method `{}`: path variable `{}` is a `repeated` field; a \
+                 path variable takes one value",
                 m.name, f
             ));
         }
         if !is_scalar(&fld.ty) {
             return Err(format!(
                 "REST method `{}`: field `{}` is used in the path/query but is \
-                 not a scalar (Phase 1 only renders scalar path/query fields)",
+                 not a scalar (only a scalar renders into a URL)",
+                m.name, f
+            ));
+        }
+        if matches!(&fld.ty, IrType::Scalar(ScalarKind::Bytes)) {
+            return Err(format!(
+                "REST method `{}`: field `{}` is `bytes`, which has no URL \
+                 rendering here (proto3 JSON writes it as base64)",
                 m.name, f
             ));
         }
@@ -242,7 +277,7 @@ fn emit_rest_method(
     let has_body = !matches!(part.body, BodyDesignator::None);
 
     w.line(&format!(
-        "def {method_name}[RT: Runtime](mut self, req: {req_ty}, token: String, \
+        "def {method_name}[RT: Runtime](mut self, req: {req_ty}, \
          mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> {resp_ty}:"
     ));
     w.indent();
@@ -269,7 +304,7 @@ fn emit_rest_method(
     w.line("var headers = HeaderMap()");
     w.line("self._rest_apply_default_headers(headers)");
     w.line(
-        "headers.append(String(\"Authorization\"), String(\"Bearer \") + token)",
+        "headers.append(String(\"Authorization\"), String(\"Bearer \") + self._token_source.access_token())",
     );
     if has_body {
         w.line(
@@ -341,18 +376,24 @@ fn emit_rest_method(
     w.line(")");
 
     // -- status check --------------------------------------------------------
+    // Anything but 2xx is an error: a 3xx or 1xx body decoded leniently
+    // would read as an empty success. The body goes to the core's
+    // `google.rpc.Status` mapper, which reports its code and byte count and
+    // never echoes it (`GCP_STATUS_ERROR`).
     w.line("var status_int = Int(resp.status)");
-    w.line("if status_int >= 400:");
+    w.line("var resp_bytes = resp.body.take_bytes()");
+    w.line("if status_int < 200 or status_int >= 300:");
     w.indent();
     w.line(&format!(
-        "raise Error(String(\"REST {} {} failed: HTTP \") + String(status_int))",
+        "raise {GCP_STATUS_ERROR}(String(\"{}\"), String(\"{}\"), status_int, resp_bytes)",
         verb.to_uppercase(),
         m.name
     ));
     w.dedent();
 
     // -- response decode -----------------------------------------------------
-    w.line("var resp_bytes = resp.body.take_bytes()");
+    // Lenient: a field the server added after these protos were pinned is
+    // skipped, not an error (the proto3 JSON forward-compatibility rule).
     w.line(
         "var resp_text = String(unsafe_from_utf8=Span(resp_bytes))",
     );
@@ -360,21 +401,21 @@ fn emit_rest_method(
     w.indent();
     w.line("resp_text = String(\"{}\")");
     w.dedent();
-    w.line("var dec = JsonDecoder.from_text(resp_text)");
+    w.line("var dec = JsonDecoder.from_text_lenient(resp_text)");
     w.line(&format!("return {resp_ty}.decode(dec)"));
     w.dedent();
     w.blank();
     Ok(())
 }
 
-/// Emit the path-string build: `var path = String("/") + seg + ...`, with
-/// each `{var}` substituted by the percent-encoded same-named request field.
+/// Emit the path-string build: `var path = String("") + "/" + seg + ...`, each
+/// variable filled from its request field, then the `:verb` suffix.
 fn emit_path_build(
     w: &mut Writer,
     template: &PathTemplate,
     bool_fields: &std::collections::BTreeSet<String>,
 ) {
-    // Build the path incrementally so a `{var}`'s runtime value is encoded.
+    // Build the path incrementally so a variable's runtime value is encoded.
     w.line("var path = String(\"\")");
     for seg in &template.segments {
         match seg {
@@ -384,16 +425,42 @@ fn emit_path_build(
                     percent_encode_simple(lit)
                 ));
             }
-            PathSegment::Var(name) => {
-                // A `{var}` segment — the same-named scalar field, stringified
-                // and percent-encoded at runtime via `_rest_pct_encode`.
+            PathSegment::Var(var) => {
+                let value = field_to_str_expr(&var.field, bool_fields);
                 w.line("path += String(\"/\")");
-                w.line(&format!(
-                    "path += _rest_pct_encode({})",
-                    field_to_str_expr(name, bool_fields)
-                ));
+                match &var.pattern {
+                    // `{field}` / `{field=*}`: one segment, `/` included in
+                    // the encoding; an empty, `.` or `..` value is refused at
+                    // run time, as in `_rest_path_var`. The field name is an
+                    // identifier (the parser refuses anything else), so it is
+                    // safe inside a Mojo literal.
+                    VarPattern::Segment => {
+                        w.line(&format!(
+                            "path += _rest_path_segment({value}, String(\"{}\"))",
+                            var.field
+                        ));
+                    }
+                    // `{field=pattern}`: checked against the pattern at run
+                    // time, each segment encoded, the `/` between them kept.
+                    // The pattern is unreserved-only (the parser refuses
+                    // anything else), so it is safe inside a Mojo literal.
+                    VarPattern::Segments(pattern) => {
+                        w.line(&format!(
+                            "path += _rest_path_var({value}, String(\"{pattern}\"), String(\"{}\"))",
+                            var.field
+                        ));
+                    }
+                }
             }
         }
+    }
+    if template.segments.is_empty() {
+        w.line("path += String(\"/\")");
+    }
+    // The custom verb (`:list`), an unreserved literal (the parser refuses
+    // anything else).
+    if let Some(verb) = &template.verb {
+        w.line(&format!("path += String(\":{verb}\")"));
     }
 }
 
@@ -433,22 +500,35 @@ fn emit_query_build(
         // the field name — the common single-word case — this is a no-op.)
         let fld = req_msg.fields.iter().find(|x| &x.name == f);
         let key = fld.map(|x| x.json_name.as_str()).unwrap_or(f.as_str());
-        let optional = fld
-            .map(|x| matches!(x.label, Label::Optional))
-            .unwrap_or(false);
-        // An `Optional[T]` field reads through `.value()` INSIDE its presence
-        // check; a plain field reads directly (`field_to_str_expr`).
-        let value_expr = if optional {
+        let label = fld.map(|x| x.label).unwrap_or(Label::Single);
+        let stringify = |expr: &str| {
             if bool_fields.contains(f) {
-                format!("_rest_bool_str(req.{f}.value())")
+                format!("_rest_bool_str({expr})")
             } else {
-                format!("_rest_to_str(req.{f}.value())")
+                format!("_rest_to_str({expr})")
             }
-        } else {
-            field_to_str_expr(f, bool_fields)
         };
-        if optional {
-            w.line(&format!("if req.{f}:"));
+        // An `Optional[T]` field reads through `.value()` INSIDE its presence
+        // check; a repeated one appends its key once per element, in order
+        // (`?resourceNames=a&resourceNames=b`); a plain field reads directly.
+        let (guard, value_expr) = match label {
+            Label::Optional => (Some(format!("if req.{f}:")), stringify(&format!("req.{f}.value()"))),
+            Label::Repeated => (Some(format!("for _rest_v in req.{f}:")), stringify("_rest_v")),
+            // An implicit-presence scalar at its default is omitted, as the
+            // proto3 JSON mapping omits it: no `pageToken=` on a first page.
+            // An enum renders whatever its value is.
+            Label::Single => {
+                let guard = match fld.map(|x| &x.ty) {
+                    Some(IrType::Scalar(ScalarKind::String)) => Some(format!("if req.{f}.byte_length() > 0:")),
+                    Some(IrType::Scalar(ScalarKind::Bool)) => Some(format!("if req.{f}:")),
+                    Some(IrType::Scalar(_)) => Some(format!("if req.{f} != 0:")),
+                    _ => None,
+                };
+                (guard, field_to_str_expr(f, bool_fields))
+            }
+        };
+        if let Some(g) = &guard {
+            w.line(g);
             w.indent();
         }
         w.line("if query.byte_length() > 0:");
@@ -460,7 +540,7 @@ fn emit_query_build(
             percent_encode_simple(key),
             value_expr
         ));
-        if optional {
+        if guard.is_some() {
             w.dedent();
         }
     }
@@ -509,61 +589,170 @@ fn emit_body_build(
     Ok(())
 }
 
-/// The percent-encode + stringify helpers the generated path/query code calls.
-/// Emitted ONCE per REST file (free functions, module level). Kept in the
-/// generated file so the runtime has no extra import dependency.
+/// The percent-encode, path-variable and stringify helpers the generated
+/// path/query code calls. Emitted ONCE per REST file (free functions, module
+/// level), so the generated code needs no URL library.
 pub fn rest_helper_functions() -> &'static str {
-    "\
+    r#"# ---- REST URL helpers (one copy per REST file) ----
+def _rest_pct_append(mut out: String, b: UInt8):
+    """Append byte `b` to `out`, percent-encoded unless it is in the RFC 3986
+    unreserved set `[A-Za-z0-9-._~]`."""
+    var unreserved = (
+        (b >= 0x30 and b <= 0x39)  # 0-9
+        or (b >= 0x41 and b <= 0x5A)  # A-Z
+        or (b >= 0x61 and b <= 0x7A)  # a-z
+        or b == 0x2D  # -
+        or b == 0x2E  # .
+        or b == 0x5F  # _
+        or b == 0x7E  # ~
+    )
+    if unreserved:
+        out += chr(Int(b))
+    else:
+        out += String("%")
+        out += _rest_hex_upper(b >> 4)
+        out += _rest_hex_upper(b & 0x0F)
+
+
 def _rest_pct_encode(s: String) -> String:
-    \"\"\"RFC 6570 simple-string percent-encoding — escape every byte except
-    the unreserved set `-._~` + alnum.\"\"\"
-    var out = String(\"\")
+    """Percent-encode every byte of `s` outside the unreserved set, `/`
+    included: the expansion of a one-segment path variable and of a query
+    value."""
+    var out = String("")
     var bs = s.as_bytes()
     var i = 0
     while i < len(bs):
-        var b = bs[i]
-        var unreserved = (
-            (b >= 0x30 and b <= 0x39)  # 0-9
-            or (b >= 0x41 and b <= 0x5A)  # A-Z
-            or (b >= 0x61 and b <= 0x7A)  # a-z
-            or b == 0x2D  # -
-            or b == 0x2E  # .
-            or b == 0x5F  # _
-            or b == 0x7E  # ~
-        )
-        if unreserved:
-            out += chr(Int(b))
-        else:
-            out += String(\"%\")
-            out += _rest_hex_upper(b >> 4)
-            out += _rest_hex_upper(b & 0x0F)
+        _rest_pct_append(out, bs[i])
         i += 1
     return out^
 
 
+def _rest_path_segment(value: String, field: String) raises -> String:
+    """Expand a one-segment `{field}` or `{field=*}` path variable: every byte
+    outside the unreserved set is percent-encoded, `/` included. An empty,
+    `.` or `..` value is refused: an RFC 3986 normalizer (a proxy, a URL
+    parser, the front end) would drop or collapse it, and the request would
+    name a different resource. An error names the field, never the value."""
+    var vb = value.as_bytes()
+    var n = len(vb)
+    if (
+        n == 0
+        or (n == 1 and vb[0] == 0x2E)
+        or (n == 2 and vb[0] == 0x2E and vb[1] == 0x2E)
+    ):
+        raise Error(
+            String("path variable `") + field
+            + String("` is empty, `.` or `..`")
+        )
+    return _rest_pct_encode(value)
+
+
+def _rest_path_var(value: String, pattern: String, field: String) raises -> String:
+    """Expand a `{field=pattern}` path variable as `google/api/http.proto`
+    states it: `value` must match `pattern` segment by segment (`*` is one
+    segment, a trailing `**` the rest of the value, zero or more segments,
+    anything else a literal), and each segment is percent-encoded with the
+    `/` between them kept. An empty, `.` or `..` segment is refused: it would
+    change which resource the path names. So is an empty expansion, which a
+    lone `**` would otherwise produce from an empty value. An error names the
+    field and the pattern, never the value."""
+    var vb = value.as_bytes()
+    var pb = pattern.as_bytes()
+    var out = String("")
+    var vi = 0  # start of the next value segment
+    var vleft = len(vb) > 0  # a value segment starts at vi
+    var pi = 0
+    while pi < len(pb):
+        var pe = pi
+        while pe < len(pb) and pb[pe] != 0x2F:
+            pe += 1
+        var plen = pe - pi
+        var dstar = plen == 2 and pb[pi] == 0x2A and pb[pi + 1] == 0x2A
+        var star = plen == 1 and pb[pi] == 0x2A
+        var took = 0
+        while vleft and (dstar or took == 0):
+            var ve = vi
+            while ve < len(vb) and vb[ve] != 0x2F:
+                ve += 1
+            var n = ve - vi
+            if (
+                n == 0
+                or (n == 1 and vb[vi] == 0x2E)
+                or (n == 2 and vb[vi] == 0x2E and vb[vi + 1] == 0x2E)
+            ):
+                raise Error(
+                    String("path variable `") + field
+                    + String("` has an empty, `.` or `..` segment")
+                )
+            if not star and not dstar:
+                var same = n == plen
+                var k = 0
+                while same and k < n:
+                    same = vb[vi + k] == pb[pi + k]
+                    k += 1
+                if not same:
+                    raise Error(
+                        String("path variable `") + field
+                        + String("` does not match `") + pattern + String("`")
+                    )
+            if out.byte_length() > 0:
+                out += String("/")
+            var j = vi
+            while j < ve:
+                _rest_pct_append(out, vb[j])
+                j += 1
+            took += 1
+            if ve < len(vb):
+                vi = ve + 1
+            else:
+                vleft = False
+        if took == 0 and not dstar:
+            raise Error(
+                String("path variable `") + field
+                + String("` does not match `") + pattern + String("`")
+            )
+        pi = pe + 1
+    if vleft:
+        raise Error(
+            String("path variable `") + field
+            + String("` does not match `") + pattern + String("`")
+        )
+    # A lone `**` takes zero segments of an empty value; the path would then
+    # end in the `/` before the variable and name a different resource.
+    if out.byte_length() == 0:
+        raise Error(
+            String("path variable `") + field
+            + String("` has an empty, `.` or `..` segment")
+        )
+    return out^
+
+
 def _rest_hex_upper(nibble: UInt8) -> String:
-    \"\"\"One uppercase hex digit for a 4-bit nibble.\"\"\"
+    """One uppercase hex digit for a 4-bit nibble."""
     if nibble < 10:
         return chr(Int(0x30 + nibble))
     return chr(Int(0x41 + (nibble - 10)))
 
 
 def _rest_to_str[T: Writable](v: T) -> String:
-    \"\"\"Stringify a scalar path/query field value. `T: Writable` (NOT
+    """Stringify a scalar path/query field value. `T: Writable` (NOT
     `Stringable`, which is not available unqualified in a generated module
     in Mojo 1.0.0b1) — `String(v)` is the canonical conversion and every
-    scalar (String / Int* / Float* / Bool) conforms to `Writable`.\"\"\"
+    scalar (String / Int* / Float* / Bool) conforms to `Writable`."""
     return String(v)
 
 
 def _rest_bool_str(b: Bool) -> String:
-    \"\"\"Stringify a proto `bool` for the URL as proto3-JSON lowercase
+    """Stringify a proto `bool` for the URL as proto3-JSON lowercase
     `true`/`false`. Mojo's `String(Bool)` yields `True`/`False`, which is
-    wrong on the wire — proto3 JSON mandates lowercase.\"\"\"
+    wrong on the wire — proto3 JSON mandates lowercase."""
     if b:
-        return String(\"true\")
-    return String(\"false\")
-"
+        return String("true")
+    return String("false")
+
+
+# ---- end of REST URL helpers ----
+"#
 }
 
 /// Partition the request fields, mapping the error to a per-method message.
@@ -735,7 +924,9 @@ mod tests {
         let emit = emit_rest_service(&file, &svc).unwrap();
         // The path var is substituted via the runtime helper, the query field
         // is appended, and the GET request constructor is used.
-        assert!(emit.source.contains("_rest_pct_encode(_rest_to_str(req.shelf))"));
+        assert!(emit.source.contains(
+            "path += _rest_path_segment(_rest_to_str(req.shelf), String(\"shelf\"))"
+        ));
         assert!(emit.source.contains("page_size="));
         assert!(emit.source.contains("build_get_request(url^, headers^)"));
         assert!(emit.source.contains("GetReq.decode(dec)"));
@@ -778,7 +969,7 @@ mod tests {
         let emit = emit_rest_service(&file, &svc).unwrap();
         assert!(
             emit.source
-                .contains("struct SvcClient[C: Connector](Movable, Deinitable):"),
+                .contains("struct SvcClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):"),
             "the generated REST client must conform to 1.0.0's `Deinitable`; got:\n{}",
             emit.source
         );
@@ -1040,11 +1231,8 @@ mod tests {
         assert!(emit.source.contains("var _default_headers: HeaderMap"));
         assert!(emit
             .source
-            .contains("def __init__(out self, var client: HttpClient[Self.C]):"));
-        assert!(emit.source.contains(
-            "def __init__(out self, var client: HttpClient[Self.C], \
-             var default_headers: HeaderMap):"
-        ));
+            .contains("def __init__(out self, var client: HttpClient[Self.C], var token_source: Self.T):"));
+        assert!(emit.source.contains("    var default_headers: HeaderMap,\n"));
         assert!(emit.source.contains(
             "def _rest_apply_default_headers(self, mut headers: HeaderMap) raises:"
         ));
@@ -1217,5 +1405,150 @@ mod tests {
         let emit = emit_rest_service(&file, &svc).unwrap();
         assert!(emit.source.contains("if resp_text.byte_length() == 0:"));
         assert!(emit.source.contains("resp_text = String(\"{}\")"));
+    }
+
+    /// One service `Logging` with one unary method `M` over request `Req`.
+    fn one_method(fields: Vec<IrField>, verb: &str, path: &str, body: &str) -> Result<RestServiceEmit, String> {
+        let req = IrMessage {
+            name: "Req".into(),
+            mojo_name: "Req".into(),
+            fq_name: ".tiny.rest.v1.Req".into(),
+            is_map_entry: false,
+            fields,
+            oneofs: vec![],
+        };
+        let ty = TypeRef { fq_name: ".tiny.rest.v1.Req".into(), mojo_name: "Req".into() };
+        let svc = IrService {
+            name: "Logging".into(),
+            methods: vec![IrMethod {
+                name: "M".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(IrHttpRule {
+                    verb: verb.into(),
+                    path_template: path.into(),
+                    body: body.into(),
+                }),
+                routing_rule: None,
+            }],
+        };
+        let file = file_with(vec![req], svc.clone());
+        emit_rest_service(&file, &svc)
+    }
+
+    fn repeated(mut f: IrField) -> IrField {
+        f.label = Label::Repeated;
+        f
+    }
+
+    #[test]
+    fn custom_verb_is_appended_after_the_path() {
+        let e = one_method(vec![], "post", "/v2/entries:list", "*").unwrap();
+        assert!(e.source.contains("path += String(\"/entries\")\n"), "{}", e.source);
+        assert!(e.source.contains("path += String(\":list\")\n"), "{}", e.source);
+    }
+
+    #[test]
+    fn pattern_capture_goes_through_the_checked_expansion() {
+        let e = one_method(
+            vec![scalar_field("parent", ScalarKind::String)],
+            "get",
+            "/v2/{parent=projects/*}/logs",
+            "",
+        )
+        .unwrap();
+        assert!(e.source.contains(
+            "path += _rest_path_var(_rest_to_str(req.parent), String(\"projects/*\"), String(\"parent\"))"
+        ));
+        assert!(rest_helper_functions().contains("def _rest_path_var("));
+    }
+
+    #[test]
+    fn repeated_query_field_appends_one_key_per_element() {
+        let mut f = repeated(scalar_field("resource_names", ScalarKind::String));
+        f.json_name = "resourceNames".into();
+        let e = one_method(vec![f], "get", "/v2/logs", "").unwrap();
+        assert!(e.source.contains("for _rest_v in req.resource_names:"), "{}", e.source);
+        assert!(e.source.contains(
+            "query += String(\"resourceNames=\") + _rest_pct_encode(_rest_to_str(_rest_v))"
+        ));
+    }
+
+    #[test]
+    fn repeated_path_variable_is_refused() {
+        let f = repeated(scalar_field("name", ScalarKind::String));
+        let err = one_method(vec![f], "get", "/v2/{name}", "").unwrap_err();
+        assert!(err.contains("takes one value"), "{err}");
+    }
+
+    #[test]
+    fn token_comes_from_the_source_and_errors_never_echo_the_body() {
+        let e = one_method(vec![], "post", "/v2/entries:list", "*").unwrap();
+        assert!(!e.source.contains("token: String"));
+        assert!(e.source.contains("self._token_source.access_token()"));
+        assert!(e.source.contains("if status_int < 200 or status_int >= 300:"));
+        assert!(e.source.contains(
+            "raise gcp_status_error(String(\"POST\"), String(\"M\"), status_int, resp_bytes)"
+        ));
+        assert!(e.source.contains("JsonDecoder.from_text_lenient(resp_text)"));
+        assert!(!e.source.contains("JsonDecoder.from_text("));
+        // The import line states exactly the names the contract constants name.
+        assert_eq!(
+            rest_imports()[0],
+            format!("from {GCP_CORE} import {GCP_TOKEN_SOURCE}, {GCP_STATUS_ERROR}")
+        );
+    }
+
+    #[test]
+    fn default_valued_implicit_scalars_stay_out_of_the_query() {
+        let e = one_method(
+            vec![
+                scalar_field("page_token", ScalarKind::String),
+                scalar_field("page_size", ScalarKind::Int32),
+                scalar_field("show_deleted", ScalarKind::Bool),
+            ],
+            "get",
+            "/v2/logs",
+            "",
+        )
+        .unwrap();
+        assert!(e.source.contains("if req.page_token.byte_length() > 0:"), "{}", e.source);
+        assert!(e.source.contains("if req.page_size != 0:"));
+        assert!(e.source.contains("if req.show_deleted:"));
+    }
+
+    #[test]
+    fn bytes_field_in_the_url_is_refused() {
+        let err = one_method(vec![scalar_field("blob", ScalarKind::Bytes)], "get", "/v2/x", "")
+            .unwrap_err();
+        assert!(err.contains("is `bytes`"), "{err}");
+    }
+
+    #[test]
+    fn one_segment_capture_goes_through_the_checked_segment() {
+        // `{name}` and `{name=*}` expand alike: one segment, through the
+        // helper that refuses an empty, `.` or `..` value.
+        for path in ["/v1/{name}/things", "/v1/{name=*}/things"] {
+            let e = one_method(vec![scalar_field("name", ScalarKind::String)], "get", path, "")
+                .unwrap();
+            assert!(
+                e.source.contains(
+                    "path += _rest_path_segment(_rest_to_str(req.name), String(\"name\"))"
+                ),
+                "{path}: {}",
+                e.source
+            );
+        }
+        assert!(rest_helper_functions().contains("def _rest_path_segment("));
+    }
+
+    #[test]
+    fn root_template_builds_a_slash() {
+        let e = one_method(vec![], "get", "/", "").unwrap();
+        assert!(e.source.contains("var path = String(\"\")\n"), "{}", e.source);
+        assert!(e.source.contains("path += String(\"/\")\n"), "{}", e.source);
     }
 }
