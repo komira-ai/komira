@@ -151,12 +151,11 @@ The cost is an indirect call and a heap allocation per entry, which a shard pays
 
 **Decision.** Anything that waits is a struct whose `step` returns parked, done or error; the runtime resumes no coroutines.
 
-**Because.** A completion is seen by the worker that owns the reactor, so its waiter must resume on that worker. Mojo's coroutines run on its AsyncRT runtime, which picks the resuming thread: resuming one on a worker thread leaves AsyncRT's per-thread state inconsistent, and AsyncRT ignores a requested worker id. A state machine also owns its working set and holds no borrow between steps.
+**Because.** A completion is seen by the worker that owns the reactor, so its waiter must resume on that worker. The library's own `parallel_fork_join_shared` notes that the stdlib's AsyncRT thread pool is a second pool this runtime cannot see, pin or govern, so the design keeps all resumption on the reactor's worker. A state machine also owns its working set and holds no borrow between steps.
 
 **Alternatives weighed.**
 
-- Coroutines resumed by the worker: they leave AsyncRT's per-thread state inconsistent.
-- Coroutines left on AsyncRT's threads: a waiter would not resume on its reactor's worker.
+- Coroutines left on AsyncRT's threads: a waiter would not resume on its reactor's worker, and the runtime could not pin or govern those threads.
 - Raising to signal "parked": builds a heap string on every park.
 
 **Revisit if.** Mojo lets an external executor choose the thread that resumes a coroutine.
@@ -187,7 +186,7 @@ The cost is an indirect call and a heap allocation per entry, which a shard pays
 
 ## Where is the code?
 
-The library is the `komira_async` target in `src/komira_async/BUCK`: every `.mojo` file under `src/komira_async/` except `src/komira_async/tests/`, plus the C shim `src/komira_async/reactor/_posix_shim.c` built as `komira_async_posix`. It depends on `komira_core`, `komira_atomic_alias` and `komira_log`; the worker loop's idle hook is how a higher layer drains the per-core log ring. Start with these files:
+The library is the `komira_async` target in `src/komira_async/BUCK`: every `.mojo` file under `src/komira_async/` except `src/komira_async/tests/`, plus the C shim `src/komira_async/reactor/_posix_shim.c`, built as the `:komira_async_posix` `cxx_library` that the library depends on. Its other four dependencies are `komira_core`, `komira_atomic_alias`, `komira_log` and `komira_runtime_paths` (tests take their scratch directory from it); the worker loop's idle hook is how a higher layer drains the per-core log ring. Start with these files:
 
 | File | Holds |
 |---|---|
@@ -227,5 +226,5 @@ Not tested:
 - **Limit: declared but inert.** `shutdown_token()` raises; the `placement` constructor argument is never read (worker CPU placement comes from `EnginePlacement`); `MAX_LOG_DRAIN_PER_IDLE` and `SPIN_LIMIT_FLOOR` have no effect; `ExecutionBudget` ignores its `deadline_ns`; the reactor raises `Unknown backend kind` for `BACKEND_IO_URING` and `BACKEND_DPDK`.
 - **Limit: one kernel timer per deadline.** The loop does not drive `TimerWheel`, so on Linux every pending deadline holds a `timerfd`.
 - **Open question: the backend for run-to-completion work.** A worker whose shards never park on its reactor uses the backend only to decide how an idle worker waits. `BACKEND_MOCK` costs idle CPU, and a shard posted to a parked worker waits out the rest of the park sleep ([loop step 4](#how-does-a-worker-loop)) plus the kernel's timer slack. A kernel backend costs a wake write per parked worker and makes the sleeping-flag handshake load-bearing for every dispatch. Deciding it takes measuring dispatch latency and idle CPU under both.
-- **Open question: field destruction order.** A comment on `PerCoreAsyncRuntime`'s fields assumes reverse declaration order; its `__deinit__` docstring says declaration order. Threads are joined first, but no test pins the order.
-- **Open question: stale headers.** Several module headers, including `src/komira_async/__init__.mojo`, contradict the code; this document follows the code.
+- **Open question: field destruction order.** The field comment in `src/komira_async/runtime/runtime.mojo` says Mojo drops fields in reverse declaration order, while the `__deinit__` docstring in the same file says declaration order. Threads are joined first, but no test pins the order.
+- **Open question: stale headers.** The module list in the header of `src/komira_async/__init__.mojo` omits the `fs`, `net` and `observability` directories; this document follows the code.
