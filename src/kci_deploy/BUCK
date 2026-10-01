@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The deploy library: the facade over the `kci_iac` reconcile engine
+# (deploy_plan / deploy_apply / deploy_destroy / deploy_rollback /
+# deploy_status), its two frontend seams (CredsProvider, Reporter), the
+# environment-governance gate over a neutral EnvBinding, the data-plane
+# readiness wait, the deploy-and-validate loop with its parallel validation
+# DAG, and the deploy-fault raise protocol (`kci_deploy.deploy_fault`).
+#
+# Deps: kci_iac (the reconcile engine it wraps) and kci_logs (the run-log tail
+# a failing validate step prints). It names no cloud SDK, transport or proto.
+#
+# The welded tests drive the real facade and scheduler over in-memory graphs,
+# scripted validators and scripted probes: governance, rollback edges, status
+# mapping, the retention override, converge reporting, data-plane readiness,
+# and the validation DAG's ordering, retries, start failures, failure output
+# and teardown reasons.
+mojo_library(
+    name = "kci_deploy",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_iac:kci_iac",
+        "//src/kci_logs:kci_logs",
+    ],
+    test_srcs = [
+        "tests/test_converge_names_every_drifted_served_node.mojo",
+        "tests/test_data_plane_readiness.mojo",
+        "tests/test_delete_retained_logs_each_retained_deletion.mojo",
+        "tests/test_deploy_apply_pipeline_run_authorizes_pipeline_only.mojo",
+        "tests/test_deploy_rollback_fail_loud_edges.mojo",
+        "tests/test_deploy_status_maps_resource_status.mojo",
+        "tests/test_validate_dag_prints_the_failing_validators_rows.mojo",
+        "tests/test_validate_dag_survives_a_failed_job_creation.mojo",
+        "tests/test_validate_dag_teardown_states_its_reason.mojo",
+        "tests/test_validation_dag.mojo",
+        "tests/test_validation_dag_retries_transient.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
