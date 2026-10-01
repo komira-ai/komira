@@ -30,12 +30,14 @@ A snappy block is the raw snappy bytes followed by a big-endian CRC32 of the unc
 
 ### How does the ORC reader skip data?
 
-`src/komira_orc/orc_stride_skip.mojo` has a four-level cascade, with predicates expressed as `komira_core` `Expr` values:
+`src/komira_orc/orc_stride_skip.mojo` has a four-level cascade, with predicates expressed as `komira_core` `Expr` values, reached through two entry points:
 
-1. `read_orc_bytes_pruned` applies column projection, then stripe statistics: a stripe whose min and max are disjoint from the predicate is never decoded.
-2. `read_orc_bytes_filtered` applies per-stride row-index statistics, and the stride bloom filters (`bloom_filter.mojo`) hang off the same per-stride loop. It decodes the whole stripe and drops the rows of skipped strides after decode.
+1. Column projection: `read_orc_bytes_pruned` takes a list of output-column indices and decodes only those columns.
+2. Stripe statistics: also `read_orc_bytes_pruned`. A stripe whose min and max are disjoint from the predicate is never decoded.
+3. Stride statistics: `read_orc_bytes_filtered` applies the per-stride row-index statistics. It decodes the whole stripe and drops the rows of skipped strides after decode.
+4. Stride bloom filters: also `read_orc_bytes_filtered`; the filters (`bloom_filter.mojo`) are consulted in the same per-stride loop as level 3.
 
-Only a range-predicate subset is understood (a column against an integer literal, with AND and OR); any other predicate shape keeps every stride, so a stride is never skipped wrongly. Separately, `read_orc_file` unwraps a Hive ACID file: `is_acid_schema` (`orc_logical_arrow.mojo`) detects the six-column wrapper, and `acid_output_columns` lifts the `row` struct's children and hides the five metadata columns unless `with_acid_columns` is set.
+Only a range-predicate subset is understood (a column against an integer literal, with AND and OR); any other predicate shape keeps every stride, so a stride is never skipped wrongly. Separately, `read_orc_file` unwraps a Hive ACID file: `is_acid_schema` (`orc_logical_arrow.mojo`) detects the six-column wrapper, and `acid_output_columns` lifts the `row` struct's children and hides the five metadata columns by default; `read_orc_file_opts` (and `read_orc_bytes_opts`) takes `with_acid_columns` to expose them.
 
 ## Why is it built this way?
 
@@ -62,7 +64,7 @@ Only a range-predicate subset is understood (a column against an integer literal
 ## What must always hold?
 
 - **An Avro snappy block with a wrong CRC raises.** Enforced by the check in `avro_codec.mojo` and pinned by `test_snappy_bad_crc_raises` in `test_avro_snappy_codec_decode.mojo`.
-- **An unsupported ORC predicate keeps the stride.** Stated in the header of `orc_stride_skip.mojo`; no test pins an unsupported shape.
+- **An unsupported ORC predicate keeps the stride.** Stated in the header of `orc_stride_skip.mojo`; `test_orc_stride_skip.mojo` has three tests, none of which passes an unsupported predicate shape.
 
 ## Where is the code?
 

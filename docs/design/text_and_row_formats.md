@@ -28,7 +28,7 @@ write: RecordBatch ─► CsvSink | write_avro_file | write_orc_file
 `read_csv_bytes_to_batch[Q, SCANNER_VARIANT]` in `src/komira_csv/reader.mojo` is the serial reader. `Q` is the dialect, a `QuoteStyle` conformer: `Rfc4180`, `Excel` or `Posix` (defined in `src/komira_core/arrow/quote_styles.mojo`, re-exported from `src/komira_csv/quote_styles/`), which differ in compile-time constants such as `DOUBLE_QUOTE_ESCAPES` and `ESCAPE_BYTE`. `read_csv_bytes_to_batch_dynamic` picks `Q` from `CsvReadOptions.quote_style_tag` at run time (0 is `Rfc4180`, 1 `Excel`, 2 `Posix`). The reader:
 
 1. Skips a UTF-8 byte-order mark when `strip_utf8_bom` is set, as it is by default.
-2. Scans the bytes into a `ScannedCells` buffer: flat lists of cell starts, cell ends, cell flags and row starts (`scanned_cells.mojo`). `_dispatch_scan` selects one of three scanners from `csv_scanner_phase1.mojo`, `csv_scanner_phase2` and `csv_scanner_phase3` variants; the default, `DEFAULT_SCANNER_VARIANT = 2`, is `scan_csv_phase2_movemask_into_cells`.
+2. Scans the bytes into a `ScannedCells` buffer: flat lists of cell starts, cell ends, cell flags and row starts (`scanned_cells.mojo`). `_dispatch_scan` (`reader.mojo`) selects one of three scanners, `scan_csv_phase1_into_cells`, `scan_csv_phase2_movemask_into_cells` and `scan_csv_phase3_pclmulqdq_into_cells`, all of which live in `csv_scanner_phase1.mojo` and are chosen by `SCANNER_VARIANT_PHASE_2` or `SCANNER_VARIANT_PHASE_3`; the default, `DEFAULT_SCANNER_VARIANT = 2`, is `scan_csv_phase2_movemask_into_cells`.
 3. Takes column names from the header row, or names them `col_0`, `col_1` and so on when `has_header` is false.
 4. Uses `declared_column_types` when set, after `check_declared_column_types` has confirmed there is one entry per column. Otherwise it infers with `infer_column_types`, whose lattice is Int64, Float64, Date32, Bool, then String (`type_inference.mojo`), or with `infer_column_types_wide` when `infer_temporal_types` is set, which adds the temporal types.
 5. Builds each column with `_build_column`: Int64, Float64, Date32, Bool and String have builders in `reader.mojo`, and every other type goes to `dispatch_typed_builder` (`typed_column_builders.mojo`). A short row gives a null, and so does a cell that does not parse as the column's type.
@@ -53,7 +53,7 @@ Decoding takes one of two paths, chosen by `classify_avro_shape` in `comptime_de
 
 ### How is an ORC file read?
 
-`read_orc_file` (`src/komira_orc/orc_reader.mojo`) maps the whole file (`read_chunked`) and parses the tail: the PostScript, footer and stripe footers, which are Protocol Buffers messages decoded by `footer.mojo`. For each stripe it locates the streams of each column (`_locate_streams`) and decodes column by column through `decode_stripe_column` (`column_decoder.mojo`), the RLE decoders in `rle_decode.mojo` and `decompress_stream` (`orc_codec.mojo`: none, zlib, snappy, LZO, LZ4 and zstd). `read_orc_file_with_dispatcher` decodes the columns in parallel (`_decode_orc_columns_parallel_with_dispatcher`). A schema with nested types, or with Hive ACID columns, goes to the recursive decoder in `nested_decoder.mojo` (`_read_orc_nested`).
+`read_orc_file` (`src/komira_orc/orc_reader.mojo`) maps the whole file (`komira_core.io.chunked_read.read_chunked`, mmap-backed) and hands the bytes to `read_orc_bytes` (`read_orc_file_opts` goes through `read_orc_bytes_opts`), which parses the tail: the PostScript, footer and stripe footers, which are Protocol Buffers messages decoded by `footer.mojo`. For each stripe it locates the streams of each column (`_locate_streams`) and decodes column by column through `decode_stripe_column` (`column_decoder.mojo`), the RLE decoders in `rle_decode.mojo` and `decompress_stream` (`orc_codec.mojo`: none, zlib, snappy, LZO, LZ4 and zstd). `read_orc_file_with_dispatcher` decodes the columns in parallel (`_decode_orc_columns_parallel_with_dispatcher`). A schema with nested types, or with Hive ACID columns, goes to the recursive decoder in `nested_decoder.mojo` (`_read_orc_nested`).
 
 ### How is an ORC file written?
 
@@ -135,7 +135,7 @@ Well-formed XML, leniently. `XmlReader` (`src/komira_xml/xml_reader.mojo`) is a 
 
 ## What must always hold?
 
-- **A declared CSV schema is positional.** Column `i` of the file parses at declared type `i`, and a width mismatch raises rather than truncating, padding or re-inferring. Enforced by `check_declared_column_types` (`csv_options.mojo`), which the readers call; no test sets a mismatched width.
+- **A declared CSV schema is positional.** Column `i` of the file parses at declared type `i`, and a width mismatch raises rather than truncating, padding or re-inferring. Enforced by `check_declared_column_types` (`csv_options.mojo`), which the readers call; no `komira_csv` test imports it or is named for a mismatched width.
 - **A CSV split starts every range at a row start.** Pinned by `test_csv_quote_safe_chunk_split`, including a stray-quote fixture.
 - **Parallel decode keeps file order.** CSV concatenates in range order and Avro reassembles in block order. Pinned by `test_csv_parallel_reader` (parallel against serial values) and `test_avro_block_parallel_decode`.
 - **A writer refuses a type it cannot encode, by name.** Avro raises `AvroWriteError.UNSUPPORTED_TYPE`, pinned by `test_avro_write_roundtrip`; ORC raises `OrcWriteError.UNSUPPORTED_TYPE`, which no test checks.
@@ -175,7 +175,7 @@ Entry points are the functions and types in the last column.
 
 ## How is it tested?
 
-Each library lists its tests in `test_srcs` in its `BUCK` file: 21 for `komira_csv`, 24 for `komira_avro`, 33 for `komira_orc` and one for `komira_xml`. Each test is built against the library and run, and the package is published only if every one passes (see [the Mojo rules](../../tools/build/mojo/README.md)). Run: `./buck2 build //src/komira_csv:komira_csv` (likewise for the other three).
+Each library lists its tests in `test_srcs` in its `BUCK` file: 21 for `komira_csv`, 24 for `komira_avro`, 33 for `komira_orc` and one for `komira_xml`. Each test is built against the library and run, and the package is published only if every one passes, unless the BUCK file holds a test in its known-failing ledger (see [the Mojo rules](../../tools/build/mojo/README.md), "The gate"). Run: `./buck2 build //src/komira_csv:komira_csv` (likewise for the other three).
 
 | Test | Covers |
 |---|---|
@@ -183,18 +183,18 @@ Each library lists its tests in `test_srcs` in its `BUCK` file: 21 for `komira_c
 | `test_csv_quote_safe_chunk_split`, `test_csv_parallel_reader`, `test_csv_phase_4_column_parallel_concat` | split, parallel decode, concat |
 | `test_csv_phase_b`, `test_csv_dtype_completion`, `test_csv_schema_sample_inference` | options, types, prefix inference |
 | `test_avro_codec_matrix`, `test_avro_block_parallel_decode`, `test_avro_comptime_shape_kind_decode` | codecs, block parallelism, specialised shapes |
-| `test_avro_resolve_*`, `test_avro_recursive_reject` | schema resolution, recursive schemas |
+| `test_avro_resolve_*` (five files: aliases and defaults, errors, field skip, promotions, union and enum), `test_avro_recursive_reject` | schema resolution, recursive schemas |
 | `test_avro_write_roundtrip`, `test_avro_write_parallel_block_compress` | writer |
 | `test_orc_footer_decode`, `test_orc_rle_families`, `test_orc_codec_matrix`, `test_orc_lzo1x_decompress` | tail, RLE, codecs |
 | `test_orc_struct_decode`, `test_orc_list_decode`, `test_orc_map_decode`, `test_orc_union_decode` | nested reads |
-| `test_orc_write_*`, `test_orc_pyarrow_orc_cross_impl_read` | writer, a file from another writer |
+| `test_orc_write_*` (six files: multistripe, nullable roundtrip, parallel stream compress, primitives roundtrip, roundtrip, statistics), `test_orc_pyarrow_orc_cross_impl_read` | writer, a file from another writer |
 | `test_xml_codec` | escaping, events, writer, namespaces, malformed input, round trip |
 
-Not tested: the decode of a CSV file with a quote inside an unquoted field on the parallel path, and the ORC writer's type refusal.
+**Not tested.** the decode of a CSV file with a quote inside an unquoted field on the parallel path, and the ORC writer's type refusal.
 
 ## What are its limits and open questions?
 
-- **Limit: the parallel CSV reader ignores three options when it splits.** `parallel_reader.mojo` never reads `strip_utf8_bom`, `infer_temporal_types` or `projection_columns`; only its serial fallbacks honour them. So with the RFC 4180 dialect, a file of 1 MiB or more that starts with a byte-order mark can get a different first column name. `Posix` never splits, and the `Excel` scanners skip the mark themselves (`ACCEPTS_BOM`).
+- **Limit: the parallel CSV reader ignores three options when it splits.** `parallel_reader.mojo` never reads `strip_utf8_bom` or `infer_temporal_types`; only its serial fallbacks honour them. (`projection_columns` is honoured by the serial reader through `CsvReadOptions.is_projected`, and the parallel reader does not read it either.) So with the RFC 4180 dialect, a file of 1 MiB or more that starts with a byte-order mark can get a different first column name. `Posix` never splits, and the `Excel` scanners skip the mark themselves (`ACCEPTS_BOM`, tested in `scan_csv_phase3_pclmulqdq_into_cells`, the scanner the parallel workers run).
 - **Limit: the parallel CSV scanner mis-tokenizes a stray quote.** The header of `csv_chunk_split.mojo` records that `scan_csv_phase3_pclmulqdq`, which the parallel reader and its serial fallback use, mis-tokenizes a file with a quote inside an unquoted field. The serial default is the phase-2 scanner.
 - **Limit: inference sees a prefix only.** A CSV schema comes from the first `infer_rows` data rows (100 by default); in the serial builders a later cell that does not parse becomes null.
 - **Limit: Avro schema resolution is not used by the readers here.** The parallel driver decodes with `ResolutionTable.identity`. `ResolutionTable.resolve` and `read_avro_bytes_resolved`, which apply a reader schema with aliases, defaults and promotions, are called only by tests inside `komira_avro`.
