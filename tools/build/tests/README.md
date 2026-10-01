@@ -14,7 +14,7 @@ tools/build/tests/run_tests.sh --no-uncached   # skip the uncached half of test 
 It prints one `PASS`, `FAIL` or `SKIP` line per test, then the directory
 holding every log, and exits 1 if any test failed. `BUCK2=...`, `TMPDIR` and
 `KEEP_SCRATCH=1` are described in
-[DEVELOPMENT.md](../../../DEVELOPMENT.md#4-run-the-tests).
+[DEVELOPMENT.md](../../../DEVELOPMENT.md#3-run-the-tests).
 
 ## Layout
 
@@ -45,7 +45,7 @@ buck2 registers, and the first line of output names it:
 
 - `MODE  remote`: `.buckconfig.local`, or a machine-wide buckconfig as on the
   CI runner, names a remote-execution service
-  ([DEVELOPMENT.md](../../../DEVELOPMENT.md#3-optional-build-on-a-remote-execution-service)).
+  ([DEVELOPMENT.md](../../../DEVELOPMENT.md#advanced-remote-execution)).
   Every action runs there, and every test runs. CI runs this way.
 - `MODE  local`: no service is configured; every action runs on this
   machine. These need a service and print `SKIP ... needs a remote-execution

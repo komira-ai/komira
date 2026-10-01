@@ -2,13 +2,12 @@
 
 komira is written in [Mojo](https://www.modular.com/mojo) and built with
 [Buck2](https://buck2.build) and a hermetic toolchain: the Mojo compiler, zig
-and the file utilities every action uses are pinned downloads. On a Linux x86_64 machine a
-fresh clone builds locally by default (see
-[DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees) for what has
-been checked locally so far). On a Mac, `./buck2` installs and runs, but a
-build needs a remote-execution service that speaks the Bazel Remote Execution
-API, such as Buildbarn, which you run yourself; a purely local macOS build is
-not supported yet ([getting started](docs/getting-started.md#3-choose-where-builds-run)).
+and the file utilities every action uses are pinned downloads.
+
+> **Supported today: Linux x86_64.** A fresh clone builds on that machine
+> with no build service. Native builds on macOS (Apple silicon) and Linux
+> arm64 are being added: a Mac will build on its own, with no build service.
+> Until then, on a Mac you can install and run `./buck2` and read the code.
 
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
 examples and end-to-end tests) lives in [`tools/build/`](tools/build/).
@@ -25,24 +24,19 @@ On Linux x86_64, with `curl` and `zstd` installed:
 [`./buck2`](buck2) fetches the buck2 release pinned in [`tools/buck2`](tools/buck2)
 once, verifies it, and caches it under `~/.cache/komira/buck2/`.
 
-A local Mojo compile has not yet been measured: so far these commands have
-run only against a remote-execution service
-([DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees)).
-
-To build on a remote-execution service instead (from Linux x86_64 or macOS
-arm64), copy `.buckconfig.local.example` to `.buckconfig.local` and fill in your
-service and its worker properties; the same commands then run every action
-there.
+A local Mojo compile has not yet been measured; see
+[what a local build guarantees](DEVELOPMENT.md#what-a-local-build-guarantees).
+Step by step: [getting started](docs/getting-started.md).
 
 [DEVELOPMENT.md](DEVELOPMENT.md) explains each step, what a local build does
-and does not guarantee (Buck2 does not sandbox local actions), what to put in
-`.buckconfig.local`, and what to do when something goes wrong.
+and does not guarantee (Buck2 does not sandbox local actions), how to run the checks, an optional section for people who run a
+remote-execution service, and what to do when something goes wrong.
 
 ## Documentation
 
 | read | for |
 |---|---|
-| [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: `./buck2` and the pinned release, local builds and what they guarantee, `.buckconfig.local` and a remote-execution service, running the checks, the host floor, caching, troubleshooting |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: `./buck2` and the pinned release, local builds and what they guarantee, running the checks, remote execution for those who run a service, the host floor, caching, troubleshooting |
 | [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository uses komira, as a git external cell or a submodule |
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test` |
 | [tools/build/platforms/README.md](tools/build/platforms/README.md) | target platforms, execution platforms and toolchain selection; local or remote execution |
