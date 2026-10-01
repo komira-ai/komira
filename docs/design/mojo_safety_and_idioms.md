@@ -8,8 +8,8 @@ The design rests on one idea: the compiler can only keep a value alive while it 
 
 Out of scope:
 
-- The build rules, the compiler pin and packaging: see [the Mojo rules](../../../tools/build/mojo/README.md) and [the toolchains](../../../tools/build/toolchains/README.md).
-- The buffer, view and slab types themselves: see [columnar memory](../core/columnar_memory_and_arrow.md#what-do-the-collections-and-simd-kernels-provide).
+- The build rules, the compiler pin and packaging: see [the Mojo rules](../../tools/build/mojo/README.md) and [the toolchains](../../tools/build/toolchains/README.md).
+- The buffer, view and slab types themselves: see [columnar memory](columnar_memory_and_arrow.md#what-do-the-collections-and-simd-kernels-provide).
 - The worker pool that runs parallel work, which belongs to the async runtime.
 
 ## How does it work?

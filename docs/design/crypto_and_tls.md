@@ -9,7 +9,7 @@ Connectors and servers need hashes, message authentication codes, key derivation
 Out of scope:
 
 - TLS connections. They run on s2n-tls (`third_party/s2n-tls`), which verifies certificates against its own trust store and calls no code in this library. s2n-tls is built against the same AWS-LC, so a binary that links both links one `libcrypto`.
-- Building AWS-LC: see `third_party/aws-lc/BUCK` and [the C and C++ rules](../../../tools/build/mojo/README.md).
+- Building AWS-LC: see `third_party/aws-lc/BUCK` and [the C and C++ rules](../../tools/build/mojo/README.md).
 - The protocols built on these primitives, such as SCRAM-SHA-256, AWS SigV4 and signed URLs, which belong to the libraries that implement them.
 
 ## How does it work?
@@ -47,7 +47,7 @@ The package root `__init__.mojo` re-exports most names, but not the ECDSA P-256 
 
 Every AWS-LC call site in `komira_crypto` is in `internal/asm/`. Outside that directory, the library's only `external_call` sites are the libc calls in `zeroize.mojo`. Each wrapper file binds one AWS-LC area: `sha256_ffi.mojo` the digests, `hmac_ffi.mojo` HMAC, `hkdf_ffi.mojo` HKDF, `aes_gcm_ffi.mojo` and `chacha20_poly1305_ffi.mojo` the AEADs, `ed25519_ffi.mojo`, `p256_ffi.mojo`, `p384_ffi.mojo`, `rsa_ffi.mojo` and `rsa_sign_ffi.mojo` the signatures, `x25519_ffi.mojo` key agreement, `rng_ffi.mojo` randomness and `base64_ffi.mojo` base64. `sha256_compress.mojo` binds AWS-LC's `sha256_block_data_order_hw` as `sha256_compress_blocks`; `internal/asm/__init__.mojo` re-exports it and nothing calls it.
 
-`komira_crypto` lists `//third_party/aws-lc:crypto` in its `deps`. A `mojo_library` passes its C and C++ deps on to its consumers and to its own tests (see [the Mojo rules](../../../tools/build/mojo/README.md)), so every binary or test with `komira_crypto` in its closure links AWS-LC statically and names nothing itself.
+`komira_crypto` lists `//third_party/aws-lc:crypto` in its `deps`. A `mojo_library` passes its C and C++ deps on to its consumers and to its own tests (see [the Mojo rules](../../tools/build/mojo/README.md)), so every binary or test with `komira_crypto` in its closure links AWS-LC statically and names nothing itself.
 
 ### How are hashes, HMAC and HKDF composed?
 
@@ -128,7 +128,7 @@ Between phases 1 and 2 the leaf is checked: a key usage, if present, must allow 
 
 ## What must always hold?
 
-- **In `komira_crypto`, AWS-LC is called only from `internal/asm/`.** Outside that directory, the library's only `external_call` sites are the libc calls in `zeroize.mojo`, and no function signature outside `internal/asm/` names a pointer type; see [the pointer rule](../cross_cutting/mojo_safety_and_idioms.md#why-must-a-raw-pointer-stay-inside-one-module). Not enforced by any check in this library's build.
+- **In `komira_crypto`, AWS-LC is called only from `internal/asm/`.** Outside that directory, the library's only `external_call` sites are the libc calls in `zeroize.mojo`, and no function signature outside `internal/asm/` names a pointer type; see [the pointer rule](mojo_safety_and_idioms.md#why-must-a-raw-pointer-stay-inside-one-module). Not enforced by any check in this library's build.
 - **A consumer links AWS-LC.** Held by the library's `deps`, which carry `//third_party/aws-lc:crypto` into every link that includes `komira_crypto`.
 - **The AWS-LC digest follows `OUTPUT_SIZE`.** The AWS-LC HMAC and HKDF calls behind `Hmac[H]` and `Hkdf[H]` use SHA-256, SHA-384 or SHA-512 by `H.OUTPUT_SIZE`, not `H`'s own implementation. `Hkdf.derive_secret` also hashes its transcript with `H` itself, so its result depends on `H` computing the digest its size selects. Only the size is enforced, at compile time, by `comptime assert` in `hmac_ffi.mojo` and `hkdf_ffi.mojo`; the asserts do not look at `H`'s implementation.
 - **A failed tag check raises.** `open_in_place` raises rather than return unauthenticated plaintext. Enforced by the tamper cases in `test_aes_gcm_smoke` and `test_chacha20_poly1305_kat`.
@@ -160,7 +160,7 @@ Entry points:
 
 ## How is it tested?
 
-`komira_crypto` lists its 59 test files in `test_srcs` in `src/komira_crypto/BUCK`, so building the library runs them all (see [the `test_srcs` gate](../../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)), and each links AWS-LC through the library's `deps`.
+`komira_crypto` lists its 59 test files in `test_srcs` in `src/komira_crypto/BUCK`, so building the library runs them all (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)), and each links AWS-LC through the library's `deps`.
 
 | Test | Covers |
 |---|---|

@@ -207,7 +207,7 @@ Entry points:
 
 ## How is it tested?
 
-The `komira_core` target in `src/komira_core/BUCK` lists files from `src/komira_core/tests/` in its `test_srcs`, so each runs as part of building the library (see [the `test_srcs` gate](../../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)). `komira_uuid` and `komira_atomic_alias` do the same with `test_uuid_v7` and `test_atomic_alias_widths`. Run: `./buck2 build //src/komira_core:komira_core //src/komira_uuid:komira_uuid //src/komira_atomic_alias:komira_atomic_alias`.
+The `komira_core` target in `src/komira_core/BUCK` lists files from `src/komira_core/tests/` in its `test_srcs`, so each runs as part of building the library (see [the `test_srcs` gate](../../tools/build/mojo/README.md#libraries-and-the-test_srcs-gate)). `komira_uuid` and `komira_atomic_alias` do the same with `test_uuid_v7` and `test_atomic_alias_widths`. Run: `./buck2 build //src/komira_core:komira_core //src/komira_uuid:komira_uuid //src/komira_atomic_alias:komira_atomic_alias`.
 
 Some of the `komira_core` tests and what they cover:
 
