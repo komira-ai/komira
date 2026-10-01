@@ -8,8 +8,9 @@
 # suite drives exactly that path, through a hand-written message shaped like
 # what the code generator emits for Cloud Logging v2's `LogEntry`:
 #
-#   - `write_wkt_field` / `write_wkt_element` + `read_wkt` /
-#     `read_into_repeated_wkt` / `read_into_string_wkt_map` — the WKT arms;
+#   - `write_message_field` / `write_message_element` + `read_message` /
+#     `read_into_repeated_message` / `read_into_string_message_map` -- the
+#     plain message arms, which give a WKT its canonical form;
 #   - `Optional[T]` message fields, `expect_fields` + the `next_field` loop;
 #   - a `map<string, string>` (labels) next to a `map<string, Value>`.
 #
@@ -76,7 +77,7 @@ struct HttpRequestLike(Serializable, Copyable, Movable):
         if self.request_method != "":
             enc.write_string_field(1, "requestMethod", self.request_method)
         if self.latency:
-            enc.write_wkt_field[Duration](14, "latency", self.latency.value())
+            enc.write_message_field[Duration](14, "latency", self.latency.value())
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -92,7 +93,7 @@ struct HttpRequestLike(Serializable, Copyable, Movable):
             if key.field_no == 1 or key.json_name == "requestMethod" or key.json_name == "request_method":
                 request_method = dec.read_string()
             elif key.field_no == 14 or key.json_name == "latency":
-                latency = dec.read_wkt[Duration]()
+                latency = dec.read_message[Duration]()
             else:
                 dec.skip()
         return Self(request_method^, latency^)
@@ -137,15 +138,15 @@ struct LogEntryLike(Serializable, Copyable, Movable):
         if self.log_name != "":
             enc.write_string_field(12, "logName", self.log_name)
         if self.timestamp:
-            enc.write_wkt_field[Timestamp](9, "timestamp", self.timestamp.value())
+            enc.write_message_field[Timestamp](9, "timestamp", self.timestamp.value())
         if self.receive_timestamp:
-            enc.write_wkt_field[Timestamp](
+            enc.write_message_field[Timestamp](
                 24, "receiveTimestamp", self.receive_timestamp.value()
             )
         if self.json_payload:
-            enc.write_wkt_field[Struct](6, "jsonPayload", self.json_payload.value())
+            enc.write_message_field[Struct](6, "jsonPayload", self.json_payload.value())
         if self.proto_payload:
-            enc.write_wkt_field[Any](2, "protoPayload", self.proto_payload.value())
+            enc.write_message_field[Any](2, "protoPayload", self.proto_payload.value())
         if len(self.labels) > 0:
             enc.begin_map_field(11, "labels")
             for entry in self.labels.items():
@@ -159,24 +160,24 @@ struct LogEntryLike(Serializable, Copyable, Movable):
                 7, "httpRequest", self.http_request.value()
             )
         if self.update_mask:
-            enc.write_wkt_field[FieldMask](30, "updateMask", self.update_mask.value())
+            enc.write_message_field[FieldMask](30, "updateMask", self.update_mask.value())
         if self.trace_sampled:
-            enc.write_wkt_field[BoolValue](31, "traceSampled", self.trace_sampled.value())
+            enc.write_message_field[BoolValue](31, "traceSampled", self.trace_sampled.value())
         if self.severity_number:
-            enc.write_wkt_field[Int64Value](
+            enc.write_message_field[Int64Value](
                 32, "severityNumber", self.severity_number.value()
             )
         if len(self.checkpoints) > 0:
             enc.begin_list_field(33, "checkpoints")
             for i in range(len(self.checkpoints)):
-                enc.write_wkt_element[Timestamp](33, self.checkpoints[i])
+                enc.write_message_element[Timestamp](33, self.checkpoints[i])
             enc.end_list_field()
         if len(self.attrs) > 0:
             enc.begin_map_field(34, "attrs")
             for entry in self.attrs.items():
                 enc.begin_map_entry()
                 enc.write_string_field(1, "key", entry.key)
-                enc.write_wkt_field[Value](2, "value", entry.value)
+                enc.write_message_field[Value](2, "value", entry.value)
                 enc.end_map_entry()
             enc.end_map_field()
 
@@ -199,27 +200,27 @@ struct LogEntryLike(Serializable, Copyable, Movable):
             if key.field_no == 12 or n == "logName" or n == "log_name":
                 out.log_name = dec.read_string()
             elif key.field_no == 9 or n == "timestamp":
-                out.timestamp = dec.read_wkt[Timestamp]()
+                out.timestamp = dec.read_message[Timestamp]()
             elif key.field_no == 24 or n == "receiveTimestamp" or n == "receive_timestamp":
-                out.receive_timestamp = dec.read_wkt[Timestamp]()
+                out.receive_timestamp = dec.read_message[Timestamp]()
             elif key.field_no == 6 or n == "jsonPayload" or n == "json_payload":
-                out.json_payload = dec.read_wkt[Struct]()
+                out.json_payload = dec.read_message[Struct]()
             elif key.field_no == 2 or n == "protoPayload" or n == "proto_payload":
-                out.proto_payload = dec.read_wkt[Any]()
+                out.proto_payload = dec.read_message[Any]()
             elif key.field_no == 11 or n == "labels":
                 dec.read_into_string_string_map(out.labels)
             elif key.field_no == 7 or n == "httpRequest" or n == "http_request":
                 out.http_request = dec.read_message[HttpRequestLike]()
             elif key.field_no == 30 or n == "updateMask" or n == "update_mask":
-                out.update_mask = dec.read_wkt[FieldMask]()
+                out.update_mask = dec.read_message[FieldMask]()
             elif key.field_no == 31 or n == "traceSampled" or n == "trace_sampled":
-                out.trace_sampled = dec.read_wkt[BoolValue]()
+                out.trace_sampled = dec.read_message[BoolValue]()
             elif key.field_no == 32 or n == "severityNumber" or n == "severity_number":
-                out.severity_number = dec.read_wkt[Int64Value]()
+                out.severity_number = dec.read_message[Int64Value]()
             elif key.field_no == 33 or n == "checkpoints":
-                dec.read_into_repeated_wkt[Timestamp](out.checkpoints)
+                dec.read_into_repeated_message[Timestamp](out.checkpoints)
             elif key.field_no == 34 or n == "attrs":
-                dec.read_into_string_wkt_map[Value](out.attrs)
+                dec.read_into_string_message_map[Value](out.attrs)
             else:
                 dec.skip()
         return out^
@@ -281,25 +282,25 @@ struct AllWktLike(Serializable, Copyable, Movable):
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         if self.empty:
-            enc.write_wkt_field[Empty](1, "empty", self.empty.value())
+            enc.write_message_field[Empty](1, "empty", self.empty.value())
         if self.u64:
-            enc.write_wkt_field[UInt64Value](2, "u64", self.u64.value())
+            enc.write_message_field[UInt64Value](2, "u64", self.u64.value())
         if self.i32:
-            enc.write_wkt_field[Int32Value](3, "i32", self.i32.value())
+            enc.write_message_field[Int32Value](3, "i32", self.i32.value())
         if self.dbl:
-            enc.write_wkt_field[DoubleValue](4, "dbl", self.dbl.value())
+            enc.write_message_field[DoubleValue](4, "dbl", self.dbl.value())
         if self.str:
-            enc.write_wkt_field[StringValue](5, "str", self.str.value())
+            enc.write_message_field[StringValue](5, "str", self.str.value())
         if self.byt:
-            enc.write_wkt_field[BytesValue](6, "byt", self.byt.value())
+            enc.write_message_field[BytesValue](6, "byt", self.byt.value())
         if self.lst:
-            enc.write_wkt_field[ListValue](7, "lst", self.lst.value())
+            enc.write_message_field[ListValue](7, "lst", self.lst.value())
         if self.val:
-            enc.write_wkt_field[Value](8, "val", self.val.value())
+            enc.write_message_field[Value](8, "val", self.val.value())
         if self.f32:
-            enc.write_wkt_field[FloatValue](9, "f32", self.f32.value())
+            enc.write_message_field[FloatValue](9, "f32", self.f32.value())
         if self.u32:
-            enc.write_wkt_field[UInt32Value](10, "u32", self.u32.value())
+            enc.write_message_field[UInt32Value](10, "u32", self.u32.value())
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
@@ -313,25 +314,25 @@ struct AllWktLike(Serializable, Copyable, Movable):
                 break
             var n = key.json_name
             if key.field_no == 1 or n == "empty":
-                out.empty = dec.read_wkt[Empty]()
+                out.empty = dec.read_message[Empty]()
             elif key.field_no == 2 or n == "u64":
-                out.u64 = dec.read_wkt[UInt64Value]()
+                out.u64 = dec.read_message[UInt64Value]()
             elif key.field_no == 3 or n == "i32":
-                out.i32 = dec.read_wkt[Int32Value]()
+                out.i32 = dec.read_message[Int32Value]()
             elif key.field_no == 4 or n == "dbl":
-                out.dbl = dec.read_wkt[DoubleValue]()
+                out.dbl = dec.read_message[DoubleValue]()
             elif key.field_no == 5 or n == "str":
-                out.str = dec.read_wkt[StringValue]()
+                out.str = dec.read_message[StringValue]()
             elif key.field_no == 6 or n == "byt":
-                out.byt = dec.read_wkt[BytesValue]()
+                out.byt = dec.read_message[BytesValue]()
             elif key.field_no == 7 or n == "lst":
-                out.lst = dec.read_wkt[ListValue]()
+                out.lst = dec.read_message[ListValue]()
             elif key.field_no == 8 or n == "val":
-                out.val = dec.read_wkt[Value]()
+                out.val = dec.read_message[Value]()
             elif key.field_no == 9 or n == "f32":
-                out.f32 = dec.read_wkt[FloatValue]()
+                out.f32 = dec.read_message[FloatValue]()
             elif key.field_no == 10 or n == "u32":
-                out.u32 = dec.read_wkt[UInt32Value]()
+                out.u32 = dec.read_message[UInt32Value]()
             else:
                 dec.skip()
         return out^
@@ -350,7 +351,7 @@ struct StampMapLike(Serializable, Copyable, Movable):
             for entry in self.stamps.items():
                 enc.begin_map_entry()
                 enc.write_string_field(1, "key", entry.key)
-                enc.write_wkt_field[Timestamp](2, "value", entry.value)
+                enc.write_message_field[Timestamp](2, "value", entry.value)
                 enc.end_map_entry()
             enc.end_map_field()
 
@@ -363,7 +364,7 @@ struct StampMapLike(Serializable, Copyable, Movable):
             if key.end:
                 break
             if key.field_no == 1 or key.json_name == "stamps":
-                dec.read_into_string_wkt_map[Timestamp](stamps)
+                dec.read_into_string_message_map[Timestamp](stamps)
             else:
                 dec.skip()
         return Self(stamps^)

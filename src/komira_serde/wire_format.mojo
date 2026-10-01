@@ -339,30 +339,6 @@ trait WireEncoder(Movable):
     ](mut self, field_no: Int, v: M) raises:
         ...
 
-    # -- well-known-type fields (google.protobuf.*) -----------------------
-    #
-    # A WKT field (`Timestamp`, `Struct`, `Any`, a wrapper, ...) is an
-    # ordinary embedded message on the protobuf-BINARY wire, but proto3-JSON
-    # gives every WKT its own canonical form ("2026-10-01T00:00:00Z", "1.5s",
-    # a free-form object, a bare scalar, ...). The generated body routes a
-    # WKT-typed field through these arms instead of the `*_message_*` ones:
-    #   - protobuf-binary: forwards to the message arm (WIRE-IDENTICAL);
-    #   - proto3-JSON: `T.write_proto3_json` writes the complete canonical
-    #     JSON value in place of the `{...}` object.
-    # The field / element / map-VALUE positions each have an arm (a map
-    # value is written as `write_wkt_field(2, "value", v)` inside a map
-    # entry, exactly like the other `write_*_field(2, ..)` value writers).
-
-    def write_wkt_field[
-        T: Proto3JsonWkt
-    ](mut self, field_no: Int, json_name: StringSlice, v: T) raises:
-        ...
-
-    def write_wkt_element[
-        T: Proto3JsonWkt
-    ](mut self, field_no: Int, v: T) raises:
-        ...
-
     # -- map (proto `map<K,V>`) framing ----------------------------------
     #
     # A proto3 `map<K,V>` is a JSON OBJECT `{"<key>": <value>, ...}` (the key
@@ -624,25 +600,6 @@ trait WireDecoder(Copyable, Movable):
     ](mut self, mut out: Dict[String, V]) raises:
         ...
 
-    # -- well-known-type fields (google.protobuf.*) -----------------------
-    #
-    # The decode twins of `WireEncoder.write_wkt_*`. On protobuf-binary each
-    # forwards to its `*_message*` arm; on proto3-JSON each reads the
-    # field's already-parsed JSON value through `T.read_proto3_json`.
-
-    def read_wkt[T: Proto3JsonWkt](mut self) raises -> T:
-        ...
-
-    def read_into_repeated_wkt[
-        T: Proto3JsonWkt
-    ](mut self, mut out: List[T]) raises:
-        ...
-
-    def read_into_string_wkt_map[
-        T: Proto3JsonWkt & Deinitable
-    ](mut self, mut out: Dict[String, T]) raises:
-        ...
-
     def skip(mut self) raises:
         """Skip the current field's value (unknown-field forward-compat).
 
@@ -739,7 +696,13 @@ trait Serializable(Copyable, Movable):
 # SPECIAL JSON form instead of the `{field: value}` object every other
 # message gets. `Serializable.encode/decode` cannot say that — one body
 # serves both backends — so a WKT ALSO conforms to this trait, and the
-# `write_wkt_*` / `read_wkt*` codec arms dispatch on it at comptime:
+# proto3-JSON backend's ordinary message arms (`write_message_field` /
+# `write_message_element`, `read_message` / `read_into_repeated_message` /
+# `read_into_string_message_map`) and the top-level `encode_json` /
+# `decode_json*` dispatch on it at comptime
+# (`comptime if conforms_to(T, Proto3JsonWkt)`). There is deliberately no
+# WKT-specific arm: a parallel arm whose wrong twin still compiles is how a
+# WKT ends up in its binary-shaped JSON. On that backend:
 #
 #   - `write_proto3_json` appends ONE COMPLETE JSON value to `buf`: quoted
 #     where the canonical form is a string (`"1.5s"`), bare where it is a

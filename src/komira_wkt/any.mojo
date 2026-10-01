@@ -120,6 +120,16 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
                 + "' holds protobuf-binary payload bytes; writing it as JSON"
                 + " needs a type registry, which komira_wkt does not have"
             )
+        if not self.has_json_payload() and _names_wkt(self.type_url):
+            # A WKT payload's canonical JSON is `{"@type": .., "value": <its
+            # JSON form>}` even when the payload bytes are empty (a zero
+            # Duration is `"value": "0s"`); writing `{"@type": ..}` alone
+            # would be a form reference parsers reject.
+            raise Error(
+                "WktError: Any of well-known type '" + self.type_url
+                + "' has no JSON payload; writing its canonical 'value'"
+                + " needs a type registry, which komira_wkt does not have"
+            )
         buf.append(0x7B)  # '{'
         var first = True
         if self.type_url != "":
@@ -165,3 +175,23 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
                 "WktError: Any JSON has members but no '@type' to name them"
             )
         return Self(type_url, List[UInt8](), members^)
+
+
+def _names_wkt(type_url: String) -> Bool:
+    """True iff `type_url` names a `google.protobuf.*` well-known type whose
+    JSON form inside an `Any` is the `"value"` member."""
+    var slash = type_url.rfind("/")
+    var name = String(type_url[byte=slash + 1 :])
+    if not name.startswith("google.protobuf."):
+        return False
+    var short = String(name[byte=16:])
+    var wkts: List[String] = [
+        "Any", "Duration", "Empty", "FieldMask", "ListValue", "Struct",
+        "Timestamp", "Value", "BoolValue", "BytesValue", "DoubleValue",
+        "FloatValue", "Int32Value", "Int64Value", "StringValue",
+        "UInt32Value", "UInt64Value",
+    ]
+    for i in range(len(wkts)):
+        if short == wkts[i]:
+            return True
+    return False

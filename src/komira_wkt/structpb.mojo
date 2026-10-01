@@ -253,7 +253,11 @@ struct Value(Proto3JsonWkt, Copyable, Movable):
         """Append the literal JSON value. REFUSES a NaN / Infinity number:
         the spec says a `Value` holding one cannot be serialized, and
         JSON has no spelling for it."""
-        if self.kind == VALUE_KIND_NULL or self.kind == VALUE_KIND_UNSET:
+        if self.kind == VALUE_KIND_UNSET:
+            # No arm set is not a JSON value; the reference implementations
+            # refuse it ("no kind set") rather than guess `null`.
+            raise Error("WktError: google.protobuf.Value has no kind set")
+        if self.kind == VALUE_KIND_NULL:
             _append_ascii(buf, "null")
         elif self.kind == VALUE_KIND_NUMBER:
             _write_number(buf, self.number_value)

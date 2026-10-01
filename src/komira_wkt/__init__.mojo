@@ -40,13 +40,15 @@ So each WKT here conforms to `komira_serde.Proto3JsonWkt` (a refinement of
   2. `write_proto3_json(buf)` appends the COMPLETE canonical JSON value
      (quoted where it is a string) and `read_proto3_json(JsonValue)` reads
      it back from the already-parsed value, refusing what the spec refuses.
-A message field of a WKT type is written with `enc.write_wkt_field[T]` /
-`write_wkt_element[T]` and read with `dec.read_wkt[T]` /
-`read_into_repeated_wkt[T]` / `read_into_string_wkt_map[T]`. On the binary
-backend those forward to the message arms (wire-identical); on the JSON
-backend they call the two methods above. That routing is what makes
-`encode_json` / `decode_json` produce and accept the canonical form — the
-way mainstream protobuf libraries route their JSON codec to the WKT form.
+A WKT goes through the ordinary message arms (`write_message_field` /
+`write_message_element`, `read_message` / `read_into_repeated_message` /
+`read_into_string_message_map`) and the top-level `encode_json` /
+`decode_json*`, like any message. On the binary backend that is the
+message form; on the JSON backend each of those branches at comptime on
+`Proto3JsonWkt` and calls the two methods above. That is what makes
+`encode_json` / `decode_json` produce and accept the canonical form, whichever
+arm a generated body picks -- the way mainstream protobuf libraries route
+their JSON codec to the WKT form.
 The `to_proto3_json()` / `from_proto3_json()` string helpers remain for
 standalone use (scalar text, unquoted for the string-shaped types).
 

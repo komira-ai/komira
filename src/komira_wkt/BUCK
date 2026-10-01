@@ -11,6 +11,7 @@ mojo_library(
     deps = ["//src/komira_serde:komira_serde"],
     test_srcs = [
         "tests/test_wkt_json_codec_path.mojo",
+        "tests/test_wkt_plain_arms.mojo",
         "tests/test_wkt_runtime.mojo",
     ],
     visibility = ["PUBLIC"],
