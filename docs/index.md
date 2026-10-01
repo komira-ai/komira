@@ -12,4 +12,3 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | The end-to-end tests | [tools/build/tests/README.md](../tools/build/tests/README.md) |
 | Continuous integration: the one job, the runner on the farm, approving a fork's run, farm access | [ci.md](ci.md) |
 | The knowledge graph: not here yet, and what replaces it until then | [knowledge_graph.md](knowledge_graph.md) |
-| The async runtime: the reactor, per-worker event loops, fork-join dispatch, spawn and join | [design/async_runtime.md](design/async_runtime.md) |
