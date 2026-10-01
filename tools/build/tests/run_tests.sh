@@ -10,8 +10,7 @@
 # action runs there and every test below runs. Without one, every action
 # runs on this machine: the script says so on its first line, and skips,
 # each with its own SKIP line, the tests that need a remote-execution service
-# (7, 9, 10's registered multi-NUMA platform, 11's hardware stand-in, 12 and
-# 24), and test 3, whose red needs the remote executor's input isolation. The remote and local executors are never mixed in one run.
+# (7, 9, 12 and 24), and test 3, whose red needs the remote executor's input isolation. The remote and local executors are never mixed in one run.
 #
 # The tests are numbered, and the number is the test's name everywhere (the
 # README, the docs). What a test builds lives in functional/ (behaviour that
@@ -56,30 +55,20 @@
 #      machine from a fresh clone, downloads only the binary and its runtime libraries, and
 #      the runnable directory still starts after it is moved
 #      (tools/build/tests/functional/buck2_run.sh; skipped with --no-run).
-#  10. Execution platforms: Mojo compiles, gated tests and run checks resolve
-#      to `exec-mojo` (mojo_compile, numa_single); toolchain unpack/copy
-#      targets, and third_party_srcs generation, drift test and fixture
-#      archive, to `exec-light`. A target requiring numa_multi, with no
-#      platform providing it, fails to configure and runs nothing; given one
-#      (resolution only, nothing is built), it resolves to it.
-#  11. The multi-NUMA run checks the hardware it got, not only the label:
-#      numa_guard.sh gives the right verdict on 12 made-up topologies
-#      (tests//functional/numa:guard_cases, a remote action); komira_execution_platforms
-#      refuses a multi-NUMA property set equal to the mojo_compile one; and on
-#      a stand-in platform whose multi-NUMA workers are the single-NUMA
-#      mojo_compile workers (tests//negative/numa_standin), both the build's run
-#      check and `buck2 test` refuse to start (numa_guard: REFUSING to run);
-#      there, the same `buck2 test` command minus the guard
-#      (tests//functional/numa:gate_run) passes through the gate runner, which is how
-#      a multi-NUMA worker would run it.
-#  12. Actions run with their platform's property set, read per action: an
-#      uncached build of //tools/build/examples:hello and
+#  10. Execution platforms: Mojo compiles, gated tests and run checks,
+#      toolchain unpack/copy targets, and third_party_srcs generation, drift
+#      test and fixture archive all resolve to the one linux execution
+#      platform, `linux-x86_64`.
+#  11. (Retired 2026-09-30 with the multi-NUMA rule.)
+#  12. Every action runs with the one linux property set, read per action:
+#      an uncached build of //tools/build/examples:hello and
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
-#      fixed --isolation-dir, --no-remote-cache, so every action really executes)
-#      must record the light set for zig_unpack, zig_build_exe, conda_unpack,
-#      mojo_runtime, fixture_archive and third_party_srcs, and the mojo_compile set for mojo_build (`buck2 log
-#      what-ran`; a cache hit records no properties, so a warm build cannot
-#      answer this). Costs about 3 minutes of remote execution; the isolated
+#      fixed --isolation-dir, --no-remote-cache, so every action really
+#      executes) must record a remote execution carrying `[komira_re]
+#      linux_properties` for every action it ran, and must have run
+#      zig_unpack, zig_build_exe, conda_unpack, mojo_runtime, fixture_archive,
+#      third_party_srcs and mojo_build (`buck2 log what-ran`; a cache hit
+#      records no properties, so a warm build cannot answer this). Costs about 3 minutes of remote execution; the isolated
 #      daemon's buck-out/komira_tests_uncached (~50 MB) is reused per run.
 #  13. A program built as a bundle behaves as its executable: stdout, stderr
 #      and exit status agree byte for byte across argv, environment, exit(),
@@ -110,12 +99,14 @@
 #      tests//negative/doc_links:dead fails naming a missing file, a bad
 #      #anchor and a link leaving the tree. Every package of the komira and
 #      tests cells is in //:docs through the doc_tree its rules declare, the
-#      toolchains cell (not in it) holds no Markdown, no BUCK file but one
-#      names a doc_tree (the rules do), and neither cell sets `[project] package_boundary_exceptions` (a
-#      prefix covering one package covers every package under it, so a
-#      target could own another package's files).
-#  18. The configuration hashes of exec-light, exec-mojo and linux-x86_64 equal
-#      their pins: they are in the digest of every configured action.
+#      toolchains cell (not in it) holds no Markdown, no BUCK file names a
+#      doc_tree or calls package_docs (the rules do), and neither cell sets
+#      `[project] package_boundary_exceptions` (a prefix covering one package
+#      covers every package under it, so a target could own another
+#      package's files).
+#  18. The configuration hash of linux-x86_64 (the target platform, and the
+#      execution platform's configuration) equals its pin: it is in the
+#      digest of every configured action.
 #  19. What a repository using komira as a cell loads names no cell but
 #      komira, prelude and toolchains: every label outside a comment in the
 #      BUCK and .bzl files of tools/build/{mojo,rust,proto-codegen,toolchains,
@@ -265,7 +256,7 @@ elif [ "$n_local" = "$n_platforms" ]; then
     MODE=local
     EXEC_RE='^local'
     echo "MODE  local: no remote-execution service is configured, so every action of these tests runs on this machine ($n_platforms local execution platforms from $EP)."
-    echo "      Skipped here, they need one: 7 umbrella cache, 9 buck2 run, 10 registered multi-NUMA platform, 11 multi-NUMA hardware, 12 action platforms, 24 macOS. To run them, configure .buckconfig.local (DEVELOPMENT.md, step 3)."
+    echo "      Skipped here, they need one: 7 umbrella cache, 9 buck2 run, 12 action platforms, 24 macOS. To run them, configure .buckconfig.local (DEVELOPMENT.md, step 3)."
 elif [ "$n_local" = 0 ]; then
     MODE=remote
     EXEC_RE='^(re\(|cache)'
@@ -456,9 +447,7 @@ fi
 
 # 10
 # `buck2 audit execution-platform-resolution` prints, per target, either
-# "Execution platform: <label>" or "Failed to configure: ...". The
-# multi-NUMA key is set explicitly both ways so the result does not depend on
-# .buckconfig.local.
+# "Execution platform: <label>" or "Failed to configure: ...".
 resolve() { # log name, extra args..., targets...: prints "<target> <platform|FAILED>"
     local name=$1; shift
     "$BUCK2" audit execution-platform-resolution "$@" > "$LOG/$name.txt" 2>&1 || return 1
@@ -466,98 +455,46 @@ resolve() { # log name, extra args..., targets...: prints "<target> <platform|FA
          t != "" && /^  Execution platform: / { print t, $3; t = "" }
          t != "" && /^  Failed to configure/ { print t, "FAILED"; t = "" }' "$LOG/$name.txt"
 }
-NO_MULTI=(-c komira_re.mojo_compile_multi_numa_properties=)
 EXPECT_PLATFORMS="
-komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo
-komira//tools/build/examples:hellopkg komira//tools/build/platforms:exec-mojo
-komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/platforms:exec-mojo
-komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:exec-mojo
-tests//functional/numa:hello komira//tools/build/platforms:exec-mojo
-komira//tools/build/toolchains:zig komira//tools/build/platforms:exec-light
-komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:exec-light
-komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:exec-light
-komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:exec-light
-komira//tools/build/third_party_srcs:aws-lc-mini.tar.gz komira//tools/build/platforms:exec-light
-komira//tools/build/third_party_srcs:aws_lc_mini_gen komira//tools/build/platforms:exec-light
-komira//tools/build/third_party_srcs:aws_lc_mini_drift komira//tools/build/platforms:exec-light
-komira//third_party/aws-lc:srcs_gen komira//tools/build/platforms:exec-light
-tests//functional/numa:hello_multi_numa FAILED"
+komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64
+komira//tools/build/examples:hellopkg komira//tools/build/platforms:linux-x86_64
+komira//tools/build/examples/libgate_ok:libgate_ok komira//tools/build/platforms:linux-x86_64
+komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:linux-x86_64
+komira//tools/build/toolchains:zig komira//tools/build/platforms:linux-x86_64
+komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:linux-x86_64
+komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:linux-x86_64
+komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:linux-x86_64
+komira//tools/build/third_party_srcs:aws-lc-mini.tar.gz komira//tools/build/platforms:linux-x86_64
+komira//tools/build/third_party_srcs:aws_lc_mini_gen komira//tools/build/platforms:linux-x86_64
+komira//tools/build/third_party_srcs:aws_lc_mini_drift komira//tools/build/platforms:linux-x86_64
+komira//third_party/aws-lc:srcs_gen komira//tools/build/platforms:linux-x86_64"
 want=$(printf '%s\n' "$EXPECT_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
-if ! got=$(resolve platforms "${NO_MULTI[@]}" $(printf '%s\n' "$want" | cut -d' ' -f1)); then
+# shellcheck disable=SC2046 # one target label per line, split into arguments on purpose
+if ! got=$(resolve platforms $(printf '%s\n' "$want" | cut -d' ' -f1)); then
     fail "exec platforms: audit failed (see $LOG/platforms.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
     fail "exec platforms: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^>' | tr '\n' ' ') (see $LOG/platforms.txt)"
-elif ! grep -qF 'exec_compatible_with requires `komira//tools/build/platforms:numa_multi` but it was not satisfied' "$LOG/platforms.txt"; then
-    fail "exec platforms: the multi-NUMA refusal does not name numa_multi (see $LOG/platforms.txt)"
 else
-    pass "exec platforms: $(printf '%s\n' "$want" | grep -c exec-mojo) Mojo targets on exec-mojo, $(printf '%s\n' "$want" | grep -c exec-light) toolchain targets on exec-light, numa_multi unresolvable"
-fi
-# The refusal holds for a real build too, and nothing runs. (Skipped if the
-# audit above did not refuse, so a broken constraint never runs the binary on
-# a single-NUMA worker here.)
-if printf '%s\n' "${got:-}" | grep -qx 'tests//functional/numa:hello_multi_numa FAILED'; then
-    if "$BUCK2" build "${NO_MULTI[@]}" tests//functional/numa:hello_multi_numa > "$LOG/numa_refusal.log" 2>&1; then
-        fail "multi-NUMA refusal: tests//functional/numa:hello_multi_numa built with no numa_multi platform"
-    # Literal wording of buck2 2026-09-15 (tools/buck2). A buck2 release that
-    # rewords it turns this test red, not green; update it with the pin.
-    elif ! grep -qF "Can't find toolchain_dep execution platform" "$LOG/numa_refusal.log"; then
-        fail "multi-NUMA refusal: failed for another reason (see $LOG/numa_refusal.log)"
-    elif ! "$BUCK2" log what-ran > "$LOG/numa_refusal.what_ran.txt" 2>&1; then
-        fail "multi-NUMA refusal: cannot read what-ran"
-    elif awk -F'\t' 'NF >= 3' "$LOG/numa_refusal.what_ran.txt" | grep -q .; then
-        fail "multi-NUMA refusal: actions ran before the refusal (see $LOG/numa_refusal.what_ran.txt)"
-    else
-        pass "multi-NUMA refusal: the build fails to configure and runs no action"
-    fi
-else
-    fail "multi-NUMA refusal: not attempted, the audit resolved tests//functional/numa:hello_multi_numa"
-fi
-if [ "$MODE" = local ]; then
-    needs_remote "multi-NUMA platform (registered only from [komira_re])"
-elif ! got=$(resolve platforms_multi -c komira_re.mojo_compile_multi_numa_properties=pool=unreachable-check-only \
-        tests//functional/numa:hello_multi_numa komira//tools/build/examples:hello); then
-    fail "multi-NUMA platform: audit failed (see $LOG/platforms_multi.txt)"
-elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$(printf '%s\n' 'tests//functional/numa:hello_multi_numa komira//tools/build/platforms:exec-mojo-multi-numa' 'komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo' | LC_ALL=C sort)" ]; then
-    fail "multi-NUMA platform: with one registered, got [$(printf '%s\n' "$got" | tr '\n' ' ')] (see $LOG/platforms_multi.txt)"
-else
-    pass "multi-NUMA platform: when registered, only the multi-NUMA run resolves to it"
+    pass "exec platforms: $(printf '%s\n' "$want" | grep -c .) Mojo and toolchain targets on linux-x86_64"
 fi
 
-# 11
-if ! "$BUCK2" build tests//functional/numa:guard_cases --show-full-simple-output > "$LOG/guard_cases.txt" 2> "$LOG/guard_cases.log"; then
-    fail "NUMA guard cases: failed (see $LOG/guard_cases.log)"
-else
-    report=$(tail -n 1 "$LOG/guard_cases.txt")
-    ok=$(grep -c '^ok ' "$report" || true)
-    if grep -q '^BAD ' "$report" || [ "$ok" -lt 12 ] || ! grep -q ' run$' "$report" || ! grep -q ' refuse$' "$report"; then
-        fail "NUMA guard cases: $(grep -v '^ok ' "$report" | tr '\n' ' ') ($ok ok; see $report)"
-    else
-        pass "NUMA guard cases: $ok topologies, each run or refused as required"
-    fi
-fi
+# 12
 re_value() { # key: prints [komira_re] <key> of the root cell
     cfg_value "komira_re.$1"
 }
-action_platforms() { # what-ran json: every category ran remotely, with its platform's set
-    local light mojo acts
-    light=$(props_norm "$LIGHT_PROPS")
-    mojo=$(props_norm "$MC_PROPS")
-    if [ "$light" = "$mojo" ]; then
-        echo "light and mojo_compile property sets are equal; nothing to tell apart"
-        return 1
-    fi
+action_platforms() { # what-ran json: every action ran remotely, with the linux set
+    local linux acts
+    linux=$(props_norm "$LINUX_PROPS")
     acts=$(whatran_actions "$1") || { echo "cannot read $1"; return 1; }
-    printf '%s\n' "$acts" | awk -F '\t' -v L="$light" -v M="$mojo" '
+    printf '%s\n' "$acts" | awk -F '\t' -v P="$linux" '
         BEGIN {
             n = split("conda_unpack fixture_archive mojo_build mojo_runtime third_party_srcs zig_build_exe zig_unpack", order, " ")
-            for (i = 1; i <= n; i++) want[order[i]] = L
-            want["mojo_build"] = M
         }
-        !($1 in want) { next }
+        NF < 3 { next }
         {
             seen[$1]++; total++
             if ($2 != "Re" || $3 == "-") msg = $1 " ran as " $2 ", not a remote execution"
-            else if ($3 != want[$1]) msg = $1 " ran with the " ($3 == M ? "mojo_compile" : ($3 == L ? "light" : "an unknown")) " set"
+            else if ($3 != P) msg = $1 " ran with [" $3 "], not the linux set"
             else next
             bad = bad (bad == "" ? "" : "; ") msg
         }
@@ -565,61 +502,15 @@ action_platforms() { # what-ran json: every category ran remotely, with its plat
             for (i = 1; i <= n; i++) if (!(order[i] in seen)) missing = missing " " order[i]
             if (missing != "") bad = bad (bad == "" ? "" : "; ") "not executed:" missing
             if (bad != "") { print bad; exit 1 }
-            printf "%d actions: conda_unpack/fixture_archive/mojo_runtime/third_party_srcs/zig_build_exe/zig_unpack on light, mojo_build on mojo_compile\n", total
+            printf "%d actions, every one a remote execution with [%s]\n", total, P
         }'
 }
-MC_PROPS=$(re_value mojo_compile_properties)
-LIGHT_PROPS=$(re_value light_properties)
-if [ "$MODE" = local ]; then
-    needs_remote "multi-NUMA hardware (the stand-in reuses the [komira_re] worker sets)"
-elif [ -z "$MC_PROPS" ] || [ -z "$LIGHT_PROPS" ]; then
-    fail "multi-NUMA hardware: cannot read [komira_re] mojo_compile_properties / light_properties"
-else
-    if "$BUCK2" audit execution-platform-resolution -c "komira_re.mojo_compile_multi_numa_properties=$MC_PROPS" \
-            tests//functional/numa:hello_multi_numa > "$LOG/numa_same_set.log" 2>&1; then
-        fail "multi-NUMA hardware: a multi-NUMA property set equal to mojo_compile was accepted"
-    elif ! grep -qF 'but it equals `mojo_compile`' "$LOG/numa_same_set.log"; then
-        fail "multi-NUMA hardware: the equal-set refusal failed for another reason (see $LOG/numa_same_set.log)"
-    else
-        pass "multi-NUMA hardware: a multi-NUMA property set equal to mojo_compile is refused at load"
-    fi
-    # The stand-in routes numa_multi to the single-NUMA workers. A timeout
-    # bounds each invocation: an unknown property set queues forever.
-    STANDIN=(-c build.execution_platforms=tests//negative/numa_standin:single_numa_standin
-             -c "tests//komira_re.mojo_compile_properties=$MC_PROPS"
-             -c "tests//komira_re.light_properties=$LIGHT_PROPS")
-    if timeout 600 "$BUCK2" build "${STANDIN[@]}" tests//functional/numa:hello_multi_numa > "$LOG/numa_standin.log" 2>&1; then
-        fail "multi-NUMA hardware: the run check went green on single-NUMA workers"
-    elif ! grep -qF 'numa_guard: REFUSING to run' "$LOG/numa_standin.log"; then
-        fail "multi-NUMA hardware: the stand-in build failed without the guard's refusal (see $LOG/numa_standin.log)"
-    else
-        pass "multi-NUMA hardware: run check refused on single-NUMA workers ($(grep -o -m1 'usable NUMA nodes \[[^]]*\]' "$LOG/numa_standin.log"))"
-    fi
-    if timeout 600 "$BUCK2" test "${STANDIN[@]}" tests//functional/numa:hello_multi_numa > "$LOG/numa_standin_test.log" 2>&1; then
-        fail "multi-NUMA hardware: buck2 test passed on single-NUMA workers"
-    elif ! grep -qF 'numa_guard: REFUSING to run' "$LOG/numa_standin_test.log"; then
-        fail "multi-NUMA hardware: buck2 test failed without the guard's refusal (see $LOG/numa_standin_test.log)"
-    else
-        pass "multi-NUMA hardware: buck2 test refused on single-NUMA workers"
-    fi
-    if ! timeout 600 "$BUCK2" build "${STANDIN[@]}" tests//functional/numa:gate_run --show-full-simple-output > "$LOG/numa_gate_run.txt" 2> "$LOG/numa_gate_run.log"; then
-        fail "multi-NUMA gate run: tests//functional/numa:gate_run failed to build (see $LOG/numa_gate_run.log)"
-    else
-        report=$(tail -n 1 "$LOG/numa_gate_run.txt")
-        if [ "$(head -n 1 "$report")" = "rc 0" ]; then
-            pass "multi-NUMA gate run: the rule's buck2 test command, minus the guard, passes the gate runner"
-        else
-            fail "multi-NUMA gate run: $(head -n 4 "$report" | tr '\n' ' ')(see $report)"
-        fi
-    fi
-fi
-
-# 12
+LINUX_PROPS=$(re_value linux_properties)
 ISO=komira_tests_uncached
 if [ "$MODE" = local ]; then
     needs_remote "action platforms (per-action worker property sets)"
-elif [ -z "${MC_PROPS:-}" ] || [ -z "${LIGHT_PROPS:-}" ]; then
-    fail "action platforms: cannot read [komira_re] mojo_compile_properties / light_properties"
+elif [ -z "$LINUX_PROPS" ]; then
+    fail "action platforms: cannot read [komira_re] linux_properties"
 # The isolated daemon keeps its outputs between runs, and --no-remote-cache
 # does not rerun an action whose output is already on disk: clean first, or
 # a second run of these tests in the same checkout executes nothing.
@@ -733,9 +624,9 @@ if [ -n "$tc_md" ]; then
 else
     pass "doc links: the toolchains cell, which //:docs does not read, holds no Markdown"
 fi
-# The one BUCK file that calls package_docs() itself declares a target only
-# when configured (tools/build/lint/doc_tree.bzl).
-named=$(cd "$ROOT" && git ls-files -- BUCK '*/BUCK' | xargs grep -lE '^[[:space:]]*(doc_tree|package_docs)[(]' | grep -vxF tools/build/tests/negative/numa_standin/BUCK | tr '\n' ' ' || true)
+# Every BUCK file calls a rule or macro that declares its doc_tree, so none
+# names a doc_tree or calls package_docs() itself.
+named=$(cd "$ROOT" && git ls-files -- BUCK '*/BUCK' | xargs grep -lE '^[[:space:]]*(doc_tree|package_docs)[(]' | tr '\n' ' ' || true)
 if [ -n "$named" ]; then
     fail "doc links: BUCK files name a doc_tree or call package_docs, which the rules declare: $named"
 else
@@ -761,17 +652,15 @@ fi
 # the repository and every repository mounting it (a buck2 upgrade may too).
 # The pins make such a change a deliberate edit of this list.
 EXPECT_CFGS="
-komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
-komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
 komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be"
 want=$(printf '%s\n' "$EXPECT_CFGS" | sed '/^$/d')
 if ! "$BUCK2" cquery 'deps(komira//tools/build/examples:hello)' > "$LOG/cfg_hashes.txt" 2>&1; then
     fail "configuration hashes: cquery failed (see $LOG/cfg_hashes.txt)"
-elif got=$(grep -oE '\([^ ()]*:(exec-light|exec-mojo|linux-x86_64)#[0-9a-f]+\)' "$LOG/cfg_hashes.txt" | tr -d '()' | LC_ALL=C sort -u) \
+elif got=$(grep -oE '\([^ ()]*:[a-z0-9_-]+#[0-9a-f]+\)' "$LOG/cfg_hashes.txt" | tr -d '()' | LC_ALL=C sort -u) \
         && [ "$got" != "$want" ]; then
     fail "configuration hashes moved, so every action digest did: got $(printf '%s' "$got" | tr '\n' ' '); if deliberate, update EXPECT_CFGS (see $LOG/cfg_hashes.txt)"
 else
-    pass "configuration hashes: exec-light, exec-mojo and linux-x86_64 keep their pinned hashes"
+    pass "configuration hashes: linux-x86_64, the only configuration of hello's closure, keeps its pinned hash"
 fi
 
 # 19

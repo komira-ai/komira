@@ -140,7 +140,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
 | cloud: AWS clients, cloud credentials, infrastructure providers, secrets and service registry | the cloud SDK libraries |
 | CI and deploy: the bundle model, apply, validate and rollout, the command line | kci |
-| packaging: the shared-library ABI, the release train | komira_so and the packaging rules |
+| packaging: the shared-library ABI, the release machine | komira_so and the packaging rules |
 
 ## Conventions
 

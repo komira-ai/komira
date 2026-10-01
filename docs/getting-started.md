@@ -69,7 +69,7 @@ your own.
 `linux-x86_64`, because `.buckconfig` maps every target there, so it builds a
 Linux result even from a Mac. To build for macOS pass
 `--target-platforms komira//tools/build/platforms:darwin-arm64`, and in
-`.buckconfig.local` set `darwin_mojo_compile_properties` (the property set of
+`.buckconfig.local` set `darwin_properties` (the property set of
 your macOS workers) and `darwin_macos_hosts` (one identity per macOS worker
 OS and hardware, from `sh tools/build/mojo/darwin/host_identity.sh` run on
 that worker). The identities are pinned: a worker whose identity does not

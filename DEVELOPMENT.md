@@ -26,7 +26,7 @@ by a `.buckconfig.local` you write.
 
 A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
 the Markdown link check reads its files with nothing more ([step 2](#2-build-on-linux-x86_64-locally-by-default)).
-A library kci (komira_ci) owns is named `kci_<x>`.
+A library kci owns is named `kci_<x>`.
 
 ## 1. Get buck2
 
@@ -109,10 +109,7 @@ BUCK file naming its own `doc_tree`.
 
 Mojo compiles take a lot of memory. Buck2 runs as many local actions at once
 as the machine has cores; on a machine with less than a few GB of memory per
-core, pass `-j <n>` to run fewer. A `mojo_multi_numa_test` does not configure
-locally (nothing knows how many NUMA nodes this machine has); it needs a
-remote service with multi-NUMA workers
-([tools/build/platforms/README.md](tools/build/platforms/README.md#multi-numa-runs)).
+core, pass `-j <n>` to run fewer.
 
 `./buck2 audit execution-platform-resolution <target>` shows where a target
 builds; `./buck2 log what-ran` shows `local` for each action that ran here.
@@ -177,21 +174,21 @@ Fill in:
 - **`[buck2_re_client]`**: the addresses of your remote-execution service
   (engine, action cache, CAS), its instance name, TLS, and
   `execution_concurrency_limit`.
-- **`[komira_re]`**: the exact platform property set of each kind of Linux
-  x86_64 worker, as comma-separated `key=value` pairs:
-  `light_properties` and `mojo_compile_properties` (for example `pool=light`
-  and `pool=mojo`; both may name the same set if you have one kind of
-  worker), and optionally `mojo_compile_multi_numa_properties` for workers
-  spanning more than one NUMA node. What each class runs, and what a
-  multi-NUMA worker must provide, is in
-  [tools/build/platforms/README.md](tools/build/platforms/README.md).
+- **`[komira_re]`**: `linux_properties`, the exact platform property set
+  every Linux x86_64 action carries, as comma-separated `key=value` pairs
+  (for example `pool=default`). Your service picks the worker for each
+  action; the build says nothing about worker classes. macOS workers have a
+  set of their own (`darwin_properties`, see
+  [tools/build/toolchains/README.md](tools/build/toolchains/README.md#macos)).
+  How target platforms, execution platforms and toolchains fit together is
+  in [tools/build/platforms/README.md](tools/build/platforms/README.md).
 
 Workers match a property set exactly: a key your workers do not advertise
-leaves actions queued until the scheduler gives up. The property sets are
-part of every action digest, so checkouts share cache entries only when they
-send the same sets.
+leaves actions queued until the scheduler gives up. The property set is part
+of every action digest, so checkouts share cache entries only when they send
+the same set.
 
-Once `light_properties` and `mojo_compile_properties` are set, every action
+Once `linux_properties` is set, every action
 runs remotely: the platforms then have local execution disabled, so nothing
 falls back to your machine. `-c komira.execution=local` builds one command
 locally anyway, and `[komira] execution = local` in `.buckconfig.local` keeps
@@ -200,8 +197,8 @@ either way.
 
 A `.buckconfig.local` that names a service in `[buck2_re_client]` but has no
 `[komira_re]` section (missing, or misspelled) refuses to build rather than
-building on your machine; so does a `[komira_re]` with only some of the
-required property sets. On a machine that must never build locally, put
+building on your machine; so does a `[komira_re]` still naming a key of the
+earlier per-class layout, which names the key to rename it to. On a machine that must never build locally, put
 `[komira] execution = remote` in your user buckconfig (`~/.buckconfig.local`):
 a checkout there with no `.buckconfig.local` then refuses too.
 
@@ -227,7 +224,7 @@ which: `MODE  remote` with a `.buckconfig.local` (or, as on the CI runner, a
 machine-wide buckconfig) naming a service, when every
 test runs; `MODE  local` without one, when every action runs on this machine
 and the tests that need a remote service (the umbrella cache, `buck2 run`'s
-download budget, the multi-NUMA and per-action property-set tests, macOS)
+download budget, the per-action property-set test, macOS)
 each print a `SKIP` line saying so. Test 3 (a missing `deps` edge fails to
 compile) is also skipped locally: it relies on the remote executor staging
 only declared inputs, and a local action, which is not sandboxed, may find
@@ -260,7 +257,7 @@ refuses any other with exit 2.
   no public one exists. The plain `./buck2 build` then targets `linux-x86_64`.
   For a native macOS build pass
   `--target-platforms komira//tools/build/platforms:darwin-arm64` and set
-  `darwin_mojo_compile_properties` and `darwin_macos_hosts` in
+  `darwin_properties` and `darwin_macos_hosts` in
   `.buckconfig.local` (identity from
   `sh tools/build/mojo/darwin/host_identity.sh`; identities are pinned and a
   mismatch makes the worker refuse). Checks:
@@ -334,22 +331,18 @@ not share a remote cache.
   has the service addresses but no (or a misspelled) `[komira_re]`; fill it
   in (step 3), or pass `-c komira.execution=local` to build here.
 - **``[komira_re] <key>` is not set``.** You asked for remote execution
-  (`.buckconfig.local` names one of the property sets, or `komira.execution =
-  remote`) but not all of them; see step 3.
+  (`.buckconfig.local` names a `[komira_re]` key, or `komira.execution =
+  remote`) but not `linux_properties`; see step 3.
 - **Actions sit queued and never start.** The property set names a key or
   value no worker advertises.
 - **`.buckconfig.local` seems ignored in a non-root cell.** It configures the
   root cell (`komira`, which holds the rules and toolchains) only; the
   standalone-only `toolchains` and `tests` cells do not read it. Pass a cell-scoped override instead, e.g.
-  `-c tests//komira_re.light_properties=...`.
-- **`Can't find toolchain_dep execution platform`** for a
-  `mojo_multi_numa_test`. No multi-NUMA workers are configured; that is the
-  intended refusal
-  ([tools/build/platforms/README.md](tools/build/platforms/README.md#multi-numa-runs)).
-- **Which worker class did a target get?**
+  `-c tests//komira_re.linux_properties=...`.
+- **Which execution platform did a target get?**
   `./buck2 audit execution-platform-resolution <target>` shows the platform and
   why the others were skipped.
 - **Errors from inside the Mojo rules**: `GATED TEST FAILED`, `REFUSING:
   toolchain member ...` (exit 2), an output containing the action's working
-  directory (exit 4), `numa_guard: REFUSING to run` (exit 3) -- see
+  directory (exit 4) -- see
   [tools/build/mojo/README.md](tools/build/mojo/README.md#errors).
