@@ -23,7 +23,7 @@ opt-in: it is configured only by a `.buckconfig.local` you write.
 
 A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
 the Markdown link check reads its files with nothing more ([step 2](#2-build-locally-by-default)).
-A library kci (komira_ci) owns is named `kci_<x>`.
+A library kci owns is named `kci_<x>`.
 
 ## 1. Get buck2
 
