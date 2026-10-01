@@ -1,0 +1,17 @@
+syntax = "proto3";
+
+package komira.test.refuse.bytes_in_url;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = { get: "/v1/things" };
+  }
+}
+
+// `blob` is a query field: proto3 JSON writes `bytes` as base64, which this
+// client does not render into a URL.
+message Req {
+  bytes blob = 1;
+}

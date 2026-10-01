@@ -14,6 +14,9 @@ target IS the check:
     holds each string of `present` (which keeps an absence check from
     passing over an empty output).
 
+`proto_codegen_rest_helpers` cuts the REST URL helpers block out of one
+generated file, for a mojo_library whose welded test runs them.
+
 The `out` sub-target is the generated directory itself, checked or not:
 `buck2 build '<target>[out]' --out <dir>` is how a golden is (re)written.
 """
@@ -214,3 +217,49 @@ proto_codegen_goldens_rule = rule(
 # tests cell's doc_tree reads every subpackage's.
 proto_codegen_golden = declares_docs(proto_codegen_golden_rule)
 proto_codegen_goldens = declares_docs(proto_codegen_goldens_rule)
+
+# ---- the emitted URL helpers, as Mojo the check below compiles ---------------
+
+# $1 busybox, $2 generated file, $3 output. Copies the lines from the begin
+# marker to the end marker, both included, and fails unless each occurs
+# exactly once: a helper moved out of the block fails to compile in the
+# check rather than going unchecked.
+_EXTRACT = """
+BB=$1; SRC=$2; OUT=$3
+BEGIN='# ---- REST URL helpers (one copy per REST file) ----'
+END='# ---- end of REST URL helpers ----'
+for m in "$BEGIN" "$END"; do
+    n=$("$BB" grep -cxF -- "$m" "$SRC" || true)
+    if [ "$n" != 1 ]; then
+        echo "proto_codegen: $SRC holds the marker '$m' $n times, not once" >&2
+        exit 1
+    fi
+done
+"$BB" awk -v b="$BEGIN" -v e="$END" '$0 == b { on = 1 } on { print } $0 == e { on = 0 }' "$SRC" > "$OUT"
+"""
+
+def _extract_impl(ctx):
+    bb = ctx.attrs._proto_toolchain[MojoProtoToolchainInfo].busybox
+    out = ctx.actions.declare_output(ctx.attrs.out)
+    src = ctx.attrs.gen.project(ctx.attrs.file)
+    ctx.actions.run(
+        cmd_args(bb, "sh", "-euc", _EXTRACT, "sh", bb, src, out.as_output()),
+        category = "proto_codegen_extract",
+    )
+    return [DefaultInfo(default_output = out)]
+
+# The URL helpers block of one generated file (`file`, inside the `[out]`
+# directory `gen`, so `files/<name>.mojo`), written to `out`: the source a
+# mojo_library compiles so its welded test can run the helpers the plugin
+# emits.
+proto_codegen_rest_helpers_rule = rule(
+    impl = _extract_impl,
+    attrs = {
+        "file": attrs.string(),
+        "gen": attrs.source(),
+        "out": attrs.string(),
+        "_proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+    },
+)
+
+proto_codegen_rest_helpers = declares_docs(proto_codegen_rest_helpers_rule)
