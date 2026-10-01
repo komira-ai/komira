@@ -9,7 +9,7 @@
 // write-ahead intent row per node. The plan's diff is the changeset review.
 //
 // The manifest is synthesized once per run, content-addressed and pinned, so a
-// redeploy of the control plane mid-run cannot change the desired state. The
+// redeploy of the deploying system mid-run cannot change the desired state. The
 // deployer's ONLY desired-state input is this pinned manifest, never the
 // bundle, which is why this schema is STANDALONE: it imports no intent schema.
 //
@@ -138,7 +138,7 @@ enum ResourceKind {
   // timer or crontab entry). The resolved form of an authored cron.
   //
   // ⛔ IT IS NOT A TRIGGER (kind 15). A Trigger's schedule arm is a cadence the
-  // control plane reads; a ScheduledCall is a real scheduler object in the
+  // scheduler reads; a ScheduledCall is a real scheduler object in the
   // target project that fires at the named instant.
   //
   // ⛔ THE ADDRESS IS NOT ON THE NODE. The target is named by LOGICAL ID: a
@@ -260,7 +260,7 @@ enum EgressMode {
   EGRESS_MODE_PRIVATE_WITH_PUBLIC_EGRESS = 2;
   // PRIVATE: fully isolated, with no inbound public address and no outbound
   // internet path. Not yet wired to a conformer: it requires a private
-  // endpoint for every cloud control-plane service the workload calls.
+  // endpoint for every cloud API endpoint the workload calls.
   EGRESS_MODE_PRIVATE = 3;
 }
 
@@ -316,7 +316,7 @@ enum ArtifactVisibility {
 enum SourceKind {
   // Proto3 zero default. UNSPECIFIED is an invalid source (fail-fast).
   SOURCE_KIND_UNSPECIFIED = 0;
-  // A repository on the platform's own self-hosted git service.
+  // A repository on a self-hosted git service.
   SOURCE_KIND_GIT_SELFHOSTED = 1;
   // A repository on an EXTERNAL third-party git host, reached over a webhook.
   SOURCE_KIND_GIT_EXTERNAL = 2;
@@ -334,8 +334,10 @@ enum RegistryKind {
   REGISTRY_KIND_UNSPECIFIED = 0;
   // A package published to an EXTERNAL third-party package registry.
   REGISTRY_KIND_GITHUB_PACKAGES = 1;
-  // A package published to the platform's own package registry.
-  REGISTRY_KIND_CODEWORKS = 2;
+  // A package published to a package registry hosted alongside the deploying
+  // system.
+  REGISTRY_KIND_SELF_HOSTED = 2;
+  reserved "REGISTRY_KIND_CODEWORKS";
 }
 
 // ─── The generic capability vocabulary (the Grant model) ─────────────────────
@@ -616,8 +618,8 @@ enum Capability {
   // returns, no mutation. A project-relative custom role.
   //
   // ⛔ GRANTED BY THE PROJECT OWNER, IN THEIR PROJECT, AND ONLY WHERE THEY
-  // ADMIT IT. Serial output can carry customer data, so the control plane's
-  // own graph composes NO grant for this ordinal.
+  // ADMIT IT. Serial output can carry customer data, so a reader's own graph
+  // composes NO grant for this ordinal.
   //
   // Declared only: the conformers refuse it by name until the composition
   // that grants it exists.
@@ -838,17 +840,15 @@ enum SupervisorMode {
 // ServerlessCompute / RunToCompletionJob node and never authored on the bundle
 // (an application cannot set or unset it). The application may HINT app-level
 // knobs (child health path, sidecar cpu/memory), which the composer merges in;
-// the composer owns the platform fields (supervisor digest, mode, lease and
-// heartbeat timing, report target). Read-only in the plan.
+// the composer owns the platform fields (mode, lease and heartbeat timing).
+// Read-only in the plan.
 //
 // Per-attempt runtime binding (attempt id, epoch, lease token) is NOT here: it
 // is minted by the job runner at placement and injected at start. This message
 // is the static shape only.
 message SupervisorSpec {
-  // The pinned content digest (sha256:...) of the supervisor artifact.
-  // WRAPPER: the layer the build step copies the supervisor binary from.
-  // SIDECAR: the supervisor container image.
-  string supervisor_image_digest = 1;
+  reserved 1, 6;
+  reserved "supervisor_image_digest", "report_target";
   // WRAPPER (default) | SIDECAR.
   SupervisorMode mode = 2;
   // The lease TTL (seconds). A renewal not seen within ttl + grace fences the
@@ -859,10 +859,6 @@ message SupervisorSpec {
   // Extra slack past the TTL before the lease check declares the lease
   // expired (absorbs a transient network stall or a cold start).
   int32 grace_seconds = 5;
-  // The report target as a LOGICAL registry name, never a literal URL;
-  // resolved to a concrete endpoint by the conformer at render time. Also the
-  // supervisor's OIDC audience.
-  string report_target = 6;
   // Merged hint: the HTTP liveness path the supervisor probes on the child
   // ("" = process liveness only, the default).
   string child_health_path = 7;
@@ -1336,9 +1332,9 @@ message ResolvedGitPush {
 // A wall-clock cadence fires the pipeline.
 //
 // ⚠ NO CONFORMER PROVISIONS A TIMER FOR THIS. A resolved schedule is declared
-// desired state that the control plane reads, deliberately not a cloud
-// resource: a per-deployment cloud timer would be one scheduler job per
-// application per organization. The trigger reconciler skips this arm.
+// desired state that the scheduler reads, deliberately not a cloud resource:
+// a per-deployment cloud timer would be one cloud scheduler job per
+// deployment. The trigger reconciler skips this arm.
 message ResolvedSchedule {
   // The 5-field cron CADENCE (`m h dom mon dow`).
   string cron = 1;
@@ -1361,7 +1357,7 @@ message TriggerSpec {
   reserved "source_kind", "repo_ref", "ref", "event";
 
   // The pipeline this source drives: the application SYMBOL (== the bundle
-  // name), resolved by the control plane to a pipeline definition at apply
+  // name), resolved by the scheduler to a pipeline definition at apply
   // time (NOT an in-manifest logical_id). N Triggers sharing this value are
   // the fan-in.
   //
@@ -1525,7 +1521,7 @@ message GrantSpec {
 // key/value rather than a `map` so the authored order is stable and diffable.
 // Only public client-side identifiers ride here, never a secret.
 message WebRuntimeConfigEntry {
-  // The runtime-config key (e.g. "VITE_FIREBASE_PROJECT_ID"). The conformer
+  // The runtime-config key (e.g. "PUBLIC_A"). The conformer
   // maps it to the config.json path.
   string key = 1;
   // The literal per-environment value (e.g. "example-project"). A public
@@ -1687,8 +1683,8 @@ enum EdgeAuthMode {
   // third-party relay) cannot mint such a token.
   EDGE_AUTH_MODE_FEDERATED_SA_JWT = 3;
 
-  // The IDENTITY-TOKEN mode: the edge validates the control plane's
-  // short-lived, identity-only ES256 JWT against the control plane's published
+  // The IDENTITY-TOKEN mode: the edge validates the token issuer's
+  // short-lived, identity-only ES256 JWT against the token issuer's published
   // EC key set. The token says WHO is calling and has no field that can
   // express a permission: authorization is a live call the application makes
   // on every request, so a permission change takes effect immediately.
@@ -1825,7 +1821,7 @@ message ApiEdgeSpec {
   // mode reads is a manifest whose author believed the edge was checking
   // something.
 
-  // THE CONTROL PLANE'S ISSUER URL. One field, and the JWKS URL is DERIVED
+  // THE TOKEN ISSUER'S URL. One field, and the JWKS URL is DERIVED
   // from it, for the reason `SecuredEdgeRoute.sa_email` is one field: a
   // separate key-set field would let an edge verify signatures against key
   // set A while its issuer claims B. There is deliberately no field to author
