@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The placement vocabulary: PlacementSpec / ContainerSpec / PlacementStatus, the
+# PodManager seam (with K8sPodManager and the FakePodManager test double), the
+# resource-request and compose renderers, the Kubernetes quantity parser, and
+# the heartbeat identity / credential types. Shared by a job manager and every
+# cloud bridge that places a unit.
+
+mojo_library(
+    name = "komira_placement",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_k8s:komira_k8s",
+    ],
+    visibility = ["PUBLIC"],
+)
