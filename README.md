@@ -2,12 +2,13 @@
 
 komira is written in [Mojo](https://www.modular.com/mojo) and built with
 [Buck2](https://buck2.build) and a hermetic toolchain: the Mojo compiler, zig
-and the file utilities every action uses are pinned downloads. A fresh clone
-builds on your own Linux x86_64 machine by default (see
+and the file utilities every action uses are pinned downloads. On a Linux x86_64 machine a
+fresh clone builds locally by default (see
 [DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees) for what has
-been checked locally so far).
-If you have a remote-execution service that speaks the Bazel Remote Execution
-API, such as Buildbarn, you can opt in to building there instead.
+been checked locally so far). On a Mac, `./buck2` installs and runs, but a
+build needs a remote-execution service that speaks the Bazel Remote Execution
+API, such as Buildbarn, which you run yourself; a purely local macOS build is
+not supported yet ([getting started](docs/getting-started.md#3-choose-where-builds-run)).
 
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
 examples and end-to-end tests) lives in [`tools/build/`](tools/build/).

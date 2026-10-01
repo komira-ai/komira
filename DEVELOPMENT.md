@@ -1,14 +1,17 @@
 # Developing komira
 
-The build uses [Buck2](https://buck2.build). By default every action runs
-on your machine, with the [pinned toolchain](tools/build/toolchains/README.md)
+The build uses [Buck2](https://buck2.build). On Linux x86_64, by default
+every action runs on your machine, with the [pinned toolchain](tools/build/toolchains/README.md)
 buck2 downloads and verifies. So far only the toolchain, zig and C actions
 have been measured running locally; Mojo compiles and tests have run only on
 a remote-execution service
-([what a local build guarantees](#what-a-local-build-guarantees)). If you have
-a remote-execution service that speaks the Bazel Remote Execution API (for
-example Buildbarn), you can build there instead (step 3). Remote execution is
-opt-in: it is configured only by a `.buckconfig.local` you write.
+([what a local build guarantees](#what-a-local-build-guarantees)). On a Mac
+only `./buck2` itself runs without a service; building needs a
+remote-execution service you run yourself (a server that speaks the Bazel
+Remote Execution API, for example Buildbarn; no public one exists), see
+[the Mac notes](#building-on-a-mac). On Linux you can also build on such a
+service instead (step 3). Remote execution is opt-in: it is configured only
+by a `.buckconfig.local` you write.
 
 ## Repository layout
 
@@ -22,7 +25,7 @@ opt-in: it is configured only by a `.buckconfig.local` you write.
 | `third_party/` | C and C++ libraries built from pinned source archives |
 
 A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
-the Markdown link check reads its files with nothing more ([step 2](#2-build-locally-by-default)).
+the Markdown link check reads its files with nothing more ([step 2](#2-build-on-linux-x86_64-locally-by-default)).
 A library kci (komira_ci) owns is named `kci_<x>`.
 
 ## 1. Get buck2
@@ -53,7 +56,7 @@ Mac, naming `.buckconfig.local`. On a Mac, build through a remote-execution
 service (step 3): the repository has a `darwin-arm64` target platform and a
 macOS Mojo toolchain, and the compile runs on macOS arm64 workers while the
 unpack runs on Linux ones. A local macOS build is a gap in the repository
-rather than a limit of Mojo, and is planned. Two things need a Linux x86_64
+rather than a limit of Mojo, and is a known gap. Two things need a Linux x86_64
 client either way, because they run Linux binaries on your machine:
 `./buck2 run`, and `tools/build/tests/run_tests.sh` (section 4), which
 refuses any other client.
@@ -61,7 +64,7 @@ refuses any other client.
 Commands below use `./buck2`; a `buck2` on your `PATH` at the same version
 works the same.
 
-## 2. Build (locally, by default)
+## 2. Build (on Linux x86_64, locally by default)
 
 With no `.buckconfig.local`, every action runs on this machine. A local
 Mojo compile has not yet been measured
@@ -247,6 +250,25 @@ script, after `./buck2 build //...` and `./buck2 test //...`; see
 binaries the farm built, and `readelf`/`objdump`, on your machine) and
 refuses any other with exit 2.
 
+## Building on a Mac
+
+- `./buck2` installs and runs (`brew install zstd` first).
+- A purely local build refuses at load, by design. Lifting that is not
+  enough: the toolchain unpack tools are Linux x86_64 binaries. Not supported
+  yet.
+- The working route is a remote-execution service you run yourself (step 3);
+  no public one exists. The plain `./buck2 build` then targets `linux-x86_64`.
+  For a native macOS build pass
+  `--target-platforms komira//tools/build/platforms:darwin-arm64` and set
+  `darwin_mojo_compile_properties` and `darwin_macos_hosts` in
+  `.buckconfig.local` (identity from
+  `sh tools/build/mojo/darwin/host_identity.sh`; identities are pinned and a
+  mismatch makes the worker refuse). Checks:
+  [check.sh](tools/build/tests/functional/darwin/check.sh).
+- Known gap: a `darwin-arm64` build of a real library fails its welded test
+  gate (`libKGENCompilerRTShared.dylib` not found, exit 134); a target with
+  no gated test, `//tools/build/examples:hello`, builds.
+
 ## Host floor
 
 An action takes a small, fixed set of things from the worker: a Linux x86_64
@@ -290,7 +312,7 @@ not share a remote cache.
 
 - **`komira_local_execution_platforms: local execution runs the pinned linux
   x86_64 toolchain on this machine, which is not Linux x86_64`.** Local builds
-  need Linux x86_64; configure a remote service (step 3).
+  need Linux x86_64; on a Mac, see [building on a Mac](#building-on-a-mac).
 - **A local build is slow or runs out of memory.** Pass `-j <n>` to run
   fewer actions at once (step 2).
 - **You want to know whether a build was local or remote.** `buck2 log
