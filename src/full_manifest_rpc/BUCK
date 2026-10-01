@@ -26,3 +26,14 @@ mojo_test(
     srcs = ["tests/test_resource_kind_ordinals.mojo"],
     deps = [":full_manifest_rpc"],
 )
+
+# `WebFrontendSpec.content_store` (field 12): the literal wire bytes, and the
+# binary and proto3-JSON round trips.
+mojo_test(
+    name = "test_web_frontend_content_store",
+    srcs = ["tests/test_web_frontend_content_store.mojo"],
+    deps = [
+        ":full_manifest_rpc",
+        "//src/komira_serde:komira_serde",
+    ],
+)
