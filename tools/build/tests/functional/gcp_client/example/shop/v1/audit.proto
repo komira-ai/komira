@@ -1,0 +1,9 @@
+// In the proto_deps closure, imported by nothing the client generates and not
+// in `bundle_only`: no audit.mojo may be written.
+syntax = "proto3";
+
+package example.shop.v1;
+
+message AuditRecord {
+  string actor = 1;
+}
