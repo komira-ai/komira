@@ -137,9 +137,13 @@ fn emit_operation(w: &mut YamlWriter, model: &IrModel, op: &Operation<'_>) {
     let partition = op.rule.and_then(|rule| {
         input_msg.and_then(|msg| {
             let leaf_names: Vec<String> = msg.fields.iter().map(|f| f.name.clone()).collect();
+            // A `{field=pattern}` variable has no OpenAPI spelling (the path
+            // key is the template text, so its parameter name would not
+            // match): such a template keeps the whole-body projection.
             PathTemplate::parse(&rule.path_template)
-                .and_then(|t| partition_fields(&leaf_names, &t, &rule.body))
                 .ok()
+                .filter(|t| !t.has_patterns())
+                .and_then(|t| partition_fields(&leaf_names, &t, &rule.body).ok())
         })
     });
 
@@ -530,4 +534,75 @@ pub fn emit_openapi_files(model: &IrModel) -> Vec<(String, String)> {
     // a trailing newline is guaranteed by `YamlWriter::line`.
     let _ = write!(doc, "");
     vec![("openapi.yaml".to_string(), doc)]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A one-method model: `Req { string name }`, served at `path` by GET.
+    fn model(path: &str) -> IrModel {
+        let ty = TypeRef { fq_name: ".t.v1.Req".into(), mojo_name: "Req".into() };
+        let svc = IrService {
+            name: "S".into(),
+            methods: vec![IrMethod {
+                name: "M".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(IrHttpRule {
+                    verb: "get".into(),
+                    path_template: path.into(),
+                    body: String::new(),
+                }),
+                routing_rule: None,
+            }],
+        };
+        IrModel {
+            files: vec![IrFile {
+                proto_path: "t.proto".into(),
+                proto_package: "t.v1".into(),
+                mojo_package: "t".into(),
+                messages: vec![IrMessage {
+                    name: "Req".into(),
+                    mojo_name: "Req".into(),
+                    fq_name: ".t.v1.Req".into(),
+                    is_map_entry: false,
+                    fields: vec![IrField {
+                        name: "name".into(),
+                        ty: IrType::Scalar(ScalarKind::String),
+                        label: Label::Single,
+                        proto_field_number: 1,
+                        json_name: "name".into(),
+                        oneof_index: None,
+                    }],
+                    oneofs: vec![],
+                }],
+                enums: vec![],
+                services: vec![svc],
+                imports: vec![],
+            }],
+        }
+    }
+
+    #[test]
+    fn plain_capture_is_a_path_parameter() {
+        let doc = emit_openapi(&model("/v1/{name}/things"));
+        assert!(doc.contains("/v1/{name}/things:"), "{doc}");
+        assert!(doc.contains("in: path"), "{doc}");
+    }
+
+    #[test]
+    fn written_pattern_keeps_the_whole_body_projection() {
+        // The path key is the template text, which has no `{name}`
+        // placeholder for an `in: path` parameter called `name` to fill:
+        // `{name=*}` (one segment, like `{name}`) included.
+        for path in ["/v1/{name=*}/things", "/v1/{name=projects/*}/things"] {
+            let doc = emit_openapi(&model(path));
+            assert!(!doc.contains("in: path"), "{path}: {doc}");
+            assert!(doc.contains("requestBody:"), "{path}: {doc}");
+        }
+    }
 }

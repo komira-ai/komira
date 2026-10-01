@@ -1,0 +1,13 @@
+// A second package declaring a LogEntry and a ListLogEntries method, so a
+// bare `LogEntry` root or `ListLogEntries` method is ambiguous.
+syntax = "proto3";
+
+package example.audit.v1;
+
+service AuditService {
+  rpc ListLogEntries(LogEntry) returns (LogEntry);
+}
+
+message LogEntry {
+  string actor = 1;
+}
