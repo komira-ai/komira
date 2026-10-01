@@ -6,8 +6,6 @@ disagree, the code is what runs; when two docs disagree, the one listed here win
 | Authority for | Doc |
 |---|---|
 | What komira is, and the map of its docs | [README.md](../README.md) |
-| The architecture: the module map of `src/`, how the build welds tests and lints, the layers still to come | [architecture.md](architecture.md) |
-| A first build: clone, build a library with its tests, add a library, where docs go | [getting-started.md](getting-started.md) |
 | Developer setup: buck2, the build farm, running the tests | [DEVELOPMENT.md](../DEVELOPMENT.md) |
 | The build tooling, and using komira from another repository | [tools/build/README.md](../tools/build/README.md) |
 | The Mojo rules | [tools/build/mojo/README.md](../tools/build/mojo/README.md) |
