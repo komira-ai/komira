@@ -31,6 +31,7 @@ mojo_library(
         "tests/test_L1_tls_client_construction.mojo",
         "tests/test_L1_tls_client_disable_verify.mojo",
         "tests/test_L1_tls_client_handshake_against_test_root.mojo",
+        "tests/test_L1_tls_client_hostname_verify.mojo",
         "tests/test_L1_tls_client_sni_send.mojo",
         "tests/test_L1_tls_client_verify_fail_no_trust.mojo",
         "tests/test_L1_tls_config_lifetime_uaf.mojo",
@@ -183,6 +184,7 @@ mojo_library(
         "tests/test_slow_dial_phase_breadcrumb.mojo",
         "tests/test_state_machine.mojo",
         "tests/test_streaming_body.mojo",
+        "tests/test_streaming_scheme_check.mojo",
         "tests/test_tcp_nodelay_parity.mojo",
         "tests/test_timeout_layer.mojo",
         "tests/test_timeout_layer_bounds_wall_time.mojo",
@@ -208,6 +210,11 @@ mojo_library(
             "tests/fixtures/tls/leaf_key.pem",
         ],
         "tests/test_L1_tls_client_handshake_against_test_root.mojo": [
+            "tests/fixtures/tls/leaf_cert.pem",
+            "tests/fixtures/tls/leaf_key.pem",
+            "tests/fixtures/tls/root_ca.pem",
+        ],
+        "tests/test_L1_tls_client_hostname_verify.mojo": [
             "tests/fixtures/tls/leaf_cert.pem",
             "tests/fixtures/tls/leaf_key.pem",
             "tests/fixtures/tls/root_ca.pem",

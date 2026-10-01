@@ -26,7 +26,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_serde import JsonValue, parse_json_value
+from komira_json import JsonValue, parse_json_value
 
 
 # =============================================================================

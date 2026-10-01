@@ -34,23 +34,29 @@
 # code generator emits the loop; the JSON value model (`JsonValue`) exposes
 # the object so the generated body can walk it.
 #
-# Encode rides the direct-byte `List[UInt8]` writers in `json_number`
-# (`write_i64_dec`, `write_f64_dtoa`) — no intermediate `String` allocation
-# on the value path. String escaping uses a local byte-iterating `_write_
-# json_string`: indexing via `ord(s[byte=i])` asserts on a
-# non-codepoint-boundary index for a multibyte-UTF-8 string, whereas
-# `_write_json_string` iterates raw bytes via `String.as_bytes()`, which is
-# UTF-8-safe: bytes >= 0x80 are valid JSON content and pass through
-# verbatim. Decode rides the self-contained
-# `json_value.JsonValue` recursive object cursor (the proto3-JSON decode
-# path is the debuggability format, off the codec hot path).
+# Encode rides the direct-byte `List[UInt8]` writers in `komira_json`
+# (`write_json_string`, `write_i64_dec`, `write_u64_dec`, `write_f64_dtoa`)
+# — no intermediate `String` allocation on the value path; bytes >= 0x80
+# are valid JSON content and pass through verbatim. Decode rides the
+# `komira_json.JsonValue` tree (the proto3-JSON decode path is the
+# debuggability format, off the codec hot path).
 #
 # Encapsulation: `JsonEncoder` is a `List[UInt8]` accumulator + small
 # bookkeeping; `JsonDecoder` wraps an owned `JsonValue`. No pointers cross the
 # module boundary.
 # =============================================================================
 
-from .json_number import write_i64_dec, write_f64_dtoa
+from komira_encoding import base64_encode, base64_decode
+from komira_json import (
+    JsonValue,
+    parse_json_value,
+    parse_int64_text,
+    JSON_STRING,
+    write_json_string,
+    write_i64_dec,
+    write_u64_dec,
+    write_f64_dtoa,
+)
 
 from .wire_format import (
     FieldKey,
@@ -59,13 +65,6 @@ from .wire_format import (
     WireDecoder,
     WireEncoder,
 )
-from .json_value import (
-    JsonValue,
-    parse_json_value,
-    _parse_int64,
-    JSON_STRING,
-)
-from .base64 import base64_encode, base64_decode
 
 
 # =============================================================================
@@ -126,7 +125,7 @@ struct JsonEncoder(WireEncoder):
         self._ensure_open()
         if self._need_comma:
             self.buf.append(0x2C)  # ','
-        _write_json_string(self.buf, String(json_name))
+        write_json_string(self.buf, String(json_name))
         self.buf.append(0x3A)  # ':'
         self._need_comma = True
 
@@ -166,7 +165,7 @@ struct JsonEncoder(WireEncoder):
         mut self, field_no: Int, json_name: StringSlice, v: String
     ) raises:
         self._begin_field(json_name)
-        _write_json_string(self.buf, v)
+        write_json_string(self.buf, v)
         self._end_field()
 
     def write_bytes_field(
@@ -174,7 +173,7 @@ struct JsonEncoder(WireEncoder):
     ) raises:
         # proto3 JSON: bytes -> base64 string.
         self._begin_field(json_name)
-        _write_json_string(self.buf, base64_encode(v))
+        write_json_string(self.buf, base64_encode(v))
         self._end_field()
 
     def write_i64_field(
@@ -207,7 +206,7 @@ struct JsonEncoder(WireEncoder):
         # (write_i64_dec is signed; a uint64 above Int64.MAX must not wrap).
         self._begin_field(json_name)
         self.buf.append(0x22)
-        _append_u64_dec(self.buf, v)
+        write_u64_dec(self.buf, v)
         self.buf.append(0x22)
         self._end_field()
 
@@ -219,7 +218,7 @@ struct JsonEncoder(WireEncoder):
         var quote = self._map_key_unquoted()
         if quote:
             self.buf.append(0x22)
-        _append_u64_dec(self.buf, UInt64(v))
+        write_u64_dec(self.buf, UInt64(v))
         if quote:
             self.buf.append(0x22)
         self._end_field()
@@ -303,7 +302,7 @@ struct JsonEncoder(WireEncoder):
         En: ProtoEnum
     ](mut self, field_no: Int, json_name: StringSlice, v: En) raises:
         self._begin_field(json_name)
-        _write_json_string(self.buf, v.json_name())
+        write_json_string(self.buf, v.json_name())
         self._end_field()
 
     # -- the embedded-message field (cross-trait recursion) ---------------
@@ -333,7 +332,7 @@ struct JsonEncoder(WireEncoder):
         self._ensure_open()
         if self._need_comma:
             self.buf.append(0x2C)  # ','
-        _write_json_string(self.buf, String(json_name))
+        write_json_string(self.buf, String(json_name))
         self.buf.append(0x3A)  # ':'
         self.buf.append(0x5B)  # '['
         self._need_comma = True
@@ -351,7 +350,7 @@ struct JsonEncoder(WireEncoder):
 
     def write_string_element(mut self, field_no: Int, v: String) raises:
         self._list_sep()
-        _write_json_string(self.buf, v)
+        write_json_string(self.buf, v)
 
     def write_i64_element(mut self, field_no: Int, v: Int64) raises:
         # proto3 JSON: int64 -> JSON STRING.
@@ -367,12 +366,12 @@ struct JsonEncoder(WireEncoder):
     def write_u64_element(mut self, field_no: Int, v: UInt64) raises:
         self._list_sep()
         self.buf.append(0x22)
-        _append_u64_dec(self.buf, v)
+        write_u64_dec(self.buf, v)
         self.buf.append(0x22)
 
     def write_u32_element(mut self, field_no: Int, v: UInt32) raises:
         self._list_sep()
-        _append_u64_dec(self.buf, UInt64(v))
+        write_u64_dec(self.buf, UInt64(v))
 
     def write_f64_element(mut self, field_no: Int, v: Float64) raises:
         self._list_sep()
@@ -414,7 +413,7 @@ struct JsonEncoder(WireEncoder):
     ](mut self, field_no: Int, v: En) raises:
         # A repeated enum element renders as its bare NAME string element.
         self._list_sep()
-        _write_json_string(self.buf, v.json_name())
+        write_json_string(self.buf, v.json_name())
 
     def write_message_element[
         M: Serializable
@@ -444,7 +443,7 @@ struct JsonEncoder(WireEncoder):
         self._ensure_open()
         if self._need_comma:
             self.buf.append(0x2C)  # ','
-        _write_json_string(self.buf, String(json_name))
+        write_json_string(self.buf, String(json_name))
         self.buf.append(0x3A)  # ':'
         self.buf.append(0x7B)  # '{'
         self._need_comma = True
@@ -863,7 +862,7 @@ struct JsonDecoder(WireDecoder):
     #
     # The current field's value is a JSON `{...}` object; insert ALL of its
     # key/value pairs into `out`. The object key is the map key (an integral
-    # proto key arrives as its decimal text — parsed back via `_parse_int64`
+    # proto key arrives as its decimal text — parsed back via `parse_int64_text`
     # on the key string). proto3-JSON always renders the value per its scalar
     # type (string -> string, int32 -> number).
 
@@ -894,7 +893,7 @@ struct JsonDecoder(WireDecoder):
         var obj = self._cur_object()
         for i in range(len(obj.obj_keys)):
             # The integral map key is the object key's decimal text.
-            out[_parse_int64(obj.obj_keys[i])] = obj.children[i].as_string()
+            out[parse_int64_text(obj.obj_keys[i])] = obj.children[i].as_string()
 
     def read_into_string_message_map[
         V: Serializable & Deinitable
@@ -1208,75 +1207,3 @@ def _append_lit(mut buf: List[UInt8], lit: StringLiteral):
     for i in range(len(bytes)):
         buf.append(bytes[i])
 
-
-def _write_json_string(mut buf: List[UInt8], s: String):
-    """Write `s` as a JSON-spec escaped string (wrapped in `"..."`).
-
-    Iterates the RAW UTF-8 bytes of `s` (`String.as_bytes()`), so a
-    multibyte codepoint is handled byte-by-byte safely — every byte >= 0x20
-    that is not a double-quote or backslash (including all UTF-8 continuation
-    bytes) passes through verbatim, which is valid JSON. Escape lattice per
-    RFC 8259 section 7: double-quote, backslash, and the C0 controls newline
-    / carriage-return / tab / backspace / form-feed get the two-char escape;
-    any other control byte (< 0x20) gets the six-char lowercase-hex escape."""
-    buf.append(0x22)  # opening '"'
-    var bytes = s.as_bytes()
-    for i in range(len(bytes)):
-        var b = bytes[i]
-        if b == 0x22:  # '"'
-            buf.append(0x5C)
-            buf.append(0x22)
-        elif b == 0x5C:  # backslash
-            buf.append(0x5C)
-            buf.append(0x5C)
-        elif b == 0x0A:  # '\n'
-            buf.append(0x5C)
-            buf.append(0x6E)
-        elif b == 0x0D:  # '\r'
-            buf.append(0x5C)
-            buf.append(0x72)
-        elif b == 0x09:  # '\t'
-            buf.append(0x5C)
-            buf.append(0x74)
-        elif b == 0x08:  # '\b'
-            buf.append(0x5C)
-            buf.append(0x62)
-        elif b == 0x0C:  # '\f'
-            buf.append(0x5C)
-            buf.append(0x66)
-        elif b < 0x20:  # other control char -> \u00XX
-            buf.append(0x5C)  # '\'
-            buf.append(0x75)  # 'u'
-            buf.append(0x30)  # '0'
-            buf.append(0x30)  # '0'
-            buf.append(_hex_digit((b >> 4) & 0xF))
-            buf.append(_hex_digit(b & 0xF))
-        else:
-            # >= 0x20 and not " or \\ — includes every UTF-8 byte; verbatim.
-            buf.append(b)
-    buf.append(0x22)  # closing '"'
-
-
-@always_inline
-def _hex_digit(nibble: UInt8) -> UInt8:
-    """A 0..15 nibble as its lowercase-hex ASCII byte."""
-    if nibble < 10:
-        return 0x30 + nibble  # '0'..'9'
-    return 0x61 + (nibble - 10)  # 'a'..'f'
-
-
-def _append_u64_dec(mut buf: List[UInt8], v: UInt64):
-    """Append `v` as an unsigned decimal — UInt64-safe (write_i64_dec is
-    signed and would wrap a value above Int64.MAX)."""
-    if v == UInt64(0):
-        buf.append(0x30)  # '0'
-        return
-    var digits = List[UInt8]()
-    var x = v
-    while x > UInt64(0):
-        var d = Int(x % UInt64(10))
-        digits.append(UInt8(0x30 + d))
-        x = x // UInt64(10)
-    var n = len(digits)
-    for i in range(n):
-        buf.append(digits[n - 1 - i])

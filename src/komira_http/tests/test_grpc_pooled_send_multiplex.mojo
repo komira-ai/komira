@@ -156,7 +156,7 @@ def test_n_grpc_rpcs_multiplex_on_one_pooled_h2_conn() raises:
     # next RPC's drive. (A greedy read would pull frames for streams not
     # yet created on the conn, which the client drops → EOF_MID_RESPONSE.)
     stream.set_max_read_per_call(1)
-    var connector = ScriptedConnector.with_stream(stream^)
+    var connector = ScriptedConnector.with_stream_tls(stream^)
     var client = HttpClient[ScriptedConnector].with_defaults(connector^)
     var reactor = _make_reactor()
     var token = CancellationToken.never()
