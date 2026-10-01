@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+mojo_library(
+    name = "kci_edge",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_iac:kci_iac",
+    ],
+    test_srcs = [
+        "tests/test_direct_edge_conformer.mojo",
+        "tests/test_network_accumulator.mojo",
+        "tests/test_transport_split_planner.mojo",
+        "tests/test_transport_split_render.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
