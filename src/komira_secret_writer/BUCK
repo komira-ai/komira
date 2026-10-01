@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The write-only secret seam: the `SecretWriter` trait (a secret_ref and a
+# move-only zeroizing `SecretValue` in, nothing out) and its in-memory test
+# double. It names no provider, no endpoint, no credential and no tenant; every
+# particular writer lives with its cloud client. It is a sibling of
+# `komira_secret_store` rather than part of it so that a target can depend on
+# the resolve seam without gaining the write verb. Its one dependency is
+# `komira_secret_store`, for `SecretValue` and the paired resolve double.
+mojo_library(
+    name = "komira_secret_writer",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_secret_store:komira_secret_store"],
+    test_srcs = ["tests/test_secret_writer.mojo"],
+    visibility = ["PUBLIC"],
+)
