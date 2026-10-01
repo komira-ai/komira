@@ -97,7 +97,28 @@ pub fn emit_rest_service(
     w.line(&format!(
         "    `{GCP_CORE}.{GCP_TOKEN_SOURCE}`): the client reads no environment"
     ));
-    w.line("    and holds no credential of its own.\"\"\"");
+    w.line("    and holds no credential of its own.");
+    w.blank();
+    // ONE role for the connector: the `HttpClient` owns it and every method
+    // dials through `send_buffered`, which scheme-checks, sets the per-request
+    // dial host (SNI), applies the request budget and consults the client's
+    // pool. A per-method `connector` argument would be a second connector of
+    // the same type that the owned one never sees; `call_pooled` would pool
+    // only when handed that same type, and its keepalive cache is plaintext
+    // h1 only, so over https it would dial fresh exactly like `call`.
+    w.line("    The connector has one role: the `HttpClient[C]` passed to `__init__`");
+    w.line("    owns it, and every method sends through that client's");
+    w.line("    `send_buffered`, which checks the URL scheme against the connector,");
+    w.line("    sets the dial host (SNI) per request and goes through the client's");
+    w.line("    connection pool.");
+    w.line("    No method takes a connector of its own.");
+    w.blank();
+    w.line("    The caller owns the time budget: build the `HttpClient[C]` with the");
+    w.line("    `HttpClientConfig` that fits the process. A process serving requests");
+    w.line("    under a platform deadline (Cloud Run, Lambda) builds it from");
+    w.line("    `HttpClientConfig.for_serving_ceiling(ceiling)`, not");
+    w.line("    `HttpClient.with_defaults`, whose 600s budget can outlive the");
+    w.line("    container. This client applies no ceiling of its own.\"\"\"");
     w.blank();
     w.line("var _client: HttpClient[Self.C]");
     w.line("\"\"\"The HTTP transport.\"\"\"");
@@ -278,7 +299,7 @@ fn emit_rest_method(
 
     w.line(&format!(
         "def {method_name}[RT: Runtime](mut self, req: {req_ty}, \
-         mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> {resp_ty}:"
+         mut reactor: Reactor[RT.Sink]) raises -> {resp_ty}:"
     ));
     w.indent();
     w.line(&format!(
@@ -319,9 +340,9 @@ fn emit_rest_method(
 
     // -- request construction (verb is a property of the request) ------------
     // The request-body conformer type the constructor yields drives the
-    // `call[RT, C, B]` binding below: GET builds a `ClientRequest[EmptyBody]`
+    // `send_buffered[RT, B]` binding below: GET builds a `ClientRequest[EmptyBody]`
     // (`build_get_request`), every other verb a `ClientRequest[BytesBody]`.
-    // The `call`'s `B` parameter MUST match the constructed request's body
+    // The `send_buffered`'s `B` parameter MUST match the constructed request's body
     // type — pinning `BytesBody` for a GET would be a hard type mismatch
     // against `ClientRequest[EmptyBody]`.
     let body_ty: &str;
@@ -370,10 +391,11 @@ fn emit_rest_method(
     }
 
     // -- dispatch ------------------------------------------------------------
-    // `Self.C` (NOT bare `C`) — same struct-parameter qualification rule.
-    w.line(&format!("var resp = self._client.call[RT, Self.C, {body_ty}]("));
-    w.line("    req_http^, connector, reactor,");
-    w.line(")");
+    // Through the client-owned connector (the struct docstring states why
+    // there is no per-method one).
+    w.line(&format!(
+        "var resp = self._client.send_buffered[RT, {body_ty}](req_http^, reactor)"
+    ));
 
     // -- status check --------------------------------------------------------
     // Anything but 2xx is an error: a 3xx or 1xx body decoded leniently
@@ -1074,10 +1096,10 @@ mod tests {
         assert!(emit.source.contains("BytesBody.from_str(body_text)"));
         assert!(emit.source.contains("HttpMethod.post()"));
         assert!(emit.source.contains("Content-Type"));
-        // POST routes through `call[RT, Self.C, BytesBody]` (the body verb).
+        // POST routes through `send_buffered[RT, BytesBody]` (the body verb).
         assert!(emit
             .source
-            .contains("self._client.call[RT, Self.C, BytesBody]"));
+            .contains("self._client.send_buffered[RT, BytesBody](req_http^, reactor)"));
     }
 
     #[test]
@@ -1184,7 +1206,13 @@ mod tests {
         // GET binds EmptyBody (its request is ClientRequest[EmptyBody]).
         assert!(emit
             .source
-            .contains("self._client.call[RT, Self.C, EmptyBody]"));
+            .contains("self._client.send_buffered[RT, EmptyBody](req_http^, reactor)"));
+        // The connector has ONE role (the HttpClient owns it): no method takes
+        // one, nothing reaches the unpooled `call`, and the docstring states
+        // the caller's serving-ceiling obligation.
+        assert!(!emit.source.contains("mut connector"));
+        assert!(!emit.source.contains("self._client.call["));
+        assert!(emit.source.contains("HttpClientConfig.for_serving_ceiling(ceiling)"));
         assert!(emit
             .source
             .contains("_rest_bool_str(req.include_reviews)"));

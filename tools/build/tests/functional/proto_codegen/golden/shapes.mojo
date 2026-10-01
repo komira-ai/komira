@@ -362,7 +362,21 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
         Every request carries `Authorization: Bearer <token>` from `T` (a
         `komira_gcp_core.GcpTokenSource`): the client reads no environment
-        and holds no credential of its own."""
+        and holds no credential of its own.
+
+        The connector has one role: the `HttpClient[C]` passed to `__init__`
+        owns it, and every method sends through that client's
+        `send_buffered`, which checks the URL scheme against the connector,
+        sets the dial host (SNI) per request and goes through the client's
+        connection pool.
+        No method takes a connector of its own.
+
+        The caller owns the time budget: build the `HttpClient[C]` with the
+        `HttpClientConfig` that fits the process. A process serving requests
+        under a platform deadline (Cloud Run, Lambda) builds it from
+        `HttpClientConfig.for_serving_ceiling(ceiling)`, not
+        `HttpClient.with_defaults`, whose 600s budget can outlive the
+        container. This client applies no ceiling of its own."""
 
     var _client: HttpClient[Self.C]
     """The HTTP transport."""
@@ -413,7 +427,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
             headers.append(_rest_e.name, _rest_e.value)
             _rest_i += 1
 
-    def get_object[RT: Runtime](mut self, req: GetObjectRequest, mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> Thing:
+    def get_object[RT: Runtime](mut self, req: GetObjectRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/v1/{name=buckets/*/objects/**}` — REST/JSON."""
         var path = String("")
         path += String("/v1")
@@ -424,9 +438,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())
         var req_http = build_get_request(url^, headers^)
-        var resp = self._client.call[RT, Self.C, EmptyBody](
-            req_http^, connector, reactor,
-        )
+        var resp = self._client.send_buffered[RT, EmptyBody](req_http^, reactor)
         var status_int = Int(resp.status)
         var resp_bytes = resp.body.take_bytes()
         if status_int < 200 or status_int >= 300:
@@ -437,7 +449,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var dec = JsonDecoder.from_text_lenient(resp_text)
         return Thing.decode(dec)
 
-    def cancel_operation[RT: Runtime](mut self, req: CancelOperationRequest, mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> Thing:
+    def cancel_operation[RT: Runtime](mut self, req: CancelOperationRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """POST `/v1/{name=operations/**}:cancel` — REST/JSON."""
         var path = String("")
         path += String("/v1")
@@ -457,9 +469,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var req_http = build_request_with_body[BytesBody](
             HttpMethod.post(), url^, headers^, body^,
         )
-        var resp = self._client.call[RT, Self.C, BytesBody](
-            req_http^, connector, reactor,
-        )
+        var resp = self._client.send_buffered[RT, BytesBody](req_http^, reactor)
         var status_int = Int(resp.status)
         var resp_bytes = resp.body.take_bytes()
         if status_int < 200 or status_int >= 300:
@@ -470,7 +480,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var dec = JsonDecoder.from_text_lenient(resp_text)
         return Thing.decode(dec)
 
-    def list_things[RT: Runtime](mut self, req: ListThingsRequest, mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> Thing:
+    def list_things[RT: Runtime](mut self, req: ListThingsRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/v1/{name=*}/things` — REST/JSON."""
         var path = String("")
         path += String("/v1")
@@ -500,9 +510,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())
         var req_http = build_get_request(url^, headers^)
-        var resp = self._client.call[RT, Self.C, EmptyBody](
-            req_http^, connector, reactor,
-        )
+        var resp = self._client.send_buffered[RT, EmptyBody](req_http^, reactor)
         var status_int = Int(resp.status)
         var resp_bytes = resp.body.take_bytes()
         if status_int < 200 or status_int >= 300:
@@ -513,7 +521,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var dec = JsonDecoder.from_text_lenient(resp_text)
         return Thing.decode(dec)
 
-    def get_root[RT: Runtime](mut self, req: Thing, mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> Thing:
+    def get_root[RT: Runtime](mut self, req: Thing, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/` — REST/JSON."""
         var path = String("")
         path += String("/")
@@ -528,9 +536,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())
         var req_http = build_get_request(url^, headers^)
-        var resp = self._client.call[RT, Self.C, EmptyBody](
-            req_http^, connector, reactor,
-        )
+        var resp = self._client.send_buffered[RT, EmptyBody](req_http^, reactor)
         var status_int = Int(resp.status)
         var resp_bytes = resp.body.take_bytes()
         if status_int < 200 or status_int >= 300:

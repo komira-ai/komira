@@ -566,7 +566,21 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
 
         Every request carries `Authorization: Bearer <token>` from `T` (a
         `komira_gcp_core.GcpTokenSource`): the client reads no environment
-        and holds no credential of its own."""
+        and holds no credential of its own.
+
+        The connector has one role: the `HttpClient[C]` passed to `__init__`
+        owns it, and every method sends through that client's
+        `send_buffered`, which checks the URL scheme against the connector,
+        sets the dial host (SNI) per request and goes through the client's
+        connection pool.
+        No method takes a connector of its own.
+
+        The caller owns the time budget: build the `HttpClient[C]` with the
+        `HttpClientConfig` that fits the process. A process serving requests
+        under a platform deadline (Cloud Run, Lambda) builds it from
+        `HttpClientConfig.for_serving_ceiling(ceiling)`, not
+        `HttpClient.with_defaults`, whose 600s budget can outlive the
+        container. This client applies no ceiling of its own."""
 
     var _client: HttpClient[Self.C]
     """The HTTP transport."""
@@ -617,7 +631,7 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
             headers.append(_rest_e.name, _rest_e.value)
             _rest_i += 1
 
-    def list_log_entries[RT: Runtime](mut self, req: ListLogEntriesRequest, mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> ListLogEntriesResponse:
+    def list_log_entries[RT: Runtime](mut self, req: ListLogEntriesRequest, mut reactor: Reactor[RT.Sink]) raises -> ListLogEntriesResponse:
         """POST `/v2/entries:list` — REST/JSON."""
         var path = String("")
         path += String("/v2")
@@ -636,9 +650,7 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
         var req_http = build_request_with_body[BytesBody](
             HttpMethod.post(), url^, headers^, body^,
         )
-        var resp = self._client.call[RT, Self.C, BytesBody](
-            req_http^, connector, reactor,
-        )
+        var resp = self._client.send_buffered[RT, BytesBody](req_http^, reactor)
         var status_int = Int(resp.status)
         var resp_bytes = resp.body.take_bytes()
         if status_int < 200 or status_int >= 300:
@@ -649,7 +661,7 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
         var dec = JsonDecoder.from_text_lenient(resp_text)
         return ListLogEntriesResponse.decode(dec)
 
-    def list_logs[RT: Runtime](mut self, req: ListLogsRequest, mut connector: Self.C, mut reactor: Reactor[RT.Sink]) raises -> ListLogsResponse:
+    def list_logs[RT: Runtime](mut self, req: ListLogsRequest, mut reactor: Reactor[RT.Sink]) raises -> ListLogsResponse:
         """GET `/v2/{parent=projects/*}/logs` — REST/JSON."""
         var path = String("")
         path += String("/v2")
@@ -675,9 +687,7 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())
         var req_http = build_get_request(url^, headers^)
-        var resp = self._client.call[RT, Self.C, EmptyBody](
-            req_http^, connector, reactor,
-        )
+        var resp = self._client.send_buffered[RT, EmptyBody](req_http^, reactor)
         var status_int = Int(resp.status)
         var resp_bytes = resp.body.take_bytes()
         if status_int < 200 or status_int >= 300:
