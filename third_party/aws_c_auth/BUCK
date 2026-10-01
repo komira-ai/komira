@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":suite.bzl", "SIGV4_SUITE_DIR", "sigv4_suite_files")
 
 # awslabs/aws-c-auth at c4bc791ac6985eedb503e882cd450cc5b344c2f2, Apache-2.0
@@ -19,7 +20,7 @@ pinned_file(
 # `[tests/aws-signing-test-suite/v4]` is the suite alone.
 archive_files(
     name = "files",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":aws-c-auth-c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz",
     files = ["LICENSE", "NOTICE"] + sigv4_suite_files(),
     one_tree = True,

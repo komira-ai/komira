@@ -11,13 +11,13 @@ The files are not committed: `srcs` are files extracted at build time from
 the googleapis archive at one pinned commit (BUCK: a `pinned_file`, whose
 sha256 buck2 checks on download, and an `archive_files`). `proto_check`
 stages `srcs` at their import paths (less `strip_prefix`) and runs
-proto_check.sh over them, one action under the pinned busybox on a light
-worker: protoc (`toolchains//:mojo_proto`, the protoc every
-mojo_proto_library runs) must parse the roots with nothing on its path but
-the tree and its own well-known types, writing a descriptor set
-(--include_imports) whose files are exactly the tree's. So a file the closure
-needs and the tree lacks fails here (as after a bump that adds an import),
-and so does a listed file nothing imports.
+proto_check.sh over them, one action under the pinned busybox (a linux x86_64
+binary, so on the linux execution platform): protoc
+(`toolchains//:mojo_proto`, the protoc every mojo_proto_library runs) must
+parse the roots with nothing on its path but the tree and its own well-known
+types, writing a descriptor set (--include_imports) whose files are exactly
+the tree's. So a file the closure needs and the tree lacks fails here (as
+after a bump that adds an import), and so does a listed file nothing imports.
 
 The default output is that descriptor set; `[tree]` is the checked copy of
 the tree, written only when every check passes. `ProtoSrcsInfo` carries that
@@ -33,9 +33,10 @@ checked tree, not only of its own test.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:proto.bzl", "MojoProtoToolchainInfo", "ProtoSrcsInfo")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# Checking runs on the light workers: it parses a few files and compiles nothing.
-_LIGHT = ["komira//tools/build/platforms:light"]
+# Checking runs linux x86_64 tools (busybox, protoc): it parses a few files and
+# compiles nothing.
 
 def _stage(ctx):
     """`srcs` staged at their import paths: (directory, import paths)."""
@@ -154,10 +155,10 @@ _proto_check_case = rule(
 )
 
 def proto_check(**kwargs):
-    _proto_check(exec_compatible_with = _LIGHT, **kwargs)
+    _proto_check(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 def proto_check_case(**kwargs):
-    _proto_check_case(exec_compatible_with = _LIGHT, **kwargs)
+    _proto_check_case(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 proto_check = declares_docs(proto_check)
 proto_check_case = declares_docs(proto_check_case)

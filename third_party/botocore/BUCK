@@ -1,5 +1,6 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":defs.bzl", "botocore_model")
 load(":models.bzl", "BOTOCORE_MODELS", "botocore_model_path")
 
@@ -19,7 +20,7 @@ pinned_file(
 
 archive_files(
     name = "files",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":botocore-1.43.70.tar.gz",
     files = ["LICENSE.txt", "NOTICE"] + [botocore_model_path(s) for s in sorted(BOTOCORE_MODELS)],
     strip_prefix = "botocore-1.43.70",
@@ -30,7 +31,7 @@ archive_files(
 # sha256.
 [botocore_model(
     name = service,
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     path = "{}/{}/service-2.json".format(service, BOTOCORE_MODELS[service].api_version),
     sha256 = BOTOCORE_MODELS[service].sha256,
     src = ":files[{}]".format(botocore_model_path(service)),
