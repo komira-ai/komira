@@ -1,0 +1,212 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
+
+# Text goldens and refusals of komira//tools/build/proto-codegen:aws-client-gen,
+# as check actions: `buck2 build tests//functional/aws_codegen:` runs them all
+# (run_tests.sh, test 34).
+#
+# model/ is a copy of tools/vendor/aws_models/ as the vendoring change lays it
+# out: the CloudWatch Logs model from the botocore 1.43.70 sdist with its
+# prose members stripped (sha256 below = that model's MANIFEST.tsv row), and
+# botocore's LICENSE and NOTICE, unmodified. Once the vendored model is on
+# main, a follow-up points _LOGS_MODEL at it and deletes this copy.
+
+_LOGS_SHA256 = "24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2"
+_LOGS_MODEL = "model/logs/2014-03-28/service-2.json"
+_LOGS = [
+    "--model-sha256",
+    _LOGS_SHA256,
+    "--service",
+    "logs",
+]
+
+# The module kci_logs needs first: GetLogEvents, without transport.
+aws_codegen_golden(
+    name = "logs_pure",
+    gen_args = _LOGS + [
+        "--operations",
+        "GetLogEvents",
+        "--pure-only",
+        "--probe-import",
+        "komira_aws_logs.komira_aws_logs",
+    ],
+    golden = "golden/logs_pure.mojo",
+    golden_probe = "golden/logs_pure_probe.mojo",
+    model = _LOGS_MODEL,
+    module = "komira_aws_logs",
+)
+
+# The same operation as a client: it adds the komira_aws_core transport names
+# and komira_http.transport.io_stream.Connector.
+aws_codegen_golden(
+    name = "logs_client",
+    gen_args = _LOGS + [
+        "--operations",
+        "GetLogEvents",
+        "--probe-import",
+        "komira_aws_logs.komira_aws_logs",
+    ],
+    golden = "golden/logs_client.mojo",
+    golden_probe = "golden/logs_client_probe.mojo",
+    model = _LOGS_MODEL,
+    module = "komira_aws_logs",
+)
+
+aws_codegen_refusal(
+    name = "refuse_empty_operations",
+    expect = "--operations is MANDATORY and may not be empty",
+    gen_args = _LOGS + [
+        "--operations",
+        "",
+    ],
+    model = _LOGS_MODEL,
+)
+
+aws_codegen_refusal(
+    name = "refuse_no_operations",
+    expect = "--operations is MANDATORY and may not be empty",
+    gen_args = _LOGS,
+    model = _LOGS_MODEL,
+)
+
+aws_codegen_refusal(
+    name = "refuse_unknown_operation",
+    expect = "GetLogEvent",
+    gen_args = _LOGS + [
+        "--operations",
+        "GetLogEvent",
+    ],
+    model = _LOGS_MODEL,
+)
+
+aws_codegen_refusal(
+    name = "refuse_unsupported_protocol",
+    expect = "rest-xml",
+    gen_args = [
+        "--model-sha256",
+        "5f457c555302b8e12a8b7def55eaf4e94510d3c19731c57325f10e4a91cad9ab",
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+    ],
+    model = "model/tiny_restxml.json",
+)
+
+# The digest is checked against the bytes: the right model with another
+# model's digest is refused.
+aws_codegen_refusal(
+    name = "refuse_wrong_sha256",
+    expect = "The model is not the pinned one",
+    gen_args = [
+        "--model-sha256",
+        "5f457c555302b8e12a8b7def55eaf4e94510d3c19731c57325f10e4a91cad9ab",
+        "--service",
+        "logs",
+        "--operations",
+        "GetLogEvents",
+    ],
+    model = _LOGS_MODEL,
+)
+
+aws_codegen_refusal(
+    name = "refuse_no_sha256",
+    expect = "--model-sha256 is required",
+    gen_args = [
+        "--service",
+        "logs",
+        "--operations",
+        "GetLogEvents",
+    ],
+    model = _LOGS_MODEL,
+)
+
+# A zero-byte model, under its own (correct) digest: it passes the digest
+# check and is refused as EMPTY before the JSON parser sees it.
+aws_codegen_refusal(
+    name = "refuse_empty_model",
+    expect = "is EMPTY. A zero-byte model",
+    gen_args = [
+        "--model-sha256",
+        "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "--service",
+        "logs",
+        "--operations",
+        "GetLogEvents",
+    ],
+    model = "model/empty.json",
+)
+
+# The digest is 64 LOWERCASE hex digits: the right digest in upper case, and
+# one digit short, are both refused before the model is read.
+aws_codegen_refusal(
+    name = "refuse_uppercase_sha256",
+    expect = "is not 64 lowercase hex digits",
+    gen_args = [
+        "--model-sha256",
+        "24A6C5868F1DC6CE9661113F79BC6C51580363957B9B59DAD3D530A350183FA2",
+        "--service",
+        "logs",
+        "--operations",
+        "GetLogEvents",
+    ],
+    model = _LOGS_MODEL,
+)
+
+aws_codegen_refusal(
+    name = "refuse_short_sha256",
+    expect = "is not 64 lowercase hex digits",
+    gen_args = [
+        "--model-sha256",
+        "24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa",
+        "--service",
+        "logs",
+        "--operations",
+        "GetLogEvents",
+    ],
+    model = _LOGS_MODEL,
+)
+
+# --probe-import names the probe's import, so without --probe-out it is refused.
+aws_codegen_refusal(
+    name = "refuse_probe_import_without_probe_out",
+    expect = "--probe-import names the probe's import, so it needs --probe-out",
+    gen_args = _LOGS + [
+        "--operations",
+        "GetLogEvents",
+        "--probe-import",
+        "komira_aws_logs.komira_aws_logs",
+    ],
+    model = _LOGS_MODEL,
+    probe_out = False,
+)
+
+# Not checked here: emit_layout_probe's refusal of a module with no struct.
+# The CLI cannot reach it: --operations may not be empty, and the front-end
+# gives every operation a Request and a Response struct (synthesising an
+# empty one where the model declares no input or output), so every module
+# the CLI emits has at least two structs to probe.
+
+export_file(
+    name = "aws_codegen.sh",
+    visibility = ["//negative/aws_codegen:"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["aws_codegen.sh"],
+    visibility = ["komira//:tests_lints"],
+)
+
+# For tests//negative/aws_codegen, which plants a golden that differs.
+export_file(
+    name = "logs_client_golden",
+    src = "golden/logs_client.mojo",
+    visibility = ["//negative/aws_codegen:"],
+)
+
+export_file(
+    name = "logs_model",
+    src = _LOGS_MODEL,
+    visibility = ["//negative/aws_codegen:"],
+)
