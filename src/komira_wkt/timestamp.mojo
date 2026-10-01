@@ -26,7 +26,23 @@
 # self-contained here so `komira_wkt` depends only on `komira_serde`.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_serde import (
+    Serializable,
+    Proto3JsonWkt,
+    WireEncoder,
+    WireDecoder,
+    JsonValue,
+    JSON_STRING,
+    write_json_string,
+)
+
+
+# The canonical range of each type, as `timestamp.proto` and `duration.proto`
+# state it: 0001-01-01T00:00:00Z through 9999-12-31T23:59:59Z, and
+# +-10000 years of seconds.
+comptime _TS_MIN_SECONDS: Int = -62135596800
+comptime _TS_MAX_SECONDS: Int = 253402300799
+comptime _DUR_MAX_SECONDS: Int = 315576000000
 
 
 # =============================================================================
@@ -35,7 +51,7 @@ from komira_serde import Serializable, WireEncoder, WireDecoder
 
 
 @fieldwise_init
-struct Timestamp(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct Timestamp(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.Timestamp` — a point in time as a Unix-epoch offset.
 
     `seconds` is seconds since 1970-01-01T00:00:00Z; `nanos` is the
@@ -80,9 +96,23 @@ struct Timestamp(Serializable, Copyable, Movable, ImplicitlyCopyable):
         """The RFC-3339 string form, e.g. `"1972-01-01T10:00:20.021Z"`.
 
         Returns the raw scalar text WITHOUT enclosing JSON quotes — the
-        generated client / `encode_json` wraps it as a JSON string."""
+        generated client / `encode_json` wraps it as a JSON string.
+
+        REFUSES a value the canonical form cannot express: `seconds` outside
+        0001-01-01T00:00:00Z..9999-12-31T23:59:59Z, or `nanos` outside
+        [0, 999999999]."""
         var secs = Int(self.seconds)
         var nanos = Int(self.nanos)
+        if secs < _TS_MIN_SECONDS or secs > _TS_MAX_SECONDS:
+            raise Error(
+                "WktError: Timestamp seconds outside 0001..9999: "
+                + String(secs)
+            )
+        if nanos < 0 or nanos > 999999999:
+            raise Error(
+                "WktError: Timestamp nanos outside [0, 999999999]: "
+                + String(nanos)
+            )
         # The day index and the seconds-of-day, floor-divided so a negative
         # epoch (a pre-1970 timestamp) lands on the correct civil day.
         var days = _floor_div(secs, 86400)
@@ -145,11 +175,51 @@ struct Timestamp(Serializable, Copyable, Movable, ImplicitlyCopyable):
             for _ in range(9 - frac_digits):
                 scale *= 10
             nanos = frac_val * scale
-        if idx >= n or b[idx] != 0x5A:  # 'Z'
-            raise Error("WktError: Timestamp must end in 'Z' (UTC): " + text)
+        # The zone: `Z`, or a `+hh:mm` / `-hh:mm` offset (RFC 3339 allows
+        # one on input; the canonical OUTPUT is always `Z`). It must be the
+        # LAST thing in the string: `...Zjunk` is not a timestamp.
+        var offset = 0
+        if idx < n and b[idx] == 0x5A:  # 'Z'
+            idx += 1
+        elif idx < n and (b[idx] == 0x2B or b[idx] == 0x2D):  # '+' / '-'
+            var sign = 1 if b[idx] == 0x2B else -1
+            if idx + 6 > n:
+                raise Error("WktError: bad Timestamp offset: " + text)
+            var oh = _parse_uint(b, idx + 1, 2)
+            _expect(b, idx + 3, 0x3A, text)  # ':'
+            var om = _parse_uint(b, idx + 4, 2)
+            if oh > 23 or om > 59:
+                raise Error("WktError: bad Timestamp offset: " + text)
+            offset = sign * (oh * 3600 + om * 60)
+            idx += 6
+        else:
+            raise Error(
+                "WktError: Timestamp needs a 'Z' or +hh:mm zone: " + text
+            )
+        if idx != n:
+            raise Error("WktError: trailing bytes after Timestamp: " + text)
+        if year < 1 or month < 1 or month > 12:
+            raise Error("WktError: Timestamp date out of range: " + text)
+        if day < 1 or day > _days_in_month(year, month):
+            raise Error("WktError: Timestamp day out of range: " + text)
+        if hh > 23 or mm > 59 or ss > 59:
+            raise Error("WktError: Timestamp time out of range: " + text)
         var days = _days_from_civil(year, month, day)
-        var secs = days * 86400 + hh * 3600 + mm * 60 + ss
+        var secs = days * 86400 + hh * 3600 + mm * 60 + ss - offset
+        if secs < _TS_MIN_SECONDS or secs > _TS_MAX_SECONDS:
+            raise Error("WktError: Timestamp outside 0001..9999: " + text)
         return Self(Int64(secs), Int32(nanos))
+
+    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_json_string(buf, self.to_proto3_json())
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        if v.kind != JSON_STRING:
+            raise Error("WktError: Timestamp JSON must be an RFC 3339 string")
+        return Self.from_proto3_json(v.text)
 
 
 # =============================================================================
@@ -158,7 +228,7 @@ struct Timestamp(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct Duration(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct Duration(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.Duration` — a signed, fixed-length span of time.
 
     `seconds` is the whole-second span; `nanos` is the fractional part in
@@ -206,6 +276,21 @@ struct Duration(Serializable, Copyable, Movable, ImplicitlyCopyable):
         whole-second magnitude; an all-zero duration is `0s`."""
         var secs = Int(self.seconds)
         var nanos = Int(self.nanos)
+        if secs < -_DUR_MAX_SECONDS or secs > _DUR_MAX_SECONDS:
+            raise Error(
+                "WktError: Duration seconds outside +-315576000000: "
+                + String(secs)
+            )
+        if nanos < -999999999 or nanos > 999999999:
+            raise Error(
+                "WktError: Duration nanos outside +-999999999: "
+                + String(nanos)
+            )
+        if (secs > 0 and nanos < 0) or (secs < 0 and nanos > 0):
+            raise Error(
+                "WktError: Duration seconds and nanos have opposite signs: "
+                + String(secs) + ", " + String(nanos)
+            )
         var negative = secs < 0 or nanos < 0
         var abs_secs = secs if secs >= 0 else -secs
         var abs_nanos = nanos if nanos >= 0 else -nanos
@@ -236,6 +321,8 @@ struct Duration(Serializable, Copyable, Movable, ImplicitlyCopyable):
             idx += 1
         if idx == int_start:
             raise Error("WktError: Duration has no integer part: " + text)
+        if idx - int_start > 12:
+            raise Error("WktError: Duration out of range: " + text)
         var whole = _parse_uint(b, int_start, idx - int_start)
         var nanos = 0
         if idx < n - 1 and b[idx] == 0x2E:  # '.'
@@ -253,9 +340,22 @@ struct Duration(Serializable, Copyable, Movable, ImplicitlyCopyable):
             nanos = frac_val * scale
         if idx != n - 1:
             raise Error("WktError: trailing chars in Duration: " + text)
+        if whole > _DUR_MAX_SECONDS:
+            raise Error("WktError: Duration out of range: " + text)
         var secs_signed = -whole if negative else whole
         var nanos_signed = -nanos if negative else nanos
         return Self(Int64(secs_signed), Int32(nanos_signed))
+
+    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_json_string(buf, self.to_proto3_json())
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        if v.kind != JSON_STRING:
+            raise Error("WktError: Duration JSON must be a string like 1.5s")
+        return Self.from_proto3_json(v.text)
 
 
 # =============================================================================
@@ -329,6 +429,17 @@ def _frac_suffix(nanos: Int) -> String:
     for i in range(keep):
         digits += String(tmp[i])
     return String(".") + digits
+
+
+def _days_in_month(y: Int, m: Int) -> Int:
+    """The number of days in month `m` (1..12) of proleptic-Gregorian year
+    `y`."""
+    if m == 2:
+        var leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
+        return 29 if leap else 28
+    if m == 4 or m == 6 or m == 9 or m == 11:
+        return 30
+    return 31
 
 
 def _pad2(v: Int) -> String:

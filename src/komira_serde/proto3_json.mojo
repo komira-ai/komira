@@ -56,6 +56,7 @@ from .wire_format import (
     FieldKey,
     ProtoEnum,
     Serializable,
+    Proto3JsonWkt,
     WireDecoder,
     WireEncoder,
 )
@@ -428,6 +429,30 @@ struct JsonEncoder(WireEncoder):
         child.finish()
         for i in range(len(child.buf)):
             self.buf.append(child.buf[i])
+
+    # -- well-known-type fields: the CANONICAL proto3-JSON form -----------
+    #
+    # The WKT writes its own complete JSON value (`"2026-10-01T00:00:00Z"`,
+    # `"1.5s"`, a free-form object, a bare scalar, ...) where every other
+    # message gets its `{field: value}` object. The punctuation around it is
+    # the same as any value: `_begin_field` / `_end_field` for a field or a
+    # map VALUE, `_list_sep` for a repeated element.
+
+    def write_wkt_field[
+        T: Proto3JsonWkt
+    ](mut self, field_no: Int, json_name: StringSlice, v: T) raises:
+        if self._map_phase == 1:
+            # proto3 forbids a message-typed map KEY; a WKT is a message.
+            raise Error("JsonError: a well-known type cannot be a map key")
+        self._begin_field(json_name)
+        v.write_proto3_json(self.buf)
+        self._end_field()
+
+    def write_wkt_element[
+        T: Proto3JsonWkt
+    ](mut self, field_no: Int, v: T) raises:
+        self._list_sep()
+        v.write_proto3_json(self.buf)
 
     # -- map (object) framing --------------------------------------------
     #
@@ -912,6 +937,51 @@ struct JsonDecoder(WireDecoder):
             )
             out[obj.obj_keys[i]] = V.decode[JsonDecoder](sub_dec)
 
+    # -- well-known-type fields: the CANONICAL proto3-JSON form -----------
+    #
+    # Each reads the field's already-parsed JSON value through
+    # `T.read_proto3_json`. A refusal is re-raised with the JSON path of the
+    # field, so "bad Timestamp" says WHICH timestamp.
+    #
+    # A field whose JSON value is `null` never reaches `read_wkt`:
+    # `next_field()` skips it as ABSENT, which is right for every WKT but
+    # one. The spec reads `null` in a `google.protobuf.Value` FIELD as
+    # NULL_VALUE; here such a field decodes as absent. (A null INSIDE a
+    # Struct, a ListValue or a map<string, Value> is a NULL_VALUE.)
+
+    def read_wkt[T: Proto3JsonWkt](mut self) raises -> T:
+        try:
+            return T.read_proto3_json(self._cur())
+        except e:
+            raise Error(String(e) + " at " + self._cur_path())
+
+    def read_into_repeated_wkt[
+        T: Proto3JsonWkt
+    ](mut self, mut out: List[T]) raises:
+        var arr = self._cur_array()
+        var base = self._cur_path()
+        for i in range(len(arr.children)):
+            try:
+                out.append(T.read_proto3_json(arr.children[i]))
+            except e:
+                raise Error(
+                    String(e) + " at " + base + "[" + String(i) + "]"
+                )
+
+    def read_into_string_wkt_map[
+        T: Proto3JsonWkt & Deinitable
+    ](mut self, mut out: Dict[String, T]) raises:
+        var obj = self._cur_object()
+        var base = self._cur_path()
+        for i in range(len(obj.obj_keys)):
+            try:
+                out[obj.obj_keys[i]] = T.read_proto3_json(obj.children[i])
+            except e:
+                raise Error(
+                    String(e) + " at " + base + "[" + _quote(obj.obj_keys[i])
+                    + "]"
+                )
+
     # -- the unknown-token refusals ---------------------------------------
 
     def expect_fields(
@@ -1207,6 +1277,13 @@ def _append_lit(mut buf: List[UInt8], lit: StringLiteral):
     var bytes = s.as_bytes()
     for i in range(len(bytes)):
         buf.append(bytes[i])
+
+
+def write_json_string(mut buf: List[UInt8], s: String):
+    """Append `s` as a complete, escaped JSON string literal (with its
+    quotes). The public spelling of the encoder's own string writer, for a
+    `Proto3JsonWkt.write_proto3_json` body — one escaper, not two."""
+    _write_json_string(buf, s)
 
 
 def _write_json_string(mut buf: List[UInt8], s: String):

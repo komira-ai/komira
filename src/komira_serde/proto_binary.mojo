@@ -69,6 +69,7 @@ from komira_protobuf import (
 from .wire_format import (
     FieldKey,
     ProtoEnum,
+    Proto3JsonWkt,
     Serializable,
     WireDecoder,
     WireEncoder,
@@ -351,6 +352,24 @@ struct PbEncoder(WireEncoder):
         for i in range(len(child.buf)):
             self.buf.append(child.buf[i])
         self._return_scratch(child.into_buf())
+
+    # -- well-known-type fields: WIRE-IDENTICAL to the message arms -------
+    #
+    # A WKT is an ordinary embedded message on the binary wire; only its
+    # proto3-JSON form is special. Forwarding (not re-implementing) is what
+    # keeps the two spellings byte-identical by construction.
+
+    @always_inline
+    def write_wkt_field[
+        T: Proto3JsonWkt
+    ](mut self, field_no: Int, json_name: StringSlice, v: T) raises:
+        self.write_message_field[T](field_no, json_name, v)
+
+    @always_inline
+    def write_wkt_element[
+        T: Proto3JsonWkt
+    ](mut self, field_no: Int, v: T) raises:
+        self.write_message_element[T](field_no, v)
 
     # -- map framing -----------------------------------------------------
     #
@@ -1002,6 +1021,24 @@ struct PbDecoder(WireDecoder):
             # exactly the level where nothing is nested.
             var empty_sub = PbDecoder(List[UInt8]())
             out[k] = V.decode[PbDecoder](empty_sub)
+
+    # -- well-known-type fields: WIRE-IDENTICAL to the message arms -------
+
+    @always_inline
+    def read_wkt[T: Proto3JsonWkt](mut self) raises -> T:
+        return self.read_message[T]()
+
+    @always_inline
+    def read_into_repeated_wkt[
+        T: Proto3JsonWkt
+    ](mut self, mut out: List[T]) raises:
+        self.read_into_repeated_message[T](out)
+
+    @always_inline
+    def read_into_string_wkt_map[
+        T: Proto3JsonWkt & Deinitable
+    ](mut self, mut out: Dict[String, T]) raises:
+        self.read_into_string_message_map[T](out)
 
     def skip(mut self) raises:
         self.pos = pb_skip_field(Span(self.backing), self.pos, self._cur_wire)

@@ -8,7 +8,8 @@ fn-ptr, no vtable.
 
 Modules:
   - wire_format.mojo : the `Serializable` + `WireEncoder` + `WireDecoder`
-                       traits + the `FieldKey` decode-loop handle.
+                       traits, `Proto3JsonWkt` (a well-known type's
+                       canonical-JSON hook) + the `FieldKey` decode-loop handle.
   - proto_binary.mojo: `PbEncoder` / `PbDecoder` — the protobuf-binary
                        backend, delegating to the `komira_protobuf`
                        primitives. Carries the POOLED SCRATCH BUFFER for
@@ -39,6 +40,7 @@ UnsafePointer crosses the module boundary; no wildcard origins; no
 from .wire_format import (
     ProtoEnum,
     Serializable,
+    Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
     FieldKey,
@@ -54,7 +56,16 @@ from .proto_binary import (
     PB_DECODE_TOO_DEEP,
 )
 
-from .proto3_json import JsonEncoder, JsonDecoder, UnknownFields
+from .proto3_json import (
+    JsonEncoder,
+    JsonDecoder,
+    UnknownFields,
+    write_json_string,
+)
+# The JSON number writers the encoder uses, for a `Proto3JsonWkt` body that
+# writes a number (one formatter, so a WKT number and a plain double field
+# render byte-identically).
+from .json_number import write_i64_dec, write_f64_dtoa
 
 from .json_value import (
     JsonValue,

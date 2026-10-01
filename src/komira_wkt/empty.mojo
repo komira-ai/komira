@@ -10,11 +10,17 @@
 #   - canonical JSON (proto3 JSON mapping): the empty object `{}`.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_serde import (
+    Serializable,
+    Proto3JsonWkt,
+    WireEncoder,
+    WireDecoder,
+    JsonValue,
+)
 
 
 @fieldwise_init
-struct Empty(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct Empty(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.Empty` — a message with no fields."""
 
     @staticmethod
@@ -48,4 +54,18 @@ struct Empty(Serializable, Copyable, Movable, ImplicitlyCopyable):
     def from_proto3_json(text: String) -> Self:
         """Parse `{}` — `Empty` carries no state, so any input yields the
         singleton value."""
+        return Self()
+
+    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        buf.append(0x7B)  # '{'
+        buf.append(0x7D)  # '}'
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        """`{}` and nothing else: a member in an `Empty` is a field no
+        `Empty` has, which the strict decoder refuses everywhere else."""
+        if not v.is_object() or len(v.obj_keys) != 0:
+            raise Error("WktError: Empty JSON must be the empty object {}")
         return Self()

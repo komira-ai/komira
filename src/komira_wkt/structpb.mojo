@@ -43,7 +43,15 @@
 # `komira_wkt` keeps its single dependency on `komira_serde`.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_serde import (
+    Serializable,
+    Proto3JsonWkt,
+    WireEncoder,
+    WireDecoder,
+    write_json_string,
+    write_i64_dec,
+    write_f64_dtoa,
+)
 from komira_serde import JsonValue, parse_json_value
 from komira_serde import (
     JSON_NULL,
@@ -95,7 +103,7 @@ comptime NULL_VALUE = NullValue(0)
 
 
 @fieldwise_init
-struct Value(Serializable, Copyable, Movable):
+struct Value(Proto3JsonWkt, Copyable, Movable):
     """`google.protobuf.Value` — a dynamically-typed JSON value.
 
     Exactly one arm is set; `kind` is the discriminant (`VALUE_KIND_*`).
@@ -230,27 +238,43 @@ struct Value(Serializable, Copyable, Movable):
 
     def to_proto3_json(self) raises -> String:
         """The literal JSON value this `Value` models."""
-        if self.kind == VALUE_KIND_NULL or self.kind == VALUE_KIND_UNSET:
-            return String("null")
-        elif self.kind == VALUE_KIND_NUMBER:
-            return String(self.number_value)
-        elif self.kind == VALUE_KIND_STRING:
-            return _json_quote(self.string_value)
-        elif self.kind == VALUE_KIND_BOOL:
-            return String("true") if self.bool_value else String("false")
-        elif self.kind == VALUE_KIND_STRUCT:
-            if len(self.struct_value) == 0:
-                return String("{}")
-            return self.struct_value[0].to_proto3_json()
-        else:  # VALUE_KIND_LIST
-            if len(self.list_value) == 0:
-                return String("[]")
-            return self.list_value[0].to_proto3_json()
+        var buf = List[UInt8]()
+        self.write_proto3_json(buf)
+        return String(unsafe_from_utf8=Span(buf))
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
         """Parse any JSON value into a `Value`."""
         return _value_from_json(parse_json_value(text))
+
+    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        """Append the literal JSON value. REFUSES a NaN / Infinity number:
+        the spec says a `Value` holding one cannot be serialized, and
+        JSON has no spelling for it."""
+        if self.kind == VALUE_KIND_NULL or self.kind == VALUE_KIND_UNSET:
+            _append_ascii(buf, "null")
+        elif self.kind == VALUE_KIND_NUMBER:
+            _write_number(buf, self.number_value)
+        elif self.kind == VALUE_KIND_STRING:
+            write_json_string(buf, self.string_value)
+        elif self.kind == VALUE_KIND_BOOL:
+            _append_ascii(buf, "true" if self.bool_value else "false")
+        elif self.kind == VALUE_KIND_STRUCT:
+            if len(self.struct_value) == 0:
+                _append_ascii(buf, "{}")
+            else:
+                self.struct_value[0].write_proto3_json(buf)
+        else:  # VALUE_KIND_LIST
+            if len(self.list_value) == 0:
+                _append_ascii(buf, "[]")
+            else:
+                self.list_value[0].write_proto3_json(buf)
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return _value_from_json(v)
 
 
 # =============================================================================
@@ -259,7 +283,7 @@ struct Value(Serializable, Copyable, Movable):
 
 
 @fieldwise_init
-struct Struct(Serializable, Copyable, Movable):
+struct Struct(Proto3JsonWkt, Copyable, Movable):
     """`google.protobuf.Struct` — a JSON object: ordered `(key, Value)` pairs.
 
     Stored as parallel `keys` / `values` lists (not a `Dict`) to keep field
@@ -275,7 +299,13 @@ struct Struct(Serializable, Copyable, Movable):
         return Self(List[String](), List[Value]())
 
     def put(mut self, key: String, var value: Value):
-        """Append a `(key, value)` pair."""
+        """Set `key` to `value`. `Struct.fields` is a `map<string, Value>`,
+        so a key already present is REPLACED in place (last write wins, and
+        the key keeps its first position); a new key is appended."""
+        for i in range(len(self.keys)):
+            if self.keys[i] == key:
+                self.values[i] = value^
+                return
         self.keys.append(key)
         self.values.append(value^)
 
@@ -316,15 +346,9 @@ struct Struct(Serializable, Copyable, Movable):
 
     def to_proto3_json(self) raises -> String:
         """The JSON object form `{"k": v, ...}`."""
-        var out = String("{")
-        for i in range(len(self.keys)):
-            if i > 0:
-                out += ","
-            out += _json_quote(self.keys[i])
-            out += ":"
-            out += self.values[i].to_proto3_json()
-        out += "}"
-        return out
+        var buf = List[UInt8]()
+        self.write_proto3_json(buf)
+        return String(unsafe_from_utf8=Span(buf))
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
@@ -333,6 +357,26 @@ struct Struct(Serializable, Copyable, Movable):
         if not jv.is_object():
             raise Error("WktError: Struct JSON is not an object: " + text)
         return _struct_from_json(jv)
+
+    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        buf.append(0x7B)  # '{'
+        for i in range(len(self.keys)):
+            if i > 0:
+                buf.append(0x2C)  # ','
+            write_json_string(buf, self.keys[i])
+            buf.append(0x3A)  # ':'
+            self.values[i].write_proto3_json(buf)
+        buf.append(0x7D)  # '}'
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        """A free-form JSON object, every member kept (a real document
+        decodes to a POPULATED Struct)."""
+        if not v.is_object():
+            raise Error("WktError: Struct JSON must be an object")
+        return _struct_from_json(v)
 
 
     # An explicit destructor breaks the non-co-inductive `Deinitable`
@@ -348,7 +392,7 @@ struct Struct(Serializable, Copyable, Movable):
 
 
 @fieldwise_init
-struct ListValue(Serializable, Copyable, Movable):
+struct ListValue(Proto3JsonWkt, Copyable, Movable):
     """`google.protobuf.ListValue` — a JSON array: `repeated Value values`."""
 
     var values: List[Value]
@@ -387,13 +431,9 @@ struct ListValue(Serializable, Copyable, Movable):
 
     def to_proto3_json(self) raises -> String:
         """The JSON array form `[v, ...]`."""
-        var out = String("[")
-        for i in range(len(self.values)):
-            if i > 0:
-                out += ","
-            out += self.values[i].to_proto3_json()
-        out += "]"
-        return out
+        var buf = List[UInt8]()
+        self.write_proto3_json(buf)
+        return String(unsafe_from_utf8=Span(buf))
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
@@ -402,6 +442,22 @@ struct ListValue(Serializable, Copyable, Movable):
         if not jv.is_array():
             raise Error("WktError: ListValue JSON is not an array: " + text)
         return _list_from_json(jv)
+
+    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        buf.append(0x5B)  # '['
+        for i in range(len(self.values)):
+            if i > 0:
+                buf.append(0x2C)  # ','
+            self.values[i].write_proto3_json(buf)
+        buf.append(0x5D)  # ']'
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        if not v.is_array():
+            raise Error("WktError: ListValue JSON must be an array")
+        return _list_from_json(v)
 
 
     # An explicit destructor breaks the non-co-inductive `Deinitable`
@@ -489,52 +545,32 @@ def _list_from_json(jv: JsonValue) raises -> ListValue:
     return lv^
 
 
-def _json_quote(s: String) -> String:
-    """Wrap `s` as a JSON string with RFC-8259 §7 escaping. Iterates raw
-    UTF-8 bytes (multibyte-safe — a continuation byte >= 0x80 passes
-    through verbatim)."""
-    var out = List[UInt8]()
-    out.append(0x22)  # '"'
-    var bytes = s.as_bytes()
-    for i in range(len(bytes)):
-        var b = bytes[i]
-        if b == 0x22:  # '"'
-            out.append(0x5C)
-            out.append(0x22)
-        elif b == 0x5C:  # backslash
-            out.append(0x5C)
-            out.append(0x5C)
-        elif b == 0x0A:  # '\n'
-            out.append(0x5C)
-            out.append(0x6E)
-        elif b == 0x0D:  # '\r'
-            out.append(0x5C)
-            out.append(0x72)
-        elif b == 0x09:  # '\t'
-            out.append(0x5C)
-            out.append(0x74)
-        elif b == 0x08:  # '\b'
-            out.append(0x5C)
-            out.append(0x62)
-        elif b == 0x0C:  # '\f'
-            out.append(0x5C)
-            out.append(0x66)
-        elif b < 0x20:
-            out.append(0x5C)
-            out.append(0x75)
-            out.append(0x30)
-            out.append(0x30)
-            out.append(_hex_digit((b >> 4) & 0xF))
-            out.append(_hex_digit(b & 0xF))
-        else:
-            out.append(b)
-    out.append(0x22)  # '"'
-    return String(unsafe_from_utf8=Span(out))
+def _write_number(mut buf: List[UInt8], v: Float64) raises:
+    """A `Value` number as JSON. REFUSES NaN / +-Infinity (the spec: a
+    `Value` holding one cannot be serialized). An integral value below 2^53
+    renders WITHOUT a fraction (`42`, not `42.0`) — what the reference
+    implementations emit, so a free-form payload re-encodes byte-identically
+    to the document it was read from. `-0.0` keeps its sign via the general
+    formatter."""
+    if v != v:
+        raise Error("WktError: a Value number cannot be NaN")
+    if v > Float64(1.7976931348623157e308) or v < Float64(
+        -1.7976931348623157e308
+    ):
+        raise Error("WktError: a Value number cannot be Infinity")
+    var limit = Float64(9007199254740992.0)  # 2^53
+    if v > -limit and v < limit and v != Float64(0.0):
+        var i = Int64(v)
+        if Float64(i) == v:
+            write_i64_dec(buf, i)
+            return
+    if v == Float64(0.0) and Float64(1.0) / v > Float64(0.0):
+        buf.append(0x30)  # '0' (+0.0; -0.0 falls through to keep its sign)
+        return
+    write_f64_dtoa(buf, v)
 
 
-@always_inline
-def _hex_digit(nibble: UInt8) -> UInt8:
-    """A 0..15 nibble as its lowercase-hex ASCII byte."""
-    if nibble < 10:
-        return 0x30 + nibble
-    return 0x61 + (nibble - 10)
+def _append_ascii(mut buf: List[UInt8], s: StringSlice):
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        buf.append(b[i])

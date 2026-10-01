@@ -30,7 +30,18 @@
 # standalone and as a generated message field.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_serde import (
+    Serializable,
+    Proto3JsonWkt,
+    WireEncoder,
+    WireDecoder,
+    JsonValue,
+    JSON_NUMBER,
+    JSON_STRING,
+    write_json_string,
+    write_i64_dec,
+    write_f64_dtoa,
+)
 from komira_serde import base64_encode, base64_decode
 
 
@@ -40,7 +51,7 @@ from komira_serde import base64_encode, base64_decode
 
 
 @fieldwise_init
-struct DoubleValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct DoubleValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.DoubleValue` — a boxed `double`."""
 
     var value: Float64
@@ -61,6 +72,15 @@ struct DoubleValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
                 dec.skip()
         return Self(v)
 
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        _write_f64_json(buf, self.value)
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(_read_f64_json(v))
+
     def to_proto3_json(self) -> String:
         return String(self.value)
 
@@ -74,7 +94,7 @@ struct DoubleValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct FloatValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct FloatValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.FloatValue` — a boxed `float`."""
 
     var value: Float32
@@ -95,6 +115,15 @@ struct FloatValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
                 dec.skip()
         return Self(v)
 
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        _write_f64_json(buf, Float64(self.value))
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(Float32(_read_f64_json(v)))
+
     def to_proto3_json(self) -> String:
         return String(self.value)
 
@@ -113,7 +142,7 @@ struct FloatValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct Int64Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct Int64Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.Int64Value` — a boxed `int64`."""
 
     var value: Int64
@@ -134,6 +163,17 @@ struct Int64Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
                 dec.skip()
         return Self(v)
 
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        buf.append(0x22)
+        write_i64_dec(buf, self.value)
+        buf.append(0x22)
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(v.as_int64())
+
     def to_proto3_json(self) -> String:
         # proto3 JSON: int64 -> JSON STRING. Raw decimal text; the caller
         # quotes.
@@ -149,7 +189,7 @@ struct Int64Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct UInt64Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct UInt64Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.UInt64Value` — a boxed `uint64`."""
 
     var value: UInt64
@@ -170,6 +210,15 @@ struct UInt64Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
                 dec.skip()
         return Self(v)
 
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_json_string(buf, String(self.value))
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(v.as_uint64())
+
     def to_proto3_json(self) -> String:
         # proto3 JSON: uint64 -> JSON STRING.
         return String(self.value)
@@ -189,7 +238,7 @@ struct UInt64Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct Int32Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct Int32Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.Int32Value` — a boxed `int32`."""
 
     var value: Int32
@@ -210,6 +259,18 @@ struct Int32Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
                 dec.skip()
         return Self(v)
 
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_i64_dec(buf, Int64(self.value))
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        var x = v.as_int64()
+        if x < Int64(-2147483648) or x > Int64(2147483647):
+            raise Error("WktError: Int32Value out of range: " + v.text)
+        return Self(Int32(x))
+
     def to_proto3_json(self) -> String:
         return String(self.value)
 
@@ -223,7 +284,7 @@ struct Int32Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct UInt32Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct UInt32Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.UInt32Value` — a boxed `uint32`."""
 
     var value: UInt32
@@ -244,6 +305,18 @@ struct UInt32Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
                 dec.skip()
         return Self(v)
 
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_i64_dec(buf, Int64(self.value))
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        var x = v.as_uint64()
+        if x > UInt64(4294967295):
+            raise Error("WktError: UInt32Value out of range: " + v.text)
+        return Self(UInt32(x))
+
     def to_proto3_json(self) -> String:
         return String(self.value)
 
@@ -262,7 +335,7 @@ struct UInt32Value(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct BoolValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
+struct BoolValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
     """`google.protobuf.BoolValue` — a boxed `bool`."""
 
     var value: Bool
@@ -282,6 +355,15 @@ struct BoolValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
             else:
                 dec.skip()
         return Self(v)
+
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        _append_ascii(buf, self.to_proto3_json())
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(v.as_bool())
 
     def to_proto3_json(self) -> String:
         return String("true") if self.value else String("false")
@@ -305,7 +387,7 @@ struct BoolValue(Serializable, Copyable, Movable, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct StringValue(Serializable, Copyable, Movable):
+struct StringValue(Proto3JsonWkt, Copyable, Movable):
     """`google.protobuf.StringValue` — a boxed `string`."""
 
     var value: String
@@ -325,6 +407,15 @@ struct StringValue(Serializable, Copyable, Movable):
             else:
                 dec.skip()
         return Self(v)
+
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_json_string(buf, self.value)
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(v.as_string())
 
     def to_proto3_json(self) -> String:
         # The raw string content; the caller wraps + escapes as a JSON string.
@@ -346,7 +437,7 @@ struct StringValue(Serializable, Copyable, Movable):
 
 
 @fieldwise_init
-struct BytesValue(Serializable, Copyable, Movable):
+struct BytesValue(Proto3JsonWkt, Copyable, Movable):
     """`google.protobuf.BytesValue` — a boxed `bytes`."""
 
     var value: List[UInt8]
@@ -366,6 +457,15 @@ struct BytesValue(Serializable, Copyable, Movable):
             else:
                 dec.skip()
         return Self(v^)
+
+    # -- `Proto3JsonWkt`: the bare scalar, through the codec arms ------
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        write_json_string(buf, base64_encode(self.value))
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        return Self(base64_decode(v.as_string()))
 
     def to_proto3_json(self) -> String:
         # proto3 JSON: bytes -> base64 string content (the caller quotes it).
@@ -438,3 +538,47 @@ def _parse_f64(text: String) raises -> Float64:
         return atof(text)
     except:
         raise Error("WktError: bad floating-point text: " + text)
+
+
+# =============================================================================
+# The proto3-JSON double form, shared by DoubleValue / FloatValue.
+#
+# A finite value is a JSON number, written by the same formatter a plain
+# `double` field uses. The three non-finite values are the spec's STRINGS
+# "NaN" / "Infinity" / "-Infinity" — a JSON number cannot carry them, and
+# writing `null` would turn a present wrapper into an absent one.
+# =============================================================================
+
+
+def _write_f64_json(mut buf: List[UInt8], v: Float64):
+    if v != v:
+        write_json_string(buf, String("NaN"))
+    elif v > Float64(1.7976931348623157e308):
+        write_json_string(buf, String("Infinity"))
+    elif v < Float64(-1.7976931348623157e308):
+        write_json_string(buf, String("-Infinity"))
+    else:
+        write_f64_dtoa(buf, v)
+
+
+def _read_f64_json(v: JsonValue) raises -> Float64:
+    """A JSON number, or a string holding a number or one of the spec's
+    three non-finite spellings."""
+    if v.kind == JSON_STRING:
+        var inf = Float64(1.0e308) * Float64(10.0)
+        if v.text == "NaN":
+            return inf - inf
+        if v.text == "Infinity":
+            return inf
+        if v.text == "-Infinity":
+            return -inf
+        return _parse_f64(v.text)
+    if v.kind != JSON_NUMBER:
+        raise Error("WktError: expected a JSON number for a double wrapper")
+    return _parse_f64(v.text)
+
+
+def _append_ascii(mut buf: List[UInt8], s: String):
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        buf.append(b[i])

@@ -353,7 +353,7 @@ def test_struct_roundtrip() raises:
     # The literal-JSON form (insertion order preserved).
     assert_equal(
         s.to_proto3_json(),
-        String('{"name":"example","active":true,"meta":{"count":3.0}}'),
+        String('{"name":"example","active":true,"meta":{"count":3}}'),
     )
 
 
@@ -370,13 +370,13 @@ def test_list_value_roundtrip() raises:
     assert_equal(back.values[0].kind, VALUE_KIND_NUMBER)
     assert_equal(back.values[1].string_value, String("two"))
 
-    assert_equal(lv.to_proto3_json(), String('[1.0,"two",false]'))
+    assert_equal(lv.to_proto3_json(), String('[1,"two",false]'))
 
 
 def test_value_recursive_json() raises:
     """A deeply recursive Value (object -> array -> object) round-trips
     through the canonical JSON form."""
-    var doc = String('{"items":[{"id":1.0},{"id":2.0}],"ok":true}')
+    var doc = String('{"items":[{"id":1},{"id":2.5}],"ok":true}')
     var v = Value.from_proto3_json(doc)
     assert_equal(v.kind, VALUE_KIND_STRUCT)
     # to_proto3_json reproduces the document byte-for-byte (key order kept).

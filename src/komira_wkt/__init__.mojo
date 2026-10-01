@@ -28,19 +28,27 @@ object. The protobuf JSON mapping mandates a SPECIAL JSON form per WKT:
     JSON form (a number / string / bool — NOT an object).
   - FieldMask -> a comma-joined lowerCamelCase path string.
   - Struct / Value / ListValue -> the literal JSON value they model.
+  - Any       -> `{"@type": <type_url>, <the payload's members>}` (opaque
+    here: no type registry, see any.mojo).
 The `komira_serde` `Serializable` trait has ONE shared `encode[E]` body
 across both backends, written with the generic `write_*_field` primitives —
 it cannot itself express "a different shape on JSON than on proto-binary".
-So each WKT here:
-  1. conforms to `Serializable` for the protobuf-BINARY wire form (its
-     `encode[E]` / `decode[D]` body uses the standard field primitives —
-     correct + round-trip-safe on `PbEncoder` / `PbDecoder`);
-  2. ALSO exposes explicit `to_proto3_json()` / `from_proto3_json()` methods
-     that implement the canonical-JSON special form.
-This is exactly how mainstream protobuf libraries handle WKTs (a custom JSON
-codec separate from the generic message codec). It needs no change to the
-`Serializable` trait surface: no additive parallel trait API, no trait
-reshape.
+So each WKT here conforms to `komira_serde.Proto3JsonWkt` (a refinement of
+`Serializable`):
+  1. its `encode[E]` / `decode[D]` body is the ordinary message form — what
+     runs on `PbEncoder` / `PbDecoder`;
+  2. `write_proto3_json(buf)` appends the COMPLETE canonical JSON value
+     (quoted where it is a string) and `read_proto3_json(JsonValue)` reads
+     it back from the already-parsed value, refusing what the spec refuses.
+A message field of a WKT type is written with `enc.write_wkt_field[T]` /
+`write_wkt_element[T]` and read with `dec.read_wkt[T]` /
+`read_into_repeated_wkt[T]` / `read_into_string_wkt_map[T]`. On the binary
+backend those forward to the message arms (wire-identical); on the JSON
+backend they call the two methods above. That routing is what makes
+`encode_json` / `decode_json` produce and accept the canonical form — the
+way mainstream protobuf libraries route their JSON codec to the WKT form.
+The `to_proto3_json()` / `from_proto3_json()` string helpers remain for
+standalone use (scalar text, unquoted for the string-shaped types).
 
 Encapsulation: every WKT struct stores only owned `Int64` / `Int32` /
 `String` / `List` / `Optional` fields. No `UnsafePointer`, no wildcard
@@ -52,6 +60,7 @@ since `Serializable` requires `Copyable` and `OwnedPointer` is not).
 """
 
 from .timestamp import Timestamp, Duration
+from .any import Any
 
 from .empty import Empty
 

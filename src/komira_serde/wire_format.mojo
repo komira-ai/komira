@@ -40,6 +40,9 @@
 # =============================================================================
 
 
+from .json_value import JsonValue
+
+
 # =============================================================================
 # ProtoEnum — the format-neutral enum mapping a generated enum conforms to.
 #
@@ -336,6 +339,30 @@ trait WireEncoder(Movable):
     ](mut self, field_no: Int, v: M) raises:
         ...
 
+    # -- well-known-type fields (google.protobuf.*) -----------------------
+    #
+    # A WKT field (`Timestamp`, `Struct`, `Any`, a wrapper, ...) is an
+    # ordinary embedded message on the protobuf-BINARY wire, but proto3-JSON
+    # gives every WKT its own canonical form ("2026-10-01T00:00:00Z", "1.5s",
+    # a free-form object, a bare scalar, ...). The generated body routes a
+    # WKT-typed field through these arms instead of the `*_message_*` ones:
+    #   - protobuf-binary: forwards to the message arm (WIRE-IDENTICAL);
+    #   - proto3-JSON: `T.write_proto3_json` writes the complete canonical
+    #     JSON value in place of the `{...}` object.
+    # The field / element / map-VALUE positions each have an arm (a map
+    # value is written as `write_wkt_field(2, "value", v)` inside a map
+    # entry, exactly like the other `write_*_field(2, ..)` value writers).
+
+    def write_wkt_field[
+        T: Proto3JsonWkt
+    ](mut self, field_no: Int, json_name: StringSlice, v: T) raises:
+        ...
+
+    def write_wkt_element[
+        T: Proto3JsonWkt
+    ](mut self, field_no: Int, v: T) raises:
+        ...
+
     # -- map (proto `map<K,V>`) framing ----------------------------------
     #
     # A proto3 `map<K,V>` is a JSON OBJECT `{"<key>": <value>, ...}` (the key
@@ -597,6 +624,25 @@ trait WireDecoder(Copyable, Movable):
     ](mut self, mut out: Dict[String, V]) raises:
         ...
 
+    # -- well-known-type fields (google.protobuf.*) -----------------------
+    #
+    # The decode twins of `WireEncoder.write_wkt_*`. On protobuf-binary each
+    # forwards to its `*_message*` arm; on proto3-JSON each reads the
+    # field's already-parsed JSON value through `T.read_proto3_json`.
+
+    def read_wkt[T: Proto3JsonWkt](mut self) raises -> T:
+        ...
+
+    def read_into_repeated_wkt[
+        T: Proto3JsonWkt
+    ](mut self, mut out: List[T]) raises:
+        ...
+
+    def read_into_string_wkt_map[
+        T: Proto3JsonWkt & Deinitable
+    ](mut self, mut out: Dict[String, T]) raises:
+        ...
+
     def skip(mut self) raises:
         """Skip the current field's value (unknown-field forward-compat).
 
@@ -683,4 +729,38 @@ trait Serializable(Copyable, Movable):
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
+        ...
+
+
+# =============================================================================
+# Proto3JsonWkt — a well-known type with its own proto3-JSON form.
+#
+# The protobuf JSON mapping gives each `google.protobuf.*` well-known type a
+# SPECIAL JSON form instead of the `{field: value}` object every other
+# message gets. `Serializable.encode/decode` cannot say that — one body
+# serves both backends — so a WKT ALSO conforms to this trait, and the
+# `write_wkt_*` / `read_wkt*` codec arms dispatch on it at comptime:
+#
+#   - `write_proto3_json` appends ONE COMPLETE JSON value to `buf`: quoted
+#     where the canonical form is a string (`"1.5s"`), bare where it is a
+#     number / bool / object / array. A caller never adds quotes.
+#   - `read_proto3_json` reads from the field's ALREADY-PARSED `JsonValue`
+#     (never re-parses text) and refuses anything the spec does not accept.
+#
+# The protobuf-binary backend never calls either: a WKT is an ordinary
+# message on that wire, so its `Serializable` body is what runs there.
+# =============================================================================
+
+
+trait Proto3JsonWkt(Serializable):
+    """A `Serializable` message whose proto3-JSON form is special-cased by
+    the protobuf JSON mapping (the `google.protobuf.*` well-known types)."""
+
+    def write_proto3_json(self, mut buf: List[UInt8]) raises:
+        """Append the complete canonical JSON value for `self` to `buf`."""
+        ...
+
+    @staticmethod
+    def read_proto3_json(v: JsonValue) raises -> Self:
+        """Read a `Self` from its canonical JSON value."""
         ...
