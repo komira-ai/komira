@@ -44,7 +44,13 @@ empty, which the plugin refuses); with `False`, it must be empty.
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_serde, komira_wkt, and with
 services the transport), which the caller names as `komira//` labels, or as
-stubs in a test.
+stubs in a test. They are the library's `deps`, so they take what
+`mojo_library.deps` takes (C and C++ libraries too); `<name>_gen` sees only
+their count.
+
+Sources. `protos` takes source paths of `.proto` files only, never a label
+(even one to a generated `.proto`): the library's file names
+(`<stem>.mojo`) are derived from those paths, so anything else is refused.
 
 Every refusal happens at analysis, in `<name>_gen`, so a BUCK file with one
 wrong gcp_client still loads.
@@ -52,7 +58,6 @@ wrong gcp_client still loads.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
-load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load(
     "@komira//tools/build/mojo:proto.bzl",
     "MojoProtoToolchainInfo",
@@ -88,7 +93,10 @@ def _gcp_client_gen_impl(ctx):
     import_name = ctx.attrs.import_name
     check_proto_import_name(ctx, import_name)
 
-    if not ctx.attrs.runtime_deps:
+    for p in ctx.attrs.proto_paths:
+        if ":" in p or not p.endswith(".proto"):
+            fail("{}: `protos` entry `{}` is not a source path of a `.proto` file. `protos` takes source paths only, never a label (not even one to a generated .proto): the library's `<stem>.mojo` file names are derived from these paths".format(ctx.label, p))
+    if ctx.attrs.runtime_dep_count == 0:
         fail("{}: `deps` is empty. The generated code imports its runtime (komira_serde, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if not ctx.attrs.roots and not ctx.attrs.methods:
         fail("{}: neither `roots` nor `methods` is set. A gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
@@ -140,18 +148,21 @@ _gcp_client_gen = rule(
         "messages_only": attrs.bool(default = False),
         "methods": attrs.list(attrs.string(), default = []),
         "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
+        # `protos` as written, so an entry the macro cannot derive a file
+        # name from is refused here (`srcs` is the same list, resolved).
+        "proto_paths": attrs.list(attrs.string()),
         "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
         "roots": attrs.list(attrs.string(), default = []),
-        # The library's `deps`, read here only so an empty list is refused at
-        # analysis; the library compiles against them.
-        "runtime_deps": attrs.list(attrs.dep(providers = [MojoInfo])),
+        # `len(deps)` of the library, so an empty runtime is refused at
+        # analysis. A count, not the labels: the generator has no edge to the
+        # runtime, and `deps` keeps every kind `mojo_library.deps` accepts.
+        "runtime_dep_count": attrs.int(),
         "srcs": attrs.list(attrs.source()),
     },
 )
 
 def _stem(path):
-    b = path.rsplit("/", 1)[-1]
-    return b[:-len(".proto")] if b.endswith(".proto") else b
+    return path.rsplit("/", 1)[-1][:-len(".proto")]
 
 def _gcp_client(
         name,
@@ -180,14 +191,18 @@ def _gcp_client(
         messages_only = messages_only,
         methods = methods,
         proto_deps = proto_deps,
+        proto_paths = protos,
         roots = roots,
-        runtime_deps = deps,
+        runtime_dep_count = len(deps),
         **vis
     )
 
     # The file names the generation action is held to (generate_proto_dir
-    # refuses a missing, empty or extra file), so they can be named here.
-    stems = [_stem(p) for p in protos] + [_stem(p) for p in bundle_only]
+    # refuses a missing, empty or extra file), so they can be named here. An
+    # entry that is not a `.proto` path is left out rather than turned into a
+    # sub-target name: `<name>_gen` refuses it, and that refusal is what the
+    # build reports.
+    stems = [_stem(p) for p in protos + bundle_only if p.endswith(".proto") and ":" not in p]
     srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems]
     mojo_library(
         name = name,

@@ -63,6 +63,8 @@ expect_red gcp_client_unscoped 'neither `roots` nor `methods` is set' tests//neg
 expect_red gcp_client_joined_items 'is not a proto name' tests//negative/gcp_client:joined_items
 expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/gcp_client:no_runtime
 expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/gcp_client:whole_closure
+expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/gcp_client:label_in_protos
+expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/gcp_client:caller_test_red
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/gcp_client:tests_check_can_fail
 

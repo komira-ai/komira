@@ -86,3 +86,30 @@ tests_check(
     expect = ["_layout_probe"],
     markers = "//functional/proto:komira_serde[tests]",
 )
+
+# "is not a source path of a `.proto` file": a label in `protos` is refused
+# by the rule, not reported as an unknown sub-target of the library.
+gcp_client(
+    name = "label_in_protos",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = ["//functional/gcp_client:shop_deps"],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "GATED TEST FAILED": a failing caller `test_srcs` entry blocks the client
+# like any library's test, next to the generated layout probe.
+gcp_client(
+    name = "caller_test_red",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    test_srcs = ["test_item_deliberate_failure.mojo"],
+    deps = _RUNTIME,
+)

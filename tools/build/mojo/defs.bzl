@@ -10,8 +10,10 @@ Output layout of a library `L` with import name `I`:
     L/pkg/I.mojoc          the public package: a copy of the ungated one that
                            takes every test's PASS marker as an input
     L/src/I/...            the staged package sources
-    L[gen]                 with `gen`: that target's outputs, re-exported (the
-                           generated sources a rule like gcp_client compiled)
+    L[gen]                 with `gen`: that target's DefaultInfo, re-exported
+                           whole, sub-targets included (for gcp_client: the
+                           generated directory, `[gen][<file>]`, and the
+                           staged `.proto` inputs `[gen][proto]`)
     L/tests/<t>/...        per test: its binary, its staged tree `root/`
                            (bin/<t> and share/, see _test_root) and its marker
 
@@ -470,8 +472,10 @@ mojo_library_rule = rule(
         # Mojo packages and C/C++ libraries; see _check_deps.
         "deps": attrs.list(attrs.dep(), default = []),
         # Optional: the target that generated `srcs` (gcp_client, for example).
-        # Its DefaultInfo is re-exported as the `[gen]` sub-target, so a reader
-        # or an IDE finds the generated code; nothing else reads it.
+        # Its DefaultInfo is re-exported whole as the `[gen]` sub-target, so a
+        # reader or an IDE finds the generated code (and what it was generated
+        # from); nothing else reads it. Unchecked: nothing verifies that `srcs`
+        # come from this target, which is acceptable for a reader-only view.
         "gen": attrs.option(attrs.dep(), default = None),
         "import_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
