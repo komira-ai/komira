@@ -6,8 +6,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_crypto. It reads nothing from the environment.
 #
 # test_sigv4_test_suite runs every case of the official AWS SigV4 signing test
-# suite (//tools/vendor/aws_sigv4_test_suite, staged at aws_sigv4_test_suite/)
-# byte for byte, after checking each staged file against the suite's PIN.
+# suite byte for byte. The suite is not copied here: it is read from the
+# aws-c-auth archive //third_party/aws_c_auth pins by sha256, and staged at
+# aws_c_auth/.
 mojo_library(
     name = "komira_aws_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -18,7 +19,7 @@ mojo_library(
     ],
     test_data = {
         "tests/test_sigv4_test_suite.mojo": {
-            "aws_sigv4_test_suite": "//tools/vendor/aws_sigv4_test_suite:suite",
+            "aws_c_auth": "//third_party/aws_c_auth:files",
         },
     },
     visibility = ["PUBLIC"],

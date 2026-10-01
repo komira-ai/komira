@@ -2,9 +2,8 @@
 # komira_aws_core/tests/test_sigv4_test_suite.mojo
 # =============================================================================
 #
-# Runs every case of the official AWS SigV4 signing test suite
-# (tools/vendor/aws_sigv4_test_suite, staged at aws_sigv4_test_suite/), in
-# both signing modes, byte for byte:
+# Runs every case of the official AWS SigV4 signing test suite, in both
+# signing modes, byte for byte:
 #
 #   header signing: canonical request, string to sign, signature, and the
 #     signed request (the headers added, the Authorization header among them)
@@ -12,9 +11,14 @@
 #     signed request (the presigned request target)
 #
 # The clock is fixed: each case's signing time is its context.json
-# timestamp. Before any case runs, every staged file is checked against the
-# sha256 lines of the suite's PIN, and the staged tree must hold exactly the
-# files PIN lists, so the test cannot run a changed or a shrunken suite.
+# timestamp.
+#
+# The suite is the aws-c-auth archive's tests/aws-signing-test-suite/v4,
+# which //third_party/aws_c_auth pins by sha256 and extracts, staged at
+# aws_c_auth/. The archive's sha256 pins every byte, so the test checks no
+# per-file digest. What it does check, before any case runs: every case
+# directory holds exactly the ten files of a case, and there are exactly
+# _EXPECTED_CASES of them, so a shrunken extraction cannot pass as the suite.
 # =============================================================================
 
 from std.os import listdir
@@ -31,10 +35,11 @@ from komira_aws_core import (
 )
 
 
-comptime _ROOT = "aws_sigv4_test_suite/"
+comptime _ROOT = "aws_c_auth/tests/aws-signing-test-suite/"
 
 
-# The number of cases at the PIN'd commit. Update it with PIN.
+# The number of cases at the pinned aws-c-auth commit
+# (third_party/aws_c_auth/suite.bzl). Update it with the pin.
 comptime _EXPECTED_CASES = 38
 
 
@@ -109,54 +114,32 @@ def _contains(xs: List[String], x: String) -> Bool:
 
 
 # -----------------------------------------------------------------------------
-# PIN
+# The staged suite
 # -----------------------------------------------------------------------------
 
 
-def _verify_pin() raises -> List[String]:
-    """Checks every staged file against PIN; returns the case names."""
-    var lines = _read_text(_ROOT + "PIN").split("\n")
-    var paths = List[String]()
+def _list_cases() raises -> List[String]:
+    """The case names, after checking the staged tree is the whole suite."""
+    var want = _join(_sorted(_case_files()), "\n")
     var cases = List[String]()
-    for i in range(len(lines)):
-        var line = String(lines[i])
-        if not line.startswith("sha256 "):
-            continue
-        var parts = line.split(" ")
-        if len(parts) != 3:
-            raise Error("PIN: malformed line: " + line)
-        var want = String(parts[1])
-        var path = String(parts[2])
-        var data = _read_bytes(_ROOT + path)
-        var got = hex_lower_array_32(sha256(Span(data)))
-        if got != want:
-            raise Error("PIN: " + path + " has sha256 " + got + ", PIN says " + want)
-        paths.append(path)
-        var segs = path.split("/")
-        if len(segs) != 3 or String(segs[0]) != "v4":
-            raise Error("PIN: unexpected path " + path)
-        var cname = String(segs[1])
-        if not _contains(cases, cname):
-            cases.append(cname)
-
-    # The staged tree holds exactly the files PIN lists.
-    var staged = List[String]()
     for name in listdir(_ROOT + "v4"):
         var cname = String(name)
         if not isdir(_ROOT + "v4/" + cname):
             raise Error("staged v4/" + cname + " is not a case directory")
+        var files = List[String]()
         for f in listdir(_ROOT + "v4/" + cname):
-            staged.append("v4/" + cname + "/" + String(f))
-    var a = _join(_sorted(paths^), "\n")
-    var b = _join(_sorted(staged^), "\n")
-    if a != b:
-        raise Error("staged files differ from PIN:\nPIN:\n" + a + "\nstaged:\n" + b)
-
-    for i in range(len(cases)):
-        var files = _case_files()
-        for k in range(len(files)):
-            if not _contains_path(a, "v4/" + cases[i] + "/" + files[k]):
-                raise Error("case " + cases[i] + " has no " + files[k])
+            files.append(String(f))
+        var got = _join(_sorted(files^), "\n")
+        if got != want:
+            raise Error(
+                "case "
+                + cname
+                + " holds:\n"
+                + got
+                + "\nexpected the files of a case:\n"
+                + want
+            )
+        cases.append(cname)
     if len(cases) != _EXPECTED_CASES:
         raise Error(
             "suite has "
@@ -165,10 +148,6 @@ def _verify_pin() raises -> List[String]:
             + String(_EXPECTED_CASES)
         )
     return _sorted(cases^)
-
-
-def _contains_path(joined: String, path: String) -> Bool:
-    return ("\n" + joined + "\n").find("\n" + path + "\n") >= 0
 
 
 # -----------------------------------------------------------------------------
@@ -407,7 +386,7 @@ def _run_case(cname: String, mut failures: List[String]) raises:
 
 
 def main() raises:
-    var cases = _verify_pin()
+    var cases = _list_cases()
     var failures = List[String]()
     for i in range(len(cases)):
         _run_case(cases[i], failures)
