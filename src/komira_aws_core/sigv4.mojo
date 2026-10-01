@@ -19,8 +19,9 @@
 # It is pure computation: no clock, no network, no environment. The caller
 # supplies the signing time (`amz_date`) and the credential, so a test signs
 # with a fixed clock. Every case of the official AWS SigV4 signing test suite
-# (tools/vendor/aws_sigv4_test_suite) is checked byte for byte by
-# tests/test_sigv4_test_suite.mojo, in both header and query signing.
+# (read from the aws-c-auth archive //third_party/aws_c_auth pins) is checked
+# byte for byte by tests/test_sigv4_test_suite.mojo, in both header and query
+# signing.
 #
 # The signer owns the headers and query parameters it writes: a request that
 # already carries one (Authorization, X-Amz-Date, X-Amz-Security-Token,

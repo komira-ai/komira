@@ -1,0 +1,11 @@
+// A LogEntry in a package whose name ENDS in `.example.logging.v1`, so the
+// fully-qualified `.example.logging.v1.LogEntry` is also a dotted suffix of
+// `.nested.example.logging.v1.LogEntry`. A name with a leading `.` is
+// already fully qualified and must select only the type it spells.
+syntax = "proto3";
+
+package nested.example.logging.v1;
+
+message LogEntry {
+  string note = 1;
+}
