@@ -14,8 +14,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the CredentialTransport trait: this package opens no socket.
 #
 # test_sigv4_test_suite runs every case of the official AWS SigV4 signing test
-# suite (//tools/vendor/aws_sigv4_test_suite, staged at aws_sigv4_test_suite/)
-# byte for byte, after checking each staged file against the suite's PIN.
+# suite byte for byte. The suite is not copied here: it is read from the
+# aws-c-auth archive //third_party/aws_c_auth pins by sha256, and staged at
+# aws_c_auth/.
 # test_credential_wire checks each credential request builder byte for byte
 # against tests/fixtures/*.request, and test_signed_request each signed
 # service request against one recorded from an independent SigV4
@@ -50,7 +51,7 @@ mojo_library(
         "tests/test_signed_request.mojo": _FIXTURES,
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),
         "tests/test_sigv4_test_suite.mojo": {
-            "aws_sigv4_test_suite": "//tools/vendor/aws_sigv4_test_suite:suite",
+            "aws_c_auth": "//third_party/aws_c_auth:files",
         },
     },
     visibility = ["PUBLIC"],

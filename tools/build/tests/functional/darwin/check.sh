@@ -6,13 +6,14 @@
 #
 # Sections 1-6 need no macOS worker; 7 runs on the macOS workers when the root
 # cell configures them, and is SKIPped otherwise. What runs where:
-#   1. Unset `[komira_re] darwin_mojo_compile_properties`: no macOS platform
-#      is registered, and a darwin-arm64 Mojo target fails to configure
-#      (naming the macos constraint) while the linux target still resolves to
-#      exec-mojo.
+#   1. Unset `[komira_re] darwin_properties`: no macOS platform is
+#      registered, and a darwin-arm64 Mojo target fails to configure (naming
+#      the macos constraint) while the linux target still resolves to
+#      linux-x86_64.
 #   2. Set (a placeholder, resolution only, nothing is built): darwin-arm64
-#      Mojo targets resolve to exec-mojo-darwin-arm64, the darwin toolchain's
-#      unpacking to linux exec-light, linux targets are unchanged; a property
+#      Mojo targets resolve to the darwin-arm64 execution platform, the
+#      darwin toolchain's unpacking to linux-x86_64, linux targets are
+#      unchanged; a property
 #      set with no `[komira_re] darwin_macos_hosts`, or equal to a linux set,
 #      is refused at load, and so (tests//functional/darwin:BUCK, cases.bzl) are an
 #      empty set and malformed host identities. Unset, a wildcard over
@@ -21,8 +22,8 @@
 #      busybox, the osx-arm64 compiler closure, --target-cpu apple-m1, the
 #      deployment target, no zig, no absolute path.
 #   4. The linux actions are the same with and without the darwin key.
-#   5. The osx-arm64 closure, unpacked and cut on the farm (linux `light`
-#      workers): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
+#   5. The osx-arm64 closure, unpacked and cut on the farm (linux
+#      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
 #      DYLD scripts are the shared scripts behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
 #      (applets only from /bin and /usr/bin, anything else refused), the cc
@@ -34,7 +35,7 @@
 #      rendered with the one run path @loader_path/lib), and run_check.sh
 #      (clears DYLD_* as well as LD_*).
 #   7. Live, on the macOS workers (SKIP unless both `[komira_re]
-#      darwin_mojo_compile_properties` and `darwin_macos_hosts` are set):
+#      darwin_properties` and `darwin_macos_hosts` are set):
 #      every host identity the workers report (tests//functional/darwin:host_census,
 #      uncached) is listed; //tools/build/examples:hello and its run check
 #      build and pass there, with the configured property set in `buck2 log
@@ -230,7 +231,7 @@ hello names a worker path"
 }
 
 DARWIN=(--target-platforms komira//tools/build/platforms:darwin-arm64)
-KEY=komira_re.darwin_mojo_compile_properties
+KEY=komira_re.darwin_properties
 HOSTS_KEY=komira_re.darwin_macos_hosts
 PLACEHOLDER=(-c "$KEY=pool=unreachable-check-only" -c "$HOSTS_KEY=0.0-check")
 UNSET=(-c "$KEY=" -c "$HOSTS_KEY=")
@@ -252,15 +253,15 @@ elif [ "$got" != "komira//tools/build/examples:hello FAILED" ]; then
     fail "unset: a darwin-arm64 target configured with no macOS platform: $got"
 elif ! grep -qF 'exec_compatible_with requires `prelude//os/constraints:macos`' "$LOG/darwin_unset.txt"; then
     fail "unset: the refusal does not name the macos constraint (see $LOG/darwin_unset.txt)"
-elif [ "$(resolve darwin_unset_linux "${UNSET[@]}" //tools/build/examples:hello)" != "komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo" ]; then
-    fail "unset: the linux target no longer resolves to exec-mojo (see $LOG/darwin_unset_linux.txt)"
+elif [ "$(resolve darwin_unset_linux "${UNSET[@]}" //tools/build/examples:hello)" != "komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64" ]; then
+    fail "unset: the linux target no longer resolves to linux-x86_64 (see $LOG/darwin_unset_linux.txt)"
 else
     pass "unset: no macOS platform; a darwin-arm64 target fails to configure, linux resolves as before"
 fi
 
 # ---- 2. set: resolution and load-time refusals --------------------------------
-want=$(printf '%s komira//tools/build/platforms:exec-mojo-darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
-       printf '%s komira//tools/build/platforms:exec-light\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
+want=$(printf '%s komira//tools/build/platforms:darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
+       printf '%s komira//tools/build/platforms:linux-x86_64\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
            komira//tools/build/toolchains/darwin:gate_runner komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link)
 want=$(printf '%s\n' "$want" | LC_ALL=C sort)
 if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS[@]}" \
@@ -269,20 +270,20 @@ if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS
     fail "set: audit failed (see $LOG/darwin_set.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
     fail "set: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^[<>]' | tr '\n' ' ')"
-elif [ "$(resolve darwin_set_linux "${PLACEHOLDER[@]}" "${MOJO_TARGETS[@]}" | awk '{print $2}' | sort -u)" != "komira//tools/build/platforms:exec-mojo" ]; then
-    fail "set: a linux target left exec-mojo once a macOS platform was registered (see $LOG/darwin_set_linux.txt)"
+elif [ "$(resolve darwin_set_linux "${PLACEHOLDER[@]}" "${MOJO_TARGETS[@]}" | awk '{print $2}' | sort -u)" != "komira//tools/build/platforms:linux-x86_64" ]; then
+    fail "set: a linux target left linux-x86_64 once a macOS platform was registered (see $LOG/darwin_set_linux.txt)"
 else
-    pass "set: ${#MOJO_TARGETS[@]} darwin-arm64 Mojo targets on exec-mojo-darwin-arm64, darwin unpacking on linux exec-light, linux unchanged"
+    pass "set: ${#MOJO_TARGETS[@]} darwin-arm64 Mojo targets on darwin-arm64, darwin unpacking on linux-x86_64, linux unchanged"
 fi
 if "$BUCK2" audit execution-platform-resolution -c "$KEY=pool=mac-only-no-hosts" -c "$HOSTS_KEY=" "${DARWIN[@]}" //tools/build/examples:hello \
         > "$LOG/darwin_no_hosts.txt" 2>&1; then
     fail "load: a macOS property set without darwin_macos_hosts was accepted"
 elif ! grep -qF 'names no macOS host' "$LOG/darwin_no_hosts.txt"; then
     fail "load: the missing-hosts refusal failed for another reason (see $LOG/darwin_no_hosts.txt)"
-elif MC=$(cfg_value komira_re.mojo_compile_properties) && [ -n "$MC" ] &&
+elif MC=$(cfg_value komira_re.linux_properties) && [ -n "$MC" ] &&
     "$BUCK2" audit execution-platform-resolution -c "$HOSTS_KEY=0.0-check" \
         -c "$KEY=$MC" //tools/build/examples:hello > "$LOG/darwin_linux_set.txt" 2>&1; then
-    fail "load: a macOS property set equal to the linux mojo_compile set was accepted"
+    fail "load: a macOS property set equal to the linux set was accepted"
 elif ! grep -qF 'must name macOS workers' "$LOG/darwin_linux_set.txt"; then
     fail "load: the linux-set refusal failed for another reason (see $LOG/darwin_linux_set.txt)"
 else

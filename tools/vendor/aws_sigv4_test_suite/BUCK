@@ -1,9 +1,0 @@
-# The official AWS SigV4 signing test suite (see PIN: upstream, commit,
-# license, and the sha256 of every vendored file). `suite` is test data of
-# //src/komira_aws_core, whose test checks the files against PIN and runs
-# every case.
-filegroup(
-    name = "suite",
-    srcs = ["PIN"] + glob(["v4/**"]),
-    visibility = ["PUBLIC"],
-)
