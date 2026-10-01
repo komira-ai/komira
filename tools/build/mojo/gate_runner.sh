@@ -19,7 +19,7 @@
 # empty directories made for this run under the action's own working
 # directory, so no two runs share them. Each --env adds one variable; the rule
 # refuses the names above and this script refuses them again. A --env variable
-# is given to the TEST PROCESS ONLY (`busybox env NAME=VALUE ... <test>`), never
+# is given to the TEST PROCESS ONLY (exported in the subshell that execs it), never
 # to this script's own shell: exported here it would reach the variables the
 # verdict is computed from (HELD, BIN, rc, ...), so `test_env = {"HELD": "1"}`
 # would mute an unheld red and `env = {"BIN": "true"}` would run `true` in
@@ -111,7 +111,14 @@ HOME="$T/home"
 export PATH LD_LIBRARY_PATH TMPDIR TEST_TMPDIR HOME
 
 rc=0
-(cd "$CWD" && exec "$BB" env "$@" "$BIN") > "$T/log" 2>&1 < /dev/null || rc=$?
+# The test's variables are exported by this shell, in the subshell that execs the
+# test, and not given through the `env` applet: on macOS that applet is a
+# system-integrity-protected binary, and dyld prunes every DYLD_* variable from
+# the environment of such a process, so a test started through it never sees
+# DYLD_LIBRARY_PATH and cannot find its runtime library. Nothing between this
+# shell and the test may be such a binary. (The names were checked above.)
+# shellcheck disable=SC2163 # each $kv is NAME=VALUE: the value is exported, not a variable named by it
+(cd "$CWD" && for kv in "$@"; do export "$kv"; done && exec "$BIN") > "$T/log" 2>&1 < /dev/null || rc=$?
 if [ -n "$HELD" ]; then
     if [ "$rc" = 137 ]; then
         {

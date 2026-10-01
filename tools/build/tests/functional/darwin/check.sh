@@ -33,7 +33,8 @@
 #      shared-lib build, a non-$ORIGIN run path and a host whose identity is
 #      not listed are refused, a listed host is accepted; modular.cfg is
 #      rendered with the one run path @loader_path/lib), and run_check.sh
-#      (clears DYLD_* as well as LD_*).
+#      (clears DYLD_* as well as LD_*), and gate_runner.sh (the test sees
+#      DYLD_LIBRARY_PATH although the `env` applet prunes it, as on macOS).
 #   7. Live, on the macOS workers (SKIP unless both `[komira_re]
 #      darwin_properties` and `darwin_macos_hosts` are set):
 #      every host identity the workers report (tests//functional/darwin:host_census,
@@ -582,6 +583,39 @@ elif [ "$(cat "$U/env_out.txt")" != "[]" ]; then
     fail "run_check.sh: the binary inherited a library path: $(cat "$U/env_out.txt")"
 else
     pass "run_check.sh: the binary starts with no LD_* or DYLD_* library path"
+fi
+
+# gate_runner.sh hands the test the toolchain's lib/ through DYLD_LIBRARY_PATH.
+# On macOS /usr/bin/env is a system-integrity-protected binary: dyld prunes every
+# DYLD_* variable from the environment of such a process, so a test started
+# through the `env` applet never sees the variable and dies with "Library not
+# loaded: @rpath/libKGENCompilerRTShared.dylib". The stand-in busybox below
+# prunes them in its `env` applet as the operating system does; the test must
+# still see the variable, and its --env variables.
+mkdir -p "$U/gate/root/bin" "$U/gate/tmp"
+cat > "$U/sip_busybox.sh" <<SIPBB
+#!/bin/sh
+if [ "\$1" = env ]; then
+    shift
+    unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+    exec /usr/bin/env "\$@"
+fi
+exec sh "$BB" "\$@"
+SIPBB
+chmod +x "$U/sip_busybox.sh"
+cat > "$U/gate/root/bin/seen" <<SEEN
+#!/bin/sh
+printf '%s|%s\n' "\${DYLD_LIBRARY_PATH-}" "\${GATE_FOO-}" > "$U/gate/seen.txt"
+SEEN
+chmod +x "$U/gate/root/bin/seen"
+cat tools/build/mojo/darwin/dyld_prelude.sh tools/build/mojo/gate_runner.sh > "$U/gate/gate_runner.sh"
+rm -f "$U/gate/seen.txt" "$U/gate/marker"
+if ! (cd "$U/gate/tmp" && sh "$U/gate/gate_runner.sh" "$U/sip_busybox.sh" "$TC" //stand:in "$U/gate/root/bin/seen" "$U/gate/marker" --env GATE_FOO=bar) > "$U/gate/run.txt" 2>&1; then
+    fail "gate_runner.sh: the stand-in test failed (see $U/gate/run.txt)"
+elif [ "$(cat "$U/gate/seen.txt")" != "$TC/lib|bar" ]; then
+    fail "gate_runner.sh: the test saw [$(cat "$U/gate/seen.txt")], not [$TC/lib|bar]: DYLD_LIBRARY_PATH did not reach it (an SIP binary between the runner and the test prunes it)"
+else
+    pass "gate_runner.sh: the test starts with DYLD_LIBRARY_PATH at the toolchain's lib/ although env prunes DYLD_*, and with its --env variables"
 fi
 
 # ---- 7. live, on the macOS workers ----------------------------------------------
