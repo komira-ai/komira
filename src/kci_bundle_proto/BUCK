@@ -1,16 +1,16 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 
-# The authored intent bundle schema (`komira.bundle.v1`) and its generated
-# Mojo. app_bundle.proto imports `komira/deploy/v1/deploy_model.proto` for the
+# The authored intent bundle schema (`kci.bundle.v1`) and its generated
+# Mojo. app_bundle.proto imports `kci/deploy/v1/deploy_model.proto` for the
 # intent types it reuses, and the generated app_bundle.mojo refers to them as
-# `komira_rpc_bundle.deploy_model`, so `bundle_proto_deps` generates the
+# `kci_bundle_proto.deploy_model`, so `bundle_proto_deps` generates the
 # imported schema into this package too: one flat package holding both.
 #
-#   from komira_rpc_bundle.app_bundle import (
+#   from kci_bundle_proto.app_bundle import (
 #       AppBundle, AppKind, BuildTarget, ImageRef, ValueFrom, BundleEnvVar,
 #       Scaling, AppSpec, HttpCheck, GateOn, RunContainer, ValidateStep, Wave,
 #   )
-#   from komira_rpc_bundle.deploy_model import (
+#   from kci_bundle_proto.deploy_model import (
 #       ComputeIntent, DatastoreNeed, SecretBinding,
 #   )
 #
@@ -18,10 +18,10 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # generated package has no tests of its own: it is gated through the tests of
 # the libraries that depend on it.
 mojo_proto_library(
-    name = "komira_rpc_bundle",
+    name = "kci_bundle_proto",
     srcs = ["app_bundle.proto"],
-    import_prefix = "komira/deploy/v1",
-    proto_deps = ["//src/deploy_model_rpc:deploy_model_rpc"],
+    import_prefix = "kci/bundle/v1",
+    proto_deps = ["//src/kci_deploy_model_proto:kci_deploy_model_proto"],
     bundle_proto_deps = True,
     deps = ["//src/komira_serde:komira_serde"],
     visibility = ["PUBLIC"],

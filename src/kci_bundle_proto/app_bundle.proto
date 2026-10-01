@@ -35,15 +35,14 @@
 
 syntax = "proto3";
 
-package komira.bundle.v1;
+package kci.bundle.v1;
 
 // The reused intent enums/messages: ComputeIntent, DatastoreNeed,
-// SecretBinding. ⚠ THE IMPORT PATH DOES NOT MIRROR THE PACKAGE: this file
-// declares `komira.bundle.v1` and its import path is
-// `komira/deploy/v1/app_bundle.proto`, the import directory of the
-// deploy-model protos. The wire depends on the package and field numbers,
+// SecretBinding. This file declares `kci.bundle.v1` and its import path is
+// `kci/bundle/v1/app_bundle.proto`; the deploy-model protos it imports live
+// under `kci/deploy/v1/`. The wire depends on the package and field numbers,
 // never on the path.
-import "komira/deploy/v1/deploy_model.proto";
+import "kci/deploy/v1/deploy_model.proto";
 
 // ─── The customer-facing app kind ────────────────────────────────────────────
 //
@@ -578,7 +577,7 @@ message ServiceRef {
 // ─── One container env var, with a typed wave-output arm ─────────────────────
 //
 // Not named `EnvVar`: this file imports `deploy_model.proto`, which defines
-// `komira.deploy.v1.EnvVar`, and the bundle's shape is different.
+// `kci.deploy.v1.EnvVar`, and the bundle's shape is different.
 // `BundleEnvVar` carries a `value | value_from | service_ref` oneof (a plain
 // literal OR a typed self wave-output reference OR a typed cross-service
 // reference), which `deploy_model.EnvVar` (name/value only) does not.
@@ -858,9 +857,9 @@ message Scaling {
 // bucket policy. Empty/false defaults keep a bucket-free bundle BYTE-IDENTICAL
 // (additive-safe).
 //
-// ─── ITS RESOLVED COUNTERPART IS `komira.manifest.v1.ResolvedBucketSpec` ─────
-// The two tiers live in different packages (`komira.bundle.v1` /
-// `komira.manifest.v1`), but a Mojo consumer imports both tiers into one flat
+// ─── ITS RESOLVED COUNTERPART IS `kci.manifest.v1.ResolvedBucketSpec` ─────
+// The two tiers live in different packages (`kci.bundle.v1` /
+// `kci.manifest.v1`), but a Mojo consumer imports both tiers into one flat
 // namespace, so the pair is disambiguated: the RESOLVED side takes the
 // prefix, the convention in this file pair, where `GitPush` / `Schedule` /
 // `PackagePublished` sit opposite `ResolvedGitPush` / `ResolvedSchedule` /
@@ -951,14 +950,14 @@ message AppSpec {
   Scaling scaling = 4;
   // The compute intent (serverless | serverful), REUSED from
   // `deploy_model.proto` by import.
-  .komira.deploy.v1.ComputeIntent compute = 5;
+  .kci.deploy.v1.ComputeIntent compute = 5;
   // The datastore INTENT (none | serverless | dedicated), REUSED from
   // `deploy_model.proto` by import. The IMPL is resolved per target by the
   // composition/mapper, not stated here.
-  .komira.deploy.v1.DatastoreNeed datastore = 6;
+  .kci.deploy.v1.DatastoreNeed datastore = 6;
   // The secrets this app resolves at runtime: the REUSED `SecretBinding` from
   // `deploy_model.proto` (a name + capability node, never a value).
-  repeated .komira.deploy.v1.SecretBinding secret_bindings = 7;
+  repeated .kci.deploy.v1.SecretBinding secret_bindings = 7;
   // The AUTHORED runtime service account the compute RUNS AS (the identity the
   // ServerlessCompute node carries as `runtime_identity`). EMPTY = derive
   // `<service>-role` (a plain app leaves this unset). NON-EMPTY = the
@@ -1026,7 +1025,7 @@ message AppSpec {
   // {CATCH_ALL, CLIENT_PASSTHROUGH} node per service, gated per wave by
   // `Wave.api_edge_enabled` (the staging toggle). WEBHOOK ⇒ the SINGLE_PATH
   // edge emission.
-  .komira.deploy.v1.InboundNeed inbound = 18;
+  .kci.deploy.v1.InboundNeed inbound = 18;
   // The SINGLE_PATH inbound route (e.g. "/mail/inbound"): REQUIRED iff
   // `inbound: WEBHOOK` (authored by the app bundle; NO baked default in the
   // conformer). MUST be empty for CLIENT/POLL/NONE (validated fail-fast).
@@ -1290,7 +1289,7 @@ message AppSpec {
   // that authors none composes and deploys BYTE-IDENTICALLY. The two sources
   // are UNIONED, never one-or-the-other, so shapes can be moved into bundles
   // one block at a time with the tree deployable at every step.
-  repeated .komira.deploy.v1.BundleIndexTable index_tables = 29;
+  repeated .kci.deploy.v1.BundleIndexTable index_tables = 29;
 
   // ─── ★ THE INGRESS REALIZATION INPUTS: the declarable front door ─────────
   //
@@ -1353,7 +1352,7 @@ message AppSpec {
   // Run. A bundle that omits this field is choosing the platform's default; a
   // repository check should REPORT every such bundle by name rather than let
   // the omission look like a decision.
-  .komira.deploy.v1.NetworkIngress network_ingress = 32;
+  .kci.deploy.v1.NetworkIngress network_ingress = 32;
 
   // ─── ★ THE SERVED SERVICE'S OUTBOUND PATH (the `network_ingress` sibling) ──
   //
@@ -1518,7 +1517,7 @@ message AppSpec {
   // grant nodes on it. This field puts the SAME key in the authoring tier. Do
   // not propose a second axis (`deploy_provider` is not one).
   //
-  // ⚠ `cloud` IS AN `int32` MIRRORING `komira.deploy.v1.Cloud`'s ORDINAL
+  // ⚠ `cloud` IS AN `int32` MIRRORING `kci.deploy.v1.Cloud`'s ORDINAL
   // CONTRACT (1=GCP, 2=AWS, 3=AZURE, 4=KUBERNETES, 5=LOCAL), the identical
   // treatment `Environment.deploy_provider` and `Environment.tenancy` take, and
   // for the identical reason stated in environment.proto's header: the two
@@ -1705,7 +1704,7 @@ message AppSpec {
 // field itself is wrongly shaped.
 message CloudVariant {
   // WHICH cloud posture this variant answers for. Mirrors the
-  // `komira.deploy.v1.Cloud` ORDINAL CONTRACT: 1=GCP, 2=AWS, 3=AZURE,
+  // `kci.deploy.v1.Cloud` ORDINAL CONTRACT: 1=GCP, 2=AWS, 3=AZURE,
   // 4=KUBERNETES (on-prem), 5=LOCAL. 0 (UNSPECIFIED) is REFUSED at compose:
   // never a wildcard, never a default arm.
   int32 cloud = 1;
@@ -2902,7 +2901,7 @@ message JobSpec {
   // The secrets the job resolves at runtime: the REUSED `SecretBinding` from
   // `deploy_model.proto` (a name + capability, never a value), the same shape
   // `AppSpec.secret_bindings` carries.
-  repeated .komira.deploy.v1.SecretBinding secret_bindings = 4;
+  repeated .kci.deploy.v1.SecretBinding secret_bindings = 4;
   // The identity the job RUNS AS. EMPTY ⇒ the same runtime identity the
   // bundle's service resolves to (`AppSpec.runtime_identity`, or its derived
   // default), never a broader one. A job that needs its own identity states
@@ -3446,8 +3445,8 @@ message WebFrontendOverride {
 // deliberately-STANDALONE resolved tier (it imports NO intent schema). Neither
 // may import the other (that would be a layering inversion: the synthesized
 // output is not a dependency of the authored input). The two files declare
-// different packages (`komira.bundle.v1` here, `komira.manifest.v1` there),
-// so `komira.bundle.v1.SourceKind` and `komira.manifest.v1.SourceKind` are
+// different packages (`kci.bundle.v1` here, `kci.manifest.v1` there),
+// so `kci.bundle.v1.SourceKind` and `kci.manifest.v1.SourceKind` are
 // different symbols: the same name means a different thing in the intent and
 // resolved tiers, and both files can be compiled by one protoc. The
 // composition translates the intent-tier enum ordinal to the resolved-tier
