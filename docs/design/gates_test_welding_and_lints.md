@@ -73,7 +73,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 
 **Decision.** `gate_runner.sh` runs a test from a tree of its own, with a fixed environment, and gives a `test_env` variable to the test process only, never to the runner's own shell. The rule refuses the reserved names, and the script refuses them again.
 
-**Because.** A test that reaches a file it did not declare passes here and fails somewhere that lacks the file. Staging the declared data under `share/` and running from there makes a relative path reach a declared file and nothing else. Exported into the runner's shell, a variable would reach the values the verdict is computed from, so `HELD` or `BIN` set in `env` would change what the runner decides. Putting the variable on the test's own command line closes that.
+**Because.** A test that reaches a file it did not declare passes here and fails somewhere that lacks the file. Staging the declared data under `share/` and running from there makes a relative path reach a declared file and nothing else. Exported into the runner's shell, a variable would reach the values the verdict is computed from, so a `BIN` set in `env` would change what the runner decides. Putting the variable on the test's own command line closes that.
 
 **Revisit if.** buck2 gives a test action a sandbox that already limits what it reads.
 
