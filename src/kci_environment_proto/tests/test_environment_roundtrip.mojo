@@ -174,7 +174,7 @@ def test_environment_dev_model_fields_roundtrip() raises:
         Optional[String](String("gcs-emulator:443")),
     )
     var env = Environment(
-        String("local-gcp"),
+        String("local"),
         Cloud(Cloud.CLOUD_LOCAL),
         String(""),
         String(""),

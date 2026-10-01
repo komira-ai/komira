@@ -122,7 +122,7 @@ enum EnvironmentKind {
   // production, a personal cloud environment). `deploy_provider` resolves to
   // a cloud runner.
   ENVIRONMENT_KIND_CLOUD = 1;
-  // A LOCAL emulated environment (e.g. `local-gcp`): emulator-backed services;
+  // A LOCAL emulated environment (e.g. `local`): emulator-backed services;
   // the single-box or local-Kubernetes applier stands up the emulators and the
   // workload. Cheap service-code verification; needs Docker.
   ENVIRONMENT_KIND_LOCAL = 2;
