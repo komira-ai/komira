@@ -1,9 +1,9 @@
 # =============================================================================
 # kci_secret_writer — the WRITE-ONLY secret seam: the verb a deployer uses to
-#   write a managed-app secret value that it is the source of.
+#   write an app secret value that it is the source of.
 # =============================================================================
 #
-# A deploy's ensure-secret step needs to WRITE a managed operational secret
+# A deploy's ensure-secret step needs to WRITE an operational secret
 # value into the customer's secret store so the running app's runtime
 # `SecretCapability` resolve finds it. `komira_secret_store` RESOLVES only —
 # there is no write path on the `SecretStore` trait (deliberately: the
@@ -28,10 +28,10 @@
 #
 # Dependency direction (cycle-free; a leaf on the secrets foundation):
 #   kci_secret_writer -> komira_secret_store  (SecretValue — the zeroizing
-#                                                 move-only value;
-#                                                 StaticSecretStore — the paired
-#                                                 resolve double for the
-#                                                 round-trip test)
+#                                              move-only value;
+#                                              StaticSecretStore — the paired
+#                                              resolve double for the
+#                                              round-trip test)
 #   NOT the reverse (the resolve foundation must NOT depend on the writer — the
 #   firewall is one-directional: the writer knows about resolve for the test
 #   bridge, but resolve never knows about the writer).

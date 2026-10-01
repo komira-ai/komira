@@ -3,8 +3,8 @@
 #   the `StaticSecretWriter` in-memory test double.
 # =============================================================================
 #
-# THE VERB. A managed app has OPERATIONAL secrets whose value the platform
-# operator is the authoritative SOURCE of (for example, the SMTP relay
+# THE VERB. A deployed app can have OPERATIONAL secrets whose value the
+# deploying party is the authoritative SOURCE of (for example, an SMTP relay
 # credential a mail app needs). The deployer must WRITE that value into the
 # customer's secret store at ensure-infra so the running app's runtime
 # `SecretCapability` resolve finds it. The `SecretStore` trait RESOLVES only —
@@ -31,13 +31,13 @@
 # The separation MUST be at the TYPE level; a `SecretWriter` a resolve holder
 # cannot obtain is the guarantee.
 #
-# THE SCOPE LINE (the distinction that must not blur). ONLY managed
-# *operational* secrets the operator is the SOURCE of are written. Customer
-# *data* secrets stay customer-owned + do-not-read — the operator never writes
+# THE SCOPE LINE (the distinction that must not blur). ONLY *operational*
+# secrets the deploying party is the SOURCE of are written. Customer
+# *data* secrets stay customer-owned + do-not-read — the deployer never writes
 # (or reads) a customer's DB password / API key; those are entered by the
 # customer's own tooling. The `SecretWriter` surface does NOT enforce this class
 # distinction by type (it cannot know a ref's class); it is enforced by WHO is
-# handed a `SecretWriter` (only the managed-operational ensure-infra path) —
+# handed a `SecretWriter` (only the operational ensure-infra path) —
 # the applier only ever writes refs it authoritatively sources. This is
 # documented here so a future caller does not route a customer data secret
 # through it.
@@ -80,7 +80,7 @@ from komira_secret_store.secret_value import SecretValue
 # `SecretStore` (resolve-only). Only the applier's ensure-infra path holds one.
 # =============================================================================
 trait SecretWriter(Movable, Deinitable):
-    """WRITE a control-plane-sourced managed-operational secret VALUE into the
+    """WRITE a deployer-sourced operational secret VALUE into the
     customer's secret store. A separate verb — the `SecretStore` trait
     resolves only. This is a TYPE-ENFORCED firewall:
     a `SecretWriter` is a SEPARATE type from `SecretStore`, so the runtime-resolve
@@ -341,7 +341,7 @@ struct StaticSecretWriter(SecretWriter, Movable):
     def last_token(self) -> String:
         """The `deploy_token` the LAST `write` carried (the assumed customer-role
         bearer token when the applier deploys into a customer environment). A test
-        asserts it matches the assumed token — NOT the control-plane token — proving
+        asserts it matches the assumed token — NOT the deployer's own token — proving
         the secret write acted AS the assumed role."""
         return self._p[].last_token
 
@@ -378,7 +378,7 @@ struct StaticSecretWriter(SecretWriter, Movable):
         WRITE-THEN-RESOLVE bridge: the ensure-secret falsifier writes via THIS
         `SecretWriter`, then resolves the same ref via the returned store and
         asserts the value round-trips (the running app's runtime resolve finds
-        the control-plane-written value). The bytes are copied into
+        the deployer-written value). The bytes are copied into
         the store's own script; the two doubles then hold independent copies."""
         var store = StaticSecretStore()
         for ref entry in self._p[].written.items():

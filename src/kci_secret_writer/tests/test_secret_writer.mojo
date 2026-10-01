@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Drives `StaticSecretWriter` (the in-process `SecretWriter` test double) and
-# asserts the managed-app secret WRITE verb — the deployer-sourced write into
+# asserts the app secret WRITE verb — the deployer-sourced write into
 # the customer store that ensure-secret uses.
 #
 # Each test is a FALSIFIER: it proves a property that FAILS on a broken writer and
@@ -12,7 +12,7 @@
 #       right value) — FAILS if write is a no-op / writes the wrong value.
 #   (2) write-then-resolve ROUND-TRIP: a value written via the SecretWriter is
 #       FOUND by a paired resolve (the running app's runtime resolve finds the
-#       control-plane-written value) — FAILS if the write does
+#       deployer-written value) — FAILS if the write does
 #       not land where the resolve reads.
 #   (3) a re-write of the SAME ref OVERWRITES (the versioned-PUT / rotation
 #       semantics) — FAILS if the write appends / keeps a stale value.
@@ -42,7 +42,7 @@ comptime _SMTP_VAL: String = "relay-server-token-abc123"
 
 def _secret_value(s: String) raises -> SecretValue:
     """A zeroizing SecretValue from a plaintext String (the ensure-secret path:
-    the control plane hands the applier the value, which it moves into the write)."""
+    the deployer hands the applier the value, which it moves into the write)."""
     return SecretValue.from_string(s)
 
 
@@ -91,7 +91,7 @@ def test_write_records_ref_and_value() raises:
     )
     assert_true(
         w.written_equals(_SMTP_REF, _SMTP_VAL),
-        "the written value byte-equals the control-plane value",
+        "the written value byte-equals the deployer-sourced value",
     )
     _ = w^
 
@@ -105,7 +105,7 @@ def test_write_then_resolve_round_trip() raises:
     _write_via(w, _SMTP_REF, _secret_value(_SMTP_VAL))
 
     # The running app's runtime resolve reads over a SecretStore seeded with the
-    # writer's writes (the round-trip: control plane WRITES, the app RESOLVES).
+    # writer's writes (the round-trip: the deployer WRITES, the app RESOLVES).
     var store = w.as_static_store()
     var resolved = _resolve_via(store, _SMTP_REF)
 
@@ -138,7 +138,7 @@ def test_rewrite_overwrites_versioned_put() raises:
         w.written_equals(_SMTP_REF, String("old-token-v1")), "first write landed"
     )
 
-    # A rotation: the control plane writes a NEW value for the SAME ref.
+    # A rotation: the deployer writes a NEW value for the SAME ref.
     _write_via(w, _SMTP_REF, _secret_value(String("new-token-v2-rotated")))
 
     # THE FALSIFIER: the LATEST value wins (the store's create-secret-version
