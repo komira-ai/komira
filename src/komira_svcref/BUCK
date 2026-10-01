@@ -1,0 +1,23 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The service-reference primitive: a service registers the URL it serves under
+# its logical name on a compare-and-swap object store (`ServiceRegistry`), and
+# peers resolve name -> URL through a TTL-cached read-through client
+# (`ServiceResolver`). Also the registry's delete verb and the orphan report
+# (catalog vs live deployment set). It depends on komira_objectstore only.
+
+mojo_library(
+    name = "komira_svcref",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    test_srcs = [
+        "tests/test_service_registry_cas.mojo",
+        "tests/test_service_registry_cloud_scope.mojo",
+        "tests/test_service_registry_error_classification.mojo",
+        "tests/test_service_registry_idempotent_skip.mojo",
+        "tests/test_service_registry_orphan_reap.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
