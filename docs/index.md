@@ -27,7 +27,7 @@ and its limits. A family's doc lands together with the libraries it describes.
 |---|---|
 | core | [columnar memory and Arrow](design/columnar_memory_and_arrow.md) |
 | cross-cutting | [Mojo safety and idioms](design/mojo_safety_and_idioms.md) |
-| connectors | [crypto](design/crypto_and_tls.md); [protobuf, gRPC and code generation](design/protobuf_grpc_and_codegen.md); HTTP, databases, object stores and file-system discovery: coming with `komira_http`, `komira_db` and `komira_objectstore` |
+| connectors | [crypto](design/crypto_and_tls.md); [protobuf, gRPC and code generation](design/protobuf_grpc_and_codegen.md); the HTTP client and server (`komira_http`), databases, object stores and file-system discovery: docs coming with `komira_db` and `komira_objectstore` |
 | storage | compression codecs, Parquet, text and row formats, Iceberg and CDC, serverless Postgres: coming with `komira_parquet`, `komira_csv`, `komira_iceberg` and `komira_pgstore` |
 | execution and operators | pipelines and morsel dispatch, aggregation, joins, sort, top-N and window: coming with the engine libraries |
 | plan and optimizer | logical plans and expressions, physical planning, the plan wire format, the query optimizer: coming with `komira_compiler` and `komira_optimizer` |
