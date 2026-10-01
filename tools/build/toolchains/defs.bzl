@@ -14,6 +14,7 @@ runs an action is the service's choice.
 """
 
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "row")
 
 load("@komira//tools/build/mojo:cxx.bzl", "no_python_bootstrap_toolchain", "zig_cxx_toolchain")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_toolchain")
@@ -25,13 +26,13 @@ _TOOLCHAINS_RUST = "komira//tools/build/toolchains/rust:"
 
 MOJO_TOOLCHAIN_ATTRS = dict(
     busybox = _TOOLCHAINS + "busybox",
-    cc_target = "x86_64-linux-gnu.2.34",
+    cc_target = row("linux-x86_64")["zig_triple"],
     compiler = _TOOLCHAINS + "mojo_compiler",
     runtime = _TOOLCHAINS + "mojo_runtime",
     # Every compile targets this CPU, whatever worker runs it. x86-64-v3
     # (AVX2, BMI2, FMA): built binaries and gated tests need a worker, and a
     # deployment host, that implements it.
-    target_cpu = "x86-64-v3",
+    target_cpu = row("linux-x86_64")["target_cpu"],
     zig = _TOOLCHAINS + "zig",
 )
 

@@ -34,7 +34,7 @@
 #   5. With an empty `.buckconfig.local` (no keys), `build
 #      komira//tools/build/examples:hello` succeeds with every action local,
 #      from an empty environment and `PATH`, and the binary prints its greeting.
-# On any other host, (1) is replaced by the refusal that names the host and
+# On a macOS arm64 host (1) is replaced by the one local darwin-arm64 platform; on any other host, by the refusal that names the host and
 # `.buckconfig.local`.
 #
 # Only (4) and (5) execute anything, and only on Linux x86_64.
@@ -80,9 +80,20 @@ got_ep=$(b2 audit config build.execution_platforms --style simple 2> "$W/ep.err"
 [ "$got_ep" = "$EP" ] || die "[build] execution_platforms is '$got_ep', not $EP (see $W/ep.err)"
 
 if [ "$(uname -s)/$(uname -m)" != Linux/x86_64 ]; then
+    # The platform table (tools/build/platforms/table.bzl) decides: a host that
+    # matches a registered row registers that row, locally; any other host is
+    # refused, naming why and `.buckconfig.local`.
+    if [ "$(uname -s)/$(uname -m)" = Darwin/arm64 ]; then
+        b2 audit providers "$EP" > "$W/providers.txt" 2>&1 || die "on Darwin/arm64, cannot read the providers of $EP (see $W/providers.txt)"
+        labels=$(grep -oE '^ +label=komira//tools/build/platforms:[a-z0-9_-]+' "$W/providers.txt" | sed 's/.*://' | tr '\n' ' ')
+        [ "$labels" = "darwin-arm64 " ] && [ "$(grep -c 'executor: Local(' "$W/providers.txt")" = 1 ] ||
+            die "on Darwin/arm64, the local platforms are [$labels], want one local darwin-arm64 (see $W/providers.txt)"
+        echo "PASS  local default: on Darwin/arm64 a fresh clone registers the one local platform of its own row, darwin-arm64"
+        exit 0
+    fi
     if b2 audit providers "$EP" > "$W/providers.txt" 2>&1; then
         die "on $(uname -s)/$(uname -m), $EP registered platforms instead of refusing (see $W/providers.txt)"
-    elif ! grep -qF 'which is not Linux x86_64' "$W/providers.txt" || ! grep -qF '.buckconfig.local' "$W/providers.txt"; then
+    elif ! grep -qE 'no platform row matches this host|reserves a row' "$W/providers.txt" || ! grep -qF '.buckconfig.local' "$W/providers.txt"; then
         die "on $(uname -s)/$(uname -m), $EP failed without naming the host and .buckconfig.local (see $W/providers.txt)"
     fi
     echo "PASS  local default: on $(uname -s)/$(uname -m) a fresh clone refuses local execution and points to .buckconfig.local"

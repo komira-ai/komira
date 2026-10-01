@@ -221,6 +221,16 @@
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
 #      (tests//negative/aws_client).
+#  37. The platform table (tools/build/platforms/table.bzl, one row per
+#      (os, cpu)) is complete and the default target platform is the client's
+#      own: loading tests//functional/platform_table: runs the load-time
+#      cases (a table missing a pin or a field, with a pending pin in a
+#      registered row, a malformed sha256 or a duplicate key or host is
+#      refused naming the row and the pin; each host_info() selects its row);
+#      `platforms:host` is linux-x86_64 on this client and a target stating no
+#      --target-platforms is configured for it; the reserved linux-arm64 row
+#      has no platform and its `[komira_re]` key is refused
+#      (tools/build/tests/functional/platform_table/check.sh).
 set -uo pipefail
 
 umbrella=1
@@ -920,6 +930,17 @@ elif [ "$umbrella" = 1 ]; then
 else
     echo "SKIP  umbrella cache (--no-umbrella)"
 fi
+
+# 37
+pt_rc=0
+pt_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/tests/functional/platform_table/check.sh "$LOG" 2>&1) || pt_rc=$?
+printf '%s\n' "$pt_out" > "$LOG/platform_table.log"
+grep -E '^(PASS|FAIL)  ' "$LOG/platform_table.log"
+pt_fails=$(grep -c '^FAIL  ' "$LOG/platform_table.log" || true)
+if [ "$pt_rc" != 0 ] && [ "$pt_fails" = 0 ]; then
+    fail "platform table: check.sh exited $pt_rc without a FAIL line (see $LOG/platform_table.log)"
+fi
+fails=$((fails + pt_fails))
 
 echo "logs: $LOG"
 [ "$fails" = 0 ] || { echo "$fails test(s) failed"; exit 1; }

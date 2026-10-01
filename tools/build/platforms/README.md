@@ -5,18 +5,66 @@ and the rest of this page follows.
 
 | question | answered by | in komira |
 |---|---|---|
-| What is this target **built for**? | the **target platform** | `linux-x86_64` (the default), or `darwin-arm64` with `--target-platforms` |
+| What is this target **built for**? | the **target platform** | the client's own platform (`host`, below), or any registered row with `--target-platforms` |
 | **Which tools** build it? | the **toolchain**, chosen by the target platform | `toolchains//:mojo` picks the linux or the macOS Mojo toolchain from the target platform's OS; C/C++, Rust and protobuf are linux x86_64 only |
-| **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per OS: `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
+| **Where do its actions run?** | the **execution platform**, chosen by what the toolchain says it runs on | one per (os, cpu): `linux-x86_64`, and `darwin-arm64` when macOS workers are configured |
+
+## The platform table
+
+A platform is an (os, cpu) pair, and [`table.bzl`](table.bzl) has one row for
+each. Everything else is derived from the row: the `platform()` targets in
+[`BUCK`](BUCK), the execution platforms and the `[komira_re]` key of each
+([`defs.bzl`](defs.bzl)), the toolchains' constraints, zig triple, CPU floor
+and runtime library list, the pinned downloads of every toolchain, and the
+default platform below. Adding a platform is one row plus its pins.
+
+A row states, all required:
+
+| field | what it is |
+|---|---|
+| `os`, `cpu`, `constraints` | the constraint values that name the platform; also the `exec_compatible_with` of the tools that run on it |
+| `host` | what `host_info()` reports on a machine of this platform; it only SELECTS the row |
+| `re_key` | the `[komira_re]` key of this platform's worker property set (the value is the client's, never committed) |
+| `zig_triple`, `unpack_triple` | the zig target of its links (`<arch>-<os>-<abi>.<os floor>`) and of the static tools that unpack archives |
+| `target_cpu`, `target_features` | the CPU floor every compile targets, whatever worker runs it |
+| `object_format`, `runtime_libs`, `os_floor` | `elf` or `macho`; what a built binary loads from the toolchain's `lib/`; the oldest OS it runs on |
+| `assets` | every pinned download, by role (`zig`, `mojo_compiler`, `rustc`, `rust_std`, `protoc`, `shellcheck`, `actionlint`, `busybox`, and the conda runtime libraries `libgcc`, `libstdcxx`, `libzlib`): the name of its `pinned_file`, URL and sha256, or `none(reason)` where a platform needs nothing |
+| `oci_base`, `bundles` | the container base, and whether bundles, OCI images and the launcher are products of this platform (Linux server artifacts) |
+| `registered` | `True`: a build key. `False`: reserved |
+
+**The table checks itself when it loads**: a row missing a field or a pin, a
+pin that is not an https URL with a 64-digit lowercase sha256, a `pending` pin
+in a registered row, two rows sharing a key or a host, fail every package that
+reads the table, naming the row and the pin. [`tests//functional/platform_table`](../tests/functional/platform_table/BUCK)
+holds the cases, each a table with one defect, and
+[`check.sh`](../tests/functional/platform_table/check.sh) is test 37 of
+`run_tests.sh`.
+
+Rows today:
+
+| row | state | CPU floor | notes |
+|---|---|---|---|
+| `linux-x86_64` | registered | `x86-64-v3` | the pinned configuration every cached action is keyed by |
+| `darwin-arm64` | registered | `apple-m1` | links through the host's `cc` for now (see the toolchain README); its zig, rustc, protoc and linter pins are recorded for the unpack tier |
+| `linux-arm64` | **reserved** | `generic` ARMv8-A with outline atomics | Ampere Altra servers (Neoverse N1) are the main build machines and a Raspberry Pi must run what they build, so the floor is generic ARMv8-A, chosen at run time (outline atomics and dispatch) for anything wider. A tuned `neoverse-n1` build is a later, opt-in variant, not this row. Declared and pinned, not a build key: no `platform()` target, no execution platform, and `[komira_re] linux_arm64_properties` is refused |
 
 ## Target platforms
 
-[`BUCK`](BUCK) declares two, each an OS and a CPU and nothing else:
+[`BUCK`](BUCK) declares one `platform()` per registered row, each an OS and a
+CPU and nothing else, and `host`:
 
 | platform | constraints | used |
 |---|---|---|
-| `linux-x86_64` | `prelude//os/constraints:linux`, `prelude//cpu/constraints:x86_64` | for every target, by default (`[parser]` in `.buckconfig`) |
-| `darwin-arm64` | `prelude//os/constraints:macos`, `prelude//cpu/constraints:arm64` | `buck2 build --target-platforms komira//tools/build/platforms:darwin-arm64 <targets>` |
+| `host` | an alias of the row `host_info()` selects | the default target platform of every target (`[parser]` in `.buckconfig`): the client's own |
+| `linux-x86_64` | `prelude//os/constraints:linux`, `prelude//cpu/constraints:x86_64` | on a Linux x86_64 client, by default; anywhere with `--target-platforms komira//tools/build/platforms:linux-x86_64` |
+| `darwin-arm64` | `prelude//os/constraints:macos`, `prelude//cpu/constraints:arm64` | on a macOS arm64 client, by default; anywhere with `--target-platforms komira//tools/build/platforms:darwin-arm64` |
+
+`host` is an alias, so the label, configuration and output paths of a Linux
+x86_64 client's build are `linux-x86_64`'s own, unchanged. It supplies no tool,
+path or flag: a machine is only ever used to pick a row. On a machine no
+registered row matches (a Linux arm64 machine, for now), analysing `host`
+fails naming why, and stating `--target-platforms` still works from it.
+Building for another OS or CPU stays explicit.
 
 A target that only makes sense on one OS says so with
 `target_compatible_with`; a wildcard build for the other platform skips it
@@ -43,9 +91,9 @@ toolchain's files, state `LINUX_X86_64` themselves: they run linux tools.
 
 An execution platform is a place actions can run: a configuration plus an
 executor (this machine, or a remote-execution service with a property set).
-komira registers **one per OS**, under the label and with the configuration
+komira registers **one per (os, cpu)**, under the label and with the configuration
 of the target platform of the same name. A tool built to run inside an
-action is therefore configured exactly like a target built for that OS.
+action is therefore configured exactly like a target built for that platform.
 
 For each target, Buck2 takes the first registered execution platform that
 satisfies the target's `exec_compatible_with` (its own and its toolchains').
@@ -76,10 +124,13 @@ ran with the linux property set.
 ([`defs.bzl`](defs.bzl)), which registers one of two sets:
 
 - **Local (the default).** When `[komira_re]` names no property set,
-  `komira_local_execution_platforms` registers `linux-x86_64` with a local
-  executor only: every action runs on this machine, with no remote cache. It
-  refuses a host that is not Linux x86_64, since every toolchain action is a
-  Linux x86_64 binary, and registers no macOS platform.
+  `komira_local_execution_platforms` registers the row that matches this
+  host (`linux-x86_64` on a Linux x86_64 machine) with a local executor only:
+  every action runs on this machine, with no remote cache. A host no
+  registered row matches is refused, naming why. On a Mac it registers
+  `darwin-arm64`, but every toolchain action that unpacks is still a Linux
+  x86_64 binary, so a darwin target does not build there until the unpack
+  tier has a darwin row of its own.
 - **Remote.** When `.buckconfig.local` names the linux property set, it
   registers exactly what `komira_execution_platforms` registers from it
   (below).
@@ -96,7 +147,7 @@ exists. What a local action does and does not guarantee is in
 ## Remote workers
 
 `komira_execution_platforms(name, linux, darwin = None)`
-([`defs.bzl`](defs.bzl)) registers one remote execution platform per OS,
+([`defs.bzl`](defs.bzl)) registers one remote execution platform per (os, cpu),
 given the exact REAPI platform property dict every action of that OS
 carries. Every platform it registers runs remotely only (local execution
 disabled), reads the remote cache, and uploads no results of its own.
@@ -108,6 +159,7 @@ A standalone checkout reads those sets from `[komira_re]` in
 |---|---|---|
 | `linux_properties` | `linux-x86_64` | yes, for remote execution |
 | `darwin_properties` | `darwin-arm64` | no; needs `darwin_macos_hosts` as well |
+| `linux_arm64_properties` | `linux-arm64` | **reserved**: refused if set, until that row is registered |
 | `darwin_macos_hosts` | (the macOS hosts a compile may run on) | with `darwin_properties` |
 
 Each property value is comma-separated `key=value` pairs matching what the

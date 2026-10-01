@@ -322,7 +322,8 @@ target platform, and the configuration of the linux execution platform), read
 with `buck2 cquery 'deps(komira//tools/build/examples:hello)'`, equals the pin
 in `run_tests.sh`, and it is the only configuration in that closure. A configuration's hash is keyed by its
 platform's label and constraints and appears in the output paths, and so in
-the digest, of every configured action, product code included. Moving the
+the digest, of every configured action, product code included. The default target platform (`platforms:host`) is an alias of this one
+on a Linux x86_64 client, so it has the same hash. Moving the
 `platforms` package, renaming a platform or changing a constraint therefore
 invalidates every cached action here and in every repository using
 komira; the pins make that a deliberate edit. Upgrading buck2 may change the
@@ -423,7 +424,8 @@ fails closed), as does a retired `[komira_re]` key such as
 `mojo_compile_properties` (naming `linux_properties`), while
 `-c komira.execution=local` still registers the local platform;
 `[komira] execution = remote` in a user `~/.buckconfig.local` refuses; and an
-unknown mode refuses. On any other host the clone must refuse local
+unknown mode refuses. On a macOS arm64 host the clone registers the one
+local `darwin-arm64` platform; on any other host it must refuse local
 execution, naming the host and `.buckconfig.local`. Last, on Linux x86_64,
 it builds `komira//tools/build/toolchains:conda_unpack` and `:zig_cc_launcher`
 locally, from a daemon started with an empty environment and `PATH`: zig is
@@ -628,6 +630,25 @@ buck2 build tests//negative/rust_test:env_scrubbed 'tests//negative/rust_test:bi
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
 buck2 test //tools/build/proto-codegen:komira_proto_codegen
 ```
+
+## 37. Platform table
+
+[`functional/platform_table`](functional/platform_table/BUCK): the platform
+table ([`table.bzl`](../platforms/table.bzl), one row per (os, cpu)) and the
+default target platform. Loading the package runs the load-time cases of
+[`cases.bzl`](functional/platform_table/cases.bzl): the committed table is
+complete, and a copy with one defect (a pin missing from a registered, a
+macOS or the reserved row, a pending pin in a registered row, a sha256 that
+is not 64 lowercase hex digits, a url that is not https, `none` for a pin that
+must be real, a missing or unknown field, two rows sharing a key or a host)
+is refused with a sentence naming the row and the pin; each `host_info()`
+selects its row, or is refused with a reason (a Linux arm64 host: the row is
+reserved). [`check.sh`](functional/platform_table/check.sh) then checks, on
+the client: `komira//tools/build/platforms:` declares `darwin-arm64`,
+`linux-x86_64` and `host`, and nothing for the reserved `linux-arm64`;
+`host` is this client's own platform and a target stating no
+`--target-platforms` is configured for it; and `[komira_re]
+linux_arm64_properties` is refused, naming the platform. Analysis only.
 
 ## Diagnostics
 

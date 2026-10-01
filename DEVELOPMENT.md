@@ -282,9 +282,16 @@ not share a remote cache.
 
 ## Troubleshooting
 
-- **`komira_local_execution_platforms: local execution runs the pinned linux
-  x86_64 toolchain on this machine, which is not Linux x86_64`.** Local builds
-  need Linux x86_64; configure a remote service (step 3).
+- **`komira_local_execution_platforms: no platform row matches this host`** (or
+  `this host is linux-arm64, which komira reserves a row for but does not
+  build for yet`). Local builds run this machine's own platform, one row of
+  [the platform table](tools/build/platforms/table.bzl); a machine no
+  registered row matches builds through a remote service (step 3), naming
+  the platform with `--target-platforms`.
+- **On a Mac, a local build stops at the first toolchain action.** The
+  default platform is `darwin-arm64`, but unpacking the toolchain still runs
+  Linux x86_64 binaries, so a darwin target needs a remote service until the
+  unpack tier has a darwin row of its own.
 - **A local build is slow or runs out of memory.** Pass `-j <n>` to run
   fewer actions at once (step 2).
 - **You want to know whether a build was local or remote.** `buck2 log
