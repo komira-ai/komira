@@ -603,6 +603,43 @@ cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/l
 cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
 ```
 
+## 35. Rust tests are part of the build
+
+`rust_test` ([`../rust/README.md`](../rust/README.md#tests-are-part-of-the-build))
+compiles a crate with `rustc --test` and runs it as a build action, and
+`tests = [...]` on `rust_library` and `rust_binary` makes the published
+artifact wait on every test's `.passed` marker.
+`//tools/build/proto-codegen:komira_proto_codegen_unit` (the inline tests of
+`komira_proto_codegen`, which gate the library and so every generator binary)
+must build, and its marker must record a non-zero passed count.
+
+In [`negative/rust_test`](negative/rust_test/BUCK), `red` holds one passing
+and one failing test. It must fail with `GATED TEST FAILED` and the harness's
+`1 passed; 1 failed` (the panic unwound through the zig-linked harness, so
+the run continued), while `red[bin]`, the test executable, builds: the red is
+the run, not the compile. `bin` (welded to `red`) and `lib_consumer` (linking
+`red_lib`, which is welded to `red`) must fail the same way. `bin_green`,
+welded to `env_scrubbed`, must build and run (`[run_check]`); `env_scrubbed`
+must build: its test asserts the harness's environment is exactly `HOME`,
+`PATH` and `TMPDIR`. Each of these must fail, naming its cause: no tests
+(`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
+hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). There are
+no holds: a welded test that fails makes its artifact unbuildable until it
+passes.
+
+`buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
+print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
+gives `buck2 test` the same runner, so the reused `tests` attribute runs what
+it names. `buck2 test tests//negative/rust_test:bin` must fail with `GATED
+TEST FAILED`.
+
+```sh
+buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
+buck2 build tests//negative/rust_test:env_scrubbed 'tests//negative/rust_test:bin_green[run_check]'
+buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
+buck2 test //tools/build/proto-codegen:komira_proto_codegen
+```
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
