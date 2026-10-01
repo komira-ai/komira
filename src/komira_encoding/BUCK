@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Binary-to-text encodings (base64, base64url, base32, hex) in pure Mojo with
+# no dependencies. Strict, constant-time decoding; see __init__.mojo.
+mojo_library(
+    name = "komira_encoding",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_base64.mojo",
+        "tests/test_base32.mojo",
+        "tests/test_hex.mojo",
+        "tests/test_invalid_input.mojo",
+        "tests/test_crypto_compat.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
