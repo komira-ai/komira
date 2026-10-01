@@ -68,7 +68,7 @@ from komira_aws_core import (
     aws_ts_from_json,
     aws_ts_to_json,
 )
-from komira_serde.json_value import (
+from komira_json import (
     JsonValue,
     parse_json_value,
 )
