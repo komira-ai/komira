@@ -31,7 +31,7 @@
 //     (full_manifest.proto).
 // Importing the enum would generate the other file into this package (the
 // generated package is flat, and a reference to another file's message is a
-// module of the same package), so every consumer of `environment_rpc` would
+// module of the same package), so every consumer of `kci_environment_proto` would
 // pull in that schema too. Instead the registry reader mirrors the ordinals as
 // constants at its boundary and a drift-guard test asserts the mirror equals
 // the real enum. Do not "fix" one of these into an import, and do not declare
@@ -40,7 +40,7 @@
 
 syntax = "proto3";
 
-package komira.deploy.v1;
+package kci.deploy.v1;
 
 // ─── The cloud posture (the 5-value enum) ────────────────────────────────────
 //
@@ -404,13 +404,13 @@ message Environment {
   // AND `kind` DOES NOT ALREADY SAY THIS. `EnvironmentKind` is CLOUD/LOCAL, a
   // fidelity rung, an orthogonal axis.
   //
-  // ── WHY `int32` AND NOT `komira.bundle.v1.Tenancy`; READ BEFORE "FIXING" ──
+  // ── WHY `int32` AND NOT `kci.bundle.v1.Tenancy`; READ BEFORE "FIXING" ──
   // This proto is standalone BY DESIGN (see the file header): naming the
   // `Tenancy` enum would import app_bundle.proto into every consumer of
-  // `environment_rpc`, the same bind that made `deploy_provider` an `int32`.
+  // `kci_environment_proto`, the same bind that made `deploy_provider` an `int32`.
   //
   // AND DUPLICATING THE ENUM HERE WOULD BE WORSE THAN EITHER. This file is
-  // `komira.deploy.v1` and app_bundle.proto is `komira.bundle.v1`, so a second
+  // `kci.deploy.v1` and app_bundle.proto is `kci.bundle.v1`, so a second
   // `Tenancy` would not collide in protoc, and that is exactly the problem:
   // the whole value of this field is that it is THE SAME ENUM the bundle
   // declares. The placement rule is a type match, and a type match across two
@@ -508,7 +508,7 @@ message EnvironmentComputeEnvironment {
   // environment's own `region`.
   string zone = 1;
   // The egress posture of the subnet the VMs join: the ORDINAL CONTRACT of
-  // `komira.manifest.v1.EgressMode` (full_manifest.proto), carried as a bare
+  // `kci.manifest.v1.EgressMode` (full_manifest.proto), carried as a bare
   // `int32` for the reason `deploy_provider` and `tenancy` are (see the file
   // header). The registry parser accepts the enum NAME tokens (`egress:
   // EGRESS_MODE_PRIVATE_WITH_PUBLIC_EGRESS`), mirrored as constants and

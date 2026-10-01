@@ -1,4 +1,4 @@
-# The generated `environment_rpc` package on the proto binary wire.
+# The generated `kci_environment_proto` package on the proto binary wire.
 #
 # The round trips show that every `Environment` field, both arms of each
 # binding (Firestore/DynamoDB, GCS/S3) and every enum survive encode + decode
@@ -15,7 +15,7 @@ from std.testing import assert_equal, assert_true, assert_false
 
 from komira_serde import encode_proto, decode_proto
 
-from environment_rpc.environment import (
+from kci_environment_proto.environment import (
     Environment,
     Cloud,
     DirectApply,
