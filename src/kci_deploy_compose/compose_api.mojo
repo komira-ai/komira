@@ -7426,6 +7426,7 @@ def _web_frontend_node(
                 content_digest^,
                 runtime_config^,
                 route_rules^,  # field 11 — the FULL url-map route table
+                String(""),  # field 12 content_store: stamped by the pass that pins content_digest, never at compose
             )
         ),  # arm 18 (web_frontend)
         None,  # arm 19 (api_edge left unset)
