@@ -32,7 +32,13 @@ fn main() -> std::io::Result<()> {
 }
 
 fn respond(request: &CodeGeneratorRequest, request_bytes: &[u8]) -> CodeGeneratorResponse {
-    let params = PluginParameters::parse(request.parameter.as_deref().unwrap_or(""));
+    let params = match PluginParameters::parse(request.parameter.as_deref().unwrap_or("")) {
+        Ok(p) => p,
+        Err(e) => return CodeGeneratorResponse::with_error(format!("protoc-gen-openapi: {e}")),
+    };
+    if let Err(e) = params.require_only_package_prefix("protoc-gen-openapi") {
+        return CodeGeneratorResponse::with_error(format!("protoc-gen-openapi: {e}"));
+    }
     let http_rules = match HttpRuleTable::from_request_bytes(request_bytes) {
         Ok(t) => t,
         Err(e) => {
