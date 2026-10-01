@@ -49,8 +49,8 @@ RustCrateInfo = provider(fields = {
     "closure": provider_field(list),
 })
 
-# A rust_test: the `.passed` marker its run writes. Only a passing run (or a
-# held test's recorded failure) writes it; `tests = [...]` on rust_library and
+# A rust_test: the `.passed` marker its run writes. Only a passing run writes
+# it; `tests = [...]` on rust_library and
 # rust_binary takes these markers as inputs of the published artifact.
 RustTestInfo = provider(fields = {
     "marker": provider_field(typing.Any),
@@ -306,54 +306,13 @@ def _gate(ctx, tc, ungated, public):
 def _tests_sub_target(markers):
     return {"tests": [DefaultInfo(default_outputs = markers)]}
 
-# `tests_known_failing` on rust_test -- a hold on a red test, which INVERTS
-# rather than mutes, exactly as mojo_library's does. Keyed by the libtest name
-# (`module::tests::name`). A held test still runs, alone, and must FAIL; a
-# held test that passes is red (LEDGER STALE) naming its row. A row is
-# `{"issue": ..., "reason": ...}`, refused at analysis when the issue is
-# missing or malformed, the reason is empty, or two rows carry byte-identical
-# reasons. Whether the name is a test of the binary, and whether every test is
-# held, is known only from the harness's own list: test_runner.sh refuses
-# both at RUN time, when the marker action runs, so a mistyped row passes
-# analysis (`buck2 targets`) and reds only the build that runs the test.
-_KNOWN_FAILING_FIELDS = ["issue", "reason"]
-_ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
-_TEST_NAME = "^[A-Za-z_][A-Za-z0-9_]*(::[A-Za-z_][A-Za-z0-9_]*)*$"
-
-def _admit_known_failing(ctx):
-    held = ctx.attrs.tests_known_failing
-    where = "{}: tests_known_failing".format(ctx.label.raw_target())
-    seen = {}
-    for name, row in held.items():
-        if not regex_match(_TEST_NAME, name):
-            fail("{}[{}]: not a libtest test name (`module::tests::name`, as `--list` prints it).".format(where, repr(name)))
-        for field in row:
-            if field not in _KNOWN_FAILING_FIELDS:
-                fail("{}[{}]: unknown field `{}`; a row has exactly `issue` and `reason`.".format(where, repr(name), field))
-        issue = row.get("issue", "")
-        reason = row.get("reason", "")
-        if not issue:
-            fail("{}[{}]: no `issue`. A hold is debt; name the GitHub issue that will remove it (`123`, `#123` or its URL).".format(where, repr(name)))
-        if not regex_match(_ISSUE_REF, issue):
-            fail("{}[{}]: issue {} is not a GitHub issue number (`123`, `#123`) or https://github.com/<owner>/<repo>/issues/<n> URL.".format(where, repr(name), repr(issue)))
-        if not reason.strip():
-            fail("{}[{}]: empty `reason`. Say what this test shows is broken; a reader deciding whether the hold is still honest has nothing else to go on.".format(where, repr(name)))
-        if reason in seen:
-            fail("{}[{}] and [{}] carry byte-identical reasons. If they share a cause, say what each test shows; otherwise the second test was never examined.".format(where, repr(seen[reason]), repr(name)))
-        seen[reason] = name
-    return held
-
 def _test_impl(ctx):
     tc = ctx.attrs.toolchain[RustToolchainInfo]
-    held = _admit_known_failing(ctx)
     exe = ctx.actions.declare_output("bin/" + ctx.label.name)
     _compile(ctx, "test", exe)
     marker = ctx.actions.declare_output(ctx.label.name + ".passed")
     if ctx.attrs.test_timeout_s < 1:
         fail("{}: test_timeout_s must be at least 1, not {}".format(ctx.label.raw_target(), ctx.attrs.test_timeout_s))
-    holds = []
-    for name in sorted(held):
-        holds += ["--hold", name, held[name]["issue"], held[name]["reason"]]
 
     def runner(marker_arg):
         return cmd_args(
@@ -365,7 +324,6 @@ def _test_impl(ctx):
             exe,
             marker_arg,
             str(ctx.attrs.test_timeout_s),
-            holds,
         )
 
     ctx.actions.run(runner(marker.as_output()), category = "rust_gated_test", identifier = ctx.label.name)
@@ -374,7 +332,7 @@ def _test_impl(ctx):
         # (a test executable, not a shippable artifact).
         DefaultInfo(default_output = marker, sub_targets = {"bin": [DefaultInfo(default_output = exe)]}),
         RustTestInfo(marker = marker),
-        # `buck2 test` runs the same runner, holds and timeout over the same
+        # `buck2 test` runs the same runner and timeout over the same
         # harness, outside the build (it writes no marker). So `buck2 test` of
         # a rust_test, or of a rust_library/rust_binary naming it in `tests`,
         # runs its tests rather than reporting NO TESTS RAN.
@@ -384,11 +342,9 @@ def _test_impl(ctx):
 rust_test_rule = rule(
     impl = _test_impl,
     attrs = _COMMON_ATTRS | {
-        # {libtest name: {"issue": ..., "reason": ...}}; see _admit_known_failing.
-        "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
         "labels": attrs.list(attrs.string(), default = []),
-        # Each harness invocation (the list, the unheld run, each held run) is
-        # killed after this many seconds, and the run is NO VERDICT (exit 142).
+        # Each harness invocation (the list, then the run) is killed after
+        # this many seconds, and the run is NO VERDICT (exit 142).
         "test_timeout_s": attrs.int(default = 600),
     },
 )

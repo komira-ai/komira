@@ -36,58 +36,6 @@ rust_binary(
     deps = [":red_lib"],
 )
 
-# green: the failing test is held, and fails as its row records.
-rust_test(
-    name = "held_red",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-    },
-)
-
-# green: a binary welded to that test builds, and runs (`[run_check]`).
-rust_binary(
-    name = "bin_held",
-    srcs = ["src/main.rs"],
-    crate_root = "src/main.rs",
-    tests = [":held_red"],
-    expected_stdout = "hello\n",
-)
-
-# must fail: LEDGER STALE, a held test passes.
-rust_test(
-    name = "held_passing",
-    srcs = ["src/held.rs"],
-    crate_root = "src/held.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-        "tests::passes": {"issue": "2", "reason": "planted: this test passes"},
-    },
-)
-
-# must fail: every test is held.
-rust_test(
-    name = "all_held",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-        "tests::passes": {"issue": "2", "reason": "planted: held although it passes"},
-    },
-)
-
-# must fail: the hold names no test of the binary.
-rust_test(
-    name = "held_unknown",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-        "tests::gone": {"issue": "2", "reason": "planted: no such test"},
-    },
-)
-
 # must fail: EMPTY GATE, nothing to run.
 rust_test(
     name = "empty",
@@ -102,96 +50,20 @@ rust_test(
     crate_root = "src/ignored.rs",
 )
 
-# must fail at analysis: the issue is not an issue reference.
-rust_test(
-    name = "bad_issue",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "someday", "reason": "planted: asserts 2 + 2 == 5"},
-    },
-)
-
-# must fail at analysis: an empty reason.
-rust_test(
-    name = "bad_empty_reason",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "1", "reason": " "},
-    },
-)
-
-# must fail at analysis: a row with no issue.
-rust_test(
-    name = "missing_issue",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"reason": "planted: asserts 2 + 2 == 5"},
-    },
-)
-
-# must fail at analysis: a row field other than issue and reason.
-rust_test(
-    name = "unknown_field",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "tests::fails": {"card": "x", "issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-    },
-)
-
-# must fail at analysis: a key that is not a libtest test name.
-rust_test(
-    name = "bad_name",
-    srcs = ["src/red.rs"],
-    crate_root = "src/red.rs",
-    tests_known_failing = {
-        "src/red.rs": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-    },
-)
-
-# must fail at analysis: two rows with byte-identical reasons (the
-# anti-copy-paste rule, as on mojo_library).
-rust_test(
-    name = "dup_reason",
-    srcs = ["src/held.rs"],
-    crate_root = "src/held.rs",
-    tests_known_failing = {
-        "tests::fails": {"issue": "1", "reason": "planted: asserts 2 + 2 == 5"},
-        "tests::passes": {"issue": "2", "reason": "planted: asserts 2 + 2 == 5"},
-    },
-)
-
-# green: a panicking #[ignore]d test held; the held run includes ignored
-# tests, so it runs and fails as its row records.
-rust_test(
-    name = "held_ignored",
-    srcs = ["src/ignored.rs"],
-    crate_root = "src/ignored.rs",
-    tests_known_failing = {
-        "tests::muted": {"issue": "1", "reason": "planted: an #[ignore]d test that panics"},
-    },
-)
-
-# must fail: the held test aborts (exit 134, not a NO VERDICT code) and
-# prints no `test result: FAILED. 0 passed; 1 failed` summary, so the hold
-# is not measured.
-rust_test(
-    name = "held_abort",
-    srcs = ["src/abort.rs"],
-    crate_root = "src/abort.rs",
-    tests_known_failing = {
-        "tests::aborts": {"issue": "1", "reason": "planted: calls std::process::abort()"},
-    },
-)
-
 # green: the harness sees only HOME, PATH and TMPDIR.
 rust_test(
     name = "env_scrubbed",
     srcs = ["src/env.rs"],
     crate_root = "src/env.rs",
+)
+
+# green: a binary welded to a passing test builds, and runs (`[run_check]`).
+rust_binary(
+    name = "bin_green",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    tests = [":env_scrubbed"],
+    expected_stdout = "hello\n",
 )
 
 # must fail: NO VERDICT, the harness is killed at its timeout (exit 142).

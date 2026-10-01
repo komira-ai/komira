@@ -1,10 +1,10 @@
 # test_runner.sh -- runs one rust_test inside a build action.
 #
 # usage: busybox sh test_runner.sh <busybox> <label> <test_binary> <marker> \
-#            <timeout seconds> [--hold <test name> <issue> <reason>]...
+#            <timeout seconds>
 #
 # <test_binary> is a libtest harness (`rustc --test`). On success writes
-# `PASS <label>: <n> passed[, <h> held]` to <marker> and to stdout. A gated
+# `PASS <label>: <n> passed` to <marker> and to stdout. A gated
 # rust_library or rust_binary is produced by an action that takes every
 # marker as an input, so it cannot exist unless each of its tests passed
 # (defs.bzl, `tests`). `buck2 test` runs this same script with /dev/null as
@@ -13,17 +13,10 @@
 # The run, in order:
 #   1. `--list` names every test. None is a refusal (EMPTY GATE): a gate that
 #      runs nothing passes for any code.
-#   2. Each --hold must name a listed test (else LEDGER STALE), and not every
-#      test may be held.
-#   3. The unheld tests run in one harness invocation (`--exact --skip <held>`).
-#      Any failure is red (GATED TEST FAILED). The harness's own summary must
-#      count every unheld test as passed: an #[ignore]d test is refused, and a
-#      count that does not add up is refused.
-#   4. Each held test runs alone (`--exact --include-ignored <name>`, so an
-#      #[ignore]d test runs too) and must FAIL, measured: the harness's summary
-#      must read `0 passed; 1 failed`. A pass is red (LEDGER STALE), naming the
-#      row to delete; any other outcome (a crash, a summary counting something
-#      else) is red too, because it does not show the held test failing.
+#   2. Every test runs in one harness invocation. Any failure is red (GATED
+#      TEST FAILED). The harness's own summary must count every listed test as
+#      passed: an #[ignore]d test is refused, and a count that does not add up
+#      is refused. There are no holds: every test must pass.
 #
 # NO VERDICT, in every run above: SIGKILL (exit 137), because a memory limit's
 # kill is not the test's failure (tools/build/mojo/gate_runner.sh says why);
@@ -50,13 +43,12 @@ abspath() {
     esac
 }
 
-[ "$#" -ge 5 ] || { echo "rust test_runner: usage error" >&2; exit 2; }
+[ "$#" -eq 5 ] || { echo "rust test_runner: usage error" >&2; exit 2; }
 BB=$(abspath "$1")
 LABEL=$2
 BIN=$(abspath "$3")
 MARKER=$4
 TIMEOUT=$5
-shift 5
 case "$TIMEOUT" in
     ''|*[!0-9]*|0) echo "rust test_runner: timeout must be a positive number of seconds, not '$TIMEOUT'" >&2; exit 2 ;;
 esac
@@ -92,23 +84,6 @@ no_verdict() {
     esac
 }
 
-# Held rows, one per line: name, then issue and reason in parallel files.
-: > "$T/held"
-: > "$T/held_issue"
-: > "$T/held_reason"
-while [ "$#" -gt 0 ]; do
-    case "$1" in
-        --hold)
-            [ "$#" -ge 4 ] || { echo "rust test_runner: --hold needs <name> <issue> <reason>" >&2; exit 2; }
-            printf '%s\n' "$2" >> "$T/held"
-            printf '%s\n' "$3" >> "$T/held_issue"
-            printf '%s\n' "$4" >> "$T/held_reason"
-            shift 4
-            ;;
-        *) echo "rust test_runner: unknown argument $1" >&2; exit 2 ;;
-    esac
-done
-
 banner() {
     echo "=================================================================="
     echo "$1"
@@ -125,39 +100,20 @@ if [ "$rc" != 0 ]; then
 fi
 sed -n 's/: test$//p' "$T/list_raw" > "$T/list"
 listed=$(wc -l < "$T/list" | tr -d ' ')
-held=$(wc -l < "$T/held" | tr -d ' ')
 if [ "$listed" = 0 ]; then
     banner "EMPTY GATE: $LABEL lists 0 tests. A gate that runs nothing passes for any code; give it a #[test], or drop it from \`tests\`." >&2
     exit 1
 fi
 
-# 2. Each hold names a listed test.
-while IFS= read -r name; do
-    if ! grep -qxF -- "$name" "$T/list"; then
-        banner "LEDGER STALE: $LABEL: tests_known_failing[\"$name\"] names no test of this target." >&2
-        echo "  The test was renamed or deleted; fix the row's name, or delete the row." >&2
-        exit 1
-    fi
-done < "$T/held"
-if [ "$held" -ge "$listed" ]; then
-    banner "REFUSED: $LABEL holds all $listed tests. That gate asserts nothing passes." >&2
-    exit 1
-fi
-
-# 3. The unheld tests, in one run.
-set -- --exact
-while IFS= read -r name; do
-    set -- "$@" --skip "$name"
-done < "$T/held"
+# 2. Every test, in one run.
 rc=0
-harness "$@" > "$T/log" 2>&1 || rc=$?
-no_verdict "$rc" "the unheld tests"
+harness > "$T/log" 2>&1 || rc=$?
+no_verdict "$rc" "the tests"
 if [ "$rc" != 0 ]; then
     banner "GATED TEST FAILED: $LABEL (exit $rc)" >&2
     tail -n 100 "$T/log" >&2
     exit "$rc"
 fi
-want=$((listed - held))
 summary=$(grep -m1 '^test result: ok\.' "$T/log" || true)
 passed=$(printf '%s\n' "$summary" | sed -n 's/^test result: ok\. \([0-9]*\) passed; \([0-9]*\) failed; \([0-9]*\) ignored;.*/\1/p')
 ignored=$(printf '%s\n' "$summary" | sed -n 's/^test result: ok\. \([0-9]*\) passed; \([0-9]*\) failed; \([0-9]*\) ignored;.*/\3/p')
@@ -167,45 +123,16 @@ if [ -z "$passed" ]; then
     exit 1
 fi
 if [ "$ignored" != 0 ]; then
-    banner "REFUSED: $LABEL: $ignored #[ignore]d test(s) did not run. An ignored test is a mute; remove its #[ignore], delete it, or, if it fails, hold it in tests_known_failing (a held test runs with --include-ignored and must fail)." >&2
+    banner "REFUSED: $LABEL: $ignored #[ignore]d test(s) did not run. An ignored test is a mute; remove its #[ignore] and make it pass, or delete it." >&2
     grep ' \.\.\. ignored' "$T/log" >&2 || true
     exit 1
 fi
-if [ "$passed" != "$want" ]; then
-    banner "REFUSED: $LABEL: $listed tests listed, $held held, so $want must pass; the harness reports $passed." >&2
+if [ "$passed" != "$listed" ]; then
+    banner "REFUSED: $LABEL: $listed tests listed, so $listed must pass; the harness reports $passed." >&2
     tail -n 50 "$T/log" >&2
     exit 1
 fi
 
-# 4. Each held test runs alone and must fail.
-i=0
-while IFS= read -r name; do
-    i=$((i + 1))
-    issue=$(sed -n "${i}p" "$T/held_issue")
-    reason=$(sed -n "${i}p" "$T/held_reason")
-    rc=0
-    harness --exact --include-ignored "$name" > "$T/held_log" 2>&1 || rc=$?
-    no_verdict "$rc" "held test $name"
-    if [ "$rc" = 0 ]; then
-        banner "LEDGER STALE: held test $name of $LABEL PASSES." >&2
-        echo "  row:    tests_known_failing[\"$name\"]" >&2
-        echo "  issue:  $issue" >&2
-        echo "  reason: $reason" >&2
-        echo "  The test is fixed: delete the row, and close the issue if nothing else holds it." >&2
-        exit 1
-    fi
-    if ! grep -q '^test result: FAILED\. 0 passed; 1 failed; 0 ignored;' "$T/held_log"; then
-        banner "REFUSED: held test $name of $LABEL exited $rc without a \`test result: FAILED. 0 passed; 1 failed\` summary." >&2
-        echo "  A hold asserts that this one test runs and fails; that was not measured." >&2
-        tail -n 50 "$T/held_log" >&2
-        exit 1
-    fi
-done < "$T/held"
-
-if [ "$held" = 0 ]; then
-    line=$(printf 'PASS %s: %s passed' "$LABEL" "$passed")
-else
-    line=$(printf 'PASS %s: %s passed, %s held (each failing, as its row records)' "$LABEL" "$passed" "$held")
-fi
+line=$(printf 'PASS %s: %s passed' "$LABEL" "$passed")
 printf '%s\n' "$line" > "$MARKER"
 printf '%s\n' "$line"

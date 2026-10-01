@@ -209,16 +209,12 @@
 #      makes the test, a binary welded to it, and a binary linking a library
 #      welded to it unbuildable (GATED TEST FAILED, with the harness's
 #      `1 passed; 1 failed`: the panic unwound), while the test executable
-#      itself compiles; a held failing test builds and its welded binary runs;
-#      a held #[ignore]d test that panics builds (held runs include ignored
-#      tests); the harness sees only HOME, PATH and TMPDIR; a held test that
-#      passes, holding every test, a hold naming no test, a target with no
-#      tests, an unheld #[ignore]d test, and, at analysis, a row with no
-#      issue, a malformed issue, an empty reason, an unknown row field, a key
-#      that is not a libtest test name, and two byte-identical reasons are
-#      each refused; a hanging test is NO VERDICT at its timeout. `buck2 test`
-#      of a welded library runs its rust_test (Pass, with the harness's
-#      count), and of a binary welded to a red test fails.
+#      itself compiles; a binary welded to a passing test builds and runs;
+#      the harness sees only HOME, PATH and TMPDIR; a target with no tests
+#      and an #[ignore]d test are each refused; a hanging test is NO VERDICT
+#      at its timeout. There are no holds: every welded test must pass.
+#      `buck2 test` of a welded library runs its rust_test (Pass, with the
+#      harness's count), and of a binary welded to a red test fails.
 set -uo pipefail
 
 umbrella=1
@@ -983,20 +979,9 @@ expect_red rust_test_red "GATED TEST FAILED: tests//negative/rust_test:red" "$RT
 expect_red rust_test_unwinds "1 passed; 1 failed" "$RT:red"
 expect_red rust_test_bin_red "GATED TEST FAILED" "$RT:bin"
 expect_red rust_test_lib_consumer_red "GATED TEST FAILED" "$RT:lib_consumer"
-expect_green rust_test_held_green "$RT:held_red" "$RT:bin_held[run_check]"
-expect_red rust_test_held_passing "LEDGER STALE: held test tests::passes" "$RT:held_passing"
-expect_red rust_test_all_held "holds all 2 tests" "$RT:all_held"
-expect_red rust_test_held_unknown 'tests_known_failing["tests::gone"] names no test' "$RT:held_unknown"
+expect_green rust_test_bin_green "$RT:bin_green" "$RT:bin_green[run_check]"
 expect_red rust_test_empty "EMPTY GATE" "$RT:empty"
 expect_red rust_test_ignored "#[ignore]d test(s) did not run" "$RT:ignored"
-expect_red rust_test_bad_issue "is not a GitHub issue number" "$RT:bad_issue"
-expect_red rust_test_bad_empty_reason "empty \`reason\`" "$RT:bad_empty_reason"
-expect_red rust_test_missing_issue "no \`issue\`" "$RT:missing_issue"
-expect_red rust_test_unknown_field "unknown field \`card\`" "$RT:unknown_field"
-expect_red rust_test_bad_name "not a libtest test name" "$RT:bad_name"
-expect_red rust_test_dup_reason "byte-identical reasons" "$RT:dup_reason"
-expect_green rust_test_held_ignored "$RT:held_ignored"
-expect_red rust_test_held_abort "without a \`test result: FAILED" "$RT:held_abort"
 expect_green rust_test_env_scrubbed "$RT:env_scrubbed"
 expect_red rust_test_hang "timed out after 3s (exit 142)" "$RT:hang"
 if "$BUCK2" test //tools/build/proto-codegen:komira_proto_codegen > "$LOG/rust_test_buck2_test.log" 2>&1 &&
