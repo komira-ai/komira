@@ -1,0 +1,45 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The CSV reader and writer: RFC 4180 / Excel / POSIX quote styles, the
+# SIMD structural scanner (byte-class masks and carry-less-multiply quote
+# regions), quote-safe chunk splitting, typed cell parsers and column
+# builders, schema sampling and type inference, the parallel reader on the
+# komira_async dispatcher, and the CSV sink. It depends on komira_core
+# (Arrow types, record batches, SIMD byte classes), komira_eval (the row
+# format the sink drains) and komira_async (the dispatcher, cancellation
+# and the local filesystem). komira_runtime_paths is declared because two
+# tests take their scratch directory from `test_tmpdir()`.
+mojo_library(
+    name = "komira_csv",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_core:komira_core",
+        "//src/komira_eval:komira_eval",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_csv_cell_parsers.mojo",
+        "tests/test_csv_cell_parsers_wire_to_builders.mojo",
+        "tests/test_csv_dtype_completion.mojo",
+        "tests/test_csv_parallel_reader.mojo",
+        "tests/test_csv_parallel_reader_dispatcher_arm.mojo",
+        "tests/test_csv_phase_4_column_parallel_concat.mojo",
+        "tests/test_csv_phase_b.mojo",
+        "tests/test_csv_q_chassis_wiring.mojo",
+        "tests/test_csv_quote_safe_chunk_split.mojo",
+        "tests/test_csv_reader_e2e.mojo",
+        "tests/test_csv_scanner_flat_cells.mojo",
+        "tests/test_csv_scanner_phase1.mojo",
+        "tests/test_csv_scanner_phase2_movemask.mojo",
+        "tests/test_csv_scanner_phase3_pclmulqdq.mojo",
+        "tests/test_csv_schema_sample_inference.mojo",
+        "tests/test_csv_simd_cell_parsers.mojo",
+        "tests/test_csv_simd_int_column.mojo",
+        "tests/test_csv_simd_string_column.mojo",
+        "tests/test_csv_simd_temporal_parsers.mojo",
+        "tests/test_phase_4_stage_breakdown.mojo",
+        "tests/test_simd_row_boundary_scan.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
