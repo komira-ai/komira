@@ -46,7 +46,7 @@ trait EnvSource:
         ...
 
 
-struct ProcessEnv(EnvSource, Movable):
+struct ProcessEnv(EnvSource, Movable, Deinitable):
     """The process environment, through komira_core_ffi's one getenv."""
 
     def __init__(out self):
@@ -56,7 +56,7 @@ struct ProcessEnv(EnvSource, Movable):
         return _read_env(name)
 
 
-struct MapEnv(EnvSource, Movable):
+struct MapEnv(EnvSource, Movable, Deinitable):
     """A fixed environment held in memory. Records every name read, in order,
     so a test can assert exactly what the chain looked at."""
 
@@ -97,7 +97,7 @@ trait FileSource:
         ...
 
 
-struct ProcessFiles(FileSource, Movable):
+struct ProcessFiles(FileSource, Movable, Deinitable):
     """The local filesystem."""
 
     def __init__(out self):
@@ -114,7 +114,7 @@ struct ProcessFiles(FileSource, Movable):
             raise Error("cannot read the file " + path)
 
 
-struct MapFiles(FileSource, Movable):
+struct MapFiles(FileSource, Movable, Deinitable):
     """Files held in memory. Records every path read."""
 
     var files: Dict[String, String]
@@ -146,7 +146,7 @@ trait AwsClock:
 
 
 @fieldwise_init
-struct FixedClock(AwsClock, Copyable, Movable):
+struct FixedClock(AwsClock, Copyable, Movable, Deinitable):
     """A clock stopped at one instant."""
 
     var unix_seconds: Int

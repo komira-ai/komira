@@ -15,6 +15,11 @@ MojoInfo = provider(fields = {
     # on: what a binary linking this package must also link. None when there
     # are none.
     "c_link": provider_field(typing.Any, default = None),
+    # The import names of the packages this one lists in `deps`, sorted: its
+    # direct dependencies, which a published package names in its run
+    # requirements (tools/build/package/conda.bzl). Required, not defaulted:
+    # a rule that forgot it would publish a package with no dependencies.
+    "direct": provider_field(typing.Any),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
 })
@@ -48,6 +53,11 @@ MojoToolchainInfo = provider(fields = {
     # Directory: only the shared libraries a built binary loads (a
     # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
     "runtime": provider_field(typing.Any),
+    # The operating system the compiled code runs on: "linux" or "darwin".
+    # Rules that differ by platform (mojo_shared_lib: .so or .dylib, the link
+    # flags that name and limit its symbols) read it here, so the target
+    # platform is decided by the toolchain, never by a second attribute.
+    "os": provider_field(str, default = "linux"),
 })
 
 # A built binary that starts on its own: `run_dir` holds the binary and lib/,
