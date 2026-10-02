@@ -27,7 +27,10 @@ WHAT IS IN HERE:
     (credential.mojo).
   * the legacy upload form and its classification (core_metadata.mojo,
     legacy_upload.mojo).
-  * `PypiLegacyRegistry` (pypi.org, TestPyPI) — the protocol struct.
+  * `PypiLegacyRegistry` (pypi.org, TestPyPI) and `PrefixDevRegistry` (a
+    prefix.dev conda channel: the one-part upload form, `repodata.json`
+    reads, never `force`) — the protocol structs (pypi_registry.mojo,
+    prefix_dev_registry.mojo, conda_repodata.mojo).
   * `RegistrySet[T, C]` (registry_set.mojo) — THE substrate ladder.
   * `ApprovedNames` (approved_names.mojo) — the exact names an upload may
     claim, supplied by the caller; `RegistrySet.upload` asks it before
@@ -54,6 +57,7 @@ from .identity import (
 )
 
 from .coordinate import (
+    SUBSTRATE_PREFIX_DEV_CONDA,
     SUBSTRATE_PUBLIC_PYPI,
     PackageCoordinate,
     PackageFile,
@@ -109,5 +113,6 @@ from .credential import (
 )
 
 from .approved_names import ApprovedNames
+from .prefix_dev_registry import PrefixDevRegistry, prefix_dev_repo_of_location
 from .pypi_registry import PypiLegacyRegistry
 from .registry_set import RegistrySet

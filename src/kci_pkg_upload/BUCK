@@ -1,10 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Native package-registry clients: upload a package file, ask whether it is
-# there, read back what the registry holds, and fetch it. The PyPI legacy
-# upload is byte for byte what `uv publish` sends (pinned by recorded
-# fixtures), and `RegistrySet` is the one substrate ladder every caller goes
-# through. The package names no channel, account or organisation: locations,
+# there, read back what the registry holds, and fetch it, on PyPI and on a
+# prefix.dev conda channel. The PyPI legacy upload is byte for byte what
+# `uv publish` sends (pinned by recorded fixtures), and `RegistrySet` is the
+# one substrate ladder every caller goes through. The package names no channel, account or organisation: locations,
 # approved names and credentials all come from the caller.
 #
 # Deps: komira_http (the HTTPS transport and its redirect policy), komira_async
@@ -32,12 +32,16 @@ mojo_library(
         "tests/test_pkg_upload_convergence.mojo",
         # surface-keyed credentials; the one substrate ladder; local refusals
         "tests/test_pkg_upload_credential_dispatch.mojo",
+        # repodata reads: kinds, the 303 off-host, ABSENT only from a read listing
+        "tests/test_pkg_upload_conda_reads.mojo",
         # the HTTPS transport elaborates (nothing dials)
         "tests/test_pkg_upload_http_transport_elaborates.mojo",
         # field-by-field identity; NO_COMMON_FIELD is never MATCH
         "tests/test_pkg_upload_identity.mojo",
         # golden request bytes written out inline; every local form refusal
         "tests/test_pkg_upload_legacy_form.mojo",
+        # the prefix.dev upload: golden form, kinds, 409 settled by read-back
+        "tests/test_pkg_upload_prefix_dev.mojo",
         # read_back / presence / fetch; 404 is ABSENT, never a raise
         "tests/test_pkg_upload_reads.mojo",
         # byte for byte what `uv publish` sends (loopback recordings)

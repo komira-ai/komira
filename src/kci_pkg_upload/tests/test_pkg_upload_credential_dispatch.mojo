@@ -9,7 +9,8 @@
 #       refuses an empty token;
 #   (2) `RegistrySet` routes PUBLIC_PYPI to the warehouse arm: pypi.org
 #       uploads to `upload.pypi.org/legacy/`, any other warehouse to
-#       `<host><path>/legacy/`, each with the PYPI_UPLOAD credential;
+#       `<host><path>/legacy/`, each with the PYPI_UPLOAD credential; and
+#       PREFIX_DEV_CONDA to the prefix.dev arm with the PREFIX_DEV credential;
 #   (3) a substrate with no arm RAISES `no registry arm for substrate <n>` on
 #       all four methods, with ZERO requests sent;
 #   (4) a credential refusing the surface RAISES before any request (the
@@ -26,6 +27,7 @@ from std.testing import assert_equal, assert_raises, assert_true
 
 from kci_pkg_upload.approved_names import ApprovedNames
 from kci_pkg_upload.coordinate import (
+    SUBSTRATE_PREFIX_DEV_CONDA,
     SUBSTRATE_PUBLIC_PYPI,
     PackageCoordinate,
     PackageFile,
@@ -119,6 +121,38 @@ def test_dispatch_routes_by_substrate() raises:
     print("  test_dispatch_routes_by_substrate: PASS")
 
 
+def test_dispatch_routes_conda_to_prefix_dev() raises:
+    var t = ScriptedPkgTransport()
+    t.queue(PkgResponse(201))
+    var c = ScriptedCredential()
+    c.serve(SURFACE_PYPI_UPLOAD, String("Basic warehouse-upload"))
+    c.serve(SURFACE_PREFIX_DEV, String("Bearer pfx"))
+    var rs = RegistrySet[ScriptedPkgTransport, ScriptedCredential](t^, c^)
+    var names = ApprovedNames()
+    names.approve(String("komira-probe"))
+    var f = PackageFile(
+        PackageCoordinate(
+            SUBSTRATE_PREFIX_DEV_CONDA,
+            String("prefix.dev/example-channel"),
+            String("komira-probe"),
+            String("1.1.3"),
+            String("linux-64"),
+            String("komira-probe-1.1.3-h0_0.conda"),
+        ),
+        bytes_of(String("conda-bytes")),
+        String(""),
+    )
+    _ = rs.upload(f, names)
+    assert_equal(rs.transport().call(0).host, String("prefix.dev"))
+    assert_equal(rs.transport().call(0).path, String("/api/v1/upload/example-channel"))
+    assert_equal(
+        rs.transport().call(0).header_value(String("Authorization")), String("Bearer pfx")
+    )
+    assert_equal(rs.credential().asked_count(), 1)
+    assert_equal(rs.credential().asked(0), SURFACE_PREFIX_DEV)
+    print("  test_dispatch_routes_conda_to_prefix_dev: PASS")
+
+
 def test_a_substrate_with_no_arm_raises_before_any_request() raises:
     var t = ScriptedPkgTransport()
     var rs = RegistrySet[ScriptedPkgTransport, ScriptedCredential](t^, _creds())
@@ -183,6 +217,7 @@ def test_malformed_repo_raises_before_any_request() raises:
 def main() raises:
     test_authorization_shapes()
     test_dispatch_routes_by_substrate()
+    test_dispatch_routes_conda_to_prefix_dev()
     test_a_substrate_with_no_arm_raises_before_any_request()
     test_a_refused_surface_sends_nothing()
     test_public_pypi_reads_ask_for_no_credential()

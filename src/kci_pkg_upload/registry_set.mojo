@@ -6,7 +6,7 @@
 # WHY A LADDER AND NOT A TRAIT. Mojo 1.0 has no trait objects, so dispatching
 # per substrate is an if-ladder over concrete arms whatever a trait would say.
 # This struct holds that ladder, and it is the ONLY one in the package: every
-# protocol struct (`PypiLegacyRegistry`, ...) is stateless and is reached only
+# protocol struct (`PypiLegacyRegistry`, `PrefixDevRegistry`) is stateless and is reached only
 # from here. A substrate with no arm RAISES
 # `no registry arm for substrate <n>` — a local fault, before any request — so
 # a totality test over every substrate goes RED on a missing arm rather than
@@ -33,6 +33,7 @@
 
 from .approved_names import ApprovedNames
 from .coordinate import (
+    SUBSTRATE_PREFIX_DEV_CONDA,
     SUBSTRATE_PUBLIC_PYPI,
     PackageCoordinate,
     PackageFile,
@@ -61,11 +62,12 @@ from .outcome import (
     ReadBack,
     UploadOutcome,
 )
+from .prefix_dev_registry import PrefixDevRegistry
 from .pypi_registry import PypiLegacyRegistry
 from .transport import PkgTransport
 
 
-comptime SERVED_SUBSTRATES: String = "PUBLIC_PYPI"
+comptime SERVED_SUBSTRATES: String = "PUBLIC_PYPI and PREFIX_DEV_CONDA"
 """The substrates `RegistrySet` has an arm for, as a refusal names them."""
 
 
@@ -150,14 +152,20 @@ struct RegistrySet[T: PkgTransport, C: RegistryCredential](Movable, Deinitable):
         var s = f.coordinate.substrate
         if s == SUBSTRATE_PUBLIC_PYPI:
             return PypiLegacyRegistry.upload(self._transport, self._cred, f)
+        if s == SUBSTRATE_PREFIX_DEV_CONDA:
+            return PrefixDevRegistry.upload(self._transport, self._cred, f)
         raise no_registry_arm(s)
 
     def read_back(mut self, c: PackageCoordinate) raises -> ReadBack:
         if c.substrate == SUBSTRATE_PUBLIC_PYPI:
             return PypiLegacyRegistry.read_back(self._transport, self._cred, c)
+        if c.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
+            return PrefixDevRegistry.read_back(self._transport, self._cred, c)
         raise no_registry_arm(c.substrate)
 
     def fetch(mut self, c: PackageCoordinate) raises -> Fetched:
         if c.substrate == SUBSTRATE_PUBLIC_PYPI:
             return PypiLegacyRegistry.fetch(self._transport, self._cred, c)
+        if c.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
+            return PrefixDevRegistry.fetch(self._transport, self._cred, c)
         raise no_registry_arm(c.substrate)

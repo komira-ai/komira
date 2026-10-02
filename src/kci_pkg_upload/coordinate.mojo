@@ -25,11 +25,14 @@ from .identity import ContentIdentity, content_identity_of
 
 # The substrates this package has an arm for (see the header).
 comptime SUBSTRATE_PUBLIC_PYPI: Int = 4
+comptime SUBSTRATE_PREFIX_DEV_CONDA: Int = 6
 
 
 def substrate_name(substrate: Int) -> String:
     if substrate == SUBSTRATE_PUBLIC_PYPI:
         return String("PUBLIC_PYPI")
+    if substrate == SUBSTRATE_PREFIX_DEV_CONDA:
+        return String("PREFIX_DEV_CONDA")
     return String("SUBSTRATE(") + String(substrate) + String(")")
 
 
@@ -38,12 +41,13 @@ struct PackageCoordinate(Copyable, Movable, Deinitable):
 
       substrate    — a substrate ordinal (see the header).
       repo         — HOST + PATH with no scheme and no trailing slash, e.g.
-                     `pypi.org` / `test.pypi.org` for a warehouse.
+                     `pypi.org` / `test.pypi.org` for a warehouse,
+                     `<host>/<channel>` for a prefix.dev conda channel.
       distribution — the distribution name as the producer wrote it.
       version      — the version string.
-      subdir       — `linux-64` | `osx-arm64` | `noarch`. Not sent to a python
-                     registry (the wheel's platform tag carries it there); it
-                     is part of the key a caller's ledger uses.
+      subdir       — `linux-64` | `osx-arm64` | `noarch`. A conda channel
+                     stores the file under it; a python registry is not sent
+                     it (the wheel's platform tag carries it there).
       file_name    — the exact file name the registry sees.
 
     Layout: an Int and owned Strings. No pointer field."""
