@@ -136,7 +136,7 @@ grep -q "linux-x86_64#03cc1a891c89e4be" "$W/resolution.txt" ||
 # 3
 if b2 audit providers -c komira.execution=remote "$EP" > "$W/forced_remote.txt" 2>&1; then
     die "-c komira.execution=remote registered platforms with no [komira_re] (see $W/forced_remote.txt)"
-elif ! grep -qF '`[komira_re] linux_properties` is not set' "$W/forced_remote.txt"; then
+elif ! grep -qF '`[komira_re] linux_x86_64_properties` is not set' "$W/forced_remote.txt"; then
     die "-c komira.execution=remote failed without naming [komira_re] (see $W/forced_remote.txt)"
 fi
 # A service named without a worker property set, or a retired [komira_re]
@@ -154,9 +154,21 @@ done
 if b2 audit providers -c komira_re.mojo_compile_properties=pool=mojo "$EP" > "$W/retired_re.txt" 2>&1; then
     die "a retired [komira_re] mojo_compile_properties registered platforms (see $W/retired_re.txt)"
 elif ! grep -qF '`[komira_re] mojo_compile_properties` is no longer read' "$W/retired_re.txt" ||
-    ! grep -qF 'Rename it to `linux_properties`' "$W/retired_re.txt"; then
-    die "a retired [komira_re] mojo_compile_properties failed without naming linux_properties (see $W/retired_re.txt)"
+    ! grep -qF 'Rename it to `linux_x86_64_properties`' "$W/retired_re.txt"; then
+    die "a retired [komira_re] mojo_compile_properties failed without naming linux_x86_64_properties (see $W/retired_re.txt)"
 fi
+# The keys that named a platform by its OS alone are retired the same way: one
+# key per (os, cpu), and the refusal names the key that replaces it.
+for pair in linux_properties:linux_x86_64_properties darwin_properties:darwin_arm64_properties; do
+    old=${pair%%:*}
+    new=${pair##*:}
+    if b2 audit providers -c "komira_re.$old=pool=retired-check" "$EP" > "$W/retired_$old.txt" 2>&1; then
+        die "a retired [komira_re] $old registered platforms (see $W/retired_$old.txt)"
+    elif ! grep -qF "\`[komira_re] $old\` is no longer read" "$W/retired_$old.txt" ||
+        ! grep -qF "Rename it to \`$new\`" "$W/retired_$old.txt"; then
+        die "a retired [komira_re] $old failed without naming $new (see $W/retired_$old.txt)"
+    fi
+done
 b2 audit providers -c "buck2_re_client.engine_address=$RE_ADDR" -c komira.execution=local "$EP" > "$W/forced_local.txt" 2>&1 ||
     die "-c komira.execution=local with a service named did not register platforms (see $W/forced_local.txt)"
 [ "$(grep -c 'executor: Local(' "$W/forced_local.txt")" = 1 ] ||
@@ -168,7 +180,7 @@ mkdir -p "$W/home_user"
 printf '[komira]\n  execution = remote\n' > "$W/home_user/.buckconfig.local"
 if (cd "$C" && env HOME="$W/home_user" "$BUCK2" --isolation-dir user_cfg audit providers "$EP") > "$W/user_cfg.txt" 2>&1; then
     die "[komira] execution = remote in ~/.buckconfig.local registered platforms instead of refusing (see $W/user_cfg.txt)"
-elif ! grep -qF '`[komira_re] linux_properties` is not set' "$W/user_cfg.txt"; then
+elif ! grep -qF '`[komira_re] linux_x86_64_properties` is not set' "$W/user_cfg.txt"; then
     die "[komira] execution = remote in ~/.buckconfig.local failed without naming [komira_re] (see $W/user_cfg.txt)"
 fi
 (cd "$C" && env HOME="$W/home_user" "$BUCK2" --isolation-dir user_cfg kill) > /dev/null 2>&1

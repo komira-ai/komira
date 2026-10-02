@@ -106,6 +106,6 @@ cxx_library(
     exported_headers = {h[len("include/"):]: ":src[{}]".format(h) for h in PUBLIC_HEADERS},
     header_namespace = "",
     # The assembly above is x86_64 ELF; see srcs.bzl for the aarch64 lists.
-    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
     visibility = ["PUBLIC"],
 )

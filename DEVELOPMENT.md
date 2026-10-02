@@ -167,11 +167,12 @@ Fill in:
 - **`[buck2_re_client]`**: the addresses of your remote-execution service
   (engine, action cache, CAS), its instance name, TLS, and
   `execution_concurrency_limit`.
-- **`[komira_re]`**: `linux_properties`, the exact platform property set
-  every Linux x86_64 action carries, as comma-separated `key=value` pairs
-  (for example `pool=default`). Your service picks the worker for each
-  action; the build says nothing about worker classes. macOS workers have a
-  set of their own (`darwin_properties`, see
+- **`[komira_re]`**: one key per platform, each the exact property set every
+  action of that platform carries, as comma-separated `key=value` pairs:
+  `linux_x86_64_properties` (for example `pool=mojo-sized`) and
+  `darwin_arm64_properties` (for example `pool=darwin-sized`). Your service
+  picks the worker for each action; the build says nothing about worker
+  classes. A Mac needs `darwin_macos_hosts` too (see
   [tools/build/toolchains/README.md](tools/build/toolchains/README.md#macos)).
   How target platforms, execution platforms and toolchains fit together is
   in [tools/build/platforms/README.md](tools/build/platforms/README.md).
@@ -181,9 +182,15 @@ leaves actions queued until the scheduler gives up. The property set is part
 of every action digest, so checkouts share cache entries only when they send
 the same set.
 
-Once `linux_properties` is set, every action
-runs remotely: the platforms then have local execution disabled, so nothing
-falls back to your machine. `-c komira.execution=local` builds one command
+**Where actions run follows your own platform.** Builds default to the
+platform of the machine you run them on. Once the key of *that* platform is
+set (`linux_x86_64_properties` on Linux x86_64, `darwin_arm64_properties` on
+a Mac), every action runs remotely: the platforms then have local execution
+disabled, so nothing falls back to your machine. If `.buckconfig.local` sets
+only another platform's key, builds for your own platform run on your machine
+and nothing fails; that key is used when you name the platform with
+`--target-platforms`. Names no key at all: everything is local.
+`-c komira.execution=local` builds one command
 locally anyway, and `[komira] execution = local` in `.buckconfig.local` keeps
 the service settings but builds locally. The commands in step 2 are the same
 either way.
@@ -191,8 +198,9 @@ either way.
 A `.buckconfig.local` that names a service in `[buck2_re_client]` but has no
 `[komira_re]` section (missing, or misspelled) refuses to build rather than
 building on your machine; so does a `[komira_re]` still naming a key of the
-earlier per-class layout (`light_properties`, `mojo_compile_properties`,
-...), which names the key to rename it to. On a machine that must never build locally, put
+earlier layouts (`linux_properties` and `darwin_properties`, the per-class
+`light_properties` and `mojo_compile_properties`, ...), which names the key to
+rename it to. On a machine that must never build locally, put
 `[komira] execution = remote` in your user buckconfig (`~/.buckconfig.local`):
 a checkout there with no `.buckconfig.local` then refuses too.
 
@@ -309,14 +317,14 @@ not share a remote cache.
   has the service addresses but no (or a misspelled) `[komira_re]`; fill it
   in (step 3), or pass `-c komira.execution=local` to build here.
 - **``[komira_re] <key>` is not set``.** You asked for remote execution
-  (`.buckconfig.local` names a `[komira_re]` key, or `komira.execution =
-  remote`) but not `linux_properties`; see step 3.
+  (`komira.execution = remote`, or a `[komira_re]` key on a machine no platform
+  row matches) but not the key of your own platform; see step 3.
 - **Actions sit queued and never start.** The property set names a key or
   value no worker advertises.
 - **`.buckconfig.local` seems ignored in a non-root cell.** It configures the
   root cell (`komira`, which holds the rules and toolchains) only; the
   standalone-only `toolchains` and `tests` cells do not read it. Pass a cell-scoped override instead, e.g.
-  `-c tests//komira_re.linux_properties=...`.
+  `-c tests//komira_re.linux_x86_64_properties=...`.
 - **Which execution platform did a target get?**
   `./buck2 audit execution-platform-resolution <target>` shows the platform and
   why the others were skipped.

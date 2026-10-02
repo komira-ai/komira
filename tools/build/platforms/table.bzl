@@ -63,15 +63,21 @@ _NONE_ALLOWED = ["busybox", "libgcc", "libstdcxx", "libzlib"]
 
 # Fields of a row, all required. `assets` is checked role by role.
 ROW_FIELDS = [
+    "applets",  # the utilities a wrapper script may call: a sorted list, or `none(...)` when a pinned busybox carries them
     "assets",  # pinned downloads, by role (ASSET_ROLES)
     "bundles",  # whether bundles, OCI images and the launcher are products of this platform
+    "cache_line_bytes",  # the cache line of this platform's CPUs, for padding that avoids false sharing
     "constraints",  # the `platform()` constraint values; the exec_compatible_with of its tools
     "cpu",  # constraint name of the cpu: `x86_64`, `arm64`
+    "features",  # what the platform has that tests select on (a test needing one is compatible only with rows listing it)
+    "golden_config_hash",  # the configuration hash of this row's platform: what output paths and action keys carry; `pending(...)` for a row with no platform
     "host",  # what host_info() reports on a machine of this platform: {"os": ..., "arch": ...}
     "object_format",  # `elf` or `macho`
     "oci_base",  # the container base (kwargs of `oci_base`), or `none(...)`
     "os",  # constraint name of the os: `linux`, `macos`
     "os_floor",  # the oldest operating system a built binary runs on
+    "page_bytes",  # the smallest virtual-memory page of this platform's default kernel
+    "pool",  # the `[komira_re]` property that selects the worker pool serving this row, as a client sets it (`pool=<name>`)
     "re_key",  # `[komira_re]` key of the property set of this platform's execution platform
     "registered",  # True: a build key; False: reserved
     "remote_required",  # remote execution refuses to register without this row's property set
@@ -79,15 +85,22 @@ ROW_FIELDS = [
     "target_cpu",  # the CPU every compile targets, whatever worker runs it
     "target_features",  # extra target features every compile enables
     "unpack_triple",  # zig target of the static tools that unpack archives (they only move bytes)
+    "zig_exe_sha256",  # sha256 of the `zig` executable inside the zig archive: what the bootstrap checks after unpacking
     "zig_triple",  # zig target of every link of this platform (`<arch>-<os>-<abi>.<os floor>`)
 ]
 
 _HEX = "0123456789abcdef"
 
+# What a row's `features` may name. A test that needs one is compatible only
+# with the rows listing it (never a run-time skip), and the portable half of
+# the behaviour runs everywhere.
+FEATURES = ["epoll", "erms", "futex", "kqueue", "neon", "thp", "ulock", "x86_simd"]
+
 # ---- The rows ------------------------------------------------------------------
 
 PLATFORMS = {
     "linux-x86_64": {
+        "applets": none("the pinned busybox (assets.busybox) carries every applet"),
         "assets": {
             "actionlint": pin(
                 "actionlint_1.7.12_linux_amd64.tar.gz",
@@ -147,11 +160,14 @@ PLATFORMS = {
             ),
         },
         "bundles": True,
+        "cache_line_bytes": 64,
         "constraints": [
             "prelude//os/constraints:linux",
             "prelude//cpu/constraints:x86_64",
         ],
         "cpu": "x86_64",
+        "features": ["epoll", "erms", "futex", "thp", "x86_simd"],
+        "golden_config_hash": "03cc1a891c89e4be",
         "host": {"arch": "x86_64", "os": "linux"},
         "object_format": "elf",
         # The base of oci_base: distroless base-debian12 (glibc, CA certificates,
@@ -186,7 +202,9 @@ PLATFORMS = {
         # glibc 2.34: the floor zig links against (`zig_triple`), so a built
         # binary runs on any host with glibc 2.34 or newer.
         "os_floor": "glibc-2.34",
-        "re_key": "linux_properties",
+        "page_bytes": 4096,
+        "pool": "pool=mojo-sized",
+        "re_key": "linux_x86_64_properties",
         "registered": True,
         "remote_required": True,
         # What a built binary loads, read from the loader's own record of a run
@@ -204,9 +222,11 @@ PLATFORMS = {
         "target_cpu": "x86-64-v3",
         "target_features": [],
         "unpack_triple": "x86_64-linux-musl",
+        "zig_exe_sha256": "871186494014f9630683fea5780ae89bd1be16bab11f229f08acba08263c799a",
         "zig_triple": "x86_64-linux-gnu.2.34",
     },
     "darwin-arm64": {
+        "applets": ["awk", "basename", "cat", "chmod", "cmp", "cp", "cut", "dirname", "env", "expr", "find", "grep", "head", "ln", "ls", "mkdir", "mkfifo", "mktemp", "mv", "printf", "ps", "readlink", "rm", "rmdir", "sed", "sh", "sleep", "sort", "tail", "tee", "test", "touch", "tr", "uname", "wc"],
         "assets": {
             "actionlint": pin(
                 "actionlint_1.7.12_darwin_arm64.tar.gz",
@@ -253,18 +273,23 @@ PLATFORMS = {
         },
         # Bundles, OCI images and the launcher are Linux server products.
         "bundles": False,
+        "cache_line_bytes": 128,
         "constraints": [
             "prelude//os/constraints:macos",
             "prelude//cpu/constraints:arm64",
         ],
         "cpu": "arm64",
+        "features": ["kqueue", "neon", "ulock"],
+        "golden_config_hash": "7fd7ccfd5d5f8024",
         "host": {"arch": "aarch64", "os": "macos"},
         "object_format": "macho",
         "oci_base": none("OCI images are a Linux product"),
         "os": "macos",
         # The compiler's own minimum OS.
         "os_floor": "macos-11.0",
-        "re_key": "darwin_properties",
+        "page_bytes": 16384,
+        "pool": "pool=darwin-sized",
+        "re_key": "darwin_arm64_properties",
         "registered": True,
         "remote_required": False,
         # The compiler's three runtime libraries. Everything else a built binary
@@ -279,6 +304,7 @@ PLATFORMS = {
         "target_cpu": "apple-m1",
         "target_features": [],
         "unpack_triple": "aarch64-macos",
+        "zig_exe_sha256": "c007814ca1128eeceeb9ce4d625be4d0b13d85228bef8a5534aeb6bcfb56a529",
         "zig_triple": "aarch64-macos.11.0",
     },
     # RESERVED. Linux on aarch64: Ampere Altra servers (Neoverse N1) are the
@@ -289,6 +315,7 @@ PLATFORMS = {
     # opt-in addition; it is not this row. Not a build key yet: no platform
     # target, no execution platform, and `linux_arm64_properties` is refused.
     "linux-arm64": {
+        "applets": pending("busybox has no upstream aarch64 static binary; the bring-up chooses the applet carrier"),
         "assets": {
             "actionlint": pin(
                 "actionlint_1.7.12_linux_arm64.tar.gz",
@@ -346,18 +373,23 @@ PLATFORMS = {
             ),
         },
         "bundles": True,
+        "cache_line_bytes": 64,
         "constraints": [
             "prelude//os/constraints:linux",
             "prelude//cpu/constraints:arm64",
         ],
         "cpu": "arm64",
+        "features": ["epoll", "futex", "neon", "thp"],
+        "golden_config_hash": pending("the platform exists once the row is registered"),
         "host": {"arch": "aarch64", "os": "linux"},
         "object_format": "elf",
         "oci_base": pending("the distroless base-debian12 linux/arm64 manifest and its blobs are recorded when the platform is brought up"),
         "os": "linux",
         "os_floor": "glibc-2.34",
+        "page_bytes": 4096,
+        "pool": "pool=linux-arm64-sized",
         "re_key": "linux_arm64_properties",
-        "registered": False,
+        "registered": False,  # komira-limit:linux-arm64-unregistered
         "remote_required": False,
         # Measured on the linux-aarch64 compiler package: the same three
         # libraries, and the same NEEDED libstdc++.so.6 and libgcc_s.so.1.
@@ -371,6 +403,7 @@ PLATFORMS = {
         "target_cpu": "generic",
         "target_features": ["+outline-atomics"],
         "unpack_triple": "aarch64-linux-musl",
+        "zig_exe_sha256": "63eb4d2bd19140feee8fe02b50dc6dd2264567c5d6dae0fb7ccec5150e96ae8a",
         "zig_triple": "aarch64-linux-gnu.2.34",
     },
 }
@@ -402,12 +435,65 @@ def _pin_refusal(row_name, role, a, registered):
         return "row {}: pin `{}`: url is not https: `{}`".format(row_name, role, a["url"])
     return None
 
+def _hex_refusal(name, field, v, n):
+    if type(v) != "string" or len(v) != n or [c for c in v.elems() if c not in _HEX]:
+        return "row {}: `{}` is not {} lowercase hex digits: {}".format(name, field, n, repr(v))
+    return None
+
+def _pow2(v):
+    return type(v) == "int" and v > 0 and v & (v - 1) == 0
+
+def _shape_refusals(name, row):
+    """The refusals of the fields that are not pins: applets, the sizes, features, the golden hash, the pool, the zig digest."""
+    out = []
+    registered = row["registered"]
+    applets = row["applets"]
+    if type(applets) == "dict":
+        if "none" in applets and not applets["none"]:
+            out.append("row {}: `applets` is `none` with no reason".format(name))
+        elif "pending" in applets and (registered or not applets["pending"]):
+            out.append("row {}: `applets` is pending, but the row is registered, or with no reason".format(name))
+        elif "none" not in applets and "pending" not in applets:
+            out.append("row {}: `applets` is a dict that is neither `none(...)` nor `pending(...)`".format(name))
+    elif type(applets) != "list" or not applets or applets != sorted(applets) or len({a: 1 for a in applets}) != len(applets):
+        out.append("row {}: `applets` must be a non-empty sorted list without duplicates, or `none(...)`".format(name))
+    for f in ["cache_line_bytes", "page_bytes"]:
+        if not _pow2(row[f]) or row[f] < 16:
+            out.append("row {}: `{}` is not a power of two of at least 16: {}".format(name, f, repr(row[f])))
+    feats = row["features"]
+    if type(feats) != "list" or feats != sorted(feats) or len({f: 1 for f in feats}) != len(feats):
+        out.append("row {}: `features` must be a sorted list without duplicates".format(name))
+    else:
+        for f in feats:
+            if f not in FEATURES:
+                out.append("row {}: feature `{}` is not one of {}".format(name, f, ", ".join(FEATURES)))
+    g = row["golden_config_hash"]
+    if type(g) == "dict":
+        if "pending" not in g or not g["pending"] or registered:
+            out.append("row {}: `golden_config_hash` is a dict that is not `pending(reason)` of an unregistered row".format(name))
+    else:
+        r = _hex_refusal(name, "golden_config_hash", g, 16)
+        if r:
+            out.append(r)
+    if not registered and type(g) != "dict":
+        out.append("row {}: `golden_config_hash` is recorded, but the row has no platform: use `pending(...)`".format(name))
+    if registered and type(g) == "dict":
+        out.append("row {}: a registered row has a platform, so `golden_config_hash` is its hash, not pending".format(name))
+    pool = row["pool"]
+    if type(pool) != "string" or not pool.startswith("pool=") or len(pool) <= len("pool="):
+        out.append("row {}: `pool` must be `pool=<name>`: {}".format(name, repr(pool)))
+    r = _hex_refusal(name, "zig_exe_sha256", row["zig_exe_sha256"], 64)
+    if r:
+        out.append(r)
+    return out
+
 def table_refusals(table):
     """Every way `table` is incomplete or inconsistent, as sentences naming the row and the pin; [] when it is complete."""
     out = []
     if not table:
         return ["the platform table has no row"]
     keys = {}
+    pools = {}
     hosts = {}
     for name in sorted(table):
         row = table[name]
@@ -436,6 +522,9 @@ def table_refusals(table):
         if row["re_key"] in keys:
             out.append("row {}: `re_key` `{}` is also row {}'s".format(name, row["re_key"], keys[row["re_key"]]))
         keys[row["re_key"]] = name
+        if row["pool"] in pools:
+            out.append("row {}: `pool` `{}` is also row {}'s".format(name, row["pool"], pools[row["pool"]]))
+        pools[row["pool"]] = name
         hk = "{} {}".format(row["host"].get("os"), row["host"].get("arch"))
         if hk in hosts:
             out.append("row {}: `host` {} is also row {}'s".format(name, hk, hosts[hk]))
@@ -443,6 +532,7 @@ def table_refusals(table):
         if type(row["registered"]) != "bool":
             out.append("row {}: `registered` is not a bool".format(name))
             continue
+        out.extend(_shape_refusals(name, row))
         oci = row["oci_base"]
         if type(oci) != "dict":
             out.append("row {}: `oci_base` is not a pin, `none(...)` or `pending(...)`".format(name))

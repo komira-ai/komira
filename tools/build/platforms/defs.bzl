@@ -15,8 +15,8 @@ one property set of the platform.
   refused, naming why.
 - `komira_execution_platforms`: every action runs remotely, on workers whose
   property set is read from `.buckconfig.local`
-  (`[komira_re] linux_properties = key=value,...`, and
-  `darwin_properties` for macOS), so that no service address or worker
+  (`[komira_re] linux_x86_64_properties = key=value,...`, and
+  `darwin_arm64_properties` for macOS), so that no service address or worker
   property is committed.
 - `komira_default_execution_platforms`: the first when `[komira_re]` names no
   worker property set, the second when it does. A standalone checkout
@@ -183,12 +183,16 @@ DARWIN_PROPERTIES_KEY = row("darwin-arm64")["re_key"]
 # naming the reason, rather than read as configuration for nothing.
 _RESERVED_KEYS = {PLATFORMS[n]["re_key"]: n for n in reserved_names()}
 
-# Keys of an earlier layout, which split linux actions by worker class and
-# NUMA placement. A `.buckconfig.local` still naming one is refused, naming
-# the key that replaces it, rather than read as half a configuration.
+# Keys of earlier layouts: one that split linux actions by worker class and
+# NUMA placement, and the two that named a platform by its OS alone
+# (`linux_properties`, `darwin_properties`) before there was one key per
+# (os, cpu). A `.buckconfig.local` still naming one is refused, naming the key
+# that replaces it, rather than read as half a configuration.
 _RETIRED_KEYS = {
     "darwin_mojo_compile_properties": DARWIN_PROPERTIES_KEY,
+    "darwin_properties": DARWIN_PROPERTIES_KEY,
     "light_properties": LINUX_PROPERTIES_KEY,
+    "linux_properties": LINUX_PROPERTIES_KEY,
     "mojo_compile_multi_numa_properties": None,
     "mojo_compile_properties": LINUX_PROPERTIES_KEY,
 }
@@ -236,20 +240,28 @@ def darwin_properties_refusal(props, hosts):
             return "`[komira_re] {}`: `{}` is not a host identity (<sdk version>-<digest>)".format(DARWIN_HOSTS_KEY, h)
     return None
 
-def komira_execution_platforms(name, linux, darwin = None, visibility = None):
+def komira_execution_platforms(name, linux = None, darwin = None, visibility = None):
     """Registers komira's remote execution platforms, given their worker property sets.
 
-    `linux` is the exact REAPI platform property dict every linux action
-    carries; the service picks the worker. `darwin` is optional: the property
-    dict of macOS arm64 workers that build darwin-arm64 targets; it needs the
-    root cell's `[komira_re] darwin_macos_hosts` (see DARWIN_HOSTS_KEY), and
-    without it no darwin-arm64 Mojo target can configure.
+    `linux` is the exact REAPI platform property dict every linux x86_64
+    action carries; the service picks the worker. `darwin` is the property
+    dict of the macOS arm64 workers that build darwin-arm64 targets; it needs
+    the root cell's `[komira_re] darwin_macos_hosts` (see DARWIN_HOSTS_KEY),
+    and without it no darwin-arm64 Mojo target can configure. Each is
+    optional (a platform without a property set is not registered, so its
+    actions cannot run remotely), but at least one is required.
     """
-    if not linux:
+    if linux != None and not linux:
         fail("komira_execution_platforms: `linux` must name at least one worker property; got {}".format(linux))
-    names = ["linux"]
-    constraints = [_LINUX_PLATFORM]
-    properties = [linux]
+    if linux == None and darwin == None:
+        fail("komira_execution_platforms: name the worker property set of at least one platform (`linux` or `darwin`)")
+    names = []
+    constraints = []
+    properties = []
+    if linux != None:
+        names.append("linux")
+        constraints.append(_LINUX_PLATFORM)
+        properties.append(linux)
     if darwin != None:
         # A macOS action must never match a linux worker, nor the reverse.
         if darwin == linux:
@@ -289,17 +301,26 @@ def komira_local_execution_platforms(name, visibility = None):
         visibility = visibility,
     )
 
-# `[komira] execution`: `auto` (the default) runs remotely when `[komira_re]`
-# names a worker property set, refuses when `[buck2_re_client]` names a
-# service but `[komira_re]` does not, and runs locally when neither is set;
-# `local` and `remote` force one. `-c komira.execution=local` builds one command locally
-# in a checkout configured for a remote service.
+# `[komira] execution`: `auto` (the default) decides by the platform a build
+# defaults to, which is this client's own (`platforms:host`). When `[komira_re]`
+# names a worker property set for that platform, actions run remotely on it;
+# when it does not, they run on this machine, even if it names another
+# platform's set (that set is read only by a build that states
+# `--target-platforms` for that platform: a client with only another platform's
+# set never sends host-platform work to the wrong pool, and never fails because
+# of it). A client whose host matches no registered row cannot run locally, so
+# any property set selects remote there. `auto` also refuses when
+# `[buck2_re_client]` names a service but `[komira_re]` names no property set at
+# all. `local` and `remote` force one; `-c komira.execution=local` builds one
+# command locally in a checkout configured for a remote service.
 EXECUTION_MODES = ("auto", "local", "remote")
 
-# The `[komira_re]` keys whose presence opts a checkout into remote execution.
-# Any one of them does: the required linux set then fails, naming itself,
-# instead of a partly filled-in section building on this machine.
-_REMOTE_KEYS = tuple([PLATFORMS[n]["re_key"] for n in registered_names()] + [DARWIN_HOSTS_KEY])
+# The `[komira_re]` keys that name a platform's worker property set: one per
+# registered row of the platform table.
+_REMOTE_KEYS = tuple([PLATFORMS[n]["re_key"] for n in registered_names()])
+
+def _set_keys():
+    return [k for k in _REMOTE_KEYS if read_config("komira_re", k, "").strip()]
 
 # The `[buck2_re_client]` keys that name a remote-execution service. A
 # checkout that names one but no `[komira_re]` worker property set was meant
@@ -323,6 +344,11 @@ def _refuse_retired_keys():
                   "(tools/build/platforms/table.bzl) but does not build for yet, so no execution " +
                   "platform reads it. Delete it.").format(key, _RESERVED_KEYS[key]))
 
+def _host_key():
+    """The `[komira_re]` key of this client's own platform (the linux one on a host no row matches)."""
+    name = host_row(host_info())
+    return PLATFORMS[name]["re_key"] if name != None else LINUX_PROPERTIES_KEY
+
 def execution_mode():
     """`local` or `remote`: where a standalone checkout's actions run."""
     _refuse_retired_keys()
@@ -331,9 +357,17 @@ def execution_mode():
         fail("`[komira] execution`: expected one of {}, got `{}`".format(EXECUTION_MODES, mode))
     if mode != "auto":
         return mode
-    for key in _REMOTE_KEYS:
-        if read_config("komira_re", key, "").strip():
-            return "remote"
+    host_name = host_row(host_info())
+    set_keys = _set_keys()
+    if host_name == None and set_keys:
+        # No row runs here, so nothing can run locally: a set names the
+        # service that builds for a platform stated with --target-platforms.
+        return "remote"
+    if host_name != None and PLATFORMS[host_name]["re_key"] in set_keys:
+        return "remote"
+    if set_keys:
+        # Another platform's set only: this client's own platform builds here.
+        return "local"
     named = [k for k in _RE_CLIENT_KEYS if read_config("buck2_re_client", k, "").strip()]
     if named:
         fail(("`[buck2_re_client] {}` names a remote-execution service, but `[komira_re]` " +
@@ -341,34 +375,37 @@ def execution_mode():
               "or there. Set `[komira_re] {}` to build remotely (.buckconfig.local.example), " +
               "or pass `-c komira.execution=local` to build on this machine.").format(
             named[0],
-            LINUX_PROPERTIES_KEY,
-            LINUX_PROPERTIES_KEY,
+            ", ".join(_REMOTE_KEYS),
+            _host_key(),
         ))
     return "local"
 
-def _linux_properties():
-    props = re_properties(LINUX_PROPERTIES_KEY, required = False)
-    if props:
+def _remote_properties(key):
+    """The property set of `[komira_re] <key>`, or None; remote mode requires this client's own platform's."""
+    props = re_properties(key, required = False)
+    if props or key != _host_key():
         return props
     fail(("remote execution is selected (`[komira] execution = remote`, or a `[komira_re]` " +
           "key is set; check `buck2 audit config komira` for the file it comes from, " +
-          "such as a ~/.buckconfig.d file), but `[komira_re] {}` is not set. Set it " +
-          "(.buckconfig.local.example), or build on this machine with " +
-          "`-c komira.execution=local`.").format(LINUX_PROPERTIES_KEY))
+          "such as a ~/.buckconfig.d file), but `[komira_re] {}` " +
+          "is not set (it is the key of this client's own platform). Set it (.buckconfig.local.example), or build on " +
+          "this machine with `-c komira.execution=local`.").format(key))
 
 def komira_default_execution_platforms(name, visibility = None):
     """Local execution platforms, or remote ones when `.buckconfig.local` names workers.
 
     See `execution_mode`. Remote mode registers exactly what
-    `komira_execution_platforms` registers from `[komira_re]`.
+    `komira_execution_platforms` registers from `[komira_re]`: the property
+    set of every platform that names one, and it requires this client's own
+    platform's.
     """
     if execution_mode() == "local":
         komira_local_execution_platforms(name = name, visibility = visibility)
         return
     komira_execution_platforms(
         name = name,
-        linux = _linux_properties(),
-        darwin = re_properties(DARWIN_PROPERTIES_KEY, required = False),
+        linux = _remote_properties(LINUX_PROPERTIES_KEY),
+        darwin = _remote_properties(DARWIN_PROPERTIES_KEY),
         visibility = visibility,
     )
 

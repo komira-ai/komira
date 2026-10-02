@@ -26,7 +26,7 @@ pinned_file(**pinned_kwargs("darwin-arm64", "mojo_compiler"))
 conda_closure(
     name = "mojo_compiler",
     exec_compatible_with = LINUX_X86_64,
-    target_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-compiler
     package = ":mojo_compiler_1.0.0_osx-arm64.conda",
     unpacker = "komira//tools/build/toolchains:conda_unpack",
     visibility = ["PUBLIC"],
@@ -39,7 +39,7 @@ mojo_runtime(
     exec_compatible_with = LINUX_X86_64,
     busybox = "komira//tools/build/toolchains:busybox",
     compiler = ":mojo_compiler",
-    target_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo-runtime
     libs = [
         "libAsyncRTRuntimeGlobals.dylib",
         "libKGENCompilerRTShared.dylib",
@@ -54,7 +54,7 @@ dyld_script(
     busybox = "komira//tools/build/toolchains:busybox",
     prelude = "komira//tools/build/mojo/darwin:dyld_prelude.sh",
     src = "komira//tools/build/mojo:gate_runner.sh",
-    target_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-gate-runner
 )
 
 # MojoToolchainInfo requires a `launcher` (launch.sh: starts a built binary
@@ -69,7 +69,7 @@ dyld_script(
     busybox = "komira//tools/build/toolchains:busybox",
     prelude = "komira//tools/build/mojo/darwin:dyld_prelude.sh",
     src = "komira//tools/build/mojo:launch.sh",
-    target_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-launcher
 )
 
 # The `cc` a compile finds on PATH, host_identity.sh, and the host identities
@@ -80,7 +80,7 @@ dyld_script(
 mojo_darwin_link(
     name = "link",
     exec_compatible_with = LINUX_X86_64,
-    target_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-link
     cc = "komira//tools/build/mojo/darwin:cc",
     host_identity = "komira//tools/build/mojo/darwin:host_identity.sh",
     macos_hosts = darwin_macos_hosts(),
@@ -90,7 +90,7 @@ mojo_darwin_link(
 mojo_darwin_toolchain(
     name = "mojo",
     exec_compatible_with = DARWIN_ARM64,
-    target_compatible_with = DARWIN_ARM64,
+    target_compatible_with = DARWIN_ARM64,  # komira-limit:darwin-mojo
     busybox = "komira//tools/build/mojo/darwin:busybox.sh",
     compiler = ":mojo_compiler",
     # Matches the compiler's own minimum OS.

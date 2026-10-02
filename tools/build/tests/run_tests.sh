@@ -65,7 +65,7 @@
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really
 #      executes) must record a remote execution carrying `[komira_re]
-#      linux_properties` for every action it ran, and must have run
+#      linux_x86_64_properties` for every action it ran, and must have run
 #      zig_unpack, zig_build_exe, conda_unpack, mojo_runtime, fixture_archive,
 #      third_party_srcs and mojo_build (`buck2 log what-ran`; a cache hit
 #      records no properties, so a warm build cannot answer this). Costs about 3 minutes of remote execution; the isolated
@@ -252,6 +252,7 @@ done
 # another client they would fail one by one, looking like defects; stop here
 # instead. `./buck2 build //...` and `./buck2 test //...` work from any client.
 client=$(uname -s) arch=$(uname -m)
+# komira-limit:run-tests-linux-x86-64-client
 if [ "$client $arch" != "Linux x86_64" ]; then
     echo "run_tests.sh: needs a Linux x86_64 client, this is $client $arch: the tests run Linux x86_64 binaries and ELF tools here. ./buck2 build //... and ./buck2 test //... run from any client." >&2
     exit 2
@@ -542,12 +543,12 @@ action_platforms() { # what-ran json: every action ran remotely, with the linux 
             printf "%d actions, every one a remote execution with [%s]\n", total, P
         }'
 }
-LINUX_PROPS=$(re_value linux_properties)
+LINUX_PROPS=$(re_value linux_x86_64_properties)
 ISO=komira_tests_uncached
 if [ "$MODE" = local ]; then
     needs_remote "action platforms (per-action worker property sets)"
 elif [ -z "$LINUX_PROPS" ]; then
-    fail "action platforms: cannot read [komira_re] linux_properties"
+    fail "action platforms: cannot read [komira_re] linux_x86_64_properties"
 # The isolated daemon keeps its outputs between runs, and --no-remote-cache
 # does not rerun an action whose output is already on disk: clean first, or
 # a second run of these tests in the same checkout executes nothing.

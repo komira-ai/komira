@@ -68,7 +68,7 @@ def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo"
     # linux x86_64: compiles, gated tests and run checks.
     mojo_toolchain(
         name = "mojo_linux_x86_64",
-        target_compatible_with = _LINUX_X86_64,
+        target_compatible_with = _LINUX_X86_64,  # komira-limit:mojo-toolchain-x86-64
         exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
@@ -100,7 +100,7 @@ def komira_cxx_toolchains(**overrides):
     zig_cxx_toolchain(
         name = "cxx",
         # It builds for linux x86_64 only (see _LINUX_X86_64).
-        target_compatible_with = _LINUX_X86_64,
+        target_compatible_with = _LINUX_X86_64,  # komira-limit:cxx-toolchain-x86-64
         exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
@@ -135,7 +135,7 @@ def komira_rust_toolchains(**overrides):
     rust_toolchain(
         name = "rust",
         # It builds for linux x86_64 only (see _LINUX_X86_64).
-        target_compatible_with = _LINUX_X86_64,
+        target_compatible_with = _LINUX_X86_64,  # komira-limit:rust-toolchain-x86-64
         exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
@@ -163,7 +163,7 @@ def komira_proto_toolchains(**overrides):
     mojo_proto_toolchain(
         name = "mojo_proto",
         # It builds for linux x86_64 only (see _LINUX_X86_64).
-        target_compatible_with = _LINUX_X86_64,
+        target_compatible_with = _LINUX_X86_64,  # komira-limit:proto-toolchain-x86-64
         visibility = ["PUBLIC"],
         **attrs
     )
