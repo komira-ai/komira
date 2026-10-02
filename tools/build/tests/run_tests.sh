@@ -65,7 +65,7 @@
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really
 #      executes) must record a remote execution carrying `[komira_re]
-#      linux_properties` for every action it ran, and must have run
+#      linux_x86_64_properties` for every action it ran, and must have run
 #      zig_unpack, zig_build_exe, conda_unpack, mojo_runtime, fixture_archive,
 #      third_party_srcs and mojo_build (`buck2 log what-ran`; a cache hit
 #      records no properties, so a warm build cannot answer this). Costs about 3 minutes of remote execution; the isolated
@@ -173,6 +173,11 @@
 #      (tools/build/tests/negative/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
+#  33a. Conda packages: see tools/build/tests/functional/conda.sh (the package is
+#       read back with unzip, zstd, tar and jq; the refusals; the approved-list
+#       lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
+#       install from a file:// channel and a Mojo program importing the library,
+#       skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -221,6 +226,16 @@
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
 #      (tests//negative/aws_client).
+#  37. The platform table (tools/build/platforms/table.bzl, one row per
+#      (os, cpu)) is complete and the default target platform is the client's
+#      own: loading tests//functional/platform_table: runs the load-time
+#      cases (a table missing a pin or a field, with a pending pin in a
+#      registered row, a malformed sha256 or a duplicate key or host is
+#      refused naming the row and the pin; each host_info() selects its row);
+#      `platforms:host` is linux-x86_64 on this client and a target stating no
+#      --target-platforms is configured for it; the reserved linux-arm64 row
+#      has no platform and its `[komira_re]` key is refused
+#      (tools/build/tests/functional/platform_table/check.sh).
 set -uo pipefail
 
 umbrella=1
@@ -242,6 +257,7 @@ done
 # another client they would fail one by one, looking like defects; stop here
 # instead. `./buck2 build //...` and `./buck2 test //...` work from any client.
 client=$(uname -s) arch=$(uname -m)
+# komira-limit:run-tests-linux-x86-64-client
 if [ "$client $arch" != "Linux x86_64" ]; then
     echo "run_tests.sh: needs a Linux x86_64 client, this is $client $arch: the tests run Linux x86_64 binaries and ELF tools here. ./buck2 build //... and ./buck2 test //... run from any client." >&2
     exit 2
@@ -544,12 +560,12 @@ action_platforms() { # what-ran json: every action ran remotely, with the linux 
             printf "%d actions, every one a remote execution with [%s]\n", total, P
         }'
 }
-LINUX_PROPS=$(re_value linux_properties)
+LINUX_PROPS=$(re_value linux_x86_64_properties)
 ISO=komira_tests_uncached
 if [ "$MODE" = local ]; then
     needs_remote "action platforms (per-action worker property sets)"
 elif [ -z "$LINUX_PROPS" ]; then
-    fail "action platforms: cannot read [komira_re] linux_properties"
+    fail "action platforms: cannot read [komira_re] linux_x86_64_properties"
 # The isolated daemon keeps its outputs between runs, and --no-remote-cache
 # does not rerun an action whose output is already on disk: clean first, or
 # a second run of these tests in the same checkout executes nothing.
@@ -832,6 +848,19 @@ else
     fail "./buck2 bootstrap: $(grep '^FAIL' "$LOG/bootstrap.log" | cut -c 18- | tr '\n' ' ')(see $LOG/bootstrap.log)"
 fi
 
+# 33a
+conda_args=()
+[ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda "*) pass "${line#PASS  }" ;;
+        "FAIL  conda "*) fail "${line#FAIL  } (see $LOG/conda.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda.log"
+grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
+
 # 33
 S="$LOG/uname_shim"
 mkdir -p "$S/mac" "$S/here"
@@ -932,6 +961,17 @@ elif [ "$umbrella" = 1 ]; then
 else
     echo "SKIP  umbrella cache (--no-umbrella)"
 fi
+
+# 37
+pt_rc=0
+pt_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/tests/functional/platform_table/check.sh "$LOG" 2>&1) || pt_rc=$?
+printf '%s\n' "$pt_out" > "$LOG/platform_table.log"
+grep -E '^(PASS|FAIL)  ' "$LOG/platform_table.log"
+pt_fails=$(grep -c '^FAIL  ' "$LOG/platform_table.log" || true)
+if [ "$pt_rc" != 0 ] && [ "$pt_fails" = 0 ]; then
+    fail "platform table: check.sh exited $pt_rc without a FAIL line (see $LOG/platform_table.log)"
+fi
+fails=$((fails + pt_fails))
 
 echo "logs: $LOG"
 [ "$fails" = 0 ] || { echo "$fails test(s) failed"; exit 1; }

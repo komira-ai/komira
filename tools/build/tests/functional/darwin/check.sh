@@ -6,7 +6,7 @@
 #
 # Sections 1-6 need no macOS worker; 7 runs on the macOS workers when the root
 # cell configures them, and is SKIPped otherwise. What runs where:
-#   1. Unset `[komira_re] darwin_properties`: no macOS platform is
+#   1. Unset `[komira_re] darwin_arm64_properties`: no macOS platform is
 #      registered, and a darwin-arm64 Mojo target fails to configure (naming
 #      the macos constraint) while the linux target still resolves to
 #      linux-x86_64.
@@ -36,7 +36,7 @@
 #      (clears DYLD_* as well as LD_*), and gate_runner.sh (the test sees
 #      DYLD_LIBRARY_PATH although the `env` applet prunes it, as on macOS).
 #   7. Live, on the macOS workers (SKIP unless both `[komira_re]
-#      darwin_properties` and `darwin_macos_hosts` are set):
+#      darwin_arm64_properties` and `darwin_macos_hosts` are set):
 #      every host identity the workers report (tests//functional/darwin:host_census,
 #      uncached) is listed; //tools/build/examples:hello and its run check
 #      build and pass there, with the configured property set in `buck2 log
@@ -232,7 +232,7 @@ hello names a worker path"
 }
 
 DARWIN=(--target-platforms komira//tools/build/platforms:darwin-arm64)
-KEY=komira_re.darwin_properties
+KEY=komira_re.darwin_arm64_properties
 HOSTS_KEY=komira_re.darwin_macos_hosts
 PLACEHOLDER=(-c "$KEY=pool=unreachable-check-only" -c "$HOSTS_KEY=0.0-check")
 UNSET=(-c "$KEY=" -c "$HOSTS_KEY=")
@@ -281,7 +281,7 @@ if "$BUCK2" audit execution-platform-resolution -c "$KEY=pool=mac-only-no-hosts"
     fail "load: a macOS property set without darwin_macos_hosts was accepted"
 elif ! grep -qF 'names no macOS host' "$LOG/darwin_no_hosts.txt"; then
     fail "load: the missing-hosts refusal failed for another reason (see $LOG/darwin_no_hosts.txt)"
-elif MC=$(cfg_value komira_re.linux_properties) && [ -n "$MC" ] &&
+elif MC=$(cfg_value komira_re.linux_x86_64_properties) && [ -n "$MC" ] &&
     "$BUCK2" audit execution-platform-resolution -c "$HOSTS_KEY=0.0-check" \
         -c "$KEY=$MC" //tools/build/examples:hello > "$LOG/darwin_linux_set.txt" 2>&1; then
     fail "load: a macOS property set equal to the linux set was accepted"
