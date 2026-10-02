@@ -15,8 +15,9 @@
 #   contract   the manifest of every package of the set, and of the metapackage, is read by
 #              kci's own parser (src/kci_artifact_manifest, run as the probe
 #              //tools/build/package/manifest_probe:parse_manifest) and rendered again by kci's
-#              writer: the bytes are identical. The same probe refuses a manifest that points at
-#              its metadata, so it is not a probe that accepts anything.
+#              writer: the bytes are identical, and each names its metadata.json next to it. The
+#              same probe refuses a manifest without `metadata`, so it is not a probe that accepts
+#              anything.
 #   metapackage `komira_pack conda-meta` over the members' manifests gives a package with no
 #              file whose requirements are exactly the platform guard and every member at its own
 #              version (no compiler pin: the members carry it); the same inputs give the same
@@ -196,12 +197,13 @@ problems=""
 lines=$(printf '%s\n' "$PROBE" | grep -c '^OK CONDA ')
 [ "$lines" = "$((${#OK[@]} + 1))" ] || problems="$problems read-$lines-of-$((${#OK[@]} + 1))"
 printf '%s\n' "$PROBE" | grep -v '^OK CONDA .* render-identical=yes$' | grep -q . && problems="$problems not-rendered-identically-or-refused:[$(printf '%s\n' "$PROBE" | grep -v '^OK CONDA .* render-identical=yes$' | head -n 2)]"
+printf '%s\n' "$PROBE" | grep -v '^OK CONDA .* metadata=metadata\.json metadata_path=[^ ]*/metadata\.json render-identical=yes$' | grep -q . && problems="$problems metadata-not-named-next-to-the-manifest"
 printf '%s\n' "$PROBE" | grep -q "^OK CONDA $META $VERSION linux-64 $MF " || problems="$problems metapackage-line"
-cp "$K/meta1/manifest.json" "$W/with_metadata.json" && sed -i 's/}$/,"metadata":"metadata.json"}/' "$W/with_metadata.json"
-"$BUCK2" run //tools/build/package/manifest_probe:parse_manifest -- "$W/with_metadata.json" > "$W/probe_neg.out" 2>&1 && problems="$problems probe-accepted-a-metadata-key"
-grep -q "'metadata' belongs to a PYTHON artifact" "$W/probe_neg.out" || problems="$problems probe-negative-text"
+jq -c 'del(.metadata)' "$K/meta1/manifest.json" > "$W/without_metadata.json"
+"$BUCK2" run //tools/build/package/manifest_probe:parse_manifest -- "$W/without_metadata.json" > "$W/probe_neg.out" 2>&1 && problems="$problems probe-accepted-a-manifest-without-metadata"
+grep -q "a CONDA artifact needs 'metadata'" "$W/probe_neg.out" || problems="$problems probe-negative-text"
 if [ -n "$problems" ]; then fail "contract:$problems (see $W)"; else
-    pass "contract: kci's artifact-manifest parser reads the manifests of all ${#OK[@]} packages and of the metapackage, and kci's writer renders each one back to the same bytes; the same probe refuses a manifest with a \`metadata\` key (so it can fail)"
+    pass "contract: kci's artifact-manifest parser reads the manifests of all ${#OK[@]} packages and of the metapackage, and kci's writer renders each one back to the same bytes; each names the metadata.json next to it; the same probe refuses a manifest without \`metadata\` (so it can fail)"
 fi
 
 # ---- refusals -------------------------------------------------------------
@@ -245,7 +247,7 @@ mcheck "$K/meta1" "${MAN[@]:1}" 2> "$W/mc_short.err" && problems="$problems chec
 grep -q 'index depends has' "$W/mc_short.err" || problems="$problems short-text"
 mcheck "$K/meta1" "${MAN[@]}" "$K/rel8/${OK[0]}/manifest.json" 2> "$W/mc_long.err" && problems="$problems check-accepted-a-longer-member-list"
 "$PACK" conda-check --dir "$K/meta1" --kind library --name "$META" --expect-subdir linux-64 --import-name x --mojo-pin "$pin" --payload "$K/rel/${OK[0]}/${OK[0]}-$VERSION-0.conda" --out "$W/mcheck.marker" 2> "$W/mc_kind.err" && problems="$problems check-accepted-the-wrong-kind"
-cp -r "$K/meta1" "$W/meta_x" && chmod -R u+w "$W/meta_x" && jq -c '. + {metadata: "metadata.json"}' "$K/meta1/manifest.json" > "$W/meta_x/manifest.json"
+cp -r "$K/meta1" "$W/meta_x" && chmod -R u+w "$W/meta_x" && jq -c '. + {label: "x"}' "$K/meta1/manifest.json" > "$W/meta_x/manifest.json"
 mcheck "$W/meta_x" "${MAN[@]}" 2> "$W/mc_extra.err" && problems="$problems check-accepted-an-extra-key"
 # an unstamped metapackage (members built unstamped) is no release
 UN=()
