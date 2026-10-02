@@ -24,6 +24,7 @@ staged source directory can never shadow a package.
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -329,6 +330,33 @@ def _check_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
+def _conda_facts(ctx, import_name, c_link, has_tests):
+    """(conda name, refusal) of this library's conda package.
+
+    The name is None when the library opted out. The refusal is None when the
+    package can be built, else the reason it cannot: a reason known without
+    reading a source (native code, no tests, a dependency with no package, a name
+    that is not a conda name). The package target still builds, as a directory
+    holding the reason (tools/build/package/conda.bzl).
+    """
+    if not ctx.attrs.conda:
+        return None, None
+    name = ctx.attrs.conda_name or import_name
+    if not regex_match("^[a-z][a-z0-9_]*$", name):
+        return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
+    if c_link != None:
+        return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    if not has_tests:
+        return name, "{} has no tests, so its package would not be gated by any; declare test_srcs on the library".format(ctx.label.raw_target())
+    for d in ctx.attrs.deps:
+        if MojoInfo in d:
+            di = d[MojoInfo]
+            if di.conda_name == None:
+                return name, "it depends on {}, which has no conda package (`conda = False`, or it is not a mojo_library)".format(d.label.raw_target())
+            if di.conda_refusal != None:
+                return name, "it depends on {}, which has no conda package: {}".format(d.label.raw_target(), di.conda_refusal)
+    return name, None
+
 def _library_impl(ctx):
     tc = _toolchain(ctx)
     import_name = ctx.attrs.import_name or ctx.label.name
@@ -415,6 +443,7 @@ def _library_impl(ctx):
     else:
         public = ungated
 
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, len(markers) > 0)
     return [
         DefaultInfo(
             default_output = public,
@@ -430,7 +459,14 @@ def _library_impl(ctx):
         ),
         MojoInfo(
             c_link = c_link,
+            conda_name = conda_name,
+            conda_refusal = conda_refusal,
             direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps if MojoInfo in d]),
+            direct_conda = {
+                d[MojoInfo].import_name: struct(name = d[MojoInfo].conda_name, refusal = d[MojoInfo].conda_refusal)
+                for d in ctx.attrs.deps
+                if MojoInfo in d
+            },
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
         ),
@@ -443,6 +479,12 @@ _TOOLCHAIN_ATTR = {
 mojo_library_rule = rule(
     impl = _library_impl,
     attrs = {
+        # The library's conda package (tools/build/package/conda.bzl): the macro
+        # declares `<name>_conda` unless `conda = False`; `conda_name` is the
+        # published name when it is not the import name. Both are read here so
+        # that a dependent's package can name this one by its published name.
+        "conda": attrs.bool(default = True),
+        "conda_name": attrs.option(attrs.string(), default = None),
         # Mojo packages and C/C++ libraries; see _check_deps.
         "deps": attrs.list(attrs.dep(), default = []),
         # Optional: the target that generated `srcs` (gcp_client, for example).
@@ -782,7 +824,19 @@ def _mojo_library(**kwargs):
     # generic "unexpected parameter".
     if "tests_known_failing" in kwargs:
         fail("{}: tests_known_failing was removed: every welded test must pass".format(kwargs.get("name", "mojo_library")))
-    return mojo_library_rule(**kwargs)
+    # Every library has a conda package target, `<name>_conda`, unless it opts
+    # out with `conda = False`. Nothing is published by that: the release tool's
+    # artifact declarations say which packages are (tools/build/package/conda.bzl).
+    summary = kwargs.pop("conda_summary", None)
+    mojo_library_rule(**kwargs)
+    if kwargs.get("conda", True):
+        name = kwargs["name"]
+        conda_package(
+            name = name + "_conda",
+            lib = ":" + name,
+            summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),
+            visibility = ["PUBLIC"],
+        )
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.

@@ -73,7 +73,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_obs.ring_buffer import OVERFLOW_BLOCK
+from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK
 
 from komira_log import SharedEngine
 from komira_log.env_filter import EnvFilter
