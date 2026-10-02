@@ -59,7 +59,7 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from .backend import GcsStorageBackend
+from .backend import GCS_LIST_MAX_PAGES, GcsStorageBackend
 from .errors import GCS_ERR_NOT_FOUND, gcs_store_error_kind_from_message
 
 
@@ -75,49 +75,52 @@ def _generation_to_version(generation: Int64) -> String:
 
 
 def _version_to_generation(version: String) raises -> Int64:
-    """Parse a handle String back into a GCS generation, for a CAS. Raises on
-    an empty or non-integer handle: the caller must pass a handle a previous
-    write or head returned."""
-    if version.byte_length() == 0:
+    """Parse a handle String back into a GCS generation, for a CAS.
+
+    Accepts only a base-10 integer in `1..Int64.MAX`: what
+    `_generation_to_version` renders for a live object. Raises on anything
+    else before any backend call. In particular `"0"` is refused, because
+    `if_generation_match = 0` on the wire means "create only if absent" and
+    would quietly turn a compare-and-swap into a create; a sign, a server
+    etag, or a value past Int64.MAX is refused too."""
+    var n = version.byte_length()
+    if n == 0:
         raise Error(
             "GcsConditionalStore.compare_and_swap: empty version handle;"
             " pass the etag or version a previous write returned"
         )
-    var n = version.byte_length()
-    var i = 0
-    var neg = False
-    if ord(version[byte=0]) == ord("-"):
-        neg = True
-        i = 1
+    var max_div10 = Int64(922337203685477580)  # Int64.MAX // 10
+    var max_mod10 = Int64(7)  # Int64.MAX % 10
     var acc = Int64(0)
-    var saw = False
-    while i < n:
+    for i in range(n):
         var c = ord(version[byte=i])
         if c < ord("0") or c > ord("9"):
             raise Error(
                 String("GcsConditionalStore.compare_and_swap: malformed")
-                + " version handle (not an integer generation): "
+                + " version handle (not a base-10 generation): "
                 + version
             )
-        acc = acc * Int64(10) + Int64(c - ord("0"))
-        saw = True
-        i += 1
-    if not saw:
+        var d = Int64(c - ord("0"))
+        if acc > max_div10 or (acc == max_div10 and d > max_mod10):
+            raise Error(
+                String("GcsConditionalStore.compare_and_swap: version handle")
+                + " overflows a generation: "
+                + version
+            )
+        acc = acc * Int64(10) + d
+    if acc == Int64(0):
         raise Error(
-            String("GcsConditionalStore.compare_and_swap: malformed")
-            + " version handle (no digits): "
-            + version
+            String("GcsConditionalStore.compare_and_swap: version handle 0")
+            + " is not a generation (if_generation_match=0 means create)"
         )
-    return -acc if neg else acc
+    return acc
 
 
 @always_inline
 def _is_not_found(msg: String) -> Bool:
-    """True iff a raised backend Error is a NOT_FOUND (404)."""
-    return (
-        gcs_store_error_kind_from_message(msg) == GCS_ERR_NOT_FOUND
-        or msg.find(String("status=404")) >= 0
-    )
+    """True iff a raised backend Error is a NOT_FOUND, read from its leading
+    `StoreError[<KIND>]` token only (never from the key in the message)."""
+    return gcs_store_error_kind_from_message(msg) == GCS_ERR_NOT_FOUND
 
 
 # =============================================================================
@@ -242,11 +245,10 @@ struct GcsConditionalStore[B: GcsStorageBackend](
         var objects = List[ObjectMeta]()
         var common = List[String]()
         var page_token = String("")
-        var max_pages = 100_000
         var pages = 0
         while True:
             pages += 1
-            if pages > max_pages:
+            if pages > GCS_LIST_MAX_PAGES:
                 raise Error(
                     "GcsConditionalStore.list_with_delimiter: page cap exceeded"
                 )
@@ -357,8 +359,19 @@ struct GcsConditionalStore[B: GcsStorageBackend](
         self, path: Path, start: Int64, length: Int64
     ) raises -> List[UInt8]:
         """`length` bytes from `start`. A zero-length read returns empty
-        without a call; a short read raises."""
-        if length <= Int64(0):
+        without a call; a negative `start` or `length`, or a short read,
+        raises."""
+        if start < Int64(0) or length < Int64(0):
+            raise Error(
+                "GcsConditionalStore.get_range: negative start ("
+                + String(start)
+                + ") or length ("
+                + String(length)
+                + ") (key: "
+                + path.raw()
+                + ")"
+            )
+        if length == Int64(0):
             return List[UInt8]()
         self._build_backend_if_absent()
         ref backend = self._backend[].value()

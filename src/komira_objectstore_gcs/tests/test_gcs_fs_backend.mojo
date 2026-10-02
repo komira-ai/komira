@@ -12,10 +12,13 @@
 #          and drains every page;
 #       2. a short response from the backend makes read_at raise;
 #       3. a read ending exactly at EOF returns the exact tail bytes;
-#       4. clone() builds an independent backend through the factory.
+#       4. clone() builds an independent backend through the factory;
+#       5. a zero-length read issues no request, a negative range is
+#          refused, and a footer window inside the object reads its tail.
 #
-# The backend here is test-local rather than FakeGcsStorageBackend because it
-# needs knobs the fake does not have: a forced short read and a page size.
+# The backend wraps FakeGcsStorageBackend, so the listing fold, the name order
+# and the paging under test are the public fake's; the wrapper adds only a
+# forced short read.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -25,6 +28,7 @@ from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
 from komira_core.io.heap_region import HeapRegion
 
 from komira_objectstore_gcs import (
+    FakeGcsStorageBackend,
     GcsFs,
     GcsStorageBackend,
     ListPageRaw,
@@ -42,7 +46,7 @@ def _buf_u8(imm buf: SharedAlignedBuffer[HeapRegion], offset: Int) -> UInt8:
 
 
 # =============================================================================
-# §1 — a test-local GcsStorageBackend with a fixed object set and knobs.
+# §1 — the public fake, seeded, plus a short-read knob.
 # =============================================================================
 
 
@@ -50,7 +54,6 @@ def _buf_u8(imm buf: SharedAlignedBuffer[HeapRegion], offset: Int) -> UInt8:
 struct _Obj(Movable, Copyable, Deinitable):
     var key: String
     var bytes: List[UInt8]
-    var generation: Int64
 
 
 def _b(s: String) -> List[UInt8]:
@@ -62,7 +65,8 @@ def _b(s: String) -> List[UInt8]:
 
 
 def _seed_objects() -> List[_Obj]:
-    """The fixture every backend build starts from:
+    """The fixture every backend build starts from, in this (unsorted) write
+    order:
 
         data/a.parquet       12 bytes "AAAABBBBCCCC"
         data/b.parquet       4 bytes  "DDDD"
@@ -72,94 +76,41 @@ def _seed_objects() -> List[_Obj]:
         other/e.parquet
     """
     var out = List[_Obj]()
-    out.append(_Obj(String("data/a.parquet"), _b(String("AAAABBBBCCCC")), Int64(101)))
-    out.append(_Obj(String("data/b.parquet"), _b(String("DDDD")), Int64(102)))
-    out.append(_Obj(String("data/sub/c.parquet"), _b(String("CCC")), Int64(103)))
-    out.append(_Obj(String("data/sub/d.parquet"), _b(String("DDD")), Int64(104)))
-    out.append(_Obj(String("data/"), List[UInt8](), Int64(105)))
-    out.append(_Obj(String("other/e.parquet"), _b(String("EE")), Int64(106)))
+    out.append(_Obj(String("data/a.parquet"), _b(String("AAAABBBBCCCC"))))
+    out.append(_Obj(String("data/b.parquet"), _b(String("DDDD"))))
+    out.append(_Obj(String("data/sub/c.parquet"), _b(String("CCC"))))
+    out.append(_Obj(String("data/sub/d.parquet"), _b(String("DDD"))))
+    out.append(_Obj(String("data/"), List[UInt8]()))
+    out.append(_Obj(String("other/e.parquet"), _b(String("EE"))))
     return out^
 
 
-def _starts_with(s: String, prefix: String) -> Bool:
-    if prefix.byte_length() == 0:
-        return True
-    var sb = s.as_bytes()
-    var pb = prefix.as_bytes()
-    if len(sb) < len(pb):
-        return False
-    for i in range(len(pb)):
-        if sb[i] != pb[i]:
-            return False
-    return True
-
-
-def _find_slash_after(s: String, start: Int) -> Int:
-    var sb = s.as_bytes()
-    var i = start
-    while i < len(sb):
-        if sb[i] == UInt8(ord("/")):
-            return i
-        i += 1
-    return -1
-
-
-def _contains(items: List[String], needle: String) -> Bool:
-    for i in range(len(items)):
-        if items[i] == needle:
-            return True
-    return False
-
-
-def _prefix_bytes(s: String, n: Int) -> String:
-    """The first `n` bytes of `s`, byte for byte."""
-    var bs = s.as_bytes()
-    var lim = n if n < len(bs) else len(bs)
-    var buf = List[UInt8]()
-    for i in range(lim):
-        buf.append(bs[i])
-    return String(unsafe_from_utf8=Span(buf))
-
-
 struct _ProbeBackend(GcsStorageBackend, Movable, Deinitable):
-    """`short_read` makes the next read_range return one byte fewer than
-    asked; `_page_size` splits listings into pages."""
+    """`FakeGcsStorageBackend` (so the listing fold and paging are the public
+    fake's), seeded with `_seed_objects()`. `short_read` makes the next
+    read_range return one byte fewer than asked."""
 
-    var _objects: List[_Obj]
+    var _inner: FakeGcsStorageBackend
     var short_read: Bool
-    var _page_size: Int
 
-    def __init__(out self):
-        self._objects = _seed_objects()
-        self.short_read = False
-        self._page_size = 1000
+    def __init__(out self) raises:
+        self = Self(_seed_objects(), False, 0)
 
     def __init__(
         out self, var objects: List[_Obj], short_read: Bool, page_size: Int
-    ):
-        self._objects = objects^
+    ) raises:
+        var inner = FakeGcsStorageBackend(page_size=page_size)
+        for i in range(len(objects)):
+            _ = inner.conditional_create(
+                String("test-bucket"), objects[i].key, objects[i].bytes
+            )
+        self._inner = inner^
         self.short_read = short_read
-        self._page_size = page_size
-
-    def _find(self, key: String) -> Int:
-        for i in range(len(self._objects)):
-            if self._objects[i].key == key:
-                return i
-        return -1
 
     def conditional_create(
         mut self, bucket: String, key: String, data: List[UInt8]
     ) raises -> Int64:
-        if self._find(key) >= 0:
-            raise Error(
-                String("StoreError[PRECONDITION] WriteObject gs://")
-                + bucket
-                + "/"
-                + key
-                + " status=412"
-            )
-        self._objects.append(_Obj(key, data.copy(), Int64(900)))
-        return Int64(900)
+        return self._inner.conditional_create(bucket, key, data)
 
     def compare_and_swap(
         mut self,
@@ -168,18 +119,9 @@ struct _ProbeBackend(GcsStorageBackend, Movable, Deinitable):
         data: List[UInt8],
         expected_generation: Int64,
     ) raises -> Int64:
-        var idx = self._find(key)
-        if idx < 0 or self._objects[idx].generation != expected_generation:
-            raise Error(
-                String("StoreError[PRECONDITION] WriteObject gs://")
-                + bucket
-                + "/"
-                + key
-                + " status=412"
-            )
-        self._objects[idx].bytes = data.copy()
-        self._objects[idx].generation += Int64(1)
-        return self._objects[idx].generation
+        return self._inner.compare_and_swap(
+            bucket, key, data, expected_generation
+        )
 
     def read_range(
         mut self,
@@ -188,59 +130,17 @@ struct _ProbeBackend(GcsStorageBackend, Movable, Deinitable):
         read_offset: Int64,
         read_limit: Int64,
     ) raises -> List[UInt8]:
-        var idx = self._find(key)
-        if idx < 0:
-            raise Error(
-                String("StoreError[NOT_FOUND] ReadObject gs://")
-                + bucket
-                + "/"
-                + key
-                + " status=404"
-            )
-        ref e = self._objects[idx]
-        var n = len(e.bytes)
-        var start = Int(read_offset)
-        if start < 0:
-            start = 0
-        if start > n:
-            start = n
-        var end = n
-        if read_limit > Int64(0):
-            var lim_end = start + Int(read_limit)
-            if lim_end < end:
-                end = lim_end
-        var out = List[UInt8]()
-        for i in range(start, end):
-            out.append(e.bytes[i])
+        var out = self._inner.read_range(bucket, key, read_offset, read_limit)
         if self.short_read and len(out) > 0:
             self.short_read = False
             _ = out.pop()
         return out^
 
     def get_object(mut self, bucket: String, key: String) raises -> ObjectMetaRaw:
-        var idx = self._find(key)
-        if idx < 0:
-            raise Error(
-                String("StoreError[NOT_FOUND] GetObject gs://")
-                + bucket
-                + "/"
-                + key
-                + " status=404"
-            )
-        ref e = self._objects[idx]
-        return ObjectMetaRaw(
-            key=e.key,
-            size=Int64(len(e.bytes)),
-            generation=e.generation,
-            etag=String(""),
-        )
+        return self._inner.get_object(bucket, key)
 
     def delete_object(mut self, bucket: String, key: String) raises:
-        var keep = List[_Obj]()
-        for i in range(len(self._objects)):
-            if self._objects[i].key != key:
-                keep.append(self._objects[i].copy())
-        self._objects = keep^
+        self._inner.delete_object(bucket, key)
 
     def list_objects(
         mut self,
@@ -249,46 +149,7 @@ struct _ProbeBackend(GcsStorageBackend, Movable, Deinitable):
         page_token: String,
         delimiter: String = String(""),
     ) raises -> ListPageRaw:
-        """The service's listing, paged: `page_token` is the decimal index of
-        the first object of the page; the common prefixes come whole on the
-        first page."""
-        var use_delim = delimiter.byte_length() > 0
-        var matched_obj = List[ObjectMetaRaw]()
-        var common = List[String]()
-        for i in range(len(self._objects)):
-            ref e = self._objects[i]
-            if not _starts_with(e.key, prefix):
-                continue
-            if use_delim:
-                var fold = _find_slash_after(e.key, prefix.byte_length())
-                if fold >= 0:
-                    var cp = _prefix_bytes(e.key, fold + 1)
-                    if not _contains(common, cp):
-                        common.append(cp^)
-                    continue
-            matched_obj.append(
-                ObjectMetaRaw(
-                    key=e.key,
-                    size=Int64(len(e.bytes)),
-                    generation=e.generation,
-                    etag=String(""),
-                )
-            )
-        var start = 0
-        if page_token.byte_length() > 0:
-            start = Int(atol(page_token))
-        var page_objs = List[ObjectMetaRaw]()
-        var end = start + self._page_size
-        var actual_end = end if end < len(matched_obj) else len(matched_obj)
-        for i in range(start, actual_end):
-            page_objs.append(matched_obj[i].copy())
-        var next_token = String("")
-        if actual_end < len(matched_obj):
-            next_token = String(actual_end)
-        var page_common = List[String]()
-        if start == 0:
-            page_common = common^
-        return ListPageRaw(page_objs^, page_common^, next_token^)
+        return self._inner.list_objects(bucket, prefix, page_token, delimiter)
 
 
 def _make_probe_backend() raises -> _ProbeBackend:
@@ -413,6 +274,10 @@ def test_list_recursive_flat_no_fold() raises:
             saw_deep = True
     assert_true(saw_deep, "a recursive list must include data/sub/c.parquet")
     assert_equal(len(keys), 5)
+    # Name (byte) order, as ListObjects returns it, whatever the write order.
+    assert_equal(keys[0], String("data/"))
+    assert_equal(keys[1], String("data/a.parquet"))
+    assert_equal(keys[4], String("data/sub/d.parquet"))
 
 
 def test_list_dir_shallow_paginates() raises:
@@ -434,6 +299,10 @@ def test_list_dir_shallow_paginates() raises:
             n_files += 1
     assert_equal(n_files, 2)
     assert_equal(n_dirs, 1)
+    # One entry per page, so arrival order is name order.
+    assert_equal(entries[0].name, String("a.parquet"))
+    assert_equal(entries[1].name, String("b.parquet"))
+    assert_equal(entries[2].name, String("sub"))
 
 
 # =============================================================================
@@ -534,6 +403,52 @@ def test_clone_mints_fresh_independent_backend() raises:
     assert_equal(_buf_u8(again, 0), UInt8(ord("D")))
 
 
+# =============================================================================
+# §B.5 — zero-length and negative ranges, and a window inside the object.
+# =============================================================================
+
+
+def test_read_at_zero_length_issues_no_request() raises:
+    """A zero-length read returns an empty buffer without a request: on the
+    wire `read_limit = 0` means "to the end", so sending it would download the
+    rest of the object. The key is absent, so a request would raise 404."""
+    var fs = _make_fs()
+    var h = fs.open(String("data/absent.parquet"))
+    var buf = fs.read_at(h, Int64(3), Int64(0))
+    assert_equal(_buf_len(buf), 0)
+
+
+def test_read_at_refuses_negative_offset_or_length() raises:
+    var fs = _make_fs()
+    var h = fs.open(String("data/a.parquet"))
+    var raised_offset = False
+    try:
+        _ = fs.read_at(h, Int64(-4), Int64(4))
+    except e:
+        raised_offset = True
+        assert_true(String(e).find(String("negative")) >= 0)
+    assert_true(raised_offset, "a negative offset must be refused")
+    var raised_length = False
+    try:
+        _ = fs.read_at(h, Int64(0), Int64(-1))
+    except e:
+        raised_length = True
+        assert_true(String(e).find(String("negative")) >= 0)
+    assert_true(raised_length, "a negative length must be refused")
+
+
+def test_read_footer_window_inside_object() raises:
+    """An 8-byte window over the 12-byte object starts at offset 4."""
+    var fs = _make_fs()
+    var footer = fs.read_footer(String("data/a.parquet"), 8)
+    assert_equal(footer.offset, 4)
+    assert_equal(footer.file_size, 12)
+    assert_equal(footer.len(), 8)
+    var want = String("BBBBCCCC").as_bytes()
+    for i in range(8):
+        assert_equal(footer.bytes[i], want[i])
+
+
 def main() raises:
     test_bucket_and_open()
     test_capability_queries()
@@ -549,4 +464,7 @@ def main() raises:
     test_read_footer_reads_trailing_region()
     test_read_footer_too_small_raises()
     test_clone_mints_fresh_independent_backend()
+    test_read_at_zero_length_issues_no_request()
+    test_read_at_refuses_negative_offset_or_length()
+    test_read_footer_window_inside_object()
     print("PASS test_gcs_fs_backend")

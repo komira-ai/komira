@@ -9,7 +9,8 @@
 # the google.storage.v2 object verbs with the generation-based CAS the live
 # service enforces, and raises the same `StoreError[<KIND>] ... status=<http>`
 # messages a network backend raises for a FAILED_PRECONDITION / NOT_FOUND, so
-# a conformer behaves the same over it as over the live service.
+# a conformer behaves the same over it as over the live service. Listings come
+# back in name (byte) order and page as the service pages them.
 #
 # Storage is a plain owned `List` of value entries; no UnsafePointer.
 # =============================================================================
@@ -31,8 +32,13 @@ struct FakeGcsStorageBackend(GcsStorageBackend, Movable, Deinitable):
     generation, minted fresh on every successful write. Create-if-absent
     succeeds only when the key is absent; compare_and_swap(expected) succeeds
     only when the live generation equals `expected`. A miss raises
-    `StoreError[PRECONDITION] ... status=412`; a read of an absent key raises
-    `StoreError[NOT_FOUND] ... status=404`.
+    `StoreError[PRECONDITION] ... status=412`; a read, head or delete of an
+    absent key raises `StoreError[NOT_FOUND] ... status=404`.
+
+    Listing (as GCS): objects and folded common prefixes come back merged in
+    name (byte) order, at most `page_size` of them per page (0: one page
+    holding everything); `next_page_token` resumes after the last name of the
+    page.
 
     The bucket argument is carried into error messages only: one fake models
     one bucket.
@@ -44,10 +50,21 @@ struct FakeGcsStorageBackend(GcsStorageBackend, Movable, Deinitable):
 
     var _entries: List[_FakeEntry]
     var _gen_counter: Int64
+    var _page_size: Int
 
     def __init__(out self):
+        """An empty fake whose listings come back in one page."""
         self._entries = List[_FakeEntry]()
         self._gen_counter = Int64(0)
+        self._page_size = 0
+
+    def __init__(out self, page_size: Int):
+        """An empty fake whose listings hold at most `page_size` entries
+        (objects plus common prefixes) per page; 0 means one page."""
+        self._entries = List[_FakeEntry]()
+        self._gen_counter = Int64(0)
+        self._page_size = page_size if page_size > 0 else 0
+
 
     def _find(self, key: String) -> Int:
         for i in range(len(self._entries)):
@@ -139,14 +156,27 @@ struct FakeGcsStorageBackend(GcsStorageBackend, Movable, Deinitable):
         read_offset: Int64,
         read_limit: Int64,
     ) raises -> List[UInt8]:
+        if read_offset < Int64(0) or read_limit < Int64(0):
+            # The seam's precondition. The wire gives a negative offset a
+            # suffix meaning this fake does not model, so it refuses rather
+            # than read the wrong bytes.
+            raise Error(
+                String("StoreError[MALFORMED] ReadObject gs://")
+                + bucket
+                + "/"
+                + key
+                + " status=400 grpc_code=3 grpc_detail=negative read_offset ("
+                + String(read_offset)
+                + ") or read_limit ("
+                + String(read_limit)
+                + ")"
+            )
         var idx = self._find(key)
         if idx < 0:
             raise Self._not_found_error(String("ReadObject"), bucket, key)
         ref e = self._entries[idx]
         var n = len(e.bytes)
         var start = Int(read_offset)
-        if start < 0:
-            start = 0
         if start > n:
             start = n
         var end = n
@@ -172,9 +202,14 @@ struct FakeGcsStorageBackend(GcsStorageBackend, Movable, Deinitable):
         )
 
     def delete_object(mut self, bucket: String, key: String) raises:
+        """Deletes `key`; an absent key raises NOT_FOUND, as DeleteObject
+        does."""
+        var idx = self._find(key)
+        if idx < 0:
+            raise Self._not_found_error(String("DeleteObject"), bucket, key)
         var keep = List[_FakeEntry]()
         for i in range(len(self._entries)):
-            if self._entries[i].key != key:
+            if i != idx:
                 keep.append(self._entries[i].copy())
         self._entries = keep^
 
@@ -185,15 +220,20 @@ struct FakeGcsStorageBackend(GcsStorageBackend, Movable, Deinitable):
         page_token: String,
         delimiter: String = String(""),
     ) raises -> ListPageRaw:
-        """One page holding every match (`next_page_token` is always empty).
-        Models the service's directory fold:
+        """One page of the listing under `prefix`. Models the service's
+        directory fold:
           * `delimiter == ""`: every key under `prefix` lands in `objects`.
           * otherwise: a key whose remainder after `prefix` contains the
             delimiter is folded to its name up to and including the first
             delimiter, emitted once in `common_prefixes`; other keys land in
-            `objects`."""
-        var objects = List[ObjectMetaRaw]()
-        var common = List[String]()
+            `objects`.
+        Objects and prefixes are merged in name (byte) order; a page holds the
+        first `page_size` names after `page_token` (the last name of the
+        previous page)."""
+        # The merged listing: every name, and the entry index of each object
+        # (-1 for a folded prefix).
+        var names = List[String]()
+        var entry_of = List[Int]()
         var use_delim = delimiter.byte_length() > 0
         for i in range(len(self._entries)):
             ref e = self._entries[i]
@@ -207,18 +247,50 @@ struct FakeGcsStorageBackend(GcsStorageBackend, Movable, Deinitable):
                     var cp = _prefix_bytes(
                         e.key, fold_end + delimiter.byte_length()
                     )
-                    if not _contains_str(common, cp):
-                        common.append(cp^)
+                    if not _contains_str(names, cp):
+                        names.append(cp^)
+                        entry_of.append(-1)
                     continue
-            objects.append(
-                ObjectMetaRaw(
-                    key=e.key,
-                    size=Int64(len(e.bytes)),
-                    generation=e.generation,
-                    etag=String(""),
+            names.append(e.key.copy())
+            entry_of.append(i)
+
+        # Insertion sort by byte order; a fake's listings are small.
+        for i in range(1, len(names)):
+            var j = i
+            while j > 0 and _bytes_less(names[j], names[j - 1]):
+                var tn = names[j].copy()
+                names[j] = names[j - 1].copy()
+                names[j - 1] = tn^
+                var te = entry_of[j]
+                entry_of[j] = entry_of[j - 1]
+                entry_of[j - 1] = te
+                j -= 1
+
+        var resume = page_token.byte_length() > 0
+        var objects = List[ObjectMetaRaw]()
+        var common = List[String]()
+        var taken = 0
+        var next_token = String("")
+        for i in range(len(names)):
+            if resume and not _bytes_less(page_token, names[i]):
+                continue
+            if self._page_size > 0 and taken == self._page_size:
+                next_token = names[i - 1].copy()
+                break
+            taken += 1
+            if entry_of[i] < 0:
+                common.append(names[i].copy())
+            else:
+                ref e = self._entries[entry_of[i]]
+                objects.append(
+                    ObjectMetaRaw(
+                        key=e.key,
+                        size=Int64(len(e.bytes)),
+                        generation=e.generation,
+                        etag=String(""),
+                    )
                 )
-            )
-        return ListPageRaw(objects^, common^, String(""))
+        return ListPageRaw(objects^, common^, next_token^)
 
 
 @always_inline
@@ -233,6 +305,17 @@ def _starts_with(s: String, prefix: String) -> Bool:
         if sb[i] != pb[i]:
             return False
     return True
+
+
+def _bytes_less(a: String, b: String) -> Bool:
+    """True iff `a` sorts before `b` in byte order (GCS's name order)."""
+    var ab = a.as_bytes()
+    var bb = b.as_bytes()
+    var n = len(ab) if len(ab) < len(bb) else len(bb)
+    for i in range(n):
+        if ab[i] != bb[i]:
+            return ab[i] < bb[i]
+    return len(ab) < len(bb)
 
 
 def _find_delim_after(s: String, start: Int, delim: String) -> Int:

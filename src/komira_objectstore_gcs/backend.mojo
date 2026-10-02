@@ -78,6 +78,12 @@ struct ListPageRaw(Movable, Deinitable):
         return ListPageRaw(List[ObjectMetaRaw](), List[String](), String(""))
 
 
+# The most ListObjects pages a conformer drains for one listing before it
+# raises. A backend that keeps returning a page token would otherwise spin a
+# drain loop forever.
+comptime GCS_LIST_MAX_PAGES: Int = 100_000
+
+
 trait GcsStorageBackend(Movable, Deinitable):
     """The narrow google.storage.v2 object-verb surface the GCS conformers
     depend on. Every conformer raises the same `StoreError[<KIND>] ...
@@ -117,7 +123,13 @@ trait GcsStorageBackend(Movable, Deinitable):
     ) raises -> List[UInt8]:
         """Read `[read_offset, read_offset + read_limit)`; `read_limit = 0`
         reads to the end. If the object is absent, raises
-        `StoreError[NOT_FOUND] ... status=404`."""
+        `StoreError[NOT_FOUND] ... status=404`.
+
+        Precondition: `read_offset >= 0` and `read_limit >= 0`. The wire
+        request gives a negative offset a different meaning (that many bytes
+        back from the end) and refuses a negative limit, so the conformers
+        refuse negative values before calling, and a backend may raise on
+        them."""
         ...
 
     def get_object(mut self, bucket: String, key: String) raises -> ObjectMetaRaw:
@@ -137,8 +149,9 @@ trait GcsStorageBackend(Movable, Deinitable):
         page_token: String,
         delimiter: String = String(""),
     ) raises -> ListPageRaw:
-        """ListObjects under `prefix`, one page. The caller paginates by
-        calling again with the page's `next_page_token`.
+        """ListObjects under `prefix`, one page, in name (byte) order. The
+        caller paginates by calling again with the page's `next_page_token`,
+        and stops after `GCS_LIST_MAX_PAGES` pages.
 
         `delimiter` selects the listing mode:
           * `""` (default): recursive. Every key under `prefix`, at any depth,

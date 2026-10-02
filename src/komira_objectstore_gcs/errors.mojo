@@ -19,19 +19,39 @@ comptime GCS_ERR_TRANSPORT: UInt8 = 5
 comptime GCS_ERR_MALFORMED: UInt8 = 6
 
 
+def _kind_at(msg: String, at: Int, token: String) -> Bool:
+    """True iff `msg` holds `token` starting at byte `at`."""
+    var mb = msg.as_bytes()
+    var tb = token.as_bytes()
+    if at + len(tb) > len(mb):
+        return False
+    for i in range(len(tb)):
+        if mb[at + i] != tb[i]:
+            return False
+    return True
+
+
 def gcs_store_error_kind_from_message(msg: String) -> UInt8:
-    """The StoreError kind named by a `StoreError[<KIND>]` token in `msg`, or
-    `GCS_ERR_NONE` if it holds none."""
-    if msg.find(String("StoreError[NOT_FOUND]")) >= 0:
+    """The StoreError kind named by the FIRST `StoreError[<KIND>]` token in
+    `msg`, or `GCS_ERR_NONE` if it holds none.
+
+    Only the first token counts: a backend message carries the object key
+    after its kind (`StoreError[<KIND>] <method> gs://<bucket>/<key> ...`),
+    and a key may itself contain `StoreError[...]`, which must not change the
+    kind."""
+    var at = msg.find(String("StoreError["))
+    if at < 0:
+        return GCS_ERR_NONE
+    if _kind_at(msg, at, String("StoreError[NOT_FOUND]")):
         return GCS_ERR_NOT_FOUND
-    if msg.find(String("StoreError[PERMISSION_DENIED]")) >= 0:
+    if _kind_at(msg, at, String("StoreError[PERMISSION_DENIED]")):
         return GCS_ERR_PERMISSION_DENIED
-    if msg.find(String("StoreError[THROTTLED]")) >= 0:
+    if _kind_at(msg, at, String("StoreError[THROTTLED]")):
         return GCS_ERR_THROTTLED
-    if msg.find(String("StoreError[PRECONDITION]")) >= 0:
+    if _kind_at(msg, at, String("StoreError[PRECONDITION]")):
         return GCS_ERR_PRECONDITION
-    if msg.find(String("StoreError[TRANSPORT]")) >= 0:
+    if _kind_at(msg, at, String("StoreError[TRANSPORT]")):
         return GCS_ERR_TRANSPORT
-    if msg.find(String("StoreError[MALFORMED]")) >= 0:
+    if _kind_at(msg, at, String("StoreError[MALFORMED]")):
         return GCS_ERR_MALFORMED
     return GCS_ERR_NONE

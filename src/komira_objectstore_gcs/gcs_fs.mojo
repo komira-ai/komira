@@ -32,14 +32,18 @@ from std.memory import unsafe_memcpy
 
 from komira_async.fs.file_system import FileSystem, WriteMode
 from komira_async.fs.footer_region import FooterRegion, speculative_tail_start
+# `_shallow_basename` is a private helper of komira_async, used here on
+# purpose: it is the one definition of a listing key's final component that
+# every object-store FileSystem shares, and a copy here could drift from it.
 from komira_async.fs.shallow_dir_entry import ShallowDirEntry, _shallow_basename
 
 from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
 from komira_core.collections.slab import Slab
 from komira_core.io.heap_region import HeapRegion
+from komira_core.plan.fs_descriptor_pod import FS_SCHEME_GCS
 
-from .backend import GcsStorageBackend
+from .backend import GCS_LIST_MAX_PAGES, GcsStorageBackend
 
 
 @fieldwise_init
@@ -78,8 +82,8 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
     # GcsFs has a shallow listing (`list_dir_shallow`, from the delimiter
     # fold) and a paginated recursive `list`, which lazy Hive discovery needs.
     comptime SUPPORTS_LAZY_HIVE: Bool = True
-    # The GCS scheme tag.
-    comptime SCHEME: UInt8 = 2
+    # The GCS scheme tag, by name, so it cannot drift from the descriptor.
+    comptime SCHEME: UInt8 = FS_SCHEME_GCS
 
     var _bucket: String
     # The owned backend. Built lazily on a clone, because `clone()` is
@@ -154,7 +158,11 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
 
         var out = List[String]()
         var page_token = String("")
+        var pages = 0
         while True:
+            pages += 1
+            if pages > GCS_LIST_MAX_PAGES:
+                raise Error("GcsFs.list: page cap exceeded")
             var page = backend.list_objects(
                 self._bucket, prefix, page_token, String("")
             )
@@ -177,7 +185,22 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
         length: Int64,
     ) raises -> SharedAlignedBuffer[HeapRegion]:
         """`length` bytes from `offset` of `file`, via
-        `backend.read_range(offset, length)`. A short response raises."""
+        `backend.read_range(offset, length)`. A zero-length read returns an
+        empty buffer without a request (the wire reads `read_limit = 0` as
+        "to the end"); a negative `offset` or `length`, or a short response,
+        raises."""
+        if offset < Int64(0) or length < Int64(0):
+            raise Error(
+                "GcsFs.read_at: negative offset ("
+                + String(offset)
+                + ") or length ("
+                + String(length)
+                + ") (object key: "
+                + file._key
+                + ")"
+            )
+        if length == Int64(0):
+            return SharedAlignedBuffer.from_owned(OwnedAlignedBuffer(0))
         self._build_backend_if_absent()
         ref backend = self._backend.get_mut_interior(0).value()
 
@@ -224,8 +247,8 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
 
     @always_inline
     def prefetch_depth(self) -> Int:
-        """64, the same as S3: both are networked object stores with similar
-        round trips."""
+        """64: a networked object store, where the round trip, not the
+        transfer, dominates a small read."""
         return 64
 
     @always_inline
@@ -235,9 +258,10 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
     def read_footer(self, path: String, window: Int) raises -> FooterRegion:
         """The last `window` bytes of `path`, with the object's size.
 
-        The ReadObject range is absolute `(start, length)`, with no suffix
-        form, so this takes the size first (GetObject) and then reads: two
-        requests per file.
+        The seam's `read_range` returns bytes but no object metadata, and
+        the footer needs the object's size, so this takes the size first
+        (GetObject) and then reads the absolute tail range: two requests per
+        file.
 
         Raises if the object is smaller than the 8-byte parquet trailer."""
         var size = self.file_size(path)
@@ -294,7 +318,8 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
         A non-empty `prefix` is normalized to end in `/` (as in `is_dir`); the
         empty prefix (the bucket root) is left as is. The zero-byte
         placeholder object named exactly the prefix is the directory itself
-        and is skipped. Every page is drained, in arrival (key) order."""
+        and is skipped. Every page is drained, in page order; within a page the
+        directories come first, then the files, each in name order."""
         var probe_prefix = prefix
         if probe_prefix.byte_length() > 0 and not probe_prefix.endswith(
             String("/")
@@ -305,7 +330,11 @@ struct GcsFs[B: GcsStorageBackend](FileSystem, Movable, Deinitable):
 
         var out = List[ShallowDirEntry]()
         var page_token = String("")
+        var pages = 0
         while True:
+            pages += 1
+            if pages > GCS_LIST_MAX_PAGES:
+                raise Error("GcsFs.list_dir_shallow: page cap exceeded")
             var page = backend.list_objects(
                 self._bucket, probe_prefix, page_token, String("/")
             )
