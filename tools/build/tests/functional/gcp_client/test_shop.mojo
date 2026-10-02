@@ -1,6 +1,6 @@
 from komira_gcp_shop.item import Item
 from komira_gcp_shop.shop import GetItemRequest, GetItemResponse
-from komira_serde import PbDecoder, PbEncoder
+from komira_proto_codec import PbDecoder, PbEncoder
 from std.testing import assert_equal, assert_true
 
 

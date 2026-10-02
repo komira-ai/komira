@@ -1,14 +1,11 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:proto.bzl", "protoc_dist")
 
 # protoc 29.1, the release build for linux x86_64 (a static executable),
 # with the well-known-type .proto files under include/.
-pinned_file(
-    name = "protoc-29.1-linux-x86_64.zip",
-    url = "https://github.com/protocolbuffers/protobuf/releases/download/v29.1/protoc-29.1-linux-x86_64.zip",
-    sha256 = "00c83fe9722d85e96c81b941b29f17a744b33b4ce66e0f18009fd8937de22c60",
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "protoc"))
 
 protoc_dist(
     name = "protoc",

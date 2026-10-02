@@ -1,4 +1,4 @@
-"""Binary-to-text encodings: base64, base64url, base32 and hex.
+"""Binary-to-text encodings: base64, base64url, base32, hex, and PEM armor.
 
 Pure Mojo, no dependencies. Every function takes and returns safe types:
 `Span[UInt8]` (or `String`) in, `String` or `List[UInt8]` out.
@@ -9,6 +9,13 @@ Pure Mojo, no dependencies. Every function takes and returns safe types:
 | base64url (RFC 4648 section 5) | `base64_url_encode` (padded), `base64_url_encode_nopad` (RFC 7515 section 2) | `base64_url_decode` (padded or not), `base64_url_decode_nopad` (padding rejected) |
 | base32 (RFC 4648 section 6) | `base32_encode` (padded), `base32_encode_nopad` | `base32_decode` (either case, padded or not) |
 | hex (RFC 4648 section 8) | `hex_encode` (lower case) | `hex_decode` (either case) |
+| PEM (RFC 7468) | `pem_encode` (64-symbol lines) | `pem_decode` (first block, label required), `pem_label` |
+
+PEM is armor around strict base64: `pem.mojo` states which whitespace and
+surrounding text it accepts (RFC 7468 section 3 lax body, boundaries on
+lines of their own, BEGIN and END labels equal) and refuses the rest with
+`InvalidBoundary` or `LabelMismatch`, or the base64 error of the body, each
+with a position in the PEM text and no byte of it.
 
 Decoding is strict. It rejects, with a named error giving the byte position
 (see `errors.mojo`): any byte outside the alphabet, INCLUDING whitespace and
@@ -44,10 +51,22 @@ from .base64 import (
 )
 from .base32 import base32_encode, base32_encode_nopad, base32_decode
 from .hex import hex_encode, hex_decode
+from .pem import (
+    pem_encode,
+    pem_decode,
+    pem_label,
+    PEM_LABEL_CERTIFICATE,
+    PEM_LABEL_PRIVATE_KEY,
+    PEM_LABEL_ENCRYPTED_PRIVATE_KEY,
+    PEM_LABEL_PUBLIC_KEY,
+    PEM_LINE_SYMBOLS,
+)
 from .errors import (
     INVALID_CHARACTER,
     INVALID_PADDING,
     INVALID_LENGTH,
     NON_CANONICAL,
+    INVALID_BOUNDARY,
+    LABEL_MISMATCH,
     error_kind,
 )
