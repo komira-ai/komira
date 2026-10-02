@@ -25,7 +25,7 @@ from std.testing import assert_equal, assert_true
 
 from std.sys import argv
 
-from komira_async.net.dns import resolve_host_be
+from komira_net.dns import resolve_host_be
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.socket_setup import inet_loopback_be
 from komira_async.runtime.blocking_runtime import BlockingRuntime
