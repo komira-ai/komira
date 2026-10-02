@@ -22,6 +22,10 @@
 #              hops on `<host>`.
 #   fetch      GET https://<host>/<channel>/<subdir>/<file>, redirects followed
 #              the same way.
+#   package_names
+#              GET the same repodata.json; the package names its listings
+#              hold (`classify_repodata_names`), read with the same redirect
+#              and credential rules as `read_back`.
 #
 # ⛔ NEVER `force`. The server overwrites an existing file name when asked to
 # (`?force=true`), and an overwrite of a published file is a different package
@@ -54,7 +58,11 @@ from .coordinate import (
     repo_host,
     repo_path,
 )
-from .conda_repodata import classify_repodata_answer
+from .conda_repodata import (
+    NameListing,
+    classify_repodata_answer,
+    classify_repodata_names,
+)
 from .credential import SURFACE_PREFIX_DEV, RegistryCredential
 from .http_read import get_following_redirects
 from .identity import ContentIdentity, ascii_lower
@@ -134,15 +142,25 @@ def _refuse_malformed_subdir(c: PackageCoordinate) raises:
             String("kci_pkg_upload: a conda coordinate names no subdir: ")
             + c.describe()
         )
+    refuse_malformed_subdir_segment(c.subdir)
+
+
+def refuse_malformed_subdir_segment(subdir: String) raises:
+    """A conda subdir is one non-empty path segment with no query, fragment
+    or percent sign: it is sent in a URL path as is. RAISES (a local fault)."""
+    if subdir.byte_length() == 0:
+        raise Error("kci_pkg_upload: a conda subdir is EMPTY")
     if (
-        c.subdir.find(String("/")) >= 0
-        or c.subdir.find(String("?")) >= 0
-        or c.subdir.find(String("#")) >= 0
-        or c.subdir.find(String("%")) >= 0
+        subdir.find(String("/")) >= 0
+        or subdir.find(String("?")) >= 0
+        or subdir.find(String("#")) >= 0
+        or subdir.find(String("%")) >= 0
+        or subdir == String(".")
+        or subdir == String("..")
     ):
         raise Error(
             String("kci_pkg_upload: conda subdir '")
-            + c.subdir
+            + subdir
             + String("' is not one path segment")
         )
 
@@ -410,3 +428,22 @@ struct PrefixDevRegistry(Deinitable):
                 authorization,
             ),
         )
+
+    @staticmethod
+    def package_names[T: PkgTransport, C: RegistryCredential](
+        mut transport: T, mut cred: C, repo: String, subdir: String
+    ) raises -> NameListing:
+        """The package names `repo`'s `subdir` holds a file under, from its
+        repodata. RAISES only for a local fault (a malformed repo or subdir)
+        before the request; every server answer is a kind."""
+        _ = prefix_dev_channel(repo)
+        refuse_malformed_subdir_segment(subdir)
+        var authorization = cred.authorization(SURFACE_PREFIX_DEV, repo_host(repo))
+        var got = get_following_redirects(
+            transport,
+            repo_host(repo),
+            repo_path(repo) + String("/") + subdir + String("/repodata.json"),
+            String("application/json"),
+            authorization,
+        )
+        return classify_repodata_names(got, authorization)

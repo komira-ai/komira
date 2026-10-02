@@ -24,14 +24,27 @@
 #       UNKNOWN;
 #   (6) a credentialed read whose error body echoes the token ACROSS the
 #       excerpt's byte bound quotes no prefix of it (repodata 403 and 5xx, the
-#       file GET 403).
+#       file GET 403);
+#   (7) package_names: the names of BOTH listings, lowercased, sorted, once
+#       each, read from `/<channel>/<subdir>/repodata.json`; a 404 is ABSENT
+#       with no name; a listing that was not read (not an object, neither
+#       key, an entry that is not an object, a key that is not
+#       <name>-<version>-<build>, a 5xx, a transport fault) is UNKNOWN with NO
+#       name and `holds` RAISES on it, never answering "not held"; a 403 is
+#       AUTH_REFUSED; PyPI has no subdir listing and a malformed subdir is a
+#       local fault — both RAISE with ZERO requests.
 #
 # Hermetic: ScriptedPkgTransport + ScriptedCredential; no network.
 # =============================================================================
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
-from kci_pkg_upload.coordinate import SUBSTRATE_PREFIX_DEV_CONDA, PackageCoordinate
+from kci_pkg_upload.conda_repodata import NameListing, conda_package_name_of_file
+from kci_pkg_upload.coordinate import (
+    SUBSTRATE_PREFIX_DEV_CONDA,
+    SUBSTRATE_PUBLIC_PYPI,
+    PackageCoordinate,
+)
 from kci_pkg_upload.credential import SURFACE_PREFIX_DEV, ScriptedCredential
 from kci_pkg_upload.identity import ContentIdentity, content_identity_of
 from kci_pkg_upload.outcome import (
@@ -282,6 +295,138 @@ def test_a_read_never_quotes_a_cut_echo_of_its_credential() raises:
     print("  test_a_read_never_quotes_a_cut_echo_of_its_credential: PASS")
 
 
+def _names(var t: ScriptedPkgTransport, subdir: String = String("linux-64")) raises -> NameListing:
+    var rs = _set(t^)
+    var n = rs.package_names(SUBSTRATE_PREFIX_DEV_CONDA, String(_REPO), subdir)
+    assert_equal(rs.transport().unconsumed(), 0)
+    return n^
+
+
+def test_package_names_from_both_listings() raises:
+    var t = ScriptedPkgTransport()
+    t.queue(
+        _json(
+            String('{"info": {"subdir": "linux-64"}, "packages": {')
+            + String('"Old-Lib-0.1-0.tar.bz2": {"sha256": "00"}}, "packages.conda": {')
+            + String('"komira-probe-1.2.3-h0123abc_0.conda": {},')
+            + String('"komira-probe-1.2.4-h0123abc_0.conda": {},')
+            + String('"a-lib-9-0.conda": {}}}')
+        )
+    )
+    var rs = _set(t^)
+    var n = rs.package_names(SUBSTRATE_PREFIX_DEV_CONDA, String(_REPO), String("noarch"))
+    assert_equal(n.kind, READ_PRESENT, read_kind_name(n.kind) + n.detail)
+    assert_equal(len(n.names), 3)
+    assert_equal(n.names[0], String("a-lib"))
+    assert_equal(n.names[1], String("komira-probe"))
+    assert_equal(n.names[2], String("old-lib"))
+    assert_true(n.holds(String("Komira-Probe")))
+    assert_true(n.holds(String("old-lib")))
+    assert_false(n.holds(String("komira")))
+    var req = rs.transport().call(0)
+    assert_equal(req.host, String("prefix.dev"))
+    assert_equal(req.path, String("/example-channel/noarch/repodata.json"))
+    assert_equal(req.header_value(String("Authorization")), String("Bearer pfx-token"))
+
+    # Only one listing present, as an object: read, and its names are all.
+    var t2 = ScriptedPkgTransport()
+    t2.queue(_json(String('{"packages.conda": {}}')))
+    var empty = _names(t2^)
+    assert_equal(empty.kind, READ_PRESENT, empty.detail)
+    assert_equal(len(empty.names), 0)
+    assert_false(empty.holds(String("komira-probe")))
+
+    # 404: the subdir holds no repodata, so no name; ABSENT is a read answer.
+    var t3 = ScriptedPkgTransport()
+    t3.queue(_status(404))
+    var none = _names(t3^)
+    assert_equal(none.kind, READ_ABSENT)
+    assert_true(none.was_read())
+    assert_false(none.holds(String("komira-probe")))
+    print("  test_package_names_from_both_listings: PASS")
+
+
+def _assert_names_not_read(var r: PkgResponse, expect_kind: Int) raises:
+    var t = ScriptedPkgTransport()
+    t.queue(r^)
+    var n = _names(t^)
+    assert_equal(n.kind, expect_kind, read_kind_name(n.kind) + String(" ") + n.detail)
+    assert_equal(len(n.names), 0, n.detail)
+    assert_false(n.was_read())
+    var raised = False
+    try:
+        _ = n.holds(String("komira-probe"))
+    except e:
+        raised = True
+        assert_true(String(e).find(String("not read")) >= 0, String(e))
+    assert_true(raised, String("holds() answered from a listing that was not read"))
+
+
+def test_package_names_never_empty_from_a_listing_not_read() raises:
+    _assert_names_not_read(_json(String("{not json")), READ_UNKNOWN)
+    _assert_names_not_read(_json(String("[]")), READ_UNKNOWN)
+    _assert_names_not_read(_json(String('{"info": {}}')), READ_UNKNOWN)
+    _assert_names_not_read(_json(String('{"packages.conda": null}')), READ_UNKNOWN)
+    _assert_names_not_read(
+        _json(String('{"packages": {}, "packages.conda": []}')), READ_UNKNOWN
+    )
+    _assert_names_not_read(
+        _json(String('{"packages.conda": {"komira-1-0.conda": "x"}}')), READ_UNKNOWN
+    )
+    _assert_names_not_read(
+        _json(String('{"packages.conda": {"komira-1-0.conda": {}, "README.md": {}}}')),
+        READ_UNKNOWN,
+    )
+    _assert_names_not_read(
+        _json(String('{"packages.conda": {"nodashes.conda": {}}}')), READ_UNKNOWN
+    )
+    _assert_names_not_read(_status(502), READ_UNKNOWN)
+    _assert_names_not_read(_status(403), READ_AUTH_REFUSED)
+    _assert_names_not_read(_status(429), READ_RATE_LIMITED)
+    var t = ScriptedPkgTransport()
+    t.queue_fault(String("dial: connection refused"))
+    var n = _names(t^)
+    assert_equal(n.kind, READ_UNKNOWN)
+    assert_equal(len(n.names), 0)
+    print("  test_package_names_never_empty_from_a_listing_not_read: PASS")
+
+
+def test_package_names_local_faults_send_nothing() raises:
+    var rs = _set(ScriptedPkgTransport())
+    var bad = List[String]()
+    bad.append(String(""))
+    bad.append(String("linux-64/x"))
+    bad.append(String(".."))
+    bad.append(String("linux-64?x=1"))
+    for i in range(len(bad)):
+        var raised = False
+        try:
+            _ = rs.package_names(SUBSTRATE_PREFIX_DEV_CONDA, String(_REPO), bad[i])
+        except:
+            raised = True
+        assert_true(raised, String("subdir '") + bad[i] + String("' was sent"))
+    var raised = False
+    try:
+        _ = rs.package_names(SUBSTRATE_PUBLIC_PYPI, String("pypi.org"), String("noarch"))
+    except e:
+        raised = True
+        assert_true(String(e).find(String("no registry arm")) >= 0, String(e))
+    assert_true(raised, String("PyPI answered a subdir listing"))
+    assert_equal(rs.transport().call_count(), 0)
+    print("  test_package_names_local_faults_send_nothing: PASS")
+
+
+def test_conda_package_name_of_file() raises:
+    assert_equal(conda_package_name_of_file(String("komira-probe-1.2.3-h0_0.conda")), String("komira-probe"))
+    assert_equal(conda_package_name_of_file(String("Mojo-Compiler-26.1-0.tar.bz2")), String("mojo-compiler"))
+    assert_equal(conda_package_name_of_file(String("komira-1.2.3.conda")), String(""))
+    assert_equal(conda_package_name_of_file(String("komira--0.conda")), String(""))
+    assert_equal(conda_package_name_of_file(String("-1-0.conda")), String(""))
+    assert_equal(conda_package_name_of_file(String("komira-1-.conda")), String(""))
+    assert_equal(conda_package_name_of_file(String("komira-1-0.whl")), String(""))
+    print("  test_conda_package_name_of_file: PASS")
+
+
 def main() raises:
     test_repodata_kinds()
     test_the_redirect_and_where_the_credential_goes()
@@ -289,4 +434,8 @@ def main() raises:
     test_a_tar_bz2_file_is_read_from_packages()
     test_fetch_and_server_answers()
     test_a_read_never_quotes_a_cut_echo_of_its_credential()
+    test_package_names_from_both_listings()
+    test_package_names_never_empty_from_a_listing_not_read()
+    test_package_names_local_faults_send_nothing()
+    test_conda_package_name_of_file()
     print("test_pkg_upload_conda_reads: ALL PASS")

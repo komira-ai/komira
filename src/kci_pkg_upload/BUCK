@@ -34,7 +34,8 @@ mojo_library(
         "tests/test_pkg_upload_convergence.mojo",
         # surface-keyed credentials; the one substrate ladder; local refusals
         "tests/test_pkg_upload_credential_dispatch.mojo",
-        # repodata reads: kinds, the 303 off-host, ABSENT only from a read listing
+        # repodata reads: kinds, the 303 off-host, ABSENT only from a read listing;
+        # package_names never answers "no names" from a listing it did not read
         "tests/test_pkg_upload_conda_reads.mojo",
         # trusted publishing: ID-token request, both exchanges, every refusal
         "tests/test_pkg_upload_github_oidc_credential.mojo",
