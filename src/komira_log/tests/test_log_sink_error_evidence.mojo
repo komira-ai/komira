@@ -21,7 +21,7 @@
 # write the ENGINE swallowed", which is an engine fact: two of the three sites
 # are not drains at all and run on threads that own no sink state. A sink-side
 # counter answers a different question (how many write(2) calls short-wrote or
-# retried — `komira_obs.log_write`'s loss counters); the two are complementary,
+# retried — `komira_log.log_write`'s loss counters); the two are complementary,
 # not duplicates.
 #
 # HOW A SINK ERROR IS PROVOKED DETERMINISTICALLY. `SegmentFile.append_line`

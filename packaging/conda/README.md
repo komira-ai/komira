@@ -4,100 +4,179 @@ A Mojo library published as a conda package (a `.conda`) installs one file,
 `lib/mojo/<name>.mojoc`, into the prefix. The Mojo compiler's default import
 path is that prefix's `lib/mojo`, where `std.mojoc` already sits, so a program
 that imports the library compiles with no `-I` flag and no activation script.
-Nothing here uploads anything: the build produces files, a digest and a
-manifest; publishing is a separate, gated step.
+Nothing here uploads anything: the build produces files; publishing is a
+separate, gated step that belongs to the release tool (kci).
 
 > **A registry name and version, once claimed, is permanent in practice.**
 > Lock files pin the sha256 of every file, so replacing or deleting a version
 > breaks whoever locked it, and a registry that allows an overwrite makes
 > permanence a policy, not a mechanism. The first upload to a public channel is
-> a one-way door: it is gated by an approved list of names (below), a dry run
-> that uploads nothing, a protected environment, and a one-package canary
-> before the rest.
+> a one-way door. That is why the list of what is published is a reviewed file
+> of the release tool, behind a protected environment, and not something the
+> build can grow by itself.
 
-## One package
+## Three layers, and who owns what
+
+| layer | what it is | where |
+|---|---|---|
+| 1. Mojo packages | `mojo_library`: built, and consumed by other libraries through `deps`. Unchanged by anything here | `src/*/BUCK` |
+| 2. packaging rules | `conda_package`: turns one library into a `.conda` directory (this page). A Python wheel rule is a design only, see below | `tools/build/package/conda.bzl`, `komira_pack` |
+| 3. the release tool | declares **which artifacts exist and how to build them**, builds them through the rules above, and publishes the BUILT files | kci: a reviewed list of artifact declarations |
+
+So there is **one list of published packages, and it is kci's declarations**,
+not a file in Buck. Buck states how to make a package of any library; kci says
+which of them ship.
+
+## One package per library, generated
+
+The `mojo_library` macro declares a package target for every library, named
+`<name>_conda`. Nobody writes one:
 
 ```python
-load("@komira//tools/build/package:conda.bzl", "conda_package")
-
-conda_package(
-    name = "komira_encoding",        # the library's import name
-    lib = "//src/komira_encoding:komira_encoding",
-    summary = "One line for the channel page.",
-)
+mojo_library(name = "komira_json", ...)           # also declares :komira_json_conda
+mojo_library(name = "x", conda = False, ...)      # opts out: no package target
+mojo_library(name = "x", conda_name = "other")    # published as `other`; the import
+                                                  # name stays `x`
 ```
 
-`./buck2 build //packaging/conda:komira_encoding` writes `komira_encoding.conda`.
-Everything about it is derived from the library, so the package cannot disagree
-with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each):
+`./buck2 build //src/komira_json:komira_json_conda` writes a directory (below).
+Everything about the package is derived from the library, so the package cannot
+disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each):
 
 | fact | where it comes from |
 |---|---|
-| name | the library's import name (the `.mojoc` basename); the target is named for it; it must be in `names.tsv` and start with `komira_` |
-| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<pin>`, then each **direct** dependency of the library at the same version, sorted. Direct only: every package is released in lockstep, so the solver's closure is the build's |
-| subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform |
+| name | `conda_name` of the library, else its import name (the `.mojoc` basename): lowercase letters, digits, `_`, starting with a letter |
+| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<pin>`, then each **direct** dependency of the library, by its published name, at the same version, sorted. Direct only: every package is released in lockstep, so the solver's closure is the build's |
+| subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. On any other target platform the package target still builds, as a refusal saying so |
 | payload | the library's gated `.mojoc`, so the package cannot exist until the library's own welded tests pass |
 | version | `<prefix>.<N>`, below |
 
-A package is refused, at analysis or by the packing tool, when: its name or a
-dependency is not in the approved list or lacks the prefix; its target is not
-named for the import name; the library has no tests; the library links native
-code (a `.mojoc` holds none, so a consumer would fail at its own link); or the
-library opens a shared library by name at run time (`OwnedDLHandle`), whose
-conda package this tool does not yet derive.
+To list the package targets (a development helper; it is not the published
+list): `tools/build/package/list_conda_targets.sh [pattern...]`, which prints
+`buck2 uquery 'kind(conda_package, //src/...)'`.
 
-## What an uploader reads, and must do
+### What a package is: a directory
 
-**The output contract: an uploader reads `<package target>[release]` and
-nothing else.** It is a copy of the package, made only after
-`[release_check]` passed, so it does not exist for an unstamped build, a stamp
-without its source commit, or a non-positive commit time. Its nested
-sub-targets are `[release][file]` (the same file), `[release][manifest]` and
-`[release][digest]`.
+```
+<name>-<version>-0.conda   the file the channel carries
+manifest.json              the artifact manifest
+metadata.json              everything else the build knows
+```
+
+`manifest.json` is **exactly** the artifact manifest that kci's
+`kci_artifact_manifest` parses (`kci build` writes it and `kci publish` reads
+it): seven string keys, in this order, compact, one trailing newline.
+
+```json
+{"artifact_type":"CONDA","name":"komira_json","version":"0.1.57","subdir":"linux-64","file":"komira_json-0.1.57-0.conda","sha256":"<64 hex>","metadata":"metadata.json"}
+```
+
+`file` is the channel's file name, relative to the manifest; `sha256` is that
+file's; `metadata` is `metadata.json`, the file next to the manifest. The
+parser requires `metadata` on a CONDA manifest and refuses one that is not a
+bare file name (no `/`, not `.` or `..`), so copying the manifest's directory
+cannot separate the two. The parser refuses any other key, so every other fact
+is in `metadata.json` (sorted compact JSON): `schema`, `kind` (`library` or
+`metapackage`), `name`, `version`, `subdir`, `build`, `build_number`,
+`file_name`, `size`, `depends`, `timestamp_ms`, `source_commit`, `stamped`,
+`label`, and for a library `import_name`, `mojo_pin`, `payload_path`,
+`payload_sha256`; for a metapackage `members` (name, version, sha256 each).
+`tools/build/package/manifest_probe` runs kci's parser and writer over a
+manifest: the build gate `//tools/build/package/manifest_probe:conda_manifest_kci`
+runs it over one real package on every `buck2 build //...`, and
+`tools/build/tests/functional/conda_set.sh` runs it over every manifest the
+build emits.
+
+### A library that cannot be packaged
+
+It keeps its package target, and the target **builds**: its directory holds one
+file, `REFUSED`, with the reason. Refusing by failing would make
+`buck2 build //...` red on every such library. What fails is asking for the
+release (`[release]`, `[release][manifest]`, `[release_check]`), naming the
+reason. The reasons:
+
+- it links native code (a `.mojoc` holds none, so a consumer would fail at its
+  own link);
+- it has no tests (no test would gate its package);
+- it depends on a library with no package (`conda = False`, or itself refused);
+- its name is not a conda name;
+- it opens a shared library by name at run time (`OwnedDLHandle`), whose conda
+  package this tool does not derive yet.
+
+The first four are known to the build when it analyses the library, so a
+dependent of such a library is refused too. The last is found only when the
+package is made (the tool reads the sources), so **a dependent of a library
+that dlopens is not refused by the build**; the release tool must therefore
+check that every dependency of a declared package is itself declared and has a
+`[release]` (below).
+
+### Sub-targets
 
 | sub-target | content |
 |---|---|
-| `[release]`, `[release][file]` | `<name>.conda` |
-| `[release][digest]` | one line, `sha256:<hex>` of that file |
-| `[release][manifest]` | JSON, sorted keys: `schema`, `artifact_type` (`conda`), `name`, `version`, `subdir`, `build`, `build_number`, `file_name` (the channel's file name), `sha256`, `size`, `payload_path`, `payload_sha256`, `depends`, `mojo_pin`, `stamped`, `source_commit`, `label`, `approved_names_sha256` |
-| `[release_check]` | the marker of `komira_pack conda-check --require-stamped`, which reads the package back (zip, both zstd streams, both tars, every property below) and refuses an unstamped version, a stamp without a full 40-digit source commit in the manifest, and a commit time that is not positive |
-| `[default]`, `[file]`, `[manifest]`, `[digest]` | **development outputs**, built whether or not the package was stamped. An unstamped one is `<prefix>.0`, and uploading it would claim `<prefix>.0` for good. An uploader never reads them |
-| `[check]` | the marker of `komira_pack conda-check`; it takes the approved-names lint as an input, so a build of any package runs that lint |
+| `[release]` | the directory, a copy made only after `[release_check]` passed, so it does not exist for an unstamped build, a stamp without its source commit, a non-positive commit time, or a refused library. **An uploader reads this and nothing else.** Nested: `[release][manifest]`, `[release][metadata]` |
+| `[release_check]` | the marker of `komira_pack conda-check --require-stamped`, which reads the package back (zip, both zstd streams, both tars, the manifest against the file, the metadata against the index) |
+| default, `[manifest]`, `[metadata]` | **development outputs**, built whether or not stamped. An unstamped one is `<prefix>.0`, and uploading it would claim `<prefix>.0` for good. An uploader never reads them |
+| `[check]` | the marker of `komira_pack conda-check` |
 
-Before the first byte goes to a registry, the publish job must do all of the
-following, each of which is a stop (never a retry) when it fails:
+## The metapackage
 
-1. **Refuse `stamped: false`.** A manifest that says so is not a release,
-   whatever target it was read from.
+`komira` (the name is the release tool's) is a package with **no file** whose
+run requirements are the platform guard and every member at exactly its
+version. Installing it installs the whole release; a registry that receives it
+LAST makes it the switch for users.
+
+Buck cannot enumerate targets, and does not know which libraries are published.
+So it is **not** a Buck target: the release tool, which has the list, passes the
+members' manifests to the packer.
+
+```sh
+komira_pack conda-meta --name komira --member-manifest <dir>/manifest.json ... \
+    --license Apache-2.0 --summary "..." --home <url> \
+    --extra-file info/licenses/LICENSE=LICENSE --label <what made it> --out-dir <dir>
+komira_pack conda-check --dir <dir> --kind metapackage --name komira --expect-subdir linux-64 \
+    --member-manifest <dir>/manifest.json ... [--require-stamped true] --out <marker>
+```
+
+It reads each member (its manifest against the manifest contract, its file
+against the manifest's sha256, its metadata), requires one release (one
+version, subdir, source commit and commit time; no member twice; no member that
+is itself a metapackage; a name that is not a member's), and writes the same
+directory a library does (the same manifest contract). `conda-check` re-derives
+the requirements from the member manifests it is given, independently of the
+writer.
+
+Why one package per library plus a metapackage: a `.mojoc` needs the full
+closure of its dependencies on the import path at the consumer's compile, and
+the closure is the package set, so the solver does the closure (exact pins).
+Versions are in lockstep, so every release is a whole new set.
+
+## What the release tool does with them
+
+The release tool (kci) owns the list. For each declared artifact it runs the
+build system on the declaration's build rule, collects the manifests, builds the
+metapackage with `conda-meta`, and publishes. What its publish step must do is
+its own requirements; the ones that depend on how this directory is built:
+
+1. **Refuse `stamped: false`** (in the metadata) and an unstamped file: a
+   development output is not a release.
 2. **Re-derive the stamp from git.** At a clean, full-history checkout of
    `main` at the release commit, run
    [`tools/build/package/release_version.sh`](../../tools/build/package/release_version.sh)
    and require its `version=` to equal the manifest's `version`, and its
-   `commit=` to equal the manifest's `source_commit`. The build cannot read git,
+   `commit=` to equal the metadata's `source_commit`. The build cannot read git,
    and a release check cannot tell a derived stamp from a typed one:
    `-c komira.package_stamp=999999999` passes it, and would shadow every future
-   version of that name. Only this comparison ties the stamp to history.
-3. **Recompute the approval.** The manifest's `approved_names_sha256` is only a
-   value the build wrote; recompute it from `names.tsv` at the release commit
-   and require equality:
-   `grep -vE '^(#|$)' packaging/conda/names.tsv | cut -f1 | LC_ALL=C sort | sha256sum`
-   (the digest of the sorted names, one per line). Require the package's name
-   to be in that list. `komira_pack conda-check` recomputes it from the list it
-   is given and refuses a different digest, but the uploader must not trust a
-   check that ran on the builder's own file.
+   version of that name.
+3. **Check the set**: every declared artifact built; every requirement of a
+   package is another declared package at the same version (or the guard, or the
+   compiler at its pin); one version, one subdir, one source commit; the
+   metapackage pins exactly the declared libraries.
 4. **Build once, under the default isolation directory** (below), upload the
-   file that build produced, and re-read its sha256 against
-   `[release][digest]` before the upload.
-5. **Treat "same name and version, different sha256" as a stop.** The registry
-   never overwrites. It is never answered by building again.
-
-The names lint covers `packaging/conda/BUCK` only. What stops a package from
-being checked against another list is the rule itself: a `conda_package` that
-states `names =` is refused outside the `tests` cell, so the one list is
-`names.tsv`, and the lint is an input of every package's check. What is **not**
-checked: that the library behind a package is the one on the list's label (the
-name must equal the library's import name, nothing more); the release job's
-rebuild from the release commit is the control for that.
+   file that build produced, and compare its sha256 with the manifest.
+5. **Same name and version, different sha256, is a stop.** The registry never
+   overwrites; it is never answered by building again.
+6. Members first, the metapackage last, every file read back from the channel.
 
 ## Reproducibility
 
@@ -110,27 +189,26 @@ sorted and compact, and `info/index.json` carries the commit time given at
 stamping. The condition comes from the compiler, not the packing:
 
 A `.mojoc` records the relative path of the sources it was compiled from
-(`buck-out/<isolation dir>/art/...`: seven source files and the package
-directory for `komira_encoding`, eight places in all), so **the same library
-built under two `--isolation-dir` names is two different files**, and so are
-two packages made from them. Measured, on the farm and with no cache: the
-two `.mojoc` differ in exactly those eight bytes and nothing else, and the
-header's content hash is equal. The wrapper's existing `-strip-file-prefix`
-(which `mojo build` honours) does not change a `precompile` output, with the
-absolute or the relative prefix; so this is **not fixed here**, it is a
-documented gate on the release job, with a follow-up (below):
+(`buck-out/<isolation dir>/art/...`), so **the same library built under two
+`--isolation-dir` names is two different files**, and so are two packages made
+from them. Measured, on the farm and with no cache: the two `.mojoc` differ in
+those path bytes and nothing else, and the header's content hash is equal. The
+wrapper's existing `-strip-file-prefix` does not change a `precompile` output,
+so this is **not fixed here**, it is a documented gate on the release job, with
+a follow-up (below):
 
 - **build once, under the default isolation directory** (no `--isolation-dir`),
   and upload the file that build produced;
 - **never rebuild and retry**: a second build is a different file under the
   same name and version, which the registry refuses for good;
-- **"same name and version, different sha256" is a stop**, never a rebuild;
 - the release job's checkout location does not matter (the paths are relative to
   the checkout), the isolation directory does; reproducibility across two
   different farm workers is **unmeasured**.
 
-`tools/build/tests/functional/conda.sh` pins what is true: two uncached builds
-in fresh daemons under one isolation directory give one sha256.
+`tools/build/tests/functional/conda.sh` and `conda_set.sh` pin what is true: two
+uncached builds in fresh daemons under one isolation directory give one sha256
+for a package, and for every package of the set and the metapackage made from
+them.
 
 The `.conda` is a zip of three stored members (`metadata.json`,
 `pkg-*.tar.zst`, `info-*.tar.zst`); it is zip version 2.0 (zip32), not the zip64
@@ -151,12 +229,12 @@ channels = ["<the komira channel>", "https://conda.modular.com/max", "conda-forg
 platforms = ["linux-64"]
 
 [dependencies]
-komira_encoding = "==0.1.<N>"
+komira_encoding = "==0.1.<N>"      # or: komira = "==0.1.<N>" for every library
 ```
 
 `import komira_encoding` then compiles with no `-I` and no activation script.
-`tools/build/tests/functional/conda.sh` does exactly this from a `file://`
-channel.
+`tools/build/tests/functional/conda.sh` and `conda_set.sh` do exactly this from
+a `file://` channel.
 
 ## Version
 
@@ -175,25 +253,30 @@ The version is `<prefix>.<N>`, in lockstep across every package:
   compile;
 - a build with no stamp is `<prefix>.0`: it builds as a development output, and
   `[release_check]` (hence `[release]`) refuses it;
-- the commit the stamp was derived from is `-c komira.package_commit=<sha>`
-  (`release_version.sh` prints the whole `buck_args` line); a stamped package
-  without it, or with one that is not 40 lowercase hex digits, is refused, and
-  `[release_check]` refuses a package whose commit time is not positive. These
-  prove the stamp is *accompanied* by a commit, not that it is the right one:
-  see step 2 of the uploader's list above.
+- a stamped package without a source commit, or with one that is not 40
+  lowercase hex digits, is refused, and `[release_check]` refuses a package
+  whose commit time is not positive. These prove the stamp is *accompanied* by
+  a commit, not that it is the right one: see step 2 above.
 
-## The approved list
+## A Python wheel rule (design only; no code)
 
-[`names.tsv`](names.tsv) is the only list of what may be published: a name not
-in it is not published, and a listed package's direct dependencies must be
-listed too. Adding a row is the approval to claim that name, so review it as
-that. The sha256 of the sorted names is in every manifest
-(`approved_names_sha256`), so an approval can be bound to the exact list (by an uploader that recomputes it:
-step 3 above).
-[`names_lint`](BUCK) checks its shape (rows of name, label and reason; the
-prefix; the flat `//src/<name>:<name>` label; sorted and unique), that this
-directory declares one `conda_package` per row, and that none names another
-list.
+The conda rules do not cover the Python front end. A wheel is a different
+artifact with a different licence question: a self-contained wheel would carry
+the Modular Mojo runtime, where a conda package only depends on it. So the
+rule, when it is written:
+
+- **explicit, and off by default.** Unlike the conda package, a library does not
+  get a wheel unless it asks (`wheel = True`, or a `python_wheel` target for the
+  front end); there are few wheels, and each is a reviewed decision.
+- **front end only.** The wheel is the Python package that drives komira, not a
+  per-library artifact.
+- **same contract as the conda rule**: `[release]` is a directory holding the
+  `.whl`, `manifest.json` in the artifact-manifest contract for a PYTHON
+  artifact (`artifact_type`, `name`, `version`, `file`, `sha256`, `metadata`,
+  where `metadata` is the wheel's `METADATA`), gated on a stamp tied to git, built
+  reproducibly, read back by an independent check.
+- **declared in kci** like every other artifact (a `PYTHON_WHEEL` declaration
+  whose build rule is that target); nothing in Buck lists it as published.
 
 ## Not done yet
 
@@ -201,32 +284,22 @@ list.
   architecture guard);
 - libraries that link native code, and libraries that open a shared library
   at run time (both refused by name rather than published incompletely);
-- an aggregate of every package's manifest, and the upload step with its dry
-  run and its approval gate;
-- **a `.mojoc` that does not record the isolation directory** (follow-up, to
-  be filed on the issue tracker): compile `precompile` from a private working
-  directory with the sources staged at a fixed relative path (the wrapper must
-  then absolutize every `-I` and the `-o`), or ask the compiler for a
-  path-remapping option; then the gate in "Reproducibility" can be a test
-  (two isolation directories, one sha256) instead of a rule for the release job;
-- the rest of the libraries: the list holds the one canary.
+- the upload step and the release tool's list (kci's; the files it reads are
+  above);
+- the Python wheel rule (design above);
+- **a `.mojoc` that does not record the isolation directory** (follow-up):
+  compile `precompile` from a private working directory with the sources staged
+  at a fixed relative path (the wrapper must then absolutize every `-I` and the
+  `-o`), or ask the compiler for a path-remapping option; then the gate in
+  "Reproducibility" can be a test (two isolation directories, one sha256)
+  instead of a rule for the release job;
+- the build does not refuse a dependent of a library that dlopens (above).
 
-How it is tested: [`conda.sh`](../../tools/build/tests/functional/conda.sh).
+How it is tested: [`conda.sh`](../../tools/build/tests/functional/conda.sh) (one
+package, the generated targets, the refusals, the packer and its check, the
+stamp) and [`conda_set.sh`](../../tools/build/tests/functional/conda_set.sh)
+(the set, the metapackage, kci's parser over the emitted manifests, the
+two-daemon sha equality, a pixi install).
 
-## Review log
-
-The findings of the review of the first version of this change, each checked
-against the code and the logs, and what was done.
-
-| # | finding | verdict | what changed |
-|---|---|---|---|
-| 1 | `conda.sh` read the build output path once, early; under local execution the stamp section builds the same target with another configuration at the same path, so the install step installed the stamped file under the unstamped file's checksum | **correct**, measured | the script copies the built file, manifest, digest, check marker and library into its scratch directory right after the build and uses only the copies; the whole script was run in both modes (farm and local) |
-| 2 | the default output of a package target is the unstamped `0.1.0`; only `[release_check]` refuses it, so an uploader reading the obvious target would claim the version for good | **correct** | `[release]` (nested `[file]`, `[manifest]`, `[digest]`) is joined on `[release_check]` and is the only artifact an uploader reads; it is in the output contract above; the unstamped outputs are named development outputs; an uploader refuses `stamped: false` |
-| 3 | nothing ties the stamp to git; any `-c komira.package_stamp=<9 digits>` passes; a stamped package with timestamp 0 or below passes | **correct** | the manifest carries `source_commit`; a stamped package without a full commit id is refused by the packer, and `[release_check]` refuses a missing or malformed commit and a commit time that is not positive; `release_version.sh` prints the commit and passes it; the publish job re-derives `version` and `commit` at a clean full-history checkout and compares both with the manifest (step 2). The check cannot read git, so it cannot refuse a typed stamp: that comparison is the only control, and it is stated as one |
-| 4 | the approval is only as strong as `approved_names_sha256`, which nothing consumes; `names` is overridable on any `conda_package`; the lint scans only `packaging/conda/BUCK` and is not an input of the package | **correct** | the check recomputes the digest from the list it is given and refuses a different one; the uploader's recomputation is a one-line command (step 3), pinned by a test; `names =` is refused outside the `tests` cell; `names_lint` is a dependency of every package of the real list, so a direct build runs it (a test reads the dependency graph). **Not done:** a package whose library is not the one on the list's label is not refused (the name must equal the library's import name, nothing more); the release job's rebuild from the release commit is the control |
-| 5 | the same library built under two isolation directories gives two files; a release must be a gate, not a sentence | **correct**; the cause was measured | the cause is the compiler recording the source paths (above). A fix with the wrapper's `-strip-file-prefix` was tried, absolute and relative, on the farm without a cache, and does not change a `precompile` output. It is a gate on the release job (build once under the default isolation directory, never rebuild and retry, "same name, different sha256" is a stop) and a follow-up (Not done yet) |
-| 6 | a consumer is not told which channels to list | **correct** | "Using a package" above, and `docs/releases.md`; the install test now takes the compiler from the `max` channel. `mojo-compiler ==1.0.0` is satisfied by an existing `mojo` dependency |
-| 7 | test-only epoch values may trip a date gate | **correct, cheap** | the test uses small epoch values (decades before this project) and one day of milliseconds, no date of this project |
-
-Not verified: that the registry accepts a zip32 `.conda`, and that conda,
-mamba or micromamba install one (only pixi/rattler was tried).
+Not verified: that the registry accepts a zip32 `.conda`, and that conda, mamba
+or micromamba install one (only pixi/rattler was tried).

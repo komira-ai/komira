@@ -309,7 +309,9 @@ for d in tools/build/mojo tools/build/package tools/build/toolchains tools/build
 done
 dl=$(grep -rlF 'download_file' --include='*.bzl' tools/build/mojo tools/build/package tools/build/toolchains tools/build/platforms 2> /dev/null | grep -vx 'tools/build/mojo/download.bzl' | tr '\n' ' ')
 [ -z "$dl" ] || problems="$problems download_file-outside-pinned_file:[$dl]"
-net=$(grep -rlwE 'wget|curl|nc|ssh|git' --include='*.bzl' --include='*.sh' tools/build/mojo tools/build/package 2> /dev/null | tr '\n' ' ')
+# release_version.sh is run by a release job, at a clone, to read git history; it is no build action
+# (the build receives its output as `-c` flags and reads no git), so it is the one name excluded.
+net=$(grep -rlwE 'wget|curl|nc|ssh|git' --include='*.bzl' --include='*.sh' tools/build/mojo tools/build/package 2> /dev/null | grep -vx 'tools/build/package/release_version.sh' | tr '\n' ' ')
 [ -z "$net" ] || problems="$problems network-tool-named-in:[$net]"
 grep -qE 'ctx\.attrs\._pack\[RunInfo\],' tools/build/package/defs.bzl || problems="$problems komira_pack-not-run-directly"
 file_out=$(head -c 20 "$(built //tools/build/package:komira_pack)" | od -An -c | tr -d ' \n')

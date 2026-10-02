@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_http/middleware/tracing.mojo — span emit via komira_obs
+# src/komira_http/middleware/tracing.mojo — span timing, no live span
 # =============================================================================
 #
 # L3 tracing middleware. Span name = "http.request" (comptime span names;
@@ -10,7 +10,7 @@
 # per-worker ring plus a comptime `name`, so this ships a SIMPLIFIED surface:
 # when enabled, the middleware records (start_ns, end_ns) into a server-local
 # `List[TracingSpan]` buffer; this is the test surface. It uses
-# `komira_obs.clock.now_ns` only for timestamps and emits NO live span.
+# `komira_clock.now_ns` only for timestamps and emits NO live span.
 #
 # The simplified surface gives us:
 #   - chain composability (before/after pair)
@@ -27,8 +27,8 @@ from komira_http.codec.types import HttpRequest, HttpResponse
 from komira_http.middleware.middleware import RequestContext
 
 
-# Use komira_obs.clock directly for the platform-monotonic ns counter.
-from komira_obs.clock import now_ns as _now_ns
+# Use komira_clock directly for the platform-monotonic ns counter.
+from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================
@@ -41,7 +41,7 @@ struct TracingSpan(
     Copyable, ImplicitlyCopyable, Movable, Deinitable
 ):
     """One emitted span. carries the minimal field set; a later version swaps
-    to komira_obs.SpanRecord on the production path.
+    to komira_trace.SpanRecord on the production path.
 
     Schema:
       span_id     — sequential id assigned by TracingMiddleware (1, 2, ...)
