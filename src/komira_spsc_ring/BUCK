@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# One bounded single-producer / single-consumer ring, `SpscRing[T]`. The memory
+# ordering argument is in the header of spsc_ring.mojo. The tests are welded to
+# the library: its package does not exist until they pass.
+mojo_library(
+    name = "komira_spsc_ring",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_core:komira_core",
+    ],
+    test_srcs = [
+        "tests/test_spsc_ring.mojo",
+        "tests/test_ring_variants.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# Microbenchmark (not a gated test); see the header of the file.
+mojo_binary(
+    name = "spsc_ring_bench",
+    srcs = ["tests/bench_spsc_ring.mojo"],
+    deps = [
+        ":komira_spsc_ring",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+    ],
+)

@@ -21,7 +21,7 @@
 #                   envelope shape.
 #
 # This codec does NOT touch the protobuf encoder — JSON encoding lives in
-# komira_serde's Proto3JsonWire backend. The codec is purely about wire
+# komira_proto_codec's Proto3JsonWire backend. The codec is purely about wire
 # framing + the Connect-JSON error envelope shape.
 #
 # Encapsulation: NO UnsafePointer in any public sig; ZERO wildcard origins.

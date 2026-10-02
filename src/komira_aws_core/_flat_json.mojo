@@ -197,3 +197,74 @@ def parse_flat_json(doc: String) raises -> FlatJson:
     except e:
         raise Error("not a flat JSON object (" + String(e) + ")")
     return out^
+
+
+def _skip_nested(b: Span[UInt8, _], mut i: Int) raises:
+    """Skips one nested object or array starting at `b[i]`, strings
+    included. Errors name a position, never the text."""
+    var depth = 0
+    while i < len(b):
+        var c = b[i]
+        if c == UInt8(0x22):
+            _ = _string(b, i)
+            continue
+        if c == UInt8(0x7B) or c == UInt8(0x5B):
+            depth += 1
+        elif c == UInt8(0x7D) or c == UInt8(0x5D):
+            depth -= 1
+            if depth == 0:
+                i += 1
+                return
+        i += 1
+    raise Error("unterminated nested value")
+
+
+def parse_top_level_strings(doc: String) raises -> FlatJson:
+    """The top-level string members of one JSON object, skipping nested
+    objects and arrays (an AWS error body can carry structured members next
+    to `__type` and `message`). Refuses anything that is not one object."""
+    var b = doc.as_bytes()
+    var i = 0
+    var out = FlatJson()
+    try:
+        _skip(b, i)
+        if i >= len(b) or b[i] != UInt8(0x7B):
+            raise Error("expected '{'")
+        i += 1
+        _skip(b, i)
+        if i < len(b) and b[i] == UInt8(0x7D):
+            i += 1
+        else:
+            while True:
+                _skip(b, i)
+                if i >= len(b) or b[i] != UInt8(0x22):
+                    raise Error("expected a member name")
+                var key = _string(b, i)
+                _skip(b, i)
+                if i >= len(b) or b[i] != UInt8(0x3A):
+                    raise Error("expected ':'")
+                i += 1
+                _skip(b, i)
+                if i >= len(b):
+                    raise Error("expected a value")
+                if b[i] == UInt8(0x22):
+                    out.keys.append(key)
+                    out.values.append(_string(b, i))
+                elif b[i] == UInt8(0x7B) or b[i] == UInt8(0x5B):
+                    _skip_nested(b, i)
+                else:
+                    _scalar(b, i)
+                _skip(b, i)
+                if i < len(b) and b[i] == UInt8(0x2C):
+                    i += 1
+                    continue
+                if i < len(b) and b[i] == UInt8(0x7D):
+                    i += 1
+                    break
+                raise Error("expected ',' or '}'")
+        _skip(b, i)
+        if i != len(b):
+            raise Error("text after the object")
+    except e:
+        raise Error("not a JSON object (" + String(e) + ")")
+    return out^

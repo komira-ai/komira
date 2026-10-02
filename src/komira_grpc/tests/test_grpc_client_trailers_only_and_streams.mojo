@@ -167,7 +167,7 @@ def _h2_client(var script: List[UInt8]) raises -> GrpcClient[ScriptedConnector]:
     var s = ScriptedStream.from_read_script(script^)
     s.set_negotiated_protocol(NEGOTIATED_HTTP_2)
     s.set_max_read_per_call(1)
-    var connector = ScriptedConnector.with_stream(s^)
+    var connector = ScriptedConnector.with_stream_tls(s^)
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
     var base = Url.parse(String("https://run.googleapis.com:443/"))
     return GrpcClient[ScriptedConnector](http^, base^)
