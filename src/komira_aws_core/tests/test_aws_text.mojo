@@ -5,8 +5,7 @@
 #   [B]  https://smithy.io/2.0/spec/http-bindings.html (httpHeader,
 #        httpLabel, httpQuery serialization rules)
 #   [T]  https://smithy.io/2.0/spec/protocol-traits.html#timestampformat-trait
-#   [H]  RFC 9110 section 5.6.7 (HTTP-date; IMF-fixdate), whose example
-#        instant "Sun, 06 Nov 1994 08:49:37 GMT" is epoch 784111777
+#   [H]  RFC 9110 section 5.6.7 (HTTP-date; IMF-fixdate)
 #   [R]  RFC 3339 section 5.6 (date-time)
 #   [64] RFC 4648 section 4 (base64)
 
@@ -35,7 +34,10 @@ from komira_aws_core import (
 )
 
 
-comptime _RFC9110_EXAMPLE = 784111777.0
+# Tue, 15 Sep 2026 12:00:00 GMT.
+comptime _INSTANT = 1789473600.0
+# Tue, 29 Feb 2400 00:00:00 GMT: a leap day of a year divisible by 400.
+comptime _LEAP_400 = 13574563200.0
 
 
 def _refused_int(text: String, bits: Int) raises:
@@ -105,9 +107,11 @@ def test_integers() raises:
     _refused_int("9223372036854775808", 64)
     _refused_int("-9223372036854775809", 64)
     _refused_int("99999999999999999999999", 64)
+    # Read beyond the written form, as the AWS SDKs' integer parsers read
+    # it: leading zeros and "-0".
     assert_equal(aws_i64_from_text("-0"), Int64(0))
     assert_equal(aws_i64_from_text("007"), Int64(7))
-    # Only what the writer writes is read.
+    # Nothing else is read; "+1" is refused although those parsers take it.
     _refused_int("", 32)
     _refused_int("-", 32)
     _refused_int("+1", 32)
@@ -180,33 +184,28 @@ def test_blobs_and_media() raises:
 
 
 def test_timestamp_text() raises:
-    # [H] the RFC 9110 example instant in each format.
+    # [H] one instant in each format.
     assert_equal(
-        aws_text_ts(_RFC9110_EXAMPLE, AWS_TS_RFC822),
-        "Sun, 06 Nov 1994 08:49:37 GMT",
+        aws_text_ts(_INSTANT, AWS_TS_RFC822), "Tue, 15 Sep 2026 12:00:00 GMT"
     )
     # [R] / [T] date-time: UTC, "Z".
-    assert_equal(
-        aws_text_ts(_RFC9110_EXAMPLE, AWS_TS_ISO8601), "1994-11-06T08:49:37Z"
-    )
+    assert_equal(aws_text_ts(_INSTANT, AWS_TS_ISO8601), "2026-09-15T12:00:00Z")
     # [T] epoch-seconds: a whole number when there is no fraction.
-    assert_equal(aws_text_ts(_RFC9110_EXAMPLE, AWS_TS_UNIX), "784111777")
+    assert_equal(aws_text_ts(_INSTANT, AWS_TS_UNIX), "1789473600")
     # Milliseconds are kept by date-time and epoch-seconds, trailing zeros
     # cut; IMF-fixdate has none.
-    var frac = _RFC9110_EXAMPLE + 0.25
-    assert_equal(aws_text_ts(frac, AWS_TS_ISO8601), "1994-11-06T08:49:37.25Z")
-    assert_equal(aws_text_ts(frac, AWS_TS_UNIX), "784111777.25")
-    assert_equal(aws_text_ts(frac, AWS_TS_RFC822), "Sun, 06 Nov 1994 08:49:37 GMT")
-    # The epoch itself; 1970-01-01 was a Thursday.
-    assert_equal(aws_text_ts(0.0, AWS_TS_RFC822), "Thu, 01 Jan 1970 00:00:00 GMT")
-    assert_equal(aws_text_ts(0.0, AWS_TS_ISO8601), "1970-01-01T00:00:00Z")
+    var frac = _frac_example()
+    assert_equal(aws_text_ts(frac, AWS_TS_ISO8601), "2026-09-15T12:00:00.25Z")
+    assert_equal(aws_text_ts(frac, AWS_TS_UNIX), "1789473600.25")
+    assert_equal(aws_text_ts(frac, AWS_TS_RFC822), "Tue, 15 Sep 2026 12:00:00 GMT")
+    # The lower bound, epoch 0, is written.
     assert_equal(aws_text_ts(0.0, AWS_TS_UNIX), "0")
-    # A leap day (2000 is a leap year: divisible by 400); a Tuesday.
+    # A leap day in a year divisible by 400.
     assert_equal(
-        aws_text_ts(951782400.0, AWS_TS_RFC822), "Tue, 29 Feb 2000 00:00:00 GMT"
+        aws_text_ts(_LEAP_400, AWS_TS_RFC822), "Tue, 29 Feb 2400 00:00:00 GMT"
     )
-    assert_equal(aws_text_ts(951782400.0, AWS_TS_ISO8601), "2000-02-29T00:00:00Z")
-    # Refused: before 1970, NaN, an unknown format.
+    assert_equal(aws_text_ts(_LEAP_400, AWS_TS_ISO8601), "2400-02-29T00:00:00Z")
+    # Refused: before epoch 0, NaN, an unknown format.
     var z = Float64(0.0)
     var bad: List[Float64] = [-1.0, z / z]
     for i in range(len(bad)):
@@ -225,66 +224,69 @@ def test_timestamp_text() raises:
 def test_timestamp_read() raises:
     # Every written form reads back in its own format.
     var fmts: List[Int] = [AWS_TS_ISO8601, AWS_TS_RFC822, AWS_TS_UNIX]
-    var instants: List[Float64] = [0.0, _RFC9110_EXAMPLE, 951782400.0]
+    var instants: List[Float64] = [0.0, _INSTANT, _LEAP_400]
     for f in range(len(fmts)):
         for k in range(len(instants)):
             var t = aws_text_ts(instants[k], fmts[f])
             assert_equal(aws_ts_from_text(t, fmts[f]), instants[k], t)
     # [R] an offset is the same instant; any number of fraction digits.
     assert_equal(
-        aws_ts_from_text("1994-11-06T09:49:37+01:00", AWS_TS_ISO8601),
-        _RFC9110_EXAMPLE,
+        aws_ts_from_text("2026-09-15T13:00:00+01:00", AWS_TS_ISO8601),
+        _INSTANT,
     )
     assert_equal(
-        aws_ts_from_text("1994-11-06T08:49:37.5Z", AWS_TS_ISO8601),
-        _RFC9110_EXAMPLE + 0.5,
+        aws_ts_from_text("2026-09-15T12:00:00.5Z", AWS_TS_ISO8601),
+        _INSTANT + 0.5,
     )
-    var nine = aws_ts_from_text("1994-11-06T08:49:37.123456789Z", AWS_TS_ISO8601)
-    assert_true(abs(nine - (_RFC9110_EXAMPLE + 0.123456789)) < 1e-6)
+    var nine = aws_ts_from_text("2026-09-15T12:00:00.123456789Z", AWS_TS_ISO8601)
+    assert_true(abs(nine - (_INSTANT + 0.123456789)) < 1e-6)
     # [H] IMF-fixdate with a fraction of a second.
     assert_equal(
-        aws_http_date_from_text("Sun, 06 Nov 1994 08:49:37.5 GMT"),
-        _RFC9110_EXAMPLE + 0.5,
+        aws_http_date_from_text("Tue, 15 Sep 2026 12:00:00.5 GMT"),
+        _INSTANT + 0.5,
     )
     # [T] epoch-seconds with a fraction, and before the epoch.
-    assert_equal(aws_ts_from_text("784111777.25", AWS_TS_UNIX), frac_example())
+    assert_equal(aws_ts_from_text("1789473600.25", AWS_TS_UNIX), _frac_example())
     assert_equal(aws_ts_from_text("-1.5", AWS_TS_UNIX), -1.5)
     # Text of one format is not read as another.
-    _refused_ts("1994-11-06T08:49:37Z", AWS_TS_RFC822)
-    _refused_ts("1994-11-06T08:49:37Z", AWS_TS_UNIX)
-    _refused_ts("Sun, 06 Nov 1994 08:49:37 GMT", AWS_TS_ISO8601)
-    _refused_ts("784111777", AWS_TS_ISO8601)
-    _refused_ts("784111777", AWS_TS_RFC822)
-    _refused_ts("7.8e8", AWS_TS_UNIX)
+    _refused_ts("2026-09-15T12:00:00Z", AWS_TS_RFC822)
+    _refused_ts("2026-09-15T12:00:00Z", AWS_TS_UNIX)
+    _refused_ts("Tue, 15 Sep 2026 12:00:00 GMT", AWS_TS_ISO8601)
+    _refused_ts("1789473600", AWS_TS_ISO8601)
+    _refused_ts("1789473600", AWS_TS_RFC822)
+    _refused_ts("1.7e9", AWS_TS_UNIX)
     _refused_ts("", AWS_TS_UNIX)
-    _refused_ts("1994-11-06", AWS_TS_ISO8601)
-    _refused_ts("1994-11-06T08:49:37", AWS_TS_ISO8601)
-    _refused_ts("1994-02-30T08:49:37Z", AWS_TS_ISO8601)
-    _refused_ts("784111777", 9)
+    _refused_ts("2026-09-15", AWS_TS_ISO8601)
+    _refused_ts("2026-09-15T12:00:00", AWS_TS_ISO8601)
+    _refused_ts("2027-02-30T12:00:00Z", AWS_TS_ISO8601)
+    # A year divisible by 100 but not by 400 has no leap day.
+    _refused_ts("2100-02-29T00:00:00Z", AWS_TS_ISO8601)
+    _refused_ts("1789473600", 9)
     # [H] the two obsolete forms are refused, as the AWS SDKs refuse them.
-    _refused_ts("Sunday, 06-Nov-94 08:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Sun Nov  6 08:49:37 1994", AWS_TS_RFC822)
-    # [H] IMF-fixdate is exact: names are case-sensitive, the day has two
-    # digits, the zone is GMT, the day exists.
-    _refused_ts("sun, 06 Nov 1994 08:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Xyz, 06 Nov 1994 08:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Sun, 06 nov 1994 08:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Sun, 6 Nov 1994 08:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Sun, 06 Nov 1994 08:49:37 UTC", AWS_TS_RFC822)
-    _refused_ts("Sun, 06 Nov 1994 08:49:37 GMT ", AWS_TS_RFC822)
-    _refused_ts("Sun,06 Nov 1994 08:49:37 GMT ", AWS_TS_RFC822)
-    _refused_ts("Sun, 31 Nov 1994 08:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Sun, 06 Nov 1994 24:49:37 GMT", AWS_TS_RFC822)
-    _refused_ts("Sun, 06 Nov 1994 08:49:37. GMT", AWS_TS_RFC822)
+    _refused_ts("Tuesday, 15-Sep-26 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue Sep 15 12:00:00 2026", AWS_TS_RFC822)
+    # [H] IMF-fixdate is exact: names are case-sensitive, ", " follows the
+    # day name, the day has two digits, the zone is GMT, the day exists.
+    _refused_ts("tue, 15 Sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Xyz, 15 Sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue, 15 sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue, 5 Sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue, 15 Sep 2026 12:00:00 UTC", AWS_TS_RFC822)
+    _refused_ts("Tue, 15 Sep 2026 12:00:00 GMT ", AWS_TS_RFC822)
+    # Same length as the valid text; only the byte after ',' differs.
+    _refused_ts("Tue,_15 Sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue; 15 Sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue, 31 Sep 2026 12:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue, 15 Sep 2026 24:00:00 GMT", AWS_TS_RFC822)
+    _refused_ts("Tue, 15 Sep 2026 12:00:00. GMT", AWS_TS_RFC822)
     # The day name is redundant (RFC 9110); a mismatched one is not checked.
     assert_equal(
-        aws_http_date_from_text("Mon, 06 Nov 1994 08:49:37 GMT"),
-        _RFC9110_EXAMPLE,
+        aws_http_date_from_text("Mon, 15 Sep 2026 12:00:00 GMT"), _INSTANT
     )
 
 
-def frac_example() -> Float64:
-    return _RFC9110_EXAMPLE + 0.25
+def _frac_example() -> Float64:
+    return _INSTANT + 0.25
 
 
 def main() raises:

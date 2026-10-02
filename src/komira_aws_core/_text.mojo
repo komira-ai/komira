@@ -144,3 +144,13 @@ def bytes_of(s: String) -> List[UInt8]:
     var out = List[UInt8](capacity=s.byte_length())
     out.extend(Span(s.as_bytes()))
     return out^
+
+
+def nan64() -> Float64:
+    var z = Float64(0.0)
+    return z / z
+
+
+def inf64() -> Float64:
+    var z = Float64(0.0)
+    return Float64(1.0) / z

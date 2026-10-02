@@ -24,13 +24,22 @@
 #                                                      12:00:00 GMT
 #                        AWS_TS_UNIX     epoch-seconds 1789473600
 #
-# Writers produce exactly that text. Readers are strict: each reads only the
-# text its rule writes, so "1", "TRUE" and " true" are not booleans, "+1"
-# and "1.0" are not integers, and a date-time is not read where an
-# http-date belongs. The two timestamp reads that are more than the written
-# form are fractional seconds -- "Sun, 06 Nov 1994 08:49:37.5 GMT" and any
-# number of fraction digits in a date-time -- and a date-time with a UTC
-# offset; the Smithy timestamp formats allow both
+# Writers produce exactly that text. Readers take the written text and, of
+# anything else, only what is listed here, so "1", "TRUE" and " true" are
+# not booleans, "1.0" is not an integer, and a date-time is not read where
+# an http-date belongs. Read beyond the written form:
+#
+#   integer     leading zeros and "-0" ("007" is 7), as the AWS SDKs'
+#               integer parsers (Go strconv.ParseInt, Rust i64::from_str)
+#               read them. Those parsers also take a leading '+'; it is
+#               refused here, deliberately: no AWS rule writes one.
+#   date-time   any number of fraction digits, a UTC offset in place of
+#               "Z", and a lowercase "t" / "z" (RFC 3339 section 5.6 allows
+#               both cases)
+#   http-date   a fraction of a second after the seconds,
+#               "Tue, 15 Sep 2026 12:00:00.5 GMT"
+#
+# The Smithy timestamp formats allow those timestamp forms
 # (https://smithy.io/2.0/spec/protocol-traits.html#timestampformat-trait).
 #
 # http-date is the IMF-fixdate form of RFC 9110 section 5.6.7. The two
@@ -46,23 +55,16 @@
 
 from komira_encoding import base64_decode, base64_encode
 
-from ._text import sub, utf8_text
+from ._text import inf64, nan64, sub, utf8_text
+from ._time import DAY_NAMES, MONTH_NAMES, from_fields, parse_iso8601
 from .aws_codec import (
     AWS_TS_ISO8601,
     AWS_TS_RFC822,
     AWS_TS_UNIX,
-    _from_fields,
-    _inf,
-    _nan,
-    _parse_iso8601,
     aws_token_f32,
     aws_token_f64,
     aws_token_ts,
 )
-
-
-comptime _DAYS = "SunMonTueWedThuFriSat"
-comptime _MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec"
 
 
 # -----------------------------------------------------------------------------
@@ -181,11 +183,11 @@ def aws_f64_from_text(text: String) raises -> Float64:
     """A float or double: "NaN", "Infinity", "-Infinity", or a decimal
     number `-?D+(.D+)?([eE][+-]?D+)?`."""
     if text == "NaN":
-        return _nan()
+        return nan64()
     if text == "Infinity":
-        return _inf()
+        return inf64()
     if text == "-Infinity":
-        return -_inf()
+        return -inf64()
     var b = text.as_bytes()
     var i = 0
     if len(b) > 0 and b[0] == UInt8(0x2D):
@@ -226,7 +228,7 @@ def aws_ts_from_text(text: String, fmt: Int) raises -> Float64:
         # ("YYYY-MM-DDTHH:MM:SSZ") is 20 bytes.
         if text.byte_length() < 20:
             raise Error("an AWS date-time is too short")
-        return _parse_iso8601(text)
+        return parse_iso8601(text)
     if fmt == AWS_TS_RFC822:
         return aws_http_date_from_text(text)
     if fmt == AWS_TS_UNIX:
@@ -274,14 +276,14 @@ def aws_http_date_from_text(text: String) raises -> Float64:
     var b = text.as_bytes()
     if len(b) < 29:
         raise Error("an AWS http-date is too short")
-    if _name_index(String(_DAYS), text, 0) < 0:
+    if _name_index(String(DAY_NAMES), text, 0) < 0:
         raise Error("an AWS http-date has an unknown day name")
     if b[3] != UInt8(0x2C) or b[4] != UInt8(0x20):
         raise Error("an AWS http-date is malformed")
     var d = _two(b, 5)
     if b[7] != UInt8(0x20):
         raise Error("an AWS http-date is malformed")
-    var mo = _name_index(String(_MONTHS), text, 8) + 1
+    var mo = _name_index(String(MONTH_NAMES), text, 8) + 1
     if mo == 0:
         raise Error("an AWS http-date has an unknown month")
     if b[11] != UInt8(0x20):
@@ -310,4 +312,4 @@ def aws_http_date_from_text(text: String) raises -> Float64:
             raise Error("an AWS http-date has an empty fraction")
     if sub(text, i, len(b)) != " GMT":
         raise Error("an AWS http-date does not end in GMT")
-    return Float64(_from_fields(y, mo, d, h, mi, s)) + frac
+    return Float64(from_fields(y, mo, d, h, mi, s)) + frac
