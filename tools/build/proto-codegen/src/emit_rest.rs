@@ -51,7 +51,7 @@ pub const GCP_STATUS_ERROR: &str = "gcp_status_error";
 pub fn rest_imports() -> &'static [&'static str] {
     &[
         "from komira_gcp_core import GcpTokenSource, gcp_status_error",
-        "from komira_serde.proto3_json import JsonEncoder, JsonDecoder",
+        "from komira_proto_codec.proto3_json import JsonEncoder, JsonDecoder",
         "from komira_http.client.client import (",
         "    HttpClient,",
         "    build_get_request,",
