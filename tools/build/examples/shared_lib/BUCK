@@ -42,3 +42,24 @@ mojo_shared_lib(
     gate_srcs = ["hidden_driver.mojo"],
     deps = ["//tools/build/examples/cshim:add"],
 )
+
+# The same shape with no C dependency, which is what builds on macOS arm64
+# today (the C/C++ toolchain is Linux only): two exports and one @export,
+# `plain_hidden`, that `exports` does not name.
+mojo_shared_lib(
+    name = "plain",
+    srcs = ["plain_abi.mojo"],
+    exports = ["plain_add", "plain_sum_squares"],
+    gate_srcs = ["plain_driver.mojo"],
+)
+
+# `exports_exact`: `plain_hidden` is local to the library (a version script on
+# Linux, an exported symbols list on macOS). The twin of
+# tests//negative/shared_lib:plain_leaks.
+mojo_shared_lib(
+    name = "plain_exact",
+    srcs = ["plain_abi.mojo"],
+    exports = ["plain_add", "plain_sum_squares"],
+    exports_exact = True,
+    gate_srcs = ["plain_exact_driver.mojo"],
+)

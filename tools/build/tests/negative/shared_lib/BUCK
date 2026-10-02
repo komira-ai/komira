@@ -54,3 +54,14 @@ mojo_shared_lib(
     gate_srcs = ["expects_hidden.mojo"],
     deps = ["komira//tools/build/examples/cshim:add"],
 )
+
+# The no-C twin of leaks_by_default: `exports_exact` is off, so the unlisted
+# @export `plain_hidden` is in the dynamic table and the driver that expects it
+# hidden goes red. (examples/shared_lib:plain_exact is the twin that passes.)
+mojo_shared_lib(
+    name = "plain_leaks",
+    srcs = ["plain_hidden_abi.mojo"],
+    exports = ["plain_add"],
+    gate_srcs = ["plain_leaks_driver.mojo"],
+    out_name = "plain_leaks",
+)

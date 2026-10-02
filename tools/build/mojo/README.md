@@ -17,7 +17,7 @@ the compiler sees. Worked uses of each rule are in
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
-| `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so`: a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). Linux only. | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
+| `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so` (Linux) or `<out_name>.dylib` (macOS arm64): a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -365,7 +365,7 @@ rule is at analysis. The module docstring of
 
 ## C-ABI shared libraries
 
-`mojo_shared_lib` builds `<out_name>.so` straight from a file of `@export ... abi("C")`
+`mojo_shared_lib` builds `<out_name>.so` (`.dylib` on macOS) straight from a file of `@export ... abi("C")`
 functions (`main`, or the one entry of `srcs`) over the closure of `deps`. It has no
 generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
 
@@ -388,7 +388,14 @@ generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
   (`libMSupportGlobals.so`, `libAsyncRTRuntimeGlobals.so`, libstdc++, libgcc_s), resolves: the run path is
   `$ORIGIN/lib`, so a packaged copy must ship them in `lib/` beside it (the runnable directory of a binary
   carries the same set). Whoever publishes the `.so` must ship or relocate those libraries.
-- **macOS.** The darwin wrapper refuses `--emit shared-lib`; the rule is Linux only until that is decided.
+- **macOS arm64.** The same rule builds `<out_name>.dylib`: install name `@rpath/<out_name>.dylib`, run path
+  `@loader_path/lib`, linker-signed ad hoc by ld (nothing else signs it), runtime library
+  `@rpath/libKGENCompilerRTShared.dylib`. `exports_exact` uses `-exported_symbols_list` (names with the C
+  underscore) and `force_load` uses one `-force_load` per archive of the C libraries' link line. A driver
+  opens `./<out_name>.dylib` there: pick the name with `CompilationTarget.is_macos()`. The gate runs
+  on the macOS worker with `DYLD_LIBRARY_PATH` set to the compiler's `lib/` (as for tests). The wrapper
+  lets `--emit shared-lib` through only when the link names itself with `-install_name`; the
+  bundle's `-soname` library stays refused (bundles are Linux only).
 - **Run path.** `$ORIGIN/lib`, where a packaged copy puts the runtime libraries.
 - **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
 

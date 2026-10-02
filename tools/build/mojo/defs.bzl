@@ -205,13 +205,17 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             cmd_args(staged.project(entry_dir) if entry_dir else staged, format = "-I{}"),
         ]
     if abi_lib:
+        # The library's name for the loader: ELF DT_SONAME, Mach-O install
+        # name. On macOS an unnamed dylib records the -o path as given, which
+        # is a build directory; `@rpath/<file>` is the same
+        # no-directory name the soname is.
         emit = [
             "--emit",
             "shared-lib",
             "-Xlinker",
-            "-soname",
+            "-install_name" if tc.os == "darwin" else "-soname",
             "-Xlinker",
-            exe.basename,
+            ("@rpath/" + exe.basename) if tc.os == "darwin" else exe.basename,
         ]
     tail = _link_tail(c_link)
     if link_extra:
@@ -597,11 +601,15 @@ mojo_test_rule = rule(
 # ---- mojo_shared_lib --------------------------------------------------------
 #
 # A C-ABI shared library: `mojo build --emit shared-lib` of one file of
-# `@export` functions, over the closure of `deps`. Linux only (the darwin
-# wrapper refuses `--emit shared-lib`).
+# `@export` functions, over the closure of `deps`. Linux (`.so`) and macOS
+# arm64 (`.dylib`); mojo_binary's `[shared]` and the bundles are Linux only,
+# and the darwin wrapper still refuses `--emit shared-lib` for them.
 #
-#   out_name       the file is `<out_name>.so`, DT_SONAME the same: no `lib`
-#                  prefix is forced (mojo_binary's `[shared]` forces one).
+#   out_name       the file is `<out_name>.so` (Linux) or `<out_name>.dylib`
+#                  (macOS), its DT_SONAME / install name `@rpath/<file>`: no
+#                  `lib` prefix is forced (mojo_binary's `[shared]` forces
+#                  one). Drivers open `./<out_name>.so` or `./<out_name>.dylib`
+#                  by `CompilationTarget.is_macos()`.
 #   exports        the symbols the library must export. The gate dlopens the
 #                  library (RTLD_NOW, so an unresolved symbol fails there) and
 #                  fails unless every one resolves.
@@ -657,21 +665,35 @@ def _shared_lib_impl(ctx):
     force = None
     if ctx.attrs.force_load:
         force = _link_tail(create_merged_link_info_for_propagation(ctx, [d[MergedLinkInfo] for d in ctx.attrs.force_load]))
+    darwin = tc.os == "darwin"
     link_extra = None
     if force != None:
-        link_extra = cmd_args("-Wl,--whole-archive", force, "-Wl,--no-whole-archive")
+        if darwin:
+            # ld has no bracketed whole-archive: -force_load names one
+            # archive, so each argument of the C libraries' link line is one.
+            link_extra = cmd_args(force, format = "-Wl,-force_load,{}")
+        else:
+            link_extra = cmd_args("-Wl,--whole-archive", force, "-Wl,--no-whole-archive")
     if ctx.attrs.exports_exact:
-        # A version script: the dynamic symbol table is `exports` and nothing
-        # else, so a symbol of a static C dependency, or an @export the list
-        # does not name, is local to the library.
-        script = ctx.actions.write(
-            "exports.map",
-            "{ global: " + " ".join([sym + ";" for sym in ctx.attrs.exports]) + " local: *; };\n",
-        )
-        version = cmd_args(script, format = "-Wl,--version-script={}")
-        link_extra = cmd_args(link_extra, version) if link_extra else cmd_args(version)
+        # The dynamic symbol table is `exports` and nothing else, so a symbol
+        # of a static C dependency, or an @export the list does not name, is
+        # local to the library. ELF: a version script. Mach-O: an exported
+        # symbols list, whose names carry the C underscore.
+        if darwin:
+            script = ctx.actions.write(
+                "exports.list",
+                "".join(["_" + sym + "\n" for sym in ctx.attrs.exports]),
+            )
+            limit = cmd_args(script, format = "-Wl,-exported_symbols_list,{}")
+        else:
+            script = ctx.actions.write(
+                "exports.map",
+                "{ global: " + " ".join([sym + ";" for sym in ctx.attrs.exports]) + " local: *; };\n",
+            )
+            limit = cmd_args(script, format = "-Wl,--version-script={}")
+        link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
 
-    so_file = out_name + ".so"
+    so_file = out_name + (".dylib" if darwin else ".so")
     ungated = _build_executable(
         ctx,
         tc,

@@ -1,8 +1,11 @@
 from std.ffi import OwnedDLHandle
+from std.sys import CompilationTarget
+
+comptime LIB = "./spike.dylib" if CompilationTarget.is_macos() else "./spike.so"
 
 
 def main() raises:
-    var lib = OwnedDLHandle("./spike.so")
+    var lib = OwnedDLHandle(LIB)
     var add = lib.call["spike_add", Int32](Int32(2), Int32(3))
     if add != 5:
         raise Error("spike_add(2, 3) = " + String(add))
