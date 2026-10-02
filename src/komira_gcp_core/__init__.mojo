@@ -9,8 +9,8 @@ parameterized on komira_http's `Connector` (`emit_rest.rs` `rest_imports`:
 `<Svc>Client[C: Connector, T: GcpTokenSource]`). They build the URL and the
 `Bearer` header themselves and send through komira_http's `HttpClient`. From
 this package they take `GcpTokenSource` and `gcp_status_error`, and the pure
-pieces a caller composes into its own loop: `RetryPolicy.decide`,
-`PageCursor`, `next_page_token` and `with_page_token`. This package defines
+pieces a caller composes into its own loop: `GcpRetryClassifier` (for a
+komira_retry `RetryLoop`), `PageCursor`, `next_page_token` and `with_page_token`. This package defines
 no request/response type and no send loop.
 
 This is part P18a-1. Still to come:
@@ -33,9 +33,14 @@ Modules:
                       Never echoes a body byte.
   - pagination.mojo : `pageToken` / `nextPageToken` paging (AIP-158):
                       `PageCursor`, `next_page_token`, `with_page_token`.
-  - retry.mojo      : AIP-194 retryable codes and jittered exponential
-                      backoff under a deadline: `RetryPolicy.decide`.
-  - clock.mojo      : the injected `Clock` and its `MonotonicClock`.
+  - retry.mojo      : `GcpRetryClassifier` (AIP-194 retryable codes, with
+                      google.rpc.RetryInfo as the server delay) and
+                      `gcp_retry_policy` (AIP-4221 backoff); the policy,
+                      backoff and loop themselves are komira_retry's.
+  - clock.mojo      : the injected `Clock` and its `MonotonicClock`. It moves
+                      out of this package when the shared clock proposal
+                      (komira_core's split) lands; nothing new goes into
+                      komira_core until then.
   - utf8.mojo       : validating untrusted bytes before decoding them to a
                       String (internal). The JSON paths do not use it:
                       komira_json refuses ill-formed UTF-8 itself.
@@ -78,6 +83,8 @@ from .status import (
     code_name,
     gcp_status_error,
     parse_gcp_status,
+    duration_to_ms,
+    RETRY_INFO_TYPE,
 )
 from .pagination import (
     DEFAULT_MAX_PAGES,
@@ -86,9 +93,4 @@ from .pagination import (
     percent_encode,
     with_page_token,
 )
-from .retry import (
-    RetryDecision,
-    RetryPolicy,
-    RetryRng,
-    SplitMix64Rng,
-)
+from .retry import GcpRetryClassifier, gcp_retry_policy

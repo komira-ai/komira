@@ -19,8 +19,10 @@
 # endpoint can carry the credential that was rejected. A `GcpStatusError`
 # keeps only: the HTTP status, the envelope's numeric `code`, the `status`
 # name IF it is a bare `[A-Z_]+` token of at most 64 bytes (so a server cannot
-# smuggle text through it), the BYTE LENGTH of `error.message`, and the byte
-# count of the whole body. `gcp_status_error` is the contract the generated
+# smuggle text through it), the BYTE LENGTH of `error.message`, the byte
+# count of the whole body, and the wait a `google.rpc.RetryInfo` detail asks
+# for, as a number of milliseconds (`retry_delay_ms`; the retry classifier's
+# server delay). `gcp_status_error` is the contract the generated
 # REST clients call (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
 # =============================================================================
 
@@ -141,7 +143,9 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
 
     `envelope_code` and `message_bytes` are -1 when the envelope has no such
     field (or a wrong-typed one); `status` is "" when absent or not a bare
-    status token."""
+    status token. `retry_delay_ms` is the first `google.rpc.RetryInfo`
+    detail's `retryDelay` in milliseconds (rounded up), or -1 when there is
+    none or it is not a well-formed non-negative proto3 JSON Duration."""
 
     var verb: String
     var rpc: String
@@ -151,6 +155,7 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
     var status: String
     var message_bytes: Int
     var body_bytes: Int
+    var retry_delay_ms: Int64
 
     def code(self) -> Int:
         """The canonical `google.rpc.Code`: the envelope's `status` name when it
@@ -184,6 +189,8 @@ struct GcpStatusError(Copyable, Movable, Deinitable):
         else:
             out += ", body is not a JSON document"
         out += ", body " + String(self.body_bytes) + " bytes"
+        if self.retry_delay_ms >= 0:
+            out += ", RetryInfo " + String(self.retry_delay_ms) + " ms"
         return out^
 
     def to_error(self) -> Error:
@@ -197,7 +204,7 @@ def parse_gcp_status(
     beyond the allow-listed fields described in the module header."""
     var out = GcpStatusError(
         verb.copy(), rpc.copy(), http_status, ENVELOPE_MALFORMED, -1, String(),
-        -1, len(body),
+        -1, len(body), -1,
     )
     # Whitespace-only (or empty) body: nothing to parse.
     var blank = True
@@ -243,9 +250,85 @@ def parse_gcp_status(
                 out.status = s^
         if err.has("message") and err.get("message").kind_tag() == JSON_STRING:
             out.message_bytes = err.get("message").as_string().byte_length()
+        if err.has("details") and err.get("details").is_array():
+            out.retry_delay_ms = _retry_info_delay_ms(err.get("details"))
     except:
         pass
     return out^
+
+
+comptime RETRY_INFO_TYPE = "type.googleapis.com/google.rpc.RetryInfo"
+"""The `@type` of a `google.rpc.RetryInfo` entry in `error.details`."""
+
+comptime _MAX_DURATION_SECONDS_DIGITS: Int = 12
+"""A `retryDelay` with more whole-second digits than this is clamped to
+`_HUGE_DELAY_MS` rather than parsed: 10^12 s is already far past any
+`max_server_delay_ms`, and the clamp keeps the arithmetic in Int64."""
+
+comptime _HUGE_DELAY_MS: Int64 = 1 << 62
+
+
+def _retry_info_delay_ms(details: JsonValue) -> Int64:
+    """`retryDelay` of the first RetryInfo entry in `details`, in ms, or -1."""
+    try:
+        for i in range(details.array_len()):
+            var d = details.element_at(i)
+            if not d.is_object() or not d.has("@type"):
+                continue
+            var t = d.get("@type")
+            if t.kind_tag() != JSON_STRING or t.as_string() != RETRY_INFO_TYPE:
+                continue
+            if not d.has("retryDelay"):
+                return -1
+            var rd = d.get("retryDelay")
+            if rd.kind_tag() != JSON_STRING:
+                return -1
+            return duration_to_ms(rd.as_string())
+    except:
+        return -1
+    return -1
+
+
+def duration_to_ms(s: String) -> Int64:
+    """A proto3 JSON `google.protobuf.Duration` (`"1.5s"`: whole seconds, an
+    optional 1-9 digit fraction, then `s`) as milliseconds, rounded up so a
+    retry never comes earlier than asked. -1 for a negative or malformed
+    duration."""
+    var b = s.as_bytes()
+    var n = len(b)
+    if n < 2 or b[n - 1] != UInt8(ord("s")):
+        return -1
+    var i = 0
+    var secs: Int64 = 0
+    var sec_digits = 0
+    while i < n - 1 and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
+        if sec_digits < _MAX_DURATION_SECONDS_DIGITS:
+            secs = secs * 10 + Int64(Int(b[i]) - ord("0"))
+        sec_digits += 1
+        i += 1
+    if sec_digits == 0:
+        return -1
+    var nanos: Int64 = 0
+    if i < n - 1:
+        if b[i] != UInt8(ord(".")):
+            return -1
+        i += 1
+        var frac_digits = 0
+        while i < n - 1:
+            if b[i] < UInt8(ord("0")) or b[i] > UInt8(ord("9")):
+                return -1
+            frac_digits += 1
+            if frac_digits > 9:
+                return -1
+            nanos = nanos * 10 + Int64(Int(b[i]) - ord("0"))
+            i += 1
+        if frac_digits == 0:
+            return -1
+        for _ in range(frac_digits, 9):
+            nanos *= 10
+    if sec_digits > _MAX_DURATION_SECONDS_DIGITS:
+        return _HUGE_DELAY_MS
+    return secs * 1000 + (nanos + 999_999) // 1_000_000
 
 
 def gcp_status_error(

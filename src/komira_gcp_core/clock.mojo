@@ -2,15 +2,19 @@
 # komira_gcp_core/clock.mojo — the injected clock every timed decision reads.
 # =============================================================================
 #
-# Two things in this package depend on time: whether a cached access token is
-# still fresh (`token.mojo`) and how long a retry waits and whether the
-# deadline has passed (`retry.mojo`). Both read a `Clock` passed in by the
-# caller rather than the system clock directly, so a test can pin "now",
-# advance it, and observe a sleep without waiting.
+# Whether a cached access token is still fresh (`token.mojo`) depends on
+# time. It reads a `Clock` passed in by the caller rather than the system
+# clock directly, so a test can pin "now", advance it, and observe a sleep
+# without waiting. (Retry waits and deadlines run on komira_retry's own
+# `MonotonicClock` / `Sleeper` seams.)
+#
+# HOLD: this file is a placeholder for a shared clock. It moves out of this
+# package when the komira_core split proposal lands and names the clock's
+# home; until then nothing new goes into komira_core, so it stays here.
 #
 # `MonotonicClock` is the production conformer. It is MONOTONIC on purpose:
 # every expiry this package computes is relative (`expires_in` seconds from
-# the token endpoint, a retry deadline from the call's start), so a wall-clock
+# the token endpoint), so a wall-clock
 # step (NTP, a suspended VM) must not make a token look fresher or older than
 # it is. A wall clock (for a JWT `iat`/`exp`) arrives with the JWT
 # assertion in P18a-2.
