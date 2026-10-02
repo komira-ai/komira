@@ -70,7 +70,7 @@ from komira_http.client.client import HttpClient, build_get_request
 from komira_http.client.header_map import HeaderMap
 from komira_http.client.url import Url
 from komira_http.transport.scripted import ScriptedConnector, ScriptedStream
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 
 
 comptime _BUDGET_US: Int = 150_000

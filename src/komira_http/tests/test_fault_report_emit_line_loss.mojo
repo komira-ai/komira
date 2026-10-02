@@ -5,7 +5,7 @@
 #
 # SCOPE. `fault_report._emit_line` / `emit_line_to_fd` / `fault_sos_line`. The
 # retry policy itself is tested where it lives
-# (`komira_obs/tests/test_log_write_retry_and_loss_accounting.mojo`); what can
+# (`komira_log/tests/test_log_write_retry_and_loss_accounting.mojo`); what can
 # only be wrong HERE is whether this emitter is wired to it and what it does
 # when fd 1 refuses.
 #
@@ -33,7 +33,7 @@ from std.sys.info import CompilationTarget
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
 from komira_runtime_paths import test_tmpdir
-from komira_obs.log_write import LineWrite
+from komira_log.log_write import LineWrite
 
 from komira_http.middleware.fault_report import (
     _emit_line,
