@@ -75,6 +75,13 @@ def _bytes(prefix: String, mid: List[UInt8], suffix: String) -> List[UInt8]:
     return out^
 
 
+def _seq(*vals: Int) -> List[UInt8]:
+    var out = List[UInt8]()
+    for i in range(len(vals)):
+        out.append(UInt8(vals[i]))
+    return out^
+
+
 def _bytes_refused(var src: List[UInt8], needle: String, what: String) -> Int:
     """The reader raises over `src`, mentioning `needle`."""
     try:
@@ -367,22 +374,18 @@ def test_characters_and_encoding() raises -> Int:
     f += _refused(String("<a>") + chr(0xFFFF) + "</a>", "character", "U+FFFF literally")
     f += _eq(parse_xml("<a>\tx\n</a>").text, String("\tx\n"), "TAB and LF are Chars")
     var bad = List[List[UInt8]]()
-    bad.append(List[UInt8](0xFF))  # never valid in UTF-8
-    bad.append(List[UInt8](0xC3))  # truncated sequence
-    bad.append(List[UInt8](0xC0, 0x80))  # overlong NUL
-    bad.append(List[UInt8](0xE0, 0x80, 0x80))  # overlong
-    bad.append(List[UInt8](0xED, 0xA0, 0x80))  # encoded surrogate U+D800
-    bad.append(List[UInt8](0xF4, 0x90, 0x80, 0x80))  # U+110000
-    bad.append(List[UInt8](0x80))  # lone continuation byte
+    bad.append(_seq(0xFF))  # never valid in UTF-8
+    bad.append(_seq(0xC3))  # truncated sequence
+    bad.append(_seq(0xC0, 0x80))  # overlong NUL
+    bad.append(_seq(0xE0, 0x80, 0x80))  # overlong
+    bad.append(_seq(0xED, 0xA0, 0x80))  # encoded surrogate U+D800
+    bad.append(_seq(0xF4, 0x90, 0x80, 0x80))  # U+110000
+    bad.append(_seq(0x80))  # lone continuation byte
     for i in range(len(bad)):
         f += _bytes_refused(
             _bytes("<a>", bad[i], "</a>"), "UTF-8", "invalid UTF-8 row " + String(i)
         )
-    var good = List[UInt8]()
-    good.append(0xF0)
-    good.append(0x9F)
-    good.append(0x98)
-    good.append(0x80)
+    var good = _seq(0xF0, 0x9F, 0x98, 0x80)
     try:
         _drain(_bytes("<a>", good, "</a>"))
     except e:

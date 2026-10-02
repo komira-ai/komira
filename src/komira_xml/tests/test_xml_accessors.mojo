@@ -4,9 +4,9 @@
 #
 # A rest-xml response decoder walks the tree by name: S3's ListObjectsV2
 # repeats `<Contents>` once per key, and STS nests the credentials three
-# levels down. `first_child` returns a COPY of the whole subtree; `child`
-# borrows it, and `children_named` gives the positions of every repeat
-# without copying any of them.
+# levels down. `first_child` returns a COPY of the whole subtree;
+# `child_index` and `children_named` give positions to borrow through
+# (`node.children[i]`), and `child_text` copies only the text.
 # =============================================================================
 
 from komira_xml import XML_MAX_DEPTH, XmlNode, parse_xml
@@ -45,17 +45,20 @@ comptime _LIST = """<?xml version="1.0" encoding="UTF-8"?>
 def test_child() raises -> Int:
     var f = 0
     var t = parse_xml(_LIST)
-    f += _eq(t.child("Name").text, String("bucket"), "child by local name")
-    f += _eq(t.child("Contents").child("Key").text, String("a.parquet"), "the FIRST match")
+    f += _eq(String(t.child_index("Name")), String("0"), "child_index by local name")
+    f += _eq(String(t.child_index("Contents")), String("1"), "the FIRST match")
+    f += _eq(String(t.child_index("Missing")), String("-1"), "absent is -1")
+    f += _eq(
+        t.children[t.child_index("Contents")].child_text("Key"),
+        String("a.parquet"),
+        "borrow by position, then child_text",
+    )
     var raised = False
     try:
-        _ = t.child("Missing").text
+        _ = t.child_text("Missing")
     except e:
         raised = String(e).find("<Missing>") >= 0
-    f += _true(raised, "an absent child raises, naming it")
-    # A borrow, not a copy: a write through it lands in the tree.
-    t.child("Name").text = String("renamed")
-    f += _eq(t.children[0].text, String("renamed"), "child() borrows")
+    f += _true(raised, "child_text of an absent child raises, naming it")
     return f
 
 
@@ -81,7 +84,8 @@ def test_text_accessors() raises -> Int:
     # the indentation between them.
     f += _true(t.text.byte_length() > 0, "an indented parent has whitespace text")
     f += _eq(t.trimmed_text(), String(""), "trimmed_text of an indented parent")
-    var k = t.children[t.children_named("Contents")[1]].child("Key").trimmed_text()
+    ref second = t.children[t.children_named("Contents")[1]]
+    var k = second.children[second.child_index("Key")].trimmed_text()
     f += _eq(k, String("spaced key"), "trimmed_text strips XML whitespace only")
     f += _eq(
         parse_xml(String("<a>\t\r\n x") + chr(0xA0) + "\n</a>").trimmed_text(),

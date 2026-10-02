@@ -11,13 +11,29 @@
 #
 # ATTRIBUTES ARE FIRST-CLASS HERE and that is deliberate: they are the one
 # thing the JSON codec has no analogue for, and rest-xml uses them
-# (`xmlAttribute`, `xmlNamespace` -> `xmlns`). See `komira_restxml` for what
-# that costs the shared `WireEncoder` trait surface.
+# (`xmlAttribute`, `xmlNamespace` -> `xmlns`).
+#
+# `text` and `attr` refuse a C0 control character other than TAB, LF and CR:
+# XML 1.0 has no way to write one, not even as a reference, so a document
+# carrying one could not be read back.
 #
 # Encapsulation: no `UnsafePointer` in any signature.
 # =============================================================================
 
 from .xml_escape import append_escaped_attr, append_escaped_text
+
+
+def _refuse_c0(s: StringSlice, what: StringSlice) raises:
+    """Raise if `s` holds a byte below 0x20 other than TAB, LF or CR. Such a
+    byte is always a whole UTF-8 character, and never a legal XML one."""
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = b[i]
+        if c < 0x20 and c != 0x09 and c != 0x0A and c != 0x0D:
+            raise Error(
+                "xml writer: " + String(what) + " holds character (code point "
+                + String(Int(c)) + "), which XML cannot represent"
+            )
 
 
 struct XmlWriter(Movable):
@@ -56,6 +72,7 @@ struct XmlWriter(Movable):
         """Write ` name="value"` on the currently-open start tag."""
         if not self._open:
             raise Error("xml writer: attribute after the start tag was closed")
+        _refuse_c0(value, "an attribute value")
         self.buf.append(0x20)  # ' '
         self._raw(name)
         self.buf.append(0x3D)  # '='
@@ -63,8 +80,9 @@ struct XmlWriter(Movable):
         append_escaped_attr(self.buf, value)
         self.buf.append(0x22)
 
-    def text(mut self, s: StringSlice):
+    def text(mut self, s: StringSlice) raises:
         """Write escaped element text content."""
+        _refuse_c0(s, "element text")
         self._close_open_tag()
         append_escaped_text(self.buf, s)
 
