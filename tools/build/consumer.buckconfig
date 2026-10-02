@@ -15,7 +15,7 @@
 #   toolchains/BUCK  from tools/build/cells/toolchains/BUCK. The `toolchains`
 #                    cell belongs to the root repository (the prelude requires
 #                    one); the Mojo rules take their toolchain from its `mojo`
-#                    and `mojo_multi_numa` targets.
+#                    target.
 #   platforms/BUCK   from tools/build/platforms/default/BUCK: your execution
 #                    platforms: local, or remote from `[komira_re]` in your
 #                    .buckconfig.local.
