@@ -45,6 +45,12 @@
 # space and tab collapsed, sorted, duplicates joined with `,`), the blank line
 # after the header block and the `;`-joined signed-header list match SigV4.
 #
+# The URL authority may carry a port; the signed `host` header does not (the
+# vectors that send to `localhost:8080` sign `host:localhost`). An input that
+# would sign one request and send another is refused rather than signed: a
+# control byte in a header, a path without a leading `/`, a caller's own
+# X-Goog-* signing parameter, a second payload hash.
+#
 # Specification:
 #   canonical request  https://cloud.google.com/storage/docs/authentication/canonical-requests
 #   string to sign     https://cloud.google.com/storage/docs/authentication/signatures
@@ -172,20 +178,39 @@ struct GcsV4CanonicalHeaders(Copyable, Movable, Deinitable):
 struct GcsV4Stamps(ImplicitlyCopyable, Copyable, Movable, Deinitable):
     """`datetime_z` (`YYYYMMDDTHHMMSSZ`), `short_date` (`YYYYMMDD`), and the
     unix seconds both were rendered from, so a caller reports the expiry from
-    the same instant it signed at."""
+    the same instant it signed at.
+
+    The one constructor renders both strings from the instant, so the date
+    in the credential scope and X-Goog-Date cannot disagree."""
 
     var datetime_z: String
     var short_date: String
     var unix_seconds: Int64
 
-    def __init__(
-        out self,
-        var datetime_z: String,
-        var short_date: String,
-        unix_seconds: Int64,
-    ):
-        self.datetime_z = datetime_z^
-        self.short_date = short_date^
+    def __init__(out self, unix_seconds: Int64) raises:
+        """The UTC stamps of `unix_seconds`, for a year in 0000-9999 (the
+        four-digit field of the X-Goog-Date format); any other instant
+        raises."""
+        var total = Int(unix_seconds)
+        # Floor division, so an instant before 1970 lands on the right day.
+        var days = total // 86400
+        var sod = total - days * 86400
+        var ymd = _civil_from_days(days)
+        if ymd[0] < 0 or ymd[0] > 9999:
+            raise Error(
+                "gcs v4: unix time "
+                + String(unix_seconds)
+                + " is outside years 0000-9999"
+            )
+        self.short_date = _pad(ymd[0], 4) + _pad(ymd[1], 2) + _pad(ymd[2], 2)
+        self.datetime_z = (
+            self.short_date
+            + "T"
+            + _pad(sod // 3600, 2)
+            + _pad((sod % 3600) // 60, 2)
+            + _pad(sod % 60, 2)
+            + "Z"
+        )
         self.unix_seconds = unix_seconds
 
 
@@ -196,6 +221,85 @@ struct GcsV4Stamps(ImplicitlyCopyable, Copyable, Movable, Deinitable):
 
 def _is_ws(c: UInt8) -> Bool:
     return c == UInt8(0x20) or c == UInt8(0x09)
+
+
+def _is_ctl(c: UInt8) -> Bool:
+    """An ASCII control byte: 0x00-0x1F or DEL. Tab is one."""
+    return c < UInt8(0x20) or c == UInt8(0x7F)
+
+
+def _is_digit(c: UInt8) -> Bool:
+    return c >= UInt8(0x30) and c <= UInt8(0x39)
+
+
+def _signed_host(authority: String) raises -> String:
+    """The `host` header value signed for the URL authority `authority`:
+    `authority` without its port.
+
+    The vectors sign the host alone and keep the port in the URL: "Simple GET
+    with non-default hostname" sends to `localhost:8080` and signs
+    `host:localhost`, and "Simple GET with endpoint on client" sends to
+    `storage.googleapis.com:443` and signs `host:storage.googleapis.com`.
+
+    Refused: an empty authority or host; a space, tab or control byte; any of
+    `/ ? # @ \\` (a path, query, fragment or userinfo is not an authority);
+    a port that is empty or not all digits; an unbracketed second `:`; an
+    unclosed `[` (an IPv6 literal is `[addr]` or `[addr]:port`)."""
+    var b = authority.as_bytes()
+    if len(b) == 0:
+        raise Error("gcs v4: refusing to sign without a host")
+    for i in range(len(b)):
+        var c = b[i]
+        if (
+            _is_ws(c)
+            or _is_ctl(c)
+            or c == UInt8(0x2F)
+            or c == UInt8(0x3F)
+            or c == UInt8(0x23)
+            or c == UInt8(0x40)
+            or c == UInt8(0x5C)
+        ):
+            raise Error(
+                "gcs v4: the host '"
+                + authority
+                + "' holds a byte an authority may not"
+            )
+    var host_end = len(b)
+    if b[0] == UInt8(0x5B):
+        var close = authority.find("]")
+        if close < 2:
+            raise Error(
+                "gcs v4: an unclosed or empty '[' in the host '"
+                + authority
+                + "'"
+            )
+        host_end = close + 1
+        if host_end < len(b) and b[host_end] != UInt8(0x3A):
+            raise Error(
+                "gcs v4: the host '" + authority + "' has bytes after ']'"
+            )
+    else:
+        var colon = authority.find(":")
+        if colon >= 0:
+            if authority.find(":", colon + 1) >= 0:
+                raise Error(
+                    "gcs v4: the host '"
+                    + authority
+                    + "' has two ':' (an IPv6 address is bracketed)"
+                )
+            host_end = colon
+    if host_end < len(b):
+        # b[host_end] is ':'; the rest is the port.
+        if host_end + 1 == len(b):
+            raise Error("gcs v4: empty port in the host '" + authority + "'")
+        for i in range(host_end + 1, len(b)):
+            if not _is_digit(b[i]):
+                raise Error(
+                    "gcs v4: the port of '" + authority + "' is not a number"
+                )
+    if host_end == 0:
+        raise Error("gcs v4: refusing to sign without a host")
+    return String(authority[byte=0:host_end])
 
 
 def _ascii_lower(s: String) -> String:
@@ -257,11 +361,15 @@ def _collapse_inner_ws(s: String) -> String:
 # (`_text._percent_encode`, the package's one encoder).
 
 
-def gcs_v4_canonical_path(path: String) -> String:
+def gcs_v4_canonical_path(path: String) raises -> String:
     """`path` percent-encoded with `/` kept, and NOT normalized (difference 1
-    above). An empty path is `/`."""
+    above). An empty path is `/`; any other path must start with `/`, since
+    the URL appends it to the authority as it is (`b/o` would sign one path
+    and send to the host `<authority>b`)."""
     if path.byte_length() == 0:
         return String("/")
+    if not path.startswith("/"):
+        raise Error("gcs v4: the path '" + path + "' does not start with '/'")
     return _percent_encode(path, keep_slash=True)
 
 
@@ -317,35 +425,74 @@ def gcs_v4_canonical_query(params: List[GcsV4QueryParam]) -> String:
 # -----------------------------------------------------------------------------
 
 
+def _check_header_name(name: String) raises:
+    """A header name is a non-empty run of bytes with no space, tab, control
+    byte or `:` (as given: it is not trimmed, so ` x` is refused)."""
+    var b = name.as_bytes()
+    if len(b) == 0:
+        raise Error("gcs v4: refusing a header with an empty name")
+    for i in range(len(b)):
+        if _is_ws(b[i]) or _is_ctl(b[i]) or b[i] == UInt8(0x3A):
+            raise Error(
+                "gcs v4: the header name '"
+                + name
+                + "' holds a space, tab, control byte or ':'"
+            )
+
+
+def _check_header_value(name: String, value: String) raises:
+    """A header value may hold any byte but a control byte other than tab: a
+    CR or LF would put what reads as another header line into the canonical
+    request. The value is not echoed (it may be a key)."""
+    var b = value.as_bytes()
+    for i in range(len(b)):
+        if _is_ctl(b[i]) and b[i] != UInt8(0x09):
+            raise Error(
+                "gcs v4: the value of header '"
+                + name
+                + "' holds a control byte"
+            )
+
+
 def gcs_v4_canonical_headers(
-    headers: List[GcsV4Header], host: String
+    headers: List[GcsV4Header], authority: String
 ) raises -> GcsV4CanonicalHeaders:
     """Lowercase the names, trim and collapse the values, add `host`, sort
     by name (stably, so duplicates keep their order), and join duplicates
     with `,`.
 
-    `host` is required by the specification and is synthesized from `host`
-    here; a `host` header in `headers` is refused rather than joined into
-    `host:a,b`, a well-formed request for a host that does not exist. The
-    payload line is `UNSIGNED-PAYLOAD`, or the value of a signed
-    `x-goog-content-sha256` header."""
-    var host_value = _trim_ws(host)
-    if host_value.byte_length() == 0:
-        raise Error("gcs v4: refusing to sign without a host")
+    `host` is required by the specification and is synthesized here from
+    the URL authority `authority` (`host` or `host:port`), without the port
+    (`_signed_host`); a `host` header in `headers` is refused rather than
+    joined into `host:a,b`, a well-formed request for a host that does not
+    exist. The payload line is `UNSIGNED-PAYLOAD`, or the value of a signed
+    `x-goog-content-sha256` header, which may appear once: a second would
+    join into the header block while the payload line kept one value.
+
+    Refused: a header name that is empty or holds a space, tab, control byte
+    or `:`; a header value that holds a control byte other than tab."""
+    var host_value = _signed_host(authority)
 
     var pairs = List[GcsV4Header](capacity=len(headers) + 1)
     var payload = String(GCS_V4_UNSIGNED_PAYLOAD)
+    var payload_seen = False
     for i in range(len(headers)):
-        var name = _ascii_lower(_trim_ws(headers[i].name))
-        if name.byte_length() == 0:
-            raise Error("gcs v4: refusing a header with an empty name")
+        _check_header_name(headers[i].name)
+        var name = _ascii_lower(headers[i].name)
         if name == String("host"):
             raise Error(
                 "gcs v4: 'host' is synthesized from the request host; a host"
                 " header as well would sign two hosts"
             )
+        _check_header_value(name, headers[i].value)
         var value = _collapse_inner_ws(_trim_ws(headers[i].value))
         if name == String(GCS_V4_CONTENT_SHA256_HEADER):
+            if payload_seen:
+                raise Error(
+                    "gcs v4: a second 'x-goog-content-sha256' header; the"
+                    " payload hash is one value"
+                )
+            payload_seen = True
             payload = value
         pairs.append(GcsV4Header(name^, value^))
     pairs.append(GcsV4Header(String("host"), host_value^))
@@ -385,11 +532,25 @@ def gcs_v4_canonical_headers(
 # -----------------------------------------------------------------------------
 
 
-def gcs_v4_credential_scope(short_date: String, location: String) -> String:
+def gcs_v4_credential_scope(
+    short_date: String, location: String
+) raises -> String:
     """`DATE/LOCATION/storage/goog4_request`.
 
     LOCATION is the bucket's region or `auto`. Every conformance vector uses
-    `auto`, which Cloud Storage accepts for a bucket in any region."""
+    `auto`, which Cloud Storage accepts for a bucket in any region. An empty
+    LOCATION, or one holding `/`, a space, tab or control byte, is refused:
+    each signs a scope with the wrong number of fields."""
+    var b = location.as_bytes()
+    if len(b) == 0:
+        raise Error("gcs v4: refusing an empty location in the scope")
+    for i in range(len(b)):
+        if _is_ws(b[i]) or _is_ctl(b[i]) or b[i] == UInt8(0x2F):
+            raise Error(
+                "gcs v4: the location '"
+                + location
+                + "' holds '/', a space, tab or control byte"
+            )
     return (
         short_date
         + "/"
@@ -401,9 +562,38 @@ def gcs_v4_credential_scope(short_date: String, location: String) -> String:
     )
 
 
+def _is_reserved_query_name(name: String) -> Bool:
+    """Whether `name` is, in any case, one of the six query parameters the
+    signer adds; a caller's parameter of that name would be signed and sent
+    twice."""
+    var lower = _ascii_lower(name)
+    return (
+        lower == "x-goog-algorithm"
+        or lower == "x-goog-credential"
+        or lower == "x-goog-date"
+        or lower == "x-goog-expires"
+        or lower == "x-goog-signedheaders"
+        or lower == "x-goog-signature"
+    )
+
+
+def _check_method(method: String) raises:
+    """An HTTP method as Cloud Storage takes it: `A`-`Z` only (`GET`, `PUT`,
+    `POST`, `DELETE`, `HEAD`). A lower-case method signs a request that no
+    client sends."""
+    var b = method.as_bytes()
+    if len(b) == 0:
+        raise Error("gcs v4: refusing an empty method")
+    for i in range(len(b)):
+        if b[i] < UInt8(0x41) or b[i] > UInt8(0x5A):
+            raise Error(
+                "gcs v4: the method '" + method + "' is not upper-case A-Z"
+            )
+
+
 def gcs_v4_build_canonical_request(
     method: String,
-    host: String,
+    authority: String,
     path: String,
     headers: List[GcsV4Header],
     extra_query: List[GcsV4QueryParam],
@@ -418,13 +608,25 @@ def gcs_v4_build_canonical_request(
         METHOD \\n PATH \\n QUERY \\n HEADERS \\n (blank) \\n SIGNED_HEADERS
         \\n PAYLOAD
 
+    `authority` is the URL authority, `host` or `host:port`; the signed
+    `host` header is the host without the port (`gcs_v4_canonical_headers`).
     The headers are canonicalized first, although they come later in the
     output: X-Goog-SignedHeaders is a query parameter whose value is their
-    list."""
-    var ch = gcs_v4_canonical_headers(headers, host)
+    list.
+
+    Refused: a method that is not `A`-`Z`; an `extra_query` name equal, in
+    any case, to one of the six X-Goog-* parameters the signer adds."""
+    _check_method(method)
+    var ch = gcs_v4_canonical_headers(headers, authority)
 
     var q = List[GcsV4QueryParam](capacity=len(extra_query) + 5)
     for i in range(len(extra_query)):
+        if _is_reserved_query_name(extra_query[i].name):
+            raise Error(
+                "gcs v4: the query parameter '"
+                + extra_query[i].name
+                + "' is added by the signer"
+            )
         q.append(extra_query[i])
     q.append(GcsV4QueryParam("X-Goog-Algorithm", String(GCS_V4_ALGORITHM)))
     q.append(
@@ -484,24 +686,33 @@ def gcs_v4_sign_string_to_sign(
 def gcs_v4_signed_url(
     scheme: String,
     method: String,
-    host: String,
+    authority: String,
     path: String,
     headers: List[GcsV4Header],
     extra_query: List[GcsV4QueryParam],
     account: GcsV4ServiceAccount,
     location: String,
-    short_date: String,
-    datetime_z: String,
+    stamps: GcsV4Stamps,
     expires_seconds: Int,
 ) raises -> String:
-    """Canonicalize, sign, and assemble `scheme://host/path?query&X-Goog-
+    """Canonicalize, sign, and assemble `scheme://authority/path?query&X-Goog-
     Signature=<hex>`.
 
-    The signing instant is `short_date` and `datetime_z`
-    (`gcs_v4_stamps_from_unix_seconds`); nothing here reads a clock. The URL
-    carries the signed canonical query verbatim, so the bytes Cloud Storage
-    canonicalizes on receipt are the bytes that were signed. Expiry must be
-    in (0, GCS_V4_MAX_EXPIRES_SECONDS]."""
+    `authority` is `host` or `host:port` and goes into the URL as given; the
+    signature covers the host without the port (`gcs_v4_canonical_headers`).
+    The signing instant is `stamps` (`gcs_v4_stamps_from_unix_seconds`), the
+    one source of both the scope's date and X-Goog-Date; nothing here reads a
+    clock. The URL carries the signed canonical path and query verbatim, so
+    the bytes Cloud Storage canonicalizes on receipt are the bytes that were
+    signed.
+
+    Refused: a scheme other than `http` or `https`; an expiry outside
+    (0, GCS_V4_MAX_EXPIRES_SECONDS]; and whatever the canonical request and
+    the credential scope refuse."""
+    if scheme != "https" and scheme != "http":
+        raise Error(
+            "gcs v4: the scheme '" + scheme + "' is not 'https' or 'http'"
+        )
     if expires_seconds <= 0:
         raise Error(
             "gcs v4: refusing a non-positive X-Goog-Expires ("
@@ -516,24 +727,26 @@ def gcs_v4_signed_url(
             + String(GCS_V4_MAX_EXPIRES_SECONDS)
             + "s (7 days)"
         )
-    var scope = gcs_v4_credential_scope(short_date, location)
+    var scope = gcs_v4_credential_scope(stamps.short_date, location)
     var built = gcs_v4_build_canonical_request(
         method,
-        host,
+        authority,
         path,
         headers,
         extra_query,
         account.client_email,
         scope,
-        datetime_z,
+        stamps.datetime_z,
         expires_seconds,
     )
-    var sts = gcs_v4_string_to_sign(built.canonical_request, datetime_z, scope)
+    var sts = gcs_v4_string_to_sign(
+        built.canonical_request, stamps.datetime_z, scope
+    )
     var sig = gcs_v4_sign_string_to_sign(sts, account.private_key_der)
     return (
         scheme
         + "://"
-        + host
+        + authority
         + gcs_v4_canonical_path(path)
         + "?"
         + built.canonical_query
@@ -548,10 +761,11 @@ def gcs_v4_signed_url(
 
 
 def _civil_from_days(z_in: Int) -> Tuple[Int, Int, Int]:
-    """Days since 1970-01-01 to (year, month, day), proleptic Gregorian
+    """Days since the Unix epoch to (year, month, day), proleptic Gregorian
     (H. Hinnant, "chrono-Compatible Low-Level Date Algorithms")."""
     var z = z_in + 719468
-    var era = (z if z >= 0 else z - 146096) // 146097
+    # Mojo's `//` floors, so no truncation adjustment for a negative z.
+    var era = z // 146097
     var doe = z - era * 146097
     var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
     var y = yoe + era * 400
@@ -575,24 +789,4 @@ def _pad(v: Int, width: Int) -> String:
 def gcs_v4_stamps_from_unix_seconds(unix_seconds: Int64) raises -> GcsV4Stamps:
     """The UTC stamps of an instant, for a year in 0000-9999 (the four-digit
     field of the X-Goog-Date format); any other instant raises."""
-    var total = Int(unix_seconds)
-    # Floor division, so an instant before 1970 lands on the right day.
-    var days = total // 86400
-    var sod = total - days * 86400
-    var ymd = _civil_from_days(days)
-    if ymd[0] < 0 or ymd[0] > 9999:
-        raise Error(
-            "gcs v4: unix time "
-            + String(unix_seconds)
-            + " is outside years 0000-9999"
-        )
-    var short_date = _pad(ymd[0], 4) + _pad(ymd[1], 2) + _pad(ymd[2], 2)
-    var dtz = (
-        short_date
-        + "T"
-        + _pad(sod // 3600, 2)
-        + _pad((sod % 3600) // 60, 2)
-        + _pad(sod % 60, 2)
-        + "Z"
-    )
-    return GcsV4Stamps(dtz^, short_date^, unix_seconds)
+    return GcsV4Stamps(unix_seconds)
