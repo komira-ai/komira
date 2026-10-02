@@ -1053,7 +1053,9 @@ def _check_parameter(
                 + String(
                     ": 'secret_ref' requires 'type: PARAM_TYPE_SECRET' — the type"
                     " is what makes the value a REFERENCE on argv rather than"
-                    " plaintext in /proc/self/cmdline."
+                    " plaintext, and argv is readable by other processes on the"
+                    " same machine (e.g. /proc/<pid>/cmdline on Linux, ps on any"
+                    " Unix)."
                 )
             )
         if not prm.secret_ref.value().startswith(PARAM_SECRET_SCHEME):
@@ -2267,7 +2269,8 @@ def _check_run_container(
                 + a.name
                 + String(
                     "': 'secret_ref' is refused on a validate-step arg. Argv is"
-                    " WORLD-READABLE — /proc/self/cmdline is mode 0444, and the"
+                    " readable by other processes on the same machine (e.g."
+                    " /proc/<pid>/cmdline on Linux, ps on any Unix), and the"
                     " tokens appear in every `gcloud run jobs describe` and every"
                     " deploy audit log. A validator that needs a secret declares"
                     " it in 'reads_secret' and fetches it under its own identity,"
