@@ -31,7 +31,10 @@ from komira_async.runtime.runtime_trait import Runtime
 
 from komira_http.client.body import EmptyBody, RequestBody
 from komira_http.client.header_map import HeaderMap
-from komira_http.client.redirect import RedirectLayer
+from komira_http.client.redirect import (
+    RedirectLayer,
+    _strip_sensitive_headers,
+)
 from komira_http.client.response_body import BufferedResponseBody
 from komira_http.client.service import (
     ClientRequest,
@@ -396,6 +399,93 @@ def test_no_redirect_returns_directly() raises:
     assert_equal(Int(layer.last_hops()), 0)
 
 
+def test_loop_error_redacts_query_and_userinfo() raises:
+    """The loop error names `scheme://host/path` only: a presigned Location's
+    signature (query) and userinfo must not reach error and log text."""
+    var statuses = List[Int]()
+    statuses.append(302)
+    statuses.append(302)
+    var locations = List[String]()
+    locations.append(String("http://u:pw@example.com/b?X-Sig=SECRETSIG"))
+    locations.append(String("http://u:pw@example.com/b?X-Sig=SECRETSIG"))
+    var inner = ScriptedRedirectService.new(statuses^, locations^)
+    var layer = RedirectLayer[ScriptedRedirectService].wrap(inner^, UInt32(10))
+    var reactor = _make_reactor()
+    var connector = _make_connector()
+    var req = _make_request_with_auth(
+        String("http://example.com/start"), String(""),
+    )
+    var raised = False
+    try:
+        var resp = layer.call_empty[
+            PerCoreAsyncRuntime[NoopSink], ScriptedConnector
+        ](req^, connector, reactor)
+        _ = resp^
+    except e:
+        var msg = String(e)
+        assert_true("redirect loop" in msg, "got: " + msg)
+        assert_true("SECRETSIG" not in msg, "query leaked: " + msg)
+        assert_true("pw" not in msg, "userinfo leaked: " + msg)
+        assert_true("example.com/b" in msg, "path must remain: " + msg)
+        raised = True
+    assert_true(raised, "loop must raise")
+
+
+def _assert_downgrade_refused(status: Int) raises:
+    var statuses = List[Int]()
+    statuses.append(status)
+    statuses.append(200)
+    var locations = List[String]()
+    locations.append(String("http://example.com/plain"))
+    locations.append(String(""))
+    var inner = ScriptedRedirectService.new(statuses^, locations^)
+    var layer = RedirectLayer[ScriptedRedirectService].wrap(inner^, UInt32(3))
+    var reactor = _make_reactor()
+    var connector = _make_connector()
+    var req = _make_request_with_auth(
+        String("https://example.com/start"), String("Bearer t"),
+    )
+    var raised = False
+    try:
+        var resp = layer.call_empty[
+            PerCoreAsyncRuntime[NoopSink], ScriptedConnector
+        ](req^, connector, reactor)
+        _ = resp^
+    except e:
+        var msg = String(e)
+        assert_true("downgrade" in msg, "got: " + msg)
+        raised = True
+    assert_true(raised, "downgrade must raise")
+    assert_equal(layer._inner.call_count(), 1, "no request after the refusal")
+
+
+def test_https_to_http_downgrade_refused() raises:
+    """An https origin redirecting to http is refused before the second call,
+    so a 307/308 never replays the request in cleartext."""
+    _assert_downgrade_refused(307)
+
+
+def test_https_to_http_downgrade_refused_on_301_get() raises:
+    _assert_downgrade_refused(301)
+
+
+def test_https_to_http_downgrade_refused_on_302_get() raises:
+    _assert_downgrade_refused(302)
+
+
+def test_strip_covers_cloud_credential_headers() raises:
+    var h = HeaderMap()
+    h.insert(String("X-Amz-Security-Token"), String("tok"))
+    h.insert(String("x-goog-api-key"), String("key"))
+    h.insert(String("X-Goog-User-Project"), String("proj"))
+    h.insert(String("Accept"), String("*/*"))
+    _strip_sensitive_headers(h)
+    assert_true(not h.get(String("X-Amz-Security-Token")).__bool__())
+    assert_true(not h.get(String("X-Goog-Api-Key")).__bool__())
+    assert_true(not h.get(String("X-Goog-User-Project")).__bool__())
+    assert_true(h.get(String("Accept")).__bool__(), "unrelated header kept")
+
+
 def main() raises:
     test_same_origin_redirect_keeps_authorization()
     test_cross_origin_redirect_strips_authorization()
@@ -403,4 +493,9 @@ def main() raises:
     test_redirect_loop_detected()
     test_max_redirects_exceeded_raises()
     test_no_redirect_returns_directly()
-    print("[OK] test_redirect_layer — all 6 tests passed")
+    test_loop_error_redacts_query_and_userinfo()
+    test_https_to_http_downgrade_refused()
+    test_https_to_http_downgrade_refused_on_301_get()
+    test_https_to_http_downgrade_refused_on_302_get()
+    test_strip_covers_cloud_credential_headers()
+    print("[OK] test_redirect_layer — all 11 tests passed")
