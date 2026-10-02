@@ -628,8 +628,8 @@ def _write_bytes_to_file(path: String, bytes: List[UInt8]) raises:
     fast path for sub-64 MiB payloads; chunked at 64 MiB above that). This
     decouples the ORC writer from the file API, so other file-system sinks
     can plug in without codec changes."""
-    from komira_async.fs.local_fs import LocalFs
-    from komira_async.fs.file_system import WriteMode
+    from komira_fs.local_fs import LocalFs
+    from komira_fs.file_system import WriteMode
     from komira_async.ops.waker_sink import NoopSink
 
     var fs = LocalFs[NoopSink].new()

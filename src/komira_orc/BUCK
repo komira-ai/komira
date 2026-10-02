@@ -15,6 +15,7 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_core:komira_core",
+        "//src/komira_fs:komira_fs",
         "//src/komira_protobuf:komira_protobuf",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
