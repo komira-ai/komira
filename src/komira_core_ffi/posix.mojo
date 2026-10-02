@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_core_ffi.posix — the one `getenv(3)` primitive, `access(2)` path
+# komira_core_ffi.posix — the one `getenv(3)` declaration, `access(2)` path
 # probes, and the calling thread's identity.
 # =============================================================================
 #
@@ -39,9 +39,16 @@
 # test reads through one small test-harness helper, never ad hoc. Any other
 # read is configuration and belongs in a parameter or a flag.
 #
+# `_read_env_into` is the second reader over the same declaration, for SECRET
+# material only: komira_secret_env's `ProcessEnv`, the secret store whose
+# handle names an environment variable. A secret may not ride argv (it is
+# world-readable in /proc/<pid>/cmdline), so the environment is one of its
+# channels. That reader copies into a caller-owned byte buffer, never a
+# `String`, so the caller can wipe it.
+#
 # Encapsulation: the `UnsafePointer[UInt8, MutUntrackedOrigin]` result of
 # `getenv` IS the FFI boundary. It never leaves this file; `_read_env`
-# returns a `String`.
+# returns a `String`, and `_read_env_into` copies into a caller's `Array`.
 #
 # Env reads use exactly the name asked for: no prefix rewriting, no fallback
 # to another spelling.
@@ -116,6 +123,44 @@ def _read_env(name: StaticString) -> String:
     return String(
         StringSlice(unsafe_from_utf8=Span(unsafe_ptr=env_ptr, length=n))
     )
+
+
+def _read_env_into[N: Int](name: String, mut buf: Array[UInt8, N]) raises -> Int:
+    """Copy environment variable `name`'s bytes into `buf`, exactly.
+
+    The reader for a SECRET held in the environment (komira_secret_env's
+    `ProcessEnv`): no `String` or `List` ever holds the value, so the caller
+    can build its zeroizing holder from `buf` and then wipe `buf`. Unlike
+    `_read_env`, unset and set-but-empty are different answers.
+
+    Returns -1 when the variable is unset, else the value's length `n`, with
+    the value in `buf[0:n]` (bytes past `n` are not written). Raises when the
+    value is longer than `N` bytes; `buf` is then left untouched, and the
+    error names neither the variable nor any byte of its value.
+
+    SAFETY: the untracked-origin `getenv` result is read only inside this
+    function: scanned to its NUL (no further than `N + 1` bytes), then copied
+    into `buf`. No pointer leaves this function.
+    """
+    var env_ptr = _env_getenv_owned(name)
+    if Int(env_ptr) == 0:
+        return -1
+    # Scan to the NUL, but no further than one byte past `N`: a longer value
+    # is refused, so its length past that is never needed.
+    var n: Int = 0
+    while n <= N:
+        if env_ptr[n] == UInt8(0):
+            break
+        n += 1
+    if n > N:
+        raise Error(
+            String("environment value is longer than ")
+            + String(N)
+            + " bytes"
+        )
+    for i in range(n):
+        buf[i] = env_ptr[i]
+    return n
 
 
 # -----------------------------------------------------------------------------

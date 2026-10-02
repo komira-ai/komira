@@ -15,7 +15,7 @@
 from std.ffi import external_call
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_core_ffi.posix import _read_env
+from komira_core_ffi.posix import _read_env, _read_env_into
 
 
 # -----------------------------------------------------------------------------
@@ -218,6 +218,68 @@ def test_read_env_preserves_non_ascii_bytes() raises:
 
 
 # -----------------------------------------------------------------------------
+# _read_env_into (the secret reader): N = 8 so both sides of the limit are
+# cheap to reach.
+# -----------------------------------------------------------------------------
+
+
+def test_read_env_into_unset_empty_and_set_differ() raises:
+    """Unset is -1 and set-but-empty is 0: the two answers `_read_env` merges."""
+    var buf = Array[UInt8, 8](fill=UInt8(0x5A))
+    _unsetenv("KOMIRA_TEST_POSIX_INTO_UNSET")
+    assert_equal(_read_env_into("KOMIRA_TEST_POSIX_INTO_UNSET", buf), -1)
+    _setenv("KOMIRA_TEST_POSIX_INTO_EMPTY", "")
+    var n_empty = _read_env_into("KOMIRA_TEST_POSIX_INTO_EMPTY", buf)
+    _unsetenv("KOMIRA_TEST_POSIX_INTO_EMPTY")
+    assert_equal(n_empty, 0)
+    _setenv("KOMIRA_TEST_POSIX_INTO_SET", "abc")
+    var n = _read_env_into("KOMIRA_TEST_POSIX_INTO_SET", buf)
+    _unsetenv("KOMIRA_TEST_POSIX_INTO_SET")
+    assert_equal(n, 3)
+    assert_equal(Int(buf[0]), Int(ord("a")))
+    assert_equal(Int(buf[2]), Int(ord("c")))
+    assert_equal(Int(buf[3]), 0x5A, "bytes past n are not written")
+
+
+def test_read_env_into_at_the_limit_and_one_past() raises:
+    """N bytes are read whole; N + 1 bytes are refused, never truncated to N.
+
+    Killed by: scanning `while n < N` (an N + 1 byte value would then read as
+    its first N bytes, a corrupted credential)."""
+    var buf = Array[UInt8, 8](fill=UInt8(0))
+    _setenv("KOMIRA_TEST_POSIX_INTO_MAX", "qqqqqqqq")
+    var n = _read_env_into("KOMIRA_TEST_POSIX_INTO_MAX", buf)
+    _unsetenv("KOMIRA_TEST_POSIX_INTO_MAX")
+    assert_equal(n, 8)
+    assert_equal(Int(buf[7]), Int(ord("q")))
+
+    var clean = Array[UInt8, 8](fill=UInt8(0))
+    _setenv("KOMIRA_TEST_POSIX_INTO_LONG", "rrrrrrrrr")
+    var msg = String("<not refused>")
+    try:
+        _ = _read_env_into("KOMIRA_TEST_POSIX_INTO_LONG", clean)
+    except e:
+        msg = String(e)
+    _unsetenv("KOMIRA_TEST_POSIX_INTO_LONG")
+    assert_equal(msg, "environment value is longer than 8 bytes")
+    for i in range(8):
+        assert_equal(Int(clean[i]), 0, "a refused value is not copied")
+
+
+def test_read_env_into_preserves_non_ascii_bytes() raises:
+    """Byte-exact, like `_read_env`: no byte >= 0x80 is re-encoded."""
+    var want = String("donn") + "é" + "日"
+    var buf = Array[UInt8, 16](fill=UInt8(0))
+    _setenv("KOMIRA_TEST_POSIX_INTO_UTF8", want)
+    var n = _read_env_into("KOMIRA_TEST_POSIX_INTO_UTF8", buf)
+    _unsetenv("KOMIRA_TEST_POSIX_INTO_UTF8")
+    var wb = want.as_bytes()
+    assert_equal(n, len(wb))
+    for i in range(len(wb)):
+        assert_equal(Int(buf[i]), Int(wb[i]))
+
+
+# -----------------------------------------------------------------------------
 # Test driver
 # -----------------------------------------------------------------------------
 
@@ -230,4 +292,7 @@ def main() raises:
     test_read_env_special_chars()
     test_read_env_value_is_not_ascii_only()
     test_read_env_preserves_non_ascii_bytes()
-    print("[test_posix_read_env] all 7 tests PASS")
+    test_read_env_into_unset_empty_and_set_differ()
+    test_read_env_into_at_the_limit_and_one_past()
+    test_read_env_into_preserves_non_ascii_bytes()
+    print("[test_posix_read_env] all 10 tests PASS")
