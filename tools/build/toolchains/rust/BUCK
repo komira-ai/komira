@@ -1,3 +1,4 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_libs")
 load("@komira//tools/build/rust:defs.bzl", "rust_sysroot")
@@ -34,7 +35,7 @@ pinned_file(
 # Mojo compiler closure takes its libgcc_s.so.1 from.
 conda_libs(
     name = "rustc_libs",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     libs = {
         "lib/libgcc_s.so.1": "komira//tools/build/toolchains:libgcc_15.3.0_linux-64.conda",
         "lib/libz.so.1": ":libzlib_1.3.1_linux-64.conda",
@@ -44,7 +45,7 @@ conda_libs(
 
 rust_sysroot(
     name = "sysroot",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     busybox = "komira//tools/build/toolchains:busybox",
     libs = ":rustc_libs",
     rust_std = ":rust-std-1.85.0-x86_64-unknown-linux-gnu.tar.xz",

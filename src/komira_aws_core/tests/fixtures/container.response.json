@@ -1,0 +1,7 @@
+{
+  "AccessKeyId": "ASIACONTAINEREXAMPLE",
+  "Expiration": "2026-09-15T18:00:00Z",
+  "RoleArn": "arn:aws:iam::123456789012:role/example-task-role",
+  "SecretAccessKey": "FAKEcontainerSecretKey\/EXAMPLEKEY00000000",
+  "Token": "FAKE-CONTAINER-SESSION-TOKEN"
+}
