@@ -84,6 +84,16 @@ def test_accepts_crlf_indentation_split_body_and_surrounding_text() raises:
 
 def test_pem_decode_takes_any_label() raises:
     _assert_equal_bytes(pem_decode(_block("CERTIFICATE", _BODY), "CERTIFICATE"), _bytes())
+    # The first block is the one read; a later block of the label is not.
+    var raised = False
+    try:
+        _ = pem_decode(
+            _block("CERTIFICATE", _BODY) + _block("PRIVATE KEY", _BODY),
+            "PRIVATE KEY",
+        )
+    except:
+        raised = True
+    assert_true(raised, "a block after the first was read")
 
 
 def test_refusals() raises:
@@ -95,8 +105,12 @@ def test_refusals() raises:
     assert_true(
         _refusal(_block("ENCRYPTED PRIVATE KEY", _BODY)).find("ENCRYPTED") >= 0
     )
-    # Another label.
+    # Another label, and another label first: the first block is the one
+    # read, and a PRIVATE KEY after a CERTIFICATE is not looked for.
     assert_true(_refused(_block("CERTIFICATE", _BODY)))
+    assert_true(
+        _refused(_block("CERTIFICATE", _BODY) + _block("PRIVATE KEY", _BODY))
+    )
     # END with another label, and no END at all.
     assert_true(
         _refused(

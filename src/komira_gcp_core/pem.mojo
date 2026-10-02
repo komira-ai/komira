@@ -104,7 +104,9 @@ def _label(line: List[UInt8], prefix: StaticString) raises -> String:
 
 
 def pem_decode(pem: String, label: String) raises -> List[UInt8]:
-    """The DER bytes of the first PEM block in `pem` labelled `label`.
+    """The DER bytes of the first PEM block in `pem`, which must be labelled
+    `label`. A block of another label is not skipped: a file whose first
+    block is a CERTIFICATE is refused when a PRIVATE KEY is asked for.
 
     Raises if there is no BEGIN line, if the first BEGIN line carries another
     label, if the block has no END line or the END line's label differs, or if
