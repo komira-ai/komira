@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
-load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library")
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
 
 # The protoc plugins that generate Mojo, from the `komira_proto_codegen`
 # crate. The Mojo proto rules name these binaries through the toolchain
@@ -10,13 +10,28 @@ _DEPS = [
     "komira//third_party/rust:prost-types",
 ]
 
+_LIB_SRCS = glob(
+    ["src/**/*.rs"],
+    exclude = ["src/main.rs", "src/main_*.rs"],
+)
+
+# The library is published behind its inline #[test]s: it, and every
+# generator binary that links it, cannot build unless they pass.
 rust_library(
     name = "komira_proto_codegen",
-    srcs = glob(
-        ["src/**/*.rs"],
-        exclude = ["src/main.rs", "src/main_*.rs"],
-    ),
+    srcs = _LIB_SRCS,
     crate_root = "src/lib.rs",
+    deps = _DEPS,
+    tests = [":komira_proto_codegen_unit"],
+)
+
+# The crate's inline #[test]s: the same sources, compiled with `rustc --test`
+# and run as a build action.
+rust_test(
+    name = "komira_proto_codegen_unit",
+    srcs = _LIB_SRCS,
+    crate_root = "src/lib.rs",
+    crate_name = "komira_proto_codegen",
     deps = _DEPS,
 )
 
