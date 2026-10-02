@@ -26,8 +26,11 @@
 # `to_proto3_json()` returns the raw scalar JSON text (a number / `true` /
 # `false`, or — for the string-shaped wrappers — the text WITHOUT enclosing
 # quotes; the caller wraps it). `is_json_string()` tells the caller whether
-# the value must be JSON-quoted. This split keeps the wrappers usable both
-# standalone and as a generated message field.
+# the value must be JSON-quoted. The float wrappers return the complete JSON
+# value the codec writes (`0.5`, `"NaN"`), so theirs is False. Every
+# numeric `from_proto3_json()` reads through `read_proto3_json`, with its
+# checks. This split keeps the wrappers usable both standalone and as a
+# generated message field.
 # =============================================================================
 
 from komira_proto_codec import (
@@ -43,6 +46,7 @@ from komira_json import (
     write_json_string,
     write_i64_dec,
     write_f64_dtoa,
+    parse_json_value,
 )
 from komira_encoding import base64_encode, base64_decode
 
@@ -84,7 +88,7 @@ struct DoubleValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
         return Self(_read_f64_json(v))
 
     def to_proto3_json(self) -> String:
-        return String(self.value)
+        return _f64_json_text(self.value)
 
     @staticmethod
     def is_json_string() -> Bool:
@@ -92,7 +96,7 @@ struct DoubleValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
-        return Self(_parse_f64(text))
+        return Self.read_proto3_json(parse_json_value(text))
 
 
 @fieldwise_init
@@ -127,7 +131,7 @@ struct FloatValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
         return Self(Float32(_read_f64_json(v)))
 
     def to_proto3_json(self) -> String:
-        return String(self.value)
+        return _f64_json_text(Float64(self.value))
 
     @staticmethod
     def is_json_string() -> Bool:
@@ -135,7 +139,7 @@ struct FloatValue(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
-        return Self(Float32(_parse_f64(text)))
+        return Self.read_proto3_json(parse_json_value(text))
 
 
 # =============================================================================
@@ -187,7 +191,7 @@ struct Int64Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
-        return Self(Int64(_parse_int(text)))
+        return Self.read_proto3_json(_json_string(text))
 
 
 @fieldwise_init
@@ -231,7 +235,7 @@ struct UInt64Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
-        return Self(UInt64(_parse_uint_text(text)))
+        return Self.read_proto3_json(_json_string(text))
 
 
 # =============================================================================
@@ -282,7 +286,7 @@ struct Int32Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
-        return Self(Int32(_parse_int(text)))
+        return Self.read_proto3_json(_json_string(text))
 
 
 @fieldwise_init
@@ -328,7 +332,7 @@ struct UInt32Value(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
-        return Self(UInt32(_parse_uint_text(text)))
+        return Self.read_proto3_json(_json_string(text))
 
 
 # =============================================================================
@@ -483,55 +487,30 @@ struct BytesValue(Proto3JsonWkt, Copyable, Movable):
 
 
 # =============================================================================
-# Local scalar parsers — kept self-contained (the only library calls are the
-# base64 codecs from komira_encoding).
+# The string helpers' readers. `from_proto3_json(text)` on a numeric wrapper
+# reads through the same `read_proto3_json` the codec arms call, so the
+# string helpers and the codec accept and refuse exactly the same values
+# (Int64 / UInt64 bounds, the 32-bit range checks). The integer wrappers
+# take the unquoted text, so it is handed over as a JSON string value, which
+# `as_int64` / `as_uint64` read as the decimal text proto3 JSON carries.
 # =============================================================================
 
 
-def _parse_int(text: String) raises -> Int:
-    """Parse a signed decimal integer."""
-    var b = text.as_bytes()
-    var n = len(b)
-    if n == 0:
-        raise Error("WktError: empty integer text")
-    var idx = 0
-    var negative = False
-    if b[0] == 0x2D:  # '-'
-        negative = True
-        idx = 1
-    elif b[0] == 0x2B:  # '+'
-        idx = 1
-    if idx >= n:
-        raise Error("WktError: integer text has no digits: " + text)
-    var v = 0
-    while idx < n:
-        var c = b[idx]
-        if c < 0x30 or c > 0x39:
-            raise Error("WktError: bad integer text: " + text)
-        v = v * 10 + Int(c - 0x30)
-        idx += 1
-    return -v if negative else v
+def _json_string(text: String) -> JsonValue:
+    var v = JsonValue()
+    v.kind = JSON_STRING
+    v.text = text
+    return v^
 
 
-def _parse_uint_text(text: String) raises -> Int:
-    """Parse an unsigned decimal integer."""
-    var b = text.as_bytes()
-    var n = len(b)
-    if n == 0:
-        raise Error("WktError: empty unsigned-integer text")
-    var idx = 0
-    if b[0] == 0x2B:  # tolerate a leading '+'
-        idx = 1
-    if idx >= n:
-        raise Error("WktError: unsigned-integer text has no digits: " + text)
-    var v = 0
-    while idx < n:
-        var c = b[idx]
-        if c < 0x30 or c > 0x39:
-            raise Error("WktError: bad unsigned-integer text: " + text)
-        v = v * 10 + Int(c - 0x30)
-        idx += 1
-    return v
+def _f64_json_text(v: Float64) -> String:
+    """The complete JSON value `write_proto3_json` writes for a double: a
+    shortest-form number, or the quoted string "NaN" / "Infinity" /
+    "-Infinity" (which is why the float wrappers' `is_json_string()` is
+    False: their text is already a complete JSON value)."""
+    var buf = List[UInt8]()
+    _write_f64_json(buf, v)
+    return String(unsafe_from_utf8=Span(buf))
 
 
 def _parse_f64(text: String) raises -> Float64:

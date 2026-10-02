@@ -326,9 +326,10 @@ struct Struct(Proto3JsonWkt, Copyable, Movable):
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
-        """Decode the `map<string, Value>` field."""
-        var keys = List[String]()
-        var values = List[Value]()
+        """Decode the `map<string, Value>` field. A key that repeats on the
+        wire replaces the earlier entry (last write wins), as `put` and the
+        JSON reader do and as protobuf map semantics require."""
+        var out = Self.new()
         while True:
             var key = dec.next_field()
             if key.end:
@@ -338,11 +339,10 @@ struct Struct(Proto3JsonWkt, Copyable, Movable):
                 # Copy both fields out — a partial-move (`entry.key^`) of a
                 # field from the middle of a struct with a synthesized
                 # destructor is not allowed.
-                keys.append(entry.key)
-                values.append(entry.value.copy())
+                out.put(entry.key, entry.value.copy())
             else:
                 dec.skip()
-        return Self(keys^, values^)
+        return out^
 
     # -- the canonical-JSON surface ---------------------------------------
 
