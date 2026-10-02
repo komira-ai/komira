@@ -1,0 +1,4 @@
+GET /latest/meta-data/iam/security-credentials/ HTTP/1.1
+Host: 169.254.169.254
+X-aws-ec2-metadata-token: AQAEAFAKE-IMDS-SESSION-TOKEN==
+

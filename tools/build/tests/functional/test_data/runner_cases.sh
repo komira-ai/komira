@@ -31,6 +31,11 @@ case "\${PROBE_MODE:-}" in
         echo "\$TEST_TMPDIR" >> "\$PROBE_LOG"
         : > "\$TEST_TMPDIR/left_by_probe"
         exit 0 ;;
+    other) exit 0 ;;
+    seen)
+        [ "\${SEEN_VAR:-}" = "a=b c" ] || { echo "probe: SEEN_VAR='\${SEEN_VAR:-}'"; exit 16; }
+        [ -n "\${LD_LIBRARY_PATH:-}" ] || { echo "probe: LD_LIBRARY_PATH unset"; exit 17; }
+        exit 0 ;;
     *) echo "probe: PROBE_MODE='\${PROBE_MODE:-}'"; exit 15 ;;
 esac
 PROBE
@@ -80,6 +85,25 @@ if [ "$rc" = 0 ] || [ -e "$D/m4" ]; then
 else
     ok env_bin
 fi
+# BIN naming ANOTHER program that would pass: the test must still run (and fail).
+printf '#!%s sh\nexit 0\n' "$BB" > "$D/other"
+"$BB" chmod +x "$D/other"
+run env_bin_other "$D/m4b" --env PROBE_MODE=red --env "BIN=$D/other"
+if [ "$rc" = 0 ] || [ -e "$D/m4b" ]; then
+    bad env_bin_other "a red test with --env BIN=<passing script> gave rc $rc, marker '$("$BB" cat "$D/m4b" 2> /dev/null)'"
+else
+    ok env_bin_other
+fi
+# Every other name the runner's shell uses after the export step.
+run env_names "$D/m4c" --env PROBE_MODE=red --env T=/nonexistent --env CWD=/nonexistent --env HELD=1 --env HOLD_ENTRY=e --env IFS=x --env ENV=/dev/null --env BB=true --env RUNNER=true
+if [ "$rc" = 0 ] || [ -e "$D/m4c" ]; then
+    bad env_names "a red test with runner-variable names in --env gave rc $rc"
+else
+    ok env_names
+fi
+# The test's own variables reach it (a value with a space and an =), alongside the runner's.
+run env_seen "$D/m4d" --env PROBE_MODE=seen --env "SEEN_VAR=a=b c"
+if [ "$rc" = 0 ] && [ "$("$BB" cat "$D/m4d" 2> /dev/null)" = "PASS //x:env_seen" ]; then ok env_seen; else bad env_seen "rc $rc: $("$BB" tail -n 3 "$D/env_seen.log")"; fi
 run env_rc "$D/m5" --env PROBE_MODE=red --env rc=0 --env MARKER=/dev/null --env LABEL=x
 if [ "$rc" = 0 ] || [ -e "$D/m5" ]; then bad env_rc "a red test with --env rc=0 gave rc $rc"; else ok env_rc; fi
 # A test killed by a signal is red with its own status (128+N) and no marker:

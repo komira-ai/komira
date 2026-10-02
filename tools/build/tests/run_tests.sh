@@ -187,6 +187,18 @@
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
 #      go red (tests//negative/aws_codegen).
+#  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
+#      inline tests of komira_proto_codegen run as a build action and pass,
+#      every one counted. In tests//negative/rust_test a failing #[test]
+#      makes the test, a binary welded to it, and a binary linking a library
+#      welded to it unbuildable (GATED TEST FAILED, with the harness's
+#      `1 passed; 1 failed`: the panic unwound), while the test executable
+#      itself compiles; a binary welded to a passing test builds and runs;
+#      the harness sees only HOME, PATH and TMPDIR; a target with no tests
+#      and an #[ignore]d test are each refused; a hanging test is NO VERDICT
+#      at its timeout. There are no holds: every welded test must pass.
+#      `buck2 test` of a welded library runs its rust_test (Pass, with the
+#      harness's count), and of a binary welded to a red test fails.
 set -uo pipefail
 
 umbrella=1
@@ -808,6 +820,42 @@ fi
 expect_green aws_codegen tests//functional/aws_codegen:
 expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
 expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
+
+# 35
+RT=tests//negative/rust_test
+if "$BUCK2" build //tools/build/proto-codegen:komira_proto_codegen_unit --show-full-simple-output > "$LOG/rust_test_unit.txt" 2> "$LOG/rust_test_unit.log"; then
+    rt_marker=$(tail -n 1 "$LOG/rust_test_unit.txt")
+    if grep -qE '^PASS komira//tools/build/proto-codegen:komira_proto_codegen_unit: [1-9][0-9]* passed$' "$rt_marker"; then
+        pass "rust_test_unit: $(cut -d' ' -f3- "$rt_marker")"
+    else
+        fail "rust_test_unit: marker $rt_marker does not record a passing run: $(cat "$rt_marker")"
+    fi
+else
+    fail "rust_test_unit (see $LOG/rust_test_unit.log)"
+fi
+expect_green rust_test_compiles "$RT:red[bin]"
+expect_red rust_test_red "GATED TEST FAILED: tests//negative/rust_test:red" "$RT:red"
+expect_red rust_test_unwinds "1 passed; 1 failed" "$RT:red"
+expect_red rust_test_bin_red "GATED TEST FAILED" "$RT:bin"
+expect_red rust_test_lib_consumer_red "GATED TEST FAILED" "$RT:lib_consumer"
+expect_green rust_test_bin_green "$RT:bin_green" "$RT:bin_green[run_check]"
+expect_red rust_test_empty "EMPTY GATE" "$RT:empty"
+expect_red rust_test_ignored "#[ignore]d test(s) did not run" "$RT:ignored"
+expect_green rust_test_env_scrubbed "$RT:env_scrubbed"
+expect_red rust_test_hang "timed out after 3s (exit 142)" "$RT:hang"
+if "$BUCK2" test //tools/build/proto-codegen:komira_proto_codegen > "$LOG/rust_test_buck2_test.log" 2>&1 &&
+    grep -qE 'PASS komira//tools/build/proto-codegen:komira_proto_codegen_unit: [1-9][0-9]* passed' "$LOG/rust_test_buck2_test.log"; then
+    pass "rust_test_buck2_test: $(grep -m1 -oE 'komira_proto_codegen_unit: [0-9]+ passed' "$LOG/rust_test_buck2_test.log")"
+else
+    fail "rust_test_buck2_test: buck2 test of the welded library did not run its tests (see $LOG/rust_test_buck2_test.log)"
+fi
+if "$BUCK2" test "$RT:bin" > "$LOG/rust_test_buck2_test_red.log" 2>&1; then
+    fail "rust_test_buck2_test_red: buck2 test $RT:bin passed, but its welded test fails"
+elif grep -qF "GATED TEST FAILED: tests//negative/rust_test:red" "$LOG/rust_test_buck2_test_red.log"; then
+    pass "rust_test_buck2_test_red"
+else
+    fail "rust_test_buck2_test_red: failed without the GATED TEST FAILED line (see $LOG/rust_test_buck2_test_red.log)"
+fi
 
 # 9
 if [ "$MODE" = local ]; then

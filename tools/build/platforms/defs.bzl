@@ -229,8 +229,9 @@ def local_host_refusal():
     if host.os.is_linux and host.arch.is_x86_64:
         return None
     return ("local execution runs the pinned linux x86_64 toolchain on this machine, " +
-            "which is not Linux x86_64. Use a remote-execution service: copy " +
-            ".buckconfig.local.example to .buckconfig.local and fill it in " +
+            "which is not Linux x86_64, so this checkout cannot build here yet. Build " +
+            "on a Linux x86_64 machine, or point it at a remote-execution service: " +
+            "copy .buckconfig.local.example to .buckconfig.local and fill it in " +
             "(DEVELOPMENT.md, step 3).")
 
 def komira_local_execution_platforms(name, visibility = None):
@@ -304,6 +305,16 @@ def execution_mode():
         ))
     return "local"
 
+def _linux_properties():
+    props = re_properties(LINUX_PROPERTIES_KEY, required = False)
+    if props:
+        return props
+    fail(("remote execution is selected (`[komira] execution = remote`, or a `[komira_re]` " +
+          "key is set; check `buck2 audit config komira` for the file it comes from, " +
+          "such as a ~/.buckconfig.d file), but `[komira_re] {}` is not set. Set it " +
+          "(.buckconfig.local.example), or build on this machine with " +
+          "`-c komira.execution=local`.").format(LINUX_PROPERTIES_KEY))
+
 def komira_default_execution_platforms(name, visibility = None):
     """Local execution platforms, or remote ones when `.buckconfig.local` names workers.
 
@@ -315,7 +326,7 @@ def komira_default_execution_platforms(name, visibility = None):
         return
     komira_execution_platforms(
         name = name,
-        linux = re_properties(LINUX_PROPERTIES_KEY),
+        linux = _linux_properties(),
         darwin = re_properties(DARWIN_PROPERTIES_KEY, required = False),
         visibility = visibility,
     )
