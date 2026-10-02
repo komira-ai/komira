@@ -69,3 +69,23 @@ archive_files(
     tree_dirs = [_PROTOCOL_TESTS],
     visibility = ["PUBLIC"],
 )
+
+# The endpoint rulesets komira_aws_core's interpreter (endpoint_rules.mojo)
+# evaluates, the partition table their `aws.partition` reads, and botocore's
+# test cases for them. Each file is a sub-target named by its path; all are
+# read by komira_aws_core's endpoint ruleset tests (test_s3_endpoint_rules,
+# test_endpoint_rules_library).
+archive_files(
+    name = "endpoint_rules",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":botocore-1.43.70.tar.gz",
+    files = [
+        "LICENSE.txt",
+        "NOTICE",
+        "botocore/data/partitions.json",
+        "botocore/data/s3/2006-03-01/endpoint-rule-set-1.json",
+        "tests/functional/endpoint-rules/s3/endpoint-tests-1.json",
+    ],
+    strip_prefix = "botocore-1.43.70",
+    visibility = ["PUBLIC"],
+)
