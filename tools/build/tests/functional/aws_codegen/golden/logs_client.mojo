@@ -13,7 +13,7 @@
 #   model sha256 : 24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 1
+#   generator    : aws-client-gen version 2
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -79,7 +79,7 @@ from komira_aws_core import (
     resolve_endpoint,
     send_sigv4_signed_request,
 )
-from komira_serde.json_value import (
+from komira_json import (
     JsonValue,
     parse_json_value,
 )

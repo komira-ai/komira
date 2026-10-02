@@ -9,7 +9,7 @@ encoders); every other name raises or answers empty, so a test that came to
 depend on one would fail rather than pass on a stand-in.
 """
 
-from komira_serde.json_value import JsonValue
+from komira_json import JsonValue
 
 comptime AWS_TS_UNIX: Int = 0
 comptime AWS_TS_ISO8601: Int = 1

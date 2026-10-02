@@ -17,16 +17,17 @@ file at the pinned commit.
 | `:googleapis.tar.gz` | the archive at the pin (`pinned_file`) |
 | `:googleapis` | the files extracted from it, each a sub-target named by its path (`:googleapis[google/rpc/status.proto]`, `:googleapis[LICENSE]`) |
 | `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
+| `:storage_v2` | the Cloud Storage v2 protos (root `google/storage/v2/storage.proto`, the gRPC storage API), checked the same way |
 
 ## Using the protos
 
-Depend on `//tools/vendor/googleapis:logging_v2`. Its `ProtoSrcsInfo` is the
-checked tree, so a `mojo_proto_library` names it in `proto_deps`;
-`:logging_v2[tree]` is that tree as a directory (the files at their import
-paths), and the default output is protoc's descriptor set for the roots
-(`--include_imports`).
+Depend on the closure target for your API (`:logging_v2`, `:storage_v2`). Its
+`ProtoSrcsInfo` is the checked tree, so a `mojo_proto_library` names it in
+`proto_deps`; `:<target>[tree]` is that tree as a directory (the files at
+their import paths), and the default output is protoc's descriptor set for the
+roots (`--include_imports`).
 
-`:logging_v2` is a `proto_check` ([proto_check.bzl](proto_check.bzl),
+Each closure target is a `proto_check` ([proto_check.bzl](proto_check.bzl),
 [proto_check.sh](proto_check.sh)): protoc must parse the roots from the
 extracted files alone, into a descriptor set naming every one of them. A file
 the closure needs and the list lacks fails the build, and so does a listed
@@ -44,12 +45,14 @@ build on its own.
    there is nothing to bump for.
 2. Set `_COMMIT` in BUCK to the new full commit sha, and `_SHA256` to the
    sha256 of `https://github.com/googleapis/googleapis/archive/<commit>.tar.gz`.
-3. Build `//tools/vendor/googleapis:logging_v2`. If the new commit changed the
-   import closure, the check names the file to add to (or drop from)
-   `_LOGGING_V2_CLOSURE`.
+3. Build `//tools/vendor/googleapis:` (every checked closure). If the new
+   commit changed an import closure, its check names the file to add to (or
+   drop from) that closure's list (`_LOGGING_V2_CLOSURE`,
+   `_STORAGE_V2_CLOSURE`).
 
 ## Adding a client
 
-Add its roots and their closure as a list in BUCK, add the closure to
-`:googleapis`'s `files`, and declare a `proto_check` over them as
-`:logging_v2` is declared.
+Add its roots and their closure as a list in BUCK, append the closure to
+`_ALL_CLOSURES` (`:googleapis` extracts the union, so a file two closures
+need is extracted once), and declare a `proto_check` over them as
+`:logging_v2` and `:storage_v2` are declared.

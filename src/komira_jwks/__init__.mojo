@@ -18,8 +18,8 @@
 #
 # Two IETF documents and a hash: anyone can use every symbol here.
 #
-# Dep closure: `komira_crypto` (sha256 / base64url / ed25519_pubkey_from_seed)
-# and `komira_secret_store` (the zeroizing move-only `SecretValue`). It must not
+# Dep closure: `komira_crypto` (sha256 / ed25519_pubkey_from_seed),
+# `komira_encoding` (base64url) and `komira_secret_store` (the zeroizing move-only `SecretValue`). It must not
 # grow a dependency on any token-minting or authorization package.
 #
 # `well_known.IDENTITY_JWKS_PATH` names the path an identity-token issuer serves

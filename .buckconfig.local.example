@@ -1,16 +1,32 @@
 # Copy to `.buckconfig.local` (gitignored) and fill in your remote-execution
 # service to build there instead of on your machine. Without this file every
-# action runs locally; with `[komira_re]
-  # The exact REAPI platform property set every Linux x86_64 action carries,
-  # as comma-separated key=value pairs. Your service chooses the worker for
-  # each action; the build states nothing about worker classes. Workers
-  # match a set exactly: a key the workers do not advertise leaves actions
-  # queued until the scheduler gives up. See tools/build/platforms/README.md.
-  linux_properties = pool=default
-  # Optional: macOS arm64 workers, for `--target-platforms
-  # komira//tools/build/platforms:darwin-arm64`: their exact property set
-  # (different from the linux one), and the host identity each prints for
+# action runs locally, for this machine's own platform.
+#
+# Where actions run follows the platform the build defaults to, which is this
+# machine's own: set the key of YOUR platform below to build on that platform's
+# pool. A key for another platform is used only when you name that platform
+# with --target-platforms; it never changes where your own builds run.
+
+[buck2_re_client]
+  # Your remote-execution service. See DEVELOPMENT.md, step 3.
+  # engine_address = grpc://re.example.invalid:8980
+  # action_cache_address = grpc://re.example.invalid:8980
+  # cas_address = grpc://re.example.invalid:8980
+  # instance_name = main
+  # tls = false
+
+[komira_re]
+  # The exact REAPI platform property set every action of one platform
+  # carries, as comma-separated key=value pairs; one key per (os, cpu). Your
+  # service chooses the worker for each action; the build states nothing about
+  # worker classes. Workers match a set exactly: a key the workers do not
+  # advertise leaves actions queued until the scheduler gives up. See
+  # tools/build/platforms/README.md.
+  linux_x86_64_properties = pool=mojo-sized
+  # macOS arm64 workers: their exact property set (different from the linux
+  # one), and the host identity each prints for
   # `sh tools/build/mojo/darwin/host_identity.sh`, separated by spaces. See
   # tools/build/toolchains/README.md, "macOS".
-  # darwin_properties = pool=macos
+  # darwin_arm64_properties = pool=darwin-sized
   # darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210
+  # linux_arm64_properties is reserved: the platform is declared, not built yet.
