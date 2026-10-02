@@ -17,7 +17,7 @@
 # TRACKS it), every `_eng[].method()` inlines — the dispatch cost is gone,
 # leaving the irreducible TLS / raw-ts / encode / push.
 #
-# This is EXACTLY how `TracerHandle[origin]` (komira_obs) carries
+# This is EXACTLY how `TracerHandle[origin]` (komira_trace) carries
 # `Pointer[Tracer, origin]` for the obs path.
 #
 # # THE THREE-TIER API (documented here; the call surface is identical across
@@ -26,7 +26,7 @@
 #   ctx.logger.info[fmt, module](*args)      # TYPED, primary.
 #                                            #   concrete-origin field ref,
 #                                            #   dispatch inlines.
-#   service.logger.info[fmt, module](*args)  # TYPED, control-plane — same path,
+#   service.logger.info[fmt, module](*args)  # TYPED, service-owned — same path,
 #                                            #   the service owns its engine.
 #   log.info[fmt, module](*args)             # AMBIENT fallback. The
 #                                            #   no-ctx/no-service reach via the
@@ -60,7 +60,7 @@ from komira_log.levels import (
 )
 from komira_log.log_arg import LogArg, ARG_FIELD
 from komira_log.pattern_layout import interpolate, render_line
-from komira_obs.clock import now_unix_ms
+from komira_clock import now_unix_ms
 
 from komira_log.engine.shared_engine import SharedEngine
 from komira_log.engine.log_event_record import (

@@ -38,8 +38,8 @@
 # process lifetime. It outlives every possible logging call site (logging
 # happens only while the process is live), so there is no destroy-recreate
 # cycle and no stale-pointer hazard. The parked value is a POD integer address
-# (no wildcard-origin FIELD); the `unsafe_from_address` cast is the documented
-# singleton exception, confined to `_resolve_config()` below.
+# (no wildcard-origin FIELD); the pointer is produced by a C getter
+# (`komira_log_holder_get_config`) inside `_resolve_config()` below.
 #
 # `LogConfig` itself holds `EnvFilter` (heap) + `StderrSink` (atomic) + an
 # `Atomic[uint8]` global level. It is NEVER stored in a byte-backed slab — it
@@ -199,9 +199,10 @@ def _resolve_config() -> UnsafePointer[LogConfig, MutUntrackedOrigin]:
     facade) MUST check `is_installed()` before deref. The untracked origin is
     confined to this one resolve site.
     """
-    return UnsafePointer[LogConfig, MutUntrackedOrigin](
-        unsafe_from_address=_config_holder_get()
-    )
+    return external_call[
+        "komira_log_holder_get_config",
+        UnsafePointer[LogConfig, MutUntrackedOrigin],
+    ]()
 
 
 # =============================================================================

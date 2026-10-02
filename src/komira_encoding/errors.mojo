@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # A decoder raises an `Error` whose message starts with
-# `komira_encoding.<Kind>: `, where `<Kind>` is one of the four names below,
+# `komira_encoding.<Kind>: `, where `<Kind>` is one of the names below,
 # followed by the function name, what is wrong, and the zero-based byte
 # position in the input where it was found:
 #
@@ -32,6 +32,15 @@ symbols."""
 comptime NON_CANONICAL: StaticString = "NonCanonical"
 """Non-zero unused bits in the last symbol (RFC 4648 section 3.5): the input
 is not the encoding of any byte string. Position: the last symbol."""
+
+comptime INVALID_BOUNDARY: StaticString = "InvalidBoundary"
+"""PEM (pem.mojo): no BEGIN line, a malformed encapsulation boundary, a block
+with no END line, or an END label that differs from the BEGIN label.
+Position: the start of the offending boundary (or the end of the input)."""
+
+comptime LABEL_MISMATCH: StaticString = "LabelMismatch"
+"""PEM (pem.mojo): the first block is well-formed but its label is not the
+one asked for. Position: the start of the label on the BEGIN line."""
 
 comptime ERROR_PREFIX: StaticString = "komira_encoding."
 """Every decode error message starts with this, then the kind."""
