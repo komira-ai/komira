@@ -37,3 +37,35 @@ archive_files(
     src = ":files[{}]".format(botocore_model_path(service)),
     visibility = ["PUBLIC"],
 ) for service in sorted(BOTOCORE_MODELS)]
+
+# botocore's protocol conformance corpus, `tests/unit/protocols`: the case
+# files of the protocols the AWS generator serves or is to serve, and the
+# ignore list botocore applies to them (matched by file basename, as
+# botocore's tests/unit/test_protocols.py does). One directory, the
+# `[tests/unit/protocols]` sub-target, read by
+# komira//tools/build/proto-codegen (the conformance driver, its test, and
+# xml-equiv-verdicts).
+_PROTOCOL_TESTS = "tests/unit/protocols"
+
+_PROTOCOL_TEST_STEMS = [
+    "json",
+    "json_1_0",
+    "json_1_0-query-compatible",
+    "rest-json",
+    "rest-xml",
+]
+
+archive_files(
+    name = "protocol_tests",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":botocore-1.43.70.tar.gz",
+    one_tree = True,
+    files = ["LICENSE.txt", "NOTICE", _PROTOCOL_TESTS + "/protocol-tests-ignore-list.json"] + [
+        "{}/{}/{}.json".format(_PROTOCOL_TESTS, direction, stem)
+        for direction in ["input", "output"]
+        for stem in _PROTOCOL_TEST_STEMS
+    ],
+    strip_prefix = "botocore-1.43.70",
+    tree_dirs = [_PROTOCOL_TESTS],
+    visibility = ["PUBLIC"],
+)

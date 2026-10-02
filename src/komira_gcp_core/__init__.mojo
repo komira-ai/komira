@@ -40,6 +40,13 @@ komira_retry):
                       google.rpc.RetryInfo as the server delay) and
                       `gcp_retry_policy` (AIP-4221 backoff); the policy,
                       backoff and loop themselves are komira_retry's.
+  - v4_sign.mojo    : Cloud Storage V4 signed URLs (GOOG4-RSA-SHA256):
+                      canonical request, string to sign, the RSA signature
+                      (komira_crypto) and `gcs_v4_signed_url`. Pure: the
+                      signing time is a parameter
+                      (`gcs_v4_stamps_from_unix_seconds`).
+  - _text.mojo      : private, not re-exported: the package's one RFC 3986
+                      percent-encoder (`pageToken`, the V4 path and query).
 
 Nothing in this package reads the environment or opens a socket.
 """
@@ -87,3 +94,27 @@ from .pagination import (
     with_page_token,
 )
 from .retry import GcpRetryClassifier, gcp_retry_policy
+from .v4_sign import (
+    GCS_V4_ALGORITHM,
+    GCS_V4_CONTENT_SHA256_HEADER,
+    GCS_V4_DEFAULT_HOST,
+    GCS_V4_MAX_EXPIRES_SECONDS,
+    GCS_V4_REQUEST_TYPE,
+    GCS_V4_SERVICE,
+    GCS_V4_UNSIGNED_PAYLOAD,
+    GcsV4CanonicalHeaders,
+    GcsV4CanonicalRequest,
+    GcsV4Header,
+    GcsV4QueryParam,
+    GcsV4ServiceAccount,
+    GcsV4Stamps,
+    gcs_v4_build_canonical_request,
+    gcs_v4_canonical_headers,
+    gcs_v4_canonical_path,
+    gcs_v4_canonical_query,
+    gcs_v4_credential_scope,
+    gcs_v4_sign_string_to_sign,
+    gcs_v4_signed_url,
+    gcs_v4_stamps_from_unix_seconds,
+    gcs_v4_string_to_sign,
+)
