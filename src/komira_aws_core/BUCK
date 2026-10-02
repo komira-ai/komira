@@ -5,6 +5,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the AWS SDK default credential provider chain and region resolution; and
 # the socket-free half of a generated client's send: AwsRequest / AwsResponse /
 # HttpResult (bodies as bytes), AwsErrorInfo,
+# the REST binding runtime a restJson1 / restXml client calls (URI labels
+# and query, list and prefix headers, scalar text and the timestamp formats,
+# restJson1 errors),
 # the awsJson scalar codec and error shape, endpoint and partition resolution
 # (AWS_ENDPOINT_URL[_<SERVICE>], FIPS, dual-stack), the AwsCredsSource trait,
 # and the SigV4-signed request builder.
@@ -44,6 +47,9 @@ mojo_library(
         "tests/test_aws_codec.mojo",
         "tests/test_aws_json.mojo",
         "tests/test_aws_response.mojo",
+        "tests/test_aws_rest_headers.mojo",
+        "tests/test_aws_rest_uri.mojo",
+        "tests/test_aws_text.mojo",
         "tests/test_credential_chain.mojo",
         "tests/test_credential_wire.mojo",
         "tests/test_creds_source.mojo",
