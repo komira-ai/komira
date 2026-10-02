@@ -19,6 +19,8 @@ clients.
 - `aws_codec.mojo`: the awsJson scalar encoding (`AwsJsonToken`, the
   `aws_token_*` encoders and decoders, the AWS_TS_* timestamp formats) and
   the error shape (`aws_error_code*`, `aws_error_message_from_body`).
+- `aws_json.mojo`: the `JsonValue`-typed `aws_json_*` / `aws_*_from_json` /
+  `aws_ts_to_json` names a generated module calls, over komira_json.
 - `endpoint.mojo`: `AwsEndpoint`, the partitions, `aws_service_endpoint`,
   `resolve_endpoint`, and `aws_endpoint_config` (AWS_ENDPOINT_URL[_<SVC>],
   FIPS and dual-stack, from the standard settings only).
@@ -53,6 +55,19 @@ from .aws_codec import (
     aws_token_string,
     aws_token_ts,
     aws_ts_from_token,
+)
+from .aws_json import (
+    aws_blob_from_json,
+    aws_f64_from_json,
+    aws_json_blob,
+    aws_json_bool,
+    aws_json_f32,
+    aws_json_f64,
+    aws_json_i32,
+    aws_json_i64,
+    aws_json_string,
+    aws_ts_from_json,
+    aws_ts_to_json,
 )
 from .aws_request import AwsRequest, HttpResult
 from .credential import AwsCredential

@@ -23,7 +23,7 @@
 # (number, string, bool) and its text, unescaped. The JSON document type is
 # komira_json's `JsonValue`; each `aws_json_*` name the generator imports is
 # a one-line wrap of the token function here (`JsonValue.from_number(t.text)`
-# / `.from_string` / `.from_bool`) and lands with that dependency. Every rule
+# / `.from_string` / `.from_bool`) in aws_json.mojo. Every rule
 # of the encoding is here and tested here.
 #
 # Errors (https://smithy.io/2.0/aws/protocols/aws-json-1_0-protocol.html

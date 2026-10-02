@@ -31,10 +31,12 @@ mojo_library(
     deps = [
         "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_json:komira_json",
         "//src/komira_xml:komira_xml",
     ],
     test_srcs = [
         "tests/test_aws_codec.mojo",
+        "tests/test_aws_json.mojo",
         "tests/test_credential_chain.mojo",
         "tests/test_credential_wire.mojo",
         "tests/test_creds_source.mojo",
