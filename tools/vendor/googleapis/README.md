@@ -21,13 +21,13 @@ file at the pinned commit.
 
 ## Using the protos
 
-Depend on `//tools/vendor/googleapis:logging_v2`. Its `ProtoSrcsInfo` is the
-checked tree, so a `mojo_proto_library` names it in `proto_deps`;
-`:logging_v2[tree]` is that tree as a directory (the files at their import
-paths), and the default output is protoc's descriptor set for the roots
-(`--include_imports`).
+Depend on the closure target for your API (`:logging_v2`, `:storage_v2`). Its
+`ProtoSrcsInfo` is the checked tree, so a `mojo_proto_library` names it in
+`proto_deps`; `:<target>[tree]` is that tree as a directory (the files at
+their import paths), and the default output is protoc's descriptor set for the
+roots (`--include_imports`).
 
-`:logging_v2` is a `proto_check` ([proto_check.bzl](proto_check.bzl),
+Each closure target is a `proto_check` ([proto_check.bzl](proto_check.bzl),
 [proto_check.sh](proto_check.sh)): protoc must parse the roots from the
 extracted files alone, into a descriptor set naming every one of them. A file
 the closure needs and the list lacks fails the build, and so does a listed
@@ -52,7 +52,7 @@ build on its own.
 
 ## Adding a client
 
-Add its roots and their closure as a list in BUCK, add the closure to
-`:googleapis`'s `files` (shared: a file two closures need is extracted
-once), and declare a `proto_check` over them as
-`:logging_v2` is declared.
+Add its roots and their closure as a list in BUCK, append the closure to
+`_ALL_CLOSURES` (`:googleapis` extracts the union, so a file two closures
+need is extracted once), and declare a `proto_check` over them as
+`:logging_v2` and `:storage_v2` are declared.

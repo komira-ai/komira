@@ -43,7 +43,8 @@ _LOGGING_V2_CLOSURE = _LOGGING_V2_ROOTS + [
 
 # Cloud Storage v2 (the gRPC storage API, for the generated GCS client): the
 # root and its import closure, google/protobuf/* excepted. :storage_v2 refuses
-# this list unless it is exactly that closure.
+# this list unless it is exactly that closure, so a bump that changes the
+# imports fails the build until the list follows.
 _STORAGE_V2_ROOTS = [
     "google/storage/v2/storage.proto",
 ]
@@ -64,6 +65,10 @@ _STORAGE_V2_CLOSURE = _STORAGE_V2_ROOTS + [
     "google/type/expr.proto",
 ]
 
+# Every client's closure; a new client appends its list here, and :googleapis
+# extracts the union.
+_ALL_CLOSURES = _LOGGING_V2_CLOSURE + _STORAGE_V2_CLOSURE
+
 # The files out of the archive, each a sub-target named by its path:
 # :googleapis[LICENSE] is googleapis's license file at the pin. A file several
 # closures share is extracted once.
@@ -71,7 +76,7 @@ archive_files(
     name = "googleapis",
     exec_compatible_with = LINUX_X86_64,
     archive = ":googleapis.tar.gz",
-    files = ["LICENSE"] + sorted({f: None for f in _LOGGING_V2_CLOSURE + _STORAGE_V2_CLOSURE}.keys()),
+    files = ["LICENSE"] + sorted({f: None for f in _ALL_CLOSURES}.keys()),
     strip_prefix = "googleapis-" + _COMMIT,
     visibility = ["PUBLIC"],
 )
