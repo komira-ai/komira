@@ -1,0 +1,5 @@
+GET /v1/credentials HTTP/1.1
+Host: 169.254.170.23
+Accept: application/json
+Authorization: example-eks-pod-identity-token
+

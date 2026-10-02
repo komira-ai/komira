@@ -84,8 +84,8 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_obs.ring_buffer import OVERFLOW_BLOCK
-from komira_obs.metric_point import (
+from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK
+from komira_metrics.metric_point import (
     MetricPoint,
     METRIC_COUNTER,
     METRIC_GAUGE,
@@ -140,7 +140,7 @@ def _fixed_anchor() -> CalibrationAnchor:
 
 
 def _a_point() raises -> MetricPoint:
-    """A monotonic DELTA counter point built through `komira_obs`'s own
+    """A monotonic DELTA counter point built through `komira_metrics`'s own
     constructor — a hand-assembled `MetricPoint` could disagree with the
     kind/flag pairing the exporter relies on and would prove nothing."""
     var p = counter_point(

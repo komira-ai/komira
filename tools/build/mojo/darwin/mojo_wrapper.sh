@@ -26,9 +26,12 @@
 #                  `$ORIGIN` run path becomes `@loader_path`.
 #   --watchdog-idle-secs, --watchdog-sample-secs   the compile watchdog of
 #                  ../mojo_wrapper.sh, sampling ps(1) rather than /proc; see
-#                  the compile step below.#
-# `--emit shared-lib` (the bundle's library) is refused: bundles are linux
-# only.
+#                  the compile step below.
+#
+# `--emit shared-lib` is accepted only for a C-ABI library that names itself
+# for dyld (`-Xlinker -install_name`, which mojo_shared_lib passes): its
+# output is a .dylib. The bundle's library, named by `-soname`, is refused:
+# bundles are linux only.
 #
 # The system libraries and the SDK are the host's: /usr/lib, /System and the
 # Command Line Tools (found by the compiler through /usr/bin/xcrun). No other
@@ -94,12 +97,16 @@ esac
 [ "$WD_SAMPLE" -ge 1 ] || { echo "mojo_wrapper: REFUSING: --watchdog-sample-secs must be at least 1" >&2; exit 2; }
 [ "$#" -gt 0 ] && [ "$1" = "--" ] || { echo "mojo_wrapper: expected -- before compiler arguments" >&2; exit 2; }
 shift
+shared=0
+named=0
 for a in "$@"; do
-    if [ "$a" = "shared-lib" ]; then
-        echo "mojo_wrapper: REFUSING: --emit shared-lib on macOS; bundles are linux only" >&2
-        exit 2
-    fi
+    [ "$a" = "shared-lib" ] && shared=1
+    [ "$a" = "-install_name" ] && named=1
 done
+if [ "$shared" = 1 ] && [ "$named" = 0 ]; then
+    echo "mojo_wrapper: REFUSING: --emit shared-lib on macOS without -Xlinker -install_name; bundles are linux only (a C-ABI library, mojo_shared_lib, builds as a .dylib)" >&2
+    exit 2
+fi
 
 EXPECT=""
 prev=""

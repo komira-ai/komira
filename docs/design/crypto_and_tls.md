@@ -2,9 +2,9 @@
 
 ## What is it for, and what is out of scope?
 
-Connectors and servers need hashes, message authentication codes, key derivation, authenticated encryption, signatures and key agreement. `komira_crypto` provides them as Mojo functions and types over AWS-LC's `libcrypto`, which the build compiles from source as the static library `//third_party/aws-lc:crypto`. It is not a Mojo implementation of the algorithms. Thirteen `internal/asm/*_ffi.mojo` files and `internal/asm/sha256_compress.mojo` call AWS-LC through `external_call`, and the public modules wrap those calls in APIs that take `Span` and `Array` values. Mojo code in the package covers base32 and hex, the PBKDF2 iteration loop, constant-time comparison, the RS256 key-set parser, RFC 6979 nonce derivation for ECDSA, ASN.1 and X.509 parsing, and certificate chain validation.
+Connectors and servers need hashes, message authentication codes, key derivation, authenticated encryption, signatures and key agreement. `komira_crypto` provides them as Mojo functions and types over AWS-LC's `libcrypto`, which the build compiles from source as the static library `//third_party/aws-lc:crypto`. It is not a Mojo implementation of the algorithms. Twelve `internal/asm/*_ffi.mojo` files and `internal/asm/sha256_compress.mojo` call AWS-LC through `external_call`, and the public modules wrap those calls in APIs that take `Span` and `Array` values. Mojo code in the package covers hex, the PBKDF2 iteration loop, constant-time comparison, the RS256 key-set parser, RFC 6979 nonce derivation for ECDSA, ASN.1 and X.509 parsing, and certificate chain validation.
 
-`komira_crypto` (`src/komira_crypto`) holds the primitives, the encoders, and the certificate code under `cert/`. It imports only the standard library, and its `mojo_library` lists one dependency, AWS-LC.
+`komira_crypto` (`src/komira_crypto`) holds the primitives, hex encoding, and the certificate code under `cert/`. Besides the standard library it imports `komira_encoding` (base64, base64url and base32), and its `mojo_library` lists two dependencies, `komira_encoding` and AWS-LC.
 
 Out of scope:
 
@@ -36,7 +36,7 @@ The table lists each family and the AWS-LC functions behind it.
 | Signatures | `ed25519_*`, `ecdsa_p256_*`, `ecdsa_p384_*`, `rsa_sha256_sign`, `rsa_pkcs1_sha256_verify`, `rsa_pss_verify` | `ED25519_*`, `EC_KEY`, `ECDSA_*`, `EVP_DigestSign`, `RSA_verify`, `RSA_verify_pss_mgf1` |
 | Key agreement | `x25519`, `x25519_base_mult`, `x25519_4way` | `X25519` |
 | Randomness | `system_entropy`, `SystemEntropy`, `ChaCha20Drbg` | `RAND_bytes` |
-| Encoding | `base64_*`, `base32_encode_nopad`, `base32_decode`, `hex_lower`, `hex_lower_array_32`, `hex_upper` | base64: `EVP_EncodeBlock`, `EVP_DecodeBlock`; base32 and hex: Mojo |
+| Encoding | `hex_lower`, `hex_lower_array_32`, `hex_upper` | Mojo. Base64, base64url and base32 are `komira_encoding`'s, which this package imports and does not re-export |
 | RS256 JWS | `parse_rsa_jwks`, `verify_rs256_jws`, `verify_rs256_jws_against_jwks` | Mojo parser over `rsa_pkcs1_sha256_verify` |
 | Certificates | `cert/`: `x509_parse_certificate`, `chain_verify`, `match_hostname`, `mozilla_root_store`, `root_store_verify` | Mojo, verifying through the signature wrappers |
 | Hygiene | `zeroize_inline_array*`, `constant_time_eq_32`, `constant_time_eq_n` | libc `explicit_bzero` (Linux) or `memset_s` (macOS); Mojo byte compares |
@@ -45,7 +45,7 @@ The package root `__init__.mojo` re-exports most names, but not the ECDSA P-256 
 
 ### How do the wrappers reach AWS-LC?
 
-Every AWS-LC call site in `komira_crypto` is in `internal/asm/`. Outside that directory, the library's only `external_call` sites are the libc calls in `zeroize.mojo`. Each wrapper file binds one AWS-LC area: `sha256_ffi.mojo` the digests, `hmac_ffi.mojo` HMAC, `hkdf_ffi.mojo` HKDF, `aes_gcm_ffi.mojo` and `chacha20_poly1305_ffi.mojo` the AEADs, `ed25519_ffi.mojo`, `p256_ffi.mojo`, `p384_ffi.mojo`, `rsa_ffi.mojo` and `rsa_sign_ffi.mojo` the signatures, `x25519_ffi.mojo` key agreement, `rng_ffi.mojo` randomness and `base64_ffi.mojo` base64. `sha256_compress.mojo` binds AWS-LC's `sha256_block_data_order_hw` as `sha256_compress_blocks`; `internal/asm/__init__.mojo` re-exports it and nothing calls it.
+Every AWS-LC call site in `komira_crypto` is in `internal/asm/`. Outside that directory, the library's only `external_call` sites are the libc calls in `zeroize.mojo`. Each wrapper file binds one AWS-LC area: `sha256_ffi.mojo` the digests, `hmac_ffi.mojo` HMAC, `hkdf_ffi.mojo` HKDF, `aes_gcm_ffi.mojo` and `chacha20_poly1305_ffi.mojo` the AEADs, `ed25519_ffi.mojo`, `p256_ffi.mojo`, `p384_ffi.mojo`, `rsa_ffi.mojo` and `rsa_sign_ffi.mojo` the signatures, `x25519_ffi.mojo` key agreement and `rng_ffi.mojo` randomness. `sha256_compress.mojo` binds AWS-LC's `sha256_block_data_order_hw` as `sha256_compress_blocks`; `internal/asm/__init__.mojo` re-exports it and nothing calls it.
 
 `komira_crypto` lists `//third_party/aws-lc:crypto` in its `deps`. A `mojo_library` passes its C and C++ deps on to its consumers and to its own tests (see [the Mojo rules](../../tools/build/mojo/README.md)), so every binary or test with `komira_crypto` in its closure links AWS-LC statically and names nothing itself.
 
@@ -148,7 +148,7 @@ Between phases 1 and 2 the leaf is checked: a key usage, if present, must allow 
 | `src/komira_crypto/ed25519.mojo`, `ecdsa_p256.mojo`, `ecdsa_p384.mojo`, `rsa.mojo`, `rsa_pss.mojo` | signatures | `ed25519_sign`, `ecdsa_p256_sign_deterministic`, `rsa_sha256_sign`, `rsa_pss_verify` |
 | `src/komira_crypto/x25519.mojo`, `x25519_simd.mojo` | X25519 | `x25519`, `x25519_base_mult`, `x25519_4way` |
 | `src/komira_crypto/rng.mojo`, `zeroize.mojo` | randomness and wiping | `system_entropy`, `SystemEntropy`, `ChaCha20Drbg`, `zeroize_inline_array` |
-| `src/komira_crypto/base64.mojo`, `base32.mojo`, `hex.mojo`, `rs256_jwks.mojo` | encoders and the RS256 key-set parser | `base64_url_decode`, `base32_decode`, `hex_lower_array_32`, `parse_rsa_jwks`, `verify_rs256_jws` |
+| `src/komira_crypto/hex.mojo`, `rs256_jwks.mojo` | hex and the RS256 key-set parser (base64url through `komira_encoding`) | `hex_lower_array_32`, `parse_rsa_jwks`, `verify_rs256_jws` |
 | `src/komira_crypto/internal/asm/` | the AWS-LC bindings | `Sha2Hasher`, `HmacFfiCtx`, `rand_bytes_ffi`, `p256_sign_with_nonce`, `x25519_scalarmult` |
 | `src/komira_crypto/cert/` | ASN.1, X.509, host-name matching, roots, chain validation | `x509_parse_certificate`, `match_hostname`, `mozilla_root_store`, `chain_verify` |
 | `src/komira_crypto/BUCK` | the `komira_crypto` library and its gated tests | `mojo_library(name = "komira_crypto")` |

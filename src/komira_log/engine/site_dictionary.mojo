@@ -7,7 +7,7 @@
 # dictionary, mapping `site_id → fmt` and `module_id → module` so it can
 # reconstruct the human line — the NanoLog "format string lives in the binary;
 # the record carries only the id" property, with ZERO new comptime capability
-# beyond what `komira_obs/tracer.mojo` already ships (`_fnv1a_compute`).
+# beyond what `komira_trace/tracer.mojo` already ships (`fnv1a_compute`).
 #
 # Why a runtime-built dictionary (not a comptime global): Mojo has no
 # const-evaluable mutable module-global, so each site that wants to be decodable
@@ -26,12 +26,11 @@
 
 # -----------------------------------------------------------------------------
 # FNV-1a 32-bit — the comptime site-ID seed. The same hash as the tracer's
-# span-ID hash (komira_obs/name_registry.mojo, used by tracer.mojo), so the
+# span-ID hash (`komira_hash`, which the tracer's name registry also uses), so the
 # digest matches exactly.
 # -----------------------------------------------------------------------------
 
-comptime FNV1A_32_OFFSET_BASIS: UInt32 = UInt32(2166136261)
-comptime FNV1A_32_PRIME: UInt32 = UInt32(16777619)
+from komira_hash import FNV1A_32_OFFSET_BASIS, FNV1A_32_PRIME
 
 
 def fnv1a_32(name: StringLiteral) -> UInt32:

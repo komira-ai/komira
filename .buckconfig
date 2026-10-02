@@ -6,8 +6,8 @@
   komira = .
   prelude = prelude
   # The prelude's toolchains cell belongs to the root repository. Standalone,
-  # that is komira; it holds the Mojo toolchains the rules default to
-  # (toolchains//:mojo, toolchains//:mojo_multi_numa).
+  # that is komira; it holds the Mojo toolchain the rules default to
+  # (toolchains//:mojo).
   toolchains = tools/build/cells/toolchains
   # The tests of this repository, a cell of their own so that `komira//...`
   # holds no target that fails by design. Not needed by a consuming repository.
@@ -34,7 +34,7 @@
   includes = komira//tools/build/lint/includes.bzl
 
 [parser]
-  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:tests//...->komira//tools/build/platforms:linux-x86_64
+  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:host target:toolchains//...->komira//tools/build/platforms:host target:tests//...->komira//tools/build/platforms:host
 
 [build]
   # Local unless .buckconfig.local names a remote-execution service; see

@@ -1,5 +1,16 @@
 //! XML equivalence for the conformance harness: two documents are equal
 //! when their namespace-resolved element trees are.
+//!
+//! ⚠ This is DELIBERATELY MORE LENIENT than botocore on namespace prefixes.
+//! botocore compares canonical XML (`ET.canonicalize(strip_text=True)`),
+//! which keeps each prefix, so `<p:a xmlns:p="urn:x"/>`, `<q:a
+//! xmlns:q="urn:x"/>` and `<a xmlns="urn:x"/>` are three different documents
+//! to it and one document here. A serializer that writes the wrong prefix
+//! (or a prefix where the corpus has a default namespace) passes this
+//! comparison and fails botocore's, and so do the verdicts
+//! `xml-equiv-verdicts` writes from it. The tests that pin the leniency say
+//! so; on whitespace, CDATA, attribute order and whitespace, and unused
+//! namespace declarations the two agree.
 
 use std::collections::BTreeMap;
 
@@ -420,4 +431,235 @@ fn decode_entities(s: &str) -> Result<String, XmlParseError> {
     }
     out.push_str(rest);
     Ok(out)
+}
+
+// ---------------------------------------------------------------------------
+// Unit tests. Each pair is written from the XML 1.0 and Namespaces in XML
+// 1.0 recommendations (the section is named per test); none is taken from
+// the botocore corpus. Four pin the prefix leniency the module doc states,
+// and say so: there, botocore's canonical comparison disagrees.
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn same(a: &str, b: &str) {
+        assert!(xml_bodies_equivalent(a, b), "expected equivalent:\n  {a}\n  {b}");
+        assert!(xml_bodies_equivalent(b, a), "not symmetric:\n  {a}\n  {b}");
+    }
+
+    fn differ(a: &str, b: &str) {
+        assert!(!xml_bodies_equivalent(a, b), "expected different:\n  {a}\n  {b}");
+        assert!(!xml_bodies_equivalent(b, a), "not symmetric:\n  {a}\n  {b}");
+    }
+
+    fn refused(doc: &str) {
+        assert!(parse(doc).is_err(), "expected a parse error: {doc}");
+    }
+
+    // XML 1.0 §3.1: an empty-element tag and a start tag directly followed
+    // by its end tag are the same element.
+    #[test]
+    fn empty_element_tag_equals_start_end_pair() {
+        same("<a/>", "<a></a>");
+    }
+
+    // §2.8: the XML declaration is prolog, not content.
+    #[test]
+    fn xml_declaration_is_not_content() {
+        same("<?xml version=\"1.0\" encoding=\"UTF-8\"?><a/>", "<a/>");
+    }
+
+    // §2.10 and the relation's own rule: whitespace-only text between
+    // elements is dropped, and text is compared trimmed.
+    #[test]
+    fn whitespace_between_elements_is_dropped() {
+        same("<a>\n  <b>1</b>\n</a>", "<a><b>1</b></a>");
+    }
+
+    #[test]
+    fn surrounding_text_whitespace_is_trimmed() {
+        same("<a>  x\t</a>", "<a>x</a>");
+    }
+
+    // §3.1: the order of attribute specifications is not significant.
+    #[test]
+    fn attribute_order_is_not_significant() {
+        same("<a x=\"1\" y=\"2\"/>", "<a y=\"2\" x=\"1\"/>");
+    }
+
+    // §2.3 (AttValue): single and double quotes delimit the same value.
+    #[test]
+    fn attribute_quote_style_is_not_significant() {
+        same("<a x='1'/>", "<a x=\"1\"/>");
+    }
+
+    // §3.1 (S? around Eq, trailing S in tags).
+    #[test]
+    fn whitespace_inside_tags_is_not_significant() {
+        same("<a  x = \"1\" />", "<a x=\"1\"/>");
+        same("<a></a >", "<a/>");
+    }
+
+    // Namespaces §3: a name is its namespace name plus local part; the
+    // prefix is not part of it. DELIBERATE LENIENCY: botocore's canonical
+    // comparison keeps the prefix and calls these different.
+    #[test]
+    fn prefix_choice_is_not_significant() {
+        same("<p:a xmlns:p=\"urn:x\"/>", "<q:a xmlns:q=\"urn:x\"/>");
+    }
+
+    // Namespaces §6.2: a default namespace applies to unprefixed elements.
+    // DELIBERATE LENIENCY: botocore's canonical comparison calls these
+    // different.
+    #[test]
+    fn default_namespace_equals_a_prefixed_one() {
+        same("<a xmlns=\"urn:x\"/>", "<p:a xmlns:p=\"urn:x\"/>");
+    }
+
+    // Namespaces §6.1: a declaration is in scope in the element's content.
+    // DELIBERATE LENIENCY (one side is prefixed): botocore's canonical
+    // comparison calls these different.
+    #[test]
+    fn default_namespace_is_inherited_by_children() {
+        same("<a xmlns=\"urn:x\"><b/></a>", "<p:a xmlns:p=\"urn:x\"><p:b/></p:a>");
+    }
+
+    // Namespaces §6.1: an inner declaration overrides an outer one.
+    // DELIBERATE LENIENCY (one side is prefixed): botocore's canonical
+    // comparison calls these different.
+    #[test]
+    fn inner_declaration_overrides_outer() {
+        same(
+            "<a xmlns=\"urn:x\"><b xmlns=\"urn:y\"/></a>",
+            "<p:a xmlns:p=\"urn:x\"><q:b xmlns:q=\"urn:y\"/></p:a>",
+        );
+    }
+
+    // Namespaces §3: declarations are not attributes of the element.
+    #[test]
+    fn namespace_declarations_are_not_attributes() {
+        same("<a xmlns:p=\"urn:x\"/>", "<a/>");
+    }
+
+    // §4.6: the predefined entities.
+    #[test]
+    fn predefined_entities_equal_their_characters() {
+        same("<a>&lt;&amp;&gt;</a>", "<a><![CDATA[<&>]]></a>");
+        same("<a x=\"&quot;&apos;\"/>", "<a x='\"&apos;'/>");
+    }
+
+    // §4.1: decimal and hexadecimal character references.
+    #[test]
+    fn character_references_equal_their_characters() {
+        same("<a>&#65;&#x42;</a>", "<a>AB</a>");
+    }
+
+    // §2.7: a CDATA section is character data, and adjacent character data
+    // is one text run.
+    #[test]
+    fn cdata_joins_adjacent_text() {
+        same("<a>ab<![CDATA[c]]>d</a>", "<a>abcd</a>");
+    }
+
+    // §2.5, §2.6: comments and processing instructions are not character
+    // data.
+    #[test]
+    fn comments_and_processing_instructions_are_not_content() {
+        same("<a><!-- c --><b/></a>", "<a><b/></a>");
+        same("<a><?pi x?><b/></a>", "<a><b/></a>");
+        same("<!-- before --><a/><!-- after -->", "<a/>");
+    }
+
+    // §3.3.3: literal tab, LF and CR in an attribute value normalize to a
+    // space.
+    #[test]
+    fn attribute_value_whitespace_normalizes_to_space() {
+        same("<a x=\"1\t2\n3\"/>", "<a x=\"1 2 3\"/>");
+    }
+
+    // Namespaces §3: the `xml` prefix is bound without a declaration.
+    #[test]
+    fn xml_prefix_needs_no_declaration() {
+        same("<a xml:lang=\"en\"/>", "<a xml:lang='en'></a>");
+    }
+
+    #[test]
+    fn different_text_differs() {
+        differ("<a>x</a>", "<a>y</a>");
+    }
+
+    // §3: element content is ordered.
+    #[test]
+    fn child_order_is_significant() {
+        differ("<a><b/><c/></a>", "<a><c/><b/></a>");
+    }
+
+    #[test]
+    fn different_namespace_names_differ() {
+        differ("<a xmlns=\"urn:x\"/>", "<a xmlns=\"urn:y\"/>");
+        differ("<a xmlns=\"urn:x\"/>", "<a/>");
+    }
+
+    // Namespaces §6.2: the default namespace does not apply to attributes.
+    #[test]
+    fn default_namespace_does_not_apply_to_attributes() {
+        differ("<a xmlns=\"urn:x\" b=\"1\"/>", "<p:a xmlns:p=\"urn:x\" p:b=\"1\"/>");
+    }
+
+    #[test]
+    fn attribute_values_and_sets_are_significant() {
+        differ("<a x=\"1\"/>", "<a x=\"2\"/>");
+        differ("<a x=\"1\"/>", "<a x=\"1\" y=\"1\"/>");
+    }
+
+    // §2.3: names are case-sensitive.
+    #[test]
+    fn names_are_case_sensitive() {
+        differ("<a/>", "<A/>");
+    }
+
+    #[test]
+    fn interior_text_whitespace_is_significant() {
+        differ("<a>x y</a>", "<a>x  y</a>");
+    }
+
+    #[test]
+    fn text_differs_from_an_element() {
+        differ("<a>b</a>", "<a><b/></a>");
+    }
+
+    // §3 (WFC: Element Type Match).
+    #[test]
+    fn mismatched_end_tag_is_not_xml() {
+        refused("<a></b>");
+        refused("<p:a xmlns:p=\"urn:x\"></q:a>");
+    }
+
+    // Namespaces §5 (NSC: Prefix Declared).
+    #[test]
+    fn undeclared_prefix_is_not_namespace_well_formed() {
+        refused("<p:a/>");
+    }
+
+    // §4.1 (WFC: Entity Declared): no DTD declares any other entity here.
+    #[test]
+    fn undeclared_entity_is_not_xml() {
+        refused("<a>&nbsp;</a>");
+    }
+
+    #[test]
+    fn unclosed_element_and_trailing_content_are_not_xml() {
+        refused("<a><b></a>");
+        refused("<a/><b/>");
+    }
+
+    // Not XML on either side: the bodies are compared byte for byte.
+    #[test]
+    fn non_xml_bodies_compare_as_bytes() {
+        same("raw payload", "raw payload");
+        differ("raw payload", "raw  payload");
+        differ("<a></b>", "<a></a>");
+    }
 }
