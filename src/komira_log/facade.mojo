@@ -68,7 +68,7 @@ from komira_log.levels import (
 from komira_log.log_arg import LogArg, ARG_FIELD
 from komira_log.pattern_layout import interpolate, render_line
 from komira_log.config import _ensure_config
-from komira_obs.clock import now_unix_ms
+from komira_clock import now_unix_ms
 
 # P2b engine reach — the binary-ring backend behind the stable facade. The
 # ambient facade resolves the process-global IMMORTAL LogManager (a
