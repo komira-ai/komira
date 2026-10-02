@@ -17,7 +17,8 @@
 #     execution; a stopword-only query still matches nothing;
 #   * fast-field conjuncts of a request predicate are lowered into the search;
 #   * the identity corpus passes core's audit;
-#   * refusals are by name (unknown index, analyzer drift, foreign kind,
+#   * refusals are by name (unknown index, analyzer drift at bind AND at
+#     execution, foreign kind,
 #     unservable pin, missing required param).
 # =============================================================================
 
@@ -66,6 +67,7 @@ from komira_search_runtime.search_scan_kind import (
     SEARCH_RESOLVED_GENERATION,
     SEARCH_SCAN_KIND_NAME,
     SearchScanRuntime,
+    search_scan_binding,
     search_scan_descriptor,
     search_scan_identity_corpus,
     search_scan_kind_id,
@@ -520,6 +522,31 @@ def test_analyzer_drift_is_refused_by_name() raises:
         raised = True
         assert_true(String(SEARCH_ANALYZER_MISMATCH) in String(err))
     assert_true(raised, "a plan built against another analyzer is refused")
+
+
+def test_analyzer_drift_is_refused_at_execution() raises:
+    # The EXECUTION-time arm, not build_binding's: a binding built elsewhere
+    # (a cached plan) against another analyzer reaches `open_scan` without
+    # passing `build_binding`, and must be refused there by name -- else it
+    # silently matches a different term set. The binding is made directly
+    # with `search_scan_binding`, so `build_binding`'s check never runs.
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    var stale = search_scan_binding(
+        String("logs"),
+        String("body"),
+        String("alpha"),
+        analyzer_config_fingerprint(_cfg()) + 1,
+    )
+    var raised = False
+    try:
+        _ = _open(rt, stale)
+    except err:
+        raised = True
+        var msg = String(err)
+        assert_true(String(SEARCH_ANALYZER_MISMATCH) in msg, msg)
+        assert_true("logs" in msg, msg)
+    assert_true(raised, "open_scan refuses a binding built on another analyzer")
 
 
 def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
