@@ -97,7 +97,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         mode: AwsImportMode::ClientOnly,
     },
     AwsImport {
-        module: "komira_serde.json_value",
+        module: "komira_json",
         names: &["JsonValue", "parse_json_value"],
         mode: AwsImportMode::Always,
     },
