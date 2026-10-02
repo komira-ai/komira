@@ -5,12 +5,14 @@ usage: parse_manifest <manifest.json>...
 For each path: `read_artifact_manifest` (the parser `kci publish` uses), then
 `render_artifact_manifest` (the writer `kci build` uses); prints one line
 
-    OK <type> <name> <version> <subdir> <file> <sha256> render-identical=<yes|no>
+    OK <type> <name> <version> <subdir> <file> <sha256> metadata=<metadata> metadata_path=<metadata_path> render-identical=<yes|no>
 
-where render-identical says the rendered text is the file's bytes exactly. A
-manifest the parser refuses prints `REFUSED <the parser's message>` and the
-program exits 1 after the last path. A fixture of tools/build/tests: it is run
-by tools/build/tests/functional/conda_set.sh, never published.
+where `metadata` is the key as written, `metadata_path` the parser's
+resolution of it against the manifest's directory, and render-identical says
+the rendered text is the file's bytes exactly. A manifest the parser refuses
+prints `REFUSED <the parser's message>` and the program exits 1 after the last
+path. Run by tools/build/tests/functional/conda_set.sh and by the build gate
+`:conda_manifest_kci` (BUCK); never published.
 """
 
 from std.pathlib import Path
@@ -40,6 +42,8 @@ def main() raises:
                 m.subdir,
                 m.file,
                 m.sha256_hex,
+                "metadata=" + m.metadata,
+                "metadata_path=" + m.metadata_path,
                 "render-identical=" + same,
             )
         except e:

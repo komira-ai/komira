@@ -65,25 +65,27 @@ metadata.json              everything else the build knows
 
 `manifest.json` is **exactly** the artifact manifest that kci's
 `kci_artifact_manifest` parses (`kci build` writes it and `kci publish` reads
-it): six string keys, in this order, compact, one trailing newline.
+it): seven string keys, in this order, compact, one trailing newline.
 
 ```json
-{"artifact_type":"CONDA","name":"komira_json","version":"0.1.57","subdir":"linux-64","file":"komira_json-0.1.57-0.conda","sha256":"<64 hex>"}
+{"artifact_type":"CONDA","name":"komira_json","version":"0.1.57","subdir":"linux-64","file":"komira_json-0.1.57-0.conda","sha256":"<64 hex>","metadata":"metadata.json"}
 ```
 
 `file` is the channel's file name, relative to the manifest; `sha256` is that
-file's. The parser refuses any other key, so every other fact is in
-`metadata.json` (sorted compact JSON): `schema`, `kind` (`library` or
+file's; `metadata` is `metadata.json`, the file next to the manifest. The
+parser requires `metadata` on a CONDA manifest and refuses one that is not a
+bare file name (no `/`, not `.` or `..`), so copying the manifest's directory
+cannot separate the two. The parser refuses any other key, so every other fact
+is in `metadata.json` (sorted compact JSON): `schema`, `kind` (`library` or
 `metapackage`), `name`, `version`, `subdir`, `build`, `build_number`,
 `file_name`, `size`, `depends`, `timestamp_ms`, `source_commit`, `stamped`,
 `label`, and for a library `import_name`, `mojo_pin`, `payload_path`,
 `payload_sha256`; for a metapackage `members` (name, version, sha256 each).
-The parser also refuses a `metadata` key on a CONDA manifest (it belongs to a
-PYTHON artifact), so the manifest cannot point at `metadata.json`: a reader
-finds it **next to the manifest, under that name**.
 `tools/build/package/manifest_probe` runs kci's parser and writer over a
-manifest, and `tools/build/tests/functional/conda_set.sh` runs it over every
-manifest the build emits.
+manifest: the build gate `//tools/build/package/manifest_probe:conda_manifest_kci`
+runs it over one real package on every `buck2 build //...`, and
+`tools/build/tests/functional/conda_set.sh` runs it over every manifest the
+build emits.
 
 ### A library that cannot be packaged
 

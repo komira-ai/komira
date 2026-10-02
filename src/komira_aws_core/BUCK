@@ -7,7 +7,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # HttpResult (bodies as bytes), AwsErrorInfo,
 # the awsJson scalar codec and error shape, endpoint and partition resolution
 # (AWS_ENDPOINT_URL[_<SERVICE>], FIPS, dual-stack), the AwsCredsSource trait,
-# and the SigV4-signed request builder.
+# and the SigV4-signed request builder; and the interpreter of the endpoint
+# rulesets AWS publishes as data (endpoint_rules.mojo, over partitions.json),
+# which reads no environment: every input is a parameter.
 #
 # The chain reads only the STANDARD AWS SDK environment variables and shared
 # files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
@@ -26,9 +28,25 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # through the request builder (the suite staged as for
 # test_sigv4_test_suite). The suite's post-x-www-form-urlencoded cases are
 # not put through the builder: they sign Content-Length, which the builder
-# never signs, so test_sigv4_test_suite alone covers them. test_env_source_only scans the package's own
-# sources, staged as its data, for any environment read outside sources.mojo.
+# never signs, so test_sigv4_test_suite alone covers them.
+# test_s3_endpoint_rules runs every case of botocore's S3 endpoint tests
+# through the ruleset interpreter (endpoint_rules.mojo) over S3's published
+# ruleset, and requires each to pass. test_env_source_only scans the
+# package's own sources, staged as its data, for any environment read
+# outside sources.mojo.
 _FIXTURES = glob(["tests/fixtures/*"])
+
+# botocore's S3 endpoint ruleset, partition table and endpoint test cases,
+# read from the botocore archive //third_party/botocore pins by sha256, each
+# staged at its path in that archive.
+_ENDPOINT_RULES = {
+    path: "//third_party/botocore:endpoint_rules[{}]".format(path)
+    for path in [
+        "botocore/data/partitions.json",
+        "botocore/data/s3/2006-03-01/endpoint-rule-set-1.json",
+        "tests/functional/endpoint-rules/s3/endpoint-tests-1.json",
+    ]
+}
 
 mojo_library(
     name = "komira_aws_core",
@@ -48,7 +66,10 @@ mojo_library(
         "tests/test_credential_wire.mojo",
         "tests/test_creds_source.mojo",
         "tests/test_endpoint_resolution.mojo",
+        "tests/test_endpoint_rules_library.mojo",
         "tests/test_env_source_only.mojo",
+        "tests/test_s3_endpoint_rules.mojo",
+        "tests/test_s3_wire.mojo",
         "tests/test_shared_config.mojo",
         "tests/test_signed_request.mojo",
         "tests/test_sigv4_refusals.mojo",
@@ -66,6 +87,10 @@ mojo_library(
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),
         "tests/test_sigv4_test_suite.mojo": {
             "aws_c_auth": "//third_party/aws_c_auth:files",
+        },
+        "tests/test_s3_endpoint_rules.mojo": _ENDPOINT_RULES,
+        "tests/test_endpoint_rules_library.mojo": {
+            "botocore/data/partitions.json": _ENDPOINT_RULES["botocore/data/partitions.json"],
         },
     },
     visibility = ["PUBLIC"],

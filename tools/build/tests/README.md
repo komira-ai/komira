@@ -557,8 +557,8 @@ fixture libraries of [`negative/conda`](negative/conda/BUCK) ([`conda.sh`](funct
 a package is a directory (the `.conda`, `manifest.json`, `metadata.json`), read
 back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it (three
 stored members, valid zstd, owner-0 tars, sorted compact JSON, the library's
-`.mojoc` byte for byte); `manifest.json` is exactly kci's six-key artifact
-manifest; the compiler pin equals the pinned compiler's version; no BUCK file
+`.mojoc` byte for byte); `manifest.json` is exactly kci's seven-key artifact
+manifest, `metadata` naming the `metadata.json` next to it; the compiler pin equals the pinned compiler's version; no BUCK file
 declares a package, and a NEW fixture library gets `<name>_conda` from the
 `mojo_library` macro with no declaration anywhere and builds; `conda = False`
 gets no target; `conda_name` publishes under another name and a dependent
@@ -594,7 +594,8 @@ with no file that requires exactly the guard and every member at its version,
 the same bytes twice, accepted by `conda-check` (as a release too); kci's own
 artifact-manifest parser (`tools/build/package/manifest_probe`) reads the
 manifest of every package and of the metapackage and renders it back to the same
-bytes, and refuses a manifest with a `metadata` key; `conda-meta` refuses
+bytes (each naming the `metadata.json` next to it), and refuses a manifest
+without `metadata`; `conda-meta` refuses
 version skew, a member twice, a member whose file is not its manifest's sha256,
 a refused package, a name that is a member, a name that is not a conda name, a
 metapackage as a member and no members; `conda-check` refuses a metapackage
