@@ -1,0 +1,41 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Tests that use a real object store and clean up after themselves: a
+# run-scoped `TestBucket` (lease first, delete everything, re-list, verdict),
+# a run-id minter, the leak check, the runner flags and backend choice, and
+# the local backend that starts a pinned MinIO on 127.0.0.1 inside the test.
+#
+# No deployment fact lives here: endpoints, buckets and credential paths come
+# from a config file named by a flag. The object store and the process
+# launcher are seams with in-memory fakes; real clients implement them in
+# adapter packages, so this library depends on no cloud client.
+#
+# Deps: komira_textproto (the config file), komira_validation_run (the run-id
+# rule), komira_core_ffi (the wall clock and chmod) and komira_crypto (the
+# sha256 of the MinIO binary against its pin).
+#
+# The welded tests are hermetic: in-memory fakes, a scripted process runner,
+# and the test's own TEST_TMPDIR; no network and no process is started.
+mojo_library(
+    name = "komira_test_infra",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core_ffi:komira_core_ffi",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_textproto:komira_textproto",
+        "//src/komira_validation_run:komira_validation_run",
+    ],
+    test_srcs = [
+        "tests/test_bucket_failures.mojo",
+        "tests/test_bucket_lifecycle.mojo",
+        "tests/test_config.mojo",
+        "tests/test_flags.mojo",
+        "tests/test_leak_check.mojo",
+        "tests/test_local_backend.mojo",
+        "tests/test_no_endpoint_in_messages.mojo",
+        "tests/test_run_id.mojo",
+        "tests/test_skip.mojo",
+        "tests/test_unclosed.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
