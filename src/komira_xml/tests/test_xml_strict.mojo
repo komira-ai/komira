@@ -9,8 +9,8 @@
 # malformed body is silently wrong data. The refusal rows name the text the
 # error must carry, so a refusal for the wrong reason does not pass.
 #
-# Only the API that predates the hardening is used here (`parse_xml`,
-# `XmlReader`, `XmlWriter`), so every row can be run against both.
+# Only `parse_xml`, `XmlReader`, `XmlWriter` and `canonical_xml` are used, so
+# the rows test the parse contract rather than the tree accessors.
 # =============================================================================
 
 from komira_xml import (
@@ -142,6 +142,14 @@ def test_document_shape() raises -> Int:
     f += _refused("<a/><![CDATA[x]]>", "outside the root", "CDATA after the root")
     f += _refused("<a/><b/>", "root", "two root elements")
     f += _refused("<a><b/>", "unterminated", "EOF inside an element")
+    # The reader refuses both on its own, for callers that never build a tree.
+    var none = List[UInt8]()
+    f += _bytes_refused(
+        _bytes("<a/><b/>", none, ""), "more than one root", "reader: second root"
+    )
+    f += _bytes_refused(
+        _bytes("<a><b/>", none, ""), "unterminated element", "reader: EOF inside an element"
+    )
     f += _eq(
         parse_xml('\n<?xml-stylesheet href="s"?>\n<!-- c -->\n<a/>\n<!-- d -->\n').local,
         String("a"),
@@ -153,6 +161,26 @@ def test_document_shape() raises -> Int:
     f += _refused('<a/><?xml version="1.0"?>', "declaration", "XMLDecl after the root")
     f += _refused("<a><?XmL x?></a>", "declaration", "PI target 'xml' in any case")
     f += _eq(parse_xml("<a><?xml-ish x?></a>").local, String("a"), "PI target starting 'xml'")
+    # [16] PI requires a PITarget.
+    f += _refused("<a><? x?></a>", "target", "PI with no target")
+    f += _refused("<a><??></a>", "target", "empty PI")
+    f += _refused('<?XML version="1.0"?><a/>', "reserved", "XMLDecl spelled in upper case")
+    # [23] XMLDecl: VersionInfo is required and names 1.x; [80] EncodingDecl
+    # names an encoding this parser must actually read (§4.3.3: anything else
+    # is a fatal error, not a guess).
+    f += _eq(
+        parse_xml('<?xml version="1.0" encoding="utf-8" standalone="yes" ?><a/>').local,
+        String("a"),
+        "version, encoding and standalone",
+    )
+    f += _eq(parse_xml("<?xml version='1.1'?><a/>").local, String("a"), "version 1.1, single quotes")
+    f += _refused('<?xml version="2.0"?><a/>', "version", "XML version 2.0")
+    f += _refused('<?xml encoding="UTF-8"?><a/>', "version", "XMLDecl without a version")
+    f += _refused('<?xml version="1.0" encoding="UTF-16"?><a/>', "encoding", "UTF-16 declared")
+    f += _refused('<?xml version="1.0" encoding="ISO-8859-1"?><a/>', "encoding", "Latin-1 declared")
+    f += _refused('<?xml encoding="UTF-8" version="1.0"?><a/>', "XML declaration", "encoding before version")
+    f += _refused('<?xml version="1.0"encoding="UTF-8"?><a/>', "XML declaration", "no S between pseudo-attributes")
+    f += _refused('<?xml version="1.0" standalone="maybe"?><a/>', "XML declaration", "standalone not yes/no")
     # §4.3.3: a UTF-8 byte order mark may precede the document.
     f += _eq(
         parse_xml(chr(0xFEFF) + '<?xml version="1.0" encoding="UTF-8"?><a>v</a>').text,
@@ -217,6 +245,8 @@ def test_references() raises -> Int:
     f += _refused("<a>&#;</a>", "malformed character reference", "empty decimal reference")
     f += _refused("<a>&#x;</a>", "malformed character reference", "empty hex reference")
     f += _refused("<a>&#12a;</a>", "malformed character reference", "non-digit in a decimal reference")
+    # [66] CharRef: the hex marker is a lowercase 'x' only.
+    f += _refused("<a>&#X41;</a>", "malformed character reference", "uppercase X in a hex reference")
     # [WFC: Legal Character]: the referenced value must match [2] Char.
     f += _refused("<a>&#0;</a>", "illegal character", "NUL by reference")
     f += _refused("<a>&#8;</a>", "illegal character", "C0 control by reference")
@@ -373,6 +403,19 @@ def test_characters_and_encoding() raises -> Int:
     f += _refused(String('<a x="') + chr(0x1F) + '"/>', "illegal character", "C0 control in a value")
     f += _refused(String("<a>") + chr(0xFFFF) + "</a>", "illegal character", "U+FFFF literally")
     f += _eq(parse_xml("<a>\tx\n</a>").text, String("\tx\n"), "TAB and LF are Chars")
+    # [4] NameStartChar / [4a] NameChar hold for non-ASCII names too.
+    var e_ = chr(0xE9)
+    f += _eq(
+        parse_xml(String("<caf") + e_ + " " + e_ + "t" + e_ + "='1'/>").local,
+        String("caf") + e_,
+        "non-ASCII names",
+    )
+    f += _eq(parse_xml(String("<a") + chr(0xB7) + "b/>").local, String("a") + chr(0xB7) + "b", "U+00B7 is a NameChar")
+    f += _refused(String("<a") + chr(0xD7) + "b/>", "character in a name", "U+00D7 in an element name")
+    f += _refused(String("<") + chr(0xB7) + "a/>", "character in a name", "U+00B7 cannot start a name")
+    f += _refused(String("<a") + chr(0x3000) + "/>", "character in a name", "U+3000 in an element name")
+    f += _refused(String("<a b") + chr(0xA0) + "c='1'/>", "character in a name", "NBSP in an attribute name")
+    f += _refused(String("<a><?p") + chr(0xF7) + " x?></a>", "character in a name", "U+00F7 in a PI target")
     var bad = List[List[UInt8]]()
     bad.append(_seq(0xFF))  # never valid in UTF-8
     bad.append(_seq(0xC3))  # truncated sequence
@@ -409,7 +452,7 @@ def test_depth_limit() raises -> Int:
     return f
 
 
-# -- The writer never emits what the parser must refuse ------------------------
+# -- The writer refuses a value the parser must refuse -------------------------
 
 
 def _writer_text_raises(s: String) -> Bool:
@@ -437,6 +480,11 @@ def test_writer_refuses_illegal_characters() raises -> Int:
     f += _true(_writer_text_raises(String("a") + chr(0) + "b"), "writer: NUL in text")
     f += _true(_writer_text_raises(String("a") + chr(0x1B) + "b"), "writer: ESC in text")
     f += _true(_writer_attr_raises(String("a") + chr(1)), "writer: C0 in a value")
+    # U+FFFE and U+FFFF are valid in a String and outside [2] Char.
+    f += _true(_writer_text_raises(String("a") + chr(0xFFFE)), "writer: U+FFFE in text")
+    f += _true(_writer_text_raises(String("a") + chr(0xFFFF)), "writer: U+FFFF in text")
+    f += _true(_writer_attr_raises(chr(0xFFFF) + "a"), "writer: U+FFFF in a value")
+    f += _true(not _writer_text_raises(chr(0xFFFD) + chr(0x10FFFF)), "writer: U+FFFD and U+10FFFF are fine")
     f += _true(not _writer_text_raises("tab\tlf\ncr\r"), "writer: TAB LF CR are fine")
     f += _true(not _writer_attr_raises("tab\tlf\ncr\r"), "writer: TAB LF CR in a value")
     return f
