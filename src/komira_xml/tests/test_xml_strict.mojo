@@ -174,12 +174,12 @@ def test_dtd_refused() raises -> Int:
     var f = 0
     f += _refused(
         '<!DOCTYPE a [<!ENTITY x SYSTEM "file:///etc/passwd">]><a>&x;</a>',
-        "DTD",
+        "DTD refused",
         "external entity (XXE)",
     )
     f += _refused(
         '<!DOCTYPE a SYSTEM "http://example.invalid/a.dtd"><a/>',
-        "DTD",
+        "DTD refused",
         "external DTD subset",
     )
     var lol = String('<!DOCTYPE a [<!ENTITY l0 "lol">')
@@ -189,9 +189,9 @@ def test_dtd_refused() raises -> Int:
             lol += "&l" + String(i - 1) + ";"
         lol += '">'
     lol += "]><a>&l9;</a>"
-    f += _refused(lol, "DTD", "entity expansion (billion laughs)")
-    f += _refused("<!DOCTYPE a><a/>", "DTD", "a bare DOCTYPE")
-    f += _refused("<a><!DOCTYPE a></a>", "DTD", "DOCTYPE inside the root")
+    f += _refused(lol, "DTD refused", "entity expansion (billion laughs)")
+    f += _refused("<!DOCTYPE a><a/>", "DTD refused", "a bare DOCTYPE")
+    f += _refused("<a><!DOCTYPE a></a>", "DTD refused", "DOCTYPE inside the root")
     f += _refused('<a><!ENTITY x "y"></a>', "markup declaration", "stray markup declaration")
     return f
 
@@ -214,15 +214,15 @@ def test_references() raises -> Int:
     f += _refused("<a>&foo;</a>", "reference", "undeclared entity, made-up name")
     f += _refused("<a>a & b</a>", "reference", "bare '&'")
     f += _refused("<a>&amp</a>", "reference", "reference without ';'")
-    f += _refused("<a>&#;</a>", "reference", "empty decimal reference")
-    f += _refused("<a>&#x;</a>", "reference", "empty hex reference")
-    f += _refused("<a>&#12a;</a>", "reference", "non-digit in a decimal reference")
+    f += _refused("<a>&#;</a>", "malformed character reference", "empty decimal reference")
+    f += _refused("<a>&#x;</a>", "malformed character reference", "empty hex reference")
+    f += _refused("<a>&#12a;</a>", "malformed character reference", "non-digit in a decimal reference")
     # [WFC: Legal Character]: the referenced value must match [2] Char.
-    f += _refused("<a>&#0;</a>", "character", "NUL by reference")
-    f += _refused("<a>&#8;</a>", "character", "C0 control by reference")
-    f += _refused("<a>&#xD800;</a>", "character", "surrogate by reference")
-    f += _refused("<a>&#xFFFE;</a>", "character", "U+FFFE by reference")
-    f += _refused("<a>&#x110000;</a>", "character", "beyond U+10FFFF by reference")
+    f += _refused("<a>&#0;</a>", "illegal character", "NUL by reference")
+    f += _refused("<a>&#8;</a>", "illegal character", "C0 control by reference")
+    f += _refused("<a>&#xD800;</a>", "illegal character", "surrogate by reference")
+    f += _refused("<a>&#xFFFE;</a>", "illegal character", "U+FFFE by reference")
+    f += _refused("<a>&#x110000;</a>", "illegal character", "beyond U+10FFFF by reference")
     f += _refused('<a x="&bogus;"/>', "reference", "undeclared entity in an attribute")
     return f
 
@@ -369,9 +369,9 @@ def test_namespaces() raises -> Int:
 
 def test_characters_and_encoding() raises -> Int:
     var f = 0
-    f += _refused(String("<a>x") + chr(1) + "</a>", "character", "C0 control in text")
-    f += _refused(String('<a x="') + chr(0x1F) + '"/>', "character", "C0 control in a value")
-    f += _refused(String("<a>") + chr(0xFFFF) + "</a>", "character", "U+FFFF literally")
+    f += _refused(String("<a>x") + chr(1) + "</a>", "illegal character", "C0 control in text")
+    f += _refused(String('<a x="') + chr(0x1F) + '"/>', "illegal character", "C0 control in a value")
+    f += _refused(String("<a>") + chr(0xFFFF) + "</a>", "illegal character", "U+FFFF literally")
     f += _eq(parse_xml("<a>\tx\n</a>").text, String("\tx\n"), "TAB and LF are Chars")
     var bad = List[List[UInt8]]()
     bad.append(_seq(0xFF))  # never valid in UTF-8
