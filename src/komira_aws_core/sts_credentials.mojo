@@ -38,7 +38,8 @@ from .credential_transport import (
     host_header,
 )
 from .sigv4 import Header, SigV4SigningContext, sigv4_sign, uri_encode
-from ._text import has_control
+from ._text import bytes_of, has_control
+from .aws_xml import aws_xml_error_info
 
 
 comptime STS_API_VERSION: StaticString = "2011-06-15"
@@ -308,17 +309,12 @@ def parse_sts_credentials(
     status, is refused naming the STS error code and message."""
     var root = _parse_body(action, resp)
     if root.local == "ErrorResponse" or resp.status != 200:
-        var code = String("")
-        var message = String("")
-        if root.has_child("Error"):
-            var err = root.first_child("Error")
-            if err.has_child("Code"):
-                code = err.first_child("Code").text
-            if err.has_child("Message"):
-                message = err.first_child("Message").text
+        var err = aws_xml_error_info(
+            resp.status, bytes_of(resp.body), String("")
+        )
         raise Error(
             "STS " + action + " refused (HTTP " + String(resp.status) + "): "
-            + code + ": " + message
+            + err.code + ": " + err.message
         )
     if root.local != action + "Response":
         raise Error("STS " + action + " answered with a " + root.local)
