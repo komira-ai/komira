@@ -1,12 +1,17 @@
 """A stub `komira_aws_core` for the aws_client fixture.
 
-komira's komira_aws_core does not yet hold the request and codec surface
-that generated pure-mode code imports (`AwsRequest` and the `aws_*`
-helpers), so this stub declares each name that code imports, with the
-signature the generator expects. Only what the fixture's GetLogEvents
-client calls is implemented (`AwsRequest` and the scalar `aws_json_*`
+The real core is komira//src/komira_aws_core, and generated code is built
+against it in the komira cell (the AWS conformance driver,
+komira//tools/build/proto-codegen). A library of this cell cannot depend
+on it (a mojo_library of another cell carries another cell's MojoPkgTSet
+type), and nothing generates this file: it is kept by hand, in step with
+the names and signatures the generator imports (emit_aws.rs AWS_IMPORTS,
+the `Always` row). Only what the fixture's GetLogEvents client calls is
+implemented (`AwsRequest`, `AwsResponse` and the scalar `aws_json_*`
 encoders); every other name raises or answers empty, so a test that came to
-depend on one would fail rather than pass on a stand-in.
+depend on one would fail rather than pass on a stand-in. Bodies are bytes,
+as in the real core; `body_text` here refuses any non-ASCII byte rather
+than validating UTF-8.
 """
 
 from komira_json import JsonValue
@@ -17,20 +22,27 @@ comptime AWS_TS_RFC822: Int = 2
 
 
 struct AwsRequest(Copyable, Movable):
-    """One request, serialised and not signed: method, URI, headers, body."""
+    """One request, serialised and not signed: method, URI, headers, body
+    bytes."""
 
     var method: String
     var uri: String
-    var body: String
+    var body: List[UInt8]
     var header_names: List[String]
     var header_values: List[String]
 
     def __init__(out self, var method: String, var uri: String):
         self.method = method^
         self.uri = uri^
-        self.body = String("")
+        self.body = List[UInt8]()
         self.header_names = List[String]()
         self.header_values = List[String]()
+
+    def set_body_text(mut self, text: String):
+        self.body = _bytes(text)
+
+    def body_text(self) raises -> String:
+        return _ascii_text(self.body)
 
     def set_header(mut self, var name: String, var value: String):
         self.header_names.append(name^)
@@ -42,6 +54,45 @@ struct AwsRequest(Copyable, Movable):
             if self.header_names[i] == name:
                 return self.header_values[i].copy()
         return String("")
+
+
+struct AwsResponse(Copyable, Movable):
+    """One response: status, headers, body bytes."""
+
+    var status: Int
+    var header_names: List[String]
+    var header_values: List[String]
+    var body: List[UInt8]
+
+    def __init__(out self, status: Int, var body: List[UInt8]):
+        self.status = status
+        self.header_names = List[String]()
+        self.header_values = List[String]()
+        self.body = body^
+
+    @staticmethod
+    def of_text(status: Int, text: String) -> AwsResponse:
+        return AwsResponse(status, _bytes(text))
+
+    def add_header(mut self, var name: String, var value: String):
+        self.header_names.append(name^)
+        self.header_values.append(value^)
+
+    def body_text(self) raises -> String:
+        return _ascii_text(self.body)
+
+
+def _bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    out.extend(Span(s.as_bytes()))
+    return out^
+
+
+def _ascii_text(b: List[UInt8]) raises -> String:
+    for i in range(len(b)):
+        if b[i] > UInt8(0x7F):
+            raise Error("stub komira_aws_core: a non-ASCII body byte")
+    return String(unsafe_from_utf8=Span(b))
 
 
 def aws_json_i64(v: Int64) -> JsonValue:

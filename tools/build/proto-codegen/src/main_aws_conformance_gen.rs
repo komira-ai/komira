@@ -413,9 +413,9 @@ fn driver_header(
     o.line("from komira_aws_core import (");
     o.line("    AwsCredential,");
     o.line("    AwsEndpoint,");
+    o.line("    AwsResponse,");
     o.line("    FixedClock,");
     o.line("    Header,");
-    o.line("    HttpResult,");
     o.line("    build_sigv4_signed_request,");
     o.line(")");
     o.line("");
@@ -559,7 +559,7 @@ fn emit_input_case(
     o.line("_ep,");
     o.line("_req.uri,");
     o.line("_ct,");
-    o.line("_req.body,");
+    o.line("Span(_req.body),");
     o.line("_extra,");
     o.line("_clock,");
     o.indent -= 1;
@@ -568,7 +568,7 @@ fn emit_input_case(
     o.line("_rec.set_member(String(\"host\"), JsonValue.from_string(_sr.header(String(\"Host\"))))");
     o.line("_rec.set_member(String(\"method\"), JsonValue.from_string(_sr.method.copy()))");
     o.line("_rec.set_member(String(\"uri\"), JsonValue.from_string(_sr.target.copy()))");
-    o.line("_rec.set_member(String(\"body\"), JsonValue.from_string(_sr.body.copy()))");
+    o.line("_rec.set_member(String(\"body\"), JsonValue.from_string(_sr.body_text()))");
     o.line("var _hdr = JsonValue.empty_object()");
     o.line("for _i in range(len(_sr.headers)):");
     o.indent += 1;
@@ -634,9 +634,9 @@ fn emit_output_case(
     o.line("try:");
     o.indent += 1;
     let fp = s.prefix.to_lowercase();
-    // The whole response is bound, status and headers included, as a
-    // client's send receives it.
-    o.line(&format!("var _resp = HttpResult({status}, String(\"{}\"))", esc(&body)));
+    // The whole response is bound, status and headers included: the
+    // AwsResponse a generated parser reads.
+    o.line(&format!("var _resp = AwsResponse.of_text({status}, String(\"{}\"))", esc(&body)));
     for (k, v) in &headers {
         o.line(&format!("_resp.add_header(String(\"{}\"), String(\"{}\"))", esc(k), esc(v)));
     }
@@ -651,7 +651,7 @@ fn emit_output_case(
     o.indent -= 1;
     o.line("else:");
     o.indent += 1;
-    o.line(&format!("var _out = {fp}_parse_{method}_response(_resp.body)"));
+    o.line(&format!("var _out = {fp}_parse_{method}_response(_resp)"));
     o.line("_rec.set_member(String(\"result\"), _out.to_model_json())");
     o.indent -= 1;
     o.line(&format!("outp.set_member(String(\"{}\"), _rec^)", esc(key)));
