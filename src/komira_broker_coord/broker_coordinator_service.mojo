@@ -49,7 +49,7 @@ from komira_objectstore.store import (
     CloneableConditionalWriteStore,
 )
 
-from engine_rpc.engine import (
+from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
     HeartbeatResponse as PbHeartbeatResponse,
 )

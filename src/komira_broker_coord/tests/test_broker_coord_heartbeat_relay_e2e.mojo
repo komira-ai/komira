@@ -23,11 +23,13 @@ from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
-from engine_rpc.engine import (
+from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
     HeartbeatResponse as PbHeartbeatResponse,
-    NodeLoad as PbNodeLoad,
     JobPhase as PbJobPhase,
+)
+from komira_broker_proto.broker import (
+    NodeLoad as PbNodeLoad,
 )
 
 comptime _Store = SharedInMemoryConditionalStore

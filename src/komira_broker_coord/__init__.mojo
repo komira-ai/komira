@@ -13,7 +13,9 @@ Dependencies (cycle-free):
   komira_http          (HttpServer + RequestDispatcher serve loop)
   komira_proto_codec   (encode_proto / decode_proto)
   komira_async         (Reactor / BlockingRuntime serve runtime)
-  engine_rpc           (SupervisorHeartbeat / HeartbeatResponse wire)
+  komira_supervisor_proto, komira_broker_proto
+                       (SupervisorHeartbeat / HeartbeatResponse wire and the
+                       broker cluster map types)
   komira_objectstore   (CloneableConditionalWriteStore trait)
   komira_uuid          (now_unix_ms)
 None of these depends back on komira_broker_coord: it is a leaf above the
