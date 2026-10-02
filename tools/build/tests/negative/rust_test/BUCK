@@ -1,0 +1,75 @@
+load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+
+# Planted defects for the Rust test weld; each `must fail` target must fail
+# its build, and the `green` ones must build (run_tests.sh, test 35).
+
+# One test passes, one fails: red.
+rust_test(
+    name = "red",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+)
+
+# must fail: a binary welded to a red test cannot be built, though it compiles
+# (its `[ungated]` compile is not a target; `:red[bin]` shows the test
+# compiles too, so the red is the test's run).
+rust_binary(
+    name = "bin",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    tests = [":red"],
+)
+
+# must fail: a library welded to a red test cannot be built, so neither can a
+# binary that links it.
+rust_library(
+    name = "red_lib",
+    srcs = ["src/red.rs"],
+    crate_root = "src/red.rs",
+    tests = [":red"],
+)
+
+rust_binary(
+    name = "lib_consumer",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    deps = [":red_lib"],
+)
+
+# must fail: EMPTY GATE, nothing to run.
+rust_test(
+    name = "empty",
+    srcs = ["src/empty.rs"],
+    crate_root = "src/empty.rs",
+)
+
+# must fail: an #[ignore]d test is a mute.
+rust_test(
+    name = "ignored",
+    srcs = ["src/ignored.rs"],
+    crate_root = "src/ignored.rs",
+)
+
+# green: the harness sees only HOME, PATH and TMPDIR.
+rust_test(
+    name = "env_scrubbed",
+    srcs = ["src/env.rs"],
+    crate_root = "src/env.rs",
+)
+
+# green: a binary welded to a passing test builds, and runs (`[run_check]`).
+rust_binary(
+    name = "bin_green",
+    srcs = ["src/main.rs"],
+    crate_root = "src/main.rs",
+    tests = [":env_scrubbed"],
+    expected_stdout = "hello\n",
+)
+
+# must fail: NO VERDICT, the harness is killed at its timeout (exit 142).
+rust_test(
+    name = "hang",
+    srcs = ["src/hang.rs"],
+    crate_root = "src/hang.rs",
+    test_timeout_s = 3,
+)

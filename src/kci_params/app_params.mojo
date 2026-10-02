@@ -5,7 +5,7 @@
 #   Design requirements:
 #     * a managed app is an INSTANCE of a deploy pattern, not a fork; it takes
 #       generic parameters, and the deploy path plumbs them in through the
-#       komira_ci libraries. The control plane knows only about generic
+#       kci libraries. The control plane knows only about generic
 #       parameters, never anything specific to one app;
 #     * parameters are passed as COMMAND-LINE ARGUMENTS, not as environment
 #       variables;
@@ -92,7 +92,7 @@
 # specific parameter of any specific app.
 #
 # "The control plane does not know what a managed app is" is a property of the
-# control-plane BINARIES, not of a leaf value type, so it is not this module's to
+# control plane's BINARIES, not of a leaf value type, so it is not this module's to
 # measure: it has to be checked against the control plane's own source, where it
 # lives.
 #
@@ -100,7 +100,7 @@
 # ZERO deps. Pure value types (flat `String`/`Int`) + string helpers: no I/O, no
 # process state, no cloud, no DB, no FFI. ZERO UnsafePointer crosses any boundary;
 # no wildcard origin. That is deliberate and load-bearing — this leaf is consumed by
-# THREE sides that must not depend on each other: the DEPLOY renderer (komira_ci),
+# THREE sides that must not depend on each other: the DEPLOY renderer (kci),
 # the APP's startup parser (a serving binary), and the CONTROL PLANE's opaque store.
 # A shared mechanism with a dep closure would not be adoptable by all three, and two
 # copies of a parameter contract is the fork this whole mechanism exists to end.
