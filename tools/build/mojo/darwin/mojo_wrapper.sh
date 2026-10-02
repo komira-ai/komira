@@ -96,7 +96,7 @@ esac
 shift
 for a in "$@"; do
     if [ "$a" = "shared-lib" ]; then
-        echo "mojo_wrapper: REFUSING: --emit shared-lib on macOS; bundles are linux only" >&2
+        echo "mojo_wrapper: REFUSING: --emit shared-lib on macOS; bundles are linux only (so is mojo_shared_lib)" >&2
         exit 2
     fi
 done

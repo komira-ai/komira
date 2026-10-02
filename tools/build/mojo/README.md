@@ -17,6 +17,7 @@ the compiler sees. Worked uses of each rule are in
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
+| `mojo_shared_lib(srcs, main, deps, out_name, exports, exports_exact, gate_srcs, force_load, optimization_level)` | `<out_name>.so`: a C-ABI shared library via `mojo build --emit shared-lib` from one file of `@export` functions, published only if its gate passes (see [C-ABI shared libraries](#c-abi-shared-libraries)). Linux only. | [`spike`](../examples/shared_lib/BUCK), [`mid`](../examples/shared_lib_mid/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -361,6 +362,35 @@ rule is at analysis. The module docstring of
 [`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
 (client mode, at generation only) and
 [`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) exercise it.
+
+## C-ABI shared libraries
+
+`mojo_shared_lib` builds `<out_name>.so` straight from a file of `@export ... abi("C")`
+functions (`main`, or the one entry of `srcs`) over the closure of `deps`. It has no
+generated entry file and no `komira_main`; that is `mojo_binary[shared]`.
+
+- **`out_name`** is the file name without a forced `lib` prefix (`komira.so`); DT_SONAME is the same name.
+- **`deps`** takes Mojo packages and C/C++ libraries, as everywhere. **`force_load`** names C/C++
+  libraries linked whole (`--whole-archive`): every object of their archives is in the library, referenced or not.
+- **The gate.** The library is built as `ungated/<out_name>.so`. The gate stages it as the one data
+  file of each driver and runs them: a generated driver that `dlopen`s it (`RTLD_NOW`, so an unresolved
+  symbol fails there) and fails unless every symbol in **`exports`** resolves, plus each **`gate_srcs`**
+  Mojo main, which `dlopen`s `./<out_name>.so` and calls into it. The published `<name>/<out_name>.so`
+  is a copy that takes every driver's PASS marker as an input, so it exists only if they all passed.
+  `exports` may not be empty. `[ungated]` is files only, for diagnosis.
+- **`exports_exact`** (default off). Off, the dynamic symbol table also carries the symbols of static C
+  dependencies (a C function a Mojo export calls is visible to every consumer). On, a version script makes
+  `exports` the whole table. A twin pair shows both: `examples/shared_lib:spike_exact` passes its driver and
+  `tests//negative/shared_lib:leaks_by_default` goes red on the same driver.
+- **Not self-contained.** The `.so` has `DT_NEEDED libKGENCompilerRTShared.so`, the Mojo runtime (async runtime,
+  allocator, globals), which the compiler's link adds to every Mojo binary and shared library; it is not linked
+  statically by this rule. The `.so` loads only where that library, and what it needs
+  (`libMSupportGlobals.so`, `libAsyncRTRuntimeGlobals.so`, libstdc++, libgcc_s), resolves: the run path is
+  `$ORIGIN/lib`, so a packaged copy must ship them in `lib/` beside it (the runnable directory of a binary
+  carries the same set). Whoever publishes the `.so` must ship or relocate those libraries.
+- **macOS.** The darwin wrapper refuses `--emit shared-lib`; the rule is Linux only until that is decided.
+- **Run path.** `$ORIGIN/lib`, where a packaged copy puts the runtime libraries.
+- **Not yet:** consuming a `.so` from a `deps` edge (a consumer linking it, or generating its `@extern` declarations).
 
 ## C and C++
 

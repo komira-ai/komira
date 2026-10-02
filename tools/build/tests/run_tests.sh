@@ -318,6 +318,7 @@ EXAMPLES=(
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
     //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
+    //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib_mid:mid
 )
 # Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
 # was observed to skip the sub-target, so never rely on combining them with a
@@ -358,6 +359,17 @@ expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
 expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated]"
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
 expect_red gate_bypass_refused "MojoInfo" tests//negative/libgate_bad:bypass_consumer
+
+# 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
+for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default; do
+    expect_green "sharedlib_${t}_ungated" "tests//negative/shared_lib:${t}[ungated]"
+done
+expect_red sharedlib_missing_export_red "MISSING EXPORT: neg_missing" tests//negative/shared_lib:missing_export
+expect_red sharedlib_unresolved_red "undefined symbol: komira_neg_undefined_symbol" tests//negative/shared_lib:unresolved_symbol
+expect_red sharedlib_driver_red "GATED TEST FAILED" tests//negative/shared_lib:failing_driver
+expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests//negative/shared_lib:forced_not_loaded
+expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
+expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action

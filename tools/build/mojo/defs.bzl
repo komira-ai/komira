@@ -156,17 +156,26 @@ _OPT_LEVELS = ["0", "1", "2", "3"]
 TEST_OPT_LEVEL = "1"
 SHIPPED_OPT_LEVEL = "3"
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     With `shared`, emits a shared library instead: DT_SONAME is the output's
     file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
     seen from lib/glibc-hwcaps/<level>/.
+
+    With `abi_lib`, emits a shared library straight from `main`, a file of
+    `@export` C-ABI functions: no generated entry and no `komira_main`.
+    DT_SONAME is the output's file name (the caller names it, with no `lib`
+    prefix forced) and the run path is the default `$ORIGIN/lib`.
+    `link_extra` is appended to the link tail after the C libraries (the
+    force-loaded archives of mojo_shared_lib).
     """
     if opt_level not in _OPT_LEVELS:
         fail("{}: optimization level `{}` is not one of {}".format(ctx.label, opt_level, ", ".join(_OPT_LEVELS)))
     mapping = {s.short_path: s for s in srcs}
     entry = main.short_path
+    if shared and abi_lib:
+        fail("{}: shared and abi_lib are exclusive".format(ctx.label))
     if shared:
         # `mojo build --emit shared-lib` refuses a file defining `main`, so the
         # library is built from a generated entry file next to it, which
@@ -195,6 +204,18 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             exe.basename,
             cmd_args(staged.project(entry_dir) if entry_dir else staged, format = "-I{}"),
         ]
+    if abi_lib:
+        emit = [
+            "--emit",
+            "shared-lib",
+            "-Xlinker",
+            "-soname",
+            "-Xlinker",
+            exe.basename,
+        ]
+    tail = _link_tail(c_link)
+    if link_extra:
+        tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
     ctx.actions.run(
         _mojo_cmd(tc, [
             "build",
@@ -207,7 +228,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             staged.project(entry),
             "-o",
             exe.as_output(),
-        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = _link_tail(c_link)),
+        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = tail),
         category = category,
         identifier = identifier,
     )
@@ -572,6 +593,167 @@ mojo_test_rule = rule(
     },
 )
 
+# ---- mojo_shared_lib --------------------------------------------------------
+#
+# A C-ABI shared library: `mojo build --emit shared-lib` of one file of
+# `@export` functions, over the closure of `deps`. Linux only (the darwin
+# wrapper refuses `--emit shared-lib`).
+#
+#   out_name       the file is `<out_name>.so`, DT_SONAME the same: no `lib`
+#                  prefix is forced (mojo_binary's `[shared]` forces one).
+#   exports        the symbols the library must export. The gate dlopens the
+#                  library (RTLD_NOW, so an unresolved symbol fails there) and
+#                  fails unless every one resolves.
+#   exports_exact  default False. True links with a version script that makes
+#                  `exports` the whole dynamic symbol table: nothing else is
+#                  visible, so a symbol of a static C dependency does not
+#                  leak into the ABI. The gate then also sees an @export the
+#                  list omits as MISSING for any driver that calls it.
+#   gate_srcs      linked-run drivers: Mojo mains that dlopen `./<out_name>.so`
+#                  (the gate stages it as their one data file) and call it.
+#   force_load     C/C++ libraries linked whole (--whole-archive): every object
+#                  of their archives is in the library, referenced or not.
+#
+# The published file is `<name>/<out_name>.so`: a copy of `ungated/<out_name>.so`
+# that takes the PASS marker of every gate run as an input, so it cannot exist
+# unless the exports check and every driver passed. The same pattern as
+# mojo_library's tests.
+
+_EXPORTS_DRIVER = """from std.ffi import OwnedDLHandle
+
+
+def main() raises:
+    # RTLD_NOW (the default flags): an unresolved symbol fails here, not at
+    # the first call.
+    var lib = OwnedDLHandle("./{so}")
+    var missing = 0
+{checks}
+    if missing != 0:
+        raise Error("{so}: " + String(missing) + " expected export(s) missing")
+"""
+
+_EXPORT_CHECK = """    if not lib.check_symbol("{sym}"):
+        print("MISSING EXPORT: {sym}")
+        missing += 1
+"""
+
+def _shared_lib_impl(ctx):
+    tc = _toolchain(ctx)
+    out_name = ctx.attrs.out_name or ctx.label.name
+    if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", out_name):
+        fail("{}: out_name `{}` is not [A-Za-z_][A-Za-z0-9_]*".format(ctx.label, out_name))
+    if not ctx.attrs.exports:
+        fail("{}: `exports` is empty: a gate that expects no symbol checks nothing".format(ctx.label))
+    for sym in ctx.attrs.exports:
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", sym):
+            fail("{}: export `{}` is not a C symbol name".format(ctx.label, sym))
+    main = _main_src(ctx)
+    srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
+    _check_deps(ctx)
+    for d in ctx.attrs.force_load:
+        if MergedLinkInfo not in d:
+            fail("{}: force_load {} provides no MergedLinkInfo (a C/C++ library)".format(ctx.label, d.label))
+    force = None
+    if ctx.attrs.force_load:
+        force = _link_tail(create_merged_link_info_for_propagation(ctx, [d[MergedLinkInfo] for d in ctx.attrs.force_load]))
+    link_extra = None
+    if force != None:
+        link_extra = cmd_args("-Wl,--whole-archive", force, "-Wl,--no-whole-archive")
+    if ctx.attrs.exports_exact:
+        # A version script: the dynamic symbol table is `exports` and nothing
+        # else, so a symbol of a static C dependency, or an @export the list
+        # does not name, is local to the library.
+        script = ctx.actions.write(
+            "exports.map",
+            "{ global: " + " ".join([sym + ";" for sym in ctx.attrs.exports]) + " local: *; };\n",
+        )
+        version = cmd_args(script, format = "-Wl,--version-script={}")
+        link_extra = cmd_args(link_extra, version) if link_extra else cmd_args(version)
+
+    so_file = out_name + ".so"
+    ungated = _build_executable(
+        ctx,
+        tc,
+        "ungated/" + so_file,
+        srcs,
+        main,
+        _dep_closure(ctx),
+        ctx.attrs.optimization_level,
+        "mojo_build_shared_lib",
+        None,
+        _c_link(ctx),
+        abi_lib = True,
+        link_extra = link_extra,
+    )
+
+    # The gate: each driver is a Mojo program with no dependencies that
+    # dlopens "./<out_name>.so", staged as its only data file.
+    drivers = {}
+    checks = "".join([_EXPORT_CHECK.format(sym = sym) for sym in ctx.attrs.exports])
+    drivers["exports"] = ctx.actions.write(
+        "gate/exports.mojo",
+        _EXPORTS_DRIVER.format(so = so_file, checks = checks),
+    )
+    for g in ctx.attrs.gate_srcs:
+        stem = _stem(g)
+        if stem == "exports" or stem in drivers:
+            fail("{}: gate_srcs has two drivers named `{}`".format(ctx.label, stem))
+        drivers[stem] = g
+    markers = []
+    gate_subtargets = {}
+    for stem in sorted(drivers.keys()):
+        src = drivers[stem]
+        exe = _build_executable(ctx, tc, "gate/{}/{}".format(stem, stem), [src], src, [], ctx.attrs.driver_optimization_level, "mojo_build_gate_driver", stem, None)
+        root, staged = _test_root(ctx, "gate/{}/root".format(stem), exe, {so_file: ungated})
+        marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
+        ctx.actions.run(
+            cmd_args(
+                tc.busybox,
+                "sh",
+                tc.gate_runner,
+                tc.busybox,
+                tc.compiler,
+                "{}:{}".format(ctx.label.raw_target(), stem),
+                staged,
+                marker.as_output(),
+                hidden = root,
+            ),
+            category = "mojo_shared_lib_gate",
+            identifier = stem,
+        )
+        gate_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
+        markers.append(marker)
+
+    public = ctx.actions.declare_output("pub/" + so_file)
+    ctx.actions.run(
+        cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
+        category = "mojo_shared_lib_join",
+    )
+    return [DefaultInfo(
+        default_output = public,
+        sub_targets = {
+            "gate": [DefaultInfo(default_outputs = markers, sub_targets = gate_subtargets)],
+            # Files only: the library before its gate ran.
+            "ungated": [DefaultInfo(default_output = ungated)],
+        },
+    )]
+
+mojo_shared_lib_rule = rule(
+    impl = _shared_lib_impl,
+    attrs = {
+        "deps": attrs.list(attrs.dep(), default = []),
+        "driver_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
+        "exports": attrs.list(attrs.string()),
+        "exports_exact": attrs.bool(default = False),
+        "force_load": attrs.list(attrs.dep(), default = []),
+        "gate_srcs": attrs.list(attrs.source(), default = []),
+        "main": attrs.option(attrs.source(), default = None),
+        "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
+        "out_name": attrs.option(attrs.string(), default = None),
+        "srcs": attrs.list(attrs.source()),
+    } | _TOOLCHAIN_ATTR,
+)
+
 def _mojo_library(**kwargs):
     # Refused by name, so a stale BUCK file says why rather than buck2's
     # generic "unexpected parameter".
@@ -583,4 +765,5 @@ def _mojo_library(**kwargs):
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(_mojo_library)
+mojo_shared_lib = declares_docs(mojo_shared_lib_rule)
 mojo_test = declares_docs(mojo_test_rule)
