@@ -7,9 +7,9 @@
 # CPU < 100%; p99 producer-side `span_end → drain_visible` latency ≤
 # 200µs.
 #
-# This test is a calibrated single-shot variant (10 workers, 200K
-# events/worker, ~2M events total); the 60s sustained version is a
-# benchmark, not a unit test.
+# This test is a calibrated single-shot variant (10 workers, 1_000
+# events/worker, 10_000 events total, asserted record for record); the
+# 60s sustained version is a benchmark, not a unit test.
 # =============================================================================
 
 from std.collections import Dict
