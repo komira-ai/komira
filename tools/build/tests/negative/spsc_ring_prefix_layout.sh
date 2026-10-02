@@ -44,7 +44,6 @@ mkdir "$W/src"
 
 P="$W/src/src/komira_spsc_prefix_probe"
 mkdir "$P"
-SRC="$ROOT/src/komira_spsc_ring/spsc_ring.mojo"
 TEMPLATE="$ROOT/tools/build/tests/negative/spsc_ring_prefix_layout/consumer_polling.mojo"
 echo "" > "$P/__init__.mojo"
 
