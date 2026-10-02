@@ -139,7 +139,7 @@ from komira_http.client.url import Url
 from komira_http.codec.types import HttpMethod
 from komira_http.transport.io_stream import Connector
 from komira_http.transport.scripted import ScriptedConnector, ScriptedStream
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================
@@ -190,7 +190,7 @@ it, and no implementation that waits out the inner can land under it."""
 #
 # It BUSY-WAITS rather than sleeping: `nanosleep` would mean an FFI call with a
 # raw pointer in a test file, and the duration here is a few hundred
-# milliseconds on one thread. The loop reads `komira_obs.clock.now_ns` — the
+# milliseconds on one thread. The loop reads `komira_clock.now_ns` — the
 # same monotonic source `SystemClock` wraps — so "blocked for at least
 # `_block_us`" is exact in the direction that matters.
 #

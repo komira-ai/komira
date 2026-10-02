@@ -30,7 +30,7 @@
 # retry, no errno classification, no counter — is easy to copy and wrong in
 # every copy.
 #
-# The loop now lives in `komira_obs.log_write`, once, tested once, reached by
+# The loop now lives in `komira_log.log_write`, once, tested once, reached by
 # CALLING. No `UnsafePointer` crosses this module's API or appears in it at
 # all: `write_line(String)` takes a String and returns nothing.
 # =============================================================================
@@ -38,7 +38,7 @@
 from komira_atomic_alias import AtomicU8
 from std.memory import alloc, UnsafePointer, OwnedPointer
 
-from komira_obs.log_write import LogWriteLosses, write_log_line
+from komira_log.log_write import LogWriteLosses, write_log_line
 
 
 # -----------------------------------------------------------------------------
