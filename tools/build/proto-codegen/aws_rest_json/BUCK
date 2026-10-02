@@ -1,0 +1,35 @@
+load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+
+# A restJson1 client of a tiny model, generated in pure mode and compiled
+# against the real komira_aws_core and komira_json: URI labels (one greedy)
+# after a literal query, query members (a list and a map), headers (a
+# timestamp, a list and a prefix map), a JSON body, a structure payload, the
+# status, and a streaming blob output payload (`parse_get_thing_head`).
+#
+# The library is gated by its layout probe and test_tiny_rest_json, which
+# checks the requests it builds and the responses it reads, byte for byte.
+# tests//functional/aws_codegen:tiny_rest_json_client holds the text of the
+# same model's client-mode module to a golden.
+
+export_file(
+    name = "tiny_rest_json.json",
+    visibility = ["tests//functional/aws_codegen:"],
+)
+
+aws_client(
+    name = "komira_aws_tiny_rest",
+    mode = "pure",
+    model = "tiny_rest_json.json",
+    model_sha256 = "75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee",
+    operations = [
+        "GetThing",
+        "PutThing",
+        "SetConfig",
+    ],
+    service = "tiny",
+    test_srcs = ["test_tiny_rest_json.mojo"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_json:komira_json",
+    ],
+)

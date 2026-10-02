@@ -9,6 +9,8 @@
 //!   the protocol and signing-scheme checks.
 //! - `json_codec`: the JSON body codec.
 //! - `rpc`: the awsJson RPC binding.
+//! - `rest`: the REST binding (restJson1): URI labels and query, headers,
+//!   prefix headers, the payload, the response status, and restJson1 errors.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,9 +21,10 @@ use crate::overrides::AwsOverrides;
 
 mod json_codec;
 pub mod proto;
+mod rest;
 mod rpc;
 
-pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS};
+pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS};
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -34,7 +37,7 @@ pub struct AwsEmitOptions {
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
@@ -138,6 +141,36 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &[
+            "AwsRestUri",
+            "aws_blob_from_base64",
+            "aws_bool_from_text",
+            "aws_f64_from_text",
+            "aws_header_field",
+            "aws_header_http_date_list",
+            "aws_header_http_date_list_from",
+            "aws_header_list",
+            "aws_header_list_from",
+            "aws_i32_from_text",
+            "aws_i64_from_text",
+            "aws_media_from_text",
+            "aws_prefix_headers",
+            "aws_response_code",
+            "aws_set_prefix_headers",
+            "aws_text_blob",
+            "aws_text_bool",
+            "aws_text_f32",
+            "aws_text_f64",
+            "aws_text_int",
+            "aws_text_media",
+            "aws_text_ts",
+            "aws_ts_from_text",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: REST_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
             "AwsCredential",
             "AwsCredsSource",
             "AwsEndpoint",
@@ -148,6 +181,12 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         ],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_rest_json_error"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: &[AwsProtocol::RestJson],
     },
     AwsImport {
         module: "komira_json",
@@ -168,12 +207,18 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
 /// order, holding every name that `pure_only` needs. Rows that share a
 /// module merge into one statement.
 pub fn aws_import_section(protocol: AwsProtocol, pure_only: bool) -> String {
+    aws_import_section_for(&[protocol], pure_only)
+}
+
+/// [`aws_import_section`] for a module holding code of several protocols:
+/// every row that applies to any of `protocols`, each once.
+pub fn aws_import_section_for(protocols: &[AwsProtocol], pure_only: bool) -> String {
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
         if pure_only && row.mode == AwsImportMode::ClientOnly {
             continue;
         }
-        if !row.protocols.contains(&protocol) {
+        if !row.protocols.iter().any(|p| protocols.contains(p)) {
             continue;
         }
         match groups.iter_mut().find(|(m, _)| *m == row.module) {
@@ -1152,13 +1197,18 @@ impl<'a> AwsEmitter<'a> {
             .unwrap_or_else(|_| f.json_name.clone())
     }
 
+    /// The member's name in the model (not its `locationName`).
+    fn member_name(&self, msg: &IrMessage, f: &IrField) -> String {
+        self.facts
+            .member(&msg.fq_name, &f.name)
+            .map(|m| m.member_name.clone())
+            .unwrap_or_else(|_| f.json_name.clone())
+    }
+
 
     /// The model-stated constraint on one member, or `None`.
     fn member_constraint(&self, msg: &IrMessage, f: &IrField) -> Option<MemberConstraint> {
         if self.is_boxed(msg, f) {
-            return None;
-        }
-        if self.timestamp_format(msg, f).is_some() {
             return None;
         }
         let member = self.facts.member(&msg.fq_name, &f.name).ok()?;
@@ -1267,19 +1317,30 @@ impl<'a> AwsEmitter<'a> {
     /// drift apart across the four sites that ask (the union arity check,
     /// `to_aws_json`, `to_model_json`, and the box's own setter).
     fn presence_test(&self, msg: &IrMessage, f: &IrField) -> String {
+        self.presence_test_on("self", msg, f)
+    }
+
+    /// [`Self::presence_test`] for a member of `base` rather than of `self`
+    /// (a request builder's `input`).
+    fn presence_test_on(&self, base: &str, msg: &IrMessage, f: &IrField) -> String {
         if self.is_boxed(msg, f) {
-            format!("len(self.{}) > 0", f.name)
+            format!("len({base}.{}) > 0", f.name)
         } else {
-            format!("self.{}", f.name)
+            format!("{base}.{}", f.name)
         }
     }
 
     /// The Mojo expression that READS a present non-required member.
     fn optional_access(&self, msg: &IrMessage, f: &IrField) -> String {
+        self.optional_access_on("self", msg, f)
+    }
+
+    /// [`Self::optional_access`] for a member of `base`.
+    fn optional_access_on(&self, base: &str, msg: &IrMessage, f: &IrField) -> String {
         if self.is_boxed(msg, f) {
-            format!("self.{}[0]", f.name)
+            format!("{base}.{}[0]", f.name)
         } else {
-            format!("self.{}.value()", f.name)
+            format!("{base}.{}.value()", f.name)
         }
     }
 
@@ -1584,10 +1645,11 @@ impl<'a> AwsEmitter<'a> {
     }
 }
 
-/// The import block + shared helper every generated PURE module needs. The
-/// conformance driver emits this ONCE ahead of 44 concatenated suites.
-pub fn pure_preamble(protocol: AwsProtocol, with_model_json: bool) -> String {
-    let mut em = aws_import_section(protocol, true);
+/// The import block + shared helper every generated PURE module of
+/// `protocols` needs. The conformance driver emits this ONCE ahead of its
+/// concatenated suites.
+pub fn pure_preamble(protocols: &[AwsProtocol], with_model_json: bool) -> String {
+    let mut em = aws_import_section_for(protocols, true);
     em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");

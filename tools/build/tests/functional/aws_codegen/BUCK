@@ -52,6 +52,31 @@ aws_codegen_golden(
     module = "komira_aws_logs",
 )
 
+# A restJson1 client of a tiny model, client mode: URI labels (one greedy)
+# after a literal query, query members (a list and a map), headers (a
+# timestamp, a list and a prefix map), a JSON body, a structure payload, the
+# status, a streaming blob output payload (`parse_get_thing_head`), and the
+# restJson1 error builder. The model is
+# komira//tools/build/proto-codegen/aws_rest_json's, where the pure-mode
+# module is compiled against the real runtime and tested.
+aws_codegen_golden(
+    name = "tiny_rest_json_client",
+    gen_args = [
+        "--model-sha256",
+        "75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee",
+        "--service",
+        "tiny",
+        "--operations",
+        "GetThing,PutThing,SetConfig",
+        "--probe-import",
+        "komira_aws_tiny_rest.komira_aws_tiny_rest",
+    ],
+    golden = "golden/tiny_rest_json_client.mojo",
+    golden_probe = "golden/tiny_rest_json_client_probe.mojo",
+    model = "komira//tools/build/proto-codegen/aws_rest_json:tiny_rest_json.json",
+    module = "komira_aws_tiny_rest",
+)
+
 aws_codegen_refusal(
     name = "refuse_empty_operations",
     expect = "--operations is MANDATORY and may not be empty",

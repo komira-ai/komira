@@ -191,11 +191,12 @@
 #      stops after that test; run with a `uname` reporting macOS arm64 it must
 #      refuse, and with this machine's, pass.
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
-#      GetLogEvents module, pure and client, and the layout probe of each,
-#      equal their text goldens byte for byte; the generator refuses an empty
-#      or missing operation list, an operation the model lacks, a protocol it
-#      does not implement, a missing, malformed (not 64 lowercase hex digits)
-#      or wrong --model-sha256, a zero-byte model, and --probe-import without
+#      GetLogEvents module, pure and client, a restJson1 client of a tiny
+#      model, and the layout probe of each, equal their text goldens byte for
+#      byte; the generator refuses an empty or missing operation list, an
+#      operation the model lacks, a protocol it does not implement, a
+#      missing, malformed (not 64 lowercase hex digits) or wrong
+#      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
 #      go red (tests//negative/aws_codegen).
