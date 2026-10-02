@@ -64,7 +64,7 @@ from komira_async.runtime.runtime_trait import Runtime
 # same import h2_client.mojo uses for `drive_h2_streams_to_completion`'s wall
 # bound, so both loops in this subsystem answer "how long has this taken" from
 # one source.
-from komira_obs.clock import now_ns as _mono_now_ns
+from komira_clock import now_ns as _mono_now_ns
 from komira_http.client.slow_phase import (
     SLOW_PHASE_TLS_HANDSHAKE,
     elapsed_ms_since,
@@ -76,6 +76,7 @@ from komira_http.client.pool import (
     PoolKey,
     SCHEME_HTTPS,
     VERIFY_PEER,
+    VERIFY_SKIP,
 )
 from komira_http.client.session_cache import SessionCache
 from komira_http.transport.kernel_tcp import KernelTcpConnector
@@ -786,6 +787,23 @@ struct TlsConnector[
         if not self._sni_pinned:
             self._server_name = host^
 
+    def _refuse_unverifiable_peer(self) raises:
+        """Refuse a VERIFY_PEER dial that carries no server name.
+
+        s2n only installs a hostname verifier when `s2n_set_server_name` was
+        called, so a client that never set one checks the chain but NOT the
+        host: any certificate chaining to the trust store would be accepted.
+        `TlsConfig.enable_verify_default` is a no-op and no verify_host
+        callback is installed, so the connector itself must refuse. A
+        VERIFY_SKIP connector (explicit `disable_verify`) is exempt.
+        """
+        if self._verify_mode != VERIFY_SKIP and self._server_name.byte_length() == 0:
+            raise Error(
+                "TlsConnector: refusing VERIFY_PEER connect with an empty "
+                "server name (hostname would not be verified); call "
+                "set_server_name_for_next_connect or dial via HttpClient"
+            )
+
     def server_name(self) -> String:
         """The SNI this connector will present on its next dial — `""` if it has
         none. Diagnostic / test accessor, the shape `verify_mode()` and
@@ -846,6 +864,9 @@ struct TlsConnector[
             WALL-CLOCK budget (`_HANDSHAKE_DEADLINE_DEFAULT_US`, overridable
             via `set_handshake_deadline_us`).
         """
+        # Step 0: fail closed BEFORE any dial when there is no name to verify.
+        self._refuse_unverifiable_peer()
+
         # Step 1: TCP (or whatever the underlying is) connect.
         var underlying = self._underlying.connect[RT](
             reactor=reactor, ip_be=ip_be, port=port,

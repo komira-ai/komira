@@ -394,7 +394,7 @@ struct RequestContext(
                       tracer is configured OR if TracingMiddleware
                       was not enabled.
       worker_id     — worker / pthread id; threaded through for
-                      komira_obs.Tracer.start_span which is per-worker.
+                      komira_trace.Tracer.start_span which is per-worker.
                       single-threaded baseline: 0.
       short_circuit — set by chain driver when a `before` returns
                       Some(response) so `after` knows the response did

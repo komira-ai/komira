@@ -68,7 +68,7 @@ from komira_log.levels import (
 from komira_log.log_arg import LogArg, ARG_FIELD
 from komira_log.pattern_layout import interpolate, render_line
 from komira_log.config import _ensure_config
-from komira_obs.clock import now_unix_ms
+from komira_clock import now_unix_ms
 
 # P2b engine reach — the binary-ring backend behind the stable facade. The
 # ambient facade resolves the process-global IMMORTAL LogManager (a
@@ -202,7 +202,7 @@ def _emit[
     var sink = _SINK_P1
 
     # --- THE P1 → P2 SEAM: prefer the binary-ring engine when installed.
-    # The forever-root (EngineContext / a control-plane service) installs the
+    # The forever-root (EngineContext / a long-lived service) installs the
     # SharedEngine at init; until then (early init, a tool with no runtime) the
     # P1 synchronous-stderr fallback carries the call so a log never crashes.
     # The call shape, the gate, and the args are IDENTICAL on both paths — only

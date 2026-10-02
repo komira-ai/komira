@@ -44,7 +44,7 @@ can silently stop holding.
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
-from komira_obs.clock import now_ns
+from komira_clock import now_ns
 
 from komira_http.client.tls_connector import TlsConnector
 from komira_http.tls import TlsConfig, tls_init
@@ -126,6 +126,7 @@ def test_a_scripted_dial_under_tls_fails_and_fails_PROMPTLY() raises:
     print("  test_a_scripted_dial_under_tls_fails_and_fails_PROMPTLY...")
     var connector = _scripted_under_tls()
     var reactor = _mock_reactor()
+    connector.set_server_name_for_next_connect(String("example.test"))
 
     var t0 = Int(now_ns() // UInt64(1000))
     var raised = False
@@ -179,6 +180,7 @@ def test_the_fdless_refusal_NAMES_THE_CONDITION_not_a_stray_s2n_errno(
     print("  test_the_fdless_refusal_NAMES_THE_CONDITION_not_a_stray_s2n_errno...")
     var connector = _scripted_under_tls()
     var reactor = _mock_reactor()
+    connector.set_server_name_for_next_connect(String("example.test"))
 
     var detail = String()
     var raised = False
@@ -224,6 +226,7 @@ def test_an_armed_connect_fault_propagates_through_the_tls_decorator(
     under.arm_connect_error(Int64(111))  # ECONNREFUSED
     var connector = TlsConnector[ScriptedConnector].over(TlsConfig(), under^)
     var reactor = _mock_reactor()
+    connector.set_server_name_for_next_connect(String("example.test"))
 
     var detail = String()
     var raised = False

@@ -1,0 +1,36 @@
+// A log entry, shaped like the googleapis one: its payload is an Any, a
+// string or a Struct.
+syntax = "proto3";
+
+package example.logging.v1;
+
+import "example/logging/v1/monitored_resource.proto";
+import "google/protobuf/any.proto";
+import "google/protobuf/struct.proto";
+import "google/protobuf/timestamp.proto";
+
+enum LogSeverity {
+  DEFAULT = 0;
+  INFO = 200;
+  ERROR = 500;
+}
+
+message LogEntry {
+  string log_name = 12;
+  MonitoredResource resource = 8;
+  oneof payload {
+    google.protobuf.Any proto_payload = 2;
+    string text_payload = 3;
+    google.protobuf.Struct json_payload = 6;
+  }
+  google.protobuf.Timestamp timestamp = 9;
+  LogSeverity severity = 10;
+  map<string, string> labels = 11;
+  // LogSplit is reached through this map value only.
+  map<string, LogSplit> splits = 35;
+}
+
+message LogSplit {
+  string uid = 1;
+  int32 index = 2;
+}

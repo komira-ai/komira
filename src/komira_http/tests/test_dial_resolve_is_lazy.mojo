@@ -12,7 +12,7 @@
 #
 # So a request that reused a warm h2/h1 connection and dialled NOTHING still
 # performed a blocking `getaddrinfo(3)` — the ONLY unbounded blocking libc call
-# in this tree (`komira_async/net/dns.mojo:382`; it takes no timeout argument
+# in this tree (`komira_net/dns.mojo:382`; it takes no timeout argument
 # and cannot be cancelled). On a serve loop that talks to Firestore and GCS on
 # every tick that is one unbounded phase per request, forever, for nothing.
 #
@@ -503,7 +503,7 @@ def test_grpc_pooled_h2_multiplex_resolves_once() raises:
     stream.set_negotiated_protocol(NEGOTIATED_HTTP_2)
     # One byte per read so each RPC's drive stops at its own END_STREAM.
     stream.set_max_read_per_call(1)
-    var connector = ScriptedConnector.with_stream(stream^)
+    var connector = ScriptedConnector.with_stream_tls(stream^)
     var client = HttpClient[ScriptedConnector].with_defaults(connector^)
     var reactor = _make_reactor()
     var token = CancellationToken.never()
