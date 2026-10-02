@@ -21,7 +21,7 @@ Public surface:
 Scope: the apiserver is addressed by IP (no DNS), namespaced Pods only, NO
 watch (a caller POLLS get_pod_status on a tick).
 
-Substrate: komira_http (HttpClient over s2n TLS), komira_serde (JSON),
+Substrate: komira_http (HttpClient over s2n TLS), komira_proto_codec (JSON),
 komira_async (the blocking runtime and reactor).
 """
 
