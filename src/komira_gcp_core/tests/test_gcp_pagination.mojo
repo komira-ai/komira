@@ -159,7 +159,9 @@ def test_next_page_token_edges() raises:
         _ = next_page_token(invalid)
     except e:
         raised = True
-        assert_true(_has(String(e), "not valid UTF-8"))
+        # komira_json's reason names the UTF-8 fault, never the bytes.
+        assert_true(_has(String(e), "UTF-8"), String(e))
+        assert_true(_has(String(e), "23-byte"), String(e))
     assert_true(raised)
 
 
