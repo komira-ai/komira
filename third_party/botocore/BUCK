@@ -2,13 +2,15 @@ load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load(":defs.bzl", "botocore_model")
-load(":models.bzl", "BOTOCORE_MODELS", "botocore_model_path")
+load(":models.bzl", "BOTOCORE_MODELS", "BOTOCORE_PARTITIONS_PATH", "botocore_endpoint_rules_path", "botocore_model_path")
 
 # boto/botocore 1.43.70, Apache-2.0 (LICENSE.txt and NOTICE in the archive).
 #
 # The AWS service models the Mojo AWS clients are generated from
-# (komira//tools/build/proto-codegen:aws-client-gen), read from botocore's
-# release archive at build time: no model is committed to this repository.
+# (komira//tools/build/proto-codegen:aws-client-gen), with each service's
+# endpoint ruleset and the partition table the generated clients embed,
+# read from botocore's release archive at build time: no model is committed
+# to this repository.
 # The services are models.bzl's; a newer botocore is this url and sha256 plus
 # that file's entries. tools/build/third_party_srcs/upstream_versions.sh
 # reports whether a newer release exists; it gates nothing.
@@ -22,7 +24,11 @@ archive_files(
     name = "files",
     exec_compatible_with = LINUX_X86_64,
     archive = ":botocore-1.43.70.tar.gz",
-    files = ["LICENSE.txt", "NOTICE"] + [botocore_model_path(s) for s in sorted(BOTOCORE_MODELS)],
+    files = ["LICENSE.txt", "NOTICE", BOTOCORE_PARTITIONS_PATH] + [
+        p
+        for s in sorted(BOTOCORE_MODELS)
+        for p in [botocore_model_path(s), botocore_endpoint_rules_path(s)]
+    ],
     strip_prefix = "botocore-1.43.70",
     visibility = ["PUBLIC"],
 )
@@ -72,9 +78,10 @@ archive_files(
 
 # The endpoint rulesets komira_aws_core's interpreter (endpoint_rules.mojo)
 # evaluates, the partition table their `aws.partition` reads, and botocore's
-# test cases for them. Each file is a sub-target named by its path; all are
-# read by komira_aws_core's endpoint ruleset tests (test_s3_endpoint_rules,
-# test_endpoint_rules_library).
+# test cases for them. Each file is a sub-target named by its path, read by
+# komira_aws_core's endpoint ruleset tests (test_s3_endpoint_rules,
+# test_endpoint_rules_library) and the generated clients' endpoint tests
+# (komira//tools/build/proto-codegen/aws_endpoint_rules).
 archive_files(
     name = "endpoint_rules",
     exec_compatible_with = LINUX_X86_64,
@@ -84,6 +91,7 @@ archive_files(
         "NOTICE",
         "botocore/data/partitions.json",
         "botocore/data/s3/2006-03-01/endpoint-rule-set-1.json",
+        "tests/functional/endpoint-rules/logs/endpoint-tests-1.json",
         "tests/functional/endpoint-rules/s3/endpoint-tests-1.json",
     ],
     strip_prefix = "botocore-1.43.70",

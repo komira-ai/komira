@@ -36,6 +36,9 @@ clients.
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
   library; `partitions.mojo`: `AwsPartitionSet`, the partitions.json table
   its `aws.partition` reads.
+- `endpoint_signing.mojo`: `aws_signing_target`, a resolved endpoint as the
+  signer takes it (`AwsSigningTarget`: the `AwsEndpoint`, signing name and
+  region, and headers), refusing an auth scheme this core cannot sign.
 - `s3_wire.mojo`: `s3_copy_source` and `s3_content_range_total`, the two S3
   header values no model states.
 """
@@ -133,6 +136,7 @@ from .endpoint_rules import (
     ResolvedEndpoint,
     is_valid_host_label,
 )
+from .endpoint_signing import AwsSigningTarget, aws_signing_target
 from .imds_credentials import (
     build_imds_credentials_request,
     build_imds_role_request,

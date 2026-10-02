@@ -9,6 +9,8 @@
 //!   the protocol and signing-scheme checks.
 //! - `json_codec`: the JSON body codec.
 //! - `rpc`: the awsJson RPC binding.
+//! - [`endpoint`]: endpoint resolution through the service's endpoint
+//!   ruleset, emitted when the generator is given one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -17,10 +19,12 @@ use crate::ir::{IrEnum, IrField, IrMessage, IrMethod, IrType, Label, ScalarKind}
 use crate::lower::{recursion_breaking_edges_under, ContainerInlining};
 use crate::overrides::AwsOverrides;
 
+pub mod endpoint;
 mod json_codec;
 pub mod proto;
 mod rpc;
 
+pub use endpoint::AwsEndpointRules;
 pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS};
 use proto::{select_protocol, Binding, BodyCodec};
 
@@ -55,6 +59,9 @@ pub enum AwsImportMode {
     Always,
     /// Client mode only: anything that touches the transport.
     ClientOnly,
+    /// A module generated with an endpoint ruleset, in either mode: the
+    /// ruleset interpreter (see [`endpoint`]).
+    EndpointRules,
 }
 
 /// One `from <module> import <names>` group of [`AWS_IMPORTS`].
@@ -150,6 +157,17 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         protocols: ALL_PROTOCOLS,
     },
     AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "AwsPartitionSet",
+            "EndpointParams",
+            "EndpointRuleSet",
+            "ResolvedEndpoint",
+        ],
+        mode: AwsImportMode::EndpointRules,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
         module: "komira_json",
         names: &["JsonValue", "parse_json_bytes", "parse_json_value"],
         mode: AwsImportMode::Always,
@@ -168,9 +186,22 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
 /// order, holding every name that `pure_only` needs. Rows that share a
 /// module merge into one statement.
 pub fn aws_import_section(protocol: AwsProtocol, pure_only: bool) -> String {
+    aws_import_section_with(protocol, pure_only, false)
+}
+
+/// [`aws_import_section`], with the [`AwsImportMode::EndpointRules`] rows
+/// when `endpoint_rules` is set.
+pub fn aws_import_section_with(
+    protocol: AwsProtocol,
+    pure_only: bool,
+    endpoint_rules: bool,
+) -> String {
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
         if pure_only && row.mode == AwsImportMode::ClientOnly {
+            continue;
+        }
+        if !endpoint_rules && row.mode == AwsImportMode::EndpointRules {
             continue;
         }
         if !row.protocols.contains(&protocol) {
@@ -253,6 +284,28 @@ pub fn emit_aws_module(
     options: AwsEmitOptions,
     provenance: Option<AwsProvenance<'_>>,
 ) -> Result<AwsEmitted, String> {
+    emit_aws_module_with_endpoints(lowering, overrides, module_name, options, provenance, None)
+}
+
+/// [`emit_aws_module`], resolving endpoints through `endpoint_rules` when it
+/// is given: the module embeds the ruleset and gets an endpoint config and a
+/// `resolve_<op>_endpoint` per operation ([`endpoint`]). Every binding of the
+/// model is checked against the ruleset first. Refused in `omit_preamble`
+/// mode, whose concatenated modules have no header to record it in.
+pub fn emit_aws_module_with_endpoints(
+    lowering: &AwsLowering,
+    overrides: &AwsOverrides,
+    module_name: &str,
+    options: AwsEmitOptions,
+    provenance: Option<AwsProvenance<'_>>,
+    endpoint_rules: Option<&AwsEndpointRules>,
+) -> Result<AwsEmitted, String> {
+    if endpoint_rules.is_some() && options.omit_preamble {
+        return Err(format!(
+            "emit_aws: module `{module_name}` is given an endpoint ruleset in \
+             omit_preamble mode, which has no header to record it in"
+        ));
+    }
     if provenance.is_none() && !options.omit_preamble {
         return Err(format!(
             "emit_aws: module `{module_name}` has a header but no provenance; the \
@@ -263,6 +316,7 @@ pub fn emit_aws_module(
     overrides.check_against(lowering)?;
 
     let mut em = AwsEmitter::new(lowering, overrides, module_name, selected, options)?;
+    em.endpoint_rules = endpoint_rules;
     em.provenance = provenance.map(|p| (p.model_key.to_string(), p.model_sha256.to_string()));
     let source = em.emit()?;
     Ok(AwsEmitted {
@@ -356,6 +410,8 @@ struct AwsEmitter<'a> {
     validating: BTreeSet<String>,
     /// `(model key, model sha256)` for the header.
     provenance: Option<(String, String)>,
+    /// The endpoint ruleset, when endpoints resolve through one.
+    endpoint_rules: Option<&'a AwsEndpointRules>,
     /// Non-parameterised top-level structs, in emission order.
     structs: Vec<String>,
     /// Parameterised top-level structs.
@@ -430,6 +486,7 @@ impl<'a> AwsEmitter<'a> {
             by_fq,
             validating: BTreeSet::new(),
             provenance: None,
+            endpoint_rules: None,
             structs: Vec::new(),
             parameterised: Vec::new(),
             out: String::new(),
@@ -490,6 +547,9 @@ impl<'a> AwsEmitter<'a> {
         // `emit_message` and `emit_operations` both ask, and a shape's answer
         // depends on shapes emitted after it, so it cannot be decided inline.
         self.validating = self.validating_set();
+        if let Some(rules) = self.endpoint_rules {
+            self.check_endpoint_bindings(rules)?;
+        }
         if !self.options.omit_preamble {
             self.emit_header();
             self.emit_imports();
@@ -504,6 +564,9 @@ impl<'a> AwsEmitter<'a> {
             self.emit_bytes_helper();
         }
         self.emit_operations()?;
+        if let Some(rules) = self.endpoint_rules {
+            self.emit_endpoint_section(rules)?;
+        }
         if !self.options.pure_only {
             self.emit_client()?;
         }
@@ -539,6 +602,16 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("#   model key    : {model_key}"));
         self.line(&format!("#   model sha256 : {model_sha256}"));
         self.line(&format!("#   operations   : {}", ops.join(", ")));
+        if let Some(rules) = self.endpoint_rules {
+            self.line(&format!(
+                "#   endpoints    : ruleset sha256 {}",
+                rules.ruleset_sha256
+            ));
+            self.line(&format!(
+                "#                  partitions sha256 {}",
+                rules.partitions_sha256
+            ));
+        }
         self.line(&format!(
             "#   shapes       : {} messages, {} enums",
             n_messages,
@@ -615,7 +688,11 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_imports(&mut self) {
-        let section = aws_import_section(self.protocol, self.options.pure_only);
+        let section = aws_import_section_with(
+            self.protocol,
+            self.options.pure_only,
+            self.endpoint_rules.is_some(),
+        );
         self.out.push_str(&section);
         self.blank();
         self.blank();

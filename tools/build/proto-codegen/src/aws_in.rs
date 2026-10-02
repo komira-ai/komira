@@ -59,6 +59,25 @@ pub struct AwsServiceMeta {
     pub aws_query_compatible: bool,
     pub checksum_format: Option<String>,
     pub uid: String,
+    /// The model's `clientContextParams`: endpoint-ruleset parameters a
+    /// client is configured with, in declared order.
+    pub client_context_params: Vec<AwsClientContextParam>,
+}
+
+/// One `clientContextParams` entry: a ruleset parameter a client is
+/// configured with, and its model type (`boolean` or `string`).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AwsClientContextParam {
+    pub name: String,
+    pub ty: String,
+}
+
+/// The value of one `staticContextParams` entry: the ruleset parameter an
+/// operation always resolves its endpoint with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AwsStaticValue {
+    Bool(bool),
+    Str(String),
 }
 
 // ===========================================================================
@@ -169,8 +188,8 @@ pub struct AwsMemberFacts {
     pub boxed: bool,
     pub deprecated: bool,
     pub deprecated_message: Option<String>,
-    /// `contextParam.name` — an endpoint-ruleset input. Recorded rather
-    /// than dropped even though the generator reads no ruleset.
+    /// `contextParam.name` — the endpoint-ruleset parameter this input
+    /// member binds.
     pub context_param: Option<String>,
     /// True when this member is the shape's designated `payload`.
     pub is_payload: bool,
@@ -308,6 +327,12 @@ pub struct AwsOperationFacts {
     /// `endpoint.hostPrefix` — a per-operation host prefix.
     pub host_prefix: Option<String>,
     pub http_checksum: Option<AwsHttpChecksum>,
+    /// `staticContextParams`: ruleset parameters this operation always
+    /// resolves its endpoint with, in declared order.
+    pub static_context_params: Vec<(String, AwsStaticValue)>,
+    /// `operationContextParams`: ruleset parameters taken from the input by
+    /// a path (`{"path": "A.B"}`), as (parameter, path), in declared order.
+    pub operation_context_params: Vec<(String, String)>,
 }
 
 /// The `httpChecksum` trait, flattened.
@@ -1280,22 +1305,9 @@ impl<'a> AwsLowerer<'a> {
                     .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
                     .unwrap_or_default(),
             }),
+                   static_context_params: static_context_params(op, op_name)?,
+            operation_context_params: operation_context_params(op, op_name)?,
         };
-        // DROPPED, deliberately and named: `staticContextParams` (78
-        // operations) and `operationContextParams` (5). They bind values
-        // into an ENDPOINT RULESET, and the generator reads no ruleset —
-        // there is nothing for them to parameterise, and inventing a
-        // representation for an absent consumer is how a wrong default gets
-        // established. `contextParam` (the per-MEMBER half, 179 members) IS
-        // recorded, because it costs one string.
-        if op.get("staticContextParams").is_some() || op.get("operationContextParams").is_some() {
-            self.note(format!(
-                "operation `{op_name}`: staticContextParams / operationContextParams \
-                 DROPPED — they are endpoint-ruleset inputs and the generator reads no \
-                 ruleset (see third_party/botocore/models.bzl)"
-            ));
-        }
-
         let body = self.body_designator(op_name, input_shape, &path_params)?;
         self.facts.operations.insert(op_name.to_string(), facts);
 
@@ -1413,7 +1425,82 @@ fn lower_metadata(root: &JsonObject, service: &str) -> Result<AwsServiceMeta, St
         aws_query_compatible: m.get("awsQueryCompatible").is_some(),
         checksum_format: str_of(m, "checksumFormat"),
         uid: need("uid")?,
+        client_context_params: client_context_params(root)?,
     })
+}
+
+/// The model's `clientContextParams` (a top-level object of the model, not
+/// of `metadata`), in declared order.
+fn client_context_params(root: &JsonObject) -> Result<Vec<AwsClientContextParam>, String> {
+    let Some(v) = root.get("clientContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v
+        .as_object()
+        .ok_or("AWS service model `clientContextParams` is not an object")?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let ty = spec
+            .get("type")
+            .and_then(Json::as_str)
+            .ok_or_else(|| format!("clientContextParams `{name}` has no `type`"))?;
+        out.push(AwsClientContextParam {
+            name: name.clone(),
+            ty: ty.to_ascii_lowercase(),
+        });
+    }
+    Ok(out)
+}
+
+/// An operation's `staticContextParams`, in declared order. A value that is
+/// neither a boolean nor a string is refused: no other kind occurs in the
+/// pinned models, and the emitter binds only these two.
+fn static_context_params(
+    op: &Json,
+    op_name: &str,
+) -> Result<Vec<(String, AwsStaticValue)>, String> {
+    let Some(v) = op.get("staticContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v.as_object().ok_or_else(|| {
+        format!("operation `{op_name}`: `staticContextParams` is not an object")
+    })?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let value = match spec.get("value") {
+            Some(Json::Bool(b)) => AwsStaticValue::Bool(*b),
+            Some(Json::Str(s)) => AwsStaticValue::Str(s.clone()),
+            _ => {
+                return Err(format!(
+                    "aws front-end: REFUSED static-context-param: operation `{op_name}` \
+                     binds the endpoint parameter `{name}` to a value that is neither a \
+                     boolean nor a string"
+                ))
+            }
+        };
+        out.push((name.clone(), value));
+    }
+    Ok(out)
+}
+
+/// An operation's `operationContextParams`, as (parameter, path), in
+/// declared order. The path is kept as written; the emitter decides which
+/// paths it can bind.
+fn operation_context_params(op: &Json, op_name: &str) -> Result<Vec<(String, String)>, String> {
+    let Some(v) = op.get("operationContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v.as_object().ok_or_else(|| {
+        format!("operation `{op_name}`: `operationContextParams` is not an object")
+    })?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let path = spec.get("path").and_then(Json::as_str).ok_or_else(|| {
+            format!("operation `{op_name}`: operationContextParams `{name}` has no `path`")
+        })?;
+        out.push((name.clone(), path.to_string()));
+    }
+    Ok(out)
 }
 
 /// The generated client struct's name — `serviceId` with non-alphanumerics
@@ -1683,6 +1770,40 @@ mod tests {
     fn a_custom_error_code_outside_query_compatible_lowers() {
         let op = r#", "errors": [{"shape": "Coded"}]"#;
         lower_tiny(&tiny_model("", op, "Str")).unwrap();
+    }
+
+    #[test]
+    fn endpoint_context_params_are_carried() {
+        let op = r#", "staticContextParams": {"A": {"value": true}, "B": {"value": "x"}},
+                     "operationContextParams": {"C": {"path": "M"}}"#;
+        let mut m = tiny_model("", op, "Str");
+        if let Json::Object(root) = &mut m {
+            let ccp = crate::json::parse(r#"{"D": {"type": "Boolean"}}"#).unwrap();
+            root.insert("clientContextParams".to_string(), ccp);
+        }
+        let l = lower_tiny(&m).unwrap();
+        let f = l.facts.operation("Op").unwrap();
+        assert_eq!(
+            f.static_context_params,
+            vec![
+                ("A".to_string(), AwsStaticValue::Bool(true)),
+                ("B".to_string(), AwsStaticValue::Str("x".to_string())),
+            ]
+        );
+        assert_eq!(f.operation_context_params, vec![("C".to_string(), "M".to_string())]);
+        assert_eq!(
+            l.service.client_context_params,
+            vec![AwsClientContextParam { name: "D".into(), ty: "boolean".into() }]
+        );
+    }
+
+    #[test]
+    fn a_static_context_param_of_another_kind_is_a_named_refusal() {
+        let op = r#", "staticContextParams": {"A": {"value": ["x"]}}"#;
+        assert_eq!(
+            refusal_of(&tiny_model("", op, "Str")).as_deref(),
+            Some("static-context-param")
+        );
     }
 
     #[test]

@@ -9,7 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (AWS_ENDPOINT_URL[_<SERVICE>], FIPS, dual-stack), the AwsCredsSource trait,
 # and the SigV4-signed request builder; and the interpreter of the endpoint
 # rulesets AWS publishes as data (endpoint_rules.mojo, over partitions.json),
-# which reads no environment: every input is a parameter.
+# which reads no environment: every input is a parameter; and
+# endpoint_signing.mojo, which turns an endpoint the ruleset chose into what
+# the signer takes, refusing an auth scheme it cannot sign.
 #
 # The chain reads only the STANDARD AWS SDK environment variables and shared
 # files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
@@ -66,6 +68,7 @@ mojo_library(
         "tests/test_credential_wire.mojo",
         "tests/test_creds_source.mojo",
         "tests/test_endpoint_resolution.mojo",
+        "tests/test_endpoint_signing.mojo",
         "tests/test_endpoint_rules_library.mojo",
         "tests/test_env_source_only.mojo",
         "tests/test_s3_endpoint_rules.mojo",

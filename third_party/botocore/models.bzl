@@ -11,7 +11,11 @@ requires it, and the target `:<service>` refuses the model when the two
 differ, so bumping the archive cannot leave a stale entry behind.
 
 A consumer takes the model as `botocore_model("logs").model` and passes
-`botocore_model("logs").sha256` as `--model-sha256`.
+`botocore_model("logs").sha256` as `--model-sha256`. The service's endpoint
+ruleset, `endpoint-rule-set-1.json` beside the model, is
+`botocore_model("logs").endpoint_rules`, and the partition table its
+`aws.partition` reads (`botocore/data/partitions.json`) is
+`botocore_model("logs").partitions`; both come from the same archive.
 """
 
 BOTOCORE_MODELS = {
@@ -26,9 +30,18 @@ def botocore_model_path(service):
     """The model's path in the archive, under its top directory."""
     return "botocore/data/{}/{}/service-2.json".format(service, BOTOCORE_MODELS[service].api_version)
 
+BOTOCORE_PARTITIONS_PATH = "botocore/data/partitions.json"
+
+def botocore_endpoint_rules_path(service):
+    """The path of the service's endpoint ruleset in the archive."""
+    return "botocore/data/{}/{}/endpoint-rule-set-1.json".format(service, BOTOCORE_MODELS[service].api_version)
+
 def botocore_model(service):
-    """The model target of `service` and the sha256 its consumer passes."""
+    """The model target of `service`, the sha256 its consumer passes, and
+    the service's endpoint ruleset and the partition table."""
     return struct(
         model = "komira//third_party/botocore:" + service,
         sha256 = BOTOCORE_MODELS[service].sha256,
+        endpoint_rules = "komira//third_party/botocore:files[{}]".format(botocore_endpoint_rules_path(service)),
+        partitions = "komira//third_party/botocore:files[{}]".format(BOTOCORE_PARTITIONS_PATH),
     )

@@ -1,0 +1,71 @@
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+
+# Generated clients resolving their endpoints through an endpoint ruleset
+# (aws_client's `endpoint_rules`), compiled against the real komira_aws_core,
+# with botocore's endpoint test cases run through the GENERATED code: the
+# config, the context-parameter bindings and `resolve_<op>_endpoint`. The
+# ruleset interpreter itself is komira_aws_core's subject (its
+# test_s3_endpoint_rules); this package tests what the generator binds.
+#
+# Every upstream file is read from the botocore archive
+# //third_party/botocore pins by sha256; none is copied here.
+
+_RUNTIME = [
+    "//src/komira_aws_core:komira_aws_core",
+    "//src/komira_json:komira_json",
+]
+
+# botocore's endpoint test cases of a service, staged at their archive path.
+_ENDPOINT_TESTS = {
+    service: {
+        "tests/functional/endpoint-rules/{}/endpoint-tests-1.json".format(service): "//third_party/botocore:endpoint_rules[tests/functional/endpoint-rules/{}/endpoint-tests-1.json]".format(service),
+    }
+    for service in ["logs", "s3"]
+}
+
+_LOGS = botocore_model("logs")
+
+# CloudWatch Logs, whose ruleset reads built-ins only: every one of
+# botocore's logs endpoint cases is resolved through the generated config.
+aws_client(
+    name = "logs_endpoints",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    endpoint_rules = _LOGS.endpoint_rules,
+    partitions = _LOGS.partitions,
+    deps = _RUNTIME,
+    test_srcs = ["test_logs_endpoints.mojo"],
+    test_data = {"test_logs_endpoints.mojo": _ENDPOINT_TESTS["logs"]},
+)
+
+# A model of this package's own (model/endpoint_bindings.json, awsJson, so
+# that it generates before the S3 protocol does) whose operations bind S3's
+# ruleset parameters as the S3 model's operations of the same names do:
+# `contextParam` members, `staticContextParams` (CopyObject, CreateBucket,
+# ListDirectoryBuckets, WriteGetObjectResponse) and the five
+# `clientContextParams`, plus one `operationContextParams` member path
+# (PutTarget, which S3 does not have). Every `operationInputs` entry of
+# botocore's S3 endpoint cases is resolved through it.
+aws_client(
+    name = "endpoint_bindings",
+    model = "model/endpoint_bindings.json",
+    model_sha256 = "c0ed1b711cd3530a143ddcde49578cf717b8dfca46d00e153e1956f4456b5773",
+    service = "endpoint-bindings",
+    operations = [
+        "CopyObject",
+        "CreateBucket",
+        "GetObject",
+        "ListBuckets",
+        "ListDirectoryBuckets",
+        "ListObjects",
+        "PutTarget",
+        "WriteGetObjectResponse",
+    ],
+    endpoint_rules = "//third_party/botocore:endpoint_rules[botocore/data/s3/2006-03-01/endpoint-rule-set-1.json]",
+    partitions = "//third_party/botocore:endpoint_rules[botocore/data/partitions.json]",
+    deps = _RUNTIME,
+    test_srcs = ["test_endpoint_bindings.mojo"],
+    test_data = {"test_endpoint_bindings.mojo": _ENDPOINT_TESTS["s3"]},
+)

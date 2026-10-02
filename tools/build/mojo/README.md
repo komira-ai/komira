@@ -342,7 +342,7 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 ```
 
 `aws_client(name, model, model_sha256, operations, deps, mode, service,
-overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
+endpoint_rules, partitions, overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
 `test_env`, passed to the `mojo_library`) generates an AWS client from one
 botocore service model at build time; no generated code is checked in.
 `<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
@@ -357,16 +357,24 @@ names it. `operations` is required and non-empty: only the closure of the
 operations named is emitted, and one the model lacks is refused by the
 generator. `mode = "pure"` (the default) emits shapes and
 `build_<op>_request` / `parse_<op>_response` with no transport; `"client"`
-adds the signed-send surface. `overrides` (the generator's hand-override
-manifest) and `hand_srcs` (the hand-written modules owning the operations
-it names, copied into the package) each require the other. `deps` is
-required and non-empty, and nothing is added to it. Every refusal of the
-rule is at analysis. The module docstring of
+adds the signed-send surface. `endpoint_rules` and `partitions` (the
+service's botocore endpoint ruleset and the partition table,
+`botocore_model("<service>").endpoint_rules` and `.partitions`) are set
+together or not at all; with them the module embeds both and resolves each
+operation's endpoint through `komira_aws_core.EndpointRuleSet`
+(`<Prefix>EndpointConfig` and `resolve_<op>_endpoint`). `overrides` (the
+generator's hand-override manifest) and `hand_srcs` (the hand-written
+modules owning the operations it names, copied into the package) each
+require the other. `deps` is required and non-empty, and nothing is added
+to it. Every refusal of the rule is at analysis. The module docstring of
 [`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
 [`tests//functional/aws_client`](../tests/functional/aws_client/BUCK),
 [`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
-(client mode, at generation only) and
-[`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) exercise it.
+(client mode, at generation only),
+[`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) and, for
+endpoint rulesets,
+[`../proto-codegen/aws_endpoint_rules`](../proto-codegen/aws_endpoint_rules/BUCK)
+exercise it.
 
 ## C-ABI shared libraries
 

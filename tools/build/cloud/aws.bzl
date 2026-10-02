@@ -8,6 +8,8 @@
         model_sha256 = botocore_model("logs").sha256,
         operations = ["GetLogEvents"],
         mode = "pure",                  # or "client"
+        endpoint_rules = botocore_model("logs").endpoint_rules,  # optional,
+        partitions = botocore_model("logs").partitions,          # with this
         deps = [
             "komira//src/komira_aws_core:komira_aws_core",
             "komira//src/komira_json:komira_json",
@@ -45,6 +47,16 @@ is refused by the generator, in the build.
 Mode. `pure` emits the shapes and `build_<op>_request` / `parse_<op>_response`
 with no transport (`--pure-only`); `client` adds the signed-send surface,
 which imports the komira_aws_core transport names and komira_http.
+
+Endpoints. `endpoint_rules` is the service's botocore endpoint ruleset
+(`endpoint-rule-set-1.json`, normally `botocore_model("<service>")
+.endpoint_rules`) and `partitions` the partition table it reads
+(`botocore_model("<service>").partitions`); the two are set together or not
+at all. With them the module embeds both and resolves each operation's
+endpoint through `komira_aws_core.EndpointRuleSet`: a `<Prefix>EndpointConfig`
+holding the ruleset's built-in and client context parameters, and a
+`resolve_<op>_endpoint` binding the operation's context parameters. The
+generator refuses a binding the ruleset does not declare.
 
 Overrides. `overrides` is the generator's hand-override manifest (a JSON
 file naming, per operation, the hand-written owner of its plain verb), and
@@ -136,6 +148,8 @@ def _aws_client_gen_impl(ctx):
         fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, komira_json, and in client mode komira_http); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
+    if (ctx.attrs.endpoint_rules == None) != (ctx.attrs.partitions == None):
+        fail("{}: `endpoint_rules` and `partitions` are set together: the ruleset's aws.partition reads the partition table".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:
         fail("{}: `hand_srcs` is set and `overrides` is not: hand-written modules of an aws_client own the operations its overrides manifest names".format(ctx.label))
     reserved = {"__init__.mojo": True, _LAYOUT_PROBE: True, import_name + ".mojo": True}
@@ -161,6 +175,8 @@ def _aws_client_gen_impl(ctx):
     ]
     if ctx.attrs.mode == "pure":
         gen_args.append("--pure-only")
+    if ctx.attrs.endpoint_rules:
+        gen_args += ["--endpoint-rules", ctx.attrs.endpoint_rules, "--partitions", ctx.attrs.partitions]
     if ctx.attrs.overrides:
         gen_args += ["--overrides", ctx.attrs.overrides]
         for h in ctx.attrs.hand_srcs:
@@ -199,6 +215,7 @@ def _aws_client_gen_impl(ctx):
 _aws_client_gen = rule(
     impl = _aws_client_gen_impl,
     attrs = {
+        "endpoint_rules": attrs.option(attrs.source(), default = None),
         "hand_src_paths": attrs.list(attrs.string(), default = []),
         "hand_srcs": attrs.list(attrs.source(), default = []),
         "import_name": attrs.string(),
@@ -207,6 +224,7 @@ _aws_client_gen = rule(
         "model_sha256": attrs.string(),
         "operations": attrs.list(attrs.string()),
         "overrides": attrs.option(attrs.source(), default = None),
+        "partitions": attrs.option(attrs.source(), default = None),
         # `len(deps)` of the library, so an empty runtime is refused at
         # analysis. A count, not the labels: the generator has no edge to the
         # runtime, and `deps` keeps every kind `mojo_library.deps` accepts.
@@ -225,6 +243,8 @@ def _aws_client(
         deps,
         mode = "pure",
         service = None,
+        endpoint_rules = None,
+        partitions = None,
         overrides = None,
         hand_srcs = [],
         test_srcs = [],
@@ -235,6 +255,8 @@ def _aws_client(
     vis = {"visibility": visibility} if visibility != None else {}
     _aws_client_gen(
         name = gen,
+        endpoint_rules = endpoint_rules,
+        partitions = partitions,
         hand_src_paths = hand_srcs,
         hand_srcs = hand_srcs,
         import_name = name,
