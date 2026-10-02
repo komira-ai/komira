@@ -13,7 +13,7 @@
 #   model sha256 : 24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 1
+#   generator    : aws-client-gen version 2
 #   mode         : pure (no transport)
 #
 # ── §CONSTRAINTS — the model's `min` / `max`, checked ─────────────
@@ -68,7 +68,7 @@ from komira_aws_core import (
     aws_ts_from_json,
     aws_ts_to_json,
 )
-from komira_serde.json_value import (
+from komira_json import (
     JsonValue,
     parse_json_value,
 )

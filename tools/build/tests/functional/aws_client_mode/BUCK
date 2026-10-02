@@ -23,7 +23,7 @@ aws_client(
     operations = ["GetLogEvents"],
     deps = [
         "//functional/aws_client:komira_aws_core",
-        "//functional/aws_client:komira_serde",
+        "//functional/aws_client:komira_json",
     ],
 )
 
