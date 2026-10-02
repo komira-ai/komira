@@ -3,9 +3,14 @@ load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 # Scripts used by the Rust rules.
 export_file(name = "rustc_wrapper.sh", visibility = ["PUBLIC"])
 
+export_file(name = "test_runner.sh", visibility = ["PUBLIC"])
+
 # A validation of the Rust toolchain (defs.bzl).
 shell_lint(
     name = "shell_lint",
-    srcs = ["rustc_wrapper.sh"],
+    srcs = [
+        "rustc_wrapper.sh",
+        "test_runner.sh",
+    ],
     visibility = ["PUBLIC"],
 )

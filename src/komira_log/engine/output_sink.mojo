@@ -32,7 +32,7 @@
 # critical path. A reactor-async append would keep even the off-hot-path drain
 # from parking on EAGAIN, but wiring the reactor into the engine requires
 # threading a `Reactor` handle through the forever-root → engine → drain chain,
-# and `komira_log` depends only on komira_core and komira_obs: adding
+# and `komira_log` depends only on komira_core, komira_trace, komira_metrics and the small leaf packages: adding
 # `komira_async` would invert the dependency graph (`komira_async` depends on
 # `komira_log`). So the sink uses a buffered blocking write via
 # `RawWriteFd.write_bytes`. A reactor-async upgrade needs that edge inverted or
@@ -56,8 +56,8 @@ from std.memory import alloc, UnsafePointer, OwnedPointer
 from komira_core.collections import Slab
 from komira_core.io.posix_io import RawWriteFd
 
-from komira_obs.clock import now_unix_ms
-from komira_obs.log_write import LogWriteLosses, write_log_line
+from komira_clock import now_unix_ms
+from komira_log.log_write import LogWriteLosses, write_log_line
 
 from komira_log.engine.rotation import (
     RotationPolicy,
@@ -92,8 +92,7 @@ struct SegmentFile(Deinitable, Movable):
 
     # `{base_path}.log` is the live file; archives are `{base_path}.{idx}.log`.
     var base_path: String
-    # The live append fd. `None` until `open_live()` (Slab.create_prefilled
-    # zero-fills, so the slot starts logically closed).
+    # The live append fd. `None` until `open_live()`.
     var _fd: Optional[RawWriteFd]
     # Bytes written to the CURRENT live file since it opened (drives SIZE).
     var _cur_bytes: Int
@@ -104,9 +103,7 @@ struct SegmentFile(Deinitable, Movable):
     var _policy: RotationPolicy
 
     def __init__(out self):
-        """Empty (unopened) segment — `open_live()` must follow before writes.
-        Used as the zero-state for `Slab.create_prefilled` slots before
-        `init_in_place`."""
+        """Empty (unopened) segment — `open_live()` must follow before writes."""
         self.base_path = String("")
         self._fd = Optional[RawWriteFd]()
         self._cur_bytes = 0
@@ -133,34 +130,20 @@ struct SegmentFile(Deinitable, Movable):
         self._cur_bytes = 0
         self._opened_ms = now_unix_ms()
 
-    @staticmethod
-    def init_in_place[o: Origin[mut=True], //](
-        ptr: UnsafePointer[SegmentFile, o],
-        base_path: String,
-        policy: RotationPolicy,
+    def __init__(
+        out self, base_path: String, policy: RotationPolicy
     ) raises:
-        """In-place init for a `Slab[SegmentFile]` slot (per-core segments live
-        in a Slab — `SegmentFile` is non-Copyable, so it cannot live in a
-        `List`). Mirrors `LogRecordRing.init_in_place`.
-
-        SAFETY (init-only, the rings pattern): `ptr` points at the
-        zero-initialized bytes from `Slab.create_prefilled`; the slot is the
-        empty `__init__` state BEFORE this call and a fully-opened segment
-        AFTER. The pointer is confined to this init site — it never
-        propagates to live data read through the sink API.
-
-        The origin is a PARAMETER, not a wildcard: Mojo does not coerce the
-        concrete origin that `UnsafePointer(to=...)` yields into a wildcard,
-        and the caller's Slab-slot origin is exactly what should be tracked
-        here. `o` is inferred at the call site.
-        """
-        ptr[].base_path = base_path
-        ptr[]._fd = Optional[RawWriteFd]()
-        ptr[]._cur_bytes = 0
-        ptr[]._opened_ms = Int64(0)
-        ptr[]._archive_idx = 0
-        ptr[]._policy = policy
-        ptr[].open_live()
+        """A segment whose live file `{base_path}.log` is already open.
+        `SegmentFile` is Movable, so the per-core segments are built as values
+        and appended to a `Slab[SegmentFile]`; nothing initialises a slot in
+        place."""
+        self.base_path = base_path
+        self._fd = Optional[RawWriteFd]()
+        self._cur_bytes = 0
+        self._opened_ms = Int64(0)
+        self._archive_idx = 0
+        self._policy = policy
+        self.open_live()
 
     def _rotate(mut self) raises:
         """Rename the live file to the next archive, retain the last `keep`,
@@ -303,14 +286,10 @@ struct LogSink(Movable):
         s._kind = SINK_PER_CORE_SEGMENTS
         var n = num_cores + 1
         s._n_segments = n
-        s._segments = Slab[SegmentFile].create_prefilled(n)
+        s._segments = Slab[SegmentFile].create_with_capacity(n)
         for c in range(n):
             var core_base = base_path + ".core" + String(c)
-            SegmentFile.init_in_place(
-                UnsafePointer(to=s._segments.get_mut_interior(c)),
-                base_path=core_base,
-                policy=policy,
-            )
+            s._segments.append(SegmentFile(core_base, policy))
         return s^
 
     @always_inline
@@ -340,7 +319,7 @@ struct LogSink(Movable):
         counter — lets an EINTR (a platform SIGTERM on scale-down) or an EAGAIN
         on a congested fd 2 truncate the line mid-message with nothing recording
         it. Two copies of one loop is how fixing one fixes nothing; both CALL
-        `komira_obs.log_write`.
+        `komira_log.log_write`.
 
         ⛔ IT DOES NOT RAISE. `komira_core`'s fd write-all rules that "losing a
         diagnostic beats wedging the process", and that stands. Giving up is
