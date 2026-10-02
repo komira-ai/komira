@@ -232,8 +232,8 @@ refuse() { # name, text, then the conda-meta arguments (after the name and out d
 # one version, two builds: one member from another build number (the version is the same)
 build_release "$K/rel8" build $STAMP8 > /dev/null 2>&1
 if [ -f "$K/rel8/${OK[0]}/manifest.json" ]; then
-    # shellcheck disable=SC2046
     jq -e --arg v "$VERSION" --arg b "$BUILD8" '.version == $v and .build == $b' "$K/rel8/${OK[0]}/metadata.json" > /dev/null || fail "refuse_two_builds: the second build is not the same version in another build"
+    # shellcheck disable=SC2046
     refuse two_builds_one_version "members are not one release" "$META" $(members "$K/rel8/${OK[0]}/manifest.json" "${MAN[@]:1}")
 else
     fail "refuse_version_skew: cannot build the second stamp (see $K/rel8.log)"
