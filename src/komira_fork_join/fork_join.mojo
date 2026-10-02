@@ -1,23 +1,23 @@
 # =============================================================================
-# spawn_join -- run one body on N threads and join them all
+# fork_join -- run one body on N threads and join them all
 # =============================================================================
 #
 # The fork-join shape every multi-threaded test and bench in the tree wants:
 # `n` threads each call `body.run(tid)` with their own index `0..n-1`, and
-# `spawn_join` returns only after every thread has exited.
+# `fork_join` returns only after every thread has exited.
 #
-#     struct Work(SpawnJoinBody):
+#     struct Work(ForkJoinBody):
 #         var total: Pointer[AtomicI64, origin]
 #         def run(self, tid: Int) raises:
 #             ...
 #
-#     spawn_join(work, 4)
+#     fork_join(work, 4)
 #
 # Safety shape: the body is shared by reference. Each thread reaches it
 # through a `Pointer[B, o]` held in its own slot, so the borrow checker keeps
 # `body` alive for the whole call, and no address is rebuilt from an integer.
 # The one raw pointer is the opaque `void *` the C thread API requires; it
-# points at the thread's own slot, which `spawn_join` owns and frees only
+# points at the thread's own slot, which `fork_join` owns and frees only
 # after the join barrier.
 #
 # `body` is borrowed immutably and is shared by all `n` threads at once, so
@@ -29,7 +29,7 @@
 #   * if bodies raise, the error of the LOWEST tid is rethrown, with the
 #     number of failed workers appended when more than one failed;
 #   * if `pthread_create` fails after `k` threads started, the `k` are joined
-#     and `spawn_join` raises "started k of n".
+#     and `fork_join` raises "started k of n".
 # =============================================================================
 
 from std.memory import Pointer, UnsafePointer
@@ -43,15 +43,15 @@ from ._pthread import (
 )
 
 
-trait SpawnJoinBody(Movable):
-    """A unit of work run once per thread by `spawn_join`."""
+trait ForkJoinBody(Movable):
+    """A unit of work run once per thread by `fork_join`."""
 
     def run(self, tid: Int) raises:
         """Run this thread's share. `tid` is in `0..n-1`, unique per thread."""
         ...
 
 
-struct _Slot[B: SpawnJoinBody, o: Origin](Movable):
+struct _Slot[B: ForkJoinBody, o: Origin](Movable):
     """One thread's private record. Only that thread writes it while it runs."""
 
     var body: Pointer[Self.B, Self.o]
@@ -66,11 +66,11 @@ struct _Slot[B: SpawnJoinBody, o: Origin](Movable):
         self.message = String()
 
 
-def _entry[B: SpawnJoinBody, o: Origin](arg: FfiHandle) -> FfiHandle:
+def _entry[B: ForkJoinBody, o: Origin](arg: FfiHandle) -> FfiHandle:
     """pthread start routine: run the body for this thread's slot.
 
     # SAFETY: FFI-BOUNDARY. `arg` is the address of this thread's `_Slot`,
-    # which lives in a `List` that `spawn_join` neither grows nor frees until
+    # which lives in a `List` that `fork_join` neither grows nor frees until
     # every started thread is joined. Slots are distinct per thread, so no two
     # threads write the same slot.
     """
@@ -84,8 +84,8 @@ def _entry[B: SpawnJoinBody, o: Origin](arg: FfiHandle) -> FfiHandle:
     return ffi_null()
 
 
-def spawn_join[
-    B: SpawnJoinBody, o: Origin
+def fork_join[
+    B: ForkJoinBody, o: Origin
 ](ref [o] body: B, n: Int) raises:
     """Run `body.run(tid)` on `n` threads (`tid` = 0..n-1) and join them all.
 
@@ -93,7 +93,7 @@ def spawn_join[
     that did start), or with the lowest-tid error if a body raised.
     """
     if n < 0:
-        raise Error("spawn_join: n must be >= 0, got " + String(n))
+        raise Error("fork_join: n must be >= 0, got " + String(n))
     if n == 0:
         return
 
@@ -126,7 +126,7 @@ def spawn_join[
 
     if rc != Int32(0):
         raise Error(
-            "spawn_join: pthread_create failed (rc="
+            "fork_join: pthread_create failed (rc="
             + String(Int(rc))
             + "), started "
             + String(started)
