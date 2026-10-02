@@ -10,12 +10,9 @@
 #        '/', labels are required
 #   [Q]  #httpquery-trait / #httpqueryparams-trait: lists repeat the key;
 #        a literal or httpQuery key wins over an httpQueryParams entry
-#   [S3] S3 object keys are greedy `{Key+}` and are not normalized; the
-#        rows mirror the Smithy S3 customization tests named
-#        S3EscapeObjectKeyInUriLabel, S3EscapePathObjectKeyInUriLabel,
-#        S3PreservesLeadingDotSegmentInUriLabel and
-#        S3PreservesEmbeddedDotSegmentInUriLabel, with every expectation
-#        re-derived from [U] and [L]
+#   [S3] an S3 object key is a greedy `{Key+}` whose "." and ".." are
+#        ordinary key bytes: it is encoded by [U] and [L] and never
+#        normalized
 #   [E]  https://smithy.io/2.0/spec/endpoint-traits.html#hostlabel-trait,
 #        and the rules engine's isValidHostLabel:
 #        [A-Za-z0-9][A-Za-z0-9-]{0,62}
@@ -78,8 +75,8 @@ def test_label_encoding() raises:
     # Label text is the aws_text form of the member [L].
     assert_equal(_one("/{Flag}", "Flag", aws_text_bool(True)), "/true")
     assert_equal(
-        _one("/{When}", "When", aws_text_ts(784111777.0, AWS_TS_ISO8601)),
-        "/1994-11-06T08%3A49%3A37Z",
+        _one("/{When}", "When", aws_text_ts(1789473600.0, AWS_TS_ISO8601)),
+        "/2026-09-15T12%3A00%3A00Z",
     )
 
 
@@ -88,14 +85,15 @@ def test_s3_keys() raises:
     var p = String("/{Bucket}/{Key+}?x-id=GetObject")
     var names: List[String] = ["Bucket", "Key"]
     var rows: List[String] = [
-        "my key.txt",
-        "/b/my%20key.txt?x-id=GetObject",
-        "foo/bar/my key.txt",
-        "/b/foo/bar/my%20key.txt?x-id=GetObject",
-        "../key.txt",
-        "/b/../key.txt?x-id=GetObject",
-        "foo/../key.txt",
-        "/b/foo/../key.txt?x-id=GetObject",
+        "a b.txt",
+        "/b/a%20b.txt?x-id=GetObject",
+        "x/y z/k.txt",
+        "/b/x/y%20z/k.txt?x-id=GetObject",
+        # Dot segments are key bytes, leading or embedded.
+        "../k",
+        "/b/../k?x-id=GetObject",
+        "x/../y",
+        "/b/x/../y?x-id=GetObject",
         # Not normalized: a leading '/', '//', '.' segments and a trailing
         # '/' all stay.
         "/leading",
@@ -142,11 +140,11 @@ def test_query() raises:
     assert_true(u.has_query("uploads"))
     # [Q] httpQuery: key=value, both encoded as a label is, '/' included.
     var l = AwsRestUri.expand("/{B}?list-type=2", ["B"], ["bkt"])
-    l.add_query("prefix", "photos/2026 06/")
+    l.add_query("prefix", "photos/a b/")
     l.add_query("encoding-type", "url")
     assert_equal(
         l.target(),
-        "/bkt?list-type=2&prefix=photos%2F2026%2006%2F&encoding-type=url",
+        "/bkt?list-type=2&prefix=photos%2Fa%20b%2F&encoding-type=url",
     )
     # [Q] a list repeats the key, in order; an empty string is `key=`.
     var r = AwsRestUri.expand("/r", none, none)
@@ -166,10 +164,18 @@ def test_query() raises:
     assert_equal(p.target(), "/p?fixed=1&q=x&m=1&m=2&sp%20ace=%C3%A9")
     assert_true(p.has_query("m"))
     assert_false(p.has_query("absent"))
+    # [Q] the same precedence when the httpQuery member is added after the
+    # map entry: the entry is dropped.
+    var late = AwsRestUri.expand("/p", none, none)
+    late.add_query_param("q", "z")
+    late.add_query_param("k", "1")
+    late.add_query("q", "x")
+    late.add_query("q", "y")
+    assert_equal(late.target(), "/p?k=1&q=x&q=y")
     # [Q] a query timestamp is a date-time by default.
     var t = AwsRestUri.expand("/t", none, none)
-    t.add_query("since", aws_text_ts(784111777.0, AWS_TS_ISO8601))
-    assert_equal(t.query(), "since=1994-11-06T08%3A49%3A37Z")
+    t.add_query("since", aws_text_ts(1789473600.0, AWS_TS_ISO8601))
+    assert_equal(t.query(), "since=2026-09-15T12%3A00%3A00Z")
     # No query: no '?'.
     assert_equal(AwsRestUri.expand("/", none, none).target(), "/")
     # A pattern ending in '?' carries no literal parameter.

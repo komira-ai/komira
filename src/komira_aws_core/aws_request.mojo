@@ -117,6 +117,11 @@ struct AwsRequest(Copyable, Movable):
         """The value of `name` (case-insensitive), "" when absent."""
         return _first(self.header_names, self.header_values, name)
 
+    def has_header(self, name: String) -> Bool:
+        """True when a header named `name` (case-insensitive) is set, with
+        any value, "" included."""
+        return _has(self.header_names, name)
+
     def set_body_text(mut self, text: String):
         """Sets the body to the UTF-8 bytes of `text`."""
         self.body = bytes_of(text)

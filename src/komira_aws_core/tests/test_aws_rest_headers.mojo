@@ -94,27 +94,27 @@ def test_list_read() raises:
 
 def test_http_date_lists() raises:
     # [H] [D] timestamps in a header are http-dates, written bare.
-    var ts: List[Float64] = [784111777.0, 0.0]
+    var ts: List[Float64] = [1789473600.0, 1835395200.0]
     var text = aws_header_http_date_list(ts)
     assert_equal(
-        text, "Sun, 06 Nov 1994 08:49:37 GMT, Thu, 01 Jan 1970 00:00:00 GMT"
+        text, "Tue, 15 Sep 2026 12:00:00 GMT, Tue, 29 Feb 2028 00:00:00 GMT"
     )
     var back = aws_header_http_date_list_from(text)
     assert_equal(len(back), 2)
-    assert_equal(back[0], 784111777.0)
-    assert_equal(back[1], 0.0)
+    assert_equal(back[0], 1789473600.0)
+    assert_equal(back[1], 1835395200.0)
     # Quoted dates read as whole elements, and may mix with bare ones.
     var mixed = aws_header_http_date_list_from(
-        '"Sun, 06 Nov 1994 08:49:37 GMT", Thu, 01 Jan 1970 00:00:00 GMT'
+        '"Tue, 15 Sep 2026 12:00:00 GMT", Tue, 29 Feb 2028 00:00:00 GMT'
     )
     assert_equal(len(mixed), 2)
-    assert_equal(mixed[0], 784111777.0)
-    assert_equal(mixed[1], 0.0)
+    assert_equal(mixed[0], 1789473600.0)
+    assert_equal(mixed[1], 1835395200.0)
     assert_equal(len(aws_header_http_date_list_from("")), 0)
     var bad: List[String] = [
         "Sun",
-        "Sun, 06 Nov 1994 08:49:37 GMT, Thu",
-        "1994-11-06T08:49:37Z",
+        "Tue, 15 Sep 2026 12:00:00 GMT, Tue",
+        "2026-09-15T12:00:00Z",
     ]
     for i in range(len(bad)):
         try:
@@ -167,6 +167,23 @@ def test_prefix_headers() raises:
         raise Error("unequal prefix-header lists were set")
     except e:
         assert_true(String(e).find("differ in length") >= 0, String(e))
+    # [F] keys that differ only in case would be one field: refused, and
+    # nothing of the map is set.
+    var dup = AwsRequest("PUT", "/")
+    try:
+        aws_set_prefix_headers(dup, "x-c-", ["Color", "color"], ["a", "b"])
+        raise Error("prefix keys differing only in case were set")
+    except e:
+        assert_true(String(e).find("differ only in case") >= 0, String(e))
+    assert_equal(len(dup.header_names), 0)
+    # [H] an httpHeader member wins over a prefix-header entry naming the
+    # same header, in any case; the other entries are set.
+    var both = AwsRequest("PUT", "/")
+    both.set_header("Hello", "There")
+    aws_set_prefix_headers(both, "", ["hello", "x-foo"], ["Hello", "Foo"])
+    assert_equal(len(both.header_names), 2)
+    assert_equal(both.header("hello"), "There")
+    assert_equal(both.header("x-foo"), "Foo")
     # [H] [F] read back case-insensitively; the key in its arrival case;
     # names differing only in case are one field.
     var r = AwsResponse.of_text(200, "")

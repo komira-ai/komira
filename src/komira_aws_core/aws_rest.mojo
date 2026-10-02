@@ -22,10 +22,12 @@
 #   ("?uploads", "?x-id=GetObject") is kept first, as written.
 #
 #   `add_query` appends an `httpQuery` member (once per element for a list);
-#   `add_query_param` appends an `httpQueryParams` map entry, unless a
-#   literal or an `httpQuery` member already binds that key -- those take
-#   precedence (the httpQueryParams trait, "serialization rules"). Keys and
-#   values are percent-encoded as labels are, '/' included.
+#   `add_query_param` appends an `httpQueryParams` map entry. A literal or
+#   an `httpQuery` member takes precedence over a map entry of the same key
+#   (the httpQueryParams trait, "serialization rules") whichever is added
+#   first: a map entry is not added over a bound key, and `add_query` drops
+#   the map entries of its key. Keys and values are percent-encoded as
+#   labels are, '/' included.
 #
 #   `aws_host_label` / `aws_host_prefix` do the same for the `endpoint`
 #   trait's hostPrefix, whose labels must be host labels.
@@ -46,7 +48,12 @@
 #
 #   A prefix-header map writes one header per entry, named prefix + key, and
 #   reads every response header whose name starts with the prefix, ASCII
-#   case ignored, keyed by the rest of its name.
+#   case ignored, keyed by the rest of its name. Two entries whose names
+#   differ only in case would be one field (RFC 9110 section 5.1), so a map
+#   holding them is refused. An entry naming a header the request already
+#   has is not written: an `httpHeader` member takes precedence over a
+#   prefix-header entry, as the Smithy protocol tests for an empty prefix
+#   expect. Set the `httpHeader` members first.
 #
 # Status (`httpResponseCode`): `aws_response_code`.
 #
@@ -177,8 +184,20 @@ struct AwsRestUri(Copyable, Movable):
         return out^
 
     def add_query(mut self, key: String, value: String):
-        """Appends an `httpQuery` member: `key=value`, both encoded. Call
+        """Appends an `httpQuery` member: `key=value`, both encoded, and
+        drops any `httpQueryParams` entry already added for `key`. Call
         once per element for a list; an empty value is written `key=`."""
+        var keys = List[String]()
+        var pairs = List[String]()
+        var bound = List[Bool]()
+        for i in range(len(self._keys)):
+            if self._bound[i] or self._keys[i] != key:
+                keys.append(self._keys[i])
+                pairs.append(self._pairs[i])
+                bound.append(self._bound[i])
+        self._keys = keys^
+        self._pairs = pairs^
+        self._bound = bound^
         self._keys.append(key)
         self._pairs.append(uri_encode(key) + "=" + uri_encode(value))
         self._bound.append(True)
@@ -186,7 +205,7 @@ struct AwsRestUri(Copyable, Movable):
     def add_query_param(mut self, key: String, value: String):
         """Appends an `httpQueryParams` map entry, unless the pattern's
         literal query or an `httpQuery` member binds `key`. Call once per
-        element for a map of lists; call after every `add_query`."""
+        element for a map of lists."""
         for i in range(len(self._keys)):
             if self._bound[i] and self._keys[i] == key:
                 return
@@ -440,15 +459,29 @@ def aws_set_prefix_headers(
     values: List[String],
 ) raises:
     """Sets header prefix + keys[i] to values[i] for every entry of an
-    `httpPrefixHeaders` map. Refuses an empty key (it would name the
-    prefix alone, which no reader maps back) and whatever `set_header`
-    refuses."""
+    `httpPrefixHeaders` map, except an entry naming a header `req` already
+    has (an `httpHeader` member, set first, takes precedence). Refuses an
+    empty key (it would name the prefix alone, which no reader maps back),
+    two keys that differ only in ASCII case (one field, RFC 9110 section
+    5.1), and whatever `set_header` refuses."""
     if len(keys) != len(values):
         raise Error("AWS prefix headers: keys and values differ in length")
+    var lowered = List[String]()
     for i in range(len(keys)):
         if keys[i].byte_length() == 0:
             raise Error("an AWS prefix-header map has an empty key")
-        req.set_header(prefix + keys[i], values[i])
+        var key = ascii_lower(keys[i])
+        for k in range(len(lowered)):
+            if lowered[k] == key:
+                raise Error(
+                    "an AWS prefix-header map has two keys that differ only"
+                    " in case"
+                )
+        lowered.append(key^)
+    for i in range(len(keys)):
+        var name = prefix + keys[i]
+        if not req.has_header(name):
+            req.set_header(name, values[i])
 
 
 def aws_prefix_headers(resp: AwsResponse, prefix: String) -> List[Header]:
