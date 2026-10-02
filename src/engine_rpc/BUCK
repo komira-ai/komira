@@ -14,6 +14,6 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 mojo_proto_library(
     name = "engine_rpc",
     srcs = ["komira/engine/v1/engine.proto"],
-    deps = ["//src/komira_proto_codec:komira_serde"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],
 )
