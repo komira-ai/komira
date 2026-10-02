@@ -15,7 +15,7 @@
 # =============================================================================
 
 from komira_json import JsonValue, parse_json_value
-from komira_json.json_value import (
+from komira_json.value import (
     JSON_STRING,
     JSON_NUMBER,
     JSON_ARRAY,
