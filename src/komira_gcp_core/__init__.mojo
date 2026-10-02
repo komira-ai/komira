@@ -38,9 +38,6 @@ Modules:
                       google.rpc.RetryInfo as the server delay) and
                       `gcp_retry_policy` (AIP-4221 backoff); the policy,
                       backoff and loop themselves are komira_retry's.
-  - utf8.mojo       : validating untrusted bytes before decoding them to a
-                      String (internal). The JSON paths do not use it:
-                      komira_json refuses ill-formed UTF-8 itself.
 
 Nothing in this package reads the environment or opens a socket.
 """

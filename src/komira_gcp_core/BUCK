@@ -28,7 +28,6 @@ mojo_library(
         "tests/test_gcp_pagination.mojo",
         "tests/test_gcp_retry.mojo",
         "tests/test_gcp_token.mojo",
-        "tests/test_gcp_utf8.mojo",
     ],
     visibility = ["PUBLIC"],
 )
