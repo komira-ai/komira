@@ -1,5 +1,16 @@
 //! XML equivalence for the conformance harness: two documents are equal
 //! when their namespace-resolved element trees are.
+//!
+//! ⚠ This is DELIBERATELY MORE LENIENT than botocore on namespace prefixes.
+//! botocore compares canonical XML (`ET.canonicalize(strip_text=True)`),
+//! which keeps each prefix, so `<p:a xmlns:p="urn:x"/>`, `<q:a
+//! xmlns:q="urn:x"/>` and `<a xmlns="urn:x"/>` are three different documents
+//! to it and one document here. A serializer that writes the wrong prefix
+//! (or a prefix where the corpus has a default namespace) passes this
+//! comparison and fails botocore's, and so do the verdicts
+//! `xml-equiv-verdicts` writes from it. The tests that pin the leniency say
+//! so; on whitespace, CDATA, attribute order and whitespace, and unused
+//! namespace declarations the two agree.
 
 use std::collections::BTreeMap;
 
@@ -425,7 +436,8 @@ fn decode_entities(s: &str) -> Result<String, XmlParseError> {
 // ---------------------------------------------------------------------------
 // Unit tests. Each pair is written from the XML 1.0 and Namespaces in XML
 // 1.0 recommendations (the section is named per test); none is taken from
-// the botocore corpus.
+// the botocore corpus. Four pin the prefix leniency the module doc states,
+// and say so: there, botocore's canonical comparison disagrees.
 // ---------------------------------------------------------------------------
 
 #[cfg(test)]
@@ -491,25 +503,32 @@ mod tests {
     }
 
     // Namespaces §3: a name is its namespace name plus local part; the
-    // prefix is not part of it.
+    // prefix is not part of it. DELIBERATE LENIENCY: botocore's canonical
+    // comparison keeps the prefix and calls these different.
     #[test]
     fn prefix_choice_is_not_significant() {
         same("<p:a xmlns:p=\"urn:x\"/>", "<q:a xmlns:q=\"urn:x\"/>");
     }
 
     // Namespaces §6.2: a default namespace applies to unprefixed elements.
+    // DELIBERATE LENIENCY: botocore's canonical comparison calls these
+    // different.
     #[test]
     fn default_namespace_equals_a_prefixed_one() {
         same("<a xmlns=\"urn:x\"/>", "<p:a xmlns:p=\"urn:x\"/>");
     }
 
     // Namespaces §6.1: a declaration is in scope in the element's content.
+    // DELIBERATE LENIENCY (one side is prefixed): botocore's canonical
+    // comparison calls these different.
     #[test]
     fn default_namespace_is_inherited_by_children() {
         same("<a xmlns=\"urn:x\"><b/></a>", "<p:a xmlns:p=\"urn:x\"><p:b/></p:a>");
     }
 
     // Namespaces §6.1: an inner declaration overrides an outer one.
+    // DELIBERATE LENIENCY (one side is prefixed): botocore's canonical
+    // comparison calls these different.
     #[test]
     fn inner_declaration_overrides_outer() {
         same(

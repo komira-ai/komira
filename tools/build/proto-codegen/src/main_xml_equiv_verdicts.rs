@@ -48,8 +48,8 @@ fn run(argv: &[String]) -> Result<(), String> {
         match flag.as_str() {
             "--corpus" => corpus_dir = Some(PathBuf::from(value)),
             "--protocol" => {
-                if !protocols.insert(value.clone()) {
-                    return Err(format!("--protocol `{value}` is given twice"));
+                if value.is_empty() || !protocols.insert(value.clone()) {
+                    return Err(format!("--protocol `{value}` is empty or given twice"));
                 }
             }
             "--ignore-list" => ignore_list = Some(PathBuf::from(value)),
