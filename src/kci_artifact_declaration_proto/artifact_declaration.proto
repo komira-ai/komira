@@ -1,0 +1,100 @@
+// The artifact declarations: the one reviewed list of what kci builds and
+// publishes, and the build system that builds each.
+//
+// kci models a build system generically and knows no build tool by name:
+// the build system builds, kci only ships. A build system is a program and
+// the flags it is always run with; whatever it needs is installed in the
+// container kci runs in. There is no list of supported build tools, no
+// kind of artifact and no enum anywhere in this file.
+//
+// THE CONTRACT. For each artifact kci creates an EMPTY output directory and
+// runs
+//
+//   <executable> <build_system.args...> <artifact.args...>
+//
+// with every occurrence of the literal token `{out_dir}` in any argument
+// replaced by that directory's absolute path. `{out_dir}` is the only
+// placeholder; any other `{<identifier>}` is refused (a brace not around
+// an identifier is passed through as written).
+//
+// ONE ARTIFACT PER DECLARATION. The build must leave, at the top of that
+// directory, EXACTLY ONE kci artifact manifest (the format of
+// //src/kci_artifact_manifest), named `manifest.json`, plus the files it
+// names (for a CONDA artifact: the `.conda` and `metadata.json`, both next
+// to it). kci refuses a build that leaves no `manifest.json` there, a
+// listing that names it more than once, and a manifest whose `name` is not
+// the declaration's `name`, compared exactly (byte for byte: no case
+// folding, no trimming, no `-`/`_` equivalence). kci ships exactly what
+// that manifest describes: the artifact type, version, platform, file,
+// sha256 and metadata all come from it, never from this file. A build that
+// exits non-zero is refused.
+//
+// Buck2 needs no special code: a build system `buck2` with args
+// `["build", "--config-file", "/etc/kci/remote.buckconfig"]` and artifact
+// args `["//src/komira_encoding:komira_encoding_conda[release]", "--out",
+// "{out_dir}"]`. The subcommand belongs in the build system's args because
+// those come first and buck2 accepts `--config-file` only after the
+// subcommand. What `buck2 build --out <existing dir>` copies is the ONE
+// default output of the ONE target named: a single file lands in the
+// directory under its own name, the CONTENTS of a directory output land
+// directly in it (files already there are kept, which is why kci starts
+// from an empty one), and two or more default outputs, or two targets, are
+// refused ("choice of output is ambiguous"). A `conda_package`'s
+// `[release]` is such a directory: `<name>-<version>-0.conda`,
+// `manifest.json` and `metadata.json` (tools/build/package/conda.bzl).
+//
+// Set-level rules (every declared artifact built, versions in lockstep, a
+// metapackage published after its members, each package's requirements
+// closed over the set) need the built manifests, so they are checked by kci
+// publish over those manifests, not here.
+//
+// Deliberately absent: a version, a sha256, a file name, a platform and an
+// artifact type (the built manifest carries them), and where an artifact is
+// published to (kci publish's).
+//
+// Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
+syntax = "proto3";
+
+package kci.release.v1;
+
+// A declarations file: the build systems, then every artifact kci may build
+// or publish, each once.
+message ArtifactDeclarations {
+  repeated BuildSystem build_systems = 1;
+  repeated ArtifactDeclaration artifacts = 2;
+}
+
+// A program kci runs to build an artifact, and the flags it always gets.
+message BuildSystem {
+  // The name artifacts refer to it by; `[a-z][a-z0-9_]*`, unique among the
+  // build systems.
+  string name = 1;
+
+  // Required. A program name, resolved on PATH, or an absolute path. No
+  // whitespace, and no relative path (`./buck2` would resolve against a
+  // working directory the file does not state).
+  string executable = 2;
+
+  // Args passed on every invocation, before the artifact's own, e.g.
+  // `["build", "--config-file", "/etc/kci/remote.buckconfig"]`. May be empty; no
+  // entry may be. `{out_dir}` is substituted here too.
+  repeated string args = 3;
+}
+
+message ArtifactDeclaration {
+  // The artifact's name; `[a-z][a-z0-9_]*`, unique among the artifacts.
+  // The built `manifest.json`'s `name` must equal it exactly, so this is the
+  // published name too (a conda package's name has the same syntax).
+  string name = 1;
+
+  reserved 2;
+  reserved "allowed_channels";
+
+  // The name of a declared BuildSystem.
+  string build_system = 3;
+
+  // Appended after the build system's args. Non-empty, no empty entry, and
+  // `{out_dir}` must appear in the combined args (build system's and these):
+  // otherwise kci cannot know where the outputs are.
+  repeated string args = 4;
+}
