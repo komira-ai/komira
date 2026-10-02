@@ -8,10 +8,14 @@
 # `verify_member(declaration, dir)` refuses (RAISES, every message starting
 # `artifact '<declaration>': `), in this order:
 #
-#   - `dir` is not a directory;
+#   - `dir` is a symlink, or is not a directory;
+#   - any top-level entry is a symlink (checked with lstat semantics, never
+#     followed: a link can name bytes outside the release directory, and the
+#     bare-name rule below exists so that nothing outside it can be named);
 #   - its top level holds no `manifest.json` (kci_artifact_declaration's
-#     `require_one_manifest`); the manifest does not parse
-#     (kci_artifact_manifest's `read_artifact_manifest`);
+#     `require_one_manifest`), or `manifest.json` is not a regular file; the
+#     manifest does not parse (kci_artifact_manifest's
+#     `read_artifact_manifest`);
 #   - the manifest's `name` is not the declaration's, exactly
 #     (`require_manifest_name`);
 #   - `file` or `metadata` is not a bare name in `dir` (no `/`, not `.` or
@@ -20,7 +24,8 @@
 #     `manifest.json`;
 #   - the top level holds anything other than `manifest.json`, `file` and
 #     `metadata` (the release directory is exactly what will ship), or `file`
-#     or `metadata` is missing or is not a regular file;
+#     or `metadata` is missing or is not a regular file (a symlink was
+#     already refused above, so "regular file" holds for links too);
 #   - `file` is EMPTY, or its sha256 is not the manifest's;
 #   - CONDA: `metadata` does not parse (`read_conda_metadata`), or disagrees
 #     with the manifest (`name`, `version`, `subdir`, `file_name` = `file`), or
@@ -33,7 +38,7 @@
 # =============================================================================
 
 from std.os import listdir
-from std.os.path import isdir, isfile
+from std.os.path import isdir, isfile, islink
 from std.pathlib import Path
 
 from komira_crypto import hex_lower_array_32, sha256
@@ -117,18 +122,50 @@ def file_sha256_hex(path: String) raises -> String:
     return hex_lower_array_32(sha256(Span(data)))
 
 
+def _no_trailing_slash(path: String) -> String:
+    """`path` without trailing `/`s (but never emptied): `islink("l/")`
+    resolves the link, `islink("l")` does not."""
+    var b = path.as_bytes()
+    var n = len(b)
+    while n > 1 and b[n - 1] == UInt8(47):  # '/'
+        n -= 1
+    return String(path[byte = :n])
+
+
 def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
     """Check one artifact directory (file header); return what it holds."""
+    if islink(_no_trailing_slash(dir)):
+        _refuse(
+            declaration,
+            String("'")
+            + dir
+            + String("' is a symlink, not a directory: a link can name bytes outside the")
+            + String(" release directory"),
+        )
     if not isdir(dir):
         _refuse(declaration, String("'") + dir + String("' is not a directory"))
-    var listing = List[String]()
-    var raw = listdir(dir)
-    for i in range(len(raw)):
-        listing.append(String(raw[i]))
-    require_one_manifest(declaration, listing)
     var base = dir.copy()
     if not base.endswith(String("/")):
         base += String("/")
+    var listing = List[String]()
+    var raw = listdir(dir)
+    for i in range(len(raw)):
+        var entry = String(raw[i])
+        if islink(base + entry):
+            _refuse(
+                declaration,
+                String("the directory's '")
+                + entry
+                + String("' is a symlink: the directory holds regular files only, and a link")
+                + String(" can name bytes outside the release directory"),
+            )
+        listing.append(entry^)
+    require_one_manifest(declaration, listing)
+    if not isfile(base + String(KCI_MANIFEST_NAME)):
+        _refuse(
+            declaration,
+            String("its ") + String(KCI_MANIFEST_NAME) + String(" is not a regular file"),
+        )
     var m = read_artifact_manifest(base + String(KCI_MANIFEST_NAME))
     require_manifest_name(declaration, m.name)
     _bare(declaration, String("file"), m.file)
@@ -153,6 +190,8 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
             )
     var file_path = base + m.file
     var metadata_path = base + m.metadata
+    # Every top-level entry was refused above if it was a symlink, so
+    # `isfile` (which follows links) here means a regular file.
     if not isfile(file_path):
         _refuse(declaration, String("its file '") + m.file + String("' is not in the directory"))
     if not isfile(metadata_path):

@@ -11,7 +11,7 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import getenv, makedirs
+from std.os import getenv, makedirs, remove
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
@@ -90,6 +90,28 @@ def _good(tag: String) raises -> String:
     _write(d + String("/manifest.json"), _manifest())
     _write(d + String("/metadata.json"), _metadata())
     return d^
+
+
+def _symlink(target: String, link: String) raises:
+    """`ln -s target link`, through libc (test-only FFI: the std has no
+    symlink call)."""
+    var t = target.copy()
+    var l = link.copy()
+    var rc = external_call["symlink", Int32](
+        t.as_c_string_slice().unsafe_ptr(), l.as_c_string_slice().unsafe_ptr()
+    )
+    if rc != 0:
+        raise Error(String("symlink(") + target + String(", ") + link + String(") failed"))
+
+
+def _link_outside(d: String, entry: String, tag: String) raises:
+    """Replace `d/entry` with a symlink to a file OUTSIDE `d` holding the
+    same bytes, so only the link (never the bytes) can cause a refusal."""
+    var outside = _root(String("outside_") + tag) + String("/") + entry
+    var data = Path(d + String("/") + entry).read_text()
+    _write(outside, data)
+    remove(d + String("/") + entry)
+    _symlink(outside, d + String("/") + entry)
 
 
 def _refusal(dir: String, name: String = String(_NAME)) -> String:
@@ -220,6 +242,53 @@ def test_refuses_a_missing_file_or_metadata() raises:
     _write(e + String("/manifest.json"), _manifest())
     _write(e + String("/") + String(_FILE), String(_CONTENT))
     _expect(e, String("its metadata 'metadata.json' is not in the directory"))
+
+
+def _link_refusal(entry: String) -> String:
+    return (
+        String("the directory's '")
+        + entry
+        + String("' is a symlink: the directory holds regular files only, and a link")
+        + String(" can name bytes outside the release directory")
+    )
+
+
+def test_refuses_a_file_symlinked_outside_the_directory() raises:
+    var d = _good(String("linkfile"))
+    _link_outside(d, String(_FILE), String("linkfile"))
+    _expect(d, _link_refusal(String(_FILE)))
+
+
+def test_refuses_metadata_symlinked_outside_the_directory() raises:
+    var d = _good(String("linkmeta"))
+    _link_outside(d, String("metadata.json"), String("linkmeta"))
+    _expect(d, _link_refusal(String("metadata.json")))
+
+
+def test_refuses_a_manifest_symlinked_outside_the_directory() raises:
+    var d = _good(String("linkman"))
+    _link_outside(d, String("manifest.json"), String("linkman"))
+    _expect(d, _link_refusal(String("manifest.json")))
+
+
+def test_refuses_a_directory_that_is_a_symlink() raises:
+    var real = _good(String("linkdir_real"))
+    var parent = _root(String("linkdir"))
+    var d = parent + String("/") + String(_NAME)
+    _symlink(real, d)
+    var tail = String(
+        "' is a symlink, not a directory: a link can name bytes outside the release directory"
+    )
+    _expect(d, String("'") + d + tail)
+    # a trailing `/` would make lstat resolve the link; it is refused the same
+    _expect(d + String("/"), String("'") + d + String("/") + tail)
+
+
+def test_refuses_a_manifest_that_is_not_a_regular_file() raises:
+    var d = _good(String("mandir"))
+    remove(d + String("/manifest.json"))
+    makedirs(d + String("/manifest.json"), exist_ok=True)
+    _expect(d, String("its manifest.json is not a regular file"))
 
 
 def test_refuses_an_empty_file() raises:
