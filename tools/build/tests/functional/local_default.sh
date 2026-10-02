@@ -9,8 +9,7 @@
 # runs buck2 there with its own daemon, no user or system buckconfig
 # (BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG) and HOME in the scratch directory,
 # so nothing on this machine can configure a remote service. Steps 1-3 only
-# resolve configuration and build nothing; step 4 builds toolchain targets on
-# this machine. On a Linux x86_64 host:
+# resolve configuration and build nothing; steps 4 and 5 build on this machine. On a Linux x86_64 host:
 #   1. `[build] execution_platforms` is komira//tools/build/platforms/default:default,
 #      and it registers exactly one platform, linux-x86_64, with a local
 #      executor and no remote one.
@@ -32,10 +31,13 @@
 #      built at once (about 45 MB downloaded; no Mojo compile). Local actions
 #      share the checkout root as their working directory, so this fails if
 #      they share scratch space.
+#   5. With an empty `.buckconfig.local` (no keys), `build
+#      komira//tools/build/examples:hello` succeeds with every action local,
+#      from an empty environment and `PATH`, and the binary prints its greeting.
 # On any other host, (1) is replaced by the refusal that names the host and
 # `.buckconfig.local`.
 #
-# Only (5) executes anything, and only on Linux x86_64.
+# Only (4) and (5) execute anything, and only on Linux x86_64.
 #
 # Scratch goes under $TMPDIR (a disk directory where /tmp is memory); it is
 # deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Needs git; what-ran is
@@ -165,6 +167,15 @@ elif ! grep -qF '`[komira] execution`: expected one of' "$W/bad_mode.txt"; then
     die "-c komira.execution=farm failed without naming the modes (see $W/bad_mode.txt)"
 fi
 
+# what-ran is read by the inspect tool: the caller's (run_tests.sh exports
+# INSPECT_BIN), else built here, in the clone, on this machine.
+if [ -z "${INSPECT_BIN:-}" ] || [ ! -x "$INSPECT_BIN" ]; then
+    dir=$(b2 build 'komira//tools/build/inspect:inspect[runnable]' --materializations all \
+        --show-full-simple-output 2> "$W/inspect_build.log" | tail -n 1)
+    [ -n "$dir" ] && [ -x "$dir/inspect" ] || die "cannot build komira//tools/build/inspect:inspect (see $W/inspect_build.log)"
+    export INSPECT_BIN="$dir/inspect"
+fi
+
 # 4
 # The daemon takes its environment from the client that starts it, and local
 # actions inherit it: start it with nothing but HOME.
@@ -186,4 +197,29 @@ else
 fi
 case "$ran" in '' | *[!0-9]*) die "local build: ${ran:-cannot read $W/local_what_ran.json}" ;; esac
 
-echo "PASS  local default: a fresh clone registers only the local linux-x86_64 platform; $(printf '%s\n' "$want" | grep -c '#') targets resolve to it with the pinned configuration hash, forcing remote names [komira_re], a service named without [komira_re] or a retired [komira_re] key refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH"
+# 5
+# The newcomer's command: a `.buckconfig.local` with no keys (what copying the
+# example and deleting its lines leaves, or what a stranger's editor creates)
+# is the same as none. `build //tools/build/examples:hello` runs the lint
+# validations of its graph as well as the compile, all on this machine,
+# concurrently, from a daemon with an empty environment and `PATH`; then the
+# binary runs. This is the case that failed when lint actions shared one
+# scratch directory (`rm`, `head` and `grep` "not found": a sibling action had
+# deleted the applet links).
+b2 kill > /dev/null 2>&1
+: > "$C/.buckconfig.local"
+if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+        "$BUCK2" build komira//tools/build/examples:hello) > "$W/hello_build.log" 2>&1; then
+    die "an empty .buckconfig.local: build komira//tools/build/examples:hello failed on this machine (see $W/hello_build.log)"
+fi
+b2 log what-ran --format json > "$W/hello_what_ran.json" 2>&1 || die "cannot read what-ran of the hello build"
+acts=$(whatran_actions "$W/hello_what_ran.json") || die "cannot read $W/hello_what_ran.json"
+execs=$(printf '%s\n' "$acts" | awk -F '\t' 'NF { print tolower($2) }' | LC_ALL=C sort -u | paste -sd, -)
+if [ -z "$acts" ] || [ "$execs" != local ]; then
+    die "hello build: executors ${execs:-none}, want only local (see $W/hello_what_ran.json)"
+fi
+out=$(cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+    "$BUCK2" run komira//tools/build/examples:hello 2> "$W/hello_run.err") || die "running hello failed (see $W/hello_run.err)"
+[ "$out" = "hello from mojo" ] || die "hello printed '$out', not 'hello from mojo'"
+
+echo "PASS  local default: a fresh clone registers only the local linux-x86_64 platform; $(printf '%s\n' "$want" | grep -c '#') targets resolve to it with the pinned configuration hash, forcing remote names [komira_re], a service named without [komira_re] or a retired [komira_re] key refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH, and with an empty .buckconfig.local hello builds and runs locally"

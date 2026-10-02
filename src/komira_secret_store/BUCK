@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The secret-store seam: the one-method `SecretStore` trait (a handle in, a
+# zeroizing `SecretValue` out), an in-memory test double, and the
+# names-only `SecretMeta` record. The trait and the value types name no provider
+# and no endpoint. Its one dependency is `komira_crypto`, for the secure wipe in `SecretValue`'s
+# destructor.
+mojo_library(
+    name = "komira_secret_store",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_crypto:komira_crypto"],
+    test_srcs = ["tests/test_secret_store_port.mojo"],
+    visibility = ["PUBLIC"],
+)
