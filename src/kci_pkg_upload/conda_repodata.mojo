@@ -26,12 +26,31 @@
 # A listed entry with no `sha256` is PRESENT with no exposed digest, which
 # `presence` turns into NO_COMMON_FIELD, never IDENTICAL.
 #
+# ─── WHICH PACKAGE NAMES A SUBDIR HOLDS (`NameListing`) ─────────────────────
+# `classify_repodata_names` reads the SAME document for a different question:
+# the set of package names with any file in the subdir, from the keys of BOTH
+# listings (`<name>-<version>-<build>.conda|.tar.bz2`, split at the last two
+# `-`, the name lowercased: a conda name is lowercase). A publisher uses it to
+# tell a name it is CLAIMING for the first time from one the channel already
+# holds, so the same discipline holds, in the other direction: a listing that
+# was not read yields NO names and the kind UNKNOWN, never an empty PRESENT
+# that would read as "every name is new":
+#   * a key with neither extension, or not `<name>-<version>-<build>`, is
+#     UNKNOWN naming the key: the listing holds a file whose name cannot be
+#     told, so the set is not known;
+#   * an entry that is not an object is UNKNOWN, as for `read_back`;
+#   * each format key present-but-not-an-object, or both absent, is UNKNOWN.
+# A 404 is ABSENT: the channel says the subdir holds no repodata, so no name.
+# [UNVERIFIED: that prefix.dev answers 404, not an empty repodata, for a subdir
+# that never held a file. Either answer yields no names.]
+#
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from komira_json import JSON_STRING, parse_json_value
+from komira_json import JSON_OBJECT, JSON_STRING, parse_json_value
 
 from .http_read import GetResult
+from .identity import ascii_lower
 from .index_lookup import IndexEntry
 from .outcome import (
     READ_ABSENT,
@@ -211,4 +230,194 @@ def classify_repodata_answer(
             got,
             String(""),
             String("the repodata could not be read: ") + String(e),
+        )
+
+
+struct NameListing(Copyable, Movable, Deinitable):
+    """The package names a conda subdir holds a file under.
+
+      kind   — a READ_* kind. READ_PRESENT: the listing was read, and `names`
+               is every name in it (possibly none). READ_ABSENT: the subdir
+               has no repodata (404), so no name. Any other kind: the listing
+               was NOT read, and `names` is EMPTY and means nothing.
+      names  — lowercase, sorted bytewise, each once.
+      detail — for a human, when the kind is not READ_PRESENT.
+
+    Layout: Ints and owned values. No pointer field."""
+
+    var kind: Int
+    var status: Int
+    var names: List[String]
+    var detail: String
+
+    def __init__(
+        out self,
+        kind: Int,
+        status: Int,
+        var names: List[String],
+        var detail: String,
+    ):
+        self.kind = kind
+        self.status = status
+        self.names = names^
+        self.detail = detail^
+
+    def was_read(self) -> Bool:
+        """True iff the answer says which names the subdir holds: a listing
+        that was read (READ_PRESENT) or a subdir with no repodata
+        (READ_ABSENT). Every other kind is a listing that was not read."""
+        return self.kind == READ_PRESENT or self.kind == READ_ABSENT
+
+    def holds(self, name: String) raises -> Bool:
+        """Whether the subdir holds a file of package `name` (compared
+        lowercased). RAISES when the listing was not read: "not held" must
+        never be answered from a listing nobody read."""
+        if not self.was_read():
+            raise Error(
+                String("kci_pkg_upload: asked whether a subdir holds '")
+                + name
+                + String("' from a listing that was not read: ")
+                + self.detail
+            )
+        var want = ascii_lower(name)
+        for i in range(len(self.names)):
+            if self.names[i] == want:
+                return True
+        return False
+
+
+def conda_package_name_of_file(file_name: String) -> String:
+    """The package name of a conda file name `<name>-<version>-<build>.conda`
+    (or `.tar.bz2`), lowercased; EMPTY when the file name has neither
+    extension or is not three `-`-separated non-empty parts (a name may hold
+    `-`, a version and a build may not, so it is split at the last two)."""
+    var stem: String
+    if file_name.endswith(String(".conda")):
+        stem = String(file_name[byte = : file_name.byte_length() - 6])
+    elif file_name.endswith(String(".tar.bz2")):
+        stem = String(file_name[byte = : file_name.byte_length() - 8])
+    else:
+        return String("")
+    var last = stem.rfind(String("-"))
+    if last <= 0 or last == stem.byte_length() - 1:
+        return String("")
+    var mid = String(stem[byte=:last]).rfind(String("-"))
+    if mid <= 0 or mid + 1 == last:
+        return String("")
+    return ascii_lower(String(stem[byte=:mid]))
+
+
+def _names_unknown(got: GetResult, var detail: String) -> NameListing:
+    return NameListing(READ_UNKNOWN, got.response.status, List[String](), detail^)
+
+
+def _insert_sorted_unique(mut names: List[String], var name: String):
+    var at = len(names)
+    for i in range(len(names)):
+        if names[i] == name:
+            return
+        if name < names[i]:
+            at = i
+            break
+    names.insert(at, name^)
+
+
+def classify_repodata_names(
+    got: GetResult, authorization: String
+) -> NameListing:
+    """Turn one repodata GET into the set of package names it lists (see the
+    file header). Never raises: every fault is a kind."""
+    if not got.ok:
+        return NameListing(READ_UNKNOWN, 0, List[String](), got.detail.copy())
+    var status = got.response.status
+    if status == 404:
+        return NameListing(
+            READ_ABSENT,
+            status,
+            List[String](),
+            String("the channel answered 404 for ") + got.host + got.path,
+        )
+    if status == 401 or status == 403:
+        return NameListing(
+            READ_AUTH_REFUSED,
+            status,
+            List[String](),
+            withhold_if_echoes(
+                String("the channel answered ")
+                + String(status)
+                + String(": ")
+                + excerpt_unless_echoes(got.response.body, authorization),
+                authorization,
+            ),
+        )
+    if status == 429:
+        return NameListing(
+            READ_RATE_LIMITED, status, List[String](), String("the channel answered 429")
+        )
+    if status != 200:
+        return _names_unknown(
+            got,
+            withhold_if_echoes(
+                String("the channel answered HTTP ")
+                + String(status)
+                + String(": ")
+                + excerpt_unless_echoes(got.response.body, authorization),
+                authorization,
+            ),
+        )
+    try:
+        var text = decode_utf8(Span(got.response.body), String("the repodata"))
+        var doc = parse_json_value(text)
+        if not doc.is_object():
+            return _names_unknown(
+                got,
+                String("the repodata is not a JSON object: its names cannot")
+                + String(" be read"),
+            )
+        var keys = List[String]()
+        keys.append(String(TAR_BZ2_PACKAGES_KEY))
+        keys.append(String(CONDA_PACKAGES_KEY))
+        var read_one = False
+        var names = List[String]()
+        for k in range(len(keys)):
+            if not doc.has(keys[k]):
+                continue
+            var listing = doc.get(keys[k])
+            if not listing.is_object():
+                return _names_unknown(
+                    got,
+                    String("the repodata's '")
+                    + keys[k]
+                    + String("' is not an object: its names cannot be read"),
+                )
+            read_one = True
+            for i in range(listing.num_members()):
+                var file_name = listing.key_at(i)
+                if listing.value_kind(i) != JSON_OBJECT:
+                    return _names_unknown(
+                        got,
+                        String("the repodata's entry for ")
+                        + file_name
+                        + String(" is not an object"),
+                    )
+                var name = conda_package_name_of_file(file_name)
+                if name.byte_length() == 0:
+                    return _names_unknown(
+                        got,
+                        String("the repodata lists '")
+                        + file_name
+                        + String("', which is not <name>-<version>-<build>")
+                        + String(".conda or .tar.bz2: its names cannot be told"),
+                    )
+                _insert_sorted_unique(names, name^)
+        if not read_one:
+            return _names_unknown(
+                got,
+                String("the repodata has neither a 'packages' nor a")
+                + String(" 'packages.conda' listing: its names cannot be read"),
+            )
+        return NameListing(READ_PRESENT, status, names^, String(""))
+    except e:
+        return _names_unknown(
+            got, String("the repodata could not be read: ") + String(e)
         )

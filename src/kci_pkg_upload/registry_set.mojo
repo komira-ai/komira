@@ -3,6 +3,11 @@
 #   ladder. One transport, one credential, four methods.
 # =============================================================================
 #
+# `package_names(substrate, repo, subdir)` lists the package names a conda
+# subdir holds; it takes the substrate like every other method, so the ladder
+# stays the one place an arm is chosen, and a substrate with no subdir listing
+# (PyPI) RAISES `no registry arm` rather than answering an empty set.
+#
 # WHY A LADDER AND NOT A TRAIT. Mojo 1.0 has no trait objects, so dispatching
 # per substrate is an if-ladder over concrete arms whatever a trait would say.
 # This struct holds that ladder, and it is the ONLY one in the package: every
@@ -38,6 +43,7 @@ from .coordinate import (
     PackageCoordinate,
     PackageFile,
 )
+from .conda_repodata import NameListing
 from .credential import RegistryCredential
 from .identity import (
     IDENTITY_MATCH,
@@ -169,3 +175,14 @@ struct RegistrySet[T: PkgTransport, C: RegistryCredential](Movable, Deinitable):
         if c.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
             return PrefixDevRegistry.fetch(self._transport, self._cred, c)
         raise no_registry_arm(c.substrate)
+
+    def package_names(
+        mut self, substrate: Int, repo: String, subdir: String
+    ) raises -> NameListing:
+        """The package names `repo`'s `subdir` holds a file under. Only a
+        conda channel has subdir listings; any other substrate RAISES."""
+        if substrate == SUBSTRATE_PREFIX_DEV_CONDA:
+            return PrefixDevRegistry.package_names(
+                self._transport, self._cred, repo, subdir
+            )
+        raise no_registry_arm(substrate)

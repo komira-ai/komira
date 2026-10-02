@@ -3,10 +3,10 @@
 # proto package: nested.example.logging.v1
 # Mojo package:  komira_example_logging
 #
-# Generated message structs conform to the komira_serde
+# Generated message structs conform to the komira_proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 # proto message LogEntry (.nested.example.logging.v1.LogEntry)

@@ -41,7 +41,7 @@
 # Its `app//platforms:default` must register only remote platforms, and the
 # same targets must resolve to the same execution configurations as test 18
 # pins; with `[komira] execution = remote`, a `[komira_re]` missing
-# linux_properties must refuse, naming the key
+# linux_x86_64_properties must refuse, naming the key
 # (analysis only; nothing runs).
 #
 # The remote-execution settings come from `.buckconfig.local` in the repo root,
@@ -215,14 +215,14 @@ got=$(awk '/^[^ ].* \(.*\):$/ { t = $1; next }
     t != "" && /^    Execution platform configuration: / { print t, $4; t = "" }' "$W/rootcfg.resolution.txt" | LC_ALL=C sort)
 [ "$got" = "$want" ] ||
     die "rootcfg: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ') (see $W/rootcfg.resolution.txt)"
-key=linux_properties
+key=linux_x86_64_properties
 if b2_rootcfg audit providers -c komira.execution=remote -c "komira_re.$key=" "$EP" > "$W/rootcfg.no_$key.txt" 2>&1; then
     die "rootcfg: [komira] execution = remote without [komira_re] $key registered platforms (see $W/rootcfg.no_$key.txt)"
 elif ! grep -qF "\`[komira_re] $key\` is not set" "$W/rootcfg.no_$key.txt"; then
     die "rootcfg: [komira] execution = remote without [komira_re] $key failed without naming it (see $W/rootcfg.no_$key.txt)"
 fi
 b2_rootcfg kill > /dev/null 2>&1
-echo "      root .buckconfig: a consumer with the remote settings in its root .buckconfig registers $n_platforms remote platforms, resolves $(printf '%s\n' "$want" | wc -l) targets to the pinned configurations, and refuses execution = remote without linux_properties"
+echo "      root .buckconfig: a consumer with the remote settings in its root .buckconfig registers $n_platforms remote platforms, resolves $(printf '%s\n' "$want" | wc -l) targets to the pinned configurations, and refuses execution = remote without linux_x86_64_properties"
 
 build() { # checkout, invocation number, targets...
     local d=$1 i=$2; shift 2
