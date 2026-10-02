@@ -1,7 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Binary-to-text encodings (base64, base64url, base32, hex) and PEM armor
-# (RFC 7468) in pure Mojo with no dependencies. Strict, constant-time decoding; see __init__.mojo.
+# (RFC 7468) in pure Mojo with no dependencies. The codecs decode in constant
+# time; the PEM armor scan does not. See __init__.mojo.
 mojo_library(
     name = "komira_encoding",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

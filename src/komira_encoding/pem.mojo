@@ -15,14 +15,17 @@
 # PARSING RULES (what `pem_decode` and `pem_label` accept). Boundaries are
 # line-oriented; the body follows RFC 7468 section 3 `laxtextualmsg`:
 #
-#   - Lines end in LF; a CR before it is ignored, so CRLF files work.
+#   - Lines end in LF, CRLF or a lone CR (RFC 7468 section 3 `eol`; section
+#     2 asks parsers to handle every newline convention).
 #   - Text before the first BEGIN line is ignored (RFC 7468 section 2), and so
 #     is anything on the lines after the END line. Only the FIRST block is
 #     read: a block of another label is refused, never skipped.
 #   - A boundary stands on a line of its own, with optional spaces and tabs
-#     around it: `-----BEGIN <label>-----` and `-----END <label>-----`. A
-#     line whose first non-blank bytes are `-----` but that is not a
-#     well-formed boundary is an error, not explanatory text.
+#     around it: `-----BEGIN <label>-----` and `-----END <label>-----`. Up to
+#     the END line, a line whose first non-blank bytes are `-----` but that
+#     is not the boundary expected there is an error, not explanatory text:
+#     before the block, anything but a well-formed BEGIN line; inside it,
+#     anything but a well-formed END line.
 #   - The label must match RFC 7468 section 3 `label` (printable ASCII, single
 #     hyphens or spaces between label characters, none at the ends), the END
 #     label must equal the BEGIN label (RFC 7468 section 2 lets a parser
@@ -42,13 +45,18 @@
 #
 # TIMING. The base64 symbols reach only the constant-time decoder, and the
 # whitespace is removed without a branch on the byte. The armor scan does
-# branch on line feeds and on boundary characters at the start of a line,
+# branch on line ends and on boundary characters at the start of a line,
 # so the line structure of the input (64-symbol lines in any generated
 # file) is not hidden.
+#
+# RESIDUE. The compacted base64 of the body, and on an error the bytes
+# decoded so far, are wiped (libc secure zero, codec.mojo `wipe_bytes`)
+# before they are freed. The DER returned belongs to the caller, who wipes
+# it when it holds a key; the input text is the caller's too.
 # =============================================================================
 
 from .base64 import base64_encode
-from .codec import SCHEME_BASE64, decode
+from .codec import SCHEME_BASE64, decode_at, wipe_bytes
 from .constant_time import ct_eq, ct_in_range
 from .errors import (
     INVALID_BOUNDARY,
@@ -86,9 +94,9 @@ comptime _HYPHEN = UInt8(0x2D)
 
 @fieldwise_init
 struct _Line(Copyable, Movable):
-    """One line of the input: `start` and `next` (the byte after its LF, or
-    the input length), and the bounds of its content without the leading
-    and trailing spaces, tabs and CR."""
+    """One line of the input: `start` and `next` (the byte after its line
+    end, or the input length), and the bounds of its content without the
+    leading and trailing spaces and tabs."""
 
     var start: Int
     var next: Int
@@ -107,16 +115,22 @@ struct _Block(Copyable, Movable):
 
 
 def _line_at(b: Span[UInt8, _], start: Int) -> _Line:
+    """The line at `start`. RFC 7468 `eol = CRLF / CR / LF`: a line ends at
+    an LF, at a CR LF pair, or at a CR alone."""
     var n = len(b)
     var e = start
-    while e < n and b[e] != _LF:
+    while e < n and b[e] != _LF and b[e] != _CR:
         e += 1
-    var nxt = e + 1 if e < n else n
+    var nxt = n
+    if e < n:
+        nxt = e + 1
+        if b[e] == _CR and nxt < n and b[nxt] == _LF:
+            nxt += 1
     var lo = start
     while lo < e and (b[lo] == _SP or b[lo] == _HT):
         lo += 1
     var hi = e
-    while hi > lo and (b[hi - 1] == _SP or b[hi - 1] == _HT or b[hi - 1] == _CR):
+    while hi > lo and (b[hi - 1] == _SP or b[hi - 1] == _HT):
         hi -= 1
     return _Line(start, nxt, lo, hi)
 
@@ -196,7 +210,7 @@ def _find_block(b: Span[UInt8, _], function: StaticString) raises -> _Block:
                         raise encoding_error(
                             INVALID_BOUNDARY,
                             function,
-                            "block has no END line",
+                            "unexpected boundary inside the block",
                             inner.lo,
                         )
                     var end = _boundary_label(b, inner, _END, function)
@@ -215,35 +229,32 @@ def _find_block(b: Span[UInt8, _], function: StaticString) raises -> _Block:
                         )
                     return _Block(lab[0], lab[1], body_lo, inner.start)
                 pos = inner.next
-        elif _has_at(b, line.lo, line.hi, _DASHES) and _has_at(
-            b, line.lo, line.hi, _END
-        ):
+        elif _has_at(b, line.lo, line.hi, _END):
             raise encoding_error(
                 INVALID_BOUNDARY, function, "END line before any BEGIN", line.lo
             )
-
-
-def _position_of(msg: String) -> Int:
-    """The position at the end of a komira_encoding error message."""
-    var key = String(" at position ")
-    var at = msg.rfind(key)
-    if at < 0:
-        return -1
-    try:
-        return atol(String(msg[byte=at + key.byte_length() :]))
-    except:
-        return -1
+        elif _has_at(b, line.lo, line.hi, _DASHES):
+            # A line that opens with five dashes is a boundary or an error,
+            # never explanatory text: `-----BEGIN-----` and `-----FOO-----`
+            # are refused here, not skipped on the way to a later block.
+            raise encoding_error(
+                INVALID_BOUNDARY,
+                function,
+                "malformed encapsulation boundary",
+                line.lo,
+            )
 
 
 def _decode_body(
     b: Span[UInt8, _], lo: Int, hi: Int, function: StaticString
 ) raises -> List[UInt8]:
     """Strict base64 of `b[lo:hi]` with every RFC 7468 `W` byte removed.
-    A decode error is re-raised with its position in `b`."""
+    A decode error carries its position in `b`."""
     var n = hi - lo
     # Compaction without a branch on the byte: every byte is written, and the
     # write index advances by one only for a byte that is kept. `at[k]` is
-    # where the k-th kept byte came from, for error positions.
+    # where the k-th kept byte came from, so the decoder reports positions in
+    # `b`; `at[k]` for the end of the symbols is `hi`.
     var body = List[UInt8](length=n + 1, fill=0)
     var at = List[Int](length=n + 1, fill=hi)
     var k = 0
@@ -254,20 +265,21 @@ def _decode_body(
         at[k] = i
         k += Int(1 - (w & 1))
     at[k] = hi
+    # `body` holds the key's base64: it is wiped on every way out.
     if k == 0:
+        wipe_bytes(body)
         raise encoding_error(
             INVALID_LENGTH, function, "block body is empty", hi
         )
     try:
-        return decode(SCHEME_BASE64, Span(body)[:k], True, False, function)
+        var der = decode_at(
+            SCHEME_BASE64, Span(body)[:k], True, False, function, at
+        )
+        wipe_bytes(body)
+        return der^
     except e:
-        var msg = String(e)
-        var p = _position_of(msg)
-        if p < 0 or p > k:
-            raise e^
-        var key = String(" at position ")
-        var head = String(msg[byte=: msg.rfind(key)])
-        raise Error(head + key + String(at[p]))
+        wipe_bytes(body)
+        raise e^
 
 
 def pem_label(pem: Span[UInt8, _]) raises -> String:
@@ -289,7 +301,7 @@ def pem_label(pem: String) raises -> String:
     return pem_label(pem.as_bytes())
 
 
-def pem_decode(pem: Span[UInt8, _], label: String) raises -> List[UInt8]:
+def pem_decode(pem: Span[UInt8, _], label: StringSlice) raises -> List[UInt8]:
     """The DER bytes of the first PEM block in `pem`, which must be labelled
     `label`. A block of another label is refused, not skipped: a file whose
     first block is a CERTIFICATE is refused when a PRIVATE KEY is asked for.
@@ -317,12 +329,12 @@ def pem_decode(pem: Span[UInt8, _], label: String) raises -> List[UInt8]:
     return _decode_body(pem, b.body_lo, b.body_hi, "pem_decode")
 
 
-def pem_decode(pem: String, label: String) raises -> List[UInt8]:
+def pem_decode(pem: String, label: StringSlice) raises -> List[UInt8]:
     """`pem_decode` over the bytes of `pem`."""
     return pem_decode(pem.as_bytes(), label)
 
 
-def pem_encode(label: String, der: Span[UInt8, _]) raises -> String:
+def pem_encode(label: StringSlice, der: Span[UInt8, _]) raises -> String:
     """The PEM block of `der` under `label`: the BEGIN line, the base64 body
     in lines of `PEM_LINE_SYMBOLS` symbols, the END line, each ending in LF
     (RFC 7468 section 2 generator rules). `pem_decode(pem_encode(l, d), l)`
@@ -339,11 +351,11 @@ def pem_encode(label: String, der: Span[UInt8, _]) raises -> String:
         raise encoding_error(INVALID_LENGTH, "pem_encode", "der is empty", 0)
     var body = base64_encode(der)
     var sym = body.as_bytes()
-    var out = String(_BEGIN) + label + String(_DASHES) + "\n"
+    var out = String(_BEGIN) + String(label) + String(_DASHES) + "\n"
     var i = 0
     while i < len(sym):
         var j = min(i + PEM_LINE_SYMBOLS, len(sym))
         out += String(StringSlice(unsafe_from_utf8=sym[i:j])) + "\n"
         i = j
-    out += String(_END) + label + String(_DASHES) + "\n"
+    out += String(_END) + String(label) + String(_DASHES) + "\n"
     return out^
