@@ -29,8 +29,9 @@
 # =============================================================================
 
 
-# Per-worker span-id stack depth cap (mirrors obs MAX_SPAN_DEPTH=16).
-comptime MAX_SPAN_DEPTH: Int = 16
+# Per-worker span-id stack depth cap: the tracer's own constant, imported so
+# the two stacks cannot disagree.
+from komira_trace.tracer import MAX_SPAN_DEPTH
 
 # The worker-id is laundered into the top 16 bits of a span_id so per-worker
 # monotonic counters stay globally unique without a shared atomic.

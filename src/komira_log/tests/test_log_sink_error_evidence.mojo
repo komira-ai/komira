@@ -6,7 +6,7 @@
 # CASES 1, 2, 3 — three sites that swallow a sink error.
 #
 #   shared_engine.drain_worker      a fully decoded record
-#   shared_engine.emit_fallback_line the MIRROR's write; every unbound-thread
+#   shared_engine.emit_fallback_line a log-mirroring thread's write; every unbound-thread
 #                                    log in a service takes this path
 #   shared_engine.escalate_line      the "ERROR is never dropped" path itself
 #
@@ -21,7 +21,7 @@
 # write the ENGINE swallowed", which is an engine fact: two of the three sites
 # are not drains at all and run on threads that own no sink state. A sink-side
 # counter answers a different question (how many write(2) calls short-wrote or
-# retried — `komira_obs.log_write`'s loss counters); the two are complementary,
+# retried — `komira_log.log_write`'s loss counters); the two are complementary,
 # not duplicates.
 #
 # HOW A SINK ERROR IS PROVOKED DETERMINISTICALLY. `SegmentFile.append_line`
@@ -103,8 +103,8 @@ def _cleanup(tag: String):
 
 
 # ---------------------------------------------------------------------------
-# CASE 2 — emit_fallback_line. The mirror's write, and the path every
-# unbound-thread log in the control plane takes.
+# CASE 2 — emit_fallback_line. A log-mirroring thread's write, and the path every
+# unbound-thread log in a service takes.
 # ---------------------------------------------------------------------------
 
 
