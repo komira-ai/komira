@@ -13,9 +13,11 @@
 # thing the JSON codec has no analogue for, and rest-xml uses them
 # (`xmlAttribute`, `xmlNamespace` -> `xmlns`).
 #
-# `text` and `attr` refuse a C0 control character other than TAB, LF and CR:
-# XML 1.0 has no way to write one, not even as a reference, so a document
-# carrying one could not be read back.
+# `text` and `attr` refuse a VALUE holding a character outside XML 1.0 [2]
+# Char that a `String` can carry: a C0 control other than TAB, LF and CR, or
+# U+FFFE / U+FFFF. XML has no way to write one, not even as a reference, so a
+# document carrying one could not be read back. Element and attribute NAMES
+# are written as given and are not checked; the caller owns them.
 #
 # Encapsulation: no `UnsafePointer` in any signature.
 # =============================================================================
@@ -23,16 +25,29 @@
 from .xml_escape import append_escaped_attr, append_escaped_text
 
 
-def _refuse_c0(s: StringSlice, what: StringSlice) raises:
-    """Raise if `s` holds a byte below 0x20 other than TAB, LF or CR. Such a
-    byte is always a whole UTF-8 character, and never a legal XML one."""
+def _refuse_non_xml_chars(s: StringSlice, what: StringSlice) raises:
+    """Raise if `s` holds a character outside [2] Char. A valid UTF-8 string
+    cannot hold a surrogate, so the cases are a byte below 0x20 other than
+    TAB, LF or CR (always a whole character), and U+FFFE / U+FFFF
+    (EF BF BE / EF BF BF)."""
     var b = s.as_bytes()
-    for i in range(len(b)):
+    var n = len(b)
+    for i in range(n):
         var c = b[i]
+        var cp = -1
         if c < 0x20 and c != 0x09 and c != 0x0A and c != 0x0D:
+            cp = Int(c)
+        elif (
+            c == 0xEF
+            and i + 2 < n
+            and b[i + 1] == 0xBF
+            and (b[i + 2] == 0xBE or b[i + 2] == 0xBF)
+        ):
+            cp = 0xFFFE if b[i + 2] == 0xBE else 0xFFFF
+        if cp >= 0:
             raise Error(
                 "xml writer: " + String(what) + " holds character (code point "
-                + String(Int(c)) + "), which XML cannot represent"
+                + String(cp) + "), which XML cannot represent"
             )
 
 
@@ -72,7 +87,7 @@ struct XmlWriter(Movable):
         """Write ` name="value"` on the currently-open start tag."""
         if not self._open:
             raise Error("xml writer: attribute after the start tag was closed")
-        _refuse_c0(value, "an attribute value")
+        _refuse_non_xml_chars(value, "an attribute value")
         self.buf.append(0x20)  # ' '
         self._raw(name)
         self.buf.append(0x3D)  # '='
@@ -82,7 +97,7 @@ struct XmlWriter(Movable):
 
     def text(mut self, s: StringSlice) raises:
         """Write escaped element text content."""
-        _refuse_c0(s, "element text")
+        _refuse_non_xml_chars(s, "element text")
         self._close_open_tag()
         append_escaped_text(self.buf, s)
 

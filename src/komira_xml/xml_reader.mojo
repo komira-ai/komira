@@ -33,7 +33,9 @@
 #   - an end tag that does not match the open element, a second root, text
 #     outside the root, and an element left open at the end of input;
 #   - a duplicate attribute, `<` in an attribute value, `]]>` in text, `--`
-#     in a comment, and an XML declaration anywhere but at the start;
+#     in a comment, a name outside [4] / [4a], a processing instruction with
+#     no target, and an XML declaration anywhere but at the start, or one
+#     that names a version other than 1.x or an encoding other than UTF-8;
 #   - nesting deeper than `XML_MAX_DEPTH`, which bounds every recursive walk
 #     over a tree built from the events (and the tree's own destructor).
 #
@@ -98,6 +100,44 @@ def _is_xml_char(cp: Int) -> Bool:
     )
 
 
+def _is_name_start_cp(cp: Int) -> Bool:
+    """XML 1.0 [4] NameStartChar."""
+    return (
+        (cp >= 0x41 and cp <= 0x5A)
+        or (cp >= 0x61 and cp <= 0x7A)
+        or cp == 0x5F
+        or cp == 0x3A
+        or (cp >= 0xC0 and cp <= 0xD6)
+        or (cp >= 0xD8 and cp <= 0xF6)
+        or (cp >= 0xF8 and cp <= 0x2FF)
+        or (cp >= 0x370 and cp <= 0x37D)
+        or (cp >= 0x37F and cp <= 0x1FFF)
+        or (cp >= 0x200C and cp <= 0x200D)
+        or (cp >= 0x2070 and cp <= 0x218F)
+        or (cp >= 0x2C00 and cp <= 0x2FEF)
+        or (cp >= 0x3001 and cp <= 0xD7FF)
+        or (cp >= 0xF900 and cp <= 0xFDCF)
+        or (cp >= 0xFDF0 and cp <= 0xFFFD)
+        or (cp >= 0x10000 and cp <= 0xEFFFF)
+    )
+
+
+def _is_name_char_cp(cp: Int) -> Bool:
+    """XML 1.0 [4a] NameChar."""
+    return (
+        _is_name_start_cp(cp)
+        or cp == 0x2D
+        or cp == 0x2E
+        or (cp >= 0x30 and cp <= 0x39)
+        or cp == 0xB7
+        or (cp >= 0x300 and cp <= 0x36F)
+        or (cp >= 0x203F and cp <= 0x2040)
+    )
+
+
+# The byte-level tests below decide where a name ENDS. A byte >= 0x80 is
+# taken as part of the name there; `XmlReader._check_name` then decodes the
+# name and holds every code point to [4] / [4a].
 def _is_name_start(c: UInt8) -> Bool:
     return (
         (c >= 0x41 and c <= 0x5A)
@@ -176,7 +216,10 @@ struct XmlReader(Movable):
         return String(unsafe_from_utf8=Span(self.src)[a:b])
 
     def slice_text(self, lo: Int, hi: Int) -> String:
-        """`src[lo:hi]` with XML entity references decoded."""
+        """`src[lo:hi]` with XML entity references decoded LENIENTLY, as
+        `xml_unescape` does: an unknown `&` passes through and line ends are
+        kept as written. A raw helper over any byte range; for an event's
+        decoded text use `text_of` / `attr_value`."""
         var out = List[UInt8]()
         append_unescaped(out, Span(self.src), lo, hi)
         return String(unsafe_from_utf8=Span(out))
@@ -393,6 +436,136 @@ struct XmlReader(Movable):
                 raise Error("xml: ']]>' in character data" + self._at(i))
             i += 1
 
+    def _check_name(self, lo: Int, hi: Int) raises:
+        """[5] Name over `src[lo:hi]`: the first code point a NameStartChar,
+        the rest NameChars. `_validate` has already proved the bytes UTF-8."""
+        var i = lo
+        var first = True
+        while i < hi:
+            var c = Int(self.src[i])
+            var cp = c
+            var w = 1
+            if c >= 0xF0:
+                cp = c & 0x07
+                w = 4
+            elif c >= 0xE0:
+                cp = c & 0x0F
+                w = 3
+            elif c >= 0xC0:
+                cp = c & 0x1F
+                w = 2
+            if i + w > hi:
+                raise Error("xml: invalid character in a name" + self._at(i))
+            for k in range(1, w):
+                cp = (cp << 6) | (Int(self.src[i + k]) & 0x3F)
+            var ok = _is_name_start_cp(cp) if first else _is_name_char_cp(cp)
+            if not ok:
+                raise Error(
+                    "xml: invalid character in a name (code point "
+                    + String(cp) + ")" + self._at(i)
+                )
+            first = False
+            i += w
+
+    def _lit_at(self, lo: Int, hi: Int, lit: StringSlice, fold: Bool) -> Bool:
+        """`src[lo:hi]` equals `lit`; with `fold`, ASCII letters in any case."""
+        var l = lit.as_bytes()
+        if hi - lo != len(l):
+            return False
+        for k in range(len(l)):
+            var a = self.src[lo + k]
+            var b = l[k]
+            if fold and a >= 0x41 and a <= 0x5A:
+                a |= 0x20
+            if fold and b >= 0x41 and b <= 0x5A:
+                b |= 0x20
+            if a != b:
+                return False
+        return True
+
+    def _check_xml_decl(self, lo: Int, hi: Int) raises:
+        """[23] XMLDecl between `<?xml` (ending at `lo`) and `?>` (at `hi`):
+        S VersionInfo, then optionally S EncodingDecl, then optionally S
+        SDDecl, then S?. The version must be 1.x, and a declared encoding
+        must be UTF-8, the only one this parser reads (§4.3.3)."""
+        var i = lo
+        var stage = 0  # 0: version next; 1: encoding or standalone; 2: standalone; 3: done
+        while True:
+            var s0 = i
+            while i < hi and _is_space(self.src[i]):
+                i += 1
+            if i >= hi:
+                break
+            if i == s0 or stage == 3:
+                raise Error("xml: malformed XML declaration" + self._at(i))
+            var nl = i
+            while i < hi and _is_name_char(self.src[i]):
+                i += 1
+            var nh = i
+            while i < hi and _is_space(self.src[i]):
+                i += 1
+            if i >= hi or self.src[i] != 0x3D:  # '='
+                raise Error("xml: malformed XML declaration" + self._at(i))
+            i += 1
+            while i < hi and _is_space(self.src[i]):
+                i += 1
+            if i >= hi or (self.src[i] != 0x22 and self.src[i] != 0x27):
+                raise Error("xml: malformed XML declaration" + self._at(i))
+            var q = self.src[i]
+            i += 1
+            var vl = i
+            while i < hi and self.src[i] != q:
+                i += 1
+            if i >= hi:
+                raise Error("xml: malformed XML declaration" + self._at(vl))
+            var vh = i
+            i += 1
+            if stage == 0:
+                if not self._lit_at(nl, nh, "version", False):
+                    raise Error(
+                        "xml: malformed XML declaration: it must start with"
+                        + " the version" + self._at(nl)
+                    )
+                # [26] VersionNum ::= '1.' [0-9]+
+                var ok = (
+                    vh - vl >= 3
+                    and self.src[vl] == 0x31
+                    and self.src[vl + 1] == 0x2E
+                )
+                for k in range(vl + 2, vh):
+                    if self.src[k] < 0x30 or self.src[k] > 0x39:
+                        ok = False
+                if not ok:
+                    raise Error(
+                        "xml: unsupported XML version '"
+                        + self.slice_raw(vl, vh) + "'"
+                    )
+                stage = 1
+            elif stage == 1 and self._lit_at(nl, nh, "encoding", False):
+                if not self._lit_at(vl, vh, "utf-8", True):
+                    raise Error(
+                        "xml: declared encoding '" + self.slice_raw(vl, vh)
+                        + "' is not UTF-8, the only encoding this parser reads"
+                    )
+                stage = 2
+            elif stage <= 2 and self._lit_at(nl, nh, "standalone", False):
+                if not (
+                    self._lit_at(vl, vh, "yes", False)
+                    or self._lit_at(vl, vh, "no", False)
+                ):
+                    raise Error(
+                        "xml: malformed XML declaration: standalone must be"
+                        + " 'yes' or 'no'" + self._at(vl)
+                    )
+                stage = 3
+            else:
+                raise Error("xml: malformed XML declaration" + self._at(nl))
+        if stage == 0:
+            raise Error(
+                "xml: malformed XML declaration: it must start with the version"
+                + self._at(lo)
+            )
+
     def _is_space_run(self, lo: Int, hi: Int) -> Bool:
         for i in range(lo, hi):
             if not _is_space(self.src[i]):
@@ -471,25 +644,38 @@ struct XmlReader(Movable):
                 var e3 = self._find("?>", self.pos + 2)
                 if e3 < 0:
                     raise Error("xml: unterminated processing instruction")
-                # [17] PITarget: any case variant of 'xml' is reserved for
-                # the XML declaration, which [22] allows only first.
-                var t = self.pos + 2
+                # [16] PI ::= '<?' PITarget (S ...)? '?>'. [17] PITarget:
+                # any case variant of 'xml' is reserved for the XML
+                # declaration, which [22] allows only first, spelled 'xml'.
+                var tl = self.pos + 2
+                var t = tl
                 while t < e3 and _is_name_char(self.src[t]):
                     t += 1
-                if t - (self.pos + 2) == 3:
-                    var x = self.src[self.pos + 2] | 0x20
-                    var m = self.src[self.pos + 3] | 0x20
-                    var l = self.src[self.pos + 4] | 0x20
-                    if (
-                        x == 0x78
-                        and m == 0x6D
-                        and l == 0x6C
-                        and self.pos != self._doc_start
-                    ):
+                if t == tl or not _is_name_start(self.src[tl]):
+                    raise Error(
+                        "xml: processing instruction without a target"
+                        + self._at(self.pos)
+                    )
+                if t < e3 and not _is_space(self.src[t]):
+                    raise Error(
+                        "xml: malformed processing instruction target"
+                        + self._at(t)
+                    )
+                self._check_name(tl, t)
+                if self._lit_at(tl, t, "xml", True):
+                    if self.pos != self._doc_start:
                         raise Error(
                             "xml: an XML declaration is only allowed at the "
                             + "start of the document" + self._at(self.pos)
                         )
+                    if not self._lit_at(tl, t, "xml", False):
+                        raise Error(
+                            "xml: processing instruction target '"
+                            + self.slice_raw(tl, t)
+                            + "' is reserved; the XML declaration is spelled"
+                            + " 'xml'" + self._at(self.pos)
+                        )
+                    self._check_xml_decl(t, e3)
                 self.pos = e3 + 2
                 continue
             if self._starts_with(self.pos, "<!DOCTYPE"):
@@ -514,6 +700,7 @@ struct XmlReader(Movable):
                     raise Error("xml: unterminated end tag")
                 if self.src[i2] != 0x3E or nh == nl:
                     raise Error("xml: malformed end tag" + self._at(self.pos))
+                self._check_name(nl, nh)
                 if len(self._open_lo) == 0:
                     raise Error(
                         "xml: end tag </" + self.slice_raw(nl, nh)
@@ -551,6 +738,7 @@ struct XmlReader(Movable):
             while i3 < n and _is_name_char(self.src[i3]):
                 i3 += 1
             var snh = i3
+            self._check_name(snl, snh)
             self._an_lo.clear()
             self._an_hi.clear()
             self._av_lo.clear()
@@ -595,6 +783,7 @@ struct XmlReader(Movable):
                 while i3 < n and _is_name_char(self.src[i3]):
                     i3 += 1
                 var ah = i3
+                self._check_name(al, ah)
                 while i3 < n and _is_space(self.src[i3]):
                     i3 += 1
                 if i3 >= n or self.src[i3] != 0x3D:  # '='
