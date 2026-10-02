@@ -159,8 +159,8 @@ rm -rf "$FX"
 # The real rows, each with its PR named as merged: every one that is not `never` must be refused.
 all=$(awk -F'\t' '$2 ~ /^native-pr:/ {print "build: [" $2 "]"}' tools/build/platforms/limits.tsv | sort -u)
 printf '%s\n' "$all" > "$LOG/limits_subjects_all"
-want_n=$(awk -F'\t' '$2 ~ /^native-pr:/' tools/build/platforms/limits.tsv | wc -l)
-got_n=$(bash "$LIM" --subjects "$LOG/limits_subjects_all" 2>&1 | grep -c '^FAIL  limits: limit `')
+want_n=$(awk -F'\t' '$2 ~ /^native-pr:/ {n++} END {print n + 0}' tools/build/platforms/limits.tsv)
+got_n=$(bash "$LIM" --subjects "$LOG/limits_subjects_all" 2>&1 | grep -c '^FAIL  limits: limit `' || true)
 if [ "$want_n" -gt 0 ] && [ "$got_n" = "$want_n" ]; then
     pass "limits: with every retiring PR named as merged, all $want_n retirable limits are refused (the check can fail)"
 else
