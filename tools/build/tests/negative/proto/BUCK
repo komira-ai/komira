@@ -1,5 +1,5 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
-load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "mojo_proto_library", "proto_srcs")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "mojo_proto_library")
 
 # Protobuf targets that must fail (test 23), over the protos and libraries of
 # ../../functional/proto.
@@ -78,30 +78,5 @@ mojo_proto_library(
         "//functional/proto:person_proto",
         "komira//tools/build/proto-codegen:db_options",
     ],
-    deps = ["//functional/proto:komira_proto_codec"],
-)
-
-# ---- REST: a well-known type as the response and as the `body:` field ----
-
-# The `(google.api.http)` option, so protoc accepts the annotation.
-proto_srcs(
-    name = "google_api_http",
-    srcs = [
-        "google/api/annotations.proto",
-        "google/api/http.proto",
-    ],
-)
-
-# Not a target that must fail, but one whose PACKAGE cannot compile here: a
-# REST client imports komira_http, which this repository does not ship. Test
-# 23 builds only its generated file, `[wkt_rest.mojo]`, and checks that the
-# response is read with `decode_json_lenient[...]` and the body written with
-# `encode_json(...)`, so a well-known type takes its canonical JSON form.
-mojo_proto_library(
-    name = "wkt_rest_proto",
-    srcs = ["rest/wkt_rest.proto"],
-    default_protocol = "rest",
-    import_prefix = "example",
-    proto_deps = [":google_api_http"],
     deps = ["//functional/proto:komira_proto_codec"],
 )

@@ -3,7 +3,7 @@
 // through komira_proto_codec's codec, not the binary-shaped message form.
 syntax = "proto3";
 
-package example.rest;
+package rest.v1;
 
 import "google/api/annotations.proto";
 import "google/protobuf/struct.proto";
