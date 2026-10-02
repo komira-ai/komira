@@ -18,6 +18,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_core:komira_core",
+        "//src/komira_fs:komira_fs_posix",
         "//src/komira_metrics:komira_metrics",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],

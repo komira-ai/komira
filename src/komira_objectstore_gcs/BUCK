@@ -31,6 +31,7 @@ mojo_library(
         # load the dummy account's PEM key with komira_crypto's
         # `rsa_pkcs8_der_from_pem`.
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_fs:komira_fs",
         "//src/komira_gcp_core:komira_gcp_core",
         # For the tests only: they parse the conformance JSON with it.
         "//src/komira_json:komira_json",

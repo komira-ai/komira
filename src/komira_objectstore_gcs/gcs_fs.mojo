@@ -30,12 +30,12 @@
 
 from std.memory import unsafe_memcpy
 
-from komira_async.fs.file_system import FileSystem, WriteMode
-from komira_async.fs.footer_region import FooterRegion, speculative_tail_start
+from komira_fs.file_system import FileSystem, WriteMode
+from komira_fs.footer_region import FooterRegion, speculative_tail_start
 # `_shallow_basename` is a private helper of komira_async, used here on
 # purpose: it is the one definition of a listing key's final component that
 # every object-store FileSystem shares, and a copy here could drift from it.
-from komira_async.fs.shallow_dir_entry import ShallowDirEntry, _shallow_basename
+from komira_fs.shallow_dir_entry import ShallowDirEntry, _shallow_basename
 
 from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
 from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer

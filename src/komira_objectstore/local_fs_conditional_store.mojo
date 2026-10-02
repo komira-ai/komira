@@ -94,9 +94,9 @@
 #   * ZERO UnsafePointer in any PUBLIC signature. The byte-write reuses
 # `RawWriteFd` (komira_core.io.posix_io) whose public surface is
 #     String/Span/Int. The readdir + file-read FFI is confined to module-private
-# helpers with `# SAFETY:` blocks (mirroring `komira_async.fs.local_fs`
+# helpers with `# SAFETY:` blocks (mirroring `komira_fs.local_fs`
 #     — its helpers are private to komira_async, so the FFI shape is
-#     re-derived here against the SAME C shim symbols komira_async links).
+#     re-derived here against the SAME C shim symbols komira_fs_posix defines).
 #   * ZERO wildcard origins in any field or public signature. The two
 #     readdir/free out-param locals carry the documented kernel/malloc-returned
 #     carve-out (same as `_local_fs_list_recursive`), as LOCALS, never fields.
@@ -260,9 +260,9 @@ def _decode_fname_to_key(fname: String) -> String:
 
 
 # =============================================================================
-# Module-private POSIX FFI helpers (mirror `komira_async.fs.local_fs`)
-# local_fs's helpers are private to komira_async, so the FFI shape is
-# re-derived here against the SAME C shim symbols komira_async links.
+# Module-private POSIX FFI helpers (mirror `komira_fs.local_fs`)
+# local_fs's helpers are private to komira_fs, so the FFI shape is
+# re-derived here against the SAME C shim symbols komira_fs_posix defines.
 # =============================================================================
 
 
@@ -370,7 +370,7 @@ def _read_whole_file(path: String) raises -> List[UInt8]:
     `_is_not_found` classifier matches on the message).
 
     Uses fopen("rb") + fseek/ftell for the size + a single fread into a sized
-    buffer (mirrors `komira_async.fs.local_fs._local_fs_*`)."""
+    buffer (mirrors `komira_fs.local_fs._local_fs_*`)."""
     var p = path
     var mode = String("rb")
     # SAFETY: fopen returns a FILE* (Int64 address); held in a local. `p`/`mode`
@@ -475,7 +475,7 @@ def _unique_suffix() -> String:
 
 def _list_dir_fnames(dir: String) raises -> List[String]:
     """Shallow (one-level) listing of `dir`'s immediate child filenames via the
-    `komira_list_dir_shallow` C shim (the SAME shim `komira_async/fs` uses;
+    `komira_list_dir_shallow` C shim (the SAME shim `komira_fs` uses;
     threaded into every binary by `link_posix_shim=True`). Returns each child's
     NAME (regular files only — we filter the dir tag). A non-existent dir yields
     an EMPTY list (opendir-failure → empty, consistent with the shim contract).
@@ -517,7 +517,7 @@ def _list_dir_fnames(dir: String) raises -> List[String]:
             i += 1
         # BYTE-EXACT decode of the record's `<name>` run. ⛔ NOT
         # `chr(Int(out_buf[j]))` — this body mirrors
-        # `komira_async/fs/local_fs._local_fs_list_dir_shallow`: `chr` maps a
+        # `komira_fs/local_fs._local_fs_list_dir_shallow`: `chr` maps a
         # CODE POINT to its UTF-8 ENCODING, so every byte >= 0x80 would be
         # RE-ENCODED into two and the resulting object NAME would not exist on
         # disk.
