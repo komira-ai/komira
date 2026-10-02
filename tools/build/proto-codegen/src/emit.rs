@@ -1865,7 +1865,7 @@ mod mojo_100_service_client_tests {
         assert!(
             !out.contains("ImplicitlyDestructible"),
             "`ImplicitlyDestructible` is the Mojo b2 spelling — 1.0.0 renamed it \
-             `Deinitable` (76108ca55d, 5878 hand-written sites); got:\n{out}"
+             `Deinitable`; got:\n{out}"
         );
     }
 

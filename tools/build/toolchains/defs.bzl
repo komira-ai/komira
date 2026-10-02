@@ -1,18 +1,19 @@
 """The Mojo, C/C++, Rust and protobuf toolchains, declared in the `toolchains` cell of whichever repository is at the project root.
 
-The Mojo rules take their toolchain from `toolchains//:mojo` and
-`toolchains//:mojo_multi_numa`, the prelude's convention: the `toolchains`
-cell belongs to the root repository. A standalone komira checkout declares
-them in tools/build/cells/toolchains/BUCK; a repository using komira as a cell
-copies that file (tools/build/consumer.buckconfig).
+The Mojo rules take their toolchain from `toolchains//:mojo`, the prelude's
+convention: the `toolchains` cell belongs to the root repository, so a
+repository using komira as a cell can override any toolchain attribute. A
+standalone komira checkout declares them in tools/build/cells/toolchains/BUCK;
+a repository using komira as a cell copies that file
+(tools/build/consumer.buckconfig).
 
-They are declared there, and not in `komira//tools/build/toolchains` beside
-the downloads they are built from, because `mojo_multi_numa` only configures
-where an execution platform realizes `numa_multi`. In the komira cell it
-would fail `buck2 build //...` on every checkout without multi-NUMA workers;
-in a cell of its own it is analyzed only when a `mojo_multi_numa_test` uses
-it, which is the intended refusal.
+Each toolchain states the OS and CPU its actions run on
+(`exec_compatible_with`), which picks the one execution platform of that OS.
+It states nothing else about the worker: which machine of a remote service
+runs an action is the service's choice.
 """
+
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 load("@komira//tools/build/mojo:cxx.bzl", "no_python_bootstrap_toolchain", "zig_cxx_toolchain")
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_toolchain")
@@ -20,7 +21,6 @@ load("@komira//tools/build/mojo:toolchain.bzl", "mojo_toolchain")
 load("@komira//tools/build/rust:defs.bzl", "rust_toolchain")
 
 _TOOLCHAINS = "komira//tools/build/toolchains:"
-_PLATFORMS = "komira//tools/build/platforms:"
 _TOOLCHAINS_RUST = "komira//tools/build/toolchains/rust:"
 
 MOJO_TOOLCHAIN_ATTRS = dict(
@@ -38,13 +38,10 @@ MOJO_TOOLCHAIN_ATTRS = dict(
 # What a linux x86_64 toolchain compiles for, and where its actions run: a
 # target for any other platform that reaches it is incompatible rather than
 # built for the wrong one.
-_LINUX_X86_64 = [
-    "prelude//os/constraints:linux",
-    "prelude//cpu/constraints:x86_64",
-]
+_LINUX_X86_64 = LINUX_X86_64
 
 def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo", **overrides):
-    """Declare `:mojo` and `:mojo_multi_numa` in the calling package.
+    """Declare `:mojo` in the calling package.
 
     Each keyword in `overrides` replaces the `mojo_toolchain` attribute of that
     name (see MOJO_TOOLCHAIN_ATTRS), e.g. `compiler = ...` to pin a different
@@ -67,26 +64,11 @@ def komira_mojo_toolchains(darwin = "komira//tools/build/toolchains/darwin:mojo"
         visibility = ["PUBLIC"],
     )
 
-    # linux x86_64: compiles, gated tests and run checks on one NUMA node.
+    # linux x86_64: compiles, gated tests and run checks.
     mojo_toolchain(
         name = "mojo_linux_x86_64",
         target_compatible_with = _LINUX_X86_64,
-        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"] + _LINUX_X86_64,
-        visibility = ["PUBLIC"],
-        **attrs
-    )
-
-    # The toolchain of mojo_multi_numa_test: runs a built binary on a worker
-    # spanning more than one NUMA node. Only an execution platform realizing
-    # `komira//tools/build/platforms:exec-mojo-multi-numa` satisfies it; with
-    # none registered, its users fail to configure. The constraint is only a
-    # claim: the rule's runs also start through numa_guard.sh, which refuses
-    # a worker where the action can use fewer than two NUMA nodes. linux
-    # x86_64 only.
-    mojo_toolchain(
-        name = "mojo_multi_numa",
-        target_compatible_with = _LINUX_X86_64,
-        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_multi"] + _LINUX_X86_64,
+        exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )
@@ -118,13 +100,13 @@ def komira_cxx_toolchains(**overrides):
         name = "cxx",
         # It builds for linux x86_64 only (see _LINUX_X86_64).
         target_compatible_with = _LINUX_X86_64,
-        exec_compatible_with = [_PLATFORMS + "light"],
+        exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )
     no_python_bootstrap_toolchain(
         name = "python_bootstrap",
-        exec_compatible_with = [_PLATFORMS + "light"],
+        exec_compatible_with = _LINUX_X86_64,
         busybox = attrs["busybox"],
         visibility = ["PUBLIC"],
     )
@@ -141,8 +123,7 @@ def komira_rust_toolchains(**overrides):
     """Declare `:rust`, the toolchain of rust_library and rust_binary, in the calling package.
 
     rustc 1.85.0 from `komira//tools/build/toolchains/rust:sysroot`. Compiles
-    run on the compile workers (the `mojo_compile` class, one NUMA node),
-    like Mojo compiles. rustc loads only glibc from the worker (everything
+    run on the linux execution platform, like Mojo compiles. rustc loads only glibc from the worker (everything
     else it needs is in the sysroot); links target glibc 2.34 through zig, so
     the binaries run on any worker with glibc 2.34 or newer. Each keyword in
     `overrides` replaces the `rust_toolchain` attribute of that name (see
@@ -154,7 +135,7 @@ def komira_rust_toolchains(**overrides):
         name = "rust",
         # It builds for linux x86_64 only (see _LINUX_X86_64).
         target_compatible_with = _LINUX_X86_64,
-        exec_compatible_with = [_PLATFORMS + "mojo_compile", _PLATFORMS + "numa_single"] + _LINUX_X86_64,
+        exec_compatible_with = _LINUX_X86_64,
         visibility = ["PUBLIC"],
         **attrs
     )
@@ -172,8 +153,8 @@ def komira_proto_toolchains(**overrides):
     protoc 29.1, protoc-gen-mojo and protoc-gen-mojo-db, built from source with `:rust`. It
     states no execution constraint: a mojo_proto_library also precompiles the
     generated package, and one target has one execution platform, so code
-    generation runs where the Mojo toolchain puts that target (the compile
-    workers). Each keyword in `overrides` replaces the `mojo_proto_toolchain`
+    generation runs where the Mojo toolchain puts that target (the linux
+    execution platform). Each keyword in `overrides` replaces the `mojo_proto_toolchain`
     attribute of that name (see PROTO_TOOLCHAIN_ATTRS).
     """
     attrs = dict(PROTO_TOOLCHAIN_ATTRS)

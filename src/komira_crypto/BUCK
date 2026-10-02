@@ -3,20 +3,22 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Cryptographic primitives: SHA-1 / SHA-2 / BLAKE2b-256, HMAC, HKDF, PBKDF2,
 # AES-GCM and ChaCha20-Poly1305, X25519, Ed25519, ECDSA P-256 / P-384, RSA
 # (PKCS#1 v1.5 and PSS verify, RS256 sign), an RS256 JWS/JWKS verifier, a
-# health-tested system entropy source and a ChaCha20 DRBG, the hex / base64 /
-# base32 codecs, and X.509 chain validation with an embedded root store. It
-# imports only std; the heavy primitives call AWS-LC's libcrypto, which is
-# why aws-lc is its one dependency.
+# health-tested system entropy source and a ChaCha20 DRBG, hex encoding, and
+# X.509 chain validation with an embedded root store. The heavy primitives
+# call AWS-LC's libcrypto; base64, base64url and base32 come from
+# komira_encoding.
 mojo_library(
     name = "komira_crypto",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    deps = ["//third_party/aws-lc:crypto"],
+    deps = [
+        "//src/komira_encoding:komira_encoding",
+        "//third_party/aws-lc:crypto",
+    ],
     test_srcs = [
         "tests/test_aes_gcm_kat.mojo",
         "tests/test_aes_gcm_smoke.mojo",
         "tests/test_asn1_constructed.mojo",
         "tests/test_asn1_primitives.mojo",
-        "tests/test_base32_roundtrip.mojo",
         "tests/test_bettertls_synthetic.mojo",
         "tests/test_cavp_sha256_long.mojo",
         "tests/test_cavp_sha256_monte.mojo",
@@ -32,6 +34,7 @@ mojo_library(
         "tests/test_chain_validator_ed25519.mojo",
         "tests/test_chain_validator_p384.mojo",
         "tests/test_crypto_kat.mojo",
+        "tests/test_encoding_byte_identity.mojo",
         "tests/test_derive_secret.mojo",
         "tests/test_ecdsa_p256_rfc6979.mojo",
         "tests/test_ecdsa_p256_smoke.mojo",
