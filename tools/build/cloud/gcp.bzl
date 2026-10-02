@@ -9,7 +9,7 @@
         methods = ["LoggingServiceV2.ListLogEntries"],   # or roots = [...]
         messages_only = True,
         protocol = "rest",              # the default; "grpc" only with messages_only
-        deps = ["komira//src/komira_serde:komira_serde", ...],
+        deps = ["komira//src/komira_proto_codec:komira_proto_codec", ...],
     )
 
 is two targets:
@@ -54,7 +54,7 @@ closure). Both `bundle_proto_deps` and `bundle_only` must be stated: with
 empty, which the plugin refuses); with `False`, it must be empty.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
-generated code imports its runtime (komira_serde, komira_wkt, and with
+generated code imports its runtime (komira_proto_codec, komira_wkt, and with
 services the transport), which the caller names as `komira//` labels, or as
 stubs in a test. They are the library's `deps`, so they take what
 `mojo_library.deps` takes (C and C++ libraries too); `<name>_gen` sees only
@@ -113,7 +113,7 @@ def _gcp_client_gen_impl(ctx):
         if ":" in p or not p.endswith(".proto"):
             fail("{}: `protos` entry `{}` is not a source path of a `.proto` file. `protos` takes source paths only, never a label (not even one to a generated .proto): the library's `<stem>.mojo` file names are derived from these paths".format(ctx.label, p))
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_serde, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_proto_codec, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if not ctx.attrs.roots and not ctx.attrs.methods:
         fail("{}: neither `roots` nor `methods` is set. A gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
     if ctx.attrs.protocol not in _PROTOCOLS:

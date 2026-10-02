@@ -11,7 +11,7 @@ load("//functional/gcp_client:defs.bzl", "gen_check", "tests_check")
 
 _DEPS = ["//functional/gcp_client:shop_deps"]
 
-_RUNTIME = ["//functional/proto:komira_serde"]
+_RUNTIME = ["//functional/proto:komira_proto_codec"]
 
 _ITEM = ["example/shop/v1/item.proto"]
 
@@ -88,12 +88,12 @@ gen_check(
 )
 
 # "expected exactly:": the welded-tests check of ../../functional/gcp_client
-# reds on a library whose `[tests]` lacks the layout probe (komira_serde welds
+# reds on a library whose `[tests]` lacks the layout probe (komira_proto_codec welds
 # no test at all), so dropping the probe from gcp_client cannot pass it.
 tests_check(
     name = "tests_check_can_fail",
     expect = ["_layout_probe"],
-    markers = "//functional/proto:komira_serde[tests]",
+    markers = "//functional/proto:komira_proto_codec[tests]",
 )
 
 # "is not a source path of a `.proto` file": a label in `protos` is refused

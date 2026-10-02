@@ -53,7 +53,7 @@ jobs:
       # runner (tools/build/platforms/default); refuse rather than do that.
       - name: the runner's buckconfig names the farm
         run: |
-          for key in linux_properties; do
+          for key in linux_x86_64_properties; do
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
               { echo "the runner's buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
