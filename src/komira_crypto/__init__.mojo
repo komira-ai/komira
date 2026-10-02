@@ -19,7 +19,7 @@ Layout:
   - x25519.mojo          single + batched 4-way
   - ecdsa_p256.mojo      sign + verify
   - rsa.mojo             RSA-SHA256 sign (PKCS#8 DER) + RS256 verify
-  - pem_key.mojo         PEM `PRIVATE KEY` -> the PKCS#8 DER rsa.mojo signs with
+  - rsa_pem_key.mojo     PEM RSA `PRIVATE KEY` -> the PKCS#8 DER rsa.mojo signs
   - rsa_pss.mojo         verify-only
   - rng.mojo             SystemEntropy + ChaCha20Drbg
   - cert/                X.509 + ChainValidator
@@ -60,6 +60,7 @@ from .zeroize import (
     zeroize_inline_array,
     zeroize_inline_array_u32,
     zeroize_inline_array_u64,
+    zeroize_list,
 )
 
 # Streaming Hmac[H: Hash]. The one-shot `hmac_sha256(key, data)` free
@@ -111,11 +112,11 @@ from .pbkdf2 import pbkdf2_hmac_sha256, pbkdf2_hmac_sha256_32
 from .hex import hex_lower, hex_lower_array_32, hex_upper
 from .rsa import rsa_sha256_sign, rsa_pkcs1_sha256_verify
 
-# A PEM `PRIVATE KEY` block -> the PKCS#8 DER `rsa_sha256_sign` takes. The
+# A PEM RSA `PRIVATE KEY` block -> the PKCS#8 DER `rsa_sha256_sign` takes. The
 # armor comes off through komira_encoding.pem; PKCS#1 (`RSA PRIVATE KEY`) and
 # encrypted keys are refused by name, and the DER is checked to be an RSA
 # PrivateKeyInfo envelope. The RSAPrivateKey inside is left to AWS-LC.
-from .pem_key import pkcs8_private_key_der_from_pem
+from .rsa_pem_key import rsa_pkcs8_der_from_pem
 
 # RSASSA-PKCS1-v1_5-SHA-256 VERIFY (RFC 7518 §3.3 `RS256`) + the third-party
 # JWS/JWKS verifier built on it, e.g. for checking a cloud metadata server's

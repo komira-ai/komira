@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_crypto/tests/test_pem_key.mojo -- pkcs8_private_key_der_from_pem.
+# komira_crypto/tests/test_rsa_pem_key.mojo -- rsa_pkcs8_der_from_pem.
 # =============================================================================
 #
 # The function removes PEM armor and checks the PKCS#8 PrivateKeyInfo
@@ -12,7 +12,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_encoding import error_kind, pem_encode
-from komira_crypto import pkcs8_private_key_der_from_pem, rsa_sha256_sign
+from komira_crypto import rsa_pkcs8_der_from_pem, rsa_sha256_sign
 
 
 # --- DER building blocks ----------------------------------------------------
@@ -75,9 +75,9 @@ def _pem(label: String, der: List[UInt8]) raises -> String:
 
 
 def _outcome(pem: String) -> String:
-    """`OK`, or the message pkcs8_private_key_der_from_pem raised."""
+    """`OK`, or the message rsa_pkcs8_der_from_pem raised."""
     try:
-        _ = pkcs8_private_key_der_from_pem(pem)
+        _ = rsa_pkcs8_der_from_pem(pem)
     except e:
         return String(e)
     return String("OK")
@@ -86,13 +86,25 @@ def _outcome(pem: String) -> String:
 def _refused(pem: String, detail: String) raises:
     var msg = _outcome(pem)
     assert_true(
-        msg.startswith("pkcs8_private_key_der_from_pem: "), "unexpected: " + msg
+        msg.startswith("rsa_pkcs8_der_from_pem: "), "unexpected: " + msg
     )
     assert_true(detail in msg, "want '" + detail + "', got: " + msg)
 
 
 def _refused_der(der: List[UInt8], detail: String) raises:
     _refused(_pem("PRIVATE KEY", der), detail)
+
+
+def _assert_no_body_window(pem: String, msg: String) raises:
+    """No 8 consecutive base64 symbols of `pem`'s body appear in `msg`: the
+    message echoes no part of the key, at any alignment."""
+    var body = String("")
+    for line in pem.split("\n"):
+        if line.byte_length() > 0 and not String(line).startswith("-----"):
+            body += String(line)
+    assert_true(body.byte_length() >= 8)
+    for i in range(body.byte_length() - 7):
+        assert_false(body[byte = i : i + 8] in msg, msg)
 
 
 def _assert_bytes(got: List[UInt8], want: List[UInt8]) raises:
@@ -107,7 +119,10 @@ def _assert_bytes(got: List[UInt8], want: List[UInt8]) raises:
 def test_returns_the_der_of_a_private_key_block() raises:
     """THE CONTROL: every refusal below is one field away from this."""
     var der = _good_der()
-    _assert_bytes(pkcs8_private_key_der_from_pem(_pem("PRIVATE KEY", der)), der)
+    var pem = _pem("PRIVATE KEY", der)
+    _assert_bytes(rsa_pkcs8_der_from_pem(pem), der)
+    # The Span overload, which the String one forwards to.
+    _assert_bytes(rsa_pkcs8_der_from_pem(pem.as_bytes()), der)
 
 
 def test_accepts_explanatory_text_and_crlf() raises:
@@ -118,7 +133,7 @@ def test_accepts_explanatory_text_and_crlf() raises:
         if line.byte_length() > 0:
             crlf += String(line) + "\r\n"
     var pem = String("Service account key\r\n") + crlf + "trailing text\r\n"
-    _assert_bytes(pkcs8_private_key_der_from_pem(pem), der)
+    _assert_bytes(rsa_pkcs8_der_from_pem(pem), der)
 
 
 def test_optional_fields_after_the_key_are_left_alone() raises:
@@ -128,20 +143,25 @@ def test_optional_fields_after_the_key_are_left_alone() raises:
         _tlv(0x04, _placeholder_key()),
     )
     var der = _tlv(0x30, _cat(body, _tlv(0xA0, List[UInt8]())))
-    _assert_bytes(pkcs8_private_key_der_from_pem(_pem("PRIVATE KEY", der)), der)
+    _assert_bytes(rsa_pkcs8_der_from_pem(_pem("PRIVATE KEY", der)), der)
 
 
 def test_the_rsa_key_itself_is_left_to_aws_lc() raises:
     """The envelope check does not claim the key is valid: the placeholder
     passes it, and the signer is the one that refuses it."""
-    var der = pkcs8_private_key_der_from_pem(_pem("PRIVATE KEY", _good_der()))
+    var pem = _pem("PRIVATE KEY", _good_der())
+    var der = rsa_pkcs8_der_from_pem(pem)
     var msg = String("message").as_bytes()
-    var signed = True
+    var err = String("OK")
     try:
         _ = rsa_sha256_sign(Span[UInt8, origin_of(der)](der), msg)
-    except:
-        signed = False
-    assert_false(signed, "a placeholder RSAPrivateKey must not sign")
+    except e:
+        err = String(e)
+    assert_true(err != String("OK"), "a placeholder key must not sign")
+    # Refused where the key is parsed, and not for some other reason (an
+    # allocation, a digest), and without any of the key in the message.
+    assert_true("EVP_parse_private_key failed" in err, err)
+    _assert_no_body_window(pem, err)
 
 
 # --- refused by label -------------------------------------------------------
@@ -167,7 +187,7 @@ def test_other_labels_and_armor_are_komira_encoding_errors() raises:
     var bare = _outcome(String("no armor here\n"))
     assert_equal(error_kind(Error(bare)), "InvalidBoundary", bare)
     var empty = _outcome(String(""))
-    assert_true(empty != String("OK"), "an empty string has no key")
+    assert_equal(error_kind(Error(empty)), "InvalidBoundary", empty)
 
 
 # --- refused by structure ---------------------------------------------------
@@ -272,22 +292,59 @@ def test_private_key_octet_string_is_required() raises:
     _refused_der(bare, "no privateKey OCTET STRING")
 
 
+def _marker_key() -> List[UInt8]:
+    """A key slot that holds a distinctive marker, so a message that echoed
+    the key would show it: SEQUENCE { OCTET STRING "KEYMARKER-..." }."""
+    var marker = String("KEYMARKER-7f3a9c-private-exponent-bytes")
+    var raw = List[UInt8]()
+    for b in marker.as_bytes():
+        raw.append(b)
+    return _tlv(0x30, _tlv(0x04, raw))
+
+
 def test_messages_carry_no_input_bytes() raises:
-    """The input is a private key: no refusal may echo any of it."""
-    var der = _pki(_bytes(0x01), _algorithm(_rsa_oid()), _placeholder_key())
-    var pem = _pem("PRIVATE KEY", der)
-    var body = String(pem.split("\n")[1])
-    assert_true(body.byte_length() > 8)
+    """The input is a private key: no refusal may echo any of it, neither
+    the label refusals nor the ones raised inside the DER check, whose key
+    slot carries a marker here."""
+    var key = _marker_key()
     var cases = List[String]()
-    cases.append(pem)
-    cases.append(_pem("RSA PRIVATE KEY", der))
-    cases.append(_pem("ENCRYPTED PRIVATE KEY", der))
-    cases.append(_pem("CERTIFICATE", der))
-    for c in cases:
+    # Refused on the label, before any decoding.
+    var good = _pki(_bytes(0x00), _algorithm(_rsa_oid()), key)
+    cases.append(_pem("RSA PRIVATE KEY", good))
+    cases.append(_pem("ENCRYPTED PRIVATE KEY", good))
+    cases.append(_pem("CERTIFICATE", good))
+    # Refused inside the PrivateKeyInfo check, with the marker decoded.
+    var v1 = _pki(_bytes(0x01), _algorithm(_rsa_oid()), key)
+    cases.append(_pem("PRIVATE KEY", v1))
+    cases.append(
+        _pem(
+            "PRIVATE KEY",
+            _pki(
+                _bytes(0x00),
+                _algorithm(_bytes(0x2A, 0x86, 0x48, 0xCE, 0x3D, 0x02, 0x01)),
+                key,
+            ),
+        )
+    )
+    var trailer = good.copy()
+    trailer.append(UInt8(0x00))
+    trailer.append(UInt8(0x00))
+    cases.append(_pem("PRIVATE KEY", trailer))
+    var bare = _tlv(
+        0x30, _cat(_cat(_tlv(0x02, _bytes(0x00)), _algorithm(_rsa_oid())), key)
+    )
+    cases.append(_pem("PRIVATE KEY", bare))
+    for i in range(len(cases)):
+        ref c = cases[i]
         var msg = _outcome(c)
-        assert_true(msg != String("OK"))
-        assert_false(body in msg, msg)
-        assert_false(body[byte=0:8] in msg, msg)
+        assert_true(msg != String("OK"), msg)
+        if i >= 3:  # past the label: refused by the DER check itself
+            assert_true(msg.startswith("rsa_pkcs8_der_from_pem: "), msg)
+        assert_false("KEYMARKER" in msg, msg)
+        assert_false("private-exponent" in msg, msg)
+        _assert_no_body_window(c, msg)
+    # The control: the same key slot, in a good envelope, is accepted.
+    _assert_bytes(rsa_pkcs8_der_from_pem(_pem("PRIVATE KEY", good)), good)
 
 
 def main() raises:
@@ -304,4 +361,4 @@ def main() raises:
     test_algorithm_must_be_rsa_encryption()
     test_private_key_octet_string_is_required()
     test_messages_carry_no_input_bytes()
-    print("test_pem_key: OK")
+    print("test_rsa_pem_key: OK")
