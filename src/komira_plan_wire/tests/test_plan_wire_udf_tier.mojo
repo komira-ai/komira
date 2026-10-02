@@ -43,7 +43,7 @@ from komira_plan_wire.plan_wire_codec import (
     PLAN_WIRE_UDF_NOT_DESCRIBABLE,
     PLAN_WIRE_UNSUPPORTED_UDF,
 )
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 from komira_rpc_plan.plan import WirePlanEnvelope
 
 

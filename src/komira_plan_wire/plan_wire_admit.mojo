@@ -62,7 +62,7 @@
 # to the identical byte, because both are computed by that walk. Only the size
 # cap survives, because it reads no bytes at all.
 #
-# ★ WHAT BOUNDS THE STACK: `komira_serde`'s `PbDecoder` COUNTS ITS OWN
+# ★ WHAT BOUNDS THE STACK: `komira_proto_codec`'s `PbDecoder` COUNTS ITS OWN
 # RECURSION (`PB_MAX_DECODE_DEPTH`, `_sub_decoder`). The guarantee lives ON the
 # recursion, not beside it, so nothing has to agree with it. The bound is not a
 # THREADED PARAMETER through generated `decode` bodies: it is a FIELD on the
@@ -116,7 +116,7 @@
 #       it declares. `PLAN_WIRE_MAX_BYTES` is the only thing standing between a
 #       socket and that allocation, and a caller reading from a socket should
 #       apply it AT the socket — which is why it is exported.
-#     * `decode_json`. `komira_serde`'s JSON backend is not bounded by this
+#     * `decode_json`. `komira_proto_codec`'s JSON backend is not bounded by this
 #       file: `parse_json_value` nests on `{`/`[`, and `JsonDecoder.read_message`
 #       constructs a sub-decoder of its own. `plan_from_bytes` does not use it.
 #       Any JSON surface exposed to a foreign producer — a REST body, a

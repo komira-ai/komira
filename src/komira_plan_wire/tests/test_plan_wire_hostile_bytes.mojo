@@ -113,7 +113,7 @@ from komira_core.source.source_variant import SourceVariant, SOURCE_VARIANT_ORC
 # with no admit walk in front at all, and the bound that keeps THEM alive is
 # `PbDecoder`'s own recursion count. A test that only ever goes through
 # `plan_from_bytes` cannot tell that bound from a comment.
-from komira_serde import (
+from komira_proto_codec import (
     decode_proto,
     PB_MAX_DECODE_DEPTH,
     PB_DECODE_TOO_DEEP,

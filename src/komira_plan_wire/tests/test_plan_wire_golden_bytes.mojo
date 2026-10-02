@@ -465,7 +465,7 @@ def _corpus_sort() raises -> LogicalPlan:
     ⚠ A DECODER THAT TOOK ONLY THE UNPACKED FORM would refuse a
     `WirePlanEnvelope` carrying a sort, authored as `.txtpb` and encoded by
     protoc — the "a Python frontend sends a plan" case verbatim — with
-    `ProtobufError.WIRE_MISMATCH: expected VARINT`. See `komira_serde`'s
+    `ProtobufError.WIRE_MISMATCH: expected VARINT`. See `komira_proto_codec`'s
     `read_into_repeated_bool`. A corpus of flat scalar columns avoids the
     encoding systematically, because proto3 omits an empty repeated field
     entirely. THIS fixture is what makes LEG D drive the packed path with real

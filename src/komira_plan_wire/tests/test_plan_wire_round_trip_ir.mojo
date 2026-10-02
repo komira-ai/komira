@@ -262,7 +262,7 @@ from komira_plan_wire.plan_wire_codec import PLAN_WIRE_FORMAT_VERSION
 # hostile encoder is defined by what it puts ON THE WIRE and nothing reachable
 # through `LogicalPlan` can express an out-of-range type id. `WireField.
 # arrow_type_id` is a `uint32`; `ArrowType.type_id` is a `UInt8`.
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 from komira_rpc_plan.plan import (
     WireExpr,
     WireField,

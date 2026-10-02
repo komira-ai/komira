@@ -16,7 +16,7 @@
 # -------------------------------------
 # `komira_core`'s deps stay minimal and that is load-bearing — almost every
 # package depends on it, so anything added to its deps goes upstream of nearly
-# everything. The codec needs `komira_serde` and the generated `komira_rpc_plan`
+# everything. The codec needs `komira_proto_codec` and the generated `komira_rpc_plan`
 # messages, so it lives in its own package ABOVE core. Same shape as
 # `komira_fs_registry`: the package whose job is to close over a lower layer's
 # types sits on top of it, never inside it.
@@ -57,7 +57,7 @@
 # of 1 and admit 902 bytes that then SIGSEGV `decode_proto` anyway (see
 # `plan_wire_admit.mojo`'s header).
 #
-# What bounds the stack is `komira_serde`'s `PbDecoder` COUNTING ITS OWN
+# What bounds the stack is `komira_proto_codec`'s `PbDecoder` COUNTING ITS OWN
 # RECURSION (`PB_MAX_DECODE_DEPTH`). The prescan still runs, still refuses
 # earlier and by a better name, and still owns the NODE budget — which is a
 # statement about what a plan is and which no depth bound anywhere can see. But
@@ -358,7 +358,7 @@
 
 from std.memory import OwnedPointer
 
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 
 from komira_rpc_plan.plan import (
     WireField,
