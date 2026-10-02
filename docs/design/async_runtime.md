@@ -97,7 +97,7 @@ The last three each own one `Reactor` by value, drive it on the calling thread, 
 
 ### How does the runtime read files?
 
-`FileSystem` (`src/komira_async/fs/file_system.mojo`) is a synchronous trait; `read_at(file, offset, length)` returns a `SharedAlignedBuffer[HeapRegion]`. `LocalFs` maps a file on its first read and returns buffers that borrow the mapping (`borrow_mmap_erased`), so a local read copies nothing. Overlap with compute comes from where the call runs: the I/O lane, or a `PrefetchRing` (`src/komira_async/sources/prefetch_source.mojo`).
+`FileSystem` (`src/komira_fs/file_system.mojo`) is a synchronous trait; `read_at(file, offset, length)` returns a `SharedAlignedBuffer[HeapRegion]`. `LocalFs` maps a file on its first read and returns buffers that borrow the mapping (`borrow_mmap_erased`), so a local read copies nothing. Overlap with compute comes from where the call runs: the I/O lane, or a `PrefetchRing` (`src/komira_async/sources/prefetch_source.mojo`).
 
 ### How do threads exchange data and cancel work?
 
