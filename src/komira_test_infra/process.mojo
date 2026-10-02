@@ -1,7 +1,7 @@
 # =============================================================================
-# komira_test_infra/process.mojo -- the process seam the local backend starts
+# komira_test_infra/process.mojo -- the process seam the embedded-MinIO backend starts
 # its object-store server through, a scripted fake, and the placeholder the
-# shared-deployment backend carries (it starts no process).
+# external-S3 backend carries (it starts no process).
 # =============================================================================
 #
 # A real runner (over a process supervisor) implements `ProcessRunner`
@@ -95,7 +95,7 @@ trait ProcessRunner(Movable, Deinitable):
 
 
 struct NoProcess(ProcessRunner):
-    """The shared-deployment backend's runner: it starts nothing, and any
+    """The external-S3 backend's runner: it starts nothing, and any
     call is a bug in the library."""
 
     def __init__(out self):

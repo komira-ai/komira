@@ -58,8 +58,8 @@ trait ObjectStoreClient(Movable, Deinitable):
         ...
 
     def create_bucket_if_absent(mut self) raises:
-        """Create the bound bucket unless it exists. Local backend only: the
-        shared deployment's test identity may not create buckets."""
+        """Create the bound bucket unless it exists. Embedded-MinIO backend only: an
+        external endpoint's test identity is not assumed to create buckets."""
         ...
 
     def put(mut self, key: String, body: Span[UInt8, _]) raises:

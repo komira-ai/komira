@@ -8,13 +8,15 @@ which deletes everything, lists again to prove it, and returns a `Verdict`:
 CLEAN (0), CANNOT_TELL (3) or LEAK (6). `leak_check` asks the same question
 of a run id from outside the run.
 
-Two backends:
-  * the shared store a deployment describes in a `TestInfraConfig` file
-    (`--testinfra-config=<path>`); this library holds none of its values;
-  * a local MinIO, pinned by sha256, started inside the test on 127.0.0.1
-    (`--testinfra-local-minio=<path>`), for machines without the shared store.
-With neither, the test ends with SKIP and a reason (`exit_skip`, which
-exits 77 itself), never a pass.
+Two backends, both opt-in by flag:
+  * EXTERNAL_S3: an S3-compatible endpoint described by a `TestInfraConfig`
+    file (`--testinfra-s3-config=<path>`); this library holds none of its
+    values;
+  * EMBEDDED_MINIO: a MinIO server, pinned by sha256, that the test itself
+    starts on 127.0.0.1 (`--testinfra-minio-binary=<path>`).
+With no flags (the default, on any machine with no infrastructure) the test
+ends with SKIP and a reason (`exit_skip`, which exits 77 itself), never a
+pass and never a guess at an endpoint.
 
 The object store and the process launcher are seams (`ObjectStoreClient`,
 `ProcessRunner`), with in-memory fakes; real clients live in adapter
@@ -22,8 +24,8 @@ packages. See each module's header.
 """
 
 from .bucket import (
-    BACKEND_FARM,
-    BACKEND_LOCAL,
+    BACKEND_EXTERNAL_S3,
+    BACKEND_EMBEDDED_MINIO,
     LEASE_OBJECT,
     UNCLOSED_HANDLE_MARKER,
     TestBucket,
@@ -33,23 +35,23 @@ from .bucket import (
 from .config import TestInfraConfig, load_test_infra_config, parse_test_infra_config
 from .flags import (
     BACKEND_CHOICE_CANNOT_TELL,
-    BACKEND_CHOICE_FARM,
-    BACKEND_CHOICE_LOCAL,
+    BACKEND_CHOICE_EXTERNAL_S3,
+    BACKEND_CHOICE_EMBEDDED_MINIO,
     BACKEND_CHOICE_SKIP,
     BackendChoice,
     TestInfraFlags,
     select_backend,
 )
 from .leak_check import leak_check
-from .local_backend import (
-    LOCAL_BUCKET,
-    LOCAL_HOST,
-    LOCAL_REGION,
-    LOCAL_RUN_PREFIX,
+from .embedded_minio import (
+    MINIO_BUCKET,
+    MINIO_HOST,
+    MINIO_REGION,
+    MINIO_RUN_PREFIX,
     credentials_file_text,
-    open_local_test_bucket,
+    open_embedded_minio_test_bucket,
 )
-from .local_minio_pins import MinioPin, current_minio_platform, local_minio_pins, pinned_sha256_for
+from .minio_pins import MinioPin, current_minio_platform, minio_server_pins, pinned_sha256_for
 from .process import (
     READINESS_EXITED,
     READINESS_READY,

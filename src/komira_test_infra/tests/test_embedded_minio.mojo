@@ -1,4 +1,4 @@
-# The local backend over a scripted process runner and the in-memory store:
+# The embedded-MinIO backend over a scripted process runner and the in-memory store:
 # both addresses bind 127.0.0.1; the child environment is exactly the two
 # *_FILE paths and MINIO_BROWSER=off; the credential files have the right
 # shape and modes; a binary that is not the pin raises; an early exit is
@@ -14,8 +14,8 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_core_ffi.posix import _read_env
 from komira_test_infra import (
-    LOCAL_BUCKET,
-    LOCAL_REGION,
+    MINIO_BUCKET,
+    MINIO_REGION,
     FakeObjectStore,
     FixedWallClock,
     MinioPin,
@@ -26,9 +26,9 @@ from komira_test_infra import (
     VERDICT_CANNOT_TELL,
     VERDICT_CLEAN,
     current_minio_platform,
-    open_local_test_bucket,
+    open_embedded_minio_test_bucket,
 )
-from komira_test_infra.local_backend import _open_local_with_pins
+from komira_test_infra.embedded_minio import _open_embedded_minio_with_pins
 from komira_test_infra.private_files import _sha256_file_hex
 
 
@@ -84,8 +84,8 @@ def test_open_retry_files_env_and_close() raises:
     var runner = ScriptedProcessRunner([Readiness.exited(1), Readiness.ready()])
     var entropy = _entropy()
     var clock = FixedWallClock(1790000000)
-    var b = _open_local_with_pins(
-        RunId(id, 1790000000), binary, tmp, "//p:local", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
+    var b = _open_embedded_minio_with_pins(
+        RunId(id, 1790000000), binary, tmp, "//p:embedded", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
     )
     var dir = tmp + "/kti-" + id
 
@@ -145,18 +145,18 @@ def test_open_retry_files_env_and_close() raises:
     for e in env:
         assert_false(user in e.value or password in e.value, "credential in env")
 
-    # The handle points at the local server.
+    # The handle points at the embedded server.
     assert_equal(b.endpoint(), "http://127.0.0.1:20300")
-    assert_equal(b.region(), LOCAL_REGION)
-    assert_equal(b.bucket(), LOCAL_BUCKET)
+    assert_equal(b.region(), MINIO_REGION)
+    assert_equal(b.bucket(), MINIO_BUCKET)
     assert_equal(b.credentials_file(), dir + "/credentials")
-    assert_equal(b.backend(), "local")
+    assert_equal(b.backend(), "embedded-minio")
     assert_equal(b.prefix(), "runs/" + id + "/")
     ref c = b.client()
     assert_equal(c.calls[0], "bind")
     assert_equal(c.calls[1], "create_bucket_if_absent")
     assert_equal(c.calls[2], "put runs/" + id + "/_lease.textproto")
-    assert_true("backend: \"local\"" in c.body_text("runs/" + id + "/_lease.textproto"))
+    assert_true("backend: \"embedded-minio\"" in c.body_text("runs/" + id + "/_lease.textproto"))
 
     var v = b.close()
     assert_equal(v.kind, VERDICT_CLEAN, String(v))
@@ -176,8 +176,8 @@ def test_sha_mismatch_raises_before_anything() raises:
     var raised = False
     try:
         # The real pins: the fixture is not a pinned MinIO.
-        var b = open_local_test_bucket(
-            RunId(id, 1790000000), binary, tmp, "//p:local", FakeObjectStore(), runner^, entropy, clock
+        var b = open_embedded_minio_test_bucket(
+            RunId(id, 1790000000), binary, tmp, "//p:embedded", FakeObjectStore(), runner^, entropy, clock
         )
         _ = b.close()
     except e:
@@ -201,8 +201,8 @@ def test_every_attempt_exiting_is_cannot_tell() raises:
     var clock = FixedWallClock(1790000000)
     var raised = False
     try:
-        var b = _open_local_with_pins(
-            RunId(id, 1790000000), binary, tmp, "//p:local", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
+        var b = _open_embedded_minio_with_pins(
+            RunId(id, 1790000000), binary, tmp, "//p:embedded", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
         )
         _ = b.close()
     except e:
@@ -223,12 +223,12 @@ def test_unconfirmed_stop_is_cannot_tell() raises:
     runner.stop_raises = True
     var entropy = _entropy()
     var clock = FixedWallClock(1790000000)
-    var b = _open_local_with_pins(
-        RunId(id, 1790000000), binary, tmp, "//p:local", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
+    var b = _open_embedded_minio_with_pins(
+        RunId(id, 1790000000), binary, tmp, "//p:embedded", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
     )
     var v = b.close()
     assert_equal(v.kind, VERDICT_CANNOT_TELL, String(v))
-    assert_true("local server stop not confirmed" in String(v), String(v))
+    assert_true("embedded MinIO stop not confirmed" in String(v), String(v))
     # The directory is still removed.
     assert_false(isdir(tmp + "/kti-" + id))
 
@@ -243,8 +243,8 @@ def _open_refused(
     var entropy = _entropy()
     var clock = FixedWallClock(1790000000)
     try:
-        var b = _open_local_with_pins(
-            RunId(id, 1790000000), binary, tmp_root, "//p:local", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
+        var b = _open_embedded_minio_with_pins(
+            RunId(id, 1790000000), binary, tmp_root, "//p:embedded", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
         )
         _ = b.close()
     except e:
@@ -252,7 +252,7 @@ def _open_refused(
     return String("")
 
 
-comptime _REFUSED: String = "komira_test_infra: local MinIO: refused"
+comptime _REFUSED: String = "komira_test_infra: embedded MinIO: refused"
 
 
 def test_bad_run_id_or_root_refused_before_the_disk() raises:
@@ -278,7 +278,7 @@ def test_bad_run_id_or_root_refused_before_the_disk() raises:
     assert_false(exists(inner + "/kti-"), "an empty run id made a directory")
 
     msg = _open_refused("1790000000-00000000000000c5", "relative/root", binary)
-    assert_true(msg.startswith("komira_test_infra: local MinIO: the temporary root must be"), msg)
+    assert_true(msg.startswith("komira_test_infra: embedded MinIO: the temporary root must be"), msg)
     assert_false(exists("relative"), "a relative temporary root was used")
 
     msg = _open_refused("1790000000-00000000000000c6", "", binary)
@@ -292,4 +292,4 @@ def main() raises:
     test_every_attempt_exiting_is_cannot_tell()
     test_unconfirmed_stop_is_cannot_tell()
     test_bad_run_id_or_root_refused_before_the_disk()
-    print("test_local_backend: OK")
+    print("test_embedded_minio: OK")

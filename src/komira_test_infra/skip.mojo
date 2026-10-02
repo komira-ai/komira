@@ -2,8 +2,8 @@
 # komira_test_infra/skip.mojo -- SKIP with a reason, which is never a pass.
 # =============================================================================
 #
-# A test that cannot run (no shared store configured and no pinned MinIO
-# given) prints one marker line and ENDS THE PROCESS with exit code 77:
+# A test that cannot run (no S3-compatible endpoint configured and no pinned
+# MinIO binary given -- the default) prints one marker line and ENDS THE PROCESS with exit code 77:
 #
 #     KOMIRA-TEST-INFRA: SKIP reason=<reason>
 #

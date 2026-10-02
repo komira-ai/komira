@@ -1,12 +1,12 @@
 # =============================================================================
 # komira_test_infra/config.mojo -- `TestInfraConfig`, read from a textproto
-# file whose path the test runner passes as `--testinfra-config=<path>`.
+# file whose path the test runner passes as `--testinfra-s3-config=<path>`.
 # =============================================================================
 #
-# The file's schema is public; its values are not. They describe a private
-# deployment (an object-store endpoint, a bucket, a key prefix, a path where a
-# credentials file is mounted), so this library holds no default for any of
-# them, and a missing field is an error, never a fallback:
+# The file's schema is public; its values are not. They describe whichever
+# S3-compatible endpoint the test is pointed at (an endpoint URL, a bucket, a
+# key prefix, a path where a credentials file is mounted), so this library
+# holds no default for any of them, and a missing field is an error, never a fallback:
 #
 #   object_store {
 #     endpoint: "<url>"
@@ -371,5 +371,5 @@ def load_test_infra_config[F: FileSource](path: String, mut files: F) raises -> 
     try:
         text = files.read(path)
     except:
-        raise Error(String(_SOURCE) + ": cannot read the file named by --testinfra-config")
+        raise Error(String(_SOURCE) + ": cannot read the file named by --testinfra-s3-config")
     return parse_test_infra_config(text)

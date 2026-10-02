@@ -9,8 +9,8 @@ from komira_test_infra import SKIP_EXIT_CODE, SKIP_MARKER, skip_line
 
 def test_marker_line_and_code() raises:
     assert_equal(
-        skip_line("no shared store configured"),
-        String(SKIP_MARKER) + "no shared store configured",
+        skip_line("no S3-compatible endpoint configured"),
+        String(SKIP_MARKER) + "no S3-compatible endpoint configured",
     )
     assert_equal(SKIP_EXIT_CODE, 77)
     assert_true(SKIP_EXIT_CODE != 0, "a skip mapped to exit 0")

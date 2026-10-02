@@ -5,10 +5,11 @@
 # Three kinds, numbered as the process exit codes a caller reports them with:
 #
 #   CLEAN        0  everything the run made is gone, and a re-list proved it.
-#   CANNOT_TELL  3  the library could not find out: a list raised, or a local
-#                   server's stop was not confirmed. NEVER a pass.
+#   CANNOT_TELL  3  the library could not find out: a list raised, or an
+#                   embedded server's stop was not confirmed. NEVER a pass.
 #   LEAK         6  something the run made is still there: residue was listed,
-#                   a delete failed, or a local temporary directory remained.
+#                   a delete failed, or an embedded server's temporary
+#                   directory remained.
 #
 # When several findings disagree, the worst wins, and LEAK ranks above
 # CANNOT_TELL: a LEAK is a proven fact with a name to fix, so it is the one a

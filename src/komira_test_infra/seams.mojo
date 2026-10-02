@@ -4,11 +4,11 @@
 # =============================================================================
 #
 # Real conformers: `SystemClock` (CLOCK_REALTIME through the package-private
-# `_sys`), `UrandomEntropy` (/dev/urandom) and `ProcessFiles` (the local
-# filesystem).
+# `_sys`), `UrandomEntropy` (/dev/urandom) and `ProcessFiles` (this
+# process's filesystem).
 # Fakes: `FixedWallClock`, `ScriptedEntropy` and `MapFiles`.
 #
-# The entropy here names test resources (run ids, ports, a throwaway local
+# The entropy here names test resources (run ids, ports, a throwaway embedded
 # server's root credential). It is not used to make anything a third party
 # must not guess, except that throwaway credential, which never leaves the
 # test's private temporary directory.
@@ -119,7 +119,7 @@ trait FileSource(Movable, Deinitable):
 
 
 struct ProcessFiles(FileSource):
-    """The local filesystem."""
+    """This process's filesystem."""
 
     def __init__(out self):
         pass

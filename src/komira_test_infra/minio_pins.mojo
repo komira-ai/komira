@@ -1,10 +1,10 @@
 # =============================================================================
-# komira_test_infra/local_minio_pins.mojo -- the MinIO server binaries the
-# local backend will run, pinned by sha256, one per platform.
+# komira_test_infra/minio_pins.mojo -- the MinIO server binaries the
+# embedded-MinIO backend will run, pinned by sha256, one per platform.
 # =============================================================================
 #
 # A release digest is a public fact about an upstream artifact, not a fact
-# about any deployment. The local backend hashes the binary it was given and
+# about any deployment. The embedded-MinIO backend hashes the binary it was given and
 # refuses (raises: a FAIL, never a SKIP) when the digest is not this
 # platform's pin, so a test never runs against a server nobody chose.
 #
@@ -31,7 +31,7 @@ comptime PLATFORM_LINUX_AMD64: String = "linux-amd64"
 comptime PLATFORM_DARWIN_ARM64: String = "darwin-arm64"
 
 
-def local_minio_pins() -> List[MinioPin]:
+def minio_server_pins() -> List[MinioPin]:
     var pins = List[MinioPin]()
     pins.append(
         MinioPin(

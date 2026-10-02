@@ -6,9 +6,11 @@
 # The test runner passes at most three flags, and this library reads nothing
 # else (no environment variable):
 #
-#   --testinfra-config=<path>      the TestInfraConfig file of a shared store
-#   --testinfra-target=<label>     the test target, recorded in the lease
-#   --testinfra-local-minio=<path> a pinned MinIO binary, for the local backend
+#   --testinfra-s3-config=<path>    a TestInfraConfig file describing an
+#                                   external S3-compatible endpoint
+#   --testinfra-target=<label>      the test target, recorded in the lease
+#   --testinfra-minio-binary=<path> a pinned MinIO binary the test starts
+#                                   itself (the embedded-MinIO backend)
 #
 # Other flags are left to the test. An unknown `--testinfra-*` flag, a
 # repeated one, or one with an empty value raises (an empty value and an
@@ -16,17 +18,21 @@
 #
 # Backend choice:
 #
-#   config flag given, file read and parsed   -> FARM (the shared store)
+#   config flag given, file read and parsed   -> EXTERNAL_S3
 #   config flag given, unreadable or invalid  -> CANNOT_TELL (exit 3). NEVER a
-#                                               fall back to local: a run
-#                                               asked for the shared store
-#                                               and did not get it.
-#   no config flag, a MinIO path given        -> LOCAL
-#   neither                                   -> SKIP (exit 77, see skip.mojo)
+#                                               fall back to embedded MinIO:
+#                                               a run asked for an external
+#                                               endpoint and did not get it.
+#   no config flag, a MinIO path given        -> EMBEDDED_MINIO
+#   neither (the default)                     -> SKIP (exit 77, see skip.mojo)
+#
+# Both backends are opt-in. The default -- no flags -- needs nothing on the
+# machine and SKIPS with a reason: no endpoint is assumed, and the embedded
+# MinIO is not the default because it needs a binary someone must supply.
 #
 # `exit_unless_runnable()` is how a test acts on the choice: it returns for
-# FARM and LOCAL and otherwise ENDS THE PROCESS (77 for SKIP, 3 for
-# CANNOT_TELL). `exit_code()` is the same number as data, for a caller that
+# EXTERNAL_S3 and EMBEDDED_MINIO and otherwise ENDS THE PROCESS (77 for
+# SKIP, 3 for CANNOT_TELL). `exit_code()` is the same number as data, for a caller that
 # reports it; a code returned to a caller can be dropped, and a dropped 77
 # followed by a return from `main` is exit 0, a pass.
 # =============================================================================
@@ -37,13 +43,13 @@ from .config import TestInfraConfig, load_test_infra_config
 from .seams import FileSource
 from .skip import exit_skip
 
-comptime _FLAG_CONFIG: String = "--testinfra-config"
+comptime _FLAG_S3_CONFIG: String = "--testinfra-s3-config"
 comptime _FLAG_TARGET: String = "--testinfra-target"
-comptime _FLAG_LOCAL_MINIO: String = "--testinfra-local-minio"
+comptime _FLAG_MINIO_BINARY: String = "--testinfra-minio-binary"
 comptime _FLAG_FAMILY: String = "--testinfra-"
 
-comptime BACKEND_CHOICE_FARM: Int = 0
-comptime BACKEND_CHOICE_LOCAL: Int = 1
+comptime BACKEND_CHOICE_EXTERNAL_S3: Int = 0
+comptime BACKEND_CHOICE_EMBEDDED_MINIO: Int = 1
 comptime BACKEND_CHOICE_SKIP: Int = 2
 comptime BACKEND_CHOICE_CANNOT_TELL: Int = 3
 
@@ -54,12 +60,12 @@ struct TestInfraFlags(Copyable, Movable):
 
     var config_path: String
     var target: String
-    var local_minio: String
+    var minio_binary: String
 
     def __init__(out self):
         self.config_path = String("")
         self.target = String("")
-        self.local_minio = String("")
+        self.minio_binary = String("")
 
     @staticmethod
     def parse(args: List[String]) raises -> TestInfraFlags:
@@ -73,14 +79,14 @@ struct TestInfraFlags(Copyable, Movable):
                 continue
             var eq = a.find("=")
             var name = a if eq < 0 else String(a[byte=0:eq])
-            if name != _FLAG_CONFIG and name != _FLAG_TARGET and name != _FLAG_LOCAL_MINIO:
+            if name != _FLAG_S3_CONFIG and name != _FLAG_TARGET and name != _FLAG_MINIO_BINARY:
                 raise Error("komira_test_infra: unknown flag " + name)
             if eq < 0:
                 raise Error("komira_test_infra: " + name + " needs a value (" + name + "=<value>)")
             var value = String(a[byte = eq + 1 :])
             if value.byte_length() == 0:
                 raise Error("komira_test_infra: " + name + " has an empty value")
-            if name == _FLAG_CONFIG:
+            if name == _FLAG_S3_CONFIG:
                 if seen_config:
                     raise Error("komira_test_infra: " + name + " given more than once")
                 seen_config = True
@@ -94,7 +100,7 @@ struct TestInfraFlags(Copyable, Movable):
                 if seen_minio:
                     raise Error("komira_test_infra: " + name + " given more than once")
                 seen_minio = True
-                out.local_minio = value^
+                out.minio_binary = value^
         return out^
 
     @staticmethod
@@ -108,8 +114,8 @@ struct TestInfraFlags(Copyable, Movable):
 
 
 struct BackendChoice(Copyable, Movable):
-    """Which backend to run against; `config` is set only for FARM, `reason`
-    only for SKIP and CANNOT_TELL (field names, never values)."""
+    """Which backend to run against; `config` is set only for EXTERNAL_S3,
+    `reason` only for SKIP and CANNOT_TELL (field names, never values)."""
 
     var kind: Int
     var reason: String
@@ -129,8 +135,8 @@ struct BackendChoice(Copyable, Movable):
         return 0
 
     def exit_unless_runnable(self):
-        """Return for FARM and LOCAL. Otherwise print the reason and end the
-        process: SKIP through `exit_skip` (77), CANNOT_TELL with 3."""
+        """Return for EXTERNAL_S3 and EMBEDDED_MINIO. Otherwise print the
+        reason and end the process: SKIP through `exit_skip` (77), CANNOT_TELL with 3."""
         if self.kind == BACKEND_CHOICE_SKIP:
             exit_skip(self.reason)
         if self.kind == BACKEND_CHOICE_CANNOT_TELL:
@@ -143,16 +149,16 @@ def select_backend[F: FileSource](flags: TestInfraFlags, mut files: F) -> Backen
     if flags.config_path.byte_length() > 0:
         try:
             var cfg = load_test_infra_config(flags.config_path, files)
-            return BackendChoice(BACKEND_CHOICE_FARM, String(""), Optional(cfg^))
+            return BackendChoice(BACKEND_CHOICE_EXTERNAL_S3, String(""), Optional(cfg^))
         except e:
             return BackendChoice(BACKEND_CHOICE_CANNOT_TELL, String(e), None)
-    if flags.local_minio.byte_length() > 0:
-        return BackendChoice(BACKEND_CHOICE_LOCAL, String(""), None)
+    if flags.minio_binary.byte_length() > 0:
+        return BackendChoice(BACKEND_CHOICE_EMBEDDED_MINIO, String(""), None)
     return BackendChoice(
         BACKEND_CHOICE_SKIP,
         String(
-            "no shared store configured (--testinfra-config) and no pinned MinIO"
-            " given (--testinfra-local-minio)"
+            "no S3-compatible endpoint configured (--testinfra-s3-config) and no"
+            " pinned MinIO binary given (--testinfra-minio-binary)"
         ),
         None,
     )

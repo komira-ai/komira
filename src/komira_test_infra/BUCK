@@ -3,7 +3,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # Tests that use a real object store and clean up after themselves: a
 # run-scoped `TestBucket` (lease first, delete everything, re-list, verdict),
 # a run-id minter, the leak check, the runner flags and backend choice, and
-# the local backend that starts a pinned MinIO on 127.0.0.1 inside the test.
+# the embedded-MinIO backend that starts a pinned MinIO on 127.0.0.1 inside
+# the test. With no flags a test SKIPS (exit 77): nothing here assumes an
+# endpoint exists.
 #
 # No deployment fact lives here: endpoints, buckets and credential paths come
 # from a config file named by a flag. The object store and the process
@@ -32,7 +34,7 @@ mojo_library(
         "tests/test_config.mojo",
         "tests/test_flags.mojo",
         "tests/test_leak_check.mojo",
-        "tests/test_local_backend.mojo",
+        "tests/test_embedded_minio.mojo",
         "tests/test_no_endpoint_in_messages.mojo",
         "tests/test_run_id.mojo",
         "tests/test_skip.mojo",

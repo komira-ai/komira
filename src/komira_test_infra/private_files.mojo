@@ -3,7 +3,7 @@
 # removing a tree, and a file's sha256. Module-internal helpers.
 # =============================================================================
 #
-# A local run's temporary directory holds a throwaway root credential, so it
+# An embedded-MinIO run's temporary directory holds a throwaway root credential, so it
 # is created 0700 and every file in it 0600, with the mode set BEFORE any
 # content is written. `_remove_tree` never follows a symbolic link: a link is
 # unlinked, never descended into, so a link planted in the tree cannot make

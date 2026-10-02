@@ -1,12 +1,12 @@
 # =============================================================================
-# komira_test_infra/local_backend.mojo -- the off-deployment backend: a
+# komira_test_infra/embedded_minio.mojo -- the embedded-MinIO backend: a
 # private MinIO server started inside the test, bound to 127.0.0.1, with data
 # and a throwaway root credential in the test's own temporary directory.
 # =============================================================================
 #
 # Steps, in order:
 #   1. Hash the given MinIO binary and compare it with this platform's pin
-#      (local_minio_pins.mojo). A mismatch RAISES: a FAIL, never a SKIP.
+#      (minio_pins.mojo). A mismatch RAISES: a FAIL, never a SKIP.
 #   2. Make `<tmp_root>/kti-<run_id>/` (0700) holding `root_user` and
 #      `root_password` (0600, random) and empty `data/` and `certs/`.
 #   3. Start the server with
@@ -24,14 +24,14 @@
 #      leave a server running.
 #   4. Once the port answers, write `<tmp>/credentials` (0600) in the AWS
 #      shared-credentials shape, bind the client to http://127.0.0.1:<p>,
-#      region us-east-1, bucket komira-test-local, create the bucket, and
+#      region us-east-1, bucket komira-test-embedded, create the bucket, and
 #      continue as `open_test_bucket` does (the lease first).
 #
 # `close()` also stops the server (5 s grace) and removes the temporary
 # directory; a stop it cannot confirm is CANNOT_TELL, a directory that stays
 # is LEAK.
 #
-# The local credentials file has no session token: the root keys of a server
+# This credentials file has no session token: the root keys of a server
 # that lives as long as the test need none. The file is written once and its
 # contents are never part of a message.
 #
@@ -42,11 +42,11 @@
 
 from komira_validation_run.validation_run_tag import is_valid_validation_run_id
 
-from .bucket import BACKEND_LOCAL, TestBucket, _open_bucket
-from .local_minio_pins import (
+from .bucket import BACKEND_EMBEDDED_MINIO, TestBucket, _open_bucket
+from .minio_pins import (
     MinioPin,
     current_minio_platform,
-    local_minio_pins,
+    minio_server_pins,
     pinned_sha256_for,
 )
 from .private_files import (
@@ -66,17 +66,17 @@ from .run_id import RunId, _hex16
 from .seams import Entropy, WallClock
 from .store import ObjectStoreClient, StoreTarget
 
-comptime LOCAL_HOST: String = "127.0.0.1"
-comptime LOCAL_REGION: String = "us-east-1"
-comptime LOCAL_BUCKET: String = "komira-test-local"
-comptime LOCAL_RUN_PREFIX: String = "runs/"
-comptime LOCAL_PORT_LOW: Int = 20000
-comptime LOCAL_PORT_HIGH: Int = 60000
-comptime LOCAL_START_RETRIES: Int = 3
-comptime LOCAL_READY_TIMEOUT_S: Int = 30
-comptime LOCAL_STOP_GRACE_S: Int = 5
-comptime LOCAL_MAX_LEASE_SECONDS: Int = 5400
-comptime LOCAL_TEARDOWN_BUDGET_SECONDS: Int = 120
+comptime MINIO_HOST: String = "127.0.0.1"
+comptime MINIO_REGION: String = "us-east-1"
+comptime MINIO_BUCKET: String = "komira-test-embedded"
+comptime MINIO_RUN_PREFIX: String = "runs/"
+comptime MINIO_PORT_LOW: Int = 20000
+comptime MINIO_PORT_HIGH: Int = 60000
+comptime MINIO_START_RETRIES: Int = 3
+comptime MINIO_READY_TIMEOUT_S: Int = 30
+comptime MINIO_STOP_GRACE_S: Int = 5
+comptime MINIO_MAX_LEASE_SECONDS: Int = 5400
+comptime MINIO_TEARDOWN_BUDGET_SECONDS: Int = 120
 
 
 def credentials_file_text(
@@ -93,8 +93,8 @@ def credentials_file_text(
 
 
 def _draw_port[E: Entropy](mut entropy: E) raises -> Int:
-    var span = UInt64(LOCAL_PORT_HIGH - LOCAL_PORT_LOW)
-    return LOCAL_PORT_LOW + Int(entropy.next_u64() % span)
+    var span = UInt64(MINIO_PORT_HIGH - MINIO_PORT_LOW)
+    return MINIO_PORT_LOW + Int(entropy.next_u64() % span)
 
 
 def _minio_spec(minio_path: String, tmp: String, port: Int, console_port: Int) -> ProcessSpec:
@@ -103,9 +103,9 @@ def _minio_spec(minio_path: String, tmp: String, port: Int, console_port: Int) -
     argv.append("server")
     argv.append(tmp + "/data")
     argv.append("--address")
-    argv.append(String(LOCAL_HOST) + ":" + String(port))
+    argv.append(String(MINIO_HOST) + ":" + String(port))
     argv.append("--console-address")
-    argv.append(String(LOCAL_HOST) + ":" + String(console_port))
+    argv.append(String(MINIO_HOST) + ":" + String(console_port))
     argv.append("--certs-dir")
     argv.append(tmp + "/certs")
     var env = List[EnvEntry]()
@@ -120,12 +120,12 @@ def _verify_pinned_minio(minio_path: String, pins: List[MinioPin]) raises:
     var want = pinned_sha256_for(pins, platform)
     if want.byte_length() == 0:
         raise Error(
-            "komira_test_infra: local MinIO: no pinned binary for platform " + platform
+            "komira_test_infra: embedded MinIO: no pinned binary for platform " + platform
         )
     var got = _sha256_file_hex(minio_path)
     if got != want:
         raise Error(
-            "komira_test_infra: local MinIO: the binary's sha256 "
+            "komira_test_infra: embedded MinIO: the binary's sha256 "
             + got
             + " is not the pin for "
             + platform
@@ -135,7 +135,7 @@ def _verify_pinned_minio(minio_path: String, pins: List[MinioPin]) raises:
         )
 
 
-def _open_local_with_pins[
+def _open_embedded_minio_with_pins[
     S: ObjectStoreClient, P: ProcessRunner, E: Entropy, C: WallClock
 ](
     run_id: RunId,
@@ -148,7 +148,7 @@ def _open_local_with_pins[
     mut clock: C,
     pins: List[MinioPin],
 ) raises -> TestBucket[S, P]:
-    """`open_local_test_bucket` over an explicit pin list (the library's own
+    """`open_embedded_minio_test_bucket` over an explicit pin list (the library's own
     test pins a fixture binary)."""
     # The run id becomes a directory name below: refuse a bad one (and a bad
     # temporary root) before ANY filesystem call or process start. `RunId` is
@@ -156,11 +156,11 @@ def _open_local_with_pins[
     # otherwise place the root credential outside `tmp_root`, start a server
     # on it, and hand that path to the teardown's tree removal.
     if run_id.value.byte_length() == 0 or not is_valid_validation_run_id(run_id.value):
-        raise Error("komira_test_infra: local MinIO: refused an empty or invalid run id")
+        raise Error("komira_test_infra: embedded MinIO: refused an empty or invalid run id")
     if tmp_root.byte_length() == 0:
-        raise Error("komira_test_infra: local MinIO: refused an empty temporary root")
+        raise Error("komira_test_infra: embedded MinIO: refused an empty temporary root")
     if not tmp_root.startswith("/"):
-        raise Error("komira_test_infra: local MinIO: the temporary root must be an absolute path")
+        raise Error("komira_test_infra: embedded MinIO: the temporary root must be an absolute path")
     _verify_pinned_minio(minio_path, pins)
     var user = "kti" + _hex16(entropy.next_u64())
     var password = _hex16(entropy.next_u64()) + _hex16(entropy.next_u64())
@@ -174,13 +174,13 @@ def _open_local_with_pins[
         _make_private_dir(tmp + "/data")
         _make_private_dir(tmp + "/certs")
         var last_exit = 0
-        for _attempt in range(1 + LOCAL_START_RETRIES):
+        for _attempt in range(1 + MINIO_START_RETRIES):
             port = _draw_port(entropy)
             var console_port = _draw_port(entropy)
             if console_port == port:
-                console_port = port + 1 if port + 1 < LOCAL_PORT_HIGH else LOCAL_PORT_LOW
+                console_port = port + 1 if port + 1 < MINIO_PORT_HIGH else MINIO_PORT_LOW
             var started = runner.start(_minio_spec(minio_path, tmp, port, console_port))
-            var r = runner.wait_port(started, String(LOCAL_HOST), port, LOCAL_READY_TIMEOUT_S)
+            var r = runner.wait_port(started, String(MINIO_HOST), port, MINIO_READY_TIMEOUT_S)
             if r.kind == READINESS_READY:
                 h = started
                 break
@@ -189,17 +189,17 @@ def _open_local_with_pins[
                 continue
             # TIMEOUT: the child may still be running; stop it before giving up.
             try:
-                _ = runner.stop(started, LOCAL_STOP_GRACE_S)
+                _ = runner.stop(started, MINIO_STOP_GRACE_S)
             except:
                 raise Error(
-                    "CANNOT_TELL: local MinIO did not answer on its port, and its stop was"
+                    "CANNOT_TELL: embedded MinIO did not answer on its port, and its stop was"
                     " not confirmed"
                 )
-            raise Error("CANNOT_TELL: local MinIO did not answer on its port in time")
+            raise Error("CANNOT_TELL: embedded MinIO did not answer on its port in time")
         if h < 0:
             raise Error(
-                "CANNOT_TELL: local MinIO exited early on "
-                + String(1 + LOCAL_START_RETRIES)
+                "CANNOT_TELL: embedded MinIO exited early on "
+                + String(1 + MINIO_START_RETRIES)
                 + " attempts (last exit code "
                 + String(last_exit)
                 + ")"
@@ -209,25 +209,25 @@ def _open_local_with_pins[
         var msg = String(e)
         if h >= 0:
             try:
-                _ = runner.stop(h, LOCAL_STOP_GRACE_S)
+                _ = runner.stop(h, MINIO_STOP_GRACE_S)
             except:
                 msg += "; the server's stop was not confirmed"
         if not _remove_tree(tmp):
             msg += "; the temporary directory remained"
-        raise Error("komira_test_infra: local MinIO: " + msg)
+        raise Error("komira_test_infra: embedded MinIO: " + msg)
     return _open_bucket[S, P, C](
         run_id,
         StoreTarget(
-            "http://" + String(LOCAL_HOST) + ":" + String(port),
-            String(LOCAL_REGION),
-            String(LOCAL_BUCKET),
+            "http://" + String(MINIO_HOST) + ":" + String(port),
+            String(MINIO_REGION),
+            String(MINIO_BUCKET),
             tmp + "/credentials",
         ),
-        String(LOCAL_RUN_PREFIX),
-        LOCAL_MAX_LEASE_SECONDS,
-        LOCAL_TEARDOWN_BUDGET_SECONDS,
+        String(MINIO_RUN_PREFIX),
+        MINIO_MAX_LEASE_SECONDS,
+        MINIO_TEARDOWN_BUDGET_SECONDS,
         target_label,
-        String(BACKEND_LOCAL),
+        String(BACKEND_EMBEDDED_MINIO),
         client^,
         runner^,
         h,
@@ -237,7 +237,7 @@ def _open_local_with_pins[
     )
 
 
-def open_local_test_bucket[
+def open_embedded_minio_test_bucket[
     S: ObjectStoreClient, P: ProcessRunner, E: Entropy, C: WallClock
 ](
     run_id: RunId,
@@ -251,7 +251,7 @@ def open_local_test_bucket[
 ) raises -> TestBucket[S, P]:
     """Start a pinned MinIO on loopback inside the test and open this run's
     prefix in it. See the module header for the steps."""
-    return _open_local_with_pins(
+    return _open_embedded_minio_with_pins(
         run_id,
         minio_path,
         tmp_root,
@@ -260,5 +260,5 @@ def open_local_test_bucket[
         runner^,
         entropy,
         clock,
-        local_minio_pins(),
+        minio_server_pins(),
     )

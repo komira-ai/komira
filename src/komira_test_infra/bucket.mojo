@@ -20,8 +20,8 @@
 # nothing else is left (a delete reported successful does not prove the key
 # is gone, and a program still running can write during the close), so
 # residue stays attributable. It then lists a last time to prove the prefix
-# is empty, and for a local run stops the server and removes the temporary
-# directory. Only keys inside the prefix are ever deleted (`_key_in_run`). It returns a
+# is empty, and for an embedded-MinIO run stops the server and removes the
+# temporary directory. Only keys inside the prefix are ever deleted (`_key_in_run`). It returns a
 # `Verdict` and keeps every failure it met; calling it again returns the same
 # verdict and does nothing.
 #
@@ -76,8 +76,8 @@ from .verdict import Verdict
 comptime LEASE_OBJECT: String = "_lease.textproto"
 """The lease object's name under a run's prefix."""
 
-comptime BACKEND_FARM: String = "farm"
-comptime BACKEND_LOCAL: String = "local"
+comptime BACKEND_EXTERNAL_S3: String = "external-s3"
+comptime BACKEND_EMBEDDED_MINIO: String = "embedded-minio"
 
 comptime UNCLOSED_HANDLE_MARKER: String = "komira_test_infra: UNCLOSED HANDLE (LEAK-RISK)"
 
@@ -188,11 +188,11 @@ struct _BucketState[S: ObjectStoreClient, P: ProcessRunner](Movable):
                 _ = self.runner.stop(self.proc, _STOP_GRACE_S)
             except e:
                 v.add_cannot_tell(
-                    "local server stop not confirmed: " + self.redactor.scrub(String(e))
+                    "embedded MinIO stop not confirmed: " + self.redactor.scrub(String(e))
                 )
         if self.tmpdir.byte_length() > 0:
             if not _remove_tree(self.tmpdir):
-                v.add_leak(String("local temporary directory remained"))
+                v.add_leak(String("embedded MinIO temporary directory remained"))
         self.closed = True
         self.verdict = v.copy()
         return v^
@@ -285,8 +285,8 @@ struct TestBucket[S: ObjectStoreClient, P: ProcessRunner](Movable):
         return _unclosed_message(self._state.close())
 
     def close(mut self) -> Verdict:
-        """Delete everything under the prefix, re-list, stop a local server
-        and remove its temporary directory. Idempotent."""
+        """Delete everything under the prefix, re-list, stop an embedded MinIO
+        server and remove its temporary directory. Idempotent."""
         return self._state.close()
 
     def is_closed(self) -> Bool:
@@ -432,7 +432,8 @@ def open_test_bucket[S: ObjectStoreClient, C: WallClock](
     var client: S,
     mut clock: C,
 ) raises -> TestBucket[S, NoProcess]:
-    """Open this run's prefix in the configured (shared) store. `client` is
+    """Open this run's prefix in the external S3-compatible endpoint the
+    config describes. `client` is
     unbound; this call binds it. `target_label` is the test target, as the
     runner passed it in `--testinfra-target`."""
     return _open_bucket[S, NoProcess, C](
@@ -442,7 +443,7 @@ def open_test_bucket[S: ObjectStoreClient, C: WallClock](
         config.max_lease_seconds,
         config.teardown_budget_seconds,
         target_label,
-        String(BACKEND_FARM),
+        String(BACKEND_EXTERNAL_S3),
         client^,
         NoProcess(),
         -1,

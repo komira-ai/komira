@@ -141,7 +141,7 @@ def test_config_and_flag_refusals_are_value_free() raises:
         _assert_no_value(msg)
     var files = MapFiles()
     files.put("/cfg/bad.textproto", cases[0])
-    var args: List[String] = ["--testinfra-config=/cfg/bad.textproto"]
+    var args: List[String] = ["--testinfra-s3-config=/cfg/bad.textproto"]
     var choice = select_backend(TestInfraFlags.parse(args), files)
     assert_equal(choice.exit_code(), 3)
     _assert_no_value(choice.reason)

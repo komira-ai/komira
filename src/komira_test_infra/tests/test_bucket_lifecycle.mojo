@@ -1,4 +1,4 @@
-# TestBucket on the shared-store backend, over the in-memory fake: the lease
+# TestBucket on the external-S3 backend, over the in-memory fake: the lease
 # is written first; `key()` refuses what would leave the prefix; `as_flags()`
 # carries paths, not secrets; the deadline; a clean close; and close is
 # idempotent.
@@ -6,7 +6,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_test_infra import (
-    BACKEND_FARM,
+    BACKEND_EXTERNAL_S3,
     FakeObjectStore,
     FixedWallClock,
     NoProcess,
@@ -55,7 +55,7 @@ def test_lease_is_the_first_object() raises:
     assert_equal(len(c.calls), 2)
     assert_equal(c.calls[0], "bind")
     assert_equal(c.calls[1], "put " + _PREFIX + "_lease.textproto")
-    assert_false(c.bucket_created, "the shared backend must not create buckets")
+    assert_false(c.bucket_created, "the external-S3 backend must not create buckets")
     assert_equal(c.target_endpoint, "http://store.invalid:9000")
     assert_equal(c.target_credentials_file, "/mnt/creds/credentials")
     var lease = c.body_text(_PREFIX + "_lease.textproto")
@@ -63,7 +63,7 @@ def test_lease_is_the_first_object() raises:
     assert_true("target: \"//pkg:it\"" in lease, lease)
     assert_true("created_unix: 1790000000\n" in lease, lease)
     assert_true("deadline_unix: 1790000600\n" in lease, lease)
-    assert_true("backend: \"farm\"" in lease, lease)
+    assert_true("backend: \"external-s3\"" in lease, lease)
     assert_equal(b.close().kind, VERDICT_CLEAN)
 
 
@@ -78,7 +78,7 @@ def test_accessors_keys_and_flags() raises:
     assert_equal(b.credentials_file(), "/mnt/creds/credentials")
     assert_equal(b.created_unix(), _NOW)
     assert_equal(b.deadline_unix(), _NOW + 600)
-    assert_equal(b.backend(), BACKEND_FARM)
+    assert_equal(b.backend(), BACKEND_EXTERNAL_S3)
 
     assert_equal(b.key("seg/0001.log"), _PREFIX + "seg/0001.log")
     for bad in ["", "/abs", "..", "a/../b", "a/..", "_lease.textproto"]:
