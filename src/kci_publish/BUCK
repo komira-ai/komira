@@ -1,0 +1,52 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# The `kci publish` verb: publish built package files to a release channel.
+# It resolves each artifact manifest to the channel's repository for its type
+# (kci_release_channel), checks every file against its manifest and every
+# name against the approved-names file, reads what the registry holds, and
+# plans each file as UPLOAD, SKIP or REFUSE. `--dry-run` prints that plan and
+# stops, resolving no credential; otherwise kci_pkg_upload carries it out and
+# reads every upload back. Nothing here names a channel, an account or an
+# organisation: all of that comes from the files and flags of the run.
+#
+# Every welded test drives scripted transports over the staged fixtures
+# under tests/fixtures: no socket, no network.
+mojo_library(
+    name = "kci_publish_lib",
+    import_name = "kci_publish",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    deps = [
+        "//src/kci_pkg_upload:kci_pkg_upload",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/komira_http:komira_http",
+        "//src/komira_json:komira_json",
+        "//src/komira_retry:komira_retry",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        # whole-verb runs: the dry run reaches no write transport and resolves no secret
+        "tests/test_publish_flow.mojo",
+        # every flag, both spellings, each refusal naming its flag; exit 2 first
+        "tests/test_publish_flags.mojo",
+        # the artifact manifest and the approved-names file
+        "tests/test_publish_manifest.mojo",
+        # artifact -> channel repository, the approved-names gate, presence -> action
+        "tests/test_publish_plan.mojo",
+        # the plan carried out: read-backs, 409s, lost answers, exit codes, zero-call dry run
+        "tests/test_publish_run.mojo",
+    ],
+    test_data = {
+        "tests/test_publish_flow.mojo": glob(["tests/fixtures/**"]),
+        "tests/test_publish_run.mojo": glob(["tests/fixtures/**"]),
+    },
+    visibility = ["PUBLIC"],
+)
+
+# `kci publish` as a standalone binary, until the kci binary dispatches its
+# `publish` verb to the same `publish_main`.
+mojo_binary(
+    name = "kci_publish",
+    srcs = ["main/kci_publish_main.mojo"],
+    deps = [":kci_publish_lib"],
+    visibility = ["PUBLIC"],
+)
