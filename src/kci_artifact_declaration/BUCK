@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The artifact declarations: the reviewed list of what kci builds and
+# publishes (name, allowed channels, and one typed kind with its build rule).
+# Reads a declarations file (textproto) into the generated
+# `kci.release.v1.ArtifactDeclarations` and validates it: unique exact names,
+# Buck2 labels, conda subdirs, depends_on resolved to the same kind and
+# acyclic, member_of naming a declared metapackage, channel closure; and
+# checks it against the channels file of kci_release_channel.
+#
+# The welded tests parse and refuse synthetic files in memory, assert each
+# refusal by its message, and round-trip the parsed value on the proto binary
+# wire with each kind arm's field number pinned as bytes: no file system, no
+# network.
+mojo_library(
+    name = "kci_artifact_declaration",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_textproto:komira_textproto",
+    ],
+    test_srcs = [
+        "tests/test_declaration_parse.mojo",
+        "tests/test_declaration_validate.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

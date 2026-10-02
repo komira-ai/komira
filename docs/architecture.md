@@ -74,6 +74,8 @@ A library `kci` owns is named `kci_<x>`.
 
 | module | what it is |
 |---|---|
+| [`kci_artifact_declaration`](../src/kci_artifact_declaration/) | the artifact declarations: the one reviewed list of what kci builds and publishes. Reads a declarations file into the generated schema and validates it (unique names, Buck2 labels, subdirs, `depends_on` and `member_of` references, cycles, channel closure), and checks it against the channels file. |
+| [`kci_artifact_declaration_proto`](../src/kci_artifact_declaration_proto/) | the declarations schema (`kci.release.v1`): an artifact is a name, its allowed channels and one typed kind (conda package, conda metapackage, Python wheel, OCI image) carrying that kind's build rule and fields. |
 | [`kci_logs`](../src/kci_logs/) | reads the logs behind a failed step: a pipeline run's stage logs, and a terminated cloud unit's container output. |
 | [`kci_params`](../src/kci_params/) | the generic managed-app parameter mechanism: one declaration that the deploy renderer turns into argv, the app parses at startup, and the control plane stores opaquely. |
 | [`kci_validator_report`](../src/kci_validator_report/) | the one report library every validator shares. It produces evidence, not authorization: the gate stays the exit code and the build graph. |

@@ -1,0 +1,107 @@
+// The artifact declarations: the one reviewed list of what kci builds and
+// publishes, and how each artifact is built.
+//
+// Three layers: Mojo libraries (built and consumed through `deps`), the
+// build system's packaging rules (which make a package for every library,
+// published or not), and kci, which builds the DECLARED artifacts, checks
+// their manifests and publishes them. This file is the list kci owns; the
+// build holds no list of names.
+//
+// Kinds are a closed oneof of typed arms, not an enum: each arm carries
+// exactly the fields that kind has, so a field one kind needs and another
+// cannot use is not representable on the wrong kind.
+//
+// Deliberately absent: a version (every artifact's version is the pinned
+// Mojo compiler version, made unique by the build from git: a conda build
+// number, a wheel `.postN`), a sha256 and a file name (the built manifest
+// carries them), a summary, credentials (a channel names its own by secret
+// name) and the channel's repository (the channel gives one per artifact
+// type).
+//
+// Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
+syntax = "proto3";
+
+package kci.release.v1;
+
+// A declarations file: every artifact kci may build or publish, each once.
+message ArtifactDeclarations {
+  repeated ArtifactDeclaration artifact = 1;
+}
+
+message ArtifactDeclaration {
+  // The published name. It must equal the built manifest's `name`, compared
+  // exactly (never case- or `-`/`_`-folded), and is unique in the file
+  // whatever the kind, since `depends_on` and `member_of` refer to it.
+  string name = 1;
+
+  // The release channels (names in the channels file) this artifact may be
+  // published to. Required and non-empty: an artifact with no channel named
+  // goes nowhere, so a new declaration fails closed. The channel of a run is
+  // chosen by the run; this only says which runs may carry the artifact.
+  repeated string allowed_channels = 2;
+
+  // What kind of artifact it is, and the fields that kind has.
+  oneof kind {
+    CondaPackage conda_package = 10;
+    CondaMetapackage conda_metapackage = 11;
+    PythonWheel python_wheel = 12;
+    OciImage oci_image = 13;
+  }
+}
+
+// How kci makes an artifact: one arm per build system.
+message BuildRule {
+  oneof system {
+    Buck2Target buck2 = 1;
+  }
+}
+
+// A Buck2 target.
+message Buck2Target {
+  // A target label, `//<package>:<name>` or `<cell>//<package>:<name>`, with
+  // no sub-target: kci appends `[release]` (a directory holding the artifact
+  // and its manifest) itself.
+  string label = 1;
+}
+
+// A conda package the build makes by itself.
+message CondaPackage {
+  // The package target; kci builds `[release]` of it once per subdir.
+  BuildRule build = 1;
+  // The conda platform subdirs it is built for (`linux-64`, `osx-arm64`).
+  // Non-empty; never `noarch` (a compiled package names its platform). The
+  // built manifest's `subdir` must be one of them.
+  repeated string subdirs = 2;
+  // Declared conda packages this one requires. Not a second statement of the
+  // build's requirements: kci compares it with the built package's own
+  // requirement list, and a difference either way is a refusal.
+  repeated string depends_on = 3;
+  // The conda metapackage this package is a member of, if any. A
+  // metapackage has no member list of its own, so membership is stated once.
+  string member_of = 4;
+}
+
+// A conda package kci makes from the manifests of its members (every
+// conda_package whose `member_of` names it). It has no requirements of its
+// own besides its members and holds no file.
+message CondaMetapackage {
+  // The packer kci RUNS to make it from the members' manifests.
+  BuildRule packer = 1;
+  // As CondaPackage.subdirs. Every member is built for each of them.
+  repeated string subdirs = 2;
+}
+
+// A Python wheel (the Python front end only).
+message PythonWheel {
+  // The wheel target; kci builds `[release]` of it.
+  BuildRule build = 1;
+  // Declared Python wheels this one requires; checked like
+  // CondaPackage.depends_on.
+  repeated string depends_on = 2;
+}
+
+// An OCI image.
+message OciImage {
+  // The image target; kci builds `[release]` of it.
+  BuildRule build = 1;
+}
