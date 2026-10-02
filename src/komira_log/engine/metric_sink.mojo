@@ -7,11 +7,11 @@
 # The sweep produces `MetricPoint`s, `metric_emit.mojo` turns one into a
 # `REC_METRIC`, the ring consumers decode it, and `SharedEngine` has a
 # `take_metric_points` return channel. Without a production `MetricPointSink`
-# conformer none of that is joined. `komira_obs` may not know about
+# conformer none of that is joined. `komira_metrics` may not know about
 # `REC_METRIC` (see `metric_sweep.mojo`'s "WHAT THIS FILE IS NOT"), so the
 # conformer lives here.
 #
-# The seam is one-way: `komira_log` depends on `komira_obs`, and
+# The seam is one-way: `komira_log` depends on `komira_metrics`, and
 # `metric_emit.mojo` beside this file already imports `MetricPoint`. So this
 # file adds NO dep edge — it is the one place the two are allowed to meet.
 #
@@ -106,9 +106,9 @@
 # `Int` or an `Int64`, so the struct is trivially Movable and Deinitable.
 # =============================================================================
 
-from komira_obs.histogram import HistogramPoint
-from komira_obs.metric_point import MetricPoint
-from komira_obs.metric_sweep import MetricPointSink
+from komira_metrics.histogram import HistogramPoint
+from komira_metrics.metric_point import MetricPoint
+from komira_metrics.metric_sweep import MetricPointSink
 
 from komira_log.engine.calibration import read_raw_ticks
 from komira_log.engine.log_manager import LogManager

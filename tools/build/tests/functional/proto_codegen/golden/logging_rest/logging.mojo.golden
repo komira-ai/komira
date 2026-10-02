@@ -3,17 +3,17 @@
 # proto package: google.logging.v2
 # Mojo package:  komira_gcp_logging
 #
-# Generated message structs conform to the komira_serde
+# Generated message structs conform to the komira_proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_serde import (
+from komira_proto_codec import (
     ProtoEnum,
     Serializable,
     WireEncoder,
     WireDecoder,
 )
 from komira_gcp_core import GcpTokenSource, gcp_status_error
-from komira_serde.proto3_json import JsonEncoder, JsonDecoder
+from komira_proto_codec.proto3_json import JsonEncoder, JsonDecoder
 from komira_http.client.client import (
     HttpClient,
     build_get_request,

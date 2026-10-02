@@ -4,7 +4,7 @@
 #
 # The fixed-stride POD record that rides the per-core SPSC ring: the
 # `[ts, site_id, n_args, tags, arg-blob]` shape as a fixed-stride struct so the ring is a `Slab[LogEventRecord]`
-# (exactly `SpanPacketRingBuffer`'s `Slab[SpanPacket]`), keeping the SPSC math
+# (exactly `SpanPacketRing`'s `Slab[SpanPacket]`), keeping the SPSC math
 # unchanged and the POD invariant intact.
 #
 # Layout:

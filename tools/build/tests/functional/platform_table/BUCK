@@ -1,0 +1,16 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load(":cases.bzl", "platform_table_cases")
+
+# Fails loading this package if the platform table (tools/build/platforms/table.bzl)
+# is incomplete, or if `table_refusals` or the host selection gets any case in
+# cases.bzl wrong (check.sh runs `buck2 targets tests//functional/platform_table:`).
+platform_table_cases()
+
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "check.sh",
+        "limits_retired.sh",
+    ],
+    visibility = ["komira//:tests_lints"],
+)

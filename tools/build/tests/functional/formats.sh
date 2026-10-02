@@ -250,8 +250,14 @@ else
 fi
 
 # ---- image -------------------------------------------------------------------
-# The pins, in declaration order: manifest, config, layers.
-sed -n '/^oci_base(/,/^)/p' tools/build/toolchains/BUCK | grep -oE 'sha256:[0-9a-f]{64}' > "$W/pins.txt"
+# The pins: the container base is a field of the linux-x86_64 row of the platform
+# table, which toolchains/BUCK reads. In order: manifest, config, layers.
+OCI=$(awk '/^    "linux-x86_64": \{/ { r = 1 } r && /^        "oci_base": \{/ { o = 1; next } o && /^        \},/ { exit } o { print }' tools/build/platforms/table.bzl)
+{
+    printf '%s\n' "$OCI" | sed -nE 's/^ +"manifest": "(sha256:[0-9a-f]{64})",$/\1/p'
+    printf '%s\n' "$OCI" | sed -nE 's/^ +"config": "(sha256:[0-9a-f]{64})",$/\1/p'
+    printf '%s\n' "$OCI" | sed -nE 's/^ +"(sha256:[0-9a-f]{64})",$/\1/p'
+} > "$W/pins.txt"
 P="$W/image.txt"
 if image_check "$B" "$IMG" "$AR" "$DG" "$W/pins.txt" hello > "$W/image.sum"; then
     pass "image: $(cat "$W/image.sum")"
@@ -292,7 +298,7 @@ if [ -n "$problems" ]; then fail "long-path:$problems"; else pass "long-path: a 
 
 # ---- pinned ------------------------------------------------------------------
 problems=""
-mf=$(sed -n '/^oci_base(/,/^)/p' tools/build/toolchains/BUCK | sed -nE 's/.*manifest_file = "([^"]+)".*/\1/p')
+mf=$(printf '%s\n' "$OCI" | sed -nE 's/^ +"manifest_file": "([^"]+)",$/\1/p')
 [ "sha256:$(sha256sum < "tools/build/toolchains/$mf" | cut -c1-64)" = "$(head -n 1 "$W/pins.txt")" ] ||
     problems="$problems base-manifest-does-not-hash-to-its-pin"
 [ "$(wc -l < "$W/pins.txt")" -ge 3 ] || problems="$problems fewer-than-3-pins"
@@ -303,7 +309,9 @@ for d in tools/build/mojo tools/build/package tools/build/toolchains tools/build
 done
 dl=$(grep -rlF 'download_file' --include='*.bzl' tools/build/mojo tools/build/package tools/build/toolchains tools/build/platforms 2> /dev/null | grep -vx 'tools/build/mojo/download.bzl' | tr '\n' ' ')
 [ -z "$dl" ] || problems="$problems download_file-outside-pinned_file:[$dl]"
-net=$(grep -rlwE 'wget|curl|nc|ssh|git' --include='*.bzl' --include='*.sh' tools/build/mojo tools/build/package 2> /dev/null | tr '\n' ' ')
+# release_version.sh is run by a release job, at a clone, to read git history; it is no build action
+# (the build receives its output as `-c` flags and reads no git), so it is the one name excluded.
+net=$(grep -rlwE 'wget|curl|nc|ssh|git' --include='*.bzl' --include='*.sh' tools/build/mojo tools/build/package 2> /dev/null | grep -vx 'tools/build/package/release_version.sh' | tr '\n' ' ')
 [ -z "$net" ] || problems="$problems network-tool-named-in:[$net]"
 grep -qE 'ctx\.attrs\._pack\[RunInfo\],' tools/build/package/defs.bzl || problems="$problems komira_pack-not-run-directly"
 file_out=$(head -c 20 "$(built //tools/build/package:komira_pack)" | od -An -c | tr -d ' \n')

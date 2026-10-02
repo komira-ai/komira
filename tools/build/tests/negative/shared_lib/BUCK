@@ -1,0 +1,67 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+
+# Every target below must FAIL to build, and its [ungated] library must build:
+# the red comes from the gate, not from the compile.
+
+# The gate expects `neg_missing`, which the library does not export.
+mojo_shared_lib(
+    name = "missing_export",
+    srcs = ["good.mojo"],
+    exports = ["neg_add", "neg_missing"],
+)
+
+# The library references a symbol nothing defines: dlopen refuses it.
+mojo_shared_lib(
+    name = "unresolved_symbol",
+    srcs = ["unresolved.mojo"],
+    exports = ["neg_add"],
+)
+
+# The linked-run driver's call returns the wrong answer.
+mojo_shared_lib(
+    name = "failing_driver",
+    srcs = ["good.mojo"],
+    exports = ["neg_add"],
+    gate_srcs = ["bad_call.mojo"],
+    out_name = "missing_call",
+)
+
+# Must FAIL at analysis: a gate that expects nothing checks nothing.
+mojo_shared_lib(
+    name = "empty_exports",
+    srcs = ["good.mojo"],
+    exports = [],
+)
+
+# The C library is linked normally, not force-loaded: nothing references
+# `komira_spike_forced`, so the archive's object is left out and the gate's
+# export check fails. (The positive twin, examples/shared_lib:spike, lists the
+# library in `force_load` and passes.)
+mojo_shared_lib(
+    name = "forced_not_loaded",
+    srcs = ["good.mojo"],
+    exports = ["neg_add", "komira_spike_forced"],
+    deps = ["komira//tools/build/examples/shared_lib:forced"],
+)
+
+# `exports_exact` is off by default: the static C dependency's symbol is in
+# the dynamic table, and a driver that expects it hidden goes red.
+# examples/shared_lib:spike_exact is the twin with the option on, which passes.
+mojo_shared_lib(
+    name = "leaks_by_default",
+    srcs = ["leaky.mojo"],
+    exports = ["neg_c_add"],
+    gate_srcs = ["expects_hidden.mojo"],
+    deps = ["komira//tools/build/examples/cshim:add"],
+)
+
+# The no-C twin of leaks_by_default: `exports_exact` is off, so the unlisted
+# @export `plain_hidden` is in the dynamic table and the driver that expects it
+# hidden goes red. (examples/shared_lib:plain_exact is the twin that passes.)
+mojo_shared_lib(
+    name = "plain_leaks",
+    srcs = ["plain_hidden_abi.mojo"],
+    exports = ["plain_add"],
+    gate_srcs = ["plain_leaks_driver.mojo"],
+    out_name = "plain_leaks",
+)

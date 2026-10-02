@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_logs/run_log_path.mojo — the run-scoped READ paths of the pipeline
-#   manager, in ONE place every validator and komira_ci compose from.
+#   manager, in ONE place every validator and kci compose from.
 # =============================================================================
 #
 # ⛔ WHY THIS FILE EXISTS: a failing validate step should return the relevant
