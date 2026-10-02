@@ -1,7 +1,7 @@
 # Mojo rules
 
 ```python
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_test", "mojo_multi_numa_test")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_binary", "mojo_test")
 ```
 
 The rules are in [`defs.bzl`](defs.bzl); their providers in
@@ -17,7 +17,6 @@ the compiler sees. Worked uses of each rule are in
 | `mojo_library(srcs, deps, test_srcs, import_name, test_optimization_level)` | `<name>.mojoc` via `mojo precompile`. Each file in `test_srcs` is built against the package and run; the package is published only if every one passes. `[ungated]` is the package file before its tests; it carries no `MojoInfo`, so it cannot be named in `deps`. | [`hellopkg`](../examples/BUCK), [`libgate_ok`](../examples/libgate_ok/BUCK) |
 | `mojo_binary(srcs, deps, main, optimization_level, expected_stdout)` | an executable via `mojo build`, and `RunInfo` for `buck2 run`. `[runnable]` is the binary together with its runtime libraries. `[run_check]` runs it remotely and, with `expected_stdout`, fails unless its stdout matches exactly. `[shared]` is the same program as `lib<name>.so`, for a bundle (see [Packaging](../package/README.md)). | [`hello`, `hello_pkg_user`](../examples/BUCK) |
 | `mojo_test(srcs, deps, main, optimization_level, labels)` | a test executable for `buck2 test`; `buck2 run` and `[runnable]` as for `mojo_binary`. | [`test_hellopkg`](../examples/BUCK) |
-| `mojo_multi_numa_test(binary, expected_stdout, numa_nodes, labels)` | runs `binary` (a `mojo_binary` or `mojo_test`, compiled by its own target) on a worker spanning more than one NUMA node. Building it runs the binary like `[run_check]`; `buck2 test` runs it like a `mojo_test`. Fails to configure when no execution platform provides `numa_multi`. | [`tests//functional/numa:hello_multi_numa`](../tests/functional/numa/BUCK) |
 
 ## Libraries and the `test_srcs` gate
 
@@ -51,20 +50,9 @@ mojo_library(
   ([`tests/negative/libgate_bad`](../tests/negative/libgate_bad/BUCK): the library and its
   consumer go red, `[ungated]` builds, and a binary naming `[ungated]` in
   `deps` fails analysis).
-- **Holding a known-failing test: `tests_known_failing`.** A red test that
-  must not block the library's closure is held by a row
-  `{"<test_srcs path>": {"issue": "<n>, #<n> or its GitHub issue URL", "reason": "..."}}`.
-  The hold inverts rather than mutes: the held test still builds and runs in
-  the gate, and its marker (`HELD <label>`) is produced only if it FAILS. A
-  held test that passes is red, `LEDGER STALE`, naming the row to delete; an
-  unheld failing test is still `GATED TEST FAILED`. A held test killed by
-  SIGKILL (exit 137, what a memory limit delivers) has NO VERDICT: its action
-  fails without a marker, so an executor can retry it with more memory
-  instead of caching a too-small machine's kill as the held failure. Refused
-  at analysis: a key that is not a `test_srcs` entry, any field besides
-  `issue` and `reason`, a missing or malformed issue (a GitHub issue number or
-  URL, nothing else), an empty reason, two rows with byte-identical reasons, and holding every test
-  ([`tests/functional/known_failing`](../tests/functional/known_failing/BUCK)).
+- **Every welded test must pass.** There is no way to hold a red test: a
+  `mojo_library` naming `tests_known_failing` is refused when its BUCK file
+  loads.
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
@@ -145,8 +133,7 @@ directory, pointing the loader at the toolchain's `lib/`.) The list of
 libraries is checked against what the loader actually maps during a run
 ([test 8](../tests/README.md#8-host-floor-and-runtime-libraries)).
 
-**Two runtime surfaces.** `buck2 run`, `[run_check]` and
-`mojo_multi_numa_test` start a binary from its runnable directory, whose
+**Two runtime surfaces.** `buck2 run` and `[run_check]` start a binary from its runnable directory, whose
 `lib/` holds only the libraries a run loads (`komira//tools/build/toolchains:mojo_runtime`).
 Gated library tests and `buck2 test` of a `mojo_test` still run the binary
 with `LD_LIBRARY_PATH` set to the compiler's `lib/`, a superset. A test that
@@ -168,7 +155,6 @@ or shared library runs in production.
 | each `test_srcs` file of a `mojo_library` (the gate) | `-O1` | `test_optimization_level` |
 | `mojo_binary`, and its `[shared]` library | `-O3` | `optimization_level` |
 | the shared libraries a bundle packs (a binary's `[shared]`) | `-O3` | the binary's `optimization_level` |
-| `mojo_multi_numa_test` | none of its own: it compiles nothing and runs `binary` as that target built it (`mojo_test` `-O1`, `mojo_binary` `-O3`) | the `binary` target's `optimization_level` |
 
 The level belongs to the target that compiles: nothing a consumer declares
 changes it. A test linking a shared library or a C/C++ library links it as
@@ -176,12 +162,9 @@ that library's own target built it (a `.so` at `-O3`, a C library at its own
 `compiler_flags`); a `.mojoc` holds no machine code, so a package has no
 level of its own and is compiled into each binary at that binary's level. A
 `[run_check]` runs the binary its target built. A test program declared as a
-`mojo_binary` (for `expected_stdout`, or as the `binary` of a
-`mojo_multi_numa_test`) states `optimization_level = "1"` itself, as
-[`examples/aws_lc`](../examples/aws_lc/BUCK),
-[`examples/s2n_tls`](../examples/s2n_tls/BUCK) and
-[`tests/functional/numa`](../tests/functional/numa/BUCK) do; a `mojo_multi_numa_test` over a
-shipped `mojo_binary` runs it at `-O3`, the bytes that ship. Levels are `0` to `3`;
+`mojo_binary` (for `expected_stdout`) states `optimization_level = "1"`
+itself, as [`examples/aws_lc`](../examples/aws_lc/BUCK) and
+[`examples/s2n_tls`](../examples/s2n_tls/BUCK) do. Levels are `0` to `3`;
 anything else is refused at analysis. Test 30
 ([`tests/functional/opt_level.sh`](../tests/functional/opt_level.sh)) reads the levels from the
 compile commands.
@@ -231,7 +214,7 @@ mojo_test(
   `DYLD_FALLBACK_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `TMPDIR`,
   `TEST_TMPDIR`, `HOME` and `PWD`; setting one is refused at analysis.
   The variables are given to the test process only, never to the runner's
-  own shell, so a name the runner uses internally (`HELD`, `BIN`, `rc`)
+  own shell, so a name the runner uses internally (`BIN`, `rc`, `MARKER`)
   reaches the test and cannot change the verdict
   ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
@@ -257,51 +240,6 @@ mojo_test(
   directory at `<tool>/bin` and its resources at `<tool>/share/<name>`.
   `mojo_bundle` ships `data` files mode 0644, so a shipped script is run
   through its interpreter (`bash <path>`), not executed directly.
-
-## Multi-NUMA tests
-
-```python
-mojo_binary(name = "hello", srcs = ["hello.mojo"])
-
-mojo_multi_numa_test(
-    name = "hello_multi_numa",
-    binary = ":hello",
-    expected_stdout = "...",
-)
-```
-
-Buck2 picks one execution platform per target, not per action: a target's
-compiles, gated tests and run checks all run on the same kind of worker. A run
-that needs a multi-NUMA worker is therefore its own target.
-`mojo_multi_numa_test(binary = ":b")` runs the binary `:b` built on
-`exec-mojo`, so only the run occupies a multi-NUMA worker, and the compiler is
-not one of its inputs. Its toolchain (`toolchains//:mojo_multi_numa`) is
-private and states `numa_multi`, so the requirement cannot be dropped from a
-BUCK file.
-
-`buck2 test` runs the binary through the gate runner as a `mojo_test` is run:
-from its staged tree (`bin/<name>`, plus the `data` of a `mojo_test`, which is
-also its current directory), with its `env` and a private `TEST_TMPDIR` and
-`HOME` (see "Test data, environment and scratch"). The runtime libraries come
-from the binary's runnable directory.
-
-Every run (the build's run check and the `buck2 test` command) starts through
-[`numa_guard.sh`](numa_guard.sh), which exits 3 with
-`numa_guard: REFUSING to run` unless the action can use at least `numa_nodes`
-(default 2, minimum 2) NUMA nodes. What that means, and how the workers are
-configured, is in
-[platforms/README.md](../platforms/README.md#multi-numa-runs); the fixtures
-are in [`tests/functional/numa`](../tests/functional/numa/BUCK)
-([tests 10 and 11](../tests/README.md#10-execution-platforms)).
-`tests//functional/numa:gate_run` runs the `buck2 test` command minus the guard, so the
-gate runner is reached with this rule's own arguments on any worker.
-
-A gated library test (`test_srcs`) runs inside the library's target and so
-always on `exec-mojo`. A library test that needs several NUMA nodes is
-declared as a `mojo_test` plus a `mojo_multi_numa_test` over it; it is not
-welded into the library's package, since that would need a platform per
-action. A gate that publishes a package only after such a run would take the
-run's output as an input of a separate publishing target.
 
 ## Protobuf: mojo_proto_library
 
@@ -366,7 +304,7 @@ load("@komira//tools/build/cloud:gcp.bzl", "gcp_client")
 
 `gcp_client(name, protos, deps, bundle_proto_deps, bundle_only, roots,
 methods, messages_only, proto_deps, import_prefix, test_srcs, **kwargs)`
-(`kwargs`: `test_data`, `test_env`, `tests_known_failing`, passed to the
+(`kwargs`: `test_data`, `test_env`, passed to the
 `mojo_library`) generates a Google Cloud client at build
 time; no generated code is checked in. It is the generation half of the rules
 above (`<name>_gen`: protoc-gen-mojo writes the package and its layout probe,
@@ -390,6 +328,40 @@ target whole, sub-targets included, as that sub-target; nothing checks that
 [`tests//functional/gcp_client`](../tests/functional/gcp_client/BUCK) and
 [`tests//negative/gcp_client`](../tests/negative/gcp_client/BUCK) exercise it.
 
+### Generated AWS clients: aws_client
+
+```python
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+```
+
+`aws_client(name, model, model_sha256, operations, deps, mode, service,
+overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
+`test_env`, passed to the `mojo_library`) generates an AWS client from one
+botocore service model at build time; no generated code is checked in.
+`<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
+writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
+(imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
+ordinary `mojo_library` over them, welded like gcp_client's: the probe is
+its first `test_srcs` entry, followed by the caller's. `model` and
+`model_sha256` are normally `botocore_model("<service>").model` and
+`.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);
+the service id is read from the model's botocore path unless `service`
+names it. `operations` is required and non-empty: only the closure of the
+operations named is emitted, and one the model lacks is refused by the
+generator. `mode = "pure"` (the default) emits shapes and
+`build_<op>_request` / `parse_<op>_response` with no transport; `"client"`
+adds the signed-send surface. `overrides` (the generator's hand-override
+manifest) and `hand_srcs` (the hand-written modules owning the operations
+it names, copied into the package) each require the other. `deps` is
+required and non-empty, and nothing is added to it. Every refusal of the
+rule is at analysis. The module docstring of
+[`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
+[`tests//functional/aws_client`](../tests/functional/aws_client/BUCK),
+[`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
+(client mode, at generation only) and
+[`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) exercise it.
+
 ## C and C++
 
 C and C++ code is built with the prelude's own `cxx_library` rule, using
@@ -397,7 +369,7 @@ C and C++ code is built with the prelude's own `cxx_library` rule, using
 [`../toolchains/defs.bzl`](../toolchains/defs.bzl)): zig's clang (from the
 pinned zig) for `x86_64-linux-gnu.2.34`, `x86-64-v3`, every object
 position-independent and compiled with `-g0`. Compiles and archives run on
-`exec-light`. The toolchain names no host tool: `zig_cc_launcher`
+the linux execution platform. The toolchain names no host tool: `zig_cc_launcher`
 ([`tools/zig_cc_launcher.zig`](tools/zig_cc_launcher.zig), built by a remote
 action like `conda_unpack`) runs zig after expanding the nested argument files
 the prelude writes, which zig itself refuses. The prelude's Python helper
@@ -458,8 +430,8 @@ assembly lists are generated but not built yet.
 
 | message | from | meaning |
 |---|---|---|
-| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed, and it is not held by `tests_known_failing` |
-| `LEDGER STALE: <label> PASSED, but it is held as known-failing.` | [`gate_runner.sh`](gate_runner.sh) | a test held by `tests_known_failing` passed; delete its row |
+| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |
@@ -468,7 +440,6 @@ assembly lists are generated but not built yet.
 | `mojo_wrapper: <output> contains this action's working directory` (exit 4) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | a compile output embeds a machine-specific path |
 | `mojo_wrapper: compiler exited 0 but <output> is missing or empty` (exit 3) | [`mojo_wrapper.sh`](mojo_wrapper.sh) | the compiler reported success without writing its output |
 | `run_check: stdout of <binary> differs from <expected>` | [`run_check.sh`](run_check.sh) | `[run_check]` output did not match `expected_stdout` |
-| `numa_guard: REFUSING to run: ...` (exit 3) | [`numa_guard.sh`](numa_guard.sh) | a multi-NUMA run landed on a worker it can use fewer than `numa_nodes` NUMA nodes of |
 | `<target>: dep <dep> provides neither MojoInfo (a Mojo package) nor MergedLinkInfo (a C/C++ library)` | [`defs.bzl`](defs.bzl) | a `deps` entry is neither a `mojo_library` nor a C/C++ library |
 | `cxx toolchain: <tool> is not provided` | [`cxx.bzl`](cxx.bzl) | a `cxx_library` reached a prelude feature that needs a host tool the toolchain does not provide |
 | `unable to locate module '<pkg>'` | the compiler | the importing target does not list that package in `deps` |
@@ -478,5 +449,4 @@ assembly lists are generated but not built yet.
 Test helper modules or test-only deps (each gated
 test is built from its one file against the library); extra compile flags, defines, or include roots; shared C libraries (C
 deps link statically); choosing the package root (the shallowest `__init__.mojo`
-in `srcs` is the root); a gated library test that needs more than one NUMA
-node (see [Multi-NUMA tests](#multi-numa-tests)).
+in `srcs` is the root).

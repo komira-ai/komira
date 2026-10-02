@@ -29,6 +29,11 @@
 #   * AWS role credentials: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,
 #     `AWS_SESSION_TOKEN`;
 #   * ECS / Fargate task credentials: `AWS_CONTAINER_CREDENTIALS_RELATIVE_URI`;
+#   * the STANDARD AWS SDK settings the AWS default credential and region
+#     chains read (AWS_PROFILE, AWS_REGION, AWS_CONFIG_FILE, the web identity,
+#     container and instance metadata variables, HOME for ~/.aws), read only
+#     by komira_aws_core's `ProcessEnv` (komira_aws_core/sources.mojo), each
+#     citing the AWS SDKs and Tools Reference Guide page that defines it;
 #
 # and for the test runner's own variables (`TEST_TMPDIR`, `HOME`), which a
 # test reads through one small test-harness helper, never ad hoc. Any other
