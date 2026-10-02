@@ -29,6 +29,15 @@
 # `resolve_snapshot` returns it verbatim, so the per-execution token IS the
 # pinned generation.
 #
+# `field` IS OPTIONAL. A binding built without it gets the field from the
+# catalog at bind time (`build_binding`), and only when the index has EXACTLY
+# ONE analyzed text field. Otherwise the build is refused by name
+# (`SEARCH_FIELD_AMBIGUOUS`, listing the candidate fields); the kind never
+# guesses. The derived field is WRITTEN INTO the binding, so a scan of `logs`
+# with no field and the same scan with `field=body` over a one-field index are
+# the SAME plan: same params, same fingerprint. The identity corpus's
+# `field_derived` entry pins that.
+#
 # A SCAN WITH NO QUERY IS SUPPORTED. `query == ""` scans every live
 # document of the index at the resolved generation through the existing
 # no-term arm of `SearchCore` (`QueryIR.match_all`), each row scored 0.0. It
@@ -104,6 +113,9 @@ table allocates it."""
 
 comptime SEARCH_PARAM_INDEX: String = "index"
 comptime SEARCH_PARAM_FIELD: String = "field"
+"""OPTIONAL at build: absent = derived from the catalog when the index has
+exactly one analyzed text field (`SEARCH_FIELD_AMBIGUOUS` otherwise). Every
+binding the kind BUILDS carries it."""
 comptime SEARCH_PARAM_QUERY: String = "query"
 """The raw query text, analyzed at execution with the index's analyzer. ""
 is the no-query scan: every live document."""
@@ -118,6 +130,11 @@ comptime SEARCH_RESOLVED_GENERATION: String = "generation"
 
 comptime SEARCH_INDEX_UNKNOWN: StaticString = "SEARCH_INDEX_UNKNOWN"
 """NAMED ERROR -- the catalog holds no index of that name (or no such field)."""
+
+comptime SEARCH_FIELD_AMBIGUOUS: StaticString = "SEARCH_FIELD_AMBIGUOUS"
+"""NAMED ERROR -- no `field` was stated and the index does not have exactly
+one analyzed text field, so there is nothing to derive without guessing. The
+message lists the candidate fields."""
 
 comptime SEARCH_ANALYZER_MISMATCH: StaticString = "SEARCH_ANALYZER_MISMATCH"
 """NAMED ERROR -- the plan's `analyzer_fp` is not the analyzer the index's
@@ -146,8 +163,8 @@ def _search_gate() -> PushdownGate:
 
 def search_scan_descriptor() -> ScanKindDescriptor:
     var req = List[String]()
+    # `field` is NOT required: `build_binding` derives it (header).
     req.append(String(SEARCH_PARAM_INDEX))
-    req.append(String(SEARCH_PARAM_FIELD))
     return ScanKindDescriptor(
         kind_name=String(SEARCH_SCAN_KIND_NAME),
         gate=_search_gate(),
@@ -248,6 +265,21 @@ def search_scan_identity_corpus() raises -> ScanIdentityCorpus:
             String("logs"), String("body"), String("timeout"), afp
         ),
     )
+    # `field` OMITTED, derived by the kind from a one-field catalog. It must
+    # fingerprint EXACTLY as `baseline` (the same scan, spelled without the
+    # field); `test_a_derived_field_is_the_explicit_fields_identity` asserts
+    # that equality by label.
+    var one_field = InMemorySearchIndexCatalog()
+    one_field.create_index(String("logs"), String("body"), cfg.copy())
+    var derived_params = ScanParams()
+    derived_params.put_str(String(SEARCH_PARAM_INDEX), String("logs"))
+    derived_params.put_str(String(SEARCH_PARAM_QUERY), String("error"))
+    c.add(
+        String("field_derived"),
+        SearchScanRuntime[InMemorySearchIndexCatalog](
+            one_field^
+        ).build_binding(derived_params),
+    )
     c.add(
         String("no_query"),
         search_scan_binding(String("logs"), String("body"), String(""), afp),
@@ -301,6 +333,13 @@ trait SearchIndexCatalog(Movable, Deinitable):
     def analyzer(self, index: String, field: String) raises -> AnalyzerConfig:
         ...
 
+    def fields(self, index: String) raises -> List[String]:
+        """Every analyzed text field of `index`, in declaration order. Raises
+        `SEARCH_INDEX_UNKNOWN` for an index the catalog does not hold. The
+        kind derives an omitted `field` from this list ONLY when it has
+        exactly one entry."""
+        ...
+
     def splits_at(
         self, index: String, generation: Int64
     ) raises -> List[List[UInt8]]:
@@ -310,18 +349,20 @@ trait SearchIndexCatalog(Movable, Deinitable):
 @fieldwise_init
 struct _CatalogIndex(Copyable, Movable, Deinitable):
     """One index of the in-memory catalog. Split `i` was published at
-    generation `i + 1`, so generation `g` sees splits `[0, g)`. A List
-    element, never a byte-slab element."""
+    generation `i + 1`, so generation `g` sees splits `[0, g)`. `fields[i]`
+    analyzes with `analyzers[i]` (parallel Lists: an index has a handful of
+    fields). A List element, never a byte-slab element."""
 
     var name: String
-    var field: String
-    var analyzer: AnalyzerConfig
+    var fields: List[String]
+    var analyzers: List[AnalyzerConfig]
     var splits: List[List[UInt8]]
 
 
 struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
-    """The in-process catalog: indexes created with one analyzed text field,
-    splits appended by `publish`. It keeps every published split, so every
+    """The in-process catalog: an index is created with one analyzed text
+    field and may gain more (`add_field`); splits are appended by `publish`.
+    It keeps every published split, so every
     generation it ever reported can be read back exactly (no compaction)."""
 
     var _indexes: List[_CatalogIndex]
@@ -355,9 +396,32 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
                 + name
                 + String("' already exists")
             )
+        var fields = List[String]()
+        fields.append(field^)
+        var analyzers = List[AnalyzerConfig]()
+        analyzers.append(analyzer^)
         self._indexes.append(
-            _CatalogIndex(name^, field^, analyzer^, List[List[UInt8]]())
+            _CatalogIndex(name^, fields^, analyzers^, List[List[UInt8]]())
         )
+
+    def add_field(
+        mut self, index: String, var field: String, var analyzer: AnalyzerConfig
+    ) raises:
+        """Declare one more analyzed text field on `index`. An index with two
+        or more fields cannot have its field derived: a scan over it must
+        state `field` (`SEARCH_FIELD_AMBIGUOUS` otherwise)."""
+        var at = self._find_or_raise(index)
+        for i in range(len(self._indexes[at].fields)):
+            if self._indexes[at].fields[i] == field:
+                raise Error(
+                    String("InMemorySearchIndexCatalog: index '")
+                    + index
+                    + String("' already has field '")
+                    + field
+                    + String("'")
+                )
+        self._indexes[at].fields.append(field^)
+        self._indexes[at].analyzers.append(analyzer^)
 
     def publish(mut self, index: String, var split_bytes: List[UInt8]) raises -> Int64:
         """Append one split; returns the NEW generation."""
@@ -371,18 +435,24 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
 
     def analyzer(self, index: String, field: String) raises -> AnalyzerConfig:
         var at = self._find_or_raise(index)
-        if self._indexes[at].field != field:
-            raise Error(
-                String(SEARCH_INDEX_UNKNOWN)
-                + String(": index '")
-                + index
-                + String("' has no analyzed field '")
-                + field
-                + String("' (its field is '")
-                + self._indexes[at].field
-                + String("')")
-            )
-        return self._indexes[at].analyzer.copy()
+        ref ix = self._indexes[at]
+        for i in range(len(ix.fields)):
+            if ix.fields[i] == field:
+                return ix.analyzers[i].copy()
+        raise Error(
+            String(SEARCH_INDEX_UNKNOWN)
+            + String(": index '")
+            + index
+            + String("' has no analyzed field '")
+            + field
+            + String("' (its fields: ")
+            + _render_fields(ix.fields)
+            + String(")")
+        )
+
+    def fields(self, index: String) raises -> List[String]:
+        var at = self._find_or_raise(index)
+        return self._indexes[at].fields.copy()
 
     def splits_at(
         self, index: String, generation: Int64
@@ -480,11 +550,18 @@ struct SearchScanRuntime[C: SearchIndexCatalog](
         return search_scan_descriptor()
 
     def build_binding(self, params: ScanParams) raises -> ScanBinding:
-        """Params: `index`, `field` (required), `query` (default "" = the
-        no-query scan), `analyzer_fp` (default: the catalog's; if stated it
-        must match), `generation` (optional pin)."""
+        """Params: `index` (required), `field` (default: DERIVED -- the
+        index's one analyzed text field, `SEARCH_FIELD_AMBIGUOUS` when it has
+        none or several), `query` (default "" = the no-query scan),
+        `analyzer_fp` (default: the catalog's; if stated it must match),
+        `generation` (optional pin). The binding always carries the field, so
+        a derived field and the same field stated are one identity."""
         var index = params.get_str(String(SEARCH_PARAM_INDEX))
-        var field = params.get_str(String(SEARCH_PARAM_FIELD))
+        var field: String
+        if params.has(String(SEARCH_PARAM_FIELD)):
+            field = params.get_str(String(SEARCH_PARAM_FIELD))
+        else:
+            field = derive_search_field(index, self._catalog.fields(index))
         var live_fp = analyzer_config_fingerprint(
             self._catalog.analyzer(index, field)
         )
@@ -558,6 +635,33 @@ struct SearchScanRuntime[C: SearchIndexCatalog](
         var resolved = ScanParams()
         resolved.put_i64(String(SEARCH_RESOLVED_GENERATION), generation)
         return ScanOpened(ArcPointer(out^), resolved^)
+
+
+def _render_fields(fields: List[String]) -> String:
+    var out = String("[")
+    for i in range(len(fields)):
+        if i > 0:
+            out += String(", ")
+        out += String("'") + fields[i] + String("'")
+    return out + String("]")
+
+
+def derive_search_field(index: String, fields: List[String]) raises -> String:
+    """The field a scan that states none reads: the ONLY analyzed text field
+    of `index`. Zero or several candidates is `SEARCH_FIELD_AMBIGUOUS`,
+    naming them -- never a guess."""
+    if len(fields) == 1:
+        return fields[0]
+    raise Error(
+        String(SEARCH_FIELD_AMBIGUOUS)
+        + String(": index '")
+        + index
+        + String("' has ")
+        + String(len(fields))
+        + String(" analyzed text fields ")
+        + _render_fields(fields)
+        + String("; state `field` to choose one")
+    )
 
 
 def _check_analyzer(

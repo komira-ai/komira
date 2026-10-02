@@ -19,7 +19,11 @@
 #   * the identity corpus passes core's audit;
 #   * refusals are by name (unknown index, analyzer drift at bind AND at
 #     execution, foreign kind,
-#     unservable pin, missing required param).
+#     unservable pin, missing required param);
+#   * `field` is optional: derived when the index has
+#     exactly one analyzed text field, refused by name (SEARCH_FIELD_AMBIGUOUS,
+#     listing the candidates) when it has several, honoured when stated; a
+#     derived field is the same identity as the same field stated.
 # =============================================================================
 
 from std.testing import (
@@ -62,6 +66,7 @@ from komira_search_runtime.search_source import analyzer_config_fingerprint
 from komira_search_runtime.search_scan_kind import (
     InMemorySearchIndexCatalog,
     SEARCH_ANALYZER_MISMATCH,
+    SEARCH_FIELD_AMBIGUOUS,
     SEARCH_GENERATION_NOT_AVAILABLE,
     SEARCH_INDEX_UNKNOWN,
     SEARCH_RESOLVED_GENERATION,
@@ -553,8 +558,9 @@ def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
     var cat = _catalog()
     _ = cat.publish(String("logs"), _split_a())
     var r = search_scan_runtime(cat^)
+    # `index` is the one required param (`field` is derived).
     var p = ScanParams()
-    p.put_str(String("index"), String("logs"))
+    p.put_str(String("field"), String("body"))
     var raised = False
     try:
         _ = r.build_binding(p)
@@ -562,8 +568,8 @@ def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
         raised = True
         var msg = String(err)
         assert_true(String(SCAN_BINDING_MISSING_PARAMS) in msg, msg)
-        assert_true("field" in msg, msg)
-    assert_true(raised, "field is required")
+        assert_true("index" in msg, msg)
+    assert_true(raised, "index is required")
 
     var foreign = ScanBinding(
         kind_id=UInt32(7),
@@ -581,6 +587,132 @@ def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
     except err:
         raised2 = True
     assert_true(raised2, "a foreign kind is refused")
+
+
+# =============================================================================
+# `field` is optional: derive one, refuse many, honour
+# a stated one. Executor-free: the kind's own build_binding + open_scan.
+# =============================================================================
+
+
+def _index_only_params(query: String) -> ScanParams:
+    var p = ScanParams()
+    p.put_str(String("index"), String("logs"))
+    if query != String(""):
+        p.put_str(String("query"), query)
+    return p^
+
+
+def _two_field_catalog() raises -> InMemorySearchIndexCatalog:
+    var c = _catalog()
+    c.add_field(String("logs"), String("title"), AnalyzerConfig.text("title"))
+    return c^
+
+
+def test_an_omitted_field_is_derived_when_the_index_has_one() raises:
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    _ = rt.catalog_mut().publish(String("logs"), _split_b())
+    var derived = rt.build_binding(_index_only_params(String("alpha")))
+    assert_equal(
+        derived.params.get_str(String("field")),
+        String("body"),
+        "the binding RECORDS the derived field",
+    )
+    var stated = rt.build_binding(_params(Optional(String("alpha"))))
+    assert_equal(
+        derived.fingerprint,
+        stated.fingerprint,
+        "a derived field is the same identity as the field stated",
+    )
+    assert_true(
+        derived.identity_hash() == stated.identity_hash(),
+        "and the same plan-side identity_hash",
+    )
+    var want = _concat(
+        _direct_rows(_split_a(), String("alpha")),
+        _direct_rows(_split_b(), String("alpha")),
+    )
+    _assert_rows(_rows_of(_open(rt, derived)), want, String("derived field"))
+    # The no-query read with no field: every live doc (a whole-index read
+    # that states neither a query nor a field).
+    var all_docs = rt.build_binding(_index_only_params(String("")))
+    assert_equal(len(_source_col(_open(rt, all_docs))), 5, "every live doc")
+
+
+def test_an_omitted_field_is_refused_by_name_when_the_index_has_several() raises:
+    var rt = _Runtime(_two_field_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    var raised = False
+    try:
+        _ = rt.build_binding(_index_only_params(String("alpha")))
+    except err:
+        raised = True
+        var msg = String(err)
+        assert_true(String(SEARCH_FIELD_AMBIGUOUS) in msg, msg)
+        assert_true("'body'" in msg, "lists candidate 'body': " + msg)
+        assert_true("'title'" in msg, "lists candidate 'title': " + msg)
+        assert_true("logs" in msg, "names the index: " + msg)
+    assert_true(raised, "two analyzed fields: the kind refuses to guess")
+    # Through the ERASED form too (the registry path a context takes).
+    var cat = _two_field_catalog()
+    var r = search_scan_runtime(cat^)
+    var raised2 = False
+    try:
+        _ = r.build_binding(_index_only_params(String("")))
+    except err:
+        raised2 = True
+        assert_true(String(SEARCH_FIELD_AMBIGUOUS) in String(err), String(err))
+    assert_true(raised2, "the erased kind refuses too")
+
+
+def test_an_explicit_field_is_honoured_on_a_many_field_index() raises:
+    var rt = _Runtime(_two_field_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    var b = rt.build_binding(_params(Optional(String("alpha"))))
+    assert_equal(b.params.get_str(String("field")), String("body"))
+    _assert_rows(
+        _rows_of(_open(rt, b)),
+        _direct_rows(_split_a(), String("alpha")),
+        String("explicit field on a two-field index"),
+    )
+    var p = ScanParams()
+    p.put_str(String("index"), String("logs"))
+    p.put_str(String("field"), String("nope"))
+    var raised = False
+    try:
+        _ = rt.build_binding(p)
+    except err:
+        raised = True
+        var msg = String(err)
+        assert_true(String(SEARCH_INDEX_UNKNOWN) in msg, msg)
+        assert_true("'title'" in msg, "lists the fields it has: " + msg)
+    assert_true(raised, "an explicit field the index lacks is refused")
+
+
+def test_a_derived_field_is_the_explicit_fields_identity() raises:
+    """The identity corpus pins it: `field_derived` (field omitted, derived
+    from a one-field catalog) fingerprints EXACTLY as `baseline`, and
+    `field` (another field stated) does not."""
+    var c = search_scan_identity_corpus()
+    var base = -1
+    var derived = -1
+    var other = -1
+    for i in range(c.num_entries()):
+        if c.labels[i] == String("baseline"):
+            base = i
+        elif c.labels[i] == String("field_derived"):
+            derived = i
+        elif c.labels[i] == String("field"):
+            other = i
+    assert_true(base >= 0 and derived >= 0 and other >= 0, "labels present")
+    assert_equal(c.bindings[derived].fingerprint, c.bindings[base].fingerprint)
+    assert_equal(
+        c.bindings[derived].params.get_str(String("field")), String("body")
+    )
+    assert_not_equal(c.bindings[other].fingerprint, c.bindings[base].fingerprint)
+
+
 
 
 def main() raises:
