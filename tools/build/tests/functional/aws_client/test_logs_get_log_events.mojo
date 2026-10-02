@@ -14,7 +14,7 @@
 # message). Reading the error code and message (`__type`, `message`) is
 # komira_aws_core's (aws_error_code_from_body, aws_error_message_from_body),
 # which pure-mode code imports and never calls; it is stubbed here and is
-# tested on the real core in P06.
+# tested against the real core once it carries that surface.
 from komira_aws_logs.komira_aws_logs import (
     CloudWatchLogsGetLogEventsRequest,
     CloudWatchLogsResourceNotFoundException,

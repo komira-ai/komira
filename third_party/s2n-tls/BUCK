@@ -79,6 +79,6 @@ cxx_library(
     },
     header_namespace = "",
     exported_deps = ["//third_party/aws-lc:crypto"],
-    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:s2n-tls-x86-64-linux
     visibility = ["PUBLIC"],
 )
