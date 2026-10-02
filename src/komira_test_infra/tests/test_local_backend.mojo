@@ -236,8 +236,10 @@ def test_unconfirmed_stop_is_cannot_tell() raises:
 def _open_refused(
     id: String, tmp_root: String, binary: String
 ) raises -> String:
-    """Open with a valid pin and a runner that would answer; return the error."""
-    var runner = ScriptedProcessRunner([Readiness.ready()])
+    """Open with a valid pin; return the error. The runner's script is empty,
+    so a server started anyway would time out with its own, different error:
+    the refusal has to come before the start."""
+    var runner = ScriptedProcessRunner(List[Readiness]())
     var entropy = _entropy()
     var clock = FixedWallClock(1790000000)
     try:
@@ -248,6 +250,9 @@ def _open_refused(
     except e:
         return String(e)
     return String("")
+
+
+comptime _REFUSED: String = "komira_test_infra: local MinIO: refused"
 
 
 def test_bad_run_id_or_root_refused_before_the_disk() raises:
@@ -262,22 +267,22 @@ def test_bad_run_id_or_root_refused_before_the_disk() raises:
     var inner = root + "/inner"
 
     var msg = _open_refused("x/../../escaped", inner, binary)
-    assert_true("refused an empty or invalid run id" in msg, msg)
+    assert_true(msg.startswith(String(_REFUSED) + " an empty or invalid run id"), msg)
     assert_false(exists(root + "/escaped"), "a directory was made outside the temporary root")
     assert_equal(len(listdir(root)), 1)
     assert_equal(len(listdir(inner)), 1)
     assert_equal(len(listdir(inner + "/kti-x")), 0)
 
     msg = _open_refused("", inner, binary)
-    assert_true("refused an empty or invalid run id" in msg, msg)
+    assert_true(msg.startswith(String(_REFUSED) + " an empty or invalid run id"), msg)
     assert_false(exists(inner + "/kti-"), "an empty run id made a directory")
 
     msg = _open_refused("1790000000-00000000000000c5", "relative/root", binary)
-    assert_true("must be an absolute path" in msg, msg)
+    assert_true(msg.startswith("komira_test_infra: local MinIO: the temporary root must be"), msg)
     assert_false(exists("relative"), "a relative temporary root was used")
 
     msg = _open_refused("1790000000-00000000000000c6", "", binary)
-    assert_true("refused an empty temporary root" in msg, msg)
+    assert_true(msg.startswith(String(_REFUSED) + " an empty temporary root"), msg)
     assert_equal(len(listdir(inner)), 1)
 
 
