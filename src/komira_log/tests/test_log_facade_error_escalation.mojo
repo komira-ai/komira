@@ -64,7 +64,7 @@ def _scratch_dir() -> String:
 
 
 comptime _RING_CAPACITY = 4096
-"""`DEFAULT_RING_CAPACITY` (komira_obs/ring_buffer.mojo). Restated rather
+"""`DEFAULT_RING_CAPACITY` (`komira_spsc_ring`). Restated rather
 than imported so that a change to the engine's default makes THIS test fail
 loudly (the fill loop stops filling) instead of silently ceasing to exercise
 the escalation arm."""

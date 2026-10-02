@@ -71,7 +71,7 @@ from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_http.client.tls_connector import build_public_ca_tls_connector
 from komira_http.tls import tls_init
 
-from komira_obs.clock import now_ns
+from komira_clock import now_ns
 
 
 comptime _RT = BlockingRuntime[NoopSink]

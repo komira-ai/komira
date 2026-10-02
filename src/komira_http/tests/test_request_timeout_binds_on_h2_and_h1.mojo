@@ -51,7 +51,7 @@ from std.sys.info import CompilationTarget
 from std.ffi import external_call
 from std.testing import assert_true
 
-from komira_obs.clock import now_ns
+from komira_clock import now_ns
 
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import (

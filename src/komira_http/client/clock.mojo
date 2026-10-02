@@ -15,7 +15,7 @@
 #
 # This file ships:
 #   * `Clock` trait — single method `now_us(self) -> Int`.
-#   * `SystemClock` — production conformer; wraps `komira_obs.clock.now_ns`
+#   * `SystemClock` — production conformer; wraps `komira_clock.now_ns`
 #     (monotonic, vDSO-fast on Linux, libSystem-fast on macOS).
 #   * `MockClock` — test conformer; fixed clock + `advance_us(delta)` to
 #     move time without sleeping.
@@ -42,7 +42,7 @@
 #   * ZERO additive parallel API (these are NEW traits, not migrations).
 # =============================================================================
 
-from komira_obs.clock import now_ns as _system_now_ns
+from komira_clock import now_ns as _system_now_ns
 
 
 # =============================================================================
@@ -96,7 +96,7 @@ trait Clock(Movable, Deinitable):
 # §2 — SystemClock — production conformer
 # =============================================================================
 #
-# Wraps `komira_obs.clock.now_ns`. That module is ALREADY the right
+# Wraps `komira_clock.now_ns`. That module is ALREADY the right
 # user-space monotonic source (CLOCK_UPTIME_RAW on macOS, vDSO
 # CLOCK_MONOTONIC on Linux). We divide by 1000 at the boundary.
 
@@ -126,7 +126,7 @@ struct SystemClock(Clock, Copyable, Movable, Deinitable):
     def now_us(mut self) -> Int:
         """Return monotonic time in microseconds.
 
-        Reads `komira_obs.clock.now_ns()` (UInt64 ns) and divides by
+        Reads `komira_clock.now_ns()` (UInt64 ns) and divides by
         1000. The result fits in Int63 for ~292 years of process uptime —
         safe. `mut self` per Clock trait — no internal state to
         mutate; mut is a no-op for SystemClock."""
@@ -359,7 +359,7 @@ trait Rng(Movable, Deinitable):
 # =============================================================================
 #
 # xorshift64* — single multiplication + bit operations; ~1ns/call. Seeded
-# from `komira_obs.clock.now_ns()` so each fresh SystemRng has a
+# from `komira_clock.now_ns()` so each fresh SystemRng has a
 # different initial state. NOT cryptographically secure.
 
 
