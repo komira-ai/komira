@@ -49,6 +49,25 @@ fi
 expect_red proto_full_bundle "roster_proto/options.mojo" tests//negative/proto:roster_full_bundle
 expect_red proto_bad_selection "which is not a .proto of the proto_deps closure" tests//negative/proto:roster_bad_selection
 
+# 23, gcp_client (tools/build/cloud/gcp.bzl). Building the package builds
+# each scoped client, which runs its welded tests (the generated layout probe
+# among them), each gen_check (the generated files, what is absent, what is
+# present) and each tests_check (exactly which welded tests passed). The
+# refusals of the rule, and each check going red, are expect_reds.
+if "$BUCK2" build tests//functional/gcp_client: > "$LOG/gcp_client.log" 2>&1; then
+    pass "gcp_client: scoped clients, their welded tests, gen_check and tests_check"
+else
+    fail "gcp_client: tests//functional/gcp_client: (see $LOG/gcp_client.log)"
+fi
+expect_red gcp_client_unscoped 'neither `roots` nor `methods` is set' tests//negative/gcp_client:unscoped
+expect_red gcp_client_joined_items 'is not a proto name' tests//negative/gcp_client:joined_items
+expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/gcp_client:no_runtime
+expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/gcp_client:whole_closure
+expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/gcp_client:label_in_protos
+expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/gcp_client:caller_test_red
+expect_red gcp_client_absence_check 'which must be absent' tests//negative/gcp_client:absence_check_can_fail
+expect_red gcp_client_tests_check 'expected exactly:' tests//negative/gcp_client:tests_check_can_fail
+
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin
 #     is compiled and run again) produce the same bytes for the plugin, the
