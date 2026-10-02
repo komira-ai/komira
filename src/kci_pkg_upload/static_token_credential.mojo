@@ -13,7 +13,9 @@
 # ⛔ ONE CREDENTIAL, ONE SURFACE. A token issued by one registry is presented
 # only there: every other surface is refused before any request
 # (`refuse_surface`). The shape is the surface's — Basic `__token__:<token>` on
-# PYPI_UPLOAD, `Bearer <token>` on PREFIX_DEV.
+# PYPI_UPLOAD, `Bearer <token>` on PREFIX_DEV. And it is presented only to
+# the ONE HOST named when it was built (`refuse_other_host`): a token for one
+# channel server is never sent to another.
 #
 # The token is held in a zeroizing `SecretValue` and is never printed; a
 # refusal names the path or the secret name, never the content.
@@ -35,9 +37,11 @@ from .credential import (
     RegistryCredential,
     bearer_authorization,
     pypi_upload_authorization,
+    refuse_other_host,
     refuse_surface,
     surface_name,
 )
+from .coordinate import repo_host
 
 
 def _refuse_unservable(surface: Int) raises:
@@ -98,39 +102,63 @@ def _resolve_named[S: SecretStore](mut store: S, name: String) raises -> SecretV
         )
 
 
-struct StaticTokenCredential(RegistryCredential, Deinitable):
-    """One token for one surface (see the file header).
+def _refuse_not_bare_host(host: String) raises:
+    if host.byte_length() == 0:
+        raise Error(
+            "StaticTokenCredential: names no host; a token is presented only to"
+            " the host it was issued for"
+        )
+    if repo_host(host) != host:
+        raise Error(
+            String("StaticTokenCredential: the host '")
+            + host
+            + String("' must be a bare host")
+        )
 
-    Layout: an Int and a zeroizing `SecretValue`. No pointer field."""
+
+struct StaticTokenCredential(RegistryCredential, Deinitable):
+    """One token for one surface on one host (see the file header).
+
+    Layout: an Int, an owned String and a zeroizing `SecretValue`. No pointer
+    field."""
 
     var _surface: Int
+    var _host: String
     var _token: SecretValue
 
-    def __init__(out self, surface: Int, var token: SecretValue) raises:
-        """From a token already resolved into a `SecretValue`. RAISES for a
-        surface with no token shape or an empty token."""
+    def __init__(
+        out self, surface: Int, var host: String, var token: SecretValue
+    ) raises:
+        """From a token already resolved into a `SecretValue`, for requests to
+        `host` (a bare host). RAISES for a surface with no token shape, a host
+        that is not bare, or an empty token."""
         _refuse_unservable(surface)
+        _refuse_not_bare_host(host)
         _ = _token_length(token.revealed_bytes(), String("the token"))
         self._surface = surface
+        self._host = host^
         self._token = token^
 
     @staticmethod
-    def token_file(surface: Int, path: String) raises -> StaticTokenCredential:
-        """The token held in the file at `path`. RAISES naming the path when it
-        cannot be read or does not hold one token."""
+    def token_file(
+        surface: Int, var host: String, path: String
+    ) raises -> StaticTokenCredential:
+        """The token held in the file at `path`, for `host`. RAISES naming the
+        path when it cannot be read or does not hold one token."""
         var raw = _read_token_file(path)
         var what = String("the token file '") + path + String("'")
         var n = _token_length(Span(raw), what)
         var token = SecretValue(Span(raw)[:n])
         for i in range(len(raw)):
             raw[i] = UInt8(0)
-        return StaticTokenCredential(surface, token^)
+        return StaticTokenCredential(surface, host^, token^)
 
     @staticmethod
     def token_secret[S: SecretStore](
-        surface: Int, mut store: S, name: String
+        surface: Int, var host: String, mut store: S, name: String
     ) raises -> StaticTokenCredential:
-        """The token the secret store resolves for `name`. RAISES naming the
+        """The token the secret store resolves for `name`, for `host`. RAISES
+        naming the
         secret when the store cannot resolve it or it does not hold one
         token."""
         var value = _resolve_named(store, name)
@@ -138,15 +166,21 @@ struct StaticTokenCredential(RegistryCredential, Deinitable):
         var n = _token_length(value.revealed_bytes(), what)
         if n != value.len():
             var trimmed = SecretValue(value.revealed_bytes()[:n])
-            return StaticTokenCredential(surface, trimmed^)
-        return StaticTokenCredential(surface, value^)
+            return StaticTokenCredential(surface, host^, trimmed^)
+        return StaticTokenCredential(surface, host^, value^)
 
     def surface(self) -> Int:
         return self._surface
 
-    def authorization(mut self, surface: Int) raises -> String:
+    def host(self) -> String:
+        return self._host.copy()
+
+    def authorization(mut self, surface: Int, host: String) raises -> String:
         if surface != self._surface:
             refuse_surface(String("StaticTokenCredential"), surface)
+        refuse_other_host(
+            String("StaticTokenCredential"), surface, host, self._host
+        )
         var token = String(unsafe_from_utf8=self._token.revealed_bytes())
         if surface == SURFACE_PYPI_UPLOAD:
             return pypi_upload_authorization(token)

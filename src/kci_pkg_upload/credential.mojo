@@ -17,9 +17,15 @@
 # ⛔ A SURFACE A CREDENTIAL CANNOT SERVE IS A LOCAL FAULT. `authorization`
 # RAISES, and the registry clients call it BEFORE composing any request — so a
 # misrouted credential is refused with the transport recording zero calls,
-# never presented on a surface it was not issued for. ⚠ The dispatch is keyed
-# on the surface, not the host: the warehouse arm takes any host, so a
-# coordinate's substrate decides which surface is asked for.
+# never presented on a surface it was not issued for.
+#
+# ⛔ AND A HOST A CREDENTIAL WAS NOT ISSUED FOR IS A LOCAL FAULT TOO. The
+# registry clients pass the host the request is about to go to, and a
+# credential bound to a host (`StaticTokenCredential`, `GithubOidcCredential`)
+# RAISES for any other one before minting or sending anything. Without this a
+# channels file naming a different server than the credential's would hand a
+# live upload token to that server. Only `AnonymousCredential`, which presents
+# nothing, answers for every host.
 #
 # THE CREDENTIALS: `StaticTokenCredential` (one long-lived token, by file path
 # or secret name), `GithubOidcCredential` (trusted publishing from a GitHub
@@ -33,6 +39,8 @@
 # =============================================================================
 
 from komira_encoding import base64_encode
+
+from .identity import ascii_lower
 
 
 # The surfaces a registry request is presented to.
@@ -54,7 +62,11 @@ trait RegistryCredential(Movable, Deinitable):
     RAISES — a local fault, before any request — for a surface this credential
     cannot serve, and for a source that resolves no usable secret."""
 
-    def authorization(mut self, surface: Int) raises -> String:
+    def authorization(mut self, surface: Int, host: String) raises -> String:
+        """`host` is the registry the request is for: the host of the
+        coordinate's repo, as `repo_host` returns it. For a prefix.dev channel
+        that is the host the request goes to; for a warehouse it is the index
+        (`pypi.org`) whose upload host (`upload.pypi.org`) takes the file."""
         ...
 
 
@@ -68,6 +80,28 @@ def refuse_surface(who: String, surface: Int) raises:
             " surface. The request was not sent: a credential is presented only"
             " to the surface it was issued for"
         )
+    )
+
+
+def same_host(a: String, b: String) -> Bool:
+    """Host names compare case-insensitively; nothing else is normalised."""
+    return ascii_lower(a) == ascii_lower(b)
+
+
+def refuse_other_host(who: String, surface: Int, host: String, bound: String) raises:
+    """RAISE unless `host` is `bound`, the host `who` was issued for."""
+    if same_host(host, bound):
+        return
+    raise Error(
+        who
+        + String(" was issued for '")
+        + bound
+        + String("' and will not present its ")
+        + surface_name(surface)
+        + String(" credential to '")
+        + host
+        + String("'. The request was not sent: check that the channel location")
+        + String(" and the credential name the same server")
     )
 
 
@@ -121,7 +155,7 @@ struct AnonymousCredential(RegistryCredential, Deinitable):
     def __init__(out self):
         pass
 
-    def authorization(mut self, surface: Int) raises -> String:
+    def authorization(mut self, surface: Int, host: String) raises -> String:
         return String("")
 
 
@@ -132,20 +166,22 @@ struct AnonymousCredential(RegistryCredential, Deinitable):
 
 struct ScriptedCredential(RegistryCredential, Deinitable):
     """A fixed `Authorization` value per surface; any other surface RAISES
-    exactly as a real credential refuses one. Records every surface it was
-    asked for, in order, so a test can assert which shape reached which
-    request.
+    exactly as a real credential refuses one. Records every surface and host
+    it was asked for, in order, so a test can assert which shape reached which
+    request. It is bound to no host.
 
     Layout: owned lists. No pointer field."""
 
     var _surfaces: List[Int]
     var _values: List[String]
     var _asked: List[Int]
+    var _asked_hosts: List[String]
 
     def __init__(out self):
         self._surfaces = List[Int]()
         self._values = List[String]()
         self._asked = List[Int]()
+        self._asked_hosts = List[String]()
 
     def serve(mut self, surface: Int, var value: String):
         self._surfaces.append(surface)
@@ -157,8 +193,12 @@ struct ScriptedCredential(RegistryCredential, Deinitable):
     def asked(self, i: Int) -> Int:
         return self._asked[i]
 
-    def authorization(mut self, surface: Int) raises -> String:
+    def asked_host(self, i: Int) -> String:
+        return self._asked_hosts[i].copy()
+
+    def authorization(mut self, surface: Int, host: String) raises -> String:
         self._asked.append(surface)
+        self._asked_hosts.append(host.copy())
         for i in range(len(self._surfaces)):
             if self._surfaces[i] == surface:
                 return self._values[i].copy()
