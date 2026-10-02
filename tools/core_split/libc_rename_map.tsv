@@ -1,0 +1,6 @@
+file	kind	lines	disposition	dest	new_path	note
+BUCK	build	14	regenerated	komira_libc	src/komira_libc/BUCK	one mojo_library, no first-party deps (a leaf); test_srcs from this map's two test rows and the six komira_posix_io tests of split_map.tsv; plus the cxx_library of the 19 POSIX symbols of the C shim, added by hand
+__init__.mojo	src	20	copy	komira_libc	src/komira_libc/__init__.mojo	word komira_core_ffi renamed
+posix.mojo	src	201	copy	komira_libc	src/komira_libc/posix.mojo	word renamed; getenv, access and pthread_self external_call declarations
+tests/test_posix_read_env.mojo	test	233	copy	komira_libc	src/komira_libc/tests/test_posix_read_env.mojo	word renamed
+tests/test_thread_self_discriminates.mojo	test	203	copy	komira_libc	src/komira_libc/tests/test_thread_self_discriminates.mojo	word renamed

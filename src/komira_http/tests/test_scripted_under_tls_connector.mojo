@@ -44,7 +44,7 @@ can silently stop holding.
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_MOCK, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
-from komira_obs.clock import now_ns
+from komira_clock import now_ns
 
 from komira_http.client.tls_connector import TlsConnector
 from komira_http.tls import TlsConfig, tls_init

@@ -12,7 +12,7 @@
 #
 # So a request that reused a warm h2/h1 connection and dialled NOTHING still
 # performed a blocking `getaddrinfo(3)` — the ONLY unbounded blocking libc call
-# in this tree (`komira_async/net/dns.mojo:382`; it takes no timeout argument
+# in this tree (`komira_net/dns.mojo:382`; it takes no timeout argument
 # and cannot be cancelled). On a serve loop that talks to Firestore and GCS on
 # every tick that is one unbounded phase per request, forever, for nothing.
 #

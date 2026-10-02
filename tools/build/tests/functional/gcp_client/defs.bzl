@@ -128,6 +128,6 @@ _tests_check = rule(
 # `tests_check`: which welded tests a library ran, checked as a build action.
 # `markers` is a library's `[tests]` sub-target, whose outputs are its pass
 # markers. The action fails unless their names are exactly `expect` and each
-# marker records a PASS (not a HELD test). gen_check reads the generated
+# marker records a PASS. gen_check reads the generated
 # directory and cannot see whether the layout probe is welded; this can.
 tests_check = declares_docs(_tests_check)
