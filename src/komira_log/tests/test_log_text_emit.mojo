@@ -184,7 +184,7 @@ def test_text_does_not_touch_the_ring() raises:
 
     This is the behavioural difference between the two surfaces, and it is
     load-bearing: a caller that wants the structured record on the ring must use
-    the typed surface. If `*_text` ever started pushing, a control-plane process
+    the typed surface. If `*_text` ever started pushing, a long-lived service process
     that never drains would strand its own logs.
     """
     var eng = _engine(LEVEL_TRACE)

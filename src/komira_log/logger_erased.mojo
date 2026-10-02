@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_log.logger_erased — the ERASED emit entry point, BESIDE the
-# specialised one. For the CONTROL PLANE. The engine keeps `_emit_through`.
+# specialised one. For long-lived SERVICES. The engine keeps `_emit_through`.
 # =============================================================================
 #
 # # WHAT IS ERASED, AND WHAT IS DELIBERATELY NOT
@@ -73,7 +73,7 @@
 #
 # ⛔ THE ENGINE MUST NOT USE THIS. The data plane is measured in nanoseconds and
 # the engine depends on the inlined specialised emit. This exists for
-# control-plane services, where sites are
+# long-lived services, where sites are
 # counted in thousands and lines in hundreds, and where the compiler peak is the
 # binding constraint rather than the per-line cost.
 #
@@ -88,7 +88,7 @@ from komira_log.levels import MIN_COMPILED_LEVEL, LEVEL_WARN
 from komira_log.log_value import LogValue
 from komira_log.log_arg import ARG_FIELD
 from komira_log.pattern_layout import interpolate, render_line
-from komira_obs.clock import now_unix_ms
+from komira_clock import now_unix_ms
 
 from komira_log.engine.shared_engine import SharedEngine
 from komira_log.engine.log_event_record import (
@@ -97,11 +97,8 @@ from komira_log.engine.log_event_record import (
     REC_LOG,
     FLAG_HAS_ARG_OVERFLOW,
 )
-from komira_log.engine.site_dictionary import (
-    fnv1a_32,
-    FNV1A_32_OFFSET_BASIS,
-    FNV1A_32_PRIME,
-)
+from komira_hash import FNV1A_32_OFFSET_BASIS, FNV1A_32_PRIME
+from komira_log.engine.site_dictionary import fnv1a_32
 from komira_log.engine.calibration import read_raw_ticks
 from komira_log.engine.worker_id_tls import WORKER_ID_UNSET
 

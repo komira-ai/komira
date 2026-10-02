@@ -14,17 +14,21 @@ declares `:srcs_gen`, the generated file (regenerate the committed copy with
 committed copy and the archive disagree. Both run on the farm.
 """
 
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:providers.bzl", "MojoRunnableInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
-
-# Generating, comparing and packing run on the light workers: they read and
-# write a few files and compile nothing.
-_LIGHT = ["komira//tools/build/platforms:light"]
 
 _GEN_SCRIPT = """
 BB="$1"; shift
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-T="$PWD/.komira_action"
+# Actions that run on this machine share the checkout root as their working
+# directory, so scratch is per action: the directory buck2 names in
+# BUCK_SCRATCH_PATH (unset on a remote worker, whose root is the action's own).
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_action" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
+esac
 "$BB" mkdir -p "$T/bin"
 "$BB" --install -s "$T/bin"
 PATH="$T/bin"; export PATH
@@ -115,7 +119,7 @@ def third_party_srcs(name, library, archive, committed, visibility = None):
     committed_path = "{}/{}".format(package, committed) if package else committed
     _third_party_srcs_gen(
         name = name + "_gen",
-        exec_compatible_with = _LIGHT,
+        exec_compatible_with = LINUX_X86_64,
         library = library,
         archive = archive,
         gen_label = gen_label,
@@ -125,7 +129,7 @@ def third_party_srcs(name, library, archive, committed, visibility = None):
     )
     _third_party_srcs_drift_test(
         name = name + "_drift",
-        exec_compatible_with = _LIGHT,
+        exec_compatible_with = LINUX_X86_64,
         generated = ":" + name + "_gen",
         committed = committed,
         regenerate = "./buck2 build {} --out {}".format(gen_label, committed_path),
@@ -163,7 +167,7 @@ _fixture_archive = rule(
 )
 
 def fixture_archive(**kwargs):
-    kwargs.setdefault("exec_compatible_with", _LIGHT)
+    kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     _fixture_archive(**kwargs)
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree

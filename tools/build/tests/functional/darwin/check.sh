@@ -6,13 +6,14 @@
 #
 # Sections 1-6 need no macOS worker; 7 runs on the macOS workers when the root
 # cell configures them, and is SKIPped otherwise. What runs where:
-#   1. Unset `[komira_re] darwin_mojo_compile_properties`: no macOS platform
-#      is registered, and a darwin-arm64 Mojo target fails to configure
-#      (naming the macos constraint) while the linux target still resolves to
-#      exec-mojo.
+#   1. Unset `[komira_re] darwin_arm64_properties`: no macOS platform is
+#      registered, and a darwin-arm64 Mojo target fails to configure (naming
+#      the macos constraint) while the linux target still resolves to
+#      linux-x86_64.
 #   2. Set (a placeholder, resolution only, nothing is built): darwin-arm64
-#      Mojo targets resolve to exec-mojo-darwin-arm64, the darwin toolchain's
-#      unpacking to linux exec-light, linux targets are unchanged; a property
+#      Mojo targets resolve to the darwin-arm64 execution platform, the
+#      darwin toolchain's unpacking to linux-x86_64, linux targets are
+#      unchanged; a property
 #      set with no `[komira_re] darwin_macos_hosts`, or equal to a linux set,
 #      is refused at load, and so (tests//functional/darwin:BUCK, cases.bzl) are an
 #      empty set and malformed host identities. Unset, a wildcard over
@@ -21,8 +22,8 @@
 #      busybox, the osx-arm64 compiler closure, --target-cpu apple-m1, the
 #      deployment target, no zig, no absolute path.
 #   4. The linux actions are the same with and without the darwin key.
-#   5. The osx-arm64 closure, unpacked and cut on the farm (linux `light`
-#      workers): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
+#   5. The osx-arm64 closure, unpacked and cut on the farm (linux
+#      actions): its Mach-O load commands, read by tools/build/inspect (`inspect macho`), and the
 #      DYLD scripts are the shared scripts behind dyld_prelude.sh.
 #   6. The macOS scripts, run on this machine against stand-ins: busybox.sh
 #      (applets only from /bin and /usr/bin, anything else refused), the cc
@@ -32,9 +33,10 @@
 #      shared-lib build, a non-$ORIGIN run path and a host whose identity is
 #      not listed are refused, a listed host is accepted; modular.cfg is
 #      rendered with the one run path @loader_path/lib), and run_check.sh
-#      (clears DYLD_* as well as LD_*).
+#      (clears DYLD_* as well as LD_*), and gate_runner.sh (the test sees
+#      DYLD_LIBRARY_PATH although the `env` applet prunes it, as on macOS).
 #   7. Live, on the macOS workers (SKIP unless both `[komira_re]
-#      darwin_mojo_compile_properties` and `darwin_macos_hosts` are set):
+#      darwin_arm64_properties` and `darwin_macos_hosts` are set):
 #      every host identity the workers report (tests//functional/darwin:host_census,
 #      uncached) is listed; //tools/build/examples:hello and its run check
 #      build and pass there, with the configured property set in `buck2 log
@@ -230,7 +232,7 @@ hello names a worker path"
 }
 
 DARWIN=(--target-platforms komira//tools/build/platforms:darwin-arm64)
-KEY=komira_re.darwin_mojo_compile_properties
+KEY=komira_re.darwin_arm64_properties
 HOSTS_KEY=komira_re.darwin_macos_hosts
 PLACEHOLDER=(-c "$KEY=pool=unreachable-check-only" -c "$HOSTS_KEY=0.0-check")
 UNSET=(-c "$KEY=" -c "$HOSTS_KEY=")
@@ -252,15 +254,15 @@ elif [ "$got" != "komira//tools/build/examples:hello FAILED" ]; then
     fail "unset: a darwin-arm64 target configured with no macOS platform: $got"
 elif ! grep -qF 'exec_compatible_with requires `prelude//os/constraints:macos`' "$LOG/darwin_unset.txt"; then
     fail "unset: the refusal does not name the macos constraint (see $LOG/darwin_unset.txt)"
-elif [ "$(resolve darwin_unset_linux "${UNSET[@]}" //tools/build/examples:hello)" != "komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo" ]; then
-    fail "unset: the linux target no longer resolves to exec-mojo (see $LOG/darwin_unset_linux.txt)"
+elif [ "$(resolve darwin_unset_linux "${UNSET[@]}" //tools/build/examples:hello)" != "komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64" ]; then
+    fail "unset: the linux target no longer resolves to linux-x86_64 (see $LOG/darwin_unset_linux.txt)"
 else
     pass "unset: no macOS platform; a darwin-arm64 target fails to configure, linux resolves as before"
 fi
 
 # ---- 2. set: resolution and load-time refusals --------------------------------
-want=$(printf '%s komira//tools/build/platforms:exec-mojo-darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
-       printf '%s komira//tools/build/platforms:exec-light\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
+want=$(printf '%s komira//tools/build/platforms:darwin-arm64\n' "${MOJO_TARGETS[@]/#\/\//komira//}"
+       printf '%s komira//tools/build/platforms:linux-x86_64\n' komira//tools/build/toolchains/darwin:mojo_compiler komira//tools/build/toolchains/darwin:mojo_runtime \
            komira//tools/build/toolchains/darwin:gate_runner komira//tools/build/toolchains/darwin:launcher komira//tools/build/toolchains/darwin:link)
 want=$(printf '%s\n' "$want" | LC_ALL=C sort)
 if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS[@]}" \
@@ -269,20 +271,20 @@ if ! got=$(resolve darwin_set "${PLACEHOLDER[@]}" "${DARWIN[@]}" "${MOJO_TARGETS
     fail "set: audit failed (see $LOG/darwin_set.txt)"
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
     fail "set: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^[<>]' | tr '\n' ' ')"
-elif [ "$(resolve darwin_set_linux "${PLACEHOLDER[@]}" "${MOJO_TARGETS[@]}" | awk '{print $2}' | sort -u)" != "komira//tools/build/platforms:exec-mojo" ]; then
-    fail "set: a linux target left exec-mojo once a macOS platform was registered (see $LOG/darwin_set_linux.txt)"
+elif [ "$(resolve darwin_set_linux "${PLACEHOLDER[@]}" "${MOJO_TARGETS[@]}" | awk '{print $2}' | sort -u)" != "komira//tools/build/platforms:linux-x86_64" ]; then
+    fail "set: a linux target left linux-x86_64 once a macOS platform was registered (see $LOG/darwin_set_linux.txt)"
 else
-    pass "set: ${#MOJO_TARGETS[@]} darwin-arm64 Mojo targets on exec-mojo-darwin-arm64, darwin unpacking on linux exec-light, linux unchanged"
+    pass "set: ${#MOJO_TARGETS[@]} darwin-arm64 Mojo targets on darwin-arm64, darwin unpacking on linux-x86_64, linux unchanged"
 fi
 if "$BUCK2" audit execution-platform-resolution -c "$KEY=pool=mac-only-no-hosts" -c "$HOSTS_KEY=" "${DARWIN[@]}" //tools/build/examples:hello \
         > "$LOG/darwin_no_hosts.txt" 2>&1; then
     fail "load: a macOS property set without darwin_macos_hosts was accepted"
 elif ! grep -qF 'names no macOS host' "$LOG/darwin_no_hosts.txt"; then
     fail "load: the missing-hosts refusal failed for another reason (see $LOG/darwin_no_hosts.txt)"
-elif MC=$(cfg_value komira_re.mojo_compile_properties) && [ -n "$MC" ] &&
+elif MC=$(cfg_value komira_re.linux_x86_64_properties) && [ -n "$MC" ] &&
     "$BUCK2" audit execution-platform-resolution -c "$HOSTS_KEY=0.0-check" \
         -c "$KEY=$MC" //tools/build/examples:hello > "$LOG/darwin_linux_set.txt" 2>&1; then
-    fail "load: a macOS property set equal to the linux mojo_compile set was accepted"
+    fail "load: a macOS property set equal to the linux set was accepted"
 elif ! grep -qF 'must name macOS workers' "$LOG/darwin_linux_set.txt"; then
     fail "load: the linux-set refusal failed for another reason (see $LOG/darwin_linux_set.txt)"
 else
@@ -472,14 +474,26 @@ else
         build --emit shared-lib x.mojo -o out > "$U/wrap.txt" 2>&1)
     rc_shared=$?
     grep -q 'bundles are linux only' "$U/wrap.txt" || rc_shared=x
+    # A C-ABI library names itself for dyld (mojo_shared_lib) and is let through to
+    # the compile; the bundle's `-soname` spelling is still refused.
+    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
+        build --emit shared-lib -Xlinker -soname -Xlinker x.so x.mojo -o out > "$U/wrap.txt" 2>&1)
+    rc_soname=$?
+    grep -q 'bundles are linux only' "$U/wrap.txt" || rc_soname=x
+    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
+        build --emit shared-lib -Xlinker -install_name -Xlinker @rpath/x.dylib x.mojo -o out > "$U/wrap.txt" 2>&1)
+    rc_dylib=$?
+    grep -q "compiler exited 0 but out is missing" "$U/wrap.txt" || rc_dylib=x
     wrap --runpath='$ORIGIN/../..' --source-root=src
     rc=$?
     # The stand-in compiler writes nothing, so a host that passes the identity
     # check reaches the output check (exit 3).
     if [ "$rc_same_sdk" != 2 ]; then
         fail "wrapper: a host with a listed SDK version but another toolchain digest was accepted (rc=$rc_same_sdk)"
-    elif [ "$rc_bad_opt" != 2 ] || [ "$rc_abs" != 2 ] || [ "$rc_shared" != 2 ]; then
-        fail "wrapper: an unknown option, an absolute run path or a shared-lib build was not refused ($rc_bad_opt $rc_abs $rc_shared)"
+    elif [ "$rc_bad_opt" != 2 ] || [ "$rc_abs" != 2 ] || [ "$rc_shared" != 2 ] || [ "$rc_soname" != 2 ]; then
+        fail "wrapper: an unknown option, an absolute run path or a bundle shared-lib build was not refused ($rc_bad_opt $rc_abs $rc_shared $rc_soname)"
+    elif [ "$rc_dylib" != 3 ]; then
+        fail "wrapper: a self-named (install_name) shared-lib build was refused, or did not reach the compile (rc=$rc_dylib, see $U/wrap.txt)"
     elif [ "$rc" != 3 ] || ! grep -q "compiler exited 0 but out is missing" "$U/wrap.txt"; then
         fail "wrapper: a listed host was not accepted (rc=$rc, see $U/wrap.txt)"
     else
@@ -583,6 +597,44 @@ else
     pass "run_check.sh: the binary starts with no LD_* or DYLD_* library path"
 fi
 
+# gate_runner.sh hands the test the toolchain's lib/ through DYLD_LIBRARY_PATH.
+# On macOS /usr/bin/env is a system-integrity-protected binary: dyld prunes every
+# DYLD_* variable from the environment of such a process, so a test started
+# through the `env` applet never sees the variable and dies with "Library not
+# loaded: @rpath/libKGENCompilerRTShared.dylib". The stand-in busybox below
+# prunes them in its `env` applet as the operating system does; the test must
+# still see the variable, and its --env variables.
+mkdir -p "$U/gate/root/bin" "$U/gate/tmp"
+cat > "$U/sip_busybox.sh" <<SIPBB
+#!/bin/sh
+if [ "\$1" = env ]; then
+    shift
+    unset DYLD_LIBRARY_PATH DYLD_FALLBACK_LIBRARY_PATH DYLD_INSERT_LIBRARIES
+    exec /usr/bin/env "\$@"
+fi
+exec sh "$BB" "\$@"
+SIPBB
+chmod +x "$U/sip_busybox.sh"
+cat > "$U/gate/root/bin/seen" <<SEEN
+#!/bin/sh
+printf '%s|%s\n' "\${DYLD_LIBRARY_PATH-}" "\${GATE_FOO-}" > "$U/gate/seen.txt"
+SEEN
+chmod +x "$U/gate/root/bin/seen"
+# A --env BIN naming another program must not replace the test.
+printf '#!/bin/sh\n: > "%s/gate/other_ran"\n' "$U" > "$U/gate/root/bin/other"
+chmod +x "$U/gate/root/bin/other"
+cat tools/build/mojo/darwin/dyld_prelude.sh tools/build/mojo/gate_runner.sh > "$U/gate/gate_runner.sh"
+rm -f "$U/gate/seen.txt" "$U/gate/marker" "$U/gate/other_ran"
+if ! (cd "$U/gate/tmp" && sh "$U/gate/gate_runner.sh" "$U/sip_busybox.sh" "$TC" //stand:in "$U/gate/root/bin/seen" "$U/gate/marker" --env GATE_FOO=bar --env "BIN=$U/gate/root/bin/other") > "$U/gate/run.txt" 2>&1; then
+    fail "gate_runner.sh: the stand-in test failed (see $U/gate/run.txt)"
+elif [ "$(cat "$U/gate/seen.txt")" != "$TC/lib|bar" ]; then
+    fail "gate_runner.sh: the test saw [$(cat "$U/gate/seen.txt")], not [$TC/lib|bar]: DYLD_LIBRARY_PATH did not reach it (an SIP binary between the runner and the test prunes it)"
+elif [ -e "$U/gate/other_ran" ]; then
+    fail "gate_runner.sh: --env BIN=<other program> ran that program in place of the test"
+else
+    pass "gate_runner.sh: the test starts with DYLD_LIBRARY_PATH at the toolchain's lib/ although env prunes DYLD_*, and with its --env variables, and --env BIN does not replace it"
+fi
+
 # ---- 7. live, on the macOS workers ----------------------------------------------
 MAC_PROPS=$(cfg_value "$KEY")
 MAC_HOSTS=$(cfg_value "$HOSTS_KEY")
@@ -612,6 +664,29 @@ else
     else
         pass "live: $verdict"
     fi
+    # mojo_shared_lib: a .dylib, its gate run on a macOS worker; the same red twins as Linux.
+    if ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" --show-full-output \
+            //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact > "$LOG/darwin_sharedlib.log" 2>&1; then
+        fail "live: mojo_shared_lib examples failed on macOS (see $LOG/darwin_sharedlib.log)"
+    else
+        dylib=$(grep -E ' [^ ]*/pub/plain\.dylib$' "$LOG/darwin_sharedlib.log" | sed 's/^[^ ]* //')
+        # Mach-O arm64 (the magic, cf fa ed fe), named `@rpath/plain.dylib`, with no build path in it.
+        if [ -z "$dylib" ] || [ "$(head -c4 "$dylib" | od -An -tx1 | tr -d ' \n')" != cffaedfe ] ||
+            ! grep -qF '@rpath/plain.dylib' "$dylib" || grep -qF 'buck-out' "$dylib"; then
+            fail "live: plain.dylib is not a Mach-O library named @rpath/plain.dylib free of build paths (see $LOG/darwin_sharedlib.log)"
+        else
+            pass "live: mojo_shared_lib builds a .dylib on macOS and its gate passes (plain, plain_exact)"
+        fi
+    fi
+    for t in missing_export:'MISSING EXPORT: neg_missing' failing_driver:'GATED TEST FAILED' plain_leaks:'plain_hidden leaked into the dynamic symbol table'; do
+        if timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" "tests//negative/shared_lib:${t%%:*}" > "$LOG/darwin_neg_${t%%:*}.log" 2>&1; then
+            fail "live: tests//negative/shared_lib:${t%%:*} built on macOS, but it must fail"
+        elif ! grep -qF -- "${t#*:}" "$LOG/darwin_neg_${t%%:*}.log"; then
+            fail "live: tests//negative/shared_lib:${t%%:*} failed without '${t#*:}' (see $LOG/darwin_neg_${t%%:*}.log)"
+        else
+            pass "live: tests//negative/shared_lib:${t%%:*} is red on macOS for its own reason"
+        fi
+    done
     if timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" -c "$HOSTS_KEY=0.0-nohost" \
             //tools/build/examples:hello > "$LOG/darwin_refuse.log" 2>&1; then
         fail "live: a compile whose host list names no worker succeeded"

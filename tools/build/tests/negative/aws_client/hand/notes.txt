@@ -1,0 +1,1 @@
+A hand_srcs entry that is not a .mojo file: aws_client refuses it at analysis.

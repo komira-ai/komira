@@ -3,14 +3,14 @@
 # =============================================================================
 #
 # The forever-root-owned engine instance. ONE per
-# process, owned by the forever-root (EngineContext / the control-plane
-# services), sized to `num_workers`. It bundles everything the ambient log path
+# process, owned by the forever-root (EngineContext / the long-lived
+# service processes), sized to `num_workers`. It bundles everything the ambient log path
 # touches:
 #
 #   * N per-worker SPSC `LogRecordRing`s (one per substrate worker) — produced
 #     into by the owning core during work, drained by the SAME core when idle.
-#     Stored in a `Slab[LogRecordRing]` (the obs `Tracer._rings` shape —
-#     `LogRecordRing` is non-Movable, so a `List` cannot hold it).
+#     Stored in a `Slab[LogRecordRing]` (the `komira_trace` `Tracer._rings`
+#     shape; `LogRecordRing` is Movable and is appended to the slab).
 #   * The `SiteDictionary` — `site_id → fmt`, `module_id → module`, built by the
 #     SAME comptime digests the emit path computes (keys match by construction).
 #   * The `CalibrationAnchor` — drain-side raw-tick → wall-time conversion.
@@ -29,8 +29,8 @@
 #   * Per-worker DATAPLANE rings [0, num_workers): `OVERFLOW_DROP` — a full ring
 #     drops the record (counted in `_overflow_dropped`) rather than blocking a
 #     query worker. Logging must never stall the dataplane.
-#   * The CONTROL-PLANE fallback ring [num_workers]: `OVERFLOW_BLOCK` — the
-#     non-worker producer spins until a slot frees (control-plane logs are rare
+#   * The non-worker FALLBACK ring [num_workers]: `OVERFLOW_BLOCK` — the
+#     non-worker producer spins until a slot frees (non-worker logs are rare
 #     + correctness > throughput there).
 #   * WARN AND ERROR records are NEVER dropped — if a DROP ring rejects such a
 #     push, the emit path escalates to a synchronous render+write via
@@ -69,12 +69,12 @@ from std.memory import alloc, UnsafePointer, OwnedPointer
 
 from komira_core.collections import Slab
 
-from komira_obs.ring_buffer import (
+from komira_spsc_ring.spsc_ring import (
     DEFAULT_RING_CAPACITY,
     OVERFLOW_BLOCK,
     OVERFLOW_DROP,
 )
-from komira_obs.clock import now_unix_ms
+from komira_clock import now_unix_ms
 
 
 # ~1 Hz calibration re-anchor cadence. The drain's
@@ -140,7 +140,7 @@ from komira_log.engine.metric_emit import (
     metric_record_is_decodable,
 )
 
-from komira_obs.metric_point import MetricPoint
+from komira_metrics.metric_point import MetricPoint
 from komira_log.engine.span_drain import (
     OpenSpanTable,
     UnifiedDrainResult,
@@ -259,18 +259,18 @@ struct SharedEngine(Movable):
 
         # N per-worker rings + 1 fallback ring slot.
         var n_rings = num_workers + 1
-        self._rings = Slab[LogRecordRing].create_prefilled(n_rings)
+        self._rings = Slab[LogRecordRing].create_with_capacity(n_rings)
         for w in range(n_rings):
             # Per-ring-class backpressure: the per-worker
             # DATAPLANE rings DROP (never stall query work); the [num_workers]
-            # CONTROL-PLANE fallback ring BLOCKs (control-plane logs are rare +
+            # non-worker FALLBACK ring BLOCKs (non-worker logs are rare +
             # correctness > throughput). ERROR records bypass DROP via the
             # facade's `escalate_line` slow-path (never-dropped).
             var policy = OVERFLOW_DROP if w < num_workers else OVERFLOW_BLOCK
-            LogRecordRing.init_in_place(
-                UnsafePointer(to=self._rings.get_mut_interior(w)),
-                capacity=DEFAULT_RING_CAPACITY,
-                overflow_policy=policy,
+            self._rings.append(
+                LogRecordRing(
+                    capacity=DEFAULT_RING_CAPACITY, overflow_policy=policy
+                )
             )
 
         # Per-worker span context (N slots; the fallback slot does not run
@@ -692,7 +692,7 @@ struct SharedEngine(Movable):
     # `end_span` pops the stack and emits a SPAN_CLOSE record. The drain pairs
     # OPEN↔CLOSE by span_id and renders an OTLP-shaped span JSON.
     #
-    # This generalizes `komira_obs.Tracer.start_span/end_span` onto the
+    # This generalizes `komira_trace.Tracer.start_span/end_span` onto the
     # SharedEngine: same comptime span-name digest (registered into the SAME
     # SiteDictionary as log fmts), same per-worker `Slab[SpanContextSlot]`
     # span-id stack, same OPEN/CLOSE-pair drain. The span name is registered
@@ -760,7 +760,7 @@ struct SharedEngine(Movable):
     def unknown_kind_dropped_count(mut self) -> Int64:
         """Drain-side: records REFUSED across every ring this engine owns
         because no drain arm recognised their `kind`. Summed over the dataplane
-        rings AND the control-plane fallback ring — `_num_workers + 1` slots, the
+        rings AND the non-worker fallback ring — `_num_workers + 1` slots, the
         same span `__init__` constructs.
 
         NON-ZERO MEANS A PRODUCER IS AHEAD OF THE DRAINS. The records were
@@ -776,7 +776,7 @@ struct SharedEngine(Movable):
     def overflow_dropped_count(mut self) -> Int64:
         """Records LOST because a ring was full when the producer pushed.
 
-        Summed over the dataplane rings AND the control-plane fallback ring.
+        Summed over the dataplane rings AND the non-worker fallback ring.
         The dataplane rings are `OVERFLOW_DROP` by policy — a full ring must
         never stall query work — so this is the price of that policy, and it is
         the ONLY record of it.
@@ -855,7 +855,7 @@ struct SharedEngine(Movable):
           * `drain_worker` -- a fully decoded record whose sink write raised.
             The ring did its job; the disk did not.
           * `emit_fallback_line` -- an unbound-thread log (an HTTP handler, the
-            agent heartbeat, a CLI tool, the control-plane mirror). This is the
+            agent heartbeat, a CLI tool, a log-mirroring thread). This is the
             path every log from a thread with no worker_id takes.
           * `escalate_line` -- an ERROR or WARN the ring already rejected once.
             A non-zero count here means the never-drop guarantee did not hold,
@@ -1289,8 +1289,8 @@ struct SharedEngine(Movable):
         the single append fd.
 
         ⚠ THIS IS THE PATH EVERY UNBOUND-THREAD LOG TAKES — an HTTP handler,
-        the agent heartbeat, a CLI tool with no runtime, and the control-plane
-        mirror's own write. A transient sink error is still swallowed (the
+        the agent heartbeat, a CLI tool with no runtime, and a log-mirroring
+        thread's own write. A transient sink error is still swallowed (the
         logger must never wedge its caller) but it is now COUNTED:
         `sink_dropped_line_count`. Uncounted, it would be the widest silent-loss
         channel in the engine."""

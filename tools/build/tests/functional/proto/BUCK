@@ -5,9 +5,13 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_db_proto_library", "mojo_proto
 # komira//tools/build/proto-codegen; exercised by run_tests.sh (test 23).
 
 mojo_library(
-    name = "komira_serde",
-    visibility = ["//negative/proto:"],
-    srcs = ["komira_serde/__init__.mojo"],
+    name = "komira_proto_codec",
+    visibility = [
+        "//functional/gcp_client:",
+        "//negative/gcp_client:",
+        "//negative/proto:",
+    ],
+    srcs = ["komira_proto_codec/__init__.mojo"],
 )
 
 mojo_proto_library(
@@ -15,14 +19,14 @@ mojo_proto_library(
     visibility = ["//negative/proto:"],
     srcs = ["v1/person.proto"],
     import_prefix = "example",
-    deps = [":komira_serde"],
+    deps = [":komira_proto_codec"],
 )
 
 mojo_test(
     name = "test_person",
     srcs = ["test_person.mojo"],
     deps = [
-        ":komira_serde",
+        ":komira_proto_codec",
         ":person_proto",
     ],
 )
@@ -36,14 +40,14 @@ mojo_proto_library(
     bundle_proto_deps = True,
     import_prefix = "example",
     proto_deps = [":person_proto"],
-    deps = [":komira_serde"],
+    deps = [":komira_proto_codec"],
 )
 
 mojo_test(
     name = "test_team",
     srcs = ["test_team.mojo"],
     deps = [
-        ":komira_serde",
+        ":komira_proto_codec",
         ":team_proto",
     ],
 )
@@ -95,5 +99,5 @@ mojo_proto_library(
         ":person_proto",
         "komira//tools/build/proto-codegen:db_options",
     ],
-    deps = [":komira_serde"],
+    deps = [":komira_proto_codec"],
 )
