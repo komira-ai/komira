@@ -10,8 +10,10 @@
 #                 PUBLIC means anonymous read; PRIVATE grants no read at all
 #                 (further read grants belong to whoever owns the repository).
 #   repositories  one per artifact type. Each names its `location` (the
-#                 address a push lands at) and its `push_identity` (the only
-#                 principal that may write it).
+#                 address a push lands at), its `push_identity` (the only
+#                 principal that may write it) and its `credential` (how that
+#                 principal authenticates: a kind and, for API_TOKEN, the
+#                 NAME of the secret; see `channel_credential.mojo`).
 #
 # Every function here takes the declaration list as an argument, so adding a
 # channel is adding one value.
@@ -23,47 +25,22 @@
 # Plain value types (Strings in Lists); nothing here allocates beyond them.
 # =============================================================================
 
+from .artifact_types import (
+    ARTIFACT_TYPE_CONDA,
+    ARTIFACT_TYPE_NPM,
+    ARTIFACT_TYPE_OCI,
+    ARTIFACT_TYPE_PYTHON,
+    is_known_artifact_type,
+    known_artifact_types,
+)
+from .channel_credential import ChannelCredential, validate_channel_credential
 
-# ── Artifact types a repository may carry. A closed set. ─────────────────────
-comptime ARTIFACT_TYPE_OCI: String = "OCI"
-"""Container images and other OCI artifacts. The location is the repository
-prefix an artifact name is appended to."""
-
-comptime ARTIFACT_TYPE_PYTHON: String = "PYTHON"
-"""Python packages (a PEP 503 package index)."""
-
-comptime ARTIFACT_TYPE_NPM: String = "NPM"
-"""npm packages (an npm registry)."""
-
-comptime ARTIFACT_TYPE_CONDA: String = "CONDA"
-"""Conda packages (a conda channel)."""
 
 # ── Visibility. ──────────────────────────────────────────────────────────────
 comptime VISIBILITY_PUBLIC: String = "PUBLIC"
 comptime VISIBILITY_PRIVATE: String = "PRIVATE"
 
 comptime _MAX_NAME_BYTES: Int = 63
-
-
-def is_known_artifact_type(artifact_type: String) -> Bool:
-    return (
-        artifact_type == ARTIFACT_TYPE_OCI
-        or artifact_type == ARTIFACT_TYPE_PYTHON
-        or artifact_type == ARTIFACT_TYPE_NPM
-        or artifact_type == ARTIFACT_TYPE_CONDA
-    )
-
-
-def _known_artifact_types() -> String:
-    return (
-        String(ARTIFACT_TYPE_OCI)
-        + String(", ")
-        + String(ARTIFACT_TYPE_PYTHON)
-        + String(", ")
-        + String(ARTIFACT_TYPE_NPM)
-        + String(", ")
-        + String(ARTIFACT_TYPE_CONDA)
-    )
 
 
 def is_valid_channel_name(name: String) -> Bool:
@@ -90,16 +67,32 @@ struct ChannelRepository(Copyable, Movable):
     var artifact_type: String
     var location: String
     var push_identity: String
+    var credential: Optional[ChannelCredential]
+    """None when the declaration names no credential; validation refuses
+    that, so a validated repository always carries one."""
 
     def __init__(
         out self,
         var artifact_type: String,
         var location: String,
         var push_identity: String,
+        var credential: Optional[ChannelCredential],
     ):
         self.artifact_type = artifact_type^
         self.location = location^
         self.push_identity = push_identity^
+        self.credential = credential^
+
+    def declared_credential(self) raises -> ChannelCredential:
+        """The credential this repository declares. Raises when it declares
+        none: a credential is never defaulted."""
+        if not self.credential:
+            raise Error(
+                String("the ")
+                + self.artifact_type
+                + String(" repository declares no credential")
+            )
+        return self.credential.value().copy()
 
 
 struct ChannelDeclaration(Copyable, Movable):
@@ -179,7 +172,8 @@ def validate_channel_declarations(decls: List[ChannelDeclaration]) raises:
       * a visibility of PUBLIC or PRIVATE;
       * at least one repository, each of a known artifact type, with a
         location and push_identity that are not empty or whitespace-only, at
-        most one per artifact type;
+        most one per artifact type, and a valid credential
+        (`validate_channel_credential`);
       * no location used by two repositories, in one channel or across two.
         Locations compare byte for byte: no case folding, no trailing-`/`
         trimming, so write each location in one canonical spelling.
@@ -232,7 +226,7 @@ def validate_channel_declarations(decls: List[ChannelDeclaration]) raises:
                     String("declares a repository of unknown artifact type '")
                     + r.artifact_type
                     + String("' (known: ")
-                    + _known_artifact_types()
+                    + known_artifact_types()
                     + String(")"),
                 )
             for k in range(j):
@@ -259,6 +253,7 @@ def validate_channel_declarations(decls: List[ChannelDeclaration]) raises:
                     + String(" repository; every repository has exactly")
                     + String(" one writer"),
                 )
+            validate_channel_credential(d.name, r.artifact_type, r.credential)
             for k in range(len(locations)):
                 if locations[k] != r.location:
                     continue

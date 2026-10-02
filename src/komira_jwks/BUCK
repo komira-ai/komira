@@ -4,8 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # key id (`kid_for_pubkey`), the RFC 7517 / RFC 8037 JWK Set renderer
 # (`render_jwks_json`), the publish-only seed -> JWKS derivation
 # (`jwks_json_from_seed`, which never constructs a minting keyring), and the
-# well-known identity JWKS path. It depends on `komira_crypto` for SHA-256,
-# base64url and the Ed25519 public-key derivation, and on `komira_secret_store`
+# well-known identity JWKS path. It depends on `komira_crypto` for SHA-256
+# and the Ed25519 public-key derivation, on `komira_encoding` for base64url, and
+# on `komira_secret_store`
 # for the zeroizing move-only `SecretValue` the seed arrives in. It must not
 # depend on any token-minting or authorization package.
 mojo_library(
@@ -13,6 +14,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
         "//src/komira_secret_store:komira_secret_store",
     ],
     visibility = ["PUBLIC"],

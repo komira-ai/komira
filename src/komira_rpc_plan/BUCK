@@ -29,6 +29,6 @@ mojo_proto_library(
         "plan_vocabulary.proto",
     ],
     import_prefix = "komira/plan/v1",
-    deps = ["//src/komira_serde:komira_serde"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],
 )
