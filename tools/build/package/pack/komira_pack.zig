@@ -930,19 +930,22 @@ fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_entr
 //
 //   <name>-<version>-0.conda   the package; this is the name the channel carries
 //   manifest.json              the artifact manifest, exactly the contract of
-//                              kci's `kci_artifact_manifest`: six string keys,
+//                              kci's `kci_artifact_manifest`: seven string keys,
 //                              compact, in this order, one trailing newline:
 //                                artifact_type (`CONDA`), name, version, subdir,
 //                                file (the package's name above, relative to the
-//                                manifest), sha256 (of that file)
+//                                manifest), sha256 (of that file), metadata
+//                                (`metadata.json`, the file below)
 //   metadata.json              everything else the build knows (sorted compact
 //                              JSON): kind, build, build_number, size, depends,
 //                              mojo_pin, source_commit, stamped, timestamp_ms,
 //                              label, payload_path, payload_sha256, ...
 //
-// The manifest cannot point at metadata.json (the parser refuses a `metadata`
-// key on a CONDA artifact), so the file is found by convention: next to the
-// manifest, under that name.
+// The manifest names metadata.json as a bare file name: kci's parser requires
+// `metadata` on a CONDA artifact and refuses one that is not a file next to
+// the manifest, so copying the directory cannot separate the two. The probe
+// //tools/build/package/manifest_probe:conda_manifest_kci runs kci's parser
+// over a package this tool wrote, so the two cannot drift apart.
 //
 // A library the tool cannot package (native code, no tests, a dependency with
 // no package, a run-time shared library) is written as a directory holding one
@@ -964,12 +967,15 @@ fn writeRefusal(alloc: Alloc, a: Args, why: []const u8) !void {
 }
 
 /// The contract manifest, byte for byte what kci's `render_artifact_manifest`
-/// writes for a CONDA artifact.
+/// writes for a CONDA artifact (its key order: `metadata` last).
+/// The metadata file a CONDA manifest names: next to it, under this name.
+const conda_manifest_metadata = "metadata.json";
+
 fn contractManifest(alloc: Alloc, name: []const u8, version: []const u8, subdir: []const u8, file: []const u8, sha: []const u8) ![]u8 {
     var out = std.ArrayList(u8).init(alloc);
     const w = out.writer();
     try w.writeAll("{\"artifact_type\":\"CONDA\"");
-    const vals = [_][2][]const u8{ .{ "name", name }, .{ "version", version }, .{ "subdir", subdir }, .{ "file", file }, .{ "sha256", sha } };
+    const vals = [_][2][]const u8{ .{ "name", name }, .{ "version", version }, .{ "subdir", subdir }, .{ "file", file }, .{ "sha256", sha }, .{ "metadata", conda_manifest_metadata } };
     for (vals) |kv| {
         try w.writeAll(",\"");
         try w.writeAll(kv[0]);
@@ -995,7 +1001,7 @@ fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, name:
     defer d.close();
     try writeFile(d, file, conda);
     try writeFile(d, "manifest.json", try contractManifest(alloc, name, version, subdir, file, &conda_sha));
-    try writeFile(d, "metadata.json", try jsonLine(alloc, metadata.*));
+    try writeFile(d, conda_manifest_metadata, try jsonLine(alloc, metadata.*));
 }
 
 /// komira_pack conda --name N --import-name I --version-prefix FILE --stamp N
@@ -1133,16 +1139,17 @@ fn expectEq(what: []const u8, got: []const u8, want: []const u8) void {
 }
 
 /// The manifest at `path` must be exactly the contract: parsed, then rendered
-/// again, it is the same bytes (so the six keys, their order, the compact
+/// again, it is the same bytes (so the seven keys, their order, the compact
 /// form and the newline are all checked at once).
 fn readContractManifest(alloc: Alloc, path: []const u8) !json.Value {
     const raw = readAll(alloc, path);
     const doc = json.parseFromSliceLeaky(json.Value, alloc, raw, .{}) catch |err|
         fail("{s}: not JSON: {s}", .{ path, @errorName(err) });
-    if (doc != .object or doc.object.count() != 6) fail("{s}: the manifest has exactly the six keys artifact_type, name, version, subdir, file, sha256", .{path});
+    if (doc != .object or doc.object.count() != 7) fail("{s}: the manifest has exactly the seven keys artifact_type, name, version, subdir, file, sha256, metadata", .{path});
+    expectEq(path, memberStr(doc, "metadata", path), conda_manifest_metadata);
     expectEq(path, memberStr(doc, "artifact_type", path), "CONDA");
     const again = try contractManifest(alloc, memberStr(doc, "name", path), memberStr(doc, "version", path), memberStr(doc, "subdir", path), memberStr(doc, "file", path), memberStr(doc, "sha256", path));
-    if (!std.mem.eql(u8, again, raw)) fail("{s}: not the artifact manifest format (compact JSON, keys artifact_type, name, version, subdir, file, sha256 in that order, one trailing newline)", .{path});
+    if (!std.mem.eql(u8, again, raw)) fail("{s}: not the artifact manifest format (compact JSON, keys artifact_type, name, version, subdir, file, sha256, metadata in that order, one trailing newline)", .{path});
     return doc;
 }
 
@@ -1157,7 +1164,7 @@ fn readMember(alloc: Alloc, path: []const u8) !Member {
     const file_path = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dir, memberStr(doc, "file", path) });
     const bytes = readAll(alloc, file_path);
     if (!std.mem.eql(u8, memberStr(doc, "sha256", path), &sha256Hex(bytes))) fail("{s}: the manifest's sha256 is not the file's", .{path});
-    const meta_path = try std.fmt.allocPrint(alloc, "{s}/metadata.json", .{dir});
+    const meta_path = try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dir, memberStr(doc, "metadata", path) });
     const meta = json.parseFromSliceLeaky(json.Value, alloc, readAll(alloc, meta_path), .{}) catch |err|
         fail("{s}: not JSON: {s}", .{ meta_path, @errorName(err) });
     expectEq(meta_path, memberStr(meta, "kind", meta_path), "library");
