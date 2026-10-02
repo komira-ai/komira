@@ -17,24 +17,24 @@ from std.memory import Pointer
 from std.testing import assert_true
 from std.time import perf_counter_ns
 
-from komira_spawn_join import spawn_join, SpawnJoinBody
+from komira_fork_join import fork_join, ForkJoinBody
 from komira_trace.tracer import Tracer
 
 
 # =============================================================================
-# THE FORK-JOIN -- real pthreads, through `komira_spawn_join`.
+# THE FORK-JOIN -- real pthreads, through `komira_fork_join`.
 #
 # MOJO 1.0.0 removed `parallelize` from the stdlib. A SERIAL LOOP WAS NOT TAKEN:
 # the latency arithmetic divides the whole wave's wall time by the per-thread
 # iteration count, which is only meaningful when the N threads run at once.
-# `spawn_join` is synchronous, exactly as `parallelize` was, so the caller's
+# `fork_join` is synchronous, exactly as `parallelize` was, so the caller's
 # `perf_counter_ns()` bracket still measures the whole wave. If a thread cannot
 # be started it raises, so the bench never reports a latency for a narrower
 # width than it claims.
 # =============================================================================
 
 
-struct _SpanPairsBody[o: Origin[mut=True]](SpawnJoinBody):
+struct _SpanPairsBody[o: Origin[mut=True]](ForkJoinBody):
     """Each worker emits `iters` start/end span pairs on its own ring."""
 
     var tracer: Pointer[Tracer, Self.o]
@@ -62,7 +62,7 @@ def run_microbench() raises -> Float64:
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
 
     # Warmup — populate workers + name registry.
-    spawn_join(_SpanPairsBody(Pointer(to=tracer), WARMUP_ITERATIONS), N_WORKERS)
+    fork_join(_SpanPairsBody(Pointer(to=tracer), WARMUP_ITERATIONS), N_WORKERS)
 
     # Drain the warmup records so we don't measure ring-overflow blocks.
     # We just reset ring counters via a fresh Tracer — alternative is to
@@ -72,13 +72,13 @@ def run_microbench() raises -> Float64:
     var tracer2 = Tracer(num_workers=N_WORKERS, ring_capacity=ITERATIONS_PER_WORKER * 4)
     tracer2.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
 
-    spawn_join(
+    fork_join(
         _SpanPairsBody(Pointer(to=tracer2), WARMUP_ITERATIONS), N_WORKERS
     )
 
     var t0 = perf_counter_ns()
 
-    spawn_join(
+    fork_join(
         _SpanPairsBody(Pointer(to=tracer2), ITERATIONS_PER_WORKER), N_WORKERS
     )
     _ = tracer2

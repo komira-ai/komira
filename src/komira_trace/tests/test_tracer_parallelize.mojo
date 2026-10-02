@@ -14,22 +14,22 @@
 from std.memory import Pointer
 from std.testing import assert_equal, assert_true
 
-from komira_spawn_join import spawn_join, SpawnJoinBody
+from komira_fork_join import fork_join, ForkJoinBody
 from komira_trace.tracer import Tracer
 from komira_trace.exporter import CapturingExporter
 
 
 # =============================================================================
-# THE FORK-JOIN -- real pthreads, through `komira_spawn_join`.
+# THE FORK-JOIN -- real pthreads, through `komira_fork_join`.
 #
-# MOJO 1.0.0 removed `parallelize` from the stdlib. `spawn_join(body, n)` starts
+# MOJO 1.0.0 removed `parallelize` from the stdlib. `fork_join(body, n)` starts
 # `n` threads that each call `body.run(tid)` on ONE shared body, which holds a
 # typed `Pointer` to the shared Tracer. A SERIAL LOOP WOULD HAVE VOIDED THIS
 # FILE: every arm below is about what N threads do to ONE shared Tracer -- the
 # disjointness of the per-worker rings, and the `try_register` read-then-write
 # race the second arm's docstring dissects at length.
 #
-# A body that raises fails the test: `spawn_join` joins every thread and then
+# A body that raises fails the test: `fork_join` joins every thread and then
 # rethrows the lowest tid's error.
 #
 # The file, its test names and its docstrings keep the word "parallelize": it
@@ -41,7 +41,7 @@ comptime N_WORKERS = 8
 comptime SPANS_PER_WORKER = 100
 
 
-struct _EmitBody[o: Origin[mut=True]](SpawnJoinBody):
+struct _EmitBody[o: Origin[mut=True]](ForkJoinBody):
     """Each worker opens and closes `iters` spans on its own ring."""
 
     var tracer: Pointer[Tracer, Self.o]
@@ -62,7 +62,7 @@ def test_disjoint_per_worker_emit() raises:
     """8 workers × 100 spans → 1600 records, all stacks return to depth 0."""
     var tracer = Tracer(num_workers=N_WORKERS, ring_capacity=1024)
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
-    spawn_join(_EmitBody(Pointer(to=tracer), SPANS_PER_WORKER), N_WORKERS)
+    fork_join(_EmitBody(Pointer(to=tracer), SPANS_PER_WORKER), N_WORKERS)
 
     # Every worker's stack returns to 0.
     for w in range(N_WORKERS):
@@ -80,7 +80,7 @@ def test_disjoint_per_worker_emit() raises:
     print("  test_disjoint_per_worker_emit PASS, spans=", exp.count())
 
 
-struct _DupNameBody[o: Origin[mut=True]](SpawnJoinBody):
+struct _DupNameBody[o: Origin[mut=True]](ForkJoinBody):
     """Every worker emits the SAME name, on purpose -- the `try_register`
     read-then-write race is the subject of the arm below."""
 
@@ -135,7 +135,7 @@ def test_name_registry_populated_under_parallelize() raises:
     comptime N_EMITTERS = 4
     var tracer = Tracer(num_workers=N_EMITTERS, ring_capacity=256)
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
-    spawn_join(_DupNameBody(Pointer(to=tracer)), N_EMITTERS)
+    fork_join(_DupNameBody(Pointer(to=tracer)), N_EMITTERS)
 
     var n = tracer.name_registry_count()
     assert_true(
@@ -152,7 +152,7 @@ def test_name_registry_populated_under_parallelize() raises:
     print("  test_name_registry_populated_under_parallelize PASS, count=", n)
 
 
-struct _UniqueNameBody[o: Origin[mut=True]](SpawnJoinBody):
+struct _UniqueNameBody[o: Origin[mut=True]](ForkJoinBody):
     """One DISTINCT span name per tid, so the registry must end up holding
     four."""
 
@@ -181,7 +181,7 @@ def test_distinct_names_register_separately() raises:
     """4 workers emit 4 different names — registry has 4 entries."""
     var tracer = Tracer(num_workers=4, ring_capacity=256)
     tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
-    spawn_join(_UniqueNameBody(Pointer(to=tracer)), 4)
+    fork_join(_UniqueNameBody(Pointer(to=tracer)), 4)
 
     assert_equal(tracer.name_registry_count(), Int(4),
                  "four distinct names registered")
