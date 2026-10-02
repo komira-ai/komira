@@ -1,23 +1,29 @@
 syntax = "proto3";
-package komira.engine.v1;
+package komira.supervisor.v1;
+
+import "komira/broker/v1/broker.proto";
 
 // The wire contract between a job supervisor (or a co-located broker node)
 // and the job manager / broker coordinator: the job phase vocabulary, the
-// supervisor heartbeat and its response, and the multi-node routing types the
-// response carries. Generated into the Mojo package `engine_rpc` as
-// `engine_rpc.engine`.
+// supervisor heartbeat and its response, and the failure report. The
+// multi-node routing types the heartbeat and its response carry (NodeLoad,
+// ClusterConfig, BrokerClusterMap) are declared in `komira.broker.v1`,
+// which this file imports. Generated into the Mojo package
+// `komira_supervisor_proto` as `komira_supervisor_proto.supervisor`.
 
 // ─── Job Phase (State Machine) ───────────────────────────────────────────
 
-// This vocabulary is also declared by the job store, which keeps a job's
-// phase as text. A phase stored there but missing here is invisible on the
-// wire: an agent cannot report it, and it decodes to JOB_PHASE_UNSPECIFIED at
-// every proto boundary. Add a phase in both places, in one change.
+// WARNING: this vocabulary is declared twice. `komira_job_store` keeps a
+// job's phase as a tag set and as text; this enum is the wire side. A phase
+// stored there but missing here is invisible on the wire: an agent cannot
+// report it, and it decodes to JOB_PHASE_UNSPECIFIED at every proto boundary.
+// Add a phase in both places, in one change.
 //
-// The numbers here and the store's tag ordinals are offset by one (proto3
-// reserves 0 for UNSPECIFIED) and are not a shared ordinal. The correspondence
-// is by name: store "X" <-> wire "JOB_PHASE_X". Never renumber an existing
-// value; append.
+// The numbers here and the store's tag ordinals are NOT a shared ordinal: the
+// store orders its tags differently (RECONCILING, for one, is 3 there and 6
+// here), and proto3 reserves 0 for UNSPECIFIED. The correspondence is by
+// name: store "X" <-> wire "JOB_PHASE_X". Never renumber an existing value;
+// append.
 enum JobPhase {
   JOB_PHASE_UNSPECIFIED = 0;
   JOB_PHASE_PENDING = 1;
@@ -64,7 +70,7 @@ message SupervisorHeartbeat {
   // These fields are all empty/absent for a plain job supervisor that owns
   // no broker partitions, so the existing job-only heartbeat is unchanged.
   optional string node_id = 7;          // stable cluster node identity
-  optional NodeLoad load = 8;           // soft-advisory load signal
+  optional komira.broker.v1.NodeLoad load = 8;           // soft-advisory load signal
   repeated uint32 owned_partitions = 9; // partitions this node is serving NOW
 
   // ── Broker peer routing (additive, wire-safe proto3) ──
@@ -85,7 +91,7 @@ message HeartbeatResponse {
   // cluster config (total partition count) so the node can size its routing
   // view. Empty for a plain job supervisor (no partitions assigned).
   repeated uint32 assigned_partitions = 2; // partitions this node SHOULD serve
-  optional ClusterConfig cluster = 3;      // current cluster shape
+  optional komira.broker.v1.ClusterConfig cluster = 3;      // current cluster shape
 
   // ── Broker peer routing (additive, wire-safe proto3) ──
   // The cluster-wide routing map the coordinator pushes to every node so a
@@ -94,7 +100,7 @@ message HeartbeatResponse {
   // Kafka client route correctly across the whole cluster without the client
   // having to merge Metadata across all brokers. Built AFTER the prune+reassign
   // pass so dead nodes never appear; absent on a plain job-leg heartbeat.
-  optional BrokerClusterMap broker_cluster = 4;
+  optional komira.broker.v1.BrokerClusterMap broker_cluster = 4;
 
   // ── Writer lease epoch fence (additive, wire-safe proto3) ──
   // The MONOTONE lease generation for each assigned partition, POSITIONALLY
@@ -108,64 +114,6 @@ message HeartbeatResponse {
   // generations (the owner then defaults its writer_lease_epoch to 0 -> the fence
   // is a no-op, preserving back-compat).
   repeated int64 assigned_generations = 5;
-}
-
-// ─── Broker peer routing shared types (additive, wire-safe proto3) ───────────
-
-// The cluster-wide routing map: every live broker's reachable endpoint plus the
-// current per-partition leader. The coordinator assembles this from its (already
-// stale-pruned) node registry + the live PartitionMap assignment, and ships it
-// on each HeartbeatResponse so any broker can answer a complete Kafka Metadata.
-message BrokerClusterMap {
-  repeated NodeEndpoint nodes = 1;     // every LIVE broker's reachable endpoint
-  repeated PartitionLeader leaders = 2; // per-partition leader (or NO_LEADER)
-}
-
-// One live broker's reachable Kafka endpoint (the broker id + the host/port a
-// client dials to reach it).
-message NodeEndpoint {
-  int32  node_id = 1; // the broker's stable node id (the Kafka broker.id)
-  string host    = 2; // the broker's reachable host (advertised_host)
-  uint32 port    = 3; // the broker's reachable Kafka port (advertised_port)
-}
-
-// One partition's current leader: the owning node id, or -1 (NO_LEADER) when no
-// live node owns the partition (a client reads -1 as no-leader and refreshes).
-message PartitionLeader {
-  uint32 partition_id    = 1; // the partition id
-  int32  leader_node_id  = 2; // the owning broker's node id, or -1 (NO_LEADER)
-}
-
-// ─── Multi-node shared types ──────────────────────────────────────────────
-
-// A node's soft-advisory load signal. Carried on the heartbeat and recorded
-// for observability and accounting (the record count is a free,
-// manifest-derived signal); the job manager's assignment pass does not
-// currently use it (it could later bias the tie-break toward less-loaded
-// nodes). "Soft-advisory": the job manager never grants a lease off these
-// numbers; ownership is the assignment table CAS, not a load-based lock.
-message NodeLoad {
-  uint64 records_served = 1; // cumulative records this node has served
-  uint32 partition_count = 2; // partitions this node currently owns
-
-  // ── Native multi-node scaling (additive, wire-safe proto3) ──
-  // The live topic partition count this node observes in the topic's
-  // partition map in object storage. Distinct from partition_count above
-  // (the count this node currently owns): this is the total live partition
-  // count of the topic, and it grows when a hot-shard split writes a grown
-  // map. The coordinator folds these reports into its registry and assigns
-  // partitions over max(configured count, max reported), so a split-driven
-  // partition-count change reaches the control plane (the coordinator never
-  // re-reads the map itself; it learns the grown count only from this
-  // heartbeat field). Absent (0 / unset) on a plain job supervisor and on a
-  // broker that did not read the map.
-  optional uint32 reported_partition_total = 3;
-}
-
-// The cluster shape the job manager publishes so a node can size its routing view.
-message ClusterConfig {
-  uint32 total_partitions = 1; // partition count of the (single) topic
-  uint32 node_count = 2;       // live node count the assignment spread across
 }
 
 // ─── Shared Types ────────────────────────────────────────────────────────
