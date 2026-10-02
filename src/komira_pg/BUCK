@@ -15,6 +15,7 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
         "//src/komira_http:komira_http",
     ],
     test_srcs = [
