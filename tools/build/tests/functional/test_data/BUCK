@@ -43,7 +43,8 @@ mojo_test(
 
 # The runner itself, in one action directory (runner_cases.sh): two runs get
 # two TEST_TMPDIRs, each empty, under the action directory and gone after the
-# run; --env HELD / BIN / rc cannot turn a red test green; a held red is HELD.
+# run; --env BIN / rc / MARKER cannot turn a red test green; a test killed
+# by a signal is red with its own status.
 mojo_gate_runner_cases(
     name = "runner_cases",
     script = "runner_cases.sh",

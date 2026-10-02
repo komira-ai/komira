@@ -20,7 +20,7 @@ One action chain per Mojo target, and every tool in it is an input of the action
 pinned downloads (busybox, zig, mojo-compiler .conda, C++ runtime .conda)
    |  remote actions unpack them: zig -> conda_unpack -> :mojo_compiler (+ CLOSURE_MANIFEST)
    v
-toolchains//:mojo   (mojo_compile + numa_single workers)
+toolchains//:mojo   (runs on the one execution platform of its OS)
    v
 mojo_library:  mojo_wrapper.sh -> mojo precompile -> <import>.mojoc
 mojo_binary :  mojo_wrapper.sh -> mojo build      -> executable (+ lib/ of runtime libraries)
@@ -110,13 +110,13 @@ A kill of the wrapper cannot be caught, so a tether process in the compiler's se
 
 **Revisit if.** The Mojo runtime stops loading a system C++ runtime.
 
-### Why are there two worker classes and two NUMA classes?
+### Why is there one execution platform per OS?
 
-**Decision.** `exec_class` separates `light` (unpacking and copying) from `mojo_compile` (running the compiler and what it built), and `numa` separates `numa_single` from `numa_multi`. Mojo toolchains state their classes, so a toolchain's `exec_compatible_with` binds every target that uses it.
+**Decision.** There is one Linux execution platform and one macOS one. No constraint separates unpacking from compiling, and no NUMA constraint exists: a target that needs the Linux x86_64 workers states `LINUX_X86_64` from `tools/build/platforms/defs.bzl`, and every other target needs no execution constraint.
 
-**Because.** Unpacking an archive needs little memory and few cores, while a compile needs many cores and a lot of memory; routing both to one pool either starves the compiles or wastes the large workers. buck2 chooses an execution platform per target, not per action, so a target's actions all run on one class. A multi-NUMA test therefore has to be its own target (`mojo_multi_numa_test`, taking a binary compiled by another target), or its compile would also need the rare worker. The platforms carry no service names or property sets: a repository that mounts komira supplies the platforms that realize the classes.
+**Because.** An earlier layout split the workers into classes (light, mojo_compile) and NUMA shapes, each a constraint and a platform. Every target and toolchain had to name its class, and a stale name broke analysis of everything that depended on it. The worker pool is now chosen by the service property set (`[komira_re] linux_properties`), not by the build graph.
 
-**Revisit if.** buck2 resolves an execution platform per action.
+**Revisit if.** A workload needs workers the single pool cannot serve.
 
 ## What must always hold?
 

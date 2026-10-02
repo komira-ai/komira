@@ -50,20 +50,9 @@ mojo_library(
   ([`tests/negative/libgate_bad`](../tests/negative/libgate_bad/BUCK): the library and its
   consumer go red, `[ungated]` builds, and a binary naming `[ungated]` in
   `deps` fails analysis).
-- **Holding a known-failing test: `tests_known_failing`.** A red test that
-  must not block the library's closure is held by a row
-  `{"<test_srcs path>": {"issue": "<n>, #<n> or its GitHub issue URL", "reason": "..."}}`.
-  The hold inverts rather than mutes: the held test still builds and runs in
-  the gate, and its marker (`HELD <label>`) is produced only if it FAILS. A
-  held test that passes is red, `LEDGER STALE`, naming the row to delete; an
-  unheld failing test is still `GATED TEST FAILED`. A held test killed by
-  SIGKILL (exit 137, what a memory limit delivers) has NO VERDICT: its action
-  fails without a marker, so an executor can retry it with more memory
-  instead of caching a too-small machine's kill as the held failure. Refused
-  at analysis: a key that is not a `test_srcs` entry, any field besides
-  `issue` and `reason`, a missing or malformed issue (a GitHub issue number or
-  URL, nothing else), an empty reason, two rows with byte-identical reasons, and holding every test
-  ([`tests/functional/known_failing`](../tests/functional/known_failing/BUCK)).
+- **Every welded test must pass.** There is no way to hold a red test: a
+  `mojo_library` naming `tests_known_failing` is refused when its BUCK file
+  loads.
 - **`test_srcs`, not `tests`**: Buck2 reserves `tests`. `buck2 test` on a
   `mojo_library` therefore runs nothing; its tests run when the library (or
   anything depending on it) is built.
@@ -225,7 +214,7 @@ mojo_test(
   `DYLD_FALLBACK_LIBRARY_PATH`, `DYLD_INSERT_LIBRARIES`, `TMPDIR`,
   `TEST_TMPDIR`, `HOME` and `PWD`; setting one is refused at analysis.
   The variables are given to the test process only, never to the runner's
-  own shell, so a name the runner uses internally (`HELD`, `BIN`, `rc`)
+  own shell, so a name the runner uses internally (`BIN`, `rc`, `MARKER`)
   reaches the test and cannot change the verdict
   ([`tests//functional/test_data:runner_cases`](../tests/functional/test_data/runner_cases.sh)).
 - **Scratch.** `TEST_TMPDIR` (equal to `TMPDIR`) and `HOME` are two empty
@@ -315,7 +304,7 @@ load("@komira//tools/build/cloud:gcp.bzl", "gcp_client")
 
 `gcp_client(name, protos, deps, bundle_proto_deps, bundle_only, roots,
 methods, messages_only, proto_deps, import_prefix, test_srcs, **kwargs)`
-(`kwargs`: `test_data`, `test_env`, `tests_known_failing`, passed to the
+(`kwargs`: `test_data`, `test_env`, passed to the
 `mojo_library`) generates a Google Cloud client at build
 time; no generated code is checked in. It is the generation half of the rules
 above (`<name>_gen`: protoc-gen-mojo writes the package and its layout probe,
@@ -338,6 +327,40 @@ target whole, sub-targets included, as that sub-target; nothing checks that
 [`../cloud/gcp.bzl`](../cloud/gcp.bzl) has the details;
 [`tests//functional/gcp_client`](../tests/functional/gcp_client/BUCK) and
 [`tests//negative/gcp_client`](../tests/negative/gcp_client/BUCK) exercise it.
+
+### Generated AWS clients: aws_client
+
+```python
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+```
+
+`aws_client(name, model, model_sha256, operations, deps, mode, service,
+overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
+`test_env`, passed to the `mojo_library`) generates an AWS client from one
+botocore service model at build time; no generated code is checked in.
+`<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
+writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
+(imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
+ordinary `mojo_library` over them, welded like gcp_client's: the probe is
+its first `test_srcs` entry, followed by the caller's. `model` and
+`model_sha256` are normally `botocore_model("<service>").model` and
+`.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);
+the service id is read from the model's botocore path unless `service`
+names it. `operations` is required and non-empty: only the closure of the
+operations named is emitted, and one the model lacks is refused by the
+generator. `mode = "pure"` (the default) emits shapes and
+`build_<op>_request` / `parse_<op>_response` with no transport; `"client"`
+adds the signed-send surface. `overrides` (the generator's hand-override
+manifest) and `hand_srcs` (the hand-written modules owning the operations
+it names, copied into the package) each require the other. `deps` is
+required and non-empty, and nothing is added to it. Every refusal of the
+rule is at analysis. The module docstring of
+[`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
+[`tests//functional/aws_client`](../tests/functional/aws_client/BUCK),
+[`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
+(client mode, at generation only) and
+[`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) exercise it.
 
 ## C and C++
 
@@ -407,8 +430,8 @@ assembly lists are generated but not built yet.
 
 | message | from | meaning |
 |---|---|---|
-| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed, and it is not held by `tests_known_failing` |
-| `LEDGER STALE: <label> PASSED, but it is held as known-failing.` | [`gate_runner.sh`](gate_runner.sh) | a test held by `tests_known_failing` passed; delete its row |
+| `GATED TEST FAILED: <label> (exit N)` | [`gate_runner.sh`](gate_runner.sh) | a `test_srcs` test (or `buck2 test` of a `mojo_test`) failed |
+| `<target>: tests_known_failing was removed: every welded test must pass` | [`defs.bzl`](defs.bzl) | a `mojo_library` call names `tests_known_failing`; delete it and make the test pass |
 | `<target>: test_data[<entry>]: not a test_srcs entry` | [`defs.bzl`](defs.bzl) | a `test_data` key names no test; fix the path or delete the key |
 | `<target>: ... data destination <d> ...` | [`defs.bzl`](defs.bzl) | a data destination is absolute, has an empty, `.` or `..` segment, or is also the directory of another destination |
 | `<target>: ... env sets <NAME>, which the test runner sets itself` | [`defs.bzl`](defs.bzl) | `test_env`/`env` names a variable the runner owns |
