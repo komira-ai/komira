@@ -8,12 +8,15 @@ it pins:
   * `drain_scan` refuses, by name and before opening anything, a split with no
     stop and a plan that may still grow; and a split that goes IDLE before its
     stop;
-  * the row limit and the byte budget cut the drain between polls;
+  * the row limit and the byte budget cut the drain between polls, and the
+    drain reports where each split stopped (a cut split its last position,
+    a split it never opened its start) through `resolve_drained`;
   * resume: poll k times, reopen at the position, and the rest equals the tail
     of a full read;
   * a split with no stop answers IDLE at the head, ROWS once its source grows,
     and END once it has a stop; a poll after END is refused by name;
-  * a foreign or mis-versioned position is refused on the way in and out;
+  * a foreign or mis-versioned position is refused on the way in and out,
+    including one a reader POLLS (and a refused END does not end the split);
   * each erased reader and resolver is dropped exactly once;
   * a reader facade built at another ABI is refused by name;
   * `split_read_order` refuses a duplicate key, an unknown `after` key and a
@@ -50,6 +53,7 @@ from komira_scan_resolver.scan_source_resolver import (
     refuse_discover_splits,
 )
 from komira_scan_resolver.scan_split import (
+    DrainedSplit,
     ErasedSplitReader,
     ScanSplit,
     ScanSplitPlan,
@@ -135,10 +139,12 @@ def _batch(rows: Int, first: Int) raises -> RecordBatch:
     return RecordBatch.from_typed_columns_1(_schema(), col^)
 
 
-def _pos(unit: Int, version: UInt8 = _VERSION) -> SplitPosition:
+def _pos(
+    unit: Int, version: UInt8 = _VERSION, kind: String = String(_KIND)
+) -> SplitPosition:
     var b = List[UInt8]()
     b.append(UInt8(unit))
-    return SplitPosition(scan_kind_id(String(_KIND)), version, b^)
+    return SplitPosition(scan_kind_id(kind), version, b^)
 
 
 def _first(batch: RecordBatch) raises -> Int:
@@ -155,6 +161,10 @@ struct _Reader(SplitReader, Movable, Deinitable):
     var _split: Int
     var _at: Int
     var _stop: Int
+    # The encoding the positions this reader POLLS carry (a lying reader
+    # writes another kind's, or another version).
+    var _out_kind: String
+    var _out_version: UInt8
 
     def __init__(
         out self,
@@ -163,12 +173,19 @@ struct _Reader(SplitReader, Movable, Deinitable):
         split: Int,
         at: Int,
         stop: Int,
+        var out_kind: String,
+        out_version: UInt8,
     ):
         self._tally = tally.copy()
         self._store = store.copy()
         self._split = split
         self._at = at
         self._stop = stop
+        self._out_kind = out_kind^
+        self._out_version = out_version
+
+    def _out(self) -> SplitPosition:
+        return _pos(self._at, self._out_version, self._out_kind)
 
     def __deinit__(deinit self):
         self._tally[].reader_drops += 1
@@ -179,15 +196,15 @@ struct _Reader(SplitReader, Movable, Deinitable):
         if stop < 0:
             stop = self._store[].tail_stop
         if stop >= 0 and self._at >= stop:
-            return SplitPoll.end(_pos(self._at))
+            return SplitPoll.end(self._out())
         if self._at < len(self._store[].units[self._split]):
             var rows = self._store[].units[self._split][self._at]
             var first = self._split * 1000 + self._at * 10
             self._at += 1
             return SplitPoll.rows(
-                _batch(rows, first), _pos(self._at), source_bytes=Int64(10 * rows)
+                _batch(rows, first), self._out(), source_bytes=Int64(10 * rows)
             )
-        return SplitPoll.idle(_pos(self._at))
+        return SplitPoll.idle(self._out())
 
 
 struct _Kind(ScanSourceResolver, Movable, Deinitable):
@@ -197,6 +214,8 @@ struct _Kind(ScanSourceResolver, Movable, Deinitable):
     var _store: ArcPointer[_Store]
     var _layout: Int
     var _emit_version: UInt8
+    var _poll_kind: String
+    var _poll_version: UInt8
 
     def __init__(
         out self,
@@ -204,11 +223,15 @@ struct _Kind(ScanSourceResolver, Movable, Deinitable):
         store: ArcPointer[_Store],
         layout: Int,
         emit_version: UInt8 = _VERSION,
+        var poll_kind: String = String(_KIND),
+        poll_version: UInt8 = _VERSION,
     ):
         self._tally = tally.copy()
         self._store = store.copy()
         self._layout = layout
         self._emit_version = emit_version
+        self._poll_kind = poll_kind^
+        self._poll_version = poll_version
 
     def __deinit__(deinit self):
         self._tally[].kind_drops += 1
@@ -296,7 +319,31 @@ struct _Kind(ScanSourceResolver, Movable, Deinitable):
         var stop = -1
         if split.stop:
             stop = Int(split.stop.value().bytes[0])
-        return _Reader(self._tally, self._store, idx, Int(split.start.bytes[0]), stop)
+        return _Reader(
+            self._tally,
+            self._store,
+            idx,
+            Int(split.start.bytes[0]),
+            stop,
+            String(self._poll_kind),
+            self._poll_version,
+        )
+
+    def resolve_drained(
+        self,
+        req: ScanRequest,
+        var resolved: ScanParams,
+        stopped: List[DrainedSplit],
+    ) raises -> ScanParams:
+        """Like a log's per-partition next offset: `at.<key>` is the unit the
+        drain stopped at in each split, `cut.<key>` whether it stopped short."""
+        for i in range(len(stopped)):
+            resolved.put_i64(
+                String("at.") + stopped[i].split_key,
+                Int64(stopped[i].position.bytes[0]),
+            )
+            resolved.put_bool(String("cut.") + stopped[i].split_key, stopped[i].cut)
+        return resolved^
 
 
 def _erased(
@@ -304,8 +351,12 @@ def _erased(
     store: ArcPointer[_Store],
     layout: Int,
     emit_version: UInt8 = _VERSION,
+    poll_kind: String = String(_KIND),
+    poll_version: UInt8 = _VERSION,
 ) -> ErasedScanSourceResolver:
-    return ErasedScanSourceResolver.erase(_Kind(tally, store, layout, emit_version))
+    return ErasedScanSourceResolver(
+        _Kind(tally, store, layout, emit_version, String(poll_kind), poll_version)
+    )
 
 
 def _request(r: ErasedScanSourceResolver, limit: Int64 = -1) raises -> ScanRequest:
@@ -398,6 +449,49 @@ def test_the_row_limit_and_the_byte_budget_cut_between_polls() raises:
     # No bound: everything.
     var everything = drain_scan(r, _request(r))
     assert_equal(everything.num_rows(), 9)
+
+
+def _assert_stopped(
+    opened_resolved: ScanParams, key: String, at: Int, cut: Bool, label: String
+) raises:
+    assert_equal(
+        opened_resolved.get_i64(String("at.") + key),
+        Int64(at),
+        label + String(": where '") + key + String("' stopped"),
+    )
+    assert_equal(
+        opened_resolved.get_bool(String("cut.") + key),
+        cut,
+        label + String(": whether '") + key + String("' was cut"),
+    )
+
+
+def test_the_drain_reports_where_each_split_stopped() raises:
+    var tally = ArcPointer(_Tally())
+    var store = ArcPointer(_Store())
+    var r = _erased(tally, store, _L_AFTER)
+    # Row cut, mid-split: b (2 rows) reads to its stop; a's first unit (3
+    # rows) passes limit 3, so a stops at unit 1 of its 2, cut.
+    var by_rows = drain_scan(r, _request(r, limit=3))
+    _assert_stopped(by_rows.resolved, String("b"), 1, False, "row cut")
+    _assert_stopped(by_rows.resolved, String("a"), 1, True, "row cut")
+    assert_equal(
+        by_rows.resolved.get_str(String("layout")),
+        String(_L_AFTER),
+        "the plan's own keys survive",
+    )
+    # Byte cut before a split is opened: b costs 20 of a 15-byte budget, so a
+    # is never opened and reports its start.
+    var opens_before = tally[].opens
+    var by_bytes = drain_scan(r, _request(r), max_bytes=15)
+    assert_equal(tally[].opens - opens_before, 1, "a is never opened")
+    assert_equal(by_bytes.num_rows(), 2)
+    _assert_stopped(by_bytes.resolved, String("b"), 1, False, "byte cut")
+    _assert_stopped(by_bytes.resolved, String("a"), 0, True, "byte cut")
+    # No bound: every split at its stop, none cut.
+    var everything = drain_scan(r, _request(r))
+    _assert_stopped(everything.resolved, String("b"), 1, False, "no cut")
+    _assert_stopped(everything.resolved, String("a"), 2, False, "no cut")
 
 
 # ---- resume, follow, positions ------------------------------------------------
@@ -507,6 +601,43 @@ def test_a_foreign_or_misversioned_position_is_refused() raises:
     assert_true(raised_out, "a plan carrying a foreign version must not escape")
 
 
+def _refuse_polls(mut reader: ErasedSplitReader, token: String, label: String) raises:
+    var raised = False
+    try:
+        _ = reader.poll(-1, -1)
+    except e:
+        raised = True
+        var msg = String(e)
+        _assert_raises_named(msg, token, label)
+        _assert_raises_named(msg, String("polled 'r'"), label + String(": names it"))
+    assert_true(raised, label + String(": the polled position must not escape"))
+
+
+def _check_polled_refusal(r: ErasedScanSourceResolver, token: String) raises:
+    var req = _request(r)
+    var plan = r.plan_splits(req)
+    # A ROWS poll.
+    var reader = r.open_split(req, plan.splits[0])
+    _refuse_polls(reader, token, token + String(" ROWS"))
+    # An END poll (opened at its stop), refused twice: a refused END does not
+    # end the split, so the second poll is refused for the position again and
+    # NOT as a poll after END.
+    var at_stop = r.open_split(req, plan.splits[0].resumed_at(_pos(4)))
+    _refuse_polls(at_stop, token, token + String(" END"))
+    _refuse_polls(at_stop, token, token + String(" END again"))
+
+
+def test_a_polled_foreign_or_misversioned_position_is_refused() raises:
+    var tally = ArcPointer(_Tally())
+    var store = ArcPointer(_Store())
+    var foreign = _erased(
+        tally, store, _L_RESUME, poll_kind=String("komira.test.other")
+    )
+    _check_polled_refusal(foreign, String(SCAN_RESOLVER_FOREIGN_KIND))
+    var misversioned = _erased(tally, store, _L_RESUME, poll_version=7)
+    _check_polled_refusal(misversioned, String(SCAN_SPLIT_POSITION_VERSION))
+
+
 # ---- ownership and ABI ----------------------------------------------------------
 
 
@@ -607,9 +738,11 @@ def main() raises:
     suite.test[test_the_drain_refuses_a_plan_that_may_still_grow]()
     suite.test[test_the_drain_refuses_a_split_that_stalls_before_its_stop]()
     suite.test[test_the_row_limit_and_the_byte_budget_cut_between_polls]()
+    suite.test[test_the_drain_reports_where_each_split_stopped]()
     suite.test[test_a_resumed_split_reads_exactly_the_tail_of_a_full_read]()
     suite.test[test_a_split_with_no_stop_goes_idle_then_rows_then_end]()
     suite.test[test_a_foreign_or_misversioned_position_is_refused]()
+    suite.test[test_a_polled_foreign_or_misversioned_position_is_refused]()
     suite.test[test_each_erased_box_is_dropped_exactly_once]()
     suite.test[test_a_reader_facade_at_another_abi_is_refused_by_name]()
     suite.test[test_split_read_order_refuses_a_bad_plan_by_name]()

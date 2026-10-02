@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # `drain_scan` plans one execution's splits, reads each to its stop, and
-# returns the rows as resident batches (`ScanOpened`) with the plan's resolved
-# side channel. It is what lets an execution-time pass re-root a kind's scan
+# returns the rows as resident batches (`ScanOpened`) with the resolved side
+# channel the kind reports for what was actually read. It is what lets an execution-time pass re-root a kind's scan
 # leaf as an ordinary bound IN_MEMORY scan.
 #
 # It reads ONLY bounded plans: a plan that may still grow (`complete == False`)
@@ -17,6 +17,13 @@
 # caller's `max_bytes`. Both are cuts the read MAY stop at, checked between
 # polls, and each poll is handed what is left of them. A poll returns its first
 # unit whole (`SplitReader.poll`), so a cut overshoots by at most one unit.
+#
+# A cut is reported, not hidden. The drain keeps where it left every planned
+# split (its last polled position, or its start if it never opened it, and
+# whether it stopped short of the split's stop) and hands that to the kind's
+# `resolve_drained`, whose answer is `ScanOpened.resolved`. So a side channel
+# that says where a read stopped (a per-partition next offset) says where THIS
+# read stopped, and a continuation from it skips nothing.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -28,7 +35,7 @@ from komira_scan_resolver.scan_source_resolver import (
     ScanRequest,
     ScanSourceResolver,
 )
-from komira_scan_resolver.scan_split import ScanSplit
+from komira_scan_resolver.scan_split import DrainedSplit, ScanSplit
 
 
 comptime SCAN_READ_MODE_UNBOUNDED_DRAIN: StaticString = (
@@ -135,7 +142,8 @@ def drain_scan[
     one (`SCAN_SPLIT_PLAN_INVALID`) and a split that stalls before its stop
     (`SCAN_SPLIT_STALLED`), each by name. Stops early, between polls, once
     `req.limit` rows or `max_bytes` source bytes have been read; both are
-    -1 for no bound. `ScanOpened.resolved` is the plan's `resolved`.
+    -1 for no bound. `ScanOpened.resolved` is the kind's `resolve_drained`
+    over the plan's `resolved` and one `DrainedSplit` per planned split.
     """
     var plan = resolver.plan_splits(req)
     if not plan.complete:
@@ -161,22 +169,29 @@ def drain_scan[
                 + String("') has no stop; a drain reads only bounded splits")
             )
     var order = split_read_order(plan.splits)
+    # Where the drain left each planned split, in PLAN order. A split it never
+    # opens stays at its start, cut.
+    var stopped = List[DrainedSplit]()
+    for i in range(len(plan.splits)):
+        stopped.append(
+            DrainedSplit(
+                String(plan.splits[i].split_key),
+                plan.splits[i].start.copy(),
+                cut=True,
+            )
+        )
     var batches = Slab[RecordBatch]()
     var rows: Int64 = 0
     var bytes: Int64 = 0
-    var cut = False
     for k in range(len(order)):
-        if cut:
+        # Checked before the split is opened, so a split the budget never
+        # reaches is never opened and reports its start.
+        if _budget_spent(req, max_bytes, rows, bytes):
             break
-        ref split = plan.splits[order[k]]
+        var at = order[k]
+        ref split = plan.splits[at]
         var reader = resolver.open_split(req, split)
         while True:
-            if req.has_limit() and rows >= req.limit:
-                cut = True
-                break
-            if max_bytes >= 0 and bytes >= max_bytes:
-                cut = True
-                break
             var rows_left: Int64 = -1
             if req.has_limit():
                 rows_left = req.limit - rows
@@ -186,9 +201,11 @@ def drain_scan[
             var polled = reader.poll(rows_left, bytes_left)
             bytes += polled.source_bytes
             rows += Int64(polled.num_rows())
+            stopped[at].position = polled.position.copy()
             if polled.batch:
                 batches.append(polled.batch.take())
             if polled.is_end():
+                stopped[at].cut = False
                 break
             if polled.is_idle():
                 raise Error(
@@ -201,4 +218,18 @@ def drain_scan[
                     + req.binding.kind_name
                     + String("') answered IDLE before its stop")
                 )
-    return ScanOpened(ArcPointer(batches^), plan.resolved.copy())
+            if _budget_spent(req, max_bytes, rows, bytes):
+                # Cut here, unless this poll already reached the stop.
+                stopped[at].cut = not (stopped[at].position == split.stop.value())
+                break
+    var resolved = resolver.resolve_drained(req, plan.resolved.copy(), stopped)
+    return ScanOpened(ArcPointer(batches^), resolved^)
+
+
+def _budget_spent(
+    req: ScanRequest, max_bytes: Int64, rows: Int64, bytes: Int64
+) -> Bool:
+    """True once the row limit or the byte budget is used up."""
+    if req.has_limit() and rows >= req.limit:
+        return True
+    return max_bytes >= 0 and bytes >= max_bytes

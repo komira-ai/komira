@@ -11,9 +11,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests drive stub kinds with no executor: erasing and dropping a
 # conformer or a reader destroys it exactly once, a duplicate or unregistered
 # kind and a facade from another ABI are refused by name, a foreign binding or
-# position is refused, the drain reads splits in `after` order and refuses a
-# split with no stop, a resumed split reads exactly the rest, and a split that
-# follows its source goes IDLE, then ROWS, then END once it has a stop.
+# position is refused (planned, opened or polled), the drain reads splits in
+# `after` order, refuses a split with no stop and reports where a cut left each
+# split, a resumed split reads exactly the rest, and a split that follows its
+# source goes IDLE, then ROWS, then END once it has a stop.
 mojo_library(
     name = "komira_scan_resolver",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

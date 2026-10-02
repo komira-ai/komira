@@ -15,6 +15,8 @@
 #   discover_splits(...)   splits added since the plan, for a read that follows
 #                          a growing set of them.
 #   open_split(req, split) a reader for one split (`Self.Reader`).
+#   resolve_drained(...)   what a bounded read reports back, given where each
+#                          split stopped (a default keeps the plan's own).
 #
 # This library depends on `komira_core` only, so a package that implements a
 # scan kind (a message log, a search index, a log store) can conform to the
@@ -57,6 +59,7 @@ from komira_core.source.scan_kind_registry import ScanKindDescriptor
 from komira_core.source.scan_params import ScanParams
 from komira_core.source.scan_resolver import ScanResolver
 from komira_scan_resolver.scan_split import (
+    DrainedSplit,
     ErasedSplitReader,
     ScanSplit,
     ScanSplitPlan,
@@ -287,6 +290,25 @@ trait ScanSourceResolver(ScanResolver):
         used for; `limit` is not the reader's."""
         ...
 
+    def resolve_drained(
+        self,
+        req: ScanRequest,
+        var resolved: ScanParams,
+        stopped: List[DrainedSplit],
+    ) raises -> ScanParams:
+        """What `drain_scan` returns as `ScanOpened.resolved`, given the plan's
+        `resolved` and where the drain left each planned split (`stopped`, in
+        plan order: its last position, or its start if it was never opened,
+        and whether the row limit or byte budget cut it short).
+
+        A kind whose side channel says where a read STOPPED (a per-partition
+        next offset) rewrites those keys from `stopped`; without this, a cut
+        drain would report the planned stops and a continuation would skip
+        the rows it never read. The default keeps the plan's `resolved`,
+        which is right for a kind whose side channel says only what was
+        planned (an index generation)."""
+        return resolved^
+
 
 def refuse_discover_splits(kind_name: String) raises -> SplitDelta:
     """What a kind whose splits are fixed per snapshot answers to
@@ -331,6 +353,12 @@ comptime _OpenSplitFn = def (
     UInt8,
     String,
 ) raises thin -> ErasedSplitReader
+comptime _ResolveDrainedFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    ScanRequest,
+    ScanParams,
+    List[DrainedSplit],
+) raises thin -> ScanParams
 comptime _DropScanResolverFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin]
 ) thin -> None
@@ -344,7 +372,8 @@ comptime _DropScanResolverFn = def (
 struct ErasedScanSourceResolver(ScanSourceResolver, Movable, Deinitable):
     """A RUNTIME-erased `ScanSourceResolver`: owns ONE concrete
     `R: ScanSourceResolver` behind a type-erased heap home and a manual fn-ptr
-    vtable. Construct with `ErasedScanSourceResolver.erase[R](resolver^)`.
+    vtable. Construct with `ErasedScanSourceResolver(resolver^)` (or
+    `ErasedScanSourceResolver.erase[R]`).
 
     Conforms `ScanSourceResolver` itself (its `Reader` is `ErasedSplitReader`),
     and adds the checks every conformer would otherwise have to remember: a
@@ -364,7 +393,7 @@ struct ErasedScanSourceResolver(ScanSourceResolver, Movable, Deinitable):
     #
     # SAFETY (every method below that casts `_home`): `_home` owns R's heap
     # home for this facade's lifetime. The byte ptr formed by the cast is
-    # reinterpreted by a trampoline as the SAME R bound at `erase[R]` and used
+    # reinterpreted by a trampoline as the SAME R bound at construction and used
     # in place (not moved, not freed). The mutable cast is required by the
     # vtable's single pointer type; every trampoline calls only a `read self`
     # method of R, so nothing writes through it. The untracked origin lives
@@ -383,43 +412,16 @@ struct ErasedScanSourceResolver(ScanSourceResolver, Movable, Deinitable):
     var _plan_splits_fn: _PlanSplitsFn
     var _discover_splits_fn: _DiscoverSplitsFn
     var _open_split_fn: _OpenSplitFn
+    var _resolve_drained_fn: _ResolveDrainedFn
     var _drop_fn: _DropScanResolverFn
 
-    def __init__(
-        out self,
-        var home: OwnedPointer[UInt8],
-        var descriptor: ScanKindDescriptor,
-        position_version: UInt8,
-        epoch_fn: _EpochFn,
-        is_bound_fn: _IsBoundFn,
-        resolve_snapshot_fn: _ResolveSnapshotFn,
-        build_binding_fn: _BuildBindingFn,
-        plan_splits_fn: _PlanSplitsFn,
-        discover_splits_fn: _DiscoverSplitsFn,
-        open_split_fn: _OpenSplitFn,
-        drop_fn: _DropScanResolverFn,
-    ):
-        self._abi = SCAN_RESOLVER_ABI_VERSION
-        self._home = home^
-        self._descriptor = descriptor^
-        self._position_version = position_version
-        self._epoch_fn = epoch_fn
-        self._is_bound_fn = is_bound_fn
-        self._resolve_snapshot_fn = resolve_snapshot_fn
-        self._build_binding_fn = build_binding_fn
-        self._plan_splits_fn = plan_splits_fn
-        self._discover_splits_fn = discover_splits_fn
-        self._open_split_fn = open_split_fn
-        self._drop_fn = drop_fn
-
-    @staticmethod
-    def erase[
-        R: ScanSourceResolver
-    ](var resolver: R) -> ErasedScanSourceResolver:
+    def __init__[R: ScanSourceResolver](out self, var resolver: R):
         """Erase a concrete `R`. Heap-boxes `resolver` and binds the TOP-LEVEL
         parametric trampolines (not nested closures — nested closures over a
         comptime param do not lower as stable fn-ptrs). This is the ONE site
-        where `R` (and `R.Reader`) is instantiated for a consumer.
+        where `R` (and `R.Reader`) is instantiated for a consumer, and the only
+        constructor: no caller can pair a home with a vtable bound for another
+        type, and no pointer or fn-ptr type appears in the signature.
 
         SAFETY: `alloc[R](1)` + an in-place move puts `resolver` on a fresh heap
         slot; `OwnedPointer(unsafe_from_raw_pointer=...)` takes single ownership
@@ -432,30 +434,28 @@ struct ErasedScanSourceResolver(ScanSourceResolver, Movable, Deinitable):
         var home_typed = alloc[R](1)
         # SAFETY: fresh allocation we own; move-construct `resolver` into it.
         UnsafePointer(to=home_typed[]).unsafe_write(resolver^)
-        var home = OwnedPointer[UInt8](
+        self._abi = SCAN_RESOLVER_ABI_VERSION
+        self._home = OwnedPointer[UInt8](
             unsafe_from_raw_pointer=home_typed.bitcast[UInt8]()
         )
-        var epoch_t: _EpochFn = _erased_scan_epoch_for[R]
-        var is_bound_t: _IsBoundFn = _erased_scan_is_bound_for[R]
-        var resolve_t: _ResolveSnapshotFn = _erased_scan_resolve_snapshot_for[R]
-        var build_t: _BuildBindingFn = _erased_scan_build_binding_for[R]
-        var plan_t: _PlanSplitsFn = _erased_scan_plan_splits_for[R]
-        var discover_t: _DiscoverSplitsFn = _erased_scan_discover_splits_for[R]
-        var open_t: _OpenSplitFn = _erased_scan_open_split_for[R]
-        var drop_t: _DropScanResolverFn = _erased_scan_drop_for[R]
-        return ErasedScanSourceResolver(
-            home^,
-            descriptor^,
-            position_version,
-            epoch_t,
-            is_bound_t,
-            resolve_t,
-            build_t,
-            plan_t,
-            discover_t,
-            open_t,
-            drop_t,
-        )
+        self._descriptor = descriptor^
+        self._position_version = position_version
+        self._epoch_fn = _erased_scan_epoch_for[R]
+        self._is_bound_fn = _erased_scan_is_bound_for[R]
+        self._resolve_snapshot_fn = _erased_scan_resolve_snapshot_for[R]
+        self._build_binding_fn = _erased_scan_build_binding_for[R]
+        self._plan_splits_fn = _erased_scan_plan_splits_for[R]
+        self._discover_splits_fn = _erased_scan_discover_splits_for[R]
+        self._open_split_fn = _erased_scan_open_split_for[R]
+        self._resolve_drained_fn = _erased_scan_resolve_drained_for[R]
+        self._drop_fn = _erased_scan_drop_for[R]
+
+    @staticmethod
+    def erase[
+        R: ScanSourceResolver
+    ](var resolver: R) -> ErasedScanSourceResolver:
+        """`ErasedScanSourceResolver(resolver^)`, spelled as the verb."""
+        return ErasedScanSourceResolver(resolver^)
 
     # ---- identity of the erased kind -----------------------------------------
 
@@ -618,6 +618,29 @@ struct ErasedScanSourceResolver(ScanSourceResolver, Movable, Deinitable):
             String(self._descriptor.kind_name),
         )
 
+    def resolve_drained(
+        self,
+        req: ScanRequest,
+        var resolved: ScanParams,
+        stopped: List[DrainedSplit],
+    ) raises -> ScanParams:
+        """The kind's report of a drain. Refuses a foreign binding, and a
+        stopped position encoded by another kind or at another version, before
+        the kind runs."""
+        self._refuse_foreign(req.binding, String("report a drain of"))
+        for i in range(len(stopped)):
+            stopped[i].position.require_kind(
+                self._descriptor.kind_id,
+                self._position_version,
+                self._descriptor.kind_name,
+                String("drained '") + stopped[i].split_key + String("'"),
+            )
+        # SAFETY: as the `_home` field note (a read-only in-place use of R).
+        var p = self._home.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[
+            MutUntrackedOrigin
+        ]()
+        return self._resolve_drained_fn(p, req, resolved, stopped)
+
     def __deinit__(deinit self):
         """Destroy the erased R AND free its home in ONE shot via `_drop_fn`.
         `_home`'s own free is relinquished first (`unsafe_leak()`) so the single
@@ -635,10 +658,10 @@ struct ErasedScanSourceResolver(ScanSourceResolver, Movable, Deinitable):
 
 # =============================================================================
 # §5 — the TOP-LEVEL parametric trampolines, bound ONCE per concrete R at
-#      `erase[R]`. Top-level so they lower as stable thin fn-ptrs.
+#      construction (`__init__[R]`). Top-level so they lower as stable thin fn-ptrs.
 #
 # SAFETY (all non-drop trampolines): `home` is the byte-cast of the live
-# `OwnedPointer[R]` home the facade owns (the same R bound here at `erase[R]`);
+# `OwnedPointer[R]` home the facade owns (the same R bound here at construction);
 # it is reinterpreted to `R*` and a `read self` method is called in place — R is
 # neither moved nor freed. Arguments are borrowed value types; results are owned
 # values.
@@ -713,6 +736,18 @@ def _erased_scan_open_split_for[
     return ErasedSplitReader.erase[R.Reader](
         reader^, kind_id, position_version, String(kind_name), String(split.split_key)
     )
+
+
+def _erased_scan_resolve_drained_for[
+    R: ScanSourceResolver
+](
+    home: UnsafePointer[UInt8, MutUntrackedOrigin],
+    req: ScanRequest,
+    resolved: ScanParams,
+    stopped: List[DrainedSplit],
+) raises -> ScanParams:
+    var rp = home.bitcast[R]()
+    return rp[].resolve_drained(req, resolved.copy(), stopped)
 
 
 def _erased_scan_drop_for[

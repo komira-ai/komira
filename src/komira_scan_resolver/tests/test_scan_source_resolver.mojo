@@ -11,7 +11,7 @@ context, no plan execution. What it pins:
     and a foreign binding a kind BUILDS;
   * `build_binding` refuses a params map missing a required key, by name;
   * the `resolved` side channel round-trips through `drain_scan` over the
-    erased facade;
+    erased facade (the stub keeps the stock `resolve_drained`);
   * a facade built at another ABI is refused by name, and the resolver set
     refuses to register one.
 Split ordering, resume, the follow-a-split states and position checks are in
@@ -445,6 +445,26 @@ def test_an_abi_mismatch_is_refused_by_name() raises:
     assert_true(raised, "a host at another ABI must refuse the facade")
 
 
+def test_the_resolver_set_refuses_to_register_a_facade_at_another_abi() raises:
+    var tally = ArcPointer(_Tally())
+    var a = ErasedScanSourceResolver(_StubKind(tally, String(_KIND_A)))
+    # What a facade built by another compilation looks like to this host.
+    a._abi = SCAN_RESOLVER_ABI_VERSION + 1
+    var set = ScanSourceResolvers()
+    var raised = False
+    try:
+        set.register(a^)
+    except e:
+        raised = True
+        var msg = String(e)
+        assert_true(String(SCAN_RESOLVER_ABI_MISMATCH) in msg, msg)
+        assert_true(String(SCAN_RESOLVER_ABI_VERSION + 1) in msg, msg)
+    assert_true(raised, "register must refuse a facade at another ABI")
+    assert_equal(set.num_kinds(), 0, "nothing was registered")
+    assert_false(set.contains(scan_kind_id(String(_KIND_A))))
+    assert_equal(tally[].drops, 1, "the refused facade is dropped exactly once")
+
+
 def test_a_request_copy_is_deep_and_the_default_has_no_limit() raises:
     var tally = ArcPointer(_Tally())
     var a = ErasedScanSourceResolver.erase(_StubKind(tally, String(_KIND_A)))
@@ -475,5 +495,6 @@ def main() raises:
     suite.test[test_the_drain_over_the_concrete_kind_matches_the_erased_one]()
     suite.test[test_a_bounded_kind_refuses_discovery_by_name]()
     suite.test[test_an_abi_mismatch_is_refused_by_name]()
+    suite.test[test_the_resolver_set_refuses_to_register_a_facade_at_another_abi]()
     suite.test[test_a_request_copy_is_deep_and_the_default_has_no_limit]()
     suite^.run()

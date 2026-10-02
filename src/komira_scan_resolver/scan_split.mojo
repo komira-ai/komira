@@ -21,7 +21,8 @@
 # ERASURE. `ErasedSplitReader` boxes one concrete reader behind thin fn-ptrs,
 # the same shape as `ErasedScanSourceResolver`, because a reader is produced by
 # a resolver whose concrete type the engine does not know. It is returned BY
-# VALUE; no pointer leaves this package.
+# VALUE; no pointer leaves this package, and none enters it: the only
+# constructor takes the concrete reader and binds its own trampolines.
 # =============================================================================
 
 from std.memory import OwnedPointer, UnsafePointer, alloc
@@ -256,6 +257,32 @@ struct SplitDelta(Movable, Deinitable):
         self.complete = complete
 
 
+struct DrainedSplit(Copyable, Movable, Deinitable):
+    """Where a drain left ONE split of its plan.
+
+    `position` is the resume point after the last poll of the split, or its
+    `start` when the drain never opened it. `cut` is True when the drain
+    stopped before the split's stop: the row limit or the byte budget ran out
+    in it or before it. A continuation reads the split from `position`; a
+    split that is not `cut` has nothing left to read.
+
+    What `ScanSourceResolver.resolve_drained` receives, one per planned split,
+    in plan order.
+    """
+
+    var split_key: String
+    var position: SplitPosition
+    var cut: Bool
+
+    def __init__(out self, var split_key: String, var position: SplitPosition, cut: Bool):
+        self.split_key = split_key^
+        self.position = position^
+        self.cut = cut
+
+    def copy(self) -> Self:
+        return Self(String(self.split_key), self.position.copy(), self.cut)
+
+
 # =============================================================================
 # §2 — polling a split
 # =============================================================================
@@ -365,7 +392,7 @@ comptime _DropReaderFn = def (UnsafePointer[UInt8, MutUntrackedOrigin]) thin -> 
 
 struct ErasedSplitReader(SplitReader, Movable, Deinitable):
     """A RUNTIME-erased `SplitReader`. Construct with
-    `ErasedSplitReader.erase[R](reader^, ...)`.
+    `ErasedSplitReader(reader^, ...)` (or `ErasedSplitReader.erase[R]`).
 
     Adds what every reader would otherwise have to remember: a position for
     another kind (or another encoding version) is refused on the way out, and
@@ -388,25 +415,43 @@ struct ErasedSplitReader(SplitReader, Movable, Deinitable):
     var _poll_fn: _PollFn
     var _drop_fn: _DropReaderFn
 
-    def __init__(
+    def __init__[
+        R: SplitReader
+    ](
         out self,
-        var home: OwnedPointer[UInt8],
+        var reader: R,
         kind_id: UInt32,
         position_version: UInt8,
         var kind_name: String,
         var split_key: String,
-        poll_fn: _PollFn,
-        drop_fn: _DropReaderFn,
     ):
+        """Erase a concrete reader of the split `split_key` of kind `kind_id`.
+
+        The ONLY constructor: it boxes `reader` and binds both trampolines for
+        the same `R` itself, so no caller can pair a home with a vtable bound
+        for another type, and no pointer or fn-ptr type appears in the
+        signature.
+
+        SAFETY: `alloc[R](1)` + an in-place move puts `reader` on a fresh heap
+        slot; `OwnedPointer(unsafe_from_raw_pointer=...)` takes single ownership
+        of the byte-cast slot (concrete origin, ASAP-tracked). Both trampolines
+        are bound for the SAME `R`, so the in-body reinterpret of the home ptr
+        is type-correct by construction.
+        """
+        var home_typed = alloc[R](1)
+        # SAFETY: fresh allocation we own; move-construct `reader` into it.
+        UnsafePointer(to=home_typed[]).unsafe_write(reader^)
         self._abi = SCAN_RESOLVER_ABI_VERSION
-        self._home = home^
+        self._home = OwnedPointer[UInt8](
+            unsafe_from_raw_pointer=home_typed.bitcast[UInt8]()
+        )
         self._kind_id = kind_id
         self._position_version = position_version
         self._kind_name = kind_name^
         self._split_key = split_key^
         self._ended = False
-        self._poll_fn = poll_fn
-        self._drop_fn = drop_fn
+        self._poll_fn = _erased_split_poll_for[R]
+        self._drop_fn = _erased_split_drop_for[R]
 
     @staticmethod
     def erase[
@@ -418,30 +463,9 @@ struct ErasedSplitReader(SplitReader, Movable, Deinitable):
         var kind_name: String,
         var split_key: String,
     ) -> ErasedSplitReader:
-        """Erase a concrete reader of the split `split_key` of kind `kind_id`.
-
-        SAFETY: `alloc[R](1)` + an in-place move puts `reader` on a fresh heap
-        slot; `OwnedPointer(unsafe_from_raw_pointer=...)` takes single ownership
-        of the byte-cast slot (concrete origin, ASAP-tracked). Both trampolines
-        are bound for the SAME `R`, so the in-body reinterpret of the home ptr
-        is type-correct by construction.
-        """
-        var home_typed = alloc[R](1)
-        # SAFETY: fresh allocation we own; move-construct `reader` into it.
-        UnsafePointer(to=home_typed[]).unsafe_write(reader^)
-        var home = OwnedPointer[UInt8](
-            unsafe_from_raw_pointer=home_typed.bitcast[UInt8]()
-        )
-        var poll_t: _PollFn = _erased_split_poll_for[R]
-        var drop_t: _DropReaderFn = _erased_split_drop_for[R]
+        """`ErasedSplitReader(reader^, ...)`, spelled as the verb."""
         return ErasedSplitReader(
-            home^,
-            kind_id,
-            position_version,
-            kind_name^,
-            split_key^,
-            poll_t,
-            drop_t,
+            reader^, kind_id, position_version, kind_name^, split_key^
         )
 
     def abi_version(self) -> UInt32:
@@ -458,7 +482,7 @@ struct ErasedSplitReader(SplitReader, Movable, Deinitable):
     def poll(mut self, max_rows: Int64, max_bytes: Int64) raises -> SplitPoll:
         """SAFETY: `_home` owns R's heap home for this facade's lifetime. The
         byte ptr formed here is reinterpreted by the trampoline as the SAME R
-        bound at `erase[R]`, and R's `mut self` `poll` runs in place through it
+        bound at construction, and R's `mut self` `poll` runs in place through it
         (not moved, not freed). `self` is borrowed `mut` for the call, so
         nothing else reaches the home meanwhile. The untracked origin is
         confined to this cast-site body."""
@@ -516,7 +540,7 @@ def _erased_split_poll_for[
     home: UnsafePointer[UInt8, MutUntrackedOrigin], max_rows: Int64, max_bytes: Int64
 ) raises -> SplitPoll:
     """SAFETY: `home` is the byte-cast of the live `OwnedPointer[R]` home the
-    facade owns (the same R bound here at `erase[R]`); it is reinterpreted to
+    facade owns (the same R bound here at construction); it is reinterpreted to
     `R*` and R's `poll` runs in place — R is neither moved nor freed."""
     var rp = home.bitcast[R]()
     return rp[].poll(max_rows, max_bytes)
