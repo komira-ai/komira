@@ -41,7 +41,7 @@
 # is PUBLIC — nothing needs zeroizing.
 # =============================================================================
 
-from komira_crypto.base64 import base64_url_decode
+from komira_encoding import base64_url_decode
 from komira_crypto.rsa import rsa_pkcs1_sha256_verify
 
 
