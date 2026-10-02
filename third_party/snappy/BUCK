@@ -1,3 +1,4 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -11,7 +12,7 @@ pinned_file(
 
 archive_files(
     name = "src",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":snappy-1.2.2.tar.gz",
     files = [
         "COPYING",
