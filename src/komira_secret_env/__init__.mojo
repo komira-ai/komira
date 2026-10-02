@@ -10,7 +10,7 @@
 #   * `is_secret_env_name`, `check_secret_env_name`, `MAX_SECRET_NAME_LEN`
 #                          the handle grammar.
 #
-# DEPENDENCIES: komira_secret_store only (and, through it, komira_crypto).
+# DEPENDENCIES: komira_secret_store, komira_core_ffi (getenv), komira_crypto.
 # =============================================================================
 
 from komira_secret_env.env_name import (

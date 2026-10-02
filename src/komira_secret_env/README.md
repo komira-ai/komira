@@ -30,6 +30,7 @@ The value goes from the environ block straight into the `SecretValue`; no
 
 ## Dependencies
 
-`komira_secret_store` only. `process_env.mojo` declares `getenv` itself, with
-komira_core_ffi's signature exactly; the `getenv_link_probe` target links the
-two side by side, so a signature change in either fails that build.
+`komira_secret_store` (the port), `komira_core_ffi` and `komira_crypto`.
+`ProcessEnv` reads through komira_core_ffi's `_read_env_into`, so the binary
+keeps its one `getenv` declaration, into a stack buffer that it wipes with
+komira_crypto's `zeroize_inline_array` on every path out.

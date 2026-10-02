@@ -7,13 +7,14 @@
 # runner exports for this test: nothing is set in-process and nothing is read
 # from the host. Pinned here: set, empty and unset are three different
 # answers from `ProcessEnv.lookup`, a value is copied byte for byte (a
-# non-ASCII byte is not re-encoded), and the store's refusals hold over the
-# real reader.
+# non-ASCII byte is not re-encoded), a value of exactly MAX_SECRET_LEN bytes
+# is read whole and one byte longer is refused rather than truncated, and the
+# store's refusals hold over the real reader.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_secret_store import SecretValue
+from komira_secret_store import MAX_SECRET_LEN, SecretValue
 
 from komira_secret_env import EnvSecretStore, ProcessEnv
 
@@ -60,6 +61,34 @@ def test_value_is_copied_byte_for_byte() raises:
     assert_equal(v.len(), 10)
 
 
+def test_value_at_the_limit_is_read_whole() raises:
+    """KOMIRA_SECRET_ENV_TEST_MAX is MAX_SECRET_LEN bytes of 'q'."""
+    var env = ProcessEnv()
+    var got = env.lookup("KOMIRA_SECRET_ENV_TEST_MAX")
+    assert_true(Bool(got))
+    var v = got.take()
+    assert_equal(v.len(), MAX_SECRET_LEN)
+    var b = v.revealed_bytes()
+    assert_equal(Int(b[0]), Int(ord("q")))
+    assert_equal(Int(b[MAX_SECRET_LEN - 1]), Int(ord("q")))
+
+
+def test_value_past_the_limit_is_refused_not_truncated() raises:
+    """KOMIRA_SECRET_ENV_TEST_LONG is MAX_SECRET_LEN + 1 bytes of 'q'.
+
+    Killed by: a scan that stops at MAX_SECRET_LEN, which would hand back
+    the first MAX_SECRET_LEN bytes, a corrupted credential. The refusal names
+    the handle and carries no byte of the value."""
+    var store = EnvSecretStore[ProcessEnv](ProcessEnv())
+    var msg = _refusal(store, "KOMIRA_SECRET_ENV_TEST_LONG")
+    assert_equal(
+        msg,
+        "EnvSecretStore: environment variable KOMIRA_SECRET_ENV_TEST_LONG:"
+        " value is longer than MAX_SECRET_LEN (4096 bytes)",
+    )
+    assert_false("qqqq" in msg, "the refusal quotes no value bytes")
+
+
 def test_lookup_refuses_a_bad_name() raises:
     var env = ProcessEnv()
     var refused = False
@@ -88,6 +117,8 @@ def test_store_over_the_process_env() raises:
 def main() raises:
     test_lookup_distinguishes_set_empty_and_unset()
     test_value_is_copied_byte_for_byte()
+    test_value_at_the_limit_is_read_whole()
+    test_value_past_the_limit_is_refused_not_truncated()
     test_lookup_refuses_a_bad_name()
     test_store_over_the_process_env()
     print("PASS test_process_env")
