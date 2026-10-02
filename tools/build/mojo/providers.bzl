@@ -63,6 +63,11 @@ MojoToolchainInfo = provider(fields = {
     # Directory: only the shared libraries a built binary loads (a
     # `mojo_runtime`). A runnable binary carries a copy of it as lib/.
     "runtime": provider_field(typing.Any),
+    # The operating system the compiled code runs on: "linux" or "darwin".
+    # Rules that differ by platform (mojo_shared_lib: .so or .dylib, the link
+    # flags that name and limit its symbols) read it here, so the target
+    # platform is decided by the toolchain, never by a second attribute.
+    "os": provider_field(str, default = "linux"),
 })
 
 # A built binary that starts on its own: `run_dir` holds the binary and lib/,

@@ -474,14 +474,26 @@ else
         build --emit shared-lib x.mojo -o out > "$U/wrap.txt" 2>&1)
     rc_shared=$?
     grep -q 'bundles are linux only' "$U/wrap.txt" || rc_shared=x
+    # A C-ABI library names itself for dyld (mojo_shared_lib) and is let through to
+    # the compile; the bundle's `-soname` spelling is still refused.
+    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
+        build --emit shared-lib -Xlinker -soname -Xlinker x.so x.mojo -o out > "$U/wrap.txt" 2>&1)
+    rc_soname=$?
+    grep -q 'bundles are linux only' "$U/wrap.txt" || rc_soname=x
+    (cd "$U/run" && rm -rf .komira_action && sh "$OLDPWD/tools/build/mojo/darwin/mojo_wrapper.sh" "$BB" "$TC" "$U/link" 11.0 -- \
+        build --emit shared-lib -Xlinker -install_name -Xlinker @rpath/x.dylib x.mojo -o out > "$U/wrap.txt" 2>&1)
+    rc_dylib=$?
+    grep -q "compiler exited 0 but out is missing" "$U/wrap.txt" || rc_dylib=x
     wrap --runpath='$ORIGIN/../..' --source-root=src
     rc=$?
     # The stand-in compiler writes nothing, so a host that passes the identity
     # check reaches the output check (exit 3).
     if [ "$rc_same_sdk" != 2 ]; then
         fail "wrapper: a host with a listed SDK version but another toolchain digest was accepted (rc=$rc_same_sdk)"
-    elif [ "$rc_bad_opt" != 2 ] || [ "$rc_abs" != 2 ] || [ "$rc_shared" != 2 ]; then
-        fail "wrapper: an unknown option, an absolute run path or a shared-lib build was not refused ($rc_bad_opt $rc_abs $rc_shared)"
+    elif [ "$rc_bad_opt" != 2 ] || [ "$rc_abs" != 2 ] || [ "$rc_shared" != 2 ] || [ "$rc_soname" != 2 ]; then
+        fail "wrapper: an unknown option, an absolute run path or a bundle shared-lib build was not refused ($rc_bad_opt $rc_abs $rc_shared $rc_soname)"
+    elif [ "$rc_dylib" != 3 ]; then
+        fail "wrapper: a self-named (install_name) shared-lib build was refused, or did not reach the compile (rc=$rc_dylib, see $U/wrap.txt)"
     elif [ "$rc" != 3 ] || ! grep -q "compiler exited 0 but out is missing" "$U/wrap.txt"; then
         fail "wrapper: a listed host was not accepted (rc=$rc, see $U/wrap.txt)"
     else
@@ -652,6 +664,29 @@ else
     else
         pass "live: $verdict"
     fi
+    # mojo_shared_lib: a .dylib, its gate run on a macOS worker; the same red twins as Linux.
+    if ! timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" --show-full-output \
+            //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact > "$LOG/darwin_sharedlib.log" 2>&1; then
+        fail "live: mojo_shared_lib examples failed on macOS (see $LOG/darwin_sharedlib.log)"
+    else
+        dylib=$(grep -E ' [^ ]*/pub/plain\.dylib$' "$LOG/darwin_sharedlib.log" | sed 's/^[^ ]* //')
+        # Mach-O arm64 (the magic, cf fa ed fe), named `@rpath/plain.dylib`, with no build path in it.
+        if [ -z "$dylib" ] || [ "$(head -c4 "$dylib" | od -An -tx1 | tr -d ' \n')" != cffaedfe ] ||
+            ! grep -qF '@rpath/plain.dylib' "$dylib" || grep -qF 'buck-out' "$dylib"; then
+            fail "live: plain.dylib is not a Mach-O library named @rpath/plain.dylib free of build paths (see $LOG/darwin_sharedlib.log)"
+        else
+            pass "live: mojo_shared_lib builds a .dylib on macOS and its gate passes (plain, plain_exact)"
+        fi
+    fi
+    for t in missing_export:'MISSING EXPORT: neg_missing' failing_driver:'GATED TEST FAILED' plain_leaks:'plain_hidden leaked into the dynamic symbol table'; do
+        if timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" "tests//negative/shared_lib:${t%%:*}" > "$LOG/darwin_neg_${t%%:*}.log" 2>&1; then
+            fail "live: tests//negative/shared_lib:${t%%:*} built on macOS, but it must fail"
+        elif ! grep -qF -- "${t#*:}" "$LOG/darwin_neg_${t%%:*}.log"; then
+            fail "live: tests//negative/shared_lib:${t%%:*} failed without '${t#*:}' (see $LOG/darwin_neg_${t%%:*}.log)"
+        else
+            pass "live: tests//negative/shared_lib:${t%%:*} is red on macOS for its own reason"
+        fi
+    done
     if timeout 900 "$BUCK2" --isolation-dir "$ISO" build --no-remote-cache "${DARWIN[@]}" -c "$HOSTS_KEY=0.0-nohost" \
             //tools/build/examples:hello > "$LOG/darwin_refuse.log" 2>&1; then
         fail "live: a compile whose host list names no worker succeeded"

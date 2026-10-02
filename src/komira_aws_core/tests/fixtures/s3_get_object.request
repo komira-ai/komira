@@ -1,0 +1,6 @@
+GET /photos/2026/a%20b.jpg?versionId=v1&acl HTTP/1.1
+Host: my-bucket.s3.us-west-2.amazonaws.com
+X-Amz-Date: 20260919T120000Z
+x-amz-content-sha256: e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855
+Authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260919/us-west-2/s3/aws4_request, SignedHeaders=host;x-amz-content-sha256;x-amz-date, Signature=59492edbec295d10d902fcd3bc746cc463deba05d8a911b781cbaf9ddaa3d7a8
+
