@@ -254,7 +254,7 @@ struct ProtocolConnectJson(
 
     Same framing rules as ProtocolConnectProto — JSON differs only in
     the encoded bytes a generated stub feeds in / decodes out via the
-    `Proto3JsonWire` `komira_serde` backend.
+    `Proto3JsonWire` `komira_proto_codec` backend.
     """
 
     var _placeholder: UInt8
