@@ -118,7 +118,7 @@ from komira_proto_codec import (
     PB_MAX_DECODE_DEPTH,
     PB_DECODE_TOO_DEEP,
 )
-from komira_rpc_plan.plan import WirePlanEnvelope
+from komira_plan_proto.plan import WirePlanEnvelope
 
 from komira_plan_wire import (
     plan_to_bytes,

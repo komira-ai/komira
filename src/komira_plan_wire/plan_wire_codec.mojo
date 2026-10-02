@@ -16,7 +16,7 @@
 # -------------------------------------
 # `komira_core`'s deps stay minimal and that is load-bearing — almost every
 # package depends on it, so anything added to its deps goes upstream of nearly
-# everything. The codec needs `komira_proto_codec` and the generated `komira_rpc_plan`
+# everything. The codec needs `komira_proto_codec` and the generated `komira_plan_proto`
 # messages, so it lives in its own package ABOVE core. Same shape as
 # `komira_fs_registry`: the package whose job is to close over a lower layer's
 # types sits on top of it, never inside it.
@@ -360,7 +360,7 @@ from std.memory import OwnedPointer
 
 from komira_proto_codec import encode_proto, decode_proto
 
-from komira_rpc_plan.plan import (
+from komira_plan_proto.plan import (
     WireField,
     WireSchema,
     WireScalar,
@@ -422,7 +422,7 @@ from komira_rpc_plan.plan import (
     WirePlanEnvelope,
     WireWriteTarget,
 )
-from komira_rpc_plan.plan_vocabulary import (
+from komira_plan_proto.plan_vocabulary import (
     AggFn,
     AsofDirection,
     AsofToleranceKind,

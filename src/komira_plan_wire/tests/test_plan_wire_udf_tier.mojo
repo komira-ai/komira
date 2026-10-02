@@ -44,7 +44,7 @@ from komira_plan_wire.plan_wire_codec import (
     PLAN_WIRE_UNSUPPORTED_UDF,
 )
 from komira_proto_codec import encode_proto, decode_proto
-from komira_rpc_plan.plan import WirePlanEnvelope
+from komira_plan_proto.plan import WirePlanEnvelope
 
 
 def _scan() raises -> LogicalPlan:

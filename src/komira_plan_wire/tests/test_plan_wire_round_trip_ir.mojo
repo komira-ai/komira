@@ -263,7 +263,7 @@ from komira_plan_wire.plan_wire_codec import PLAN_WIRE_FORMAT_VERSION
 # through `LogicalPlan` can express an out-of-range type id. `WireField.
 # arrow_type_id` is a `uint32`; `ArrowType.type_id` is a `UInt8`.
 from komira_proto_codec import encode_proto, decode_proto
-from komira_rpc_plan.plan import (
+from komira_plan_proto.plan import (
     WireExpr,
     WireField,
     WirePartitionValueRow,
@@ -5633,7 +5633,7 @@ def test_partition_values_with_no_partition_cols_are_refused_not_dropped() raise
 #
 # THE UNIVERSE IS DERIVED, FROM `plan.proto`
 # -------------------------------------------
-# `_wire_slot_registry()` below is DERIVED from `komira_rpc_plan`'s
+# `_wire_slot_registry()` below is DERIVED from `komira_plan_proto`'s
 # `plan.proto`, one row per declared field, and must be kept in step with it.
 # A new wire field therefore cannot arrive outside this probe: it enters the
 # registry, has no ledger row, and goes red.
