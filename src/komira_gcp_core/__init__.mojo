@@ -36,9 +36,9 @@ Modules:
   - retry.mojo      : AIP-194 retryable codes and jittered exponential
                       backoff under a deadline: `RetryPolicy.decide`.
   - clock.mojo      : the injected `Clock` and its `MonotonicClock`.
-  - utf8.mojo       : validating untrusted body bytes before decoding.
-  - nesting.mojo    : the nesting-depth guard every parse of a server body
-                      passes first (internal; not re-exported).
+  - utf8.mojo       : validating untrusted bytes before decoding them to a
+                      String (internal). The JSON paths do not use it:
+                      komira_json refuses ill-formed UTF-8 itself.
 
 Nothing in this package reads the environment or opens a socket.
 """

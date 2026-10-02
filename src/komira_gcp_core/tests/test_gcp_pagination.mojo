@@ -189,21 +189,47 @@ def test_url_helpers() raises:
 
 
 def test_deep_nesting_is_refused_not_recursed() raises:
-    # A 2xx list page is as server-chosen as an error body, and the JSON
-    # parser recurses once per level: 100k levels must raise, not overflow
-    # the stack. The refusal names the byte count and nothing of the body.
-    var deep = List[UInt8](capacity=100_000)
+    # A 2xx list page is as server-chosen as an error body: 100k levels must
+    # be refused by komira_json's depth cap (MAX_PARSE_DEPTH = 64), not
+    # parsed. The refusal names the byte count and komira_json's reason and
+    # nothing of the body: the marker string after the brackets never shows.
+    var deep = List[UInt8](capacity=100_020)
     for _ in range(100_000):
         deep.append(UInt8(ord("[")))
+    for c in String('"SECRET-MARKER"').as_bytes():
+        deep.append(c)
     var raised = False
     try:
         _ = next_page_token(deep)
     except e:
         raised = True
         var m = String(e)
-        assert_true(_has(m, "100000-byte"), m)
+        assert_true(_has(m, "100015-byte"), m)
+        assert_true(_has(m, "nesting deeper than the limit of 64"), m)
         assert_false(_has(m, "[["), m)
+        assert_false(_has(m, "SECRET"), m)
     assert_true(raised)
+    # Depth 64 exactly is read; 65 is refused.
+    var at = String('{"nextPageToken": "t", "x": ')
+    var over = String('{"nextPageToken": "t", "x": ')
+    for _ in range(63):
+        at += "["
+    for _ in range(64):
+        over += "["
+    for _ in range(63):
+        at += "]"
+    for _ in range(64):
+        over += "]"
+    at += "}"
+    over += "}"
+    assert_equal(next_page_token(_bytes(at)), "t")
+    var refused = False
+    try:
+        _ = next_page_token(_bytes(over))
+    except e:
+        refused = True
+        assert_true(_has(String(e), "nesting deeper than the limit of 64"), String(e))
+    assert_true(refused, "depth 65 was parsed")
     # The same depth inside a token string is only a long token.
     var s = String('{"nextPageToken": "')
     for _ in range(1000):
@@ -213,8 +239,8 @@ def test_deep_nesting_is_refused_not_recursed() raises:
 
 
 def test_escaped_quote_keeps_the_string_open() raises:
-    # The depth guard must honour `\"`. Each case is wrong in a DIFFERENT
-    # direction under a guard that treats `\"` as the end of the string.
+    # The depth limit must honour `\"`. Each case is wrong in a DIFFERENT
+    # direction under a parser that treats `\"` as the end of the string.
     #
     # (a) 100 `[` that really sit inside the token string, after a `\"`. A
     # guard that ended the string at `\"` would count them and refuse a
@@ -229,8 +255,8 @@ def test_escaped_quote_keeps_the_string_open() raises:
     # (b) 100 levels of REAL nesting that a guard which ended the string at
     # `\"` would mis-pair as string content: after `"x\""` it would see an
     # extra quote, open a string at `"b"`'s closing quote and never close it,
-    # so the brackets after it would go uncounted and reach the recursive
-    # parser. The real guard counts them and refuses.
+    # so the brackets after it would go uncounted and slip past the
+    # depth limit. The real parser counts them and refuses.
     var b = String('{"nextPageToken": "t", "a": "x\\"", "b": ')
     for _ in range(100):
         b += "["

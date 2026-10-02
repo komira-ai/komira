@@ -12,13 +12,13 @@
 # The cursor stops on a server that hands back the token it was just given
 # (it would otherwise page forever) and at `max_pages`, and says which.
 # The body is read for `nextPageToken` only; a refusal names byte counts. A
-# 2xx page is as server-chosen as an error body, so it passes the same
-# nesting-depth guard (`nesting.mojo`) before it reaches the recursive parser.
+# 2xx page is as server-chosen as an error body, so it is parsed under the
+# same nesting limit (`MAX_PARSE_DEPTH`) by komira_json's strict,
+# non-recursive parser, which also refuses ill-formed UTF-8.
 # =============================================================================
 
-from komira_serde.json_value import parse_json_value, JSON_STRING
-from komira_gcp_core.nesting import MAX_PARSE_DEPTH, nesting_within
-from komira_gcp_core.utf8 import utf8_string
+from komira_json import JsonValue, JSON_STRING, parse_json_bytes
+from komira_gcp_core.status import MAX_PARSE_DEPTH
 
 
 comptime DEFAULT_MAX_PAGES: Int = 1000
@@ -29,23 +29,17 @@ def next_page_token(body: List[UInt8]) raises -> String:
 
     Raises if the body is not UTF-8 JSON, not an object, nests deeper than
     `MAX_PARSE_DEPTH`, or the field is not a string; the message names the
-    body's byte count, never its content. There is deliberately no size cap
-    here: a legitimate list page can be large. The depth check is what keeps
-    a server-chosen body from choosing the parser's stack depth."""
-    if not nesting_within(body, MAX_PARSE_DEPTH):
-        raise Error(
-            String("next_page_token: the ") + String(len(body))
-            + "-byte list response nests deeper than "
-            + String(MAX_PARSE_DEPTH) + " levels; not parsed"
-        )
-    var text = utf8_string(body)
-    var doc = parse_json_value(String("{}"))
+    body's byte count and komira_json's reason (a fixed phrase plus a line
+    and column), never its content. There is deliberately no size cap here:
+    a legitimate list page can be large."""
+    var doc = JsonValue()
     try:
-        doc = parse_json_value(text)
-    except:
+        doc = parse_json_bytes(body, MAX_PARSE_DEPTH)
+    except e:
         raise Error(
             String("next_page_token: the ") + String(len(body))
-            + "-byte list response is not a JSON document"
+            + "-byte list response is not a JSON document ("
+            + String(e) + ")"
         )
     if not doc.is_object():
         raise Error(

@@ -18,6 +18,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_gcp_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_json:komira_json"],
     test_srcs = [
         "tests/test_gcp_status.mojo",
         "tests/test_gcp_pagination.mojo",

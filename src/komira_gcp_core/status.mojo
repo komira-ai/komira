@@ -24,8 +24,14 @@
 # REST clients call (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
 # =============================================================================
 
-from komira_serde.json_value import parse_json_value, JsonValue, JSON_STRING
-from komira_gcp_core.nesting import MAX_PARSE_DEPTH, nesting_within
+from komira_json import JsonValue, JSON_STRING, parse_json_bytes
+
+
+comptime MAX_PARSE_DEPTH: Int = 64
+"""The nesting limit (arrays/objects) every server body is parsed under,
+passed to komira_json as `max_depth`. A Google error envelope or list page
+is a handful of levels deep. komira_json's parser is non-recursive and
+refuses a deeper document itself, so no pre-scan of the body is needed."""
 
 
 # google.rpc.Code (googleapis google/rpc/code.proto).
@@ -203,17 +209,18 @@ def parse_gcp_status(
     if blank:
         out.envelope = ENVELOPE_ABSENT
         return out^
-    if len(body) > _MAX_PARSE_BYTES or not nesting_within(body, MAX_PARSE_DEPTH):
+    if len(body) > _MAX_PARSE_BYTES:
         return out^
     # Non-ASCII bytes only ever occur inside JSON strings; replacing each with
-    # one ASCII byte keeps every length and makes the text valid UTF-8.
+    # one ASCII byte keeps every length, so ill-formed UTF-8 in `message`
+    # (which is only counted) cannot make the envelope MALFORMED.
     var ascii = List[UInt8](capacity=len(body))
     for i in range(len(body)):
         var c = Int(body[i])
         ascii.append(UInt8(c) if c < 0x80 else UInt8(ord("x")))
     var doc = JsonValue()
     try:
-        doc = parse_json_value(String(unsafe_from_utf8=Span(ascii)))
+        doc = parse_json_bytes(ascii, MAX_PARSE_DEPTH)
     except:
         return out^
     if not doc.is_object() or not doc.has("error"):

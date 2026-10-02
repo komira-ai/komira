@@ -189,8 +189,9 @@ def _nested_envelope(brackets: Int) -> List[UInt8]:
 
 
 def test_balanced_nesting_past_the_limit_is_refused() raises:
-    # Depth 65: the parser would read it (it has no depth limit of its own),
-    # so only the guard can make it MALFORMED.
+    # Depth 65: refused by the depth limit komira_json is called with
+    # (MAX_PARSE_DEPTH = 64, below komira_json's own default of 128), so
+    # it is MALFORMED.
     var deep = _nested_envelope(63)
     var e = parse_gcp_status("GET", "S", 403, deep)
     assert_equal(e.envelope, ENVELOPE_MALFORMED)
@@ -215,9 +216,9 @@ def test_brackets_inside_a_string_do_not_count_as_nesting() raises:
 
 
 def test_escaped_quote_keeps_the_string_open() raises:
-    # The depth guard must honour `\"`. Each case is wrong in a DIFFERENT
-    # direction under a guard that treats `\"` as the end of the string, so
-    # deleting the escape handling reds this test either way.
+    # The depth limit must honour `\"`. Each case is wrong in a DIFFERENT
+    # direction under a parser that treats `\"` as the end of the string, so
+    # breaking the escape handling reds this test either way.
     #
     # (a) 100 `[` that really sit inside the message, after a `\"`. A guard
     # that ended the string at `\"` would count them and refuse a valid
@@ -233,7 +234,7 @@ def test_escaped_quote_keeps_the_string_open() raises:
     # (b) 100 levels of REAL nesting that such a guard would mis-pair as
     # string content: after `"x\""` it sees one quote too many, opens a string
     # at `"b"`'s closing quote and never closes it, so the brackets go
-    # uncounted and reach the recursive parser. The real guard refuses.
+    # uncounted. The real parser counts them and refuses.
     var b = String('{"error": {"status": "NOT_FOUND", "a": "x\\"", "b": ')
     for _ in range(100):
         b += "["
