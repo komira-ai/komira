@@ -96,7 +96,7 @@ else
 fi
 # A row added to a list adds a package, and nothing else is written.
 AD=tools/build/tests/zz_conda_set_add_test
-trap 'rm -r -f "$ROOT/$AD"' EXIT
+trap 'rm -r -f "${ROOT:?}/${AD:?}"' EXIT
 mkdir -p "$ROOT/$AD" && {
     printf 'komira_aa\t//src/komira_aa:komira_aa\tx\nkomira_bb\t//src/komira_bb:komira_bb\tx\n' > "$ROOT/$AD/names.tsv"
     sh tools/build/package/gen_conda_names.sh "$ROOT/$AD/names.tsv" > "$ROOT/$AD/names.bzl"
@@ -108,7 +108,7 @@ if [ "$added" = "komira_aa komira_bb metapackage names.tsv release_set " ]; then
 else
     fail "generated: a scratch list of two rows gave: $added (see $W/add.err)"
 fi
-rm -r -f "$ROOT/$AD"
+rm -r -f "${ROOT:?}/${AD:?}"
 
 # ---- the release set --------------------------------------------------------
 # shellcheck disable=SC2086 # STAMP is a list of words
@@ -124,7 +124,7 @@ mkdir -p "$K/m"
 cp -rL "$SETDIR" "$K/set" && chmod -R u+w "$K/set"
 for n in $NAMES; do
     # shellcheck disable=SC2086
-    m=$(out_of "$T:$n[release][manifest]" $STAMP) && cp -L "$m" "$K/m/$n.manifest.json"
+    m=$(out_of "$T:${n}[release][manifest]" $STAMP) && cp -L "$m" "$K/m/$n.manifest.json"
 done
 # shellcheck disable=SC2086
 m=$(out_of "$T:metapackage[release][manifest]" $STAMP) && cp -L "$m" "$K/m/$META.manifest.json"
@@ -220,7 +220,7 @@ pack_member() { # name stamp names-file out-prefix [extra komira_pack args]
     shift 4
     "$PACK" conda --name "$n" --name-prefix komira_ --names "$names" --version-prefix packaging/conda/VERSION_PREFIX \
         --stamp "$st" --timestamp-ms 86400000 --commit "$C40" --subdir linux-64 --mojo-pin "$pin" --license Apache-2.0 \
-        --summary s --home https://github.com/komira-ai/komira --payload "$(out_of "//src/$n:$n")" --sources "$(out_of "//src/$n:$n[src]")" \
+        --summary s --home https://github.com/komira-ai/komira --payload "$(out_of "//src/$n:$n")" --sources "$(out_of "//src/${n}:${n}[src]")" \
         --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" --label "x//$n" \
         --out "$o.conda" --conda-manifest "$o.manifest.json" --digest "$o.digest" "$@" 2> "$o.err"
 }
