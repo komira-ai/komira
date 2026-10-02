@@ -78,7 +78,6 @@ from .status import (
     code_name,
     gcp_status_error,
     parse_gcp_status,
-    duration_to_ms,
     RETRY_INFO_TYPE,
 )
 from .pagination import (

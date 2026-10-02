@@ -36,10 +36,10 @@ from komira_gcp_core import (
     CODE_UNAUTHENTICATED,
     GcpRetryClassifier,
     RETRY_INFO_TYPE,
-    duration_to_ms,
     gcp_retry_policy,
     parse_gcp_status,
 )
+from komira_gcp_core.status import _duration_to_ms
 
 
 struct FixedRng(RetryRng, Movable, Deinitable):
@@ -249,18 +249,18 @@ def test_throttle_keeps_the_retry_info_delay() raises:
 
 
 def test_duration_to_ms() raises:
-    assert_equal(duration_to_ms("0s"), 0)
-    assert_equal(duration_to_ms("1s"), 1000)
-    assert_equal(duration_to_ms("1.5s"), 1500)
-    assert_equal(duration_to_ms("0.000000001s"), 1)  # rounded up, never early
-    assert_equal(duration_to_ms("2.0010s"), 2001)
+    assert_equal(_duration_to_ms("0s"), 0)
+    assert_equal(_duration_to_ms("1s"), 1000)
+    assert_equal(_duration_to_ms("1.5s"), 1500)
+    assert_equal(_duration_to_ms("0.000000001s"), 1)  # rounded up, never early
+    assert_equal(_duration_to_ms("2.0010s"), 2001)
     var bads: List[String] = [
         "", "s", "1", "-1s", "1.s", ".5s", "1.0000000001s", "1ms", "1.5 s", "+1s", "1e3s"
     ]
     for bad in bads:
-        assert_equal(duration_to_ms(bad), -1, String("accepted ") + bad)
+        assert_equal(_duration_to_ms(bad), -1, String("accepted ") + bad)
     # Absurdly many second digits clamp to a huge value (decide gives up).
-    assert_true(duration_to_ms("99999999999999999999999s") > Int64(1) << 50)
+    assert_true(_duration_to_ms("99999999999999999999999s") > Int64(1) << 50)
 
 
 def _loop(max_attempts: Int = 5, deadline_ms: Int64 = 60_000, rng: UInt64 = _MAX_U64) raises -> GcpLoop:

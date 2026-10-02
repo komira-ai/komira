@@ -283,13 +283,13 @@ def _retry_info_delay_ms(details: JsonValue) -> Int64:
             var rd = d.get("retryDelay")
             if rd.kind_tag() != JSON_STRING:
                 return -1
-            return duration_to_ms(rd.as_string())
+            return _duration_to_ms(rd.as_string())
     except:
         return -1
     return -1
 
 
-def duration_to_ms(s: String) -> Int64:
+def _duration_to_ms(s: String) -> Int64:
     """A proto3 JSON `google.protobuf.Duration` (`"1.5s"`: whole seconds, an
     optional 1-9 digit fraction, then `s`) as milliseconds, rounded up so a
     retry never comes earlier than asked. -1 for a negative or malformed
