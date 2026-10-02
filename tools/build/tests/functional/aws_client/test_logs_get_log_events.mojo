@@ -21,7 +21,7 @@ from komira_aws_logs.komira_aws_logs import (
     build_get_log_events_request,
     parse_get_log_events_response,
 )
-from komira_serde.json_value import parse_json_value
+from komira_json import parse_json_value
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 

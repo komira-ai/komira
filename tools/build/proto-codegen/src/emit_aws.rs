@@ -24,7 +24,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "1";
+pub const AWS_GENERATOR_VERSION: &str = "2";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -97,7 +97,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         mode: AwsImportMode::ClientOnly,
     },
     AwsImport {
-        module: "komira_serde.json_value",
+        module: "komira_json",
         names: &["JsonValue", "parse_json_value"],
         mode: AwsImportMode::Always,
     },
