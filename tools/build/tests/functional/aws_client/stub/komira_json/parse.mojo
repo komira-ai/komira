@@ -2,21 +2,40 @@
 
 Strings support the `\\"`, `\\\\`, `\\/`, `\\n`, `\\t` and `\\r` escapes (no
 `\\u`, which the fixture's bodies do not use, and which is refused rather
-than mis-read); numbers keep their source text.
+than mis-read); numbers keep their source text. Arrays and objects may
+nest at most `max_depth` deep, as in komira_json.
 """
 
 from .value import JSON_NUMBER, JsonValue
+
+comptime JSON_DEFAULT_MAX_DEPTH: Int = 128
+"""The nesting limit `parse_json_value` applies by default."""
+
+comptime JSON_MAX_DEPTH: Int = 1000
+"""The largest `max_depth` `parse_json_value` accepts."""
 
 
 struct _Parser(Movable):
     var b: List[UInt8]
     var pos: Int
+    var depth: Int
+    var max_depth: Int
 
-    def __init__(out self, s: String):
+    def __init__(out self, s: String, max_depth: Int):
         self.b = List[UInt8]()
         for c in s.as_bytes():
             self.b.append(c)
         self.pos = 0
+        self.depth = 0
+        self.max_depth = max_depth
+
+    def enter_container(mut self) raises:
+        self.depth += 1
+        if self.depth > self.max_depth:
+            raise Error(
+                String("JsonError: nesting deeper than ")
+                + String(self.max_depth)
+            )
 
     def ws(mut self):
         while self.pos < len(self.b) and (
@@ -45,37 +64,39 @@ struct _Parser(Movable):
 
     def string(mut self) raises -> String:
         self.expect("\"")
-        var out = String("")
+        var out = List[UInt8]()
         while True:
             var c = self.peek()
             self.pos += 1
             if c == UInt8(ord("\"")):
-                return out^
+                return String(unsafe_from_utf8=Span(out))
             if c == UInt8(ord("\\")):
                 var e = self.peek()
                 self.pos += 1
                 if e == UInt8(ord("\"")) or e == UInt8(ord("\\")) or e == UInt8(ord("/")):
-                    out += chr(Int(e))
+                    out.append(e)
                 elif e == UInt8(ord("n")):
-                    out += "\n"
+                    out.append(UInt8(ord("\n")))
                 elif e == UInt8(ord("t")):
-                    out += "\t"
+                    out.append(UInt8(ord("\t")))
                 elif e == UInt8(ord("r")):
-                    out += "\r"
+                    out.append(UInt8(ord("\r")))
                 else:
                     raise Error("JsonError: unsupported escape (this stub has no \\u)")
             else:
-                out += chr(Int(c))
+                out.append(c)
 
     def value(mut self) raises -> JsonValue:
         self.ws()
         var c = self.peek()
         if c == UInt8(ord("{")):
             self.pos += 1
+            self.enter_container()
             var obj = JsonValue.empty_object()
             self.ws()
             if self.peek() == UInt8(ord("}")):
                 self.pos += 1
+                self.depth -= 1
                 return obj^
             while True:
                 self.ws()
@@ -88,13 +109,16 @@ struct _Parser(Movable):
                     self.pos += 1
                     continue
                 self.expect("}")
+                self.depth -= 1
                 return obj^
         if c == UInt8(ord("[")):
             self.pos += 1
+            self.enter_container()
             var arr = JsonValue.empty_array()
             self.ws()
             if self.peek() == UInt8(ord("]")):
                 self.pos += 1
+                self.depth -= 1
                 return arr^
             while True:
                 arr.push(self.value())
@@ -103,6 +127,7 @@ struct _Parser(Movable):
                     self.pos += 1
                     continue
                 self.expect("]")
+                self.depth -= 1
                 return arr^
         if c == UInt8(ord("\"")):
             return JsonValue.from_string(self.string())
@@ -133,9 +158,15 @@ struct _Parser(Movable):
         return num^
 
 
-def parse_json_value(s: String) raises -> JsonValue:
-    """One JSON value, surrounded only by whitespace; anything else raises."""
-    var p = _Parser(s)
+def parse_json_value(
+    s: String, max_depth: Int = JSON_DEFAULT_MAX_DEPTH
+) raises -> JsonValue:
+    """One JSON value, surrounded only by whitespace; anything else raises,
+    as does nesting deeper than `max_depth` or a `max_depth` outside
+    [0, `JSON_MAX_DEPTH`]."""
+    if max_depth < 0 or max_depth > JSON_MAX_DEPTH:
+        raise Error(String("JsonError: max_depth ") + String(max_depth) + " out of range")
+    var p = _Parser(s, max_depth)
     var v = p.value()
     p.ws()
     if p.pos != len(p.b):
