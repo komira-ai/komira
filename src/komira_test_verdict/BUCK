@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The exit-code vocabulary of a test that can do more than pass or fail:
+# `Verdict` (CLEAN 0 / CANNOT_TELL 3 / LEAK 6, worst wins, every reason kept)
+# and SKIP (77) / CANNOT_TELL (3) with a reason, which end the process and
+# are never exit 0. A leaf: the standard library only.
+mojo_library(
+    name = "komira_test_verdict",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_exits.mojo",
+        "tests/test_verdict.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
