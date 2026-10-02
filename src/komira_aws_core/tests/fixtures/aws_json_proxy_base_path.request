@@ -1,0 +1,10 @@
+POST /aws/ HTTP/1.1
+Host: proxy.example.com:8443
+Content-Type: application/x-amz-json-1.0
+X-Amz-Target: DynamoDB_20120810.ListTables
+x-amzn-query-mode: true
+Content-Length: 2
+X-Amz-Date: 20260919T120000Z
+Authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260919/us-west-2/dynamodb/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target;x-amzn-query-mode, Signature=6fc46226d09ddc1b75a664c0bfb2e46716624365c8396098a899cd464239e5d0
+
+{}

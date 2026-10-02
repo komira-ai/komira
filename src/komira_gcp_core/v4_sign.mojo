@@ -58,9 +58,10 @@
 #   vectors            https://github.com/googleapis/conformance-tests
 #                      storage/v1/v4_signatures.json
 #
-# The private key is PKCS#8 DER (pem.mojo decodes a key file's PEM). It is
-# passed to the RSA call and nowhere else: never into a URL, an error message
-# or a log line.
+# The private key is PKCS#8 DER; komira_crypto's
+# `rsa_pkcs8_der_from_pem` turns a key file's `private_key` into it.
+# It is passed to the RSA call and nowhere else: never into a URL, an error
+# message or a log line.
 # =============================================================================
 
 from komira_crypto import (

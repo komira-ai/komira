@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # One copy of the RFC 3986 percent-encoder and of the bytes-to-String step,
-# for pagination.mojo (`pageToken`), v4_sign.mojo (the V4 canonical path and
-# query) and pem.mojo. Nothing here is re-exported by __init__.mojo: a general
+# for pagination.mojo (`pageToken`) and v4_sign.mojo (the V4 canonical path
+# and query). Nothing here is re-exported by __init__.mojo: a general
 # percent-encoder is not part of this package's API.
 #
 # komira_aws_core has `uri_encode` with the same rule. It is not imported:

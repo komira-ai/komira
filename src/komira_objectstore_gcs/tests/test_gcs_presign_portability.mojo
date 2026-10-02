@@ -38,6 +38,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
+from komira_crypto import rsa_pkcs8_der_from_pem
 from komira_json import JsonValue, parse_json_value
 
 from komira_gcp_core import (
@@ -49,7 +50,6 @@ from komira_gcp_core import (
     gcs_v4_canonical_path,
     gcs_v4_signed_url,
     gcs_v4_stamps_from_unix_seconds,
-    pkcs8_private_key_der_from_pem,
 )
 from komira_objectstore import (
     PRESIGN_MAX_TTL_SECONDS,
@@ -93,7 +93,7 @@ def _read_text(path: String) raises -> String:
 
 def _account() raises -> GcsV4ServiceAccount:
     var a = parse_json_value(_read_text(_ACCOUNT))
-    var der = pkcs8_private_key_der_from_pem(a.get("private_key").as_string())
+    var der = rsa_pkcs8_der_from_pem(a.get("private_key").as_string())
     return GcsV4ServiceAccount(a.get("client_email").as_string(), der^)
 
 

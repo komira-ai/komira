@@ -13,8 +13,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_gcs_presign_portability signs with Google's published inactive dummy
 # service account and checks the signer against Google's published V4 URLs,
 # both read from the archive //third_party/googleapis_conformance_tests pins
-# by sha256 and staged at conformance/. It parses them with komira_json,
-# declared below for that test alone (the library itself does not import it).
+# by sha256 and staged at conformance/. It parses them with komira_json and
+# loads the account's PEM key with komira_crypto, both declared below for
+# that test alone (the library itself imports neither).
 # test_env_source_only scans the package's own sources, staged as its data,
 # for any environment read; nothing here is exempt.
 mojo_library(
@@ -23,9 +24,13 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_core:komira_core",
-        "//src/komira_gcp_core:komira_gcp_core",
         # For tests/test_gcs_presign_portability.mojo only: mojo_library has no
-        # test-only deps, and the test parses the conformance JSON with it.
+        # test-only deps, and the test loads the dummy account's PEM key with
+        # komira_crypto's `rsa_pkcs8_der_from_pem`.
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_gcp_core:komira_gcp_core",
+        # For tests/test_gcs_presign_portability.mojo only: the test parses the
+        # conformance JSON with it.
         "//src/komira_json:komira_json",
         "//src/komira_objectstore:komira_objectstore",
     ],

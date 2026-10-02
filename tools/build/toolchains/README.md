@@ -123,12 +123,12 @@ their hosts:
 
 ```ini
 [komira_re]
-  darwin_properties = pool=macos
+  darwin_arm64_properties = pool=macos
   darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210
 ```
 
-`darwin_properties` is the exact property set the workers advertise, and
-must differ from the linux one (`linux_properties`).
+`darwin_arm64_properties` is the exact property set the workers advertise, and
+must differ from the linux one (`linux_x86_64_properties`).
 `darwin_macos_hosts` lists what `sh tools/build/mojo/darwin/host_identity.sh`
 prints on each worker host: the SDK version, then a digest of the developer
 dir, the SDK version and build, `cc --version`, `ld -v` and the OS build.
@@ -171,6 +171,7 @@ path, `@loader_path/lib`, the `lib/` of its runnable directory; it targets
 minimum. Gated tests set `DYLD_LIBRARY_PATH` to the compiler's `lib/`, and
 run checks start the binary with no `DYLD_*` variable. Bundles
 (`mojo_bundle`, the `[shared]` sub-target) are linux only: the macOS wrapper
-refuses `--emit shared-lib`. `tools/build/tests/functional/darwin/check.sh` checks all
+refuses `--emit shared-lib` unless the library names itself with
+`-Xlinker -install_name` (`mojo_shared_lib`, a `.dylib`). `tools/build/tests/functional/darwin/check.sh` checks all
 of this, most of it without a macOS worker; with the keys above set, it also
 builds and runs `//tools/build/examples:hello` on the workers.
