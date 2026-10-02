@@ -16,7 +16,7 @@ mojo_proto_library(
     name = "kci_environment_proto",
     srcs = ["environment.proto"],
     import_prefix = "kci/deploy/v1",
-    deps = ["//src/komira_serde:komira_serde"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],
 )
 
@@ -25,6 +25,6 @@ mojo_test(
     srcs = ["tests/test_environment_roundtrip.mojo"],
     deps = [
         ":kci_environment_proto",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_proto_codec:komira_proto_codec",
     ],
 )
