@@ -15,12 +15,12 @@
 #   crosses the FFI boundary, so this branch is pointer-free.
 # Linux/x86: the deploy target reads RDTSC; the practical Mojo path is the
 #   readcyclecounter intrinsic. On this pinned toolchain we delegate to the
-#   already-encapsulated `komira_obs.clock.now_ns()` monotonic read (which
-#   encapsulates the Linux `clock_gettime` FFI) and tag
+#   `komira_clock.now_ns()` monotonic read (which keeps the Linux
+#   `clock_gettime` call in a C shim, so no pointer is named here) and tag
 #   the anchor's `tick_hz` as nanoseconds (1e9) so the convert is an identity
 #   shift. This keeps P2a's tick math correct on both platforms with ZERO new
-#   `unsafe_from_address` site in this module (the macOS branch is pointer-free;
-#   the Linux branch reuses the obs clock's existing carve-out).
+#   pointer site in this module (the macOS branch is pointer-free; the Linux
+#   branch goes through the core clock).
 #
 # # Encapsulation
 #
@@ -33,7 +33,7 @@
 from std.ffi import external_call
 from std.sys.info import CompilationTarget
 
-from komira_obs.clock import now_ns, now_unix_ms
+from komira_clock import now_ns, now_unix_ms
 
 
 # On Apple Silicon mach_absolute_time advances at ~24 MHz. We do NOT hardcode
@@ -48,7 +48,7 @@ comptime _NS_PER_SEC: UInt64 = UInt64(1_000_000_000)
 #
 # FFI-BOUNDARY: `mach_absolute_time(void) -> uint64_t` takes no args and
 # returns by value — NO pointer crosses. The Linux branch delegates to the
-# encapsulated obs clock (no new FFI symbol here).
+# core clock (no new FFI symbol here).
 # -----------------------------------------------------------------------------
 
 
@@ -58,14 +58,14 @@ def read_raw_ticks() -> UInt64:
         # SAFETY: no-arg, by-value-return libc call; no pointer crosses.
         return external_call["mach_absolute_time", UInt64]()
     else:
-        # Linux deploy target: reuse the obs monotonic clock (it
-        # encapsulates the clock_gettime FFI). Returns nanoseconds.
+        # Linux deploy target: reuse the core monotonic clock (its
+        # clock_gettime call lives in a C shim). Returns nanoseconds.
         return now_ns()
 
 
 # -----------------------------------------------------------------------------
 # read_realtime_ns() — the wall-clock component of the anchor (epoch ns).
-# Reuses the obs `now_unix_ms()` (CLOCK_REALTIME path) ×1e6.
+# Reuses the core `now_unix_ms()` (CLOCK_REALTIME path) ×1e6.
 # -----------------------------------------------------------------------------
 
 

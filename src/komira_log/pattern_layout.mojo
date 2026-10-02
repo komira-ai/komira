@@ -31,7 +31,7 @@
 from std.ffi import external_call
 
 from komira_log.levels import level_name
-from komira_obs.structured_log import (
+from komira_log.structured_log import (
     gcp_severity_for_level,
     json_escape,
     log_format_is_json,
@@ -44,7 +44,7 @@ from komira_obs.structured_log import (
 # Every line in a process renders in ONE layout, decided once from two facts the
 # binary was given: its `--log-format` value (`json` / `text`, empty when not
 # supplied) and whether it runs on a deployed platform (a flag the deployer
-# sets). `komira_obs.structured_log.log_format_is_json` combines them; the
+# sets). `komira_log.structured_log.log_format_is_json` combines them; the
 # answer is parked in a one-word C cell (`engine/_log_holder_shim.c`) so every
 # render site — the P1 `render_line` and the drain's runtime-module twin —
 # reads the SAME decision and neither threads it as a parameter two call sites
@@ -56,7 +56,7 @@ from komira_obs.structured_log import (
 def select_log_layout(log_format: String, on_deployed_platform: Bool):
     """Select the process's line layout: JSON iff `log_format` says `json`, or
     it is empty/malformed and the process runs on a deployed platform (see
-    `komira_obs.structured_log.log_format_is_json` for the full rule).
+    `komira_log.structured_log.log_format_is_json` for the full rule).
 
     Call at startup, before workers exist; `config.init_logging_from_spec`
     calls it. A later call re-selects (tests use that to drive both arms)."""
@@ -222,13 +222,13 @@ def format_timestamp_ms(epoch_ms: Int64) -> String:
 # A single-line JSON object on stdout/stderr is instead lifted into
 # `jsonPayload`, with `severity`, `message` and `time` promoted onto the
 # LogEntry itself. That is the shape this layout emits, and it is the shape
-# `komira_obs.structured_log` emits for its own lines.
+# `komira_log.structured_log` emits for its own lines.
 #
 # ⭐ `time` IS A PROMOTED KEY — VERIFIED, not assumed. Cloud Logging's structured
 # logging searches `jsonPayload` for time-related fields, takes `time` when it is
 # an RFC 3339 string, uses it to set `LogEntry.timestamp`, and REMOVES it from
 # `jsonPayload` (Cloud Logging's structured-logging documentation). It is worth
-# stating because `komira_obs.structured_log`'s own list of promoted keys does
+# stating because `komira_log.structured_log`'s own list of promoted keys does
 # NOT include it. `format_timestamp_ms` already emits exactly
 # `YYYY-MM-DDThh:mm:ss.mmmZ`, which is RFC 3339.
 #
@@ -238,7 +238,7 @@ def format_timestamp_ms(epoch_ms: Int64) -> String:
 # useful than the text one it replaces.
 #
 # ⚠ `redact_log_text` IS NOT APPLIED HERE, AND THAT IS A DECISION.
-# `komira_obs.StructuredLogLine` applies it to every value, correctly: its input
+# `komira_log.structured_log.StructuredLogLine` applies it to every value, correctly: its input
 # is 5xx RESPONSE BODIES — customer content a handler produced. `komira_log`'s
 # input is a call site's OWN `fmt` plus its typed args, it is the SDK/engine
 # logger (orders of magnitude more lines), and `redact_log_text` is several O(n)
@@ -253,7 +253,7 @@ def format_timestamp_ms(epoch_ms: Int64) -> String:
 # layout. The same bytes reach the collector as text from the same process; the
 # JSON layout changes the envelope, not the channel, and widens nothing. A
 # call site whose payload genuinely needs scrubbing must route through
-# `komira_obs.StructuredLogLine`, which is what the 5xx path does.
+# `komira_log.structured_log.StructuredLogLine`, which is what the 5xx path does.
 
 
 comptime _JSON_KEY_SEVERITY: StaticString = "severity"

@@ -18,6 +18,9 @@
 # where its first bad byte is, is reported (and therefore not secret).
 # =============================================================================
 
+from std.ffi import external_call
+from std.sys.info import CompilationTarget
+
 from .constant_time import (
     ct_eq,
     ct_in_range,
@@ -135,6 +138,39 @@ def encode(scheme: Int, data: Span[UInt8, _], pad: Bool) -> String:
     return String(unsafe_from_utf8=Span(out))
 
 
+def wipe_bytes(mut buf: List[UInt8]):
+    """Zero every element of `buf` through libc's secure-zero call
+    (`explicit_bzero`, or `memset_s` on macOS), which the optimizer cannot
+    remove the way it can a store loop into a buffer that is about to be
+    freed. For scratch and output buffers that held decoded secret bytes."""
+    var n = len(buf)
+    if n == 0:
+        return
+    # SAFETY: the pointer is `buf`'s own buffer, valid for `n` initialized
+    # bytes while `buf` is borrowed mutably here; it does not leave this call.
+    comptime if CompilationTarget.is_macos():
+        var _e = external_call["memset_s", Int](
+            buf.unsafe_ptr(), UInt(n), Int(0), UInt(n)
+        )
+    else:
+        external_call["explicit_bzero", NoneType](buf.unsafe_ptr(), UInt(n))
+
+
+@always_inline
+def _pos(at: List[Int], p: Int) -> Int:
+    """Position `p` of the decoded symbols as the caller wants it reported:
+    `at[p]` when `at` maps it, `p` itself when `at` is empty."""
+    if p < len(at):
+        return at[p]
+    return p
+
+
+def _fail(mut out: List[UInt8], err: Error) -> Error:
+    """`err`, once the partly decoded `out` is wiped."""
+    wipe_bytes(out)
+    return err
+
+
 def decode(
     scheme: Int,
     src: Span[UInt8, _],
@@ -143,6 +179,24 @@ def decode(
     function: StaticString,
 ) raises -> List[UInt8]:
     """Decode `src`, strictly. See the package header for the rules."""
+    return decode_at(
+        scheme, src, allow_padded, allow_unpadded, function, List[Int]()
+    )
+
+
+def decode_at(
+    scheme: Int,
+    src: Span[UInt8, _],
+    allow_padded: Bool,
+    allow_unpadded: Bool,
+    function: StaticString,
+    at: List[Int],
+) raises -> List[UInt8]:
+    """`decode`, with every error position `p` reported as `at[p]`: `src` is
+    then symbols gathered from a larger text (pem.mojo), and `at` (of length
+    `len(src) + 1`, the last entry for the end) says where each came from.
+    An empty `at` reports positions in `src`. On an error the partly decoded
+    bytes are wiped before the raise."""
     var n = len(src)
     var w = _width(scheme)
     var blk = _block(scheme)
@@ -178,42 +232,69 @@ def decode(
     # so that a stray byte (a newline, say) is reported
     # as itself rather than as the length it happens to produce.
     if bad_any != 0:
-        raise encoding_error(
-            INVALID_CHARACTER,
-            function,
-            "byte is not in the alphabet",
-            Int(first_bad),
+        raise _fail(
+            out,
+            encoding_error(
+                INVALID_CHARACTER,
+                function,
+                "byte is not in the alphabet",
+                _pos(at, Int(first_bad)),
+            ),
         )
 
     # Length and padding: public facts.
     var leftover = (body * w) % 8  # bits of the last symbol that are unused
     if t > 0:
         if not allow_padded:
-            raise encoding_error(
-                INVALID_PADDING, function, "padding is not allowed", body
+            raise _fail(
+                out,
+                encoding_error(
+                    INVALID_PADDING,
+                    function,
+                    "padding is not allowed",
+                    _pos(at, body),
+                ),
             )
         if n % blk != 0 or t >= blk or leftover >= w:
-            raise encoding_error(
-                INVALID_PADDING, function, "padding has the wrong length", body
+            raise _fail(
+                out,
+                encoding_error(
+                    INVALID_PADDING,
+                    function,
+                    "padding has the wrong length",
+                    _pos(at, body),
+                ),
             )
     else:
         if leftover >= w:
-            raise encoding_error(
-                INVALID_LENGTH,
-                function,
-                "no input encodes to this many symbols",
-                n,
+            raise _fail(
+                out,
+                encoding_error(
+                    INVALID_LENGTH,
+                    function,
+                    "no input encodes to this many symbols",
+                    _pos(at, n),
+                ),
             )
         if not allow_unpadded and n % blk != 0:
-            raise encoding_error(
-                INVALID_PADDING, function, "padding is missing", n
+            raise _fail(
+                out,
+                encoding_error(
+                    INVALID_PADDING,
+                    function,
+                    "padding is missing",
+                    _pos(at, n),
+                ),
             )
 
     if tail_nonzero != 0:
-        raise encoding_error(
-            NON_CANONICAL,
-            function,
-            "unused bits of the last symbol are not zero",
-            body - 1,
+        raise _fail(
+            out,
+            encoding_error(
+                NON_CANONICAL,
+                function,
+                "unused bits of the last symbol are not zero",
+                _pos(at, body - 1),
+            ),
         )
     return out^

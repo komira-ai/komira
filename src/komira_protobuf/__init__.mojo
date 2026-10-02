@@ -14,7 +14,7 @@ one consumer among several). This package is that general codec:
 Dependency direction (cycle-free; leaf of the proto-codegen DAG):
   komira_protobuf -> std only (no komira_* dependency).
   komira_orc      -> komira_protobuf  (the ORC metadata codec consumes it)
-  komira_serde    -> komira_protobuf  (the ProtoBinaryWire backend)
+  komira_proto_codec    -> komira_protobuf  (the ProtoBinaryWire backend)
 
 This is a SIBLING package under the `komira` namespace root (parent-claims-
 namespace-safe — one `-I` root, never split).

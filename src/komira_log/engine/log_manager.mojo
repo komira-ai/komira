@@ -23,8 +23,8 @@
 #
 # `install` MOVES the engine onto the heap and `unsafe_leak()`-LEAKS it — the
 # engine is NEVER moved, NEVER freed, valid for the whole process. So the single
-# `unsafe_from_address` accessor (`_resolve`) reconstructs a pointer that is
-# ALWAYS valid — the forever-root borrow-handle contract is literally true, not
+# accessor (`_resolve`, a C getter whose return type Mojo declares) yields a
+# pointer that is ALWAYS valid — the forever-root borrow-handle contract is literally true, not
 # faked. Contrast a holder whose target is `EngineContext._log_engine` (a
 # per-session, destroy-recreate FIELD → a dangling pointer).
 #
@@ -35,9 +35,10 @@
 #
 # # Encapsulation
 #
-# The engine's ONLY `unsafe_from_address` is `_resolve` below, over the IMMORTAL
-# target — documented with a SAFETY block (the P1 config holder in config.mojo
-# has the one other, over its own immortal slot). It produces a
+# No integer is converted to a pointer in Mojo: `_resolve` below calls
+# `komira_log_holder_get_engine`, over the IMMORTAL target — documented with a
+# SAFETY block (the P1 config holder in config.mojo does the same over its own
+# immortal slot). It produces a
 # TRANSIENT LOCAL wildcard-origin pointer (never a stored wildcard FIELD), the
 # shape `worker_id_tls` uses.
 # =============================================================================
@@ -58,8 +59,8 @@ from komira_log.engine.shared_engine import SharedEngine
 def _holder_set(engine_addr: Int):
     """Park `engine_addr` (a plain integer address) in the process-global C
     cell. Called ONCE at install. Passes the address as an INTEGER across the
-    FFI — NO `unsafe_from_address` here; the single confined int->typed-pointer
-    cast lives only in `_resolve`."""
+    FFI — no pointer here; the typed pointer is produced only by the C getter
+    `_resolve` calls."""
     external_call["komira_log_holder_set", NoneType](UInt64(engine_addr))
 
 
@@ -124,9 +125,10 @@ struct LogManager:
         # a stored wildcard-origin field). Callers null-check before deref.
         # Reads the engine's heap-owning fields coherently (proven:
         # test_log_manager_global, num_workers())."""
-        return UnsafePointer[SharedEngine, MutUntrackedOrigin](
-            unsafe_from_address=_holder_get()
-        )
+        return external_call[
+            "komira_log_holder_get_engine",
+            UnsafePointer[SharedEngine, MutUntrackedOrigin],
+        ]()
 
     @staticmethod
     def _test_reset():
