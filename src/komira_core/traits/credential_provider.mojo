@@ -7,7 +7,7 @@
 #
 #   1. A credential provider is orthogonal to the storage abstraction (in the
 #      Rust ecosystem, `aws-credential-types` lives BELOW and INDEPENDENT of
-#      `object_store`). A non-storage cloud client (a control-plane queue,
+#      `object_store`). A non-storage cloud client (a managed queue service,
 #      say) wants the credential trait without the storage substrate.
 #
 #   2. The trait is a pure *value contract*. Refresh is out-of-band

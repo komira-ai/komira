@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load(":suite.bzl", "SIGV4_SUITE_DIR", "sigv4_suite_files")
+
+# awslabs/aws-c-auth at c4bc791ac6985eedb503e882cd450cc5b344c2f2, Apache-2.0
+# (LICENSE and NOTICE in the archive).
+#
+# Only the official AWS SigV4 signing test suite is read from it, at build
+# time, as test data of //src/komira_aws_core: no file of the suite is
+# committed to this repository. The cases are suite.bzl's; a newer suite is
+# this url and sha256 plus that file's lists.
+pinned_file(
+    name = "aws-c-auth-c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz",
+    url = "https://github.com/awslabs/aws-c-auth/archive/c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz",
+    sha256 = "57a7da85a15351bfff7ff0a9eb541664757bf30da92667a170b962f2c1cd1b69",
+)
+
+# One directory, so the suite's test can list its cases; the sub-target
+# `[tests/aws-signing-test-suite/v4]` is the suite alone.
+archive_files(
+    name = "files",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":aws-c-auth-c4bc791ac6985eedb503e882cd450cc5b344c2f2.tar.gz",
+    files = ["LICENSE", "NOTICE"] + sigv4_suite_files(),
+    one_tree = True,
+    strip_prefix = "aws-c-auth-c4bc791ac6985eedb503e882cd450cc5b344c2f2",
+    tree_dirs = [SIGV4_SUITE_DIR],
+    visibility = ["PUBLIC"],
+)
