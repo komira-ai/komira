@@ -15,7 +15,12 @@ A consumer takes the model as `botocore_model("logs").model` and passes
 ruleset, `endpoint-rule-set-1.json` beside the model, is
 `botocore_model("logs").endpoint_rules`, and the partition table its
 `aws.partition` reads (`botocore/data/partitions.json`) is
-`botocore_model("logs").partitions`; both come from the same archive.
+`botocore_model("logs").partitions`. Both are sub-targets of BUCK's
+`:endpoint_rules`, the one place the archive's endpoint files are read
+(`botocore_endpoint_file`).
+
+BOTOCORE_ENDPOINT_ONLY names the services whose endpoint files are read with
+no client generated from their model: service -> api version.
 """
 
 BOTOCORE_MODELS = {
@@ -26,15 +31,37 @@ BOTOCORE_MODELS = {
     ),
 }
 
+# S3: its ruleset and endpoint test cases are run through komira_aws_core's
+# interpreter and a generated test client, and its model is the reference
+# the test client's bindings are checked against.
+BOTOCORE_ENDPOINT_ONLY = {
+    "s3": "2006-03-01",
+}
+
+def _api_version(service):
+    if service in BOTOCORE_MODELS:
+        return BOTOCORE_MODELS[service].api_version
+    if service in BOTOCORE_ENDPOINT_ONLY:
+        return BOTOCORE_ENDPOINT_ONLY[service]
+    fail("botocore service `{}` is in neither BOTOCORE_MODELS nor BOTOCORE_ENDPOINT_ONLY".format(service))
+
 def botocore_model_path(service):
     """The model's path in the archive, under its top directory."""
-    return "botocore/data/{}/{}/service-2.json".format(service, BOTOCORE_MODELS[service].api_version)
+    return "botocore/data/{}/{}/service-2.json".format(service, _api_version(service))
 
 BOTOCORE_PARTITIONS_PATH = "botocore/data/partitions.json"
 
 def botocore_endpoint_rules_path(service):
     """The path of the service's endpoint ruleset in the archive."""
-    return "botocore/data/{}/{}/endpoint-rule-set-1.json".format(service, BOTOCORE_MODELS[service].api_version)
+    return "botocore/data/{}/{}/endpoint-rule-set-1.json".format(service, _api_version(service))
+
+def botocore_endpoint_tests_path(service):
+    """The path of botocore's endpoint test cases for the service."""
+    return "tests/functional/endpoint-rules/{}/endpoint-tests-1.json".format(service)
+
+def botocore_endpoint_file(path):
+    """The `:endpoint_rules` sub-target of one archive path."""
+    return "komira//third_party/botocore:endpoint_rules[{}]".format(path)
 
 def botocore_model(service):
     """The model target of `service`, the sha256 its consumer passes, and
@@ -42,6 +69,6 @@ def botocore_model(service):
     return struct(
         model = "komira//third_party/botocore:" + service,
         sha256 = BOTOCORE_MODELS[service].sha256,
-        endpoint_rules = "komira//third_party/botocore:files[{}]".format(botocore_endpoint_rules_path(service)),
-        partitions = "komira//third_party/botocore:files[{}]".format(BOTOCORE_PARTITIONS_PATH),
+        endpoint_rules = botocore_endpoint_file(botocore_endpoint_rules_path(service)),
+        partitions = botocore_endpoint_file(BOTOCORE_PARTITIONS_PATH),
     )
