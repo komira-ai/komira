@@ -254,7 +254,7 @@ listed too. Adding a row is the approval to claim that name, so review it as
 that. The sha256 of the sorted names is in every manifest
 (`approved_names_sha256`), so an approval can be bound to the exact list (by an uploader that recomputes it:
 step 3 above).
-[`names_lint`](BUCK) checks its shape (rows of name, label and reason; the
+[`names_lint`](BUCK) checks its shape (rows of name, label, reason and summary; the
 prefix; the flat `//src/<name>:<name>` label; sorted and unique), that
 [`names.bzl`](names.bzl) is exactly what
 [`gen_conda_names.sh`](../../tools/build/package/gen_conda_names.sh) makes of it
@@ -270,7 +270,6 @@ that this directory declares no `conda_package` by hand and calls
   at run time (both refused by name rather than published incompletely);
 - the upload step with its dry run and its approval gate (the set it reads is
   above; the step is not written);
-- a per-library summary (a package's channel text is derived from its name);
 - **a `.mojoc` that does not record the isolation directory** (follow-up, to
   be filed on the issue tracker): compile `precompile` from a private working
   directory with the sources staged at a fixed relative path (the wrapper must

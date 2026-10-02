@@ -248,7 +248,7 @@ fi
 
 # ---- pin --------------------------------------------------------------------
 pin=$(sed -n 's/^MOJO_COMPILER_PIN = "\(.*\)"$/\1/p' tools/build/package/conda.bzl)
-if [ -n "$pin" ] && grep -qF "name = \"mojo_compiler_${pin}_linux-64.conda\"" tools/build/toolchains/BUCK &&
+if [ -n "$pin" ] && grep -qF "package = \":mojo_compiler_${pin}_linux-64.conda\"" tools/build/toolchains/BUCK &&
     [ "$(jq -r '.depends[1]' "$S/info/index.json")" = "mojo-compiler ==$pin" ]; then
     pass "pin: the packages require exactly mojo-compiler ==$pin, the version of the pinned compiler package"
 else
@@ -294,7 +294,7 @@ fi
 "$BUCK2" build $N:names_bad > "$W/names_bad.log" 2>&1
 problems=""
 for text in "is not after" "is not \`komira_\` + lowercase letters, digits and _" "is not //src/komira_wronglabel:komira_wronglabel" \
-    "is listed twice" "not three non-empty tab-separated columns" "a conda_release names another approved list" \
+    "is listed twice" "not four non-empty tab-separated columns" "holds a quote or a backslash" "a conda_release names another approved list" \
     "a conda_package declared by hand" "conda_release is called 2 times" "names_bad/names.bzl differs from names.tsv"; do
     grep -qF -- "$text" "$W/names_bad.log" || problems="$problems [$text]"
 done

@@ -259,23 +259,24 @@ def conda_release(entries, names = None, cell = "komira"):
     """Every package of the approved list, the metapackage and the release set.
 
     Args:
-      entries: name -> library label (`//src/<name>:<name>`), the generated
-        `APPROVED` of names.bzl. Each becomes a `conda_package` named for it.
+      entries: name -> {"label": `//src/<name>:<name>`, "summary": text}, the
+        generated `APPROVED` of names.bzl. Each becomes a `conda_package` named
+        for it.
       names: another approved list. Only the tests cell may state one.
       cell: the cell the labels in `entries` are relative to.
 
-    A package's summary is derived from its name; the channel page text is not
-    part of the approval.
+    A package's summary is the list's summary column; a list without one (a
+    test list) gets one derived from the name.
     """
     if not entries:
         fail("conda_release: entries is empty, so it would publish nothing")
     custom = names != None
-    for name, label in entries.items():
+    for name, row in entries.items():
         extra = {"names": names} if custom else {}
         conda_package(
             name = name,
-            lib = cell + label,
-            summary = "The `{}` Mojo library of komira, as a conda package.".format(name),
+            lib = cell + row["label"],
+            summary = row["summary"] or "The `{}` Mojo library of komira, as a conda package.".format(name),
             **extra
         )
     members = [":" + n for n in entries.keys()]

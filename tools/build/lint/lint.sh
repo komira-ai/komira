@@ -37,7 +37,7 @@
 #       workflow is push-triggered.
 #   kind "conda_names", args <names.tsv> <BUCK> <names.bzl> <gen_conda_names.sh> <prefix>
 #       The approved list of published conda packages (packaging/conda/names.tsv)
-#       is well formed: rows of name, label and reason; each name <prefix> +
+#       is well formed: rows of name, label, reason and summary; each name <prefix> +
 #       lowercase letters, digits, _; each label //src/<name>:<name>; sorted and
 #       unique. <names.bzl> is exactly what <gen_conda_names.sh> makes of the
 #       list (the macro reads that copy). <BUCK> declares no conda_package by
@@ -189,7 +189,8 @@ conda_names)
         /^#/ || /^$/ { next }
         {
             n++
-            if (NF != 3 || $1 == "" || $2 == "" || $3 == "") { printf "%s:%d: not three non-empty tab-separated columns (name, label, reason)\n", F, NR; next }
+            if (NF != 4 || $1 == "" || $2 == "" || $3 == "" || $4 == "") { printf "%s:%d: not four non-empty tab-separated columns (name, label, reason, summary)\n", F, NR; next }
+            if ($4 ~ /["\\]/) printf "%s:%d: the summary of `%s` holds a quote or a backslash\n", F, NR, $1
             if (index($1, P) != 1 || length($1) == length(P) || $1 !~ /^[a-z0-9_]+$/) printf "%s:%d: name `%s` is not `%s` + lowercase letters, digits and _\n", F, NR, $1, P
             if ($2 != "//src/" $1 ":" $1) printf "%s:%d: label `%s` is not //src/%s:%s (flat layout, target named for its import name)\n", F, NR, $2, $1, $1
             if ($1 in seen) printf "%s:%d: name `%s` is listed twice\n", F, NR, $1
