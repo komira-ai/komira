@@ -1,3 +1,0 @@
-# names the kci_publish tests may publish
-
-example-pkg

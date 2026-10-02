@@ -1,472 +1,276 @@
 # =============================================================================
-# src/kci_publish/tests/test_publish_run.mojo -- reading the plan from the
-#   registry, and carrying it out.
+# src/kci_publish/tests/test_publish_run.mojo -- contract steps 2 to 4:
+#   members uploaded, settled by download, every member read back, the
+#   metapackage last.
 # =============================================================================
 #
 # ROWS
-#   (1) `plan_publish` reads presence once per target, anonymously, at the
-#       subdir's repodata.json: ABSENT plans UPLOAD, identical plans SKIP;
-#   (2) `verify_target_files` refuses a file whose sha256 is not its
-#       manifest's, naming the file and both digests;
-#   (3) --dry-run makes NO registry call: the transport fails on ANY request
-#       and the credential records every ask, and both stay at zero;
-#   (4) an upload is read back until identical: CREATED + identical is
-#       UPLOADED; the index lagging one poll still converges; never
-#       identical within the polls is exit 5;
-#   (5) a 409 is settled by the same bounded read-back poll as a 201:
-#       identical is SKIPPED, including when the index lags a poll (the
-#       re-run after a lost answer); different fails (exit 3 when nothing
-#       was uploaded yet); absent on every poll is exit 5, never 3;
-#   (6) a lost upload answer (a transport fault) is settled the same way:
-#       identical is UPLOADED, including after a lagging poll; absent on
-#       every poll is exit 5;
-#   (7) exit 4 once something was uploaded; exit 3 when the first upload
-#       fails, and later entries are NOT-ATTEMPTED with no request sent;
-#   (8) the credential is asked before the first upload: a refusal there is
-#       exit 3 with zero requests;
-#   (9) a plan holding a REFUSE uploads nothing: exit 3, or 5 when every
-#       refusal is a read that could not be answered;
-#  (10) a file that changed since it was planned is refused before its
-#       upload request;
-#  (11) the credential is asked for the host each upload goes to, and a
-#       credential issued for another host is refused before the first
-#       upload with zero requests.
+#   (1) a clean publish: each file uploaded EXACTLY once; the metapackage's
+#       upload comes after the last member read-back in the recorded order;
+#       the write credential asked ONCE; exit 0;
+#   (2) a member already present-same is not uploaded but IS read back;
+#   (3) the upload's answer lost after the bytes landed: re-read
+#       present-same = done, one upload;
+#   (4) the answer lost and nothing stored, every attempt: bounded retry
+#       (upload_attempts uploads, never more), then PARTIAL (9);
+#   (5) a 409 where the channel holds OUR bytes = success; a 409 where it
+#       holds OTHER bytes = STOP (7);
+#   (6) a definitive rejection (400) = FAILED (4); later members are not
+#       attempted;
+#   (7) a member that reads back with other bytes at step 3 = 10;
+#   (8) in 4, 7, 9 and 10 the recorded requests hold NO metapackage upload;
+#   (9) `ApprovedNames` built from the listing plus claims refuses a name in
+#       neither with ZERO requests.
 #
-# Hermetic: scripted transports and credentials over staged fixture files;
-# no network.
+# The design's "--concurrency 1 and 4 give the same final state" row is not
+# here: uploads are sequential and there is no --concurrency (run.mojo).
+#
+# Hermetic: ScriptedChannel; RecordingSleeper (no wait); no network.
 # =============================================================================
 
-from std.pathlib import Path
+from std.ffi import external_call
+from std.os import getenv, makedirs
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
-
-from kci_pkg_upload import (
-    PRESENCE_ABSENT,
-    PRESENCE_PRESENT_DIFFERENT,
-    PRESENCE_UNKNOWN,
-    SURFACE_PREFIX_DEV,
-    AnonymousCredential,
-    ApprovedNames,
-    ContentIdentity,
-    PkgRequest,
-    PkgResponse,
-    PkgTransport,
-    Presence,
-    RegistrySet,
-    ScriptedCredential,
-    ScriptedPkgTransport,
-    StaticTokenCredential,
-)
-from kci_pkg_upload.wire import bytes_of
-from komira_secret_store import SecretValue
-from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
-
-from komira_retry import RecordingSleeper
-
+from kci_pkg_upload import SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
 from kci_publish import (
-    ACTION_SKIP,
-    ACTION_UPLOAD,
-    EXIT_CANNOT_TELL,
     EXIT_FAILED,
-    EXIT_OK,
-    EXIT_REFUSED,
-    ArtifactManifest,
-    PublishPlan,
+    EXIT_PARTIAL,
+    EXIT_PUBLISHED,
+    EXIT_READ_BACK_MISMATCH,
+    EXIT_STOP_DIFFERENT_BYTES,
+    PublishCredential,
     PublishReport,
     PublishTarget,
     RunOptions,
-    plan_from_presence,
-    plan_publish,
-    read_artifact_manifest,
-    resolve_targets,
+    ScriptedChannel,
+    approved_names_for,
+    read_channel,
     run_publish,
-    verify_target_files,
 )
+from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_targets
+from kci_publish.scripted_channel import (
+    UPLOAD_ANSWER_400,
+    UPLOAD_LOSE_NOT_STORED,
+    UPLOAD_STORE_ANSWER_409,
+    UPLOAD_STORE_LOSE_ANSWER,
+    UPLOAD_STORE_OTHER_BYTES,
+)
+from kci_publish.upload import package_file_of
+from komira_retry import RecordingSleeper
 
 
-comptime _FX: String = "src/kci_publish/tests/fixtures/"
-comptime _FILE: String = "example-pkg-1.2.3-h0_0.conda"
-comptime _LINUX_SHA: String = "d92ee691780d0dbc4dd45de1287d8980462041de9bd2fe3d7f8b89044a18cf52"
-comptime _OSX_SHA: String = "53fdee8fee19ebc9e3dd1441e92ad0a97d70a1f59a0b0066e005eaff188db73f"
-comptime _TOKEN: String = "Bearer example-token-not-a-credential"
+def _root(tag: String) raises -> String:
+    var base = getenv("TEST_TMPDIR")
+    if base.byte_length() == 0:
+        base = getenv("TMPDIR")
+    if base.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set")
+    var d = base + String("/prn_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))
+    makedirs(d, exist_ok=True)
+    return d^
 
 
-struct _Tripwire(PkgTransport, Deinitable):
-    """A transport that fails on ANY request and counts them."""
-
-    var calls: Int
-
-    def __init__(out self):
-        self.calls = 0
-
-    def exchange(mut self, req: PkgRequest) raises -> PkgResponse:
-        self.calls += 1
-        raise Error(String("tripwire: a request was sent to ") + req.host + req.path)
+def _bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        out.append(b[i])
+    return out^
 
 
-def _decls() raises -> List[ChannelDeclaration]:
-    return parse_channels_file(Path(String(_FX) + String("channels.textproto")).read_text())
+def _targets(tag: String) raises -> List[PublishTarget]:
+    var r = ExampleRelease()
+    var d = _root(tag)
+    r.write(d)
+    return example_targets(r, d)
 
 
-def _targets(*manifests: String) raises -> List[PublishTarget]:
-    var ms = List[ArtifactManifest]()
-    for m in manifests:
-        ms.append(read_artifact_manifest(String(_FX) + String(m)))
-    return resolve_targets(_decls(), String("example-stable"), ms)
+def _channel() -> ScriptedChannel:
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+    ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
+    ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
+    ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
+    return ch^
 
 
-def _plan(targets: List[PublishTarget], *kinds: Int) raises -> PublishPlan:
-    var ps = List[Presence]()
-    for k in kinds:
-        ps.append(Presence(k, 200, ContentIdentity.none(), String("")))
-    return plan_from_presence(find_channel(_decls(), String("example-stable")), targets, ps)
+def _registry(var ch: ScriptedChannel) -> RegistrySet[ScriptedChannel, PublishCredential]:
+    var c = PublishCredential()
+    c.configure(SURFACE_PREFIX_DEV, String(EXAMPLE_HOST), String(""))
+    return RegistrySet[ScriptedChannel, PublishCredential](ch^, c^)
 
 
-def _names() raises -> ApprovedNames:
-    var n = ApprovedNames()
-    n.approve(String("example-pkg"))
-    return n^
+def _src() -> ScriptedCredential:
+    var s = ScriptedCredential()
+    s.serve(SURFACE_PREFIX_DEV, String("Bearer pfx-test-token"))
+    return s^
 
 
-def _cred() -> ScriptedCredential:
-    var c = ScriptedCredential()
-    c.serve(SURFACE_PREFIX_DEV, String(_TOKEN))
-    return c^
-
-
-def _repodata(subdir: String, sha: String) -> PkgResponse:
-    var r = PkgResponse(200)
-    var listed = String("")
-    if sha.byte_length() > 0:
-        listed = String('"') + String(_FILE) + String('": {"sha256": "') + sha + String('", "size": 29}')
-    r.with_body(
-        bytes_of(
-            String('{"info": {"subdir": "')
-            + subdir
-            + String('"}, "packages": {}, "packages.conda": {')
-            + listed
-            + String("}}")
-        )
+def _run(
+    targets: List[PublishTarget],
+    mut reg: RegistrySet[ScriptedChannel, PublishCredential],
+    mut src: ScriptedCredential,
+    upload_attempts: Int = 2,
+) -> PublishReport:
+    var sl = RecordingSleeper()
+    return run_publish(
+        targets, List[String](), reg, src, False,
+        RunOptions(2, 0, upload_attempts, 0, 0, 1, 0), sl, PublishReport(),
     )
-    return r^
 
 
-def _set(var t: ScriptedPkgTransport) -> RegistrySet[ScriptedPkgTransport, ScriptedCredential]:
-    return RegistrySet[ScriptedPkgTransport, ScriptedCredential](t^, _cred())
+def _no_meta_upload(reg: RegistrySet[ScriptedChannel, PublishCredential], meta: String) raises:
+    assert_equal(reg.transport().upload_count(meta), 0, String("the metapackage was uploaded"))
 
 
-def _quick() -> RunOptions:
-    return RunOptions(3, 250)
+def test_a_clean_publish() raises:
+    var t = _targets(String("clean"))
+    var reg = _registry(_channel())
+    var src = _src()
+    var rep = _run(t, reg, src)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    ref ch = reg.transport()
+    for i in range(len(t)):
+        assert_equal(ch.upload_count(t[i].coordinate.file_name), 1, t[i].coordinate.file_name)
+        assert_true(ch.holds(String("linux-64"), t[i].coordinate.file_name))
+    var meta_at = ch.first_upload_call(t[2].coordinate.file_name)
+    assert_true(meta_at > ch.last_fetch_call(String("linux-64"), t[0].coordinate.file_name))
+    assert_true(meta_at > ch.last_upload_call(t[1].coordinate.file_name))
+    # step 3 read every member back before the metapackage went
+    var reads_before = 0
+    for i in range(meta_at):
+        if ch.call(i).path.endswith(t[1].coordinate.file_name) and len(ch.call(i).body) == 0:
+            reads_before += 1
+    assert_true(reads_before >= 3, String("beta read at step 1, settle and step 3"))
+    assert_equal(src.asked_count(), 1)
+    assert_equal(ch.call(meta_at).header_value(String("Authorization")), String("Bearer pfx-test-token"))
+    print("  test_a_clean_publish: PASS")
 
 
-def _posts(rs: RegistrySet[ScriptedPkgTransport, ScriptedCredential]) -> Int:
-    var n = 0
-    for i in range(rs.transport().call_count()):
-        if rs.transport().call(i).method == HTTP_METHOD_POST:
-            n += 1
-    return n
+def test_a_present_member_is_read_back_not_uploaded() raises:
+    var t = _targets(String("present"))
+    var ch = _channel()
+    ch.put(String("linux-64"), t[0].coordinate.file_name, _bytes(String("alpha conda bytes")))
+    var reg = _registry(ch^)
+    var src = _src()
+    var rep = _run(t, reg, src)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 0)
+    var meta_at = reg.transport().first_upload_call(t[2].coordinate.file_name)
+    var alpha_reads = 0
+    for i in range(meta_at):
+        if reg.transport().call(i).path.endswith(t[0].coordinate.file_name):
+            alpha_reads += 1
+    assert_equal(alpha_reads, 2, String("step 1 and step 3"))
+    print("  test_a_present_member_is_read_back_not_uploaded: PASS")
 
 
-def _dump(r: PublishReport) -> String:
-    return String("exit=") + String(r.exit_code) + String("\n") + String("\n").join(r.lines)
+def test_a_lost_answer_settles_by_download() raises:
+    var t = _targets(String("lost"))
+    var ch = _channel()
+    ch.plan_upload(t[0].coordinate.file_name, UPLOAD_STORE_LOSE_ANSWER)
+    var reg = _registry(ch^)
+    var src = _src()
+    var rep = _run(t, reg, src)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 1)
+    print("  test_a_lost_answer_settles_by_download: PASS")
 
 
-def test_plan_publish_reads_presence_anonymously() raises:
-    var sl = RecordingSleeper()
-    var ts = _targets(String("linux-64.json"), String("osx-arm64.json"))
-    var t = ScriptedPkgTransport()
-    t.queue(_repodata(String("linux-64"), String("")))
-    t.queue(_repodata(String("osx-arm64"), String(_OSX_SHA)))
-    var reader = RegistrySet[ScriptedPkgTransport, AnonymousCredential](t^, AnonymousCredential())
-    var plan = plan_publish(reader, find_channel(_decls(), String("example-stable")), ts)
-    assert_equal(plan.entries[0].action, ACTION_UPLOAD)
-    assert_equal(plan.entries[1].action, ACTION_SKIP)
-    assert_equal(reader.transport().call_count(), 2)
-    var req = reader.transport().call(0)
-    assert_equal(req.method, HTTP_METHOD_GET)
-    assert_equal(req.host, String("conda.example.invalid"))
-    assert_equal(req.path, String("/example-stable/linux-64/repodata.json"))
-    assert_equal(req.header_value(String("Authorization")), String(""))
-    assert_equal(reader.transport().call(1).path, String("/example-stable/osx-arm64/repodata.json"))
+def test_absent_after_bounded_retries_is_partial() raises:
+    var t = _targets(String("partial"))
+    var ch = _channel()
+    for _ in range(5):
+        ch.plan_upload(t[1].coordinate.file_name, UPLOAD_LOSE_NOT_STORED)
+    var reg = _registry(ch^)
+    var src = _src()
+    var rep = _run(t, reg, src, 3)
+    assert_equal(rep.exit_code, EXIT_PARTIAL, String("\n").join(rep.lines))
+    assert_equal(reg.transport().upload_count(t[1].coordinate.file_name), 3)
+    assert_true(rep.has_line_containing(String("MISSING linux-64/") + t[1].coordinate.file_name))
+    _no_meta_upload(reg, t[2].coordinate.file_name)
+    print("  test_absent_after_bounded_retries_is_partial: PASS")
 
 
-def test_verify_target_files() raises:
-    var sl = RecordingSleeper()
-    verify_target_files(_targets(String("linux-64.json"), String("osx-arm64.json")))
-    var why = String("")
+def test_a_409_is_settled_by_what_the_channel_holds() raises:
+    var t = _targets(String("dup"))
+    var ch = _channel()
+    ch.plan_upload(t[0].coordinate.file_name, UPLOAD_STORE_ANSWER_409)
+    var reg = _registry(ch^)
+    var src = _src()
+    var rep = _run(t, reg, src)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 1)
+
+    var ch2 = _channel()
+    ch2.plan_upload(t[0].coordinate.file_name, UPLOAD_STORE_OTHER_BYTES)
+    var reg2 = _registry(ch2^)
+    var rep2 = _run(t, reg2, src)
+    assert_equal(rep2.exit_code, EXIT_STOP_DIFFERENT_BYTES, String("\n").join(rep2.lines))
+    assert_equal(reg2.transport().upload_count(t[0].coordinate.file_name), 1)
+    _no_meta_upload(reg2, t[2].coordinate.file_name)
+    assert_equal(reg2.transport().upload_count(t[1].coordinate.file_name), 0)
+    print("  test_a_409_is_settled_by_what_the_channel_holds: PASS")
+
+
+def test_a_rejection_fails_and_stops() raises:
+    var t = _targets(String("reject"))
+    var ch = _channel()
+    ch.plan_upload(t[0].coordinate.file_name, UPLOAD_ANSWER_400)
+    var reg = _registry(ch^)
+    var src = _src()
+    var rep = _run(t, reg, src)
+    assert_equal(rep.exit_code, EXIT_FAILED, String("\n").join(rep.lines))
+    assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 1)
+    assert_equal(reg.transport().upload_count(t[1].coordinate.file_name), 0)
+    assert_true(rep.has_line_containing(String("NOT-ATTEMPTED linux-64/") + t[1].coordinate.file_name))
+    _no_meta_upload(reg, t[2].coordinate.file_name)
+    print("  test_a_rejection_fails_and_stops: PASS")
+
+
+def test_a_read_back_mismatch_withholds_the_metapackage() raises:
+    var t = _targets(String("mismatch"))
+    var ch = _channel()
+    # alpha: GET 1 at step 1 (404), GET 2 settles, GET 3 is step 3
+    ch.other_bytes_on_fetch(String("linux-64"), t[0].coordinate.file_name, 3)
+    var reg = _registry(ch^)
+    var src = _src()
+    var rep = _run(t, reg, src)
+    assert_equal(rep.exit_code, EXIT_READ_BACK_MISMATCH, String("\n").join(rep.lines))
+    assert_true(rep.has_line_containing(String("READ-BACK linux-64/") + t[0].coordinate.file_name))
+    _no_meta_upload(reg, t[2].coordinate.file_name)
+    print("  test_a_read_back_mismatch_withholds_the_metapackage: PASS")
+
+
+def test_the_uploader_gate_is_built_from_listing_and_claims() raises:
+    var t = _targets(String("gate"))
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+    ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
+    var reg = _registry(ch^)
+    var channel_read = read_channel(reg, t)
+    var claims = List[String]()
+    claims.append(String("komira"))
+    var names = approved_names_for(t, channel_read, claims)
+    var before = reg.transport().call_count()
+    reg.credential().arm(String("Bearer pfx-test-token"))
+    var raised = False
     try:
-        verify_target_files(_targets(String("bad_sha.json")))
+        _ = reg.upload(package_file_of(t[1]), names)
     except e:
-        why = String(e)
-    assert_true(why.find(String("refused before any upload")) >= 0, why)
-    assert_true(why.find(String("linux-64/example-pkg-1.2.3-h0_0.conda' has sha256 ") + String(_LINUX_SHA)) >= 0, why)
-    assert_true(why.find(String("its manifest says ") + String(_OSX_SHA)) >= 0, why)
-
-
-def test_dry_run_makes_no_registry_call() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json"), String("osx-arm64.json")), PRESENCE_ABSENT, PRESENCE_ABSENT)
-    var rs = RegistrySet[_Tripwire, ScriptedCredential](_Tripwire(), _cred())
-    var r = run_publish(plan, rs, _names(), True, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_OK, _dump(r))
-    assert_equal(rs.transport().calls, 0)
-    assert_equal(rs.credential().asked_count(), 0)
-    assert_equal(r.uploaded, 0)
-    assert_true(r.has_line_containing(String("(dry run)")), _dump(r))
-    assert_true(r.has_line_containing(String("UPLOAD https://conda.example.invalid/example-stable/linux-64/") + String(_FILE)), _dump(r))
-    assert_true(r.has_line_containing(String("DRY RUN: nothing was uploaded")), _dump(r))
-    assert_false(r.has_line_containing(String("UPLOADED")), _dump(r))
-    assert_equal(len(sl.slept), 0)
-    # The same plan, not a dry run, does reach the transport: the tripwire is live.
-    var live = RegistrySet[_Tripwire, ScriptedCredential](_Tripwire(), _cred())
-    var r2 = run_publish(plan, live, _names(), False, _quick(), sl)
-    assert_true(live.transport().calls > 0)
-    assert_true(r2.exit_code != EXIT_OK, _dump(r2))
-
-
-def test_upload_is_read_back_until_identical() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json")), PRESENCE_ABSENT)
-    var t = ScriptedPkgTransport()
-    t.queue(PkgResponse(201))
-    t.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    var rs = _set(t^)
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_OK, _dump(r))
-    assert_equal(r.uploaded, 1)
-    assert_true(r.has_line_containing(String("UPLOADED https://conda.example.invalid/example-stable/linux-64/") + String(_FILE)), _dump(r))
-    assert_true(r.has_line_containing(String("RESULT exit=0 uploaded=1 skipped=0")), _dump(r))
-    var post = rs.transport().call(0)
-    assert_equal(post.method, HTTP_METHOD_POST)
-    assert_equal(post.path, String("/api/v1/upload/example-stable"))
-    assert_equal(post.header_value(String("Authorization")), String(_TOKEN))
-    assert_equal(rs.transport().unconsumed(), 0)
-    # the credential is asked once before any upload, then by the upload and the read-back
-    assert_equal(rs.credential().asked_count(), 3)
-    for k in range(3):
-        assert_equal(rs.credential().asked_host(k), String("conda.example.invalid"))
-    assert_equal(len(sl.slept), 0)
-
-    var lag = ScriptedPkgTransport()
-    lag.queue(PkgResponse(201))
-    lag.queue(_repodata(String("linux-64"), String("")))
-    lag.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    var rs2 = _set(lag^)
-    var r2 = run_publish(plan, rs2, _names(), False, _quick(), sl)
-    assert_equal(r2.exit_code, EXIT_OK, _dump(r2))
-    assert_equal(rs2.transport().unconsumed(), 0)
-    # one wait, of the configured length, between the two read-backs
-    assert_equal(len(sl.slept), 1)
-    assert_equal(sl.slept[0], Int64(250))
-
-    var never = ScriptedPkgTransport()
-    never.queue(PkgResponse(201))
-    never.queue(_repodata(String("linux-64"), String("")))
-    never.queue(_repodata(String("linux-64"), String("")))
-    var rs3 = _set(never^)
-    var r3 = run_publish(plan, rs3, _names(), False, RunOptions(2, 250), sl)
-    assert_equal(r3.exit_code, EXIT_CANNOT_TELL, _dump(r3))
-    assert_true(r3.has_line_containing(String("UNCONFIRMED")), _dump(r3))
-    assert_equal(len(sl.slept), 2)
-
-    var other = ScriptedPkgTransport()
-    other.queue(PkgResponse(201))
-    other.queue(_repodata(String("linux-64"), String(_OSX_SHA)))
-    var rs4 = _set(other^)
-    var r4 = run_publish(plan, rs4, _names(), False, _quick(), sl)
-    assert_equal(r4.exit_code, EXIT_FAILED, _dump(r4))
-    assert_true(r4.has_line_containing(String("uploaded, but the registry reads back PRESENT_DIFFERENT")), _dump(r4))
-
-
-def test_a_409_is_settled_by_reading_back() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json")), PRESENCE_ABSENT)
-    var t = ScriptedPkgTransport()
-    t.queue(PkgResponse(409))
-    t.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    var rs = _set(t^)
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_OK, _dump(r))
-    assert_equal(r.uploaded, 0)
-    assert_equal(r.skipped, 1)
-    assert_true(r.has_line_containing(String("SKIPPED https://conda.example.invalid/example-stable/linux-64/")), _dump(r))
-    assert_true(r.has_line_containing(String("already holds it, identical (HTTP 409)")), _dump(r))
-    assert_equal(len(sl.slept), 0)
-
-    var d = ScriptedPkgTransport()
-    d.queue(PkgResponse(409))
-    d.queue(_repodata(String("linux-64"), String(_OSX_SHA)))
-    var rs2 = _set(d^)
-    var r2 = run_publish(plan, rs2, _names(), False, _quick(), sl)
-    assert_equal(r2.exit_code, EXIT_REFUSED, _dump(r2))
-    assert_true(r2.has_line_containing(String("DUPLICATE_REFUSED")), _dump(r2))
-    assert_true(r2.has_line_containing(String("PRESENT_DIFFERENT")), _dump(r2))
-    assert_equal(_posts(rs2), 1)
-
-    # The re-run after a lost answer: the plan read ABSENT because the index
-    # lagged, the upload answers 409, and the index shows the file one poll
-    # later. That is SKIPPED, exit 0, after one wait.
-    var lag = ScriptedPkgTransport()
-    lag.queue(PkgResponse(409))
-    lag.queue(_repodata(String("linux-64"), String("")))
-    lag.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    var rs3 = _set(lag^)
-    var sl3 = RecordingSleeper()
-    var r3 = run_publish(plan, rs3, _names(), False, _quick(), sl3)
-    assert_equal(r3.exit_code, EXIT_OK, _dump(r3))
-    assert_equal(r3.skipped, 1)
-    assert_equal(r3.uploaded, 0)
-    assert_equal(rs3.transport().unconsumed(), 0)
-    assert_equal(len(sl3.slept), 1)
-    assert_equal(sl3.slept[0], Int64(250))
-
-    # A 409 whose file never shows within the polls: the server said a file
-    # of that name exists, so this is "cannot tell" (5), not refused (3).
-    var never = ScriptedPkgTransport()
-    never.queue(PkgResponse(409))
-    never.queue(_repodata(String("linux-64"), String("")))
-    never.queue(_repodata(String("linux-64"), String("")))
-    never.queue(_repodata(String("linux-64"), String("")))
-    var rs4 = _set(never^)
-    var sl4 = RecordingSleeper()
-    var r4 = run_publish(plan, rs4, _names(), False, _quick(), sl4)
-    assert_equal(r4.exit_code, EXIT_CANNOT_TELL, _dump(r4))
-    assert_true(r4.has_line_containing(String("UNCONFIRMED")), _dump(r4))
-    assert_true(r4.has_line_containing(String("DUPLICATE_REFUSED")), _dump(r4))
-    assert_true(r4.has_line_containing(String("after 3 read(s): ABSENT")), _dump(r4))
-    assert_false(r4.has_line_containing(String("FAILED")), _dump(r4))
-    assert_equal(rs4.transport().unconsumed(), 0)
-    assert_equal(len(sl4.slept), 2)
-
-
-def test_a_lost_answer_is_settled_by_reading_back() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json")), PRESENCE_ABSENT)
-    var t = ScriptedPkgTransport()
-    t.queue_fault(String("connection reset after the body was sent"))
-    t.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    var rs = _set(t^)
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_OK, _dump(r))
-    assert_equal(r.uploaded, 1)
-    assert_true(r.has_line_containing(String("the upload's answer was lost")), _dump(r))
-
-    var a = ScriptedPkgTransport()
-    a.queue_fault(String("connection reset after the body was sent"))
-    a.queue(_repodata(String("linux-64"), String("")))
-    a.queue(_repodata(String("linux-64"), String("")))
-    a.queue(_repodata(String("linux-64"), String("")))
-    var rs2 = _set(a^)
-    var r2 = run_publish(plan, rs2, _names(), False, _quick(), sl)
-    assert_equal(r2.exit_code, EXIT_CANNOT_TELL, _dump(r2))
-    assert_true(r2.has_line_containing(String("UNCONFIRMED")), _dump(r2))
-    assert_equal(rs2.transport().unconsumed(), 0)
-
-    # The lost answer's bytes show one poll late: UPLOADED, exit 0.
-    var late = ScriptedPkgTransport()
-    late.queue_fault(String("connection reset after the body was sent"))
-    late.queue(_repodata(String("linux-64"), String("")))
-    late.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    var rs3 = _set(late^)
-    var sl3 = RecordingSleeper()
-    var r3 = run_publish(plan, rs3, _names(), False, _quick(), sl3)
-    assert_equal(r3.exit_code, EXIT_OK, _dump(r3))
-    assert_equal(r3.uploaded, 1)
-    assert_equal(len(sl3.slept), 1)
-
-
-def test_exit_4_after_an_upload_and_3_before() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json"), String("osx-arm64.json")), PRESENCE_ABSENT, PRESENCE_ABSENT)
-    var t = ScriptedPkgTransport()
-    t.queue(PkgResponse(201))
-    t.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
-    t.queue(PkgResponse(422))
-    var rs = _set(t^)
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_FAILED, _dump(r))
-    assert_equal(r.uploaded, 1)
-    assert_true(r.has_line_containing(String("FAILED https://conda.example.invalid/example-stable/osx-arm64/")), _dump(r))
-    assert_true(r.has_line_containing(String("REJECTED (HTTP 422)")), _dump(r))
-
-    var f = ScriptedPkgTransport()
-    f.queue(PkgResponse(403))
-    var rs2 = _set(f^)
-    var r2 = run_publish(plan, rs2, _names(), False, _quick(), sl)
-    assert_equal(r2.exit_code, EXIT_REFUSED, _dump(r2))
-    assert_true(r2.has_line_containing(String("AUTH_REFUSED")), _dump(r2))
-    assert_true(r2.has_line_containing(String("NOT-ATTEMPTED https://conda.example.invalid/example-stable/osx-arm64/")), _dump(r2))
-    assert_equal(rs2.transport().call_count(), 1)
-
-
-def test_the_credential_is_asked_before_the_first_upload() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json")), PRESENCE_ABSENT)
-    var rs = RegistrySet[_Tripwire, ScriptedCredential](_Tripwire(), ScriptedCredential())
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_REFUSED, _dump(r))
-    assert_true(r.has_line_containing(String("REFUSED credential")), _dump(r))
-    assert_true(r.has_line_containing(String("NOT-ATTEMPTED")), _dump(r))
-    assert_equal(rs.transport().calls, 0)
-
-
-def test_a_plan_with_a_refusal_uploads_nothing() raises:
-    var sl = RecordingSleeper()
-    var ts = _targets(String("linux-64.json"), String("osx-arm64.json"))
-    var definite = _plan(ts, PRESENCE_ABSENT, PRESENCE_PRESENT_DIFFERENT)
-    var rs = RegistrySet[_Tripwire, ScriptedCredential](_Tripwire(), _cred())
-    var r = run_publish(definite, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_REFUSED, _dump(r))
-    assert_true(r.has_line_containing(String("REFUSE https://conda.example.invalid/example-stable/osx-arm64/")), _dump(r))
-    assert_true(r.has_line_containing(String("REFUSED before any upload: 1 artifact(s)")), _dump(r))
-    assert_equal(rs.transport().calls, 0)
-    assert_equal(rs.credential().asked_count(), 0)
-    var unknown = _plan(ts, PRESENCE_ABSENT, PRESENCE_UNKNOWN)
-    var r2 = run_publish(unknown, rs, _names(), False, _quick(), sl)
-    assert_equal(r2.exit_code, EXIT_CANNOT_TELL, _dump(r2))
-    assert_equal(rs.transport().calls, 0)
-
-
-def test_a_changed_file_is_refused_before_its_upload() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("bad_sha.json")), PRESENCE_ABSENT)
-    var t = ScriptedPkgTransport()
-    var rs = _set(t^)
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_REFUSED, _dump(r))
-    assert_true(r.has_line_containing(String("changed since it was planned")), _dump(r))
-    assert_equal(rs.transport().call_count(), 0)
-
-
-def test_a_credential_for_another_host_is_refused_first() raises:
-    var sl = RecordingSleeper()
-    var plan = _plan(_targets(String("linux-64.json")), PRESENCE_ABSENT)
-    var cred = StaticTokenCredential(
-        SURFACE_PREFIX_DEV,
-        String("other.example.invalid"),
-        SecretValue.from_string(String("example-token-not-a-credential")),
-    )
-    var rs = RegistrySet[_Tripwire, StaticTokenCredential](_Tripwire(), cred^)
-    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_REFUSED, _dump(r))
-    assert_true(r.has_line_containing(String("REFUSED credential")), _dump(r))
-    assert_true(r.has_line_containing(String("'conda.example.invalid'")), _dump(r))
-    assert_true(r.has_line_containing(String("NOT-ATTEMPTED")), _dump(r))
-    assert_false(r.has_line_containing(String("example-token-not-a-credential")), _dump(r))
-    assert_equal(rs.transport().calls, 0)
+        raised = True
+        assert_true(String(e).find(String("'komira_beta' is not in the approved-names list")) >= 0, String(e))
+    assert_true(raised, String("komira_beta was neither held nor claimed"))
+    assert_equal(reg.transport().call_count(), before)
+    print("  test_the_uploader_gate_is_built_from_listing_and_claims: PASS")
 
 
 def main() raises:
-    test_plan_publish_reads_presence_anonymously()
-    test_verify_target_files()
-    test_dry_run_makes_no_registry_call()
-    test_upload_is_read_back_until_identical()
-    test_a_409_is_settled_by_reading_back()
-    test_a_lost_answer_is_settled_by_reading_back()
-    test_exit_4_after_an_upload_and_3_before()
-    test_the_credential_is_asked_before_the_first_upload()
-    test_a_plan_with_a_refusal_uploads_nothing()
-    test_a_changed_file_is_refused_before_its_upload()
-    test_a_credential_for_another_host_is_refused_first()
+    test_a_clean_publish()
+    test_a_present_member_is_read_back_not_uploaded()
+    test_a_lost_answer_settles_by_download()
+    test_absent_after_bounded_retries_is_partial()
+    test_a_409_is_settled_by_what_the_channel_holds()
+    test_a_rejection_fails_and_stops()
+    test_a_read_back_mismatch_withholds_the_metapackage()
+    test_the_uploader_gate_is_built_from_listing_and_claims()
     print("test_publish_run: ALL PASS")

@@ -1,44 +1,56 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
-# The `kci publish` verb: publish built package files to a release channel.
-# It resolves each artifact manifest to the channel's repository for its type
-# (kci_release_channel), checks every file against its manifest and every
-# name against the approved-names file, reads what the registry holds, and
-# plans each file as UPLOAD, SKIP or REFUSE. `--dry-run` prints that plan and
-# stops, resolving no credential; otherwise kci_pkg_upload carries it out and
-# reads every upload back. Nothing here names a channel, an account or an
-# organisation: all of that comes from the files and flags of the run.
+# The `kci publish` verb: publish the release set `kci build` left in a release
+# directory to a conda channel, or refuse it whole. Step 0 re-verifies every
+# member over its bytes with the same `kci_release_set.verify_member` the build
+# ran, then lockstep, the requirement closure and the set hash, before any
+# request. The channel is read by download; a file present with other bytes, an
+# unclaimed new name, or a listing that could not be read stops the run with
+# nothing written. Then the missing members are uploaded (never with `force`),
+# every member is read back, and the metapackage goes last. The credential is
+# the channel's own (kci_release_channel), resolved once. One JSON report.
+# Nothing here names a channel, an account or an organisation.
 #
-# Every welded test drives scripted transports over the staged fixtures
-# under tests/fixtures: no socket, no network.
+# Every welded test drives `ScriptedChannel`, an in-memory channel, over
+# release directories `ExampleRelease` writes under TEST_TMPDIR: no socket, no
+# network, `.invalid` hosts only.
 mojo_library(
     name = "kci_publish_lib",
     import_name = "kci_publish",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
     deps = [
+        "//src/kci_artifact_declaration:kci_artifact_declaration",
+        "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_release_channel:kci_release_channel",
+        "//src/kci_release_set:kci_release_set",
         "//src/komira_http:komira_http",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
-        # whole-verb runs: the dry run reaches no write transport and resolves no secret
-        "tests/test_publish_flow.mojo",
-        # every flag, both spellings, each refusal naming its flag; exit 2 first
+        # 2.1: every flag, both spellings; --credential/--approved-names unknown
         "tests/test_publish_flags.mojo",
-        # the artifact manifest and the approved-names file
-        "tests/test_publish_manifest.mojo",
-        # artifact -> channel repository, the approved-names gate, presence -> action
-        "tests/test_publish_plan.mojo",
-        # the plan carried out: read-backs, 409s, lost answers, exit codes, zero-call dry run
+        # 0.1/0.2/0.6: every declared member and nothing else, verified over its bytes
+        "tests/test_publish_inputs.mojo",
+        # 0.3: one version/build/build_number/commit/timestamp/subdir; --release-version
+        "tests/test_publish_lockstep.mojo",
+        # 0.4: the requirement closure; exactly one metapackage of every library
+        "tests/test_publish_closure.mojo",
+        # 0.5: golden set hash; a wrong --expect-set-hash sends nothing
+        "tests/test_publish_set_hash.mojo",
+        # 1: by download; other bytes = 7, unclaimed new name = 8, all same = 6, unread = 5
+        "tests/test_publish_channel_state.mojo",
+        # 2-4: once per attempt, settle, bounded retry, read-back barrier, metapackage last
         "tests/test_publish_run.mojo",
+        # 2: no request of any scenario says force
+        "tests/test_publish_never_force.mojo",
+        # 6: report keys and states, no secret, one verdict per exit code
+        "tests/test_publish_report.mojo",
+        # dry run reads only, mints nothing; the credential is the channel's
+        "tests/test_publish_flow.mojo",
     ],
-    test_data = {
-        "tests/test_publish_flow.mojo": glob(["tests/fixtures/**"]),
-        "tests/test_publish_run.mojo": glob(["tests/fixtures/**"]),
-    },
     visibility = ["PUBLIC"],
 )
 

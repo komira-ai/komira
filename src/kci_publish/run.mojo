@@ -1,411 +1,271 @@
 # =============================================================================
-# src/kci_publish/run.mojo -- reading the registry into a plan, and carrying
-#   the plan out (or, with --dry-run, only printing it).
+# src/kci_publish/run.mojo -- `run_publish`: contract steps 1 to 6 over a set
+#   that step 0 already verified, and the exit code (`report.mojo`'s table).
 # =============================================================================
 #
-# `plan_publish` asks the registry about every target (one presence read
-# each) and hands the answers to the pure `plan_from_presence`.
+#   1. read the channel (`channel_state.mojo`): every file by download, every
+#      listed subdir's names; `plan_from_state` decides: 7, 5, 8 or 6 stop
+#      here with NO write request;
+#   --dry-run stops here too, printing what steps 2 to 4 would do: no write
+#      request, and the channel's credential is never asked for a write
+#      value (no OIDC exchange);
+#   2. the write credential is resolved ONCE (`PublishCredential.arm`), then
+#      each member still absent is uploaded (`upload.mojo`); the first member
+#      that does not end present-same stops the run;
+#   3. EVERY member is downloaded back and compared;
+#   4. only then the metapackage, uploaded (or found present-same) and read
+#      back;
+#   5. report-only: is each file in its subdir's repodata yet (`index.mojo`);
+#   6. the report (`report.mojo`).
 #
-# `run_publish` executes a plan:
-#   * a plan holding any REFUSE uploads nothing: exit 3, or 5 when every
-#     refusal is a read that could not be answered;
-#   * `dry_run` returns the plan's lines and exit 0. It makes NO call on the
-#     registry set: no transport request and no credential request, so no
-#     token is resolved or minted and nothing is uploaded;
-#   * otherwise the credential is asked for every (surface, host) the
-#     uploads need BEFORE the first upload, so a credential refusal (an OIDC
-#     environment that is not the required one, or a host the credential was
-#     not issued for, included) stops the run with nothing uploaded. Then
-#     each UPLOAD entry, in order:
-#       - the file is read again and must still have the planned sha256;
-#       - CREATED, DUPLICATE_REFUSED (a 409: a file of that name is already
-#         there) and UNKNOWN (the answer was lost; the bytes may or may not
-#         have landed) are all settled by the SAME bounded read-back poll,
-#         because the index lags an upload whoever made it. A 409 is the
-#         usual answer on a re-run after a lost answer, while the index
-#         still lags;
-#       - read back identical: CREATED and UNKNOWN count as uploaded, a 409
-#         is SKIPPED;
-#       - read back PRESENT_DIFFERENT or NO_COMMON_FIELD fails the run: a
-#         different file holds that name;
-#       - anything else after the last poll (ABSENT, UNKNOWN, AUTH, RATE) is
-#         "cannot tell". After a 409 that is never a definite failure: the
-#         server said a file of that name exists, and the index has not yet
-#         shown which;
-#       - any other upload answer fails the run.
-#     The first failure stops the run; later entries are NOT-ATTEMPTED.
+# ⚠ NOT CONCURRENT, DELIBERATELY (a stated deviation from the design, which
+# asks for up to N workers on komira_async, each with its own registry set).
+# komira_async's fork-join (`parallel_fork_join`) runs a `ChunkWork` whose
+# `process` takes an immutable `self` and recovers its typed input and output
+# by bitcast, and every `HttpPkgTransport` exchange builds its own
+# `BlockingRuntime`; running those inside the dispatcher's worker threads is
+# unmeasured. A publish uploads a handful of files, so the members go one
+# after another on the calling thread, which is the design's
+# `--concurrency 1` path, and there is no `--concurrency` flag that would
+# claim more. Every per-file rule (settle, bounded retry, read-back barrier,
+# metapackage last) is independent of the thread count.
 #
-# EXIT CODES: 0 everything uploaded or skipped; 3 refused before any upload;
-# 4 failed after the run began uploading; 5 cannot tell whether a file
-# landed (2, a usage error, is the CLI's).
-#
-# Every line `run_publish` emits is safe to log: registry answers pass
-# through kci_pkg_upload's credential-echo redaction, and no line carries a
-# token.
-#
-# Encapsulation: owned values; the registry set is borrowed `mut` for the
-# call. No pointer, no wildcard origin.
+# Encapsulation: owned values; the registry set and the credential source are
+# borrowed `mut`. No pointer, no wildcard origin.
 # =============================================================================
 
-from std.pathlib import Path
-
-from kci_pkg_upload import (
-    PRESENCE_NO_COMMON_FIELD,
-    PRESENCE_PRESENT_DIFFERENT,
-    PRESENCE_PRESENT_IDENTICAL,
-    SUBSTRATE_PREFIX_DEV_CONDA,
-    SURFACE_PREFIX_DEV,
-    SURFACE_PYPI_UPLOAD,
-    UPLOAD_CREATED,
-    UPLOAD_DUPLICATE_REFUSED,
-    UPLOAD_UNKNOWN,
-    ApprovedNames,
-    ContentIdentity,
-    PackageFile,
-    PkgTransport,
-    Presence,
-    RegistryCredential,
-    RegistrySet,
-    presence_kind_name,
-)
-from kci_pkg_upload.coordinate import repo_host
-from kci_release_channel import ChannelDeclaration
 from komira_retry import Sleeper
 
+from kci_pkg_upload import (
+    SURFACE_PREFIX_DEV,
+    PkgTransport,
+    RegistryCredential,
+    RegistrySet,
+)
+from kci_pkg_upload.coordinate import repo_host
+
+from .channel_state import read_channel, read_file_state
+from .index import is_indexed
 from .plan import (
-    ACTION_REFUSE,
-    ACTION_SKIP,
-    ACTION_UPLOAD,
-    PublishPlan,
+    STATE_ABSENT,
+    STATE_DIFFERENT,
+    STATE_SAME,
+    VERDICT_ALREADY_PUBLISHED,
+    VERDICT_CANNOT_TELL,
+    VERDICT_PROCEED,
+    VERDICT_STOP_DIFFERENT,
+    VERDICT_STOP_NEW_NAME,
     PublishTarget,
-    action_name,
-    plan_from_presence,
+    approved_names_for,
+    plan_from_state,
+    state_name,
+)
+from .report import (
+    EXIT_ALREADY_PUBLISHED,
+    EXIT_CANNOT_TELL,
+    EXIT_FAILED,
+    EXIT_PARTIAL,
+    EXIT_PUBLISHED,
+    EXIT_READ_BACK_MISMATCH,
+    EXIT_STOP_DIFFERENT_BYTES,
+    EXIT_STOP_NEW_NAME,
+    FileRow,
+    PublishReport,
+)
+from .upload import (
+    FILE_CANNOT_TELL,
+    FILE_DONE,
+    FILE_FAILED,
+    FILE_STILL_ABSENT,
+    FILE_STOP_DIFFERENT,
+    FileOutcome,
+    PublishCredential,
+    RunOptions,
+    upload_file,
+    read_back_all,
 )
 
 
-comptime EXIT_OK: Int = 0
-comptime EXIT_USAGE: Int = 2
-comptime EXIT_REFUSED: Int = 3
-comptime EXIT_FAILED: Int = 4
-comptime EXIT_CANNOT_TELL: Int = 5
+def _exit_of_verdict(verdict: Int) -> Int:
+    if verdict == VERDICT_STOP_DIFFERENT:
+        return EXIT_STOP_DIFFERENT_BYTES
+    if verdict == VERDICT_CANNOT_TELL:
+        return EXIT_CANNOT_TELL
+    if verdict == VERDICT_STOP_NEW_NAME:
+        return EXIT_STOP_NEW_NAME
+    if verdict == VERDICT_ALREADY_PUBLISHED:
+        return EXIT_ALREADY_PUBLISHED
+    return EXIT_PUBLISHED
 
 
-struct RunOptions(Copyable, Movable, Deinitable):
-    """How long a fresh upload's read-back may wait for the index: up to
-    `read_back_attempts` reads, `read_back_wait_ms` apart.
-
-    Layout: an Int and an Int64. No pointer field."""
-
-    var read_back_attempts: Int
-    var read_back_wait_ms: Int64
-
-    def __init__(out self, read_back_attempts: Int = 6, read_back_wait_ms: Int64 = 10_000):
-        self.read_back_attempts = read_back_attempts
-        self.read_back_wait_ms = read_back_wait_ms
+def _exit_of_file(result: Int) -> Int:
+    if result == FILE_STOP_DIFFERENT:
+        return EXIT_STOP_DIFFERENT_BYTES
+    if result == FILE_FAILED:
+        return EXIT_FAILED
+    if result == FILE_STILL_ABSENT:
+        return EXIT_PARTIAL
+    if result == FILE_CANNOT_TELL:
+        return EXIT_CANNOT_TELL
+    return EXIT_PUBLISHED
 
 
-struct PublishReport(Copyable, Movable, Deinitable):
-    """The run's outcome: an exit code and the lines to print, in order.
-
-    Layout: an Int, two counters and an owned list. No pointer field."""
-
-    var exit_code: Int
-    var uploaded: Int
-    var skipped: Int
-    var lines: List[String]
-
-    def __init__(out self):
-        self.exit_code = EXIT_OK
-        self.uploaded = 0
-        self.skipped = 0
-        self.lines = List[String]()
-
-    @staticmethod
-    def refused(code: Int, var message: String) -> PublishReport:
-        """A report for a run refused before any plan line: one or more lines
-        of `message`, and `code`."""
-        var r = PublishReport()
-        r.exit_code = code
-        var parts = message.split(String("\n"))
-        for i in range(len(parts)):
-            r.lines.append(String(parts[i]))
-        return r^
-
-    def has_line_containing(self, needle: String) -> Bool:
-        for i in range(len(self.lines)):
-            if self.lines[i].find(needle) >= 0:
-                return True
-        return False
+def _read_back_rank(code: Int) -> Int:
+    """Step 3's precedence: a mismatch over a missing member over an
+    unreadable one."""
+    if code == EXIT_READ_BACK_MISMATCH:
+        return 3
+    if code == EXIT_PARTIAL:
+        return 2
+    if code == EXIT_CANNOT_TELL:
+        return 1
+    return 0
 
 
-def expected_identity(t: PublishTarget) -> ContentIdentity:
-    return ContentIdentity.of_sha256_hex(t.sha256_hex.copy())
+def _record(mut r: PublishReport, i: Int, o: FileOutcome):
+    r.files[i].action = o.action.copy()
+    r.files[i].state_after = o.state_after
+    r.lines.append(o.line.copy())
 
 
-def plan_publish[T: PkgTransport, C: RegistryCredential](
-    mut registry: RegistrySet[T, C],
-    channel: ChannelDeclaration,
+def run_publish[T: PkgTransport, S: RegistryCredential, W: Sleeper](
     targets: List[PublishTarget],
-) raises -> PublishPlan:
-    """One presence read per target, then `plan_from_presence`."""
-    var presences = List[Presence]()
-    for i in range(len(targets)):
-        presences.append(
-            registry.presence(targets[i].coordinate, expected_identity(targets[i]))
-        )
-    return plan_from_presence(channel, targets, presences)
-
-
-def render_plan(plan: PublishPlan, dry_run: Bool) -> List[String]:
-    """The plan as lines: a header, then one line per artifact."""
-    var out = List[String]()
-    out.append(
-        String("PLAN channel=")
-        + plan.channel
-        + String(" visibility=")
-        + plan.visibility
-        + String(" upload=")
-        + String(plan.count(ACTION_UPLOAD))
-        + String(" skip=")
-        + String(plan.count(ACTION_SKIP))
-        + String(" refuse=")
-        + String(plan.count(ACTION_REFUSE))
-        + (String(" (dry run)") if dry_run else String(""))
-    )
-    for i in range(len(plan.entries)):
-        ref e = plan.entries[i]
-        var line = (
-            action_name(e.action)
-            + String(" ")
-            + e.target.where()
-            + String(" sha256=")
-            + e.target.sha256_hex
-        )
-        if e.reason.byte_length() > 0:
-            line += String(" -- ") + e.reason
-        out.append(line^)
-    return out^
-
-
-def _surface_of(t: PublishTarget) -> Int:
-    if t.coordinate.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
-        return SURFACE_PREFIX_DEV
-    return SURFACE_PYPI_UPLOAD
-
-
-def surfaces_needed(plan: PublishPlan) -> List[Int]:
-    """The credential surfaces the plan's UPLOAD entries need, each once."""
-    var out = List[Int]()
-    for i in range(len(plan.entries)):
-        ref e = plan.entries[i]
-        if e.action != ACTION_UPLOAD:
-            continue
-        var s = _surface_of(e.target)
-        var seen = False
-        for j in range(len(out)):
-            if out[j] == s:
-                seen = True
-        if not seen:
-            out.append(s)
-    return out^
-
-
-def _ask_credential_first[T: PkgTransport, C: RegistryCredential](
-    plan: PublishPlan, mut registry: RegistrySet[T, C]
-) raises:
-    """Ask the credential for each (surface, host) the UPLOAD entries need,
-    each once, so a refusal comes before the first upload."""
-    var surfaces = List[Int]()
-    var hosts = List[String]()
-    for i in range(len(plan.entries)):
-        ref e = plan.entries[i]
-        if e.action != ACTION_UPLOAD:
-            continue
-        var s = _surface_of(e.target)
-        var h = repo_host(e.target.coordinate.repo)
-        var seen = False
-        for j in range(len(surfaces)):
-            if surfaces[j] == s and hosts[j] == h:
-                seen = True
-        if seen:
-            continue
-        _ = registry.credential().authorization(s, h)
-        surfaces.append(s)
-        hosts.append(h^)
-
-
-def package_file_of(t: PublishTarget) raises -> PackageFile:
-    """The target's bytes (and, for PYTHON, its METADATA text), read now.
-    RAISES when a file cannot be read or no longer has the planned sha256."""
-    var data = Path(t.file_path).read_bytes()
-    var meta = String("")
-    if t.metadata_path.byte_length() > 0:
-        meta = Path(t.metadata_path).read_text()
-    var f = PackageFile(t.coordinate.copy(), data^, meta^)
-    if f.identity.sha256_hex != t.sha256_hex:
-        raise Error(
-            String("'")
-            + t.file_path
-            + String("' changed since it was planned (sha256 now ")
-            + f.identity.sha256_hex
-            + String(")")
-        )
-    return f^
-
-
-def _describe(p: Presence) -> String:
-    var s = presence_kind_name(p.kind) + String(" (HTTP ") + String(p.status) + String(")")
-    if p.detail.byte_length() > 0:
-        s += String(": ") + p.detail
-    return s^
-
-
-def _read_back_until_identical[T: PkgTransport, C: RegistryCredential, S: Sleeper](
-    mut registry: RegistrySet[T, C],
-    t: PublishTarget,
-    opts: RunOptions,
-    mut sleeper: S,
-) raises -> Presence:
-    """Poll presence until PRESENT_IDENTICAL, a definite mismatch, or the
-    last attempt; return the last answer."""
-    var attempts = opts.read_back_attempts if opts.read_back_attempts > 0 else 1
-    var p = registry.presence(t.coordinate, expected_identity(t))
-    var n = 1
-    while n < attempts:
-        if (
-            p.kind == PRESENCE_PRESENT_IDENTICAL
-            or p.kind == PRESENCE_PRESENT_DIFFERENT
-            or p.kind == PRESENCE_NO_COMMON_FIELD
-        ):
-            break
-        sleeper.sleep_ms(opts.read_back_wait_ms)
-        p = registry.presence(t.coordinate, expected_identity(t))
-        n += 1
-    return p^
-
-
-def _finish(mut r: PublishReport, plan: PublishPlan, from_index: Int):
-    for i in range(from_index, len(plan.entries)):
-        ref e = plan.entries[i]
-        if e.action == ACTION_UPLOAD:
-            r.lines.append(String("NOT-ATTEMPTED ") + e.target.where())
-    r.lines.append(
-        String("RESULT exit=")
-        + String(r.exit_code)
-        + String(" uploaded=")
-        + String(r.uploaded)
-        + String(" skipped=")
-        + String(r.skipped)
-    )
-
-
-def _fail(mut r: PublishReport, code: Int, line: String):
-    r.lines.append(line)
-    r.exit_code = code
-
-
-def run_publish[T: PkgTransport, C: RegistryCredential, S: Sleeper](
-    plan: PublishPlan,
-    mut registry: RegistrySet[T, C],
-    names: ApprovedNames,
+    claims: List[String],
+    mut registry: RegistrySet[T, PublishCredential],
+    mut source: S,
     dry_run: Bool,
     opts: RunOptions,
-    mut sleeper: S,
+    mut sleeper: W,
+    var r: PublishReport,
 ) -> PublishReport:
-    """Execute `plan` (see the file header). `sleeper` waits between
-    read-back polls. Never raises: every fault is a line and an exit code."""
-    var r = PublishReport()
-    r.lines = render_plan(plan, dry_run)
-    if plan.count(ACTION_REFUSE) > 0:
-        r.exit_code = EXIT_REFUSED if plan.has_definite_refusal() else EXIT_CANNOT_TELL
-        r.lines.append(
-            String("REFUSED before any upload: ")
-            + String(plan.count(ACTION_REFUSE))
-            + String(" artifact(s) cannot be published as planned")
-        )
-        _finish(r, plan, len(plan.entries))
-        return r^
-    if dry_run:
-        r.lines.append(String("DRY RUN: nothing was uploaded"))
-        _finish(r, plan, len(plan.entries))
-        return r^
+    """Steps 1 to 6 (see the file header). `source` is asked ONCE for the
+    write value, and only when the registry's credential is not armed yet
+    and something is to be uploaded. Never raises."""
+    r.dry_run = dry_run
+    r.files = List[FileRow]()
+    for i in range(len(targets)):
+        r.files.append(FileRow(targets[i]))
+    # ── step 1 ───────────────────────────────────────────────────────────────
+    var channel_read = read_channel(registry, targets)
+    for i in range(len(targets)):
+        r.files[i].state_before = channel_read.states[i].kind
+        r.files[i].state_after = channel_read.states[i].kind
+    var verdict: Int
     try:
-        _ask_credential_first(plan, registry)
+        var v = plan_from_state(targets, channel_read, claims)
+        verdict = v.verdict
+        for k in range(len(v.lines)):
+            r.lines.append(v.lines[k].copy())
     except e:
-        _fail(r, EXIT_REFUSED, String("REFUSED credential: ") + String(e))
-        _finish(r, plan, 0)
+        r.exit_code = EXIT_CANNOT_TELL
+        r.lines.append(String(e))
+        r.finish_line()
         return r^
-    for i in range(len(plan.entries)):
-        ref e = plan.entries[i]
-        ref t = e.target
-        if e.action == ACTION_SKIP:
-            r.skipped += 1
-            r.lines.append(String("SKIPPED ") + t.where() + String(" -- ") + e.reason)
-            continue
-        var fail_code = EXIT_FAILED if r.uploaded > 0 else EXIT_REFUSED
-        try:
-            var f = package_file_of(t)
-            var o = registry.upload(f, names)
-            if (
-                o.kind == UPLOAD_CREATED
-                or o.kind == UPLOAD_DUPLICATE_REFUSED
-                or o.kind == UPLOAD_UNKNOWN
-            ):
-                var p = _read_back_until_identical(registry, t, opts, sleeper)
-                if p.kind == PRESENCE_PRESENT_IDENTICAL:
-                    if o.kind == UPLOAD_DUPLICATE_REFUSED:
-                        r.skipped += 1
-                        r.lines.append(
-                            String("SKIPPED ")
-                            + t.where()
-                            + String(" -- the registry already holds it, identical (HTTP 409)")
-                        )
-                        continue
-                    r.uploaded += 1
-                    var line = String("UPLOADED ") + t.where() + String(" sha256=") + t.sha256_hex
-                    if o.kind == UPLOAD_UNKNOWN:
-                        line += String(" (the upload's answer was lost; read back identical)")
-                    r.lines.append(line^)
-                    continue
-                if o.kind == UPLOAD_CREATED:
-                    r.uploaded += 1
-                var what = String(" -- uploaded, ")
-                if o.kind != UPLOAD_CREATED:
-                    what = String(" -- ") + o.detail + String("; ")
-                if (
-                    p.kind == PRESENCE_PRESENT_DIFFERENT
-                    or p.kind == PRESENCE_NO_COMMON_FIELD
-                ):
-                    var code = EXIT_FAILED if r.uploaded > 0 else EXIT_REFUSED
-                    _fail(
-                        r,
-                        code,
-                        String("FAILED ")
-                        + t.where()
-                        + what
-                        + String("but the registry reads back ")
-                        + _describe(p),
-                    )
-                else:
-                    _fail(
-                        r,
-                        EXIT_CANNOT_TELL,
-                        String("UNCONFIRMED ")
-                        + t.where()
-                        + what
-                        + String("not read back identical after ")
-                        + String(max(opts.read_back_attempts, 1))
-                        + String(" read(s): ")
-                        + _describe(p),
-                    )
-                _finish(r, plan, i + 1)
+    if verdict != VERDICT_PROCEED:
+        r.exit_code = _exit_of_verdict(verdict)
+        r.finish_line()
+        return r^
+    var to_upload = 0
+    for i in range(len(targets)):
+        var word = String("WOULD UPLOAD ") if channel_read.states[i].kind == STATE_ABSENT else String("PRESENT ")
+        if channel_read.states[i].kind == STATE_ABSENT:
+            to_upload += 1
+        r.lines.append(word + targets[i].where() + String(" sha256=") + targets[i].sha256_hex)
+    if dry_run:
+        r.lines.append(
+            String("DRY RUN: nothing was uploaded; ")
+            + String(to_upload)
+            + String(" file(s) would be, the metapackage last")
+        )
+        r.exit_code = EXIT_PUBLISHED
+        r.finish_line()
+        return r^
+    # ── step 2 ───────────────────────────────────────────────────────────────
+    try:
+        var names = approved_names_for(targets, channel_read, claims)
+        if not registry.credential().is_armed():
+            var host = repo_host(targets[0].coordinate.repo)
+            var auth = source.authorization(SURFACE_PREFIX_DEV, host)
+            registry.credential().arm(auth^)
+        for i in range(len(targets)):
+            if targets[i].is_metapackage:
+                continue
+            if channel_read.states[i].kind == STATE_SAME:
+                r.files[i].action = String("skipped")
+                r.lines.append(String("SKIPPED ") + targets[i].where() + String(" -- already present, identical"))
+                continue
+            var o = upload_file(registry, targets[i], names, opts, sleeper)
+            _record(r, i, o)
+            if o.result != FILE_DONE:
+                r.exit_code = _exit_of_file(o.result)
+                for j in range(i + 1, len(targets)):
+                    if channel_read.states[j].kind == STATE_ABSENT:
+                        r.files[j].action = String("not-attempted")
+                        r.lines.append(String("NOT-ATTEMPTED ") + targets[j].where())
+                r.finish_line()
                 return r^
-            _fail(r, fail_code, String("FAILED ") + t.where() + String(" -- ") + o.detail)
-            _finish(r, plan, i + 1)
+        # ── step 3 ───────────────────────────────────────────────────────────
+        var back = read_back_all(registry, targets)
+        var worst = EXIT_PUBLISHED
+        for i in range(len(targets)):
+            if targets[i].is_metapackage:
+                continue
+            r.files[i].state_after = back[i].kind
+            var code = EXIT_PUBLISHED
+            if back[i].kind == STATE_DIFFERENT:
+                code = EXIT_READ_BACK_MISMATCH
+            elif back[i].kind == STATE_ABSENT:
+                code = EXIT_PARTIAL
+            elif back[i].kind != STATE_SAME:
+                code = EXIT_CANNOT_TELL
+            if code != EXIT_PUBLISHED:
+                r.lines.append(
+                    String("READ-BACK ")
+                    + targets[i].where()
+                    + String(": ")
+                    + state_name(back[i].kind)
+                    + String(" ")
+                    + back[i].detail
+                )
+                if _read_back_rank(code) > _read_back_rank(worst):
+                    worst = code
+        if worst != EXIT_PUBLISHED:
+            for i in range(len(targets)):
+                if targets[i].is_metapackage:
+                    r.files[i].action = String("not-attempted")
+                    r.lines.append(String("NOT-ATTEMPTED ") + targets[i].where() + String(" -- the metapackage is published only after every member reads back"))
+            r.exit_code = worst
+            r.finish_line()
             return r^
-        except err:
-            _fail(r, fail_code, String("FAILED ") + t.where() + String(" -- ") + String(err))
-            _finish(r, plan, i + 1)
-            return r^
-    _finish(r, plan, len(plan.entries))
+        # ── step 4 ───────────────────────────────────────────────────────────
+        for i in range(len(targets)):
+            if not targets[i].is_metapackage:
+                continue
+            if channel_read.states[i].kind == STATE_SAME:
+                var s = read_file_state(registry, targets[i])
+                r.files[i].action = String("skipped")
+                r.files[i].state_after = s.kind
+                if s.kind != STATE_SAME:
+                    r.exit_code = EXIT_READ_BACK_MISMATCH if s.kind == STATE_DIFFERENT else EXIT_CANNOT_TELL
+                    r.lines.append(String("READ-BACK ") + targets[i].where() + String(": ") + state_name(s.kind))
+                    r.finish_line()
+                    return r^
+                r.lines.append(String("SKIPPED ") + targets[i].where() + String(" -- already present, identical"))
+                continue
+            var o = upload_file(registry, targets[i], names, opts, sleeper)
+            _record(r, i, o)
+            if o.result != FILE_DONE:
+                r.exit_code = _exit_of_file(o.result)
+                r.finish_line()
+                return r^
+    except e:
+        r.exit_code = EXIT_FAILED
+        r.lines.append(String("FAILED -- ") + String(e))
+        r.finish_line()
+        return r^
+    # ── step 5 (report-only) ─────────────────────────────────────────────────
+    for i in range(len(targets)):
+        r.files[i].indexed = is_indexed(registry, targets[i], opts, sleeper)
+    r.exit_code = EXIT_PUBLISHED
+    r.finish_line()
     return r^

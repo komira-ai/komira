@@ -1,393 +1,378 @@
 # =============================================================================
-# src/kci_publish/plan.mojo -- WHAT a publish run will do, decided before it
-#   does anything: every artifact resolved to its channel repository, checked
-#   against its bytes and the approved names, then planned as UPLOAD, SKIP or
-#   REFUSE from what the registry already holds.
+# src/kci_publish/plan.mojo -- the verified set resolved to where each file
+#   lands, and what step 1's channel read means for the run. Pure.
 # =============================================================================
 #
-# THE ORDER IS THE CONTRACT. Every refusal below happens before the first
-# upload of the run, so a run either refuses whole or starts uploading a set
-# that was entirely checked:
-#   1. `resolve_targets`: the channel's repository for each artifact's type
-#      (a channel declaring none is refused naming the channel and the type);
-#      the location and the push identity come from the channels file only.
-#      The file name must be the artifact's name and version, and no file may
-#      be listed twice.
-#   2. `verify_target_files`: each file's sha256 is the manifest's.
-#   3. `refuse_unapproved_names`: every name must be approved; otherwise ALL
-#      are refused, naming every unapproved name at once.
-#   4. `plan_from_presence` (pure): ABSENT plans UPLOAD, PRESENT_IDENTICAL
-#      plans SKIP, anything else plans REFUSE with the registry's answer.
-#      PRESENT_DIFFERENT and NO_COMMON_FIELD are definite (the name is taken by
-#      other bytes, or cannot be compared); UNKNOWN, AUTH_REFUSED and
-#      RATE_LIMITED mean the run cannot tell, and are marked so.
+# `resolve_targets(channel, members)` -- each member to its coordinate on the
+#   channel's CONDA repository (`kci_release_channel`; a channel declaring
+#   none is refused naming it). The file must be `.conda` and be
+#   `<name>-<version>-<build>.conda` of its metadata. Order: libraries first,
+#   by how many set-internal requirements each has (fewer first; a stable
+#   sort key, never a correctness rule), the metapackage LAST.
 #
-# Steps 1, 3 and 4 are pure functions of their arguments; step 2 reads the
-# files. Reading the registry is `run.mojo`'s `plan_publish`.
+# `plan_from_state(targets, channel_read, claims)` -- contract step 1's verdict, in
+#   this order:
+#   1. any file present with OTHER bytes (member or metapackage): STOP, exit 7,
+#      naming every such file. Nothing is uploaded;
+#   2. any file or name listing that could not be read: exit 5. A listing that
+#      was not read never makes a name "new";
+#   3. NEW NAMES: a set name with no file in any listed subdir (the set's
+#      subdir and `noarch`) is a claim. Each needs `--claim-new-name`; an
+#      unclaimed new name, a claim for a name the channel already holds, or a
+#      claim for a name not in the set: STOP, exit 8;
+#   4. every file present and identical: nothing to do, exit 6;
+#   5. otherwise PROCEED: the members still absent are uploaded, then the
+#      metapackage.
+#
+# `approved_names_for(targets, channel_read, claims)` -- the uploader's last gate
+#   (`kci_pkg_upload.ApprovedNames`), built from the set names the channel
+#   already holds plus the claims. Never read from a file.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from std.pathlib import Path
-
 from kci_pkg_upload import (
-    PRESENCE_ABSENT,
-    PRESENCE_NO_COMMON_FIELD,
-    PRESENCE_PRESENT_DIFFERENT,
-    PRESENCE_PRESENT_IDENTICAL,
     SUBSTRATE_PREFIX_DEV_CONDA,
-    SUBSTRATE_PUBLIC_PYPI,
     ApprovedNames,
     PackageCoordinate,
-    Presence,
-    content_identity_of,
-    normalize_distribution_name,
     prefix_dev_repo_of_location,
-    presence_kind_name,
 )
-from kci_pkg_upload.coordinate import repo_host, repo_path
-from kci_pkg_upload.core_metadata import parse_wheel_name
+from kci_pkg_upload.identity import ascii_lower
 from kci_pkg_upload.prefix_dev_registry import (
     refuse_malformed_conda_coordinate,
     refuse_name_not_the_files,
 )
-from kci_release_channel import (
-    ARTIFACT_TYPE_CONDA,
-    ARTIFACT_TYPE_PYTHON,
-    ChannelDeclaration,
-    find_channel,
-)
-
-from .manifest import ArtifactManifest
+from kci_release_channel import ARTIFACT_TYPE_CONDA, ChannelDeclaration
+from kci_release_set.conda_metadata import KIND_METAPACKAGE
+from kci_release_set.member import ReleaseMember
 
 
-comptime ACTION_UPLOAD: Int = 0
-comptime ACTION_SKIP: Int = 1
-comptime ACTION_REFUSE: Int = 2
+comptime STATE_ABSENT: Int = 0
+comptime STATE_SAME: Int = 1
+comptime STATE_DIFFERENT: Int = 2
+comptime STATE_CANNOT_TELL: Int = 3
+comptime STATE_NOT_READ: Int = 4
 
 
-def action_name(action: Int) -> String:
-    if action == ACTION_UPLOAD:
-        return String("UPLOAD")
-    if action == ACTION_SKIP:
-        return String("SKIP")
-    return String("REFUSE")
+def state_name(kind: Int) -> String:
+    if kind == STATE_ABSENT:
+        return String("absent")
+    if kind == STATE_SAME:
+        return String("present-same")
+    if kind == STATE_DIFFERENT:
+        return String("present-different")
+    if kind == STATE_CANNOT_TELL:
+        return String("cannot-tell")
+    return String("not-read")
 
 
-struct PublishTarget(Copyable, Movable, Deinitable):
-    """One artifact, resolved to the repository it publishes to.
+comptime VERDICT_PROCEED: Int = 0
+comptime VERDICT_STOP_DIFFERENT: Int = 1
+comptime VERDICT_CANNOT_TELL: Int = 2
+comptime VERDICT_STOP_NEW_NAME: Int = 3
+comptime VERDICT_ALREADY_PUBLISHED: Int = 4
 
-      artifact_type  CONDA or PYTHON (kci_release_channel's names).
-      location       the repository's location, from the channels file.
-      coordinate     where the file lands (kci_pkg_upload).
-      sha256_hex     the manifest's sha256 of the file.
-      file_path      the file to upload.
-      metadata_path  PYTHON: the wheel's METADATA file; EMPTY otherwise.
+comptime NOARCH_SUBDIR: String = "noarch"
+
+
+struct PublishTarget(Copyable, Movable):
+    """One member, resolved to where its file lands.
 
     Layout: owned values only. No pointer field."""
 
-    var artifact_type: String
-    var location: String
+    var declaration: String
+    var is_metapackage: Bool
     var coordinate: PackageCoordinate
     var sha256_hex: String
     var file_path: String
-    var metadata_path: String
+    var internal_requirements: Int
 
     def __init__(
         out self,
-        var artifact_type: String,
-        var location: String,
+        var declaration: String,
+        is_metapackage: Bool,
         var coordinate: PackageCoordinate,
         var sha256_hex: String,
         var file_path: String,
-        var metadata_path: String,
+        internal_requirements: Int,
     ):
-        self.artifact_type = artifact_type^
-        self.location = location^
+        self.declaration = declaration^
+        self.is_metapackage = is_metapackage
         self.coordinate = coordinate^
         self.sha256_hex = sha256_hex^
         self.file_path = file_path^
-        self.metadata_path = metadata_path^
+        self.internal_requirements = internal_requirements
 
     def where(self) -> String:
-        """`<location>/<subdir>/<file>` (no subdir for PYTHON)."""
-        var out = self.location + String("/")
-        if self.coordinate.subdir.byte_length() > 0:
-            out += self.coordinate.subdir + String("/")
-        return out + self.coordinate.file_name
+        return self.coordinate.subdir + String("/") + self.coordinate.file_name
 
 
-def substrate_of(artifact_type: String) raises -> Int:
-    """The kci_pkg_upload substrate an artifact type publishes through."""
-    if artifact_type == ARTIFACT_TYPE_CONDA:
-        return SUBSTRATE_PREFIX_DEV_CONDA
-    if artifact_type == ARTIFACT_TYPE_PYTHON:
-        return SUBSTRATE_PUBLIC_PYPI
-    raise Error(
-        String("kci publish: artifact type '")
-        + artifact_type
-        + String("' has no publisher (CONDA or PYTHON)")
-    )
+struct FileState(Copyable, Movable):
+    """What the channel holds under one file name. Layout: an Int and an
+    owned String. No pointer field."""
+
+    var kind: Int
+    var detail: String
+
+    def __init__(out self, kind: Int, var detail: String):
+        self.kind = kind
+        self.detail = detail^
 
 
-def python_repo_of_location(location: String) raises -> String:
-    """`https://<host>[/<path>]` as a coordinate's `repo`. RAISES unless the
-    location is HTTPS with a host, no port and no trailing `/`."""
-    var scheme = String("https://")
-    if not location.startswith(scheme):
-        raise Error(
-            String("kci publish: python index location '")
-            + location
-            + String("' is not an https:// URL")
-        )
-    var repo = String(location[byte = scheme.byte_length() :])
-    _ = repo_host(repo)
-    _ = repo_path(repo)
-    return repo^
-
-
-def target_of(channel: ChannelDeclaration, m: ArtifactManifest) raises -> PublishTarget:
-    """Resolve one manifest against the channel (step 1 of the header).
-    RAISES naming the manifest."""
-    var repository = channel.repository_for(m.artifact_type)
-    var substrate = substrate_of(m.artifact_type)
-    var repo: String
-    if substrate == SUBSTRATE_PREFIX_DEV_CONDA:
-        repo = prefix_dev_repo_of_location(repository.location)
-    else:
-        repo = python_repo_of_location(repository.location)
-    var c = PackageCoordinate(
-        substrate,
-        repo^,
-        m.name.copy(),
-        m.version.copy(),
-        m.subdir.copy(),
-        m.file_name(),
-    )
-    if substrate == SUBSTRATE_PREFIX_DEV_CONDA:
-        if not c.file_name.endswith(String(".conda")):
-            raise Error(
-                String("kci publish: '")
-                + c.file_name
-                + String("' is not a .conda file; only .conda is published")
-            )
-        refuse_malformed_conda_coordinate(c)
-        refuse_name_not_the_files(c)
-    else:
-        var w = parse_wheel_name(c.file_name)
-        if (
-            normalize_distribution_name(w.distribution)
-            != normalize_distribution_name(m.name)
-            or w.version != m.version
-        ):
-            raise Error(
-                String("kci publish: wheel '")
-                + c.file_name
-                + String("' is not ")
-                + m.name
-                + String(" ")
-                + m.version
-            )
-    return PublishTarget(
-        m.artifact_type.copy(),
-        repository.location.copy(),
-        c^,
-        m.sha256_hex.copy(),
-        m.file_path.copy(),
-        m.metadata_path.copy(),
-    )
-
-
-def resolve_targets(
-    decls: List[ChannelDeclaration],
-    channel_name: String,
-    manifests: List[ArtifactManifest],
-) raises -> List[PublishTarget]:
-    """Step 1 for every manifest. RAISES once, listing every refusal, so a
-    run with three bad manifests names all three."""
-    var channel = find_channel(decls, channel_name)
-    var out = List[PublishTarget]()
-    var refusals = List[String]()
-    for i in range(len(manifests)):
-        try:
-            out.append(target_of(channel, manifests[i]))
-        except e:
-            refusals.append(
-                manifests[i].source + String(": ") + String(e)
-            )
-    for i in range(len(out)):
-        for j in range(i):
-            if (
-                out[j].location == out[i].location
-                and out[j].coordinate.subdir == out[i].coordinate.subdir
-                and out[j].coordinate.file_name == out[i].coordinate.file_name
-            ):
-                refusals.append(
-                    String("'")
-                    + out[i].where()
-                    + String("' is listed by two manifests")
-                )
-    if len(refusals) > 0:
-        raise Error(
-            String("kci publish: refused before any upload:\n  ")
-            + String("\n  ").join(refusals)
-        )
-    return out^
-
-
-def refuse_file_bytes(t: PublishTarget, data: Span[UInt8, _]) raises:
-    """RAISE unless `data` hashes to the manifest's sha256."""
-    var id = content_identity_of(data)
-    if id.sha256_hex != t.sha256_hex:
-        raise Error(
-            String("'")
-            + t.file_path
-            + String("' has sha256 ")
-            + id.sha256_hex
-            + String(", its manifest says ")
-            + t.sha256_hex
-        )
-
-
-def verify_target_files(targets: List[PublishTarget]) raises:
-    """Step 2: read every file and compare its sha256 with its manifest's.
-    RAISES once, listing every file that is unreadable or different."""
-    var refusals = List[String]()
-    for i in range(len(targets)):
-        try:
-            var data = Path(targets[i].file_path).read_bytes()
-            refuse_file_bytes(targets[i], Span(data))
-        except e:
-            refusals.append(String(e))
-    if len(refusals) > 0:
-        raise Error(
-            String("kci publish: refused before any upload:\n  ")
-            + String("\n  ").join(refusals)
-        )
-
-
-def refuse_unapproved_names(targets: List[PublishTarget], names: ApprovedNames) raises:
-    """Step 3: RAISE, naming every unapproved name once, unless every
-    target's name is approved for its substrate."""
-    var unapproved = List[String]()
-    for i in range(len(targets)):
-        ref c = targets[i].coordinate
-        if names.is_approved(c.distribution, c.substrate):
-            continue
-        var seen = False
-        for j in range(len(unapproved)):
-            if unapproved[j] == c.distribution:
-                seen = True
-        if not seen:
-            unapproved.append(c.distribution.copy())
-    if len(unapproved) > 0:
-        raise Error(
-            String("kci publish: refused before any upload: not in the")
-            + String(" approved-names list (")
-            + String(names.count())
-            + String(" approved): ")
-            + String(", ").join(unapproved)
-            + String(". A published name is claimed for good, so it is")
-            + String(" approved first, never published first")
-        )
-
-
-struct PlannedArtifact(Copyable, Movable, Deinitable):
-    """One artifact's planned action. `reason` says why for SKIP and REFUSE;
-    `cannot_tell` marks a REFUSE whose cause is an unanswered read (UNKNOWN,
-    AUTH_REFUSED, RATE_LIMITED), not a definite conflict.
+struct ChannelRead(Copyable, Movable):
+    """Step 1's reads: one state per target (same order) and the package
+    names the channel holds in the listed subdirs (lowercase).
+    `names_read` False means some listing was not read; `names_detail` says
+    which.
 
     Layout: owned values only. No pointer field."""
 
-    var target: PublishTarget
-    var action: Int
-    var reason: String
-    var cannot_tell: Bool
+    var states: List[FileState]
+    var names_read: Bool
+    var names: List[String]
+    var names_detail: String
 
-    def __init__(
-        out self,
-        var target: PublishTarget,
-        action: Int,
-        var reason: String,
-        cannot_tell: Bool,
-    ):
-        self.target = target^
-        self.action = action
-        self.reason = reason^
-        self.cannot_tell = cannot_tell
+    def __init__(out self):
+        self.states = List[FileState]()
+        self.names_read = True
+        self.names = List[String]()
+        self.names_detail = String("")
 
-
-struct PublishPlan(Copyable, Movable, Deinitable):
-    """The whole run's plan: the channel and one entry per artifact, in
-    manifest order.
-
-    Layout: owned values only. No pointer field."""
-
-    var channel: String
-    var visibility: String
-    var entries: List[PlannedArtifact]
-
-    def __init__(out self, var channel: String, var visibility: String):
-        self.channel = channel^
-        self.visibility = visibility^
-        self.entries = List[PlannedArtifact]()
-
-    def count(self, action: Int) -> Int:
-        var n = 0
-        for i in range(len(self.entries)):
-            if self.entries[i].action == action:
-                n += 1
-        return n
-
-    def has_definite_refusal(self) -> Bool:
-        for i in range(len(self.entries)):
-            ref e = self.entries[i]
-            if e.action == ACTION_REFUSE and not e.cannot_tell:
+    def holds_name(self, name: String) -> Bool:
+        var want = ascii_lower(name)
+        for i in range(len(self.names)):
+            if self.names[i] == want:
                 return True
         return False
 
 
-def plan_from_presence(
-    channel: ChannelDeclaration,
-    targets: List[PublishTarget],
-    presences: List[Presence],
-) raises -> PublishPlan:
-    """Step 4 (pure). `presences[i]` is the registry's answer for
-    `targets[i]`. RAISES only when the two lists differ in length."""
-    if len(targets) != len(presences):
+struct StepOneVerdict(Copyable, Movable):
+    """`plan_from_state`'s answer: a VERDICT_* and the lines naming why.
+
+    Layout: an Int and an owned list. No pointer field."""
+
+    var verdict: Int
+    var lines: List[String]
+
+    def __init__(out self, verdict: Int):
+        self.verdict = verdict
+        self.lines = List[String]()
+
+
+def _internal_count(m: ReleaseMember, members: List[ReleaseMember]) -> Int:
+    var n = 0
+    for d in range(len(m.conda.depends)):
+        for j in range(len(members)):
+            if members[j].conda.name.byte_length() > 0 and m.conda.depends[d].startswith(
+                members[j].conda.name + String(" ==")
+            ):
+                n += 1
+    return n
+
+
+def resolve_targets(
+    channel: ChannelDeclaration, members: List[ReleaseMember]
+) raises -> List[PublishTarget]:
+    """See the file header. RAISES once, listing every refusal."""
+    var repository = channel.repository_for(String(ARTIFACT_TYPE_CONDA))
+    var repo = prefix_dev_repo_of_location(repository.location)
+    var libs = List[PublishTarget]()
+    var metas = List[PublishTarget]()
+    var refusals = List[String]()
+    for i in range(len(members)):
+        ref m = members[i]
+        var c = PackageCoordinate(
+            SUBSTRATE_PREFIX_DEV_CONDA,
+            repo.copy(),
+            m.conda.name.copy(),
+            m.conda.version.copy(),
+            m.conda.subdir.copy(),
+            m.manifest.file.copy(),
+        )
+        try:
+            if not c.file_name.endswith(String(".conda")):
+                raise Error(String("'") + c.file_name + String("' is not a .conda file"))
+            refuse_malformed_conda_coordinate(c)
+            refuse_name_not_the_files(c)
+        except e:
+            refusals.append(String("artifact '") + m.declaration + String("': ") + String(e))
+            continue
+        var t = PublishTarget(
+            m.declaration.copy(),
+            m.conda.kind == KIND_METAPACKAGE,
+            c^,
+            m.manifest.sha256_hex.copy(),
+            m.manifest.file_path.copy(),
+            _internal_count(m, members),
+        )
+        if t.is_metapackage:
+            metas.append(t^)
+        else:
+            var at = len(libs)
+            for k in range(len(libs)):
+                if t.internal_requirements < libs[k].internal_requirements:
+                    at = k
+                    break
+            libs.insert(at, t^)
+    if len(refusals) > 0:
+        raise Error(
+            String("kci publish: refused before any read:\n  ") + String("\n  ").join(refusals)
+        )
+    for i in range(len(metas)):
+        libs.append(metas[i].copy())
+    return libs^
+
+
+def listed_subdirs(targets: List[PublishTarget]) -> List[String]:
+    """The subdirs whose listings say which names exist: the set's, then
+    `noarch`, each once."""
+    var out = List[String]()
+    for i in range(len(targets)):
+        var s = targets[i].coordinate.subdir.copy()
+        var seen = False
+        for j in range(len(out)):
+            if out[j] == s:
+                seen = True
+        if not seen:
+            out.append(s^)
+    var has_noarch = False
+    for j in range(len(out)):
+        if out[j] == String(NOARCH_SUBDIR):
+            has_noarch = True
+    if not has_noarch:
+        out.append(String(NOARCH_SUBDIR))
+    return out^
+
+
+def new_names(targets: List[PublishTarget], channel_read: ChannelRead) -> List[String]:
+    """The set names the channel holds no file of (lowercase, each once).
+    Meaningful only when `read.names_read`."""
+    var out = List[String]()
+    for i in range(len(targets)):
+        var n = ascii_lower(targets[i].coordinate.distribution)
+        if channel_read.holds_name(n):
+            continue
+        var seen = False
+        for j in range(len(out)):
+            if out[j] == n:
+                seen = True
+        if not seen:
+            out.append(n^)
+    return out^
+
+
+def _in_set(targets: List[PublishTarget], name: String) -> Bool:
+    var want = ascii_lower(name)
+    for i in range(len(targets)):
+        if ascii_lower(targets[i].coordinate.distribution) == want:
+            return True
+    return False
+
+
+def plan_from_state(
+    targets: List[PublishTarget], channel_read: ChannelRead, claims: List[String]
+) raises -> StepOneVerdict:
+    """Step 1's verdict (see the file header). RAISES only when the states
+    and the targets differ in number."""
+    if len(channel_read.states) != len(targets):
         raise Error(
             String("kci publish: ")
             + String(len(targets))
             + String(" targets but ")
-            + String(len(presences))
-            + String(" presence answers")
+            + String(len(channel_read.states))
+            + String(" channel states")
         )
-    var plan = PublishPlan(channel.name.copy(), channel.visibility.copy())
+    var different = StepOneVerdict(VERDICT_STOP_DIFFERENT)
+    var cannot = StepOneVerdict(VERDICT_CANNOT_TELL)
     for i in range(len(targets)):
-        ref p = presences[i]
-        var action = ACTION_REFUSE
-        var reason = String("")
-        var cannot_tell = False
-        if p.kind == PRESENCE_ABSENT:
-            action = ACTION_UPLOAD
-        elif p.kind == PRESENCE_PRESENT_IDENTICAL:
-            action = ACTION_SKIP
-            reason = String("already present, identical")
-        else:
-            cannot_tell = not (
-                p.kind == PRESENCE_PRESENT_DIFFERENT
-                or p.kind == PRESENCE_NO_COMMON_FIELD
-            )
-            reason = (
-                String("the registry answers ")
-                + presence_kind_name(p.kind)
-                + String(" (HTTP ")
-                + String(p.status)
+        ref s = channel_read.states[i]
+        if s.kind == STATE_DIFFERENT:
+            different.lines.append(
+                String("STOP different bytes: ")
+                + targets[i].where()
+                + String(" is in the channel with other bytes than ours (sha256 ")
+                + targets[i].sha256_hex
                 + String(")")
             )
-            if p.detail.byte_length() > 0:
-                reason += String(": ") + p.detail
-        plan.entries.append(
-            PlannedArtifact(targets[i].copy(), action, reason^, cannot_tell)
+        elif s.kind != STATE_ABSENT and s.kind != STATE_SAME:
+            cannot.lines.append(
+                String("CANNOT TELL ") + targets[i].where() + String(": ") + s.detail
+            )
+    if len(different.lines) > 0:
+        return different^
+    if not channel_read.names_read:
+        cannot.lines.append(
+            String("CANNOT TELL which names the channel holds: ") + channel_read.names_detail
         )
-    return plan^
+    if len(cannot.lines) > 0:
+        return cannot^
+    var stop = StepOneVerdict(VERDICT_STOP_NEW_NAME)
+    var fresh = new_names(targets, channel_read)
+    for i in range(len(fresh)):
+        var claimed = False
+        for j in range(len(claims)):
+            if ascii_lower(claims[j]) == fresh[i]:
+                claimed = True
+        if not claimed:
+            stop.lines.append(
+                String("STOP new name: '")
+                + fresh[i]
+                + String("' has no file in the channel. Publishing it claims the name for")
+                + String(" good; pass --claim-new-name ")
+                + fresh[i]
+                + String(" if that is intended")
+            )
+    for j in range(len(claims)):
+        if not _in_set(targets, claims[j]):
+            stop.lines.append(
+                String("STOP claim: --claim-new-name '")
+                + claims[j]
+                + String("' is not a package of this release set")
+            )
+        elif channel_read.holds_name(claims[j]):
+            stop.lines.append(
+                String("STOP claim: --claim-new-name '")
+                + claims[j]
+                + String("' is already in the channel; it is not new")
+            )
+    if len(stop.lines) > 0:
+        return stop^
+    var all_same = True
+    for i in range(len(channel_read.states)):
+        if channel_read.states[i].kind != STATE_SAME:
+            all_same = False
+    if all_same:
+        var done = StepOneVerdict(VERDICT_ALREADY_PUBLISHED)
+        done.lines.append(String("already published: every file is in the channel, identical"))
+        return done^
+    return StepOneVerdict(VERDICT_PROCEED)
+
+
+def approved_names_for(
+    targets: List[PublishTarget], channel_read: ChannelRead, claims: List[String]
+) raises -> ApprovedNames:
+    """The names an upload may claim: set names the channel already holds,
+    plus the claims (see the file header)."""
+    var names = ApprovedNames()
+    var added = List[String]()
+    for i in range(len(targets)):
+        var n = ascii_lower(targets[i].coordinate.distribution)
+        if not channel_read.holds_name(n):
+            continue
+        var seen = False
+        for j in range(len(added)):
+            if added[j] == n:
+                seen = True
+        if not seen:
+            added.append(n.copy())
+            names.approve(n^)
+    for j in range(len(claims)):
+        var n = ascii_lower(claims[j])
+        var seen = False
+        for k in range(len(added)):
+            if added[k] == n:
+                seen = True
+        if not seen:
+            added.append(n.copy())
+            names.approve(n^)
+    return names^

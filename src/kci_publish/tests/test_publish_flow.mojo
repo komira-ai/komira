@@ -1,246 +1,202 @@
 # =============================================================================
-# src/kci_publish/tests/test_publish_flow.mojo -- the whole verb, from flags
-#   to report, over scripted transports.
+# src/kci_publish/tests/test_publish_flow.mojo -- the whole verb: the dry run
+#   reads and never writes, and the credential is the channel's own.
 # =============================================================================
 #
 # ROWS
-#   (1) --dry-run through the whole verb: the plan is read anonymously, the
-#       write and OIDC transports receive ZERO requests, and the named secret
-#       is NEVER resolved (the store's resolve count stays 0);
-#   (2) a real run with `token-secret:<name>`: the presence read is
-#       anonymous, the upload carries the resolved token as a Bearer, the
-#       read-back confirms it, exit 0;
-#   (3) refusals before any request, each exit 3 with every transport
-#       silent: an unapproved name (named), a manifest whose sha256 is not
-#       the file's, an unknown channel, a dry run of a PRIVATE channel, an
-#       unresolvable secret name, OIDC outside a GitHub Actions job (the
-#       handshake variables named);
-#   (4) the standalone store refuses `token-secret:` by naming the forms
-#       that work.
+#   (1) dry run, PUBLIC channel with an API token: steps 0 and 1 only --
+#       reads, ZERO write requests, every read anonymous, the secret store
+#       never asked (the standalone NoSecretStore would refuse), exit 0,
+#       WOULD UPLOAD lines;
+#   (2) dry run, PUBLIC OIDC channel: no OIDC exchange (the OIDC transport
+#       has no scripted answer and the job environment is unset: either
+#       would fail the run), exit 0;
+#   (3) dry run, PRIVATE OIDC-only channel: refused (3), naming why, with
+#       ZERO channel requests;
+#   (4) dry run, PRIVATE API-token channel: the token is resolved by secret
+#       name and carried on the reads; still ZERO writes;
+#   (5) --require-environment on a channel that is not OIDC: 3, zero
+#       requests;
+#   (6) an API-token channel and a store that cannot resolve the name: 4,
+#       naming the secret, and ZERO writes (the token is resolved before the
+#       first write).
 #
-# Hermetic: scripted transports and an in-memory secret store over staged
-# fixture files; no network. Row (3)'s OIDC case reads two environment
-# variables that a test action does not set.
+# Hermetic: TEST_TMPDIR, ScriptedChannel, ScriptedPkgTransport (no script),
+# StaticSecretStore / NoSecretStore; no network.
 # =============================================================================
 
-from std.memory import ArcPointer
-from std.testing import assert_equal, assert_true
+from std.ffi import external_call
+from std.os import getenv, makedirs
+from std.testing import assert_equal, assert_false, assert_true
 
-from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 from komira_secret_store import StaticSecretStore
 
-from kci_pkg_upload import PkgRequest, PkgResponse, PkgTransport, ScriptedPkgTransport
-from kci_pkg_upload.wire import bytes_of
-
-from komira_retry import RecordingSleeper
-
+from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
-    EXIT_OK,
+    EXIT_FAILED,
+    EXIT_PUBLISHED,
     EXIT_REFUSED,
     NoSecretStore,
+    PublishCredential,
+    PublishFlags,
     PublishReport,
     RunOptions,
-    parse_publish_flags,
+    ScriptedChannel,
     publish_flow,
 )
+from kci_publish.release_fixture import (
+    EXAMPLE_CHANNELS,
+    EXAMPLE_HOST,
+    EXAMPLE_TOKEN_SECRET,
+    ExampleRelease,
+    write_text_file,
+)
+from komira_retry import RecordingSleeper
 
 
-comptime _FX: String = "src/kci_publish/tests/fixtures/"
-comptime _FILE: String = "example-pkg-1.2.3-h0_0.conda"
-comptime _LINUX_SHA: String = "d92ee691780d0dbc4dd45de1287d8980462041de9bd2fe3d7f8b89044a18cf52"
-comptime _SECRET_NAME: String = "EXAMPLE_PUBLISH_TOKEN"
-comptime _TOKEN: String = "example-token-not-a-credential"
+comptime _TOKEN: String = "pfx-flow-secret-0123456789abcdef"
 
 
-struct _Shared(PkgTransport, Deinitable):
-    """A scripted transport the test keeps a second handle on, so it can
-    read the conversation after the verb consumed the first."""
-
-    var _p: ArcPointer[ScriptedPkgTransport]
-
-    def __init__(out self):
-        self._p = ArcPointer[ScriptedPkgTransport](ScriptedPkgTransport())
-
-    def __init__(out self, *, var _share: ArcPointer[ScriptedPkgTransport]):
-        self._p = _share^
-
-    def share(self) -> _Shared:
-        # SAFETY: ArcPointer shared ownership; one thread.
-        return _Shared(_share=ArcPointer[ScriptedPkgTransport](copy=self._p))
-
-    def queue(mut self, var r: PkgResponse):
-        self._p[].queue(r^)
-
-    def call_count(self) -> Int:
-        return self._p[].call_count()
-
-    def call(self, i: Int) -> PkgRequest:
-        return self._p[].call(i)
-
-    def exchange(mut self, req: PkgRequest) raises -> PkgResponse:
-        return self._p[].exchange(req)
+def _root(tag: String) raises -> String:
+    var base = getenv("TEST_TMPDIR")
+    if base.byte_length() == 0:
+        base = getenv("TMPDIR")
+    if base.byte_length() == 0:
+        raise Error("neither TEST_TMPDIR nor TMPDIR is set")
+    var d = base + String("/pfl_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))
+    makedirs(d, exist_ok=True)
+    return d^
 
 
-def _args(s: String) -> List[String]:
-    var out = List[String]()
-    var parts = s.split(String(" "))
-    for i in range(len(parts)):
-        if String(parts[i]).byte_length() > 0:
-            out.append(String(parts[i]))
+def _bytes(s: String) -> List[UInt8]:
+    var out = List[UInt8]()
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        out.append(b[i])
     return out^
 
 
-def _flags(
-    channel: String = String("example-stable"),
-    manifest: String = String("linux-64.json"),
-    credential: String = String("token-secret:") + String(_SECRET_NAME),
-    extra: String = String(""),
-) -> String:
-    return (
-        String("--channels ")
-        + String(_FX)
-        + String("channels.textproto --channel ")
-        + channel
-        + String(" --artifacts ")
-        + String(_FX)
-        + manifest
-        + String(" --approved-names ")
-        + String(_FX)
-        + String("approved.txt --credential ")
-        + credential
-        + String(" ")
-        + extra
-    )
+def _flags(tag: String, channel: String, dry_run: Bool) raises -> PublishFlags:
+    var r = ExampleRelease()
+    var d = _root(tag)
+    r.write(d + String("/release"))
+    write_text_file(d + String("/decls.textproto"), r.declarations_text())
+    write_text_file(d + String("/channels.textproto"), String(EXAMPLE_CHANNELS))
+    write_text_file(d + String("/rv.txt"), r.release_version_text())
+    var f = PublishFlags()
+    f.declarations_file = d + String("/decls.textproto")
+    f.artifacts_dir = d + String("/release")
+    f.channels_file = d + String("/channels.textproto")
+    f.channel = channel.copy()
+    f.release_version_file = d + String("/rv.txt")
+    f.expect_set_hash = r.set_hash(d + String("/release"))
+    f.report_file = d + String("/report.json")
+    f.dry_run = dry_run
+    return f^
 
 
-def _repodata(sha: String) -> PkgResponse:
-    var r = PkgResponse(200)
-    var listed = String("")
-    if sha.byte_length() > 0:
-        listed = String('"') + String(_FILE) + String('": {"sha256": "') + sha + String('"}')
-    r.with_body(
-        bytes_of(
-            String('{"info": {"subdir": "linux-64"}, "packages": {}, "packages.conda": {')
-            + listed
-            + String("}}")
-        )
-    )
-    return r^
+def _channel(name: String) -> ScriptedChannel:
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), name.copy(), String("linux-64"))
+    ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
+    ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
+    ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
+    return ch^
 
 
-def _store() -> StaticSecretStore:
-    var s = StaticSecretStore()
-    s.put(String(_SECRET_NAME), String(_TOKEN))
-    return s^
+def _opts() -> RunOptions:
+    return RunOptions(2, 0, 2, 0, 0, 1, 0)
 
 
-def _dump(r: PublishReport) -> String:
-    return String("exit=") + String(r.exit_code) + String("\n") + String("\n").join(r.lines)
+def _all_anonymous(reg: RegistrySet[ScriptedChannel, PublishCredential]) raises:
+    for i in range(reg.transport().call_count()):
+        assert_equal(reg.transport().call(i).header_value(String("Authorization")), String(""))
 
 
-def _quick() -> RunOptions:
-    return RunOptions(3, 250)
-
-
-def test_dry_run_through_the_verb() raises:
+def test_dry_run_public_api_token() raises:
+    var f = _flags(String("dry_pub"), String("example-stable"), True)
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
+    var store = NoSecretStore()
     var sl = RecordingSleeper()
-    var read = _Shared()
-    read.queue(_repodata(String("")))
-    var write = _Shared()
-    var oidc = _Shared()
-    var store = _store()
-    var flags = parse_publish_flags(_args(_flags(extra=String("--dry-run"))))
-    var r = publish_flow(flags, read.share(), write.share(), oidc.share(), store, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_OK, _dump(r))
-    assert_true(r.has_line_containing(String("UPLOAD https://conda.example.invalid/example-stable/linux-64/") + String(_FILE)), _dump(r))
-    assert_true(r.has_line_containing(String("DRY RUN: nothing was uploaded")), _dump(r))
-    assert_equal(read.call_count(), 1)
-    assert_equal(read.call(0).method, HTTP_METHOD_GET)
-    assert_equal(read.call(0).header_value(String("Authorization")), String(""))
-    assert_equal(write.call_count(), 0)
-    assert_equal(oidc.call_count(), 0)
-    assert_equal(store.resolve_count(), 0)
-    # the dry run of an oidc run never reaches the handshake either
-    var read2 = _Shared()
-    read2.queue(_repodata(String("")))
-    var oidc2 = _Shared()
-    var f2 = parse_publish_flags(
-        _args(_flags(credential=String("oidc"), extra=String("--require-environment release --dry-run")))
-    )
-    var r2 = publish_flow(f2, read2.share(), _Shared(), oidc2.share(), store, _quick(), sl)
-    assert_equal(r2.exit_code, EXIT_OK, _dump(r2))
-    assert_equal(oidc2.call_count(), 0)
+    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    assert_true(rep.has_line_containing(String("DRY RUN: nothing was uploaded; 3 file(s) would be")))
+    assert_true(rep.has_line_containing(String("WOULD UPLOAD linux-64/komira-1.0.0-h01234567_3.conda")))
+    assert_true(reg.transport().call_count() > 0, String("a dry run reads"))
+    assert_equal(reg.transport().write_count(), 0)
+    _all_anonymous(reg)
+    print("  test_dry_run_public_api_token: PASS")
 
 
-def test_a_real_run_with_a_named_secret() raises:
+def test_dry_run_public_oidc_mints_nothing() raises:
+    var f = _flags(String("dry_oidc"), String("example-oidc"), True)
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
+    var store = NoSecretStore()
     var sl = RecordingSleeper()
-    var read = _Shared()
-    read.queue(_repodata(String("")))
-    var write = _Shared()
-    write.queue(PkgResponse(201))
-    write.queue(_repodata(String(_LINUX_SHA)))
-    var store = _store()
-    var flags = parse_publish_flags(_args(_flags()))
-    var r = publish_flow(flags, read.share(), write.share(), _Shared(), store, _quick(), sl)
-    assert_equal(r.exit_code, EXIT_OK, _dump(r))
-    assert_true(r.has_line_containing(String("UPLOADED https://conda.example.invalid/example-stable/linux-64/") + String(_FILE)), _dump(r))
-    assert_equal(read.call_count(), 1)
-    assert_equal(read.call(0).header_value(String("Authorization")), String(""))
-    assert_equal(write.call_count(), 2)
-    var post = write.call(0)
-    assert_equal(post.method, HTTP_METHOD_POST)
-    assert_equal(post.host, String("conda.example.invalid"))
-    assert_equal(post.path, String("/api/v1/upload/example-stable"))
-    assert_equal(post.header_value(String("Authorization")), String("Bearer ") + String(_TOKEN))
-    assert_equal(store.resolve_count(), 1)
-    for i in range(len(r.lines)):
-        assert_true(r.lines[i].find(String(_TOKEN)) < 0, r.lines[i])
+    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    assert_equal(reg.transport().write_count(), 0)
+    _all_anonymous(reg)
+    print("  test_dry_run_public_oidc_mints_nothing: PASS")
 
 
-def _refused(flags: String, needle: String) raises:
-    var read = _Shared()
-    var write = _Shared()
-    var oidc = _Shared()
-    var store = _store()
+def test_dry_run_private_oidc_is_refused() raises:
+    var f = _flags(String("dry_poidc"), String("example-oidc-private"), True)
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc-private")), PublishCredential())
+    var store = NoSecretStore()
     var sl = RecordingSleeper()
-    var r = publish_flow(
-        parse_publish_flags(_args(flags)), read.share(), write.share(), oidc.share(), store, _quick(), sl
-    )
-    assert_equal(r.exit_code, EXIT_REFUSED, _dump(r))
-    assert_true(r.has_line_containing(needle), _dump(r))
-    assert_equal(read.call_count() + write.call_count() + oidc.call_count(), 0)
+    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    assert_equal(rep.exit_code, EXIT_REFUSED)
+    assert_true(rep.has_line_containing(String("is PRIVATE and publishes with OIDC only")))
+    assert_equal(reg.transport().call_count(), 0)
+    print("  test_dry_run_private_oidc_is_refused: PASS")
 
 
-def test_refusals_before_any_request() raises:
+def test_dry_run_private_api_token_reads_with_the_token() raises:
+    var f = _flags(String("dry_priv"), String("example-private"), True)
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-private")), PublishCredential())
+    var store = StaticSecretStore()
+    store.put(String(EXAMPLE_TOKEN_SECRET), String(_TOKEN))
     var sl = RecordingSleeper()
-    _refused(
-        _flags(manifest=String("other.json")),
-        String("not in the approved-names list (1 approved): other-pkg."),
-    )
-    _refused(_flags(manifest=String("bad_sha.json")), String("its manifest says"))
-    _refused(_flags(channel=String("example-beta")), String("unknown release channel 'example-beta'"))
-    _refused(
-        _flags(channel=String("example-private"), extra=String("--dry-run")),
-        String("channel 'example-private' is PRIVATE"),
-    )
-    _refused(_flags(credential=String("token-secret:NO_SUCH_SECRET")), String("NO_SUCH_SECRET"))
-    _refused(_flags(credential=String("oidc")), String("ACTIONS_ID_TOKEN_REQUEST_URL"))
+    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    assert_equal(reg.transport().write_count(), 0)
+    assert_true(reg.transport().call_count() > 0)
+    for i in range(reg.transport().call_count()):
+        assert_equal(reg.transport().call(i).header_value(String("Authorization")), String("Bearer ") + String(_TOKEN))
+    assert_false(rep.has_line_containing(String(_TOKEN)))
+    print("  test_dry_run_private_api_token_reads_with_the_token: PASS")
 
 
-def test_the_standalone_store_names_the_working_forms() raises:
+def test_require_environment_needs_an_oidc_channel() raises:
+    var f = _flags(String("reqenv"), String("example-stable"), False)
+    f.require_environment = String("release")
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
+    var store = NoSecretStore()
     var sl = RecordingSleeper()
-    var s = NoSecretStore()
-    var why = String("")
-    try:
-        _ = s.resolve(String("ANY"))
-    except e:
-        why = String(e)
-    assert_true(why.find(String("--credential token-file:<path> or --credential oidc")) >= 0, why)
+    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    assert_equal(rep.exit_code, EXIT_REFUSED)
+    assert_true(rep.has_line_containing(String("does not publish with OIDC trusted publishing")))
+    assert_equal(reg.transport().call_count(), 0)
+    print("  test_require_environment_needs_an_oidc_channel: PASS")
+
+
+def test_an_unresolvable_secret_fails_before_any_write() raises:
+    var f = _flags(String("nosecret"), String("example-stable"), False)
+    var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
+    var store = NoSecretStore()
+    var sl = RecordingSleeper()
+    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    assert_equal(rep.exit_code, EXIT_FAILED, String("\n").join(rep.lines))
+    assert_true(rep.has_line_containing(String(EXAMPLE_TOKEN_SECRET)))
+    assert_equal(reg.transport().write_count(), 0)
+    print("  test_an_unresolvable_secret_fails_before_any_write: PASS")
 
 
 def main() raises:
-    test_dry_run_through_the_verb()
-    test_a_real_run_with_a_named_secret()
-    test_refusals_before_any_request()
-    test_the_standalone_store_names_the_working_forms()
+    test_dry_run_public_api_token()
+    test_dry_run_public_oidc_mints_nothing()
+    test_dry_run_private_oidc_is_refused()
+    test_dry_run_private_api_token_reads_with_the_token()
+    test_require_environment_needs_an_oidc_channel()
+    test_an_unresolvable_secret_fails_before_any_write()
     print("test_publish_flow: ALL PASS")

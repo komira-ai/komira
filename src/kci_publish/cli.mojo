@@ -3,31 +3,37 @@
 #   argv to exit code.
 # =============================================================================
 #
-# `publish_main(args)` parses the flags, then hands the real HTTPS transport
-# to `publish_flow`; `publish_flow` is generic over the transport so the
-# welded tests drive the whole verb over scripted ones. The order:
+# `publish_flow` is generic over the channel transport, the OIDC transport,
+# the secret store and the sleeper, so the welded tests drive the whole verb
+# over an in-memory channel. The order:
 #
-#   1. flags (`flags.mojo`) -- a refusal is exit 2, before any file is read;
-#   2. inputs: the channels file, every manifest, the approved names, the
-#      targets, each file's sha256, the approved-names gate (`plan.mojo`) --
-#      a refusal is exit 3, before any request;
-#   3. --dry-run: the presence reads go through an ANONYMOUS credential, the
-#      plan is printed, and the verb returns. No credential is constructed,
-#      resolved or minted, and no upload is composed. A PRIVATE channel cannot
-#      be read anonymously, so a dry run of one is refused (exit 3);
-#   4. otherwise the credential named by --credential is built, the plan is
-#      read (anonymously for a PUBLIC channel, with the credential for a
-#      PRIVATE one) and `run_publish` carries it out.
+#   1. flags (`flags.mojo`): a refusal is exit 2, before any file is read;
+#   2. STEP 0, every check before any request (exit 3): the declarations;
+#      the release directory member by member (`inputs.mojo`); CONDA only;
+#      `--release-version`; lockstep, requirement closure and the set hash
+#      (`verify.mojo`); the channel and each member's coordinate
+#      (`plan.mojo`);
+#   3. THE CREDENTIAL comes from the channel's CONDA repository, never from a
+#      flag: an API_TOKEN by secret name (resolved through the `SecretStore`)
+#      or OIDC trusted publishing. Reads on a PUBLIC channel are anonymous;
+#      on a PRIVATE one they carry the credential, so it is resolved before
+#      step 1 (an OIDC exchange included: that is the one value the run
+#      uses). On a PUBLIC channel the write value is resolved at step 2,
+#      once;
+#   4. --dry-run: steps 0 and 1 only. No write request and no OIDC exchange.
+#      A PUBLIC channel resolves nothing; a PRIVATE channel with an API_TOKEN
+#      resolves it for the reads; a PRIVATE channel with OIDC only cannot be
+#      dry-run (reading it would mint), so that is refused (exit 3);
+#   5. `run_publish` (`run.mojo`), then the report is written to --report.
+#      A report that cannot be written turns a 0 or 6 into 4: the release job
+#      reads it.
 #
 # THE ONE ENVIRONMENT READ is the GitHub Actions OIDC handshake, inside
-# `GithubOidcCredential.from_actions_env`, and only for `--credential oidc`
-# outside a dry run. Everything else comes from the flags and the files
-# they name.
+# `GithubOidcCredential.from_actions_env`, and only for an OIDC channel
+# outside a dry run.
 #
-# `token-secret:<name>` resolves the name through the `SecretStore` the
-# caller passes to `publish_main_with_store`. The standalone binary carries
-# no secret store, so it refuses that form by name; a host binary that has
-# one calls `publish_main_with_store`.
+# The standalone binary carries no secret store (`NoSecretStore` refuses by
+# name); a host binary that has one calls `publish_main_with_store`.
 #
 # Encapsulation: owned values and generic seams. No pointer, no wildcard
 # origin.
@@ -41,105 +47,101 @@ from komira_http.transport.kernel_tcp import KernelTcpConnector
 from komira_retry import Sleeper
 from komira_secret_store import SecretStore, SecretValue
 
+from kci_artifact_declaration import read_artifact_declarations
 from kci_pkg_upload import (
-    SUBSTRATE_PREFIX_DEV_CONDA,
     SURFACE_PREFIX_DEV,
-    SURFACE_PYPI_UPLOAD,
     AnonymousCredential,
-    ApprovedNames,
     GithubOidcCredential,
     HttpPkgTransport,
     PkgTransport,
-    RegistryCredential,
     RegistrySet,
     StaticTokenCredential,
 )
 from kci_pkg_upload.coordinate import repo_host
-from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
+from kci_release_channel import (
+    ARTIFACT_TYPE_CONDA,
+    ChannelCredential,
+    ChannelDeclaration,
+    find_channel,
+    parse_channels_file,
+)
 
-from .flags import (
-    CREDENTIAL_OIDC,
-    CREDENTIAL_TOKEN_FILE,
-    PUBLISH_USAGE,
-    PublishFlags,
-    parse_publish_flags,
-)
-from .manifest import ArtifactManifest, read_approved_names, read_artifact_manifest
+from .flags import PUBLISH_USAGE, PublishFlags, parse_publish_flags
+from .inputs import LoadedRelease, load_release
 from .pause import UsleepSleeper
-from .plan import (
-    PublishPlan,
-    PublishTarget,
-    refuse_unapproved_names,
-    resolve_targets,
-    verify_target_files,
-)
-from .run import (
-    EXIT_OK,
+from .plan import PublishTarget, resolve_targets
+from .release_version import ReleaseVersion, read_release_version
+from .report import (
+    EXIT_ALREADY_PUBLISHED,
+    EXIT_FAILED,
+    EXIT_PUBLISHED,
     EXIT_REFUSED,
     EXIT_USAGE,
     PublishReport,
-    RunOptions,
-    plan_publish,
-    run_publish,
+    write_report,
+)
+from .run import run_publish
+from .upload import PublishCredential, RunOptions
+from .verify import (
+    require_closure,
+    require_conda_only,
+    require_lockstep,
+    require_set_hash,
 )
 
 
-struct PublishInputs(Movable, Deinitable):
-    """Everything step 2 read and checked.
+struct PreparedRelease(Movable):
+    """Everything step 0 read and checked.
 
     Layout: owned values only. No pointer field."""
 
+    var loaded: LoadedRelease
+    var release_version: ReleaseVersion
     var channel: ChannelDeclaration
+    var credential: Optional[ChannelCredential]
     var targets: List[PublishTarget]
-    var names: ApprovedNames
 
     def __init__(
         out self,
+        var loaded: LoadedRelease,
+        var release_version: ReleaseVersion,
         var channel: ChannelDeclaration,
+        var credential: Optional[ChannelCredential],
         var targets: List[PublishTarget],
-        var names: ApprovedNames,
     ):
+        self.loaded = loaded^
+        self.release_version = release_version^
         self.channel = channel^
+        self.credential = credential^
         self.targets = targets^
-        self.names = names^
 
 
-def load_inputs(flags: PublishFlags) raises -> PublishInputs:
-    """Step 2 of the header. RAISES with every refusal it found."""
+def prepare_release(flags: PublishFlags) raises -> PreparedRelease:
+    """Step 0 (see the file header). RAISES with the refusal; no request."""
+    var decls = read_artifact_declarations(flags.declarations_file)
+    var loaded = load_release(decls, flags.artifacts_dir)
+    require_conda_only(loaded.members)
+    var rv = read_release_version(flags.release_version_file)
+    require_lockstep(loaded.members, rv)
+    require_closure(loaded.members)
+    require_set_hash(loaded, flags.expect_set_hash)
     var text: String
     try:
         text = Path(flags.channels_file).read_text()
     except e:
         raise Error(
-            String("channels file '")
-            + flags.channels_file
-            + String("' cannot be read: ")
-            + String(e)
+            String("channels file '") + flags.channels_file + String("' cannot be read: ") + String(e)
         )
-    var decls = parse_channels_file(text)
-    var channel = find_channel(decls, flags.channel)
-    var manifests = List[ArtifactManifest]()
-    var refusals = List[String]()
-    for i in range(len(flags.artifacts)):
-        try:
-            manifests.append(read_artifact_manifest(flags.artifacts[i]))
-        except e:
-            refusals.append(String(e))
-    if len(refusals) > 0:
-        raise Error(
-            String("kci publish: refused before any upload:\n  ")
-            + String("\n  ").join(refusals)
-        )
-    var names = read_approved_names(flags.approved_names_file)
-    var targets = resolve_targets(decls, flags.channel, manifests)
-    verify_target_files(targets)
-    refuse_unapproved_names(targets, names)
-    return PublishInputs(channel^, targets^, names^)
+    var decls_c = parse_channels_file(text)
+    var channel = find_channel(decls_c, flags.channel)
+    var repository = channel.repository_for(String(ARTIFACT_TYPE_CONDA))
+    var targets = resolve_targets(channel, loaded.members)
+    return PreparedRelease(loaded^, rv^, channel^, repository.credential.copy(), targets^)
 
 
 struct NoSecretStore(SecretStore, Movable):
-    """The standalone binary's store: it holds nothing, and says so naming
-    the forms that work. Layout: no fields."""
+    """The standalone binary's store: it holds nothing, and says so. Layout:
+    no fields."""
 
     def __init__(out self):
         pass
@@ -148,122 +150,138 @@ struct NoSecretStore(SecretStore, Movable):
         raise Error(
             String("this kci publish binary has no secret store to resolve '")
             + secret_ref
-            + String("'; use --credential token-file:<path> or --credential oidc")
+            + String("'; run kci publish from a binary that carries one, or use a channel")
+            + String(" whose credential is OIDC trusted publishing")
         )
 
 
-def _surfaces_of(targets: List[PublishTarget]) -> List[Int]:
-    var out = List[Int]()
-    for i in range(len(targets)):
-        var s = SURFACE_PYPI_UPLOAD
-        if targets[i].coordinate.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
-            s = SURFACE_PREFIX_DEV
-        var seen = False
-        for j in range(len(out)):
-            if out[j] == s:
-                seen = True
-        if not seen:
-            out.append(s)
-    return out^
+def _base_report(p: PreparedRelease, flags: PublishFlags) -> PublishReport:
+    var r = PublishReport()
+    r.channel = p.channel.name.copy()
+    r.set_hash = p.loaded.set_hash()
+    r.release_commit = p.release_version.commit.copy()
+    r.dry_run = flags.dry_run
+    return r^
 
 
-def _publish_with[T: PkgTransport, C: RegistryCredential, W: Sleeper](
-    inputs: PublishInputs,
-    var read_t: T,
-    var write_t: T,
-    var cred: C,
-    opts: RunOptions,
-    mut sleeper: W,
-) -> PublishReport:
-    var writer = RegistrySet[T, C](write_t^, cred^)
-    var plan: PublishPlan
-    try:
-        if inputs.channel.is_public():
-            var reader = RegistrySet[T, AnonymousCredential](
-                read_t^, AnonymousCredential()
-            )
-            plan = plan_publish(reader, inputs.channel, inputs.targets)
-        else:
-            plan = plan_publish(writer, inputs.channel, inputs.targets)
-    except e:
-        return PublishReport.refused(EXIT_REFUSED, String(e))
-    return run_publish(plan, writer, inputs.names, False, opts, sleeper)
+def _refused(var p_report: PublishReport, code: Int, why: String) -> PublishReport:
+    var r = p_report^
+    r.exit_code = code
+    var parts = why.split(String("\n"))
+    for i in range(len(parts)):
+        r.lines.append(String(parts[i]))
+    r.finish_line()
+    return r^
 
 
-def publish_flow[T: PkgTransport, S: SecretStore, W: Sleeper](
+def _flow[T: PkgTransport, U: PkgTransport, S: SecretStore, W: Sleeper](
     flags: PublishFlags,
-    var read_t: T,
-    var write_t: T,
-    var cred_t: T,
+    mut registry: RegistrySet[T, PublishCredential],
+    var oidc_t: U,
     mut store: S,
     opts: RunOptions,
     mut sleeper: W,
 ) -> PublishReport:
-    """Steps 2-4 of the header over the given transports: `read_t` for the
-    anonymous presence reads, `write_t` for uploads and read-backs, `cred_t`
-    for the OIDC exchange; `sleeper` waits between read-back polls. Never
-    raises."""
-    var inputs: PublishInputs
+    var p: PreparedRelease
     try:
-        inputs = load_inputs(flags)
+        p = prepare_release(flags)
     except e:
         return PublishReport.refused(EXIT_REFUSED, String(e))
-    if flags.dry_run:
-        if not inputs.channel.is_public():
-            return PublishReport.refused(
-                EXIT_REFUSED,
-                String("kci publish: channel '")
-                + inputs.channel.name
-                + String("' is PRIVATE; a dry run reads anonymously and")
-                + String(" resolves no credential, so it cannot read it"),
-            )
-        var reader = RegistrySet[T, AnonymousCredential](read_t^, AnonymousCredential())
-        var plan: PublishPlan
-        try:
-            plan = plan_publish(reader, inputs.channel, inputs.targets)
-        except e:
-            return PublishReport.refused(EXIT_REFUSED, String(e))
-        return run_publish(plan, reader, inputs.names, True, opts, sleeper)
-    var surfaces = _surfaces_of(inputs.targets)
+    var base = _base_report(p, flags)
+    var host: String
     try:
-        if flags.credential_kind == CREDENTIAL_OIDC:
-            var prefix_host = String("")
-            var pypi_index = String("")
-            for i in range(len(inputs.targets)):
-                ref c = inputs.targets[i].coordinate
-                if c.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
-                    prefix_host = repo_host(c.repo)
-                else:
-                    pypi_index = c.repo.copy()
-            var oidc = GithubOidcCredential[T].from_actions_env(
-                cred_t^, prefix_host^, pypi_index^
-            )
+        host = repo_host(p.targets[0].coordinate.repo)
+    except e:
+        return _refused(base^, EXIT_REFUSED, String("kci publish: ") + String(e))
+    var public = p.channel.is_public()
+    var has_cred = Bool(p.credential)
+    var is_oidc = has_cred and p.credential.value().is_oidc_trusted_publishing()
+    if flags.require_environment.byte_length() > 0 and not is_oidc:
+        return _refused(
+            base^,
+            EXIT_REFUSED,
+            String("kci publish: --require-environment checks the OIDC token's `environment`")
+            + String(" claim, and channel '")
+            + p.channel.name
+            + String("' does not publish with OIDC trusted publishing"),
+        )
+    if not has_cred and not (flags.dry_run and public):
+        return _refused(
+            base^,
+            EXIT_REFUSED,
+            String("kci publish: channel '")
+            + p.channel.name
+            + String("' declares no credential for its CONDA repository, so it cannot be")
+            + String(" published to"),
+        )
+    try:
+        if flags.dry_run:
+            if public:
+                registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
+            elif is_oidc:
+                return _refused(
+                    base.copy(),
+                    EXIT_REFUSED,
+                    String("kci publish: channel '")
+                    + p.channel.name
+                    + String("' is PRIVATE and publishes with OIDC only; a dry run would have")
+                    + String(" to mint a token to read it, so it cannot be dry-run"),
+                )
+            else:
+                var token = StaticTokenCredential.token_secret(
+                    SURFACE_PREFIX_DEV, host.copy(), store, p.credential.value().secret_name
+                )
+                var auth = token.authorization(SURFACE_PREFIX_DEV, host)
+                registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth^)
+            var nobody = AnonymousCredential()
+            return run_publish(p.targets, flags.claims, registry, nobody, True, opts, sleeper, base.copy())
+        if is_oidc:
+            var oidc = GithubOidcCredential[U].from_actions_env(oidc_t^, host.copy(), String(""))
             if flags.require_environment.byte_length() > 0:
                 oidc.with_required_environment(flags.require_environment.copy())
-            return _publish_with(inputs, read_t^, write_t^, oidc^, opts, sleeper)
-        if len(surfaces) != 1:
-            return PublishReport.refused(
-                EXIT_REFUSED,
-                String("kci publish: a token credential serves one registry,")
-                + String(" and these artifacts publish to both a conda channel")
-                + String(" and a python index; publish them in two runs"),
-            )
-        # The token is bound to the channel's host: `run_publish` asks for it
-        # per (surface, host) before the first upload, so a target on any
-        # other host is refused with nothing sent.
-        var host = repo_host(inputs.targets[0].coordinate.repo)
-        var token: StaticTokenCredential
-        if flags.credential_kind == CREDENTIAL_TOKEN_FILE:
-            token = StaticTokenCredential.token_file(
-                surfaces[0], host^, flags.credential_arg
-            )
+            if public:
+                registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
+            else:
+                var auth = oidc.authorization(SURFACE_PREFIX_DEV, host)
+                registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
+                registry.credential().arm(auth^)
+            return run_publish(p.targets, flags.claims, registry, oidc, False, opts, sleeper, base.copy())
+        var token = StaticTokenCredential.token_secret(
+            SURFACE_PREFIX_DEV, host.copy(), store, p.credential.value().secret_name
+        )
+        if public:
+            registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
         else:
-            token = StaticTokenCredential.token_secret(
-                surfaces[0], host^, store, flags.credential_arg
-            )
-        return _publish_with(inputs, read_t^, write_t^, token^, opts, sleeper)
+            var auth = token.authorization(SURFACE_PREFIX_DEV, host)
+            registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
+            registry.credential().arm(auth^)
+        return run_publish(p.targets, flags.claims, registry, token, False, opts, sleeper, base.copy())
     except e:
-        return PublishReport.refused(EXIT_REFUSED, String("kci publish: ") + String(e))
+        return _refused(base^, EXIT_FAILED, String("kci publish: the channel's credential: ") + String(e))
+
+
+def publish_flow[T: PkgTransport, U: PkgTransport, S: SecretStore, W: Sleeper](
+    flags: PublishFlags,
+    mut registry: RegistrySet[T, PublishCredential],
+    var oidc_t: U,
+    mut store: S,
+    opts: RunOptions,
+    mut sleeper: W,
+) -> PublishReport:
+    """Steps 0 to 6 over the given seams (see the file header): `registry`
+    talks to the channel (its credential unconfigured; the flow configures
+    it), `oidc_t` carries the OIDC exchange. Writes the report. Never
+    raises."""
+    var r = _flow(flags, registry, oidc_t^, store, opts, sleeper)
+    try:
+        write_report(r, flags.report_file)
+    except e:
+        r.lines.append(
+            String("REPORT not written to '") + flags.report_file + String("': ") + String(e)
+        )
+        if r.exit_code == EXIT_PUBLISHED or r.exit_code == EXIT_ALREADY_PUBLISHED:
+            r.exit_code = EXIT_FAILED
+    return r^
 
 
 comptime _Conn = TlsConnector[KernelTcpConnector]
@@ -282,9 +300,9 @@ def _http() -> _Http:
 
 
 def publish_main_with_store[S: SecretStore](args: List[String], mut store: S) -> Int:
-    """`kci publish` with `args` (the arguments after the verb), resolving
-    `token-secret:<name>` through `store`. Prints the report; returns the
-    exit code."""
+    """`kci publish` with `args` (the arguments after the verb), resolving an
+    API_TOKEN channel credential through `store`. Prints the lines; returns
+    the exit code."""
     var flags: PublishFlags
     try:
         flags = parse_publish_flags(args)
@@ -293,11 +311,10 @@ def publish_main_with_store[S: SecretStore](args: List[String], mut store: S) ->
         return EXIT_USAGE
     if flags.help:
         print(String(PUBLISH_USAGE))
-        return EXIT_OK
+        return EXIT_PUBLISHED
     var sleeper = UsleepSleeper()
-    var report = publish_flow(
-        flags, _http(), _http(), _http(), store, RunOptions(), sleeper
-    )
+    var registry = RegistrySet[_Http, PublishCredential](_http(), PublishCredential())
+    var report = publish_flow(flags, registry, _http(), store, RunOptions(), sleeper)
     for i in range(len(report.lines)):
         print(report.lines[i])
     return report.exit_code
