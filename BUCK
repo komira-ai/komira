@@ -44,9 +44,9 @@ no_endpoint(
 # shell_lint and is named here.
 _TESTS_LINTS = [
     "tests//:shell_lint",
+    "tests//functional/aws_codegen:shell_lint",
     "tests//functional/bundle_parity:shell_lint",
     "tests//functional/darwin:shell_lint",
-    "tests//functional/numa:shell_lint",
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",
 ] if read_root_config("cells", "tests") else []

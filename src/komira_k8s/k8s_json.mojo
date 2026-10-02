@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_k8s/k8s_json.mojo — manifest serialize (write) + PodPhase derivation
-# and Status-envelope parse (read), via komira_serde
+# and Status-envelope parse (read), via komira_json
 # =============================================================================
 #
 # JSON lives ENTIRELY inside this module — it is the wire seam, never the
@@ -14,8 +14,8 @@
 # => Running; waiting => Pending — else fall back to `status.phase`.
 # =============================================================================
 
-from komira_serde import JsonValue, parse_json_value
-from komira_serde.json_value import (
+from komira_json import JsonValue, parse_json_value
+from komira_json.value import (
     JSON_STRING,
     JSON_NUMBER,
     JSON_ARRAY,
@@ -328,6 +328,6 @@ def parse_pod_list(v: JsonValue) raises -> List[PodSummary]:
 
 
 def parse_json(body: String) raises -> JsonValue:
-    """Parse a response body to a JsonValue (komira_serde). Internal only —
+    """Parse a response body to a JsonValue (komira_json). Internal only —
     JsonValue never crosses the public boundary."""
     return parse_json_value(body)

@@ -31,8 +31,8 @@ do:
   in a snapshot of the tree.
 
 A test with both halves keeps one package name in each, for example
-`tests//functional/known_failing` (a hold that works) and
-`tests//negative/known_failing` (the holds that must be refused).
+`tests//functional/test_data` (the test runtime contract that works) and
+`tests//negative/test_data` (the declarations and env that must go red).
 `functional/` and `negative/` are not packages themselves: their
 scripts belong to the root package of the cell, and are linted by `tests//:shell_lint`, which the root `//:tests_lints`
 names. At the top of this directory are the driver,
@@ -50,9 +50,8 @@ buck2 registers, and the first line of output names it:
 - `MODE  local`: no service is configured; every action runs on this
   machine. These need a service and print `SKIP ... needs a remote-execution
   service` instead: 7 (remote cache hits across checkouts), 9 (what a remote
-  build downloads), the registered-platform half of 10 and the stand-in half
-  of 11 (both built from the `[komira_re]` worker sets), 12 (per-action
-  worker property sets) and 24 (macOS workers). Test 3 prints `SKIP ...
+  build downloads), 12 (per-action worker property sets) and 24 (macOS
+  workers). Test 3 prints `SKIP ...
   needs remote input isolation`: its red relies on the executor staging only
   declared inputs, and an unsandboxed local action may find the undeclared
   package in the checkout. Tests 1, 22 and 23 require every action to have
@@ -179,11 +178,10 @@ A fifth consumer, fetched as a git external cell, has no `.buckconfig.local`:
 the remote-execution settings are appended to its root `.buckconfig`, and it
 runs with no user or system buckconfig and `HOME` in the scratch directory.
 Its `app//platforms:default` must register only remote platforms, including
-`exec-mojo` and `exec-light`; hello, hellopkg, test_hellopkg and
-`toolchains//:mojo` must resolve to `exec-mojo` and the zig and conda_unpack
-targets to `exec-light`, with the configuration hashes test 18 pins; and
-with `-c komira.execution=remote`, clearing `[komira_re] light_properties`,
-or `mojo_compile_properties`, must refuse, naming the key. Analysis only.
+`linux-x86_64`; hello, hellopkg, test_hellopkg, `toolchains//:mojo` and the
+zig and conda_unpack targets must resolve to it, with the configuration hash
+test 18 pins; and with `-c komira.execution=remote`, clearing `[komira_re]
+linux_properties` must refuse, naming the key. Analysis only.
 See
 [Using komira from another repository](../README.md#using-komira-from-another-repository).
 
@@ -220,54 +218,33 @@ tools/build/tests/functional/buck2_run.sh
 
 ## 10. Execution platforms
 
-Mojo compiles, gated tests and run checks resolve to `exec-mojo`
-(`mojo_compile`, `numa_single`); the toolchain unpack and copy targets, and
-the `third_party_srcs` generation, drift test and fixture archive, to
-`exec-light`: none of them compiles, and a rule that takes the Mojo toolchain
-for its busybox would inherit that toolchain's `mojo_compile` class. A target
-requiring `numa_multi` ([`numa`](functional/numa/BUCK)), with no platform
-providing it, fails to configure and runs no action; given one
-(resolution only, nothing is built), it resolves to it. See
+Mojo compiles, gated tests and run checks, the toolchain unpack and copy
+targets, and the `third_party_srcs` generation, drift test and fixture
+archive all resolve to the one linux execution platform, `linux-x86_64`. See
 [platforms/README.md](../platforms/README.md).
 
 ```sh
-buck2 audit execution-platform-resolution -c komira_re.mojo_compile_multi_numa_properties= \
-    //tools/build/examples:hello tests//functional/numa:hello_multi_numa
+buck2 audit execution-platform-resolution //tools/build/examples:hello //tools/build/toolchains:zig
 ```
 
-## 11. Multi-NUMA hardware
+## 11. (Retired)
 
-The multi-NUMA run checks the hardware it got, not only its label:
-
-- [`numa_guard.sh`](../mojo/numa_guard.sh) gives the right verdict on 12
-  made-up topologies (`tests//functional/numa:guard_cases`, a remote action;
-  [`guard_cases.sh`](functional/numa/guard_cases.sh));
-- `komira_execution_platforms` refuses a multi-NUMA property set equal to the
-  `mojo_compile` one;
-- on a stand-in platform whose multi-NUMA workers are the single-NUMA
-  `mojo_compile` workers ([`numa/standin`](negative/numa_standin/BUCK)), both the
-  build's run check and `buck2 test` refuse to start
-  (`numa_guard: REFUSING to run`);
-- on that stand-in, the `buck2 test` command minus the guard
-  (`tests//functional/numa:gate_run`, [`numa/defs.bzl`](functional/numa/defs.bzl)) exits 0
-  through the gate runner: the runner accepts the arguments this rule gives
-  it, which the guard's refusal would otherwise hide.
-
-```sh
-buck2 build tests//functional/numa:guard_cases --show-full-simple-output
-```
+Retired 2026-09-30 with the multi-NUMA rule and its NUMA guard. The number
+is not reused.
 
 ## 12. Action platforms
 
-Actions run with their platform's property set, read per action: an uncached
-build of `//tools/build/examples:hello` and
+Every action runs with the one linux property set, read per action: an
+uncached build of `//tools/build/examples:hello` and
 `//tools/build/third_party_srcs:aws_lc_mini_gen` (its own daemon under a fixed
 `--isolation-dir`, `--no-remote-cache`, so every action really executes) must
-record the `light` set for `zig_unpack`, `zig_build_exe`, `conda_unpack`,
-`mojo_runtime`, `fixture_archive` and `third_party_srcs`, and the `mojo_compile` set for `mojo_build` (`buck2 log
-what-ran`; a cache hit records no properties, so a warm build cannot answer
-this). Costs about 3 minutes of remote execution; the isolated daemon's
-`buck-out/komira_tests_uncached` (~50 MB) is reused per run.
+record a remote execution carrying `[komira_re] linux_properties` for every
+action it ran, and must have run `zig_unpack`, `zig_build_exe`,
+`conda_unpack`, `mojo_runtime`, `fixture_archive`, `third_party_srcs` and
+`mojo_build` (`buck2 log what-ran`; a cache hit records no properties, so a
+warm build cannot answer this). Costs about 3 minutes of remote execution;
+the isolated daemon's `buck-out/komira_tests_uncached` (~50 MB) is reused per
+run.
 
 ## 13. Bundle parity
 
@@ -328,9 +305,8 @@ a file of `tree`, which must resolve), and requires
 [`negative/doc_links`](negative/doc_links/BUCK) to fail naming each of its
 planted links: a missing file, a bad anchor and a link leaving the tree, and
 nothing else. It also requires every package of the komira and tests cells
-to be in `//:docs`, the toolchains cell to hold no Markdown, no BUCK file but
-[`negative/numa_standin`](negative/numa_standin/BUCK) (which may call no
-rule) to declare a `doc_tree` itself, and neither cell to set
+to be in `//:docs`, the toolchains cell to hold no Markdown, no BUCK file
+to declare a `doc_tree` or call `package_docs()` itself, and neither cell to set
 `[project] package_boundary_exceptions`: an exception is a path prefix, so
 one that covers the root package covers every package, and any target could
 then name a file of another package.
@@ -341,9 +317,10 @@ then name a file of another package.
 
 ## 18. Configuration hashes
 
-The configuration hashes of `komira//tools/build/platforms:exec-light`, `:exec-mojo` and
-`:linux-x86_64`, read with `buck2 cquery 'deps(komira//tools/build/examples:hello)'`,
-equal the pins in `run_tests.sh`. A configuration's hash is keyed by its
+The configuration hash of `komira//tools/build/platforms:linux-x86_64` (the
+target platform, and the configuration of the linux execution platform), read
+with `buck2 cquery 'deps(komira//tools/build/examples:hello)'`, equals the pin
+in `run_tests.sh`, and it is the only configuration in that closure. A configuration's hash is keyed by its
 platform's label and constraints and appears in the output paths, and so in
 the digest, of every configured action, product code included. Moving the
 `platforms` package, renaming a platform or changing a constraint therefore
@@ -374,7 +351,7 @@ which record the test file's source location in the binary; they build only
 because the wrapper strips the staging directory from it
 (`-strip-file-prefix`), and fail with exit 4 on the worker's absolute path
 without it (`test_source_paths`). C compiles and archives
-resolve to `exec-light`, the Mojo targets using them to `exec-mojo`. The
+and the Mojo targets using them resolve to `linux-x86_64`. The
 snappy test binary, which links C++ with zig's static libc++, carries
 libc++abi and exports no dynamic symbol, so its C++ runtime cannot interpose
 on the `libstdc++.so.6` the Mojo runtime loads.
@@ -436,15 +413,15 @@ into a scratch clone (`.buckconfig.local` is gitignored, so it is never
 copied) and runs buck2 there with its own daemon, no user or system
 buckconfig and `HOME` in the scratch directory. On Linux x86_64, every
 platform `[build] execution_platforms` registers is local-only (exactly
-`exec-mojo`, `exec-light`); Mojo targets and the toolchain targets resolve to
-them with the configuration hashes test 18 pins, so a local and a remote
-build configure every target identically; a `numa_multi` target does not
-configure; `-c komira.execution=remote` refuses, naming `[komira_re]`; a
+`linux-x86_64`); Mojo targets and the toolchain targets resolve to it with
+the configuration hash test 18 pins, so a local and a remote build configure
+every target identically; `-c komira.execution=remote` refuses, naming `[komira_re]`; a
 `[buck2_re_client]` `address`, `engine_address`, `cas_address` or
 `action_cache_address` with no `[komira_re]`
 refuses instead of building locally (a missing or misspelled `[komira_re]`
-fails closed), as does a `[komira_re]` without `light_properties`, while
-`-c komira.execution=local` still registers the local platforms;
+fails closed), as does a retired `[komira_re]` key such as
+`mojo_compile_properties` (naming `linux_properties`), while
+`-c komira.execution=local` still registers the local platform;
 `[komira] execution = remote` in a user `~/.buckconfig.local` refuses; and an
 unknown mode refuses. On any other host the clone must refuse local
 execution, naming the host and `.buckconfig.local`. Last, on Linux x86_64,
@@ -452,8 +429,11 @@ it builds `komira//tools/build/toolchains:conda_unpack` and `:zig_cc_launcher`
 locally, from a daemon started with an empty environment and `PATH`: zig is
 unpacked, then the two zig programs are built at once, and every action must
 have run locally. Local actions share the checkout root as their working
-directory, so this is what fails if two of them share scratch space. It
-downloads about 45 MB, compiles no Mojo, and runs in both modes.
+directory, so this is what fails if two of them share scratch space.
+Then, with an empty `.buckconfig.local`, it builds and runs
+`komira//tools/build/examples:hello` the same way (the newcomer's first
+command), every action local, lint validations included. It downloads about
+45 MB plus the Mojo toolchain, and runs in both modes.
 
 ```sh
 tools/build/tests/functional/local_default.sh
@@ -473,18 +453,6 @@ check on a worker. Every probe named in `third_party/s2n-tls/features.bzl`
 compiles (`tests//functional/s2n_probes`) and every other probe fails to, so a feature
 define cannot be added or dropped without its probe agreeing. Neither test
 binary exports a dynamic symbol.
-
-## 27. Known-failing tests
-
-[`functional/known_failing`](functional/known_failing/BUCK): `held_ok` holds its failing test and
-builds, and that test's marker reads `HELD <label>`; in
-[`negative/known_failing`](negative/known_failing/BUCK), `held_passing` holds a
-test that passes and must fail with `LEDGER STALE`, naming the row;
-`unheld_red` holds one failing test and must still fail with
-`GATED TEST FAILED` on the other. Each `bad_*` target must fail at analysis
-with its own refusal: no issue, an issue that is not a GitHub issue
-reference, an empty reason, a key that is not a test, an unknown field,
-byte-identical reasons, every test held.
 
 ## 28. Compile watchdog
 
@@ -522,10 +490,8 @@ is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
-`runner_cases` also runs the runner on a held stand-in that kills itself:
-with SIGKILL (a memory limit's kill) it must exit 137 with `NO VERDICT` and
-no marker, so an executor retries it with more memory rather than caching
-`HELD`; with SIGABRT it is still `HELD`; unheld and SIGKILLed it is red, 137.
+`runner_cases` also runs the runner on a stand-in that kills itself: with
+SIGKILL it must exit 137 and with SIGABRT 134, each with no marker.
 
 ## 30. Optimization levels
 
@@ -591,6 +557,76 @@ and with one reporting this machine, which must pass.
 
 ```sh
 tools/build/tests/run_tests.sh --host-check-only
+```
+
+## 34. AWS client generator
+
+[`functional/aws_codegen`](functional/aws_codegen/BUCK) runs
+`komira//tools/build/proto-codegen:aws-client-gen` over a copy of the
+CloudWatch Logs model as check actions ([`defs.bzl`](functional/aws_codegen/defs.bzl)).
+The GetLogEvents module, pure and client, and the layout probe of each, must
+equal their goldens under `golden/` byte for byte. The generator must refuse,
+naming the reason and writing no file: an empty or missing `--operations`, an
+operation the model lacks, a protocol it does not implement (rest-xml), a
+missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
+or one digit short), one that is not the model's, a zero-byte model, and
+`--probe-import` without `--probe-out`.
+
+Two negatives in [`negative/aws_codegen`](negative/aws_codegen/BUCK) must fail
+their builds: a golden that differs from the generated module (`golden_differs`),
+and a refusal check given inputs the generator accepts (`accepted`).
+
+```sh
+buck2 build tests//functional/aws_codegen:
+buck2 build tests//negative/aws_codegen:golden_differs   # must fail: differs from the golden
+buck2 build tests//negative/aws_codegen:accepted         # must fail: expected a refusal
+```
+
+To update a golden after a deliberate change to the emitter, build the
+golden's `[gen]` sub-target and copy its output over the golden (and
+likewise for `logs_pure`):
+
+```sh
+out=$(buck2 build 'tests//functional/aws_codegen:logs_client[gen]' --show-full-simple-output)
+cp "$out/komira_aws_logs.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client.mojo
+cp "$out/_layout_probe.mojo" tools/build/tests/functional/aws_codegen/golden/logs_client_probe.mojo
+```
+
+## 35. Rust tests are part of the build
+
+`rust_test` ([`../rust/README.md`](../rust/README.md#tests-are-part-of-the-build))
+compiles a crate with `rustc --test` and runs it as a build action, and
+`tests = [...]` on `rust_library` and `rust_binary` makes the published
+artifact wait on every test's `.passed` marker.
+`//tools/build/proto-codegen:komira_proto_codegen_unit` (the inline tests of
+`komira_proto_codegen`, which gate the library and so every generator binary)
+must build, and its marker must record a non-zero passed count.
+
+In [`negative/rust_test`](negative/rust_test/BUCK), `red` holds one passing
+and one failing test. It must fail with `GATED TEST FAILED` and the harness's
+`1 passed; 1 failed` (the panic unwound through the zig-linked harness, so
+the run continued), while `red[bin]`, the test executable, builds: the red is
+the run, not the compile. `bin` (welded to `red`) and `lib_consumer` (linking
+`red_lib`, which is welded to `red`) must fail the same way. `bin_green`,
+welded to `env_scrubbed`, must build and run (`[run_check]`); `env_scrubbed`
+must build: its test asserts the harness's environment is exactly `HOME`,
+`PATH` and `TMPDIR`. Each of these must fail, naming its cause: no tests
+(`empty`, `EMPTY GATE`), an `#[ignore]`d test (`ignored`), and a test that
+hangs (`hang`, NO VERDICT at its 3 s `test_timeout_s`, exit 142). There are
+no holds: a welded test that fails makes its artifact unbuildable until it
+passes.
+
+`buck2 test //tools/build/proto-codegen:komira_proto_codegen` must pass and
+print the harness's `komira_proto_codegen_unit: <n> passed`: `rust_test`
+gives `buck2 test` the same runner, so the reused `tests` attribute runs what
+it names. `buck2 test tests//negative/rust_test:bin` must fail with `GATED
+TEST FAILED`.
+
+```sh
+buck2 build //tools/build/proto-codegen:komira_proto_codegen_unit
+buck2 build tests//negative/rust_test:env_scrubbed 'tests//negative/rust_test:bin_green[run_check]'
+buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
+buck2 test //tools/build/proto-codegen:komira_proto_codegen
 ```
 
 ## Diagnostics

@@ -1,4 +1,4 @@
-"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test, mojo_multi_numa_test.
+"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test.
 
 Every action runs the hermetic toolchain from `toolchains//:mojo` through
 `mojo_wrapper.sh`; see that file for the environment the compiler sees.
@@ -10,6 +10,10 @@ Output layout of a library `L` with import name `I`:
     L/pkg/I.mojoc          the public package: a copy of the ungated one that
                            takes every test's PASS marker as an input
     L/src/I/...            the staged package sources
+    L[gen]                 with `gen`: that target's DefaultInfo, re-exported
+                           whole, sub-targets included (for gcp_client: the
+                           generated directory, `[gen][<file>]`, and the
+                           staged `.proto` inputs `[gen][proto]`)
     L/tests/<t>/...        per test: its binary, its staged tree `root/`
                            (bin/<t> and share/, see _test_root) and its marker
 
@@ -18,7 +22,7 @@ staged source directory can never shadow a package.
 """
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
-load(":providers.bzl", "MojoGateRunInfo", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _toolchain(ctx):
@@ -211,62 +215,13 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
 # ---- mojo_library ----------------------------------------------------------
 
-# `tests_known_failing` -- a hold on a red test, which INVERTS rather than
-# mutes. A held test still builds and runs as an action of the library's gate;
-# its marker is produced only if it FAILS. So:
-#   an unheld test that fails   -> the gate is red (GATED TEST FAILED)
-#   a held test that fails      -> satisfied (marker `HELD <label>`)
-#   a held test that passes     -> red (LEDGER STALE), naming its row: delete it
-#   a held test SIGKILLed (137) -> red (NO VERDICT): a memory limit's kill is
-#                                  not the test's failure (gate_runner.sh)
-# A hold therefore silences nothing: the red is asserted on every build, and
-# the fix is reported as a build failure until the row goes.
-#
-# A row is `{"issue": ..., "reason": ...}`. `issue` is the GitHub issue that
-# will remove the hold (`123`, `#123` or its https://github.com/<o>/<r>/issues/
-# URL); `reason` says why THIS test fails. Refused at analysis, before any
-# action: a key that is not a `test_srcs` entry, another field, a missing or
-# malformed issue, an empty reason, two rows with byte-identical reasons (one
-# investigation pasted over a second test), and holding every test (a gate
-# that asserts nothing passes).
-_KNOWN_FAILING_FIELDS = ["issue", "reason"]
-_ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
-
 def _test_key(ctx, t):
-    """The package-relative path of test source `t`: its tests_known_failing key."""
+    """The package-relative path of test source `t`: its test_data key."""
     p = t.short_path
     pkg = ctx.label.package
     if pkg and p.startswith(pkg + "/"):
         p = p[len(pkg) + 1:]
     return p
-
-def _admit_known_failing(ctx):
-    held = ctx.attrs.tests_known_failing
-    if not held:
-        return {}
-    keys = [_test_key(ctx, t) for t in ctx.attrs.test_srcs]
-    where = "{}: tests_known_failing".format(ctx.label.raw_target())
-    seen = {}
-    for entry, row in held.items():
-        if entry not in keys:
-            fail("{}[{}]: not a test_srcs entry (entries: {}). A hold that matches no test reads as applied and is not; fix the path, or delete the row if the test is gone.".format(where, repr(entry), ", ".join(keys)))
-        for field in row:
-            if field not in _KNOWN_FAILING_FIELDS:
-                fail("{}[{}]: unknown field `{}`; a row has exactly `issue` and `reason`.".format(where, repr(entry), field))
-        issue = row.get("issue", "")
-        reason = row.get("reason", "")
-        if not issue:
-            fail("{}[{}]: no `issue`. A hold is debt; name the GitHub issue that will remove it (`123`, `#123` or its URL).".format(where, repr(entry)))
-        if not regex_match(_ISSUE_REF, issue):
-            fail("{}[{}]: issue {} is not a GitHub issue number (`123`, `#123`) or https://github.com/<owner>/<repo>/issues/<n> URL.".format(where, repr(entry), repr(issue)))
-        if not reason.strip():
-            fail("{}[{}]: empty `reason`. Say what this test shows is broken; a reader deciding whether the hold is still honest has nothing else to go on.".format(where, repr(entry)))
-        if reason in seen:
-            fail("{}[{}] and [{}] carry byte-identical reasons. If they share a cause, say what each test shows; otherwise the second test was never examined.".format(where, repr(seen[reason]), repr(entry)))
-        seen[reason] = entry
-    if len(held) >= len(keys):
-        fail("{}: holds all {} tests. That gate asserts nothing passes; a library whose whole suite is red has a defect, not a debt.".format(where, len(keys)))
-    return held
 
 # ---- the test runtime contract ------------------------------------------
 #
@@ -376,7 +331,6 @@ def _library_impl(ctx):
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
 
-    held = _admit_known_failing(ctx)
     test_data = _admit_test_data(ctx)
     env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
 
@@ -402,7 +356,6 @@ def _library_impl(ctx):
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
         root, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
-        hold = ["--hold", key, held[key]["issue"], held[key]["reason"]] if key in held else []
         ctx.actions.run(
             cmd_args(
                 tc.busybox,
@@ -414,7 +367,6 @@ def _library_impl(ctx):
                 staged,
                 marker.as_output(),
                 env_args,
-                hold,
                 hidden = root,
             ),
             category = "mojo_gated_test",
@@ -449,7 +401,7 @@ def _library_impl(ctx):
                 # gated package. The tests above use the ungated package
                 # in-rule, never through a label.
                 "ungated": [DefaultInfo(default_output = ungated)],
-            },
+            } | ({"gen": [ctx.attrs.gen[DefaultInfo]]} if ctx.attrs.gen else {}),
         ),
         MojoInfo(
             c_link = c_link,
@@ -467,6 +419,12 @@ mojo_library_rule = rule(
     attrs = {
         # Mojo packages and C/C++ libraries; see _check_deps.
         "deps": attrs.list(attrs.dep(), default = []),
+        # Optional: the target that generated `srcs` (gcp_client, for example).
+        # Its DefaultInfo is re-exported whole as the `[gen]` sub-target, so a
+        # reader or an IDE finds the generated code (and what it was generated
+        # from); nothing else reads it. Unchecked: nothing verifies that `srcs`
+        # come from this target, which is acceptable for a reader-only view.
+        "gen": attrs.option(attrs.dep(), default = None),
         "import_name": attrs.option(attrs.string(), default = None),
         "srcs": attrs.list(attrs.source()),
         "test_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
@@ -475,8 +433,6 @@ mojo_library_rule = rule(
         "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
-        # {test_srcs path: {"issue": ..., "reason": ...}}; see _admit_known_failing.
-        "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
     } | _TOOLCHAIN_ATTR,
 )
 
@@ -515,13 +471,12 @@ def _runnable(ctx, tc, exe):
     # downloads the binary and its runtime libraries only.
     return run_dir, cmd_args(run_dir.project(name), hidden = run_dir)
 
-def _run_check(ctx, tc, command, guard = []):
+def _run_check(ctx, tc, command):
     # Runs the RunInfo command itself, in a remote action with no library
     # path, so a runnable directory that cannot start on its own fails here.
-    # The action runs on this target's execution platform. `guard` is an
-    # argv prefix that must let the run start (mojo_multi_numa_test).
+    # The action runs on this target's execution platform.
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
-    args = guard + [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
+    args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout != None:
         args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
@@ -536,8 +491,6 @@ def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
     run_dir, command = _runnable(ctx, tc, exe)
     shared = _shared(ctx, tc)
-    # Built only when a mojo_multi_numa_test runs this binary as its test.
-    test_root, test_binary = _test_root(ctx, ctx.label.name + ".testroot", exe, {})
     return [
         DefaultInfo(
             default_output = exe,
@@ -548,7 +501,7 @@ def _binary_impl(ctx):
             },
         ),
         RunInfo(args = command),
-        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir, test_root = test_root, test_binary = test_binary, test_env = []),
+        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
     ]
 
@@ -598,7 +551,7 @@ def _test_impl(ctx):
         # `buck2 run` of a test runs its binary directly, from the runnable
         # directory; `buck2 test` runs it through the gate runner on RE.
         RunInfo(args = run_command),
-        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir, test_root = root, test_binary = staged, test_env = env_args),
+        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],
@@ -619,79 +572,15 @@ mojo_test_rule = rule(
     },
 )
 
-# ---- mojo_multi_numa_test ---------------------------------------------------
-#
-# Buck2 picks one execution platform per TARGET, so every action of a target
-# (its compile, its gated tests, its run check) runs on the same kind of
-# worker. A run that needs a worker spanning more than one NUMA node is
-# therefore its own target: `binary` (a mojo_binary or mojo_test) is compiled
-# by its own target on the default single-NUMA platform, and this target only
-# RUNS it, on a platform providing `komira//tools/build/platforms:numa_multi`.
-#
-# Two refusals, because the constraint alone is only a claim:
-#   - The toolchain is private and states `numa_multi`, so the requirement
-#     cannot be dropped from a BUCK file. When no registered execution
-#     platform provides `numa_multi`, the target fails to configure.
-#   - Every run (the build's run check and the `buck2 test` command) starts
-#     through numa_guard.sh, which exits 3 unless the action can use at least
-#     `numa_nodes` NUMA nodes -- online, with memory, and allowed by its own
-#     cpuset, affinity mask and memory binding. A platform whose property set
-#     routes to a single-NUMA worker therefore goes red, not green.
-
-def _multi_numa_test_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
-    runnable = ctx.attrs.binary[MojoRunnableInfo]
-    if ctx.attrs.numa_nodes < 2:
-        fail("mojo_multi_numa_test: numa_nodes must be at least 2, got {}".format(ctx.attrs.numa_nodes))
-    guard = [tc.busybox, "sh", tc.numa_guard, tc.busybox, str(ctx.attrs.numa_nodes), "--"]
-    # Building the target runs the binary (a build action on the multi-NUMA
-    # platform): it must start with no library path, exit 0, and print
-    # `expected_stdout` when that is set.
-    stdout = _run_check(ctx, tc, runnable.command, guard)
-    # `buck2 test` runs the binary as a test, exactly as mojo_test does: from
-    # its staged tree (bin/<name>, with the data and env of a mojo_test), with
-    # private scratch. gate_runner puts <dir>/lib on the library path; the
-    # runnable directory holds lib/, so the compiler is not an input of the run.
-    gate_run = cmd_args(
-        tc.busybox,
-        "sh",
-        tc.gate_runner,
-        tc.busybox,
-        runnable.run_dir,
-        str(ctx.label.raw_target()),
-        runnable.test_binary,
-        "/dev/null",
-        runnable.test_env,
-        hidden = runnable.test_root,
-    )
-    test_command = cmd_args(guard, gate_run)
-    return [
-        DefaultInfo(default_output = stdout),
-        RunInfo(args = runnable.command),
-        MojoGateRunInfo(command = gate_run),
-        ExternalRunnerTestInfo(
-            type = "mojo",
-            command = [test_command],
-            labels = ctx.attrs.labels,
-        ),
-    ]
-
-mojo_multi_numa_test_rule = rule(
-    impl = _multi_numa_test_impl,
-    attrs = {
-        "binary": attrs.dep(providers = [MojoRunnableInfo]),
-        # When set, building this target fails unless the run's stdout equals it.
-        "expected_stdout": attrs.option(attrs.string(), default = None),
-        "labels": attrs.list(attrs.string(), default = []),
-        # The run refuses to start on a worker where it can use fewer nodes.
-        "numa_nodes": attrs.int(default = 2),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_multi_numa", providers = [MojoToolchainInfo]),
-    },
-)
+def _mojo_library(**kwargs):
+    # Refused by name, so a stale BUCK file says why rather than buck2's
+    # generic "unexpected parameter".
+    if "tests_known_failing" in kwargs:
+        fail("{}: tests_known_failing was removed: every welded test must pass".format(kwargs.get("name", "mojo_library")))
+    return mojo_library_rule(**kwargs)
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_binary = declares_docs(mojo_binary_rule)
-mojo_library = declares_docs(mojo_library_rule)
-mojo_multi_numa_test = declares_docs(mojo_multi_numa_test_rule)
+mojo_library = declares_docs(_mojo_library)
 mojo_test = declares_docs(mojo_test_rule)

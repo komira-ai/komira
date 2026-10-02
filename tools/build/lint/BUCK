@@ -1,5 +1,5 @@
 # The linters run by the lint rules (defs.bzl), as pinned downloads, and the
-# lint action script. linux x86_64 static binaries, run on the light workers.
+# lint action script. linux x86_64 static binaries.
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load(":defs.bzl", "shell_lint", "tar_member")
 

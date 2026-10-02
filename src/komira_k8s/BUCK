@@ -15,7 +15,7 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_http:komira_http",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_json:komira_json",
     ],
     test_srcs = [
         "tests/test_k8s_config_json.mojo",
