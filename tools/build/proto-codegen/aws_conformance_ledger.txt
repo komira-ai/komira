@@ -10,7 +10,8 @@
 #   total          the cases of that protocol and direction in the corpus.
 #   pass           cases the generated code answers exactly as expected.
 #   upstream_skip  cases botocore's own protocol-tests-ignore-list.json
-#                  skips. Derived from that file, never typed here.
+#                  skips. It must equal the count derived from that file
+#                  (CorpusDrift otherwise).
 #   refused        cases whose client the generator refuses to emit, per
 #                  refusal name (generation fails with `REFUSED <name>:`).
 #
@@ -19,12 +20,12 @@
 #   a total or upstream_skip that differs from the corpus (CorpusDrift);
 #   fewer passes than recorded (Regression);
 #   a refusal that grew, or a new refusal name (RefusalGrew);
-#   a refusal that shrank (Stale when its cases now pass, RefusalVanished
-#     when they do not);
+#   a refusal that shrank (Stale when no case in the row is red,
+#     RefusalVanished when one is);
 #   a row the run does not produce, or a missing one (ExtraRow, MissingRow).
 #
 # Checked by //tools/build/proto-codegen:aws_conformance_test, which
 # aws-client-gen is published behind.
 
-json input 76 67 7 refused[aws-query-compatible=1,document=1]
-json output 92 77 12 refused[aws-query-compatible=2,document=1]
+json input 76 64 7 refused[document=1,host-prefix=4]
+json output 92 78 12 refused[aws-query-compatible=1,document=1]

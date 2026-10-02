@@ -133,6 +133,8 @@ pub struct ActualsFile {
     /// Case key -> the generator error that stopped it (a suite that did
     /// not lower, a case the driver could not construct).
     pub refused: BTreeMap<String, String>,
+    /// Case key -> the error the generated code raised on it. Always red.
+    pub raised: BTreeMap<String, String>,
     /// The protocols (suite `metadata.protocol`) the driver was generated
     /// for: the `--protocol` flags of aws-conformance-gen.
     pub protocols: BTreeSet<String>,
@@ -194,6 +196,14 @@ impl ActualsFile {
                     .as_str()
                     .ok_or_else(|| format!("actuals refused `{key}` must be a string"))?;
                 out.refused.insert(key.clone(), text.to_string());
+            }
+        }
+        if let Some(Json::Object(m)) = obj.get("raised") {
+            for (key, v) in m {
+                let text = v
+                    .as_str()
+                    .ok_or_else(|| format!("actuals raised `{key}` must be a string"))?;
+                out.raised.insert(key.clone(), text.to_string());
             }
         }
         Ok(out)
@@ -749,6 +759,7 @@ pub fn run(
         let outcome = verdict(
             skip,
             actuals.refused.get(&case.key),
+            actuals.raised.get(&case.key),
             actuals.input.get(&case.key).map(|a| compare_request(case, a)),
         );
         report.record(&case.protocol, Direction::Input, &case.key, outcome);
@@ -758,6 +769,7 @@ pub fn run(
         let outcome = verdict(
             skip,
             actuals.refused.get(&case.key),
+            actuals.raised.get(&case.key),
             actuals.output.get(&case.key).map(|a| compare_response(case, a)),
         );
         report.record(&case.protocol, Direction::Output, &case.key, outcome);
@@ -765,12 +777,24 @@ pub fn run(
     report
 }
 
-fn verdict(skip: bool, refusal: Option<&String>, compared: Option<Vec<Mismatch>>) -> Outcome {
+fn verdict(
+    skip: bool,
+    refusal: Option<&String>,
+    raised: Option<&String>,
+    compared: Option<Vec<Mismatch>>,
+) -> Outcome {
     if skip {
-        return if refusal.is_some() || compared.is_some() {
+        return if refusal.is_some() || raised.is_some() || compared.is_some() {
             Outcome::Failed("botocore skips this case, and the driver answered it".into())
         } else {
             Outcome::UpstreamSkip
+        };
+    }
+    if let Some(text) = raised {
+        return if refusal.is_some() || compared.is_some() {
+            Outcome::Failed(format!("the case both raised and has another record: {text}"))
+        } else {
+            Outcome::Failed(format!("the generated code raised: {text}"))
         };
     }
     if let Some(text) = refusal {
@@ -783,7 +807,7 @@ fn verdict(skip: bool, refusal: Option<&String>, compared: Option<Vec<Mismatch>>
         };
     }
     match compared {
-        None => Outcome::Failed("no actual: the generated code raised, or the case was never run".into()),
+        None => Outcome::Failed("no actual: the case was never run".into()),
         Some(m) if m.is_empty() => Outcome::Pass,
         Some(m) => Outcome::Failed(describe(&m)),
     }
@@ -816,7 +840,10 @@ pub enum LedgerViolation {
     Failed { row: String, key: String, why: String },
     /// Fewer passes than the row records.
     Regression { row: String, ledger: usize, actual: usize },
-    /// A recorded refusal is gone and its cases do not all pass.
+    /// A recorded refusal shrank while the row has a red case. The ledger
+    /// records counts, not which cases a refusal covered, so the red case
+    /// may be one of them or an unrelated one; the [`Self::Failed`]
+    /// violations name each red case and why.
     RefusalVanished { row: String, name: String, ledger: usize, actual: usize },
     /// The ledger refuses more than the generator does: shrink the row.
     Stale { row: String, name: String, ledger: usize, actual: usize },
@@ -1292,6 +1319,34 @@ json output 2 2 0 refused[]
         a.refused.insert("input/json.json#SendsName".into(), "REFUSED document: x".into());
         let r = report(&a);
         assert!(matches!(r.outcomes["input/json.json#SendsName"], Outcome::Failed(_)));
+    }
+
+    #[test]
+    fn a_raised_case_is_red_and_carries_the_error() {
+        let a = ActualsFile::parse(
+            r#"{"raised": {"output/json.json#ParsesName": "bad timestamp `x`"}}"#,
+        )
+        .unwrap();
+        assert_eq!(a.raised["output/json.json#ParsesName"], "bad timestamp `x`");
+        let mut a2 = passing_actuals();
+        a2.output.remove("output/json.json#ParsesName");
+        a2.raised = a.raised.clone();
+        let r = report(&a2);
+        assert!(matches!(&r.outcomes["output/json.json#ParsesName"], Outcome::Failed(w)
+            if w.contains("raised") && w.contains("bad timestamp `x`")));
+    }
+
+    #[test]
+    fn a_raised_record_beside_another_record_is_red() {
+        let mut a = passing_actuals();
+        a.raised.insert("input/json.json#SendsName".into(), "boom".into());
+        let r = report(&a);
+        assert!(matches!(&r.outcomes["input/json.json#SendsName"], Outcome::Failed(w)
+            if w.contains("boom")));
+        let mut a = passing_actuals();
+        a.raised.insert("input/json.json#SkippedById".into(), "boom".into());
+        let r = report(&a);
+        assert!(matches!(r.outcomes["input/json.json#SkippedById"], Outcome::Failed(_)));
     }
 
     fn refusing_actuals() -> ActualsFile {

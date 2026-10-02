@@ -395,8 +395,8 @@ fn driver_header(
     o.line("# signed by komira_aws_core's build_sigv4_signed_request (static");
     o.line("# credentials, fixed clock), the path a client sends through.");
     o.line("#");
-    o.line("# A case the generated code raises on is reported on stderr and has no");
-    o.line("# record, which the harness scores red. A case the generator could not");
+    o.line("# A case the generated code raises on has a `raised` record holding the");
+    o.line("# error, which the harness scores red. A case the generator could not");
     o.line("# build has a `refused` record holding the error.");
     o.line("#");
     let p: Vec<&str> = protocols.iter().map(String::as_str).collect();
@@ -410,7 +410,6 @@ fn driver_header(
     }
     o.line("# ==========================================================================");
     o.line("");
-    o.line("from std.sys import stderr");
     o.line("from komira_aws_core import (");
     o.line("    AwsCredential,");
     o.line("    AwsEndpoint,");
@@ -429,21 +428,13 @@ fn emit_driver(
     protocols: &BTreeSet<String>,
 ) -> Result<(String, Vec<(String, String)>), String> {
     let mut o = Out::new();
-    o.line("def _note_unsupported(key: String, e: Error):");
-    o.indent += 1;
-    o.line("\"\"\"A case the generated code RAISED on: reported on STDERR, with no");
-    o.line("    record, so the harness scores it red. Stdout carries the actuals");
-    o.line("    JSON and nothing else.\"\"\"");
-    o.line("print(String(\"UNSUPPORTED \") + key + String(\": \") + String(e), file=stderr)");
-    o.indent -= 1;
-    o.line("");
-    o.line("");
     o.line("def main() raises:");
     o.indent += 1;
     o.line("var actuals = JsonValue.empty_object()");
     o.line("var inp = JsonValue.empty_object()");
     o.line("var outp = JsonValue.empty_object()");
     o.line("var refused = JsonValue.empty_object()");
+    o.line("var raised = JsonValue.empty_object()");
     o.line("var protocols = JsonValue.empty_array()");
     for p in protocols {
         o.line(&format!("protocols.push(JsonValue.from_string(String(\"{}\")))", esc(p)));
@@ -494,6 +485,7 @@ fn emit_driver(
     o.line("actuals.set_member(String(\"input\"), inp^)");
     o.line("actuals.set_member(String(\"output\"), outp^)");
     o.line("actuals.set_member(String(\"refused\"), refused^)");
+    o.line("actuals.set_member(String(\"raised\"), raised^)");
     o.line("print(actuals.serialize())");
     o.indent -= 1;
     Ok((o.buf, undriveable))
@@ -539,20 +531,23 @@ fn emit_input_case(
     o.line(&format!("var {var} = {expr}"));
     let fp = s.prefix.to_lowercase();
     o.line(&format!("var _req = {fp}_build_{method}_request({var})"));
-    // The unsigned request's headers go to the signer as `extra`, except
-    // Content-Type, which is its own argument. The endpoint takes the
-    // operation's host prefix, as a client's send does.
+    // MIRRORS the generated `send` (emit_aws.rs), which this driver cannot
+    // call without a connector: the unsigned request's headers go to the
+    // signer as `extra`, except a header named exactly `Content-Type`, which
+    // is its own argument, and the endpoint is resolved WITHOUT
+    // `_req.host_prefix`, because `send` does not apply it (the front-end
+    // refuses an operation with a host prefix, by name, until it does).
     o.line("var _ct = String(\"\")");
     o.line("var _extra = List[Header]()");
     o.line("for _i in range(len(_req.header_names)):");
     o.indent += 1;
-    o.line("if _req.header_names[_i].lower() == String(\"content-type\"):");
+    o.line("if _req.header_names[_i] == String(\"Content-Type\"):");
     o.line("    _ct = _req.header_values[_i].copy()");
     o.line("else:");
     o.line("    _extra.append(Header(_req.header_names[_i].copy(), _req.header_values[_i].copy()))");
     o.indent -= 1;
     o.line(&format!(
-        "var _ep = AwsEndpoint.parse(String(\"{}\"), String(\"clientEndpoint\")).with_host_prefix(_req.host_prefix)",
+        "var _ep = AwsEndpoint.parse(String(\"{}\"), String(\"clientEndpoint\"))",
         esc(&endpoint)
     ));
     o.line("var _sr = build_sigv4_signed_request(");
@@ -589,7 +584,10 @@ fn emit_input_case(
     o.indent -= 1;
     o.line("except e:");
     o.indent += 1;
-    o.line(&format!("_note_unsupported(String(\"{}\"), e)", esc(key)));
+    o.line(&format!(
+        "raised.set_member(String(\"{}\"), JsonValue.from_string(String(e)))",
+        esc(key)
+    ));
     o.indent -= 1;
     Ok(())
 }
@@ -643,8 +641,9 @@ fn emit_output_case(
         o.line(&format!("_resp.add_header(String(\"{}\"), String(\"{}\"))", esc(k), esc(v)));
     }
     o.line("var _rec = JsonValue.empty_object()");
-    // The classification and the error fields are what a generated client's
-    // error builder computes from the same response.
+    // MIRRORS the generated client's error builder (`_<module>_error` in
+    // emit_aws.rs), which reads the code and message from the body only. The
+    // builder is not called, so a defect in it would not show here.
     o.line("if aws_is_error_status(_resp.status):");
     o.indent += 1;
     o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(aws_error_code_from_body(_resp.body)))");
@@ -659,7 +658,10 @@ fn emit_output_case(
     o.indent -= 1;
     o.line("except e:");
     o.indent += 1;
-    o.line(&format!("_note_unsupported(String(\"{}\"), e)", esc(key)));
+    o.line(&format!(
+        "raised.set_member(String(\"{}\"), JsonValue.from_string(String(e)))",
+        esc(key)
+    ));
     o.indent -= 1;
     Ok(())
 }

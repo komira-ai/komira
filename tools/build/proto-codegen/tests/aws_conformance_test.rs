@@ -12,7 +12,8 @@ use komira_proto_codegen::aws_conformance::{
 };
 
 /// Where the archive's `tests/unit/protocols` is staged, relative to this
-/// file.
+/// file: `files/` is the tree archive_files declares
+/// (tools/build/mojo/archive.bzl), so renaming it breaks these paths.
 macro_rules! corpus {
     ($rel:literal) => {
         include_str!(concat!("../files/tests/unit/protocols/", $rel))
@@ -42,6 +43,8 @@ const FILES: &[(Direction, &str, &str)] = &[
 ];
 
 const IGNORE_LIST: &str = corpus!("protocol-tests-ignore-list.json");
+// The `[run_check]` sub-target of the driver writes `<name>.stdout`
+// (tools/build/mojo/defs.bzl); renaming it breaks this path.
 const ACTUALS: &str = include_str!("../aws_conformance_driver.stdout");
 const LEDGER: &str = include_str!("../aws_conformance_ledger.txt");
 
@@ -79,6 +82,7 @@ fn every_actual_names_a_corpus_case() {
         .keys()
         .chain(actuals.output.keys())
         .chain(actuals.refused.keys())
+        .chain(actuals.raised.keys())
         .filter(|k| !keys.contains(*k))
         .collect();
     assert!(stray.is_empty(), "actuals for no corpus case: {stray:?}");
