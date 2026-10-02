@@ -348,7 +348,7 @@ struct InMemorySource(SourceLike, Movable, Copyable, Deinitable):
         The one factory that takes the `ArcPointer` rather than the `Slab`. Its
         caller is the execution-time scan resolve pass
         (`komira_morsel` scan-binding resolve pass): a tier-2 kind's
-        `drain_scan` hands back an `ArcPointer[Slab[RecordBatch]]` that the kind
+        `open_scan` hands back an `ArcPointer[Slab[RecordBatch]]` that the kind
         may still hold (a cache, a registry), and `RecordBatch` is Movable-only,
         so the batches can be neither moved out of the Arc nor cheaply copied.
 
