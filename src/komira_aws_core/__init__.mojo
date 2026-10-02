@@ -32,6 +32,12 @@ clients.
   through, a static source and the cached default chain.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
   of a send, and `AwsPayloadSigning` (hashed, unsigned or precomputed).
+- `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
+  Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
+  library; `partitions.mojo`: `AwsPartitionSet`, the partitions.json table
+  its `aws.partition` reads.
+- `s3_wire.mojo`: `s3_copy_source` and `s3_content_range_total`, the two S3
+  header values no model states.
 """
 
 from .aws_codec import (
@@ -119,6 +125,14 @@ from .endpoint import (
     resolve_endpoint,
     service_endpoint_env_var,
 )
+from .endpoint_rules import (
+    ENDPOINT_RULESET_MAX_DEPTH,
+    EndpointOutcome,
+    EndpointParams,
+    EndpointRuleSet,
+    ResolvedEndpoint,
+    is_valid_host_label,
+)
 from .imds_credentials import (
     build_imds_credentials_request,
     build_imds_role_request,
@@ -128,6 +142,8 @@ from .imds_credentials import (
     parse_imds_role,
     parse_imds_token,
 )
+from .partitions import AwsPartitionSet
+from .s3_wire import s3_content_range_total, s3_copy_source
 from .shared_config import (
     AwsProfile,
     AwsProfileSet,
