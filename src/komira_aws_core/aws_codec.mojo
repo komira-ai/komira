@@ -33,7 +33,7 @@
 # returns other text from the body: a response body can hold a secret.
 # =============================================================================
 
-from komira_crypto import base64_decode, base64_encode
+from komira_encoding import base64_decode, base64_encode
 
 from ._flat_json import parse_top_level_strings
 from ._text import sub

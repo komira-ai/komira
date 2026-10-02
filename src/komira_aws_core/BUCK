@@ -31,6 +31,7 @@ mojo_library(
     deps = [
         "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
         "//src/komira_json:komira_json",
         "//src/komira_xml:komira_xml",
     ],

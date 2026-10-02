@@ -36,12 +36,12 @@ from .aws_codec import (
 )
 
 
-def _json_of(var tok: AwsJsonToken) -> JsonValue:
+def _json_of(tok: AwsJsonToken) -> JsonValue:
     if tok.kind == AWS_JSON_NUMBER:
-        return JsonValue.from_number(tok.text^)
+        return JsonValue.from_number(tok.text.copy())
     if tok.kind == AWS_JSON_BOOL:
         return JsonValue.from_bool(tok.text == "true")
-    return JsonValue.from_string(tok.text^)
+    return JsonValue.from_string(tok.text.copy())
 
 
 def _token_of(v: JsonValue, what: StaticString) raises -> AwsJsonToken:
