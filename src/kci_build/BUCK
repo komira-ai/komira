@@ -1,0 +1,37 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The `kci build` verb: build the targets on the publishable list on the farm,
+# in one buck2 invocation, check every package against its artifact manifest
+# (type, file name, sha256) and lay the set out for `kci publish`. A preflight
+# refuses a buckconfig that names no farm and proves the farm executes before
+# anything is built; there is no local fallback. buck2 is started through the
+# ProcessRunner seam: SupervisorRunner (komira_supervisor) for real runs,
+# ScriptedRunner for tests. Nothing here names a farm, a channel or an
+# account: all of that comes from the files and flags of the run.
+#
+# The welded tests drive ScriptedRunner over files they write under
+# TEST_TMPDIR, plus SupervisorRunner over /bin/sh: no buck2, no network.
+mojo_library(
+    name = "kci_build",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_json:komira_json",
+        "//src/komira_supervisor:komira_supervisor",
+    ],
+    test_srcs = [
+        # the publishable list: every refusal by line, --only narrowing
+        "tests/test_build_publishable_list.mojo",
+        # every flag, both spellings, each refusal naming its flag
+        "tests/test_build_flags.mojo",
+        # buck2's build report: cell-qualified keys, sub-target outputs, failures
+        "tests/test_build_report.mojo",
+        # the whole verb over ScriptedRunner: preflight, build, rebuilds, verify, emit
+        "tests/test_build_flow.mojo",
+        # SupervisorRunner over /bin/sh: output files, exit codes, the timeout
+        "tests/test_supervisor_runner.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
