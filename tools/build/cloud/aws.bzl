@@ -8,7 +8,10 @@
         model_sha256 = botocore_model("logs").sha256,
         operations = ["GetLogEvents"],
         mode = "pure",                  # or "client"
-        deps = ["komira//src/komira_aws_core:komira_aws_core", ...],
+        deps = [
+            "komira//src/komira_aws_core:komira_aws_core",
+            "komira//src/komira_json:komira_json",
+        ],
     )
 
 is two targets:
@@ -50,8 +53,8 @@ checks each named owner exists in them, and they are copied into the
 package next to the generated module. Each needs the other.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
-generated code imports its runtime (komira_aws_core, the JSON value model,
-and in client mode komira_http), which the caller names as `komira//`
+generated code imports its runtime (komira_aws_core, komira_json, and in
+client mode komira_http), which the caller names as `komira//`
 labels, or as stubs in a test. They are the library's `deps`, so they take
 what `mojo_library.deps` takes; `<name>_gen` sees only their count.
 
@@ -130,7 +133,7 @@ def _aws_client_gen_impl(ctx):
             fail("{}: `operations` names `{}` twice".format(ctx.label, op))
         seen[op] = True
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, the JSON value model, and in client mode komira_http); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, komira_json, and in client mode komira_http); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:

@@ -84,9 +84,9 @@
 # =============================================================================
 
 from komira_http.codec.types import HttpRequest, HttpResponse
-from komira_obs.clock import now_ns as _now_ns
-from komira_obs.log_write import LineWrite, write_log_line
-from komira_obs.structured_log import (
+from komira_clock import now_ns as _now_ns
+from komira_log.log_write import LineWrite, write_log_line
+from komira_log.structured_log import (
     SEVERITY_ERROR,
     StructuredLogLine,
     TRACE_HEADER,
@@ -370,7 +370,7 @@ def _emit_line(line: String):
     unparseable one the collector DROPS, which is the same silent logger the
     paragraph above exists to prevent. And it fires during a 5xx burst, exactly
     when fd 1 is most likely to be congested and the diagnostic matters most.
-    `komira_obs.log_write` classifies the errno, retries EINTR/EAGAIN within a
+    `komira_log.log_write` classifies the errno, retries EINTR/EAGAIN within a
     bounded budget, and gives up at once on a dead fd."""
     _ = emit_line_to_fd(Int32(1), line)
 
@@ -380,7 +380,7 @@ def emit_line_to_fd(fd: Int32, line: String) -> LineWrite:
     returning what happened.
 
     ⚠ IT EXISTS FOR TWO REASONS, AND ONLY ONE OF THEM IS THE TEST. The other is
-    that `komira_obs.structured_log.emit()` is being converted from a buffered
+    that `komira_log.structured_log.emit()` is being converted from a buffered
     `print` to an unbuffered `write(2)` modelled on this function — so this is
     about to be a template, and a template whose failure handling is inlined
     into a `def f(line: String)` cannot be reused without transcribing it,
