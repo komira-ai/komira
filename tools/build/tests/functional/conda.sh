@@ -18,9 +18,10 @@
 #              info/paths.json says so; the licence is the repository's. The
 #              package is a directory: the .conda, `manifest.json` and
 #              `metadata.json`. manifest.json is EXACTLY the artifact manifest
-#              contract of kci (six string keys in a fixed order, compact, one
-#              trailing newline, `file` the channel's file name, `sha256` the
-#              file's); every other fact is in metadata.json.
+#              contract of kci (seven string keys in a fixed order, compact,
+#              one trailing newline, `file` the channel's file name, `sha256` the
+#              file's, `metadata` the bare name `metadata.json`); every other
+#              fact is in metadata.json.
 #   pin        the package version AND the compiler pin in the run requirements
 #              are the version of the pinned compiler in the platform table
 #              (tools/build/platforms/table.bzl), the one place it is stated.
@@ -41,9 +42,9 @@
 #   packer     komira_pack run directly gives the same bytes as the rule; its
 #              check refuses a different payload, name, subdir or dependency
 #              list, a corrupt zip, an unstamped release, a manifest that is not
-#              the contract (an extra key such as `metadata`, another key order,
-#              no newline, a wrong sha256), a metadata file that disagrees, and a
-#              stray file in the directory.
+#              the contract (an extra key, no `metadata` or another one, another
+#              key order, no newline, a wrong sha256), a metadata file that
+#              disagrees, and a stray file in the directory.
 #   stamp      the version is the compiler version and the release iteration is
 #              the conda BUILD NUMBER N from the configuration, with the build
 #              string h<8 hex of the commit>_<N>, so two builds of one version
@@ -192,9 +193,9 @@ jq -e --arg s "$want_sha" '.paths_version == 1 and (.paths | length) == 1 and .p
 [ "$(jq .paths[0].size_in_bytes "$S/info/paths.json")" = "$(stat -L -c %s "$LIBPKG")" ] || p paths-size
 file_sha=$(sha256sum "$CONDA" | cut -c1-64)
 # manifest.json: exactly kci's artifact manifest contract.
-jq -e --arg s "$file_sha" --arg v "$pin" --arg f "$F0" '(keys_unsorted == ["artifact_type","name","version","subdir","file","sha256"])
+jq -e --arg s "$file_sha" --arg v "$pin" --arg f "$F0" '(keys_unsorted == ["artifact_type","name","version","subdir","file","sha256","metadata"])
     and .artifact_type == "CONDA" and .name == "komira_encoding" and .version == $v and .subdir == "linux-64"
-    and .file == $f and .sha256 == $s' "$MANIFEST" > /dev/null || p manifest-contract
+    and .file == $f and .sha256 == $s and .metadata == "metadata.json"' "$MANIFEST" > /dev/null || p manifest-contract
 [ "$(jq -c . "$MANIFEST")" = "$(head -c -1 "$MANIFEST")" ] && [ "$(tail -c 1 "$MANIFEST" | od -An -c | tr -d ' ')" = '\n' ] || p manifest-not-compact-with-newline
 # metadata.json: everything else.
 jq -e --arg s "$file_sha" --arg p "$want_sha" --arg v "$pin" --arg b "$B0" --arg f "$F0" --argjson z "$(stat -L -c %s "$CONDA")" '.schema == 1 and .kind == "library"
@@ -206,7 +207,7 @@ jq -e --arg s "$file_sha" --arg p "$want_sha" --arg v "$pin" --arg b "$B0" --arg
 [ "$(jq -S -c . "$METADATA")" = "$(cat "$METADATA")" ] || p metadata-not-sorted-compact
 [ "$(cat "$CHECK")" = ok ] || p check-marker
 if [ -n "$problems" ]; then fail "shape:$problems (see $S)"; else
-    pass "shape: $PKG is a directory of the .conda (three stored members, two valid zstd streams of owner-0 tars, linux-64, the library's .mojoc byte for byte), the artifact manifest (exactly the six contract keys) and the metadata; sha256 $file_sha"
+    pass "shape: $PKG is a directory of the .conda (three stored members, two valid zstd streams of owner-0 tars, linux-64, the library's .mojoc byte for byte), the artifact manifest (exactly the seven contract keys, \`metadata\` naming metadata.json) and the metadata; sha256 $file_sha"
 fi
 
 # ---- packer ---------------------------------------------------------------
@@ -279,9 +280,11 @@ if [ -z "$problems" ]; then
         esac
         if check "$d" "$LIBPKG" 2> "$W/mut_$name.err"; then problems="$problems check-accepted-$name"; fi
     }
-    mutate manifest-extra-key '. + {metadata: "metadata.json"}'
+    mutate manifest-extra-key '. + {label: "x"}'
     mutate manifest-missing-key 'del(.subdir)'
-    mutate manifest-other-order '{name, artifact_type, version, subdir, file, sha256}'
+    mutate manifest-no-metadata 'del(.metadata)'
+    mutate manifest-other-metadata '.metadata = "meta.json"'
+    mutate manifest-other-order '{name, artifact_type, version, subdir, file, sha256, metadata}'
     mutate manifest-wrong-sha '.sha256 = ("0" * 64)'
     mutate manifest-wrong-type '.artifact_type = "conda"'
     mutate manifest-wrong-file '.file = "x.conda"'
@@ -289,7 +292,9 @@ if [ -z "$problems" ]; then
     mutate metadata-wrong-size 'meta:.size += 1'
     mutate metadata-wrong-kind 'meta:.kind = "metapackage"'
     mutate metadata-wrong-payload 'meta:.payload_sha256 = ("1" * 64)'
-    grep -q 'exactly the six keys' "$W/mut_manifest-extra-key.err" || problems="$problems extra-key-text"
+    grep -q 'exactly the seven keys' "$W/mut_manifest-extra-key.err" || problems="$problems extra-key-text"
+    grep -q 'exactly the seven keys' "$W/mut_manifest-no-metadata.err" || problems="$problems no-metadata-text"
+    grep -q 'is `meta.json`, must be `metadata.json`' "$W/mut_manifest-other-metadata.err" || problems="$problems other-metadata-text"
     cp -r "$W/pack1" "$W/pack5" && chmod -R u+w "$W/pack5" && echo stray > "$W/pack5/stray.txt"
     check "$W/pack5" "$LIBPKG" 2> "$W/check_stray.err" && problems="$problems check-accepted-a-stray-file"
 fi
@@ -336,7 +341,7 @@ if [ -z "$problems" ]; then
     grep -q 'is not a full lowercase 40-digit hex commit id' "$W/rel_shortcommit.err" || problems="$problems short-commit-text"
 fi
 if [ -n "$problems" ]; then fail "packer:$problems (see $W)"; else
-    pass "packer: komira_pack gives byte-identical packages from one payload (and the rule's), changes only the package for a changed payload; conda-check accepts it and refuses a different payload, name, subdir or dependency list, a corrupt zip, a manifest that is not the contract (extra key, missing key, other order, wrong sha256, wrong type, wrong file, no newline), a metadata file that disagrees, a stray file, and an unstamped release; a release needs its source commit and a positive commit time"
+    pass "packer: komira_pack gives byte-identical packages from one payload (and the rule's), changes only the package for a changed payload; conda-check accepts it and refuses a different payload, name, subdir or dependency list, a corrupt zip, a manifest that is not the contract (extra key, missing key, no or another metadata, other order, wrong sha256, wrong type, wrong file, no newline), a metadata file that disagrees, a stray file, and an unstamped release; a release needs its source commit and a positive commit time"
 fi
 
 # ---- pin --------------------------------------------------------------------

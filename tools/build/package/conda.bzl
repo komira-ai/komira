@@ -62,7 +62,8 @@ nothing else:
     manifest.json              the artifact manifest, exactly the contract of
                                kci's kci_artifact_manifest: artifact_type
                                (`CONDA`), name, version (the compiler version),
-                               subdir, file, sha256
+                               subdir, file, sha256, metadata (`metadata.json`:
+                               the file below, named next to the manifest)
     metadata.json              every other fact: kind, build (string),
                                build_number, size,
                                depends, mojo_pin, source_commit, stamped,
@@ -89,6 +90,7 @@ for each choice: packaging/conda/README.md.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
+load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/platforms:table.bzl", "asset")
 
@@ -294,4 +296,74 @@ def conda_package(**kwargs):
         **kwargs
     )
 
+# ---- the gate between the packer and kci ------------------------------------
+
+_KCI_CHECK = """
+BB="$1"; OUT="$2"; DIR="$3"; shift 3
+case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
+case "$DIR" in /*) ;; *) DIR="$PWD/$DIR" ;; esac
+# Private scratch, as every busybox action here (defs.bzl `_PRELUDE`).
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_action" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
+esac
+"$BB" mkdir -p "$T/bin" "$T/tmp" "$T/home"
+"$BB" --install -s "$T/bin"
+PATH="$T/bin"; TMPDIR="$T/tmp"; HOME="$T/home"; export PATH TMPDIR HOME
+unset LD_LIBRARY_PATH LD_PRELOAD || true
+no() { echo "conda_manifest_kci: $*" >&2; exit 1; }
+# The directory is what an uploader copies: the package, its manifest and its
+# metadata, nothing else.
+listing=$(ls -A "$DIR" | tr '\\n' ' ')
+[ "$(ls -A "$DIR" | wc -l)" = 3 ] && [ -f "$DIR/manifest.json" ] && [ -s "$DIR/metadata.json" ] &&
+    [ "$(ls "$DIR" | grep -c '\\.conda$')" = 1 ] ||
+    no "$DIR holds [$listing], not exactly one .conda, manifest.json and metadata.json"
+rc=0
+"$@" "$DIR/manifest.json" > "$T/probe" 2>&1 < /dev/null || rc=$?
+line=$(cat "$T/probe")
+[ "$rc" = 0 ] || no "kci's artifact-manifest parser refuses $DIR/manifest.json (exit $rc): $line"
+want=" metadata=metadata.json metadata_path=$DIR/metadata.json render-identical=yes"
+case "$line" in
+    "OK CONDA "*"$want") ;;
+    *) no "kci reads $DIR/manifest.json as [$line]; it must be one OK CONDA line ending [$want]" ;;
+esac
+printf '%s\\n' "$line" | sed "s|$DIR/||" > "$OUT"
+rm -rf "$T"
+"""
+
+def _conda_manifest_kci_impl(ctx):
+    pkg = ctx.attrs.package[DefaultInfo].default_outputs[0]
+    bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
+    out = ctx.actions.declare_output(ctx.label.name + ".parsed")
+    ctx.actions.run(
+        busybox_sh(bb, _KCI_CHECK, out.as_output(), pkg, ctx.attrs._probe[RunInfo]),
+        category = "conda_manifest_kci",
+    )
+    return [DefaultInfo(default_output = out)]
+
+_conda_manifest_kci = rule(
+    impl = _conda_manifest_kci_impl,
+    attrs = {
+        "package": attrs.dep(),
+        "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
+        "_probe": attrs.exec_dep(default = "komira//tools/build/package/manifest_probe:parse_manifest", providers = [RunInfo]),
+    },
+)
+
+def conda_manifest_kci(**kwargs):
+    """Builds `package` (a conda_package) and reads its manifest with kci's parser.
+
+    Fails the build unless the package's directory holds exactly the `.conda`,
+    `manifest.json` and `metadata.json`, kci's `parse_artifact_manifest`
+    (`//tools/build/package/manifest_probe:parse_manifest`) accepts the
+    manifest, kci's writer renders it back to the same bytes, and its
+    `metadata_path` is the `metadata.json` next to it. The output is the
+    probe's line. It reads the default directory, not `[release]`: `[release]`
+    exists only in a stamped build, and is a copy of the same `komira_pack`
+    output.
+    """
+    _conda_manifest_kci(exec_compatible_with = LINUX_X86_64, **kwargs)
+
 conda_package = declares_docs(conda_package)
+conda_manifest_kci = declares_docs(conda_manifest_kci)
