@@ -20,7 +20,8 @@
 #
 # A cut is reported, not hidden. The drain keeps where it left every planned
 # split (its last polled position, or its start if it never opened it, and
-# whether it stopped short of the split's stop) and hands that to the kind's
+# whether it stopped short of the split's stop, including an END the reader
+# answered before the stop) and hands that to the kind's
 # `resolve_drained`, whose answer is `ScanOpened.resolved`. So a side channel
 # that says where a read stopped (a per-partition next offset) says where THIS
 # read stopped, and a continuation from it skips nothing.
@@ -190,6 +191,11 @@ def drain_scan[
             break
         var at = order[k]
         ref split = plan.splits[at]
+        # A split reads after its `after` splits reached their stops. One the
+        # drain left cut (a reader-enforced stop ended it short) has not, so
+        # its dependents are not opened and report their starts, cut.
+        if _after_cut(plan.splits, stopped, split):
+            continue
         var reader = resolver.open_split(req, split)
         while True:
             var rows_left: Int64 = -1
@@ -205,7 +211,10 @@ def drain_scan[
             if polled.batch:
                 batches.append(polled.batch.take())
             if polled.is_end():
-                stopped[at].cut = False
+                # END at the split's stop is a whole read. END anywhere else
+                # is a stop the reader enforces (a per-split byte budget):
+                # the rows from `position` to the stop are still there.
+                stopped[at].cut = not (stopped[at].position == split.stop.value())
                 break
             if polled.is_idle():
                 raise Error(
@@ -224,6 +233,17 @@ def drain_scan[
                 break
     var resolved = resolver.resolve_drained(req, plan.resolved.copy(), stopped)
     return ScanOpened(ArcPointer(batches^), resolved^)
+
+
+def _after_cut(
+    splits: List[ScanSplit], stopped: List[DrainedSplit], split: ScanSplit
+) -> Bool:
+    """True when a split `split` reads after was left cut by the drain."""
+    for a in range(len(split.after)):
+        for j in range(len(splits)):
+            if splits[j].split_key == split.after[a] and stopped[j].cut:
+                return True
+    return False
 
 
 def _budget_spent(

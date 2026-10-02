@@ -85,6 +85,7 @@ comptime _L_INCOMPLETE = 2  # a; may still grow
 comptime _L_RESUME = 3  # r
 comptime _L_TAIL = 4  # tail with no stop; may still grow
 comptime _L_STALLED = 5  # tail with stop 2 (the store holds 1 unit)
+comptime _L_SHORT = 6  # a (after r), r with stop 4 whose reader ENDs at 2
 
 
 struct _Tally(Movable):
@@ -165,6 +166,9 @@ struct _Reader(SplitReader, Movable, Deinitable):
     # writes another kind's, or another version).
     var _out_kind: String
     var _out_version: UInt8
+    # A stop the READER enforces (-1: none), like a per-split byte budget: it
+    # answers END there, short of the split's stop.
+    var _end_at: Int
 
     def __init__(
         out self,
@@ -175,6 +179,7 @@ struct _Reader(SplitReader, Movable, Deinitable):
         stop: Int,
         var out_kind: String,
         out_version: UInt8,
+        end_at: Int = -1,
     ):
         self._tally = tally.copy()
         self._store = store.copy()
@@ -183,6 +188,7 @@ struct _Reader(SplitReader, Movable, Deinitable):
         self._stop = stop
         self._out_kind = out_kind^
         self._out_version = out_version
+        self._end_at = end_at
 
     def _out(self) -> SplitPosition:
         return _pos(self._at, self._out_version, self._out_kind)
@@ -196,6 +202,8 @@ struct _Reader(SplitReader, Movable, Deinitable):
         if stop < 0:
             stop = self._store[].tail_stop
         if stop >= 0 and self._at >= stop:
+            return SplitPoll.end(self._out())
+        if self._end_at >= 0 and self._at >= self._end_at:
             return SplitPoll.end(self._out())
         if self._at < len(self._store[].units[self._split]):
             var rows = self._store[].units[self._split][self._at]
@@ -296,6 +304,11 @@ struct _Kind(ScanSourceResolver, Movable, Deinitable):
         elif self._layout == _L_TAIL:
             splits.append(self._split(String("tail"), -1))
             complete = False
+        elif self._layout == _L_SHORT:
+            var after = List[String]()
+            after.append(String("r"))
+            splits.append(self._split(String("a"), 2, after^))
+            splits.append(self._split(String("r"), 4))
         else:
             splits.append(self._split(String("tail"), 2))
         var resolved = ScanParams()
@@ -319,6 +332,9 @@ struct _Kind(ScanSourceResolver, Movable, Deinitable):
         var stop = -1
         if split.stop:
             stop = Int(split.stop.value().bytes[0])
+        var end_at = -1
+        if self._layout == _L_SHORT and split.split_key == String("r"):
+            end_at = 2
         return _Reader(
             self._tally,
             self._store,
@@ -327,6 +343,7 @@ struct _Kind(ScanSourceResolver, Movable, Deinitable):
             stop,
             String(self._poll_kind),
             self._poll_version,
+            end_at,
         )
 
     def resolve_drained(
@@ -492,6 +509,21 @@ def test_the_drain_reports_where_each_split_stopped() raises:
     var everything = drain_scan(r, _request(r))
     _assert_stopped(everything.resolved, String("b"), 1, False, "no cut")
     _assert_stopped(everything.resolved, String("a"), 2, False, "no cut")
+
+
+def test_a_reader_end_short_of_the_stop_is_a_cut() raises:
+    """END short of the split's stop (a stop the reader enforces, such as a
+    per-split byte budget) is a cut: the split reports where its rest starts,
+    and a split that reads after it is not opened."""
+    var tally = ArcPointer(_Tally())
+    var store = ArcPointer(_Store())
+    var r = _erased(tally, store, _L_SHORT)
+    var opened = drain_scan(r, _request(r))
+    # r's units 0 and 1 (1 + 2 rows), then END at unit 2 of its 4.
+    assert_equal(opened.num_rows(), 3)
+    _assert_stopped(opened.resolved, String("r"), 2, True, "reader stop")
+    assert_equal(tally[].opens, 1, "a, after a cut r, is never opened")
+    _assert_stopped(opened.resolved, String("a"), 0, True, "after a cut")
 
 
 # ---- resume, follow, positions ------------------------------------------------
@@ -739,6 +771,7 @@ def main() raises:
     suite.test[test_the_drain_refuses_a_split_that_stalls_before_its_stop]()
     suite.test[test_the_row_limit_and_the_byte_budget_cut_between_polls]()
     suite.test[test_the_drain_reports_where_each_split_stopped]()
+    suite.test[test_a_reader_end_short_of_the_stop_is_a_cut]()
     suite.test[test_a_resumed_split_reads_exactly_the_tail_of_a_full_read]()
     suite.test[test_a_split_with_no_stop_goes_idle_then_rows_then_end]()
     suite.test[test_a_foreign_or_misversioned_position_is_refused]()
