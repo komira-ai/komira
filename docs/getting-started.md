@@ -39,8 +39,13 @@ the pinned release, checks its size and sha256, and caches it. You need `sh`,
 
 The first build also downloads the toolchain, so it takes longest; later
 builds reuse it. Nothing else is configured: with no `.buckconfig.local`,
-every step runs on your machine. A local Mojo compile has not been measured
-yet ([what a local build guarantees](../DEVELOPMENT.md#what-a-local-build-guarantees)).
+every step runs on your machine. It prints `hello from mojo`.
+
+Measured on one Linux x86_64 workstation (61 GB of memory), from a clean
+checkout with nothing cached: `hello` took 23 seconds, including the toolchain
+download; one library and its tests took 5 seconds; `//src/...` took about 10
+minutes (588 seconds, 962 local actions). Other machines will differ.
+See [what a local build guarantees](../DEVELOPMENT.md#what-a-local-build-guarantees).
 
 ## 4. Build a library and run its tests
 

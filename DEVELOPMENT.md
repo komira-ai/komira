@@ -17,8 +17,6 @@ configured only by a `.buckconfig.local` you write.
 | directory | holds |
 |---|---|
 | `src/<module>/` | one Mojo library per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
-| `src/proto/` | `.proto` sources |
-| `src/mojo_sdk/`, `src/python_sdk/`, `src/typescript_sdk/` | the user-facing SDKs |
 | `tools/` | the build rules, toolchains and platforms, the lints, and the end-to-end tests cell (`tools/build/tests`) |
 | `docs/` | the repository's documentation |
 | `third_party/` | C and C++ libraries built from pinned source archives |
@@ -61,8 +59,9 @@ works the same.
 
 ## 2. Build (Linux x86_64)
 
-With no `.buckconfig.local`, every action runs on this machine. A local
-Mojo compile has not yet been measured
+With no `.buckconfig.local`, every action runs on this machine. Measured on
+one Linux x86_64 workstation: `hello` took 23 seconds cold, `//src/...` about
+10 minutes
 ([what a local build guarantees](#what-a-local-build-guarantees)); the same
 commands build on a remote-execution service if you run one
 ([Advanced: remote execution](#advanced-remote-execution)):
@@ -127,10 +126,12 @@ What that gives you, and what it does not:
   programs, assembling the Mojo runtime, and one C compile and archive run
   locally and succeed; [test 25](tools/build/tests/README.md) repeats the
   zig unpack and two concurrent zig builds on every run. **A local
-  Mojo compile has not yet been measured**: `mojo_build`, `mojo_precompile`,
-  gated tests, run checks and bundles have so far run only on a
-  remote-execution service. Until they have, do not assume a local build of
-  a Mojo target succeeds with an empty host `PATH`, or at all.
+  Mojo compile has been measured once**, on one Linux x86_64 workstation
+  (61 GB of memory) from a clean checkout with nothing cached: `hello` built
+  and ran in 23 seconds (9 local actions, a 119 MiB toolchain download), one
+  library with its welded tests built in 5 seconds, and `//src/...` built in
+  588 seconds (962 local actions, none cached). That is one machine; do not
+  assume another host, or an empty host `PATH`, behaves the same.
 - **Guaranteed: the host floor, as remotely.** An action still takes the
   kernel, the CPU and glibc from the machine it runs on (see
   [Host floor](#host-floor)).

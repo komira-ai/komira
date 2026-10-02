@@ -24,7 +24,9 @@ On Linux x86_64, with `curl` and `zstd` installed:
 [`./buck2`](buck2) fetches the buck2 release pinned in [`tools/buck2`](tools/buck2)
 once, verifies it, and caches it under `~/.cache/komira/buck2/`.
 
-A local Mojo compile has not yet been measured; see
+On one Linux x86_64 workstation, from a clean checkout, `hello` took 23 seconds
+including the toolchain download, one library and its tests 5 seconds, and
+`//src/...` about 10 minutes; see
 [what a local build guarantees](DEVELOPMENT.md#what-a-local-build-guarantees).
 Step by step: [getting started](docs/getting-started.md).
 
@@ -47,7 +49,7 @@ remote-execution service, and what to do when something goes wrong.
 | [docs/knowledge_graph.md](docs/knowledge_graph.md) | the knowledge graph: not here yet (it returns as a Mojo tool) |
 | [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
-| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module directly under `src/`, protos in `src/proto/`, the SDKs in `src/*_sdk/`, tooling in `tools/` |
+| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module directly under `src/`, tooling in `tools/` |
 | [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |
 
 ## License

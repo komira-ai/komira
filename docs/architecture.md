@@ -19,7 +19,7 @@ is the import name (`from komira_crypto import ...`) and the name of the
 module's `mojo_library`; a module's tests are in its own `tests/`
 ([DEVELOPMENT.md](../DEVELOPMENT.md#repository-layout)). Each line below is
 the module's own description, from the header of its `__init__.mojo` (or, where
-that header only re-exports, its BUCK file).
+that header only re-exports, its BUCK file). The current list is `ls src/`.
 
 ### Core
 
@@ -38,6 +38,10 @@ that header only re-exports, its BUCK file).
 | [`komira_zlib`](../src/komira_zlib/) | a zero-dependency FFI facade over libz, so a consumer that needs only zlib framing does not depend on a file-format reader. |
 | [`komira_protobuf`](../src/komira_protobuf/) | a general-purpose Protocol Buffers wire codec (reader, writer, wire types), not tied to any one message set. |
 | [`komira_xml`](../src/komira_xml/) | a general XML codec: reader, tree, writer and escaping. |
+| [`komira_encoding`](../src/komira_encoding/) | binary-to-text encodings, base64, base64url, base32 and hex, in pure Mojo with no dependencies; decoding is strict and names the byte position of what it rejects. |
+| [`komira_json`](../src/komira_json/) | a small dependency-free JSON library (RFC 8259): a tagged `JsonValue`, a strict non-recursive parser with a nesting-depth limit, and direct-byte writers. |
+| [`komira_textproto`](../src/komira_textproto/) | a zero-dependency textproto lexer: typed tokens (so a quoted brace never equals a brace) and a cursor for hand-written parsers. |
+| [`komira_kafka_server`](../src/komira_kafka_server/) | a Kafka-protocol server for the komira broker. Today it holds only its wire codec (`komira_kafka_server.wire`: framing, primitive types, the v2 RecordBatch with CRC-32C, request and response schemas); connection handling and dispatch arrive in the same package. |
 
 ### Security and identity
 
@@ -45,6 +49,9 @@ that header only re-exports, its BUCK file).
 |---|---|
 | [`komira_crypto`](../src/komira_crypto/) | cryptographic primitives: hashes, MACs, KDFs, AEADs, key agreement, signatures, an entropy source and DRBG, hex / base64 / base32 codecs, and X.509 chain validation. The heavy primitives call AWS-LC's `libcrypto`; the traits, codecs and DER / X.509 layer are Mojo. Design: [crypto and TLS](design/crypto_and_tls.md). |
 | [`komira_uuid`](../src/komira_uuid/) | UUIDv7 (RFC 9562): the `Uuid` value type, a stateless generator and a monotonic one. |
+| [`komira_jwks`](../src/komira_jwks/) | the public half of an offline-verify token stack: the deterministic `kid`, the JWK Set renderer (RFC 7517 / RFC 8037, public members only) and the publish-only seed-to-JWKS derivation. The minter's own authorization vocabulary stays out of it. |
+| [`komira_secret_store`](../src/komira_secret_store/) | the secret-store seam: a one-method `SecretStore` trait (handle in, `SecretValue` out) and a scripted, network-free double, so a consumer can bind a store without depending on any implementation. |
+| [`komira_secret_registry`](../src/komira_secret_registry/) | the per-execution secret registry: a side table binding a query's secret-bearing plan nodes to opaque handles, and the connector reveal seam that resolves a handle only at the moment a connector needs the bytes. |
 
 ### Runtime support and change data capture
 
@@ -52,6 +59,14 @@ that header only re-exports, its BUCK file).
 |---|---|
 | [`komira_resources`](../src/komira_resources/) | the files a program reads at run time: `read_resource` and `resource_path`. |
 | [`komira_snapshotter`](../src/komira_snapshotter/) | the provider-agnostic change-stream seam: one trait every change-stream provider conforms to, so a snapshotter's apply, write, commit and checkpoint half is written once. It holds no provider client code. |
+| [`komira_retry`](../src/komira_retry/) | generic retry: when to retry and how long to wait, never which failures. A pure `RetryPolicy`, a `RetryLoop` over injected clock, sleeper and random-source seams, and an optional retry budget; classifying a failure belongs to the client library that knows the protocol. |
+
+### Cloud
+
+| module | what it is |
+|---|---|
+| [`komira_aws_core`](../src/komira_aws_core/) | the one hand-written AWS core under the generated AWS clients: the credential value, SigV4 signing (headers and presigned URLs), the SDK default credential chain and region resolution, the shared config file parser, and the network-backed credential providers as request builders and response parsers. |
+| [`komira_gcp_core`](../src/komira_gcp_core/) | the one hand-written core of the Google Cloud SDK: the token-source seam, status-to-error mapping, a retry classifier and page-token helpers the generated `komira_gcp_<service>` clients compose. It defines no request type and no send loop. |
 
 ### CI and deploy (`kci`)
 
@@ -63,6 +78,8 @@ A library `kci` owns is named `kci_<x>`.
 | [`kci_params`](../src/kci_params/) | the generic managed-app parameter mechanism: one declaration that the deploy renderer turns into argv, the app parses at startup, and the control plane stores opaquely. |
 | [`kci_validator_report`](../src/kci_validator_report/) | the one report library every validator shares. It produces evidence, not authorization: the gate stays the exit code and the build graph. |
 | [`kci_validator_rows`](../src/kci_validator_rows/) | the positional row-accounting model every managed-app validator shares, so a run that emitted only a prefix of its rows cannot report PASS. |
+| [`kci_release_channel`](../src/kci_release_channel/) | release-channel declarations: a publish destination (a name, a visibility and one repository per artifact type), its lookups and validation, and the channels-file parser. |
+| [`kci_secret_writer`](../src/kci_secret_writer/) | the write-only secret seam: the verb a deployer uses to write an app secret it is the source of, a capability distinct from `SecretStore` so the runtime resolve path cannot write. |
 | [`komira_validation_run`](../src/komira_validation_run/) | the validation-run correlator: the tag key under which a validation run stamps its identity on every billable cloud resource it creates, so cleanup acts only on what it can prove that run made. |
 
 ### Third-party code
@@ -138,8 +155,9 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | runtime: the async runtime, the job agent and supervisor | komira_async, komira_agent |
 | observability: logging and telemetry | komira_log |
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
-| cloud: AWS clients, cloud credentials, infrastructure providers, secrets and service registry | the cloud SDK libraries |
-| CI and deploy: the bundle model, apply, validate and rollout, the command line | kci |
+| cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, are in `src/`) |
+| CI and deploy: the bundle model, apply, validate and rollout, the command line itself | kci (its `kci_*` libraries above are in `src/`) |
+| message broker: connection handling and request dispatch | komira_kafka_server (its wire codec is in `src/`) |
 | packaging: the shared-library ABI, the release machine | komira_so and the packaging rules |
 
 ## Conventions
