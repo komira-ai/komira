@@ -72,9 +72,9 @@ archive_files(
 
 # The endpoint rulesets komira_aws_core's interpreter (endpoint_rules.mojo)
 # evaluates, the partition table their `aws.partition` reads, and botocore's
-# test cases for them. Each file is a sub-target named by its path; the
-# rulesets and the partition table are data the generated clients embed, the
-# test cases are read by komira_aws_core's test_s3_endpoint_rules.
+# test cases for them. Each file is a sub-target named by its path; all are
+# read by komira_aws_core's endpoint ruleset tests (test_s3_endpoint_rules,
+# test_endpoint_rules_library).
 archive_files(
     name = "endpoint_rules",
     exec_compatible_with = LINUX_X86_64,

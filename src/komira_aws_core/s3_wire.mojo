@@ -20,8 +20,9 @@ from ._text import ascii_lower, sub, trim
 from .sigv4 import uri_encode
 
 
-# botocore's VALID_S3_ARN (botocore/handlers.py): an access point ARN, or an
-# Outposts access point ARN. A bucket matching either names an access point,
+# botocore's VALID_S3_ARN (botocore/handlers.py, at the release
+# //third_party/botocore pins; re-check both when the pin moves): an access
+# point ARN, or an Outposts access point ARN. A bucket matching either names an access point,
 # whose objects live under `object/`.
 comptime _ACCESS_POINT_ARN = (
     "^arn:(aws).*:(s3|s3-object-lambda):[a-z\\-0-9]*:[0-9]{12}:accesspoint[/:]"
@@ -41,8 +42,10 @@ def s3_copy_source(
     byte but the RFC 3986 unreserved set and '/' is percent-encoded, as
     UTF-8; the version id is appended unencoded."""
     var path: String
-    if Regex(_ACCESS_POINT_ARN).matches(bucket) or Regex(_OUTPOST_ARN).matches(
-        bucket
+    # Both patterns start `^arn:`; a plain bucket name skips compiling them.
+    if bucket.startswith("arn:") and (
+        Regex(_ACCESS_POINT_ARN).matches(bucket)
+        or Regex(_OUTPOST_ARN).matches(bucket)
     ):
         path = bucket + "/object/" + key
     else:

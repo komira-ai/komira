@@ -21,6 +21,8 @@
 #     an `endpoint` (resolved and returned), an `error` (its message
 #     returned), or a `tree` whose rules are evaluated in turn. A tree none
 #     of whose rules apply falls through to the next rule, as in botocore.
+#     When no top-level rule applies the ruleset is malformed (Smithy ends
+#     every rule list in an unconditional rule), and resolving raises.
 #   - Names assigned by a rule's conditions are seen by that rule and the
 #     rules under it, never by its siblings. Assigning a name that is
 #     already in scope is an error.
@@ -37,9 +39,10 @@
 #
 # Two kinds of failure are kept apart. An `error` rule is an ANSWER: the
 # parameters name no endpoint, and `EndpointOutcome.error` says why in the
-# ruleset's words. A raised Error is a FAULT: the ruleset is malformed, a
-# function got arguments of the wrong type, or a parameter is missing or of
-# the wrong type. Every raised message starts with `EndpointRules:`.
+# ruleset's words. A raised Error is a FAULT: the ruleset is malformed
+# (including one where no top-level rule applies), a function got arguments
+# of the wrong type, or a parameter is missing or of the wrong type. Every
+# raised message starts with `EndpointRules:`.
 # =============================================================================
 
 from komira_json import (
@@ -111,10 +114,10 @@ struct EndpointParams(Copyable, Movable):
     def set_bool(mut self, name: String, value: Bool):
         self.set_json(name, JsonValue.from_bool(value))
 
-    def set_string_array(mut self, name: String, values: List[String]) raises:
+    def set_string_array(mut self, name: String, values: List[String]):
         var a = JsonValue.empty_array()
         for i in range(len(values)):
-            a.push(JsonValue.from_string(values[i]))
+            a.children.append(JsonValue.from_string(values[i]))
         self.set_json(name, a^)
 
 
@@ -259,8 +262,10 @@ def _kind_name(v: JsonValue) -> String:
 
 
 def _is_host_label(value: String) -> Bool:
-    """One RFC 1123 label: 1 to 63 of [A-Za-z0-9-], not starting or ending
-    with '-' (botocore's VALID_HOST_LABEL_RE)."""
+    """One RFC 1123 label: 1 to 63 of ASCII [A-Za-z0-9-], not starting or
+    ending with '-'. Stricter than botocore's VALID_HOST_LABEL_RE, whose `$`
+    also matches before a final line feed and whose `\\d` also matches
+    non-ASCII digits; both are refused here."""
     var b = value.as_bytes()
     var n = len(b)
     if n < 1 or n > 63:
@@ -691,9 +696,9 @@ struct EndpointRuleSet(Copyable, Movable):
         for i in range(len(rules.children)):
             if self._eval_rule(rules.children[i], scope, res):
                 return res^
-        return EndpointOutcome.of_error(
-            String("No endpoint found for the given parameters")
-        )
+        # A well-formed ruleset ends in a rule without conditions, so
+        # reaching here means the data is malformed: a fault, not an answer.
+        raise _fault("no rule of the ruleset applies to the given parameters")
 
     def _eval_rule(
         self, rule: JsonValue, mut scope: _Scope, mut res: EndpointOutcome
@@ -977,6 +982,11 @@ struct EndpointRuleSet(Copyable, Movable):
             var hi = _hostinfo(u.netloc)
             if hi.find("[") != 0:
                 return JsonValue.null()
+            # Nothing but a ':port' may follow the ']'.
+            var cb = hi.find("]")
+            if cb >= 0 and cb + 1 < hi.byte_length():
+                if hi.as_bytes()[cb + 1] != UInt8(ord(":")):
+                    return JsonValue.null()
             var hb = host.as_bytes()
             var future = len(hb) > 0 and hb[0] == UInt8(ord("v"))
             if not future and not self._ipv6.matches("[" + host + "]"):

@@ -104,6 +104,13 @@ def test_regex() raises:
     assert_false(Regex("^a.c$").matches("a\nc"))
     # `$` is the end of input only.
     assert_false(Regex("^a$").matches("a\n"))
+    # `{,n}` is `{0,n}` and `{,}` is `{0,}`, as in Python; an unclosed
+    # brace is a literal.
+    assert_true(Regex("^x{,3}$").matches(""))
+    assert_true(Regex("^x{,3}$").matches("xxx"))
+    assert_false(Regex("^x{,3}$").matches("xxxx"))
+    assert_true(Regex("^x{,}$").matches("xxxxx"))
+    assert_true(Regex("^x{,3$").matches("x{,3"))
     # Refused at compile time, never misread.
     for bad in ["(?=a)", "a+?", "\\bx", "(a", "a)", "*a", "\\1", "[a-", "a{3,2}"]:
         try:
@@ -114,7 +121,7 @@ def test_regex() raises:
 
 
 def test_partitions() raises:
-    var t = AwsPartitionSet(_read("partitions.json"))
+    var t = AwsPartitionSet(_read("botocore/data/partitions.json"))
     assert_equal(t.lookup("us-east-1").get("name").as_string(), "aws")
     assert_equal(
         t.lookup("us-east-1").get("dnsSuffix").as_string(), "amazonaws.com"
@@ -152,6 +159,10 @@ def test_host_labels() raises:
         l63 += "x"
     assert_true(is_valid_host_label(l63, False))
     assert_false(is_valid_host_label(l63 + "x", False))
+    # ASCII only, and the label is the whole input: stricter than
+    # botocore's regex, which accepts both of these.
+    assert_false(is_valid_host_label("abc\n", False))
+    assert_false(is_valid_host_label("١٢٣", False))
 
 
 # -----------------------------------------------------------------------------
@@ -199,6 +210,8 @@ def test_parse_url() raises:
     assert_equal(_one(rs, "https://example.com:8a"), "error:none")
     assert_equal(_one(rs, "https://[::1"), "error:none")
     assert_equal(_one(rs, "https://[nothex]"), "error:none")
+    # Only a ':port' may follow the ']' (urlsplit: "Invalid IPv6 URL").
+    assert_equal(_one(rs, "https://[::1]x/"), "error:none")
     assert_equal(_one(rs, "example.com"), "error:none")
 
 
@@ -306,6 +319,19 @@ def test_scope_and_fall_through() raises:
     )
     assert_equal(_one(rs, "go"), "url:https://go")
     assert_equal(_one(rs, "stop"), "error:fell through stop")
+    # No top-level rule applies: the ruleset is malformed, a fault.
+    var open_ended = _ruleset(
+        _IN,
+        '{"conditions": [{"fn": "stringEquals", "argv": [{"ref": "In"}, "go"]}],'
+        + _url("https://{In}")
+        + "}",
+    )
+    assert_equal(_one(open_ended, "go"), "url:https://go")
+    assert_equal(
+        _one(open_ended, "stop"),
+        "raised:EndpointRules: no rule of the ruleset applies to the given"
+        " parameters",
+    )
 
 
 def test_templates_and_headers() raises:

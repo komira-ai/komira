@@ -15,8 +15,8 @@
 #     punctuation byte as itself;
 #   - classes `[...]` and `[^...]` with ranges and the escapes above;
 #   - groups `( )` and `(?: )`, alternation `|`;
-#   - quantifiers `*` `+` `?` `{m}` `{m,}` `{m,n}` (greedy; a lazy or
-#     possessive suffix is refused);
+#   - quantifiers `*` `+` `?` `{m}` `{m,}` `{m,n}`, and `{,n}` `{,}` with
+#     a minimum of 0 (greedy; a lazy or possessive suffix is refused);
 #   - anchors `^` (start of input) and `$` (end of input).
 # Anything else (lookaround, backreferences, \b, named groups, flags) is
 # refused when the pattern is compiled, so a pattern this matcher would
@@ -199,13 +199,16 @@ struct Regex(Copyable, Movable):
     def _brace_quant(
         self, p: List[UInt8], pos: Int, mut lo: Int, mut hi: Int
     ) -> Int:
-        """Parses `{m}`, `{m,}` or `{m,n}` at `pos`; returns the position
-        after it, or -1 when the brace is not a quantifier (Python then
-        reads it as a literal)."""
+        """Parses `{m}`, `{m,}`, `{m,n}`, `{,n}` or `{,}` at `pos` (an
+        omitted minimum is 0, as in Python); returns the position after it,
+        or -1 when the brace is not a quantifier (Python then reads it as a
+        literal)."""
         var q = pos + 1
         var m = self._read_int(p, q)
         if m < 0:
-            return -1
+            if q >= len(p) or p[q] != UInt8(ord(",")):
+                return -1
+            m = 0
         if q < len(p) and p[q] == UInt8(ord("}")):
             lo = m
             hi = m
