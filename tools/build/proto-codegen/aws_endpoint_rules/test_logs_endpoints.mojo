@@ -2,14 +2,22 @@
 # the GENERATED client: the case's parameters set on the generated
 # `CloudWatchLogsEndpointConfig` (the logs ruleset declares built-ins only,
 # so each parameter is a config field), then `resolve_get_log_events_endpoint`
-# over the embedded ruleset. An endpoint case must give the expected URL and
-# be signable (`aws_signing_target`, under the logs signing name); an error
+# over the embedded ruleset. An endpoint case must give the expected URL,
+# properties and headers (none, when the case states none) and be signable (`aws_signing_target`, under the logs signing name); an error
 # case must raise the expected message.
 #
 # The cases are read from the botocore archive //third_party/botocore pins,
 # staged at their path in it.
 
-from komira_json import JSON_BOOL, JSON_OBJECT, JSON_STRING, JsonValue, parse_json_value
+from komira_json import (
+    JSON_ARRAY,
+    JSON_BOOL,
+    JSON_NUMBER,
+    JSON_OBJECT,
+    JSON_STRING,
+    JsonValue,
+    parse_json_value,
+)
 
 from komira_aws_core import EndpointRuleSet, aws_signing_target
 
@@ -43,10 +51,42 @@ def _find(v: JsonValue, key: String) -> Int:
     return -1
 
 
+def _member_or_empty(v: JsonValue, key: String) -> JsonValue:
+    var i = _find(v, key)
+    if i < 0:
+        return JsonValue.empty_object()
+    return v.children[i].copy()
+
+
+def _json_equal(a: JsonValue, b: JsonValue) -> Bool:
+    """Structural equality: object members by key in any order."""
+    if a.kind != b.kind:
+        return False
+    if a.kind == JSON_BOOL:
+        return a.bool_val == b.bool_val
+    if a.kind == JSON_STRING or a.kind == JSON_NUMBER:
+        return a.text == b.text
+    if a.kind == JSON_ARRAY:
+        if len(a.children) != len(b.children):
+            return False
+        for i in range(len(a.children)):
+            if not _json_equal(a.children[i], b.children[i]):
+                return False
+        return True
+    if a.kind == JSON_OBJECT:
+        if len(a.obj_keys) != len(b.obj_keys):
+            return False
+        for i in range(len(a.obj_keys)):
+            var j = _find(b, a.obj_keys[i])
+            if j < 0 or not _json_equal(a.children[i], b.children[j]):
+                return False
+        return True
+    return True
+
+
 def _config(tc: JsonValue) raises -> CloudWatchLogsEndpointConfig:
     """The generated config holding exactly the case's parameters."""
-    var c = CloudWatchLogsEndpointConfig("")
-    c.region = Optional[String]()
+    var c = CloudWatchLogsEndpointConfig()
     var pi = _find(tc, "params")
     if pi < 0:
         return c^
@@ -79,6 +119,14 @@ def _check(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -> Boo
             var got = resolve_get_log_events_endpoint(rules, config, input)
             if got.url != url:
                 why = "url " + got.url + ", expected " + url
+                return False
+            var props = _member_or_empty(want, "properties")
+            if not _json_equal(got.properties, props):
+                why = "properties " + got.properties.serialize() + ", expected " + props.serialize()
+                return False
+            var headers = _member_or_empty(want, "headers")
+            if not _json_equal(got.headers, headers):
+                why = "headers " + got.headers.serialize() + ", expected " + headers.serialize()
                 return False
             if not config.region:
                 # A custom endpoint needs no region to resolve, and there is

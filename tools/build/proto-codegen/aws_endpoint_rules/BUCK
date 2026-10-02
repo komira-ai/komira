@@ -1,4 +1,12 @@
-load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "BOTOCORE_PARTITIONS_PATH",
+    "botocore_endpoint_file",
+    "botocore_endpoint_rules_path",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+    "botocore_model_path",
+)
 load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 
 # Generated clients resolving their endpoints through an endpoint ruleset
@@ -19,7 +27,7 @@ _RUNTIME = [
 # botocore's endpoint test cases of a service, staged at their archive path.
 _ENDPOINT_TESTS = {
     service: {
-        "tests/functional/endpoint-rules/{}/endpoint-tests-1.json".format(service): "//third_party/botocore:endpoint_rules[tests/functional/endpoint-rules/{}/endpoint-tests-1.json]".format(service),
+        botocore_endpoint_tests_path(service): botocore_endpoint_file(botocore_endpoint_tests_path(service)),
     }
     for service in ["logs", "s3"]
 }
@@ -45,9 +53,13 @@ aws_client(
 # ruleset parameters as the S3 model's operations of the same names do:
 # `contextParam` members, `staticContextParams` (CopyObject, CreateBucket,
 # ListDirectoryBuckets, WriteGetObjectResponse) and the five
-# `clientContextParams`, plus one `operationContextParams` member path
-# (PutTarget, which S3 does not have). Every `operationInputs` entry of
+# `clientContextParams`. The test checks each of those against the pinned
+# S3 model (staged beside it), so a binding typed here that S3 does not make
+# fails it. PutTarget's `operationContextParams` member path is this model's
+# alone: S3 has none at the pinned release. Every `operationInputs` entry of
 # botocore's S3 endpoint cases is resolved through it.
+_S3_MODEL = botocore_model_path("s3")
+
 aws_client(
     name = "endpoint_bindings",
     model = "model/endpoint_bindings.json",
@@ -63,9 +75,12 @@ aws_client(
         "PutTarget",
         "WriteGetObjectResponse",
     ],
-    endpoint_rules = "//third_party/botocore:endpoint_rules[botocore/data/s3/2006-03-01/endpoint-rule-set-1.json]",
-    partitions = "//third_party/botocore:endpoint_rules[botocore/data/partitions.json]",
+    endpoint_rules = botocore_endpoint_file(botocore_endpoint_rules_path("s3")),
+    partitions = botocore_endpoint_file(BOTOCORE_PARTITIONS_PATH),
     deps = _RUNTIME,
     test_srcs = ["test_endpoint_bindings.mojo"],
-    test_data = {"test_endpoint_bindings.mojo": _ENDPOINT_TESTS["s3"]},
+    test_data = {"test_endpoint_bindings.mojo": _ENDPOINT_TESTS["s3"] | {
+        _S3_MODEL: botocore_endpoint_file(_S3_MODEL),
+        "model/endpoint_bindings.json": "model/endpoint_bindings.json",
+    }},
 )

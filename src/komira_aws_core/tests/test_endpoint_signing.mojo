@@ -1,18 +1,20 @@
 # A resolved endpoint as the signer takes it (endpoint_signing.mojo).
 #
-# The scheme choice is botocore's with no scheme requested
-# (`auth_schemes_to_signing_ctx`, botocore/regions.py): the first scheme of
-# the list that can be signed, which here is `sigv4` alone, and a refusal
-# naming the offered schemes when there is none. The `authSchemes` values
-# below are the shapes S3's published ruleset answers with: plain S3, a
-# Multi-Region Access Point (`sigv4a`), an Outposts bucket (`sigv4a` then
-# `sigv4` under `s3-outposts`) and an S3 Express bucket (`sigv4-s3express`).
+# The scheme choice is botocore's with no scheme requested and without its
+# CRT extra (`auth_schemes_to_signing_ctx`, botocore/regions.py): the first
+# scheme of the list botocore has a signer for, by its exact name, which
+# must be `sigv4`; otherwise a refusal naming the offered schemes. The
+# `authSchemes` values below are the shapes S3's published ruleset answers
+# with: plain S3, a Multi-Region Access Point (`sigv4a`), an Outposts
+# bucket (`sigv4a` then `sigv4` under `s3-outposts`), an S3 Express bucket
+# (`sigv4-s3express`, or `sigv4` under `s3express` with session auth
+# disabled) and an Object Lambda access point (`s3-object-lambda`).
 
 from std.testing import assert_equal, assert_true
 
 from komira_json import JsonValue, parse_json_value
 
-from komira_aws_core import ResolvedEndpoint, aws_signing_target
+from komira_aws_core import ResolvedEndpoint, aws_signing_target, is_s3_signing_name
 
 
 def _endpoint(url: String, properties: String) raises -> ResolvedEndpoint:
@@ -69,7 +71,8 @@ def test_path_style_url_is_the_base_path() raises:
 
 
 def test_first_signable_scheme_is_chosen() raises:
-    # A list offering sigv4a first: sigv4 is the one that can be signed.
+    # A list offering sigv4a first: botocore has no sigv4a signer without
+    # its CRT extra, so sigv4 is the first it can sign.
     var r = _endpoint(
         "https://bucket-name.s3.us-east-1.amazonaws.com",
         '{"authSchemes": [{"name": "sigv4a", "signingName": "s3",'
@@ -80,12 +83,6 @@ def test_first_signable_scheme_is_chosen() raises:
     var t = aws_signing_target(r, "us-east-1", "s3")
     assert_equal(t.signing_name, "s3")
     assert_equal(t.signing_region, "us-east-1")
-    # A namespaced name is the same scheme.
-    var n = _endpoint(
-        "https://logs.us-east-1.amazonaws.com",
-        '{"authSchemes": [{"name": "aws.auth#sigv4", "signingName": "logs"}]}',
-    )
-    assert_equal(aws_signing_target(n, "us-east-1", "logs").signing_name, "logs")
 
 
 def test_unsignable_schemes_are_refused_by_name() raises:
@@ -106,28 +103,81 @@ def test_unsignable_schemes_are_refused_by_name() raises:
         ),
         "auth scheme(s) sigv4-s3express,",
     )
-
-
-def test_double_encoding_mismatch_is_refused() raises:
-    # sigv4 under `s3-outposts` without double encoding: the signer encodes
-    # twice for any name but s3, so it is refused rather than signed wrongly.
+    # botocore signs the first of sigv4-s3express and sigv4 it meets, so a
+    # sigv4 after a sigv4-s3express is not reached.
     _refused(
         _endpoint(
-            "https://op-01234567890123456.s3-outposts.us-west-2.amazonaws.com",
-            '{"authSchemes": [{"name": "sigv4a", "signingName": "s3-outposts",'
-            ' "signingRegionSet": ["*"], "disableDoubleEncoding": true},'
-            ' {"name": "sigv4", "signingName": "s3-outposts",'
-            ' "signingRegion": "us-west-2", "disableDoubleEncoding": true}]}',
+            "https://mybucket--usw2-az1--x-s3.s3express-usw2-az1.us-west-2.amazonaws.com",
+            '{"authSchemes": [{"name": "sigv4-s3express", "signingName":'
+            ' "s3express", "signingRegion": "us-west-2"},'
+            ' {"name": "sigv4", "signingName": "s3express",'
+            ' "signingRegion": "us-west-2"}]}',
         ),
-        "disableDoubleEncoding to true for the signing name s3-outposts",
+        "auth scheme(s) sigv4-s3express, sigv4, and",
     )
-    # And s3 with double encoding left on.
+    # A namespaced name is not botocore's `sigv4`.
     _refused(
+        _endpoint(
+            "https://logs.us-east-1.amazonaws.com",
+            '{"authSchemes": [{"name": "aws.auth#sigv4", "signingName": "logs"}]}',
+        ),
+        "auth scheme(s) aws.auth#sigv4, and",
+    )
+
+
+def test_s3_signing_names_sign_once() raises:
+    # sigv4 under each S3 signing name is signed, as botocore signs it with
+    # S3SigV4Auth: the name and region are the scheme's.
+    var cases: List[String] = [
+        "s3-outposts",
+        "s3express",
+        "s3-object-lambda",
+    ]
+    for i in range(len(cases)):
+        var r = _endpoint(
+            "https://bucket.example.us-west-2.amazonaws.com",
+            '{"authSchemes": [{"name": "sigv4a", "signingName": "'
+            + cases[i]
+            + '", "signingRegionSet": ["*"], "disableDoubleEncoding": true},'
+            + ' {"name": "sigv4", "signingName": "'
+            + cases[i]
+            + '", "signingRegion": "us-west-2", "disableDoubleEncoding": true}]}',
+        )
+        var t = aws_signing_target(r, "us-east-1", "s3")
+        assert_equal(t.signing_name, cases[i])
+        assert_equal(t.signing_region, "us-west-2")
+        assert_true(is_s3_signing_name(t.signing_name))
+    # An absent disableDoubleEncoding is the signer's own rule for the name,
+    # as botocore never reads the flag: s3 signs once, logs twice.
+    var s3 = aws_signing_target(
         _endpoint(
             "https://s3.us-east-1.amazonaws.com",
             '{"authSchemes": [{"name": "sigv4", "signingName": "s3"}]}',
         ),
-        "disableDoubleEncoding to false for the signing name s3",
+        "us-east-1",
+        "s3",
+    )
+    assert_equal(s3.signing_name, "s3")
+    assert_true(not is_s3_signing_name("logs"))
+
+
+def test_double_encoding_against_the_signer_is_refused() raises:
+    # A flag stating the other encoding than the signer's for the name.
+    _refused(
+        _endpoint(
+            "https://s3.us-east-1.amazonaws.com",
+            '{"authSchemes": [{"name": "sigv4", "signingName": "s3",'
+            ' "disableDoubleEncoding": false}]}',
+        ),
+        "disableDoubleEncoding to false for the signing name s3,",
+    )
+    _refused(
+        _endpoint(
+            "https://logs.us-east-1.amazonaws.com",
+            '{"authSchemes": [{"name": "sigv4", "signingName": "logs",'
+            ' "disableDoubleEncoding": true}]}',
+        ),
+        "disableDoubleEncoding to true for the signing name logs,",
     )
 
 
@@ -162,7 +212,8 @@ def main() raises:
     test_path_style_url_is_the_base_path()
     test_first_signable_scheme_is_chosen()
     test_unsignable_schemes_are_refused_by_name()
-    test_double_encoding_mismatch_is_refused()
+    test_s3_signing_names_sign_once()
+    test_double_encoding_against_the_signer_is_refused()
     test_headers_are_carried()
     test_no_region_is_refused()
     print("OK")

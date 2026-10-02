@@ -9,29 +9,37 @@
 # `build_sigv4_signed_request` takes: the `AwsEndpoint`, the signing name and
 # region, and the headers to send.
 #
-# The scheme is chosen as botocore chooses one with no scheme requested
-# (`EndpointRulesetResolver.auth_schemes_to_signing_ctx`,
+# The scheme is chosen as botocore chooses one with no scheme requested and
+# without its CRT extra (`EndpointRulesetResolver.auth_schemes_to_signing_ctx`,
 # botocore/regions.py, at the release third_party/botocore pins): the first
-# scheme of the list this core can sign. That is `sigv4` alone: a list with
-# no `sigv4` (`sigv4a` for a Multi-Region Access Point, `sigv4-s3express`
-# for an S3 Express directory bucket) is REFUSED, naming every scheme it
-# offers. An endpoint with no `authSchemes` is signed with sigv4 under the
-# client's own signing name and region.
+# scheme of the list botocore has a signer for, matched by its exact name
+# (`aws.auth#sigv4` is not `sigv4` there, and not here). Of those, `sigv4`
+# and `sigv4-s3express`, this core signs `sigv4` alone, so a list whose
+# first such scheme is `sigv4-s3express` (an S3 Express directory bucket),
+# or that has neither (`sigv4a` alone, a Multi-Region Access Point), is
+# REFUSED, naming every scheme it offers. An endpoint with no `authSchemes`
+# is signed with sigv4 under the client's own signing name and region.
 #
-# `disableDoubleEncoding` is not a switch here. The signer decides it from
-# the signing name: service `s3` signs the path as sent, any other encodes
-# it again (signed_request.mojo). A scheme asking for the other behaviour
-# would be signed wrongly, so it is refused rather than signed.
+# How the path is encoded follows from the signing name, as in botocore: an
+# S3 signing name (`is_s3_signing_name`: s3, s3-outposts, s3-object-lambda,
+# s3express) signs the path as sent, any other encodes it again
+# (signed_request.mojo). botocore carries a scheme's `disableDoubleEncoding`
+# and never reads it; here an absent one is that same default, and one that
+# states the other behaviour for its signing name is REFUSED rather than
+# signed against what the ruleset asked. No endpoint test case of botocore,
+# at that release, states one.
 # =============================================================================
 
 from komira_json import JSON_ARRAY, JSON_BOOL, JSON_OBJECT, JSON_STRING, JsonValue
 
-from ._text import sub
 from .endpoint import AwsEndpoint
 from .endpoint_rules import ResolvedEndpoint
+from .signed_request import is_s3_signing_name
 
 
 comptime _SIGNABLE_SCHEME: StaticString = "sigv4"
+# The other scheme botocore signs without its CRT extra; this core does not.
+comptime _S3EXPRESS_SCHEME: StaticString = "sigv4-s3express"
 
 
 struct AwsSigningTarget(Copyable, Movable):
@@ -73,17 +81,11 @@ def _member(v: JsonValue, key: String) -> Int:
 
 
 def _scheme_name(scheme: JsonValue) -> String:
-    """A scheme's name without a `namespace#` prefix, "" when it has none."""
+    """A scheme's `name` as written, "" when it has none."""
     var i = _member(scheme, "name")
     if i < 0 or scheme.children[i].kind != JSON_STRING:
         return String("")
-    var name = scheme.children[i].text
-    var b = name.as_bytes()
-    var start = 0
-    for j in range(len(b)):
-        if b[j] == UInt8(0x23):  # '#'
-            start = j + 1
-    return sub(name, start, len(b))
+    return scheme.children[i].text
 
 
 def _string_property(
@@ -105,24 +107,29 @@ def aws_signing_target(
     """The signing target for `resolved`: `region` and `service` are the
     client's own, used where the chosen scheme names none.
 
-    Refuses an endpoint whose `authSchemes` offer no `sigv4`, naming the
-    schemes it offers; a sigv4 scheme whose `disableDoubleEncoding` differs
-    from what the signer does for its signing name; and a URL
-    `AwsEndpoint.parse` refuses."""
+    Refuses an endpoint whose first scheme botocore can sign is not `sigv4`,
+    naming the schemes it offers; a `disableDoubleEncoding` that is not a
+    boolean, or that states the other encoding than the signer uses for the
+    signing name; and a URL `AwsEndpoint.parse` refuses."""
     var schemes = resolved.auth_schemes()
     var signing_name = service
     var signing_region = region
-    var double_encoding_off = service == "s3"
     if len(schemes.children) > 0:
         var chosen = -1
+        var decided = False
         var offered = String("")
         for i in range(len(schemes.children)):
             var name = _scheme_name(schemes.children[i])
             if offered.byte_length() > 0:
                 offered += ", "
             offered += name if name.byte_length() > 0 else String("(unnamed)")
-            if chosen < 0 and name == _SIGNABLE_SCHEME:
+            if decided:
+                continue
+            if name == _SIGNABLE_SCHEME:
                 chosen = i
+                decided = True
+            elif name == _S3EXPRESS_SCHEME:
+                decided = True
         if chosen < 0:
             raise Error(
                 "the endpoint must be signed with the auth scheme(s) "
@@ -141,17 +148,17 @@ def aws_signing_target(
                     "the endpoint's sigv4 auth scheme has a disableDoubleEncoding"
                     " that is not a boolean"
                 )
-            double_encoding_off = scheme.children[d].bool_val
-        else:
-            double_encoding_off = False
-    if double_encoding_off != (signing_name == "s3"):
-        raise Error(
-            "the endpoint's sigv4 auth scheme sets disableDoubleEncoding to "
-            + ("true" if double_encoding_off else "false")
-            + " for the signing name "
-            + signing_name
-            + ", and the signer encodes a path once for s3 alone"
-        )
+            var once = scheme.children[d].bool_val
+            if once != is_s3_signing_name(signing_name):
+                raise Error(
+                    "the endpoint's sigv4 auth scheme sets disableDoubleEncoding"
+                    " to "
+                    + ("true" if once else "false")
+                    + " for the signing name "
+                    + signing_name
+                    + ", and the signer encodes a path once for the S3 signing"
+                    " names alone (s3, s3-outposts, s3-object-lambda, s3express)"
+                )
     if signing_region.byte_length() == 0:
         raise Error("the endpoint names no signing region and none is configured")
     var out = AwsSigningTarget(

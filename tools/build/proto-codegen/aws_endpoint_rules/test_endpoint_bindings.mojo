@@ -9,9 +9,15 @@
 #    package's model binds S3's ruleset as the S3 model's operation of the
 #    same name does, so this checks the generator's contextParam and
 #    staticContextParams bindings and the config against upstream answers.
-#    Each endpoint is then given to `aws_signing_target`, which must sign a
-#    plain `sigv4` / `s3` scheme and refuse every other, by name.
-# 2. What no `operationInputs` entry reaches: CopyObject's
+#    Each endpoint is then given to `aws_signing_target`. Where the first
+#    scheme botocore can sign (`sigv4` or `sigv4-s3express`) is `sigv4`, it
+#    must sign with that scheme's signing name and region, at the URL the
+#    case expects, under any S3 signing name; otherwise it must refuse,
+#    naming the offered schemes. The signed and refused totals are pinned.
+# 2. That the model's bindings are S3's: each operation's `contextParam`
+#    members, `staticContextParams` and `operationContextParams`, and the
+#    `clientContextParams`, against the pinned S3 model.
+# 3. What no `operationInputs` entry reaches: CopyObject's
 #    staticContextParams (`DisableS3ExpressSessionAuth`) and the same
 #    parameter as a client setting, each checked against the upstream case
 #    stating those parameters; an operationContextParams member path; and
@@ -31,7 +37,12 @@ from komira_json import (
     parse_json_value,
 )
 
-from komira_aws_core import EndpointRuleSet, ResolvedEndpoint, aws_signing_target
+from komira_aws_core import (
+    EndpointRuleSet,
+    ResolvedEndpoint,
+    aws_signing_target,
+    is_s3_signing_name,
+)
 
 from endpoint_bindings.endpoint_bindings import (
     EndpointBindingsCopyObjectRequest,
@@ -58,9 +69,17 @@ from endpoint_bindings.endpoint_bindings import (
 
 comptime _CASES = "tests/functional/endpoint-rules/s3/endpoint-tests-1.json"
 
-# The `operationInputs` entries at the pinned botocore release: a shrunken
-# file cannot pass as the suite.
+comptime _MODEL = "model/endpoint_bindings.json"
+comptime _S3_MODEL = "botocore/data/s3/2006-03-01/service-2.json"
+
+# The `operationInputs` entries at the pinned botocore release, and of those
+# expecting an endpoint, how many are signed (sigv4 under s3 96,
+# s3-object-lambda 11, s3express 9, s3-outposts 6) and refused
+# (sigv4-s3express 29, sigv4a 1): a shrunken file cannot pass as the suite,
+# and a refusal cannot stand in for a signature.
 comptime _EXPECTED_OPERATION_INPUTS = 215
+comptime _EXPECTED_SIGNED = 122
+comptime _EXPECTED_REFUSED = 30
 
 
 def _read(path: String) raises -> String:
@@ -166,8 +185,7 @@ def _builtin_param(builtin: String) raises -> String:
 
 
 def _config(op: JsonValue) raises -> EndpointBindingsEndpointConfig:
-    var c = EndpointBindingsEndpointConfig("")
-    c.region = Optional[String]()
+    var c = EndpointBindingsEndpointConfig()
     var b = _find(op, "builtInParams")
     if b >= 0:
         ref bp = op.children[b]
@@ -255,20 +273,91 @@ def _same_endpoint(got: ResolvedEndpoint, want: JsonValue, mut why: String) -> B
     return True
 
 
-def _signable(props: JsonValue) -> Bool:
-    """Whether the first sigv4 scheme of `props` signs as s3, the one this
-    signer encodes a path once for (every S3 sigv4 scheme sets
-    disableDoubleEncoding)."""
+def _text_or(v: JsonValue, key: String, default: String) -> String:
+    var i = _find(v, key)
+    if i < 0 or v.children[i].kind != JSON_STRING:
+        return default
+    return v.children[i].text
+
+
+def _chosen_scheme(props: JsonValue, mut offered: String) -> Int:
+    """The index in `authSchemes` of the scheme to sign with: the first of
+    `sigv4` and `sigv4-s3express`, botocore's signers, when it is `sigv4`;
+    -1 when it is not or there is none. `offered` gets every scheme's name,
+    comma-separated."""
     var a = _find(props, "authSchemes")
     if a < 0:
-        return False
+        return -1
     ref schemes = props.children[a]
+    var chosen = -1
+    var decided = False
     for i in range(len(schemes.children)):
-        ref s = schemes.children[i]
-        if s.children[_find(s, "name")].text == "sigv4":
-            var n = _find(s, "signingName")
-            return n >= 0 and s.children[n].text == "s3"
-    return False
+        var name = _text_or(schemes.children[i], "name", "")
+        if offered.byte_length() > 0:
+            offered += ", "
+        offered += name
+        if decided:
+            continue
+        if name == "sigv4":
+            chosen = i
+            decided = True
+        elif name == "sigv4-s3express":
+            decided = True
+    return chosen
+
+
+def _check_signing(
+    got: ResolvedEndpoint, region: String, mut why: String, mut signed: Int,
+    mut refused: Int,
+) raises -> Bool:
+    var offered = String("")
+    var chosen = _chosen_scheme(got.properties, offered)
+    if chosen < 0:
+        # Every S3 endpoint states its auth schemes.
+        var want = (
+            "the endpoint must be signed with the auth scheme(s) " + offered
+            + ", and komira_aws_core signs sigv4 only"
+        )
+        try:
+            _ = aws_signing_target(got, region, "s3")
+        except e:
+            if String(e) != want:
+                why = "signing refused with '" + String(e) + "', expected '" + want + "'"
+                return False
+            refused += 1
+            return True
+        why = "signed an endpoint whose auth schemes are " + offered
+        return False
+    ref scheme = got.properties.children[_find(got.properties, "authSchemes")].children[chosen]
+    var name = _text_or(scheme, "signingName", "s3")
+    var signing_region = _text_or(scheme, "signingRegion", region)
+    try:
+        var t = aws_signing_target(got, region, "s3")
+        if t.signing_name != name or t.signing_region != signing_region:
+            why = (
+                "signs as " + t.signing_name + "/" + t.signing_region
+                + ", expected " + name + "/" + signing_region
+            )
+            return False
+        if not is_s3_signing_name(t.signing_name):
+            why = "signs as " + t.signing_name + ", which is no S3 signing name"
+            return False
+        var at = t.endpoint.url_for("/")
+        if at != got.url and at != got.url + "/":
+            why = "the signing target is at " + at + ", the endpoint at " + got.url
+            return False
+        var headers = 0
+        ref h = got.headers
+        for i in range(len(h.children)):
+            headers += len(h.children[i].children)
+        if len(t.header_names) != headers:
+            why = "the signing target carries " + String(len(t.header_names)) + " headers"
+            return False
+    except e:
+        why = "signing refused: " + String(e)
+        return False
+    signed += 1
+    return True
 
 
 def _check(
@@ -297,24 +386,111 @@ def _check(
         return False
     var config = _config(op)
     var region = config.region.value() if config.region else String("")
-    if _signable(got.properties):
-        try:
-            var t = aws_signing_target(got, region, "s3")
-            if t.signing_name != "s3":
-                why = "signs as " + t.signing_name
-                return False
-        except e:
-            why = "signing refused: " + String(e)
+    return _check_signing(got, region, why, signed, refused)
+
+
+def _member(v: JsonValue, key: String, what: String) raises -> JsonValue:
+    var i = _find(v, key)
+    if i < 0:
+        raise Error(what + " has no " + key)
+    return v.children[i].copy()
+
+
+def _context_params(model: JsonValue, op: JsonValue) raises -> List[String]:
+    """An operation's `contextParam` members, as "member=parameter"."""
+    var out = List[String]()
+    var i = _find(op, "input")
+    if i < 0:
+        return out^
+    var shape_name = _member(op.children[i], "shape", "an operation input").text
+    var shape = _member(_member(model, "shapes", "a model"), shape_name, "the shapes")
+    ref members = shape.children[_find(shape, "members")]
+    for m in range(len(members.obj_keys)):
+        var c = _find(members.children[m], "contextParam")
+        if c >= 0:
+            out.append(
+                members.obj_keys[m] + "="
+                + _member(members.children[m].children[c], "name", "a contextParam").text
+            )
+    return out^
+
+
+def _same_set(a: List[String], b: List[String]) -> Bool:
+    if len(a) != len(b):
+        return False
+    for i in range(len(a)):
+        var found = False
+        for j in range(len(b)):
+            if a[i] == b[j]:
+                found = True
+        if not found:
             return False
-        signed += 1
-    else:
-        try:
-            _ = aws_signing_target(got, region, "s3")
-            why = "signed an endpoint whose auth schemes are " + got.properties.serialize()
-            return False
-        except:
-            refused += 1
     return True
+
+
+def _joined(v: List[String]) -> String:
+    var out = String("")
+    for i in range(len(v)):
+        out += (", " if i > 0 else "") + v[i]
+    return out
+
+
+def test_bindings_are_the_s3_models() raises:
+    var own = parse_json_value(_read(_MODEL))
+    var s3 = parse_json_value(_read(_S3_MODEL))
+    var own_ops = _member(own, "operations", "the test model")
+    var s3_ops = _member(s3, "operations", "the S3 model")
+    for i in range(len(own_ops.obj_keys)):
+        var name = own_ops.obj_keys[i]
+        ref op = own_ops.children[i]
+        var k = _find(s3_ops, name)
+        if name == "PutTarget":
+            # This model's own operation: its operationContextParams path is
+            # what S3 has no operation to show.
+            if k >= 0:
+                raise Error("S3 has a PutTarget; bind it as S3 does")
+            continue
+        if k < 0:
+            raise Error("S3 has no operation " + name)
+        ref s3op = s3_ops.children[k]
+        var keys: List[String] = ["staticContextParams", "operationContextParams"]
+        for ki in range(len(keys)):
+            var a = _member_or_empty(op, keys[ki])
+            var b = _member_or_empty(s3op, keys[ki])
+            if not _json_equal(a, b):
+                raise Error(
+                    name + " " + keys[ki] + ": " + a.serialize() + ", and S3's are "
+                    + b.serialize()
+                )
+        var own_members = _context_params(own, op)
+        var s3_members = _context_params(s3, s3op)
+        if not _same_set(own_members, s3_members):
+            raise Error(
+                name + " contextParam members: " + _joined(own_members) + "; S3's: "
+                + _joined(s3_members)
+            )
+    # The clientContextParams: the same names, each of the same type.
+    var own_ccp = _member(own, "clientContextParams", "the test model")
+    var s3_ccp = _member(s3, "clientContextParams", "the S3 model")
+    if len(own_ccp.obj_keys) != len(s3_ccp.obj_keys):
+        raise Error("the test model and S3 declare different clientContextParams")
+    for i in range(len(own_ccp.obj_keys)):
+        var j = _find(s3_ccp, own_ccp.obj_keys[i])
+        if j < 0 or _text_or(own_ccp.children[i], "type", "") != _text_or(s3_ccp.children[j], "type", "?"):
+            raise Error("clientContextParams " + own_ccp.obj_keys[i] + " is not S3's")
+
+
+def test_config_constructors() raises:
+    # Every parameter unset; Region set by the one-argument form unless "".
+    var none = EndpointBindingsEndpointConfig()
+    if none.region or none.endpoint or none.force_path_style:
+        raise Error("EndpointConfig() sets a parameter")
+    var empty = EndpointBindingsEndpointConfig("")
+    if empty.region:
+        raise Error("EndpointConfig(\"\") sets Region")
+    var west = EndpointBindingsEndpointConfig("us-west-2")
+    if not west.region or west.region.value() != "us-west-2" or west.endpoint:
+        raise Error("EndpointConfig(\"us-west-2\") is not Region alone")
 
 
 def _case(cases: JsonValue, documentation: String) raises -> JsonValue:
@@ -361,9 +537,11 @@ def test_static_and_client_context_params(rules: EndpointRuleSet, cases: JsonVal
         rules, config, EndpointBindingsGetObjectRequest("mybucket--usw2-az1--x-s3", "k")
     )
     _refused(get, "auth scheme(s) sigv4-s3express,")
-    # sigv4 under `s3express` is refused too: the signer would encode the
-    # path twice.
-    _refused(copy, "for the signing name s3express")
+    # CopyObject's endpoint is signed with plain sigv4 under `s3express`,
+    # as botocore signs it (S3SigV4Auth).
+    var t = aws_signing_target(copy, "us-west-2", "s3")
+    if t.signing_name != "s3express" or t.signing_region != "us-west-2":
+        raise Error("CopyObject signs as " + t.signing_name + "/" + t.signing_region)
     # The same parameter as a client setting reaches GetObject.
     config.disable_s3_express_session_auth = Optional[Bool](True)
     var get2 = resolve_get_object_endpoint(
@@ -450,6 +628,14 @@ def main() raises:
         )
     if failed > 0:
         raise Error(String(failed) + " of " + String(inputs) + " S3 operation inputs failed:\n" + report)
+    if signed != _EXPECTED_SIGNED or refused != _EXPECTED_REFUSED:
+        raise Error(
+            "signed " + String(signed) + " and refused " + String(refused)
+            + " at signing, expected " + String(_EXPECTED_SIGNED) + " and "
+            + String(_EXPECTED_REFUSED)
+        )
+    test_bindings_are_the_s3_models()
+    test_config_constructors()
     test_static_and_client_context_params(rules, cases)
     test_operation_context_param_path(rules)
     test_custom_endpoint_addressing(rules)

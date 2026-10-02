@@ -31,7 +31,8 @@ clients.
 - `creds_source.mojo`: the `AwsCredsSource` trait a generated client signs
   through, a static source and the cached default chain.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
-  of a send, and `AwsPayloadSigning` (hashed, unsigned or precomputed).
+  of a send, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
+  `is_s3_signing_name`, the signing names signed by S3's rules.
 - `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
   library; `partitions.mojo`: `AwsPartitionSet`, the partitions.json table
@@ -158,7 +159,11 @@ from .shared_config import (
     select_profile,
     shared_file_paths,
 )
-from .signed_request import AwsPayloadSigning, build_sigv4_signed_request
+from .signed_request import (
+    AwsPayloadSigning,
+    build_sigv4_signed_request,
+    is_s3_signing_name,
+)
 from .sigv4 import (
     EMPTY_PAYLOAD_SHA256,
     MAX_PRESIGN_EXPIRES_SECONDS,
