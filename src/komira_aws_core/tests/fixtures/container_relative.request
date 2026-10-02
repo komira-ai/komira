@@ -1,0 +1,4 @@
+GET /v2/credentials/example-task-id HTTP/1.1
+Host: 169.254.170.2
+Accept: application/json
+
