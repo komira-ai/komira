@@ -136,6 +136,13 @@ def test_refusals_name_the_manifest_and_the_key() raises:
         ),
     )
     assert_equal(
+        _refusal(_conda().replace(String('"metadata.json"'), String('"."'))),
+        String(
+            "artifact manifest 'out/m.json': a CONDA 'metadata' is a file name"
+            " next to the manifest, not a path"
+        ),
+    )
+    assert_equal(
         _refusal(_conda().replace(String('"metadata.json"'), String('""'))),
         String("artifact manifest 'out/m.json': 'metadata' is EMPTY"),
     )
