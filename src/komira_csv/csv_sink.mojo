@@ -61,8 +61,8 @@
 from komira_async.runtime.sched_trace import SITE_FORMAT_WRITE
 from std.io import FileHandle
 
-from komira_async.fs.local_fs import LocalFs, LocalWriteFile
-from komira_async.fs.file_system import WriteMode
+from komira_fs.local_fs import LocalFs, LocalWriteFile
+from komira_fs.file_system import WriteMode
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.cancellation.token import CancellationToken
 from komira_async.runtime.local_dispatcher import LocalDispatcher
