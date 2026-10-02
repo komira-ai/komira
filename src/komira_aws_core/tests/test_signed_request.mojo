@@ -12,9 +12,12 @@
 # `.precomputed()` must both reproduce, and the same request with
 # UNSIGNED-PAYLOAD, signed with openssl HMAC-SHA256 over the canonical
 # request. The aws-c-auth get-vanilla-query* cases (staged at aws_c_auth/,
-# the archive //third_party/aws_c_auth pins) go through the builder too: the
-# query in the uri is signed as it stands (s3_get_object.request carries a
-# key with no value, `acl`).
+# the archive //third_party/aws_c_auth pins) go through the builder too, each
+# signed with its own context.json: the query in the uri is signed as it
+# stands (s3_get_object.request carries a key with no value, `acl`). The
+# suite's post-x-www-form-urlencoded cases do not: they sign Content-Length,
+# which this builder never signs, so they are covered by
+# test_sigv4_test_suite alone.
 
 from std.testing import assert_equal, assert_true
 
@@ -26,6 +29,8 @@ from komira_aws_core import (
     CredentialHttpRequest,
     FixedClock,
     Header,
+    aws_token_string,
+    aws_ts_from_token,
     build_sigv4_signed_request,
     resolve_endpoint,
 )
@@ -216,6 +221,9 @@ def test_content_length_on_bodyless_requests() raises:
 
 # ---- payload signing ---------------------------------------------------------
 
+# AWS's S3 SigV4 documentation example (see the header): every value below
+# and the Date header in `_s3_put_example` are that example's, and its
+# published signature depends on each of them.
 comptime _S3_EXAMPLE_KEY = "AKIAIOSFODNN7EXAMPLE"
 comptime _S3_EXAMPLE_SECRET = "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
 # The example's signing time (its x-amz-date).
@@ -315,6 +323,26 @@ def test_payload_precomputed() raises:
             assert_true(
                 String(e).find("not 64 lowercase hex digits") >= 0, String(e)
             )
+    # A value built directly, past `precomputed`, is checked by the builder:
+    # a kind that is none of the three, or a hash that does not fit its kind.
+    var direct: List[AwsPayloadSigning] = [
+        AwsPayloadSigning(2, String("abc")),
+        AwsPayloadSigning(7, String("")),
+        AwsPayloadSigning(1, String(_S3_EXAMPLE_SHA256)),
+        AwsPayloadSigning(0, String(_S3_EXAMPLE_SHA256)),
+    ]
+    var why: List[String] = [
+        "not 64 lowercase hex digits",
+        "none of hashed, unsigned, precomputed",
+        "is not UNSIGNED-PAYLOAD",
+        "carries a hash of its own",
+    ]
+    for i in range(len(direct)):
+        try:
+            _ = _s3_put_example(body, direct[i])
+            raise Error("the builder accepted payload " + String(i))
+        except e:
+            assert_true(String(e).find(why[i]) >= 0, String(e))
 
 
 def test_payload_unsigned() raises:
@@ -408,13 +436,37 @@ def test_binary_body() raises:
 # ---- aws-c-auth query vectors through the builder ----------------------------
 
 comptime _SUITE = "aws_c_auth/tests/aws-signing-test-suite/v4/"
-# The cases' context.json timestamp.
-comptime _SUITE_NOW = 1440938160
 
 
 def _read_text(path: String) raises -> String:
     with open(path, "r") as f:
         return f.read()
+
+
+def _context_string(text: String, key: String) raises -> String:
+    """The string value of `"key":` in a case's context.json (flat reading:
+    each key the cases use is unique in the file, and no value is
+    escaped)."""
+    var at = text.find('"' + key + '"')
+    if at < 0:
+        raise Error("context.json has no " + key)
+    var b = text.as_bytes()
+    var i = at + key.byte_length() + 2
+    while i < len(b) and (b[i] == UInt8(0x20) or b[i] == UInt8(0x0A)):
+        i += 1
+    if i >= len(b) or b[i] != UInt8(0x3A):
+        raise Error("context.json: no ':' after " + key)
+    i += 1
+    while i < len(b) and (b[i] == UInt8(0x20) or b[i] == UInt8(0x0A)):
+        i += 1
+    if i >= len(b) or b[i] != UInt8(0x22):
+        raise Error("context.json: " + key + " is not a string")
+    var j = i + 1
+    while j < len(b) and b[j] != UInt8(0x22):
+        if b[j] == UInt8(0x5C):
+            raise Error("context.json: escaped string in " + key)
+        j += 1
+    return String(StringSlice(unsafe_from_utf8=b[i + 1 : j]))
 
 
 def _request_target(request_txt: String) raises -> String:
@@ -447,12 +499,22 @@ def test_query_vectors_through_the_builder() raises:
     for i in range(len(cases)):
         var dir = String(_SUITE) + cases[i] + "/"
         var target = _request_target(_read_text(dir + "request.txt"))
-        var clock = FixedClock(_SUITE_NOW)
+        var context = _read_text(dir + "context.json")
+        assert_true(context.find('"token"') < 0, cases[i])
+        var clock = FixedClock(
+            Int(aws_ts_from_token(aws_token_string(
+                _context_string(context, "timestamp")
+            )))
+        )
         var req = build_sigv4_signed_request(
             String("GET"),
-            AwsCredential(String(_KEY), String(_SECRET), String("")),
-            String("us-east-1"),
-            String("service"),
+            AwsCredential(
+                _context_string(context, "access_key_id"),
+                _context_string(context, "secret_access_key"),
+                String(""),
+            ),
+            _context_string(context, "region"),
+            _context_string(context, "service"),
             AwsEndpoint.https("example.amazonaws.com"),
             target,
             String(""),

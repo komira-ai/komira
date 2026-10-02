@@ -81,10 +81,23 @@ struct CredentialHttpRequest(Copyable, Movable):
 
 @fieldwise_init
 struct CredentialHttpResponse(Copyable, Movable):
-    """The status code and body of a response. Bodies hold secrets."""
+    """The status code and body of a response. Bodies hold secrets.
+
+    Every credential response is text (XML from STS, JSON from the
+    container endpoint, plain text from instance metadata), so the body is
+    a `String`. A transport holding the received bytes builds one with
+    `of_bytes`, which refuses bytes that are not well-formed UTF-8; that
+    refusal is the transport's, and the providers never see such a body.
+    """
 
     var status: Int
     var body: String
+
+    @staticmethod
+    def of_bytes(status: Int, body: Span[UInt8, _]) raises -> Self:
+        """A response whose body is `body` read as UTF-8. Refuses bytes that
+        are not well-formed UTF-8, quoting none of them."""
+        return Self(status, utf8_text(body, "a credential response body"))
 
 
 trait CredentialTransport:

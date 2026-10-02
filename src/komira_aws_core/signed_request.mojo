@@ -25,6 +25,14 @@
 # unsigned or precomputed hash only from that header. For "s3" the S3 SigV4
 # rules apply too: the path is neither normalized nor encoded twice.
 #
+# Outside S3 this follows botocore: its base `SigV4Auth` sends
+# `X-Amz-Content-SHA256: UNSIGNED-PAYLOAD` for any service whose payload
+# signing is turned off, and only `S3SigV4Auth` sends a real hash. Sending a
+# precomputed hash outside S3 goes one step further, and is a choice of this
+# builder: aws-c-auth makes the header (`signed_body_header`) a setting apart
+# from the hash it carries (`signed_body_value`), and a caller who passes
+# `.precomputed()` has asked that the hash, not the body, be signed.
+#
 # The result holds the signature and, for a temporary credential, the session
 # token. It is not `Writable`; `to_wire()` is for the transport and tests.
 # =============================================================================
@@ -58,7 +66,9 @@ struct AwsPayloadSigning(Copyable, ImplicitlyCopyable, Movable):
 
     def __init__(out self, kind: Int, hash: String):
         """Construct one through `hashed()`, `unsigned()` or
-        `precomputed()`, which check what this does not."""
+        `precomputed()`. A value made here directly is checked by
+        `build_sigv4_signed_request`, which refuses a kind that is none of
+        the three or a hash that does not fit its kind."""
         self._kind = kind
         self._hash = hash
 
@@ -78,20 +88,27 @@ struct AwsPayloadSigning(Copyable, ImplicitlyCopyable, Movable):
         hex digits, refused otherwise. The builder does not re-hash the
         body, so a hash that does not match it is answered by the service,
         not here."""
-        var b = hex.as_bytes()
-        var ok = len(b) == 64
-        for i in range(len(b)):
-            var c = b[i]
-            if not (
-                (c >= UInt8(0x30) and c <= UInt8(0x39))
-                or (c >= UInt8(0x61) and c <= UInt8(0x66))
-            ):
-                ok = False
-        if not ok:
-            raise Error(
-                "a precomputed payload hash is not 64 lowercase hex digits"
-            )
-        return AwsPayloadSigning(_PRECOMPUTED, hex)
+        var p = AwsPayloadSigning(_PRECOMPUTED, hex)
+        p.check()
+        return p^
+
+    def check(self) raises:
+        """Refuses a kind that is none of the three, and a hash that does
+        not fit its kind: "" for hashed, UNSIGNED-PAYLOAD for unsigned, 64
+        lowercase hex digits for precomputed."""
+        if self._kind == _HASHED:
+            if self._hash.byte_length() != 0:
+                raise Error("a hashed payload carries a hash of its own")
+        elif self._kind == _UNSIGNED:
+            if self._hash != UNSIGNED_PAYLOAD:
+                raise Error("an unsigned payload's hash is not UNSIGNED-PAYLOAD")
+        elif self._kind == _PRECOMPUTED:
+            if not _is_sha256_hex(self._hash):
+                raise Error(
+                    "a precomputed payload hash is not 64 lowercase hex digits"
+                )
+        else:
+            raise Error("a payload signing kind is none of hashed, unsigned, precomputed")
 
     def is_hashed(self) -> Bool:
         return self._kind == _HASHED
@@ -101,6 +118,20 @@ struct AwsPayloadSigning(Copyable, ImplicitlyCopyable, Movable):
         if self._kind == _HASHED:
             return hex_lower_array_32(sha256(body))
         return self._hash
+
+
+def _is_sha256_hex(hex: String) -> Bool:
+    var b = hex.as_bytes()
+    if len(b) != 64:
+        return False
+    for i in range(len(b)):
+        var c = b[i]
+        if not (
+            (c >= UInt8(0x30) and c <= UInt8(0x39))
+            or (c >= UInt8(0x61) and c <= UInt8(0x66))
+        ):
+            return False
+    return True
 
 
 def _is_token_byte(c: UInt8) -> Bool:
@@ -158,10 +189,12 @@ def build_sigv4_signed_request[
     Authorization.
 
     Refuses a malformed method, a `uri` not starting with '/', CR/LF
-    anywhere in a header, and an `extra` header named Host, Content-Type or
-    Content-Length (each has its own argument) or one the signer writes.
+    anywhere in a header, an `extra` header named Host, Content-Type or
+    Content-Length (each has its own argument) or one the signer writes,
+    and a `payload` that `AwsPayloadSigning.check` refuses.
     """
     _check_method(method)
+    payload.check()
     if not uri.startswith("/"):
         raise Error("an AWS request path does not start with '/'")
     if has_crlf(uri) or has_crlf(content_type):

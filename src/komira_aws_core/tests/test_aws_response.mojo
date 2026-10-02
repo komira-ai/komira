@@ -3,7 +3,7 @@
 # prefix lookup names each header by the rest of its name, body_text refuses
 # bytes that are not well-formed UTF-8 (and never quotes them), and an error
 # carries the status, code, message and request id and nothing else of the
-# body.
+# body. A credential response built from bytes refuses ill-formed UTF-8.
 
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -12,6 +12,7 @@ from komira_aws_core import (
     AwsErrorInfo,
     AwsRequest,
     AwsResponse,
+    CredentialHttpResponse,
     HttpResult,
     aws_error_code_from_body,
     aws_error_message_from_body,
@@ -71,6 +72,16 @@ def test_response_headers() raises:
     assert_equal(meta[1].name, "size")
     assert_equal(meta[1].value, "10")
     assert_equal(len(r.headers_with_prefix(String("x-amz-nothing-"))), 0)
+    # A name or prefix holding a byte at or above 0x80 is no header name: it
+    # matches nothing, so no name is cut inside a character.
+    var odd = AwsResponse.of_text(200, String(""))
+    odd.add_header(String("x-amz-meta-é"), String("1"))
+    odd.add_header(String("éx-amz-meta-a"), String("2"))
+    odd.add_header(String("x-amz-meta-b"), String("3"))
+    var got = odd.headers_with_prefix(String("x-amz-meta-"))
+    assert_equal(len(got), 1)
+    assert_equal(got[0].name, "b")
+    assert_equal(len(odd.headers_with_prefix(String("é"))), 0)
 
 
 def test_response_body_text() raises:
@@ -108,6 +119,12 @@ def test_http_result_to_response() raises:
     assert_equal(r.header("X-Amzn-RequestId"), "req-1")
     assert_equal(r.body_text(), '{"__type":"NotFound"}')
     assert_equal(h.body_text(), '{"__type":"NotFound"}')
+    # into_response moves the same status, headers and body.
+    var m = h^.into_response()
+    assert_equal(m.status, 404)
+    assert_equal(len(m.header_names), 1)
+    assert_equal(m.header("x-amzn-requestid"), "req-1")
+    assert_equal(m.body_text(), '{"__type":"NotFound"}')
 
 
 def test_error_readers_on_bytes() raises:
@@ -159,8 +176,40 @@ def test_json_error_info() raises:
         var e = AwsResponse.of_text(500, String("{}"))
         e.add_header(String("x-amzn-requestid"), ids[i])
         assert_equal(aws_json_error_info(e).request_id, "")
+    # The X-Amzn-Errortype header names the code before the body does, and
+    # is cleaned the same way; a header that cleans to nothing falls back to
+    # the body.
+    var hdr = AwsResponse.of_text(400, String('{"__type":"FromBody"}'))
+    hdr.add_header(
+        String("x-amzn-errortype"),
+        String("aws.protocoltests#FooError:http://internal.amazon.com/"),
+    )
+    assert_equal(aws_json_error_info(hdr).code, "FooError")
+    var hdr_only = AwsResponse.of_text(400, String(""))
+    hdr_only.add_header(String("X-Amzn-Errortype"), String("BarError"))
+    assert_equal(aws_json_error_info(hdr_only).code, "BarError")
+    var hdr_junk = AwsResponse.of_text(400, String('{"code":"FromCode"}'))
+    hdr_junk.add_header(String("X-Amzn-Errortype"), String("!!"))
+    assert_equal(aws_json_error_info(hdr_junk).code, "FromCode")
+    # A response that names no code leaves it "" (botocore would use the
+    # status); the status stays in `status`.
+    var nameless = aws_json_error_info(AwsResponse.of_text(500, String("{}")))
+    assert_equal(nameless.code, "")
+    assert_equal(nameless.status, 500)
     var direct = AwsErrorInfo(409, String("Conflict"), String(""), String(""))
     assert_equal(String(direct.to_error(String("Op"))), "Op failed: HTTP 409 Conflict")
+
+
+def test_credential_response_of_bytes() raises:
+    var ok = CredentialHttpResponse.of_bytes(200, Span(_bytes(String("rôle\n"))))
+    assert_equal(ok.status, 200)
+    assert_equal(ok.body, "rôle\n")
+    var bad: List[UInt8] = [UInt8(0x61), UInt8(0xC3)]
+    try:
+        _ = CredentialHttpResponse.of_bytes(200, Span(bad))
+        raise Error("of_bytes accepted a truncated sequence")
+    except e:
+        assert_true(String(e).find("not well-formed UTF-8") >= 0, String(e))
 
 
 def main() raises:
@@ -170,4 +219,5 @@ def main() raises:
     test_http_result_to_response()
     test_error_readers_on_bytes()
     test_json_error_info()
+    test_credential_response_of_bytes()
     print("OK")

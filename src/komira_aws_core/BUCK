@@ -24,7 +24,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # implementation (fake keys, fixed clock), each payload-signing arm against
 # AWS's published S3 example, and the suite's get-vanilla-query* cases
 # through the request builder (the suite staged as for
-# test_sigv4_test_suite). test_env_source_only scans the package's own
+# test_sigv4_test_suite). The suite's post-x-www-form-urlencoded cases are
+# not put through the builder: they sign Content-Length, which the builder
+# never signs, so test_sigv4_test_suite alone covers them. test_env_source_only scans the package's own
 # sources, staged as its data, for any environment read outside sources.mojo.
 _FIXTURES = glob(["tests/fixtures/*"])
 
@@ -55,8 +57,10 @@ mojo_library(
     test_data = {
         "tests/test_credential_chain.mojo": _FIXTURES,
         "tests/test_credential_wire.mojo": _FIXTURES,
+        # The fixtures at the path the list form stages them at (the
+        # test's _FIX), so they can sit beside the aws_c_auth mapping.
         "tests/test_signed_request.mojo": {
-            "src/komira_aws_core/" + f: f
+            package_name() + "/" + f: f
             for f in _FIXTURES
         } | {"aws_c_auth": "//third_party/aws_c_auth:files"},
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),

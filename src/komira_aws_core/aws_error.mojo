@@ -8,14 +8,25 @@
 # the code and message are the cleaned, length-capped readings of
 # aws_codec.mojo and the request id is a header.
 #
-# `aws_json_error_info` reads one from an awsJson response. Its code and
-# message are `aws_error_code_from_body` / `aws_error_message_from_body`;
-# its request id is the `x-amzn-RequestId` header, which is where botocore's
-# JSON parser reads it (`_inject_response_metadata`).
+# `aws_json_error_info` reads one from an awsJson response. Its code is the
+# `X-Amzn-Errortype` header when the response has one, else
+# `aws_error_code_from_body` (`__type`, then `code`), as the Smithy
+# awsJson1_0 / awsJson1_1 error rules allow; both are cleaned by
+# `aws_error_code`. Its message is `aws_error_message_from_body`, and its
+# request id the `x-amzn-RequestId` header, which is where botocore's JSON
+# parser reads it (`_inject_response_metadata`).
+#
+# A response that names no code has code "". botocore's JSON parser puts
+# the status there instead (`str(status_code)`); here the status is already
+# `status`, and a code that is a number would match no modeled error.
 # =============================================================================
 
 from ._text import has_control
-from .aws_codec import aws_error_code_from_body, aws_error_message_from_body
+from .aws_codec import (
+    aws_error_code,
+    aws_error_code_from_body,
+    aws_error_message_from_body,
+)
 from .aws_request import AwsResponse
 
 
@@ -70,10 +81,16 @@ def aws_request_id(resp: AwsResponse, header: String) -> String:
 
 
 def aws_json_error_info(resp: AwsResponse) -> AwsErrorInfo:
-    """The `AwsErrorInfo` of an awsJson response."""
+    """The `AwsErrorInfo` of an awsJson response: the code from
+    `X-Amzn-Errortype`, else from the body, "" when neither names one."""
+    var code = String("")
+    if resp.has_header(String("X-Amzn-Errortype")):
+        code = aws_error_code(resp.header(String("X-Amzn-Errortype")))
+    if code.byte_length() == 0:
+        code = aws_error_code_from_body(resp.body)
     return AwsErrorInfo(
         resp.status,
-        aws_error_code_from_body(resp.body),
+        code,
         aws_error_message_from_body(resp.body),
         aws_request_id(resp, String("x-amzn-RequestId")),
     )
