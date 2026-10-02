@@ -17,6 +17,7 @@ file at the pinned commit.
 | `:googleapis.tar.gz` | the archive at the pin (`pinned_file`) |
 | `:googleapis` | the files extracted from it, each a sub-target named by its path (`:googleapis[google/rpc/status.proto]`, `:googleapis[LICENSE]`) |
 | `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
+| `:storage_v2` | the Cloud Storage v2 protos (root `google/storage/v2/storage.proto`, the gRPC storage API), checked the same way |
 
 ## Using the protos
 
@@ -44,12 +45,14 @@ build on its own.
    there is nothing to bump for.
 2. Set `_COMMIT` in BUCK to the new full commit sha, and `_SHA256` to the
    sha256 of `https://github.com/googleapis/googleapis/archive/<commit>.tar.gz`.
-3. Build `//tools/vendor/googleapis:logging_v2`. If the new commit changed the
-   import closure, the check names the file to add to (or drop from)
-   `_LOGGING_V2_CLOSURE`.
+3. Build `//tools/vendor/googleapis:` (every checked closure). If the new
+   commit changed an import closure, its check names the file to add to (or
+   drop from) that closure's list (`_LOGGING_V2_CLOSURE`,
+   `_STORAGE_V2_CLOSURE`).
 
 ## Adding a client
 
 Add its roots and their closure as a list in BUCK, add the closure to
-`:googleapis`'s `files`, and declare a `proto_check` over them as
+`:googleapis`'s `files` (shared: a file two closures need is extracted
+once), and declare a `proto_check` over them as
 `:logging_v2` is declared.

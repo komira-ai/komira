@@ -41,13 +41,37 @@ _LOGGING_V2_CLOSURE = _LOGGING_V2_ROOTS + [
     "google/rpc/status.proto",
 ]
 
+# Cloud Storage v2 (the gRPC storage API, for the generated GCS client): the
+# root and its import closure, google/protobuf/* excepted. :storage_v2 refuses
+# this list unless it is exactly that closure.
+_STORAGE_V2_ROOTS = [
+    "google/storage/v2/storage.proto",
+]
+
+_STORAGE_V2_CLOSURE = _STORAGE_V2_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/resource.proto",
+    "google/api/routing.proto",
+    "google/iam/v1/iam_policy.proto",
+    "google/iam/v1/options.proto",
+    "google/iam/v1/policy.proto",
+    "google/rpc/status.proto",
+    "google/type/date.proto",
+    "google/type/expr.proto",
+]
+
 # The files out of the archive, each a sub-target named by its path:
-# :googleapis[LICENSE] is googleapis's license file at the pin.
+# :googleapis[LICENSE] is googleapis's license file at the pin. A file several
+# closures share is extracted once.
 archive_files(
     name = "googleapis",
     exec_compatible_with = LINUX_X86_64,
     archive = ":googleapis.tar.gz",
-    files = ["LICENSE"] + sorted(_LOGGING_V2_CLOSURE),
+    files = ["LICENSE"] + sorted({f: None for f in _LOGGING_V2_CLOSURE + _STORAGE_V2_CLOSURE}.keys()),
     strip_prefix = "googleapis-" + _COMMIT,
     visibility = ["PUBLIC"],
 )
@@ -60,6 +84,15 @@ proto_check(
     name = "logging_v2",
     roots = _LOGGING_V2_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_LOGGING_V2_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Cloud Storage v2 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "storage_v2",
+    roots = _STORAGE_V2_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_STORAGE_V2_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )
