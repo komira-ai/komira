@@ -11,14 +11,14 @@ mojo_proto_library(
     srcs = ["renamed/person.proto"],
     import_name = "person_proto",
     import_prefix = "example",
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 mojo_test(
     name = "test_person_renamed",
     srcs = ["test_person.mojo"],
     deps = [
-        "//functional/proto:komira_serde",
+        "//functional/proto:komira_proto_codec",
         ":person_renamed_proto",
     ],
 )
@@ -31,7 +31,7 @@ mojo_proto_library(
     import_name = "team_proto",
     import_prefix = "example",
     proto_deps = ["//functional/proto:person_proto"],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 # note.proto declares no table, so the plugin writes no note_db.mojo: the
@@ -64,7 +64,7 @@ mojo_proto_library(
         "//functional/proto:person_proto",
         "komira//tools/build/proto-codegen:db_options",
     ],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 # Without the selection, the options file is generated into the package too.
@@ -78,5 +78,5 @@ mojo_proto_library(
         "//functional/proto:person_proto",
         "komira//tools/build/proto-codegen:db_options",
     ],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
