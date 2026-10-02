@@ -1,0 +1,20 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The per-execution secret registry: a `node_id -> secret_ref` side table that
+# owns a `SecretStore` by value, and the `CredentialConsumer` seam a connector
+# receives the revealed bytes through. Its closure is the store trait and the
+# value type (`komira_secret_store`) plus `Slab` and the plan's flat bindings
+# table (`komira_core`); nothing from the engine or the file formats.
+#
+# The gate test runs over the in-memory `StaticSecretStore`: no sockets, no
+# files, no cloud.
+mojo_library(
+    name = "komira_secret_registry",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = ["tests/test_secret_registry.mojo"],
+    visibility = ["PUBLIC"],
+)

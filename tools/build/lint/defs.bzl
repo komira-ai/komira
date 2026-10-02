@@ -125,6 +125,21 @@ no_endpoint_rule = rule(
     },
 )
 
+def _conda_names_impl(ctx):
+    staged, copy = _stage(ctx, [ctx.attrs.names, ctx.attrs.buck])
+    prefix = ctx.attrs.prefix
+    return _lint(ctx, "conda_names", [], [copy[ctx.attrs.names.short_path], copy[ctx.attrs.buck.short_path], prefix], staged)
+
+conda_names_rule = rule(
+    impl = _conda_names_impl,
+    doc = "The approved list of published conda packages (`names`) is well formed and matches the conda_package targets of `buck`, which swaps no other list in.",
+    attrs = _COMMON | {
+        "buck": attrs.source(),
+        "names": attrs.source(),
+        "prefix": attrs.string(),
+    },
+)
+
 def _push_verdicts_impl(ctx):
     staged, copy = _stage(ctx, ctx.attrs.srcs)
     return _lint(ctx, "push_verdicts", [], [copy[s.short_path] for s in ctx.attrs.srcs], staged)
@@ -217,6 +232,9 @@ def action_pins(**kwargs):
 def no_endpoint(**kwargs):
     no_endpoint_rule(**_linux(kwargs))
 
+def conda_names(**kwargs):
+    conda_names_rule(**_linux(kwargs))
+
 def push_verdicts(**kwargs):
     push_verdicts_rule(**_linux(kwargs))
 
@@ -231,6 +249,7 @@ def markdown_docs(**kwargs):
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
+conda_names = declares_docs(conda_names)
 lint_suite = declares_docs(lint_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
 no_endpoint = declares_docs(no_endpoint)

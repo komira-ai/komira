@@ -1,0 +1,93 @@
+load("@komira//tools/build/lint:defs.bzl", "conda_names")
+load("@komira//tools/build/package:conda.bzl", "PUBLISHED_NAME_PREFIX", "conda_package")
+
+# Fixtures of the refusals of conda_package and of the approved-list lint;
+# tools/build/tests/functional/conda.sh builds each and requires the named
+# outcome. Their libraries are in tests//negative/conda. `names.tsv` lists
+# komira_neg_dlopen, komira_neg_listed, komira_neg_notests, komira_neg_ok_user and
+# komira_neg_user, and NOT komira_neg_dep or komira_neg_unlisted.
+
+# --- must build: the fixture list is in use, and a dependency is rendered ---
+
+conda_package(
+    name = "komira_neg_listed",
+    lib = "tests//negative/conda:komira_neg_listed",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# Its dependency is listed: it builds, with that dependency in its run
+# requirements at its own version.
+conda_package(
+    name = "komira_neg_ok_user",
+    lib = "tests//negative/conda:komira_neg_ok_user",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# --- must fail, each with the text conda.sh requires ---
+
+# A name that is not in the approved list.
+conda_package(
+    name = "komira_neg_unlisted",
+    lib = "tests//negative/conda:komira_neg_unlisted",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# Listed, but its dependency (komira_neg_dep) is not.
+conda_package(
+    name = "komira_neg_user",
+    lib = "tests//negative/conda:komira_neg_user",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# A name without the published prefix.
+conda_package(
+    name = "neg_noprefix",
+    lib = "tests//negative/conda:neg_noprefix",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# A target named for something other than the library's import name.
+conda_package(
+    name = "komira_neg_other",
+    lib = "tests//negative/conda:komira_neg_listed",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# A library with no tests: no test would gate its package.
+conda_package(
+    name = "komira_neg_notests",
+    lib = "tests//negative/conda:komira_neg_notests",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# A library that opens a shared library by name at run time.
+conda_package(
+    name = "komira_neg_dlopen",
+    lib = "tests//negative/conda:komira_neg_dlopen",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# A library that links native code.
+conda_package(
+    name = "cadd",
+    lib = "komira//tools/build/examples/cshim:cadd",
+    names = "names.tsv",
+    summary = "fixture",
+)
+
+# An approved list with every defect the lint names, and a BUCK file that
+# declares a package the list does not hold (and swaps its list).
+conda_names(
+    name = "names_bad",
+    names = "names_bad/names.tsv",
+    buck = "names_bad/BUCK.txt",
+    prefix = PUBLISHED_NAME_PREFIX,
+)

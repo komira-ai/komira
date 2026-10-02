@@ -1,0 +1,20 @@
+load(":defs.bzl", "neg_lib")
+
+# The libraries the fixtures of tests//negative/conda_pkgs package. Each is a
+# one-function library with one welded test (none for komira_neg_notests).
+
+neg_lib("komira_neg_listed")
+
+neg_lib("komira_neg_dep")
+
+neg_lib("komira_neg_unlisted")
+
+neg_lib("neg_noprefix")
+
+neg_lib("komira_neg_notests", tests = False)
+
+neg_lib("komira_neg_dlopen")
+
+neg_lib("komira_neg_user", deps = [":komira_neg_dep"])
+
+neg_lib("komira_neg_ok_user", deps = [":komira_neg_listed"])
