@@ -26,6 +26,10 @@
 # any level, a scalar field set twice, a `credential` block set twice, a
 # `channel`, `repository` or `credential` block that is never closed, and a
 # file declaring no channel.
+# Inside a `credential` block no refusal quotes a token: a secret pasted where
+# a field name, a colon or a value was expected would otherwise be echoed by
+# the token cursor into the error text and from there into a CI log. Those
+# refusals name the field and the line and say the value is not quoted.
 # Everything else (names, visibility, artifact types, empty values, sharing)
 # is `validate_channel_declarations`, which runs on the parsed list before it
 # is returned, so a parsed list is always a valid one.
@@ -102,6 +106,32 @@ def _channel_label(name: String, ordinal: Int) -> String:
     return String("channel #") + String(ordinal)
 
 
+def _credential_scalar(
+    mut c: TokenCursor, field: String, line: Int, label: String
+) raises -> String:
+    """`_scalar` for a credential field, with its refusal reworded so it never
+    quotes the token it got: the cursor's own refusal echoes that token, and
+    in a credential block that token may be a pasted secret."""
+    var value = String("")
+    var failed = False
+    try:
+        value = _scalar(c, field)
+    except:
+        failed = True
+    if failed:
+        raise Error(
+            _at(line)
+            + String("malformed ")
+            + field
+            + String(" in ")
+            + label
+            + String(" (expected `")
+            + field
+            + String(": <value>`; value not quoted)")
+        )
+    return value^
+
+
 def _parse_credential(
     mut c: TokenCursor, where: String, open_line: Int
 ) raises -> ChannelCredential:
@@ -116,25 +146,31 @@ def _parse_credential(
         if c.is_kind(TOKEN_RBRACE):
             _ = c.expect(TOKEN_RBRACE)
             break
+        if not c.is_kind(TOKEN_WORD):
+            var bad_line = c.next(String("a field name")).line
+            raise Error(
+                _at(bad_line)
+                + String("expected a field name in ")
+                + label
+                + String(" (expected kind, secret_name; token not quoted)")
+            )
         var f = c.expect(TOKEN_WORD)
         if f.text == "kind":
             if seen_kind:
                 _refuse_twice(f.line, f.text, label)
-            kind = _scalar(c, f.text)
+            kind = _credential_scalar(c, f.text, f.line, label)
             seen_kind = True
         elif f.text == "secret_name":
             if seen_secret:
                 _refuse_twice(f.line, f.text, label)
-            secret_name = _scalar(c, f.text)
+            secret_name = _credential_scalar(c, f.text, f.line, label)
             seen_secret = True
         else:
             raise Error(
                 _at(f.line)
-                + String("unknown field '")
-                + f.text
-                + String("' in ")
+                + String("unknown field in ")
                 + label
-                + String(" (expected kind, secret_name)")
+                + String(" (expected kind, secret_name; field not quoted)")
             )
     return ChannelCredential(kind^, secret_name^)
 

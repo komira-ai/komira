@@ -127,8 +127,9 @@ def test_unknown_credential_field() raises:
             String("    credential { kind: API_TOKEN token: \"x\" }\n"),
         ),
         String(
-            "channels file: line 8: unknown field 'token' in the credential of a"
-            " repository of channel 'beta' (expected kind, secret_name)"
+            "channels file: line 8: unknown field in the credential of a"
+            " repository of channel 'beta' (expected kind, secret_name; field"
+            " not quoted)"
         ),
     )
 
@@ -187,9 +188,9 @@ def test_unknown_kind() raises:
             String("    credential { kind: PASSWORD secret_name: \"A\" }\n"),
         ),
         String(
-            "channel 'beta' declares unknown credential kind 'PASSWORD'"
-            " (expected API_TOKEN, OIDC_TRUSTED_PUBLISHING) for its OCI"
-            " repository"
+            "channel 'beta' declares an unknown credential kind (not quoted: it"
+            " may be a pasted secret; expected API_TOKEN,"
+            " OIDC_TRUSTED_PUBLISHING) for its OCI repository"
         ),
     )
 
@@ -200,7 +201,7 @@ def test_kind_is_case_sensitive() raises:
             String("OCI"),
             String("    credential { kind: api_token secret_name: \"A\" }\n"),
         ),
-        String("declares unknown credential kind 'api_token'"),
+        String("declares an unknown credential kind"),
     )
 
 
@@ -276,6 +277,106 @@ def test_invalid_secret_name_is_refused_without_quoting_it() raises:
             ),
         )
         _assert_not_quoted(text, pasted[i])
+
+
+def _pasted_secrets() -> List[String]:
+    """The same six pasted shapes the invalid-secret_name test uses."""
+    var pasted = List[String]()
+    pasted.append(String("pypi-AgEIcHlwaS5vcmcCJGFiY2Q"))
+    pasted.append(String("ghp_abc.def"))
+    pasted.append(String("1TOKEN"))
+    pasted.append(String("TOKEN NAME"))
+    pasted.append(String("tok/en+="))
+    var long = String("")
+    for _ in range(129):
+        long += "A"
+    pasted.append(long^)
+    return pasted^
+
+
+def test_malformed_secret_name_is_refused_without_quoting_it() raises:
+    """A parse-time refusal must not quote the value either: with the colon
+    missing, the token cursor's own refusal would echo the pasted secret."""
+    var pasted = _pasted_secrets()
+    for i in range(len(pasted)):
+        var text = _file(
+            String("CONDA"),
+            String("    credential { kind: API_TOKEN secret_name \"")
+            + pasted[i]
+            + String("\" }\n"),
+        )
+        _assert_refused(
+            text,
+            String(
+                "channels file: line 8: malformed secret_name in the credential"
+                " of a repository of channel 'beta' (expected `secret_name:"
+                " <value>`; value not quoted)"
+            ),
+        )
+        _assert_not_quoted(text, pasted[i])
+
+
+def test_a_pasted_kind_is_refused_without_quoting_it() raises:
+    """A secret pasted into `kind`: malformed (missing colon) at parse time,
+    and well-formed but unknown at validation. Neither refusal quotes it."""
+    var pasted = _pasted_secrets()
+    for i in range(len(pasted)):
+        var missing_colon = _file(
+            String("OCI"),
+            String("    credential { kind \"") + pasted[i] + String("\" }\n"),
+        )
+        _assert_refused(
+            missing_colon,
+            String(
+                "channels file: line 8: malformed kind in the credential of a"
+                " repository of channel 'beta'"
+            ),
+        )
+        _assert_not_quoted(missing_colon, pasted[i])
+        var unknown = _file(
+            String("OCI"),
+            String("    credential { kind: \"") + pasted[i] + String("\" }\n"),
+        )
+        _assert_refused(
+            unknown,
+            String("channel 'beta' declares an unknown credential kind (not quoted"),
+        )
+        _assert_not_quoted(unknown, pasted[i])
+
+
+def test_a_pasted_field_name_is_refused_without_quoting_it() raises:
+    """A secret where a credential field NAME was expected: as a string it is
+    not a field name, and as a bare word it is an unknown field. Neither
+    refusal quotes it."""
+    var pasted = _pasted_secrets()
+    for i in range(len(pasted)):
+        var as_string = _file(
+            String("OCI"),
+            String("    credential { kind: API_TOKEN \"")
+            + pasted[i]
+            + String("\" }\n"),
+        )
+        _assert_refused(
+            as_string,
+            String(
+                "channels file: line 8: expected a field name in the credential"
+                " of a repository of channel 'beta'"
+            ),
+        )
+        _assert_not_quoted(as_string, pasted[i])
+    var as_word = _file(
+        String("OCI"),
+        String("    credential { kind: API_TOKEN ghp_abc123: \"A\" }\n"),
+    )
+    _assert_refused(
+        as_word,
+        String(
+            "channels file: line 8: unknown field in the credential of a"
+            " repository of channel 'beta' (expected kind, secret_name; field"
+            " not quoted)"
+        ),
+    )
+    _assert_not_quoted(as_word, String("ghp_abc123"))
 
 
 def test_a_constructed_repository_without_credential_is_refused() raises:

@@ -119,7 +119,8 @@ def validate_channel_credential(
 ) raises:
     """Every rule a repository's credential must satisfy, each refused by its
     own message naming the channel and the repository's artifact type. See
-    the module header. Never quotes a secret_name."""
+    the module header. Never quotes a secret_name or a kind: either field is
+    where a secret gets pasted."""
     if not credential:
         _refuse(
             channel,
@@ -139,9 +140,8 @@ def validate_channel_credential(
         _refuse(
             channel,
             artifact_type,
-            String("declares unknown credential kind '")
-            + cred.kind
-            + String("' (expected ")
+            String("declares an unknown credential kind (not quoted: it may")
+            + String(" be a pasted secret; expected ")
             + _known_credential_kinds()
             + String(")"),
         )
