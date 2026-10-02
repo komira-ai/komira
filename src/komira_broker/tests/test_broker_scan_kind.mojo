@@ -9,7 +9,7 @@
 # executor, so this file stays a light welded test of `komira_broker`.
 #
 # Pinned here, one test each:
-#   * the live tier AND a log-compacted chunk are both read, a start offset
+#   * the live tier is read, including its log-compacted chunks, a start offset
 #     inside a compacted chunk skipping exactly the survivors below it;
 #   * a produce between two executions is visible, while the plan's
 #     `structural_hash` and the cached binding's token stay put — and an
@@ -239,11 +239,11 @@ def _eq(got: List[Int64], want: List[Int64], what: String) raises:
 
 
 # =============================================================================
-# 1. both tiers of the log
+# 1. the live tier, including its log-compacted chunks
 # =============================================================================
 
 
-def test_live_and_compacted_tiers_are_both_read() raises:
+def test_live_tier_including_log_compacted_chunks_is_read() raises:
     var store = _Store()
     var topic = String("compactT")
     _write_config(store, topic, 1)
@@ -781,7 +781,7 @@ def test_a_zero_survivor_compacted_chunk() raises:
 
 def main() raises:
     var suite = TestSuite()
-    suite.test[test_live_and_compacted_tiers_are_both_read]()
+    suite.test[test_live_tier_including_log_compacted_chunks_is_read]()
     suite.test[test_a_body_swapped_without_its_segment_is_refused_by_name]()
     suite.test[test_produce_between_executions_is_visible_and_the_key_does_not_move]()
     suite.test[test_kip74_first_segment_is_returned_whole_over_budget]()
