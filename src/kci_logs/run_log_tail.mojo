@@ -861,7 +861,7 @@ def _next_action_sentence(tail: RunLogTail) -> String:
     output, and neither is ever a pass.
 
     ⛔ IT NAMES NO RAW CLOUD COMMAND, DELIBERATELY. The operator's remedy is a
-    `komira_ci` command, not a raw `gcloud` or `aws` one: THIS read is the tool
+    `kci` command, not a raw `gcloud` or `aws` one: THIS read is the tool
     that replaces those, and printing one here would undo that.
 
     ⛔ AND IT DOES NOT NAME THE VALIDATION RECORD. The record carries the step's
