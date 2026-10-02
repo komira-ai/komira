@@ -4,8 +4,11 @@
 # =============================================================================
 #
 # 1. Read the declarations (kci_artifact_declaration validates them).
-#    Refuse a `--work-dir` that is not a directory and a `--out-dir` that is
-#    not absent or empty, before anything runs.
+#    Refuse a `--work-dir` that is not a directory, a `--out-dir` that is
+#    not absent or empty, and a `--log-dir` that IS `--out-dir` or lies under
+#    it (both compared absolute, `.`/`..` folded and every existing prefix
+#    resolved through its symlinks), before anything runs: the out dir becomes
+#    the release directory, and a log there is an entry no declaration names.
 # 2. For each artifact, in declarations-file order, one at a time:
 #      a. create `<out>/<name>/` (empty by construction: `<out>` was empty
 #         and declaration names are unique);
@@ -17,10 +20,17 @@
 #         cannot be started is CANNOT_TELL; either way, stop;
 #      d. `kci_release_set.verify_member(name, <out>/<name>)`: REFUSED on
 #         any refusal; stop.
-# 3. Only when every artifact passed: compute the set hash and write
-#    `<out>/release.json` LAST. It is the commit marker: a run that stopped
-#    leaves member directories and no `release.json`, and `kci publish`
-#    refuses a directory without one.
+# 3. Only when every artifact passed, and before `release.json`:
+#      a. `<out>` must hold exactly the declared member directories: a build
+#         that wrote a sibling of its own out dir (it is handed an absolute
+#         path) is REFUSED, naming the entry;
+#      b. `verify_member` runs again over every member, and a member whose
+#         name, version, build or sha256 changed since its own check (a later
+#         build wrote into it) is REFUSED. The set hash is computed from this
+#         second pass, i.e. from the bytes that stay on disk.
+#    Then compute the set hash and write `<out>/release.json` LAST. It is the
+#    commit marker: a run that stopped leaves member directories and no
+#    `release.json`, and `kci publish` refuses a directory without one.
 #
 # Sequential, not concurrent: one buck2 daemon serves one repository and
 # blocks a second command with different args, so concurrency buys nothing
@@ -84,6 +94,56 @@ def check_out_dir(out_dir: String) raises -> BuildOutcome:
     return BuildOutcome(EXIT_OK, String(""))
 
 
+def _parent(path: String) -> String:
+    """The lexical parent of the absolute `path`; `/` for `/` and `/x`."""
+    var slash = path.rfind(String("/"))
+    if slash <= 0:
+        return String("/")
+    return String(path[byte = :slash])
+
+
+def resolved_path(path: String) raises -> String:
+    """`path` made absolute (a relative one against the cwd) with `.` and `..`
+    folded and every EXISTING prefix resolved through its symlinks; the
+    missing tail, if any, is folded lexically. Two spellings of one place
+    compare equal, whether or not it exists yet."""
+    var cur = String("/") if path.startswith(String("/")) else realpath(String("."))
+    var parts = path.split(String("/"))
+    for i in range(len(parts)):
+        var c = String(parts[i])
+        if c.byte_length() == 0 or c == ".":
+            continue
+        if c == "..":
+            cur = _parent(cur)
+            continue
+        var cand = (String("/") + c) if cur == "/" else (cur + String("/") + c)
+        if exists(cand):
+            cur = realpath(cand)
+        else:
+            cur = cand^
+    return cur^
+
+
+def check_log_dir(out_dir: String, log_dir: String) raises -> BuildOutcome:
+    """REFUSED when `log_dir` is `out_dir` or lies under it (file header)."""
+    var out = resolved_path(out_dir)
+    var log = resolved_path(log_dir)
+    if log == out or out == "/" or log.startswith(out + String("/")):
+        return _refused(
+            String("--log-dir '")
+            + log_dir
+            + String("' is --out-dir '")
+            + out_dir
+            + String("' or lies under it ('")
+            + log
+            + String("' in '")
+            + out
+            + String("'): the out dir becomes the release directory, which holds only the")
+            + String(" member directories and release.json")
+        )
+    return BuildOutcome(EXIT_OK, String(""))
+
+
 def _failure(name: String, spec: RunSpec, r: RunResult) -> BuildOutcome:
     var why = (
         String("kci build: artifact '")
@@ -113,6 +173,38 @@ def _member_line(m: ReleaseMember) -> String:
     )
 
 
+def _check_release_top(release_dir: String, names: List[String]) raises -> BuildOutcome:
+    """REFUSED unless `release_dir` holds exactly the member directories `names`."""
+    var raw = listdir(release_dir)
+    for i in range(len(raw)):
+        var entry = String(raw[i])
+        var declared = False
+        for k in range(len(names)):
+            if names[k] == entry:
+                declared = True
+                break
+        if not declared:
+            return _refused(
+                String("--out-dir '")
+                + release_dir
+                + String("' holds '")
+                + entry
+                + String("', which no declaration names: the release directory holds only the")
+                + String(" member directories and release.json (a build wrote outside its own")
+                + String(" directory)")
+            )
+    for k in range(len(names)):
+        if not isdir(release_dir + String("/") + names[k]):
+            return _refused(
+                String("artifact '")
+                + names[k]
+                + String("': its directory is gone from --out-dir '")
+                + release_dir
+                + String("' (a later build removed it)")
+            )
+    return BuildOutcome(EXIT_OK, String(""))
+
+
 def build_release[R: ProcessRunner](req: BuildRequest, mut runner: R) -> BuildOutcome:
     """Build every declared artifact (file header)."""
     try:
@@ -122,6 +214,9 @@ def build_release[R: ProcessRunner](req: BuildRequest, mut runner: R) -> BuildOu
         var gate = check_out_dir(req.out_dir)
         if not gate.ok():
             return gate^
+        var logs = check_log_dir(req.out_dir, req.log_dir)
+        if not logs.ok():
+            return logs^
         makedirs(req.out_dir, exist_ok=True)
         makedirs(req.log_dir, exist_ok=True)
         var out = realpath(req.out_dir)
@@ -160,6 +255,33 @@ def build_release[R: ProcessRunner](req: BuildRequest, mut runner: R) -> BuildOu
                 members.append(verify_member(name, dir))
             except e:
                 return _refused(String(e))
+        var names = List[String]()
+        for i in range(len(decls.artifacts)):
+            names.append(decls.artifacts[i].name.copy())
+        var top = _check_release_top(out, names)
+        if not top.ok():
+            return top^
+        var final = List[ReleaseMember]()
+        for i in range(len(members)):
+            ref first = members[i]
+            var again: ReleaseMember
+            try:
+                again = verify_member(first.declaration, first.dir)
+            except e:
+                return _refused(String("after every build ran, ") + String(e))
+            if _member_line(again) != _member_line(first) or again.size != first.size:
+                return _refused(
+                    String("artifact '")
+                    + first.declaration
+                    + String("': its directory changed after it was verified (a later build")
+                    + String(" wrote into it): was `")
+                    + _member_line(first)
+                    + String("`, now `")
+                    + _member_line(again)
+                    + String("`")
+                )
+            final.append(again^)
+        members = final^
         var release = release_manifest_of(members)
         var text = render_release_manifest(release)
         _write(out + String("/") + String(RELEASE_MANIFEST_NAME), text)

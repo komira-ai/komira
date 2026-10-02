@@ -8,7 +8,11 @@
 #                              with which program and args
 #   --work-dir <abs dir>       the cwd of every build (an absolute path)
 #   --out-dir <dir>            absent or empty; becomes the release directory
-#   --log-dir <dir>            each build's stdout and stderr go here
+#   --log-dir <dir>            each build's stdout and stderr go here; never
+#                              --out-dir itself or a directory under it (the
+#                              build refuses that before anything runs, after
+#                              resolving both paths: build.mojo
+#                              `check_log_dir`)
 #   [--build-timeout-s <n>]    per artifact; default 3600
 #   [--help]
 #

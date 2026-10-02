@@ -2,9 +2,12 @@
 # src/kci_build/tests/test_build_flow.mojo
 #   The whole `kci build` verb over ScriptedRunner: one build per declared
 #   artifact, in file order, each into its own empty directory; every stop
-#   (exit, signal, timeout, not startable, every verify_member refusal) with
-#   later artifacts not run and no release.json; release.json last on
-#   success, with the set hash printed.
+#   (exit, signal, timeout, not startable, every verify_member refusal, a
+#   symlinked entry) with later artifacts not run and no release.json; a
+#   --log-dir that is --out-dir or under it refused with zero runs; a stray
+#   sibling in the out dir and a later build rewriting an earlier member
+#   refused before release.json; release.json last on success, with the set
+#   hash printed.
 # =============================================================================
 #
 # Every file a build would have left (package, manifest.json, metadata.json)
@@ -15,7 +18,7 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import getenv, listdir, makedirs
+from std.os import getenv, listdir, makedirs, remove, rmdir
 from std.os.path import exists, isdir, realpath
 from std.pathlib import Path
 
@@ -587,6 +590,240 @@ def test_unstamped_is_refused() raises:
         String("r7"),
         7,
         String("its metadata says stamped: false; an unstamped package is never released"),
+    )
+
+
+# ---- --log-dir is --out-dir or under it: REFUSED, nothing runs, nothing made -----
+
+
+def _log_dir_refused(tag: String, log_dir: String, shown: String) raises:
+    """`log_dir` (relative to the fresh root) resolves to `shown` (relative
+    to the root), which is the out dir or under it."""
+    var root = _fresh(tag)
+    var req = _request(root)
+    req.log_dir = root + String("/") + log_dir
+    var runner = ScriptedRunner()
+    var outcome = build_release(req, runner)
+    assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
+    assert_equal(
+        outcome.message,
+        String("kci build: --log-dir '") + req.log_dir + String("' is --out-dir '") + req.out_dir
+        + String("' or lies under it ('") + root + String("/") + shown + String("' in '")
+        + req.out_dir
+        + String("'): the out dir becomes the release directory, which holds only the")
+        + String(" member directories and release.json"),
+    )
+    assert_equal(len(runner.calls), 0)
+    assert_false(exists(req.out_dir))
+    assert_false(exists(req.log_dir))
+
+
+def test_log_dir_that_is_the_out_dir_is_refused_with_zero_runs() raises:
+    _log_dir_refused(String("log_eq"), String("out"), String("out"))
+    _log_dir_refused(String("log_eq2"), String("repo/../out/."), String("out"))
+
+
+def test_log_dir_under_the_out_dir_is_refused_with_zero_runs() raises:
+    _log_dir_refused(String("log_under"), String("out/logs"), String("out/logs"))
+    # named like an artifact: it would have collided with that member's dir
+    _log_dir_refused(String("log_member"), String("out/komira"), String("out/komira"))
+
+
+def test_log_dir_under_the_out_dir_through_a_symlink_is_refused() raises:
+    var root = _fresh(String("log_link"))
+    var req = _request(root)
+    makedirs(req.out_dir, exist_ok=True)
+    _symlink(req.out_dir, root + String("/alias"))
+    req.log_dir = root + String("/alias/logs")
+    var runner = ScriptedRunner()
+    var outcome = build_release(req, runner)
+    assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
+    assert_true(outcome.message.find(String("' or lies under it ('") + req.out_dir + String("/logs' in '")) >= 0, outcome.message)
+    assert_equal(len(runner.calls), 0)
+
+
+def test_log_dir_beside_the_out_dir_is_accepted() raises:
+    var root = _fresh(String("log_beside"))
+    var req = _request(root)
+    req.log_dir = root + String("/out-logs")  # shares a prefix, not a directory
+    var runner = ScriptedRunner()
+    var names = _names()
+    for i in range(len(names)):
+        runner.expect(_good_step(req, names[i]))
+    var outcome = build_release(req, runner)
+    assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
+
+
+# ---- after every build: the out dir must hold exactly the final members ------------
+
+
+def _symlink(target: String, link: String) raises:
+    """`ln -s target link`, through libc (test-only FFI)."""
+    var t = target.copy()
+    var l = link.copy()
+    var rc = external_call["symlink", Int32](
+        t.as_c_string_slice().unsafe_ptr(), l.as_c_string_slice().unsafe_ptr()
+    )
+    if rc != 0:
+        raise Error(String("symlink(") + target + String(", ") + link + String(") failed"))
+
+
+def _three_with(tag: String, which: Int) raises -> _Run:
+    """All three builds succeed; the LAST one (komira) also does `which`:
+    1 writes a stray sibling into the out dir, 2 rewrites the first member
+    consistently (it still verifies, with other bytes), 3 leaves a stray
+    file inside the first member."""
+    var root = _fresh(tag)
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    runner.expect(_good_step(req, String("komira_hash")))
+    runner.expect(_good_step(req, String("komira_name_registry")))
+    var last = _good_step(req, String("komira"))
+    var first = req.out_dir + String("/komira_hash/")
+    if which == 1:
+        last.writes(req.out_dir + String("/BUILD_SUMMARY.txt"), String("x"))
+    if which == 2:
+        var other = _content(String("komira_hash")) + String(" v2")
+        var file = _file(String("komira_hash"))
+        last.writes(first + file, other.copy())
+        last.writes(first + String("manifest.json"), _manifest(String("komira_hash"), file, _hash(other)))
+        last.writes(
+            first + String("metadata.json"),
+            _metadata(String("komira_hash"), file, other.byte_length()),
+        )
+    if which == 3:
+        last.writes(first + String("stray.txt"), String("x"))
+    runner.expect(last^)
+    var outcome = build_release(req, runner)
+    return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
+
+
+def test_a_stray_sibling_in_the_out_dir_is_refused() raises:
+    var r = _three_with(String("sibling"), 1)
+    assert_equal(r.code, EXIT_REFUSED, r.message)
+    assert_equal(
+        r.message,
+        String("kci build: --out-dir '") + r.req.out_dir
+        + String("' holds 'BUILD_SUMMARY.txt', which no declaration names: the release")
+        + String(" directory holds only the member directories and release.json (a build wrote")
+        + String(" outside its own directory)"),
+    )
+    assert_equal(r.remaining, 0)
+    assert_false(exists(_release_json(r.req)))
+
+
+def test_a_later_build_rewriting_an_earlier_member_is_refused() raises:
+    var r = _three_with(String("rewrite"), 2)
+    assert_equal(r.code, EXIT_REFUSED, r.message)
+    var was = _hash(_content(String("komira_hash")))
+    var now = _hash(_content(String("komira_hash")) + String(" v2"))
+    assert_equal(
+        r.message,
+        String("kci build: artifact 'komira_hash': its directory changed after it was verified")
+        + String(" (a later build wrote into it): was `komira_hash  1.0.0  ") + String(_BUILD)
+        + String("  ") + was + String("`, now `komira_hash  1.0.0  ") + String(_BUILD)
+        + String("  ") + now + String("`"),
+    )
+    assert_equal(r.remaining, 0)
+    assert_false(exists(_release_json(r.req)))
+
+
+def test_a_later_build_breaking_an_earlier_member_is_refused() raises:
+    var r = _three_with(String("break"), 3)
+    assert_equal(r.code, EXIT_REFUSED, r.message)
+    assert_equal(
+        r.message,
+        String("kci build: after every build ran, artifact 'komira_hash': the directory holds")
+        + String(" 'stray.txt', which its manifest does not name; it holds exactly manifest.json,")
+        + String(" the file and the metadata"),
+    )
+    assert_false(exists(_release_json(r.req)))
+
+
+# ---- a member entry that is a symlink: REFUSED, later not run, no release.json ----
+
+
+struct _LinksFirstFile(ProcessRunner):
+    """ScriptedRunner; after the FIRST run, replaces `entry` of that run's out
+    dir with a symlink to an identical-bytes file outside the out dir. An
+    EMPTY `entry` replaces the member dir itself, its files moved to
+    `outside`."""
+
+    var inner: ScriptedRunner
+    var member_dir: String
+    var entry: String
+    var outside: String
+
+    def __init__(
+        out self, var inner: ScriptedRunner, var member_dir: String, var entry: String, var outside: String
+    ):
+        self.inner = inner^
+        self.member_dir = member_dir^
+        self.entry = entry^
+        self.outside = outside^
+
+    def run(mut self, spec: RunSpec) raises -> RunResult:
+        var r = self.inner.run(spec)
+        if self.inner.next_step == 1 and self.entry.byte_length() == 0:
+            var listing = listdir(self.member_dir)
+            for i in range(len(listing)):
+                var name = String(listing[i])
+                var p = self.member_dir + String("/") + name
+                write_text_file(self.outside + String("/") + name, Path(p).read_text())
+                remove(p)
+            rmdir(self.member_dir)
+            _symlink(self.outside, self.member_dir)
+        elif self.inner.next_step == 1:
+            var p = self.member_dir + String("/") + self.entry
+            write_text_file(self.outside, Path(p).read_text())
+            remove(p)
+            _symlink(self.outside, p)
+        return r^
+
+
+def _linked_first(tag: String, entry: String, why: String = String("")) raises:
+    var root = _fresh(tag)
+    var req = _request(root)
+    var inner = ScriptedRunner()
+    var names = _names()
+    for i in range(len(names)):
+        inner.expect(_good_step(req, names[i]))
+    var runner = _LinksFirstFile(
+        inner^, req.out_dir + String("/komira_hash"), entry.copy(), root + String("/elsewhere/") + entry
+    )
+    var outcome = build_release(req, runner)
+    assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
+    var expected = why.copy()
+    if expected.byte_length() == 0:
+        expected = (
+            String("the directory's '") + entry
+            + String("' is a symlink: the directory holds regular files only, and a link can name")
+            + String(" bytes outside the release directory")
+        )
+    assert_equal(outcome.message, String("kci build: artifact 'komira_hash': ") + expected)
+    assert_equal(runner.inner.remaining(), 2)
+    assert_false(exists(_release_json(req)))
+
+
+def test_a_symlinked_file_is_refused() raises:
+    _linked_first(String("lnfile"), _file(String("komira_hash")))
+
+
+def test_a_symlinked_metadata_is_refused() raises:
+    _linked_first(String("lnmeta"), String("metadata.json"))
+
+
+def test_a_symlinked_manifest_is_refused() raises:
+    _linked_first(String("lnman"), String("manifest.json"))
+
+
+def test_a_symlinked_member_dir_is_refused() raises:
+    var root = _fresh(String("lndir"))
+    _linked_first(
+        String("lndir"),
+        String(""),
+        String("'") + root + String("/out/komira_hash' is a symlink, not a directory: a link can")
+        + String(" name bytes outside the release directory"),
     )
 
 
