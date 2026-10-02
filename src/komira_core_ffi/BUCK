@@ -1,13 +1,14 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The single home of each shared libc/POSIX `external_call` declaration
-# (`getenv`, `access`, `pthread_self`). It has no first-party deps by design:
-# every other package may depend on it. The LZ4 raw-block codec is its own
+# (`getenv`, `access`, `pthread_self`, `clock_gettime`, `chmod`). It has no
+# first-party deps by design: every other package may depend on it. The LZ4 raw-block codec is its own
 # module, //src/komira_lz4.
 mojo_library(
     name = "komira_core_ffi",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     test_srcs = [
+        "tests/test_posix_clock_and_chmod.mojo",
         "tests/test_posix_read_env.mojo",
         "tests/test_thread_self_discriminates.mojo",
     ],

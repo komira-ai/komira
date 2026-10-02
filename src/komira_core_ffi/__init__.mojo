@@ -13,7 +13,8 @@
 #   * posix.mojo — `_read_env` (the one `getenv(3)` primitive, for platform
 #     handshake values and test-runner variables only; configuration is never
 #     read from the environment), the `access(2)` path probes, and
-#     `_thread_self`.
+#     `_thread_self`, `_clock_realtime_unix_seconds` (the wall clock, whole
+#     seconds) and `_chmod`.
 #
 # DO NOT add inline `external_call["getenv", ...]` calls anywhere
 # else, and do not add configuration readers here: configuration is a
