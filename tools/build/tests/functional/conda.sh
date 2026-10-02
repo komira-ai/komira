@@ -24,7 +24,7 @@
 #              rendered into the run requirements at its own version.
 #   lint       //packaging/conda:names_lint is green and is a dependency of the
 #              package; a list with every defect, and a BUCK file that declares
-#              another package or swaps the list, is red naming each; a package
+#              another package by hand, calls conda_release twice or swaps the list, or a stale names.bzl, is red naming each; a package
 #              outside the tests cell that names its own list is refused.
 #   stamp      the version is <prefix>.N from the configuration: the unstamped
 #              build is refused by [release_check] and has no [release]; a
@@ -294,8 +294,8 @@ fi
 "$BUCK2" build $N:names_bad > "$W/names_bad.log" 2>&1
 problems=""
 for text in "is not after" "is not \`komira_\` + lowercase letters, digits and _" "is not //src/komira_wronglabel:komira_wronglabel" \
-    "is listed twice" "not three non-empty tab-separated columns" "a conda_package names another approved list" \
-    "conda_package targets differ from the rows"; do
+    "is listed twice" "not three non-empty tab-separated columns" "a conda_release names another approved list" \
+    "a conda_package declared by hand" "conda_release is called 2 times" "names_bad/names.bzl differs from names.tsv"; do
     grep -qF -- "$text" "$W/names_bad.log" || problems="$problems [$text]"
 done
 if [ -n "$problems" ]; then fail "lint: names_bad did not name:$problems (see $W/names_bad.log)"; else pass "lint: a list with every defect, and a BUCK file declaring another package and swapping the list, is red naming each"; fi

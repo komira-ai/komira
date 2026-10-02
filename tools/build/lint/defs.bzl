@@ -126,17 +126,20 @@ no_endpoint_rule = rule(
 )
 
 def _conda_names_impl(ctx):
-    staged, copy = _stage(ctx, [ctx.attrs.names, ctx.attrs.buck])
+    staged, copy = _stage(ctx, [ctx.attrs.names, ctx.attrs.buck, ctx.attrs.bzl, ctx.attrs._gen])
     prefix = ctx.attrs.prefix
-    return _lint(ctx, "conda_names", [], [copy[ctx.attrs.names.short_path], copy[ctx.attrs.buck.short_path], prefix], staged)
+    args = [copy[ctx.attrs.names.short_path], copy[ctx.attrs.buck.short_path], copy[ctx.attrs.bzl.short_path], copy[ctx.attrs._gen.short_path], prefix]
+    return _lint(ctx, "conda_names", [], args, staged)
 
 conda_names_rule = rule(
     impl = _conda_names_impl,
-    doc = "The approved list of published conda packages (`names`) is well formed and matches the conda_package targets of `buck`, which swaps no other list in.",
+    doc = "The approved list of published conda packages (`names`) is well formed; `bzl` is exactly what gen_conda_names.sh makes of it; `buck` declares no conda_package by hand, calls conda_release once, and swaps no other list in.",
     attrs = _COMMON | {
         "buck": attrs.source(),
+        "bzl": attrs.source(),
         "names": attrs.source(),
         "prefix": attrs.string(),
+        "_gen": attrs.source(default = "komira//tools/build/package:gen_conda_names.sh"),
     },
 )
 

@@ -5,6 +5,9 @@
 //!   komira_pack tar --bundle <dir> --prefix <top>/ --out <file.tar.gz>
 //!   komira_pack conda ...           (a `.conda` conda package; see below)
 //!   komira_pack conda-check ...     (reads one back and refuses what is wrong)
+//!   komira_pack conda-meta ...      (the metapackage: pins every approved library, no file)
+//!   komira_pack conda-meta-check ...  (reads it back)
+//!   komira_pack conda-set ...       (verifies a whole release set, then writes it as one directory)
 //!   komira_pack oci --bundle <dir> --name <n> --version <v> --repo <r>
 //!       --manifest <base manifest> --manifest-digest sha256:<hex>
 //!       --config <base config>
@@ -878,6 +881,61 @@ fn refuseDlopen(alloc: Alloc, dir_path: []const u8) !void {
     if (files == 0) fail("sources {s} hold no .mojo file", .{dir_path});
 }
 
+/// `<prefix>.<stamp>` from --version-prefix (the one line, MAJOR.MINOR) and
+/// --stamp (a decimal; 0 is an unstamped build).
+fn versionOf(alloc: Alloc, a: Args) ![]const u8 {
+    const prefix_text = std.mem.trim(u8, readAll(alloc, need(one(a, "--version-prefix"), "--version-prefix")), " \t\r\n");
+    var parts = std.mem.splitScalar(u8, prefix_text, '.');
+    const major = parts.next() orelse "";
+    const minor = parts.next() orelse "";
+    if (!decimal(major) or !decimal(minor) or parts.next() != null) fail("version prefix `{s}` is not MAJOR.MINOR", .{prefix_text});
+    const stamp = need(one(a, "--stamp"), "--stamp");
+    if (!decimal(stamp)) fail("--stamp `{s}` is not a decimal number without leading zeros", .{stamp});
+    return std.fmt.allocPrint(alloc, "{s}.{s}.{s}", .{ major, minor, stamp });
+}
+
+/// The source commit of a stamp (--commit): empty only for an unstamped build.
+fn commitOf(a: Args, stamp: []const u8) []const u8 {
+    const commit = one(a, "--commit") orelse "";
+    if (commit.len != 0 and !fullCommit(commit)) fail("--commit `{s}` is not a full lowercase 40-digit hex commit id", .{commit});
+    if (!std.mem.eql(u8, stamp, "0") and commit.len == 0) fail("a stamped package (N={s}) must carry --commit, the commit its stamp was derived from", .{stamp});
+    return commit;
+}
+
+/// The info/ entries every package carries besides index.json and paths.json:
+/// about.json, and the licence given as `--extra-file info/licenses/LICENSE=F`.
+fn aboutAndLicense(alloc: Alloc, a: Args, info_entries: *std.ArrayList(Entry)) !void {
+    const summary = need(one(a, "--summary"), "--summary");
+    var about = newObject(alloc);
+    try about.object.put("description", str(summary));
+    try about.object.put("home", str(need(one(a, "--home"), "--home")));
+    try about.object.put("license", str(need(one(a, "--license"), "--license")));
+    try about.object.put("summary", str(summary));
+    try info_entries.append(.{ .path = "info/about.json", .mode = 0o644, .data = try jsonLine(alloc, about) });
+    var have_license = false;
+    for (try all(alloc, a, "--extra-file")) |ef| {
+        const eq = std.mem.indexOfScalar(u8, ef, '=') orelse fail("--extra-file `{s}` is not info/<path>=<file>", .{ef});
+        const dest = ef[0..eq];
+        if (!std.mem.startsWith(u8, dest, "info/licenses/") or std.mem.indexOf(u8, dest, "..") != null or dest.len > 100)
+            fail("--extra-file destination `{s}` must be a short path under info/licenses/", .{dest});
+        have_license = have_license or std.mem.eql(u8, dest, license_member);
+        try info_entries.append(.{ .path = dest, .mode = 0o644, .data = readAll(alloc, ef[eq + 1 ..]) });
+    }
+    if (!have_license) fail("no {s}: Apache-2.0 requires the licence text to accompany a redistributed package", .{license_member});
+}
+
+/// The `.conda` zip of a package: metadata.json, then the pkg and info tars.
+fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_entries: []Entry) ![]u8 {
+    const pkg_tar = try writeTar(alloc, pkg_entries);
+    const info_tar = try writeTar(alloc, info_entries);
+    const members = [_]ZipMember{
+        .{ .name = "metadata.json", .data = conda_metadata },
+        .{ .name = try std.fmt.allocPrint(alloc, "pkg-{s}.tar.zst", .{stem}), .data = try zstdRaw(alloc, pkg_tar) },
+        .{ .name = try std.fmt.allocPrint(alloc, "info-{s}.tar.zst", .{stem}), .data = try zstdRaw(alloc, info_tar) },
+    };
+    return zipStored(alloc, &members);
+}
+
 /// komira_pack conda --name N --version-prefix FILE --stamp N --timestamp-ms T
 ///     --subdir linux-64 --mojo-pin V --license SPDX --summary S --home URL
 ///     --payload F.mojoc [--dep NAME]... --sources DIR --names FILE
@@ -906,23 +964,15 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     const pin = plain(need(one(a, "--mojo-pin"), "--mojo-pin"), "mojo pin", "");
     if (!decimal(std.mem.sliceTo(pin, '.'))) fail("mojo pin `{s}` is not an exact version", .{pin});
 
-    const prefix_text = std.mem.trim(u8, readAll(alloc, need(one(a, "--version-prefix"), "--version-prefix")), " \t\r\n");
-    var parts = std.mem.splitScalar(u8, prefix_text, '.');
-    const major = parts.next() orelse "";
-    const minor = parts.next() orelse "";
-    if (!decimal(major) or !decimal(minor) or parts.next() != null) fail("version prefix `{s}` is not MAJOR.MINOR", .{prefix_text});
+    const version = try versionOf(alloc, a);
     const stamp = need(one(a, "--stamp"), "--stamp");
-    if (!decimal(stamp)) fail("--stamp `{s}` is not a decimal number without leading zeros", .{stamp});
-    const version = try std.fmt.allocPrint(alloc, "{s}.{s}.{s}", .{ major, minor, stamp });
     const ts_text = need(one(a, "--timestamp-ms"), "--timestamp-ms");
     const timestamp = std.fmt.parseInt(i64, ts_text, 10) catch fail("--timestamp-ms `{s}` is not an integer", .{ts_text});
 
     // The source commit the stamp was derived from (release_version.sh). A
     // stamped package must carry it, so a stamp is tied to git and not just to
     // a number someone typed; an unstamped one carries it only if given.
-    const commit = one(a, "--commit") orelse "";
-    if (commit.len != 0 and !fullCommit(commit)) fail("--commit `{s}` is not a full lowercase 40-digit hex commit id", .{commit});
-    if (!std.mem.eql(u8, stamp, "0") and commit.len == 0) fail("a stamped package (N={s}) must carry --commit, the commit its stamp was derived from", .{stamp});
+    const commit = commitOf(a, stamp);
 
     try refuseDlopen(alloc, need(one(a, "--sources"), "--sources"));
 
@@ -956,39 +1006,14 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     try paths.object.put("paths", rows);
     try paths.object.put("paths_version", .{ .integer = 1 });
 
-    const summary = need(one(a, "--summary"), "--summary");
-    var about = newObject(alloc);
-    try about.object.put("description", str(summary));
-    try about.object.put("home", str(need(one(a, "--home"), "--home")));
-    try about.object.put("license", str(need(one(a, "--license"), "--license")));
-    try about.object.put("summary", str(summary));
-
     var info_entries = std.ArrayList(Entry).init(alloc);
-    try info_entries.append(.{ .path = "info/about.json", .mode = 0o644, .data = try jsonLine(alloc, about) });
-    const index_bytes = try jsonLine(alloc, index);
-    try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = index_bytes });
+    try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
     try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
-    var have_license = false;
-    for (try all(alloc, a, "--extra-file")) |ef| {
-        const eq = std.mem.indexOfScalar(u8, ef, '=') orelse fail("--extra-file `{s}` is not info/<path>=<file>", .{ef});
-        const dest = ef[0..eq];
-        if (!std.mem.startsWith(u8, dest, "info/licenses/") or std.mem.indexOf(u8, dest, "..") != null or dest.len > 100)
-            fail("--extra-file destination `{s}` must be a short path under info/licenses/", .{dest});
-        have_license = have_license or std.mem.eql(u8, dest, license_member);
-        try info_entries.append(.{ .path = dest, .mode = 0o644, .data = readAll(alloc, ef[eq + 1 ..]) });
-    }
-    if (!have_license) fail("no {s}: Apache-2.0 requires the licence text to accompany a redistributed package", .{license_member});
+    try aboutAndLicense(alloc, a, &info_entries);
 
     const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, conda_build });
     var pkg_entries = [_]Entry{.{ .path = payload_path, .mode = 0o644, .data = payload }};
-    const pkg_tar = try writeTar(alloc, &pkg_entries);
-    const info_tar = try writeTar(alloc, info_entries.items);
-    const members = [_]ZipMember{
-        .{ .name = "metadata.json", .data = conda_metadata },
-        .{ .name = try std.fmt.allocPrint(alloc, "pkg-{s}.tar.zst", .{stem}), .data = try zstdRaw(alloc, pkg_tar) },
-        .{ .name = try std.fmt.allocPrint(alloc, "info-{s}.tar.zst", .{stem}), .data = try zstdRaw(alloc, info_tar) },
-    };
-    const conda = try zipStored(alloc, &members);
+    const conda = try assembleConda(alloc, stem, &pkg_entries, info_entries.items);
     const conda_sha = sha256Hex(conda);
 
     var m = newObject(alloc);
@@ -999,6 +1024,7 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     try m.object.put("build_number", .{ .integer = 0 });
     try m.object.put("depends", try strArray(alloc, depends));
     try m.object.put("file_name", str(try std.fmt.allocPrint(alloc, "{s}.conda", .{stem})));
+    try m.object.put("kind", str("library"));
     try m.object.put("label", str(need(one(a, "--label"), "--label")));
     try m.object.put("mojo_pin", str(pin));
     try m.object.put("name", str(name));
@@ -1166,12 +1192,410 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
 }
 
 
+// ---- the metapackage and the release set ---------------------------------
+//
+// A release is a SET: one package per approved name, in lockstep, and a
+// metapackage that pins all of them and carries no file. The set is verified
+// as a whole (`conda-set`) before anything is offered to an uploader.
+
+/// The metapackage's name: the one line of `--meta-name-file`. It is a name of
+/// its own, never `<prefix>` + something, so it cannot be mistaken for a library
+/// and a list of libraries cannot claim it.
+fn metaNameOf(alloc: Alloc, a: Args, approved: []const []const u8, prefix: []const u8) []const u8 {
+    const raw = std.mem.trim(u8, readAll(alloc, need(one(a, "--meta-name-file"), "--meta-name-file")), " \t\r\n");
+    if (raw.len == 0) fail("--meta-name-file holds no name", .{});
+    for (raw) |c| if (!(std.ascii.isLower(c) or std.ascii.isDigit(c) or c == '_')) fail("metapackage name `{s}` is not lowercase letters, digits and _", .{raw});
+    if (isApproved(approved, raw)) fail("metapackage name `{s}` is also a library on the approved list", .{raw});
+    if (std.mem.startsWith(u8, raw, prefix)) fail("metapackage name `{s}` carries the library prefix `{s}`: it would read as a library", .{ raw, prefix });
+    return raw;
+}
+
+/// The run requirements of the metapackage: the platform guard, then every
+/// approved library at exactly this version, sorted.
+fn metaRequirements(alloc: Alloc, subdir: []const u8, version: []const u8, approved: []const []const u8) ![][]const u8 {
+    var list = std.ArrayList([]const u8).init(alloc);
+    try list.append(guardFor(subdir));
+    const sorted = try alloc.dupe([]const u8, approved);
+    std.mem.sort([]const u8, sorted, {}, lessStr);
+    for (sorted) |d| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ d, version }));
+    return list.toOwnedSlice();
+}
+
+/// komira_pack conda-meta --names FILE --name-prefix P --meta-name-file FILE
+///     --version-prefix FILE --stamp N --timestamp-ms T [--commit SHA]
+///     --subdir linux-64 --license SPDX --summary S --home URL
+///     --extra-file info/licenses/LICENSE=FILE --label L
+///     --out F.conda --conda-manifest F.json --digest F
+///
+/// The metapackage: no file, run requirements that are exactly every approved
+/// library at this version. Installing it installs the whole release set, and a
+/// registry that receives it LAST makes it the switch for users.
+fn cmdCondaMeta(alloc: Alloc, a: Args) !void {
+    allow(a, &.{ "--names", "--name-prefix", "--meta-name-file", "--version-prefix", "--stamp", "--timestamp-ms", "--commit", "--subdir", "--license", "--summary", "--home", "--extra-file", "--label", "--conda-manifest" });
+    const prefix = need(one(a, "--name-prefix"), "--name-prefix");
+    const approved = try approvedNames(alloc, need(one(a, "--names"), "--names"));
+    const name = metaNameOf(alloc, a, approved, prefix);
+    const subdir = need(one(a, "--subdir"), "--subdir");
+    _ = guardFor(subdir);
+    const version = try versionOf(alloc, a);
+    const stamp = need(one(a, "--stamp"), "--stamp");
+    const ts_text = need(one(a, "--timestamp-ms"), "--timestamp-ms");
+    const timestamp = std.fmt.parseInt(i64, ts_text, 10) catch fail("--timestamp-ms `{s}` is not an integer", .{ts_text});
+    const commit = commitOf(a, stamp);
+
+    const depends = try metaRequirements(alloc, subdir, version, approved);
+    var index = newObject(alloc);
+    try index.object.put("arch", str("x86_64"));
+    try index.object.put("build", str(conda_build));
+    try index.object.put("build_number", .{ .integer = 0 });
+    try index.object.put("depends", try strArray(alloc, depends));
+    try index.object.put("license", str(need(one(a, "--license"), "--license")));
+    try index.object.put("name", str(name));
+    try index.object.put("platform", str("linux"));
+    try index.object.put("subdir", str(subdir));
+    try index.object.put("timestamp", .{ .integer = timestamp });
+    try index.object.put("version", str(version));
+    var paths = newObject(alloc);
+    try paths.object.put("paths", newArray(alloc));
+    try paths.object.put("paths_version", .{ .integer = 1 });
+
+    var info_entries = std.ArrayList(Entry).init(alloc);
+    try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
+    try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
+    try aboutAndLicense(alloc, a, &info_entries);
+    const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, conda_build });
+    var no_files = [_]Entry{};
+    const conda = try assembleConda(alloc, stem, &no_files, info_entries.items);
+    const conda_sha = sha256Hex(conda);
+
+    var m = newObject(alloc);
+    const names_digest = try namesDigest(alloc, approved);
+    try m.object.put("approved_names_sha256", str(&names_digest));
+    try m.object.put("artifact_type", str("conda"));
+    try m.object.put("build", str(conda_build));
+    try m.object.put("build_number", .{ .integer = 0 });
+    try m.object.put("depends", try strArray(alloc, depends));
+    try m.object.put("file_name", str(try std.fmt.allocPrint(alloc, "{s}.conda", .{stem})));
+    try m.object.put("kind", str("metapackage"));
+    try m.object.put("label", str(need(one(a, "--label"), "--label")));
+    try m.object.put("name", str(name));
+    try m.object.put("schema", .{ .integer = 1 });
+    try m.object.put("sha256", str(&conda_sha));
+    try m.object.put("size", .{ .integer = @intCast(conda.len) });
+    try m.object.put("source_commit", str(commit));
+    try m.object.put("stamped", .{ .bool = !std.mem.eql(u8, stamp, "0") });
+    try m.object.put("subdir", str(subdir));
+    try m.object.put("version", str(version));
+
+    try writeFile(std.fs.cwd(), need(a.out, "--out"), conda);
+    try writeFile(std.fs.cwd(), need(one(a, "--conda-manifest"), "--conda-manifest"), try jsonLine(alloc, m));
+    try writeFile(std.fs.cwd(), need(a.digest, "--digest"), try std.fmt.allocPrint(alloc, "sha256:{s}\n", .{conda_sha}));
+}
+
+/// The package's own `info/index.json`, read back from the zip.
+fn packageIndex(alloc: Alloc, bytes: []const u8, what: []const u8) !json.Value {
+    const zip = try readZip(alloc, bytes, what);
+    if (zip.len != 3) fail("{s}: {d} members, must be 3 (metadata.json, pkg-*, info-*)", .{ what, zip.len });
+    const info = try readTar(alloc, zstdDecode(alloc, zip[2].data, "info tar"), "info tar");
+    const raw = (findTar(info, "info/index.json") orelse fail("{s}: no info/index.json", .{what})).data;
+    return json.parseFromSliceLeaky(json.Value, alloc, raw, .{});
+}
+
+/// komira_pack conda-meta-check --package F.conda --conda-manifest F.json
+///     --names FILE --name-prefix P --meta-name-file FILE --expect-subdir S
+///     [--require-stamped true] --out MARKER
+///
+/// Reads the metapackage back: it holds no file, and its requirements are the
+/// guard and EVERY approved library, each at its own version, sorted.
+fn cmdCondaMetaCheck(alloc: Alloc, a: Args) !void {
+    allow(a, &.{ "--package", "--conda-manifest", "--names", "--name-prefix", "--meta-name-file", "--expect-subdir", "--require-stamped" });
+    const bytes = readAll(alloc, need(one(a, "--package"), "--package"));
+    const approved = try approvedNames(alloc, need(one(a, "--names"), "--names"));
+    const prefix = need(one(a, "--name-prefix"), "--name-prefix");
+    const meta_name = metaNameOf(alloc, a, approved, prefix);
+    const subdir = need(one(a, "--expect-subdir"), "--expect-subdir");
+    const zip = try readZip(alloc, bytes, "package");
+    if (zip.len != 3) fail("package: {d} members, must be 3 (metadata.json, pkg-*, info-*)", .{zip.len});
+    expectEq("member 0 name", zip[0].name, "metadata.json");
+    expectEq("metadata.json", zip[0].data, conda_metadata);
+    if (!std.mem.startsWith(u8, zip[1].name, "pkg-") or !std.mem.endsWith(u8, zip[1].name, ".tar.zst")) fail("member 1 `{s}` is not pkg-*.tar.zst", .{zip[1].name});
+    if (!std.mem.startsWith(u8, zip[2].name, "info-") or !std.mem.endsWith(u8, zip[2].name, ".tar.zst")) fail("member 2 `{s}` is not info-*.tar.zst", .{zip[2].name});
+    const stem = zip[1].name["pkg-".len .. zip[1].name.len - ".tar.zst".len];
+    expectEq("info member stem", zip[2].name["info-".len .. zip[2].name.len - ".tar.zst".len], stem);
+    const pkg = try readTar(alloc, zstdDecode(alloc, zip[1].data, "pkg tar"), "pkg tar");
+    if (pkg.len != 0) fail("pkg tar: {d} files, a metapackage carries none", .{pkg.len});
+    const info = try readTar(alloc, zstdDecode(alloc, zip[2].data, "info tar"), "info tar");
+    for (info) |f| {
+        const known = std.mem.eql(u8, f.name, "info/about.json") or std.mem.eql(u8, f.name, "info/index.json") or std.mem.eql(u8, f.name, "info/paths.json");
+        if (!known and !std.mem.startsWith(u8, f.name, "info/licenses/")) fail("info tar: unexpected member {s}", .{f.name});
+    }
+    if (findTar(info, license_member) == null) fail("info tar: no {s}", .{license_member});
+    const index_raw = (findTar(info, "info/index.json") orelse fail("info tar: no info/index.json", .{})).data;
+    const index = try json.parseFromSliceLeaky(json.Value, alloc, index_raw, .{});
+    if (!std.mem.eql(u8, try jsonLine(alloc, index), index_raw)) fail("info/index.json is not sorted compact JSON with one trailing newline", .{});
+    const paths_raw = (findTar(info, "info/paths.json") orelse fail("info tar: no info/paths.json", .{})).data;
+    if (!std.mem.eql(u8, paths_raw, "{\"paths\":[],\"paths_version\":1}\n")) fail("info/paths.json lists a file: a metapackage carries none", .{});
+
+    if (index != .object or index.object.count() != 10) fail("info/index.json is not an object of exactly the ten keys", .{});
+    expectEq("index name", memberStr(index, "name", "index"), meta_name);
+    const version = memberStr(index, "version", "index");
+    expectEq("index subdir", memberStr(index, "subdir", "index"), subdir);
+    expectEq("index platform", memberStr(index, "platform", "index"), "linux");
+    expectEq("index arch", memberStr(index, "arch", "index"), "x86_64");
+    expectEq("index build", memberStr(index, "build", "index"), conda_build);
+    expectEq("member stem", stem, try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ meta_name, version, conda_build }));
+    var vparts = std.mem.splitScalar(u8, version, '.');
+    _ = vparts.next();
+    _ = vparts.next();
+    const v_stamp = vparts.next() orelse "";
+    const stamped = !std.mem.eql(u8, v_stamp, "0");
+    if (one(a, "--require-stamped") != null) {
+        if (!stamped) fail("version {s} was never stamped (N is 0): a release has a real N", .{version});
+        if (memberInt(index, "timestamp", "index") <= 0) fail("version {s} is stamped but its index timestamp is not positive: a release carries its commit's time", .{version});
+    }
+    const want = try metaRequirements(alloc, subdir, version, approved);
+    const depends = member(index, "depends", "index");
+    if (depends != .array or depends.array.items.len != want.len) fail("metapackage depends is not the guard and every one of the {d} approved libraries", .{want.len - 1});
+    for (depends.array.items, want) |got, w| {
+        if (got != .string) fail("index depends holds a non-string", .{});
+        expectEq("metapackage requirement", got.string, w);
+    }
+
+    const man_raw = readAll(alloc, need(one(a, "--conda-manifest"), "--conda-manifest"));
+    const man = try json.parseFromSliceLeaky(json.Value, alloc, man_raw, .{});
+    if (!std.mem.eql(u8, try jsonLine(alloc, man), man_raw)) fail("manifest is not sorted compact JSON with one trailing newline", .{});
+    expectEq("manifest kind", memberStr(man, "kind", "manifest"), "metapackage");
+    expectEq("manifest name", memberStr(man, "name", "manifest"), meta_name);
+    expectEq("manifest version", memberStr(man, "version", "manifest"), version);
+    expectEq("manifest file_name", memberStr(man, "file_name", "manifest"), try std.fmt.allocPrint(alloc, "{s}.conda", .{stem}));
+    expectEq("manifest sha256", memberStr(man, "sha256", "manifest"), &sha256Hex(bytes));
+    if (memberInt(man, "size", "manifest") != @as(i64, @intCast(bytes.len))) fail("manifest size differs from the file", .{});
+    if (memberBool(man, "stamped", "manifest") != stamped) fail("manifest `stamped` disagrees with the version", .{});
+    const man_commit = memberStr(man, "source_commit", "manifest");
+    if (man_commit.len != 0 and !fullCommit(man_commit)) fail("manifest source_commit `{s}` is not a full lowercase 40-digit hex commit id", .{man_commit});
+    if (one(a, "--require-stamped") != null and !fullCommit(man_commit)) fail("a release must carry the source commit of its stamp in the manifest", .{});
+    const names_digest = try namesDigest(alloc, approved);
+    expectEq("manifest approved_names_sha256", memberStr(man, "approved_names_sha256", "manifest"), &names_digest);
+
+    std.debug.print("komira_pack conda-meta-check: {s} {s} ({s}) pins {d} libraries, ok\n", .{ meta_name, version, subdir, approved.len });
+    try writeFile(std.fs.cwd(), need(a.out, "--out"), "ok\n");
+}
+
+const SetEntry = struct {
+    role: []const u8, // "member" or "metapackage"
+    name: []const u8,
+    version: []const u8,
+    subdir: []const u8,
+    file_name: []const u8,
+    sha256: []const u8,
+    size: i64,
+    commit: []const u8,
+    names_digest: []const u8,
+    stamped: bool,
+    depends: []const []const u8,
+    bytes: []const u8,
+};
+
+fn problem(alloc: Alloc, list: *std.ArrayList([]const u8), comptime fmt: []const u8, args: anytype) void {
+    list.append(std.fmt.allocPrint(alloc, fmt, args) catch fail("out of memory", .{})) catch fail("out of memory", .{});
+}
+
+/// One artifact of the set, read from the package ITSELF (its own info/index.json
+/// and its bytes) and from its manifest, with every disagreement noted.
+fn readSetEntry(alloc: Alloc, role: []const u8, pair: []const u8, problems: *std.ArrayList([]const u8)) !SetEntry {
+    const eq = std.mem.indexOfScalar(u8, pair, '=') orelse fail("`{s}` is not <manifest>=<file>", .{pair});
+    const man_path = pair[0..eq];
+    const file_path = pair[eq + 1 ..];
+    const bytes = readAll(alloc, file_path);
+    const man = try json.parseFromSliceLeaky(json.Value, alloc, readAll(alloc, man_path), .{});
+    const index = try packageIndex(alloc, bytes, file_path);
+    const name = memberStr(man, "name", man_path);
+    const version = memberStr(man, "version", man_path);
+    if (!std.mem.eql(u8, memberStr(index, "name", "index"), name)) problem(alloc, problems, "{s}: the package's own name is `{s}`, its manifest says `{s}`", .{ file_path, memberStr(index, "name", "index"), name });
+    if (!std.mem.eql(u8, memberStr(index, "version", "index"), version)) problem(alloc, problems, "{s}: the package's own version is {s}, its manifest says {s}", .{ name, memberStr(index, "version", "index"), version });
+    const subdir = memberStr(index, "subdir", "index");
+    if (!std.mem.eql(u8, memberStr(man, "subdir", man_path), subdir)) problem(alloc, problems, "{s}: manifest subdir differs from the package's", .{name});
+    const file_name = memberStr(man, "file_name", man_path);
+    const want_file = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}.conda", .{ name, version, conda_build });
+    if (!std.mem.eql(u8, file_name, want_file)) problem(alloc, problems, "{s}: file_name `{s}` is not `{s}`", .{ name, file_name, want_file });
+    const sha = sha256Hex(bytes);
+    if (!std.mem.eql(u8, memberStr(man, "sha256", man_path), &sha)) problem(alloc, problems, "{s}: the manifest's sha256 is not the file's ({s})", .{ name, &sha });
+    if (memberInt(man, "size", man_path) != @as(i64, @intCast(bytes.len))) problem(alloc, problems, "{s}: the manifest's size is not the file's", .{name});
+    const kind = memberStr(man, "kind", man_path);
+    if (!std.mem.eql(u8, kind, if (std.mem.eql(u8, role, "member")) "library" else "metapackage")) problem(alloc, problems, "{s}: manifest kind `{s}` is not that of a {s}", .{ name, kind, role });
+    const idx_depends = member(index, "depends", "index");
+    const man_depends = member(man, "depends", man_path);
+    var same = idx_depends == .array and man_depends == .array and idx_depends.array.items.len == man_depends.array.items.len;
+    if (same) for (idx_depends.array.items, man_depends.array.items) |x, y| {
+        same = same and x == .string and y == .string and std.mem.eql(u8, x.string, y.string);
+    };
+    if (!same) problem(alloc, problems, "{s}: the manifest's depends differ from the package's own", .{name});
+    var deps = std.ArrayList([]const u8).init(alloc);
+    if (idx_depends == .array) for (idx_depends.array.items) |d| if (d == .string) try deps.append(d.string);
+    return .{
+        .role = role,
+        .name = name,
+        .version = version,
+        .subdir = subdir,
+        .file_name = file_name,
+        .sha256 = try alloc.dupe(u8, &sha),
+        .size = @intCast(bytes.len),
+        .commit = memberStr(man, "source_commit", man_path),
+        .names_digest = memberStr(man, "approved_names_sha256", man_path),
+        .stamped = memberBool(man, "stamped", man_path),
+        .depends = try deps.toOwnedSlice(),
+        .bytes = bytes,
+    };
+}
+
+fn setEntryJson(alloc: Alloc, e: SetEntry) !json.Value {
+    var o = newObject(alloc);
+    try o.object.put("depends", try strArray(alloc, e.depends));
+    try o.object.put("file_name", str(e.file_name));
+    try o.object.put("name", str(e.name));
+    try o.object.put("path", str(try std.fmt.allocPrint(alloc, "{s}.conda", .{e.name})));
+    try o.object.put("role", str(e.role));
+    try o.object.put("sha256", str(e.sha256));
+    try o.object.put("size", .{ .integer = e.size });
+    try o.object.put("source_commit", str(e.commit));
+    try o.object.put("subdir", str(e.subdir));
+    try o.object.put("version", str(e.version));
+    return o;
+}
+
+fn lessSetEntry(_: void, x: SetEntry, y: SetEntry) bool {
+    return std.mem.lessThan(u8, x.name, y.name);
+}
+
+/// komira_pack conda-set --names FILE --name-prefix P --meta-name-file FILE
+///     --mojo-pin V --external NAME... --member MANIFEST=FILE... --meta MANIFEST=FILE
+///     --out-dir DIR
+///
+/// Verifies a release set as a whole and, only if it is complete and consistent,
+/// writes DIR: every package as `<name>.conda` and `release_set.json`. Every
+/// problem is reported, not only the first. Refuses (exit 2) when:
+///   * an approved name has no package, or a package is not an approved name;
+///   * versions, subdir, source commit or approved-list digest are not one value
+///     across the set (lockstep), or a package is unstamped;
+///   * a package's requirement is neither an approved library at the set's
+///     version nor an allowed external (`--external`; the compiler at its pin);
+///   * the metapackage does not pin every library, or pins anything else;
+///   * a package's manifest disagrees with the package's own bytes.
+fn cmdCondaSet(alloc: Alloc, a: Args) !void {
+    allow(a, &.{ "--names", "--name-prefix", "--meta-name-file", "--mojo-pin", "--external", "--member", "--meta", "--out-dir" });
+    const approved = try approvedNames(alloc, need(one(a, "--names"), "--names"));
+    const prefix = need(one(a, "--name-prefix"), "--name-prefix");
+    const meta_name = metaNameOf(alloc, a, approved, prefix);
+    const pin = need(one(a, "--mojo-pin"), "--mojo-pin");
+    const externals = try all(alloc, a, "--external");
+    if (externals.len == 0) fail("no --external: every package requires at least the platform guard", .{});
+    var problems = std.ArrayList([]const u8).init(alloc);
+
+    var entries = std.ArrayList(SetEntry).init(alloc);
+    for (try all(alloc, a, "--member")) |pair| try entries.append(try readSetEntry(alloc, "member", pair, &problems));
+    const meta = try readSetEntry(alloc, "metapackage", need(one(a, "--meta"), "--meta"), &problems);
+    if (entries.items.len == 0) fail("no --member: a release set of nothing", .{});
+
+    // completeness: the approved list and the packages are the same set
+    for (approved) |n| {
+        var found = false;
+        for (entries.items) |e| found = found or std.mem.eql(u8, e.name, n);
+        if (!found) problem(alloc, &problems, "missing member: `{s}` is approved but no package for it is in the set", .{n});
+    }
+    for (entries.items, 0..) |e, i| {
+        if (!isApproved(approved, e.name)) problem(alloc, &problems, "`{s}` is in the set but not on the approved list", .{e.name});
+        for (entries.items[0..i]) |p| if (std.mem.eql(u8, p.name, e.name)) problem(alloc, &problems, "`{s}` is in the set twice", .{e.name});
+    }
+    if (!std.mem.eql(u8, meta.name, meta_name)) problem(alloc, &problems, "the metapackage is named `{s}`, the approved name is `{s}`", .{ meta.name, meta_name });
+
+    // lockstep, and a release
+    const names_digest = try namesDigest(alloc, approved);
+    var all_entries = std.ArrayList(SetEntry).init(alloc);
+    try all_entries.appendSlice(entries.items);
+    try all_entries.append(meta);
+    for (all_entries.items) |e| {
+        if (!std.mem.eql(u8, e.version, meta.version)) problem(alloc, &problems, "version skew: `{s}` is {s}, the metapackage is {s}", .{ e.name, e.version, meta.version });
+        if (!std.mem.eql(u8, e.subdir, meta.subdir)) problem(alloc, &problems, "`{s}` is for {s}, the metapackage for {s}", .{ e.name, e.subdir, meta.subdir });
+        if (!std.mem.eql(u8, e.commit, meta.commit)) problem(alloc, &problems, "`{s}` was stamped from commit `{s}`, the metapackage from `{s}`", .{ e.name, e.commit, meta.commit });
+        if (!e.stamped) problem(alloc, &problems, "`{s}` was never stamped: a release is stamped", .{e.name});
+        if (!fullCommit(e.commit)) problem(alloc, &problems, "`{s}` carries no full source commit", .{e.name});
+        if (!std.mem.eql(u8, e.names_digest, &names_digest)) problem(alloc, &problems, "`{s}` was built against another approved list (approved_names_sha256 {s}, this list {s})", .{ e.name, e.names_digest, &names_digest });
+    }
+
+    // every requirement of a library is inside the set or an allowed external
+    for (entries.items) |e| {
+        for (e.depends) |d| {
+            const sp = std.mem.indexOf(u8, d, " ==");
+            const dn = if (sp) |i| d[0..i] else d;
+            var external = false;
+            for (externals) |x| external = external or std.mem.eql(u8, x, dn);
+            if (external) {
+                if (std.mem.eql(u8, dn, mojo_conda_name)) {
+                    const want = try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin });
+                    if (!std.mem.eql(u8, d, want)) problem(alloc, &problems, "`{s}` requires `{s}`, the set's compiler is `{s}`", .{ e.name, d, want });
+                }
+                continue;
+            }
+            if (!isApproved(approved, dn)) {
+                problem(alloc, &problems, "`{s}` requires `{s}`, which is outside the release set", .{ e.name, dn });
+                continue;
+            }
+            const ver = if (sp) |i| d[i + 3 ..] else "";
+            if (!std.mem.eql(u8, ver, e.version)) problem(alloc, &problems, "`{s}` requires `{s}`, not at its own version {s}", .{ e.name, d, e.version });
+        }
+    }
+
+    // the metapackage pins exactly the approved libraries
+    const want_meta = try metaRequirements(alloc, meta.subdir, meta.version, approved);
+    var meta_ok = meta.depends.len == want_meta.len;
+    if (meta_ok) for (meta.depends, want_meta) |g, w| {
+        meta_ok = meta_ok and std.mem.eql(u8, g, w);
+    };
+    if (!meta_ok) problem(alloc, &problems, "the metapackage's requirements are not exactly the guard and every approved library at {s}", .{meta.version});
+
+    if (problems.items.len != 0) {
+        for (problems.items) |p| std.debug.print("komira_pack conda-set: {s}\n", .{p});
+        fail("{d} problem(s): the set is not a release", .{problems.items.len});
+    }
+
+    // upload order: members sorted by name, the metapackage LAST
+    std.mem.sort(SetEntry, entries.items, {}, lessSetEntry);
+    var artifacts = newArray(alloc);
+    var order = newArray(alloc);
+    for (entries.items) |e| {
+        try artifacts.array.append(try setEntryJson(alloc, e));
+        try order.array.append(str(e.file_name));
+    }
+    try artifacts.array.append(try setEntryJson(alloc, meta));
+    try order.array.append(str(meta.file_name));
+    var set = newObject(alloc);
+    try set.object.put("approved_names_sha256", str(&names_digest));
+    try set.object.put("artifact_type", str("conda-release-set"));
+    try set.object.put("artifacts", artifacts);
+    try set.object.put("member_count", .{ .integer = @intCast(entries.items.len) });
+    try set.object.put("metapackage", str(meta.name));
+    try set.object.put("mojo_pin", str(pin));
+    try set.object.put("schema", .{ .integer = 1 });
+    try set.object.put("source_commit", str(meta.commit));
+    try set.object.put("subdir", str(meta.subdir));
+    try set.object.put("upload_order", order);
+    try set.object.put("version", str(meta.version));
+
+    const out_dir = need(one(a, "--out-dir"), "--out-dir");
+    try std.fs.cwd().makePath(out_dir);
+    var dir = try std.fs.cwd().openDir(out_dir, .{});
+    defer dir.close();
+    for (all_entries.items) |e| try writeFile(dir, try std.fmt.allocPrint(alloc, "{s}.conda", .{e.name}), e.bytes);
+    try writeFile(dir, "release_set.json", try jsonLine(alloc, set));
+    std.debug.print("komira_pack conda-set: {d} libraries and the metapackage `{s}`, version {s}, ok\n", .{ entries.items.len, meta.name, meta.version });
+}
+
 pub fn main() !void {
     var arena = std.heap.ArenaAllocator.init(std.heap.page_allocator);
     defer arena.deinit();
     const alloc = arena.allocator();
     const argv = try std.process.argsAlloc(alloc);
-    if (argv.len < 2) fail("usage: komira_pack tar|oci|conda|conda-check --flag value ...", .{});
+    if (argv.len < 2) fail("usage: komira_pack tar|oci|conda|conda-check|conda-meta|conda-meta-check|conda-set --flag value ...", .{});
     const a = try parseArgs(alloc, argv);
     if (std.mem.eql(u8, argv[1], "tar")) {
         try cmdTar(alloc, a);
@@ -1181,5 +1605,11 @@ pub fn main() !void {
         try cmdConda(alloc, a);
     } else if (std.mem.eql(u8, argv[1], "conda-check")) {
         try cmdCondaCheck(alloc, a);
+    } else if (std.mem.eql(u8, argv[1], "conda-meta")) {
+        try cmdCondaMeta(alloc, a);
+    } else if (std.mem.eql(u8, argv[1], "conda-meta-check")) {
+        try cmdCondaMetaCheck(alloc, a);
+    } else if (std.mem.eql(u8, argv[1], "conda-set")) {
+        try cmdCondaSet(alloc, a);
     } else fail("unknown command {s}", .{argv[1]});
 }

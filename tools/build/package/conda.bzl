@@ -75,6 +75,10 @@ MOJO_COMPILER_PIN = "1.0.0"
 _LICENSE = "Apache-2.0"
 _HOME = "https://github.com/komira-ai/komira"
 
+# The same two facts, for conda_set.bzl (a loaded name cannot start with `_`).
+PACKAGE_LICENSE = _LICENSE
+PACKAGE_HOME = _HOME
+
 def _subdir(ctx):
     # Set by the macro from the TARGET platform's constraints (a select), so no
     # BUCK file states it.

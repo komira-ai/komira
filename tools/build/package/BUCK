@@ -23,5 +23,14 @@ zig_exe(
 # release job, tested by tools/build/tests/functional/conda.sh.
 shell_lint(
     name = "shell_lint",
-    srcs = ["release_version.sh"],
+    srcs = [
+        "gen_conda_names.sh",
+        "release_version.sh",
+    ],
+)
+
+# names.bzl from names.tsv (packaging/conda); read by //packaging/conda:names_lint.
+export_file(
+    name = "gen_conda_names.sh",
+    visibility = ["PUBLIC"],
 )

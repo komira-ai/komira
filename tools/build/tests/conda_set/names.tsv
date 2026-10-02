@@ -1,0 +1,19 @@
+# TEST LIST, NOT AN APPROVAL. The set that tools/build/tests/functional/conda_set.sh builds,
+# installs and breaks on purpose: the phase-1 libraries that have tests, no native code and
+# no run-time shared library. Nothing here is a name approved for a registry (that list is
+# packaging/conda/names.tsv) and nothing here is uploaded. Same columns as that list;
+# names.bzl is generated from it by tools/build/package/gen_conda_names.sh.
+komira_atomic_alias	//src/komira_atomic_alias:komira_atomic_alias	test set
+komira_clock	//src/komira_clock:komira_clock	test set
+komira_core_ffi	//src/komira_core_ffi:komira_core_ffi	test set
+komira_encoding	//src/komira_encoding:komira_encoding	test set
+komira_gcp_core	//src/komira_gcp_core:komira_gcp_core	test set
+komira_hash	//src/komira_hash:komira_hash	test set
+komira_json	//src/komira_json:komira_json	test set
+komira_kafka_server	//src/komira_kafka_server:komira_kafka_server	test set
+komira_name_registry	//src/komira_name_registry:komira_name_registry	test set
+komira_protobuf	//src/komira_protobuf:komira_protobuf	test set
+komira_retry	//src/komira_retry:komira_retry	test set
+komira_textproto	//src/komira_textproto:komira_textproto	test set
+komira_validation_run	//src/komira_validation_run:komira_validation_run	test set
+komira_xml	//src/komira_xml:komira_xml	test set

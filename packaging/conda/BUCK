@@ -1,24 +1,31 @@
 load("@komira//tools/build/lint:defs.bzl", "conda_names")
-load("@komira//tools/build/package:conda.bzl", "PUBLISHED_NAME_PREFIX", "conda_package")
+load("@komira//tools/build/package:conda.bzl", "PUBLISHED_NAME_PREFIX")
+load("@komira//tools/build/package:conda_set.bzl", "conda_release")
+load(":names.bzl", "APPROVED")
 
 # The approved list and the version prefix are the only statements of either
-# (tools/build/package/conda.bzl reads them); see README.md.
+# (tools/build/package/conda.bzl reads them); see README.md. names.bzl is the
+# generated copy of names.tsv that this file needs at load time; names_lint is
+# red when it differs from the list.
 export_file(name = "names.tsv", visibility = ["PUBLIC"])
+
+export_file(name = "names.bzl", visibility = ["PUBLIC"])
 
 export_file(name = "VERSION_PREFIX", visibility = ["PUBLIC"])
 
-# The list is well formed, every row names a `komira_` package whose library
-# exists as a target here, and this file never swaps the list for another.
+# The metapackage's name, one line (see README.md, "The release set").
+export_file(name = "METAPACKAGE", visibility = ["PUBLIC"])
+
+# The list is well formed, names.bzl is its generated copy, this file declares
+# no package by hand and never swaps the list for another.
 conda_names(
     name = "names_lint",
     names = "names.tsv",
+    bzl = "names.bzl",
     buck = "BUCK",
     prefix = PUBLISHED_NAME_PREFIX,
 )
 
-# The canary: one library with no dependencies and no native code.
-conda_package(
-    name = "komira_encoding",
-    lib = "//src/komira_encoding:komira_encoding",
-    summary = "Base64, base64url, base32 and hex in pure Mojo, with constant-time strict decoding.",
-)
+# One conda_package per approved name (//packaging/conda:<name>), the
+# metapackage (:metapackage) and the verified release set (:release_set).
+conda_release(entries = APPROVED)

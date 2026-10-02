@@ -15,17 +15,15 @@ manifest; publishing is a separate, gated step.
 > that uploads nothing, a protected environment, and a one-package canary
 > before the rest.
 
-## One package
+## One package, generated
 
-```python
-load("@komira//tools/build/package:conda.bzl", "conda_package")
-
-conda_package(
-    name = "komira_encoding",        # the library's import name
-    lib = "//src/komira_encoding:komira_encoding",
-    summary = "One line for the channel page.",
-)
-```
+No package is written by hand. [`BUCK`](BUCK) makes one call,
+`conda_release(entries = APPROVED)`, and
+[`conda_set.bzl`](../../tools/build/package/conda_set.bzl) declares a
+[`conda_package`](../../tools/build/package/conda.bzl) for every row of
+[`names.tsv`](names.tsv): **adding a row adds the package** (the generated
+`names.bzl` is the copy of the list the macro reads at load time, below).
+The same call declares the metapackage and the release set (next section).
 
 `./buck2 build //packaging/conda:komira_encoding` writes `komira_encoding.conda`.
 Everything about it is derived from the library, so the package cannot disagree
@@ -45,6 +43,72 @@ named for the import name; the library has no tests; the library links native
 code (a `.mojoc` holds none, so a consumer would fail at its own link); or the
 library opens a shared library by name at run time (`OwnedDLHandle`), whose
 conda package this tool does not yet derive.
+
+## The release set and the metapackage
+
+A release is a SET: one package per approved name, all at one version, and one
+metapackage. Three targets of this directory make it:
+
+| target | what it is |
+|---|---|
+| `//packaging/conda:<name>` | the package of one approved library (generated) |
+| `//packaging/conda:metapackage` | a package named by the one line of [`METAPACKAGE`](METAPACKAGE), with **no file** and run requirements that are exactly the platform guard and **every** approved library at exactly this version. Installing it installs the whole release; the name is a claim of its own and is reviewed like a row of the list |
+| `//packaging/conda:release_set` | one directory: every package as `<name>.conda`, and `release_set.json` |
+
+`release_set` is written only after `komira_pack conda-set` verified the set as
+a whole, reading every package back (not only its manifest) and reporting every
+problem it finds, not the first:
+
+- every approved name has a package, and nothing else is in the set;
+- one version, one subdir, one source commit and one approved-list digest across
+  the set, and every package stamped (an unstamped build has no set at all);
+- every requirement of a library is a library of the set at the set's own
+  version, or the platform guard, or the compiler at its exact pin, and nothing
+  outside the set;
+- the metapackage pins exactly the guard and every library;
+- each manifest agrees with its package's own bytes (sha256, size, name,
+  version, depends, file name).
+
+`release_set.json` (sorted compact JSON): `schema`, `artifact_type`
+(`conda-release-set`), `version`, `subdir`, `source_commit`,
+`approved_names_sha256`, `mojo_pin`, `metapackage`, `member_count`,
+`upload_order` (channel file names: the libraries sorted by name, **the
+metapackage last**) and `artifacts` in that order, each with `role` (`member` or
+`metapackage`), `name`, `version`, `subdir`, `file_name` (the channel's),
+`path` (inside the directory), `sha256`, `size`, `depends`, `source_commit`.
+**An uploader of a set reads `release_set` (and `release_set[manifest]`) and
+nothing else.**
+
+Why a metapackage, and one package per library: a `.mojoc` needs the full
+closure of its dependencies on the import path at the consumer's compile, and
+the closure is the package set, so the solver does the closure (exact pins).
+The metapackage is the one name a user installs; a registry that receives it
+LAST makes it the switch (a user who asks for a library directly can see that
+library when it lands). Versions are in lockstep, so every release is a whole
+new set; a per-library version that moves only when the library's closure
+changes is possible later and is not done.
+
+### Publishing a set (nothing here uploads)
+
+The upload step belongs to the release tooling, and for a set it must:
+
+1. refuse a set whose `release_set.json` it cannot re-verify (the rules above,
+   and the five checks of "What an uploader reads" below, which apply to every
+   member and to the metapackage);
+2. read the channel first: for each file, absent, present with the same sha256,
+   or present with another sha256. **Any file present with another sha256 stops
+   the whole publish before a byte is sent**;
+3. upload the missing libraries (in parallel is fine: a library whose pins are
+   not published yet is unsolvable, not broken), **never** with an overwrite
+   flag, re-reading the channel after any error before trying again;
+4. only when every library is present, read every one back from the channel and
+   compare its sha256 with the manifest;
+5. upload the metapackage last, and read it back.
+
+A partial failure is repaired by running the same publish again: what is
+present and identical is skipped. The registry is not known to offer
+transactions or an atomic multi-file visibility (**unverified**), so the order
+above, not the registry, is what the set relies on.
 
 ## What an uploader reads, and must do
 
@@ -191,9 +255,12 @@ that. The sha256 of the sorted names is in every manifest
 (`approved_names_sha256`), so an approval can be bound to the exact list (by an uploader that recomputes it:
 step 3 above).
 [`names_lint`](BUCK) checks its shape (rows of name, label and reason; the
-prefix; the flat `//src/<name>:<name>` label; sorted and unique), that this
-directory declares one `conda_package` per row, and that none names another
-list.
+prefix; the flat `//src/<name>:<name>` label; sorted and unique), that
+[`names.bzl`](names.bzl) is exactly what
+[`gen_conda_names.sh`](../../tools/build/package/gen_conda_names.sh) makes of it
+(regenerate with `sh tools/build/package/gen_conda_names.sh packaging/conda/names.tsv > packaging/conda/names.bzl`),
+that this directory declares no `conda_package` by hand and calls
+`conda_release` once, and that no call names another list.
 
 ## Not done yet
 
@@ -201,15 +268,18 @@ list.
   architecture guard);
 - libraries that link native code, and libraries that open a shared library
   at run time (both refused by name rather than published incompletely);
-- an aggregate of every package's manifest, and the upload step with its dry
-  run and its approval gate;
+- the upload step with its dry run and its approval gate (the set it reads is
+  above; the step is not written);
+- a per-library summary (a package's channel text is derived from its name);
 - **a `.mojoc` that does not record the isolation directory** (follow-up, to
   be filed on the issue tracker): compile `precompile` from a private working
   directory with the sources staged at a fixed relative path (the wrapper must
   then absolutize every `-I` and the `-o`), or ask the compiler for a
   path-remapping option; then the gate in "Reproducibility" can be a test
   (two isolation directories, one sha256) instead of a rule for the release job;
-- the rest of the libraries: the list holds the one canary.
+- the rest of the libraries: the list holds the one canary. The generated set
+  is exercised on a TEST list of the libraries that can be built
+  (`tools/build/tests/conda_set`, not an approval).
 
 How it is tested: [`conda.sh`](../../tools/build/tests/functional/conda.sh).
 

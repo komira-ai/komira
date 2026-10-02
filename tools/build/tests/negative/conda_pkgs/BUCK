@@ -84,10 +84,12 @@ conda_package(
 )
 
 # An approved list with every defect the lint names, and a BUCK file that
-# declares a package the list does not hold (and swaps its list).
+# declares a package by hand, calls conda_release twice and swaps its list, next
+# to a names.bzl that is not the list's generated copy.
 conda_names(
     name = "names_bad",
     names = "names_bad/names.tsv",
+    bzl = "names_bad/names.bzl",
     buck = "names_bad/BUCK.txt",
     prefix = PUBLISHED_NAME_PREFIX,
 )

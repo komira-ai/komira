@@ -1,0 +1,10 @@
+load("@komira//tools/build/package:conda_set.bzl", "conda_release")
+load(":names.bzl", "APPROVED")
+
+# TEST LIST (names.tsv here is not an approval; see its header): every package,
+# the metapackage and the release set of the libraries below, built exactly as
+# //packaging/conda builds the approved ones. Only the tests cell may state its
+# own list.
+export_file(name = "names.tsv", visibility = ["PUBLIC"])
+
+conda_release(entries = APPROVED, names = "names.tsv")

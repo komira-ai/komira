@@ -2,10 +2,11 @@
 conda_package(
     name = "komira_zeta",
     lib = "//src/komira_zeta:komira_zeta",
+)
+
+conda_release(
+    entries = APPROVED,
     names = "other.tsv",
 )
 
-conda_package(
-    name = "komira_unlisted_here",
-    lib = "//src/komira_unlisted_here:komira_unlisted_here",
-)
+conda_release(entries = APPROVED)

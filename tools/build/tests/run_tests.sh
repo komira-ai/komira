@@ -178,6 +178,10 @@
 #       lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
 #       install from a file:// channel and a Mojo program importing the library,
 #       skipped with --no-install).
+#  33b. The conda release set: see tools/build/tests/functional/conda_set.sh (a
+#       package per row of a list, the metapackage and the verified set; the
+#       refusals; two uncached builds, skipped with --no-uncached; a pixi
+#       install of the metapackage alone, skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -848,6 +852,17 @@ while IFS= read -r line; do
     esac
 done < "$LOG/conda.log"
 grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
+
+# 33b
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda_set.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda_set.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda_set "*) pass "${line#PASS  }" ;;
+        "FAIL  conda_set "*) fail "${line#FAIL  } (see $LOG/conda_set.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda_set.log"
+grep -qE '^(PASS|FAIL)  conda_set ' "$LOG/conda_set.log" || fail "conda_set: tools/build/tests/functional/conda_set.sh reported nothing (see $LOG/conda_set.log)"
 
 # 33
 S="$LOG/uname_shim"

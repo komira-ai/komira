@@ -574,6 +574,27 @@ it, with the compiler from Modular's `max` channel, and
 project without it cannot (skipped with `--no-install`, without `pixi`, or
 without network). See [packaging/conda](../../../packaging/conda/README.md).
 
+## 33b. Conda release set
+
+The release set of the TEST list in [`conda_set`](conda_set/names.tsv) (not an
+approval; the libraries with tests, no native code and no run-time shared
+library), by [`conda_set.sh`](functional/conda_set.sh): one package target per
+row and no other, so a row added to a list adds a package (shown on a scratch
+list of two rows); the release directory holds every package and
+`release_set.json` with each file's sha256, one version and one source commit
+across the set, every requirement inside the set or the guard and the compiler
+pin, the metapackage last in the upload order and pinning every library
+exactly with no file of its own; an unstamped build has no set;
+`komira_pack conda-set` refuses, naming it, a missing member, version skew, a
+dependency outside the set, a manifest that disagrees with its file, a changed
+file, a member off the list, a metapackage of a shorter list and one named like
+a library, and accepts the unmodified set; two uncached builds in fresh daemons
+give the same sha256 for every file of the set (`--no-uncached` skips); and
+`pixi` installs ONLY the metapackage from a `file://` channel of the set, the
+solver brings every library and the compiler, and a program importing two
+libraries prints the right bytes (`--no-install`, no `pixi` or no network
+skips). See [packaging/conda](../../../packaging/conda/README.md).
+
 ## 33. Client
 
 `run_tests.sh` runs binaries the farm built for Linux x86_64 (the inspect
