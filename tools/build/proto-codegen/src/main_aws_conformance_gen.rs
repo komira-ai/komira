@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use komira_proto_codegen::aws_conformance::{Direction as CorpusDirection, IgnoreList};
 use komira_proto_codegen::aws_in::{lower_aws_service, AwsLowering};
-use komira_proto_codegen::emit_aws::{emit_aws_client, pure_preamble, AwsEmitOptions};
+use komira_proto_codegen::emit_aws::{emit_aws_client, pure_preamble, AwsEmitOptions, AwsProtocol};
 use komira_proto_codegen::ir::{IrField, IrMessage, IrType, Label, ScalarKind};
 use komira_proto_codegen::json::{parse, Json, JsonObject};
 use komira_proto_codegen::overrides::AwsOverrides;
@@ -243,7 +243,7 @@ fn run(args: &Args) -> Result<(), String> {
     let mut all_refused = refused.clone();
     all_refused.extend(undriveable.iter().cloned());
     let mut whole = driver_header(&suites, &all_refused, n_cases, n_skipped, &args.protocols);
-    whole.push_str(&pure_preamble(true));
+    whole.push_str(&pure_preamble(AwsProtocol::Json, true));
     whole.push_str(&bodies);
     whole.push_str(&driver_main);
     std::fs::write(&args.out, &whole)
@@ -589,7 +589,7 @@ fn emit_input_case(
     o.line(&format!("var {var} = {expr}"));
     let fp = s.prefix.to_lowercase();
     o.line(&format!("var _req = {fp}_build_{method}_request({var})"));
-    // MIRRORS the generated `send` (emit_aws.rs), which this driver cannot
+    // MIRRORS the generated `send` (emit_aws/mod.rs), which this driver cannot
     // call without a connector: the unsigned request's headers go to the
     // signer as `extra`, except a header named exactly `Content-Type`, which
     // is its own argument, and the endpoint is resolved WITHOUT
@@ -700,7 +700,7 @@ fn emit_output_case(
     }
     o.line("var _rec = JsonValue.empty_object()");
     // MIRRORS the generated client's error builder (`_<module>_error` in
-    // emit_aws.rs), which reads the code and message from the body only. The
+    // emit_aws/mod.rs), which reads the code and message from the body only. The
     // builder is not called, so a defect in it would not show here.
     o.line("if aws_is_error_status(_resp.status):");
     o.indent += 1;

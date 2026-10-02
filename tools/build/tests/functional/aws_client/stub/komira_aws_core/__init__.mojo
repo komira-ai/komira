@@ -5,8 +5,8 @@ against it in the komira cell (the AWS conformance driver,
 komira//tools/build/proto-codegen). A library of this cell cannot depend
 on it (a mojo_library of another cell carries another cell's MojoPkgTSet
 type), and nothing generates this file: it is kept by hand, in step with
-the names and signatures the generator imports (emit_aws.rs AWS_IMPORTS,
-the `Always` row). Only what the fixture's GetLogEvents client calls is
+the names and signatures the generator imports (emit_aws/mod.rs AWS_IMPORTS,
+the `Always` rows). Only what the fixture's GetLogEvents client calls is
 implemented (`AwsRequest`, `AwsResponse` and the scalar `aws_json_*`
 encoders); every other name raises or answers empty, so a test that came to
 depend on one would fail rather than pass on a stand-in. Bodies are bytes,

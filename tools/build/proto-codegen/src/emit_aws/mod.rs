@@ -1,12 +1,28 @@
 //! The AWS client emitter: the IR plus the `aws_in` overlay, emitted as one
 //! Mojo module per service.
+//!
+//! The module is split along the protocol seam ([`proto`]): this file is the
+//! protocol-independent core (header, shape structs, constraints, the client
+//! and its signed send); a protocol supplies a body codec and a binding.
+//!
+//! - [`proto`]: [`AwsProtocol`], the `BodyCodec` and `Binding` traits, and
+//!   the protocol and signing-scheme checks.
+//! - `json_codec`: the JSON body codec.
+//! - `rpc`: the awsJson RPC binding.
 
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::aws_in::{AwsFacts, AwsLowering, AwsServiceMeta, AwsTimestampFormat};
-use crate::ir::{IrEnum, IrField, IrMessage, IrType, Label, ScalarKind};
+use crate::ir::{IrEnum, IrField, IrMessage, IrMethod, IrType, Label, ScalarKind};
 use crate::lower::{recursion_breaking_edges_under, ContainerInlining};
 use crate::overrides::AwsOverrides;
+
+mod json_codec;
+pub mod proto;
+mod rpc;
+
+pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS};
+use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -16,7 +32,8 @@ pub struct AwsEmitOptions {
     pub omit_preamble: bool,
 }
 
-/// The two protocols this emitter implements. Anything else is refused.
+/// The protocols this emitter implements, by botocore name. Anything else is
+/// refused.
 pub const SUPPORTED_PROTOCOLS: &[&str] = &["json"];
 
 /// The `jsonVersion` values this emitter implements.
@@ -46,6 +63,8 @@ pub struct AwsImport {
     pub module: &'static str,
     pub names: &'static [&'static str],
     pub mode: AwsImportMode,
+    /// The protocols whose generated modules import this row.
+    pub protocols: &'static [AwsProtocol],
 }
 
 /// EVERY module the emitted code imports, and every name it imports from
@@ -54,9 +73,14 @@ pub struct AwsImport {
 /// this table, so a layout change is an edit here and nowhere else.
 ///
 /// The [`AWS_CORE`] rows are the contract `komira_aws_core` must meet, as
-/// names re-exported from its package root. The `Always` row is what a
+/// names re-exported from its package root. The `Always` rows are what a
 /// pure-mode module needs, so the core's socket-free half can land before
-/// any HTTP library; the `ClientOnly` row needs the transport.
+/// any HTTP library; the `ClientOnly` rows need the transport. A row
+/// applies to the protocols it lists: the JSON codec names and the
+/// `komira_json` runtime only to [`JSON_BODY_PROTOCOLS`].
+///
+/// Rows of one module merge into one `from` statement, in table order, so
+/// the row order is the order of the emitted names.
 pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
@@ -66,11 +90,37 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "AWS_TS_UNIX",
             "AwsRequest",
             "AwsResponse",
-            "aws_blob_from_json",
-            "aws_error_code",
-            "aws_error_code_from_body",
-            "aws_error_message_from_body",
-            "aws_is_error_status",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_blob_from_json"],
+        mode: AwsImportMode::Always,
+        protocols: JSON_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_error_code"],
+        mode: AwsImportMode::Always,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_error_code_from_body", "aws_error_message_from_body"],
+        mode: AwsImportMode::Always,
+        protocols: JSON_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_is_error_status"],
+        mode: AwsImportMode::Always,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
             "aws_f64_from_json",
             "aws_json_blob",
             "aws_json_bool",
@@ -83,6 +133,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "aws_ts_to_json",
         ],
         mode: AwsImportMode::Always,
+        protocols: JSON_BODY_PROTOCOLS,
     },
     AwsImport {
         module: AWS_CORE,
@@ -96,26 +147,33 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "send_sigv4_signed_request",
         ],
         mode: AwsImportMode::ClientOnly,
+        protocols: ALL_PROTOCOLS,
     },
     AwsImport {
         module: "komira_json",
         names: &["JsonValue", "parse_json_bytes", "parse_json_value"],
         mode: AwsImportMode::Always,
+        protocols: JSON_BODY_PROTOCOLS,
     },
     AwsImport {
         module: "komira_http.transport.io_stream",
         names: &["Connector"],
         mode: AwsImportMode::ClientOnly,
+        protocols: ALL_PROTOCOLS,
     },
 ];
 
-/// The import section of a module: one `from` statement per module of
-/// [`AWS_IMPORTS`], in table order, holding every name that `pure_only`
-/// needs. Rows that share a module merge into one statement.
-pub fn aws_import_section(pure_only: bool) -> String {
+/// The import section of a `protocol` module: one `from` statement per
+/// module of the [`AWS_IMPORTS`] rows that apply to `protocol`, in table
+/// order, holding every name that `pure_only` needs. Rows that share a
+/// module merge into one statement.
+pub fn aws_import_section(protocol: AwsProtocol, pure_only: bool) -> String {
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
         if pure_only && row.mode == AwsImportMode::ClientOnly {
+            continue;
+        }
+        if !row.protocols.contains(&protocol) {
             continue;
         }
         match groups.iter_mut().find(|(m, _)| *m == row.module) {
@@ -201,31 +259,10 @@ pub fn emit_aws_module(
              header must name the model key and its sha256"
         ));
     }
-    let meta = &lowering.service;
-    if !SUPPORTED_PROTOCOLS.contains(&meta.protocol.as_str()) {
-        return Err(format!(
-            "emit_aws: service `{}` declares protocol `{}`, and this emitter \
-             implements only {:?} (awsJson1_0 / awsJson1_1). It is REFUSED by name \
-             rather than emitted half-right: a `{}` client emitted by a `json` \
-             serializer produces requests that are syntactically valid and \
-             semantically wrong, which is the failure mode a conformance corpus \
-             catches late and a service catches never.",
-            meta.service, meta.protocol, SUPPORTED_PROTOCOLS, meta.protocol
-        ));
-    }
-    let json_version = meta.json_version.clone().unwrap_or_default();
-    if !SUPPORTED_JSON_VERSIONS.contains(&json_version.as_str()) {
-        return Err(format!(
-            "emit_aws: service `{}` declares protocol `json` with jsonVersion \
-             {json_version:?}; this emitter implements {:?}. The version is not \
-             cosmetic — it is the `Content-Type` (`application/x-amz-json-<v>`) \
-             the service dispatches on.",
-            meta.service, SUPPORTED_JSON_VERSIONS
-        ));
-    }
+    let selected = select_protocol(&lowering.service)?;
     overrides.check_against(lowering)?;
 
-    let mut em = AwsEmitter::new(lowering, overrides, module_name, json_version, options)?;
+    let mut em = AwsEmitter::new(lowering, overrides, module_name, selected, options)?;
     em.provenance = provenance.map(|p| (p.model_key.to_string(), p.model_sha256.to_string()));
     let source = em.emit()?;
     Ok(AwsEmitted {
@@ -295,6 +332,11 @@ struct AwsEmitter<'a> {
     meta: &'a AwsServiceMeta,
     overrides: &'a AwsOverrides,
     module_name: String,
+    /// The protocol, and the codec and binding it plugs into the seam.
+    protocol: AwsProtocol,
+    codec: &'static dyn BodyCodec,
+    binding: &'static dyn Binding,
+    /// The awsJson `jsonVersion`; empty for any other protocol.
     json_version: String,
     options: AwsEmitOptions,
     /// The Mojo name prefix every emitted type carries, so two generated
@@ -348,7 +390,7 @@ impl<'a> AwsEmitter<'a> {
         lowering: &'a AwsLowering,
         overrides: &'a AwsOverrides,
         module_name: &str,
-        json_version: String,
+        selected: proto::SelectedProtocol,
         options: AwsEmitOptions,
     ) -> Result<Self, String> {
         let file = lowering
@@ -373,7 +415,10 @@ impl<'a> AwsEmitter<'a> {
             meta: &lowering.service,
             overrides,
             module_name: module_name.to_string(),
-            json_version,
+            protocol: selected.protocol,
+            codec: selected.codec,
+            binding: selected.binding,
+            json_version: selected.json_version,
             options,
             prefix: service_type_prefix(&lowering.service),
             boxed: recursion_breaking_edges_under(
@@ -488,12 +533,8 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("#   service      : {}", self.meta.service_full_name));
         self.line(&format!("#   botocore id  : {}", self.meta.service));
         self.line(&format!("#   api version  : {}", self.meta.api_version));
-        self.line(&format!(
-            "#   protocol     : {} {} (targetPrefix `{}`)",
-            self.meta.protocol,
-            self.json_version,
-            self.meta.target_prefix.clone().unwrap_or_default()
-        ));
+        let protocol_line = self.binding.header_protocol(self);
+        self.line(&format!("#   protocol     : {protocol_line}"));
         let (model_key, model_sha256) = self.provenance.clone().unwrap_or_default();
         self.line(&format!("#   model key    : {model_key}"));
         self.line(&format!("#   model sha256 : {model_sha256}"));
@@ -574,7 +615,7 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_imports(&mut self) {
-        let section = aws_import_section(self.options.pure_only);
+        let section = aws_import_section(self.protocol, self.options.pure_only);
         self.out.push_str(&section);
         self.blank();
         self.blank();
@@ -593,14 +634,8 @@ impl<'a> AwsEmitter<'a> {
             "comptime {p}_ENDPOINT_PREFIX: String = \"{}\"",
             self.meta.endpoint_prefix
         ));
-        self.line(&format!(
-            "comptime {p}_CONTENT_TYPE: String = \"application/x-amz-json-{}\"",
-            self.json_version
-        ));
-        let target_prefix = self.meta.target_prefix.clone().unwrap_or_default();
-        self.line(&format!(
-            "comptime {p}_TARGET_PREFIX: String = \"{target_prefix}\""
-        ));
+        let binding = self.binding;
+        binding.emit_wire_constants(self);
         self.blank();
         let global = self.meta.global_endpoint.clone();
         let mn = self.module_name.clone();
@@ -732,24 +767,8 @@ impl<'a> AwsEmitter<'a> {
             required.len()
         ));
         self.blank();
-        if is_union {
-            self.line("    ⛔ THIS IS AN AWS `union` SHAPE — EXACTLY ONE member may be set.");
-            self.line("    awsJson serialises a union as an object with a single key, so");
-            self.line("    `to_aws_json` REFUSES a value with zero or two set members rather");
-            self.line("    than emitting a body the service will reject with an error that");
-            self.line("    names neither member.");
-            self.blank();
-        }
-        if is_synthetic {
-            self.line("    SYNTHESISED: the operation declares no shape here. awsJson still");
-            self.line("    requires `{}` on the wire, which is what this empty struct emits.");
-            self.blank();
-        }
-        self.line("    Required members are plain fields taken by `__init__`; every other");
-        self.line("    member is `Optional[...]` and is OMITTED from the body when unset.");
-        self.line("    PRESENCE IS NOT EMPTINESS: an explicitly-set empty list serialises as");
-        self.line("    `[]` and an unset one is absent, which the corpus distinguishes");
-        self.line("    (`serializes_empty_list_shapes`).\"\"\"");
+        let codec = self.codec;
+        codec.emit_shape_doc(self, is_union, is_synthetic);
         self.blank();
 
         // -- fields --------------------------------------------------------
@@ -857,14 +876,13 @@ impl<'a> AwsEmitter<'a> {
             self.blank();
         }
 
-        // -- to_aws_json ---------------------------------------------------
-        self.emit_to_json(msg, is_union)?;
+        // -- the body codec: encoder, decoder, and the model convention ---
+        codec.emit_encoder(self, msg, is_union)?;
         self.blank();
-        // -- from_aws_json -------------------------------------------------
-        self.emit_from_json(msg)?;
+        codec.emit_decoder(self, msg)?;
         if self.options.emit_model_json {
             self.blank();
-            self.emit_model_json(msg)?;
+            codec.emit_model_value(self, msg)?;
         }
 
         self.pop();
@@ -1011,530 +1029,6 @@ impl<'a> AwsEmitter<'a> {
         self.pop();
         self.line(")");
     }
-
-    fn emit_to_json(&mut self, msg: &IrMessage, is_union: bool) -> Result<(), String> {
-        self.line("def to_aws_json(self) raises -> JsonValue:");
-        self.push();
-        self.line("\"\"\"This shape as an awsJson body fragment.\"\"\"");
-        self.line("var obj = JsonValue.empty_object()");
-        if is_union {
-            self.line("var _set = 0");
-            for f in &msg.fields {
-                if self.required(msg, f) {
-                    self.line("_set += 1");
-                } else {
-                    self.line(&format!("if {}:", self.presence_test(msg, f)));
-                    self.push();
-                    self.line("_set += 1");
-                    self.pop();
-                }
-            }
-            self.line("if _set != 1:");
-            self.push();
-            self.line("raise Error(");
-            self.push();
-            self.line(&format!(
-                "String(\"{}.to_aws_json: an AWS `union` must have EXACTLY\")",
-                self.ty_name(&msg.mojo_name)
-            ));
-            self.line("+ String(\" one member set; this value has \")");
-            self.line("+ String(_set)");
-            self.line("+ String(");
-            self.push();
-            self.line("\". awsJson renders a union as a single-key object, so a\"");
-            self.line("\" zero- or two-member value has no wire form and the service\"");
-            self.line("\" would answer with an error naming neither member.\"");
-            self.pop();
-            self.line(")");
-            self.pop();
-            self.line(")");
-            self.pop();
-        }
-        for f in &msg.fields {
-            let wire = self.wire_name(msg, f);
-            if self.required(msg, f) {
-                let access = if self.is_boxed(msg, f) {
-                    format!("self.{}[0]", f.name)
-                } else {
-                    format!("self.{}", f.name)
-                };
-                let expr = self.to_json_expr(msg, f, &access, "obj", &wire)?;
-                if let Some(e) = expr {
-                    self.line(&format!(
-                        "obj.set_member(String(\"{wire}\"), {e})"
-                    ));
-                }
-            } else {
-                self.line(&format!("if {}:", self.presence_test(msg, f)));
-                self.push();
-                let access = self.optional_access(msg, f);
-                let expr = self.to_json_expr(msg, f, &access, "obj", &wire)?;
-                if let Some(e) = expr {
-                    self.line(&format!(
-                        "obj.set_member(String(\"{wire}\"), {e})"
-                    ));
-                }
-                self.pop();
-            }
-        }
-        self.line("return obj^");
-        self.pop();
-        Ok(())
-    }
-
-    /// The expression that renders `access` as a `JsonValue`, or `None` when
-    /// the emitter already wrote the statements (list / map need a loop).
-    fn to_json_expr(
-        &mut self,
-        msg: &IrMessage,
-        f: &IrField,
-        access: &str,
-        obj: &str,
-        wire: &str,
-    ) -> Result<Option<String>, String> {
-        match (&f.label, &f.ty) {
-            (Label::Repeated, ty) => {
-                let tmp = format!("_a_{}", f.name);
-                self.line(&format!("var {tmp} = JsonValue.empty_array()"));
-                self.line(&format!("for _i in range(len({access})):"));
-                self.push();
-                let elem = self.value_to_json(msg, f, ty, &format!("{access}[_i]"), 1)?;
-                self.line(&format!("{tmp}.push({elem})"));
-                self.pop();
-                self.line(&format!("{obj}.set_member(String(\"{wire}\"), {tmp}^)"));
-                Ok(None)
-            }
-            (_, IrType::Map(_, v)) => {
-                let tmp = format!("_m_{}", f.name);
-                self.line(&format!("var {tmp} = JsonValue.empty_object()"));
-                self.line(&format!("for _k in {access}.keys():"));
-                self.push();
-                let elem = self.value_to_json(msg, f, v, &format!("{access}[_k]"), 1)?;
-                self.line(&format!("{tmp}.set_member(_k.copy(), {elem})"));
-                self.pop();
-                self.line(&format!("{obj}.set_member(String(\"{wire}\"), {tmp}^)"));
-                Ok(None)
-            }
-            (_, ty) => Ok(Some(self.value_to_json(msg, f, ty, access, 1)?)),
-        }
-    }
-
-    fn value_to_json(
-        &mut self,
-        msg: &IrMessage,
-        f: &IrField,
-        ty: &IrType,
-        access: &str,
-        depth: usize,
-    ) -> Result<String, String> {
-        match ty {
-            IrType::List(e) => {
-                let tmp = format!("_a{depth}_{}", f.name);
-                let iv = format!("_i{depth}");
-                self.line(&format!("var {tmp} = JsonValue.empty_array()"));
-                self.line(&format!("for {iv} in range(len({access})):"));
-                self.push();
-                let elem =
-                    self.value_to_json(msg, f, e, &format!("{access}[{iv}]"), depth + 1)?;
-                self.line(&format!("{tmp}.push({elem})"));
-                self.pop();
-                Ok(format!("{tmp}^"))
-            }
-            IrType::Map(_, v) => {
-                let tmp = format!("_m{depth}_{}", f.name);
-                let kv = format!("_k{depth}");
-                self.line(&format!("var {tmp} = JsonValue.empty_object()"));
-                self.line(&format!("for {kv} in {access}.keys():"));
-                self.push();
-                let elem =
-                    self.value_to_json(msg, f, v, &format!("{access}[{kv}]"), depth + 1)?;
-                self.line(&format!("{tmp}.set_member({kv}.copy(), {elem})"));
-                self.pop();
-                Ok(format!("{tmp}^"))
-            }
-            other => self.scalar_to_json(msg, f, other, access),
-        }
-    }
-
-    /// Render ONE value (not a container) as a `JsonValue` expression.
-    fn scalar_to_json(
-        &self,
-        msg: &IrMessage,
-        f: &IrField,
-        ty: &IrType,
-        access: &str,
-    ) -> Result<String, String> {
-        Ok(match ty {
-            IrType::Message(_) => format!("{access}.to_aws_json()"),
-            IrType::Enum(_) => format!("aws_json_string({access})"),
-            // A container needs a LOOP, not an expression — `value_to_json`
-            // takes those and calls back here for the leaf. Reaching this arm
-            // means a caller bypassed it.
-            IrType::Map(_, _) | IrType::List(_) => {
-                return Err(format!(
-                    "emit_aws: {}.{} reached `scalar_to_json` with a container type; \
-                     `value_to_json` is the entry point that writes the loop.",
-                    msg.name, f.name
-                ))
-            }
-            IrType::Scalar(s) => match s {
-                ScalarKind::String => {
-                    if let Some(fmt) = self.timestamp_format(msg, f) {
-                        format!("aws_ts_to_json({access}, {})", ts_const(fmt))
-                    } else {
-                        format!("aws_json_string({access})")
-                    }
-                }
-                ScalarKind::Bytes => format!("aws_json_blob({access})"),
-                ScalarKind::Bool => format!("aws_json_bool({access})"),
-                ScalarKind::Double => format!("aws_json_f64({access})"),
-                ScalarKind::Float => format!("aws_json_f32({access})"),
-                ScalarKind::Int64 | ScalarKind::Sint64 | ScalarKind::Sfixed64 => {
-                    format!("aws_json_i64({access})")
-                }
-                ScalarKind::Int32 | ScalarKind::Sint32 | ScalarKind::Sfixed32 => {
-                    format!("aws_json_i32({access})")
-                }
-                ScalarKind::Uint64 | ScalarKind::Fixed64 => {
-                    format!("aws_json_i64(Int64({access}))")
-                }
-                ScalarKind::Uint32 | ScalarKind::Fixed32 => {
-                    format!("aws_json_i32(Int32({access}))")
-                }
-            },
-        })
-    }
-
-    fn emit_from_json(&mut self, msg: &IrMessage) -> Result<(), String> {
-        let ty = self.ty_name(&msg.mojo_name);
-        self.line("@staticmethod");
-        self.line(&format!("def from_aws_json(v: JsonValue) raises -> {ty}:"));
-        self.push();
-        self.line("\"\"\"Read this shape from an awsJson response fragment.");
-        self.blank();
-        self.line("    ⚠ AN UNKNOWN KEY IS IGNORED, AND SO IS AN EXPLICIT `null`. Both are");
-        self.line("    corpus requirements, not tolerance for its own sake:");
-        self.line("    `AwsJson11DeserializeIgnoreType` puts a `__type` discriminator inside");
-        self.line("    a union body, and `AwsJson10DeserializeAllowNulls` sends every unset");
-        self.line("    member as an explicit `null`. A decoder that treated either as a");
-        self.line("    member would fail a response that is entirely valid.\"\"\"");
-
-        // Required members are constructor arguments, so they are read first
-        // into locals.
-        let required: Vec<IrField> = msg
-            .fields
-            .iter()
-            .filter(|f| self.required(msg, f))
-            .cloned()
-            .collect();
-        for f in &required {
-            let wire = self.wire_name(msg, f);
-            let local = format!("_r_{}", f.name);
-            if self.needs_no_nullary(f) {
-                self.line(&format!(
-                    "if not v.has(String(\"{wire}\")) or v.get(String(\"{wire}\")).is_null():"
-                ));
-                self.push();
-                self.line(&format!(
-                    "raise Error(\"{}.from_aws_json: required member `{wire}` is absent from the response.\")",
-                    self.ty_name(&msg.mojo_name)
-                ));
-                self.pop();
-                let expr = self.scalar_from_json(msg, f, &f.ty, &format!("v.get(String(\"{wire}\"))"))?;
-                self.line(&format!("var {local} = {expr}"));
-                continue;
-            }
-            self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
-            self.line(&format!(
-                "if v.has(String(\"{wire}\")) and not v.get(String(\"{wire}\")).is_null():"
-            ));
-            self.push();
-            self.read_into(msg, f, &local, &wire)?;
-            self.pop();
-        }
-        let args: Vec<String> = required
-            .iter()
-            .map(|f| format!("_r_{}^", f.name))
-            .collect();
-        self.line(&format!("var out = {ty}({})", args.join(", ")));
-        for f in &msg.fields {
-            if self.required(msg, f) {
-                continue;
-            }
-            let wire = self.wire_name(msg, f);
-            let local = format!("_v_{}", f.name);
-            self.line(&format!(
-                "if v.has(String(\"{wire}\")) and not v.get(String(\"{wire}\")).is_null():"
-            ));
-            self.push();
-            if self.needs_no_nullary(f) {
-                let expr = self.scalar_from_json(msg, f, &f.ty, &format!("v.get(String(\"{wire}\"))"))?;
-                self.line(&format!("var {local} = {expr}"));
-            } else {
-                self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
-                self.read_into(msg, f, &local, &wire)?;
-            }
-            self.line(&format!("out.set_{}({local}^)", f.name));
-            self.pop();
-        }
-        self.line("return out^");
-        self.pop();
-        Ok(())
-    }
-
-    fn emit_model_json(&mut self, msg: &IrMessage) -> Result<(), String> {
-        self.line("def to_model_json(self) raises -> JsonValue:");
-        self.push();
-        self.line("\"\"\"This shape in botocore's MODEL convention: a timestamp is epoch");
-        self.line("    seconds as a NUMBER whatever its declared `timestampFormat`, and a");
-        self.line("    blob is its decoded bytes rather than base64. This is the convention");
-        self.line("    a protocol-test case states its `params` and its expected `result`");
-        self.line("    in, and it is NOT the wire convention — see `to_aws_json`.\"\"\"");
-        self.line("var obj = JsonValue.empty_object()");
-        for f in &msg.fields {
-            let wire = self.wire_name(msg, f);
-            if self.required(msg, f) {
-                let access = if self.is_boxed(msg, f) {
-                    format!("self.{}[0]", f.name)
-                } else {
-                    format!("self.{}", f.name)
-                };
-                self.model_json_member(msg, f, &access, &wire)?;
-            } else {
-                self.line(&format!("if {}:", self.presence_test(msg, f)));
-                self.push();
-                let access = self.optional_access(msg, f);
-                self.model_json_member(msg, f, &access, &wire)?;
-                self.pop();
-            }
-        }
-        self.line("return obj^");
-        self.pop();
-        Ok(())
-    }
-
-    fn model_json_member(
-        &mut self,
-        msg: &IrMessage,
-        f: &IrField,
-        access: &str,
-        wire: &str,
-    ) -> Result<(), String> {
-        match (&f.label, &f.ty) {
-            (Label::Repeated, ty) => {
-                let tmp = format!("_ma_{}", f.name);
-                self.line(&format!("var {tmp} = JsonValue.empty_array()"));
-                self.line(&format!("for _i in range(len({access})):"));
-                self.push();
-                let e = self.value_to_model_json(msg, f, ty, &format!("{access}[_i]"), 1)?;
-                self.line(&format!("{tmp}.push({e})"));
-                self.pop();
-                self.line(&format!("obj.set_member(String(\"{wire}\"), {tmp}^)"));
-            }
-            (_, IrType::Map(_, v)) => {
-                let tmp = format!("_mm_{}", f.name);
-                self.line(&format!("var {tmp} = JsonValue.empty_object()"));
-                self.line(&format!("for _k in {access}.keys():"));
-                self.push();
-                let e = self.value_to_model_json(msg, f, v, &format!("{access}[_k]"), 1)?;
-                self.line(&format!("{tmp}.set_member(_k.copy(), {e})"));
-                self.pop();
-                self.line(&format!("obj.set_member(String(\"{wire}\"), {tmp}^)"));
-            }
-            (_, ty) => {
-                let e = self.value_to_model_json(msg, f, ty, access, 1)?;
-                self.line(&format!("obj.set_member(String(\"{wire}\"), {e})"));
-            }
-        }
-        Ok(())
-    }
-
-    /// [`Self::value_to_json`] for the MODEL convention — same recursion, same
-    /// depth-naming rule, different leaf renderer.
-    fn value_to_model_json(
-        &mut self,
-        msg: &IrMessage,
-        f: &IrField,
-        ty: &IrType,
-        access: &str,
-        depth: usize,
-    ) -> Result<String, String> {
-        match ty {
-            IrType::List(e) => {
-                let tmp = format!("_ma{depth}_{}", f.name);
-                let iv = format!("_i{depth}");
-                self.line(&format!("var {tmp} = JsonValue.empty_array()"));
-                self.line(&format!("for {iv} in range(len({access})):"));
-                self.push();
-                let elem =
-                    self.value_to_model_json(msg, f, e, &format!("{access}[{iv}]"), depth + 1)?;
-                self.line(&format!("{tmp}.push({elem})"));
-                self.pop();
-                Ok(format!("{tmp}^"))
-            }
-            IrType::Map(_, v) => {
-                let tmp = format!("_mm{depth}_{}", f.name);
-                let kv = format!("_k{depth}");
-                self.line(&format!("var {tmp} = JsonValue.empty_object()"));
-                self.line(&format!("for {kv} in {access}.keys():"));
-                self.push();
-                let elem =
-                    self.value_to_model_json(msg, f, v, &format!("{access}[{kv}]"), depth + 1)?;
-                self.line(&format!("{tmp}.set_member({kv}.copy(), {elem})"));
-                self.pop();
-                Ok(format!("{tmp}^"))
-            }
-            other => self.scalar_to_model_json(msg, f, other, access),
-        }
-    }
-
-    fn scalar_to_model_json(
-        &self,
-        msg: &IrMessage,
-        f: &IrField,
-        ty: &IrType,
-        access: &str,
-    ) -> Result<String, String> {
-        Ok(match ty {
-            IrType::Message(_) => format!("{access}.to_model_json()"),
-            IrType::Scalar(ScalarKind::String) if self.timestamp_format(msg, f).is_some() => {
-                // Epoch seconds as a NUMBER, whatever the declared format.
-                format!("aws_json_f64({access})")
-            }
-            IrType::Scalar(ScalarKind::Bytes) => {
-                // The DECODED bytes, not base64.
-                format!("aws_json_string(_aws_bytes_to_string({access}))")
-            }
-            other => self.scalar_to_json(msg, f, other, access)?,
-        })
-    }
-
-    /// Emit the statements that fill `local` from `v[wire]`.
-    fn read_into(
-        &mut self,
-        msg: &IrMessage,
-        f: &IrField,
-        local: &str,
-        wire: &str,
-    ) -> Result<(), String> {
-        let src = format!("v.get(String(\"{wire}\"))");
-        match (&f.label, &f.ty) {
-            (Label::Repeated, ty) => {
-                let arr = format!("_arr_{}", f.name);
-                self.line(&format!("var {arr} = {src}"));
-                self.line(&format!("for _i in range({arr}.array_len()):"));
-                self.push();
-                let e = self.value_from_json(msg, f, ty, &format!("{arr}.element_at(_i)"), 1)?;
-                self.line(&format!("{local}.append({e})"));
-                self.pop();
-            }
-            (_, IrType::Map(_, vt)) => {
-                let o = format!("_obj_{}", f.name);
-                self.line(&format!("var {o} = {src}"));
-                self.line(&format!("for _i in range({o}.num_members()):"));
-                self.push();
-                let e = self.value_from_json(msg, f, vt, &format!("{o}.value_at(_i)"), 1)?;
-                self.line(&format!("{local}[{o}.key_at(_i)] = {e}"));
-                self.pop();
-            }
-            (_, ty) => {
-                let e = self.value_from_json(msg, f, ty, &src, 1)?;
-                self.line(&format!("{local} = {e}"));
-            }
-        }
-        Ok(())
-    }
-
-    fn value_from_json(
-        &mut self,
-        msg: &IrMessage,
-        f: &IrField,
-        ty: &IrType,
-        src: &str,
-        depth: usize,
-    ) -> Result<String, String> {
-        match ty {
-            IrType::List(e) => {
-                let j = format!("_arr{depth}_{}", f.name);
-                let tmp = format!("_lst{depth}_{}", f.name);
-                let iv = format!("_i{depth}");
-                self.line(&format!("var {j} = {src}"));
-                self.line(&format!("var {tmp} = List[{}]()", self.elem_type(msg, f, e)?));
-                self.line(&format!("for {iv} in range({j}.array_len()):"));
-                self.push();
-                let elem =
-                    self.value_from_json(msg, f, e, &format!("{j}.element_at({iv})"), depth + 1)?;
-                self.line(&format!("{tmp}.append({elem})"));
-                self.pop();
-                Ok(format!("{tmp}^"))
-            }
-            IrType::Map(_, v) => {
-                let j = format!("_obj{depth}_{}", f.name);
-                let tmp = format!("_dct{depth}_{}", f.name);
-                let iv = format!("_i{depth}");
-                self.line(&format!("var {j} = {src}"));
-                self.line(&format!(
-                    "var {tmp} = Dict[String, {}]()",
-                    self.elem_type(msg, f, v)?
-                ));
-                self.line(&format!("for {iv} in range({j}.num_members()):"));
-                self.push();
-                let elem =
-                    self.value_from_json(msg, f, v, &format!("{j}.value_at({iv})"), depth + 1)?;
-                self.line(&format!("{tmp}[{j}.key_at({iv})] = {elem}"));
-                self.pop();
-                Ok(format!("{tmp}^"))
-            }
-            other => self.scalar_from_json(msg, f, other, src),
-        }
-    }
-
-    fn scalar_from_json(
-        &self,
-        msg: &IrMessage,
-        f: &IrField,
-        ty: &IrType,
-        src: &str,
-    ) -> Result<String, String> {
-        Ok(match ty {
-            IrType::Message(t) => {
-                let n = self.by_fq.get(&t.fq_name).cloned().unwrap_or_else(|| t.mojo_name.clone());
-                format!("{}.from_aws_json({src})", self.ty_name(&n))
-            }
-            IrType::Enum(_) => format!("{src}.as_string()"),
-            IrType::Map(_, _) | IrType::List(_) => {
-                return Err(format!(
-                    "emit_aws: {}.{} reached `scalar_from_json` with a container type; \
-                     `value_from_json` is the entry point that writes the loop.",
-                    msg.name, f.name
-                ))
-            }
-            IrType::Scalar(s) => match s {
-                ScalarKind::String => {
-                    if self.timestamp_format(msg, f).is_some() {
-                        format!("aws_ts_from_json({src})")
-                    } else {
-                        format!("{src}.as_string()")
-                    }
-                }
-                ScalarKind::Bytes => format!("aws_blob_from_json({src})"),
-                ScalarKind::Bool => format!("{src}.as_bool()"),
-                ScalarKind::Double => format!("aws_f64_from_json({src})"),
-                ScalarKind::Float => format!("Float32(aws_f64_from_json({src}))"),
-                ScalarKind::Int64 | ScalarKind::Sint64 | ScalarKind::Sfixed64 => {
-                    format!("{src}.as_int64()")
-                }
-                ScalarKind::Int32 | ScalarKind::Sint32 | ScalarKind::Sfixed32 => {
-                    format!("Int32({src}.as_int64())")
-                }
-                ScalarKind::Uint64 | ScalarKind::Fixed64 => format!("{src}.as_uint64()"),
-                ScalarKind::Uint32 | ScalarKind::Fixed32 => {
-                    format!("UInt32({src}.as_uint64())")
-                }
-            },
-        })
-    }
-
 
     /// The declared field type, including the `Optional[...]` wrapper for a
     /// non-required member and the `List[...]` recursion box.
@@ -1789,6 +1283,44 @@ impl<'a> AwsEmitter<'a> {
         }
     }
 
+    /// The Mojo name of an operation's input message, before the type prefix.
+    fn op_input_mojo(&self, m: &IrMethod) -> String {
+        self.by_fq
+            .get(&m.input.fq_name)
+            .cloned()
+            .unwrap_or_else(|| m.input.mojo_name.clone())
+    }
+
+    /// The Mojo type of an operation's input.
+    fn op_input_type(&self, m: &IrMethod) -> String {
+        self.ty_name(&self.op_input_mojo(m))
+    }
+
+    /// The Mojo type of an operation's output.
+    fn op_output_type(&self, m: &IrMethod) -> String {
+        self.ty_name(
+            &self
+                .by_fq
+                .get(&m.output.fq_name)
+                .cloned()
+                .unwrap_or_else(|| m.output.mojo_name.clone()),
+        )
+    }
+
+    /// The input's `validate()` call, first in a request builder, when the
+    /// input shape has one.
+    ///
+    /// ⛔ THE CONSTRAINT CHECK IS ON THE PATH TO THE WIRE, NOT BESIDE IT. A
+    /// `validate()` a caller must remember to call is a convention; the
+    /// request builder is the only entry point that produces an
+    /// `AwsRequest`, so a value that reaches AWS has been through it.
+    fn emit_validate_call(&mut self, m: &IrMethod) {
+        if self.validating.contains(&self.op_input_mojo(m)) {
+            self.line("input.validate()");
+        }
+    }
+
+    /// §4: per operation, the binding's request builder and response parser.
     fn emit_operations(&mut self) -> Result<(), String> {
         self.line(&format!("# {}", "=".repeat(75)));
         self.line("# §4 — request builders + response parsers. PURE: no connector, no");
@@ -1802,165 +1334,21 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("# {}", "=".repeat(75)));
         self.blank();
 
-        let methods: Vec<crate::ir::IrMethod> = {
+        let methods: Vec<IrMethod> = {
             let svc = self.lowering.model.files[0]
                 .services
                 .first()
                 .ok_or_else(|| "emit_aws: the lowering carries no IrService".to_string())?;
             svc.methods.clone()
         };
-        let prefix = self.meta.target_prefix.clone().unwrap_or_default();
-
+        let binding = self.binding;
         for m in &methods {
             let facts = self.facts.operation_by_ir_method(&m.name)?.clone();
-            let in_ty = self.ty_name(
-                &self
-                    .by_fq
-                    .get(&m.input.fq_name)
-                    .cloned()
-                    .unwrap_or_else(|| m.input.mojo_name.clone()),
-            );
-            let out_ty = self.ty_name(
-                &self
-                    .by_fq
-                    .get(&m.output.fq_name)
-                    .cloned()
-                    .unwrap_or_else(|| m.output.mojo_name.clone()),
-            );
-            let p = self.prefix.to_uppercase();
-
-            let fp = self.fn_prefix();
-            self.line(&format!(
-                "def {fp}build_{}_request(input: {in_ty}) raises -> AwsRequest:",
-                m.name
-            ));
-            self.push();
-            self.line(&format!(
-                "\"\"\"`{}` — the awsJson request, serialised and NOT signed.\"\"\"",
-                facts.name
-            ));
-            // ⛔ THE CONSTRAINT CHECK IS ON THE PATH TO THE WIRE, NOT BESIDE IT.
-            // A `validate()` a caller must remember to call is a convention;
-            // this is the only entry point that produces an `AwsRequest`, so a
-            // value that reaches AWS has been through it.
-            {
-                let input_mojo = self
-                    .by_fq
-                    .get(&m.input.fq_name)
-                    .cloned()
-                    .unwrap_or_else(|| m.input.mojo_name.clone());
-                if self.validating.contains(&input_mojo) {
-                    self.line("input.validate()");
-                }
-            }
-            self.line(&format!(
-                "var req = AwsRequest(String(\"{}\"), String(\"{}\"))",
-                facts.http_method.to_uppercase(),
-                escape(&facts.path)
-            ));
-            self.line(&format!(
-                "req.set_header(String(\"X-Amz-Target\"), String(\"{}.{}\"))",
-                escape(&prefix),
-                escape(&facts.name)
-            ));
-            self.line(&format!(
-                "req.set_header(String(\"Content-Type\"), String({p}_CONTENT_TYPE))"
-            ));
-            if self.meta.aws_query_compatible {
-                self.line(
-                    "req.set_header(String(\"x-amzn-query-mode\"), String(\"true\"))",
-                );
-            }
-            // `endpoint.hostPrefix`, with its `hostLabel` members substituted.
-            if let Some(hp) = &facts.host_prefix {
-                let expr = self.host_prefix_expr(hp, &m.input.fq_name)?;
-                self.line(&format!("req.host_prefix = {expr}"));
-            }
-            self.line("req.set_body_text(input.to_aws_json().serialize())");
-            self.line("return req^");
-            self.pop();
-            self.blank();
-
-            self.line(&format!(
-                "def {fp}parse_{}_response(resp: AwsResponse) raises -> {out_ty}:",
-                m.name
-            ));
-            self.push();
-            self.line(&format!(
-                "\"\"\"`{}` — the awsJson response. An EMPTY body is `{{}}`: awsJson",
-                facts.name
-            ));
-            self.line("    operations with no output still answer 200 with no bytes, and");
-            self.line("    `parses_operations_with_empty_json_bodies` states it.\"\"\"");
-            self.line("if len(resp.body) == 0:");
-            self.push();
-            self.line(&format!(
-                "return {out_ty}.from_aws_json(parse_json_value(String(\"{{}}\")))"
-            ));
-            self.pop();
-            self.line(&format!(
-                "return {out_ty}.from_aws_json(parse_json_bytes(resp.body))"
-            ));
-            self.pop();
-            self.blank();
+            binding.emit_request_builder(self, m, &facts)?;
+            binding.emit_response_parser(self, m, &facts)?;
         }
         self.blank();
         Ok(())
-    }
-
-    /// The Mojo expression for an `endpoint.hostPrefix`, substituting each
-    /// `{member}` placeholder with the input's `hostLabel` member.
-    ///
-    /// ⚠ A HOST LABEL IS A MEMBER, NOT A CONSTANT. `AwsJson11EndpointTraitWithHostLabel`
-    /// declares `hostPrefix: "{foo}.bar."`, and a generator that emitted the
-    /// template verbatim would send a request to the literal host `{foo}.bar.…`
-    /// — a DNS failure naming a brace.
-    fn host_prefix_expr(&self, hp: &str, input_fq: &str) -> Result<String, String> {
-        let mut parts: Vec<String> = Vec::new();
-        let mut lit = String::new();
-        let mut rest = hp;
-        while let Some(i) = rest.find('{') {
-            lit.push_str(&rest[..i]);
-            let j = rest[i..].find('}').ok_or_else(|| {
-                format!("emit_aws: unterminated `{{` in hostPrefix `{hp}`")
-            })? + i;
-            let member = &rest[i + 1..j];
-            if !lit.is_empty() {
-                parts.push(format!("String(\"{}\")", escape(&lit)));
-                lit.clear();
-            }
-            let msg = self
-                .messages
-                .values()
-                .find(|m| m.fq_name == input_fq)
-                .ok_or_else(|| format!("emit_aws: no input message {input_fq}"))?;
-            let field = msg
-                .fields
-                .iter()
-                .find(|f| self.wire_name(msg, f) == member)
-                .ok_or_else(|| {
-                    format!(
-                        "emit_aws: hostPrefix `{hp}` names `{{{member}}}`, and the input \
-                         shape `{}` has no such member. A host label that resolves to \
-                         nothing is a request to a host with a literal brace in it.",
-                        msg.name
-                    )
-                })?;
-            parts.push(if self.required(msg, field) {
-                format!("input.{}.copy()", field.name)
-            } else {
-                format!("input.{}.value()", field.name)
-            });
-            rest = &rest[j + 1..];
-        }
-        lit.push_str(rest);
-        if !lit.is_empty() {
-            parts.push(format!("String(\"{}\")", escape(&lit)));
-        }
-        if parts.is_empty() {
-            parts.push("String(\"\")".to_string());
-        }
-        Ok(parts.join(" + "))
     }
 
     fn emit_client(&mut self) -> Result<(), String> {
@@ -2034,23 +1422,31 @@ impl<'a> AwsEmitter<'a> {
         // -- the send primitive ------------------------------------------
         self.line("def send(mut self, var req: AwsRequest) raises -> HttpResult:");
         self.push();
-        self.line("\"\"\"Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call");
-        self.line(&format!(
-            "    into the hand-written `{}.send_sigv4_signed_request`, which is",
-            AWS_CORE
-        ));
-        self.line("    tested against the AWS SigV4 test vectors.");
-        self.blank();
-        self.line("    ⛔ `X-Amz-Target` MUST RIDE IN THE **SIGNED** SET, not merely on the");
-        self.line("    wire: an awsJson service includes it in the canonical request, so an");
-        self.line("    unsigned one comes back `SignatureDoesNotMatch` and sends every");
-        self.line("    reader to the credential. It is passed as an extra SIGNED header for");
-        self.line("    exactly that reason.\"\"\"");
+        let mut doc: Vec<String> = vec![
+            "\"\"\"Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call".to_string(),
+            format!(
+                "    into the hand-written `{}.send_sigv4_signed_request`, which is",
+                AWS_CORE
+            ),
+            "    tested against the AWS SigV4 test vectors.".to_string(),
+        ];
+        let notes = self.binding.send_notes();
+        if !notes.is_empty() {
+            doc.push(String::new());
+            doc.extend(notes.iter().map(|l| l.to_string()));
+        }
+        if let Some(last) = doc.last_mut() {
+            last.push_str("\"\"\"");
+        }
+        for l in &doc {
+            self.line(l);
+        }
         self.line("var cred = self._creds_source.credentials()");
         self.line("var extra = List[Header]()");
         self.line("var content_type = String(String(" );
         self.push();
-        self.line(&format!("{p}_CONTENT_TYPE"));
+        let default_content_type = self.binding.default_content_type(self);
+        self.line(&default_content_type);
         self.pop();
         self.line("))");
         self.line("for _i in range(len(req.header_names)):");
@@ -2097,20 +1493,8 @@ impl<'a> AwsEmitter<'a> {
             } else {
                 m.name.clone()
             };
-            let in_ty = self.ty_name(
-                &self
-                    .by_fq
-                    .get(&m.input.fq_name)
-                    .cloned()
-                    .unwrap_or_else(|| m.input.mojo_name.clone()),
-            );
-            let out_ty = self.ty_name(
-                &self
-                    .by_fq
-                    .get(&m.output.fq_name)
-                    .cloned()
-                    .unwrap_or_else(|| m.output.mojo_name.clone()),
-            );
+            let in_ty = self.op_input_type(m);
+            let out_ty = self.op_output_type(m);
             self.line(&format!(
                 "def {verb}(mut self, input: {in_ty}) raises -> {out_ty}:"
             ));
@@ -2176,8 +1560,9 @@ impl<'a> AwsEmitter<'a> {
         self.line("    cannot know which of its shapes carry a secret, so the discipline is");
         self.line("    unconditional — the `secrets_manager_client._sm_error` rule, applied");
         self.line("    everywhere because the generator has no way to make the exception.\"\"\"");
-        self.line("var code = aws_error_code_from_body(res.body)");
-        self.line("var msg = aws_error_message_from_body(res.body)");
+        let (code_expr, msg_expr) = self.binding.error_code_and_message();
+        self.line(&format!("var code = {code_expr}"));
+        self.line(&format!("var msg = {msg_expr}"));
         self.line("return Error(");
         self.push();
         self.line(&format!("String(\"{}.\")", self.ty_name(&svc_name)));
@@ -2198,8 +1583,8 @@ impl<'a> AwsEmitter<'a> {
 
 /// The import block + shared helper every generated PURE module needs. The
 /// conformance driver emits this ONCE ahead of 44 concatenated suites.
-pub fn pure_preamble(with_model_json: bool) -> String {
-    let mut em = aws_import_section(true);
+pub fn pure_preamble(protocol: AwsProtocol, with_model_json: bool) -> String {
+    let mut em = aws_import_section(protocol, true);
     em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");
@@ -2299,16 +1684,75 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
 mod tests {
     use super::*;
 
+    /// The rows of [`AWS_IMPORTS`] that apply to `protocol`.
+    fn rows_for(protocol: AwsProtocol) -> Vec<&'static AwsImport> {
+        AWS_IMPORTS
+            .iter()
+            .filter(|row| row.protocols.contains(&protocol))
+            .collect()
+    }
+
     #[test]
     fn json_runtime_is_komira_json_in_every_mode() {
-        let rows: Vec<&AwsImport> = AWS_IMPORTS
-            .iter()
-            .filter(|row| row.names.contains(&"JsonValue"))
-            .collect();
-        assert_eq!(rows.len(), 1, "exactly one row imports JsonValue");
-        let row = rows[0];
-        assert_eq!(row.module, "komira_json");
-        assert_eq!(row.names, &["JsonValue", "parse_json_bytes", "parse_json_value"]);
-        assert_eq!(row.mode, AwsImportMode::Always);
+        for p in JSON_BODY_PROTOCOLS {
+            let rows: Vec<&AwsImport> = rows_for(*p)
+                .into_iter()
+                .filter(|row| row.names.contains(&"JsonValue"))
+                .collect();
+            assert_eq!(rows.len(), 1, "{p:?}: exactly one row imports JsonValue");
+            let row = rows[0];
+            assert_eq!(row.module, "komira_json");
+            assert_eq!(row.names, &["JsonValue", "parse_json_bytes", "parse_json_value"]);
+            assert_eq!(row.mode, AwsImportMode::Always);
+            for pure_only in [true, false] {
+                assert!(
+                    aws_import_section(*p, pure_only).contains("from komira_json import ("),
+                    "{p:?} pure_only={pure_only}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn no_other_protocol_imports_the_json_runtime() {
+        for p in ALL_PROTOCOLS.iter().filter(|p| !JSON_BODY_PROTOCOLS.contains(p)) {
+            for row in rows_for(*p) {
+                assert_ne!(row.module, "komira_json", "{p:?}");
+                assert!(
+                    !row.names.iter().any(|n| n.contains("json")),
+                    "{p:?} imports a JSON codec name from {}: {:?}",
+                    row.module,
+                    row.names
+                );
+            }
+            for pure_only in [true, false] {
+                assert!(!aws_import_section(*p, pure_only).contains("komira_json"), "{p:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn every_row_names_a_protocol_and_no_name_twice() {
+        for row in AWS_IMPORTS {
+            assert!(!row.protocols.is_empty(), "{}: {:?}", row.module, row.names);
+            assert!(!row.names.is_empty(), "{}: a row with no names", row.module);
+        }
+        for p in ALL_PROTOCOLS {
+            let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+            for row in rows_for(*p) {
+                for n in row.names {
+                    assert!(seen.insert((row.module, n)), "{p:?}: `{n}` is imported twice");
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn every_protocol_gets_the_transport_in_client_mode_only() {
+        for p in ALL_PROTOCOLS {
+            assert!(!aws_import_section(*p, true).contains("Connector"), "{p:?}");
+            assert!(aws_import_section(*p, false).contains("Connector"), "{p:?}");
+            assert!(aws_import_section(*p, true).contains("    AwsRequest,"), "{p:?}");
+        }
     }
 }
