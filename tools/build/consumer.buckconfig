@@ -48,7 +48,7 @@
   name = BUCK
 
 [parser]
-  target_platform_detector_spec = target:app//...->komira//tools/build/platforms:linux-x86_64 target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64
+  target_platform_detector_spec = target:app//...->komira//tools/build/platforms:host target:komira//...->komira//tools/build/platforms:host target:toolchains//...->komira//tools/build/platforms:host
 
 [build]
   execution_platforms = app//platforms:default

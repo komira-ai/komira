@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+
+# The largest closure on main today: komira_core (the engine core, snappy C
+# library), json, encoding, crypto (aws-lc), protobuf, gcp_core, re-exported
+# through one @export file.
+mojo_shared_lib(
+    name = "mid",
+    srcs = ["mid_abi.mojo"],
+    exports = [
+        "mid_json_serialized_len",
+        "mid_base64_len",
+        "mid_sha256_first_byte",
+        "mid_pb_roundtrip",
+        "mid_gcp_code_from_http",
+        "mid_batch_rows",
+    ],
+    gate_srcs = ["mid_driver.mojo"],
+    deps = [
+        "//src/komira_core:komira_core",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_protobuf:komira_protobuf",
+    ],
+)

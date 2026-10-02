@@ -1,4 +1,5 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":defs.bzl", "launcher_level_test")
 
@@ -15,5 +16,29 @@ zig_exe(
     src = "pack/komira_pack.zig",
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
+    visibility = ["PUBLIC"],
+)
+
+# The version a release of the conda packages carries (conda.bzl); run by a
+# release job, tested by tools/build/tests/functional/conda.sh. The other one
+# prints the library packages' targets (the release tool declares which of
+# them it publishes).
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "list_conda_targets.sh",
+        "release_version.sh",
+    ],
+)
+
+# Selectable form of linux-x86_64: what conda_package derives its subdir from
+# (conda.bzl). Declared here and not in //tools/build/platforms, which holds
+# exactly the platform table's targets (tests//functional/platform_table).
+config_setting(
+    name = "is_linux_x86_64",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
+    ],
     visibility = ["PUBLIC"],
 )

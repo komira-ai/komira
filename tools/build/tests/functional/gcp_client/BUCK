@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
 load(":defs.bzl", "gen_check", "tests_check")
 
 # gcp_client (tools/build/cloud/gcp.bzl) over a fixture API, with the stub
-# komira_serde of ../proto as the runtime. `buck2 build
+# komira_proto_codec of ../proto as the runtime. `buck2 build
 # tests//functional/gcp_client:` builds each library, which runs its welded
 # tests (the generated layout probe first), each gen_check and each
 # tests_check. proto_tests.sh (sourced by run_tests.sh) builds this package
@@ -32,7 +32,7 @@ gcp_client(
     proto_deps = [":shop_deps"],
     protos = ["example/shop/v1/shop.proto"],
     test_srcs = ["test_shop.mojo"],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 # The absence check: DeleteItem and what only it reaches are not emitted,
@@ -74,7 +74,7 @@ gcp_client(
         "GetItemRequest",
         ".example.shop.v1.Item",
     ],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 gen_check(
@@ -114,4 +114,49 @@ tests_check(
     name = "komira_gcp_shop_roots_tests",
     expect = ["_layout_probe"],
     markers = ":komira_gcp_shop_roots[tests]",
+)
+
+# "grpc" with messages only: the plugin branches on the protocol only for
+# service code, so the messages generate and compile as under "rest", and no
+# gRPC import is written.
+gcp_client(
+    name = "komira_gcp_shop_grpc_messages",
+    bundle_only = ["example/shop/v1/item.proto"],
+    bundle_proto_deps = True,
+    messages_only = True,
+    methods = ["ShopService.GetItem"],
+    proto_deps = [":shop_deps"],
+    protocol = "grpc",
+    protos = ["example/shop/v1/shop.proto"],
+    deps = ["//functional/proto:komira_proto_codec"],
+)
+
+gen_check(
+    name = "komira_gcp_shop_grpc_messages_scoped",
+    absent = [
+        "komira_grpc",
+        "GrpcClient",
+        "ShopService",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "item.mojo",
+        "shop.mojo",
+    ],
+    gen = ":komira_gcp_shop_grpc_messages[gen]",
+    present = [
+        "struct GetItemRequest(",
+        "struct GetItemResponse(",
+        "struct Item(",
+    ],
+)
+
+# shop.proto as a proto_deps entry, so ../../negative/gcp_client can bundle
+# it and generate its service.
+proto_srcs(
+    name = "shop_api",
+    visibility = ["//negative/gcp_client:"],
+    srcs = ["example/shop/v1/shop.proto"],
+    proto_deps = [":shop_deps"],
 )
