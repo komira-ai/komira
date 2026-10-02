@@ -14,7 +14,10 @@
 #   (4) ONE surface: a token for PREFIX_DEV is refused on PYPI_UPLOAD (and the
 #       reverse) — through `RegistrySet.upload`, with zero requests sent;
 #   (5) `AnonymousCredential` presents nothing, and an upload with it is
-#       refused before any request on both arms.
+#       refused before any request on both arms;
+#   (6) ONE host: a token built for one server is refused, with zero
+#       requests, on an upload, a read-back and a fetch whose coordinate names
+#       another server; a host that is not bare is refused at construction.
 #
 # Hermetic: files under the test's own temporary directory; no network.
 # =============================================================================
@@ -69,60 +72,60 @@ def _never_quotes_the_token(msg: String) raises:
 
 def test_a_token_file_in_both_shapes() raises:
     var path = _write(String("token_lf"), String(_TOKEN) + String("\n"))
-    var pypi = StaticTokenCredential.token_file(SURFACE_PYPI_UPLOAD, path)
-    assert_equal(pypi.authorization(SURFACE_PYPI_UPLOAD), pypi_upload_authorization(String(_TOKEN)))
+    var pypi = StaticTokenCredential.token_file(SURFACE_PYPI_UPLOAD, String("test.pypi.org"), path)
+    assert_equal(pypi.authorization(SURFACE_PYPI_UPLOAD, String("test.pypi.org")), pypi_upload_authorization(String(_TOKEN)))
     var crlf = _write(String("token_crlf"), String(_TOKEN) + String("\r\n"))
-    var pfx = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, crlf)
-    assert_equal(pfx.authorization(SURFACE_PREFIX_DEV), String("Bearer ") + String(_TOKEN))
+    var pfx = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), crlf)
+    assert_equal(pfx.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_TOKEN))
     var bare = _write(String("token_bare"), String(_TOKEN))
-    var b = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, bare)
-    assert_equal(b.authorization(SURFACE_PREFIX_DEV), String("Bearer ") + String(_TOKEN))
+    var b = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), bare)
+    assert_equal(b.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_TOKEN))
     print("  test_a_token_file_in_both_shapes: PASS")
 
 
 def test_a_token_by_secret_name() raises:
     var store = StaticSecretStore()
     store.put(String("registry/prefix-dev"), String(_TOKEN))
-    var cred = StaticTokenCredential.token_secret(SURFACE_PREFIX_DEV, store, String("registry/prefix-dev"))
-    assert_equal(cred.authorization(SURFACE_PREFIX_DEV), String("Bearer ") + String(_TOKEN))
+    var cred = StaticTokenCredential.token_secret(SURFACE_PREFIX_DEV, String("prefix.dev"), store, String("registry/prefix-dev"))
+    assert_equal(cred.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_TOKEN))
     store.put(String("registry/pypi"), String(_TOKEN) + String("\n"))
-    var p = StaticTokenCredential.token_secret(SURFACE_PYPI_UPLOAD, store, String("registry/pypi"))
-    assert_equal(p.authorization(SURFACE_PYPI_UPLOAD), pypi_upload_authorization(String(_TOKEN)))
+    var p = StaticTokenCredential.token_secret(SURFACE_PYPI_UPLOAD, String("test.pypi.org"), store, String("registry/pypi"))
+    assert_equal(p.authorization(SURFACE_PYPI_UPLOAD, String("test.pypi.org")), pypi_upload_authorization(String(_TOKEN)))
     print("  test_a_token_by_secret_name: PASS")
 
 
 def test_refusals_never_quote_the_token() raises:
     var missing = _tmp(String("no_such_token_file"))
     try:
-        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, missing)
+        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), missing)
         assert_true(False, "a missing token file must be refused")
     except e:
         assert_true(String(e).find(missing) >= 0, String(e))
     var empty = _write(String("token_empty"), String("\n"))
     with assert_raises(contains="is EMPTY"):
-        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, empty)
+        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), empty)
     var spaced = _write(String("token_spaced"), String("static-probe ") + String(_TOKEN))
     try:
-        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, spaced)
+        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), spaced)
         assert_true(False, "a token file holding a space must be refused")
     except e:
         assert_true(String(e).find(String("holds whitespace")) >= 0, String(e))
         _never_quotes_the_token(String(e))
     var two = _write(String("token_two_lines"), String(_TOKEN) + String("\nsecond\n"))
     try:
-        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, two)
+        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), two)
         assert_true(False, "a token file holding two lines must be refused")
     except e:
         _never_quotes_the_token(String(e))
     var store = StaticSecretStore()
     try:
-        _ = StaticTokenCredential.token_secret(SURFACE_PREFIX_DEV, store, String("registry/absent"))
+        _ = StaticTokenCredential.token_secret(SURFACE_PREFIX_DEV, String("prefix.dev"), store, String("registry/absent"))
         assert_true(False, "an unresolved secret must be refused")
     except e:
         assert_true(String(e).find(String("'registry/absent'")) >= 0, String(e))
     var ok = _write(String("token_ok"), String(_TOKEN))
     with assert_raises(contains="no token shape"):
-        _ = StaticTokenCredential.token_file(99, ok)
+        _ = StaticTokenCredential.token_file(99, String("prefix.dev"), ok)
     print("  test_refusals_never_quote_the_token: PASS")
 
 
@@ -142,10 +145,14 @@ def _wheel() -> PackageFile:
 
 
 def _conda() -> PackageFile:
+    return _conda_at(String("prefix.dev/example-channel"))
+
+
+def _conda_at(repo: String) -> PackageFile:
     return PackageFile(
         PackageCoordinate(
             SUBSTRATE_PREFIX_DEV_CONDA,
-            String("prefix.dev/example-channel"),
+            repo.copy(),
             String("komira-probe"),
             String("1.2.3"),
             String("linux-64"),
@@ -168,7 +175,7 @@ def test_one_credential_one_surface() raises:
     var t = ScriptedPkgTransport()
     t.queue(PkgResponse(201))
     var rs = RegistrySet[ScriptedPkgTransport, StaticTokenCredential](
-        t^, StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, path)
+        t^, StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), path)
     )
     with assert_raises(contains="cannot serve the PYPI_UPLOAD surface"):
         _ = rs.upload(_wheel(), _names())
@@ -185,8 +192,8 @@ def test_one_credential_one_surface() raises:
 
 def test_an_anonymous_upload_is_refused_before_any_request() raises:
     var anon = AnonymousCredential()
-    assert_equal(anon.authorization(SURFACE_PREFIX_DEV), String(""))
-    assert_equal(anon.authorization(SURFACE_PYPI_UPLOAD), String(""))
+    assert_equal(anon.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String(""))
+    assert_equal(anon.authorization(SURFACE_PYPI_UPLOAD, String("test.pypi.org")), String(""))
     var t = ScriptedPkgTransport()
     t.queue(PkgResponse(200))
     var rs = RegistrySet[ScriptedPkgTransport, AnonymousCredential](t^, AnonymousCredential())
@@ -198,10 +205,42 @@ def test_an_anonymous_upload_is_refused_before_any_request() raises:
     print("  test_an_anonymous_upload_is_refused_before_any_request: PASS")
 
 
+def test_one_credential_one_host() raises:
+    var path = _write(String("token_one_host"), String(_TOKEN))
+    var t = ScriptedPkgTransport()
+    t.queue(PkgResponse(201))
+    var rs = RegistrySet[ScriptedPkgTransport, StaticTokenCredential](
+        t^, StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev"), path)
+    )
+    var other = _conda_at(String("conda.example.org/example-channel"))
+    try:
+        _ = rs.upload(other, _names())
+        assert_true(False, "a token for prefix.dev must not reach another server")
+    except e:
+        var msg = String(e)
+        assert_true(msg.find(String("will not present")) >= 0, msg)
+        assert_true(msg.find(String("'conda.example.org'")) >= 0, msg)
+        _never_quotes_the_token(msg)
+    with assert_raises(contains="will not present"):
+        _ = rs.read_back(other.coordinate)
+    with assert_raises(contains="will not present"):
+        _ = rs.fetch(other.coordinate)
+    assert_equal(rs.transport().call_count(), 0)
+    # CONTROL: its own host gets it.
+    _ = rs.upload(_conda(), _names())
+    assert_equal(rs.transport().call_count(), 1)
+    with assert_raises(contains="must be a bare host"):
+        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("prefix.dev/example-channel"), path)
+    with assert_raises(contains="names no host"):
+        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String(""), path)
+    print("  test_one_credential_one_host: PASS")
+
+
 def main() raises:
     test_a_token_file_in_both_shapes()
     test_a_token_by_secret_name()
     test_refusals_never_quote_the_token()
     test_one_credential_one_surface()
     test_an_anonymous_upload_is_refused_before_any_request()
+    test_one_credential_one_host()
     print("test_pkg_upload_static_token_credential: ALL PASS")

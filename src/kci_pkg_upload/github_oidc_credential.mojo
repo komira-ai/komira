@@ -42,8 +42,11 @@
 # the caller requires (`with_required_environment`) — a second check beside the
 # registry's own trusted-publisher restriction, never instead of it.
 #
-# Minting is lazy: the first `authorization(surface)` fetches one ID token per
-# audience and mints once; later calls reuse the minted token.
+# Minting is lazy: the first `authorization(surface, host)` fetches one ID token per
+# audience and mints once; later calls reuse the minted token. The token is
+# presented only to the host it was minted at: the prefix.dev host for
+# PREFIX_DEV, the python index's host for PYPI_UPLOAD. Any other host is
+# refused before minting.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -62,6 +65,7 @@ from .credential import (
     RegistryCredential,
     bearer_authorization,
     pypi_upload_authorization,
+    refuse_other_host,
     refuse_surface,
 )
 from .identity import ascii_lower
@@ -510,12 +514,24 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
         self._pypi_token = token^
         self._has_pypi_token = True
 
-    def authorization(mut self, surface: Int) raises -> String:
+    def authorization(mut self, surface: Int, host: String) raises -> String:
+        """The minted token's shape for `surface`, only for the host it was
+        minted at. The host check runs BEFORE any minting, so a mismatched
+        host costs zero requests."""
         if surface == SURFACE_PREFIX_DEV and self._prefix_dev_host.byte_length() > 0:
+            refuse_other_host(
+                String("GithubOidcCredential"), surface, host, self._prefix_dev_host
+            )
             if not self._has_prefix_token:
                 self._mint_prefix_dev()
             return bearer_authorization(_secret_string(self._prefix_token))
         if surface == SURFACE_PYPI_UPLOAD and self._pypi_index.byte_length() > 0:
+            refuse_other_host(
+                String("GithubOidcCredential"),
+                surface,
+                host,
+                repo_host(self._pypi_index),
+            )
             if not self._has_pypi_token:
                 self._mint_pypi()
             return pypi_upload_authorization(_secret_string(self._pypi_token))

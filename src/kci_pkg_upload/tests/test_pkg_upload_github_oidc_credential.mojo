@@ -26,7 +26,11 @@
 #       zero requests; construction refuses an empty request token, a
 #       non-https or port-carrying request URL, and no surface at all;
 #   (8) `from_actions_env` refuses, naming both variables, when the runner
-#       did not set them.
+#       did not set them;
+#   (9) the minted token goes ONLY to the host it was minted at: a prefix.dev
+#       or index upload whose coordinate names another server is refused with
+#       ZERO requests on either transport (no ID token, no mint, no upload),
+#       on both surfaces and on reads; host case does not matter.
 #
 # Hermetic: ScriptedPkgTransport; no network. The test sets the two
 # handshake variables EMPTY for row (8) and never to a value.
@@ -39,6 +43,13 @@ from komira_encoding import base64_url_encode_nopad
 from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 from komira_secret_store import SecretValue
 
+from kci_pkg_upload.approved_names import ApprovedNames
+from kci_pkg_upload.coordinate import (
+    SUBSTRATE_PREFIX_DEV_CONDA,
+    SUBSTRATE_PUBLIC_PYPI,
+    PackageCoordinate,
+    PackageFile,
+)
 from kci_pkg_upload.credential import (
     SURFACE_PREFIX_DEV,
     SURFACE_PYPI_UPLOAD,
@@ -51,6 +62,7 @@ from kci_pkg_upload.github_oidc_credential import (
     decode_jwt_claims,
     prefix_dev_audience,
 )
+from kci_pkg_upload.registry_set import RegistrySet
 from kci_pkg_upload.transport import PkgResponse, ScriptedPkgTransport
 from kci_pkg_upload.wire import bytes_of
 
@@ -107,8 +119,8 @@ def test_the_prefix_dev_exchange() raises:
     t.queue(_id_token_answer(jwt))
     t.queue(_raw(200, String(_MINTED)))
     var cred = _cred(t^)
-    assert_equal(cred.authorization(SURFACE_PREFIX_DEV), String("Bearer ") + String(_MINTED))
-    assert_equal(cred.authorization(SURFACE_PREFIX_DEV), String("Bearer ") + String(_MINTED))
+    assert_equal(cred.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_MINTED))
+    assert_equal(cred.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_MINTED))
     assert_equal(cred.transport().call_count(), 2, "minted once, reused")
     var idreq = cred.transport().call(0)
     assert_equal(idreq.method, HTTP_METHOD_GET)
@@ -133,7 +145,7 @@ def test_the_pypi_exchange() raises:
     t.queue(_raw(200, String('{"success": true, "token": "pypi-minted-0123456789"}')))
     var cred = _cred(t^, String(""), String("test.pypi.org"))
     assert_equal(
-        cred.authorization(SURFACE_PYPI_UPLOAD),
+        cred.authorization(SURFACE_PYPI_UPLOAD, String("test.pypi.org")),
         pypi_upload_authorization(String("pypi-minted-0123456789")),
     )
     var aud = cred.transport().call(0)
@@ -157,7 +169,7 @@ def test_the_audience() raises:
     t.queue(_id_token_answer(_jwt(String(""))))
     t.queue(_raw(200, String(_MINTED)))
     var cred = _cred(t^, String("conda.example.org"), String(""), String("https://t.example.invalid/idtoken"))
-    _ = cred.authorization(SURFACE_PREFIX_DEV)
+    _ = cred.authorization(SURFACE_PREFIX_DEV, String("conda.example.org"))
     assert_equal(cred.transport().call(0).path, String("/idtoken?audience=conda.example.org"))
     assert_equal(cred.transport().call(1).host, String("conda.example.org"))
     print("  test_the_audience: PASS")
@@ -170,7 +182,7 @@ def _mint_refused(var answer: PkgResponse, want: String) raises:
     var cred = _cred(t^)
     var raised = False
     try:
-        _ = cred.authorization(SURFACE_PREFIX_DEV)
+        _ = cred.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
     except e:
         raised = True
         assert_true(String(e).find(want) >= 0, String(e))
@@ -189,7 +201,7 @@ def test_a_malformed_exchange_answer_is_refused() raises:
     t.queue(_raw(200, String('{"success": true}')))
     var cred = _cred(t^, String(""), String("pypi.org"))
     with assert_raises(contains="answered no token"):
-        _ = cred.authorization(SURFACE_PYPI_UPLOAD)
+        _ = cred.authorization(SURFACE_PYPI_UPLOAD, String("pypi.org"))
     print("  test_a_malformed_exchange_answer_is_refused: PASS")
 
 
@@ -199,7 +211,7 @@ def test_nothing_secret_reaches_an_error() raises:
     t.queue(_raw(403, String("bad bearer ") + String(_REQ_TOKEN)))
     var cred = _cred(t^)
     try:
-        _ = cred.authorization(SURFACE_PREFIX_DEV)
+        _ = cred.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
         assert_true(False, "a 403 must be refused")
     except e:
         assert_true(String(e).find(String(_REQ_TOKEN)) < 0, String(e))
@@ -211,7 +223,7 @@ def test_nothing_secret_reaches_an_error() raises:
     t2.queue(_raw(401, String("rejected token ") + jwt))
     var cred2 = _cred(t2^)
     try:
-        _ = cred2.authorization(SURFACE_PREFIX_DEV)
+        _ = cred2.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
         assert_true(False, "a 401 must be refused")
     except e:
         assert_true(String(e).find(jwt) < 0, String(e))
@@ -222,7 +234,7 @@ def test_nothing_secret_reaches_an_error() raises:
     t3.queue(_raw(200, String(_MINTED) + String(" trailing")))
     var cred3 = _cred(t3^)
     try:
-        _ = cred3.authorization(SURFACE_PREFIX_DEV)
+        _ = cred3.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
         assert_true(False, "a malformed body must be refused")
     except e:
         assert_true(String(e).find(String(_MINTED)) < 0, String(e))
@@ -243,7 +255,7 @@ def test_claims_and_the_required_environment() raises:
     t.queue(_raw(200, String(_MINTED)))
     var ok = _cred(t^)
     ok.with_required_environment(String("release"))
-    assert_equal(ok.authorization(SURFACE_PREFIX_DEV), String("Bearer ") + String(_MINTED))
+    assert_equal(ok.authorization(SURFACE_PREFIX_DEV, String("prefix.dev")), String("Bearer ") + String(_MINTED))
     assert_true(ok.has_claims())
     assert_equal(ok.claims().environment, String("release"))
     # Another environment: refused after the ID token, before the exchange.
@@ -252,7 +264,7 @@ def test_claims_and_the_required_environment() raises:
     var bad = _cred(t2^)
     bad.with_required_environment(String("release"))
     with assert_raises(contains="not the required 'release'"):
-        _ = bad.authorization(SURFACE_PREFIX_DEV)
+        _ = bad.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
     assert_equal(bad.transport().call_count(), 1)
     # No environment claim at all: refused the same way.
     var t3 = ScriptedPkgTransport()
@@ -260,7 +272,7 @@ def test_claims_and_the_required_environment() raises:
     var none = _cred(t3^)
     none.with_required_environment(String("release"))
     with assert_raises(contains="not the required 'release'"):
-        _ = none.authorization(SURFACE_PREFIX_DEV)
+        _ = none.authorization(SURFACE_PREFIX_DEV, String("prefix.dev"))
     assert_equal(none.transport().call_count(), 1)
     print("  test_claims_and_the_required_environment: PASS")
 
@@ -269,7 +281,7 @@ def test_unserved_surfaces_and_construction_refusals() raises:
     var t = ScriptedPkgTransport()
     var only_prefix = _cred(t^)
     with assert_raises(contains="cannot serve the PYPI_UPLOAD surface"):
-        _ = only_prefix.authorization(SURFACE_PYPI_UPLOAD)
+        _ = only_prefix.authorization(SURFACE_PYPI_UPLOAD, String("test.pypi.org"))
     assert_equal(only_prefix.transport().call_count(), 0)
     with assert_raises(contains="request token is EMPTY"):
         _ = GithubOidcCredential[ScriptedPkgTransport](
@@ -303,6 +315,74 @@ def test_from_actions_env_names_the_missing_variables() raises:
     print("  test_from_actions_env_names_the_missing_variables: PASS")
 
 
+def _conda_at(repo: String) -> PackageFile:
+    return PackageFile(
+        PackageCoordinate(
+            SUBSTRATE_PREFIX_DEV_CONDA,
+            repo.copy(),
+            String("komira-probe"),
+            String("1.2.3"),
+            String("linux-64"),
+            String("komira-probe-1.2.3-h0_0.conda"),
+        ),
+        bytes_of(String("conda-bytes")),
+        String(""),
+    )
+
+
+def _wheel_at(repo: String) -> PackageFile:
+    return PackageFile(
+        PackageCoordinate(
+            SUBSTRATE_PUBLIC_PYPI,
+            repo.copy(),
+            String("komira_probe"),
+            String("1.1.3"),
+            String("linux-64"),
+            String("komira_probe-1.1.3-py3-none-any.whl"),
+        ),
+        bytes_of(String("wheel-bytes")),
+        String("Metadata-Version: 2.1\nName: komira_probe\nVersion: 1.1.3\n\n"),
+    )
+
+
+def _names() raises -> ApprovedNames:
+    var p = ApprovedNames()
+    p.approve(String("komira_probe"))
+    p.approve(String("komira-probe"))
+    return p^
+
+
+def test_the_token_goes_only_to_its_mint_host() raises:
+    var oidc = ScriptedPkgTransport()
+    oidc.queue(_id_token_answer(_jwt(String("release"))))
+    oidc.queue(_raw(200, String(_MINTED)))
+    var w = ScriptedPkgTransport()
+    w.queue(PkgResponse(201))
+    var rs = RegistrySet[ScriptedPkgTransport, GithubOidcCredential[ScriptedPkgTransport]](
+        w^, _cred(oidc^, String("prefix.dev"), String("test.pypi.org"))
+    )
+    var other = _conda_at(String("conda.example.org/example-channel"))
+    with assert_raises(contains="will not present its PREFIX_DEV credential to 'conda.example.org'"):
+        _ = rs.upload(other, _names())
+    with assert_raises(contains="will not present"):
+        _ = rs.read_back(other.coordinate)
+    with assert_raises(contains="will not present"):
+        _ = rs.fetch(other.coordinate)
+    with assert_raises(contains="will not present its PYPI_UPLOAD credential to 'pypi.org'"):
+        _ = rs.upload(_wheel_at(String("pypi.org")), _names())
+    assert_equal(rs.transport().call_count(), 0, "nothing reached the other server")
+    assert_equal(rs.credential().transport().call_count(), 0, "nothing was minted")
+    # CONTROL: the mint host, in any case, gets the token.
+    _ = rs.upload(_conda_at(String("Prefix.Dev/example-channel")), _names())
+    assert_equal(rs.credential().transport().call_count(), 2)
+    assert_equal(rs.transport().call_count(), 1)
+    assert_equal(
+        rs.transport().call(0).header_value(String("Authorization")),
+        String("Bearer ") + String(_MINTED),
+    )
+    print("  test_the_token_goes_only_to_its_mint_host: PASS")
+
+
 def main() raises:
     test_the_prefix_dev_exchange()
     test_the_pypi_exchange()
@@ -312,4 +392,5 @@ def main() raises:
     test_claims_and_the_required_environment()
     test_unserved_surfaces_and_construction_refusals()
     test_from_actions_env_names_the_missing_variables()
+    test_the_token_goes_only_to_its_mint_host()
     print("test_pkg_upload_github_oidc_credential: ALL PASS")

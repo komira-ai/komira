@@ -106,7 +106,7 @@ def _drive[C: RegistryCredential](mut rs: RegistrySet[_Http, C]) raises:
 def test_the_production_types_elaborate() raises:
     var static_set = RegistrySet[_Http, StaticTokenCredential](
         _Http(_mk),
-        StaticTokenCredential(SURFACE_PREFIX_DEV, SecretValue.from_string(String("t"))),
+        StaticTokenCredential(SURFACE_PREFIX_DEV, String("prefix.dev"), SecretValue.from_string(String("t"))),
     )
     var oidc_set = RegistrySet[_Http, GithubOidcCredential[_Http]](
         _Http(_mk),
@@ -128,7 +128,9 @@ def test_the_production_types_elaborate() raises:
         _ = GithubOidcCredential[_Http].from_actions_env(
             _Http(_mk), String("prefix.dev"), String("")
         )
-        _ = StaticTokenCredential.token_file(SURFACE_PREFIX_DEV, String("/nonexistent"))
+        _ = StaticTokenCredential.token_file(
+            SURFACE_PREFIX_DEV, String("prefix.dev"), String("/nonexistent")
+        )
     assert_true(True)
     print("  test_the_production_types_elaborate: PASS")
 

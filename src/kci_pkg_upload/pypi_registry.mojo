@@ -107,7 +107,12 @@ struct PypiLegacyRegistry(Deinitable):
         UNKNOWN."""
         refuse_malformed_file_name(f.coordinate)
         var target = pypi_upload_target(f.coordinate.repo)
-        var authorization = cred.authorization(SURFACE_PYPI_UPLOAD)
+        # The index the coordinate names (`pypi.org`), not its upload host
+        # (`upload.pypi.org`): a credential is issued by, and bound to, the
+        # index.
+        var authorization = cred.authorization(
+            SURFACE_PYPI_UPLOAD, repo_host(f.coordinate.repo)
+        )
         if authorization.byte_length() == 0:
             raise Error(
                 String("kci_pkg_upload: an upload to ")

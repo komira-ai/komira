@@ -343,7 +343,9 @@ struct PrefixDevRegistry(Deinitable):
         request; a transport fault is UNKNOWN."""
         refuse_malformed_conda_coordinate(f.coordinate)
         refuse_name_not_the_files(f.coordinate)
-        var authorization = cred.authorization(SURFACE_PREFIX_DEV)
+        var authorization = cred.authorization(
+            SURFACE_PREFIX_DEV, repo_host(f.coordinate.repo)
+        )
         var req = build_prefix_dev_upload_request(f, authorization)
         var ex = try_exchange(transport, req)
         if not ex.ok:
@@ -358,7 +360,7 @@ struct PrefixDevRegistry(Deinitable):
     ) raises -> ReadBack:
         """What the subdir's repodata says it holds under `c.file_name`."""
         refuse_malformed_conda_coordinate(c)
-        var authorization = cred.authorization(SURFACE_PREFIX_DEV)
+        var authorization = cred.authorization(SURFACE_PREFIX_DEV, repo_host(c.repo))
         var got = get_following_redirects(
             transport,
             repo_host(c.repo),
@@ -383,7 +385,7 @@ struct PrefixDevRegistry(Deinitable):
         """The bytes the channel serves for `c.file_name`. The caller hashes
         them: a fetch never vouches for its own content."""
         refuse_malformed_conda_coordinate(c)
-        var authorization = cred.authorization(SURFACE_PREFIX_DEV)
+        var authorization = cred.authorization(SURFACE_PREFIX_DEV, repo_host(c.repo))
         var got = get_following_redirects(
             transport,
             repo_host(c.repo),
