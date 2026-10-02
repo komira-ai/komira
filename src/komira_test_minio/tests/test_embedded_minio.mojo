@@ -293,6 +293,39 @@ def test_bad_run_id_or_root_refused_before_the_disk() raises:
     assert_equal(len(listdir(inner)), 1)
 
 
+def test_file_refusals_carry_no_path() raises:
+    # Every path here is built from a caller's value (the binary, the
+    # temporary root, the run id); a refusal names the file's role only.
+    var tmp = _tmp()
+    var binary = _fixture_binary(tmp)
+    var runner = ScriptedProcessRunner(List[Readiness]())
+    var entropy = _entropy()
+    var msg = String("")
+    try:
+        var s = start_embedded_minio_with_pins(
+            RunId(String("1790000000-00000000000000c7"), 1790000000),
+            tmp + "/sentinel-missing-binary",
+            tmp,
+            runner^,
+            entropy,
+            _pins(binary),
+        )
+        _ = s.stop()
+    except e:
+        msg = String(e)
+    assert_equal(msg, "komira_test_minio: cannot read the MinIO binary")
+
+    # An existing run directory: refused, not reused, and not removed.
+    var id = String("1790000000-00000000000000c8")
+    mkdir(tmp + "/kti-" + id)
+    msg = _start_refused(id, tmp, binary)
+    assert_equal(
+        msg, "komira_test_minio: refusing to reuse an existing temporary directory for this run"
+    )
+    assert_false(tmp in msg, msg)
+    assert_true(exists(tmp + "/kti-" + id), "a directory this call did not make was removed")
+
+
 def main() raises:
     test_start_retry_files_env_and_stop()
     test_sha_mismatch_raises_before_anything()
@@ -300,4 +333,5 @@ def main() raises:
     test_unconfirmed_stop_is_cannot_tell()
     test_unstopped_server_stops_and_builds_the_message()
     test_bad_run_id_or_root_refused_before_the_disk()
+    test_file_refusals_carry_no_path()
     print("test_embedded_minio: OK")

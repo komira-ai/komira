@@ -122,7 +122,13 @@ def _verify_pinned_minio(minio_path: String, pins: List[MinioPin]) raises:
     var want = pinned_sha256_for(pins, platform)
     if want.byte_length() == 0:
         raise Error("komira_test_minio: no pinned binary for platform " + platform)
-    var got = _sha256_file_hex(minio_path)
+    # Outside the start's `try`, so nothing scrubs this message after it:
+    # it must carry no path (the path is a caller's value).
+    var got: String
+    try:
+        got = _sha256_file_hex(minio_path, "the MinIO binary")
+    except e:
+        raise Error("komira_test_minio: " + String(e))
     if got != want:
         raise Error(
             "komira_test_minio: the binary's sha256 "
@@ -240,14 +246,19 @@ def start_embedded_minio_with_pins[P: ProcessRunner, E: Entropy](
     var user = "kti" + hex16_lower(entropy.next_u64())
     var password = hex16_lower(entropy.next_u64()) + hex16_lower(entropy.next_u64())
     var tmp = tmp_root + "/kti-" + run_id.value
-    _make_private_dir(tmp)
+    # Outside the `try` below: a directory this call did not make is never
+    # removed by its cleanup.
+    try:
+        _make_private_dir(tmp, "temporary directory for this run")
+    except e:
+        raise Error("komira_test_minio: " + String(e))
     var h = -1
     var port = 0
     try:
-        _write_private_file(tmp + "/root_user", user)
-        _write_private_file(tmp + "/root_password", password)
-        _make_private_dir(tmp + "/data")
-        _make_private_dir(tmp + "/certs")
+        _write_private_file(tmp + "/root_user", user, "root user file")
+        _write_private_file(tmp + "/root_password", password, "root password file")
+        _make_private_dir(tmp + "/data", "data directory")
+        _make_private_dir(tmp + "/certs", "certs directory")
         var last_exit = 0
         for _attempt in range(1 + MINIO_START_RETRIES):
             port = _draw_port(entropy)
@@ -279,7 +290,9 @@ def start_embedded_minio_with_pins[P: ProcessRunner, E: Entropy](
                 + String(last_exit)
                 + ")"
             )
-        _write_private_file(tmp + "/credentials", credentials_file_text(user, password, ""))
+        _write_private_file(
+            tmp + "/credentials", credentials_file_text(user, password, ""), "credentials file"
+        )
     except e:
         var msg = String(e)
         if h >= 0:

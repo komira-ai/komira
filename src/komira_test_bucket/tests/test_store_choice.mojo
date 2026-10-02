@@ -209,6 +209,27 @@ def test_open_from_flags_reaches_the_chosen_store() raises:
         assert_true("komira_test_minio: the binary's sha256" in String(err), String(err))
     assert_true(raised, "an unpinned binary was started")
 
+    # A --test-minio-binary that cannot be read (a typo'd path) is refused
+    # naming the FLAG; the path is a value and never reaches the message.
+    var missing: List[String] = ["--test-minio-binary=/nonexistent/sentinel-path"]
+    raised = False
+    try:
+        var m = open_test_bucket_from_flags(
+            _choose(missing), id, tmp, FakeObjectStore(), ScriptedProcessRunner([Readiness.ready()]), entropy, clock
+        )
+        _ = m.close()
+    except err:
+        raised = True
+        var msg = String(err)
+        assert_false("sentinel-path" in msg, msg)
+        assert_false("nonexistent" in msg, msg)
+        assert_equal(
+            msg,
+            "komira_test_bucket: the MinIO given by --test-minio-binary did not start:"
+            " komira_test_minio: cannot read the MinIO binary",
+        )
+    assert_true(raised, "an unreadable binary was accepted")
+
     # SKIP and CANNOT_TELL are refused, not opened.
     raised = False
     try:

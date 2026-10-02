@@ -5,7 +5,7 @@
 # 999999999 -- raises with an exact message that names the flag and never
 # its value.
 
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_test_bucket import TestStoreFlags
 
@@ -67,8 +67,11 @@ def test_unknown_flags_in_the_family_are_refused() raises:
     _assert_refused(
         ["--test-minio-bin=/tools/minio"], "komira_test_bucket: unknown flag --test-minio-bin"
     )
+    # `--test-targets` is `--test-target` with an `s` glued on: shown as the
+    # known name, since the glued text could be a value.
     _assert_refused(
-        ["--test-targets=//p:t"], "komira_test_bucket: unknown flag --test-targets"
+        ["--test-targets=//p:t"],
+        "komira_test_bucket: unknown flag --test-target with text glued on (missing `=`?)",
     )
     _assert_refused(
         ["--test-max-lease=600"], "komira_test_bucket: unknown flag --test-max-lease"
@@ -80,8 +83,54 @@ def test_unknown_flags_in_the_family_are_refused() raises:
     # A value glued on without `=` is not echoed as a "flag name".
     _assert_refused(
         ["--test-s3-endpointhttps://x.invalid:9000"],
+        "komira_test_bucket: unknown flag --test-s3-endpoint with text glued on (missing `=`?)",
+    )
+    # Not starting with a known name and not shaped like one: the placeholder.
+    _assert_refused(
+        ["--test-s3-https://x.invalid:9000"],
         "komira_test_bucket: unknown flag (a flag whose name is not shown: not shaped like"
         " a flag name)",
+    )
+
+
+def test_a_glued_value_shaped_like_a_flag_name_is_not_echoed() raises:
+    # A bucket and a region are made only of `[a-z0-9-]`, so the shape check
+    # alone would echo them. Each known flag with a value glued on shows only
+    # the known name.
+    var glued = (
+        "komira_test_bucket: unknown flag --test-s3-bucket with text glued on (missing `=`?)"
+    )
+    _assert_refused(["--test-s3-bucketmy-prod-bucket"], glued)
+    _assert_refused(["--test-s3-bucketmy-prod-bucket=x"], glued)
+    var region = (
+        "komira_test_bucket: unknown flag --test-s3-region with text glued on (missing `=`?)"
+    )
+    _assert_refused(["--test-s3-regionus-east-1"], region)
+    _assert_refused(["--test-s3-regionus-east-1=x"], region)
+    # The longest known prefix wins, and every known flag is covered.
+    var names: List[String] = [
+        "--test-s3-endpoint",
+        "--test-s3-region",
+        "--test-s3-bucket",
+        "--test-s3-credentials-file",
+        "--test-minio-binary",
+        "--test-target",
+        "--test-max-lease-seconds",
+        "--test-teardown-budget-seconds",
+    ]
+    for n in names:
+        var args: List[String] = [n + "sentinel-value-7"]
+        var msg = _parse_error(args)
+        assert_equal(
+            msg,
+            "komira_test_bucket: unknown flag " + n + " with text glued on (missing `=`?)",
+        )
+        assert_false("sentinel" in msg, msg)
+    # A retired spelling with a value glued on: same, plus the retirement.
+    _assert_refused(
+        ["--testinfra-configprod-config"],
+        "komira_test_bucket: unknown flag --testinfra-config with text glued on (missing"
+        " `=`?) (the --testinfra-* flags are retired; use the --test-* flags)",
     )
 
 
@@ -139,6 +188,7 @@ def test_value_refusals() raises:
 def main() raises:
     test_parse_reads_every_flag_and_ignores_others()
     test_unknown_flags_in_the_family_are_refused()
+    test_a_glued_value_shaped_like_a_flag_name_is_not_echoed()
     test_retired_spellings_are_refused_loudly()
     test_value_refusals()
     print("test_flags: OK")

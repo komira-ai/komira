@@ -72,4 +72,4 @@ def binary_sha256(path: String) raises -> String:
     """The lowercase hex sha256 of the file at `path`: the digest
     `start_embedded_minio` compares with the pin. A test that pins a fixture
     file builds its `MinioPin` from this."""
-    return _sha256_file_hex(path)
+    return _sha256_file_hex(path, "the file to hash")

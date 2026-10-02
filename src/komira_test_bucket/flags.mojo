@@ -55,8 +55,12 @@
 # the machine and SKIPS with a reason.
 #
 # ⛔ NO MESSAGE CARRIES A VALUE. A test's output can land in a public log, so
-# every refusal names the FLAG and never what it holds. A "flag name" that is
-# not shaped like one (a value glued on without `=`) is not echoed.
+# every refusal names the FLAG and never what it holds. An unknown name that
+# starts with a known (or retired) flag name -- a value glued on without `=`,
+# e.g. `--test-s3-bucketmy-prod-bucket` -- shows only that flag name plus
+# `with text glued on`; any other name not shaped like one is not echoed.
+# An embedded MinIO that does not start is reported naming
+# `--test-minio-binary`, never the path it holds.
 #
 # `exit_unless_runnable()` is how a test acts on the choice: it returns for
 # EXTERNAL_S3 and EMBEDDED_MINIO and otherwise ENDS THE PROCESS (77 for
@@ -72,7 +76,7 @@
 
 from std.sys import argv
 
-from komira_test_minio import ProcessRunner, start_embedded_minio
+from komira_test_minio import EmbeddedMinio, ProcessRunner, start_embedded_minio
 from komira_test_run_id import Entropy, RunId, WallClock
 from komira_test_verdict import (
     CANNOT_TELL_EXIT_CODE,
@@ -116,10 +120,59 @@ def _in_family(name: String) -> Bool:
     )
 
 
+def _known_flags() -> List[String]:
+    return [
+        FLAG_S3_ENDPOINT,
+        FLAG_S3_REGION,
+        FLAG_S3_BUCKET,
+        FLAG_S3_CREDENTIALS_FILE,
+        FLAG_MINIO_BINARY,
+        FLAG_TARGET,
+        FLAG_MAX_LEASE_SECONDS,
+        FLAG_TEARDOWN_BUDGET_SECONDS,
+    ]
+
+
+def _retired_flags() -> List[String]:
+    """The retired spellings, for the same glued-value check: a runner
+    passing `--testinfra-config/etc/x` must not have the path echoed."""
+    return [
+        "--testinfra-s3-config",
+        "--testinfra-minio-binary",
+        "--testinfra-target",
+        "--testinfra-config",
+        "--testinfra-local-minio",
+    ]
+
+
+def _glued_onto(name: String, known: List[String]) -> String:
+    """The longest flag in `known` that `name` starts with and is longer
+    than, else "". Such a `name` is that flag with text glued on without
+    `=`, and the text is a VALUE: a bucket or region is made only of
+    `[a-z0-9-]`, so the shape check in `_shown_flag` cannot catch it."""
+    var best = String("")
+    for k in known:
+        if (
+            name.byte_length() > k.byte_length()
+            and name.startswith(k)
+            and k.byte_length() > best.byte_length()
+        ):
+            best = String(k)
+    return best^
+
+
 def _shown_flag(name: String) -> String:
-    """`name` when it is shaped like a flag name (`--` then lowercase
-    letters, digits and `-`, at most 64 bytes), else a placeholder: a value
-    glued on without `=` must not be echoed."""
+    """How an unknown `name` appears in a refusal. A name that starts with a
+    known (or retired) flag name and is longer shows only that flag name
+    plus `with text glued on`. Otherwise `name` when it is shaped like a
+    flag name (`--` then lowercase letters, digits and `-`, at most 64
+    bytes), else a placeholder: a value glued on without `=` must never be
+    echoed."""
+    var glued = _glued_onto(name, _known_flags())
+    if glued.byte_length() == 0:
+        glued = _glued_onto(name, _retired_flags())
+    if glued.byte_length() > 0:
+        return glued + " with text glued on (missing `=`?)"
     var b = name.as_bytes()
     var ok = len(b) > 2 and len(b) <= 64
     for i in range(len(b)):
@@ -397,9 +450,17 @@ def open_test_bucket_from_flags[
             run_id, choice.scope(), choice.target_label, client^, clock
         )
     if choice.kind == BACKEND_CHOICE_EMBEDDED_MINIO:
-        var server = start_embedded_minio(
-            run_id, choice.minio_binary, tmp_root, runner^, entropy
-        )
+        # komira_test_minio's messages carry no path; this names the flag
+        # the binary came from, which that package cannot know.
+        var server: EmbeddedMinio[P]
+        try:
+            server = start_embedded_minio(
+                run_id, choice.minio_binary, tmp_root, runner^, entropy
+            )
+        except e:
+            raise Error(
+                _P + "the MinIO given by " + FLAG_MINIO_BINARY + " did not start: " + String(e)
+            )
         return open_embedded_minio_bucket(
             run_id,
             server^,
