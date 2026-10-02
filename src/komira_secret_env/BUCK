@@ -1,0 +1,41 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+
+# A SecretStore whose handle is the NAME of an environment variable: the
+# store kci composes for `--secret-store=env`. Its one dependency is
+# komira_secret_store.
+#
+# The welded tests run hermetically: one over the MapEnv double, one over
+# the real process environment, with the variables set by `test_env` below
+# (the gate runner exports them for the test; the host's environment does not
+# reach it).
+mojo_library(
+    name = "komira_secret_env",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_secret_store:komira_secret_store"],
+    test_srcs = [
+        "tests/test_env_secret_store.mojo",
+        "tests/test_process_env.mojo",
+    ],
+    test_env = {
+        "KOMIRA_SECRET_ENV_TEST_EMPTY": "",
+        "KOMIRA_SECRET_ENV_TEST_SET": "s3cr3t-value",
+        "KOMIRA_SECRET_ENV_TEST_UTF8": "données=1",
+    },
+    visibility = ["PUBLIC"],
+)
+
+# process_env.mojo declares getenv with komira_core_ffi's signature. Mojo
+# refuses at link two declarations of one C symbol with different
+# signatures, so building this binary, which links both, is the check that
+# the two still agree. (`std.os.getenv` declares it differently and cannot
+# link beside either one.)
+mojo_test(
+    name = "getenv_link_probe",
+    srcs = ["tests/getenv_link_probe.mojo"],
+    deps = [
+        ":komira_secret_env",
+        "//src/komira_core_ffi:komira_core_ffi",
+    ],
+    env = {"KOMIRA_SECRET_ENV_PROBE": "probe-value"},
+)
+
