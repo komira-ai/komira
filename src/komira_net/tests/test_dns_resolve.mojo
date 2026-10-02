@@ -10,7 +10,7 @@
 from std.testing import assert_equal, assert_false, assert_true
 from std.sys.info import CompilationTarget
 
-from komira_async.net.dns import (
+from komira_net.dns import (
     _getaddrinfo_collect,
     resolve_host,
     resolve_host_be,
