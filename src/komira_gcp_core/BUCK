@@ -1,13 +1,18 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The one hand-written core of the Google Cloud SDK. This part (P18a-1) holds
-# the token-source contract the generated `komira_gcp_<service>` clients call
-# with a token cache on an injected clock, the google.rpc.Status error envelope
-# (never echoes a body), and the PURE paging and retry pieces (`PageCursor`,
-# `next_page_token`, `GcpRetryClassifier` for komira_retry). Server bodies
-# are parsed with komira_json. It never imports a generated module,
-# reads no environment and opens no socket, and owns no transport: the one
-# transport seam is komira_http's `Connector`.
+# The one hand-written core of the Google Cloud SDK, GCP-specific code only.
+# This part (P18a-1) holds four pieces:
+#   token      - the `GcpTokenSource` contract the generated
+#                `komira_gcp_<service>` clients call, and a token cache on
+#                komira_retry's injected `MonotonicClock`;
+#   status     - the google.rpc.Status error envelope (never echoes a body);
+#   pagination - the PURE paging pieces (`PageCursor`, `next_page_token`);
+#   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for komira_retry.
+# Generic pieces come from dependencies: server bodies (and their UTF-8
+# validation) from komira_json; retry policy, backoff, loop and the clock
+# seam from komira_retry. It never imports a generated module, reads no
+# environment and opens no socket, and owns no transport: the one transport
+# seam is komira_http's `Connector`.
 #
 # Still to come, in order: P18a-2 (pure, no http) - service-account key file
 # parse, the RS256 JWT assertion, the authorized_user refresh form, the

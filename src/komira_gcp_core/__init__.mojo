@@ -23,7 +23,9 @@ This is part P18a-1. Still to come:
     identity federation) and the send/decide/sleep retry loop.
   - P21b: the paging loop, in the generated logging client.
 
-Modules:
+Modules (only GCP-specific code lives here; JSON and its UTF-8 validation
+come from komira_json, and retry/backoff and the clock seam from
+komira_retry):
   - token.mojo      : `GcpTokenSource` (the generated clients' contract),
                       `AccessToken`, `AccessTokenFetcher`,
                       `CachingTokenSource` (on komira_retry's
