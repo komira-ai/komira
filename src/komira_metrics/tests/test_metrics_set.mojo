@@ -42,7 +42,7 @@ from komira_metrics.metrics_set import (
     MAX_GAUGES,
 )
 from komira_name_registry import name_id as _literal_name_id
-from komira_spawn_join import SpawnJoinBody, spawn_join
+from komira_fork_join import ForkJoinBody, fork_join
 
 
 # -----------------------------------------------------------------------------
@@ -354,7 +354,7 @@ comptime INCS_PER_WORKER = 1_000
 
 
 # =============================================================================
-# THE FORK-JOIN -- real threads, via `komira_spawn_join`.
+# THE FORK-JOIN -- real threads, via `komira_fork_join`.
 #
 # A SERIAL LOOP WAS NOT TAKEN: all three arms below assert that N CONCURRENT
 # workers writing byte-disjoint `per_worker` slots reduce to the exact total.
@@ -362,7 +362,7 @@ comptime INCS_PER_WORKER = 1_000
 # disjointness they are named for.
 #
 # Each arm's body holds a safe `Pointer[T, o]` to the shared object and writes
-# only the slot named by its `tid`. `spawn_join` joins every thread before it
+# only the slot named by its `tid`. `fork_join` joins every thread before it
 # returns (or raises), so the object outlives every worker.
 #
 # The test names keep the word "parallelize": it names the SHAPE under test
@@ -370,7 +370,7 @@ comptime INCS_PER_WORKER = 1_000
 # =============================================================================
 
 
-struct _IncBody[o: MutOrigin](SpawnJoinBody):
+struct _IncBody[o: MutOrigin](ForkJoinBody):
     var obj: Pointer[Counter, Self.o]
 
     def __init__(out self, obj: Pointer[Counter, Self.o]):
@@ -381,7 +381,7 @@ struct _IncBody[o: MutOrigin](SpawnJoinBody):
             self.obj[].inc_in_pipeline(Int64(1), worker_id=tid)
 
 
-struct _EmitBody[o: MutOrigin](SpawnJoinBody):
+struct _EmitBody[o: MutOrigin](ForkJoinBody):
     """The same disjoint write, routed through the `MetricsSet.counter[name]()`
     lookup that operators actually call."""
 
@@ -397,7 +397,7 @@ struct _EmitBody[o: MutOrigin](SpawnJoinBody):
             )
 
 
-struct _RecordBody[o: MutOrigin](SpawnJoinBody):
+struct _RecordBody[o: MutOrigin](ForkJoinBody):
     """The recorded value is `i + 1`, so each worker contributes
     1+2+...+INCS_PER_WORKER -- the sum the arm asserts."""
 
@@ -427,7 +427,7 @@ def test_parallelize_disjoint_counter_inc() raises:
     """
     var c = Counter()
     var body = _IncBody(Pointer(to=c))
-    spawn_join(body, N_WORKERS)
+    fork_join(body, N_WORKERS)
 
     var expected = Int64(N_WORKERS * INCS_PER_WORKER)
     assert_equal(
@@ -447,7 +447,7 @@ def test_parallelize_metrics_set_lookup_path() raises:
     var ms = MetricsSet()
     _ = ms.register_counter["rows_consumed"]()
     var body = _EmitBody(Pointer(to=ms))
-    spawn_join(body, N_WORKERS)
+    fork_join(body, N_WORKERS)
 
     var snap = ms.reduce()
     comptime rows_id = _literal_name_id["rows_consumed"]()
@@ -462,7 +462,7 @@ def test_parallelize_time_record_ns() raises:
     """Time.record_ns_in_pipeline under parallelize sums correctly."""
     var t = Time()
     var body = _RecordBody(Pointer(to=t))
-    spawn_join(body, N_WORKERS)
+    fork_join(body, N_WORKERS)
 
     # Each worker contributes 1+2+...+1000 = 500_500. Across 8 workers:
     # 8 * 500_500 = 4_004_000.

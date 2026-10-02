@@ -5,7 +5,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # per-worker series and histogram tables with their export sweep, and the
 # EXPLAIN ANALYZE collector and renderer. It depends on komira_core (for
 # `Slab[T]`), komira_name_registry and komira_hash (name ids and the FNV-1a
-# constants), komira_clock, komira_spawn_join (its tests fork real threads) and
+# constants), komira_clock, komira_fork_join (its tests fork real threads) and
 # komira_atomic_alias (the atomic counters). It must NOT depend on engine
 # packages, komira_trace or komira_log.
 
@@ -32,7 +32,7 @@ mojo_library(
         "//src/komira_core:komira_core",
         "//src/komira_hash:komira_hash",
         "//src/komira_name_registry:komira_name_registry",
-        "//src/komira_spawn_join:komira_spawn_join",
+        "//src/komira_fork_join:komira_fork_join",
     ],
     test_srcs = [
         "tests/test_explain_analyze.mojo",
