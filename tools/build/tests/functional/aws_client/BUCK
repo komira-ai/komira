@@ -16,18 +16,18 @@ load("//functional/gcp_client:defs.bzl", "gen_check", "tests_check")
 # GetLogEvents' error shapes are memberless in the pinned model, so the
 # caller's test checks only that the generated one is (it decodes nothing);
 # reading an error's code and message is komira_aws_core's, stubbed here and
-# tested on the real core in P06.
+# tested against the real core once it carries that surface.
 #
-# The runtime is STUBS, as gcp_client's fixture uses a stub komira_proto_codec:
-# komira_aws_core on main holds SigV4 and the credential value but not yet
-# the request and codec surface pure-mode code imports (AwsRequest, the
-# aws_json_* encoders, the aws_error_* readers), and the real komira_json is
-# a library of another cell.
+# The runtime is STUBS: komira_aws_core on main holds SigV4 and the
+# credential value but not yet the request and codec surface pure-mode code
+# imports (AwsRequest, the aws_json_* encoders, the aws_error_* readers).
 # stub/komira_aws_core declares every name the generated module imports;
-# stub/komira_json is a minimal JSON value and parser with the API that code
-# calls. They are stubs and not komira//src labels because a library of this
-# cell cannot depend on a mojo_library of the komira cell (each cell's
-# MojoPkgTSet is a different type).
+# stub/komira_json is a minimal JSON value and parser with komira_json's
+# layout and the part of its API that code calls. They are stubs and not
+# komira//src labels because a library of this cell cannot depend on a
+# mojo_library of the komira cell (each cell's MojoPkgTSet is a different
+# type). Nothing in this cell builds a generated client against the real
+# komira_json; that check belongs with the real komira_aws_logs below.
 # The real komira_aws_logs is built in the komira cell, on the real
 # komira_aws_core, once that carries the surface; this package tests the rule.
 
@@ -37,7 +37,8 @@ mojo_library(
     name = "komira_json",
     srcs = [
         "stub/komira_json/__init__.mojo",
-        "stub/komira_json/json_value.mojo",
+        "stub/komira_json/parse.mojo",
+        "stub/komira_json/value.mojo",
     ],
     visibility = [
         "//functional/aws_client_mode:",
