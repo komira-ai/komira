@@ -1,4 +1,4 @@
-from komira_serde import PbDecoder, PbEncoder
+from komira_proto_codec import PbDecoder, PbEncoder
 from person_proto.person import Person
 from std.testing import assert_equal
 

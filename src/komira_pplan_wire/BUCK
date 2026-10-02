@@ -1,0 +1,16 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A protobuf-free, length-prefixed wire codec for one physical plan shape,
+# `PROJECT? -> FILTER* -> SCAN(parquet)`, plus the field-for-field comparator
+# its round-trip test asserts with. It depends on komira_core alone.
+mojo_library(
+    name = "komira_pplan_wire",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+    ],
+    test_srcs = [
+        "tests/test_pplan_wire_roundtrip.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
