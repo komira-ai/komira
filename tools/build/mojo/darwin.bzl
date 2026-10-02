@@ -99,6 +99,7 @@ def _mojo_darwin_toolchain_impl(ctx):
             run_check = one(ctx.attrs._run_check),
             launcher = one(ctx.attrs.launcher),
             runtime = one(ctx.attrs.runtime),
+            os = "darwin",
         ),
     ]
 

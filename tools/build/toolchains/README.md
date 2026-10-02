@@ -171,6 +171,7 @@ path, `@loader_path/lib`, the `lib/` of its runnable directory; it targets
 minimum. Gated tests set `DYLD_LIBRARY_PATH` to the compiler's `lib/`, and
 run checks start the binary with no `DYLD_*` variable. Bundles
 (`mojo_bundle`, the `[shared]` sub-target) are linux only: the macOS wrapper
-refuses `--emit shared-lib`. `tools/build/tests/functional/darwin/check.sh` checks all
+refuses `--emit shared-lib` unless the library names itself with
+`-Xlinker -install_name` (`mojo_shared_lib`, a `.dylib`). `tools/build/tests/functional/darwin/check.sh` checks all
 of this, most of it without a macOS worker; with the keys above set, it also
 builds and runs `//tools/build/examples:hello` on the workers.
