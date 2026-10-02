@@ -356,7 +356,7 @@ def test_shared_infrastructure_has_no_digest_and_says_why() raises:
     nothing, yet a validate step can name it. A digest-shaped field is
     simply wrong for it — and an unexplained empty digest reads as "we did not
     look"."""
-    var t = shared_infrastructure_target(String("shared-infra"))
+    var t = shared_infrastructure_target(String("infra-app"))
     assert_equal(t.version, String(""))
     assert_equal(t.version_source, VERSION_SOURCE_NONE)
     assert_equal(t.fault(), String(""))

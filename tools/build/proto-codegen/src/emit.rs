@@ -18,7 +18,7 @@ const TRIVIAL_REGISTER_STORAGE_TYPES: &[&str] = &[
 /// message (`map<string, M>` — common in googleapis surfaces, e.g. GCS
 /// `ObjectCustomContextPayload`). The suffix names the typed
 /// `write_*`/`read_into_*` primitive the generated map body routes through
-/// (see `komira_serde` `WireEncoder`/`WireDecoder`). A message value routes
+/// (see `komira_proto_codec` `WireEncoder`/`WireDecoder`). A message value routes
 /// through `write_message_field[V]` / `read_into_*_message_map[V]`, which are
 /// PARAMETRIC on the value type — `map_scalar_write_suffix` is only called for
 /// the suffix-keyed scalar/enum primitives, so a message value returns the
@@ -202,7 +202,7 @@ impl<'a> Emitter<'a> {
         self.line(&format!("# Mojo package:  {}", self.file.mojo_package));
         self.line("#");
         self.line(
-            "# Generated message structs conform to the komira_serde",
+            "# Generated message structs conform to the komira_proto_codec",
         );
         self.line(
             "# `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].",
@@ -210,11 +210,11 @@ impl<'a> Emitter<'a> {
         self.blank();
         if self.file.enums.is_empty() {
             self.line(
-                "from komira_serde import Serializable, WireEncoder, WireDecoder",
+                "from komira_proto_codec import Serializable, WireEncoder, WireDecoder",
             );
         } else {
             self.line(
-                "from komira_serde import (",
+                "from komira_proto_codec import (",
             );
             self.line("    ProtoEnum,");
             self.line("    Serializable,");
@@ -241,7 +241,7 @@ impl<'a> Emitter<'a> {
                 self.line("    BidiStreamCodec,");
                 self.line(")");
                 self.line(
-                    "from komira_serde.proto_binary import PbEncoder, PbDecoder",
+                    "from komira_proto_codec.proto_binary import PbEncoder, PbDecoder",
                 );
                 self.line(
                     "from komira_http.transport.io_stream import Connector",
@@ -1865,7 +1865,7 @@ mod mojo_100_service_client_tests {
         assert!(
             !out.contains("ImplicitlyDestructible"),
             "`ImplicitlyDestructible` is the Mojo b2 spelling — 1.0.0 renamed it \
-             `Deinitable` (76108ca55d, 5878 hand-written sites); got:\n{out}"
+             `Deinitable`; got:\n{out}"
         );
     }
 

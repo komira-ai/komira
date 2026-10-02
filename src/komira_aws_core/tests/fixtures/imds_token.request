@@ -1,0 +1,5 @@
+PUT /latest/api/token HTTP/1.1
+Host: 169.254.169.254
+X-aws-ec2-metadata-token-ttl-seconds: 21600
+Content-Length: 0
+
