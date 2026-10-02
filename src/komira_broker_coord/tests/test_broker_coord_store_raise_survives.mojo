@@ -51,7 +51,7 @@ from engine_rpc.engine import (
     NodeLoad as PbNodeLoad,
     JobPhase as PbJobPhase,
 )
-from komira_serde import encode_proto
+from komira_proto_codec import encode_proto
 
 
 comptime _Store = SharedInMemorySlowCasStore

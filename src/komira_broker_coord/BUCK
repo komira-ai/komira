@@ -16,7 +16,7 @@ mojo_library(
         "//src/komira_broker:komira_broker",
         "//src/komira_http:komira_http",
         "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_uuid:komira_uuid",
     ],
     test_srcs = [

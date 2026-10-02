@@ -11,7 +11,7 @@ binary built on it carries none of them.
 Dependencies (cycle-free):
   komira_broker        (ClusterAssignmentStore + the pure assignment pass)
   komira_http          (HttpServer + RequestDispatcher serve loop)
-  komira_serde         (encode_proto / decode_proto)
+  komira_proto_codec   (encode_proto / decode_proto)
   komira_async         (Reactor / BlockingRuntime serve runtime)
   engine_rpc           (SupervisorHeartbeat / HeartbeatResponse wire)
   komira_objectstore   (CloneableConditionalWriteStore trait)

@@ -84,7 +84,7 @@ from engine_rpc.engine import (
     NodeEndpoint as PbNodeEndpoint,
     PartitionLeader as PbPartitionLeader,
 )
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 
 from .broker_heartbeat_handler import (
     BrokerHeartbeatCoordinator,

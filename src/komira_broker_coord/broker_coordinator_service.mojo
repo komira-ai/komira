@@ -53,7 +53,7 @@ from engine_rpc.engine import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
     HeartbeatResponse as PbHeartbeatResponse,
 )
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 
 from .broker_heartbeat_handler import BrokerHeartbeatCoordinator
 from .broker_heartbeat_suspendable import (
