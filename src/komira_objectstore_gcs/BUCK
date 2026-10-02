@@ -1,0 +1,23 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Google Cloud Storage over the komira_objectstore traits, without a wire
+# client: the narrow object-verb seam (`GcsStorageBackend`), an in-memory
+# conformer of it for hermetic tests (`FakeGcsStorageBackend`), the
+# `ConditionalWriteStore` conformer over the seam (`GcsConditionalStore`), the
+# `FileSystem` read conformer over the seam (`GcsFs`), and the StoreError kind
+# reader. The google.storage.v2 gRPC backend is a separate conformer of the
+# same seam and lands with the gRPC client.
+mojo_library(
+    name = "komira_objectstore_gcs",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_core:komira_core",
+        "//src/komira_objectstore:komira_objectstore",
+    ],
+    test_srcs = [
+        "tests/test_gcs_conditional_store.mojo",
+        "tests/test_gcs_fs_backend.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
