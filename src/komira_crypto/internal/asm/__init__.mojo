@@ -72,14 +72,6 @@ from .hmac_ffi import (
 # RFC 5869 HKDF over the SHA-2 family.
 from .hkdf_ffi import hkdf_extract_ffi, hkdf_expand_ffi
 
-# base64 (std + url-safe variants).
-from .base64_ffi import (
-    base64_encode_std_ffi,
-    base64_encode_url_ffi,
-    base64_decode_std_ffi,
-    base64_decode_url_ffi,
-)
-
 # RAND_bytes, the entropy source under SystemEntropy + ChaCha20Drbg.
 from .rng_ffi import rand_bytes_ffi
 

@@ -23,7 +23,7 @@ def _repo(artifact_type: String, location: String, identity: String) -> String:
         + location
         + String("\"\n    push_identity: \"")
         + identity
-        + String("\"\n  }\n")
+        + String("\"\n    credential { kind: API_TOKEN secret_name: \"TOKEN\" }\n  }\n")
     )
 
 

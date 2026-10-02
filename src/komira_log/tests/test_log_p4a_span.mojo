@@ -23,8 +23,8 @@
 #
 # Standalone: builds a SharedEngine directly (the P2b test pattern). NO sdk-core
 # edit, NO obs-consumer switch — the OTLP JSON shape MIRRORS
-# komira_obs.exporter.format_span_jsonl (copied into span_drain.mojo per the
-# P4a brief, NOT by editing obs).
+# komira_trace.exporter.format_span_json_line (the very function span_drain.mojo
+# calls).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false

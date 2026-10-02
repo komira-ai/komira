@@ -13,8 +13,7 @@ the prelude rules through the `[buildfile] includes` module (includes.bzl).
 The subpackages come from Buck2 (`__internal__.sub_packages()`, which the
 prelude's `source_listing` also uses), not from a list, so a subpackage whose
 BUCK file declares no doc_tree is an analysis error of its parent's, naming
-the missing target, never a package left out. The one BUCK file that calls no
-rule (it declares a target only when configured) calls `package_docs()`.
+the missing target, never a package left out.
 
 This module loads nothing, so every rule file can load it.
 """

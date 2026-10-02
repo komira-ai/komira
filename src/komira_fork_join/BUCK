@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Fork-join over real threads: one body, n threads, all joined before return.
+# The only pthread binding in the package is _pthread.mojo.
+mojo_library(
+    name = "komira_fork_join",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_atomic_alias:komira_atomic_alias"],
+    test_srcs = ["tests/test_fork_join.mojo"],
+    visibility = ["PUBLIC"],
+)
