@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Excel formulas to a `LogicalPlan`: the formula parser and AST, the function
+# census, the scalar kernels (date, text, math, statistics, financial,
+# engineering) and the engine-free plan builders. It depends on `komira_core`
+# only, so a host can link it without an engine or an evaluator.
+mojo_library(
+    name = "komira_xl_plan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = ["//src/komira_core:komira_core"],
+    test_srcs = [
+        "tests/test_xl_agg_identity.mojo",
+        "tests/test_xl_compat_stat_kernels.mojo",
+        "tests/test_xl_condagg_build.mojo",
+        "tests/test_xl_date_serial.mojo",
+        "tests/test_xl_daycount_kernels.mojo",
+        "tests/test_xl_engineering_kernels.mojo",
+        "tests/test_xl_financial_kernels.mojo",
+        "tests/test_xl_fn_table.mojo",
+        "tests/test_xl_moment_kernels.mojo",
+        "tests/test_xl_plan_build.mojo",
+        "tests/test_xl_scalar_kernels.mojo",
+        "tests/test_xl_scalar_stat_kernels.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
