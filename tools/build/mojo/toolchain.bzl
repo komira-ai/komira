@@ -188,7 +188,6 @@ def _mojo_toolchain_impl(ctx):
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate_runner = ctx.attrs._gate_runner[DefaultInfo].default_outputs[0],
             run_check = ctx.attrs._run_check[DefaultInfo].default_outputs[0],
-            numa_guard = ctx.attrs._numa_guard[DefaultInfo].default_outputs[0],
             launcher = ctx.attrs._launcher[DefaultInfo].default_outputs[0],
             runtime = ctx.attrs.runtime[DefaultInfo].default_outputs[0],
         ),
@@ -216,7 +215,6 @@ mojo_toolchain_rule = rule(
         "zig": attrs.exec_dep(),
         "_gate_runner": attrs.dep(default = "komira//tools/build/mojo:gate_runner.sh"),
         "_launcher": attrs.dep(default = "komira//tools/build/mojo:launch.sh"),
-        "_numa_guard": attrs.dep(default = "komira//tools/build/mojo:numa_guard.sh"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         # The lint of every script the Mojo rules run (tools/build/lint): a
         # validation, so no Mojo target builds while one of them has a
