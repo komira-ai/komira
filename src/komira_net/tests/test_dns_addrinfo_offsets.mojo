@@ -22,7 +22,7 @@
 from std.testing import assert_equal, assert_true
 from std.sys.info import CompilationTarget
 
-from komira_async.net.dns import (
+from komira_net.dns import (
     IpAddr,
     _collect_a_records_from_addrinfo_list,
 )
@@ -123,12 +123,12 @@ def test_canonname_offset_not_mistaken_for_addr() raises:
     var sac_p = sa_correct.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
     var saw_p = sa_wrong.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
-    # Correct sockaddr → 10.43.0.50 (a recognizable ClusterIP-shaped value).
+    # Correct sockaddr → 10.0.0.50 (a recognizable ClusterIP-shaped value).
     (sac_p + _SIN_OFF_ADDR + 0)[0] = UInt8(10)
-    (sac_p + _SIN_OFF_ADDR + 1)[0] = UInt8(43)
+    (sac_p + _SIN_OFF_ADDR + 1)[0] = UInt8(0)
     (sac_p + _SIN_OFF_ADDR + 2)[0] = UInt8(0)
     (sac_p + _SIN_OFF_ADDR + 3)[0] = UInt8(50)
-    var expect = 10 | (43 << 8) | (0 << 16) | (50 << 24)
+    var expect = 10 | (0 << 8) | (0 << 16) | (50 << 24)
 
     # Wrong sockaddr → 9.9.9.9 (what a swapped-offset read would yield).
     (saw_p + _SIN_OFF_ADDR + 0)[0] = UInt8(9)
