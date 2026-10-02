@@ -17,11 +17,15 @@
 #              //tools/build/package/manifest_probe:parse_manifest) and rendered again by kci's
 #              writer: the bytes are identical. The same probe refuses a manifest that points at
 #              its metadata, so it is not a probe that accepts anything.
+#   release    every package of the stamped set has the Mojo compiler version as its version and
+#              one build number and build string (h<8 hex of the commit>_<N>) across the set.
 #   metapackage `komira_pack conda-meta` over the members' manifests gives a package with no
 #              file whose requirements are exactly the platform guard and every member at its own
-#              version (no compiler pin: the members carry it); the same inputs give the same
-#              bytes; `conda-check --kind metapackage` accepts it, as a release too.
-#   refusals   conda-meta refuses, naming it: version skew between members, a member twice, a member
+#              version AND build string (`name ==V BUILD`; no compiler pin: the members carry it);
+#              the same inputs give the same bytes; `conda-check --kind metapackage` accepts it,
+#              as a release too.
+#   refusals   conda-meta refuses, naming it: members of two builds (one version), members whose
+#              version is not the compiler version it is given, a member twice, a member
 #              whose file is not its manifest's sha256, a member that is a refused package (no
 #              manifest), a name that is also a member, a name that is not a conda name, no members.
 #              conda-check refuses a metapackage checked against a shorter or longer member list,
@@ -32,8 +36,12 @@
 #              --no-uncached).
 #   install    pixi installs ONLY the metapackage from a file:// channel of the set, the solver
 #              brings every library and the compiler, and `mojo run` of a program importing two
-#              libraries prints the right bytes; without the metapackage the import fails.
-#              Needs pixi, jq and network; otherwise SKIP.
+#              libraries prints the right bytes; without the metapackage the import fails. The
+#              channel holds TWO builds of one member (the pinned one and a newer one, same
+#              version): only the pinned build is installed (the solver would take the newer one
+#              if the build string in the requirement were ignored), and a requirement naming a
+#              build the channel does not have makes the install fail. Needs pixi, jq and
+#              network; otherwise SKIP.
 set -uo pipefail
 
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
@@ -63,7 +71,11 @@ C40=0123456789abcdef0123456789abcdef01234567
 STAMP="-c komira.package_stamp=7 -c komira.package_commit=$C40 -c komira.package_timestamp_ms=86400000"
 STAMP8="-c komira.package_stamp=8 -c komira.package_commit=$C40 -c komira.package_timestamp_ms=86400000"
 META=komira
-pin=$(sed -n 's/^MOJO_COMPILER_PIN = "\(.*\)"$/\1/p' tools/build/package/conda.bzl)
+# The Mojo compiler version is every package's version (the platform table states it once).
+pin=$(sed -n 's/.*"mojo_compiler_\(.*\)_linux-64\.conda".*/\1/p' tools/build/platforms/table.bzl)
+[ -n "$pin" ] || { echo "FAIL  conda_set cannot read the compiler pin from tools/build/platforms/table.bzl"; exit 1; }
+BUILD=h01234567_7  # h<8 hex of C40>_<stamp 7>
+BUILD8=h01234567_8
 
 # ---- enumerate ------------------------------------------------------------
 TARGETS=()
@@ -133,17 +145,20 @@ MAN=()
 for n in "${OK[@]}"; do MAN+=("$K/rel/$n/manifest.json"); done
 VERSION=$(jq -r .version "$K/rel/${OK[0]}/manifest.json")
 problems=""
+[ "$VERSION" = "$pin" ] || problems="$problems version-is-not-the-compiler-pin:[$VERSION|$pin]"
 for n in "${OK[@]}"; do
     [ -f "$K/rel/$n/manifest.json" ] || { problems="$problems $n-has-no-release"; continue; }
-    jq -e --arg v "$VERSION" '.version == $v' "$K/rel/$n/manifest.json" > /dev/null || problems="$problems $n-version"
-    jq -e --arg c "$C40" '.stamped == true and .source_commit == $c' "$K/rel/$n/metadata.json" > /dev/null || problems="$problems $n-stamp"
+    jq -e --arg v "$VERSION" --arg f "$n-$VERSION-$BUILD.conda" '.version == $v and .file == $f' "$K/rel/$n/manifest.json" > /dev/null || problems="$problems $n-version"
+    jq -e --arg c "$C40" --arg b "$BUILD" '.stamped == true and .source_commit == $c and .build == $b and .build_number == 7' "$K/rel/$n/metadata.json" > /dev/null || problems="$problems $n-stamp"
+    # every dependency is pinned by version AND build string
+    jq -e --arg v "$VERSION" --arg b "$BUILD" '.depends[2:] | all(endswith(" ==\($v) \($b)"))' "$K/rel/$n/metadata.json" > /dev/null || problems="$problems $n-requirement-without-build"
 done
 for r in "${REFUSED[@]}"; do
     # shellcheck disable=SC2086
     if "$BUCK2" build $STAMP "${TGT[$r]}[release]" > "$W/rel_$r.log" 2>&1; then problems="$problems refused-$r-has-a-release"; fi
 done
 if [ -n "$problems" ]; then fail "release:$problems (see $W)"; else
-    pass "release: stamped build $VERSION gives a [release] directory for each of the ${#OK[@]} packages (one version, source commit and commit time across the set), and none for the ${#REFUSED[@]} refused libraries"
+    pass "release: stamped build (version $VERSION = the compiler version, build $BUILD) gives a [release] directory for each of the ${#OK[@]} packages (one version, build string, source commit and commit time across the set, every dependency required as name ==$VERSION $BUILD), and none for the ${#REFUSED[@]} refused libraries"
 fi
 
 # ---- the metapackage ------------------------------------------------------
@@ -171,23 +186,23 @@ meta "$K/meta1" "$META" $(members "${MAN[@]}") 2> "$W/meta1.err" || problems="$p
 # shellcheck disable=SC2046
 meta "$K/meta2" "$META" $(members "${MAN[@]}") 2> "$W/meta2.err" || problems="$problems meta2-failed"
 if [ -z "$problems" ]; then
-    MF="$META-$VERSION-0.conda"
+    MF="$META-$VERSION-$BUILD.conda"
     [ "$(ls "$K/meta1" | tr '\n' ' ')" = "$MF manifest.json metadata.json " ] || problems="$problems directory:[$(ls "$K/meta1" | tr '\n' ' ')]"
     cmp -s "$K/meta1/$MF" "$K/meta2/$MF" || problems="$problems two-runs-differ"
     cmp -s "$K/meta1/manifest.json" "$K/meta2/manifest.json" || problems="$problems manifests-differ"
     mcheck "$K/meta1" "${MAN[@]}" 2> "$W/mcheck_ok.err" || problems="$problems check-refused-the-metapackage"
     mcheck "$K/meta1" "${MAN[@]}" -- --require-stamped true 2> "$W/mcheck_rel.err" || problems="$problems check-refused-it-as-a-release"
     # read with tools that are not the writer's: the requirements are the guard and every member, and it holds no file
-    want=$(for n in "${OK[@]}"; do printf '%s ==%s\n' "$n" "$VERSION"; done | LC_ALL=C sort)
+    want=$(for n in "${OK[@]}"; do printf '%s ==%s %s\n' "$n" "$VERSION" "$BUILD"; done | LC_ALL=C sort)
     got=$(unzip -p "$K/meta1/$MF" 'info-*' | zstd -dc | tar -xO -f - info/index.json | jq -r '.depends[]' | tail -n +2)
     [ "$got" = "$want" ] || problems="$problems requirements:[$got]"
     [ "$(unzip -p "$K/meta1/$MF" 'info-*' | zstd -dc | tar -xO -f - info/index.json | jq -r '.depends[0]')" = __linux ] || problems="$problems guard"
-    unzip -p "$K/meta1/$MF" 'info-*' | zstd -dc | tar -xO -f - info/index.json | jq -e '.name == "komira" and .version == "'"$VERSION"'" and .timestamp == 86400000 and (.depends | map(startswith("mojo-compiler")) | any | not)' > /dev/null || problems="$problems index"
+    unzip -p "$K/meta1/$MF" 'info-*' | zstd -dc | tar -xO -f - info/index.json | jq -e '.name == "komira" and .version == "'"$VERSION"'" and .build == "'"$BUILD"'" and .build_number == 7 and .timestamp == 86400000 and (.depends | map(startswith("mojo-compiler")) | any | not)' > /dev/null || problems="$problems index"
     [ -z "$(unzip -p "$K/meta1/$MF" 'pkg-*' | zstd -dc | tar -tf -)" ] || problems="$problems holds-a-file"
     jq -e --argjson n "${#OK[@]}" '.kind == "metapackage" and (.members | length) == $n and .stamped == true and .source_commit == "'"$C40"'"' "$K/meta1/metadata.json" > /dev/null || problems="$problems metadata"
 fi
 if [ -n "$problems" ]; then fail "metapackage:$problems (see $W)"; else
-    pass "metapackage: conda-meta over ${#OK[@]} member manifests gives $MF with no file, requiring exactly the platform guard and every member at $VERSION (no compiler pin); the same inputs give the same bytes; conda-check accepts it, as a release too"
+    pass "metapackage: conda-meta over ${#OK[@]} member manifests gives $MF with no file, requiring exactly the platform guard and every member at $VERSION $BUILD (version and build string; no compiler pin); the same inputs give the same bytes; conda-check accepts it, as a release too"
 fi
 
 # ---- contract: kci's own parser reads what the build emits -----------------
@@ -212,14 +227,18 @@ refuse() { # name, text, then the conda-meta arguments (after the name and out d
     elif grep -qF -- "$text" "$W/ref_$name.err"; then pass "refuse_$name"
     else fail "refuse_$name: refused without '$text' (see $W/ref_$name.err)"; fi
 }
-# version skew: one member from another stamp
+# one version, two builds: one member from another build number (the version is the same)
 build_release "$K/rel8" build $STAMP8 > /dev/null 2>&1
 if [ -f "$K/rel8/${OK[0]}/manifest.json" ]; then
     # shellcheck disable=SC2046
-    refuse version_skew "members are not one release" "$META" $(members "$K/rel8/${OK[0]}/manifest.json" "${MAN[@]:1}")
+    jq -e --arg v "$VERSION" --arg b "$BUILD8" '.version == $v and .build == $b' "$K/rel8/${OK[0]}/metadata.json" > /dev/null || fail "refuse_two_builds: the second build is not the same version in another build"
+    refuse two_builds_one_version "members are not one release" "$META" $(members "$K/rel8/${OK[0]}/manifest.json" "${MAN[@]:1}")
 else
     fail "refuse_version_skew: cannot build the second stamp (see $K/rel8.log)"
 fi
+# version skew against the compiler: the members' version must be the pin the caller states
+# shellcheck disable=SC2046
+refuse version_skew_vs_compiler_pin "must be the compiler version" "$META" $(members "${MAN[@]}") --mojo-pin 9.9.9
 # shellcheck disable=SC2046
 refuse member_twice "given twice" "$META" $(members "${MAN[@]}" "${MAN[0]}")
 # a member whose file is not its manifest's sha256
@@ -244,7 +263,12 @@ problems=""
 mcheck "$K/meta1" "${MAN[@]:1}" 2> "$W/mc_short.err" && problems="$problems check-accepted-a-shorter-member-list"
 grep -q 'index depends has' "$W/mc_short.err" || problems="$problems short-text"
 mcheck "$K/meta1" "${MAN[@]}" "$K/rel8/${OK[0]}/manifest.json" 2> "$W/mc_long.err" && problems="$problems check-accepted-a-longer-member-list"
-"$PACK" conda-check --dir "$K/meta1" --kind library --name "$META" --expect-subdir linux-64 --import-name x --mojo-pin "$pin" --payload "$K/rel/${OK[0]}/${OK[0]}-$VERSION-0.conda" --out "$W/mcheck.marker" 2> "$W/mc_kind.err" && problems="$problems check-accepted-the-wrong-kind"
+mcheck "$K/meta1" "${MAN[@]}" -- --mojo-pin 9.9.9 2> "$W/mc_pin.err" && problems="$problems check-accepted-a-metapackage-for-another-compiler"
+grep -q 'must be the Mojo compiler version' "$W/mc_pin.err" || problems="$problems mc-pin-text"
+mcheck "$K/meta1" "${MAN[@]}" -- --mojo-pin "$pin" 2> "$W/mc_pin_ok.err" || problems="$problems check-refused-the-metapackage-against-the-pin"
+# a member of another build (same version) is not the metapackage's member
+mcheck "$K/meta1" "$K/rel8/${OK[0]}/manifest.json" "${MAN[@]:1}" 2> "$W/mc_build.err" && problems="$problems check-accepted-a-member-of-another-build"
+"$PACK" conda-check --dir "$K/meta1" --kind library --name "$META" --expect-subdir linux-64 --import-name x --mojo-pin "$pin" --payload "$K/rel/${OK[0]}/${OK[0]}-$VERSION-$BUILD.conda" --out "$W/mcheck.marker" 2> "$W/mc_kind.err" && problems="$problems check-accepted-the-wrong-kind"
 cp -r "$K/meta1" "$W/meta_x" && chmod -R u+w "$W/meta_x" && jq -c '. + {metadata: "metadata.json"}' "$K/meta1/manifest.json" > "$W/meta_x/manifest.json"
 mcheck "$W/meta_x" "${MAN[@]}" 2> "$W/mc_extra.err" && problems="$problems check-accepted-an-extra-key"
 # an unstamped metapackage (members built unstamped) is no release
@@ -256,7 +280,7 @@ mcheck "$W/meta_un" "${UN[@]}" 2> "$W/mc_un_ok.err" || problems="$problems unsta
 mcheck "$W/meta_un" "${UN[@]}" -- --require-stamped true 2> "$W/mc_un.err" && problems="$problems check-accepted-an-unstamped-metapackage-as-a-release"
 grep -q 'never stamped' "$W/mc_un.err" || problems="$problems unstamped-text"
 if [ -n "$problems" ]; then fail "refusals: conda-check:$problems (see $W)"; else
-    pass "refusals: conda-check refuses a metapackage checked against a shorter or longer member list, the wrong kind, an extra manifest key, and an unstamped one as a release; accepts it unstamped as a development file"
+    pass "refusals: conda-check refuses a metapackage checked against a shorter or longer member list, a member of another build, another compiler version, the wrong kind, an extra manifest key, and an unstamped one as a release; accepts it unstamped as a development file"
 fi
 
 # ---- uncached ---------------------------------------------------------------
@@ -308,9 +332,12 @@ fi
 # ---- install ------------------------------------------------------------------
 if [ "$install" = 1 ] && command -v pixi > /dev/null && curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null; then
     C="$W/channel"
-    mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without"
+    mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without" "$W/unpinned" "$W/badpin"
+    problems=""
     entries='{}'
-    for dir in "${OK[@]/#/$K/rel/}" "$K/meta1"; do
+    # The channel holds TWO builds of komira_encoding at one version: build 7 (the set's) and build 8.
+    [ -d "$K/rel8/komira_encoding" ] || problems="$problems no-second-build-of-komira_encoding"
+    for dir in "${OK[@]/#/$K/rel/}" "$K/meta1" "$K/rel8/komira_encoding"; do
         fn=$(jq -r .file "$dir/manifest.json")
         f="$dir/$fn"
         cp "$f" "$C/linux-64/$fn"
@@ -334,23 +361,55 @@ def main():
     print(hex_encode(data))
     print(fnv1a_64(String("a").as_bytes()))
 EOM
-    for variant in with without; do
+    # badpin: the same channel, but its repodata says the metapackage requires a BUILD of
+    # komira_encoding that the channel does not have (the files are not needed: it must fail to solve).
+    mkdir -p "$W/badchannel/linux-64" "$W/badchannel/noarch"
+    cp "$C/noarch/repodata.json" "$W/badchannel/noarch/repodata.json"
+    jq --arg m "$META-$VERSION-$BUILD.conda" --arg v "$VERSION" --arg b "$BUILD" \
+        '.["packages.conda"][$m].depends |= map(if startswith("komira_encoding ") then "komira_encoding ==\($v) h01234567_9" else . end)' \
+        "$C/linux-64/repodata.json" > "$W/badchannel/linux-64/repodata.json"
+    jq -e --arg m "$META-$VERSION-$BUILD.conda" --arg d "komira_encoding ==$VERSION h01234567_9" '.["packages.conda"][$m].depends | index($d)' "$W/badchannel/linux-64/repodata.json" > /dev/null ||
+        problems="$problems bad-channel-not-made"
+    for variant in with without unpinned badpin; do
+        ch=$C
+        [ "$variant" = badpin ] && ch="$W/badchannel"
         {
-            printf '[workspace]\nname = "komira-conda-set-test"\nchannels = ["file://%s", "https://conda.modular.com/max", "conda-forge"]\nplatforms = ["linux-64"]\n\n[dependencies]\n' "$C"
-            if [ "$variant" = with ]; then printf '%s = "==%s"\n' "$META" "$VERSION"; else printf 'mojo-compiler = "==%s"\n' "$pin"; fi
+            printf '[workspace]\nname = "komira-conda-set-test"\nchannels = ["file://%s", "https://conda.modular.com/max", "conda-forge"]\nplatforms = ["linux-64"]\n\n[dependencies]\n' "$ch"
+            case "$variant" in
+                with | badpin) printf '%s = "==%s"\n' "$META" "$VERSION" ;;
+                unpinned) printf 'komira_encoding = "==%s"\n' "$VERSION" ;;
+                *) printf 'mojo-compiler = "==%s"\n' "$pin" ;;
+            esac
         } > "$W/$variant/pixi.toml"
         cp "$W/hello.mojo" "$W/$variant/hello.mojo"
     done
     export PIXI_CACHE_DIR="$W/pixi_cache" PIXI_HOME="$W/pixi_home"
-    problems=""
     pixi install --manifest-path "$W/with/pixi.toml" > "$W/install_with.log" 2>&1 || problems="$problems install-failed"
     if [ -z "$problems" ]; then
         for n in "${OK[@]}"; do
-            cmp -s "$W/with/.pixi/envs/default/lib/mojo/$n.mojoc" <(unzip -p "$K/rel/$n/$n-$VERSION-0.conda" 'pkg-*' | zstd -dc | tar -xO -f - "lib/mojo/$n.mojoc") || problems="$problems $n-not-installed-as-built"
+            cmp -s "$W/with/.pixi/envs/default/lib/mojo/$n.mojoc" <(unzip -p "$K/rel/$n/$n-$VERSION-$BUILD.conda" 'pkg-*' | zstd -dc | tar -xO -f - "lib/mojo/$n.mojoc") || problems="$problems $n-not-installed-as-built"
         done
-        grep -q "$META-$VERSION-0.conda" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-metapackage"
+        grep -q "$META-$VERSION-$BUILD.conda" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-metapackage"
+        # two builds of one member are in the channel, and only the PINNED build is installed
+        grep -q "komira_encoding-$VERSION-$BUILD.conda" "$W/with/pixi.lock" || problems="$problems lock-lacks-the-pinned-build"
+        grep -q "komira_encoding-$VERSION-$BUILD8.conda" "$W/with/pixi.lock" && problems="$problems lock-has-the-other-build"
+        [ -f "$W/with/.pixi/envs/default/conda-meta/komira_encoding-$VERSION-$BUILD.json" ] || problems="$problems pinned-build-not-installed"
+        [ -f "$W/with/.pixi/envs/default/conda-meta/komira_encoding-$VERSION-$BUILD8.json" ] && problems="$problems other-build-installed"
         got=$(cd "$W/with" && timeout 600 pixi run --manifest-path "$W/with/pixi.toml" mojo run hello.mojo 2> "$W/run_with.err")
         [ "$got" = "$(printf 'deadbeef\n12638187200555641996')" ] || problems="$problems program-output:[$got]"
+    fi
+    # Control: with no build pin the solver takes the newer build (so the two builds ARE distinguishable
+    # and the pin, not luck, chose the older one).
+    if pixi install --manifest-path "$W/unpinned/pixi.toml" > "$W/install_unpinned.log" 2>&1; then
+        [ -f "$W/unpinned/.pixi/envs/default/conda-meta/komira_encoding-$VERSION-$BUILD8.json" ] || problems="$problems unpinned-control-did-not-take-the-newer-build"
+    else
+        problems="$problems unpinned-control-install-failed"
+    fi
+    # A requirement naming a build the channel does not have cannot be solved.
+    if pixi install --manifest-path "$W/badpin/pixi.toml" > "$W/install_badpin.log" 2>&1; then
+        problems="$problems install-accepted-a-requirement-on-a-missing-build"
+    elif ! grep -qF "komira_encoding" "$W/install_badpin.log"; then
+        problems="$problems badpin-failed-for-another-reason:[$(tail -c 300 "$W/install_badpin.log")]"
     fi
     pixi install --manifest-path "$W/without/pixi.toml" > "$W/install_without.log" 2>&1 || problems="$problems control-install-failed"
     if (cd "$W/without" && timeout 600 pixi run --manifest-path "$W/without/pixi.toml" mojo run hello.mojo > "$W/run_without.out" 2>&1); then
@@ -359,7 +418,7 @@ EOM
         problems="$problems control-failed-for-another-reason"
     fi
     if [ -n "$problems" ]; then fail "install:$problems (see $W)"; else
-        pass "install: pixi installs only '$META ==$VERSION' from a file:// channel of the set, the solver brings all ${#OK[@]} libraries (each .mojoc installed as built) and mojo-compiler ==$pin, and a program importing komira_encoding and komira_hash prints deadbeef and 12638187200555641996; the same project without the metapackage cannot import"
+        pass "install: pixi installs only '$META ==$VERSION' from a file:// channel of the set (which also holds a newer build $BUILD8 of komira_encoding: the requirement name ==$VERSION $BUILD installs build $BUILD and not $BUILD8, while an unpinned requirement takes $BUILD8, and a requirement on a build the channel lacks fails to solve), the solver brings all ${#OK[@]} libraries (each .mojoc installed as built) and mojo-compiler ==$pin, and a program importing komira_encoding and komira_hash prints deadbeef and 12638187200555641996; the same project without the metapackage cannot import"
     fi
 else
     echo "SKIP  conda_set install ($([ "$install" = 1 ] || echo '--no-install'; command -v pixi > /dev/null || echo 'no pixi'))"

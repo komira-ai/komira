@@ -46,10 +46,11 @@ disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each)
 | fact | where it comes from |
 |---|---|
 | name | `conda_name` of the library, else its import name (the `.mojoc` basename): lowercase letters, digits, `_`, starting with a letter |
-| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<pin>`, then each **direct** dependency of the library, by its published name, at the same version, sorted. Direct only: every package is released in lockstep, so the solver's closure is the build's |
+| run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<compiler version>`, then each **direct** dependency of the library, by its published name, at the same version **and the same build string** (`name ==<version> <build string>`), sorted. Direct only: every package of a release is built in lockstep, so the solver's closure is the build's, and a second build of a dependency in the channel cannot be chosen |
 | subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. On any other target platform the package target still builds, as a refusal saying so |
 | payload | the library's gated `.mojoc`, so the package cannot exist until the library's own welded tests pass |
-| version | `<prefix>.<N>`, below |
+| version | **the Mojo compiler version** the library is built with, below |
+| build number, build string | the release iteration `N` and `h<8 hex of the source commit>_<N>`, below |
 
 To list the package targets (a development helper; it is not the published
 list): `tools/build/package/list_conda_targets.sh [pattern...]`, which prints
@@ -58,7 +59,7 @@ list): `tools/build/package/list_conda_targets.sh [pattern...]`, which prints
 ### What a package is: a directory
 
 ```
-<name>-<version>-0.conda   the file the channel carries
+<name>-<version>-<build string>.conda   the file the channel carries
 manifest.json              the artifact manifest
 metadata.json              everything else the build knows
 ```
@@ -68,16 +69,19 @@ metadata.json              everything else the build knows
 it): six string keys, in this order, compact, one trailing newline.
 
 ```json
-{"artifact_type":"CONDA","name":"komira_json","version":"0.1.57","subdir":"linux-64","file":"komira_json-0.1.57-0.conda","sha256":"<64 hex>"}
+{"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>"}
 ```
 
 `file` is the channel's file name, relative to the manifest; `sha256` is that
 file's. The parser refuses any other key, so every other fact is in
 `metadata.json` (sorted compact JSON): `schema`, `kind` (`library` or
-`metapackage`), `name`, `version`, `subdir`, `build`, `build_number`,
+`metapackage`), `name`, `version`, `subdir`, `build` (the build string),
+`build_number`,
 `file_name`, `size`, `depends`, `timestamp_ms`, `source_commit`, `stamped`,
 `label`, and for a library `import_name`, `mojo_pin`, `payload_path`,
-`payload_sha256`; for a metapackage `members` (name, version, sha256 each).
+`payload_sha256`; for a metapackage `members` (name, version, build, sha256 each).
+The manifest's `version` is the compiler version; the build number, build string
+and source commit are metadata (kci's manifest has no key for them).
 The parser also refuses a `metadata` key on a CONDA manifest (it belongs to a
 PYTHON artifact), so the manifest cannot point at `metadata.json`: a reader
 finds it **next to the manifest, under that name**.
@@ -114,14 +118,14 @@ check that every dependency of a declared package is itself declared and has a
 |---|---|
 | `[release]` | the directory, a copy made only after `[release_check]` passed, so it does not exist for an unstamped build, a stamp without its source commit, a non-positive commit time, or a refused library. **An uploader reads this and nothing else.** Nested: `[release][manifest]`, `[release][metadata]` |
 | `[release_check]` | the marker of `komira_pack conda-check --require-stamped`, which reads the package back (zip, both zstd streams, both tars, the manifest against the file, the metadata against the index) |
-| default, `[manifest]`, `[metadata]` | **development outputs**, built whether or not stamped. An unstamped one is `<prefix>.0`, and uploading it would claim `<prefix>.0` for good. An uploader never reads them |
+| default, `[manifest]`, `[metadata]` | **development outputs**, built whether or not stamped. An unstamped one has build number 0 and build string `h00000000_0`, and uploading it would claim that name for good. An uploader never reads them |
 | `[check]` | the marker of `komira_pack conda-check` |
 
 ## The metapackage
 
 `komira` (the name is the release tool's) is a package with **no file** whose
 run requirements are the platform guard and every member at exactly its
-version. Installing it installs the whole release; a registry that receives it
+version and build string. Installing it installs the whole release; a registry that receives it
 LAST makes it the switch for users.
 
 Buck cannot enumerate targets, and does not know which libraries are published.
@@ -133,12 +137,12 @@ komira_pack conda-meta --name komira --member-manifest <dir>/manifest.json ... \
     --license Apache-2.0 --summary "..." --home <url> \
     --extra-file info/licenses/LICENSE=LICENSE --label <what made it> --out-dir <dir>
 komira_pack conda-check --dir <dir> --kind metapackage --name komira --expect-subdir linux-64 \
-    --member-manifest <dir>/manifest.json ... [--require-stamped true] --out <marker>
+    --member-manifest <dir>/manifest.json ... [--mojo-pin <compiler version>] [--require-stamped true] --out <marker>
 ```
 
 It reads each member (its manifest against the manifest contract, its file
 against the manifest's sha256, its metadata), requires one release (one
-version, subdir, source commit and commit time; no member twice; no member that
+version, build string, subdir, source commit and commit time; no member twice; no member that
 is itself a metapackage; a name that is not a member's), and writes the same
 directory a library does (the same manifest contract). `conda-check` re-derives
 the requirements from the member manifests it is given, independently of the
@@ -161,19 +165,22 @@ its own requirements; the ones that depend on how this directory is built:
 2. **Re-derive the stamp from git.** At a clean, full-history checkout of
    `main` at the release commit, run
    [`tools/build/package/release_version.sh`](../../tools/build/package/release_version.sh)
-   and require its `version=` to equal the manifest's `version`, and its
-   `commit=` to equal the metadata's `source_commit`. The build cannot read git,
+   and require its `version=` to equal the manifest's `version` (and the pinned
+   compiler's), its `build=` to equal the metadata's `build`, its
+   `build_number=` to equal the metadata's `build_number`, and its `commit=` to
+   equal the metadata's `source_commit`. The build cannot read git,
    and a release check cannot tell a derived stamp from a typed one:
    `-c komira.package_stamp=999999999` passes it, and would shadow every future
    version of that name.
 3. **Check the set**: every declared artifact built; every requirement of a
-   package is another declared package at the same version (or the guard, or the
-   compiler at its pin); one version, one subdir, one source commit; the
-   metapackage pins exactly the declared libraries.
+   package is another declared package at the same version and build string (or
+   the guard, or the compiler at its pin); one version, one build string, one
+   subdir, one source commit; the metapackage pins exactly the declared
+   libraries.
 4. **Build once, under the default isolation directory** (below), upload the
    file that build produced, and compare its sha256 with the manifest.
-5. **Same name and version, different sha256, is a stop.** The registry never
-   overwrites; it is never answered by building again.
+5. **Same name, same version, same build string, different sha256, is a stop.**
+   The registry never overwrites; it is never answered by building again.
 6. Members first, the metapackage last, every file read back from the channel.
 
 ## Reproducibility
@@ -217,7 +224,7 @@ registry's own acceptance of a zip32 file are untried).
 ## Using a package
 
 A consumer lists the komira channel and the Mojo compiler's channel. The
-package requires `mojo-compiler ==1.0.0`; a project that already depends on
+package requires `mojo-compiler ==<compiler version>` (its own version); a project that already depends on
 `mojo` is satisfied by that (the `mojo` package pulls exactly that compiler),
 and a project without it gets the compiler from the second channel:
 
@@ -227,7 +234,7 @@ channels = ["<the komira channel>", "https://conda.modular.com/max", "conda-forg
 platforms = ["linux-64"]
 
 [dependencies]
-komira_encoding = "==0.1.<N>"      # or: komira = "==0.1.<N>" for every library
+komira_encoding = "==<compiler version>"   # or: komira = "==<compiler version>" for every library
 ```
 
 `import komira_encoding` then compiles with no `-I` and no activation script.
@@ -236,25 +243,61 @@ a `file://` channel.
 
 ## Version
 
-The version is `<prefix>.<N>`, in lockstep across every package:
+**The version of every package is the version of the Mojo compiler the
+repository pins** (CEO decision), so `mojo-compiler ==<version>` and the
+package's own version are one number, and a compiler bump re-versions and
+rebuilds every package (expected). The compiler's version is stated once, in
+the platform table's pin of the linux-64 compiler
+([`table.bzl`](../../tools/build/platforms/table.bzl); the pin names it in its
+asset name and in its URL, and `conda.bzl` refuses a pin whose two disagree).
+`conda.bzl` derives `MOJO_COMPILER_VERSION` from it, the toolchain downloads
+that same pin, and `release_version.sh` reads it from git. Nothing else states
+it, and `komira_pack conda-check` refuses a package whose version is not the
+compiler version it is given.
 
-- the prefix is the one line of [`VERSION_PREFIX`](VERSION_PREFIX) (currently `0.1`);
-  nothing else states it;
-- `N` is `git rev-list --count --first-parent C`, where `C` is the newest
-  commit at or below the release commit that touches anything but
+Repeated releases at one compiler version are told apart by the conda **build
+number** and **build string**, in lockstep across every package of a release:
+
+- the build number `N` is `git rev-list --count --first-parent C`, where `C` is
+  the newest commit at or below the release commit that touches anything but
   documentation (`docs/`, any `*.md`, `.github/`), so a change to what is
   published always raises it and a documentation commit never does. A release
-  job gets it, and the commit time, from
+  job gets it, the commit and its time from
   [`release_version.sh`](../../tools/build/package/release_version.sh) and passes
   them as `buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<sha> -c komira.package_timestamp_ms=<ms>`.
   They are read in the macro, so only the packages are keyed by them, never a
   compile;
-- a build with no stamp is `<prefix>.0`: it builds as a development output, and
-  `[release_check]` (hence `[release]`) refuses it;
-- a stamped package without a source commit, or with one that is not 40
-  lowercase hex digits, is refused, and `[release_check]` refuses a package
-  whose commit time is not positive. These prove the stamp is *accompanied* by
-  a commit, not that it is the right one: see step 2 above.
+- the build string is `h<first 8 hex of the source commit>_<N>` and the file is
+  `<name>-<version>-<build string>.conda`. A requirement between packages is
+  `name ==<version> <build string>`, so a package is installed with the build of
+  its dependencies it was released with, never a newer or older build of the same
+  version in the channel. pixi (rattler) honours the build string in a package's
+  `depends`: `conda_set.sh` installs the metapackage from a channel holding two
+  builds of one member and only the pinned build is installed (an unpinned
+  requirement takes the newer one, and a requirement on a missing build fails to
+  solve);
+- a build with no stamp has build number 0 and build string `h00000000_0`: it
+  builds as a development output, and `[release_check]` (hence `[release]`)
+  refuses it;
+- the stamp is tied to git: a stamped package carries its `source_commit` (40
+  lowercase hex digits), its build string must be `h<8 hex of that commit>_<N>`,
+  and `[release_check]` refuses a package whose commit time is not positive.
+  These prove the stamp is *accompanied* by a commit, not that it is the right
+  one: the release job compares `release_version.sh`'s output with the package
+  at a clean full-history checkout (step 2 above).
+
+Two builds with the same name, version and build string but different bytes are
+a stop for the release tool; a new release is a new `N` (which gives a new build
+string).
+
+## Wheels: versioning (design only; no code)
+
+A wheel is versioned the same way: **`<compiler version>.post<N>`**, the PEP 440
+post-release of the compiler version, with `N` the same number as the conda build
+number, and it depends on `mojo-compiler==<compiler version>` (PyPI has no build
+strings, so the post-release is what tells two releases of one compiler version
+apart). A compiler bump gives a new base version and every wheel is rebuilt.
+Nothing writes a wheel yet.
 
 ## A Python wheel rule (design only; no code)
 
