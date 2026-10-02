@@ -23,12 +23,19 @@
 #                                               and did not get it.
 #   no config flag, a MinIO path given        -> LOCAL
 #   neither                                   -> SKIP (exit 77, see skip.mojo)
+#
+# `exit_unless_runnable()` is how a test acts on the choice: it returns for
+# FARM and LOCAL and otherwise ENDS THE PROCESS (77 for SKIP, 3 for
+# CANNOT_TELL). `exit_code()` is the same number as data, for a caller that
+# reports it; a code returned to a caller can be dropped, and a dropped 77
+# followed by a return from `main` is exit 0, a pass.
 # =============================================================================
 
-from std.sys import argv
+from std.sys import argv, exit
 
 from .config import TestInfraConfig, load_test_infra_config
 from .seams import FileSource
+from .skip import exit_skip
 
 comptime _FLAG_CONFIG: String = "--testinfra-config"
 comptime _FLAG_TARGET: String = "--testinfra-target"
@@ -120,6 +127,15 @@ struct BackendChoice(Copyable, Movable):
         if self.kind == BACKEND_CHOICE_SKIP:
             return 77
         return 0
+
+    def exit_unless_runnable(self):
+        """Return for FARM and LOCAL. Otherwise print the reason and end the
+        process: SKIP through `exit_skip` (77), CANNOT_TELL with 3."""
+        if self.kind == BACKEND_CHOICE_SKIP:
+            exit_skip(self.reason)
+        if self.kind == BACKEND_CHOICE_CANNOT_TELL:
+            print("KOMIRA-TEST-INFRA: CANNOT_TELL reason=" + self.reason.replace("\n", " "))
+            exit(3)
 
 
 def select_backend[F: FileSource](flags: TestInfraFlags, mut files: F) -> BackendChoice:

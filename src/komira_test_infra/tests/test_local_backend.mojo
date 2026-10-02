@@ -2,12 +2,13 @@
 # both addresses bind 127.0.0.1; the child environment is exactly the two
 # *_FILE paths and MINIO_BROWSER=off; the credential files have the right
 # shape and modes; a binary that is not the pin raises; an early exit is
-# retried on fresh ports; and a stop that cannot be confirmed is CANNOT_TELL.
+# retried on fresh ports; a stop that cannot be confirmed is CANNOT_TELL; and
+# a bad run id or temporary root is refused before anything touches the disk.
 #
 # The "MinIO binary" here is a small fixture file whose digest the test pins
 # (through the library's internal pin-list entry point). Nothing is executed.
 
-from std.os import stat
+from std.os import listdir, mkdir, stat
 from std.os.path import exists, isdir
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -232,9 +233,58 @@ def test_unconfirmed_stop_is_cannot_tell() raises:
     assert_false(isdir(tmp + "/kti-" + id))
 
 
+def _open_refused(
+    id: String, tmp_root: String, binary: String
+) raises -> String:
+    """Open with a valid pin and a runner that would answer; return the error."""
+    var runner = ScriptedProcessRunner([Readiness.ready()])
+    var entropy = _entropy()
+    var clock = FixedWallClock(1790000000)
+    try:
+        var b = _open_local_with_pins(
+            RunId(id, 1790000000), binary, tmp_root, "//p:local", FakeObjectStore(), runner^, entropy, clock, _pins(binary)
+        )
+        _ = b.close()
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_bad_run_id_or_root_refused_before_the_disk() raises:
+    var tmp = _tmp()
+    var binary = _fixture_binary(tmp)
+    # `<root>/inner/kti-x` exists, so `<root>/inner/kti-x/../../escaped` would
+    # resolve to `<root>/escaped`: outside the temporary root.
+    var root = tmp + "/escape-check"
+    mkdir(root)
+    mkdir(root + "/inner")
+    mkdir(root + "/inner/kti-x")
+    var inner = root + "/inner"
+
+    var msg = _open_refused("x/../../escaped", inner, binary)
+    assert_true("refused an empty or invalid run id" in msg, msg)
+    assert_false(exists(root + "/escaped"), "a directory was made outside the temporary root")
+    assert_equal(len(listdir(root)), 1)
+    assert_equal(len(listdir(inner)), 1)
+    assert_equal(len(listdir(inner + "/kti-x")), 0)
+
+    msg = _open_refused("", inner, binary)
+    assert_true("refused an empty or invalid run id" in msg, msg)
+    assert_false(exists(inner + "/kti-"), "an empty run id made a directory")
+
+    msg = _open_refused("1790000000-00000000000000c5", "relative/root", binary)
+    assert_true("must be an absolute path" in msg, msg)
+    assert_false(exists("relative"), "a relative temporary root was used")
+
+    msg = _open_refused("1790000000-00000000000000c6", "", binary)
+    assert_true("refused an empty temporary root" in msg, msg)
+    assert_equal(len(listdir(inner)), 1)
+
+
 def main() raises:
     test_open_retry_files_env_and_close()
     test_sha_mismatch_raises_before_anything()
     test_every_attempt_exiting_is_cannot_tell()
     test_unconfirmed_stop_is_cannot_tell()
+    test_bad_run_id_or_root_refused_before_the_disk()
     print("test_local_backend: OK")

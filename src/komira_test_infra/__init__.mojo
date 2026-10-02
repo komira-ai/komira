@@ -13,7 +13,8 @@ Two backends:
     (`--testinfra-config=<path>`); this library holds none of its values;
   * a local MinIO, pinned by sha256, started inside the test on 127.0.0.1
     (`--testinfra-local-minio=<path>`), for machines without the shared store.
-With neither, the test reports SKIP with a reason (exit 77), never a pass.
+With neither, the test ends with SKIP and a reason (`exit_skip`, which
+exits 77 itself), never a pass.
 
 The object store and the process launcher are seams (`ObjectStoreClient`,
 `ProcessRunner`), with in-memory fakes; real clients live in adapter
@@ -72,7 +73,7 @@ from .seams import (
     UrandomEntropy,
     WallClock,
 )
-from .skip import SKIP_EXIT_CODE, SKIP_MARKER, report_skip, skip_line
+from .skip import SKIP_EXIT_CODE, SKIP_MARKER, exit_skip, skip_line
 from .store import FakeObjectStore, ObjectStoreClient, StoreTarget
 from .verdict import (
     VERDICT_CANNOT_TELL,

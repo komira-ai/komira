@@ -40,6 +40,8 @@
 # test.
 # =============================================================================
 
+from komira_validation_run.validation_run_tag import is_valid_validation_run_id
+
 from .bucket import BACKEND_LOCAL, TestBucket, _open_bucket
 from .local_minio_pins import (
     MinioPin,
@@ -148,9 +150,18 @@ def _open_local_with_pins[
 ) raises -> TestBucket[S, P]:
     """`open_local_test_bucket` over an explicit pin list (the library's own
     test pins a fixture binary)."""
-    _verify_pinned_minio(minio_path, pins)
+    # The run id becomes a directory name below: refuse a bad one (and a bad
+    # temporary root) before ANY filesystem call or process start. `RunId` is
+    # publicly constructible, so `RunId("x/../../elsewhere", t)` would
+    # otherwise place the root credential outside `tmp_root`, start a server
+    # on it, and hand that path to the teardown's tree removal.
+    if run_id.value.byte_length() == 0 or not is_valid_validation_run_id(run_id.value):
+        raise Error("komira_test_infra: local MinIO: refused an empty or invalid run id")
     if tmp_root.byte_length() == 0:
         raise Error("komira_test_infra: local MinIO: refused an empty temporary root")
+    if not tmp_root.startswith("/"):
+        raise Error("komira_test_infra: local MinIO: the temporary root must be an absolute path")
+    _verify_pinned_minio(minio_path, pins)
     var user = "kti" + _hex16(entropy.next_u64())
     var password = _hex16(entropy.next_u64()) + _hex16(entropy.next_u64())
     var tmp = tmp_root + "/kti-" + run_id.value

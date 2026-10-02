@@ -128,8 +128,11 @@ def test_clean_close_deletes_lease_last_and_relists() raises:
     assert_true(b.is_closed())
     ref c = b.client()
     var n = len(c.calls)
-    assert_equal(c.calls[n - 4], "list_keys " + _PREFIX)
-    assert_equal(c.calls[n - 3], "delete_keys " + _PREFIX + "a.bin," + _PREFIX + "dir/b.bin")
+    assert_equal(c.calls[n - 5], "list_keys " + _PREFIX)
+    assert_equal(c.calls[n - 4], "delete_keys " + _PREFIX + "a.bin," + _PREFIX + "dir/b.bin")
+    # Re-listed before the lease delete: the lease goes only when it is the
+    # last key left.
+    assert_equal(c.calls[n - 3], "list_keys " + _PREFIX)
     assert_equal(c.calls[n - 2], "delete_keys " + _PREFIX + "_lease.textproto")
     assert_equal(c.calls[n - 1], "list_keys " + _PREFIX)
     assert_false(c.has(_PREFIX + "_lease.textproto"))

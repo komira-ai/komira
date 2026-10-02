@@ -58,6 +58,27 @@ def test_only_foreign_residue_is_clean() raises:
     assert_equal(len(v.residue), 0)
 
 
+def test_out_of_prefix_keys_from_the_client_are_not_charged() raises:
+    # The fake filters by prefix itself; this knob makes it return keys from
+    # outside the run, so only the library's own guard keeps them out.
+    var cfg = parse_test_infra_config(_CFG)
+    var s = FakeObjectStore()
+    s.extra_listed_keys.append("runs/" + _ID + "-x/obj.bin")
+    s.extra_listed_keys.append("runs/" + _ID + "/../other/obj.bin")
+    s.extra_listed_keys.append("other/" + _ID + "/y")
+    var v = leak_check(_ID, cfg, s)
+    assert_equal(v.kind, VERDICT_CLEAN, String(v))
+    assert_equal(len(v.residue), 0)
+
+    s = FakeObjectStore()
+    s.seed("runs/" + _ID + "/mine.bin", "mine")
+    s.extra_listed_keys.append("runs/" + _ID + "/../other/obj.bin")
+    v = leak_check(_ID, cfg, s)
+    assert_equal(v.kind, VERDICT_LEAK, String(v))
+    assert_equal(len(v.residue), 1)
+    assert_equal(v.residue[0], "mine.bin")
+
+
 def test_raising_list_is_cannot_tell() raises:
     var cfg = parse_test_infra_config(_CFG)
     var s = FakeObjectStore()
@@ -82,6 +103,7 @@ def test_empty_or_invalid_id_is_refused() raises:
 def main() raises:
     test_own_residue_is_leak_and_foreign_is_not_counted()
     test_only_foreign_residue_is_clean()
+    test_out_of_prefix_keys_from_the_client_are_not_charged()
     test_raising_list_is_cannot_tell()
     test_empty_or_invalid_id_is_refused()
     print("test_leak_check: OK")

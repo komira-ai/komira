@@ -59,7 +59,7 @@ def test_unclosed_message_carries_a_leak() raises:
     b.client().put(b.key("kept.bin"), body.as_bytes())
     var msg = b._teardown_unclosed()
     assert_true(msg.startswith(String(UNCLOSED_HANDLE_MARKER) + " LEAK"), msg)
-    assert_true("residue=[kept.bin]" in msg, msg)
+    assert_true("kept.bin" in msg and "_lease.textproto" in msg, msg)
     assert_equal(b.close().kind, VERDICT_LEAK)
 
 

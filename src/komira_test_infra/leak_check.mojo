@@ -14,6 +14,10 @@
 # Other runs' objects are never counted: the trailing `/` of the prefix keeps
 # run `...-ab` from matching run `...-abc`, and a key a misbehaving client
 # returns from outside the prefix is ignored rather than charged to this run.
+# "Outside" includes a key that starts with the prefix but holds a `..`
+# segment after it (`runs/<id>/../other`): a server that normalises paths
+# resolves it to another run's key, so it is neither charged nor deleted
+# (`_key_in_run`, shared with the teardown).
 #
 # A teardown's re-list is this same check (`_leak_check_prefix`).
 # =============================================================================
@@ -30,6 +34,19 @@ def _run_prefix_for(run_prefix: String, run_id: String) -> String:
     return run_prefix + run_id + "/"
 
 
+def _key_in_run(key: String, prefix: String) -> Bool:
+    """True when `key` is under `prefix` and nothing after the prefix can
+    climb out of it (no `..` segment). The teardown deletes, and the leak
+    check charges, only keys for which this holds."""
+    if not key.startswith(prefix):
+        return False
+    var n = prefix.byte_length()
+    for seg in String(key[byte=n:]).split("/"):
+        if seg == "..":
+            return False
+    return True
+
+
 def _leak_check_prefix[S: ObjectStoreClient](
     prefix: String, mut client: S, redactor: _Redactor
 ) -> Verdict:
@@ -43,7 +60,7 @@ def _leak_check_prefix[S: ObjectStoreClient](
         return v^
     var n = prefix.byte_length()
     for k in keys:
-        if not k.startswith(prefix):
+        if not _key_in_run(k, prefix):
             continue
         if k.byte_length() == n:
             # An object named exactly the prefix (a "directory marker").

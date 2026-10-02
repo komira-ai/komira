@@ -15,10 +15,13 @@
 # Secrets travel by path only.
 #
 # ── TEARDOWN IS EXPLICIT ─────────────────────────────────────────────────────
-# `close()` is mandatory. It lists the prefix and deletes everything
-# (`_lease` last, and only once everything else is gone, so residue stays
-# attributable), lists AGAIN to prove the prefix is empty, and for a local run
-# stops the server and removes the temporary directory. It returns a
+# `close()` is mandatory. It lists the prefix and deletes everything but
+# `_lease`, then lists AGAIN and deletes `_lease` only when that listing shows
+# nothing else is left (a delete reported successful does not prove the key
+# is gone, and a program still running can write during the close), so
+# residue stays attributable. It then lists a last time to prove the prefix
+# is empty, and for a local run stops the server and removes the temporary
+# directory. Only keys inside the prefix are ever deleted (`_key_in_run`). It returns a
 # `Verdict` and keeps every failure it met; calling it again returns the same
 # verdict and does nothing.
 #
@@ -61,7 +64,7 @@ from std.os import abort
 from komira_validation_run.validation_run_tag import is_valid_validation_run_id
 
 from .config import TestInfraConfig
-from .leak_check import _leak_check_prefix, _run_prefix_for
+from .leak_check import _key_in_run, _leak_check_prefix, _run_prefix_for
 from .private_files import _remove_tree
 from .process import NoProcess, ProcessRunner
 from .redact import _Redactor
@@ -205,7 +208,7 @@ struct _BucketState[S: ObjectStoreClient, P: ProcessRunner](Movable):
         var others = List[String]()
         var has_lease = False
         for k in keys:
-            if not k.startswith(self.prefix):
+            if not _key_in_run(k, self.prefix):
                 continue
             if k == lease_key:
                 has_lease = True
@@ -225,6 +228,32 @@ struct _BucketState[S: ObjectStoreClient, P: ProcessRunner](Movable):
             return
         if not request_ok or len(failed) > 0:
             v.add_leak(String("kept ") + LEASE_OBJECT + " so the residue stays attributable")
+            return
+        # A delete reported successful is not proof the key is gone, and a
+        # program still running can write during the close: list again and
+        # delete the lease only when it is the last key left. What remains is
+        # charged by the final re-list in `close`, not here.
+        var left = List[String]()
+        try:
+            self.client.list_keys(self.prefix, left)
+        except e:
+            v.add_cannot_tell(
+                "list_keys (before lease delete): " + self.redactor.scrub(String(e))
+            )
+            v.add_leak(String("kept ") + LEASE_OBJECT + " so the residue stays attributable")
+            return
+        var lease_left = False
+        for k in left:
+            if not _key_in_run(k, self.prefix):
+                continue
+            if k == lease_key:
+                lease_left = True
+            else:
+                v.add_leak(
+                    String("kept ") + LEASE_OBJECT + " so the residue stays attributable"
+                )
+                return
+        if not lease_left:
             return
         var lease_failed = List[String]()
         var lease_keys = List[String]()

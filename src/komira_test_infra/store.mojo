@@ -86,6 +86,8 @@ struct FakeObjectStore(ObjectStoreClient):
       * `sticky_keys`: keys whose delete is reported successful but kept.
       * `fail_delete_request`: every `delete_keys` call raises.
       * `fail_puts`: every `put` raises.
+      * `extra_listed_keys`: keys every `list_keys` call returns whatever the
+        prefix, as a misbehaving client might (for the out-of-prefix guards).
       * `echo_endpoint_in_errors`: injected errors quote the bound endpoint,
         as a careless client might, so a test can prove the library scrubs it.
     """
@@ -104,6 +106,7 @@ struct FakeObjectStore(ObjectStoreClient):
     var sticky_keys: List[String]
     var fail_delete_request: Bool
     var fail_puts: Bool
+    var extra_listed_keys: List[String]
     var echo_endpoint_in_errors: Bool
 
     def __init__(out self):
@@ -121,6 +124,7 @@ struct FakeObjectStore(ObjectStoreClient):
         self.sticky_keys = List[String]()
         self.fail_delete_request = False
         self.fail_puts = False
+        self.extra_listed_keys = List[String]()
         self.echo_endpoint_in_errors = False
 
     def seed(mut self, key: String, text: String):
@@ -189,6 +193,8 @@ struct FakeObjectStore(ObjectStoreClient):
                 keys.append(k)
         sort(keys)
         for k in keys:
+            out.append(k)
+        for k in self.extra_listed_keys:
             out.append(k)
 
     def delete_keys(mut self, keys: List[String], mut failed: List[String]) raises:
