@@ -3,8 +3,9 @@
 # file reader the library runs on, each a trait so a test pins them.
 # =============================================================================
 #
-# Real conformers: `SystemClock` (CLOCK_REALTIME through komira_core_ffi),
-# `UrandomEntropy` (/dev/urandom) and `ProcessFiles` (the local filesystem).
+# Real conformers: `SystemClock` (CLOCK_REALTIME through the package-private
+# `_sys`), `UrandomEntropy` (/dev/urandom) and `ProcessFiles` (the local
+# filesystem).
 # Fakes: `FixedWallClock`, `ScriptedEntropy` and `MapFiles`.
 #
 # The entropy here names test resources (run ids, ports, a throwaway local
@@ -16,7 +17,7 @@
 from std.collections import Dict
 from std.os.path import exists, isfile
 
-from komira_core_ffi.posix import _clock_realtime_unix_seconds
+from ._sys import _clock_realtime_unix_seconds
 
 
 trait WallClock(Movable, Deinitable):

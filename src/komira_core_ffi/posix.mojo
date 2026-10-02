@@ -1,7 +1,6 @@
 # =============================================================================
 # komira_core_ffi.posix — the one `getenv(3)` primitive, `access(2)` path
-# probes, the calling thread's identity, the wall clock in whole seconds and
-# `chmod(2)`.
+# probes, and the calling thread's identity.
 # =============================================================================
 #
 # # Why the getenv declaration lives here
@@ -201,56 +200,3 @@ def _thread_self() -> UInt64:
     signature. Do not declare `pthread_self` anywhere else.
     """
     return external_call["pthread_self", UInt64]()
-
-# -----------------------------------------------------------------------------
-# Wall clock — whole seconds since the Unix epoch.
-# -----------------------------------------------------------------------------
-
-# CLOCK_REALTIME is 0 on Linux and on Darwin.
-comptime _CLOCK_REALTIME: Int32 = 0
-
-
-def _clock_realtime_unix_seconds() -> Int:
-    """Whole seconds since the Unix epoch, read from `CLOCK_REALTIME`.
-
-    The WALL clock, not a monotonic one: callers stamp it on things other
-    processes and other machines read (a creation time, a deadline). Only
-    differences between two readings on one machine are free of clock skew.
-
-    Returns 0 when `clock_gettime` fails, which it does not for
-    `CLOCK_REALTIME` on Linux or Darwin; a caller that cannot accept 0 checks
-    for it.
-
-    SAFETY: `struct timespec { time_t tv_sec; long tv_nsec; }` is two 8-byte
-    fields on x86_64, aarch64 and Darwin, so a stack-local `Array[Int64, 2]` is
-    layout-compatible. The pointer carries `ts`'s own origin; `ts` outlives
-    the synchronous call and the kernel keeps no address.
-    """
-    var ts = Array[Int64, 2](fill=Int64(0))
-    var ts_ptr = UnsafePointer(to=ts).bitcast[Int64]()
-    var rc = external_call["clock_gettime", Int32](_CLOCK_REALTIME, ts_ptr)
-    if rc != 0:
-        return 0
-    return Int(ts[0])
-
-
-# -----------------------------------------------------------------------------
-# chmod(2) — set a path's permission bits.
-# -----------------------------------------------------------------------------
-
-
-def _chmod(path: String, mode: Int) -> Bool:
-    """Set the permission bits of `path` to `mode` (for example `0o600`).
-
-    Returns True on success. `mode` is passed as a 32-bit value: `mode_t` is
-    32 bits on Linux and 16 on Darwin, where the callee reads the low 16 bits
-    of the register, so one declaration serves both.
-
-    `as_c_string_slice()` is a mutating method (appends a NUL), so it runs on
-    an owned local that outlives the call.
-    """
-    var p = path
-    var rc = external_call["chmod", Int32](
-        p.as_c_string_slice().unsafe_ptr(), UInt32(mode)
-    )
-    return rc == 0

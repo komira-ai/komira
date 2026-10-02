@@ -13,7 +13,7 @@
 from std.os import listdir, mkdir, remove, rmdir
 from std.os.path import isdir, islink, lexists
 
-from komira_core_ffi.posix import _chmod
+from ._sys import _chmod
 from komira_crypto import hex_lower_array_32, sha256
 
 

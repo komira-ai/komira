@@ -1,4 +1,4 @@
-# Guards `_clock_realtime_unix_seconds` and `_chmod` in komira_core_ffi.posix.
+# Guards `_clock_realtime_unix_seconds` and `_chmod` in komira_test_infra._sys.
 #
 # The clock: a reading is a plausible epoch (after 2026-09-01, before 2100),
 # and two readings never go backwards by more than the slack a wall clock may
@@ -10,7 +10,8 @@
 from std.os import stat, remove
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_core_ffi.posix import _chmod, _clock_realtime_unix_seconds, _read_env
+from komira_core_ffi.posix import _read_env
+from komira_test_infra._sys import _chmod, _clock_realtime_unix_seconds
 
 comptime _EPOCH_2026_09_01: Int = 1788220800
 comptime _EPOCH_2100_01_01: Int = 4102444800
@@ -41,4 +42,4 @@ def test_chmod_round_trips_the_mode() raises:
 def main() raises:
     test_clock_is_a_plausible_epoch()
     test_chmod_round_trips_the_mode()
-    print("test_posix_clock_and_chmod: OK")
+    print("test_sys_clock_and_chmod: OK")

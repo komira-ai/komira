@@ -11,8 +11,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # adapter packages, so this library depends on no cloud client.
 #
 # Deps: komira_textproto (the config file), komira_validation_run (the run-id
-# rule), komira_core_ffi (the wall clock and chmod) and komira_crypto (the
-# sha256 of the MinIO binary against its pin).
+# rule), komira_crypto (the sha256 of the MinIO binary against its pin) and
+# komira_core_ffi (`_read_env`, for the welded tests' TEST_TMPDIR). The wall
+# clock and chmod(2) are this package's own private `_sys` module.
 #
 # The welded tests are hermetic: in-memory fakes, a scripted process runner,
 # and the test's own TEST_TMPDIR; no network and no process is started.
@@ -35,6 +36,7 @@ mojo_library(
         "tests/test_no_endpoint_in_messages.mojo",
         "tests/test_run_id.mojo",
         "tests/test_skip.mojo",
+        "tests/test_sys_clock_and_chmod.mojo",
         "tests/test_unclosed.mojo",
     ],
     visibility = ["PUBLIC"],
