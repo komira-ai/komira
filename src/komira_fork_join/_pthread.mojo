@@ -8,7 +8,7 @@
 # helper uses: a `pthread_t*` out parameter, a NULL attribute pointer, a thin
 # `void *(*)(void *)` entry and an opaque `void *` argument.
 #
-# Private to the package: nothing outside `komira_spawn_join` should import
+# Private to the package: nothing outside `komira_fork_join` should import
 # this module.
 # =============================================================================
 
