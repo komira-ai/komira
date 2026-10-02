@@ -23,7 +23,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.fs.footer_region import FOOTER_SPECULATIVE_WINDOW
+from komira_fs.footer_region import FOOTER_SPECULATIVE_WINDOW
 from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
 from komira_core.io.heap_region import HeapRegion
 
