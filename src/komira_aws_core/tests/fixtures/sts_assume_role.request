@@ -1,0 +1,8 @@
+POST / HTTP/1.1
+Host: sts.us-west-2.amazonaws.com
+Content-Type: application/x-www-form-urlencoded; charset=utf-8
+Content-Length: 180
+X-Amz-Date: 20260915T120000Z
+Authorization: AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20260915/us-west-2/sts/aws4_request, SignedHeaders=content-type;host;x-amz-date, Signature=e89e7a5851e5ba899f00b8cc41c65b041b45e5d501df94e3b5716dadccc3a3e5
+
+Action=AssumeRole&Version=2011-06-15&RoleArn=arn%3Aaws%3Aiam%3A%3A123456789012%3Arole%2Fexample-role&RoleSessionName=komira-test&ExternalId=example-external-id&DurationSeconds=1800
