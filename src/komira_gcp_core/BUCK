@@ -24,6 +24,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # from the conformance-tests archive //third_party/googleapis_conformance_tests
 # pins by sha256, and staged at conformance/.
 #
+# test_env_source_only scans the package's own sources, staged as its data,
+# for any environment read. Only a Google auth-chain file it names may read
+# the environment; today it names none.
+#
 # Still to come, in order: P18a-2 (pure, no http) - service-account key file
 # parse, the RS256 JWT assertion, the authorized_user refresh form, the
 # metadata/oauth token-response parse, and the STS exchange +
@@ -47,8 +51,10 @@ mojo_library(
         "tests/test_gcp_token.mojo",
         "tests/test_pem.mojo",
         "tests/test_v4_sign_conformance.mojo",
+        "tests/test_env_source_only.mojo",
     ],
     test_data = {
+        "tests/test_env_source_only.mojo": glob(["*.mojo"]),
         "tests/test_v4_sign_conformance.mojo": {
             "conformance": "//third_party/googleapis_conformance_tests:files",
         },
