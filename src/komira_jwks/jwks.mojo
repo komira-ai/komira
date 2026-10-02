@@ -46,10 +46,8 @@
 # `Span` here.
 # =============================================================================
 
-from komira_crypto import (
-    sha256,
-    base64_url_encode_nopad,
-)
+from komira_crypto import sha256
+from komira_encoding import base64_url_encode_nopad
 
 
 # =============================================================================

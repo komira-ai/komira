@@ -8,7 +8,8 @@
         bundle_only = ["google/logging/v2/log_entry.proto", ...],
         methods = ["LoggingServiceV2.ListLogEntries"],   # or roots = [...]
         messages_only = True,
-        deps = ["komira//src/komira_serde:komira_serde", ...],
+        protocol = "rest",              # the default; "grpc" only with messages_only
+        deps = ["komira//src/komira_proto_codec:komira_proto_codec", ...],
     )
 
 is two targets:
@@ -32,6 +33,17 @@ required. `messages_only = True` emits no service. The items are joined
 with protoc-gen-mojo's list separator `+`, the options with `,`; an item
 holding either, `=` or whitespace is refused here rather than mis-split.
 
+Protocol. `protocol` is the wire protocol of the generated service code,
+passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
+HTTP, the default) or "grpc"; any other value is refused naming the
+accepted ones. gcp_client does not wire the gRPC transport runtime or its
+token-metadata hook yet, so a target that emits a service is refused for
+any protocol but "rest". `messages_only = True` takes "grpc": the plugin
+branches on the protocol only for service code, so the output is the same
+as for "rest". The attribute is a string checked in `<name>_gen`, not an
+`attrs.enum`: an enum is coerced when the BUCK file is evaluated, so one
+wrong value would fail the whole package to load.
+
 Bundling. The plugin writes a reference to a message of another `.proto` as
 `<name>.<stem>`, so every file the closure reaches is generated into this
 package: googleapis files such as monitored_resource, logging/type or
@@ -42,7 +54,7 @@ closure). Both `bundle_proto_deps` and `bundle_only` must be stated: with
 empty, which the plugin refuses); with `False`, it must be empty.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
-generated code imports its runtime (komira_serde, komira_wkt, and with
+generated code imports its runtime (komira_proto_codec, komira_wkt, and with
 services the transport), which the caller names as `komira//` labels, or as
 stubs in a test. They are the library's `deps`, so they take what
 `mojo_library.deps` takes (C and C++ libraries too); `<name>_gen` sees only
@@ -74,6 +86,10 @@ load(
 _LIST_SEPARATOR = "+"
 _LAYOUT_PROBE = "_layout_probe.mojo"
 
+# Values of `protocol`, and the ones gcp_client wires service code for.
+_PROTOCOLS = ["rest", "grpc"]
+_WIRED_PROTOCOLS = ["rest"]
+
 def _check_items(ctx, attr, items):
     seen = {}
     for item in items:
@@ -97,9 +113,13 @@ def _gcp_client_gen_impl(ctx):
         if ":" in p or not p.endswith(".proto"):
             fail("{}: `protos` entry `{}` is not a source path of a `.proto` file. `protos` takes source paths only, never a label (not even one to a generated .proto): the library's `<stem>.mojo` file names are derived from these paths".format(ctx.label, p))
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_serde, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_proto_codec, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if not ctx.attrs.roots and not ctx.attrs.methods:
         fail("{}: neither `roots` nor `methods` is set. A gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
+    if ctx.attrs.protocol not in _PROTOCOLS:
+        fail("{}: `protocol` `{}` is not one of {}".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _PROTOCOLS])))
+    if ctx.attrs.protocol not in _WIRED_PROTOCOLS and not ctx.attrs.messages_only:
+        fail("{}: `protocol = \"{}\"` with a service to emit: gcp_client does not wire that protocol's transport runtime or its token-metadata hook yet; service code is wired for {} (`messages_only = True` takes any protocol)".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _WIRED_PROTOCOLS])))
     _check_items(ctx, "roots", ctx.attrs.roots)
     _check_items(ctx, "methods", ctx.attrs.methods)
     if ctx.attrs.bundle_proto_deps and not ctx.attrs.bundle_only:
@@ -116,7 +136,7 @@ def _gcp_client_gen_impl(ctx):
         fail("{}: a .proto generates `{}`, the layout probe's name".format(ctx.label, _LAYOUT_PROBE))
 
     opt = [
-        "default_protocol=rest",
+        "default_protocol=" + ctx.attrs.protocol,
         "package_prefix=" + import_name,
         "messages_only=" + ("true" if ctx.attrs.messages_only else "false"),
         "layout_probe=true",
@@ -152,6 +172,8 @@ _gcp_client_gen = rule(
         # name from is refused here (`srcs` is the same list, resolved).
         "proto_paths": attrs.list(attrs.string()),
         "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        # Checked at analysis rather than an attrs.enum (module docstring).
+        "protocol": attrs.string(default = "rest"),
         "roots": attrs.list(attrs.string(), default = []),
         # `len(deps)` of the library, so an empty runtime is refused at
         # analysis. A count, not the labels: the generator has no edge to the
@@ -175,6 +197,7 @@ def _gcp_client(
         messages_only = False,
         proto_deps = [],
         import_prefix = "",
+        protocol = "rest",
         test_srcs = [],
         visibility = None,
         **kwargs):
@@ -192,6 +215,7 @@ def _gcp_client(
         methods = methods,
         proto_deps = proto_deps,
         proto_paths = protos,
+        protocol = protocol,
         roots = roots,
         runtime_dep_count = len(deps),
         **vis

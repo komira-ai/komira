@@ -17,6 +17,29 @@ The `version` that a bundle carries is an attribute of that bundle's
 repository can carry different versions, and the build checks only that the
 string is a plain version (`0.1.0`, `1.2.3+build.4`).
 
+## Conda packages
+
+A Mojo library builds into a conda package for linux-64 with `conda_package`:
+one file, `lib/mojo/<name>.mojoc`, which the compiler finds on its default
+import path. The build writes the file, its sha256 and a manifest; it uploads
+nothing. A package may be published only if its name is in the approved list,
+and a name and version in a registry are permanent in practice, so the
+first upload is gated. The layout, the version scheme (`<prefix>.<N>`) and the
+list are in [packaging/conda](../packaging/conda/README.md).
+
+An uploader reads only a package target's `[release]` sub-target, which exists
+only for a stamped build that carries its source commit; the unstamped
+`<prefix>.0` files the other sub-targets produce are for development and
+claim a permanent version if uploaded. Before uploading, the publish job
+re-derives the version and commit with `release_version.sh` at a clean
+full-history checkout and compares them with the manifest, and recomputes the
+approved-names digest from `names.tsv` at the release commit; both are in
+the README.
+
+A project that uses a package lists the komira channel and Modular's `max`
+channel (or already depends on `mojo`, which pulls the same pinned compiler,
+`mojo-compiler ==1.0.0`); the snippet is in the README.
+
 ## Pinning komira from another repository
 
 A repository that builds Mojo with komira's rules names komira as its `komira`
@@ -36,7 +59,8 @@ These parts of a release machine's publish step are not described here
 because the libraries that implement them are not part of this repository
 yet:
 
-- Conda packages and Python wheels of the Mojo libraries.
+- The upload of conda packages, their other platforms (linux-aarch64 and
+  macOS) and Python wheels of the Mojo libraries.
 - Package channels, and the rules for which writers each channel admits.
 - Copying and promoting a container image between registries by digest.
 - A release version shared by every artifact, and the procedure for cutting

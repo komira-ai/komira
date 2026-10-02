@@ -35,6 +35,12 @@
 #       group and cancels it for a newer one, so a group shared by pushes
 #       loses the middle push's run. Checks nothing, so fails, when no
 #       workflow is push-triggered.
+#   kind "conda_names", args <names.tsv> <BUCK> <prefix>
+#       The approved list of published conda packages (packaging/conda/names.tsv)
+#       is well formed: rows of name, label and reason; each name <prefix> +
+#       lowercase letters, digits, _; each label //src/<name>:<name>; sorted and
+#       unique. <BUCK> declares one conda_package per row and no other, and no
+#       conda_package names another list (`names =`), which would void the approval.
 #   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
 #       Every relative link and #anchor in every .md file under <tree> resolves
 #       to a file, directory or heading under <tree>, with each further tree
@@ -173,6 +179,36 @@ doc_links)
         [ -s "$REPORT" ] || echo "inspect doc-links failed without a finding" >> "$REPORT"
     fi
     checked=${checked:-0}
+    ;;
+conda_names)
+    [ "$1" = -- ] && shift
+    tsv=$1 buck=$2 prefix=$3
+    awk -F'\t' -v P="$prefix" -v F="$tsv" '
+        /^#/ || /^$/ { next }
+        {
+            n++
+            if (NF != 3 || $1 == "" || $2 == "" || $3 == "") { printf "%s:%d: not three non-empty tab-separated columns (name, label, reason)\n", F, NR; next }
+            if (index($1, P) != 1 || length($1) == length(P) || $1 !~ /^[a-z0-9_]+$/) printf "%s:%d: name `%s` is not `%s` + lowercase letters, digits and _\n", F, NR, $1, P
+            if ($2 != "//src/" $1 ":" $1) printf "%s:%d: label `%s` is not //src/%s:%s (flat layout, target named for its import name)\n", F, NR, $2, $1, $1
+            if ($1 in seen) printf "%s:%d: name `%s` is listed twice\n", F, NR, $1
+            if (prev != "" && $1 <= prev) printf "%s:%d: `%s` is not after `%s` (sorted bytewise, so a diff shows only what changed)\n", F, NR, $1, prev
+            seen[$1] = 1; prev = $1
+        }
+        END { if (n == 0) printf "%s: approves no package\n", F }
+    ' "$tsv" >> "$REPORT"
+    checked=$(grep -cvE '^(#|$)' "$tsv" || true)
+    awk -v B="$buck" '
+        /^conda_package\(/ { inpkg = 1; next }
+        inpkg && /^\)/ { inpkg = 0; next }
+        inpkg && /^[[:space:]]+names[[:space:]]*=/ { printf "%s:%d: a conda_package names another approved list; the approval is packaging/conda/names.tsv\n", B, NR }
+        inpkg && /^[[:space:]]+name[[:space:]]*=/ { v = $0; sub(/^[^"]*"/, "", v); sub(/".*$/, "", v); print v > "/dev/stderr" }
+    ' "$buck" 2> "$T/declared.txt" >> "$REPORT"
+    sort "$T/declared.txt" > "$T/declared.sorted"
+    grep -vE '^(#|$)' "$tsv" | cut -f1 | sort > "$T/listed.sorted"
+    if ! diff "$T/listed.sorted" "$T/declared.sorted" > "$T/names.diff"; then
+        echo "$buck: conda_package targets differ from the rows of $tsv (- listed only, + declared only):" >> "$REPORT"
+        grep -E '^[-+][^-+]' "$T/names.diff" >> "$REPORT" || true
+    fi
     ;;
 *)
     echo "lint.sh: unknown kind $KIND" >&2

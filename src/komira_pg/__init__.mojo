@@ -14,7 +14,7 @@ Public surface:
     for a reactor-driven caller.
 
 Substrate: komira_async (TCP, reactor, DNS), komira_http's TLS layer (s2n),
-komira_crypto (SHA-256 / HMAC / PBKDF2 / base64 / CSPRNG).
+komira_crypto (SHA-256 / HMAC / PBKDF2 / CSPRNG) and komira_encoding (base64).
 
 Not in this package: connection pooling (a pool belongs to the caller).
 """

@@ -102,7 +102,7 @@ from komira_pg.scram import (
     verify_server_signature,
     scram_field,
 )
-from komira_crypto.base64 import base64_decode
+from komira_encoding import base64_decode
 
 
 def _pg_error_from_fields(ef: ErrorFields) -> String:

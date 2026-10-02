@@ -1,4 +1,5 @@
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/mojo:toolchain.bzl", "zig_exe")
 load(":defs.bzl", "launcher_level_test")
 
@@ -16,4 +17,11 @@ zig_exe(
     busybox = "komira//tools/build/toolchains:busybox",
     zig = "komira//tools/build/toolchains:zig",
     visibility = ["PUBLIC"],
+)
+
+# The version a release of the conda packages carries (conda.bzl); run by a
+# release job, tested by tools/build/tests/functional/conda.sh.
+shell_lint(
+    name = "shell_lint",
+    srcs = ["release_version.sh"],
 )

@@ -24,7 +24,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "1";
+pub const AWS_GENERATOR_VERSION: &str = "2";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -2292,4 +2292,22 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
         out.push(String::new());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_runtime_is_komira_json_in_every_mode() {
+        let rows: Vec<&AwsImport> = AWS_IMPORTS
+            .iter()
+            .filter(|row| row.names.contains(&"JsonValue"))
+            .collect();
+        assert_eq!(rows.len(), 1, "exactly one row imports JsonValue");
+        let row = rows[0];
+        assert_eq!(row.module, "komira_json");
+        assert_eq!(row.names, &["JsonValue", "parse_json_value"]);
+        assert_eq!(row.mode, AwsImportMode::Always);
+    }
 }
