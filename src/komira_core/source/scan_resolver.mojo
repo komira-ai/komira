@@ -2,19 +2,19 @@
 # ScanResolver — the EXECUTION-TIME registry, tier 1. Lives in `komira_core`.
 # =============================================================================
 #
-# TWO TIERS, AND WHY. A core-resident trait CANNOT SPELL a type that lives
-# above core (see `komira_core/plan/fs_resolver.mojo`). `MorselSourceImpl`
-# lives in `komira_morsel`, which depends on `komira_core`. So the
+# TWO TIERS, AND WHY. Core answers only the questions every execution route
+# asks of a scan, and keeps what a KIND owns (how its store is split, read and
+# resumed) out of core (compare `komira_core/plan/fs_resolver.mojo`). So the
 # execution-time surface splits:
 #
 #   TIER 1 (here, in core)  — identity and freshness. `epoch`, `is_bound`,
 #                             `resolve_snapshot`. Names no source type.
-#   TIER 2 (komira_morsel) — `ScanMorselResolver(ScanResolver)` adds
-#                             `open_scan(...) -> MorselSource`, for a kind
-#                             whose payload the engine pulls.
-#   CONFORMER (a top package) — deps on core, morsel, and every package
-#                             that owns a kind. The same shape
-#                             `komira_fs_registry` has.
+#   TIER 2 (komira_scan_resolver) — `ScanSourceResolver(ScanResolver)` adds
+#                             `plan_splits` / `discover_splits` /
+#                             `open_split(...) -> Self.Reader`, a reader per
+#                             split, with `drain_scan` as the bounded read.
+#   CONFORMER (a kind's package) — deps on core and `komira_scan_resolver`,
+#                             never on the engine that executes it.
 #
 # `UnboundScanResolver` is the DEFAULTED comptime resolver: a call site that
 # does not name a resolver behaves exactly as if nothing were bound. It is the
@@ -99,14 +99,14 @@ trait ScanPayloadResolver(ScanResolver):
     force every conformer to answer a question about bytes, including the one
     whose entire job is to hold none.
 
-    ⚠ AND WHY IT IS NOT TIER 2 EITHER. Tier 2 puts the payload-handing surface
-    in `komira_morsel` because `MorselSourceImpl` lives above core. That reason
-    does NOT apply here: `ArcPointer[Slab[RecordBatch]]` is `std.memory` +
+    ⚠ AND WHY IT IS NOT TIER 2 EITHER. Tier 2 (`ScanSourceResolver` in
+    `komira_scan_resolver`) is for a kind whose rows are READ per execution,
+    split by split. That does NOT apply here: `ArcPointer[Slab[RecordBatch]]` is `std.memory` +
     `komira_core.collections` + `komira_core.arrow`, every one a type core
     already spells — the same reasoning that puts `ScanRegistry` itself in
     core. A kind whose payload is a core type needs no package above core;
-    this trait is that rule given a name. Tier 2 (`ScanMorselResolver`) is
-    the right shape for a kind whose payload the engine PULLS.
+    this trait is that rule given a name. Tier 2 (`ScanSourceResolver`) is
+    the right shape for a kind whose payload the engine READS.
     The single conformer is `ScanRegistry` — this trait lets a call site
     name "a thing I can resolve an in-memory payload against" without naming
     the concrete registry.
