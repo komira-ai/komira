@@ -1,0 +1,116 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load(":proto_check.bzl", "proto_check", "proto_check_case")
+
+# googleapis, Apache-2.0 (LICENSE in the archive), at one pinned commit of its
+# default branch. Nothing of it is committed here: the archive is fetched at
+# build time, checked against its sha256, and the files below extracted from
+# it. Bumping is these two lines (README.md); upstream_version.sh reports how
+# far the pin is behind upstream.
+_COMMIT = "b29d17037e889281b718bfffdeea534aed00d36f"
+_SHA256 = "737d608b0666e083fa8301bf7524875508addc13c929e592ed0ce47c2d692f58"
+
+pinned_file(
+    name = "googleapis.tar.gz",
+    url = "https://github.com/googleapis/googleapis/archive/{}.tar.gz".format(_COMMIT),
+    sha256 = _SHA256,
+)
+
+# Cloud Logging v2 (ListLogEntries, for the generated komira_gcp_logging): the
+# roots and their import closure, google/protobuf/* excepted (protoc's own).
+# :logging_v2 refuses this list unless it is exactly that closure, so a bump
+# that changes the imports fails the build until the list follows.
+_LOGGING_V2_ROOTS = [
+    "google/logging/v2/log_entry.proto",
+    "google/logging/v2/logging.proto",
+]
+
+_LOGGING_V2_CLOSURE = _LOGGING_V2_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/label.proto",
+    "google/api/launch_stage.proto",
+    "google/api/monitored_resource.proto",
+    "google/api/resource.proto",
+    "google/logging/type/http_request.proto",
+    "google/logging/type/log_severity.proto",
+    "google/rpc/status.proto",
+]
+
+# The files out of the archive, each a sub-target named by its path:
+# :googleapis[LICENSE] is googleapis's license file at the pin.
+archive_files(
+    name = "googleapis",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":googleapis.tar.gz",
+    files = ["LICENSE"] + sorted(_LOGGING_V2_CLOSURE),
+    strip_prefix = "googleapis-" + _COMMIT,
+    visibility = ["PUBLIC"],
+)
+
+# The Cloud Logging v2 protos, for a consumer: name
+# //tools/vendor/googleapis:logging_v2 in a mojo_proto_library's proto_deps
+# (its ProtoSrcsInfo is the checked tree), or :logging_v2[tree] for the
+# directory. The default output is the descriptor set (--include_imports).
+proto_check(
+    name = "logging_v2",
+    roots = _LOGGING_V2_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_LOGGING_V2_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# A validation of every proto_check target (proto_check.bzl, `_script_lint`).
+shell_lint(
+    name = "shell_lint",
+    srcs = [
+        "proto_check.sh",
+        "upstream_version.sh",
+    ],
+)
+
+# The check proto_check runs (proto_check.bzl, `_script`).
+export_file(name = "proto_check.sh")
+
+# The self-test of proto_check's check, over the fixtures in testdata/: one
+# tree it must accept, and one change per case that it must refuse, each with
+# the message it must give. Every proto_check target depends on it, so the
+# check cannot stop refusing while any checked tree builds.
+_OK = ["testdata/ok/fix/dep.proto", "testdata/ok/fix/root.proto"]
+
+_CASES = {
+    # The control: the fixture every refusal below varies in one place.
+    "accepts": {},
+    "refuses_missing_import": {
+        "expect": "fix/dep.proto: File not found",
+        "srcs": ["testdata/missing/fix/root.proto"],
+        "strip_prefix": "testdata/missing",
+    },
+    "refuses_unused_file": {
+        "expect": "fix/unused.proto is in the tree but not in the import closure of the roots",
+        "srcs": ["testdata/extra/fix/dep.proto", "testdata/extra/fix/root.proto", "testdata/extra/fix/unused.proto"],
+        "strip_prefix": "testdata/extra",
+    },
+    "refuses_vendored_wkt": {
+        "expect": "google/protobuf/timestamp.proto is in the tree, but google/protobuf/ is protoc's own",
+        "srcs": ["testdata/wkt/fix/dep.proto", "testdata/wkt/fix/root.proto", "testdata/wkt/google/protobuf/timestamp.proto"],
+        "strip_prefix": "testdata/wkt",
+    },
+}
+
+[proto_check_case(
+    name = "proto_check_" + name,
+    roots = case.get("roots", ["fix/root.proto"]),
+    srcs = case.get("srcs", _OK),
+    strip_prefix = case.get("strip_prefix", "testdata/ok"),
+    expect = case.get("expect", ""),
+) for name, case in _CASES.items()]
+
+filegroup(
+    name = "proto_check_selftest",
+    srcs = [":proto_check_" + name for name in _CASES],
+)

@@ -12,8 +12,8 @@
 #        library;
 #      - gated library tests and mojo_tests recording source locations build
 #        (the staging directory is stripped from them);
-#      - C compiles and archives resolve to `exec-light`, the Mojo targets
-#        depending on them to `exec-mojo`;
+#      - C compiles and archives, and the Mojo targets depending on them,
+#        resolve to the linux execution platform (`linux-x86_64`);
 #      - a binary linking C++ (snappy, with zig's static libc++) exports no
 #        dynamic symbol, so its C++ runtime cannot interpose on the
 #        libstdc++.so.6 the Mojo runtime loads, and the libc++ it carries is
@@ -30,11 +30,11 @@ expect_red c_dep_kind "provides neither MojoInfo" tests//negative/c_deps:bad_dep
 expect_green test_source_paths //tools/build/examples/cshim:cadd //tools/build/examples/cshim:test_add_direct
 
 C_PLATFORMS="
-komira//tools/build/examples/cshim:add komira//tools/build/platforms:exec-light
-komira//third_party/snappy:snappy komira//tools/build/platforms:exec-light
-komira//third_party/snappy:src komira//tools/build/platforms:exec-light
-komira//tools/build/examples/cshim:cadd komira//tools/build/platforms:exec-mojo
-komira//tools/build/examples/snappy:test_snappy komira//tools/build/platforms:exec-mojo"
+komira//tools/build/examples/cshim:add komira//tools/build/platforms:linux-x86_64
+komira//third_party/snappy:snappy komira//tools/build/platforms:linux-x86_64
+komira//third_party/snappy:src komira//tools/build/platforms:linux-x86_64
+komira//tools/build/examples/cshim:cadd komira//tools/build/platforms:linux-x86_64
+komira//tools/build/examples/snappy:test_snappy komira//tools/build/platforms:linux-x86_64"
 want=$(printf '%s\n' "$C_PLATFORMS" | sed '/^$/d' | LC_ALL=C sort)
 # shellcheck disable=SC2046 # one target label per line, split into arguments on purpose
 if ! got=$(resolve c_platforms $(printf '%s\n' "$want" | cut -d' ' -f1)); then
@@ -42,7 +42,7 @@ if ! got=$(resolve c_platforms $(printf '%s\n' "$want" | cut -d' ' -f1)); then
 elif [ "$(printf '%s\n' "$got" | LC_ALL=C sort)" != "$want" ]; then
     fail "C exec platforms: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got" | LC_ALL=C sort) | grep '^>' | tr '\n' ' ') (see $LOG/c_platforms.txt)"
 else
-    pass "C exec platforms: C/C++ targets on exec-light, their Mojo users on exec-mojo"
+    pass "C exec platforms: C/C++ targets and their Mojo users on linux-x86_64"
 fi
 
 if ! "$BUCK2" build //tools/build/examples/snappy:test_snappy --materializations all --show-full-simple-output > "$LOG/snappy_bin.txt" 2> "$LOG/snappy_bin.log"; then
