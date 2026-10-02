@@ -1,5 +1,5 @@
 # =============================================================================
-# test_xml_accessors.mojo — borrowed child lookup and the text accessors.
+# test_xml_accessors.mojo — position-based child lookup and text accessors.
 # =============================================================================
 #
 # A rest-xml response decoder walks the tree by name: S3's ListObjectsV2

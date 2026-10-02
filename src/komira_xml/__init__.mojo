@@ -15,10 +15,10 @@
 #   xml_writer.mojo  a streaming writer over one output buffer
 #   xml_tree.mojo    an owned tree + a namespace-aware canonical form
 #
-# The rest-xml BINDING (flattened lists, xmlAttribute, xmlNamespace,
-# timestamps, blobs) is deliberately NOT here — it belongs to the AWS core
-# (`komira_aws_core`), so this package stays a plain XML codec that anything
-# can use.
+# A rest-xml BINDING (flattened lists, xmlAttribute, xmlNamespace,
+# timestamps, blobs) is deliberately NOT here — it lives in this package's
+# consumers, which depend on it, never the other way round, so this package
+# stays a plain XML codec that anything can use.
 #
 # STRICT ON INPUT. The reader and the tree refuse what is not a well-formed,
 # namespace-well-formed XML 1.0 document, and refuse every DTD, so no entity
