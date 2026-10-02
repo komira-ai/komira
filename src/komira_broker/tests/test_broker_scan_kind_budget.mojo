@@ -42,11 +42,23 @@ from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.record_batch import RecordBatch
 from komira_core.arrow.schema import Schema
 from komira_core.arrow.string_array import StringArray
+from komira_core.source.scan_binding import ScanBinding
+from komira_core.source.scan_kind_registry import ScanKindDescriptor
 from komira_core.source.scan_params import ScanParams
 from komira_core.source.scan_resolver import resolve_for_execution
 
 from komira_scan_resolver.drain_scan import drain_scan
-from komira_scan_resolver.scan_source_resolver import ScanOpened, ScanRequest
+from komira_scan_resolver.scan_source_resolver import (
+    ScanOpened,
+    ScanRequest,
+    ScanSourceResolver,
+)
+from komira_scan_resolver.scan_split import (
+    DrainedSplit,
+    ScanSplit,
+    ScanSplitPlan,
+    SplitDelta,
+)
 
 from komira_broker.broker_core import (
     BrokerCore,
@@ -65,7 +77,9 @@ from komira_broker.broker_scan_kind import (
     BROKER_RESOLVED_NEXT_OFFSET,
     BrokerScanRuntime,
     broker_resolved_key,
+    broker_split_key,
 )
+from komira_broker.broker_split_reader import BrokerSplitReader
 from komira_broker.consume_core import ConsumeCore
 
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
@@ -175,6 +189,77 @@ def _run(
     var cached = rt.build_binding(params)
     var exec_binding = resolve_for_execution(rt, cached)
     return drain_scan(rt, ScanRequest(exec_binding^), max_bytes=max_bytes)
+
+
+struct _CutWitness(ScanSourceResolver, Movable, Deinitable):
+    """The broker kind, unchanged, plus `cut.<split_key>` in the drained side
+    channel: what the drain itself reported for each split. The broker's own
+    `resolve_drained` reports only `next_offset.<p>`, which is right whether
+    or not the drain called the split cut, so it cannot witness the cut."""
+
+    comptime Reader = BrokerSplitReader[_Store]
+
+    var _rt: BrokerScanRuntime[_Store]
+
+    def __init__(out self, var rt: BrokerScanRuntime[_Store]):
+        self._rt = rt^
+
+    def epoch(self) -> UInt64:
+        return self._rt.epoch()
+
+    def is_bound(self, kind_id: UInt32, handle: Int) -> Bool:
+        return self._rt.is_bound(kind_id, handle)
+
+    def resolve_snapshot(self, binding: ScanBinding) raises -> UInt64:
+        return self._rt.resolve_snapshot(binding)
+
+    def descriptor(self) -> ScanKindDescriptor:
+        return self._rt.descriptor()
+
+    def position_version(self) -> UInt8:
+        return self._rt.position_version()
+
+    def build_binding(self, params: ScanParams) raises -> ScanBinding:
+        return self._rt.build_binding(params)
+
+    def plan_splits(self, req: ScanRequest) raises -> ScanSplitPlan:
+        return self._rt.plan_splits(req)
+
+    def discover_splits(
+        self, req: ScanRequest, known: List[String]
+    ) raises -> SplitDelta:
+        return self._rt.discover_splits(req, known)
+
+    def open_split(
+        self, req: ScanRequest, split: ScanSplit
+    ) raises -> BrokerSplitReader[_Store]:
+        return self._rt.open_split(req, split)
+
+    def resolve_drained(
+        self,
+        req: ScanRequest,
+        var resolved: ScanParams,
+        stopped: List[DrainedSplit],
+    ) raises -> ScanParams:
+        var out = self._rt.resolve_drained(req, resolved^, stopped)
+        for i in range(len(stopped)):
+            out.put_bool(String("cut.") + stopped[i].split_key, stopped[i].cut)
+        return out^
+
+
+def _run_witnessed(
+    store: _Store, params: ScanParams, max_bytes: Int64 = -1
+) raises -> ScanOpened:
+    var w = _CutWitness(_runtime(store))
+    var cached = w.build_binding(params)
+    var exec_binding = resolve_for_execution(w, cached)
+    return drain_scan(w, ScanRequest(exec_binding^), max_bytes=max_bytes)
+
+
+def _cut(o: ScanOpened, topic: String, p: Int64) raises -> Bool:
+    return o.resolved.get_bool(
+        String("cut.") + broker_split_key(topic, p)
+    )
 
 
 def _col_i64(o: ScanOpened, col: Int) raises -> List[Int64]:
@@ -348,6 +433,19 @@ def test_partition_budget_returns_k_segments_from_each_partition() raises:
     )
     assert_equal(_next(o, Int64(0)), Int64(4))
     assert_equal(_next(o, Int64(1)), Int64(4))
+    # The partition budget ENDED each split short of its stop (offset 6), so
+    # the drain reports both cut: offsets 4..5 are still there to read.
+    var ow = _run_witnessed(store, p)
+    assert_equal(_next(ow, Int64(0)), Int64(4))
+    assert_true(_cut(ow, topic, Int64(0)), "p0, budget-cut at 4 of 6, is cut")
+    assert_true(_cut(ow, topic, Int64(1)), "p1, budget-cut at 4 of 6, is cut")
+    # A budget the partitions fit in reads each to its stop: not cut.
+    var r = _params(topic)
+    r.put_i64(String(BROKER_PARAM_PARTITION_MAX_BYTES), 3 * S)
+    var whole = _run_witnessed(store, r)
+    assert_equal(_next(whole, Int64(0)), Int64(6))
+    assert_true(not _cut(whole, topic, Int64(0)), "p0 read to its stop")
+    assert_true(not _cut(whole, topic, Int64(1)), "p1 read to its stop")
 
     # A drain budget on top ends the read inside p1: 2*S (p0) + S (p1). The
     # segment p0's partition budget refused is not charged to the drain.

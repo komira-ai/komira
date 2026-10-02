@@ -53,10 +53,13 @@
 # The first segment of the split that returns a row is returned whole even
 # over `partition_max_bytes`; after it, a segment that would take the split
 # past the budget is not returned, and the reader answers END with its
-# position at that segment. Like a time-shaped stop, a byte-shaped stop cannot
-# be written as a position before reading, so the reader enforces it and
-# answers END there. The exemption is the SPLIT's: a split cannot see whether
-# another split of the same read returned something first.
+# position at that segment. A byte-shaped stop cannot be written as a position
+# before reading, so the reader enforces it; but unlike a time-shaped stop it
+# is not where the split ends, only where this read of it is cut. END short of
+# the split's stop is a CUT (`SPLIT_POLL_END`): `drain_scan` reports the split
+# cut, the rest from its position on is still there, and a split that reads
+# after it is not opened. The exemption is the SPLIT's: a split cannot see
+# whether another split of the same read returned something first.
 #
 # The scan-wide byte budget is not the reader's: it is `drain_scan`'s
 # `max_bytes`, checked between polls. Each poll's `source_bytes` is the
@@ -491,6 +494,7 @@ struct BrokerSplitReader[Storage: CloneableConditionalWriteStore](
                 and self._partition_max_bytes >= Int64(0)
                 and self._part_bytes + sz > self._partition_max_bytes
             ):
+                # END short of the stop: a cut, resumable at this segment.
                 return self._end(seg.base_offset)
             var body = self._core.read_chunk_body(seg.chunk_seq)
             var emitted = _emit_segment(
