@@ -173,11 +173,18 @@
 #      (tools/build/tests/negative/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
-#  33a. Conda packages: see tools/build/tests/functional/conda.sh (the package is
-#       read back with unzip, zstd, tar and jq; the refusals; the approved-list
-#       lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
-#       install from a file:// channel and a Mojo program importing the library,
-#       skipped with --no-install).
+#  33a. Conda packages: see tools/build/tests/functional/conda.sh (a package is a
+#       directory read back with unzip, zstd, tar and jq; kci's manifest contract;
+#       a new library gets its package from the macro with no declaration; the
+#       refusals, as targets that build and releases that do not; the stamp; two
+#       uncached builds, skipped with --no-uncached; a pixi install from a
+#       file:// channel and a Mojo program importing the library, skipped with
+#       --no-install).
+#  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
+#       (every library's package target builds; the stamped releases; the metapackage
+#       from the members' manifests; kci's own parser over the emitted manifests; the
+#       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
+#       the metapackage alone, skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -862,6 +869,17 @@ while IFS= read -r line; do
     esac
 done < "$LOG/conda.log"
 grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
+
+# 33b
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda_set.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda_set.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda_set "*) pass "${line#PASS  }" ;;
+        "FAIL  conda_set "*) fail "${line#FAIL  } (see $LOG/conda_set.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda_set.log"
+grep -qE '^(PASS|FAIL)  conda_set ' "$LOG/conda_set.log" || fail "conda_set: tools/build/tests/functional/conda_set.sh reported nothing (see $LOG/conda_set.log)"
 
 # 33
 S="$LOG/uname_shim"

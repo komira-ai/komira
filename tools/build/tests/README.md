@@ -552,27 +552,60 @@ tools/build/tests/functional/bootstrap.sh "$(mktemp -d)/bootstrap"
 
 ## 33a. Conda packages
 
-The conda package of `//packaging/conda:komira_encoding` ([`conda.sh`](functional/conda.sh)):
-read back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it
-(three stored members, valid zstd, owner-0 tars, sorted compact JSON, the
-library's `.mojoc` byte for byte); the compiler pin equals the pinned compiler's
-version; each bad fixture of [`negative/conda_pkgs`](negative/conda_pkgs/BUCK)
-is refused with its reason (a name or dependency outside the approved list, no
-prefix, a target not named for the import name, no tests, a run-time `dlopen`,
-native code) and the two controls build; the approved-list lint is green on
-the real list and red naming each defect on a bad one; the version comes from the
+The conda package of `//src/komira_encoding:komira_encoding_conda` and of the
+fixture libraries of [`negative/conda`](negative/conda/BUCK) ([`conda.sh`](functional/conda.sh)):
+a package is a directory (the `.conda`, `manifest.json`, `metadata.json`), read
+back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it (three
+stored members, valid zstd, owner-0 tars, sorted compact JSON, the library's
+`.mojoc` byte for byte); `manifest.json` is exactly kci's six-key artifact
+manifest; the compiler pin equals the pinned compiler's version; no BUCK file
+declares a package, and a NEW fixture library gets `<name>_conda` from the
+`mojo_library` macro with no declaration anywhere and builds; `conda = False`
+gets no target; `conda_name` publishes under another name and a dependent
+requires that name; a dependency is rendered at its own version; a library that
+cannot be packaged (no tests, native code, a run-time `dlopen`, a name that is
+not a conda name, a dependency with no package) keeps a target that builds as a
+`REFUSED` directory holding the reason, its `[release]` fails naming it, and
+the library still builds; `komira_pack conda-check` refuses a different
+payload, name, subdir or dependency list, a corrupt zip, a manifest that is not
+the contract and a metadata file that disagrees; the version comes from the
 configuration and an unstamped build, a stamp without its source commit and a
 non-positive commit time are refused by the release check, `[release]` exists
-only for a stamped one, and a new stamp re-runs no compile; a package outside
-the tests cell naming its own approved list is refused, and the approved-names
-lint is a dependency of the package; `release_version.sh` counts to the last
-non-documentation commit in a scratch repository and prints that commit; two uncached builds in fresh daemons give the
-same sha256 in one isolation directory (skipped with `--no-uncached`); and a
-`pixi` project whose channel is the built file served from `file://` installs
-it, with the compiler from Modular's `max` channel, and
-`mojo run` of a program importing it prints the right bytes, while the same
-project without it cannot (skipped with `--no-install`, without `pixi`, or
-without network). See [packaging/conda](../../../packaging/conda/README.md).
+only for a stamped one, and a new stamp re-runs no compile; `release_version.sh`
+counts to the last non-documentation commit in a scratch repository and prints
+that commit; two uncached builds in fresh daemons give the same sha256 in one
+isolation directory (skipped with `--no-uncached`); and a `pixi` project whose
+channel is the built file served from `file://` installs it, with the compiler
+from Modular's `max` channel, and `mojo run` of a program importing it prints
+the right bytes, while the same project without it cannot (skipped with
+`--no-install`, without `pixi`, or without network). See
+[packaging/conda](../../../packaging/conda/README.md).
+
+## 33b. Conda package set and metapackage
+
+What a release tool does with the packages the build makes, on the packages the
+repository really builds ([`conda_set.sh`](functional/conda_set.sh)):
+`tools/build/package/list_conda_targets.sh` prints a package target for every
+library of `//src`, all of them build (a refusal is a value), and every
+requirement of a package is another package of the set; a stamped build gives a
+`[release]` directory for each package that can be made and none for a refused
+library; `komira_pack conda-meta` over the members' manifests gives a package
+with no file that requires exactly the guard and every member at its version,
+the same bytes twice, accepted by `conda-check` (as a release too); kci's own
+artifact-manifest parser (`tools/build/package/manifest_probe`) reads the
+manifest of every package and of the metapackage and renders it back to the same
+bytes, and refuses a manifest with a `metadata` key; `conda-meta` refuses
+version skew, a member twice, a member whose file is not its manifest's sha256,
+a refused package, a name that is a member, a name that is not a conda name, a
+metapackage as a member and no members; `conda-check` refuses a metapackage
+against a shorter or longer member list, the wrong kind, an extra manifest key
+and an unstamped release; two uncached builds in fresh daemons give the same
+sha256 for every file of every package and of the metapackage made from each
+run (`--no-uncached` skips); and `pixi` installs ONLY the metapackage from a
+`file://` channel of the set, the solver brings every library and the compiler,
+and a program importing two libraries prints the right bytes (`--no-install`, no
+`pixi` or no network skips). See
+[packaging/conda](../../../packaging/conda/README.md).
 
 ## 33. Client
 
