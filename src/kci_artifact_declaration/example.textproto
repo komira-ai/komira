@@ -1,0 +1,36 @@
+# An example artifact declarations file (kci.release.v1.ArtifactDeclarations).
+# The welded test test_declaration_parse.mojo reads this file, so it always
+# parses and validates.
+#
+# kci runs, per artifact, with D a fresh EMPTY directory:
+#   buck2 build --config-file /etc/kci/remote.buckconfig <target> --out D
+# and ships what the `*.kci_manifest.json` files left in D describe.
+#
+# `build` is in the build system's args, not the artifacts': the build
+# system's args come first, and buck2 takes `--config-file` only after the
+# subcommand (`buck2 --config-file P build` is refused: "unexpected argument").
+#
+# `buck2 build --out D` copies the ONE default output of the ONE target
+# named: a directory output's contents land directly in D, a single file
+# lands in D under its own name. So each target below must have, as its
+# default output, a directory holding the artifact and its kci manifest.
+# (conda_package's `[release]` is not that yet: its default output is the
+# `.conda` alone, and its `.manifest.json` is the packer's own format.)
+
+build_systems {
+  name: "buck2"
+  executable: "buck2"
+  args: "build"
+  args: "--config-file"
+  args: "/etc/kci/remote.buckconfig"
+}
+
+artifacts {
+  name: "komira_encoding"
+  build_system: "buck2"
+  args: "//packaging/conda:komira_encoding[release]"
+  args: "--out"
+  args: "{out_dir}"
+  allowed_channels: "public"
+  allowed_channels: "internal"
+}

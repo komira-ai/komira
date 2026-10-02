@@ -1,17 +1,19 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 
 # The artifact declarations schema (`kci.release.v1`): the reviewed list of
-# what kci builds and publishes. Each artifact is a name, the channels it may
-# go to, and one typed kind arm (conda package, conda metapackage, Python
-# wheel, OCI image) holding that kind's build rule and fields. Standalone:
-# the .proto imports no other proto.
+# what kci builds and publishes. A file declares build systems (a program and
+# the flags it always gets) and artifacts (a name, the channels it may go to,
+# the build system that builds it and the args appended for it). kci knows no
+# build tool by name; the contract (an empty `{out_dir}`, one kci artifact
+# manifest per artifact left in it) is in the .proto. Standalone: the .proto
+# imports no other proto.
 #
 #   from kci_artifact_declaration_proto.artifact_declaration import (
-#       ArtifactDeclarations, ArtifactDeclaration, BuildRule, Buck2Target,
-#       CondaPackage, CondaMetapackage, PythonWheel, OciImage)
+#       ArtifactDeclarations, ArtifactDeclaration, BuildSystem)
 #
-# Reading and validating a declarations file is `//src/kci_artifact_declaration`,
-# whose welded tests also round-trip this schema on the proto binary wire.
+# Reading, validating and rendering a build's argv is
+# `//src/kci_artifact_declaration`, whose welded tests also round-trip this
+# schema on the proto binary wire with every field number pinned as bytes.
 # Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
 mojo_proto_library(
     name = "kci_artifact_declaration_proto",

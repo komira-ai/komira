@@ -1,107 +1,97 @@
 // The artifact declarations: the one reviewed list of what kci builds and
-// publishes, and how each artifact is built.
+// publishes, and the build system that builds each.
 //
-// Three layers: Mojo libraries (built and consumed through `deps`), the
-// build system's packaging rules (which make a package for every library,
-// published or not), and kci, which builds the DECLARED artifacts, checks
-// their manifests and publishes them. This file is the list kci owns; the
-// build holds no list of names.
+// kci models a build system generically and knows no build tool by name:
+// the build system builds, kci only ships. A build system is a program and
+// the flags it is always run with; whatever it needs is installed in the
+// container kci runs in. There is no list of supported build tools, no
+// kind of artifact and no enum anywhere in this file.
 //
-// Kinds are a closed oneof of typed arms, not an enum: each arm carries
-// exactly the fields that kind has, so a field one kind needs and another
-// cannot use is not representable on the wrong kind.
+// THE CONTRACT. For each artifact kci creates an EMPTY output directory and
+// runs
 //
-// Deliberately absent: a version (every artifact's version is the pinned
-// Mojo compiler version, made unique by the build from git: a conda build
-// number, a wheel `.postN`), a sha256 and a file name (the built manifest
-// carries them), a summary, credentials (a channel names its own by secret
-// name) and the channel's repository (the channel gives one per artifact
-// type).
+//   <executable> <build_system.args...> <artifact.args...>
+//
+// with every occurrence of the literal token `{out_dir}` in any argument
+// replaced by that directory's absolute path. `{out_dir}` is the only
+// placeholder; any other `{<identifier>}` is refused (a brace not around
+// an identifier is passed through as written). The build must leave in that
+// directory the artifact files and one kci artifact manifest per artifact
+// (the format of //src/kci_artifact_manifest), each named
+// `<anything>.kci_manifest.json`. kci ships exactly what those manifests
+// describe: the artifact type, name, version, platform, file, sha256 and
+// metadata all come from the built manifest, never from this file. A build
+// that exits non-zero, or leaves no manifest, is refused.
+//
+// Buck2 needs no special code: a build system `buck2` with args
+// `["build", "--config-file", "/etc/kci/remote.buckconfig"]` and artifact
+// args `["//packaging/conda:foo[release]", "--out", "{out_dir}"]`. The
+// subcommand belongs in the build system's args because those come first and
+// buck2 accepts `--config-file` only after the subcommand. What
+// `buck2 build --out <existing dir>` copies is the ONE default output of the
+// ONE target named: a single file lands in the directory under its own
+// name, the CONTENTS of a directory output land directly in it (files
+// already there are kept, which is why kci starts from an empty one), and
+// two or more default outputs, or two targets, are refused ("choice of
+// output is ambiguous"). So the target's default output must be a DIRECTORY
+// holding the artifact and its kci manifest.
+//
+// Set-level rules (every declared artifact built, versions in lockstep, a
+// metapackage published after its members, each package's requirements
+// closed over the set and its channel) need the built manifests, so they are
+// checked by kci publish over those manifests, not here.
+//
+// Deliberately absent: a version, a sha256, a file name, a platform and an
+// artifact type (the built manifest carries them), credentials and the
+// channel's repository (the channels file holds them, by secret name).
 //
 // Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
 syntax = "proto3";
 
 package kci.release.v1;
 
-// A declarations file: every artifact kci may build or publish, each once.
+// A declarations file: the build systems, then every artifact kci may build
+// or publish, each once.
 message ArtifactDeclarations {
-  repeated ArtifactDeclaration artifact = 1;
+  repeated BuildSystem build_systems = 1;
+  repeated ArtifactDeclaration artifacts = 2;
+}
+
+// A program kci runs to build an artifact, and the flags it always gets.
+message BuildSystem {
+  // The name artifacts refer to it by; `[a-z][a-z0-9_]*`, unique among the
+  // build systems.
+  string name = 1;
+
+  // Required. A program name, resolved on PATH, or an absolute path. No
+  // whitespace, and no relative path (`./buck2` would resolve against a
+  // working directory the file does not state).
+  string executable = 2;
+
+  // Args passed on every invocation, before the artifact's own, e.g.
+  // `["build", "--config-file", "/etc/kci/remote.buckconfig"]`. May be empty; no
+  // entry may be. `{out_dir}` is substituted here too.
+  repeated string args = 3;
 }
 
 message ArtifactDeclaration {
-  // The published name. It must equal the built manifest's `name`, compared
-  // exactly (never case- or `-`/`_`-folded), and is unique in the file
-  // whatever the kind, since `depends_on` and `member_of` refer to it.
+  // kci's handle for the artifact (selection, logs, refusals);
+  // `[a-z][a-z0-9_]*`, unique among the artifacts. The published name is the
+  // built manifest's `name`.
   string name = 1;
 
   // The release channels (names in the channels file) this artifact may be
-  // published to. Required and non-empty: an artifact with no channel named
-  // goes nowhere, so a new declaration fails closed. The channel of a run is
-  // chosen by the run; this only says which runs may carry the artifact.
+  // published to. REQUIRED and non-empty, pending a CEO ruling: without it
+  // an internal package would be publishable to a PUBLIC channel by default,
+  // so a new declaration goes nowhere until it names a channel. The channel
+  // of a run is chosen by the run; this only says which runs may carry it.
   repeated string allowed_channels = 2;
 
-  // What kind of artifact it is, and the fields that kind has.
-  oneof kind {
-    CondaPackage conda_package = 10;
-    CondaMetapackage conda_metapackage = 11;
-    PythonWheel python_wheel = 12;
-    OciImage oci_image = 13;
-  }
-}
+  // The name of a declared BuildSystem.
+  string build_system = 3;
 
-// How kci makes an artifact: one arm per build system.
-message BuildRule {
-  oneof system {
-    Buck2Target buck2 = 1;
-  }
-}
-
-// A Buck2 target.
-message Buck2Target {
-  // A target label, `//<package>:<name>` or `<cell>//<package>:<name>`, with
-  // no sub-target: kci appends `[release]` (a directory holding the artifact
-  // and its manifest) itself.
-  string label = 1;
-}
-
-// A conda package the build makes by itself.
-message CondaPackage {
-  // The package target; kci builds `[release]` of it once per subdir.
-  BuildRule build = 1;
-  // The conda platform subdirs it is built for (`linux-64`, `osx-arm64`).
-  // Non-empty; never `noarch` (a compiled package names its platform). The
-  // built manifest's `subdir` must be one of them.
-  repeated string subdirs = 2;
-  // Declared conda packages this one requires. Not a second statement of the
-  // build's requirements: kci compares it with the built package's own
-  // requirement list, and a difference either way is a refusal.
-  repeated string depends_on = 3;
-  // The conda metapackage this package is a member of, if any. A
-  // metapackage has no member list of its own, so membership is stated once.
-  string member_of = 4;
-}
-
-// A conda package kci makes from the manifests of its members (every
-// conda_package whose `member_of` names it). It has no requirements of its
-// own besides its members and holds no file.
-message CondaMetapackage {
-  // The packer kci RUNS to make it from the members' manifests.
-  BuildRule packer = 1;
-  // As CondaPackage.subdirs. Every member is built for each of them.
-  repeated string subdirs = 2;
-}
-
-// A Python wheel (the Python front end only).
-message PythonWheel {
-  // The wheel target; kci builds `[release]` of it.
-  BuildRule build = 1;
-  // Declared Python wheels this one requires; checked like
-  // CondaPackage.depends_on.
-  repeated string depends_on = 2;
-}
-
-// An OCI image.
-message OciImage {
-  // The image target; kci builds `[release]` of it.
-  BuildRule build = 1;
+  // Appended after the build system's args. Non-empty, no empty entry, and
+  // `{out_dir}` must appear in the combined args (build system's and these):
+  // otherwise kci cannot know where the outputs are.
+  repeated string args = 4;
 }
