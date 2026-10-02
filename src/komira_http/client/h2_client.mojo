@@ -43,7 +43,7 @@
 # =============================================================================
 
 
-from komira_obs.clock import now_ns as _mono_now_ns
+from komira_clock import now_ns as _mono_now_ns
 
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime

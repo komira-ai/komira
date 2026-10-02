@@ -1,0 +1,9 @@
+POST / HTTP/1.1
+Host: sqs.us-east-1.amazonaws.com
+Content-Type: application/x-amz-json-1.0
+X-Amz-Target: AmazonSQS.ListQueues
+Content-Length: 28
+X-Amz-Date: 20260919T120000Z
+Authorization: AWS4-HMAC-SHA256 Credential=AKIDEXAMPLE/20260919/us-east-1/sqs/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-target, Signature=adc12ae3fb53dd6bd84d4e3d83cced795f392b959673a4323604188e64e6d52b
+
+{"QueueNamePrefix":"komira"}

@@ -79,7 +79,7 @@ from komira_aws_core import (
     resolve_endpoint,
     send_sigv4_signed_request,
 )
-from komira_serde.json_value import (
+from komira_json import (
     JsonValue,
     parse_json_value,
 )

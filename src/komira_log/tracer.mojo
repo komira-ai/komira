@@ -20,7 +20,7 @@
 # `Tracer[origin]` holds a `Pointer[SharedEngine, origin]` — a CONCRETE origin
 # (NOT a wildcard, NOT `unsafe_from_address=Int`), constructed from a live
 # `ref [origin] SharedEngine`. This is the SAME proven shape as `Logger[origin]`
-# and `komira_obs.TracerHandle[origin]`. In P4a it is exposed on the engine +
+# and `komira_trace.TracerHandle[origin]`. In P4a it is exposed on the engine +
 # a standalone `Tracer.borrow(engine)` handle; P4b adds the `ctx.tracer`
 # accessor (no source change to this struct — just a new accessor on the
 # forever-root, mirroring how `ctx.logger()` returns `Logger[...]`).
