@@ -23,7 +23,7 @@
 
 from komira_crypto.hmac import hmac_sha256, constant_time_eq_32
 from komira_crypto.sha256 import sha256
-from komira_crypto.base64 import base64_encode, base64_decode
+from komira_encoding import base64_encode, base64_decode
 from komira_crypto.pbkdf2 import pbkdf2_hmac_sha256_32
 from komira_crypto.rng import system_entropy
 
