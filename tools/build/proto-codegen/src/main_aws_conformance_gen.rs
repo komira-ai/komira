@@ -1,24 +1,95 @@
 //! `aws-conformance-gen`: generates the Mojo driver that runs botocore's
 //! protocol conformance corpus against the generated serializer.
+//!
+//! usage: aws-conformance-gen --corpus <dir> --protocol <p> [--protocol <p>...]
+//!            --ignore-list <file> --out <file.mojo>
+//!
+//! `<dir>` holds botocore's `input/` and `output/` case files. Every suite
+//! whose `metadata.protocol` is one of the `--protocol` values is
+//! reassembled into a service model, lowered by the real front-end and
+//! emitted by the real emitter; the driver's `main` prints one actuals
+//! record per case (the format `aws_conformance::ActualsFile::parse`
+//! reads). A case botocore's ignore list skips is not driven. A case the
+//! generator cannot build (its suite does not lower, or the driver cannot
+//! construct its input) becomes a `refused` record carrying the error text,
+//! so the harness can tell a named refusal from a defect.
 
-use std::collections::BTreeMap;
-use std::path::Path;
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
 
+use komira_proto_codegen::aws_conformance::{Direction as CorpusDirection, IgnoreList};
 use komira_proto_codegen::aws_in::{lower_aws_service, AwsLowering};
 use komira_proto_codegen::emit_aws::{emit_aws_client, pure_preamble, AwsEmitOptions};
 use komira_proto_codegen::ir::{IrField, IrMessage, IrType, Label, ScalarKind};
 use komira_proto_codegen::json::{parse, Json, JsonObject};
 use komira_proto_codegen::overrides::AwsOverrides;
 
-const PROTOCOL: &str = "json";
+/// The endpoint a case without `clientEndpoint` is sent to.
+const DEFAULT_ENDPOINT: &str = "https://protocoltests.us-east-1.amazonaws.com";
+/// The signing region, and the fixed credentials and time the driver signs
+/// with. Signing headers are not compared (botocore compares the expected
+/// headers as a subset); they are here so each request goes through the
+/// production signing path, which is what sets Content-Length.
+const SIGNING_REGION: &str = "us-east-1";
+const SIGNING_TIME_UNIX: i64 = 1_700_000_000;
+
+struct Args {
+    corpus: PathBuf,
+    protocols: BTreeSet<String>,
+    ignore_list: PathBuf,
+    out: PathBuf,
+}
+
+fn parse_args(argv: &[String]) -> Result<Args, String> {
+    let mut corpus = None;
+    let mut protocols = BTreeSet::new();
+    let mut ignore_list = None;
+    let mut out = None;
+    let mut it = argv.iter();
+    while let Some(flag) = it.next() {
+        let mut value = || {
+            it.next()
+                .cloned()
+                .ok_or_else(|| format!("{flag} needs a value"))
+        };
+        match flag.as_str() {
+            "--corpus" => corpus = Some(PathBuf::from(value()?)),
+            "--protocol" => {
+                let p = value()?;
+                if p.is_empty() || !protocols.insert(p.clone()) {
+                    return Err(format!("--protocol `{p}` is empty or given twice"));
+                }
+            }
+            "--ignore-list" => ignore_list = Some(PathBuf::from(value()?)),
+            "--out" => out = Some(PathBuf::from(value()?)),
+            other => return Err(format!("unknown argument `{other}`")),
+        }
+    }
+    if protocols.is_empty() {
+        return Err("at least one --protocol is required".into());
+    }
+    Ok(Args {
+        corpus: corpus.ok_or("--corpus is required")?,
+        protocols,
+        ignore_list: ignore_list.ok_or("--ignore-list is required")?,
+        out: out.ok_or("--out is required")?,
+    })
+}
 
 fn main() {
-    let args: Vec<String> = std::env::args().collect();
-    if args.len() != 3 {
-        eprintln!("usage: aws-conformance-gen <corpus-dir> <out-file.mojo>");
-        std::process::exit(2);
-    }
-    if let Err(e) = run(Path::new(&args[1]), Path::new(&args[2])) {
+    let argv: Vec<String> = std::env::args().skip(1).collect();
+    let args = match parse_args(&argv) {
+        Ok(a) => a,
+        Err(e) => {
+            eprintln!("aws-conformance-gen: {e}");
+            eprintln!(
+                "usage: aws-conformance-gen --corpus <dir> --protocol <p> [--protocol <p>...] \
+                 --ignore-list <file> --out <file.mojo>"
+            );
+            std::process::exit(2);
+        }
+    };
+    if let Err(e) = run(&args) {
         eprintln!("aws-conformance-gen: {e}");
         std::process::exit(1);
     }
@@ -32,6 +103,7 @@ struct Suite {
     cases: Vec<(String, Json)>,
     direction: Direction,
     client_endpoint: Option<String>,
+    signing_name: String,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -47,20 +119,35 @@ impl Direction {
             Direction::Output => "output",
         }
     }
+
+    fn corpus(self) -> CorpusDirection {
+        match self {
+            Direction::Input => CorpusDirection::Input,
+            Direction::Output => CorpusDirection::Output,
+        }
+    }
 }
 
-fn run(corpus: &Path, out: &Path) -> Result<(), String> {
-    if let Some(d) = out.parent() {
+fn read(path: &Path) -> Result<String, String> {
+    std::fs::read_to_string(path).map_err(|e| format!("read {}: {e}", path.display()))
+}
+
+fn run(args: &Args) -> Result<(), String> {
+    if let Some(d) = args.out.parent() {
         std::fs::create_dir_all(d).map_err(|e| format!("mkdir {}: {e}", d.display()))?;
     }
+    let ignore = IgnoreList::parse(&read(&args.ignore_list)?)?;
 
     let mut suites: Vec<Suite> = Vec::new();
-    let mut skipped: Vec<(String, String)> = Vec::new();
-    let mut n_cases_total = 0usize;
+    // case key -> why the generator could not build it.
+    let mut refused: Vec<(String, String)> = Vec::new();
+    let mut n_cases = 0usize;
+    let mut n_skipped = 0usize;
     let mut suite_seq = 0usize;
+    let mut seen_protocols: BTreeSet<String> = BTreeSet::new();
 
     for direction in [Direction::Input, Direction::Output] {
-        let dir = corpus.join(direction.dir());
+        let dir = args.corpus.join(direction.dir());
         let mut files: Vec<_> = std::fs::read_dir(&dir)
             .map_err(|e| format!("readdir {}: {e}", dir.display()))?
             .filter_map(|e| e.ok())
@@ -69,9 +156,7 @@ fn run(corpus: &Path, out: &Path) -> Result<(), String> {
             .collect();
         files.sort();
         for path in files {
-            let text = std::fs::read_to_string(&path)
-                .map_err(|e| format!("read {}: {e}", path.display()))?;
-            let doc = parse(&text).map_err(|e| format!("{}: {e}", path.display()))?;
+            let doc = parse(&read(&path)?).map_err(|e| format!("{}: {e}", path.display()))?;
             let arr = doc
                 .as_array()
                 .ok_or_else(|| format!("{}: not a JSON array", path.display()))?;
@@ -88,14 +173,29 @@ fn run(corpus: &Path, out: &Path) -> Result<(), String> {
                     .get("metadata")
                     .and_then(Json::as_object)
                     .ok_or_else(|| format!("{basename}[{si}]: no metadata"))?;
-                if meta.get("protocol").and_then(Json::as_str) != Some(PROTOCOL) {
+                let protocol = meta.get("protocol").and_then(Json::as_str).unwrap_or("");
+                if !args.protocols.contains(protocol) {
                     continue;
                 }
-                let cases = obj
+                seen_protocols.insert(protocol.to_string());
+                let description = obj.get("description").and_then(Json::as_str).unwrap_or("");
+                let all_cases = obj
                     .get("cases")
                     .and_then(Json::as_array)
                     .ok_or_else(|| format!("{basename}[{si}]: no cases"))?;
-                n_cases_total += cases.len();
+                n_cases += all_cases.len();
+                let mut cases: Vec<Json> = Vec::new();
+                for c in all_cases {
+                    let id = case_id(c).ok_or_else(|| format!("{basename}[{si}]: a case has no id"))?;
+                    if ignore.skips(direction.corpus(), &basename, description, id) {
+                        n_skipped += 1;
+                    } else {
+                        cases.push(c.clone());
+                    }
+                }
+                if cases.is_empty() {
+                    continue;
+                }
 
                 let module = format!(
                     "{}_{}_{}",
@@ -108,27 +208,21 @@ fn run(corpus: &Path, out: &Path) -> Result<(), String> {
                     if direction == Direction::Input { "i" } else { "o" }
                 );
                 suite_seq += 1;
-                match build_suite(obj, meta, cases, &module, &prefix, &basename, direction) {
+                match build_suite(obj, meta, &cases, &module, &prefix, &basename, direction) {
                     Ok(s) => suites.push(s),
                     Err(e) => {
-                        // A suite the front-end cannot lower yields NO actuals
-                        // for its cases, which the harness scores `unsupported`
-                        // — never a pass and never a silent zero.
-                        for c in cases {
-                            let id = c
-                                .as_object()
-                                .and_then(|o| o.get("id"))
-                                .and_then(Json::as_str)
-                                .unwrap_or("<no id>");
-                            skipped.push((
-                                format!("{}/{basename}#{id}", direction.dir()),
-                                e.clone(),
-                            ));
+                        for c in &cases {
+                            let id = case_id(c).unwrap_or("<no id>");
+                            refused.push((format!("{}/{basename}#{id}", direction.dir()), e.clone()));
                         }
                     }
                 }
             }
         }
+    }
+    let missing: Vec<&String> = args.protocols.difference(&seen_protocols).collect();
+    if !missing.is_empty() {
+        return Err(format!("the corpus holds no suite for --protocol {missing:?}"));
     }
 
     let mut bodies = String::new();
@@ -145,27 +239,31 @@ fn run(corpus: &Path, out: &Path) -> Result<(), String> {
         )?;
         bodies.push_str(&src);
     }
-    let (driver_main, undriveable) = emit_driver(&suites, &skipped, n_cases_total)?;
-    let mut whole = driver_header(&suites, &skipped, &undriveable, n_cases_total);
+    let (driver_main, undriveable) = emit_driver(&suites, &refused, &args.protocols)?;
+    let mut all_refused = refused.clone();
+    all_refused.extend(undriveable.iter().cloned());
+    let mut whole = driver_header(&suites, &all_refused, n_cases, n_skipped, &args.protocols);
     whole.push_str(&pure_preamble(true));
     whole.push_str(&bodies);
     whole.push_str(&driver_main);
-    std::fs::write(out, &whole)
-        .map_err(|e| format!("write {}: {e}", out.display()))?;
+    std::fs::write(&args.out, &whole)
+        .map_err(|e| format!("write {}: {e}", args.out.display()))?;
 
     eprintln!(
-        "aws-conformance-gen: {} suites, {} cases in scope, {} unlowerable",
+        "aws-conformance-gen: {} suites, {} cases in scope, {} skipped upstream, {} refused",
         suites.len(),
-        n_cases_total,
-        skipped.len()
+        n_cases,
+        n_skipped,
+        all_refused.len()
     );
-    for (k, e) in &skipped {
-        eprintln!("  UNLOWERABLE {k}: {}", first_line(e));
-    }
-    for (k, e) in &undriveable {
-        eprintln!("  UNDRIVEABLE {k}: {}", first_line(e));
+    for (k, e) in &all_refused {
+        eprintln!("  REFUSED {k}: {}", first_line(e));
     }
     Ok(())
+}
+
+fn case_id(c: &Json) -> Option<&str> {
+    c.as_object().and_then(|o| o.get("id")).and_then(Json::as_str)
 }
 
 fn first_line(s: &str) -> &str {
@@ -239,6 +337,11 @@ fn build_suite(
     if !m.contains_key("uid") {
         m.insert("uid".into(), Json::Str(format!("{module}-2018-01-01")));
     }
+    let signing_name = m
+        .get("signingName")
+        .and_then(Json::as_str)
+        .unwrap_or("protocoltests")
+        .to_string();
 
     let mut model = JsonObject::new();
     model.insert("version".into(), Json::Str("2.0".into()));
@@ -267,20 +370,8 @@ fn build_suite(
             .get("clientEndpoint")
             .and_then(Json::as_str)
             .map(str::to_string),
+        signing_name,
     })
-}
-
-fn init_module(modules: &[String]) -> String {
-    let mut s = String::new();
-    s.push_str("\"\"\"GENERATED by //tools/build/proto-codegen:aws-conformance-gen — DO NOT EDIT.\n\n");
-    s.push_str("The botocore protocol conformance corpus, reassembled into one generated\n");
-    s.push_str("Mojo module per suite by the REAL front-end and the REAL emitter, plus a\n");
-    s.push_str("driver that prints the actuals file the Stage-0b harness compares.\n\"\"\"\n");
-    for m in modules {
-        s.push_str(&format!("from . import {m}\n"));
-    }
-    s.push_str("from . import conformance_driver\n");
-    s
 }
 
 // ---------------------------------------------------------------------------
@@ -289,55 +380,60 @@ fn init_module(modules: &[String]) -> String {
 
 fn driver_header(
     suites: &[Suite],
-    skipped: &[(String, String)],
-    undriveable: &[(String, String)],
-    n_cases_total: usize,
+    refused: &[(String, String)],
+    n_cases: usize,
+    n_skipped: usize,
+    protocols: &BTreeSet<String>,
 ) -> String {
     let mut o = Out::new();
     o.line("# ==========================================================================");
-    o.line("# GENERATED by //tools/build/proto-codegen:aws-conformance-gen — DO NOT EDIT.");
+    o.line("# GENERATED by //tools/build/proto-codegen:aws-conformance-gen. DO NOT EDIT.");
     o.line("#");
-    o.line("# Runs botocore's own protocol conformance corpus against the GENERATED");
-    o.line("# awsJson serializer and prints the actuals file on stdout, in the format");
-    o.line("# `aws_conformance::ActualsFile::parse` reads.");
+    o.line("# Runs botocore's protocol conformance corpus against the GENERATED");
+    o.line("# serializers and parsers, and prints the actuals file on stdout, in the");
+    o.line("# format `aws_conformance::ActualsFile::parse` reads. Each request is");
+    o.line("# signed by komira_aws_core's build_sigv4_signed_request (static");
+    o.line("# credentials, fixed clock), the path a client sends through.");
     o.line("#");
-    o.line("# ⚠ A CASE THIS DRIVER CANNOT ANSWER IS ABSENT FROM THE OUTPUT, AND ABSENT");
-    o.line("# IS `unsupported` — never a pass. A `try/except` that swallowed an error");
-    o.line("# and wrote a plausible record would convert 'we cannot do this' into 'we");
-    o.line("# do this correctly', which is the failure mode the whole harness exists");
-    o.line("# to refuse.");
+    o.line("# A case the generated code raises on is reported on stderr and has no");
+    o.line("# record, which the harness scores red. A case the generator could not");
+    o.line("# build has a `refused` record holding the error.");
     o.line("#");
-    o.line(&format!("#   suites lowered : {}", suites.len()));
-    o.line(&format!("#   cases in scope : {n_cases_total}"));
-    o.line(&format!("#   unlowerable    : {}", skipped.len()));
-    for (k, e) in skipped {
-        o.line(&format!("#     {k}: {}", first_line(e)));
-    }
-    o.line(&format!("#   undriveable    : {}", undriveable.len()));
-    for (k, e) in undriveable {
+    let p: Vec<&str> = protocols.iter().map(String::as_str).collect();
+    o.line(&format!("#   protocols       : {}", p.join(", ")));
+    o.line(&format!("#   suites lowered  : {}", suites.len()));
+    o.line(&format!("#   cases in scope  : {n_cases}"));
+    o.line(&format!("#   skipped upstream: {n_skipped}"));
+    o.line(&format!("#   refused         : {}", refused.len()));
+    for (k, e) in refused {
         o.line(&format!("#     {k}: {}", first_line(e)));
     }
     o.line("# ==========================================================================");
     o.line("");
     o.line("from std.sys import stderr");
+    o.line("from komira_aws_core import (");
+    o.line("    AwsCredential,");
+    o.line("    AwsEndpoint,");
+    o.line("    FixedClock,");
+    o.line("    Header,");
+    o.line("    HttpResult,");
+    o.line("    build_sigv4_signed_request,");
+    o.line(")");
     o.line("");
     o.buf
 }
 
 fn emit_driver(
     suites: &[Suite],
-    skipped: &[(String, String)],
-    n_cases_total: usize,
+    refused: &[(String, String)],
+    protocols: &BTreeSet<String>,
 ) -> Result<(String, Vec<(String, String)>), String> {
     let mut o = Out::new();
     o.line("def _note_unsupported(key: String, e: Error):");
     o.indent += 1;
-    o.line("\"\"\"A case the generated code RAISED on. It is reported on STDERR and");
-    o.line("    contributes NO record, so the harness scores it `unsupported`.");
-    o.blank_comment();
-    o.line("    ⛔ STDERR, NOT STDOUT. Stdout carries the actuals JSON and nothing");
-    o.line("    else; one stray line there makes the whole file unparseable and");
-    o.line("    turns 168 answers into a parse error.\"\"\"");
+    o.line("\"\"\"A case the generated code RAISED on: reported on STDERR, with no");
+    o.line("    record, so the harness scores it red. Stdout carries the actuals");
+    o.line("    JSON and nothing else.\"\"\"");
     o.line("print(String(\"UNSUPPORTED \") + key + String(\": \") + String(e), file=stderr)");
     o.indent -= 1;
     o.line("");
@@ -347,6 +443,16 @@ fn emit_driver(
     o.line("var actuals = JsonValue.empty_object()");
     o.line("var inp = JsonValue.empty_object()");
     o.line("var outp = JsonValue.empty_object()");
+    o.line("var refused = JsonValue.empty_object()");
+    o.line("var protocols = JsonValue.empty_array()");
+    for p in protocols {
+        o.line(&format!("protocols.push(JsonValue.from_string(String(\"{}\")))", esc(p)));
+    }
+    o.line(&format!(
+        "var _cred = AwsCredential(String(\"AKIDCONFORMANCE\"), String(\"{}\"), String(\"\"))",
+        "conformance-secret-key"
+    ));
+    o.line(&format!("var _clock = FixedClock({SIGNING_TIME_UNIX})"));
 
     let mut undriveable: Vec<(String, String)> = Vec::new();
     let mut ctr = 0usize;
@@ -372,12 +478,22 @@ fn emit_driver(
     }
 
     o.line("");
-    for (k, e) in &undriveable {
-        o.line(&format!("# UNDRIVEABLE {k}: {}", first_line(e)));
+    let mut all: BTreeMap<&String, &String> = BTreeMap::new();
+    for (k, e) in refused.iter().chain(undriveable.iter()) {
+        all.insert(k, e);
+    }
+    for (k, e) in all {
+        o.line(&format!(
+            "refused.set_member(String(\"{}\"), JsonValue.from_string(String(\"{}\")))",
+            esc(k),
+            esc(e)
+        ));
     }
     o.line("");
+    o.line("actuals.set_member(String(\"protocols\"), protocols^)");
     o.line("actuals.set_member(String(\"input\"), inp^)");
     o.line("actuals.set_member(String(\"output\"), outp^)");
+    o.line("actuals.set_member(String(\"refused\"), refused^)");
     o.line("print(actuals.serialize())");
     o.indent -= 1;
     Ok((o.buf, undriveable))
@@ -411,22 +527,10 @@ fn emit_input_case(
         .get("params")
         .cloned()
         .unwrap_or(Json::Object(JsonObject::new()));
-
-    // `client_endpoint` is the case's own endpoint, default `https://<host>`.
     let endpoint = s
         .client_endpoint
         .clone()
-        .unwrap_or_else(|| "https://protocoltests.us-east-1.amazonaws.com".to_string());
-    let without_scheme = endpoint
-        .split_once("://")
-        .map(|(_, r)| r)
-        .unwrap_or(&endpoint)
-        .trim_end_matches('/')
-        .to_string();
-    let (endpoint_authority, endpoint_path) = match without_scheme.find('/') {
-        Some(i) => (without_scheme.clone(), without_scheme[i..].to_string()),
-        None => (without_scheme.clone(), String::new()),
-    };
+        .unwrap_or_else(|| DEFAULT_ENDPOINT.to_string());
 
     let var = format!("_c_{}", sanitize(id));
     o.line("try:");
@@ -435,48 +539,57 @@ fn emit_input_case(
     o.line(&format!("var {var} = {expr}"));
     let fp = s.prefix.to_lowercase();
     o.line(&format!("var _req = {fp}_build_{method}_request({var})"));
-    o.line("var _rec = JsonValue.empty_object()");
-    // ENDPOINT COMPOSITION happens HERE, not in the serializer. `AwsRequest`
-    // carries a host PREFIX and a path; the endpoint (`client_endpoint`, or in
-    // production a region + partition resolution) supplies the rest. botocore's
-    // own comparison folds the endpoint's PATH into both fields — expected host
-    // `example.com/custom` and uri `/custom/` for endpoint
-    // `https://example.com/custom` — which is why this is two concatenations
-    // and not one.
-    o.line(&format!(
-        "_rec.set_member(String(\"host\"), JsonValue.from_string(\n    \
-         _req.host_prefix + String(\"{}\")))",
-        esc(&endpoint_authority)
-    ));
-    o.line("_rec.set_member(String(\"method\"), JsonValue.from_string(_req.method.copy()))");
-    o.line(&format!(
-        "_rec.set_member(String(\"uri\"), JsonValue.from_string(\n    \
-         String(\"{}\") + _req.uri))",
-        esc(&endpoint_path)
-    ));
-    o.line("_rec.set_member(String(\"body\"), JsonValue.from_string(_req.body.copy()))");
-    o.line("var _hdr = JsonValue.empty_object()");
+    // The unsigned request's headers go to the signer as `extra`, except
+    // Content-Type, which is its own argument. The endpoint takes the
+    // operation's host prefix, as a client's send does.
+    o.line("var _ct = String(\"\")");
+    o.line("var _extra = List[Header]()");
     o.line("for _i in range(len(_req.header_names)):");
+    o.indent += 1;
+    o.line("if _req.header_names[_i].lower() == String(\"content-type\"):");
+    o.line("    _ct = _req.header_values[_i].copy()");
+    o.line("else:");
+    o.line("    _extra.append(Header(_req.header_names[_i].copy(), _req.header_values[_i].copy()))");
+    o.indent -= 1;
+    o.line(&format!(
+        "var _ep = AwsEndpoint.parse(String(\"{}\"), String(\"clientEndpoint\")).with_host_prefix(_req.host_prefix)",
+        esc(&endpoint)
+    ));
+    o.line("var _sr = build_sigv4_signed_request(");
+    o.indent += 1;
+    o.line("_req.method,");
+    o.line("_cred,");
+    o.line(&format!("String(\"{SIGNING_REGION}\"),"));
+    o.line(&format!("String(\"{}\"),", esc(&s.signing_name)));
+    o.line("_ep,");
+    o.line("_req.uri,");
+    o.line("_ct,");
+    o.line("_req.body,");
+    o.line("_extra,");
+    o.line("_clock,");
+    o.indent -= 1;
+    o.line(")");
+    o.line("var _rec = JsonValue.empty_object()");
+    o.line("_rec.set_member(String(\"host\"), JsonValue.from_string(_sr.header(String(\"Host\"))))");
+    o.line("_rec.set_member(String(\"method\"), JsonValue.from_string(_sr.method.copy()))");
+    o.line("_rec.set_member(String(\"uri\"), JsonValue.from_string(_sr.target.copy()))");
+    o.line("_rec.set_member(String(\"body\"), JsonValue.from_string(_sr.body.copy()))");
+    o.line("var _hdr = JsonValue.empty_object()");
+    o.line("for _i in range(len(_sr.headers)):");
     o.indent += 1;
     o.line("_hdr.set_member(");
     o.indent += 1;
-    o.line("_req.header_names[_i].copy(),");
-    o.line("JsonValue.from_string(_req.header_values[_i].copy()),");
+    o.line("_sr.headers[_i].name.copy(),");
+    o.line("JsonValue.from_string(_sr.headers[_i].value.copy()),");
     o.indent -= 1;
     o.line(")");
     o.indent -= 1;
     o.line("_rec.set_member(String(\"headers\"), _hdr^)");
-    o.line(&format!(
-        "inp.set_member(String(\"{}\"), _rec^)",
-        esc(key)
-    ));
+    o.line(&format!("inp.set_member(String(\"{}\"), _rec^)", esc(key)));
     o.indent -= 1;
     o.line("except e:");
     o.indent += 1;
-    o.line(&format!(
-        "_note_unsupported(String(\"{}\"), e)",
-        esc(key)
-    ));
+    o.line(&format!("_note_unsupported(String(\"{}\"), e)", esc(key)));
     o.indent -= 1;
     Ok(())
 }
@@ -510,50 +623,39 @@ fn emit_output_case(
             _ => None,
         })
         .unwrap_or(200);
-    let hdr = |name: &str| -> String {
-        resp.and_then(|r| r.get("headers"))
-            .and_then(Json::as_object)
-            .and_then(|h| {
-                h.iter()
-                    .find(|(k, _)| k.eq_ignore_ascii_case(name))
-                    .and_then(|(_, v)| v.as_str())
-            })
-            .unwrap_or("")
-            .to_string()
-    };
-    let err_hdr = hdr("x-amzn-errortype");
-    let query_err_hdr = hdr("x-amzn-query-error");
+    let headers: Vec<(String, String)> = resp
+        .and_then(|r| r.get("headers"))
+        .and_then(Json::as_object)
+        .map(|h| {
+            h.iter_declared()
+                .filter_map(|(k, v)| v.as_str().map(|v| (k.clone(), v.to_string())))
+                .collect()
+        })
+        .unwrap_or_default();
 
     o.line("try:");
     o.indent += 1;
     let fp = s.prefix.to_lowercase();
+    // The whole response is bound, status and headers included, as a
+    // client's send receives it.
+    o.line(&format!("var _resp = HttpResult({status}, String(\"{}\"))", esc(&body)));
+    for (k, v) in &headers {
+        o.line(&format!("_resp.add_header(String(\"{}\"), String(\"{}\"))", esc(k), esc(v)));
+    }
     o.line("var _rec = JsonValue.empty_object()");
-    // The STATUS is the case's; the CLASSIFICATION is the shipped predicate.
-    o.line(&format!("if aws_is_error_status({status}):"));
+    // The classification and the error fields are what a generated client's
+    // error builder computes from the same response.
+    o.line("if aws_is_error_status(_resp.status):");
     o.indent += 1;
-    o.line(&format!(
-        "_rec.set_member(String(\"errorCode\"), JsonValue.from_string(\n             aws_error_code(String(\"{}\"), String(\"{}\"), String(\"{}\"))))",
-        esc(&err_hdr),
-        esc(&body),
-        esc(&query_err_hdr)
-    ));
-    o.line(&format!(
-        "_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(\n             aws_error_message_from_body(String(\"{}\"))))",
-        esc(&body)
-    ));
+    o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(aws_error_code_from_body(_resp.body)))");
+    o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(aws_error_message_from_body(_resp.body)))");
     o.indent -= 1;
     o.line("else:");
     o.indent += 1;
-    o.line(&format!(
-        "var _out = {fp}_parse_{method}_response(String(\"{}\"))",
-        esc(&body)
-    ));
+    o.line(&format!("var _out = {fp}_parse_{method}_response(_resp.body)"));
     o.line("_rec.set_member(String(\"result\"), _out.to_model_json())");
     o.indent -= 1;
-    o.line(&format!(
-        "outp.set_member(String(\"{}\"), _rec^)",
-        esc(key)
-    ));
+    o.line(&format!("outp.set_member(String(\"{}\"), _rec^)", esc(key)));
     o.indent -= 1;
     o.line("except e:");
     o.indent += 1;
@@ -842,9 +944,6 @@ impl Out {
             buf: String::new(),
             indent: 0,
         }
-    }
-    fn blank_comment(&mut self) {
-        self.buf.push('\n');
     }
     fn line(&mut self, s: &str) {
         if !s.is_empty() {

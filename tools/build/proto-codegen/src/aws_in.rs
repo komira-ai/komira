@@ -485,6 +485,15 @@ pub fn lower_aws_service(
     for name in &reached {
         let shape = lowerer.shape(name)?;
         let ty = shape_type(shape, name)?;
+        // REFUSED, by name (aws_conformance::REFUSAL_MARKER): a document is
+        // untyped JSON, and lowering it as the empty structure it is spelled
+        // as would drop its contents on both the request and the response.
+        if flag(shape, "document") {
+            return Err(format!(
+                "aws front-end: REFUSED document: shape `{name}` is a document type \
+                 (untyped JSON), which the IR has no type for"
+            ));
+        }
         match ty {
             "structure" => {
                 lowerer.message_shapes.insert(name.clone());
@@ -1338,6 +1347,17 @@ fn lower_metadata(root: &JsonObject, service: &str) -> Result<AwsServiceMeta, St
             .map(String::from)
             .ok_or_else(|| format!("AWS service model `metadata` has no `{k}`"))
     };
+    // REFUSED, by name (aws_conformance::REFUSAL_MARKER): an
+    // awsQueryCompatible service names an error's code in the
+    // x-amzn-query-error header, and the generated error path reads the code
+    // from the body only, so it would report another code.
+    if m.contains_key("awsQueryCompatible") {
+        return Err(format!(
+            "aws front-end: REFUSED aws-query-compatible: service `{service}` is \
+             awsQueryCompatible, and the generated error path does not read the \
+             x-amzn-query-error header that carries its error codes"
+        ));
+    }
     let endpoint_prefix = need("endpointPrefix")?;
     Ok(AwsServiceMeta {
         service: service.to_string(),
@@ -1554,6 +1574,55 @@ fn enum_ident(wire: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A one-operation awsJson model with `extra_meta` merged into its
+    /// metadata and `member_shape` as the type of the input's one member.
+    fn tiny_model(extra_meta: &str, member_shape: &str) -> Json {
+        crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2020-01-01", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.0", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2020-01-01"{extra_meta}}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}}}}},
+                "shapes": {{"In": {{"type": "structure",
+                                   "members": {{"M": {{"shape": "{member_shape}"}}}}}},
+                           "Str": {{"type": "string"}},
+                           "Doc": {{"type": "structure", "members": {{}}, "document": true}}}}}}"#
+        ))
+        .unwrap()
+    }
+
+    fn lower_tiny(model: &Json) -> Result<AwsLowering, String> {
+        lower_aws_service(model, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny")
+    }
+
+    #[test]
+    fn the_tiny_model_lowers() {
+        lower_tiny(&tiny_model("", "Str")).unwrap();
+    }
+
+    #[test]
+    fn a_document_shape_is_a_named_refusal() {
+        let e = lower_tiny(&tiny_model("", "Doc")).err().unwrap();
+        assert_eq!(
+            crate::aws_conformance::refusal_name(&e).as_deref(),
+            Some("document"),
+            "{e}"
+        );
+    }
+
+    #[test]
+    fn an_aws_query_compatible_service_is_a_named_refusal() {
+        let e = lower_tiny(&tiny_model(r#", "awsQueryCompatible": {}"#, "Str")).err().unwrap();
+        assert_eq!(
+            crate::aws_conformance::refusal_name(&e).as_deref(),
+            Some("aws-query-compatible"),
+            "{e}"
+        );
+    }
 
     #[test]
     fn snake_case_breaks_on_acronym_boundaries() {

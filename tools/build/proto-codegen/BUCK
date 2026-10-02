@@ -1,5 +1,7 @@
 load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
 load("@komira//tools/build/rust:defs.bzl", "rust_binary", "rust_library", "rust_test")
+load(":conformance.bzl", "aws_conformance_driver_src")
 
 # The protoc plugins that generate Mojo, from the `komira_proto_codegen`
 # crate. The Mojo proto rules name these binaries through the toolchain
@@ -69,11 +71,105 @@ proto_srcs(
 # list: `--model`, `--model-sha256` (checked against the model bytes),
 # `--service`, `--operations`, `--module`, `--out`, and `--probe-out` for the
 # module's layout probe. Every input is a flag. The text goldens and
-# refusals are check actions in tests//functional/aws_codegen.
+# refusals are check actions in tests//functional/aws_codegen. It is
+# published behind :aws_conformance_test: what it emits must answer
+# botocore's protocol conformance corpus as the ledger records.
 rust_binary(
     name = "aws-client-gen",
     srcs = ["src/main_aws_client.rs"],
     crate_root = "src/main_aws_client.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    tests = [":aws_conformance_test"],
+    visibility = ["PUBLIC"],
+)
+
+# Validates one botocore model before it is used as generator input:
+# `<service> <api-version> <protocol> <model.json> <out-model.json>
+# <out-facts.tsv>`.
+rust_binary(
+    name = "aws-model-check",
+    srcs = ["src/main_aws_model_check.rs"],
+    crate_root = "src/main_aws_model_check.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+    visibility = ["PUBLIC"],
+)
+
+# ---- AWS protocol conformance -------------------------------------------
+#
+# botocore's protocol conformance corpus, read from the pinned botocore
+# archive (//third_party/botocore:protocol_tests), run against the
+# GENERATED Mojo:
+#
+#   aws_conformance_driver_src  aws-conformance-gen reassembles each suite of
+#                               the driven protocols into a service model,
+#                               lowers and emits it with the same front-end
+#                               and emitter a client gets, and writes one
+#                               Mojo file with a `main` that builds and SIGNS
+#                               each request (komira_aws_core's
+#                               build_sigv4_signed_request) and parses each
+#                               response.
+#   aws_conformance_driver      that file, compiled against the real
+#                               komira_aws_core and komira_json.
+#   [run_check]                 the driver run in a build action; its stdout
+#                               is the actuals file.
+#   aws_conformance_test        scores the actuals against the corpus and
+#                               botocore's ignore list, and checks the result
+#                               against aws_conformance_ledger.txt in both
+#                               directions. aws-client-gen is published
+#                               behind it.
+#
+# Every case of a driven protocol is PASS, UPSTREAM-SKIP (botocore's ignore
+# list) or REFUSED (the generator refuses a named feature); anything else is
+# red, and there is no way to hold a red case.
+
+_PROTOCOL_TESTS = "//third_party/botocore:protocol_tests[tests/unit/protocols]"
+
+# The conformance driver's generator (see above).
+rust_binary(
+    name = "aws-conformance-gen",
+    srcs = ["src/main_aws_conformance_gen.rs"],
+    crate_root = "src/main_aws_conformance_gen.rs",
+    deps = _DEPS + [":komira_proto_codegen"],
+)
+
+aws_conformance_driver_src(
+    name = "aws_conformance_driver_src",
+    corpus = _PROTOCOL_TESTS,
+    ignore_list = "//third_party/botocore:protocol_tests[tests/unit/protocols/protocol-tests-ignore-list.json]",
+    protocols = ["json"],
+)
+
+# A test program, built once and run once, so at the test optimization level.
+mojo_binary(
+    name = "aws_conformance_driver",
+    srcs = [":aws_conformance_driver_src"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_json:komira_json",
+    ],
+    optimization_level = "1",
+)
+
+# The corpus, the actuals and the ledger are compiled in (include_str!): the
+# test reads nothing at run time.
+rust_test(
+    name = "aws_conformance_test",
+    srcs = [
+        "tests/aws_conformance_test.rs",
+        "aws_conformance_ledger.txt",
+        ":aws_conformance_driver[run_check]",
+        _PROTOCOL_TESTS,
+    ],
+    crate_root = "tests/aws_conformance_test.rs",
+    deps = [":komira_proto_codegen"],
+)
+
+# The verdicts of the harness's XML equivalence over the corpus's XML bodies,
+# for a differential test of another XML implementation against them.
+rust_binary(
+    name = "xml-equiv-verdicts",
+    srcs = ["src/main_xml_equiv_verdicts.rs"],
+    crate_root = "src/main_xml_equiv_verdicts.rs",
     deps = _DEPS + [":komira_proto_codegen"],
     visibility = ["PUBLIC"],
 )
