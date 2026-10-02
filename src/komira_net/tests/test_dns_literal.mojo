@@ -8,7 +8,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_async.net.dns import IpAddr, parse_ip_literal
+from komira_net.dns import IpAddr, parse_ip_literal
 from komira_async.reactor.socket_setup import inet_loopback_be
 
 
@@ -50,10 +50,10 @@ def test_dotted_quad_byte_order() raises:
     assert_true(Bool(bcast))
     assert_equal(Int(bcast.value().v4_be), 0xFFFFFFFF)
 
-    # 10.43.0.50 (a typical pinned ClusterIP) → byte[0]=10 ... byte[3]=50.
-    var k = parse_ip_literal(String("10.43.0.50"))
+    # 10.0.0.50 (a typical pinned ClusterIP) → byte[0]=10 ... byte[3]=50.
+    var k = parse_ip_literal(String("10.0.0.50"))
     assert_true(Bool(k))
-    var expect = 10 | (43 << 8) | (0 << 16) | (50 << 24)
+    var expect = 10 | (0 << 8) | (0 << 16) | (50 << 24)
     assert_equal(Int(k.value().v4_be), expect)
 
 
