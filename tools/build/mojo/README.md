@@ -303,7 +303,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "gcp_client")
 ```
 
 `gcp_client(name, protos, deps, bundle_proto_deps, bundle_only, roots,
-methods, messages_only, proto_deps, import_prefix, test_srcs, **kwargs)`
+methods, messages_only, proto_deps, import_prefix, protocol, test_srcs,
+**kwargs)`
 (`kwargs`: `test_data`, `test_env`, passed to the
 `mojo_library`) generates a Google Cloud client at build
 time; no generated code is checked in. It is the generation half of the rules
@@ -313,7 +314,9 @@ files, so the client is welded like any library: the generated
 `_layout_probe.mojo` (one `size_of` per emitted struct) is its first
 `test_srcs` entry, followed by the caller's. Output is restricted to the
 closure of `roots` (messages) and `methods` (`Service.Method`), at least one
-of them required; `messages_only` emits no service. `protos` takes source
+of them required; `messages_only` emits no service. `protocol` is "rest"
+(the default) or "grpc", which is refused until gRPC emission is wired
+into gcp_client. `protos` takes source
 paths of `.proto` files only, never a label. The referenced googleapis
 files (monitored_resource, logging/type, rpc/status, ...) are generated as
 sibling modules through `bundle_only`, which `bundle_proto_deps = True`

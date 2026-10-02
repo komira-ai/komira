@@ -67,6 +67,8 @@ expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' 
 expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/gcp_client:caller_test_red
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/gcp_client:tests_check_can_fail
+expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/gcp_client:unknown_protocol
+expect_red gcp_client_grpc_not_wired 'gRPC emission is not wired into gcp_client yet' tests//negative/gcp_client:grpc_not_wired
 
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin

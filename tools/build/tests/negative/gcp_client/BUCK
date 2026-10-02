@@ -113,3 +113,31 @@ gcp_client(
     test_srcs = ["test_item_deliberate_failure.mojo"],
     deps = _RUNTIME,
 )
+
+# "`protocol` `connect` is not one of": a protocol outside "rest" and "grpc"
+# is refused at analysis, not handed to the plugin (which would accept it).
+gcp_client(
+    name = "unknown_protocol",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protocol = "connect",
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "gRPC emission is not wired into gcp_client yet": "grpc" is a value of
+# `protocol`, refused until the generation path emits it.
+gcp_client(
+    name = "grpc_not_wired",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    proto_deps = _DEPS,
+    protocol = "grpc",
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)

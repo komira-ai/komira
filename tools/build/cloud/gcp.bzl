@@ -8,6 +8,7 @@
         bundle_only = ["google/logging/v2/log_entry.proto", ...],
         methods = ["LoggingServiceV2.ListLogEntries"],   # or roots = [...]
         messages_only = True,
+        protocol = "rest",              # the default; "grpc" is not wired yet
         deps = ["komira//src/komira_serde:komira_serde", ...],
     )
 
@@ -31,6 +32,14 @@ or enums) and `methods` (`Service.Method`); at least one of them is
 required. `messages_only = True` emits no service. The items are joined
 with protoc-gen-mojo's list separator `+`, the options with `,`; an item
 holding either, `=` or whitespace is refused here rather than mis-split.
+
+Protocol. `protocol` is the wire protocol of the generated service code,
+passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
+HTTP, the default) or "grpc". gRPC emission is not wired into gcp_client
+yet, so "grpc" is refused like any other wrong value; any other value is
+refused naming the accepted ones. The attribute is a string checked in
+`<name>_gen`, not an `attrs.enum`: an enum is coerced when the BUCK file is
+evaluated, so one wrong value would fail the whole package to load.
 
 Bundling. The plugin writes a reference to a message of another `.proto` as
 `<name>.<stem>`, so every file the closure reaches is generated into this
@@ -74,6 +83,10 @@ load(
 _LIST_SEPARATOR = "+"
 _LAYOUT_PROBE = "_layout_probe.mojo"
 
+# Values of `protocol`, and the ones the generation path is wired for.
+_PROTOCOLS = ["rest", "grpc"]
+_WIRED_PROTOCOLS = ["rest"]
+
 def _check_items(ctx, attr, items):
     seen = {}
     for item in items:
@@ -100,6 +113,10 @@ def _gcp_client_gen_impl(ctx):
         fail("{}: `deps` is empty. The generated code imports its runtime (komira_serde, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if not ctx.attrs.roots and not ctx.attrs.methods:
         fail("{}: neither `roots` nor `methods` is set. A gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
+    if ctx.attrs.protocol not in _PROTOCOLS:
+        fail("{}: `protocol` `{}` is not one of {}".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _PROTOCOLS])))
+    if ctx.attrs.protocol not in _WIRED_PROTOCOLS:
+        fail("{}: `protocol = \"{}\"`: gRPC emission is not wired into gcp_client yet; use `protocol = \"rest\"`".format(ctx.label, ctx.attrs.protocol))
     _check_items(ctx, "roots", ctx.attrs.roots)
     _check_items(ctx, "methods", ctx.attrs.methods)
     if ctx.attrs.bundle_proto_deps and not ctx.attrs.bundle_only:
@@ -116,7 +133,7 @@ def _gcp_client_gen_impl(ctx):
         fail("{}: a .proto generates `{}`, the layout probe's name".format(ctx.label, _LAYOUT_PROBE))
 
     opt = [
-        "default_protocol=rest",
+        "default_protocol=" + ctx.attrs.protocol,
         "package_prefix=" + import_name,
         "messages_only=" + ("true" if ctx.attrs.messages_only else "false"),
         "layout_probe=true",
@@ -152,6 +169,8 @@ _gcp_client_gen = rule(
         # name from is refused here (`srcs` is the same list, resolved).
         "proto_paths": attrs.list(attrs.string()),
         "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        # Checked at analysis rather than an attrs.enum (module docstring).
+        "protocol": attrs.string(default = "rest"),
         "roots": attrs.list(attrs.string(), default = []),
         # `len(deps)` of the library, so an empty runtime is refused at
         # analysis. A count, not the labels: the generator has no edge to the
@@ -175,6 +194,7 @@ def _gcp_client(
         messages_only = False,
         proto_deps = [],
         import_prefix = "",
+        protocol = "rest",
         test_srcs = [],
         visibility = None,
         **kwargs):
@@ -192,6 +212,7 @@ def _gcp_client(
         methods = methods,
         proto_deps = proto_deps,
         proto_paths = protos,
+        protocol = protocol,
         roots = roots,
         runtime_dep_count = len(deps),
         **vis
