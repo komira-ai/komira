@@ -34,10 +34,14 @@
 #   5. With an empty `.buckconfig.local` (no keys), `build
 #      komira//tools/build/examples:hello` succeeds with every action local,
 #      from an empty environment and `PATH`, and the binary prints its greeting.
+#   6. The proto_check self-test cases (tools/vendor/googleapis) build
+#      concurrently on this machine with the action cache off, as `build //...`
+#      runs them; each keeps its scratch in its own directory, so none deletes
+#      another's.
 # On a macOS arm64 host (1) is replaced by the one local darwin-arm64 platform; on any other host, by the refusal that names the host and
 # `.buckconfig.local`.
 #
-# Only (4) and (5) execute anything, and only on Linux x86_64.
+# Only (4), (5) and (6) execute anything, and only on Linux x86_64.
 #
 # Scratch goes under $TMPDIR (a disk directory where /tmp is memory); it is
 # deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Needs git; what-ran is
@@ -245,4 +249,19 @@ out=$(cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=t
     "$BUCK2" run komira//tools/build/examples:hello 2> "$W/hello_run.err") || die "running hello failed (see $W/hello_run.err)"
 [ "$out" = "hello from mojo" ] || die "hello printed '$out', not 'hello from mojo'"
 
-echo "PASS  local default: a fresh clone registers only the local linux-x86_64 platform; $(printf '%s\n' "$want" | grep -c '#') targets resolve to it with the pinned configuration hash, forcing remote names [komira_re], a service named without [komira_re] or a retired [komira_re] key refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH, and with an empty .buckconfig.local hello builds and runs locally"
+# 6
+# The cases of the proto_check self-test, built together, local, with the cache
+# off. They once shared one scratch directory under the checkout root, and a
+# case deleted its siblings' ("No such file or directory" reading the check's
+# stderr), so `build //...` failed on a clean clone while each case passed alone.
+b2 kill > /dev/null 2>&1
+if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+        "$BUCK2" build --local-only --no-remote-cache komira//tools/vendor/googleapis:proto_check_selftest) > "$W/proto_check.log" 2>&1; then
+    die "the proto_check self-test cases failed when built together (see $W/proto_check.log)"
+fi
+b2 log what-ran --format json > "$W/proto_check_what_ran.json" 2>&1 || die "cannot read what-ran of the proto_check build"
+acts=$(whatran_actions "$W/proto_check_what_ran.json") || die "cannot read $W/proto_check_what_ran.json"
+cases=$(printf '%s\n' "$acts" | awk -F '\t' '$1 ~ /^proto_check_case/' | grep -c .)
+[ "$cases" -ge 3 ] || die "only $cases proto_check_case actions ran, want at least 3, one per case (see $W/proto_check_what_ran.json)"
+
+echo "PASS  local default: a fresh clone registers only the local linux-x86_64 platform; $(printf '%s\n' "$want" | grep -c '#') targets resolve to it with the pinned configuration hash, forcing remote names [komira_re], a service named without [komira_re] or a retired [komira_re] key refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH, with an empty .buckconfig.local hello builds and runs locally, and $cases proto_check_case actions built together"
