@@ -64,7 +64,7 @@ def read_avro_file(path: String) raises -> RecordBatch:
     the mmap region's lifetime is bound by the MmapAlignedBuffer's Arc keepalive
     and torn down via `munmap(2)` when this function returns.
     """
-    from komira_async.fs.local_fs import LocalFs
+    from komira_fs.local_fs import LocalFs
     from komira_async.ops.waker_sink import NoopSink
 
     var fs = LocalFs[NoopSink].new()
@@ -126,7 +126,7 @@ def read_avro_file_resolved(
     (mmap-backed MmapAlignedBuffer) instead of `Path.read_bytes()` (own-heap
     slurp).
     """
-    from komira_async.fs.local_fs import LocalFs
+    from komira_fs.local_fs import LocalFs
     from komira_async.ops.waker_sink import NoopSink
 
     var fs = LocalFs[NoopSink].new()

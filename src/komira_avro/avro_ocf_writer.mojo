@@ -909,8 +909,8 @@ def _write_bytes_to_file(path: String, bytes: List[UInt8]) raises:
     POSIX file API. `LocalFs.write_at` chunks large payloads (64 MiB) to
     avoid a stdlib >2 GB silent-flush bug (single-write fast path below
     64 MiB). Other filesystem sinks can plug in without codec changes."""
-    from komira_async.fs.local_fs import LocalFs
-    from komira_async.fs.file_system import WriteMode
+    from komira_fs.local_fs import LocalFs
+    from komira_fs.file_system import WriteMode
     from komira_async.ops.waker_sink import NoopSink
 
     var fs = LocalFs[NoopSink].new()

@@ -17,7 +17,7 @@
 from std.ffi import external_call
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_async.fs.local_fs import LocalFs
+from komira_fs.local_fs import LocalFs
 from komira_async.ops.waker_sink import NoopSink
 from komira_avro import (
     decode_ocf_header,
