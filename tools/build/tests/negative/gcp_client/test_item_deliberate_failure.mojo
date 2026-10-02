@@ -1,5 +1,5 @@
 from caller_test_red.item import Item
-from komira_serde import PbEncoder
+from komira_proto_codec import PbEncoder
 from std.testing import assert_equal
 
 

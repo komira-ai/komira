@@ -104,7 +104,13 @@ _proto_check = rule(
 # neither, and an acceptance must write both.
 _CASE_SCRIPT = """
 SCRIPT="$1"; EXPECT="$2"; REPORT="$3"; BB="$4"; shift 3
-T="$PWD/.proto_check_case"
+# Scratch in the action's own directory: a local action runs in the checkout
+# root beside every other local action, so a fixed path under $PWD is shared.
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.proto_check_case" ;;
+    /*) T="$BUCK_SCRATCH_PATH/proto_check_case" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/proto_check_case" ;;
+esac
 "$BB" rm -rf "$T"
 "$BB" mkdir -p "$T"
 # The check's arguments: BB PROTOC TREE, the outputs, the roots.

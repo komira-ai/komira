@@ -31,8 +31,9 @@ from, and `tests`, kept apart so that `//...` holds no target that fails by
 design. The Mojo toolchain is declared in the `toolchains` cell rather than
 in `komira//tools/build/toolchains` so that the repository at the project
 root, which owns that cell, can override it. `.buckconfig` maps each cell to the target platform
-`komira//tools/build/platforms:linux-x86_64`
-(`[parser] target_platform_detector_spec`) and registers
+`komira//tools/build/platforms:host`, the client's own platform
+(`[parser] target_platform_detector_spec`; a Linux x86_64 client's is
+`linux-x86_64`) and registers
 `komira//tools/build/platforms/default:default` as the execution platforms.
 
 Rules are loaded from one cell: a `.bzl` file's providers are distinct per
@@ -109,9 +110,11 @@ of a standalone checkout.
 **Your own targets need a target platform too.**
 `target_platform_detector_spec` is a single key; `consumer.buckconfig` maps
 the root cell (`app`), `komira` and `toolchains` to
-`komira//tools/build/platforms:linux-x86_64`. Keep komira's entry unchanged
+`komira//tools/build/platforms:host`. Keep komira's entry unchanged
 when you add your own cells to it: a different target platform for komira's
-targets is a different configuration, and so different digests. Keep
+targets is a different configuration, and so different digests (`host` is
+an alias of the client's own row, so on a Linux x86_64 client it is
+`linux-x86_64` itself). Keep
 `[buck2_re_client] max_total_batch_size = 1048576` too, and do not raise it:
 a server whose message limit is below buck2's default batch size fails
 `BatchReadBlobs`.
@@ -130,8 +133,9 @@ What keeps the digests equal:
   toolchain's output paths. An execution platform declared some other way must
   do the same.
 - **Target platform.** The `komira` cell maps to
-  `komira//tools/build/platforms:linux-x86_64` in `[parser]`.
-  `komira//tools/build/platforms` holds only the two platforms; the
+  `komira//tools/build/platforms:host` in `[parser]`, an alias of the row of
+  the platform table that matches the client (`linux-x86_64` on Linux x86_64).
+  `komira//tools/build/platforms` holds only the platforms; the
   standalone checkout's execution platforms live in its `default`
   subpackage, which the consuming repository never loads (it copies the file
   instead).
