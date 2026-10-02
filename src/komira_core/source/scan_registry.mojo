@@ -22,10 +22,11 @@
 # WHY THIS IS IN `komira_core` AND NOT IN A NEW TOP PACKAGE
 # =============================================================================
 #
-# A package above core is the correct answer for TIER 2 — a resolver that
-# plans and reads the splits of a store core knows nothing about
-# (`ScanSourceResolver`, in `komira_scan_resolver`) does not belong in core
-# (compare `fs_resolver.mojo`).
+# A TOP package whose deps name every package that owns a scan kind (mirroring
+# `komira_fs_registry`) is the correct answer for TIER 2 — a resolver that
+# hands back a `MorselSourceImpl` cannot live in core, because
+# `MorselSourceImpl` lives in `komira_morsel`, which depends on core (see
+# `fs_resolver.mojo`).
 #
 # It is NOT the answer for the IN_MEMORY kind. The in-memory payload is
 # `ArcPointer[Slab[RecordBatch]]` — `ArcPointer` is `std.memory`,
@@ -38,9 +39,8 @@
 # DAG-inversion hazard is about naming a SOURCE TYPE from core, and this file
 # names none.
 #
-# `ScanSourceResolver` (tier 2, in `komira_scan_resolver`, for a kind whose
-# payload the engine READS rather than holds) and its conformers go above
-# core. This file is not that.
+# `ScanMorselResolver` (tier 2, for a kind whose payload the engine PULLS
+# rather than holds) and its conformer go above core. This file is not that.
 #
 # =============================================================================
 # WHAT A HANDLE COSTS, AND WHAT IT BUYS
