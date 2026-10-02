@@ -1,0 +1,54 @@
+// A logging service, shaped like the googleapis one: of its three methods a
+// log reader uses one.
+syntax = "proto3";
+
+package example.logging.v1;
+
+import "example/logging/v1/log_entry.proto";
+import "example/logging/v1/monitored_resource.proto";
+
+service LoggingService {
+  rpc WriteLogEntries(WriteLogEntriesRequest) returns (WriteLogEntriesResponse);
+  rpc ListLogEntries(ListLogEntriesRequest) returns (ListLogEntriesResponse);
+  rpc ListMonitoredResourceDescriptors(ListMonitoredResourceDescriptorsRequest)
+      returns (ListMonitoredResourceDescriptorsResponse);
+}
+
+message WriteLogEntriesRequest {
+  string log_name = 1;
+  MonitoredResource resource = 2;
+  repeated LogEntry entries = 4;
+  // A map whose value lives in another file: when this message is pruned,
+  // so is its map entry, and the value is not imported.
+  map<string, MonitoredResourceDescriptor> resource_descriptors = 5;
+}
+
+message WriteLogEntriesResponse {}
+
+message ListLogEntriesRequest {
+  repeated string resource_names = 8;
+  string filter = 2;
+  int32 page_size = 4;
+  string page_token = 5;
+
+  // Declared, used by no field: pruned whenever its parent is reached, and
+  // its map entry with it (its value lives in another file).
+  message Hint {
+    map<string, MonitoredResourceDescriptor> by_type = 1;
+  }
+}
+
+message ListLogEntriesResponse {
+  repeated LogEntry entries = 1;
+  string next_page_token = 2;
+}
+
+message ListMonitoredResourceDescriptorsRequest {
+  int32 page_size = 1;
+  string page_token = 2;
+}
+
+message ListMonitoredResourceDescriptorsResponse {
+  repeated MonitoredResourceDescriptor resource_descriptors = 1;
+  string next_page_token = 2;
+}
