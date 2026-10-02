@@ -173,15 +173,18 @@
 #      (tools/build/tests/negative/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
-#  33a. Conda packages: see tools/build/tests/functional/conda.sh (the package is
-#       read back with unzip, zstd, tar and jq; the refusals; the approved-list
-#       lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
-#       install from a file:// channel and a Mojo program importing the library,
-#       skipped with --no-install).
-#  33b. The conda release set: see tools/build/tests/functional/conda_set.sh (a
-#       package per row of a list, the metapackage and the verified set; the
-#       refusals; two uncached builds, skipped with --no-uncached; a pixi
-#       install of the metapackage alone, skipped with --no-install).
+#  33a. Conda packages: see tools/build/tests/functional/conda.sh (a package is a
+#       directory read back with unzip, zstd, tar and jq; kci's manifest contract;
+#       a new library gets its package from the macro with no declaration; the
+#       refusals, as targets that build and releases that do not; the stamp; two
+#       uncached builds, skipped with --no-uncached; a pixi install from a
+#       file:// channel and a Mojo program importing the library, skipped with
+#       --no-install).
+#  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
+#       (every library's package target builds; the stamped releases; the metapackage
+#       from the members' manifests; kci's own parser over the emitted manifests; the
+#       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
+#       the metapackage alone, skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`

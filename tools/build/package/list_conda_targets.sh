@@ -1,7 +1,7 @@
 #!/bin/sh
 # list_conda_targets.sh -- the conda package targets of the repository, one per line.
 #
-# usage: tools/build/package/list_conda_targets.sh [<target pattern>]   (default //src/...)
+# usage: tools/build/package/list_conda_targets.sh [<target pattern>...]   (default //src/...)
 #        (BUCK2 overrides the buck2 binary)
 #
 # Every mojo_library declares a package target `<name>_conda`, unless it opted
@@ -14,6 +14,9 @@
 set -eu
 root=$(cd "$(dirname "$0")/../../.." && pwd)
 buck2=${BUCK2:-$root/buck2}
-pattern=${1:-//src/...}
+[ "$#" -gt 0 ] || set -- //src/...
+set_expr=$1
+shift
+for p in "$@"; do set_expr="$set_expr + $p"; done
 cd "$root"
-exec "$buck2" uquery "kind(conda_package, $pattern)"
+exec "$buck2" uquery "kind(conda_package, $set_expr)"
