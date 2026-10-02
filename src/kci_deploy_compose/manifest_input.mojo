@@ -85,12 +85,8 @@
 # refusal. ZERO UnsafePointer, ZERO wildcard origin.
 # =============================================================================
 
-from komira_proto_codec import (
-    JsonValue,
-    decode_json,
-    encode_json,
-    parse_json_value,
-)
+from komira_json import JsonValue, parse_json_value
+from komira_proto_codec import decode_json, encode_json
 
 from kci_manifest_proto.full_manifest import (
     FullManifest,

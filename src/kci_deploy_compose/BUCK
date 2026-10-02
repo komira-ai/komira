@@ -22,6 +22,7 @@ mojo_library(
         "//src/kci_manifest_proto:kci_manifest_proto",
         "//src/kci_params:kci_params",
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_json:komira_json",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_svcref:komira_svcref",
     ],

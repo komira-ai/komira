@@ -27,7 +27,7 @@
 #      grant for exactly the secrets its service declares in `secret_bindings`,
 #      and for nothing else.
 #   §6 SUPERVISOR PLACEMENT FIELDS — the supervisor's image and report target
-#      are facts of the placement side, so compose leaves them empty.
+#      are facts of the placement side; the schema reserves both fields.
 #
 # Pure struct construction + pure functions — no store, no cloud, no
 # UnsafePointer.
@@ -446,9 +446,12 @@ def test_runtime_sa_has_no_seed_grant() raises:
 
 
 # =============================================================================
-# §6 — THE SUPERVISOR'S PLACEMENT FIELDS ARE NOT COMPOSED.
+# §6 — THE SUPERVISOR'S PLACEMENT FIELDS ARE NOT COMPOSED. kci_manifest_proto
+#      reserves SupervisorSpec fields 1 and 6 (image digest, report target), so
+#      the schema itself keeps them out of the graph; this leg pins that the
+#      served node still carries a composed supervisor.
 # =============================================================================
-def test_supervisor_placement_fields_are_empty() raises:
+def test_supervisor_is_composed_without_placement_fields() raises:
     var b = _bundle(
         AppKind.APP_KIND_API,
         String("svc-a"),
@@ -468,19 +471,9 @@ def test_supervisor_placement_fields_are_empty() raises:
             continue
         ref sc = m.nodes[i].serverless_compute.value()
         assert_true(Bool(sc.supervisor), "the served node carries a supervisor")
-        assert_equal(
-            sc.supervisor.value().supervisor_image_digest,
-            String(""),
-            "the supervisor image is the placement side's to supply",
-        )
-        assert_equal(
-            sc.supervisor.value().report_target,
-            String(""),
-            "the heartbeat report target is the placement side's to supply",
-        )
         checked += 1
     assert_equal(checked, 1, "one served node checked")
-    print("  test_supervisor_placement_fields_are_empty: PASS")
+    print("  test_supervisor_is_composed_without_placement_fields: PASS")
 
 
 def main() raises:
@@ -518,7 +511,7 @@ def main() raises:
         print("  FAIL no_seed_grant: " + String(e))
         failed += String(" no_seed_grant")
     try:
-        test_supervisor_placement_fields_are_empty()
+        test_supervisor_is_composed_without_placement_fields()
     except e:
         print("  FAIL supervisor_fields: " + String(e))
         failed += String(" supervisor_fields")

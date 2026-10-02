@@ -577,8 +577,9 @@ comptime ENSURE_SECRET_NODE_INFIX: String = "-secret-ensure-"
 # The supervisor IMAGE and the REPORT TARGET are not composed: which wrapper
 # image runs and which service receives the heartbeats are facts of the
 # environment the graph is placed in, not of the bundle, so the placement side
-# supplies them. Compose leaves `supervisor_image_digest` and `report_target`
-# empty.
+# supplies them. kci_manifest_proto reserves SupervisorSpec fields 1 and 6
+# (`supervisor_image_digest`, `report_target`), so the graph has no slot for
+# either.
 
 # The platform lease/heartbeat timing defaults (seconds). The lease-check fences an
 # attempt whose renew is not seen within ttl+grace; the heartbeat cadence MUST be <
@@ -593,8 +594,9 @@ comptime SUPERVISOR_GRACE_SECONDS: Int = 30
 def _supervisor_spec(spec: AppSpec) raises -> SupervisorSpec:
     """SYNTHESIZE the platform-injected `SupervisorSpec` for a compute node from the
     customer `AppSpec`. The platform OWNS `mode` and the lease+heartbeat timing
-    (deploy constants above); `supervisor_image_digest` and `report_target` are
-    left EMPTY for the placement side to supply. The customer's four `AppSpec`
+    (deploy constants above); the supervisor image and report target are not
+    in the graph (SupervisorSpec fields 1 and 6 are reserved): the placement side
+    supplies them. The customer's four `AppSpec`
     supervisor HINTS (fields 9-12) are MERGED verbatim into `child_health_path` /
     `child_health_port` / `cpu` / `memory`. A bundle with NO hints (all empty/0)
     yields a valid DEFAULT SupervisorSpec that is byte-identical to one that omits
@@ -604,12 +606,10 @@ def _supervisor_spec(spec: AppSpec) raises -> SupervisorSpec:
     set the entrypoint; SIDECAR is a per-cloud fallback the mapper may downgrade
     to, NOT a customer choice)."""
     return SupervisorSpec(
-        String(""),  # supervisor_image_digest: supplied by the placement side
         SupervisorMode(SupervisorMode.SUPERVISOR_MODE_WRAPPER),  # mode (platform default)
         Int32(SUPERVISOR_LEASE_TTL_SECONDS),  # lease_ttl_seconds (platform default)
         Int32(SUPERVISOR_HEARTBEAT_INTERVAL_SECONDS),  # heartbeat_interval_seconds
         Int32(SUPERVISOR_GRACE_SECONDS),  # grace_seconds (platform default)
-        String(""),  # report_target: supplied by the placement side
         spec.supervisor_child_health_path.copy(),  # MERGED HINT (field 9)
         spec.supervisor_child_health_port,  # MERGED HINT (field 10)
         spec.supervisor_cpu.copy(),  # MERGED HINT (field 11, SIDECAR)
