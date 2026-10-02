@@ -15,7 +15,7 @@ Dependencies (cycle-free):
   komira_async         (Reactor / BlockingRuntime serve runtime)
   engine_rpc           (SupervisorHeartbeat / HeartbeatResponse wire)
   komira_objectstore   (CloneableConditionalWriteStore trait)
-  komira_uuid          (now_unix_ms)
+  komira_clock         (now_unix_ms, the wall clock)
 None of these depends back on komira_broker_coord: it is a leaf above the
 broker.
 """

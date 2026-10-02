@@ -659,7 +659,7 @@ struct BrokerCoordSuspendableDispatcher[
             )
 
         # The EAGER prelude (register + coalesce; store-free).
-        from komira_uuid.clock import now_unix_ms
+        from komira_clock import now_unix_ms
 
         var now_us = now_unix_ms() * Int64(1000)
         var prelude: HeartbeatPrelude

@@ -42,7 +42,7 @@ from komira_http import (
     Router,
 )
 
-from komira_uuid.clock import now_unix_ms
+from komira_clock import now_unix_ms
 
 from komira_objectstore.store import (
     AsyncCasStore,
