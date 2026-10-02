@@ -1,0 +1,6 @@
+# Fixture list for tests//negative/conda_pkgs. NOT listed: komira_neg_dep, komira_neg_unlisted.
+komira_neg_dlopen	//src/komira_neg_dlopen:komira_neg_dlopen	fixture
+komira_neg_listed	//src/komira_neg_listed:komira_neg_listed	fixture
+komira_neg_notests	//src/komira_neg_notests:komira_neg_notests	fixture
+komira_neg_ok_user	//src/komira_neg_ok_user:komira_neg_ok_user	fixture
+komira_neg_user	//src/komira_neg_user:komira_neg_user	fixture
