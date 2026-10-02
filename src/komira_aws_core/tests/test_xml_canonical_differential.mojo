@@ -1,11 +1,8 @@
-# =============================================================================
-# komira_aws_core/tests/test_xml_canonical_differential.mojo
-# =============================================================================
-#
-# A differential test of komira_xml's canonical form, the comparison a
-# restXml client's bodies are judged by, against the conformance harness's
-# independent XML equivalence (komira//tools/build/proto-codegen,
-# `xml_equiv`), over every XML body of botocore's rest-xml protocol corpus.
+# komira_xml's canonical form against the conformance harness (a
+# differential test): canonical_xml, the comparison a restXml client's
+# bodies are judged by, against the harness's independent XML equivalence
+# (komira//tools/build/proto-codegen, `xml_equiv`), over every XML body of
+# botocore's rest-xml protocol corpus.
 #
 # `xml-equiv-verdicts` writes, for each non-empty request and response body
 # of the cases botocore's ignore list does not skip, whether it parses as
@@ -18,14 +15,21 @@
 #            a == b byte for byte  <=>  the verdict is `equal`
 #
 # Byte equality for a body that is not XML is botocore's own fallback, and
-# the harness's. The corpus and the ignore list are read from the botocore
+# the harness's. The two rest-xml case files are read from the botocore
 # archive //third_party/botocore pins by sha256, staged at their paths in
-# it; nothing is copied into this repository.
-# =============================================================================
+# it; nothing is copied into this repository. The ignore list is applied
+# by `xml-equiv-verdicts` when it writes the verdicts: which cases are
+# skipped is read from the verdicts file, not from the list.
 
 from std.collections import Dict
 
-from komira_json import JSON_ARRAY, JSON_OBJECT, JSON_STRING, JsonValue, parse_json_value
+from komira_json import (
+    JSON_ARRAY,
+    JSON_OBJECT,
+    JSON_STRING,
+    JsonValue,
+    parse_json_value,
+)
 from komira_xml import canonical_xml
 
 
@@ -38,6 +42,9 @@ comptime _OUTPUT = "tests/unit/protocols/output/rest-xml.json"
 # Update them with the pin: a shrunken file cannot pass as the corpus.
 comptime _INPUT_BODIES = 43
 comptime _OUTPUT_BODIES = 57
+# The pairs the harness calls the same document. Pinned too: were every
+# pair `differ`, a canonical form that merged nothing would pass.
+comptime _EQUAL_PAIRS = 8
 
 
 def _read(path: String) raises -> String:
@@ -106,6 +113,10 @@ def test_canonical_agrees_with_harness() raises:
     var failures = List[String]()
     var n_input = 0
     var n_output = 0
+    var n_equal = 0
+    # `equal` pairs whose bytes differ: the ones only a canonical form, not
+    # byte equality, can call the same.
+    var n_equal_unlike = 0
 
     var text = _read(String(_VERDICTS))
     for raw in text.split("\n"):
@@ -160,6 +171,10 @@ def test_canonical_agrees_with_harness() raises:
                 same = bodies[a] == bodies[b]
             if f[3] != "equal" and f[3] != "differ":
                 raise Error("pair verdict " + f[3])
+            if f[3] == "equal":
+                n_equal += 1
+                if bodies[a] != bodies[b]:
+                    n_equal_unlike += 1
             if same != (f[3] == "equal"):
                 failures.append(
                     f[1] + " ~ " + f[2] + ": harness says " + f[3]
@@ -177,8 +192,16 @@ def test_canonical_agrees_with_harness() raises:
         )
     var n = len(keys)
     if pairs != n * (n - 1) // 2 or checked_pairs != pairs:
-        raise Error("the verdicts hold " + String(pairs) + " pairs for "
-            + String(n) + " bodies")
+        raise Error(
+            "the verdicts hold " + String(pairs) + " pairs for "
+            + String(n) + " bodies"
+        )
+    if n_equal != _EQUAL_PAIRS or n_equal_unlike == 0:
+        raise Error(
+            "the verdicts hold " + String(n_equal) + " equal pairs ("
+            + String(n_equal_unlike) + " unlike byte for byte); the pinned "
+            + "corpus has " + String(_EQUAL_PAIRS) + ", some unlike"
+        )
     if len(failures) > 0:
         var msg = String(len(failures)) + " disagreement(s):"
         for i in range(min(len(failures), 20)):
