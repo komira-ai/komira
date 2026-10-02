@@ -47,7 +47,7 @@ disagree with it ([`conda.bzl`](../../tools/build/package/conda.bzl) lists each)
 |---|---|
 | name | `conda_name` of the library, else its import name (the `.mojoc` basename): lowercase letters, digits, `_`, starting with a letter |
 | run requirements | the platform guard (`__linux`), exactly `mojo-compiler ==<pin>`, then each **direct** dependency of the library, by its published name, at the same version, sorted. Direct only: every package is released in lockstep, so the solver's closure is the build's |
-| subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. The package targets are `target_compatible_with` linux x86_64, so `buck2 build //...` skips them elsewhere |
+| subdir | the target platform's constraints (a `select`), never an attribute. Only `linux-64` is written: a `.mojoc` cannot be cross-compiled, so another subdir needs a build for that platform. On any other target platform the package target still builds, as a refusal saying so |
 | payload | the library's gated `.mojoc`, so the package cannot exist until the library's own welded tests pass |
 | version | `<prefix>.<N>`, below |
 

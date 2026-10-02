@@ -30,3 +30,15 @@ shell_lint(
         "release_version.sh",
     ],
 )
+
+# Selectable form of linux-x86_64: what conda_package derives its subdir from
+# (conda.bzl). Declared here and not in //tools/build/platforms, which holds
+# exactly the platform table's targets (tests//functional/platform_table).
+config_setting(
+    name = "is_linux_x86_64",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)

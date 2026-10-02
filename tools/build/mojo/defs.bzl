@@ -25,7 +25,6 @@ load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "creat
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/package:conda.bzl", "conda_package")
-load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -836,7 +835,6 @@ def _mojo_library(**kwargs):
             name = name + "_conda",
             lib = ":" + name,
             summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),
-            target_compatible_with = LINUX_X86_64,
             visibility = ["PUBLIC"],
         )
 

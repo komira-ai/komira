@@ -259,7 +259,7 @@ def conda_package(**kwargs):
         commit = read_config("komira", "package_commit", ""),
         stamp = read_config("komira", "package_stamp", "0"),
         subdir = select({
-            "komira//tools/build/platforms:is_linux_x86_64": "linux-64",
+            "komira//tools/build/package:is_linux_x86_64": "linux-64",
             "DEFAULT": "unsupported",
         }),
         timestamp_ms = read_config("komira", "package_timestamp_ms", "0"),
