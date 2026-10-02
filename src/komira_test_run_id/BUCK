@@ -1,0 +1,21 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# A per-run id minted inside the test process from the wall clock and 64
+# random bits, never derived from inputs, plus the `WallClock` / `Entropy`
+# seams with real conformers and fakes.
+#
+# Deps: komira_validation_run (the id rule a minted id must pass) and
+# komira_clock (the wall clock behind `SystemClock`).
+mojo_library(
+    name = "komira_test_run_id",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_clock:komira_clock",
+        "//src/komira_validation_run:komira_validation_run",
+    ],
+    test_srcs = [
+        "tests/test_run_id.mojo",
+        "tests/test_system_clock.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
