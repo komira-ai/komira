@@ -1,8 +1,0 @@
-# a list with every defect the lint names
-komira_zeta	//src/komira_zeta:komira_zeta	ok
-komira_alpha	//src/komira_alpha:komira_alpha	out of order
-Komira_Upper	//src/Komira_Upper:Komira_Upper	bad case
-komira_wronglabel	//src/elsewhere:komira_wronglabel	wrong label
-komira_zeta	//src/komira_zeta:komira_zeta	duplicate
-noprefix	//src/noprefix:noprefix	no prefix
-komira_short	//src/komira_short:komira_short

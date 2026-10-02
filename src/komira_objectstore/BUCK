@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # compaction windows, the sub-lineage shard kernel, presigned-URL signing seam,
 # and the distributed-shuffle seal. It depends on komira_core, komira_async
 # (the reactor and its C shim, which also carries the CAS-manifest gate lock),
-# komira_atomic_alias and komira_obs (the escalation metrics sink).
+# komira_atomic_alias and komira_metrics (the escalation metrics sink).
 # komira_runtime_paths is declared because several tests take their scratch
 # directory from `test_tmpdir()`.
 
@@ -18,7 +18,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_core:komira_core",
-        "//src/komira_obs:komira_obs",
+        "//src/komira_metrics:komira_metrics",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [

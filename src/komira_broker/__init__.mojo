@@ -20,7 +20,7 @@ core as thin edge structs and do not change its surface.
 
 Dependencies (cycle-free): komira_core (RecordBatch / Schema / Column and the
 Arrow-IPC encoder), komira_objectstore (ConditionalWriteStore +
-CasManifestStore), komira_async and komira_obs. The concrete cloud store is
+CasManifestStore), komira_async and komira_metrics. The concrete cloud store is
 injected by whichever program instantiates the core.
 """
 
