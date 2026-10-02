@@ -20,6 +20,16 @@ MojoInfo = provider(fields = {
     # requirements (tools/build/package/conda.bzl). Required, not defaulted:
     # a rule that forgot it would publish a package with no dependencies.
     "direct": provider_field(typing.Any),
+    # What the library's conda package is (tools/build/package/conda.bzl):
+    # `conda_name` is the published name, None when the library opted out
+    # (`conda = False`) or is not a mojo_library; `conda_refusal` is why the
+    # package cannot be built (native code, no tests, a dependency with no
+    # package), None when it can. `direct_conda` maps the import name of each
+    # direct dependency to a struct(name, refusal) of the same two facts, which
+    # is how a package names its requirements by their PUBLISHED names.
+    "conda_name": provider_field(typing.Any, default = None),
+    "conda_refusal": provider_field(typing.Any, default = None),
+    "direct_conda": provider_field(typing.Any, default = {}),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
 })

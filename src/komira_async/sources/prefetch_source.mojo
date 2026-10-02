@@ -85,7 +85,7 @@ from komira_async.runtime.step_result import StepResult
 #     ideal). The values below are NOT ring caps — they are matched to
 #     external-bandwidth saturation per storage type.
 #   * For sub-ms latencies (NVMe), depth > 32 actively hurts p99 due to
-#     kernel-timer-batching slack. PREFETCH_DEPTH_LOCAL_NVME=4 stays
+#     kernel-timer-batching slack. The local-NVMe default (4, owned by komira_fs) stays
 #     conservative.
 #   * Power users overriding via `read_parquet(..., prefetch_depth=N)` can
 #     safely go higher (256 measured clean) without the ring becoming the
@@ -93,7 +93,6 @@ from komira_async.runtime.step_result import StepResult
 #
 # The values below are defaults.
 comptime PREFETCH_DEPTH_INMEMORY: Int = 1
-comptime PREFETCH_DEPTH_LOCAL_NVME: Int = 4
 comptime PREFETCH_DEPTH_NETWORKED_BLOCK: Int = 16
 comptime PREFETCH_DEPTH_KAFKA: Int = 16
 comptime PREFETCH_DEPTH_S3_EXPRESS: Int = 32
@@ -131,7 +130,7 @@ struct PrefetchRing[
     def __init__(out self, depth: Int):
         """Construct with explicit prefetch depth. Operators pass the
         per-storage-type default (PREFETCH_DEPTH_S3_STANDARD = 64,
-        PREFETCH_DEPTH_LOCAL_NVME = 4, etc.) or a user-override value."""
+        PREFETCH_DEPTH_NETWORKED_BLOCK = 16, etc.) or a user-override value."""
         self._in_flight = List[Int64](capacity=depth)
         self._depth = depth
 

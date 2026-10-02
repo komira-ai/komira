@@ -56,7 +56,7 @@
 # has no ring encoding yet.
 #
 # An OTel default explicit-bucket histogram is 11 bounds => 12 buckets, and
-# `HistogramPoint` (komira_obs/histogram.mojo) carries count + sum + min + max
+# `HistogramPoint` (komira_metrics/histogram.mojo) carries count + sum + min + max
 # + those 12 buckets = 128 B of payload, plus this header's attrset_id(4) +
 # start_ns_delta(8) = 140 B. `ARG_INLINE_BYTES` is 48. So a histogram record
 # ALWAYS needs the `FLAG_HAS_ARG_OVERFLOW` arena path.
@@ -94,7 +94,7 @@
 # record's fixed `arg_blob`.
 # =============================================================================
 
-from komira_obs.metric_point import MetricPoint, METRIC_HISTOGRAM
+from komira_metrics.metric_point import MetricPoint, METRIC_HISTOGRAM
 
 from komira_log.engine.log_event_record import LogEventRecord, REC_METRIC
 from komira_log.engine.calibration import CalibrationAnchor

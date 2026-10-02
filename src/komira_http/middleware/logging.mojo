@@ -38,12 +38,12 @@ from komira_http.middleware.middleware import RequestContext
 # =============================================================================
 # §1 — Comptime clock function.
 # =============================================================================
-# Imports the platform-monotonic ns counter from komira_obs.clock.
+# Imports the platform-monotonic ns counter from komira_clock.
 # Falls back to a stdlib monotonic counter via `perf_counter_ns` is the
-# a later swap; for now we use komira_obs's now_ns directly.
+# a later swap; for now we use komira_clock's now_ns directly.
 
 
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================

@@ -63,6 +63,11 @@ b2() { # buck2 in the clone, configured by the clone alone
     (cd "$C" && env HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true "$BUCK2" "$@")
 }
 die() { echo "FAIL  local default: $1"; echo "logs: $W"; exit 1; }
+# The runs with an empty PATH start the binary itself: the ./buck2 wrapper needs dirname, uname and awk.
+BUCK2_BIN=$BUCK2
+if [ "$(head -c 2 "$BUCK2")" = '#!' ]; then
+    BUCK2_BIN=$(KOMIRA_BUCK2_PRINT_PATH=1 "$BUCK2") || die "cannot find the binary $BUCK2 pins (run it once to install it)"
+fi
 cleanup() {
     [ -d "$C" ] && b2 kill > /dev/null 2>&1
     [ "${KEEP_SCRATCH:-0}" = 1 ] || rm -rf "${W:?}/src" "${W:?}/clone" "${W:?}/home"
@@ -208,7 +213,7 @@ fi
 # actions inherit it: start it with nothing but HOME.
 b2 kill > /dev/null 2>&1
 if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
-        "$BUCK2" build komira//tools/build/toolchains:conda_unpack komira//tools/build/toolchains:zig_cc_launcher) > "$W/local_build.log" 2>&1; then
+        "$BUCK2_BIN" build komira//tools/build/toolchains:conda_unpack komira//tools/build/toolchains:zig_cc_launcher) > "$W/local_build.log" 2>&1; then
     die "the local toolchain build failed with an empty PATH (see $W/local_build.log)"
 fi
 b2 log what-ran --format json > "$W/local_what_ran.json" 2>&1 || die "cannot read what-ran of the local build"
@@ -236,7 +241,7 @@ case "$ran" in '' | *[!0-9]*) die "local build: ${ran:-cannot read $W/local_what
 b2 kill > /dev/null 2>&1
 : > "$C/.buckconfig.local"
 if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
-        "$BUCK2" build komira//tools/build/examples:hello) > "$W/hello_build.log" 2>&1; then
+        "$BUCK2_BIN" build komira//tools/build/examples:hello) > "$W/hello_build.log" 2>&1; then
     die "an empty .buckconfig.local: build komira//tools/build/examples:hello failed on this machine (see $W/hello_build.log)"
 fi
 b2 log what-ran --format json > "$W/hello_what_ran.json" 2>&1 || die "cannot read what-ran of the hello build"
@@ -246,7 +251,7 @@ if [ -z "$acts" ] || [ "$execs" != local ]; then
     die "hello build: executors ${execs:-none}, want only local (see $W/hello_what_ran.json)"
 fi
 out=$(cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
-    "$BUCK2" run komira//tools/build/examples:hello 2> "$W/hello_run.err") || die "running hello failed (see $W/hello_run.err)"
+    "$BUCK2_BIN" run komira//tools/build/examples:hello 2> "$W/hello_run.err") || die "running hello failed (see $W/hello_run.err)"
 [ "$out" = "hello from mojo" ] || die "hello printed '$out', not 'hello from mojo'"
 
 # 6
@@ -256,7 +261,7 @@ out=$(cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=t
 # stderr), so `build //...` failed on a clean clone while each case passed alone.
 b2 kill > /dev/null 2>&1
 if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
-        "$BUCK2" build --local-only --no-remote-cache komira//tools/vendor/googleapis:proto_check_selftest) > "$W/proto_check.log" 2>&1; then
+        "$BUCK2_BIN" build --local-only --no-remote-cache komira//tools/vendor/googleapis:proto_check_selftest) > "$W/proto_check.log" 2>&1; then
     die "the proto_check self-test cases failed when built together (see $W/proto_check.log)"
 fi
 b2 log what-ran --format json > "$W/proto_check_what_ran.json" 2>&1 || die "cannot read what-ran of the proto_check build"

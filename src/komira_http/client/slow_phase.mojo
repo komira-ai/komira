@@ -112,10 +112,10 @@ def note_slow_phase(phase: String, host: String, elapsed_ms: Int64) -> Bool:
 
 
 def elapsed_ms_since(start_ns: Int64, now_ns_value: Int64) -> Int64:
-    """Whole milliseconds between two `komira_obs.clock.now_ns()` reads.
+    """Whole milliseconds between two `komira_clock.now_ns()` reads.
 
     Takes BOTH reads as arguments rather than calling the clock itself: that
-    keeps this module free of a `komira_obs` import at a leaf both dial files
+    keeps this module free of a `komira_clock` import at a leaf both dial files
     reach, and — the reason that matters — makes the arithmetic testable at
     synthetic timestamps, including the non-monotonic case. A clock that goes
     BACKWARDS (it should not; `now_ns` is CLOCK_MONOTONIC / CLOCK_UPTIME_RAW)

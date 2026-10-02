@@ -52,7 +52,7 @@ from komira_http.client.state_machine import (
     OUTBOUND_STATE_DONE,
 )
 from komira_http.client.url import Url
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 from komira_http.transport.scripted import ScriptedStream
 
 

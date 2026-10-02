@@ -55,7 +55,12 @@ printf '%s\n' "$size" | grep -Eq '^[0-9]+$' || die "$pin: $platform: size is not
 
 cache="${XDG_CACHE_HOME:-$HOME/.cache}/komira/buck2"
 bin="$cache/$digest/buck2"
-[ -x "$bin" ] && exec "$bin" "$@"
+if [ -x "$bin" ]; then
+    # `KOMIRA_BUCK2_PRINT_PATH=1 ./buck2` prints the pinned binary's path and runs nothing: for a test that must
+    # start buck2 with an empty PATH, where this script (which needs dirname, uname, awk) cannot run.
+    [ -z "${KOMIRA_BUCK2_PRINT_PATH:-}" ] || { printf '%s\n' "$bin"; exit 0; }
+    exec "$bin" "$@"
+fi
 
 for tool in curl zstd; do
     command -v "$tool" > /dev/null || die "needs $tool to install buck2 (on macOS: brew install $tool)"

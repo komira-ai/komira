@@ -8,11 +8,25 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   status     - the google.rpc.Status error envelope (never echoes a body);
 #   pagination - the PURE paging pieces (`PageCursor`, `next_page_token`);
 #   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for komira_retry.
+# and the Cloud Storage V4 signing primitives:
+#   v4_sign    - GOOG4-RSA-SHA256 canonicalization, string to sign, RSA
+#                signature and signed URL; the signing time is a parameter.
 # Generic pieces come from dependencies: server bodies (and their UTF-8
 # validation) from komira_json; retry policy, backoff, loop and the clock
-# seam from komira_retry. It never imports a generated module, reads no
+# seam from komira_retry; SHA-256, RSA and the PEM-to-PKCS#8 step for a key
+# file's `private_key` from komira_crypto (AWS-LC; the PEM armor under it is
+# komira_encoding's). It never imports a generated module, reads no
 # environment and opens no socket, and owns no transport: the one transport
 # seam is komira_http's `Connector`.
+#
+# test_v4_sign_conformance runs Google's published V4 signing vectors and
+# signs with their published dummy key. Neither is copied here: both are read
+# from the conformance-tests archive //third_party/googleapis_conformance_tests
+# pins by sha256, and staged at conformance/.
+#
+# test_env_source_only scans the package's own sources, staged as its data,
+# for any environment read. Only a Google auth-chain file it names may read
+# the environment; today it names none.
 #
 # Still to come, in order: P18a-2 (pure, no http) - service-account key file
 # parse, the RS256 JWT assertion, the authorized_user refresh form, the
@@ -25,6 +39,7 @@ mojo_library(
     name = "komira_gcp_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
     ],
@@ -33,6 +48,14 @@ mojo_library(
         "tests/test_gcp_pagination.mojo",
         "tests/test_gcp_retry.mojo",
         "tests/test_gcp_token.mojo",
+        "tests/test_v4_sign_conformance.mojo",
+        "tests/test_env_source_only.mojo",
     ],
+    test_data = {
+        "tests/test_env_source_only.mojo": glob(["*.mojo"]),
+        "tests/test_v4_sign_conformance.mojo": {
+            "conformance": "//third_party/googleapis_conformance_tests:files",
+        },
+    },
     visibility = ["PUBLIC"],
 )

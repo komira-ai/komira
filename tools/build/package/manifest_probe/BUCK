@@ -1,0 +1,27 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+load("@komira//tools/build/package:conda.bzl", "conda_manifest_kci")
+
+# Reads each artifact manifest named on the command line with kci's own parser
+# (src/kci_artifact_manifest), renders it again with kci's writer, and says
+# whether the bytes are the same. tools/build/tests/functional/conda_set.sh runs
+# it over the manifests the conda packages emit: the proof that what the build
+# writes is what `kci publish` reads. Nothing publishes it.
+mojo_binary(
+    name = "parse_manifest",
+    srcs = ["parse_manifest.mojo"],
+    deps = ["//src/kci_artifact_manifest:kci_artifact_manifest"],
+    visibility = ["PUBLIC"],
+)
+
+# The gate between the packer and kci: builds the smallest library package
+# (komira_hash, no dependencies, one test) and reads its manifest.json with
+# kci's parser through the probe above. The build fails unless kci accepts the
+# manifest komira_pack wrote, renders it back to the same bytes, and resolves
+# its `metadata` to the metadata.json next to it (tools/build/package/conda.bzl,
+# `conda_manifest_kci`). The packer and kci drifted apart once (#132 made
+# `metadata` required; komira_pack still left it out); this makes that a red
+# `buck2 build //...`.
+conda_manifest_kci(
+    name = "conda_manifest_kci",
+    package = "//src/komira_hash:komira_hash_conda",
+)

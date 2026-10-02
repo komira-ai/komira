@@ -43,7 +43,7 @@ remote-execution service, and what to do when something goes wrong.
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test` |
 | [tools/build/platforms/README.md](tools/build/platforms/README.md) | target platforms, execution platforms and toolchain selection; local or remote execution |
 | [tools/build/package/README.md](tools/build/package/README.md) | packaging: `mojo_bundle`, a relocatable bundle with a CPU-level launcher; `bundle_tarball` and `oci_image` |
-| [packaging/conda/README.md](packaging/conda/README.md) | the Mojo libraries as conda packages: layout, version scheme, the approved list of names; nothing is uploaded |
+| [packaging/conda/README.md](packaging/conda/README.md) | the Mojo libraries as conda packages: layout, version scheme, the metapackage; nothing is uploaded and no list of names is kept in the build |
 | [tools/build/toolchains/README.md](tools/build/toolchains/README.md) | the hermetic toolchain: what is pinned, the host floor, updating a pin |
 | [tools/build/tests/README.md](tools/build/tests/README.md) | the end-to-end tests: what each one proves and how to run it |
 | [docs/ci.md](docs/ci.md) | continuous integration: one job on a runner on the build farm, approving a fork's run, what a contributor runs locally |
