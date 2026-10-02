@@ -64,7 +64,7 @@ from komira_async.runtime.runtime_trait import Runtime
 # same import h2_client.mojo uses for `drive_h2_streams_to_completion`'s wall
 # bound, so both loops in this subsystem answer "how long has this taken" from
 # one source.
-from komira_obs.clock import now_ns as _mono_now_ns
+from komira_clock import now_ns as _mono_now_ns
 from komira_http.client.slow_phase import (
     SLOW_PHASE_TLS_HANDSHAKE,
     elapsed_ms_since,

@@ -110,7 +110,7 @@ from komira_http.client.state_machine import (
 )
 from komira_http.client.url import Url
 from komira_http.transport.scripted import ScriptedConnector, ScriptedStream
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================
