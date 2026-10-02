@@ -107,12 +107,12 @@ fn run() -> Result<String, String> {
         (Some(r), Some(p)) => {
             let rb = std::fs::read(r).map_err(|e| format!("read {}: {e}", r.display()))?;
             let pb = std::fs::read(p).map_err(|e| format!("read {}: {e}", p.display()))?;
-            let rt = String::from_utf8(rb.clone())
+            let rt = std::str::from_utf8(&rb)
                 .map_err(|e| format!("{} is not UTF-8: {e}", r.display()))?;
-            let pt = String::from_utf8(pb.clone())
+            let pt = std::str::from_utf8(&pb)
                 .map_err(|e| format!("{} is not UTF-8: {e}", p.display()))?;
             Some(
-                AwsEndpointRules::parse(&rt, &sha256::hex(&rb), &pt, &sha256::hex(&pb))
+                AwsEndpointRules::parse(rt, &sha256::hex(&rb), pt, &sha256::hex(&pb))
                     .map_err(|e| format!("{} / {}: {e}", r.display(), p.display()))?,
             )
         }

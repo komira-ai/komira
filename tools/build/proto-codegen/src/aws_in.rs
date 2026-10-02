@@ -1305,7 +1305,7 @@ impl<'a> AwsLowerer<'a> {
                     .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
                     .unwrap_or_default(),
             }),
-                   static_context_params: static_context_params(op, op_name)?,
+            static_context_params: static_context_params(op, op_name)?,
             operation_context_params: operation_context_params(op, op_name)?,
         };
         let body = self.body_designator(op_name, input_shape, &path_params)?;

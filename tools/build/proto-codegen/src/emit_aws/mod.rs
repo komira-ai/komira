@@ -551,7 +551,11 @@ impl<'a> AwsEmitter<'a> {
             self.check_endpoint_bindings(rules)?;
         }
         if !self.options.omit_preamble {
-            self.emit_header();
+            let unapplied = match self.endpoint_rules {
+                Some(_) => Vec::new(),
+                None => self.unapplied_endpoint_bindings()?,
+            };
+            self.emit_header(&unapplied);
             self.emit_imports();
         }
         self.emit_constants();
@@ -573,7 +577,7 @@ impl<'a> AwsEmitter<'a> {
         Ok(std::mem::take(&mut self.out))
     }
 
-    fn emit_header(&mut self) {
+    fn emit_header(&mut self, unapplied_endpoint_bindings: &[String]) {
         let n_messages = self.lowering.model.files[0].messages.len();
         let n_enums = self.lowering.model.files[0].enums.len();
         let ops: Vec<String> = self
@@ -611,6 +615,20 @@ impl<'a> AwsEmitter<'a> {
                 "#                  partitions sha256 {}",
                 rules.partitions_sha256
             ));
+        } else if !unapplied_endpoint_bindings.is_empty() {
+            // Generated without the service's ruleset (aws_client's
+            // `endpoint_rules`): requests go to the static service host, and
+            // what the model binds into the ruleset is said here, not dropped
+            // silently.
+            self.line("#   endpoints    : NO RULESET. Requests go to the static service host,");
+            self.line("#                  and these endpoint bindings of the model are NOT");
+            self.line("#                  applied (aws_client `endpoint_rules` applies them):");
+            for b in unapplied_endpoint_bindings {
+                for (i, l) in wrap(b, 58).iter().enumerate() {
+                    let lead = if i == 0 { "-" } else { " " };
+                    self.line(&format!("#                  {lead} {l}"));
+                }
+            }
         }
         self.line(&format!(
             "#   shapes       : {} messages, {} enums",

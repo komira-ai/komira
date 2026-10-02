@@ -88,6 +88,20 @@ aws_client(
     deps = _RUNTIME,
 )
 
+# "`endpoint_rules` and `partitions` are set together", at analysis: the
+# ruleset's aws.partition reads the partition table. Its run_tests.sh row is
+# to be added with the next edit of that file: expect_red
+# aws_client_endpoint_rules_without_partitions 'are set together'
+# tests//negative/aws_client:endpoint_rules_without_partitions
+aws_client(
+    name = "endpoint_rules_without_partitions",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    endpoint_rules = _LOGS.endpoint_rules,
+    deps = _RUNTIME,
+)
+
 # "`hand_srcs` is set and `overrides` is not", at analysis.
 aws_client(
     name = "hand_srcs_without_overrides",

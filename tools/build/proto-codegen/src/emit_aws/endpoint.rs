@@ -280,6 +280,57 @@ impl<'a> AwsEmitter<'a> {
         Ok(())
     }
 
+    /// What the model binds into an endpoint ruleset, for a module
+    /// generated WITHOUT one: the `clientContextParams`, and per emitted
+    /// operation its `contextParam` members, `operationContextParams` and
+    /// `staticContextParams`, one line each. Empty when the model binds
+    /// nothing.
+    pub(super) fn unapplied_endpoint_bindings(&self) -> Result<Vec<String>, String> {
+        let mut out = Vec::new();
+        if !self.meta.client_context_params.is_empty() {
+            let names: Vec<&str> =
+                self.meta.client_context_params.iter().map(|p| p.name.as_str()).collect();
+            out.push(format!("clientContextParams: {}", names.join(", ")));
+        }
+        let Some(service) = self.file().services.first() else {
+            return Ok(out);
+        };
+        for m in &service.methods {
+            let facts = self.facts.operation_by_ir_method(&m.name)?;
+            let mut parts = Vec::new();
+            if let Some(input) = self.messages.get(&self.op_input_mojo(m)) {
+                let members: Vec<String> = input
+                    .fields
+                    .iter()
+                    .filter_map(|f| self.facts.member(&input.fq_name, &f.name).ok())
+                    .filter_map(|mf| {
+                        mf.context_param.as_ref().map(|p| format!("{} -> {p}", mf.member_name))
+                    })
+                    .collect();
+                if !members.is_empty() {
+                    parts.push(format!("contextParam {}", members.join(", ")));
+                }
+            }
+            if !facts.operation_context_params.is_empty() {
+                let v: Vec<String> = facts
+                    .operation_context_params
+                    .iter()
+                    .map(|(p, path)| format!("{path} -> {p}"))
+                    .collect();
+                parts.push(format!("operationContextParams {}", v.join(", ")));
+            }
+            if !facts.static_context_params.is_empty() {
+                let v: Vec<&str> =
+                    facts.static_context_params.iter().map(|(p, _)| p.as_str()).collect();
+                parts.push(format!("staticContextParams {}", v.join(", ")));
+            }
+            if !parts.is_empty() {
+                out.push(format!("{}: {}", facts.name, parts.join("; ")));
+            }
+        }
+        Ok(out)
+    }
+
     fn service_methods(&self) -> Result<Vec<IrMethod>, String> {
         Ok(self
             .file()
@@ -496,23 +547,28 @@ impl<'a> AwsEmitter<'a> {
         if !fields.is_empty() {
             self.blank();
         }
-        match &region {
-            Some(r) => self.line(&format!("def __init__(out self, {r}: String):")),
-            None => self.line("def __init__(out self):"),
-        }
+        self.line("def __init__(out self):");
         self.push();
-        if fields.is_empty() {
-            self.line("pass");
-        }
+        self.line("\"\"\"Every parameter unset.\"\"\"");
         for (rp, f) in &fields {
-            if Some(f) == region.as_ref() {
-                self.line(&format!("self.{f} = Optional[String]({f})"));
-            } else {
-                self.line(&format!("self.{f} = Optional[{}]()", rp.ty.mojo()));
-            }
+            self.line(&format!("self.{f} = Optional[{}]()", rp.ty.mojo()));
         }
         self.pop();
         self.blank();
+        if let Some(r) = &region {
+            self.line(&format!("def __init__(out self, {r}: String):"));
+            self.push();
+            self.line(&format!(
+                "\"\"\"Every parameter unset but `{r}`, which \"\" leaves unset too.\"\"\""
+            ));
+            self.line("self = Self()");
+            self.line(&format!("if {r}.byte_length() > 0:"));
+            self.push();
+            self.line(&format!("self.{r} = Optional[String]({r})"));
+            self.pop();
+            self.pop();
+            self.blank();
+        }
         self.line("def endpoint_params(self) -> EndpointParams:");
         self.push();
         self.line("\"\"\"The ruleset parameters this configuration sets.\"\"\"");
@@ -789,7 +845,10 @@ mod tests {
                 "    var disable_session: Optional[Bool]",
             ]
         );
+        // Two constructors: every parameter unset, and Region set unless "".
+        assert!(cfg.contains("def __init__(out self):"));
         assert!(cfg.contains("def __init__(out self, region: String):"));
+        assert!(cfg.contains("if region.byte_length() > 0:\n            self.region = Optional[String](region)"));
         assert!(cfg.contains("A custom `endpoint` keeps the ruleset's addressing"));
         // One resolver, binding: the config, then operationContextParams,
         // then contextParam members, then staticContextParams.
@@ -817,17 +876,42 @@ mod tests {
         }
     }
 
-    #[test]
-    fn a_module_without_a_ruleset_has_no_endpoint_section() {
-        let m = model("", MEMBERS, "");
-        let lowering = lower_aws_service(&m, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny").unwrap();
+    fn emit_without_ruleset(m: &Json) -> String {
+        let lowering = lower_aws_service(m, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny").unwrap();
         let options = AwsEmitOptions { pure_only: true, ..Default::default() };
         let prov = AwsProvenance { model_key: "tiny/2026-10-02", model_sha256: "m" };
-        let src = crate::emit_aws::emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, Some(prov))
+        crate::emit_aws::emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, Some(prov))
             .unwrap()
-            .source;
+            .source
+    }
+
+    #[test]
+    fn a_module_without_a_ruleset_has_no_endpoint_section() {
+        let plain = r#""Bucket": {"shape": "Str"}, "Inner": {"shape": "Inner"}, "Arns": {"shape": "Strs"}"#;
+        let src = emit_without_ruleset(&model("", plain, ""));
         for absent in ["EndpointRuleSet", "EndpointConfig", "§E", "endpoints    :"] {
             assert!(!src.contains(absent), "{absent}");
+        }
+    }
+
+    #[test]
+    fn a_module_without_a_ruleset_names_the_bindings_it_does_not_apply() {
+        let op = r#", "staticContextParams": {"DisableSession": {"value": true}},
+                     "operationContextParams": {"Key": {"path": "Inner.Name"}}"#;
+        let extra = r#", "clientContextParams": {"ForcePathStyle": {"type": "boolean"}}"#;
+        let src = emit_without_ruleset(&model(op, MEMBERS, extra));
+        for absent in ["EndpointRuleSet", "EndpointConfig", "§E"] {
+            assert!(!src.contains(absent), "{absent}");
+        }
+        let header = &src[..src.find("\n\n").unwrap()];
+        for want in [
+            "#   endpoints    : NO RULESET. Requests go to the static service host,",
+            "#                  - clientContextParams: ForcePathStyle",
+            "#                  - Op: contextParam Bucket -> Bucket, Key -> Key;",
+            "#                    operationContextParams Inner.Name -> Key;",
+            "#                    staticContextParams DisableSession",
+        ] {
+            assert!(header.contains(want), "`{want}` missing from\n{header}");
         }
     }
 

@@ -8,8 +8,9 @@
         model_sha256 = botocore_model("logs").sha256,
         operations = ["GetLogEvents"],
         mode = "pure",                  # or "client"
-        endpoint_rules = botocore_model("logs").endpoint_rules,  # optional,
-        partitions = botocore_model("logs").partitions,          # with this
+        # optional; set both or neither
+        endpoint_rules = botocore_model("logs").endpoint_rules,
+        partitions = botocore_model("logs").partitions,
         deps = [
             "komira//src/komira_aws_core:komira_aws_core",
             "komira//src/komira_json:komira_json",
@@ -56,7 +57,8 @@ at all. With them the module embeds both and resolves each operation's
 endpoint through `komira_aws_core.EndpointRuleSet`: a `<Prefix>EndpointConfig`
 holding the ruleset's built-in and client context parameters, and a
 `resolve_<op>_endpoint` binding the operation's context parameters. The
-generator refuses a binding the ruleset does not declare.
+generator refuses a binding the ruleset does not declare. Without them, the
+module's header lists the endpoint bindings of the model it does not apply.
 
 Overrides. `overrides` is the generator's hand-override manifest (a JSON
 file naming, per operation, the hand-written owner of its plain verb), and
@@ -148,10 +150,10 @@ def _aws_client_gen_impl(ctx):
         fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, komira_json, and in client mode komira_http); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
-    if (ctx.attrs.endpoint_rules == None) != (ctx.attrs.partitions == None):
-        fail("{}: `endpoint_rules` and `partitions` are set together: the ruleset's aws.partition reads the partition table".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:
         fail("{}: `hand_srcs` is set and `overrides` is not: hand-written modules of an aws_client own the operations its overrides manifest names".format(ctx.label))
+    if (ctx.attrs.endpoint_rules == None) != (ctx.attrs.partitions == None):
+        fail("{}: `endpoint_rules` and `partitions` are set together: the ruleset's aws.partition reads the partition table".format(ctx.label))
     reserved = {"__init__.mojo": True, _LAYOUT_PROBE: True, import_name + ".mojo": True}
     for p in ctx.attrs.hand_src_paths:
         if ":" in p or not p.endswith(".mojo"):
