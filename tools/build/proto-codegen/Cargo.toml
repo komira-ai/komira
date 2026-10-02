@@ -9,6 +9,9 @@ version = "0.1.0"
 edition = "2021"
 description = "protoc-gen-mojo: protoc plugins that generate Mojo from .proto files."
 publish = false
+# tests/aws_conformance_test.rs compiles in files the Buck2 build stages
+# (the botocore corpus and the driver's output); it is a Buck2 target only.
+autotests = false
 
 [lib]
 name = "komira_proto_codegen"
@@ -53,6 +56,11 @@ path = "src/main_aws_client.rs"
 [[bin]]
 name = "aws-model-check"
 path = "src/main_aws_model_check.rs"
+
+# xml_equiv verdicts over the corpus's XML bodies.
+[[bin]]
+name = "xml-equiv-verdicts"
+path = "src/main_xml_equiv_verdicts.rs"
 
 [dependencies]
 prost = "0.13"

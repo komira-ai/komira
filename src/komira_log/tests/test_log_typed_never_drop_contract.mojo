@@ -56,7 +56,7 @@ from komira_runtime_paths import test_tmpdir
 
 
 comptime _RING_CAPACITY = 4096
-"""`DEFAULT_RING_CAPACITY` (komira_obs/ring_buffer.mojo). Restated rather than
+"""`DEFAULT_RING_CAPACITY` (`komira_spsc_ring`). Restated rather than
 imported so a change to the engine's default makes THIS test fail loudly (the
 fill loop stops filling) instead of silently ceasing to exercise the arm."""
 

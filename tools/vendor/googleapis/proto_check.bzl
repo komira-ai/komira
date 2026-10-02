@@ -33,9 +33,10 @@ checked tree, not only of its own test.
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:proto.bzl", "MojoProtoToolchainInfo", "ProtoSrcsInfo")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 
-# Checking runs on the light workers: it parses a few files and compiles nothing.
-_LIGHT = ["komira//tools/build/platforms:light"]
+# Checking runs on the one Linux execution platform: it parses a few files and compiles nothing.
+_LINUX = LINUX_X86_64
 
 def _stage(ctx):
     """`srcs` staged at their import paths: (directory, import paths)."""
@@ -103,7 +104,13 @@ _proto_check = rule(
 # neither, and an acceptance must write both.
 _CASE_SCRIPT = """
 SCRIPT="$1"; EXPECT="$2"; REPORT="$3"; BB="$4"; shift 3
-T="$PWD/.proto_check_case"
+# Scratch in the action's own directory: a local action runs in the checkout
+# root beside every other local action, so a fixed path under $PWD is shared.
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.proto_check_case" ;;
+    /*) T="$BUCK_SCRATCH_PATH/proto_check_case" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/proto_check_case" ;;
+esac
 "$BB" rm -rf "$T"
 "$BB" mkdir -p "$T"
 # The check's arguments: BB PROTOC TREE, the outputs, the roots.
@@ -154,10 +161,10 @@ _proto_check_case = rule(
 )
 
 def proto_check(**kwargs):
-    _proto_check(exec_compatible_with = _LIGHT, **kwargs)
+    _proto_check(exec_compatible_with = _LINUX, **kwargs)
 
 def proto_check_case(**kwargs):
-    _proto_check_case(exec_compatible_with = _LIGHT, **kwargs)
+    _proto_check_case(exec_compatible_with = _LINUX, **kwargs)
 
 proto_check = declares_docs(proto_check)
 proto_check_case = declares_docs(proto_check_case)

@@ -1,0 +1,10 @@
+POST / HTTP/1.1
+Host: localhost:4566
+Content-Type: application/x-amz-json-1.1
+X-Amz-Target: Logs_20140328.DescribeLogGroups
+Content-Length: 11
+X-Amz-Date: 20260919T120000Z
+X-Amz-Security-Token: FAKE-SESSION-TOKEN//example==
+Authorization: AWS4-HMAC-SHA256 Credential=ASIAEXAMPLETEMPKEY01/20260919/eu-west-1/logs/aws4_request, SignedHeaders=content-type;host;x-amz-date;x-amz-security-token;x-amz-target, Signature=60f6fb5cb2315ba2f47be05369661dc4a34963cdfce38cb4aa872ec74816ac1f
+
+{"limit":5}

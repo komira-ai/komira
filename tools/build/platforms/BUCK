@@ -1,119 +1,39 @@
-# Abstract constraints and platforms only. Nothing here names a service, a
-# worker pool or a property set: the execution platforms that realize these
-# configurations are declared in //tools/build/platforms/default for a
-# standalone checkout (local, or remote when `.buckconfig.local` names a
-# service), and by any repository that mounts komira.
+load(":defs.bzl", "komira_host_platform")
+load(":table.bzl", "constraints", "registered_names")
 
-# Target platform for everything in this repo (see `[parser]` in .buckconfig).
-platform(
-    name = "linux-x86_64",
-    constraint_values = [
-        "prelude//os/constraints:linux",
-        "prelude//cpu/constraints:x86_64",
-    ],
-    visibility = ["PUBLIC"],
-)
+# Platforms only. Nothing here names a service or a worker property set: the
+# execution platforms that use these configurations are declared in
+# //tools/build/platforms/default for a standalone checkout (local, or remote
+# when `.buckconfig.local` names a service), and by any repository that
+# mounts komira.
 
-# Target platform for macOS on Apple silicon: `--target-platforms
-# komira//tools/build/platforms:darwin-arm64`. Its Mojo targets build on a macOS arm64
-# execution platform (`exec-mojo-darwin-arm64`), registered only when one is
-# configured; see README.md, "macOS".
-platform(
-    name = "darwin-arm64",
-    constraint_values = [
-        "prelude//os/constraints:macos",
-        "prelude//cpu/constraints:arm64",
-    ],
-    visibility = ["PUBLIC"],
-)
+# One platform per registered row of the platform table (table.bzl), named
+# for the row: `linux-x86_64`, `darwin-arm64`. A row komira reserves
+# (`registered = False`, today `linux-arm64`) has no platform here: it is not a
+# build key. Each is also the configuration of the one execution platform of
+# that (os, cpu) that runs actions (registered by `komira_execution_platforms`
+# or `komira_local_execution_platforms` in defs.bzl), so a tool built to run in
+# an action is configured exactly like a target built for that platform. See
+# README.md.
+#
+# `linux-x86_64` is the target platform for everything in this repo run from a
+# Linux x86_64 client (see `host` below, and `[parser]` in .buckconfig), and the
+# configuration of the linux execution platform. `darwin-arm64` is the target
+# platform for macOS on Apple silicon: `--target-platforms
+# komira//tools/build/platforms:darwin-arm64`, and the configuration of the
+# macOS execution platform, registered only when one is configured; see
+# README.md, "macOS".
+[
+    platform(
+        name = name,
+        constraint_values = constraints(name),
+        visibility = ["PUBLIC"],
+    )
+    for name in registered_names()
+]
 
-# ---- Execution constraints ---------------------------------------------------
-
-# What kind of worker an action needs.
-#   light         unpacking and copying toolchain files: little CPU, memory
-#                 bounded by the archive being unpacked.
-#   mojo_compile  running the Mojo compiler, and running what it built (gated
-#                 tests, run checks): many cores and a lot of memory.
-constraint_setting(
-    name = "exec_class",
-    visibility = ["PUBLIC"],
-)
-
-constraint_value(
-    name = "light",
-    constraint_setting = ":exec_class",
-    visibility = ["PUBLIC"],
-)
-
-constraint_value(
-    name = "mojo_compile",
-    constraint_setting = ":exec_class",
-    visibility = ["PUBLIC"],
-)
-
-# How many NUMA nodes an action may use.
-#   numa_single  the worker's CPUs and memory lie on one NUMA node. The
-#                default for every Mojo action.
-#   numa_multi   the worker spans more than one NUMA node, for tests that
-#                measure or depend on cross-node placement.
-constraint_setting(
-    name = "numa",
-    visibility = ["PUBLIC"],
-)
-
-constraint_value(
-    name = "numa_single",
-    constraint_setting = ":numa",
-    visibility = ["PUBLIC"],
-)
-
-constraint_value(
-    name = "numa_multi",
-    constraint_setting = ":numa",
-    visibility = ["PUBLIC"],
-)
-
-# ---- Execution platform configurations ----------------------------------------
-
-# The configurations an execution platform may realize. An execution platform
-# is registered under one of these labels (see `komira_execution_platforms` in
-# defs.bzl), so the configuration of every exec dep, and with it every output
-# path and action digest, is the same in any repository that builds komira.
-
-platform(
-    name = "exec-light",
-    constraint_values = [":light"],
-    deps = [":linux-x86_64"],
-    visibility = ["PUBLIC"],
-)
-
-platform(
-    name = "exec-mojo",
-    constraint_values = [
-        ":mojo_compile",
-        ":numa_single",
-    ],
-    deps = [":linux-x86_64"],
-    visibility = ["PUBLIC"],
-)
-
-platform(
-    name = "exec-mojo-multi-numa",
-    constraint_values = [
-        ":mojo_compile",
-        ":numa_multi",
-    ],
-    deps = [":linux-x86_64"],
-    visibility = ["PUBLIC"],
-)
-
-# macOS arm64 workers: Mojo compiles, gated tests and run checks of
-# darwin-arm64 targets. No `light` and no NUMA value: toolchain unpacking for
-# darwin runs on linux `light` workers (it only moves bytes), and these hosts
-# are one memory domain.
-platform(
-    name = "exec-mojo-darwin-arm64",
-    constraint_values = [":mojo_compile"],
-    deps = [":darwin-arm64"],
+# The default target platform: the client's own (`[parser]` in .buckconfig).
+komira_host_platform(
+    name = "host",
     visibility = ["PUBLIC"],
 )
