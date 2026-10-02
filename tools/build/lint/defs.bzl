@@ -17,9 +17,8 @@ downloads (tools/build/lint/BUCK). Each rule's default output is the validation
 result, a JSON file whose message holds the findings.
 """
 
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
-
-_LIGHT = ["komira//tools/build/platforms:light"]
 
 _COMMON = {
     "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
@@ -201,33 +200,33 @@ tar_member_rule = rule(
     },
 )
 
-def _light(kwargs):
-    kwargs.setdefault("exec_compatible_with", _LIGHT)
+def _linux(kwargs):
+    kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     return kwargs
 
-# Every lint runs on the light worker class: it reads a few files.
+# Every lint runs linux x86_64 tools (busybox, shellcheck): it reads a few files.
 def shell_lint(**kwargs):
-    shell_lint_rule(**_light(kwargs))
+    shell_lint_rule(**_linux(kwargs))
 
 def workflow_lint(**kwargs):
-    workflow_lint_rule(**_light(kwargs))
+    workflow_lint_rule(**_linux(kwargs))
 
 def action_pins(**kwargs):
-    action_pins_rule(**_light(kwargs))
+    action_pins_rule(**_linux(kwargs))
 
 def no_endpoint(**kwargs):
-    no_endpoint_rule(**_light(kwargs))
+    no_endpoint_rule(**_linux(kwargs))
 
 def push_verdicts(**kwargs):
-    push_verdicts_rule(**_light(kwargs))
+    push_verdicts_rule(**_linux(kwargs))
 
 def tar_member(**kwargs):
-    tar_member_rule(**_light(kwargs))
+    tar_member_rule(**_linux(kwargs))
 
 # Markdown: see markdown_docs_rule. The root BUCK applies it to the
 # repository's documentation (//:docs).
 def markdown_docs(**kwargs):
-    markdown_docs_rule(**_light(kwargs))
+    markdown_docs_rule(**_linux(kwargs))
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (doc_tree.bzl), so no BUCK file names one.

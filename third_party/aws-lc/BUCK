@@ -1,3 +1,4 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
 load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
@@ -45,7 +46,7 @@ _SRCS = CRYPTO_SRCS + CRYPTO_ASM_X86_64 + BCM_SRCS + BCM_ASM_X86_64 + S2N_BIGNUM
 # their places in the archive.
 archive_files(
     name = "src",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":aws-lc-1.39.0.tar.gz",
     files = ["LICENSE"] + _SRCS + PUBLIC_HEADERS + sorted(PRIVATE_HEADERS.values()),
     strip_prefix = "aws-lc-1.39.0",
@@ -105,6 +106,6 @@ cxx_library(
     exported_headers = {h[len("include/"):]: ":src[{}]".format(h) for h in PUBLIC_HEADERS},
     header_namespace = "",
     # The assembly above is x86_64 ELF; see srcs.bzl for the aarch64 lists.
-    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],
+    target_compatible_with = ["prelude//cpu/constraints:x86_64", "prelude//os/constraints:linux"],  # komira-limit:aws-lc-x86-64-linux
     visibility = ["PUBLIC"],
 )

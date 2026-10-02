@@ -20,7 +20,6 @@ komira//tools/build/examples:test_hellopkg mojo_build_test 1
 komira//tools/build/examples/libgate_ok:libgate_ok mojo_build_test 1
 komira//tools/build/examples/aws_lc:test_aws_lc mojo_build 1
 komira//tools/build/examples/s2n_tls:test_s2n_handshake mojo_build 1
-tests//functional/numa:hello mojo_build 1
 komira//tools/build/examples:hello mojo_build 3
 komira//tools/build/examples:hello mojo_build_shared 3
 komira//tools/build/examples:hello_pkg_user mojo_build 3
