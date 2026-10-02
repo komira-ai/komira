@@ -1,4 +1,5 @@
 load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load(":model.bzl", "TINY_REST_JSON")
 
 # A restJson1 client of a tiny model, generated in pure mode and compiled
 # against the real komira_aws_core and komira_json: URI labels (one greedy)
@@ -8,19 +9,23 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 #
 # The library is gated by its layout probe and test_tiny_rest_json, which
 # checks the requests it builds and the responses it reads, byte for byte.
-# tests//functional/aws_codegen:tiny_rest_json_client holds the text of the
-# same model's client-mode module to a golden.
+# The aws_codegen functional tests hold the text of the same model's
+# client-mode module to a golden, and check that exactly these two welded
+# tests ran and exactly the package's files were generated (a gen_check and a
+# tests_check, which live in the tests cell and so cannot be loaded here).
+# run_tests.sh builds this package (test 36). The model's digest is stated
+# once, in model.bzl.
 
 export_file(
     name = "tiny_rest_json.json",
-    visibility = ["tests//functional/aws_codegen:"],
+    visibility = ["PUBLIC"],
 )
 
 aws_client(
     name = "komira_aws_tiny_rest",
     mode = "pure",
     model = "tiny_rest_json.json",
-    model_sha256 = "75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee",
+    model_sha256 = TINY_REST_JSON.sha256,
     operations = [
         "GetThing",
         "PutThing",
@@ -28,6 +33,7 @@ aws_client(
     ],
     service = "tiny",
     test_srcs = ["test_tiny_rest_json.mojo"],
+    visibility = ["PUBLIC"],
     deps = [
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_json:komira_json",

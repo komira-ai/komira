@@ -26,8 +26,9 @@ load("//functional/gcp_client:defs.bzl", "gen_check", "tests_check")
 # stub/komira_json is a minimal JSON value and parser with komira_json's
 # layout and the part of its API that code calls. Generated code is built
 # against the real core and komira_json in the komira cell, by the AWS
-# conformance driver (komira//tools/build/proto-codegen); this package tests
-# the rule.
+# conformance driver (komira//tools/build/proto-codegen) and by the pure-mode
+# restJson1 client in komira//tools/build/proto-codegen/aws_rest_json; this
+# package tests the rule.
 
 _LOGS = botocore_model("logs")
 
