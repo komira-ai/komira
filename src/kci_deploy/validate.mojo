@@ -28,13 +28,13 @@
 #
 # Progress is reported through `Reporter.info`, so this adds no Reporter method.
 #
-# ENCAPSULATION: value-typed surface throughout. The only FFI is libc `usleep`
-# for the back-off, skipped when `interval_ms` is 0 so hermetic tests run at no
-# wall cost.
+# ENCAPSULATION: value-typed surface throughout, and no FFI. The back-off is
+# the stdlib `std.time.sleep`, skipped when `interval_ms` is 0 so hermetic tests
+# run at no wall cost.
 # =============================================================================
 
-from std.ffi import external_call
 from std.memory import ArcPointer
+from std.time import sleep
 
 from kci_iac import (
     ResourceGraph,
@@ -437,7 +437,7 @@ struct PollBudget(Copyable, Movable, Deinitable):
     def sleep_between(self):
         """Sleep `interval_ms` (no-op at 0, the hermetic setting)."""
         if self.interval_ms > 0:
-            _ = external_call["usleep", Int32](UInt32(self.interval_ms * 1000))
+            sleep(Float64(self.interval_ms) / 1000.0)
 
 
 @fieldwise_init
