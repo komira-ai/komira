@@ -20,17 +20,13 @@ zig_exe(
 )
 
 # The version a release of the conda packages carries (conda.bzl); run by a
-# release job, tested by tools/build/tests/functional/conda.sh.
+# release job, tested by tools/build/tests/functional/conda.sh. The other one
+# prints the library packages' targets (the release tool declares which of
+# them it publishes).
 shell_lint(
     name = "shell_lint",
     srcs = [
-        "gen_conda_names.sh",
+        "list_conda_targets.sh",
         "release_version.sh",
     ],
-)
-
-# names.bzl from names.tsv (packaging/conda); read by //packaging/conda:names_lint.
-export_file(
-    name = "gen_conda_names.sh",
-    visibility = ["PUBLIC"],
 )
