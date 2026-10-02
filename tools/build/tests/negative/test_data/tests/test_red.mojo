@@ -1,4 +1,4 @@
-# Always red: the env fixtures (env_held, env_bin) must stay red whatever the
+# Always red: the env fixtures (env_bin_lib, env_bin) must stay red whatever the
 # test's declared environment names.
 
 

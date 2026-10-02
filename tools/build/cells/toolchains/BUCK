@@ -1,9 +1,8 @@
 # The `toolchains` cell of a standalone komira checkout.
 #
-# The Mojo rules take their toolchain from `toolchains//:mojo` and
-# `toolchains//:mojo_multi_numa`: the prelude's convention, where the
-# `toolchains` cell belongs to the repository at the project root. Here that
-# is komira itself. The toolchains are built from the pinned downloads in
+# The Mojo rules take their toolchain from `toolchains//:mojo`: the
+# prelude's convention, where the `toolchains` cell belongs to the repository
+# at the project root. Here that is komira itself. The toolchains are built from the pinned downloads in
 # komira//tools/build/toolchains; see komira_toolchains in
 # tools/build/toolchains/defs.bzl for what it declares and why here.
 #

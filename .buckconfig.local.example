@@ -1,37 +1,16 @@
 # Copy to `.buckconfig.local` (gitignored) and fill in your remote-execution
 # service to build there instead of on your machine. Without this file every
-# action runs locally; with `[komira_re]` below set, every action runs
-# remotely (tools/build/platforms/default). `-c komira.execution=local`
-# builds one command locally anyway.
-
-[buck2_re_client]
-  engine_address = grpc://re.example.internal:8980
-  action_cache_address = grpc://re.example.internal:8980
-  cas_address = grpc://re.example.internal:8980
-  instance_name = default
-  tls = false
-  execution_concurrency_limit = 64
-
-[komira_re]
-  # Exact REAPI platform property sets of your workers, as comma-separated
-  # key=value pairs, one per execution configuration (see
-  # tools/build/platforms/BUCK).
-  # Workers match a set exactly: a key the workers do not advertise leaves
-  # actions queued until the scheduler gives up. Two keys may name the same
-  # set if you have one kind of worker.
-  #
-  # Unpacking and copying toolchain files.
-  light_properties = pool=light
-  # Mojo compiles, gated tests and run checks, on one NUMA node.
-  mojo_compile_properties = pool=mojo
-  # Optional: workers that span more than one NUMA node. Leave unset unless
-  # you have them; targets that require them then fail to configure instead
-  # of running on single-node workers.
-  # mojo_compile_multi_numa_properties = pool=mojo-multi-numa
+# action runs locally; with `[komira_re]
+  # The exact REAPI platform property set every Linux x86_64 action carries,
+  # as comma-separated key=value pairs. Your service chooses the worker for
+  # each action; the build states nothing about worker classes. Workers
+  # match a set exactly: a key the workers do not advertise leaves actions
+  # queued until the scheduler gives up. See tools/build/platforms/README.md.
+  linux_properties = pool=default
   # Optional: macOS arm64 workers, for `--target-platforms
-  # komira//tools/build/platforms:darwin-arm64`: their exact property set,
-  # and the host identity each prints for `sh
-  # tools/build/mojo/darwin/host_identity.sh`, separated by spaces. See
+  # komira//tools/build/platforms:darwin-arm64`: their exact property set
+  # (different from the linux one), and the host identity each prints for
+  # `sh tools/build/mojo/darwin/host_identity.sh`, separated by spaces. See
   # tools/build/toolchains/README.md, "macOS".
-  # darwin_mojo_compile_properties = pool=macos
+  # darwin_properties = pool=macos
   # darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210
