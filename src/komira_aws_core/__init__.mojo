@@ -25,6 +25,13 @@ clients.
   the error shape (`aws_error_code*`, `aws_error_message_from_body`).
 - `aws_json.mojo`: the `JsonValue`-typed `aws_json_*` / `aws_*_from_json` /
   `aws_ts_to_json` names a generated module calls, over komira_json.
+- `aws_text.mojo`: the text form of a scalar bound to a URI label, a query
+  value or a header (`aws_text_*` writers, strict `aws_*_from_text`
+  readers), and the three Smithy timestamp formats as text, http-date
+  (IMF-fixdate) included.
+- `aws_rest.mojo`: the HTTP binding runtime of a restJson1 / restXml
+  client: `AwsRestUri` (labels, greedy labels, query), host-prefix labels,
+  list and prefix headers, the response code, and `aws_rest_json_error`.
 - `endpoint.mojo`: `AwsEndpoint`, the partitions, `aws_service_endpoint`,
   `resolve_endpoint`, and `aws_endpoint_config` (AWS_ENDPOINT_URL[_<SVC>],
   FIPS and dual-stack, from the standard settings only).
@@ -86,6 +93,38 @@ from .aws_error import (
     aws_request_id,
 )
 from .aws_request import AwsRequest, AwsResponse, HttpResult
+from .aws_rest import (
+    AwsRestUri,
+    aws_header_field,
+    aws_header_http_date_list,
+    aws_header_http_date_list_from,
+    aws_header_list,
+    aws_header_list_from,
+    aws_host_label,
+    aws_host_prefix,
+    aws_prefix_headers,
+    aws_response_code,
+    aws_rest_json_error,
+    aws_set_prefix_headers,
+)
+from .aws_text import (
+    aws_blob_from_base64,
+    aws_bool_from_text,
+    aws_f64_from_text,
+    aws_http_date_from_text,
+    aws_i32_from_text,
+    aws_i64_from_text,
+    aws_int_from_text,
+    aws_media_from_text,
+    aws_text_blob,
+    aws_text_bool,
+    aws_text_f32,
+    aws_text_f64,
+    aws_text_int,
+    aws_text_media,
+    aws_text_ts,
+    aws_ts_from_text,
+)
 from .credential import AwsCredential
 from .creds_source import (
     AWS_CREDENTIAL_ADVISORY_REFRESH_SECONDS,
