@@ -1,6 +1,6 @@
 # =============================================================================
 # komira_log.logger_erased — the ERASED emit entry point, BESIDE the
-# specialised one. For the CONTROL PLANE. The engine keeps `_emit_through`.
+# specialised one. For long-lived SERVICES. The engine keeps `_emit_through`.
 # =============================================================================
 #
 # # WHAT IS ERASED, AND WHAT IS DELIBERATELY NOT
@@ -73,7 +73,7 @@
 #
 # ⛔ THE ENGINE MUST NOT USE THIS. The data plane is measured in nanoseconds and
 # the engine depends on the inlined specialised emit. This exists for
-# control-plane services, where sites are
+# long-lived services, where sites are
 # counted in thousands and lines in hundreds, and where the compiler peak is the
 # binding constraint rather than the per-line cost.
 #
