@@ -39,7 +39,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_crypto import (
     hex_lower_array_32,
-    pkcs8_private_key_der_from_pem,
+    rsa_pkcs8_der_from_pem,
     sha256_string,
 )
 from komira_json import JsonValue, parse_json_value
@@ -286,7 +286,7 @@ def _vectors() raises -> List[Vector]:
 
 def _account() raises -> GcsV4ServiceAccount:
     var a = parse_json_value(_read_text(_ACCOUNT))
-    var der = pkcs8_private_key_der_from_pem(a.get("private_key").as_string())
+    var der = rsa_pkcs8_der_from_pem(a.get("private_key").as_string())
     return GcsV4ServiceAccount(a.get("client_email").as_string(), der^)
 
 

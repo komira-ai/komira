@@ -59,7 +59,7 @@
 #                      storage/v1/v4_signatures.json
 #
 # The private key is PKCS#8 DER; komira_crypto's
-# `pkcs8_private_key_der_from_pem` turns a key file's `private_key` into it.
+# `rsa_pkcs8_der_from_pem` turns a key file's `private_key` into it.
 # It is passed to the RSA call and nowhere else: never into a URL, an error
 # message or a log line.
 # =============================================================================
