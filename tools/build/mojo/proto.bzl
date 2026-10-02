@@ -302,6 +302,7 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
             } | {k: [DefaultInfo(default_output = v)] for k, v in files.items()},
         ),
         MojoInfo(
+            direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps]),
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = pkg, children = deps),
         ),

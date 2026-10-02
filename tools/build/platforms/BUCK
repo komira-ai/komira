@@ -33,3 +33,14 @@ platform(
     ],
     visibility = ["PUBLIC"],
 )
+
+# Selectable form of linux-x86_64: what conda_package derives its subdir from
+# (tools/build/package/conda.bzl).
+config_setting(
+    name = "is_linux_x86_64",
+    constraint_values = [
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -629,6 +629,26 @@ buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
 buck2 test //tools/build/proto-codegen:komira_proto_codegen
 ```
 
+## 37. Conda packages
+
+The conda package of `//packaging/conda:komira_encoding` ([`conda.sh`](functional/conda.sh)):
+read back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it
+(three stored members, valid zstd, owner-0 tars, sorted compact JSON, the
+library's `.mojoc` byte for byte); the compiler pin equals the pinned compiler's
+version; each bad fixture of [`negative/conda_pkgs`](negative/conda_pkgs/BUCK)
+is refused with its reason (a name or dependency outside the approved list, no
+prefix, a target not named for the import name, no tests, a run-time `dlopen`,
+native code) and the two controls build; the approved-list lint is green on
+the real list and red naming each defect on a bad one; the version comes from the
+configuration and an unstamped build is refused by the release check, without
+re-running a compile; `release_version.sh` counts to the last non-documentation
+commit in a scratch repository; two uncached builds in fresh daemons give the
+same sha256 (skipped with `--no-uncached`); and a `pixi` project whose channel is
+the built file served from `file://` installs it with the pinned compiler and
+`mojo run` of a program importing it prints the right bytes, while the same
+project without it cannot (skipped with `--no-install`, without `pixi`, or
+without network). See [packaging/conda](../../../packaging/conda/README.md).
+
 ## Diagnostics
 
 [`re_probe`](re_probe/BUCK) is not a check: `buck2 build tests//re_probe:probe`
