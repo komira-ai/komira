@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_artifact_declaration/validate.mojo -- the rules a declarations value
-#   must satisfy, the check against the channels file, and the lookups.
+#   must satisfy, and the lookups.
 # =============================================================================
 #
 # `validate_artifact_declarations` refuses, naming the build system or the
@@ -19,13 +19,7 @@
 #   * an artifact whose combined args (its build system's, then its own)
 #     never contain `{out_dir}`: kci could not find what was built;
 #   (a placeholder in an executable is not substituted and not checked: the
-#   executable is a program name or an absolute path, never an arg);
-#   * no allowed channel, a channel name that is not one, or one named twice.
-#
-# `validate_declarations_against_channels` checks every allowed channel is
-# declared in the channels file. Whether a channel has a repository for an
-# artifact depends on the artifact's TYPE, which only the built manifest
-# states, so that check is kci publish's.
+#   executable is a program name or an absolute path, never an arg).
 #
 # What a build LEFT (exactly one `manifest.json` at the top of `{out_dir}`,
 # whose `name` is the declaration's, exactly) is checked by contract.mojo's
@@ -33,7 +27,7 @@
 #
 # Not here, by design (kci publish, over the built manifests): every
 # declared artifact built, versions in lockstep, a metapackage after its
-# members, requirement closure over the set and its channel.
+# members, requirement closure over the set.
 #
 # Owned values only; no pointer.
 # =============================================================================
@@ -42,11 +36,6 @@ from kci_artifact_declaration_proto.artifact_declaration import (
     ArtifactDeclaration,
     ArtifactDeclarations,
     BuildSystem,
-)
-from kci_release_channel import (
-    ChannelDeclaration,
-    find_channel,
-    is_valid_channel_name,
 )
 
 from .contract import OUT_DIR_PLACEHOLDER, placeholders_in
@@ -202,26 +191,6 @@ def _check_artifact(source: String, decls: ArtifactDeclarations, i: Int) raises:
             + a.build_system
             + String("': kci could not find what the build made"),
         )
-    if len(a.allowed_channels) == 0:
-        _refuse(
-            source,
-            who,
-            String("has no allowed_channels (an artifact names every channel it may go to)"),
-        )
-    for k in range(len(a.allowed_channels)):
-        if not is_valid_channel_name(a.allowed_channels[k]):
-            _refuse(
-                source,
-                who,
-                String("allowed channel '") + a.allowed_channels[k] + String("' is not a channel name"),
-            )
-        for j in range(k):
-            if a.allowed_channels[j] == a.allowed_channels[k]:
-                _refuse(
-                    source,
-                    who,
-                    String("names '") + a.allowed_channels[k] + String("' twice in allowed_channels"),
-                )
 
 
 def validate_artifact_declarations(
@@ -237,15 +206,3 @@ def validate_artifact_declarations(
     for i in range(len(decls.artifacts)):
         _check_artifact(source, decls, i)
 
-
-def validate_declarations_against_channels(
-    decls: ArtifactDeclarations, channels: List[ChannelDeclaration]
-) raises:
-    """Every allowed channel of every artifact is declared in `channels`."""
-    for i in range(len(decls.artifacts)):
-        ref a = decls.artifacts[i]
-        for k in range(len(a.allowed_channels)):
-            try:
-                _ = find_channel(channels, a.allowed_channels[k])
-            except e:
-                raise Error(String("artifact '") + a.name + String("': ") + String(e))

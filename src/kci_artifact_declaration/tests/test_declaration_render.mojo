@@ -77,9 +77,8 @@ def _file() -> String:
         + String("  args: \"--root={out_dir}/root\"\n  args: \"run\"\n}\n")
         + String("artifacts {\n  name: \"a\"\n  build_system: \"tool\"\n")
         + String("  args: \"x{out_dir}y{out_dir}z\"\n  args: \"{}\"\n  args: \"{k: 1}\"\n")
-        + String("  args: \"{out_dir\"\n  allowed_channels: \"public\"\n}\n")
-        + String("artifacts {\n  name: \"b\"\n  build_system: \"tool\"\n  args: \"plain\"\n")
-        + String("  allowed_channels: \"public\"\n}\n")
+        + String("  args: \"{out_dir\"\n}\n")
+        + String("artifacts {\n  name: \"b\"\n  build_system: \"tool\"\n  args: \"plain\"\n}\n")
     )
 
 
@@ -105,9 +104,7 @@ def test_render_refusals() raises:
     # A value that never went through the validator.
     var systems = List[BuildSystem]()
     var artifacts = List[ArtifactDeclaration]()
-    var chans = List[String]()
-    chans.append(String("public"))
-    artifacts.append(ArtifactDeclaration(String("a"), chans^, String("zz"), _argv("{out_dir}")))
+    artifacts.append(ArtifactDeclaration(String("a"), String("zz"), _argv("{out_dir}")))
     var raw = ArtifactDeclarations(systems^, artifacts^)
     assert_equal(
         _refusal(raw, String("a"), String("/o")),

@@ -32,6 +32,4 @@ artifacts {
   args: "//src/komira_encoding:komira_encoding_conda[release]"
   args: "--out"
   args: "{out_dir}"
-  allowed_channels: "public"
-  allowed_channels: "internal"
 }

@@ -45,12 +45,12 @@
 //
 // Set-level rules (every declared artifact built, versions in lockstep, a
 // metapackage published after its members, each package's requirements
-// closed over the set and its channel) need the built manifests, so they are
-// checked by kci publish over those manifests, not here.
+// closed over the set) need the built manifests, so they are checked by kci
+// publish over those manifests, not here.
 //
 // Deliberately absent: a version, a sha256, a file name, a platform and an
-// artifact type (the built manifest carries them), credentials and the
-// channel's repository (the channels file holds them, by secret name).
+// artifact type (the built manifest carries them), and where an artifact is
+// published to (kci publish's).
 //
 // Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
 syntax = "proto3";
@@ -87,12 +87,8 @@ message ArtifactDeclaration {
   // published name too (a conda package's name has the same syntax).
   string name = 1;
 
-  // The release channels (names in the channels file) this artifact may be
-  // published to. REQUIRED and non-empty, pending a CEO ruling: without it
-  // an internal package would be publishable to a PUBLIC channel by default,
-  // so a new declaration goes nowhere until it names a channel. The channel
-  // of a run is chosen by the run; this only says which runs may carry it.
-  repeated string allowed_channels = 2;
+  reserved 2;
+  reserved "allowed_channels";
 
   // The name of a declared BuildSystem.
   string build_system = 3;

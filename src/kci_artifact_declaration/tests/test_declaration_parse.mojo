@@ -37,12 +37,10 @@ def _file() -> String:
         + String("  args: \"//pkg:a[release]\"\n")  # 9
         + String("  args: \"--out\"\n")  # 10
         + String("  args: \"{out_dir}\"\n")  # 11
-        + String("  allowed_channels: \"public\"\n")  # 12
-        + String("}\n")  # 13
-        + String("# a second artifact, with the optional ':' before '{'\n")  # 14
+        + String("}\n")  # 12
+        + String("# a second artifact, with the optional ':' before '{'\n")  # 13
         + String("artifacts: {\n  name: \"b\"\n  build_system: \"buck2\"\n")
-        + String("  args: \"//pkg:b[release]\"\n  args: \"--out={out_dir}\"\n")
-        + String("  allowed_channels: \"public\"\n  allowed_channels: \"internal\"\n}\n")
+        + String("  args: \"//pkg:b[release]\"\n  args: \"--out={out_dir}\"\n}\n")
     )
 
 
@@ -70,12 +68,9 @@ def test_control_file_parses_every_field() raises:
     assert_equal(a.args[0], String("//pkg:a[release]"))
     assert_equal(a.args[1], String("--out"))
     assert_equal(a.args[2], String("{out_dir}"))
-    assert_equal(len(a.allowed_channels), 1)
-    assert_equal(a.allowed_channels[0], String("public"))
     assert_equal(d.artifacts[1].name, String("b"))
+    assert_equal(len(d.artifacts[1].args), 2)
     assert_equal(d.artifacts[1].args[1], String("--out={out_dir}"))
-    assert_equal(len(d.artifacts[1].allowed_channels), 2)
-    assert_equal(d.artifacts[1].allowed_channels[1], String("internal"))
 
 
 def test_parsed_value_round_trips_on_the_wire() raises:
@@ -97,9 +92,6 @@ def test_parsed_value_round_trips_on_the_wire() raises:
         assert_equal(len(x.args), len(y.args))
         for k in range(len(y.args)):
             assert_equal(x.args[k], y.args[k])
-        assert_equal(len(x.allowed_channels), len(y.allowed_channels))
-        for k in range(len(y.allowed_channels)):
-            assert_equal(x.allowed_channels[k], y.allowed_channels[k])
 
 
 def _one(s: String) -> List[String]:
@@ -126,7 +118,7 @@ def _bs() -> BuildSystem:
 
 
 def _art() -> ArtifactDeclaration:
-    return ArtifactDeclaration(String("a"), _one(String("p")), String("b"), _one(String("x")))
+    return ArtifactDeclaration(String("a"), String("b"), _one(String("x")))
 
 
 def test_build_system_field_numbers_are_pinned() raises:
@@ -140,16 +132,16 @@ def test_build_system_field_numbers_are_pinned() raises:
 
 
 def test_artifact_field_numbers_are_pinned() raises:
-    # name = 1 (0x0a), allowed_channels = 2 (0x12), build_system = 3 (0x1a),
-    # args = 4 (0x22).
+    # name = 1 (0x0a), build_system = 3 (0x1a), args = 4 (0x22); 2 is
+    # reserved, so no 0x12 byte.
     _expect_bytes(
         encode_proto[ArtifactDeclaration](_art()),
-        _bytes(0x0A, 1, 0x61, 0x12, 1, 0x70, 0x1A, 1, 0x62, 0x22, 1, 0x78),
+        _bytes(0x0A, 1, 0x61, 0x1A, 1, 0x62, 0x22, 1, 0x78),
     )
 
 
 def test_file_field_numbers_are_pinned() raises:
-    # build_systems = 1 (0x0a, 9 bytes), artifacts = 2 (0x12, 12 bytes).
+    # build_systems = 1 (0x0a, 9 bytes), artifacts = 2 (0x12, 9 bytes).
     var systems = List[BuildSystem]()
     systems.append(_bs())
     var artifacts = List[ArtifactDeclaration]()
@@ -158,7 +150,7 @@ def test_file_field_numbers_are_pinned() raises:
         encode_proto[ArtifactDeclarations](ArtifactDeclarations(systems^, artifacts^)),
         _bytes(
             0x0A, 9, 0x0A, 1, 0x62, 0x12, 1, 0x65, 0x1A, 1, 0x78,
-            0x12, 12, 0x0A, 1, 0x61, 0x12, 1, 0x70, 0x1A, 1, 0x62, 0x22, 1, 0x78,
+            0x12, 9, 0x0A, 1, 0x61, 0x1A, 1, 0x62, 0x22, 1, 0x78,
         ),
     )
 
@@ -202,7 +194,7 @@ def test_parse_refusals() raises:
         ),
         String(
             "decl.textproto: line 9: unknown field 'version' in artifact 'a'"
-            " (expected name, allowed_channels, build_system, args)"
+            " (expected name, build_system, args)"
         ),
     )
     assert_equal(

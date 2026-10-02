@@ -1,7 +1,6 @@
 # =============================================================================
 # src/kci_artifact_declaration/tests/test_declaration_validate.mojo
-#   Every refusal of `validate_artifact_declarations` and of the check
-#   against the channels file, one case per message.
+#   Every refusal of `validate_artifact_declarations`, one case per message.
 # =============================================================================
 #
 # Each case builds a file that is valid except for one thing (the control
@@ -13,11 +12,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_release_channel import parse_channels_file
 from kci_artifact_declaration import (
     is_valid_declaration_name,
     parse_artifact_declarations,
-    validate_declarations_against_channels,
 )
 
 comptime _PREFIX = "decl.textproto: "
@@ -51,7 +48,6 @@ def _art(
     name: String = String("a"),
     bs: String = String("buck2"),
     args: String = String("//pkg:a[release]|--out|{out_dir}"),
-    channels: String = String("public"),
 ) -> String:
     var out = String("artifacts {\n")
     if name.byte_length() > 0:
@@ -59,7 +55,6 @@ def _art(
     if bs.byte_length() > 0:
         out += String("  build_system: \"") + bs + String("\"\n")
     out += _items(String("args"), args)
-    out += _items(String("allowed_channels"), channels)
     return out + String("}\n")
 
 
@@ -87,7 +82,7 @@ def test_control_is_accepted() raises:
             + _bs(name = String("bare"), args = String(""))
             + _art()
             + _art(name = String("b"), bs = String("packer"), args = String("--set|{}|{k: 1}|{1x}"))
-            + _art(name = String("c"), bs = String("bare"), args = String("--out={out_dir}"), channels = String("public|internal"))
+            + _art(name = String("c"), bs = String("bare"), args = String("--out={out_dir}"))
         ),
         String("<parsed>"),
     )
@@ -191,44 +186,6 @@ def test_artifact_refusals() raises:
             " system 'buck2': kci could not find what the build made"
         ),
     )
-
-
-def test_channel_refusals() raises:
-    _expect(
-        _bs() + _art(channels = String("")),
-        String("artifact 'a' has no allowed_channels (an artifact names every channel it may go to)"),
-    )
-    _expect(
-        _bs() + _art(channels = String("Public")),
-        String("artifact 'a' allowed channel 'Public' is not a channel name"),
-    )
-    _expect(
-        _bs() + _art(channels = String("public|public")),
-        String("artifact 'a' names 'public' twice in allowed_channels"),
-    )
-
-
-def _channels() -> String:
-    var out = String("channel {\n  name: \"public\"\n  visibility: PUBLIC\n")
-    out += String("  repository {\n    artifact_type: CONDA\n")
-    out += String("    location: \"https://registry.example.invalid/public\"\n")
-    out += String("    push_identity: \"publisher@example.invalid\"\n")
-    out += String("    credential { kind: API_TOKEN secret_name: \"PUBLIC_TOKEN\" }\n  }\n}\n")
-    return out^
-
-
-def test_against_the_channels_file() raises:
-    var ok = parse_artifact_declarations(_bs() + _art(), String("decl.textproto"))
-    validate_declarations_against_channels(ok, parse_channels_file(_channels()))
-    var beta = parse_artifact_declarations(
-        _bs() + _art(channels = String("public|beta")), String("decl.textproto")
-    )
-    var why = String("<accepted>")
-    try:
-        validate_declarations_against_channels(beta, parse_channels_file(_channels()))
-    except e:
-        why = String(e)
-    assert_equal(why, String("artifact 'a': unknown release channel 'beta' (declared: public)"))
 
 
 def test_name_predicate() raises:

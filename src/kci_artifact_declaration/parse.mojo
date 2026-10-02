@@ -18,7 +18,6 @@
 #     args: "//src/komira_json:komira_json_conda[release]"
 #     args: "--out"
 #     args: "{out_dir}"
-#     allowed_channels: "public"
 #   }
 #
 # which kci renders as `buck2 build --config-file /etc/kci/remote.buckconfig
@@ -164,7 +163,6 @@ def _parse_build_system(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Bui
 def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> ArtifactDeclaration:
     var name = String("")
     var seen_name = False
-    var channels = List[String]()
     var build_system = String("")
     var seen_build_system = False
     var args = List[String]()
@@ -179,8 +177,6 @@ def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifac
                 _twice(x, t.line, t.text, me)
             name = _string(x, t.text)
             seen_name = True
-        elif t.text == "allowed_channels":
-            channels.append(_string(x, t.text))
         elif t.text == "build_system":
             if seen_build_system:
                 _twice(x, t.line, t.text, me)
@@ -189,10 +185,8 @@ def _parse_artifact(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Artifac
         elif t.text == "args":
             args.append(_string(x, t.text))
         else:
-            _unknown(
-                x, t.line, t.text, me, String("name, allowed_channels, build_system, args")
-            )
-    return ArtifactDeclaration(name^, channels^, build_system^, args^)
+            _unknown(x, t.line, t.text, me, String("name, build_system, args"))
+    return ArtifactDeclaration(name^, build_system^, args^)
 
 
 def parse_artifact_declarations(

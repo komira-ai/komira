@@ -7,11 +7,11 @@
 # The schema is `kci.release.v1.ArtifactDeclarations`, generated into
 # `kci_artifact_declaration_proto`; this package adds no second model of it.
 # kci knows no build tool by name: a file declares build systems (a program
-# and its always-on args) and artifacts (the build system, the args appended
-# for it, the channels it may go to).
+# and its always-on args) and artifacts (a name, the build system and the
+# args appended for it).
 #
 #   parse.mojo     the textproto reader (validates before it returns)
-#   validate.mojo  the rules, the check against the channels file, lookups
+#   validate.mojo  the rules and the lookups
 #   contract.mojo  `{out_dir}`, `manifest.json`, the substitution, and the
 #                  two refusals over what a build left (exactly one
 #                  manifest; its `name` is the declaration's, exactly)
@@ -44,5 +44,4 @@ from kci_artifact_declaration.validate import (
     find_build_system,
     is_valid_declaration_name,
     validate_artifact_declarations,
-    validate_declarations_against_channels,
 )
