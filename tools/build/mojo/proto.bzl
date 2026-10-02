@@ -6,7 +6,7 @@ protoc-gen-mojo plugin, writing one `<stem>.mojo` per `.proto` plus an
 a mojo_library: other Mojo targets name it in `deps`, and it provides the
 same MojoInfo.
 
-  * The generated code imports its runtime (for example `komira_serde`), a
+  * The generated code imports its runtime (for example `komira_proto_codec`), a
     Mojo library like any other: list it in `deps`.
   * A `.proto` is found by protoc at its import path, `import_prefix`
     joined with its path in the package. Each library's `.proto` files are
