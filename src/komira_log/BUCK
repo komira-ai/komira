@@ -5,9 +5,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the typed argument model, the per-module level filter, the synchronous P1
 # stderr path, and the P2 engine behind the same call sites (per-core binary
 # record rings, decode-at-flush drain, file/stderr/metric sinks, spans). It
-# depends on komira_core (`Slab[T]`, raw fd writes), komira_atomic_alias (the
-# atomic level gate) and komira_obs (the JSON severity mapping and the
-# observability types the engine feeds). komira_runtime_paths is declared
+# depends on komira_core (`Slab[T]`, raw fd writes), komira_spsc_ring (`SpscRing[T]`),
+# komira_clock, komira_hash (the FNV-1a constants),
+# komira_atomic_alias (the atomic level gate), komira_trace (the span-line
+# formatter the drain renders with) and komira_metrics (the metric point types
+# the engine feeds). It also owns the one-line JSON structured logger and the
+# bounded write(2) loop every rendered line goes through (`structured_log`,
+# `log_write`). komira_runtime_paths is declared
 # because several tests take their scratch directory from `test_tmpdir()`.
 
 # The process-global holders: the immortal engine's address, the P1 config's
@@ -29,8 +33,12 @@ mojo_library(
     deps = [
         ":komira_log_holder",
         "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_clock:komira_clock",
         "//src/komira_core:komira_core",
-        "//src/komira_obs:komira_obs",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
@@ -61,6 +69,7 @@ mojo_library(
         "tests/test_log_sink_write_loss_is_counted_and_announced.mojo",
         "tests/test_log_text_emit.mojo",
         "tests/test_log_typed_never_drop_contract.mojo",
+        "tests/test_log_write_retry_and_loss_accounting.mojo",
         "tests/test_ring_lazy_slots.mojo",
         "tests/test_shared_engine_tls_key_reclaimed.mojo",
     ],
