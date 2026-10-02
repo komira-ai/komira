@@ -114,7 +114,7 @@ A kill of the wrapper cannot be caught, so a tether process in the compiler's se
 
 **Decision.** There is one Linux execution platform and one macOS one. No constraint separates unpacking from compiling, and no NUMA constraint exists: a target that needs the Linux x86_64 workers states `LINUX_X86_64` from `tools/build/platforms/defs.bzl`, and every other target needs no execution constraint.
 
-**Because.** An earlier layout split the workers into classes (light, mojo_compile) and NUMA shapes, each a constraint and a platform. Every target and toolchain had to name its class, and a stale name broke analysis of everything that depended on it. The worker pool is now chosen by the service property set (`[komira_re] linux_properties`), not by the build graph.
+**Because.** An earlier layout split the workers into classes (light, mojo_compile) and NUMA shapes, each a constraint and a platform. Every target and toolchain had to name its class, and a stale name broke analysis of everything that depended on it. The worker pool is now chosen by the service property set (`[komira_re] linux_x86_64_properties`), not by the build graph.
 
 **Revisit if.** A workload needs workers the single pool cannot serve.
 
