@@ -63,10 +63,15 @@
 # covers the live and compacted tiers" still needs.
 #
 # THE STORED BYTES ARE DECODED WITH THE TOPIC'S DURABLE SCHEMA. `open_scan`
-# checks the binding's topic columns (names and types) against the topic's
-# durable config (what `build_binding` read) before decoding, and refuses a
-# mismatch with `BROKER_SCAN_SCHEMA_MISMATCH`: a stale plan-cached binding or
-# one decoded off the wire must never choose how segment bytes are read.
+# checks the binding's topic columns against the topic's durable config (what
+# `build_binding` read) before decoding: name, Arrow type, nullability and
+# decimal precision/scale per column, in order (the structural identity
+# `komira_core/arrow/schema_identity.mojo` folds). A mismatch is refused with
+# `BROKER_SCAN_SCHEMA_MISMATCH`. Past the check, every segment is decoded, and
+# every output batch built, with the CONFIG's schema (plus `__partition`), not
+# the binding's, so what the check does not compare (timezone, field metadata)
+# is the topic's too: a stale plan-cached binding or one decoded off the wire
+# never chooses how segment bytes are read.
 #
 # THE BYTE BUDGET. `max_bytes` (whole scan) and
 # `partition_max_bytes` (each partition), measured in segment bytes. KIP-74:
@@ -411,8 +416,11 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
         ref b = req.binding
         self._refuse_foreign(b, String("open"))
         var spec = _BrokerScanSpec.from_binding(b)
-        var topic_schema = _topic_schema_of(b)
-        self._check_topic_schema(spec.topic, topic_schema, b.name)
+        # The CONFIG's schema, once the binding's topic columns match it: the
+        # binding never decides how stored bytes decode.
+        var topic_schema = self._check_topic_schema(
+            spec.topic, _topic_schema_of(b), b.name
+        )
 
         # ---- pass 1: per-partition facts, and the ONE pinned txn snapshot ----
         var facts = List[_PartitionFacts]()
@@ -421,8 +429,20 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
             var p = spec.partitions[i]
             var core = self._core(spec.topic, p)
             var hwm = core.next_offset()
-            self._refuse_compacted_tier(spec.topic, p, spec.start_offsets[i], hwm)
+            # ORDERING INVARIANT -- read `log_start` and the live index BEFORE
+            # the compaction-index LIST. The compaction worker commits the
+            # `CompactedEntry` (its step 6) BEFORE it advances `log_start`
+            # (step 8), and `resolve_index` itself reads `log_start`. So any
+            # read here that sees a moved `log_start` happened after the entry
+            # was committed, and the LIST that follows every such read must see
+            # that entry and refuse. LISTing first let steps 6-8 land between
+            # an empty LIST and the `log_start` read, and pass 2 then clamped
+            # `start` to the moved `log_start`: the live suffix, no error, the
+            # prefix reported as retention.
+            var log_start = core.log_start_offset()
+            var index = core.resolve_index()
             var tags = core.chunk_txn_tags()
+            self._refuse_compacted_tier(spec.topic, p, spec.start_offsets[i], hwm)
             for t in range(len(tags)):
                 ref id = tags[t].txn_id
                 if id != String("") and not _contains(txn_ids, id):
@@ -431,8 +451,8 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
                 _PartitionFacts(
                     partition=p,
                     high_watermark=hwm,
-                    log_start_offset=core.log_start_offset(),
-                    index=core.resolve_index(),
+                    log_start_offset=log_start,
+                    index=index^,
                     tags=tags^,
                 )
             )
@@ -575,9 +595,10 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
 
     def _check_topic_schema(
         self, topic: String, topic_schema: Schema, binding_name: String
-    ) raises:
+    ) raises -> Schema:
         """Refuse a binding whose topic columns are not the topic's durable
-        config schema (names and types, in order)."""
+        config schema (name, type, nullability, decimal precision and scale,
+        in order), and return the CONFIG's schema, which is what decodes."""
         var cfg = BrokerTopicConfig.decode(
             self._store.get(Path.parse(_topic_config_key(self._cluster, topic)))
         )
@@ -599,6 +620,11 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
                 topic_schema.field_name(i) != cfg.schema.field_name(i)
                 or topic_schema.field_arrow_type(i)
                 != cfg.schema.field_arrow_type(i)
+                or topic_schema.field_nullable(i) != cfg.schema.field_nullable(i)
+                or topic_schema.field_decimal_precision(i)
+                != cfg.schema.field_decimal_precision(i)
+                or topic_schema.field_decimal_scale(i)
+                != cfg.schema.field_decimal_scale(i)
             ):
                 raise Error(
                     String(BROKER_SCAN_SCHEMA_MISMATCH)
@@ -612,8 +638,10 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
                     + topic
                     + String("' column '")
                     + cfg.schema.field_name(i)
-                    + String("' in name or type")
+                    + String("' in name, type, nullability or decimal")
+                    + String(" precision/scale")
                 )
+        return cfg.schema.copy()
 
     def _refuse_compacted_tier(
         self, topic: String, partition: Int64, start: Int64, hwm: Int64
@@ -788,7 +816,8 @@ def _decode_segment_stream(
 ) raises -> Slab[RecordBatch]:
     """Schema-directed decode of one segment's Arrow IPC stream
     (`Schema, RecordBatch*, EOS`) with `komira_core`'s record-batch decoder.
-    The Schema frame is skipped: the binding's schema is the authority, and a
+    The Schema frame is skipped: `topic_schema` is the topic's durable config
+    schema (`_check_topic_schema` returns it), which is the authority, and a
     frame whose column count disagrees with it is refused by the core decoder's
     own bounds checks."""
     var types = List[ArrowType]()

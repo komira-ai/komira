@@ -22,7 +22,8 @@
 #   * a range reaching the COMPACTED (Parquet) tier is refused by name, never
 #     clamped to the advanced `log_start`;
 #   * a binding whose topic columns disagree with the topic config (same
-#     arity, different type) is refused by name before any byte is decoded;
+#     arity, different type; or same type id, different nullability) is
+#     refused by name before any byte is decoded;
 #   * a zero-survivor log-compacted chunk contributes no rows and moves no
 #     later offset, and one whose body was swapped over the dense `.seg` is
 #     refused.
@@ -708,6 +709,22 @@ def test_a_forged_binding_schema_is_refused_by_name() raises:
     var e2 = resolve_for_execution(rt, as_ts)
     with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
         _ = rt.open_scan(ScanRequest(e2^))
+    # Same names AND type ids, different nullability: the check compares the
+    # full structural identity (`schema_identity.mojo`), not the type id alone.
+    var as_nullable = cached.copy()
+    as_nullable.schema = Schema(
+        names=[String("key"), String("value"), String(BROKER_PARTITION_COLUMN)],
+        arrow_types=[
+            ArrowType.INT64.type_id,
+            ArrowType.STRING.type_id,
+            ArrowType.INT64.type_id,
+        ],
+        dtypes=[DType.int64, DType.uint8, DType.int64],
+        nullables=[True, True, False],
+    )
+    var e3 = resolve_for_execution(rt, as_nullable)
+    with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
+        _ = rt.open_scan(ScanRequest(e3^))
 
 
 # =============================================================================
