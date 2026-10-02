@@ -248,12 +248,18 @@ def publish_flow[T: PkgTransport, S: SecretStore, W: Sleeper](
                 + String(" and these artifacts publish to both a conda channel")
                 + String(" and a python index; publish them in two runs"),
             )
+        # The token is bound to the channel's host: `run_publish` asks for it
+        # per (surface, host) before the first upload, so a target on any
+        # other host is refused with nothing sent.
+        var host = repo_host(inputs.targets[0].coordinate.repo)
         var token: StaticTokenCredential
         if flags.credential_kind == CREDENTIAL_TOKEN_FILE:
-            token = StaticTokenCredential.token_file(surfaces[0], flags.credential_arg)
+            token = StaticTokenCredential.token_file(
+                surfaces[0], host^, flags.credential_arg
+            )
         else:
             token = StaticTokenCredential.token_secret(
-                surfaces[0], store, flags.credential_arg
+                surfaces[0], host^, store, flags.credential_arg
             )
         return _publish_with(inputs, read_t^, write_t^, token^, opts, sleeper)
     except e:

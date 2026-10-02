@@ -13,10 +13,13 @@
 #   (4) an upload is read back until identical: CREATED + identical is
 #       UPLOADED; the index lagging one poll still converges; never
 #       identical within the polls is exit 5;
-#   (5) a 409 is settled by reading back: identical is SKIPPED, different
-#       fails (exit 3 when nothing was uploaded yet);
+#   (5) a 409 is settled by the same bounded read-back poll as a 201:
+#       identical is SKIPPED, including when the index lags a poll (the
+#       re-run after a lost answer); different fails (exit 3 when nothing
+#       was uploaded yet); absent on every poll is exit 5, never 3;
 #   (6) a lost upload answer (a transport fault) is settled the same way:
-#       identical is UPLOADED, absent is exit 5;
+#       identical is UPLOADED, including after a lagging poll; absent on
+#       every poll is exit 5;
 #   (7) exit 4 once something was uploaded; exit 3 when the first upload
 #       fails, and later entries are NOT-ATTEMPTED with no request sent;
 #   (8) the credential is asked before the first upload: a refusal there is
@@ -24,7 +27,10 @@
 #   (9) a plan holding a REFUSE uploads nothing: exit 3, or 5 when every
 #       refusal is a read that could not be answered;
 #  (10) a file that changed since it was planned is refused before its
-#       upload request.
+#       upload request;
+#  (11) the credential is asked for the host each upload goes to, and a
+#       credential issued for another host is refused before the first
+#       upload with zero requests.
 #
 # Hermetic: scripted transports and credentials over staged fixture files;
 # no network.
@@ -50,8 +56,10 @@ from kci_pkg_upload import (
     RegistrySet,
     ScriptedCredential,
     ScriptedPkgTransport,
+    StaticTokenCredential,
 )
 from kci_pkg_upload.wire import bytes_of
+from komira_secret_store import SecretValue
 from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
 
 from komira_retry import RecordingSleeper
@@ -236,6 +244,8 @@ def test_upload_is_read_back_until_identical() raises:
     assert_equal(rs.transport().unconsumed(), 0)
     # the credential is asked once before any upload, then by the upload and the read-back
     assert_equal(rs.credential().asked_count(), 3)
+    for k in range(3):
+        assert_equal(rs.credential().asked_host(k), String("conda.example.invalid"))
     assert_equal(len(sl.slept), 0)
 
     var lag = ScriptedPkgTransport()
@@ -280,7 +290,9 @@ def test_a_409_is_settled_by_reading_back() raises:
     assert_equal(r.exit_code, EXIT_OK, _dump(r))
     assert_equal(r.uploaded, 0)
     assert_equal(r.skipped, 1)
-    assert_true(r.has_line_containing(String("uploaded by someone else since the plan, identical")), _dump(r))
+    assert_true(r.has_line_containing(String("SKIPPED https://conda.example.invalid/example-stable/linux-64/")), _dump(r))
+    assert_true(r.has_line_containing(String("already holds it, identical (HTTP 409)")), _dump(r))
+    assert_equal(len(sl.slept), 0)
 
     var d = ScriptedPkgTransport()
     d.queue(PkgResponse(409))
@@ -291,6 +303,41 @@ def test_a_409_is_settled_by_reading_back() raises:
     assert_true(r2.has_line_containing(String("DUPLICATE_REFUSED")), _dump(r2))
     assert_true(r2.has_line_containing(String("PRESENT_DIFFERENT")), _dump(r2))
     assert_equal(_posts(rs2), 1)
+
+    # The re-run after a lost answer: the plan read ABSENT because the index
+    # lagged, the upload answers 409, and the index shows the file one poll
+    # later. That is SKIPPED, exit 0, after one wait.
+    var lag = ScriptedPkgTransport()
+    lag.queue(PkgResponse(409))
+    lag.queue(_repodata(String("linux-64"), String("")))
+    lag.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
+    var rs3 = _set(lag^)
+    var sl3 = RecordingSleeper()
+    var r3 = run_publish(plan, rs3, _names(), False, _quick(), sl3)
+    assert_equal(r3.exit_code, EXIT_OK, _dump(r3))
+    assert_equal(r3.skipped, 1)
+    assert_equal(r3.uploaded, 0)
+    assert_equal(rs3.transport().unconsumed(), 0)
+    assert_equal(len(sl3.slept), 1)
+    assert_equal(sl3.slept[0], Int64(250))
+
+    # A 409 whose file never shows within the polls: the server said a file
+    # of that name exists, so this is "cannot tell" (5), not refused (3).
+    var never = ScriptedPkgTransport()
+    never.queue(PkgResponse(409))
+    never.queue(_repodata(String("linux-64"), String("")))
+    never.queue(_repodata(String("linux-64"), String("")))
+    never.queue(_repodata(String("linux-64"), String("")))
+    var rs4 = _set(never^)
+    var sl4 = RecordingSleeper()
+    var r4 = run_publish(plan, rs4, _names(), False, _quick(), sl4)
+    assert_equal(r4.exit_code, EXIT_CANNOT_TELL, _dump(r4))
+    assert_true(r4.has_line_containing(String("UNCONFIRMED")), _dump(r4))
+    assert_true(r4.has_line_containing(String("DUPLICATE_REFUSED")), _dump(r4))
+    assert_true(r4.has_line_containing(String("after 3 read(s): ABSENT")), _dump(r4))
+    assert_false(r4.has_line_containing(String("FAILED")), _dump(r4))
+    assert_equal(rs4.transport().unconsumed(), 0)
+    assert_equal(len(sl4.slept), 2)
 
 
 def test_a_lost_answer_is_settled_by_reading_back() raises:
@@ -308,10 +355,25 @@ def test_a_lost_answer_is_settled_by_reading_back() raises:
     var a = ScriptedPkgTransport()
     a.queue_fault(String("connection reset after the body was sent"))
     a.queue(_repodata(String("linux-64"), String("")))
+    a.queue(_repodata(String("linux-64"), String("")))
+    a.queue(_repodata(String("linux-64"), String("")))
     var rs2 = _set(a^)
     var r2 = run_publish(plan, rs2, _names(), False, _quick(), sl)
     assert_equal(r2.exit_code, EXIT_CANNOT_TELL, _dump(r2))
     assert_true(r2.has_line_containing(String("UNCONFIRMED")), _dump(r2))
+    assert_equal(rs2.transport().unconsumed(), 0)
+
+    # The lost answer's bytes show one poll late: UPLOADED, exit 0.
+    var late = ScriptedPkgTransport()
+    late.queue_fault(String("connection reset after the body was sent"))
+    late.queue(_repodata(String("linux-64"), String("")))
+    late.queue(_repodata(String("linux-64"), String(_LINUX_SHA)))
+    var rs3 = _set(late^)
+    var sl3 = RecordingSleeper()
+    var r3 = run_publish(plan, rs3, _names(), False, _quick(), sl3)
+    assert_equal(r3.exit_code, EXIT_OK, _dump(r3))
+    assert_equal(r3.uploaded, 1)
+    assert_equal(len(sl3.slept), 1)
 
 
 def test_exit_4_after_an_upload_and_3_before() raises:
@@ -377,6 +439,24 @@ def test_a_changed_file_is_refused_before_its_upload() raises:
     assert_equal(rs.transport().call_count(), 0)
 
 
+def test_a_credential_for_another_host_is_refused_first() raises:
+    var sl = RecordingSleeper()
+    var plan = _plan(_targets(String("linux-64.json")), PRESENCE_ABSENT)
+    var cred = StaticTokenCredential(
+        SURFACE_PREFIX_DEV,
+        String("other.example.invalid"),
+        SecretValue.from_string(String("example-token-not-a-credential")),
+    )
+    var rs = RegistrySet[_Tripwire, StaticTokenCredential](_Tripwire(), cred^)
+    var r = run_publish(plan, rs, _names(), False, _quick(), sl)
+    assert_equal(r.exit_code, EXIT_REFUSED, _dump(r))
+    assert_true(r.has_line_containing(String("REFUSED credential")), _dump(r))
+    assert_true(r.has_line_containing(String("'conda.example.invalid'")), _dump(r))
+    assert_true(r.has_line_containing(String("NOT-ATTEMPTED")), _dump(r))
+    assert_false(r.has_line_containing(String("example-token-not-a-credential")), _dump(r))
+    assert_equal(rs.transport().calls, 0)
+
+
 def main() raises:
     test_plan_publish_reads_presence_anonymously()
     test_verify_target_files()
@@ -388,4 +468,5 @@ def main() raises:
     test_the_credential_is_asked_before_the_first_upload()
     test_a_plan_with_a_refusal_uploads_nothing()
     test_a_changed_file_is_refused_before_its_upload()
+    test_a_credential_for_another_host_is_refused_first()
     print("test_publish_run: ALL PASS")

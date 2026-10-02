@@ -12,19 +12,27 @@
 #   * `dry_run` returns the plan's lines and exit 0. It makes NO call on the
 #     registry set: no transport request and no credential request, so no
 #     token is resolved or minted and nothing is uploaded;
-#   * otherwise the credential is asked for every surface the uploads need
-#     BEFORE the first upload, so a credential refusal (an OIDC environment
-#     that is not the required one included) stops the run with nothing
-#     uploaded. Then each UPLOAD entry, in order:
+#   * otherwise the credential is asked for every (surface, host) the
+#     uploads need BEFORE the first upload, so a credential refusal (an OIDC
+#     environment that is not the required one, or a host the credential was
+#     not issued for, included) stops the run with nothing uploaded. Then
+#     each UPLOAD entry, in order:
 #       - the file is read again and must still have the planned sha256;
-#       - CREATED: read back until PRESENT_IDENTICAL (bounded polling; the
-#         index can lag the upload). PRESENT_DIFFERENT fails the run; still
-#         unconfirmed after the last poll is "cannot tell";
-#       - DUPLICATE_REFUSED (a 409; someone uploaded since the plan was read):
-#         read back once; identical is SKIPPED, anything else fails;
-#       - UNKNOWN (the bytes may or may not have landed): read back once;
-#         identical counts as uploaded, anything else is "cannot tell";
-#       - any other answer fails the run.
+#       - CREATED, DUPLICATE_REFUSED (a 409: a file of that name is already
+#         there) and UNKNOWN (the answer was lost; the bytes may or may not
+#         have landed) are all settled by the SAME bounded read-back poll,
+#         because the index lags an upload whoever made it. A 409 is the
+#         usual answer on a re-run after a lost answer, while the index
+#         still lags;
+#       - read back identical: CREATED and UNKNOWN count as uploaded, a 409
+#         is SKIPPED;
+#       - read back PRESENT_DIFFERENT or NO_COMMON_FIELD fails the run: a
+#         different file holds that name;
+#       - anything else after the last poll (ABSENT, UNKNOWN, AUTH, RATE) is
+#         "cannot tell". After a 409 that is never a definite failure: the
+#         server said a file of that name exists, and the index has not yet
+#         shown which;
+#       - any other upload answer fails the run.
 #     The first failure stops the run; later entries are NOT-ATTEMPTED.
 #
 # EXIT CODES: 0 everything uploaded or skipped; 3 refused before any upload;
@@ -60,6 +68,7 @@ from kci_pkg_upload import (
     RegistrySet,
     presence_kind_name,
 )
+from kci_pkg_upload.coordinate import repo_host
 from kci_release_channel import ChannelDeclaration
 from komira_retry import Sleeper
 
@@ -178,6 +187,12 @@ def render_plan(plan: PublishPlan, dry_run: Bool) -> List[String]:
     return out^
 
 
+def _surface_of(t: PublishTarget) -> Int:
+    if t.coordinate.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
+        return SURFACE_PREFIX_DEV
+    return SURFACE_PYPI_UPLOAD
+
+
 def surfaces_needed(plan: PublishPlan) -> List[Int]:
     """The credential surfaces the plan's UPLOAD entries need, each once."""
     var out = List[Int]()
@@ -185,9 +200,7 @@ def surfaces_needed(plan: PublishPlan) -> List[Int]:
         ref e = plan.entries[i]
         if e.action != ACTION_UPLOAD:
             continue
-        var s = SURFACE_PYPI_UPLOAD
-        if e.target.coordinate.substrate == SUBSTRATE_PREFIX_DEV_CONDA:
-            s = SURFACE_PREFIX_DEV
+        var s = _surface_of(e.target)
         var seen = False
         for j in range(len(out)):
             if out[j] == s:
@@ -195,6 +208,30 @@ def surfaces_needed(plan: PublishPlan) -> List[Int]:
         if not seen:
             out.append(s)
     return out^
+
+
+def _ask_credential_first[T: PkgTransport, C: RegistryCredential](
+    plan: PublishPlan, mut registry: RegistrySet[T, C]
+) raises:
+    """Ask the credential for each (surface, host) the UPLOAD entries need,
+    each once, so a refusal comes before the first upload."""
+    var surfaces = List[Int]()
+    var hosts = List[String]()
+    for i in range(len(plan.entries)):
+        ref e = plan.entries[i]
+        if e.action != ACTION_UPLOAD:
+            continue
+        var s = _surface_of(e.target)
+        var h = repo_host(e.target.coordinate.repo)
+        var seen = False
+        for j in range(len(surfaces)):
+            if surfaces[j] == s and hosts[j] == h:
+                seen = True
+        if seen:
+            continue
+        _ = registry.credential().authorization(s, h)
+        surfaces.append(s)
+        hosts.append(h^)
 
 
 def package_file_of(t: PublishTarget) raises -> PackageFile:
@@ -292,14 +329,12 @@ def run_publish[T: PkgTransport, C: RegistryCredential, S: Sleeper](
         r.lines.append(String("DRY RUN: nothing was uploaded"))
         _finish(r, plan, len(plan.entries))
         return r^
-    var surfaces = surfaces_needed(plan)
-    for i in range(len(surfaces)):
-        try:
-            _ = registry.credential().authorization(surfaces[i])
-        except e:
-            _fail(r, EXIT_REFUSED, String("REFUSED credential: ") + String(e))
-            _finish(r, plan, 0)
-            return r^
+    try:
+        _ask_credential_first(plan, registry)
+    except e:
+        _fail(r, EXIT_REFUSED, String("REFUSED credential: ") + String(e))
+        _finish(r, plan, 0)
+        return r^
     for i in range(len(plan.entries)):
         ref e = plan.entries[i]
         ref t = e.target
@@ -311,77 +346,56 @@ def run_publish[T: PkgTransport, C: RegistryCredential, S: Sleeper](
         try:
             var f = package_file_of(t)
             var o = registry.upload(f, names)
-            if o.kind == UPLOAD_CREATED:
-                r.uploaded += 1
+            if (
+                o.kind == UPLOAD_CREATED
+                or o.kind == UPLOAD_DUPLICATE_REFUSED
+                or o.kind == UPLOAD_UNKNOWN
+            ):
                 var p = _read_back_until_identical(registry, t, opts, sleeper)
                 if p.kind == PRESENCE_PRESENT_IDENTICAL:
-                    r.lines.append(
-                        String("UPLOADED ") + t.where() + String(" sha256=") + t.sha256_hex
-                    )
-                    continue
-                if (
-                    p.kind == PRESENCE_PRESENT_DIFFERENT
-                    or p.kind == PRESENCE_NO_COMMON_FIELD
-                ):
-                    _fail(
-                        r,
-                        EXIT_FAILED,
-                        String("FAILED ")
-                        + t.where()
-                        + String(" -- uploaded, but the registry reads back ")
-                        + _describe(p),
-                    )
-                else:
-                    _fail(
-                        r,
-                        EXIT_CANNOT_TELL,
-                        String("UNCONFIRMED ")
-                        + t.where()
-                        + String(" -- uploaded, not yet read back identical: ")
-                        + _describe(p),
-                    )
-                _finish(r, plan, i + 1)
-                return r^
-            if o.kind == UPLOAD_DUPLICATE_REFUSED or o.kind == UPLOAD_UNKNOWN:
-                var p = registry.presence(t.coordinate, expected_identity(t))
-                if p.kind == PRESENCE_PRESENT_IDENTICAL:
-                    if o.kind == UPLOAD_UNKNOWN:
-                        r.uploaded += 1
-                        r.lines.append(
-                            String("UPLOADED ")
-                            + t.where()
-                            + String(" sha256=")
-                            + t.sha256_hex
-                            + String(" (the upload's answer was lost; read back identical)")
-                        )
-                    else:
+                    if o.kind == UPLOAD_DUPLICATE_REFUSED:
                         r.skipped += 1
                         r.lines.append(
                             String("SKIPPED ")
                             + t.where()
-                            + String(" -- uploaded by someone else since the plan, identical")
+                            + String(" -- the registry already holds it, identical (HTTP 409)")
                         )
+                        continue
+                    r.uploaded += 1
+                    var line = String("UPLOADED ") + t.where() + String(" sha256=") + t.sha256_hex
+                    if o.kind == UPLOAD_UNKNOWN:
+                        line += String(" (the upload's answer was lost; read back identical)")
+                    r.lines.append(line^)
                     continue
-                if o.kind == UPLOAD_UNKNOWN:
+                if o.kind == UPLOAD_CREATED:
+                    r.uploaded += 1
+                var what = String(" -- uploaded, ")
+                if o.kind != UPLOAD_CREATED:
+                    what = String(" -- ") + o.detail + String("; ")
+                if (
+                    p.kind == PRESENCE_PRESENT_DIFFERENT
+                    or p.kind == PRESENCE_NO_COMMON_FIELD
+                ):
+                    var code = EXIT_FAILED if r.uploaded > 0 else EXIT_REFUSED
                     _fail(
                         r,
-                        EXIT_CANNOT_TELL,
-                        String("UNCONFIRMED ")
+                        code,
+                        String("FAILED ")
                         + t.where()
-                        + String(" -- ")
-                        + o.detail
-                        + String("; read back ")
+                        + what
+                        + String("but the registry reads back ")
                         + _describe(p),
                     )
                 else:
                     _fail(
                         r,
-                        fail_code,
-                        String("FAILED ")
+                        EXIT_CANNOT_TELL,
+                        String("UNCONFIRMED ")
                         + t.where()
-                        + String(" -- ")
-                        + o.detail
-                        + String("; read back ")
+                        + what
+                        + String("not read back identical after ")
+                        + String(max(opts.read_back_attempts, 1))
+                        + String(" read(s): ")
                         + _describe(p),
                     )
                 _finish(r, plan, i + 1)
