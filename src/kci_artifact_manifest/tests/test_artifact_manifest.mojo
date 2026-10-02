@@ -128,8 +128,8 @@ def test_refusals_name_the_manifest_and_the_key() raises:
     assert_equal(
         _refusal(_conda().replace(String('"CONDA"'), String('"OCI"'))),
         String(
-            "artifact manifest 'out/m.json': artifact_type 'OCI' has no artifact"
-            " manifest (CONDA or PYTHON)"
+            "artifact manifest 'out/m.json': artifact_type 'OCI' is not"
+            " published by kci publish (CONDA or PYTHON)"
         ),
     )
     assert_equal(
@@ -171,6 +171,18 @@ def test_render_refuses_what_the_parser_would() raises:
     except e:
         refused = String(e).find(String("'sha256'")) >= 0
     assert_true(refused)
+
+
+def test_file_name_reads_file_path_when_file_is_unset() raises:
+    # kci_publish's plan tests build a manifest by hand and set only
+    # `file_path`; the registry name must still come out of it.
+    var m = ArtifactManifest(String("hand"))
+    m.artifact_type = String("CONDA")
+    m.file_path = String("/pkgs/linux-64/example-pkg-1.2.3-h0_0.conda")
+    assert_equal(m.file_name(), String("example-pkg-1.2.3-h0_0.conda"))
+    var bare = ArtifactManifest(String("hand"))
+    bare.file_path = String("example_pkg-1.2.3-py3-none-any.whl")
+    assert_equal(bare.file_name(), String("example_pkg-1.2.3-py3-none-any.whl"))
 
 
 def test_is_sha256_hex() raises:

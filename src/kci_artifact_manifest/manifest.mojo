@@ -63,11 +63,17 @@ struct ArtifactManifest(Copyable, Movable, Deinitable):
         self.metadata_path = String("")
 
     def file_name(self) -> String:
-        """The last path segment of `file`: the name the registry sees."""
-        var slash = self.file.rfind(String("/"))
+        """The last path segment of `file_path`: the name the registry sees.
+
+        It is read from `file_path`, the path whose bytes get uploaded, and
+        not from `file`, so the name and the bytes cannot come from two
+        different fields. A parsed manifest and `kci build` set both, and
+        both give the same last segment; a caller that builds a manifest by
+        hand and sets only `file_path` still gets the right name."""
+        var slash = self.file_path.rfind(String("/"))
         if slash < 0:
-            return self.file.copy()
-        return String(self.file[byte = slash + 1 :])
+            return self.file_path.copy()
+        return String(self.file_path[byte = slash + 1 :])
 
 
 def _refuse(source: String, why: String) raises:
@@ -192,7 +198,9 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
             source,
             String("artifact_type '")
             + m.artifact_type
-            + String("' has no artifact manifest (CONDA or PYTHON)"),
+            # kci_publish's welded test matches this wording by its text;
+            # keep it unchanged so that verb can switch to this package.
+            + String("' is not published by kci publish (CONDA or PYTHON)"),
         )
     return m^
 
