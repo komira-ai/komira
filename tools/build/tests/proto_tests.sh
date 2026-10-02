@@ -68,7 +68,8 @@ expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/gcp_cl
 expect_red gcp_client_absence_check 'which must be absent' tests//negative/gcp_client:absence_check_can_fail
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/gcp_client:tests_check_can_fail
 expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/gcp_client:unknown_protocol
-expect_red gcp_client_grpc_not_wired 'gRPC emission is not wired into gcp_client yet' tests//negative/gcp_client:grpc_not_wired
+expect_red gcp_client_grpc_not_wired '`protocol = "grpc"` with a service to emit: gcp_client does not wire' tests//negative/gcp_client:grpc_not_wired
+expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/gcp_client:rest_reaches_plugin
 
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin

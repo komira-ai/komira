@@ -315,18 +315,20 @@ files, so the client is welded like any library: the generated
 `test_srcs` entry, followed by the caller's. Output is restricted to the
 closure of `roots` (messages) and `methods` (`Service.Method`), at least one
 of them required; `messages_only` emits no service. `protocol` is "rest"
-(the default) or "grpc", which is refused until gRPC emission is wired
-into gcp_client. `protos` takes source
-paths of `.proto` files only, never a label. The referenced googleapis
-files (monitored_resource, logging/type, rpc/status, ...) are generated as
-sibling modules through `bundle_only`, which `bundle_proto_deps = True`
-requires. `deps` is required and non-empty: nothing is added to the runtime
-the caller names, and they may be anything `mojo_library.deps` takes. Every
-refusal is at analysis. `<name>[gen]` is the generated directory, with
-`[gen][<file>]` one generated file and `[gen][proto]` the staged `.proto`
-inputs (`mojo_library`'s optional `gen` attribute re-exports a generating
-target whole, sub-targets included, as that sub-target; nothing checks that
-`srcs` come from it). The module docstring of
+(the default) or "grpc"; a target that emits a service is refused under
+"grpc" until gcp_client wires the gRPC transport runtime and its
+token-metadata hook, and `messages_only` output is the same under both.
+`protos` takes source paths of `.proto` files only, never a label. The
+referenced googleapis files (monitored_resource, logging/type, rpc/status,
+...) are generated as sibling modules through `bundle_only`, which
+`bundle_proto_deps = True` requires. `deps` is required and non-empty:
+nothing is added to the runtime the caller names, and they may be anything
+`mojo_library.deps` takes. Every refusal is at analysis. `<name>[gen]` is
+the generated directory, with `[gen][<file>]` one generated file and
+`[gen][proto]` the staged `.proto` inputs (`mojo_library`'s optional `gen`
+attribute re-exports a generating target whole, sub-targets included, as
+that sub-target; nothing checks that `srcs` come from it). The module
+docstring of
 [`../cloud/gcp.bzl`](../cloud/gcp.bzl) has the details;
 [`tests//functional/gcp_client`](../tests/functional/gcp_client/BUCK) and
 [`tests//negative/gcp_client`](../tests/negative/gcp_client/BUCK) exercise it.

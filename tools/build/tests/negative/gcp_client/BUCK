@@ -15,6 +15,15 @@ _RUNTIME = ["//functional/proto:komira_serde"]
 
 _ITEM = ["example/shop/v1/item.proto"]
 
+# shop.proto, whose service ShopService has no `(google.api.http)` annotation,
+# with the item.proto it imports.
+_SHOP = [
+    "example/shop/v1/item.proto",
+    "example/shop/v1/shop.proto",
+]
+
+_SHOP_DEPS = ["//functional/gcp_client:shop_api"]
+
 # "neither `roots` nor `methods` is set"
 gcp_client(
     name = "unscoped",
@@ -128,16 +137,30 @@ gcp_client(
     deps = _RUNTIME,
 )
 
-# "gRPC emission is not wired into gcp_client yet": "grpc" is a value of
-# `protocol`, refused until the generation path emits it.
+# "with a service to emit: gcp_client does not wire": "grpc" is a value of
+# `protocol`, but a target emitting a service under it is refused until
+# gcp_client wires the gRPC transport runtime and its token-metadata hook.
 gcp_client(
     name = "grpc_not_wired",
-    bundle_only = _ITEM,
+    bundle_only = _SHOP,
     bundle_proto_deps = True,
-    messages_only = True,
-    proto_deps = _DEPS,
+    methods = ["ShopService.GetItem"],
+    proto_deps = _SHOP_DEPS,
     protocol = "grpc",
     protos = [],
-    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "no `(google.api.http)` annotation": the default protocol reaches the
+# plugin as "rest". The fixture service carries no HTTP annotations, which
+# only the REST emitter refuses; under "grpc", "connect" or no option at all
+# the service generates without this error.
+gcp_client(
+    name = "rest_reaches_plugin",
+    bundle_only = _SHOP,
+    bundle_proto_deps = True,
+    methods = ["ShopService.GetItem"],
+    proto_deps = _SHOP_DEPS,
+    protos = [],
     deps = _RUNTIME,
 )

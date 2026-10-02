@@ -8,7 +8,7 @@
         bundle_only = ["google/logging/v2/log_entry.proto", ...],
         methods = ["LoggingServiceV2.ListLogEntries"],   # or roots = [...]
         messages_only = True,
-        protocol = "rest",              # the default; "grpc" is not wired yet
+        protocol = "rest",              # the default; "grpc" only with messages_only
         deps = ["komira//src/komira_serde:komira_serde", ...],
     )
 
@@ -35,11 +35,14 @@ holding either, `=` or whitespace is refused here rather than mis-split.
 
 Protocol. `protocol` is the wire protocol of the generated service code,
 passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
-HTTP, the default) or "grpc". gRPC emission is not wired into gcp_client
-yet, so "grpc" is refused like any other wrong value; any other value is
-refused naming the accepted ones. The attribute is a string checked in
-`<name>_gen`, not an `attrs.enum`: an enum is coerced when the BUCK file is
-evaluated, so one wrong value would fail the whole package to load.
+HTTP, the default) or "grpc"; any other value is refused naming the
+accepted ones. gcp_client does not wire the gRPC transport runtime or its
+token-metadata hook yet, so a target that emits a service is refused for
+any protocol but "rest". `messages_only = True` takes "grpc": the plugin
+branches on the protocol only for service code, so the output is the same
+as for "rest". The attribute is a string checked in `<name>_gen`, not an
+`attrs.enum`: an enum is coerced when the BUCK file is evaluated, so one
+wrong value would fail the whole package to load.
 
 Bundling. The plugin writes a reference to a message of another `.proto` as
 `<name>.<stem>`, so every file the closure reaches is generated into this
@@ -83,7 +86,7 @@ load(
 _LIST_SEPARATOR = "+"
 _LAYOUT_PROBE = "_layout_probe.mojo"
 
-# Values of `protocol`, and the ones the generation path is wired for.
+# Values of `protocol`, and the ones gcp_client wires service code for.
 _PROTOCOLS = ["rest", "grpc"]
 _WIRED_PROTOCOLS = ["rest"]
 
@@ -115,8 +118,8 @@ def _gcp_client_gen_impl(ctx):
         fail("{}: neither `roots` nor `methods` is set. A gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
     if ctx.attrs.protocol not in _PROTOCOLS:
         fail("{}: `protocol` `{}` is not one of {}".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _PROTOCOLS])))
-    if ctx.attrs.protocol not in _WIRED_PROTOCOLS:
-        fail("{}: `protocol = \"{}\"`: gRPC emission is not wired into gcp_client yet; use `protocol = \"rest\"`".format(ctx.label, ctx.attrs.protocol))
+    if ctx.attrs.protocol not in _WIRED_PROTOCOLS and not ctx.attrs.messages_only:
+        fail("{}: `protocol = \"{}\"` with a service to emit: gcp_client does not wire that protocol's transport runtime or its token-metadata hook yet; service code is wired for {} (`messages_only = True` takes any protocol)".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _WIRED_PROTOCOLS])))
     _check_items(ctx, "roots", ctx.attrs.roots)
     _check_items(ctx, "methods", ctx.attrs.methods)
     if ctx.attrs.bundle_proto_deps and not ctx.attrs.bundle_only:
