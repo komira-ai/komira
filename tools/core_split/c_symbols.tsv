@@ -1,0 +1,26 @@
+# symbol	owner: the package whose cxx_library defines the C symbol (proposal section c); a Mojo user of external_call["<symbol>"] depends on the owner. snappy_*: the prefix maps to a third-party target.
+symbol	owner
+komira_fcntl_set_nonblock	komira_libc
+komira_openat_creat	komira_libc
+komira_write_bytes	komira_libc
+komira_writev_iov	komira_libc
+komira_pwrite	komira_libc
+komira_ftruncate	komira_libc
+komira_fsync	komira_libc
+komira_lseek_end	komira_libc
+komira_prefetch_file	komira_libc
+komira_open_ro	komira_libc
+komira_fstat_size	komira_libc
+komira_mmap_ro	komira_libc
+komira_mmap_ro_count	komira_libc
+komira_munmap	komira_libc
+komira_madvise_willneed	komira_libc
+komira_madvise_willneed_bytes	komira_libc
+komira_madvise_willneed_range	komira_libc
+komira_stat_identity	komira_libc
+komira_set_mtime_ns	komira_libc
+komira_on_pool_enter	komira_concurrency
+komira_on_pool_exit	komira_concurrency
+komira_on_pool_depth	komira_concurrency
+komira_next_inmem_source_id	komira_scan_source
+snappy_*	//third_party/snappy:snappy

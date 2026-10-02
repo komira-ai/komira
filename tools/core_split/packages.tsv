@@ -1,0 +1,22 @@
+# package	description: the one authored sentence of the package README and the docstring of its __init__.mojo. One row per derived package.
+package	description
+komira_simd	SIMD byte-class, mask, copy, gather and bit-unpack primitives.
+komira_collections	The typed slab, a type-erased inline value, a variadic pack: generic containers with no dependencies.
+komira_concurrency	Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.
+komira_counters	Process-global census and falsifier counters plus the build-gated runtime introspection probe.
+komira_compression	Byte-stream codec trait and the eight codec implementations.
+komira_host	What the host looks like: cgroup-aware CPU topology, memory and hugepage probes, worker placement.
+komira_scalar_arith	Scalar 128 and 256-bit decimal arithmetic, casts, comparison and the overflow predicate.
+komira_buffer	Aligned, shared and memory-mapped byte buffers and the region trait that columns sit on.
+komira_arrow	Arrow-compatible columnar types: arrays of every kind, Column, Schema, RecordBatch, Table, bitmap, builders, typed views, selection vectors.
+komira_dynamic_filter	Bloom, range, IN-list and constant filters and the selectivity tracker.
+komira_arrow_ipc	Arrow IPC framing, encoders and decoders, the C data and stream interfaces, tensor columns, file chunk reads.
+komira_plan_expr	The expression language of a plan (Expr, AggExpr, ScalarValue, ColExpr builder, UDF payloads, ExprId/ExprPool) and the comptime schema descriptor.
+komira_exec_types	The result and error types that cross the operator / scheduler / caller boundary: EngineError, ExecResult, ProcessResult, QueryContext, the byte-budget parser, the PartitionBy output contract.
+komira_column_kernels	Vectorized compute over Arrow columns: arithmetic, comparison, casts, string, regexp, dictionary, union, decimal, case mapping, and the batch helpers that import them.
+komira_plan_stats	Plan-time statistics: the StatsProvider trait, ColumnStats and TableStats, the physical-type tag, the exact/inexact/absent precision lattice, per-source statistics; the HyperLogLog cardinality sketch is added after the copy.
+komira_scan_source	What a scan is: SourceLike, ScanBinding identity, scan params, per-format source descriptors, pushdown gate, Sink trait, in-memory registry.
+komira_plan_ir	LogicalPlan and PhysicalPlan trees, their variants, schema propagation, display, the scan-binding bind pass and audits.
+komira_agg_contract	The aggregation accumulator contract: Accumulator trait, plan-time AggLayout, strategy selection, typed column pointers, COUNT(DISTINCT) key.
+komira_join_assembly	Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression.
+komira_libc	The libc and POSIX layer every package shares: one getenv, the access probes and pthread_self, file and memory-map syscall wrappers with the C shim symbols they call, chunked large writes, RAII file descriptor.

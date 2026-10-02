@@ -1,0 +1,65 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_shared_lib")
+
+staged_files(
+    name = "c_files",
+    srcs = ["forced.c"],
+)
+
+# Reached only by force_load: nothing calls it.
+cxx_library(
+    name = "forced",
+    srcs = [":c_files[forced.c]"],
+    visibility = ["PUBLIC"],
+)
+
+# A C-ABI library of three Mojo exports and one force-loaded C symbol. It is
+# published only if the gate passes: the exports check, then the linked-run
+# driver that calls it.
+mojo_shared_lib(
+    name = "spike",
+    srcs = ["abi.mojo"],
+    exports = [
+        "spike_add",
+        "spike_sum_squares",
+        "spike_c_add",
+        "komira_spike_forced",
+    ],
+    gate_srcs = ["call_driver.mojo"],
+    deps = ["//tools/build/examples/cshim:add"],
+    force_load = [":forced"],
+)
+
+# The same sources with `exports_exact`: the dynamic symbol table is the two
+# names below, so the static C dependency's komira_example_add does not leak
+# (spike, without it, exports that symbol too). The twin of
+# tests//negative/shared_lib:leaks_by_default.
+mojo_shared_lib(
+    name = "spike_exact",
+    srcs = ["abi.mojo"],
+    exports = ["spike_add", "spike_c_add"],
+    exports_exact = True,
+    gate_srcs = ["hidden_driver.mojo"],
+    deps = ["//tools/build/examples/cshim:add"],
+)
+
+# The same shape with no C dependency, which is what builds on macOS arm64
+# today (the C/C++ toolchain is Linux only): two exports and one @export,
+# `plain_hidden`, that `exports` does not name.
+mojo_shared_lib(
+    name = "plain",
+    srcs = ["plain_abi.mojo"],
+    exports = ["plain_add", "plain_sum_squares"],
+    gate_srcs = ["plain_driver.mojo"],
+)
+
+# `exports_exact`: `plain_hidden` is local to the library (a version script on
+# Linux, an exported symbols list on macOS). The twin of
+# tests//negative/shared_lib:plain_leaks.
+mojo_shared_lib(
+    name = "plain_exact",
+    srcs = ["plain_abi.mojo"],
+    exports = ["plain_add", "plain_sum_squares"],
+    exports_exact = True,
+    gate_srcs = ["plain_exact_driver.mojo"],
+)
