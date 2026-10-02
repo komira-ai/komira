@@ -40,7 +40,8 @@ archive_files(
 # The library and its C API (snappy-c.h). C++, so it carries zig's libc++
 # (komira//tools/build/toolchains:libcxx) into every link that includes it.
 # config.h, copied into buck-out so that the compiles including it have one
-# digest wherever komira is mounted (see staged_files).
+# digest wherever komira is mounted (see staged_files). config.h hardcodes the one
+# target it compiles for, x86_64 Linux at x86-64-v3. komira-limit:snappy-x86-64-v3
 staged_files(
     name = "config",
     srcs = ["config.h"],

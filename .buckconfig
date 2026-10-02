@@ -34,7 +34,7 @@
   includes = komira//tools/build/lint/includes.bzl
 
 [parser]
-  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:linux-x86_64 target:toolchains//...->komira//tools/build/platforms:linux-x86_64 target:tests//...->komira//tools/build/platforms:linux-x86_64
+  target_platform_detector_spec = target:komira//...->komira//tools/build/platforms:host target:toolchains//...->komira//tools/build/platforms:host target:tests//...->komira//tools/build/platforms:host
 
 [build]
   # Local unless .buckconfig.local names a remote-execution service; see
