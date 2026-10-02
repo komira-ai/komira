@@ -24,7 +24,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false, assert_raises
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     WireEncoder,
     WireDecoder,

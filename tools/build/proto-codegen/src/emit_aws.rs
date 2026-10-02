@@ -22,6 +22,147 @@ pub const SUPPORTED_PROTOCOLS: &[&str] = &["json"];
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
+/// The generator version written into every generated header. Bump it when
+/// the emitted text changes for the same model, operation list and options.
+pub const AWS_GENERATOR_VERSION: &str = "2";
+
+/// The hand-written AWS core every generated module imports from: codecs,
+/// SigV4, credential providers, endpoints, retry and the signed-request
+/// transport. There is one core per cloud and no other AWS library.
+pub const AWS_CORE: &str = "komira_aws_core";
+
+/// When an emitted module needs an import.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum AwsImportMode {
+    /// Pure and client mode: the socket-free half.
+    Always,
+    /// Client mode only: anything that touches the transport.
+    ClientOnly,
+}
+
+/// One `from <module> import <names>` group of [`AWS_IMPORTS`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct AwsImport {
+    pub module: &'static str,
+    pub names: &'static [&'static str],
+    pub mode: AwsImportMode,
+}
+
+/// EVERY module the emitted code imports, and every name it imports from
+/// each. Nothing else in the emitter names a module: the import block, the
+/// shared pure preamble and the prose that cites a core symbol all read
+/// this table, so a layout change is an edit here and nowhere else.
+///
+/// The [`AWS_CORE`] rows are the contract `komira_aws_core` must meet, as
+/// names re-exported from its package root. The `Always` row is what a
+/// pure-mode module needs, so the core's socket-free half can land before
+/// any HTTP library; the `ClientOnly` row needs the transport.
+pub const AWS_IMPORTS: &[AwsImport] = &[
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "AWS_TS_ISO8601",
+            "AWS_TS_RFC822",
+            "AWS_TS_UNIX",
+            "AwsRequest",
+            "aws_blob_from_json",
+            "aws_error_code",
+            "aws_error_code_from_body",
+            "aws_error_message_from_body",
+            "aws_is_error_status",
+            "aws_f64_from_json",
+            "aws_json_blob",
+            "aws_json_bool",
+            "aws_json_f32",
+            "aws_json_f64",
+            "aws_json_i32",
+            "aws_json_i64",
+            "aws_json_string",
+            "aws_ts_from_json",
+            "aws_ts_to_json",
+        ],
+        mode: AwsImportMode::Always,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "AwsCredential",
+            "AwsCredsSource",
+            "AwsEndpoint",
+            "Header",
+            "HttpResult",
+            "resolve_endpoint",
+            "send_sigv4_signed_request",
+        ],
+        mode: AwsImportMode::ClientOnly,
+    },
+    AwsImport {
+        module: "komira_json",
+        names: &["JsonValue", "parse_json_value"],
+        mode: AwsImportMode::Always,
+    },
+    AwsImport {
+        module: "komira_http.transport.io_stream",
+        names: &["Connector"],
+        mode: AwsImportMode::ClientOnly,
+    },
+];
+
+/// The import section of a module: one `from` statement per module of
+/// [`AWS_IMPORTS`], in table order, holding every name that `pure_only`
+/// needs. Rows that share a module merge into one statement.
+pub fn aws_import_section(pure_only: bool) -> String {
+    let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
+    for row in AWS_IMPORTS {
+        if pure_only && row.mode == AwsImportMode::ClientOnly {
+            continue;
+        }
+        match groups.iter_mut().find(|(m, _)| *m == row.module) {
+            Some((_, names)) => names.extend_from_slice(row.names),
+            None => groups.push((row.module, row.names.to_vec())),
+        }
+    }
+    let mut s = String::new();
+    for (module, names) in groups {
+        if names.len() == 1 {
+            s.push_str(&format!("from {module} import {}\n", names[0]));
+        } else {
+            s.push_str(&format!("from {module} import (\n"));
+            for n in names {
+                s.push_str(&format!("    {n},\n"));
+            }
+            s.push_str(")\n");
+        }
+    }
+    s
+}
+
+/// Where the model came from, for the generated header. The emitter does
+/// not check it; `aws-client-gen` verifies the digest against the model
+/// bytes before it builds one.
+#[derive(Clone, Copy, Debug)]
+pub struct AwsProvenance<'a> {
+    /// The botocore data key, `<service>/<api version>`, e.g.
+    /// `logs/2014-03-28`.
+    pub model_key: &'a str,
+    /// The sha256 of the model file, as the pin records it.
+    pub model_sha256: &'a str,
+}
+
+/// One generated module.
+#[derive(Clone, Debug)]
+pub struct AwsEmitted {
+    /// `<module>.mojo`.
+    pub path: String,
+    pub source: String,
+    /// Every non-parameterised top-level struct the module declares, in
+    /// emission order: what a layout probe can `size_of`.
+    pub structs: Vec<String>,
+    /// The parameterised ones (the client), which a probe cannot name
+    /// without choosing parameters.
+    pub parameterised: Vec<String>,
+}
+
 // ---------------------------------------------------------------------------
 // Entry point
 // ---------------------------------------------------------------------------
@@ -37,6 +178,28 @@ pub fn emit_aws_client(
     module_name: &str,
     options: AwsEmitOptions,
 ) -> Result<(String, String), String> {
+    let e = emit_aws_module(lowering, overrides, module_name, options, None)?;
+    Ok((e.path, e.source))
+}
+
+/// [`emit_aws_client`], with the provenance the header records and the
+/// struct lists a layout probe needs.
+///
+/// Without `options.omit_preamble` the provenance is required: a standalone
+/// module whose header cannot say which model bytes it came from is refused.
+pub fn emit_aws_module(
+    lowering: &AwsLowering,
+    overrides: &AwsOverrides,
+    module_name: &str,
+    options: AwsEmitOptions,
+    provenance: Option<AwsProvenance<'_>>,
+) -> Result<AwsEmitted, String> {
+    if provenance.is_none() && !options.omit_preamble {
+        return Err(format!(
+            "emit_aws: module `{module_name}` has a header but no provenance; the \
+             header must name the model key and its sha256"
+        ));
+    }
     let meta = &lowering.service;
     if !SUPPORTED_PROTOCOLS.contains(&meta.protocol.as_str()) {
         return Err(format!(
@@ -62,8 +225,63 @@ pub fn emit_aws_client(
     overrides.check_against(lowering)?;
 
     let mut em = AwsEmitter::new(lowering, overrides, module_name, json_version, options)?;
-    let src = em.emit()?;
-    Ok((format!("{module_name}.mojo"), src))
+    em.provenance = provenance.map(|p| (p.model_key.to_string(), p.model_sha256.to_string()));
+    let source = em.emit()?;
+    Ok(AwsEmitted {
+        path: format!("{module_name}.mojo"),
+        source,
+        structs: em.structs,
+        parameterised: em.parameterised,
+    })
+}
+
+/// The layout probe for `emitted`: one `size_of` per struct it declares.
+///
+/// A generator that accepts an operation does not prove the emitted code
+/// lays out: an import alone does not make Mojo compute a struct's layout,
+/// and `size_of[T]()` does. Each `size_of` is a `comptime` value, and `main`
+/// prints their sum so none can be dropped. `import_path` is the dotted path
+/// a consumer imports the module by. A module with no struct to probe is
+/// refused, because an empty probe compiles and proves nothing. The CLI
+/// cannot reach this: every operation lowers to a Request and a Response
+/// struct, so the refusal guards other callers of this function.
+pub fn emit_layout_probe(emitted: &AwsEmitted, import_path: &str) -> Result<String, String> {
+    if emitted.structs.is_empty() {
+        return Err(format!(
+            "layout probe: `{import_path}` declares no non-parameterised struct, so a \
+             probe would compile while checking nothing"
+        ));
+    }
+    let mut s = String::new();
+    s.push_str(&format!(
+        "# GENERATED by //tools/build/proto-codegen:aws-client-gen (version {}) \
+         -- DO NOT EDIT.\n",
+        AWS_GENERATOR_VERSION
+    ));
+    s.push_str(&format!(
+        "# Layout probe for `{import_path}`: one size_of per struct it declares.\n"
+    ));
+    if emitted.parameterised.is_empty() {
+        s.push_str("# Parameterised structs, not probed: none.\n");
+    } else {
+        s.push_str(&format!(
+            "# Parameterised structs, not probed: {}.\n",
+            emitted.parameterised.join(", ")
+        ));
+    }
+    s.push_str("\nfrom std.sys import size_of\n\n");
+    s.push_str(&format!("from {import_path} import (\n"));
+    for (i, name) in emitted.structs.iter().enumerate() {
+        s.push_str(&format!("    {name} as _P{i},\n"));
+    }
+    s.push_str(")\n\n");
+    for i in 0..emitted.structs.len() {
+        s.push_str(&format!("comptime _SIZE_P{i} = size_of[_P{i}]()\n"));
+    }
+    let sum: Vec<String> = (0..emitted.structs.len()).map(|i| format!("_SIZE_P{i}")).collect();
+    s.push_str("\n\ndef main():\n");
+    s.push_str(&format!("    print({})\n", sum.join(" + ")));
+    Ok(s)
 }
 
 // ---------------------------------------------------------------------------
@@ -93,6 +311,12 @@ struct AwsEmitter<'a> {
     /// size/range constraint on a member, PLUS every shape that reaches one,
     /// so the call forwards. See [`AwsEmitter::validating_set`].
     validating: BTreeSet<String>,
+    /// `(model key, model sha256)` for the header.
+    provenance: Option<(String, String)>,
+    /// Non-parameterised top-level structs, in emission order.
+    structs: Vec<String>,
+    /// Parameterised top-level structs.
+    parameterised: Vec<String>,
     out: String,
     indent: usize,
 }
@@ -159,6 +383,9 @@ impl<'a> AwsEmitter<'a> {
             messages,
             by_fq,
             validating: BTreeSet::new(),
+            provenance: None,
+            structs: Vec::new(),
+            parameterised: Vec::new(),
             out: String::new(),
             indent: 0,
         })
@@ -238,7 +465,6 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_header(&mut self) {
-        let proto_path = self.lowering.model.files[0].proto_path.clone();
         let n_messages = self.lowering.model.files[0].messages.len();
         let n_enums = self.lowering.model.files[0].enums.len();
         let ops: Vec<String> = self
@@ -267,19 +493,30 @@ impl<'a> AwsEmitter<'a> {
             self.json_version,
             self.meta.target_prefix.clone().unwrap_or_default()
         ));
-        self.line(&format!("#   model        : {}", proto_path));
+        let (model_key, model_sha256) = self.provenance.clone().unwrap_or_default();
+        self.line(&format!("#   model key    : {model_key}"));
+        self.line(&format!("#   model sha256 : {model_sha256}"));
         self.line(&format!("#   operations   : {}", ops.join(", ")));
         self.line(&format!(
             "#   shapes       : {} messages, {} enums",
             n_messages,
             n_enums
         ));
+        self.line(&format!("#   generator    : aws-client-gen version {AWS_GENERATOR_VERSION}"));
+        self.line(&format!(
+            "#   mode         : {}",
+            if self.options.pure_only { "pure (no transport)" } else { "client" }
+        ));
         self.line("#");
-        self.line("# THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport");
-        self.line("# call below goes to the shipped, AWS-test-vector-validated");
-        self.line("# `komira_aws_relay.aws_relay_common.send_sigv4_signed_request`, which");
-        self.line("# 14 hand-written clients already share. Nothing here signs.");
-        self.line("#");
+        if !self.options.pure_only {
+            self.line("# THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport");
+            self.line(&format!(
+                "# call below goes to the hand-written `{}.send_sigv4_signed_request`,",
+                AWS_CORE
+            ));
+            self.line("# which is tested against the AWS SigV4 test vectors. Nothing here signs.");
+            self.line("#");
+        }
         if !self.validating.is_empty() {
             self.line("# ── §CONSTRAINTS — the model's `min` / `max`, checked ─────────────");
             self.line("#");
@@ -287,10 +524,9 @@ impl<'a> AwsEmitter<'a> {
             self.line("# MAKES BOTH. A required member is taken positionally by `__init__`,");
             self.line("# which forces a caller to pass one and says nothing whatever about it");
             self.line("# being non-empty. `min` is where botocore says the second thing —");
-            self.line("# `SecretIdType` is `{\"type\":\"string\",\"min\":1,\"max\":2048}` — and it");
-            self.line("# was parsed by the front-end and read by nobody until the shapes");
-            self.line("# below grew a `validate()`. Every bound here is READ FROM THE MODEL;");
-            self.line("# none is a policy this generator invented.");
+            self.line("# a string shape declared `{\"type\":\"string\",\"min\":1}` may not be");
+            self.line("# empty — and the shapes below check it in a `validate()`. Every bound");
+            self.line("# here is READ FROM THE MODEL; none is a policy this generator invented.");
             self.line("#");
             self.line("# `validate()` is called by `build_<op>_request`, which is the only");
             self.line("# entry point that produces an `AwsRequest` — so a value that reaches");
@@ -307,9 +543,8 @@ impl<'a> AwsEmitter<'a> {
             self.line("# the caller did not violate. Blob / list / map sizes and numeric");
             self.line("# ranges have no such gap and check BOTH bounds.");
             self.line("#");
-            self.line("# ⚠ `pattern` IS STILL DROPPED — 11 shapes across the six json");
-            self.line("# clients carry one and this emitter has no regex. That is a stated");
-            self.line("# gap, not an absence.");
+            self.line("# ⚠ `pattern` IS NOT CHECKED — this emitter has no regex, so a shape's");
+            self.line("# `pattern` is dropped. That is a stated gap, not an absence.");
             self.line("#");
         }
         if self.overrides.is_empty() {
@@ -338,43 +573,8 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_imports(&mut self) {
-        if !self.options.pure_only {
-            self.line("from komira_aws_core.credentials import AwsCredential");
-            self.line("from komira_aws_core.sigv4 import Header");
-        }
-        self.line("from komira_aws_wire.aws_wire import (");
-        self.line("    AWS_TS_ISO8601,");
-        self.line("    AWS_TS_RFC822,");
-        self.line("    AWS_TS_UNIX,");
-        self.line("    AwsRequest,");
-        self.line("    aws_blob_from_json,");
-        self.line("    aws_error_code,");
-        self.line("    aws_error_code_from_body,");
-        self.line("    aws_error_message_from_body,");
-        self.line("    aws_is_error_status,");
-        self.line("    aws_f64_from_json,");
-        self.line("    aws_json_blob,");
-        self.line("    aws_json_bool,");
-        self.line("    aws_json_f32,");
-        self.line("    aws_json_f64,");
-        self.line("    aws_json_i32,");
-        self.line("    aws_json_i64,");
-        self.line("    aws_json_string,");
-        self.line("    aws_ts_from_json,");
-        self.line("    aws_ts_to_json,");
-        self.line(")");
-        self.line("from komira_serde.json_value import JsonValue, parse_json_value");
-        if !self.options.pure_only {
-            self.line("from komira_http.transport.io_stream import Connector");
-            self.blank();
-            self.line("from komira_aws_relay.aws_relay_common import (");
-            self.line("    AwsEndpoint,");
-            self.line("    HttpResult,");
-            self.line("    resolve_endpoint,");
-            self.line("    send_sigv4_signed_request,");
-            self.line(")");
-            self.line("from komira_aws_relay.aws_relay_creds import AwsCredsSource");
-        }
+        let section = aws_import_section(self.options.pure_only);
+        self.out.push_str(&section);
         self.blank();
         self.blank();
     }
@@ -514,6 +714,7 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("# {}", "-".repeat(75)));
         self.line(&format!("# `{}` — AWS shape `{}`.", ty, msg.name));
         self.line(&format!("# {}", "-".repeat(75)));
+        self.structs.push(ty.clone());
         self.line(&format!("struct {ty}(Copyable, Movable, Deinitable):"));
         self.push();
 
@@ -1767,6 +1968,7 @@ impl<'a> AwsEmitter<'a> {
             (svc.name.clone(), svc.methods.clone())
         };
         let cls = format!("{}Client", self.ty_name(&svc_name));
+        self.parameterised.push(cls.clone());
         let p = self.prefix.to_uppercase();
 
         self.line(&format!("# {}", "=".repeat(75)));
@@ -1780,20 +1982,21 @@ impl<'a> AwsEmitter<'a> {
             "\"\"\"The generated {} client, parametric over the HTTP connector `C`",
             self.meta.service_full_name
         ));
-        self.line("    and the credential source `T` — the same two parameters the 14");
-        self.line("    hand-written clients in `komira_aws_relay` take.");
+        self.line("    and the credential source `T`.");
         self.blank();
-        self.line("    gap6: a per-owner value. The connector factory is a");
-        self.line("    `def () raises thin -> C` fn-ptr (FFI-POD, carve-out (a) — a code");
-        self.line("    pointer, no heap, no wildcard origin); the credential source is");
-        self.line("    moved in. No `UnsafePointer` field, no wildcard-origin field.\"\"\"");
+        self.line("    The connector factory is a `def () raises thin -> C` function");
+        self.line("    pointer (a code pointer, no heap); the credential source is moved");
+        self.line("    in. No field is an `UnsafePointer`.\"\"\"");
         self.blank();
         self.line("var _mk_connector: def () raises thin -> Self.C");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
         self.line("# WHERE this client sends. `None` = real AWS (the host derived from");
         self.line("# the region). A VALUE, never an ambient env var — see");
-        self.line("# `aws_relay_common.AwsEndpoint`. This is what makes every verb this");
+        self.line(&format!(
+            "# `{}.AwsEndpoint`. This is what makes every verb this",
+            AWS_CORE
+        ));
         self.line("# generator emits exercisable against a local emulator.");
         self.line("var _endpoint_override: Optional[AwsEndpoint]");
         self.blank();
@@ -1831,8 +2034,11 @@ impl<'a> AwsEmitter<'a> {
         self.line("def send(mut self, var req: AwsRequest) raises -> HttpResult:");
         self.push();
         self.line("\"\"\"Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call");
-        self.line("    into the shipped `send_sigv4_signed_request`, which drives the");
-        self.line("    AWS-test-vector-validated `komira_aws_core.sigv4`.");
+        self.line(&format!(
+            "    into the hand-written `{}.send_sigv4_signed_request`, which is",
+            AWS_CORE
+        ));
+        self.line("    tested against the AWS SigV4 test vectors.");
         self.blank();
         self.line("    ⛔ `X-Amz-Target` MUST RIDE IN THE **SIGNED** SET, not merely on the");
         self.line("    wire: an awsJson service includes it in the canonical request, so an");
@@ -1992,33 +2198,8 @@ impl<'a> AwsEmitter<'a> {
 /// The import block + shared helper every generated PURE module needs. The
 /// conformance driver emits this ONCE ahead of 44 concatenated suites.
 pub fn pure_preamble(with_model_json: bool) -> String {
-    let mut em = String::new();
-    em.push_str("from komira_aws_wire.aws_wire import (\n");
-    for n in [
-        "AWS_TS_ISO8601",
-        "AWS_TS_RFC822",
-        "AWS_TS_UNIX",
-        "AwsRequest",
-        "aws_blob_from_json",
-        "aws_error_code",
-        "aws_error_code_from_body",
-        "aws_error_message_from_body",
-        "aws_is_error_status",
-        "aws_f64_from_json",
-        "aws_json_blob",
-        "aws_json_bool",
-        "aws_json_f32",
-        "aws_json_f64",
-        "aws_json_i32",
-        "aws_json_i64",
-        "aws_json_string",
-        "aws_ts_from_json",
-        "aws_ts_to_json",
-    ] {
-        em.push_str(&format!("    {n},\n"));
-    }
-    em.push_str(")\n");
-    em.push_str("from komira_serde.json_value import JsonValue, parse_json_value\n\n\n");
+    let mut em = aws_import_section(true);
+    em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");
         em.push_str("    \"\"\"Decoded blob bytes as text — the MODEL convention for a blob.\"\"\"\n");
@@ -2111,4 +2292,22 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
         out.push(String::new());
     }
     out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_runtime_is_komira_json_in_every_mode() {
+        let rows: Vec<&AwsImport> = AWS_IMPORTS
+            .iter()
+            .filter(|row| row.names.contains(&"JsonValue"))
+            .collect();
+        assert_eq!(rows.len(), 1, "exactly one row imports JsonValue");
+        let row = rows[0];
+        assert_eq!(row.module, "komira_json");
+        assert_eq!(row.names, &["JsonValue", "parse_json_value"]);
+        assert_eq!(row.mode, AwsImportMode::Always);
+    }
 }

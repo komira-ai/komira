@@ -3,6 +3,9 @@
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "shell_lint", "workflow_lint")
 
+# The licence text every published package carries (tools/build/package/conda.bzl).
+export_file(name = "LICENSE", visibility = ["PUBLIC"])
+
 shell_lint(
     name = "shell_lint",
     srcs = ["buck2"] + glob([".github/ci/*.sh"]),
@@ -44,11 +47,13 @@ no_endpoint(
 # shell_lint and is named here.
 _TESTS_LINTS = [
     "tests//:shell_lint",
+    "tests//functional/aws_codegen:shell_lint",
     "tests//functional/bundle_parity:shell_lint",
     "tests//functional/darwin:shell_lint",
-    "tests//functional/numa:shell_lint",
+    "tests//functional/platform_table:shell_lint",
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",
+    "tests//golden:shell_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(

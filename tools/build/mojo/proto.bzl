@@ -6,7 +6,7 @@ protoc-gen-mojo plugin, writing one `<stem>.mojo` per `.proto` plus an
 a mojo_library: other Mojo targets name it in `deps`, and it provides the
 same MojoInfo.
 
-  * The generated code imports its runtime (for example `komira_serde`), a
+  * The generated code imports its runtime (for example `komira_proto_codec`), a
     Mojo library like any other: list it in `deps`.
   * A `.proto` is found by protoc at its import path, `import_prefix`
     joined with its path in the package. Each library's `.proto` files are
@@ -25,6 +25,10 @@ Output layout of a target `L` with import name `I`:
     L/proto/...            the staged `.proto` files (sub-target `[proto]`)
     L/gen/I/...            the generated package (sub-target per file name)
     L/pkg/I.mojoc          the precompiled package
+
+The generation half (`stage_proto_srcs`, `proto_closure`, `select_generated`,
+`generate_proto_dir`) is public, for rules that compile the generated files
+themselves through `mojo_library` (gcp_client, tools/build/cloud/gcp.bzl).
 
 protoc and the plugin come from `toolchains//:mojo_proto`. Options reach
 the plugin as `--mojo_opt` arguments, never from a file, so they are part of
@@ -122,7 +126,7 @@ mojo_proto_toolchain = rule(
 
 # ---- .proto sources ------------------------------------------------------------
 
-def _stage_srcs(ctx):
+def stage_proto_srcs(ctx):
     """Stage `srcs` at their import paths: (directory, import paths)."""
     prefix = ctx.attrs.import_prefix.strip("/")
     staged = {}
@@ -133,7 +137,7 @@ def _stage_srcs(ctx):
         own_paths.append(path)
     return ctx.actions.copied_dir("proto", staged), own_paths
 
-def _proto_closure(ctx, tree, own_paths):
+def proto_closure(ctx, tree, own_paths):
     """The staged directories of this target and its proto_deps closure, and the closure's import paths."""
     trees = [tree]
     dep_paths = []
@@ -151,8 +155,8 @@ def _proto_closure(ctx, tree, own_paths):
     return trees, dep_paths
 
 def _proto_srcs_impl(ctx):
-    tree, own_paths = _stage_srcs(ctx)
-    trees, dep_paths = _proto_closure(ctx, tree, own_paths)
+    tree, own_paths = stage_proto_srcs(ctx)
+    trees, dep_paths = proto_closure(ctx, tree, own_paths)
     return [
         DefaultInfo(default_output = tree),
         ProtoSrcsInfo(trees = trees, import_paths = own_paths + dep_paths),
@@ -218,20 +222,19 @@ fi
 rm -rf "$T"
 """
 
-def _check_import_name(ctx, name):
+def check_proto_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
-def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, names):
-    """Run protoc with `plugin` over `generate` and precompile the result.
+def generate_proto_dir(ctx, plugin, plugin_name, opt, trees, generate, names, import_name):
+    """Run protoc with `plugin` over `generate`: the generation half, no compile.
 
-    `names` are the files the plugin must write (without `__init__.mojo`).
-    Returns the providers of a generated Mojo package.
+    Writes `gen/<import_name>/`: `__init__.mojo` and exactly `names` (the
+    files the plugin must write), none empty. Returns that directory. Reads
+    `ctx.attrs.proto_toolchain`. Shared by the proto library rules here and
+    by rules that compile the result themselves (tools/build/cloud/gcp.bzl).
     """
     ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
-    tc = ctx.attrs.toolchain[MojoToolchainInfo]
-    import_name = ctx.attrs.import_name or ctx.label.name
-    _check_import_name(ctx, import_name)
 
     # One directory output: every file of a package must share one
     # directory, and separately declared outputs need not.
@@ -253,6 +256,18 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
         ),
         category = plugin_name + "_proto_gen",
     )
+    return gen_dir
+
+def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, names):
+    """Run protoc with `plugin` over `generate` and precompile the result.
+
+    `names` are the files the plugin must write (without `__init__.mojo`).
+    Returns the providers of a generated Mojo package.
+    """
+    tc = ctx.attrs.toolchain[MojoToolchainInfo]
+    import_name = ctx.attrs.import_name or ctx.label.name
+    check_proto_import_name(ctx, import_name)
+    gen_dir = generate_proto_dir(ctx, plugin, plugin_name, opt, trees, generate, names, import_name)
 
     # Precompile the generated directory, as mojo_library does.
     deps = [d[MojoInfo].pkgs for d in ctx.attrs.deps]
@@ -287,12 +302,13 @@ def _generate_package(ctx, plugin, plugin_name, opt, tree, trees, generate, name
             } | {k: [DefaultInfo(default_output = v)] for k, v in files.items()},
         ),
         MojoInfo(
+            direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps]),
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = pkg, children = deps),
         ),
     ]
 
-def _stem(ctx, path):
+def proto_stem(ctx, path):
     b = path.rsplit("/", 1)[-1]
     if not b.endswith(".proto"):
         fail("{}: `{}` is not a .proto file".format(ctx.label, path))
@@ -315,11 +331,12 @@ _COMMON_ATTRS = {
 
 # ---- mojo_proto_library --------------------------------------------------------
 
-def _mojo_proto_library_impl(ctx):
-    ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
-    tree, own_paths = _stage_srcs(ctx)
-    trees, dep_paths = _proto_closure(ctx, tree, own_paths)
+def select_generated(ctx, own_paths, dep_paths):
+    """The import paths to generate code for, and the `<stem>.mojo` each writes.
 
+    `own_paths`, then the files `ctx.attrs.bundle_proto_deps` and
+    `ctx.attrs.bundle_only` select from the proto_deps closure `dep_paths`.
+    """
     bundled = []
     if ctx.attrs.bundle_only:
         if not ctx.attrs.bundle_proto_deps:
@@ -342,10 +359,17 @@ def _mojo_proto_library_impl(ctx):
     # output is flat).
     names = []
     for p in generate:
-        name = _stem(ctx, p) + ".mojo"
+        name = proto_stem(ctx, p) + ".mojo"
         if name in names:
             fail("{}: two .proto files generate `{}`; the generated package is flat".format(ctx.label, name))
         names.append(name)
+    return generate, names
+
+def _mojo_proto_library_impl(ctx):
+    ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
+    tree, own_paths = stage_proto_srcs(ctx)
+    trees, dep_paths = proto_closure(ctx, tree, own_paths)
+    generate, names = select_generated(ctx, own_paths, dep_paths)
 
     import_name = ctx.attrs.import_name or ctx.label.name
     opt = ",".join([
@@ -375,14 +399,14 @@ mojo_proto_library_rule = rule(
 
 def _mojo_db_proto_library_impl(ctx):
     ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
-    tree, own_paths = _stage_srcs(ctx)
-    trees, _dep_paths = _proto_closure(ctx, tree, own_paths)
+    tree, own_paths = stage_proto_srcs(ctx)
+    trees, _dep_paths = proto_closure(ctx, tree, own_paths)
 
     # protoc-gen-mojo-db writes `<stem>_db.mojo` only for a .proto declaring
     # a `(komira.db.table)` message, so the outputs are stated, not derived.
     if not ctx.attrs.outs:
         fail("{}: `outs` must list the `<stem>_db.mojo` files, one per .proto of `srcs` that declares a table".format(ctx.label))
-    stems = [_stem(ctx, p) for p in own_paths]
+    stems = [proto_stem(ctx, p) for p in own_paths]
     seen = {}
     for o in ctx.attrs.outs:
         if "/" in o or not o.endswith("_db.mojo") or o[:-len("_db.mojo")] not in stems:

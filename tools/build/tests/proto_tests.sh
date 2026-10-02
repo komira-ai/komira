@@ -30,7 +30,7 @@ else
     fail "proto: generated person.mojo does not follow its .proto (see $LOG/person.mojo, $LOG/person_renamed.mojo)"
 fi
 # A REST client whose response and whose `body:` field are well-known types
-# reads and writes them through komira_serde's codec (decode_json /
+# reads and writes them through komira_proto_codec's codec (decode_json_lenient /
 # encode_json), whose comptime branch gives a WKT its canonical JSON form; a
 # direct `T.decode(JsonDecoder)` or `.encode(JsonEncoder)` would read and
 # write the binary-shaped message instead (a Struct response decoding as an
@@ -38,8 +38,8 @@ fi
 # komira_http, which this repository does not ship.
 if ! "$BUCK2" build 'tests//negative/proto:wkt_rest_proto[wkt_rest.mojo]' --out "$LOG/wkt_rest.mojo" > "$LOG/proto_rest.log" 2>&1; then
     fail "proto: generating wkt_rest.mojo (see $LOG/proto_rest.log)"
-elif grep -q 'return decode_json\[Struct\](resp_text)' "$LOG/wkt_rest.mojo" &&
-    grep -q 'return decode_json\[Timestamp\](resp_text)' "$LOG/wkt_rest.mojo" &&
+elif grep -q 'return decode_json_lenient\[Struct\](resp_text)' "$LOG/wkt_rest.mojo" &&
+    grep -q 'return decode_json_lenient\[Timestamp\](resp_text)' "$LOG/wkt_rest.mojo" &&
     grep -q 'body_text = encode_json(req.doc.value())' "$LOG/wkt_rest.mojo" &&
     ! grep -qE 'JsonDecoder|JsonEncoder|\.decode\(dec\)|\.encode\(benc\)' "$LOG/wkt_rest.mojo"; then
     pass "proto: a REST client reads and writes well-known types through the codec"
@@ -65,6 +65,28 @@ else
 fi
 expect_red proto_full_bundle "roster_proto/options.mojo" tests//negative/proto:roster_full_bundle
 expect_red proto_bad_selection "which is not a .proto of the proto_deps closure" tests//negative/proto:roster_bad_selection
+
+# 23, gcp_client (tools/build/cloud/gcp.bzl). Building the package builds
+# each scoped client, which runs its welded tests (the generated layout probe
+# among them), each gen_check (the generated files, what is absent, what is
+# present) and each tests_check (exactly which welded tests passed). The
+# refusals of the rule, and each check going red, are expect_reds.
+if "$BUCK2" build tests//functional/gcp_client: > "$LOG/gcp_client.log" 2>&1; then
+    pass "gcp_client: scoped clients, their welded tests, gen_check and tests_check"
+else
+    fail "gcp_client: tests//functional/gcp_client: (see $LOG/gcp_client.log)"
+fi
+expect_red gcp_client_unscoped 'neither `roots` nor `methods` is set' tests//negative/gcp_client:unscoped
+expect_red gcp_client_joined_items 'is not a proto name' tests//negative/gcp_client:joined_items
+expect_red gcp_client_no_runtime '`deps` is empty' tests//negative/gcp_client:no_runtime
+expect_red gcp_client_whole_closure 'with an empty `bundle_only`' tests//negative/gcp_client:whole_closure
+expect_red gcp_client_label_in_protos 'is not a source path of a `.proto` file' tests//negative/gcp_client:label_in_protos
+expect_red gcp_client_caller_test_red 'GATED TEST FAILED' tests//negative/gcp_client:caller_test_red
+expect_red gcp_client_absence_check 'which must be absent' tests//negative/gcp_client:absence_check_can_fail
+expect_red gcp_client_tests_check 'expected exactly:' tests//negative/gcp_client:tests_check_can_fail
+expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/gcp_client:unknown_protocol
+expect_red gcp_client_grpc_not_wired '`protocol = "grpc"` with a service to emit: gcp_client does not wire' tests//negative/gcp_client:grpc_not_wired
+expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/gcp_client:rest_reaches_plugin
 
 # 23, determinism. Generation is deterministic: two uncached builds (an
 #     isolated daemon, its buck-out cleaned, --no-remote-cache, so the plugin

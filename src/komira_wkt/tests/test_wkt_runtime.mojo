@@ -16,7 +16,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 
 from komira_wkt import (
     Timestamp,

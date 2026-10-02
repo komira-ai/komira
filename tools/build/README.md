@@ -7,17 +7,17 @@ Everything the build needs besides the project configuration
 
 | directory | Buck2 name | what it holds |
 |---|---|---|
-| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_multi_numa_test`, `mojo_proto_library`, `mojo_db_proto_library`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
+| [`mojo/`](mojo/) | package `komira//tools/build/mojo` | the Mojo rules (`mojo_library`, `mojo_binary`, `mojo_test`, `mojo_proto_library`, `mojo_db_proto_library`), the toolchain rules, and the scripts their actions run. [Reference](mojo/README.md). |
 | [`toolchains/`](toolchains/) | package `komira//tools/build/toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/default/`](platforms/default/) registers a standalone checkout's execution platforms: local, or remote when `.buckconfig.local` names a service. [Reference](platforms/README.md). |
 | [`rust/`](rust/) | package `komira//tools/build/rust` | the Rust rules (`rust_library`, `rust_binary`, `crates_io_library`) and the rustc toolchain rule. [Reference](rust/README.md). |
-| [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo` and `protoc-gen-mojo-db`, the protoc plugins of `mojo_proto_library` and `mojo_db_proto_library`, and `:db_options`, the `(komira.db.*)` options (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)). |
+| [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo` and `protoc-gen-mojo-db`, the protoc plugins of `mojo_proto_library` and `mojo_db_proto_library`, and `:db_options`, the `(komira.db.*)` options (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)); `aws-client-gen`, the AWS client generator, published behind `:aws_conformance_test`, which runs botocore's protocol conformance corpus against the generated Mojo and checks the result against `aws_conformance_ledger.txt`. |
 | [`lint/`](lint/) | package `komira//tools/build/lint` | lints that are part of the build: `shell_lint`, `workflow_lint`, `action_pins` and `no_endpoint` return their verdict as a Buck2 validation, and the pinned shellcheck and actionlint. The Mojo and Rust toolchains depend on the lint of the scripts their rules run; the root [`BUCK`](../../BUCK) lints the top-level scripts and the workflows. |
 | [`inspect/`](inspect/) | package `komira//tools/build/inspect` | `buildtools`, a Mojo package of readers the tools share (SHA-256, JSON, tar members, Mach-O load commands, Markdown links; its unit tests are welded), and `inspect`, the Mojo tool the [checks](tests/README.md) run for every structured read ([`inspect.mojo`](inspect/inspect.mojo)). |
 | [`third_party_srcs/`](third_party_srcs/) | package `komira//tools/build/third_party_srcs` | `gen`, which reads a vendored C library's source lists out of its pinned release archive, and `third_party_srcs`, which declares the generated file and the drift test holding the committed copy to it ([`defs.bzl`](third_party_srcs/defs.bzl)); tested on two made-up archives. |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
 | [`examples/`](examples/) | package `komira//tools/build/examples` | small targets using each rule; built by `buck2 build //...`. |
-| `cells/toolchains/` | cell `toolchains` | the Mojo toolchains the rules use, `toolchains//:mojo` and `toolchains//:mojo_multi_numa`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
+| `cells/toolchains/` | cell `toolchains` | the Mojo toolchain the rules use, `toolchains//:mojo`, declared by `komira_mojo_toolchains`, the C/C++ toolchain of the prelude's `cxx_library`, `toolchains//:cxx`, declared by `komira_cxx_toolchains`, and the Rust and protobuf toolchains, `toolchains//:rust` and `toolchains//:mojo_proto`, declared by `komira_rust_toolchains` and `komira_proto_toolchains`; one call of `komira_toolchains` declares them all ([`toolchains/defs.bzl`](toolchains/defs.bzl)). A standalone checkout's only; a consuming repository has its own ([below](#using-komira-from-another-repository)). |
 | [`tests/`](tests/) | cell `tests` | end-to-end tests: `functional/` (behaviour that must work) and `negative/` (planted defects that must go red). A standalone checkout's only, and outside `//...`. [Reference](tests/README.md). |
 | [`third_party/`](../../third_party/) | packages `komira//third_party/...` | C and C++ libraries built from pinned source archives (snappy, aws-lc, s2n-tls), see [C and C++](mojo/README.md#c-and-c); and the crates.io crates of the Rust rules (`third_party/rust`). |
 | [`consumer.buckconfig`](consumer.buckconfig) | | the `.buckconfig` of a repository using komira ([below](#using-komira-from-another-repository)). |
@@ -28,11 +28,12 @@ cell. `.buckconfig` adds two cells a standalone checkout needs and a consuming
 repository does not take: `toolchains`, which the prelude requires of the
 repository at the project root and which the Mojo rules take their toolchain
 from, and `tests`, kept apart so that `//...` holds no target that fails by
-design. The Mojo toolchains are in the `toolchains` cell rather than in
-`komira//tools/build/toolchains` for the same reason: `mojo_multi_numa`
-configures only where multi-NUMA workers are registered. `.buckconfig` maps each cell to the target platform
-`komira//tools/build/platforms:linux-x86_64`
-(`[parser] target_platform_detector_spec`) and registers
+design. The Mojo toolchain is declared in the `toolchains` cell rather than
+in `komira//tools/build/toolchains` so that the repository at the project
+root, which owns that cell, can override it. `.buckconfig` maps each cell to the target platform
+`komira//tools/build/platforms:host`, the client's own platform
+(`[parser] target_platform_detector_spec`; a Linux x86_64 client's is
+`linux-x86_64`) and registers
 `komira//tools/build/platforms/default:default` as the execution platforms.
 
 Rules are loaded from one cell: a `.bzl` file's providers are distinct per
@@ -54,7 +55,7 @@ repository's root as `.buckconfig`, and two files copied from komira:
 
 | your file | copied from | what it does |
 |---|---|---|
-| `toolchains/BUCK` | `cells/toolchains/BUCK` | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchains from its `mojo` and `mojo_multi_numa` targets, The file is one call, `komira_toolchains()`, which declares those, `toolchains//:cxx` for C and C++ deps, `toolchains//:rust` (the Rust rules) and `toolchains//:mojo_proto` (`mojo_proto_library`, whose plugin is built with `:rust`). Because it is one call, a toolchain family komira adds later needs no edit to your copy. `omit = ["cxx"]` keeps a C/C++ toolchain of your own. |
+| `toolchains/BUCK` | `cells/toolchains/BUCK` | the `toolchains` cell. The prelude requires every project to own one, and the Mojo rules take their toolchain from its `mojo` target. The file is one call, `komira_toolchains()`, which declares those, `toolchains//:cxx` for C and C++ deps, `toolchains//:rust` (the Rust rules) and `toolchains//:mojo_proto` (`mojo_proto_library`, whose plugin is built with `:rust`). Because it is one call, a toolchain family komira adds later needs no edit to your copy. `omit = ["cxx"]` keeps a C/C++ toolchain of your own. |
 | `platforms/BUCK` | [`platforms/default/BUCK`](platforms/default/BUCK) | the execution platforms, named by `[build] execution_platforms = app//platforms:default`: local, or remote when your `.buckconfig.local` names a service. |
 
 Without a `.buckconfig.local`, every action runs on your machine, as in a
@@ -98,21 +99,22 @@ and in `.buckconfig`, `komira = third_party/komira` in `[cells]`, without the
 may be nested.
 
 **Overriding the toolchain.** The rules' `toolchain` attribute defaults to
-`toolchains//:mojo` (`mojo_multi_numa_test` uses
-`toolchains//:mojo_multi_numa`), which is the consuming repository's cell.
+`toolchains//:mojo`, which is the consuming repository's cell.
 Passing an attribute of `mojo_toolchain` to `komira_toolchains`, e.g.
 `komira_toolchains(mojo = {"compiler": "//third_party/mojo:compiler"})`,
 changes it for every Mojo target; `omit = ["mojo"]` and declaring
-`mojo_toolchain` targets yourself replaces them altogether. A single target other than a `mojo_multi_numa_test` can
+`mojo_toolchain` targets yourself replaces them altogether. A single target can
 also set `toolchain =` itself. Leaving the call unchanged keeps the digests
 of a standalone checkout.
 
 **Your own targets need a target platform too.**
 `target_platform_detector_spec` is a single key; `consumer.buckconfig` maps
 the root cell (`app`), `komira` and `toolchains` to
-`komira//tools/build/platforms:linux-x86_64`. Keep komira's entry unchanged
+`komira//tools/build/platforms:host`. Keep komira's entry unchanged
 when you add your own cells to it: a different target platform for komira's
-targets is a different configuration, and so different digests. Keep
+targets is a different configuration, and so different digests (`host` is
+an alias of the client's own row, so on a Linux x86_64 client it is
+`linux-x86_64` itself). Keep
 `[buck2_re_client] max_total_batch_size = 1048576` too, and do not raise it:
 a server whose message limit is below buck2's default batch size fails
 `BatchReadBlobs`.
@@ -125,14 +127,15 @@ What keeps the digests equal:
   actions through copies under `buck-out`.
 - **Execution platform name.** `komira_execution_platforms` (and
   `komira_local_execution_platforms`) names each
-  platform after the abstract configuration it realizes
-  (`komira//tools/build/platforms:exec-mojo`, ...), not after the target that
-  declares it. That name keys the configuration of the toolchain, and so the
+  platform after the target platform whose configuration it uses
+  (`komira//tools/build/platforms:linux-x86_64`, ...), not after the target
+  that declares it. That name keys the configuration of the toolchain, and so the
   toolchain's output paths. An execution platform declared some other way must
   do the same.
 - **Target platform.** The `komira` cell maps to
-  `komira//tools/build/platforms:linux-x86_64` in `[parser]`.
-  `komira//tools/build/platforms` holds only abstract constraints; the
+  `komira//tools/build/platforms:host` in `[parser]`, an alias of the row of
+  the platform table that matches the client (`linux-x86_64` on Linux x86_64).
+  `komira//tools/build/platforms` holds only the platforms; the
   standalone checkout's execution platforms live in its `default`
   subpackage, which the consuming repository never loads (it copies the file
   instead).

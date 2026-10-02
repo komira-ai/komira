@@ -10,13 +10,13 @@
 #   - canonical JSON (proto3 JSON mapping): the empty object `{}`.
 # =============================================================================
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
-    JsonValue,
 )
+from komira_json import JsonValue
 
 
 @fieldwise_init

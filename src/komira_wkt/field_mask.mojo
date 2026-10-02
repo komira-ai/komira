@@ -17,15 +17,13 @@
 # that has no underscore is unchanged by either direction.
 # =============================================================================
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
-    JsonValue,
-    JSON_STRING,
-    write_json_string,
 )
+from komira_json import JsonValue, JSON_STRING, write_json_string
 
 
 @fieldwise_init

@@ -5,8 +5,8 @@ the concrete types a `protoc-gen-mojo`-generated client `import`s when a
 `.proto` message references a WKT (`google.protobuf.Timestamp`, `Duration`,
 etc.).
 
--- Why a separate `komira_wkt` package, not part of `komira_serde` ----------
-`komira_serde` is the format-NEUTRAL trait SUBSTRATE (the `Serializable` /
+-- Why a separate `komira_wkt` package, not part of `komira_proto_codec` ----------
+`komira_proto_codec` is the format-NEUTRAL trait SUBSTRATE (the `Serializable` /
 `WireEncoder` / `WireDecoder` traits). `komira_wkt` is a set of CONCRETE
 generated-equivalent message types. Keeping them as separate sibling
 packages:
@@ -16,7 +16,7 @@ packages:
     substrate's namespace;
   - mirrors the proto ecosystem itself: `google.protobuf.*` WKTs are their
     own proto package; `komira_wkt` is the natural Mojo analogue.
-Dependency direction (cycle-free): `komira_wkt -> komira_serde` only.
+Dependency direction (cycle-free): `komira_wkt -> komira_proto_codec`, plus the leaf libraries `komira_json` and `komira_encoding`.
 
 -- The proto3 canonical-JSON special case -----------------------------------
 A WKT does NOT serialize to proto3-canonical-JSON as a `{field: value}`
@@ -30,11 +30,11 @@ object. The protobuf JSON mapping mandates a SPECIAL JSON form per WKT:
   - Struct / Value / ListValue -> the literal JSON value they model.
   - Any       -> `{"@type": <type_url>, <the payload's members>}` (opaque
     here: no type registry, see any.mojo).
-The `komira_serde` `Serializable` trait has ONE shared `encode[E]` body
+The `komira_proto_codec` `Serializable` trait has ONE shared `encode[E]` body
 across both backends, written with the generic `write_*_field` primitives —
 it cannot itself express "a different shape on JSON than on proto-binary".
-So each WKT here conforms to `komira_serde.Proto3JsonWkt` (a refinement of
-`Serializable`):
+So each WKT here conforms to `komira_proto_codec.Proto3JsonWkt` (a refinement
+of `Serializable`):
   1. its `encode[E]` / `decode[D]` body is the ordinary message form — what
      runs on `PbEncoder` / `PbDecoder`;
   2. `write_proto3_json(buf)` appends the COMPLETE canonical JSON value

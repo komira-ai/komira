@@ -29,15 +29,13 @@
 # opaque member set here.)
 # =============================================================================
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
-    JsonValue,
-    JSON_STRING,
-    write_json_string,
 )
+from komira_json import JsonValue, JSON_STRING, write_json_string
 
 
 struct Any(Proto3JsonWkt, Copyable, Movable):

@@ -15,7 +15,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false, assert_raises
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     WireEncoder,
     WireDecoder,
@@ -24,8 +24,8 @@ from komira_serde import (
     decode_json_lenient,
     encode_proto,
     decode_proto,
-    parse_json_value,
 )
+from komira_json import parse_json_value
 from komira_wkt import (
     Any,
     Timestamp,

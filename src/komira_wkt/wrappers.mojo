@@ -30,11 +30,13 @@
 # standalone and as a generated message field.
 # =============================================================================
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     Proto3JsonWkt,
     WireEncoder,
     WireDecoder,
+)
+from komira_json import (
     JsonValue,
     JSON_NUMBER,
     JSON_STRING,
@@ -42,7 +44,7 @@ from komira_serde import (
     write_i64_dec,
     write_f64_dtoa,
 )
-from komira_serde import base64_encode, base64_decode
+from komira_encoding import base64_encode, base64_decode
 
 
 # =============================================================================
@@ -481,8 +483,8 @@ struct BytesValue(Proto3JsonWkt, Copyable, Movable):
 
 
 # =============================================================================
-# Local scalar parsers — kept self-contained (komira_wkt depends only on
-# komira_serde).
+# Local scalar parsers — kept self-contained (the only library calls are the
+# base64 codecs from komira_encoding).
 # =============================================================================
 
 
