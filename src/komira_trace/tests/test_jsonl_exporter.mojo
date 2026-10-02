@@ -17,9 +17,14 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_obs.tracer import Tracer
-from komira_obs.exporter import JsonlFileExporter
-from komira_obs.span_record import SpanRecord
+from komira_trace.tracer import Tracer
+from komira_trace.exporter import (
+    JsonlFileExporter,
+    json_escape,
+    trace_id_hex_128,
+    format_span_json_line,
+)
+from komira_trace.span_record import SpanRecord
 from komira_runtime_paths import test_tmpdir
 
 
@@ -37,7 +42,7 @@ def _make_tmp_path(suffix: String) raises -> String:
     """Build a temp filename under the test's scratch directory. We don't use mkstemp here —
     deterministic name + clobber-on-write is fine for these tests.
     """
-    return (test_tmpdir() + String("/komira_obs_test_")) + suffix + String(".jsonl")
+    return (test_tmpdir() + String("/komira_trace_test_")) + suffix + String(".jsonl")
 
 
 def _read_lines(path: String) raises -> List[String]:
@@ -50,17 +55,19 @@ def _read_lines(path: String) raises -> List[String]:
     var raw = f.read_bytes(size)
     f.close()
 
+    # Lines are rebuilt from the bytes read, copied verbatim, so a non-ASCII
+    # name compares byte for byte (re-encoding each byte with `chr` would not).
     var lines = List[String]()
-    var current = String("")
+    var current = List[UInt8]()
     for i in range(len(raw)):
         var c = raw[i]
         if c == UInt8(10):  # '\n'
-            lines.append(current^)
-            current = String("")
+            lines.append(String(unsafe_from_utf8=Span(current)))
+            current = List[UInt8]()
         else:
-            current += chr(Int(c))
-    if current.byte_length() > 0:
-        lines.append(current^)
+            current.append(c)
+    if len(current) > 0:
+        lines.append(String(unsafe_from_utf8=Span(current)))
     return lines^
 
 
@@ -161,11 +168,91 @@ def test_jsonl_contains_registered_name() raises:
     print("  test_jsonl_contains_registered_name PASS")
 
 
+def test_json_escape_passes_non_ascii_bytes_through() raises:
+    """Bytes at or above 0x80 are copied untouched; only quote, backslash and
+    control bytes are escaped."""
+    var name = String("span-é中\"x\\y\n")
+    var expected = String("span-é中\\\"x\\\\y\\n")
+    var got = json_escape(name)
+    assert_equal(got, expected)
+    assert_equal(got.byte_length(), expected.byte_length())
+
+
+def test_json_escape_control_bytes() raises:
+    """Every byte below 0x20 is escaped: the short forms for \\n \\r \\t \\b
+    \\f, `\\u00XX` for the rest. A raw control byte is invalid JSON."""
+    var s = String("")
+    for v in range(0, 32):
+        var one = List[UInt8]()
+        one.append(UInt8(v))
+        s += String(unsafe_from_utf8=Span(one))
+    var got = json_escape(s)
+    var expected = String(
+        "\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007"
+        "\\b\\t\\n\\u000b\\f\\r\\u000e\\u000f"
+        "\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017"
+        "\\u0018\\u0019\\u001a\\u001b\\u001c\\u001d\\u001e\\u001f"
+    )
+    assert_equal(got, expected)
+    print("  test_json_escape_control_bytes PASS")
+
+
+def test_shared_span_line_formatter() raises:
+    """The one formatter other packages call: key order and number rendering."""
+    var hex = trace_id_hex_128(
+        UInt64(0x0102030405060708), UInt64(0x090A0B0C0D0E0F10)
+    )
+    assert_equal(hex, String("0102030405060708090a0b0c0d0e0f10"))
+    var line = format_span_json_line(hex, 7, 3, String("a.b"), 100, 250, 2, 1)
+    assert_equal(
+        line,
+        String(
+            "{\"trace_id\":\"0102030405060708090a0b0c0d0e0f10\",\"span_id\":7,"
+            "\"parent_id\":3,\"name\":\"a.b\",\"start_ns\":100,\"end_ns\":250,"
+            "\"worker_id\":2,\"flags\":1}"
+        ),
+    )
+
+
+def test_non_ascii_span_name_round_trips_through_the_file() raises:
+    """A non-ASCII span name is written byte for byte, both in the name
+    registry meta line and in the span line. Re-encoding any byte (in the
+    registry lookup, the registry flush, or the escape) turns it into
+    mojibake and fails this."""
+    var path = _make_tmp_path("non_ascii")
+    var tracer = Tracer(num_workers=1, ring_capacity=64)
+    tracer.install_mock_ids(trace_seed=UInt64(1), span_seed=UInt64(1))
+
+    var s = tracer.start_span["span-é中"](worker_id=0)
+    tracer.end_span(s, worker_id=0)
+
+    var exporter = JsonlFileExporter(path)
+    tracer.drain_into_jsonl(exporter)
+    exporter.shutdown()
+
+    var lines = _read_lines(path)
+    var needle = String("\"name\":\"span-é中\"")
+    var with_name = 0
+    var meta_with_name = 0
+    for li in range(len(lines)):
+        if needle in lines[li]:
+            with_name += 1
+            if String("\"meta\":\"name\"") in lines[li]:
+                meta_with_name += 1
+    assert_equal(with_name, 2, "meta line and span line both carry the name")
+    assert_equal(meta_with_name, 1, "exactly one of them is the meta line")
+    print("  test_non_ascii_span_name_round_trips_through_the_file PASS")
+
+
 def main() raises:
     print("test_jsonl_exporter")
     print("===================")
     test_drain_into_jsonl_writes_file()
     test_jsonl_first_char_is_brace()
     test_jsonl_contains_registered_name()
+    test_json_escape_passes_non_ascii_bytes_through()
+    test_json_escape_control_bytes()
+    test_shared_span_line_formatter()
+    test_non_ascii_span_name_round_trips_through_the_file()
     print()
     print("ALL TESTS PASS")

@@ -35,14 +35,13 @@
 # embedder side (EngineContext holds `Optional[OwnedPointer[Tracer]]`).
 # =============================================================================
 
-from std.memory import alloc, OwnedPointer, Pointer, UnsafePointer
 from komira_atomic_alias import AtomicU64
 
 from komira_core.collections import Slab
 
-from komira_obs.clock import now_ns as _platform_now_ns
+from komira_clock import now_ns as _platform_now_ns
 
-from komira_obs.span_record import (
+from komira_trace.span_record import (
     SpanRecord,
     SpanLink,
     TRACE_ID_BYTES,
@@ -52,30 +51,33 @@ from komira_obs.span_record import (
     SPAN_STATUS_OPEN,
     SPAN_STATUS_CLOSED,
 )
-from komira_obs.span_packet import (
+from komira_trace.span_packet import (
     SpanPacket,
     PACKET_OPEN,
     PACKET_CLOSE,
 )
-from komira_obs.packet_ring import SpanPacketRingBuffer
-from komira_obs.ring_buffer import (
-    SpanRingBuffer,
+from komira_trace.span_ring import SpanPacketRing
+from komira_spsc_ring.spsc_ring import (
     OVERFLOW_BLOCK,
     OVERFLOW_DROP,
     DEFAULT_RING_CAPACITY,
 )
-from komira_obs.name_registry import (
+from komira_name_registry import (
+    MAX_REGISTERED_NAMES,
     NameRegistry,
-    NAME_BITSET_WORDS,
-    fnv1a_hash,
-    _fnv1a_compute,
+    name_id as _literal_name_id,
 )
-from komira_obs.testing import MockClock, MockIdGenerator
-from komira_obs.exporter import (
+from komira_trace.testing import MockClock, MockIdGenerator
+from komira_trace.exporter import (
     CapturingExporter,
     JsonlFileExporter,
     format_span_jsonl,
 )
+
+
+# One bit per registry slot, so the per-worker "already registered" bitset
+# covers every name the registry can hold.
+comptime NAME_BITSET_WORDS: Int = (MAX_REGISTERED_NAMES + 63) // 64
 
 
 # Comptime gate for the entire span emitter. Set to `False` to elide
@@ -191,7 +193,7 @@ struct Tracer(Deinitable):
     # and one CLOSE packet per `end_span`, and the drain (single-thread)
     # joins matching pairs by `span_id` to reconstruct the JSONL record.
     # 6x smaller per-slot copy, for a <100ns/op span.
-    var _rings: Slab[SpanPacketRingBuffer]
+    var _rings: Slab[SpanPacketRing]
 
     # Process-shared name registry (`name_registry.mojo`).
     var _name_registry: NameRegistry
@@ -222,13 +224,9 @@ struct Tracer(Deinitable):
             raise Error("Tracer: num_workers must be > 0")
         self.num_workers = num_workers
         self._ctx_slab = Slab[WorkerContextSlot].create_prefilled(num_workers)
-        self._rings = Slab[SpanPacketRingBuffer].create_prefilled(num_workers)
-        for w in range(num_workers):
-            SpanPacketRingBuffer.init_in_place(
-                UnsafePointer(to=self._rings.get_mut_interior(w)),
-                ring_capacity,
-                overflow_policy,
-            )
+        self._rings = Slab[SpanPacketRing].create_with_capacity(num_workers)
+        for _w in range(num_workers):
+            self._rings.append(SpanPacketRing(ring_capacity, overflow_policy))
         self._name_registry = NameRegistry()
         self._mock_clock = Optional[MockClock]()
         self._has_mock_ids = False
@@ -270,7 +268,7 @@ struct Tracer(Deinitable):
         if self._mock_clock:
             return self._mock_clock.value().now()
         # Platform-specific user-space monotonic clock — see
-        # `komira_obs.clock`. Not `perf_counter_ns()` (a syscall,
+        # `komira_clock`. Not `perf_counter_ns()` (a syscall,
         # ~25-50ns each on M-series): a libSystem / vDSO call
         # (~5-15ns).
         return _platform_now_ns()
@@ -312,7 +310,7 @@ struct Tracer(Deinitable):
         comptime if not TRACES_ENABLED:
             return UInt64(0)
 
-        comptime name_id = _fnv1a_compute(name)
+        comptime name_id = _literal_name_id[name]()
 
         # Lazy registration: first emit per (worker, name) inserts into
         # the process registry. The bitset check is a single load+mask.

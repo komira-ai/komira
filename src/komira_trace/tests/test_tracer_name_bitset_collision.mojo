@@ -30,12 +30,9 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_obs.tracer import Tracer
-from komira_obs.exporter import CapturingExporter
-from komira_obs.name_registry import (
-    NameRegistry,
-    fnv1a_hash,
-)
+from komira_trace.tracer import Tracer
+from komira_trace.exporter import CapturingExporter
+from komira_name_registry import NameRegistry, name_id as _literal_name_id
 
 
 def test_collision_witness_low_8_bits_match() raises:
@@ -44,8 +41,8 @@ def test_collision_witness_low_8_bits_match() raises:
     If this assertion ever fails, the literals or the FNV-1a constants
     drifted — pick a new pair before testing the fix.
     """
-    var h_finalize = fnv1a_hash["d1.finalize"]()
-    var h_insert = fnv1a_hash["d1.insert_batch"]()
+    var h_finalize = _literal_name_id["d1.finalize"]()
+    var h_insert = _literal_name_id["d1.insert_batch"]()
     assert_true(
         h_finalize != h_insert,
         "full FNV-1a digests must differ (else this test isn't a bit-7 collision)",
@@ -128,8 +125,8 @@ def test_bit7_collision_jsonl_resolves_both_names() raises:
     _ = oracle.try_register["d1.insert_batch"]()
     _ = oracle.try_register["d1.finalize"]()
 
-    var nid_insert = fnv1a_hash["d1.insert_batch"]()
-    var nid_finalize = fnv1a_hash["d1.finalize"]()
+    var nid_insert = _literal_name_id["d1.insert_batch"]()
+    var nid_finalize = _literal_name_id["d1.finalize"]()
 
     var lo_insert = oracle.lookup(nid_insert)
     var lo_finalize = oracle.lookup(nid_finalize)

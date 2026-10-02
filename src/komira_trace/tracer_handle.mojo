@@ -27,7 +27,7 @@
 
 from std.memory import Pointer
 
-from komira_obs.tracer import Tracer
+from komira_trace.tracer import Tracer
 
 
 struct TracerHandle[origin: MutOrigin](Movable, Deinitable):

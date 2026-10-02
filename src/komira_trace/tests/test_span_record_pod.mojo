@@ -14,7 +14,7 @@
 from std.sys import size_of
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_obs.span_record import (
+from komira_trace.span_record import (
     SpanRecord,
     SpanLink,
     TRACE_ID_BYTES,

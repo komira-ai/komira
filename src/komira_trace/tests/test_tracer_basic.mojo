@@ -6,17 +6,17 @@
 # via install_mock_ids + CapturingExporter).
 #
 # This file contributes a focused subset; related coverage is in
-# `test_name_registry.mojo`, `test_ring_buffer.mojo` and
+# `komira_name_registry`'s and `komira_spsc_ring`'s tests and
 # `test_span_record_pod.mojo`.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_obs.tracer import Tracer
-from komira_obs.testing import MockClock, MockIdGenerator
-from komira_obs.exporter import CapturingExporter
-from komira_obs.name_registry import fnv1a_hash
-from komira_obs.span_record import SPAN_FLAG_ROOT, SPAN_STATUS_CLOSED, SPAN_STATUS_OPEN
+from komira_trace.tracer import Tracer
+from komira_trace.testing import MockClock, MockIdGenerator
+from komira_trace.exporter import CapturingExporter
+from komira_name_registry import name_id as _literal_name_id
+from komira_trace.span_record import SPAN_FLAG_ROOT, SPAN_STATUS_CLOSED, SPAN_STATUS_OPEN
 
 
 def test_construct() raises:

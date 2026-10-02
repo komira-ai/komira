@@ -20,7 +20,7 @@
 from komira_atomic_alias import AtomicU64
 from std.memory import OwnedPointer
 
-from komira_obs.span_record import (
+from komira_trace.span_record import (
     SpanRecord,
     TRACE_ID_BYTES,
 )
