@@ -18,7 +18,16 @@
 #   * the last stable offset under an open transaction, then after commit and
 #     after abort;
 #   * a client-supplied LIVE token is always overwritten;
-#   * the byte budget is NOT in the fingerprint (and isolation IS).
+#   * the byte budget is NOT in the fingerprint (and isolation IS);
+#   * a range reaching the COMPACTED (Parquet) tier is refused by name, never
+#     clamped to the advanced `log_start`;
+#   * a binding whose topic columns disagree with the topic config (same
+#     arity, different type) is refused by name before any byte is decoded;
+#   * a zero-survivor log-compacted chunk contributes no rows and moves no
+#     later offset, and one whose body was swapped over the dense `.seg` is
+#     refused.
+# Budget arithmetic, KIP-74 over an empty partition 0, `start_offsets` and
+# the multi-partition snapshot are in `test_broker_scan_kind_budget.mojo`.
 # =============================================================================
 
 from std.testing import (
@@ -71,11 +80,13 @@ from komira_broker.broker_scan_kind import (
     BROKER_RESOLVED_ABORTED,
     BROKER_RESOLVED_HIGH_WATERMARK,
     BROKER_RESOLVED_LAST_STABLE_OFFSET,
+    BROKER_RESOLVED_LOG_START_OFFSET,
     BROKER_RESOLVED_NEXT_OFFSET,
     BrokerScanRuntime,
     broker_resolved_key,
     broker_scan_runtime,
 )
+from komira_broker.compacted_index import CompactionIndex
 from komira_broker.log_compaction import (
     CompactionConfig,
     LogCleaner,
@@ -591,6 +602,166 @@ def test_the_erased_runtime_registers_under_its_kind() raises:
     _eq(_col_i64(r.open_scan(ScanRequest(e^)), 0), [Int64(4), Int64(2)], String("erased"))
 
 
+# =============================================================================
+# 7. the COMPACTED (Parquet) tier is refused, never clamped away
+# =============================================================================
+
+
+def test_a_compacted_parquet_prefix_is_refused_by_name() raises:
+    """`compaction_worker.mojo` commits a `CompactedEntry` for a Parquet
+    object, then ADVANCES the live `log_start` past that prefix. A scan that
+    clamped its start to `log_start` would return only the live suffix, with
+    no error, and report the prefix as retention. This kind does not read the
+    Parquet tier, so a range reaching it is refused by name."""
+    var store = _Store()
+    var topic = String("parq")
+    _write_config(store, topic, 1)
+    _produce(store, topic, Int64(0), [Int64(1), Int64(2)])  # chunk 0: 0-1
+    _produce(store, topic, Int64(0), [Int64(3), Int64(4)])  # chunk 1: 2-3
+    _produce(store, topic, Int64(0), [Int64(5), Int64(6)])  # chunk 2: 4-5
+    var rt = _runtime(store)
+    assert_equal(_run(rt, _params(topic)).num_rows(), 6, "fixture: before compaction")
+
+    # Steps 7-8 of the compaction worker: chunks 0..1 (offsets 0..3) become
+    # one Parquet object, then the live log_start moves to (seq 2, offset 4).
+    var cidx = CompactionIndex[_Store].build(
+        store.clone(), String(_CLUSTER) + "/_meta/topics/" + topic + "/0"
+    )
+    _ = cidx.append_compacted(
+        String(_CLUSTER) + "/compacted/parq-0.parquet",
+        Int64(0),
+        Int64(3),
+        Int64(4),
+        Int64(0),
+        Int64(1),
+    )
+    var m = _manifest(store, topic)
+    var cur = m.read_log_start()
+    _ = m.advance_log_start(Int64(2), Int64(4), cur.etag)
+
+    with assert_raises(contains="BROKER_SCAN_COMPACTED_TIER_UNREAD"):
+        _ = _run(rt, _params(topic))
+    # A start INSIDE the compacted prefix is refused too.
+    var inside = _params(topic)
+    inside.put_i64(String(BROKER_PARAM_START_OFFSET), Int64(3))
+    with assert_raises(contains="BROKER_SCAN_COMPACTED_TIER_UNREAD"):
+        _ = _run(rt, inside)
+    # A start at the compacted tail reads the live tier, and log_start is the
+    # compacted tail.
+    var tail = _params(topic)
+    tail.put_i64(String(BROKER_PARAM_START_OFFSET), Int64(4))
+    var live = _run(rt, tail)
+    _eq(_col_i64(live, 0), [Int64(5), Int64(6)], String("live suffix from offset 4"))
+    assert_equal(
+        live.resolved.get_i64(
+            broker_resolved_key(String(BROKER_RESOLVED_LOG_START_OFFSET), Int64(0))
+        ),
+        Int64(4),
+    )
+
+
+# =============================================================================
+# 8. the binding does not choose how stored bytes decode
+# =============================================================================
+
+
+def test_a_forged_binding_schema_is_refused_by_name() raises:
+    """Same arity, different types: a stale plan-cached binding, or one
+    decoded off the wire, must not decode INT64 segment bytes as FLOAT64 or
+    TIMESTAMP. The topic's durable config is the authority."""
+    var store = _Store()
+    var topic = String("forge")
+    _write_config(store, topic, 1)
+    _produce(store, topic, Int64(0), [Int64(1), Int64(2)])
+    var rt = _runtime(store)
+    var cached = rt.build_binding(_params(topic))
+    assert_equal(
+        rt.open_scan(ScanRequest(resolve_for_execution(rt, cached))).num_rows(),
+        2,
+        "fixture: the honest binding reads",
+    )
+    var as_float = cached.copy()
+    as_float.schema = Schema(
+        names=[String("key"), String("value"), String(BROKER_PARTITION_COLUMN)],
+        arrow_types=[
+            ArrowType.FLOAT64.type_id,
+            ArrowType.STRING.type_id,
+            ArrowType.INT64.type_id,
+        ],
+        dtypes=[DType.float64, DType.uint8, DType.int64],
+        nullables=[False, True, False],
+    )
+    var e1 = resolve_for_execution(rt, as_float)
+    with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
+        _ = rt.open_scan(ScanRequest(e1^))
+    var as_ts = cached.copy()
+    as_ts.schema = Schema(
+        names=[String("key"), String("value"), String(BROKER_PARTITION_COLUMN)],
+        arrow_types=[
+            ArrowType.TIMESTAMP.type_id,
+            ArrowType.STRING.type_id,
+            ArrowType.INT64.type_id,
+        ],
+        dtypes=[DType.int64, DType.uint8, DType.int64],
+        nullables=[False, True, False],
+    )
+    var e2 = resolve_for_execution(rt, as_ts)
+    with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
+        _ = rt.open_scan(ScanRequest(e2^))
+
+
+# =============================================================================
+# 9. a zero-survivor log-compacted chunk
+# =============================================================================
+
+
+def test_a_zero_survivor_compacted_chunk() raises:
+    """The production cleaner rewrites a fully superseded chunk to an EMPTY
+    `.seg` with a sidecar of count 0, which `is_chunk_compacted` reads as
+    compacted. It contributes no rows and moves no later offset. The same
+    zero-count body over the ORIGINAL dense `.seg` is refused, which is the
+    case that tells `is_chunk_compacted(body)` from `len(survivors) > 0` (the
+    latter would number the dense rows `base_offset + r`)."""
+    var store = _Store()
+    var topic = String("zero")
+    _write_config(store, topic, 1)
+    _produce(store, topic, Int64(0), [Int64(1), Int64(2)])  # chunk 0: 0-1
+    _produce(store, topic, Int64(0), [Int64(1), Int64(2)])  # chunk 1: 2-3
+    _produce(store, topic, Int64(0), [Int64(5)])  # chunk 2: 4
+    _compact_chunk(
+        store,
+        topic,
+        Int64(0),
+        Int64(0),
+        _kv(List[Int64](), List[String](), List[Bool]()),
+        List[Int64](),
+    )
+    var rt = _runtime(store)
+    var whole = _run(rt, _params(topic))
+    _eq(_col_i64(whole, 0), [Int64(1), Int64(2), Int64(5)], String("chunk 0 is empty"))
+    assert_equal(
+        whole.resolved.get_i64(
+            broker_resolved_key(String(BROKER_RESOLVED_HIGH_WATERMARK), Int64(0))
+        ),
+        Int64(5),
+    )
+    var p = _params(topic)
+    p.put_i64(String(BROKER_PARAM_START_OFFSET), Int64(3))
+    _eq(_col_i64(_run(rt, p), 0), [Int64(2), Int64(5)], String("offsets 3.. unchanged"))
+
+    # The zero-count sidecar over chunk 1's ORIGINAL dense `.seg`.
+    var manifest = _manifest(store, topic)
+    var orig = ManifestBody.decode(manifest.read_chunk(Int64(1)))
+    manifest.rewrite_chunk_body(
+        Int64(1),
+        encode_compacted_chunk_body(
+            orig, String(orig.object_key), orig.crc32, List[Int64]()
+        ),
+    )
+    with assert_raises(contains="BROKER_SCAN_COMPACTED_CHUNK_MISMATCH"):
+        _ = _run(rt, _params(topic))
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_live_and_compacted_tiers_are_both_read]()
@@ -602,4 +773,7 @@ def main() raises:
     suite.test[test_the_byte_budget_is_not_in_the_fingerprint]()
     suite.test[test_refusals_are_named]()
     suite.test[test_the_erased_runtime_registers_under_its_kind]()
+    suite.test[test_a_compacted_parquet_prefix_is_refused_by_name]()
+    suite.test[test_a_forged_binding_schema_is_refused_by_name]()
+    suite.test[test_a_zero_survivor_compacted_chunk]()
     suite^.run()

@@ -35,6 +35,7 @@ mojo_library(
         "tests/test_broker_maintenance_authoritative_tail_offline.mojo",
         "tests/test_broker_retention_offline.mojo",
         "tests/test_broker_scan_kind.mojo",
+        "tests/test_broker_scan_kind_budget.mojo",
         "tests/test_broker_segment_key_collision_offline.mojo",
         "tests/test_broker_sublineage_write_soak_offline.mojo",
         "tests/test_broker_txn_control_offline.mojo",

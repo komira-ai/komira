@@ -25,7 +25,12 @@
 #             HWMs (monotone, so it still moves on every produce), and
 #             `open_scan` reads each partition's HWM ONCE and REPORTS exactly
 #             what it used in the side channel (`resolved`), which is the
-#             authority a frontend reads.
+#             authority a frontend reads. So a produce landing
+#             between resolve and open IS returned, and `high_watermark.<p>`
+#             says so. This is the one stated exception to `ScanRequest`'s
+#             "must not re-resolve" (carved out on `ScanRequest` itself);
+#             pinned by `test_broker_scan_kind_budget.mojo`
+#             `test_multi_partition_reads_its_own_snapshot_and_reports_it`.
 #   LSO     = the last stable offset: the base offset of the first chunk whose
 #             transaction is still UNDECIDED (Ongoing / PrepareCommit /
 #             PrepareAbort) in the PINNED transaction snapshot, else `upper`.
@@ -39,13 +44,29 @@
 # resolved — never per partition — so a commit flipping mid-scan cannot yield
 # partition 0 committed and partition 1 not.
 #
-# BOTH TIERS OF THE LOG. A LOG-COMPACTED chunk (`log_compaction.mojo`) keeps
-# its manifest offset span but holds only survivor rows; its preserved
-# absolute offsets are read off the chunk body's sidecar, so a start offset
-# inside a compacted chunk skips exactly the survivors below it. ⚠ The PARQUET
-# compaction tier (`compacted_index.mojo` / `komira_broker_compaction`) is NOT
-# read here: decoding it needs the parquet reader, which the broker leaf may
-# not depend on.
+# THE LIVE TIER, INCLUDING LOG-COMPACTED CHUNKS. A LOG-COMPACTED chunk
+# (`log_compaction.mojo`) keeps its manifest offset span but holds only
+# survivor rows; its preserved absolute offsets are read off the chunk body's
+# sidecar, so a start offset inside a compacted chunk skips exactly the
+# survivors below it.
+#
+# ⛔ THE COMPACTED (PARQUET) TIER IS NOT READ, AND IS REFUSED BY NAME. The
+# compacted tier (`compacted_index.mojo`, written by
+# `komira_broker_compaction`) holds a prefix of the log as Parquet objects,
+# and the compaction worker then ADVANCES the live `log_start` past that
+# prefix. Clamping the start to `log_start` would silently return only the
+# live suffix and report the moved `log_start` as if retention had deleted
+# the prefix. So a scan whose range `[start, HWM)` reaches a compaction-index
+# entry refuses with `BROKER_SCAN_COMPACTED_TIER_UNREAD`. Decoding that tier
+# needs the parquet reader, which this leaf may not depend on: reading it is
+# tracked follow-up work, and it is what the exit criterion "topic scan
+# covers the live and compacted tiers" still needs.
+#
+# THE STORED BYTES ARE DECODED WITH THE TOPIC'S DURABLE SCHEMA. `open_scan`
+# checks the binding's topic columns (names and types) against the topic's
+# durable config (what `build_binding` read) before decoding, and refuses a
+# mismatch with `BROKER_SCAN_SCHEMA_MISMATCH`: a stale plan-cached binding or
+# one decoded off the wire must never choose how segment bytes are read.
 #
 # THE BYTE BUDGET. `max_bytes` (whole scan) and
 # `partition_max_bytes` (each partition), measured in segment bytes. KIP-74:
@@ -63,9 +84,10 @@
 # `komira_core`'s IPC encoder (no dictionary batches). The broker leaf may not
 # import the engine's stream reader (`komira_engine_operators`), so this file
 # decodes the RecordBatch frames with `komira_core`'s
-# `decode_record_batch_message` against the schema the BINDING declared (the
-# topic config's schema) — schema-directed, the same shape the core decoder
-# already has. A dictionary frame is refused by name.
+# `decode_record_batch_message` against the topic config's schema (the
+# binding's topic columns, CHECKED against that config first — see above) —
+# schema-directed, the same shape the core decoder already has. A dictionary
+# frame is refused by name.
 #
 # ---------------------------------------------------------------------------
 # ENCAPSULATION
@@ -112,6 +134,7 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import CloneableConditionalWriteStore
 
 from .broker_core import BrokerTopicConfig, _manifest_prefix, _topic_config_key
+from .compacted_index import CompactionIndex
 from .broker_scan_binding import (
     BROKER_ISOLATION_READ_COMMITTED,
     BROKER_PARAM_ISOLATION,
@@ -176,6 +199,23 @@ row per survivor offset in its sidecar. The production cleaner
 (`ProductionLogCleaner`) rewrites the `.seg` and the body together; a chunk
 whose body was swapped without its segment cannot be numbered, so it is
 refused rather than read with invented offsets."""
+
+comptime BROKER_SCAN_COMPACTED_TIER_UNREAD: StaticString = (
+    "BROKER_SCAN_COMPACTED_TIER_UNREAD"
+)
+"""NAMED ERROR — the requested range reaches offsets held in the COMPACTED
+(Parquet) tier (`CompactionIndex`), which this kind does not read yet.
+Refused rather than clamped to the live `log_start`,
+which the compaction worker advanced past that prefix: a clamp would drop
+the prefix with no error and report it as retention."""
+
+comptime BROKER_SCAN_SCHEMA_MISMATCH: StaticString = (
+    "BROKER_SCAN_SCHEMA_MISMATCH"
+)
+"""NAMED ERROR — the binding's topic columns (names or types) disagree with
+the topic's durable config. The binding (plan-cached, or decoded off the
+wire) is not the authority on how stored segment bytes decode; the config
+is."""
 
 comptime BROKER_SCAN_DICTIONARY_SEGMENT: StaticString = (
     "BROKER_SCAN_DICTIONARY_SEGMENT"
@@ -372,6 +412,7 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
         self._refuse_foreign(b, String("open"))
         var spec = _BrokerScanSpec.from_binding(b)
         var topic_schema = _topic_schema_of(b)
+        self._check_topic_schema(spec.topic, topic_schema, b.name)
 
         # ---- pass 1: per-partition facts, and the ONE pinned txn snapshot ----
         var facts = List[_PartitionFacts]()
@@ -380,6 +421,7 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
             var p = spec.partitions[i]
             var core = self._core(spec.topic, p)
             var hwm = core.next_offset()
+            self._refuse_compacted_tier(spec.topic, p, spec.start_offsets[i], hwm)
             var tags = core.chunk_txn_tags()
             for t in range(len(tags)):
                 ref id = tags[t].txn_id
@@ -530,6 +572,76 @@ struct BrokerScanRuntime[Storage: CloneableConditionalWriteStore](
             topic=String(topic),
             partition=partition,
         )
+
+    def _check_topic_schema(
+        self, topic: String, topic_schema: Schema, binding_name: String
+    ) raises:
+        """Refuse a binding whose topic columns are not the topic's durable
+        config schema (names and types, in order)."""
+        var cfg = BrokerTopicConfig.decode(
+            self._store.get(Path.parse(_topic_config_key(self._cluster, topic)))
+        )
+        var n = cfg.schema.num_columns()
+        if topic_schema.num_columns() != n:
+            raise Error(
+                String(BROKER_SCAN_SCHEMA_MISMATCH)
+                + String(": binding '")
+                + binding_name
+                + String("' declares ")
+                + String(topic_schema.num_columns())
+                + String(" topic columns; topic '")
+                + topic
+                + String("' has ")
+                + String(n)
+            )
+        for i in range(n):
+            if (
+                topic_schema.field_name(i) != cfg.schema.field_name(i)
+                or topic_schema.field_arrow_type(i)
+                != cfg.schema.field_arrow_type(i)
+            ):
+                raise Error(
+                    String(BROKER_SCAN_SCHEMA_MISMATCH)
+                    + String(": binding '")
+                    + binding_name
+                    + String("' column ")
+                    + String(i)
+                    + String(" ('")
+                    + topic_schema.field_name(i)
+                    + String("') does not match topic '")
+                    + topic
+                    + String("' column '")
+                    + cfg.schema.field_name(i)
+                    + String("' in name or type")
+                )
+
+    def _refuse_compacted_tier(
+        self, topic: String, partition: Int64, start: Int64, hwm: Int64
+    ) raises:
+        """Refuse a range `[start, hwm)` that reaches a compaction-index entry
+        (the Parquet tier). One authoritative LIST of the compacted lineage
+        per partition per execution; an empty lineage costs no GET."""
+        var cidx = CompactionIndex[Self.Storage].build(
+            self._store.clone(), _manifest_prefix(self._cluster, topic, partition)
+        )
+        var entries = cidx.resolve_compacted()
+        for e in range(len(entries)):
+            ref ent = entries[e]
+            if ent.last_offset >= start and ent.base_offset < hwm:
+                raise Error(
+                    String(BROKER_SCAN_COMPACTED_TIER_UNREAD)
+                    + String(": topic '")
+                    + topic
+                    + String("' partition ")
+                    + String(partition)
+                    + String(" offsets ")
+                    + String(ent.base_offset)
+                    + String("..")
+                    + String(ent.last_offset)
+                    + String(" are in the compacted (Parquet) tier, which this")
+                    + String(" scan does not read; start at or after ")
+                    + String(ent.last_offset + Int64(1))
+                )
 
     def _refuse_foreign(self, binding: ScanBinding, verb: String) raises:
         if binding.kind_id != broker_scan_kind_id():
