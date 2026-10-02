@@ -173,6 +173,11 @@
 #      (tools/build/tests/negative/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
+#  33a. Conda packages: see tools/build/tests/functional/conda.sh (the package is
+#       read back with unzip, zstd, tar and jq; the refusals; the approved-list
+#       lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
+#       install from a file:// channel and a Mojo program importing the library,
+#       skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -830,6 +835,19 @@ if "$ROOT/tools/build/tests/functional/bootstrap.sh" "$LOG/bootstrap" > "$LOG/bo
 else
     fail "./buck2 bootstrap: $(grep '^FAIL' "$LOG/bootstrap.log" | cut -c 18- | tr '\n' ' ')(see $LOG/bootstrap.log)"
 fi
+
+# 33a
+conda_args=()
+[ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda "*) pass "${line#PASS  }" ;;
+        "FAIL  conda "*) fail "${line#FAIL  } (see $LOG/conda.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda.log"
+grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
 
 # 33
 S="$LOG/uname_shim"

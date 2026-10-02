@@ -15,6 +15,11 @@ MojoInfo = provider(fields = {
     # on: what a binary linking this package must also link. None when there
     # are none.
     "c_link": provider_field(typing.Any, default = None),
+    # The import names of the packages this one lists in `deps`, sorted: its
+    # direct dependencies, which a published package names in its run
+    # requirements (tools/build/package/conda.bzl). Required, not defaulted:
+    # a rule that forgot it would publish a package with no dependencies.
+    "direct": provider_field(typing.Any),
     "import_name": provider_field(str),
     "pkgs": provider_field(typing.Any),  # MojoPkgTSet
 })

@@ -405,6 +405,7 @@ def _library_impl(ctx):
         ),
         MojoInfo(
             c_link = c_link,
+            direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps if MojoInfo in d]),
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
         ),
