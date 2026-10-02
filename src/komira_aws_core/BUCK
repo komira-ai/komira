@@ -1,18 +1,26 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The ONE hand-written AWS core under the generated komira_aws_<svc> clients:
-# the AwsCredential value; SigV4 header and query signing over komira_crypto;
-# the AWS SDK default credential provider chain and region resolution; and
-# the socket-free half of a generated client's send: AwsRequest / AwsResponse /
-# HttpResult (bodies as bytes), AwsErrorInfo,
-# the REST binding runtime a restJson1 / restXml client calls (URI labels
-# and query, list and prefix headers, scalar text and the timestamp formats,
-# restJson1 errors),
-# the awsJson scalar codec and error shape, endpoint and partition resolution
-# (AWS_ENDPOINT_URL[_<SERVICE>], FIPS, dual-stack), the AwsCredsSource trait,
-# and the SigV4-signed request builder; and the interpreter of the endpoint
-# rulesets AWS publishes as data (endpoint_rules.mojo, over partitions.json),
-# which reads no environment: every input is a parameter.
+# The ONE hand-written AWS core under the generated komira_aws_<svc> clients,
+# in the order of __init__.mojo's module doc:
+#
+#   - the AwsCredential value, and SigV4 header and query signing over
+#     komira_crypto
+#   - the AWS SDK default credential provider chain and region resolution,
+#     with the shared config parser and the network-backed providers as
+#     request builders and response parsers
+#   - AwsRequest / AwsResponse / HttpResult (bodies as bytes) and
+#     AwsErrorInfo
+#   - the awsJson scalar codec and error shape, and its JsonValue-typed names
+#   - the REST binding runtime a restJson1 / restXml client calls: scalar
+#     text and the timestamp formats, URI labels and query, list and prefix
+#     headers, restJson1 errors
+#   - endpoint and partition resolution (AWS_ENDPOINT_URL[_<SERVICE>], FIPS,
+#     dual-stack), the AwsCredsSource trait, and the SigV4-signed request
+#     builder, the socket-free half of a generated client's send
+#   - the interpreter of the endpoint rulesets AWS publishes as data
+#     (endpoint_rules.mojo, over partitions.json), which reads no
+#     environment: every input is a parameter
+#   - s3_wire.mojo: the two S3 header values no model states
 #
 # The chain reads only the STANDARD AWS SDK environment variables and shared
 # files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
