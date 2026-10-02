@@ -26,7 +26,8 @@ This is part P18a-1. Still to come:
 Modules:
   - token.mojo      : `GcpTokenSource` (the generated clients' contract),
                       `AccessToken`, `AccessTokenFetcher`,
-                      `CachingTokenSource`, `StaticTokenSource`.
+                      `CachingTokenSource` (on komira_retry's
+                      `MonotonicClock` seam), `StaticTokenSource`.
   - status.mojo     : the `google.rpc.Status` error envelope:
                       `parse_gcp_status` / `GcpStatusError` and
                       `gcp_status_error` (the generated clients' contract).
@@ -37,17 +38,12 @@ Modules:
                       google.rpc.RetryInfo as the server delay) and
                       `gcp_retry_policy` (AIP-4221 backoff); the policy,
                       backoff and loop themselves are komira_retry's.
-  - clock.mojo      : the injected `Clock` and its `MonotonicClock`. It moves
-                      out of this package when the shared clock proposal
-                      (komira_core's split) lands; nothing new goes into
-                      komira_core until then.
   - utf8.mojo       : validating untrusted bytes before decoding them to a
                       String (internal). The JSON paths do not use it:
                       komira_json refuses ill-formed UTF-8 itself.
 
 Nothing in this package reads the environment or opens a socket.
 """
-from .clock import Clock, MonotonicClock
 from .token import (
     DEFAULT_REFRESH_BEFORE_MS,
     AccessToken,

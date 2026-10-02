@@ -1,5 +1,5 @@
 # =============================================================================
-# test_gcp_token.mojo — token caching and refresh-before-expiry, fake clock.
+# test_gcp_token.mojo — token caching and refresh-before-expiry, komira_retry ManualClock.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -9,23 +9,10 @@ from komira_gcp_core import (
     AccessToken,
     AccessTokenFetcher,
     CachingTokenSource,
-    Clock,
     GcpTokenSource,
     StaticTokenSource,
 )
-
-
-struct FakeClock(Clock, Movable, Deinitable):
-    var now: Int64
-
-    def __init__(out self, start: Int64):
-        self.now = start
-
-    def now_ms(mut self) -> Int64:
-        return self.now
-
-    def sleep_ms(mut self, ms: Int64):
-        self.now += ms
+from komira_retry import ManualClock
 
 
 struct CountingFetcher(AccessTokenFetcher, Movable, Deinitable):
@@ -55,7 +42,7 @@ def _bearer[T: GcpTokenSource](mut src: T) raises -> String:
 
 
 def test_token_is_cached_until_the_refresh_margin() raises:
-    var src = CachingTokenSource(CountingFetcher(3600), FakeClock(0))
+    var src = CachingTokenSource(CountingFetcher(3600), ManualClock(0))
     assert_equal(src.access_token(), "tok-1")
     assert_equal(src.access_token(), "tok-1")
     # 3600 s lifetime, 225 s margin: still fresh 1 ms before the margin.
@@ -70,7 +57,7 @@ def test_token_is_cached_until_the_refresh_margin() raises:
 
 
 def test_expired_token_is_refetched() raises:
-    var src = CachingTokenSource(CountingFetcher(60), FakeClock(5_000), refresh_before_ms=0)
+    var src = CachingTokenSource(CountingFetcher(60), ManualClock(5_000), refresh_before_ms=0)
     assert_equal(src.access_token(), "tok-1")
     src.clock().now = 5_000 + 60_000
     assert_equal(src.access_token(), "tok-2")
@@ -78,7 +65,7 @@ def test_expired_token_is_refetched() raises:
 
 def test_short_lived_token_is_refused_not_looped() raises:
     # 100 s lifetime is inside the 225 s margin: unusable.
-    var src = CachingTokenSource(CountingFetcher(100), FakeClock(0))
+    var src = CachingTokenSource(CountingFetcher(100), ManualClock(0))
     var raised = False
     try:
         _ = src.access_token()
@@ -92,7 +79,7 @@ def test_short_lived_token_is_refused_not_looped() raises:
 
 
 def test_fetch_failure_propagates_and_recovers() raises:
-    var src = CachingTokenSource(CountingFetcher(3600), FakeClock(0))
+    var src = CachingTokenSource(CountingFetcher(3600), ManualClock(0))
     src.fetcher().fail = True
     var raised = False
     try:
@@ -105,7 +92,7 @@ def test_fetch_failure_propagates_and_recovers() raises:
 
 
 def test_invalidate_forces_a_refetch() raises:
-    var src = CachingTokenSource(CountingFetcher(3600), FakeClock(0))
+    var src = CachingTokenSource(CountingFetcher(3600), ManualClock(0))
     assert_equal(src.access_token(), "tok-1")
     src.invalidate()
     assert_equal(src.access_token(), "tok-2")
@@ -132,7 +119,7 @@ def test_static_source_and_bad_margin() raises:
     except:
         refused += 1
     try:
-        _ = CachingTokenSource(CountingFetcher(1), FakeClock(0), refresh_before_ms=-1)
+        _ = CachingTokenSource(CountingFetcher(1), ManualClock(0), refresh_before_ms=-1)
     except:
         refused += 1
     assert_equal(refused, 2)

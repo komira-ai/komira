@@ -14,9 +14,13 @@
 #     over komira_http's `Connector` are P18b; nothing here reads the
 #     environment or opens a socket.
 #   * `CachingTokenSource` — a `GcpTokenSource` over any fetcher and any
-#     `Clock`: it serves the cached token while it is fresh and refetches
-#     `refresh_before_ms` BEFORE it expires, so a request never carries a token
-#     that expires in flight.
+#     komira_retry `MonotonicClock` (`SystemClock` in production,
+#     `ManualClock` in a test): it serves the cached token while it is
+#     fresh and refetches `refresh_before_ms` BEFORE it expires, so a request
+#     never carries a token that expires in flight. The clock is MONOTONIC on
+#     purpose: every expiry here is relative (`expires_in` seconds from the
+#     token endpoint), so a wall-clock step must not make a token look
+#     fresher or older than it is.
 #   * `StaticTokenSource` — a fixed token, for an emulator or a test.
 #
 # ⛔ A TOKEN IS A CREDENTIAL. Nothing in this file renders one: `AccessToken`
@@ -24,7 +28,7 @@
 # token's LENGTH and expiry, never its bytes.
 # =============================================================================
 
-from komira_gcp_core.clock import Clock
+from komira_retry import MonotonicClock
 
 
 comptime DEFAULT_REFRESH_BEFORE_MS: Int64 = 225_000
@@ -50,7 +54,7 @@ trait GcpTokenSource(Movable, Deinitable):
 
 @fieldwise_init
 struct AccessToken(Copyable, Movable, Deinitable):
-    """An OAuth2 access token and the instant, on the fetching `Clock`'s
+    """An OAuth2 access token and the instant, on the fetching `MonotonicClock`'s
     timeline, at which it stops being valid.
 
     It deliberately has no string conversion: a token is a credential, and a
@@ -97,7 +101,7 @@ trait AccessTokenFetcher(Movable, Deinitable):
         ...
 
 
-struct CachingTokenSource[F: AccessTokenFetcher, K: Clock](
+struct CachingTokenSource[F: AccessTokenFetcher, K: MonotonicClock](
     GcpTokenSource, Movable, Deinitable
 ):
     """A `GcpTokenSource` that caches the fetcher's token and refetches it

@@ -35,7 +35,6 @@ from komira_gcp_core import (
     CODE_DATA_LOSS,
     CODE_UNAUTHENTICATED,
     GcpRetryClassifier,
-    MonotonicClock,
     RETRY_INFO_TYPE,
     duration_to_ms,
     gcp_retry_policy,
@@ -300,23 +299,6 @@ def test_retry_loop_honours_the_deadline() raises:
     assert_equal(loop.sleeper().slept[0], 1000)
 
 
-def test_monotonic_clock_is_milliseconds_and_sleeps() raises:
-    # The production clock behind token expiry: now_ms is in MILLISECONDS and
-    # sleep_ms really waits. The lower bound is exact; the upper bound only
-    # has to rule out a micro- or nanosecond unit.
-    var clock = MonotonicClock()
-    var before = clock.now_ms()
-    clock.sleep_ms(50)
-    var delta = clock.now_ms() - before
-    assert_true(delta >= 50, String("slept ") + String(delta) + " ms")
-    assert_true(delta <= 5000, String("slept ") + String(delta) + " ms")
-    # A non-positive sleep returns at once.
-    var t0 = clock.now_ms()
-    clock.sleep_ms(0)
-    clock.sleep_ms(-5)
-    assert_true(clock.now_ms() - t0 < 1000)
-
-
 def main() raises:
     test_default_retryable_set_is_unavailable_only()
     test_must_never_codes_cannot_be_added()
@@ -330,5 +312,4 @@ def main() raises:
     test_retry_loop_returns_a_non_retryable_failure_at_once()
     test_retry_loop_stops_at_max_attempts()
     test_retry_loop_honours_the_deadline()
-    test_monotonic_clock_is_milliseconds_and_sleeps()
     print("all gcp retry tests passed")
