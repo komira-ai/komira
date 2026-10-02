@@ -21,6 +21,10 @@
 # Whatever order `drain_scan` reads in, it must either refuse by name or
 # return every offset from the requested start — never the suffix alone.
 #
+# The last three tests land the same compaction (or a retention advance)
+# DIRECTLY between two calls: after `plan_splits` and before `open_split`, and
+# between two polls of one reader. Each must refuse by name.
+#
 # The compaction is PRE-COMPUTED: steps 6 and 8 run once, through the real
 # `CompactionIndex` / `CasManifestStore`, over a separate SHADOW store, and the
 # hook copies the resulting objects raw into the scanned store — the
@@ -317,7 +321,94 @@ def test_a_compaction_landing_mid_scan_never_drops_the_prefix() raises:
         assert_equal(log_start, Int64(0), "reported log_start is the one read")
 
 
+def _three_segments() raises -> _Inner:
+    var inner = _Inner()
+    var cfg = BrokerTopicConfig(1, List[String](), _kv_schema())
+    _ = inner.put(
+        Path.parse(_topic_config_key(String(_CLUSTER), String(_TOPIC))), cfg.encode()
+    )
+    _produce(inner, [Int64(1), Int64(2)])  # chunk 0: offsets 0-1
+    _produce(inner, [Int64(3), Int64(4)])  # chunk 1: offsets 2-3
+    _produce(inner, [Int64(5), Int64(6)])  # chunk 2: offsets 4-5
+    return inner^
+
+
+def _request(rt: BrokerScanRuntime[_Inner]) raises -> ScanRequest:
+    var params = ScanParams()
+    params.put_str(String(BROKER_PARAM_TOPIC), String(_TOPIC))
+    return ScanRequest(resolve_for_execution(rt, rt.build_binding(params)))
+
+
+def test_a_compaction_between_plan_and_open_is_refused_at_open() raises:
+    var inner = _three_segments()
+    var rt = BrokerScanRuntime[_Inner](inner.clone(), String(_CLUSTER))
+    var req = _request(rt)
+    var plan = rt.plan_splits(req)
+    assert_equal(plan.num_splits(), 1)
+    _compact_offsets_0_to_3(inner)
+    var refused = False
+    try:
+        _ = rt.open_split(req, plan.splits[0])
+    except e:
+        refused = True
+        assert_true(
+            String(e).find("BROKER_SCAN_COMPACTED_TIER_UNREAD") >= 0,
+            String("the reader names the compacted tier; got: ") + String(e),
+        )
+    assert_true(refused, "a split planned before the compaction is not opened")
+
+
+def test_a_compaction_between_two_polls_is_refused_before_the_next_segment() raises:
+    var inner = _three_segments()
+    var rt = BrokerScanRuntime[_Inner](inner.clone(), String(_CLUSTER))
+    var req = _request(rt)
+    var plan = rt.plan_splits(req)
+    var reader = rt.open_split(req, plan.splits[0])
+    var first = reader.poll(Int64(-1), Int64(-1))
+    assert_true(first.is_rows())
+    assert_equal(first.num_rows(), 2, "fixture: chunk 0 read before compaction")
+    _compact_offsets_0_to_3(inner)
+    var refused = False
+    try:
+        _ = reader.poll(Int64(-1), Int64(-1))
+    except e:
+        refused = True
+        assert_true(
+            String(e).find("BROKER_SCAN_COMPACTED_TIER_UNREAD") >= 0,
+            String("the next poll names the compacted tier; got: ") + String(e),
+        )
+    assert_true(refused, "offsets 2-3 moved to the Parquet tier mid-read")
+
+
+def test_retention_between_plan_and_open_is_refused_not_clamped() raises:
+    """`log_start` moves past the planned start with no compaction entry
+    (retention reaped the prefix). The reader refuses by name; it does not
+    resume at the new `log_start`, which would skip offsets 0-3 silently."""
+    var inner = _three_segments()
+    var rt = BrokerScanRuntime[_Inner](inner.clone(), String(_CLUSTER))
+    var req = _request(rt)
+    var plan = rt.plan_splits(req)
+    var m = CasManifestStore[_Inner](
+        store=inner.clone(), prefix=_partition_prefix(), retry=RetryPolicy.fast_test()
+    )
+    var cur = m.read_log_start()
+    _ = m.advance_log_start(Int64(2), Int64(4), cur.etag)
+    var refused = False
+    try:
+        _ = rt.open_split(req, plan.splits[0])
+    except e:
+        refused = True
+        assert_true(
+            String(e).find("BROKER_SCAN_LOG_START_MOVED") >= 0,
+            String("the reader names the moved log_start; got: ") + String(e),
+        )
+    assert_true(refused, "a split planned from offset 0 is not opened at 4")
+
+
 def main() raises:
     var suite = TestSuite()
     suite.test[test_a_compaction_landing_mid_scan_never_drops_the_prefix]()
+    suite.test[test_a_compaction_between_plan_and_open_is_refused_at_open]()
+    suite.test[test_a_compaction_between_two_polls_is_refused_before_the_next_segment]()
+    suite.test[test_retention_between_plan_and_open_is_refused_not_clamped]()
     suite^.run()
