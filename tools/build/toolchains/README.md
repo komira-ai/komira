@@ -25,14 +25,12 @@ Remote actions unpack the pinned files: busybox extracts zig
 `.conda`, placing the pinned C++ runtime in its `lib/` (`:mojo_compiler`).
 `:mojo_runtime` copies the libraries a built binary loads out of that closure,
 and refuses (`mojo_runtime: REFUSING: lib/<name> is missing or empty`) a name
-the closure lacks. All of these run on `light` workers
-([platforms/README.md](../platforms/README.md#execution-classes)).
+the closure lacks. All of these are linux x86_64 actions, on the linux
+execution platform ([platforms/README.md](../platforms/README.md#toolchains)).
 
 `komira_mojo_toolchains` ([`defs.bzl`](defs.bzl)) bundles them into
-`toolchains//:mojo` for `mojo_library`, `mojo_binary` and `mojo_test` (on
-`mojo_compile` + `numa_single` workers), and `toolchains//:mojo_multi_numa`
-for `mojo_multi_numa_test` (on `mojo_compile` + `numa_multi` workers). Both
-link for `x86_64-linux-gnu.2.34` and compile for `target_cpu = "x86-64-v3"`.
+`toolchains//:mojo` for `mojo_library`, `mojo_binary` and `mojo_test` (its
+actions run on the linux execution platform). It links for `x86_64-linux-gnu.2.34` and compile for `target_cpu = "x86-64-v3"`.
 `komira_toolchains` calls it from the `toolchains` cell of the repository at
 the project root (`tools/build/cells/toolchains/BUCK` in a standalone
 checkout), so a repository using komira can pass its own compiler
@@ -105,9 +103,8 @@ bytes match. To move to a new release:
    digest of every action downstream of it, so expect a cold remote cache.
 
 To update buck2, change each platform's `size`, `digest` and release URL in
-[`tools/buck2`](../../buck2). Test 10 matches buck2's literal wording of the
-multi-NUMA configuration refusal, so a release that rewords it turns that
-check red until the check is updated with the pin.
+[`tools/buck2`](../../buck2). Tests 18 and 25 pin the configuration hash of
+`linux-x86_64`, which a buck2 release may move; update the pins with it.
 
 ## macOS
 
@@ -120,18 +117,18 @@ darwin-arm64 target that needs one is incompatible rather than built for
 linux.
 
 Its compiles, gated tests and run checks run on macOS arm64 workers, the
-execution platform `komira//tools/build/platforms:exec-mojo-darwin-arm64`.
+execution platform `komira//tools/build/platforms:darwin-arm64`.
 It is registered only when `.buckconfig.local` names their property set and
 their hosts:
 
 ```ini
 [komira_re]
-  darwin_mojo_compile_properties = pool=macos
+  darwin_properties = pool=macos
   darwin_macos_hosts = 26.5-0123456789abcdef 26.5-fedcba9876543210
 ```
 
-`darwin_mojo_compile_properties` is the exact property set the workers
-advertise, like the linux sets, and must differ from each of them.
+`darwin_properties` is the exact property set the workers advertise, and
+must differ from the linux one (`linux_properties`).
 `darwin_macos_hosts` lists what `sh tools/build/mojo/darwin/host_identity.sh`
 prints on each worker host: the SDK version, then a digest of the developer
 dir, the SDK version and build, `cc --version`, `ld -v` and the OS build.
@@ -140,7 +137,7 @@ configure, a wildcard over `tools/build/toolchains/darwin` skips its targets,
 and the linux build is unchanged (its actions are the same with and without
 the keys). The macOS platform is registered last, so an action that states
 no os never lands on it. Unpacking the osx-arm64 toolchain moves bytes only
-and runs on the linux `light` workers.
+and runs on the linux execution platform.
 
 What a macOS action takes from the worker, and what keys it:
 

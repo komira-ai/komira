@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Generic retry: policy, backoff with jitter, retry budget and a sleeping
+# loop, in pure Mojo with no dependencies beyond the standard library. Which
+# failures to retry is the client libraries' business (their classifiers);
+# see README.md.
+mojo_library(
+    name = "komira_retry",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_decide.mojo",
+        "tests/test_backoff.mojo",
+        "tests/test_budget.mojo",
+        "tests/test_refusals.mojo",
+        "tests/test_loop.mojo",
+        "tests/test_system.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

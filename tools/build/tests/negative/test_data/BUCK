@@ -24,12 +24,14 @@ mojo_library(
 
 # RED (GATED TEST FAILED): a test's env reaches the test only, never the
 # runner's own variables, so naming one of them cannot mute a red test.
+# Exported into the runner, BIN=true would run `true` in place of the test
+# and the gate would pass.
 mojo_library(
-    name = "env_held",
+    name = "env_bin_lib",
     srcs = _SRCS,
     import_name = "tdlib",
     test_srcs = ["tests/test_red.mojo"],
-    test_env = {"HELD": "1"},
+    test_env = {"BIN": "true"},
 )
 
 # RED under `buck2 test`: env {"BIN": "true"} does not run `true` in place of
