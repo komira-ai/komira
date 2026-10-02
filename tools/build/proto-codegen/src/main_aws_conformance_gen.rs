@@ -397,7 +397,9 @@ fn driver_header(
     o.line("#");
     o.line("# A case the generated code raises on has a `raised` record holding the");
     o.line("# error, which the harness scores red. A case the generator could not");
-    o.line("# build has a `refused` record holding the error.");
+    o.line("# build has a `refused` record holding the error. The first output");
+    o.line("# case's parser is also handed a body that is not well-formed UTF-8,");
+    o.line("# and the driver stops when it does not refuse it.");
     o.line("#");
     let p: Vec<&str> = protocols.iter().map(String::as_str).collect();
     o.line(&format!("#   protocols       : {}", p.join(", ")));
@@ -447,6 +449,9 @@ fn emit_driver(
 
     let mut undriveable: Vec<(String, String)> = Vec::new();
     let mut ctr = 0usize;
+    // The parser of the first output case driven: the ill-formed UTF-8
+    // probe below runs it.
+    let mut probe: Option<String> = None;
     for s in suites {
         for (key, case) in &s.cases {
             let co = case.as_object().unwrap();
@@ -462,10 +467,17 @@ fn emit_driver(
                     o.line("");
                     o.line(&format!("# --- {key} ---"));
                     o.buf.push_str(&sub.buf);
+                    if probe.is_none() && s.direction == Direction::Output {
+                        probe = Some(output_parser(s, co)?);
+                    }
                 }
                 Err(e) => undriveable.push((key.clone(), e)),
             }
         }
+    }
+
+    if let Some(parser) = probe {
+        emit_utf8_probe(&mut o, &parser);
     }
 
     o.line("");
@@ -489,6 +501,52 @@ fn emit_driver(
     o.line("print(actuals.serialize())");
     o.indent -= 1;
     Ok((o.buf, undriveable))
+}
+
+/// The generated parser an output case calls.
+fn output_parser(s: &Suite, case: &JsonObject) -> Result<String, String> {
+    let op_name = case
+        .get("given")
+        .and_then(Json::as_object)
+        .and_then(|g| g.get("name"))
+        .and_then(Json::as_str)
+        .ok_or("no given.name")?;
+    let facts = s.lowering.facts.operation(op_name)?;
+    Ok(format!(
+        "{}_parse_{}_response",
+        s.prefix.to_lowercase(),
+        facts.ir_method_name
+    ))
+}
+
+/// A generated parser handed a 200 response whose body is JSON holding a
+/// string that is not well-formed UTF-8 (`{"a":"\xFF"}`) must refuse it.
+/// The corpus holds only text bodies, so no case asks this; a parser that
+/// accepts the bytes stops the driver, and with it the conformance test.
+fn emit_utf8_probe(o: &mut Out, parser: &str) {
+    o.line("");
+    o.line("# --- probe: a body that is not well-formed UTF-8 is refused ---");
+    o.line("var _utf8_refused = False");
+    o.line("try:");
+    o.indent += 1;
+    o.line("var _bad: List[UInt8] = [");
+    o.indent += 1;
+    o.line("UInt8(0x7B), UInt8(0x22), UInt8(0x61), UInt8(0x22), UInt8(0x3A),");
+    o.line("UInt8(0x22), UInt8(0xFF), UInt8(0x22), UInt8(0x7D),");
+    o.indent -= 1;
+    o.line("]");
+    o.line(&format!("_ = {parser}(AwsResponse(200, _bad^))"));
+    o.indent -= 1;
+    o.line("except e:");
+    o.indent += 1;
+    o.line("_utf8_refused = String(e).find(\"UTF-8\") >= 0");
+    o.indent -= 1;
+    o.line("if not _utf8_refused:");
+    o.indent += 1;
+    o.line(&format!(
+        "raise Error(\"{parser} did not refuse a body that is not well-formed UTF-8\")"
+    ));
+    o.indent -= 1;
 }
 
 fn emit_input_case(

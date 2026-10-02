@@ -170,7 +170,7 @@ pub struct AwsMemberFacts {
     pub deprecated: bool,
     pub deprecated_message: Option<String>,
     /// `contextParam.name` — an endpoint-ruleset input. Recorded rather
-    /// than dropped even though no ruleset is vendored.
+    /// than dropped even though the generator reads no ruleset.
     pub context_param: Option<String>,
     /// True when this member is the shape's designated `payload`.
     pub is_payload: bool,
@@ -1283,7 +1283,7 @@ impl<'a> AwsLowerer<'a> {
         };
         // DROPPED, deliberately and named: `staticContextParams` (78
         // operations) and `operationContextParams` (5). They bind values
-        // into an ENDPOINT RULESET, and `PIN.json` vendors no rulesets —
+        // into an ENDPOINT RULESET, and the generator reads no ruleset —
         // there is nothing for them to parameterise, and inventing a
         // representation for an absent consumer is how a wrong default gets
         // established. `contextParam` (the per-MEMBER half, 179 members) IS
@@ -1291,8 +1291,8 @@ impl<'a> AwsLowerer<'a> {
         if op.get("staticContextParams").is_some() || op.get("operationContextParams").is_some() {
             self.note(format!(
                 "operation `{op_name}`: staticContextParams / operationContextParams \
-                 DROPPED — they are endpoint-ruleset inputs and no ruleset is vendored \
-                 (see tools/vendor/aws_models/PIN.json)"
+                 DROPPED — they are endpoint-ruleset inputs and the generator reads no \
+                 ruleset (see third_party/botocore/models.bzl)"
             ));
         }
 

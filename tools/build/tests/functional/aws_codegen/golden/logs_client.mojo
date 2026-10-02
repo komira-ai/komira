@@ -789,7 +789,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         var req = build_get_log_events_request(input)
         var res = self.send(req^)
         if not aws_is_error_status(res.status):
-            return parse_get_log_events_response(res.to_response())
+            return parse_get_log_events_response(res^.into_response())
         raise _komira_aws_logs_error(String("GetLogEvents"), res)
 
 

@@ -2150,7 +2150,7 @@ impl<'a> AwsEmitter<'a> {
             self.line("var res = self.send(req^)");
             self.line("if not aws_is_error_status(res.status):");
             self.push();
-            self.line(&format!("return {fp}parse_{}_response(res.to_response())", m.name));
+            self.line(&format!("return {fp}parse_{}_response(res^.into_response())", m.name));
             self.pop();
             self.line(&format!(
                 "raise _{}_error(String(\"{}\"), res)",
