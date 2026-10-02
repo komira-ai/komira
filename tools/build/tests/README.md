@@ -14,7 +14,7 @@ tools/build/tests/run_tests.sh --no-uncached   # skip the uncached half of test 
 It prints one `PASS`, `FAIL` or `SKIP` line per test, then the directory
 holding every log, and exits 1 if any test failed. `BUCK2=...`, `TMPDIR` and
 `KEEP_SCRATCH=1` are described in
-[DEVELOPMENT.md](../../../DEVELOPMENT.md#4-run-the-tests).
+[DEVELOPMENT.md](../../../DEVELOPMENT.md#3-run-the-tests).
 
 ## Layout
 
@@ -45,7 +45,7 @@ buck2 registers, and the first line of output names it:
 
 - `MODE  remote`: `.buckconfig.local`, or a machine-wide buckconfig as on the
   CI runner, names a remote-execution service
-  ([DEVELOPMENT.md](../../../DEVELOPMENT.md#3-optional-build-on-a-remote-execution-service)).
+  ([DEVELOPMENT.md](../../../DEVELOPMENT.md#advanced-remote-execution)).
   Every action runs there, and every test runs. CI runs this way.
 - `MODE  local`: no service is configured; every action runs on this
   machine. These need a service and print `SKIP ... needs a remote-execution
@@ -181,7 +181,7 @@ Its `app//platforms:default` must register only remote platforms, including
 `linux-x86_64`; hello, hellopkg, test_hellopkg, `toolchains//:mojo` and the
 zig and conda_unpack targets must resolve to it, with the configuration hash
 test 18 pins; and with `-c komira.execution=remote`, clearing `[komira_re]
-linux_properties` must refuse, naming the key. Analysis only.
+linux_x86_64_properties` must refuse, naming the key. Analysis only.
 See
 [Using komira from another repository](../README.md#using-komira-from-another-repository).
 
@@ -238,7 +238,7 @@ Every action runs with the one linux property set, read per action: an
 uncached build of `//tools/build/examples:hello` and
 `//tools/build/third_party_srcs:aws_lc_mini_gen` (its own daemon under a fixed
 `--isolation-dir`, `--no-remote-cache`, so every action really executes) must
-record a remote execution carrying `[komira_re] linux_properties` for every
+record a remote execution carrying `[komira_re] linux_x86_64_properties` for every
 action it ran, and must have run `zig_unpack`, `zig_build_exe`,
 `conda_unpack`, `mojo_runtime`, `fixture_archive`, `third_party_srcs` and
 `mojo_build` (`buck2 log what-ran`; a cache hit records no properties, so a
@@ -322,7 +322,8 @@ target platform, and the configuration of the linux execution platform), read
 with `buck2 cquery 'deps(komira//tools/build/examples:hello)'`, equals the pin
 in `run_tests.sh`, and it is the only configuration in that closure. A configuration's hash is keyed by its
 platform's label and constraints and appears in the output paths, and so in
-the digest, of every configured action, product code included. Moving the
+the digest, of every configured action, product code included. The default target platform (`platforms:host`) is an alias of this one
+on a Linux x86_64 client, so it has the same hash. Moving the
 `platforms` package, renaming a platform or changing a constraint therefore
 invalidates every cached action here and in every repository using
 komira; the pins make that a deliberate edit. Upgrading buck2 may change the
@@ -420,10 +421,14 @@ every target identically; `-c komira.execution=remote` refuses, naming `[komira_
 `action_cache_address` with no `[komira_re]`
 refuses instead of building locally (a missing or misspelled `[komira_re]`
 fails closed), as does a retired `[komira_re]` key such as
-`mojo_compile_properties` (naming `linux_properties`), while
+`mojo_compile_properties` (naming `linux_x86_64_properties`) and the two
+keys that named a platform by its OS alone, `linux_properties` and
+`darwin_properties` (naming `linux_x86_64_properties` and
+`darwin_arm64_properties`), while
 `-c komira.execution=local` still registers the local platform;
 `[komira] execution = remote` in a user `~/.buckconfig.local` refuses; and an
-unknown mode refuses. On any other host the clone must refuse local
+unknown mode refuses. On a macOS arm64 host the clone registers the one
+local `darwin-arm64` platform; on any other host it must refuse local
 execution, naming the host and `.buckconfig.local`. Last, on Linux x86_64,
 it builds `komira//tools/build/toolchains:conda_unpack` and `:zig_cc_launcher`
 locally, from a daemon started with an empty environment and `PATH`: zig is
@@ -545,6 +550,63 @@ sha256 and `.zst` URL for both platforms. No network.
 tools/build/tests/functional/bootstrap.sh "$(mktemp -d)/bootstrap"
 ```
 
+## 33a. Conda packages
+
+The conda package of `//src/komira_encoding:komira_encoding_conda` and of the
+fixture libraries of [`negative/conda`](negative/conda/BUCK) ([`conda.sh`](functional/conda.sh)):
+a package is a directory (the `.conda`, `manifest.json`, `metadata.json`), read
+back with `unzip`, `zstd`, `tar` and `jq`, not the tool that wrote it (three
+stored members, valid zstd, owner-0 tars, sorted compact JSON, the library's
+`.mojoc` byte for byte); `manifest.json` is exactly kci's six-key artifact
+manifest; the compiler pin equals the pinned compiler's version; no BUCK file
+declares a package, and a NEW fixture library gets `<name>_conda` from the
+`mojo_library` macro with no declaration anywhere and builds; `conda = False`
+gets no target; `conda_name` publishes under another name and a dependent
+requires that name; a dependency is rendered at its own version; a library that
+cannot be packaged (no tests, native code, a run-time `dlopen`, a name that is
+not a conda name, a dependency with no package) keeps a target that builds as a
+`REFUSED` directory holding the reason, its `[release]` fails naming it, and
+the library still builds; `komira_pack conda-check` refuses a different
+payload, name, subdir or dependency list, a corrupt zip, a manifest that is not
+the contract and a metadata file that disagrees; the version comes from the
+configuration and an unstamped build, a stamp without its source commit and a
+non-positive commit time are refused by the release check, `[release]` exists
+only for a stamped one, and a new stamp re-runs no compile; `release_version.sh`
+counts to the last non-documentation commit in a scratch repository and prints
+that commit; two uncached builds in fresh daemons give the same sha256 in one
+isolation directory (skipped with `--no-uncached`); and a `pixi` project whose
+channel is the built file served from `file://` installs it, with the compiler
+from Modular's `max` channel, and `mojo run` of a program importing it prints
+the right bytes, while the same project without it cannot (skipped with
+`--no-install`, without `pixi`, or without network). See
+[packaging/conda](../../../packaging/conda/README.md).
+
+## 33b. Conda package set and metapackage
+
+What a release tool does with the packages the build makes, on the packages the
+repository really builds ([`conda_set.sh`](functional/conda_set.sh)):
+`tools/build/package/list_conda_targets.sh` prints a package target for every
+library of `//src`, all of them build (a refusal is a value), and every
+requirement of a package is another package of the set; a stamped build gives a
+`[release]` directory for each package that can be made and none for a refused
+library; `komira_pack conda-meta` over the members' manifests gives a package
+with no file that requires exactly the guard and every member at its version,
+the same bytes twice, accepted by `conda-check` (as a release too); kci's own
+artifact-manifest parser (`tools/build/package/manifest_probe`) reads the
+manifest of every package and of the metapackage and renders it back to the same
+bytes, and refuses a manifest with a `metadata` key; `conda-meta` refuses
+version skew, a member twice, a member whose file is not its manifest's sha256,
+a refused package, a name that is a member, a name that is not a conda name, a
+metapackage as a member and no members; `conda-check` refuses a metapackage
+against a shorter or longer member list, the wrong kind, an extra manifest key
+and an unstamped release; two uncached builds in fresh daemons give the same
+sha256 for every file of every package and of the metapackage made from each
+run (`--no-uncached` skips); and `pixi` installs ONLY the metapackage from a
+`file://` channel of the set, the solver brings every library and the compiler,
+and a program importing two libraries prints the right bytes (`--no-install`, no
+`pixi` or no network skips). See
+[packaging/conda](../../../packaging/conda/README.md).
+
 ## 33. Client
 
 `run_tests.sh` runs binaries the farm built for Linux x86_64 (the inspect
@@ -628,6 +690,48 @@ buck2 build tests//negative/rust_test:env_scrubbed 'tests//negative/rust_test:bi
 buck2 build tests//negative/rust_test:bin       # must fail: GATED TEST FAILED
 buck2 test //tools/build/proto-codegen:komira_proto_codegen
 ```
+
+## 37. Platform table
+
+[`functional/platform_table`](functional/platform_table/BUCK): the platform
+table ([`table.bzl`](../platforms/table.bzl), one row per (os, cpu)) and the
+default target platform. Loading the package runs the load-time cases of
+[`cases.bzl`](functional/platform_table/cases.bzl): the committed table is
+complete, and a copy with one defect (a pin missing from a registered, a
+macOS or the reserved row, a pending pin in a registered row, a sha256 that
+is not 64 lowercase hex digits, a url that is not https, `none` for a pin that
+must be real, a missing or unknown field, a cache line or page that is not a
+power of two, an undefined or unsorted feature, a golden hash that is not 16
+hex digits or is recorded for a row with no platform, a pool that is not
+`pool=<name>`, two rows sharing a key, a host or a pool) is refused with a
+sentence naming the row and the field; each `host_info()` selects its row, or
+is refused with a reason (a Linux arm64 host: the row is reserved).
+[`check.sh`](functional/platform_table/check.sh) then checks, on the client:
+
+1. `komira//tools/build/platforms:` declares `darwin-arm64`, `linux-x86_64`
+   and `host`, and nothing for the reserved `linux-arm64`;
+2. `host` is this client's own platform and a target stating no
+   `--target-platforms` is configured for it;
+3. `[komira_re] linux_arm64_properties` is refused, naming the platform;
+4. where actions run: with only the host platform's `[komira_re]` key set the
+   one execution platform is remote; with only another platform's key set it
+   is the local one and nothing fails (no key at all is test 25's);
+5. the limits ([`limits.tsv`](../platforms/limits.tsv),
+   [`limits_retired.sh`](functional/platform_table/limits_retired.sh)): the
+   real tree passes, five fixture trees are each refused (a limit with no
+   marker, a marker with no row, a row with no marker, a duplicate row, a
+   `never` with no product reason), a fixture whose retiring PR has merged is
+   refused while one naming a different PR (`44`, `4b` for `4`) is not, and
+   with every retiring PR named as merged the real tree is refused once per
+   retirable limit;
+6. each registered row's `golden_config_hash` is the hash buck2 gives its
+   platform, and the macOS applets are those of `busybox.sh`;
+7. on a Linux x86_64 client, the golden
+   ([`golden/golden.sh`](golden/golden.sh)): the configuration and the action
+   hashes of eight sample targets equal `linux-x86_64.golden`, and a copy with
+   one hex digit of one hash changed is refused naming the sample.
+
+Analysis only.
 
 ## Diagnostics
 

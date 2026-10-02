@@ -322,6 +322,7 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, layers
 
 def _oci_image_impl(ctx):
     b = ctx.attrs.bundle[BundleInfo]
+    # komira-limit:image-linux-x86-64-only
     if b.platform != "linux-x86_64":
         fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
     if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):

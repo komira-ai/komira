@@ -65,7 +65,7 @@
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really
 #      executes) must record a remote execution carrying `[komira_re]
-#      linux_properties` for every action it ran, and must have run
+#      linux_x86_64_properties` for every action it ran, and must have run
 #      zig_unpack, zig_build_exe, conda_unpack, mojo_runtime, fixture_archive,
 #      third_party_srcs and mojo_build (`buck2 log what-ran`; a cache hit
 #      records no properties, so a warm build cannot answer this). Costs about 3 minutes of remote execution; the isolated
@@ -173,6 +173,18 @@
 #      (tools/build/tests/negative/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
+#  33a. Conda packages: see tools/build/tests/functional/conda.sh (a package is a
+#       directory read back with unzip, zstd, tar and jq; kci's manifest contract;
+#       a new library gets its package from the macro with no declaration; the
+#       refusals, as targets that build and releases that do not; the stamp; two
+#       uncached builds, skipped with --no-uncached; a pixi install from a
+#       file:// channel and a Mojo program importing the library, skipped with
+#       --no-install).
+#  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
+#       (every library's package target builds; the stamped releases; the metapackage
+#       from the members' manifests; kci's own parser over the emitted manifests; the
+#       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
+#       the metapackage alone, skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -221,6 +233,16 @@
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
 #      (tests//negative/aws_client).
+#  37. The platform table (tools/build/platforms/table.bzl, one row per
+#      (os, cpu)) is complete and the default target platform is the client's
+#      own: loading tests//functional/platform_table: runs the load-time
+#      cases (a table missing a pin or a field, with a pending pin in a
+#      registered row, a malformed sha256 or a duplicate key or host is
+#      refused naming the row and the pin; each host_info() selects its row);
+#      `platforms:host` is linux-x86_64 on this client and a target stating no
+#      --target-platforms is configured for it; the reserved linux-arm64 row
+#      has no platform and its `[komira_re]` key is refused
+#      (tools/build/tests/functional/platform_table/check.sh).
 set -uo pipefail
 
 umbrella=1
@@ -242,6 +264,7 @@ done
 # another client they would fail one by one, looking like defects; stop here
 # instead. `./buck2 build //...` and `./buck2 test //...` work from any client.
 client=$(uname -s) arch=$(uname -m)
+# komira-limit:run-tests-linux-x86-64-client
 if [ "$client $arch" != "Linux x86_64" ]; then
     echo "run_tests.sh: needs a Linux x86_64 client, this is $client $arch: the tests run Linux x86_64 binaries and ELF tools here. ./buck2 build //... and ./buck2 test //... run from any client." >&2
     exit 2
@@ -318,6 +341,7 @@ EXAMPLES=(
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
     //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
+    //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact //tools/build/examples/shared_lib_mid:mid
 )
 # Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
 # was observed to skip the sub-target, so never rely on combining them with a
@@ -358,6 +382,18 @@ expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
 expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated]"
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
 expect_red gate_bypass_refused "MojoInfo" tests//negative/libgate_bad:bypass_consumer
+
+# 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
+for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks; do
+    expect_green "sharedlib_${t}_ungated" "tests//negative/shared_lib:${t}[ungated]"
+done
+expect_red sharedlib_missing_export_red "MISSING EXPORT: neg_missing" tests//negative/shared_lib:missing_export
+expect_red sharedlib_unresolved_red "undefined symbol: komira_neg_undefined_symbol" tests//negative/shared_lib:unresolved_symbol
+expect_red sharedlib_driver_red "GATED TEST FAILED" tests//negative/shared_lib:failing_driver
+expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests//negative/shared_lib:forced_not_loaded
+expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
+expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
+expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
@@ -532,12 +568,12 @@ action_platforms() { # what-ran json: every action ran remotely, with the linux 
             printf "%d actions, every one a remote execution with [%s]\n", total, P
         }'
 }
-LINUX_PROPS=$(re_value linux_properties)
+LINUX_PROPS=$(re_value linux_x86_64_properties)
 ISO=komira_tests_uncached
 if [ "$MODE" = local ]; then
     needs_remote "action platforms (per-action worker property sets)"
 elif [ -z "$LINUX_PROPS" ]; then
-    fail "action platforms: cannot read [komira_re] linux_properties"
+    fail "action platforms: cannot read [komira_re] linux_x86_64_properties"
 # The isolated daemon keeps its outputs between runs, and --no-remote-cache
 # does not rerun an action whose output is already on disk: clean first, or
 # a second run of these tests in the same checkout executes nothing.
@@ -820,6 +856,30 @@ else
     fail "./buck2 bootstrap: $(grep '^FAIL' "$LOG/bootstrap.log" | cut -c 18- | tr '\n' ' ')(see $LOG/bootstrap.log)"
 fi
 
+# 33a
+conda_args=()
+[ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda "*) pass "${line#PASS  }" ;;
+        "FAIL  conda "*) fail "${line#FAIL  } (see $LOG/conda.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda.log"
+grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
+
+# 33b
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda_set.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda_set.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda_set "*) pass "${line#PASS  }" ;;
+        "FAIL  conda_set "*) fail "${line#FAIL  } (see $LOG/conda_set.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda_set.log"
+grep -qE '^(PASS|FAIL)  conda_set ' "$LOG/conda_set.log" || fail "conda_set: tools/build/tests/functional/conda_set.sh reported nothing (see $LOG/conda_set.log)"
+
 # 33
 S="$LOG/uname_shim"
 mkdir -p "$S/mac" "$S/here"
@@ -920,6 +980,17 @@ elif [ "$umbrella" = 1 ]; then
 else
     echo "SKIP  umbrella cache (--no-umbrella)"
 fi
+
+# 37
+pt_rc=0
+pt_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/tests/functional/platform_table/check.sh "$LOG" 2>&1) || pt_rc=$?
+printf '%s\n' "$pt_out" > "$LOG/platform_table.log"
+grep -E '^(PASS|FAIL)  ' "$LOG/platform_table.log"
+pt_fails=$(grep -c '^FAIL  ' "$LOG/platform_table.log" || true)
+if [ "$pt_rc" != 0 ] && [ "$pt_fails" = 0 ]; then
+    fail "platform table: check.sh exited $pt_rc without a FAIL line (see $LOG/platform_table.log)"
+fi
+fails=$((fails + pt_fails))
 
 echo "logs: $LOG"
 [ "$fails" = 0 ] || { echo "$fails test(s) failed"; exit 1; }
