@@ -49,7 +49,7 @@
 
 from komira_async.ops.waker_sink import WakerSink
 from komira_async.reactor.reactor import Reactor
-from komira_async.net.dns import resolve_host_be
+from komira_net.dns import resolve_host_be
 from komira_async.runtime.runtime_trait import Runtime
 from komira_async.runtime.tcp_stream import TcpStream
 

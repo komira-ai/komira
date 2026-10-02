@@ -16,7 +16,7 @@ from std.sys.info import CompilationTarget
 
 from komira_pg.pg_tls import _resolve_host_be
 from komira_async.reactor.socket_setup import inet_loopback_be
-from komira_async.net.dns import _getaddrinfo_collect
+from komira_net.dns import _getaddrinfo_collect
 
 
 def test_pg_literal_fast_path_parity() raises:
