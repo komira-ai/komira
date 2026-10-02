@@ -17,7 +17,7 @@
 # that has no underscore is unchanged by either direction.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 @fieldwise_init

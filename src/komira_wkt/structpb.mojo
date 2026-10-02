@@ -43,7 +43,7 @@
 # `komira_wkt` takes its JSON value and parser from `komira_json`.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 from komira_json import JsonValue, parse_json_value
 from komira_json import (
     JSON_NULL,

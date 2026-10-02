@@ -30,7 +30,7 @@
 # standalone and as a generated message field.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 from komira_encoding import base64_encode, base64_decode
 
 

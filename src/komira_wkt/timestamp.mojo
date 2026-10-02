@@ -23,10 +23,10 @@
 #
 # The civil-date conversion is the standard branch-free algorithm (Howard
 # Hinnant, "chrono-Compatible Low-Level Date Algorithms"). It is kept
-# self-contained here so `komira_wkt` needs no more than `komira_serde`.
+# self-contained here so `komira_wkt` needs no more than `komira_proto_codec`.
 # =============================================================================
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 # =============================================================================

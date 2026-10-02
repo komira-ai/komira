@@ -5,8 +5,8 @@ the concrete types a `protoc-gen-mojo`-generated client `import`s when a
 `.proto` message references a WKT (`google.protobuf.Timestamp`, `Duration`,
 etc.).
 
--- Why a separate `komira_wkt` package, not part of `komira_serde` ----------
-`komira_serde` is the format-NEUTRAL trait SUBSTRATE (the `Serializable` /
+-- Why a separate `komira_wkt` package, not part of `komira_proto_codec` ----------
+`komira_proto_codec` is the format-NEUTRAL trait SUBSTRATE (the `Serializable` /
 `WireEncoder` / `WireDecoder` traits). `komira_wkt` is a set of CONCRETE
 generated-equivalent message types. Keeping them as separate sibling
 packages:
@@ -16,7 +16,7 @@ packages:
     substrate's namespace;
   - mirrors the proto ecosystem itself: `google.protobuf.*` WKTs are their
     own proto package; `komira_wkt` is the natural Mojo analogue.
-Dependency direction (cycle-free): `komira_wkt -> komira_serde`, plus the leaf libraries `komira_json` and `komira_encoding`.
+Dependency direction (cycle-free): `komira_wkt -> komira_proto_codec`, plus the leaf libraries `komira_json` and `komira_encoding`.
 
 -- The proto3 canonical-JSON special case -----------------------------------
 A WKT does NOT serialize to proto3-canonical-JSON as a `{field: value}`
@@ -28,7 +28,7 @@ object. The protobuf JSON mapping mandates a SPECIAL JSON form per WKT:
     JSON form (a number / string / bool — NOT an object).
   - FieldMask -> a comma-joined lowerCamelCase path string.
   - Struct / Value / ListValue -> the literal JSON value they model.
-The `komira_serde` `Serializable` trait has ONE shared `encode[E]` body
+The `komira_proto_codec` `Serializable` trait has ONE shared `encode[E]` body
 across both backends, written with the generic `write_*_field` primitives —
 it cannot itself express "a different shape on JSON than on proto-binary".
 So each WKT here:
