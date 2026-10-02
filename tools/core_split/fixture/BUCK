@@ -1,0 +1,11 @@
+# The seeded fixture of no_mixed_closure.sh --selftest: `mixed` depends on both
+# `old` and `new` (the check must find it), `old_alone` is a target with no
+# dependent that also reaches `new` (the check must stay empty for that pair).
+# Every target is an empty filegroup, so building //... builds nothing here.
+filegroup(name = "old", srcs = [], visibility = ["PUBLIC"])
+
+filegroup(name = "old_alone", srcs = [], visibility = ["PUBLIC"])
+
+filegroup(name = "new", srcs = [], visibility = ["PUBLIC"])
+
+filegroup(name = "mixed", srcs = [":old", ":new"], visibility = ["PUBLIC"])

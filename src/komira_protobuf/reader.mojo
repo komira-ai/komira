@@ -234,7 +234,7 @@ def _pb_check_span(
     and `pb_read_string(buf, 0, 64)` silently returned 64 bytes of adjacent
     heap. Both are the module's PUBLIC API (re-exported from
     `komira_protobuf`) and both are reached from the ORC footer decoder
-    (`komira_orc`) and the protobuf-binary serde backend (`komira_serde`).
+    (`komira_orc`) and the protobuf-binary serde backend (`komira_proto_codec`).
     """
     if start < 0 or end < start or end > len(bytes):
         raise Error(
