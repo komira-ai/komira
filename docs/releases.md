@@ -17,6 +17,32 @@ The `version` that a bundle carries is an attribute of that bundle's
 repository can carry different versions, and the build checks only that the
 string is a plain version (`0.1.0`, `1.2.3+build.4`).
 
+## Conda packages
+
+Every Mojo library has a conda package target, `<name>_conda`, declared by the
+`mojo_library` macro (`conda = False` opts out); nobody writes one. The package
+is a directory: one file, `lib/mojo/<name>.mojoc`, which the compiler finds on
+its default import path, packed as a `.conda`, with the artifact manifest that
+kci reads and a metadata file. The build writes it and uploads nothing. Which
+packages are published is the release tool's reviewed list of artifact
+declarations, not a file in the build, and a name and version in a registry are
+permanent in practice, so the first upload is gated. A library that cannot be
+packaged still has a target that builds, holding the reason. The layout, the
+version scheme (`<prefix>.<N>`) and the metapackage are in
+[packaging/conda](../packaging/conda/README.md).
+
+An uploader reads only a package target's `[release]` sub-target, which exists
+only for a stamped build that carries its source commit; the unstamped
+`<prefix>.0` files the other sub-targets produce are for development and
+claim a permanent version if uploaded. Before uploading, the publish job
+re-derives the version and commit with `release_version.sh` at a clean
+full-history checkout and compares them with the manifest and metadata; that
+and the rest of the publish step are in the README.
+
+A project that uses a package lists the komira channel and Modular's `max`
+channel (or already depends on `mojo`, which pulls the same pinned compiler,
+`mojo-compiler ==1.0.0`); the snippet is in the README.
+
 ## Pinning komira from another repository
 
 A repository that builds Mojo with komira's rules names komira as its `komira`
@@ -36,7 +62,8 @@ These parts of a release machine's publish step are not described here
 because the libraries that implement them are not part of this repository
 yet:
 
-- Conda packages and Python wheels of the Mojo libraries.
+- The upload of conda packages, their other platforms (linux-aarch64 and
+  macOS) and Python wheels of the Mojo libraries.
 - Package channels, and the rules for which writers each channel admits.
 - Copying and promoting a container image between registries by digest.
 - A release version shared by every artifact, and the procedure for cutting
