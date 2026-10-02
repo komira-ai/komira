@@ -797,6 +797,28 @@ fn publishableName(n: []const u8, prefix: []const u8) bool {
     return true;
 }
 
+/// A full git commit id: 40 lowercase hex digits.
+fn fullCommit(s: []const u8) bool {
+    if (s.len != 40) return false;
+    for (s) |c| if (!(std.ascii.isDigit(c) or (c >= 'a' and c <= 'f'))) return false;
+    return true;
+}
+
+/// The sha256 a manifest carries as `approved_names_sha256`: the sorted names,
+/// one per line (each ending in a newline). An uploader recomputes it from
+/// names.tsv at the release commit with
+/// `grep -vE '^(#|$)' names.tsv | cut -f1 | LC_ALL=C sort | sha256sum`.
+fn namesDigest(alloc: Alloc, approved: []const []const u8) ![64]u8 {
+    const names_sorted = try alloc.dupe([]const u8, approved);
+    std.mem.sort([]const u8, names_sorted, {}, lessStr);
+    var joined = std.ArrayList(u8).init(alloc);
+    for (names_sorted) |n| {
+        try joined.appendSlice(n);
+        try joined.append('\n');
+    }
+    return sha256Hex(joined.items);
+}
+
 fn decimal(s: []const u8) bool {
     if (s.len == 0 or s.len > 9 or (s.len > 1 and s[0] == '0')) return false;
     for (s) |c| if (!std.ascii.isDigit(c)) return false;
@@ -866,7 +888,7 @@ fn refuseDlopen(alloc: Alloc, dir_path: []const u8) !void {
 /// --version-prefix, MAJOR.MINOR; stamp 0 is an unstamped build). The name and
 /// every --dep must be in the approved list --names, and carry --name-prefix.
 fn cmdConda(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--version-prefix", "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--names", "--name-prefix", "--extra-file", "--label", "--conda-manifest" });
+    allow(a, &.{ "--version-prefix", "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--names", "--name-prefix", "--extra-file", "--label", "--conda-manifest", "--commit" });
     const name = need(a.name, "--name");
     const prefix = need(one(a, "--name-prefix"), "--name-prefix");
     const approved = try approvedNames(alloc, need(one(a, "--names"), "--names"));
@@ -894,6 +916,13 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     const version = try std.fmt.allocPrint(alloc, "{s}.{s}.{s}", .{ major, minor, stamp });
     const ts_text = need(one(a, "--timestamp-ms"), "--timestamp-ms");
     const timestamp = std.fmt.parseInt(i64, ts_text, 10) catch fail("--timestamp-ms `{s}` is not an integer", .{ts_text});
+
+    // The source commit the stamp was derived from (release_version.sh). A
+    // stamped package must carry it, so a stamp is tied to git and not just to
+    // a number someone typed; an unstamped one carries it only if given.
+    const commit = one(a, "--commit") orelse "";
+    if (commit.len != 0 and !fullCommit(commit)) fail("--commit `{s}` is not a full lowercase 40-digit hex commit id", .{commit});
+    if (!std.mem.eql(u8, stamp, "0") and commit.len == 0) fail("a stamped package (N={s}) must carry --commit, the commit its stamp was derived from", .{stamp});
 
     try refuseDlopen(alloc, need(one(a, "--sources"), "--sources"));
 
@@ -962,16 +991,9 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     const conda = try zipStored(alloc, &members);
     const conda_sha = sha256Hex(conda);
 
-    const names_sorted = try alloc.dupe([]const u8, approved);
-    std.mem.sort([]const u8, names_sorted, {}, lessStr);
-    var joined = std.ArrayList(u8).init(alloc);
-    for (names_sorted) |n| {
-        try joined.appendSlice(n);
-        try joined.append('\n');
-    }
-
     var m = newObject(alloc);
-    try m.object.put("approved_names_sha256", str(&sha256Hex(joined.items)));
+    const names_digest = try namesDigest(alloc, approved);
+    try m.object.put("approved_names_sha256", str(&names_digest));
     try m.object.put("artifact_type", str("conda"));
     try m.object.put("build", str(conda_build));
     try m.object.put("build_number", .{ .integer = 0 });
@@ -985,6 +1007,7 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     try m.object.put("schema", .{ .integer = 1 });
     try m.object.put("sha256", str(&conda_sha));
     try m.object.put("size", .{ .integer = @intCast(conda.len) });
+    try m.object.put("source_commit", str(commit));
     try m.object.put("stamped", .{ .bool = !std.mem.eql(u8, stamp, "0") });
     try m.object.put("subdir", str(subdir));
     try m.object.put("version", str(version));
@@ -1070,7 +1093,11 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     const v_stamp = vparts.next() orelse "";
     if (!decimal(v_major) or !decimal(v_minor) or !decimal(v_stamp) or vparts.next() != null) fail("version `{s}` is not MAJOR.MINOR.N", .{version});
     const stamped = !std.mem.eql(u8, v_stamp, "0");
-    if (one(a, "--require-stamped") != null and !stamped) fail("version {s} was never stamped (N is 0): a release has a real N", .{version});
+    if (one(a, "--require-stamped") != null) {
+        if (!stamped) fail("version {s} was never stamped (N is 0): a release has a real N", .{version});
+        // A release is tied to git: a positive commit time, and the commit the stamp came from.
+        if (memberInt(index, "timestamp", "index") <= 0) fail("version {s} is stamped but its index timestamp is not positive: a release carries its commit's time", .{version});
+    }
     const depends = member(index, "depends", "index");
     if (depends != .array or depends.array.items.len < 2) fail("index depends is not an array of at least the guard and the mojo pin", .{});
     const items = depends.array.items;
@@ -1124,6 +1151,12 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     expectEq("manifest payload_path", memberStr(man, "payload_path", "manifest"), want_path);
     expectEq("manifest mojo_pin", memberStr(man, "mojo_pin", "manifest"), pin);
     if (memberBool(man, "stamped", "manifest") != stamped) fail("manifest `stamped` disagrees with the version", .{});
+    const man_commit = memberStr(man, "source_commit", "manifest");
+    if (man_commit.len != 0 and !fullCommit(man_commit)) fail("manifest source_commit `{s}` is not a full lowercase 40-digit hex commit id", .{man_commit});
+    if (stamped and man_commit.len == 0) fail("manifest source_commit is empty on a stamped package", .{});
+    if (one(a, "--require-stamped") != null and !fullCommit(man_commit)) fail("a release must carry the source commit of its stamp in the manifest", .{});
+    const names_digest = try namesDigest(alloc, approved);
+    expectEq("manifest approved_names_sha256", memberStr(man, "approved_names_sha256", "manifest"), &names_digest);
     const mdeps = member(man, "depends", "manifest");
     if (mdeps != .array or mdeps.array.items.len != items.len) fail("manifest depends differ from info/index.json", .{});
     for (items, mdeps.array.items) |x, y| if (y != .string or !std.mem.eql(u8, x.string, y.string)) fail("manifest depends differ from info/index.json", .{});

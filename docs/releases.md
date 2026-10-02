@@ -27,6 +27,19 @@ and a name and version in a registry are permanent in practice, so the
 first upload is gated. The layout, the version scheme (`<prefix>.<N>`) and the
 list are in [packaging/conda](../packaging/conda/README.md).
 
+An uploader reads only a package target's `[release]` sub-target, which exists
+only for a stamped build that carries its source commit; the unstamped
+`<prefix>.0` files the other sub-targets produce are for development and
+claim a permanent version if uploaded. Before uploading, the publish job
+re-derives the version and commit with `release_version.sh` at a clean
+full-history checkout and compares them with the manifest, and recomputes the
+approved-names digest from `names.tsv` at the release commit; both are in
+the README.
+
+A project that uses a package lists the komira channel and Modular's `max`
+channel (or already depends on `mojo`, which pulls the same pinned compiler,
+`mojo-compiler ==1.0.0`); the snippet is in the README.
+
 ## Pinning komira from another repository
 
 A repository that builds Mojo with komira's rules names komira as its `komira`

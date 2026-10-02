@@ -22,15 +22,25 @@
 #              tests, one that opens a shared library at run time, one linking
 #              native code; the two controls build, and one shows a dependency
 #              rendered into the run requirements at its own version.
-#   lint       //packaging/conda:names_lint is green; a list with every defect,
-#              and a BUCK file that declares another package or swaps the list,
-#              is red naming each.
+#   lint       //packaging/conda:names_lint is green and is a dependency of the
+#              package; a list with every defect, and a BUCK file that declares
+#              another package or swaps the list, is red naming each; a package
+#              outside the tests cell that names its own list is refused.
 #   stamp      the version is <prefix>.N from the configuration: the unstamped
-#              build is refused by [release_check]; a stamped one is accepted,
-#              carries the stamp in every place, and re-runs no compile (only
-#              the packing actions); release_version.sh counts first-parent
-#              commits to the last non-documentation commit, in a scratch repo,
+#              build is refused by [release_check] and has no [release]; a
+#              stamp without its source commit is refused; a stamped one is
+#              accepted, carries the stamp and commit in every place, and
+#              re-runs no compile (only the packing actions); [release]
+#              exists only then. Via komira_pack directly: a commit time that
+#              is not positive is refused by the release check, a short commit
+#              by the packer, a different approved list by the check.
+#              release_version.sh counts first-parent commits to the last
+#              non-documentation commit, in a scratch repo, prints that commit,
 #              and refuses a shallow clone.
+#   copies     the built file, manifest, digest and check marker are copied
+#              before anything else is built, and every later step reads the
+#              copies: under local execution a second build of the same target
+#              with another configuration overwrites the buck-out path.
 #   uncached   two builds in two fresh daemons with --no-remote-cache, one isolation
 #              directory, give the same sha256 (skipped with --no-uncached).
 #   install    a pixi project whose channel is the built file served from a
@@ -91,6 +101,20 @@ if [ -z "$CONDA" ] || [ -z "$MANIFEST" ] || [ -z "$DIGEST" ] || [ -z "$CHECK" ] 
     echo "logs: $W"
     exit 1
 fi
+# Copies, taken now and used for the rest of the script. Under local execution
+# the stamp section below builds the same target with another configuration and
+# that materializes a different file at the very same buck-out path, so a path
+# read once, early, names the wrong package by the time the install step runs.
+K="$W/keep"
+mkdir -p "$K"
+cp -L "$CONDA" "$K/package.conda" && cp -L "$MANIFEST" "$K/package.manifest.json" && cp -L "$DIGEST" "$K/package.digest" &&
+    cp -L "$CHECK" "$K/package.check" && cp -L "$LIBPKG" "$K/library.mojoc" || {
+    fail "shape: cannot copy the built files into $K"
+    echo "logs: $W"
+    exit 1
+}
+chmod u+w "$K"/*
+CONDA=$K/package.conda MANIFEST=$K/package.manifest.json DIGEST=$K/package.digest CHECK=$K/package.check LIBPKG=$K/library.mojoc
 problems=""
 p() { problems="$problems $1"; }
 S="$W/shape"
@@ -127,7 +151,7 @@ file_sha=$(sha256sum "$CONDA" | cut -c1-64)
 [ "$(cat "$DIGEST")" = "sha256:$file_sha" ] || p digest-differs
 jq -e --arg s "$file_sha" --arg p "$want_sha" --argjson z "$(stat -L -c %s "$CONDA")" '.schema == 1 and .artifact_type == "conda"
     and .sha256 == $s and .size == $z and .payload_sha256 == $p and .file_name == "komira_encoding-0.1.0-0.conda"
-    and .stamped == false and .name == "komira_encoding" and .subdir == "linux-64" and .version == "0.1.0"
+    and .stamped == false and .source_commit == "" and .name == "komira_encoding" and .subdir == "linux-64" and .version == "0.1.0"
     and .mojo_pin == "1.0.0" and .depends == ["__linux", "mojo-compiler ==1.0.0"]' "$MANIFEST" > /dev/null || p manifest
 [ "$(cat "$CHECK")" = ok ] || p check-marker
 if [ -n "$problems" ]; then fail "shape:$problems (see $S)"; else
@@ -148,6 +172,15 @@ pack() { # out-prefix, payload [extra komira_pack args...]
         --stamp 0 --timestamp-ms 0 --subdir linux-64 --mojo-pin "$pin" --license Apache-2.0 \
         --summary "Base64, base64url, base32 and hex in pure Mojo, with constant-time strict decoding." \
         --home https://github.com/komira-ai/komira --payload "$payload" --sources "$SRCS" \
+        --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" --label komira//packaging/conda:komira_encoding \
+        --out "$o.conda" --conda-manifest "$o.manifest.json" --digest "$o.digest" "$@"
+}
+packs() { # out-prefix, stamp, timestamp-ms [extra komira_pack args...]: a stamped package
+    local o=$1 st=$2 ts=$3
+    shift 3
+    "$PACK" conda --name komira_encoding --name-prefix komira_ --names "$NAMES" --version-prefix packaging/conda/VERSION_PREFIX \
+        --stamp "$st" --timestamp-ms "$ts" --subdir linux-64 --mojo-pin "$pin" --license Apache-2.0 \
+        --summary "s" --home https://github.com/komira-ai/komira --payload "$LIBPKG" --sources "$SRCS" \
         --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" --label komira//packaging/conda:komira_encoding \
         --out "$o.conda" --conda-manifest "$o.manifest.json" --digest "$o.digest" "$@"
 }
@@ -185,8 +218,32 @@ if [ -z "$problems" ]; then
     cp "$W/pack1.conda" "$W/pack4.conda" && printf 'Z' | dd of="$W/pack4.conda" bs=1 seek=200 conv=notrunc 2> /dev/null
     check "$W/pack4.conda" "$W/pack1.manifest.json" "$LIBPKG" 2> "$W/check_zip.err" && problems="$problems check-accepted-a-corrupt-zip"
 fi
+# The release gate: what makes a package one an uploader may read.
+if [ -z "$problems" ]; then
+    C40=0123456789abcdef0123456789abcdef01234567
+    packs "$W/rel_ok" 7 86400000 --commit "$C40" 2> "$W/rel_ok.err" || problems="$problems stamped-pack-failed"
+    check "$W/rel_ok.conda" "$W/rel_ok.manifest.json" "$LIBPKG" --require-stamped true 2> "$W/rel_ok_check.err" || problems="$problems release-check-refused-a-good-release"
+    jq -e --arg c "$C40" '.stamped == true and .version == "0.1.7" and .source_commit == $c' "$W/rel_ok.manifest.json" > /dev/null || problems="$problems manifest-lacks-source-commit"
+    packs "$W/rel_ts0" 7 0 --commit "$C40" 2> /dev/null || problems="$problems ts0-pack-failed"
+    check "$W/rel_ts0.conda" "$W/rel_ts0.manifest.json" "$LIBPKG" --require-stamped true 2> "$W/rel_ts0.err" && problems="$problems release-check-accepted-timestamp-0"
+    grep -q 'timestamp is not positive' "$W/rel_ts0.err" || problems="$problems timestamp-0-text"
+    packs "$W/rel_tsneg" 7 -5 --commit "$C40" 2> /dev/null || problems="$problems tsneg-pack-failed"
+    check "$W/rel_tsneg.conda" "$W/rel_tsneg.manifest.json" "$LIBPKG" --require-stamped true 2> "$W/rel_tsneg.err" && problems="$problems release-check-accepted-negative-timestamp"
+    packs "$W/rel_nocommit" 7 86400000 2> "$W/rel_nocommit.err" && problems="$problems stamped-pack-without-commit-accepted"
+    grep -q 'must carry --commit' "$W/rel_nocommit.err" || problems="$problems no-commit-text"
+    packs "$W/rel_shortcommit" 7 86400000 --commit abc123 2> "$W/rel_shortcommit.err" && problems="$problems short-commit-accepted"
+    grep -q 'is not a full lowercase 40-digit hex commit id' "$W/rel_shortcommit.err" || problems="$problems short-commit-text"
+    # the approved list a package was built against is bound into it: another list is another digest, refused by the check
+    { cat "$NAMES"; printf 'komira_zzz_extra\t//src/komira_zzz_extra:komira_zzz_extra\tx\n'; } > "$W/more_names.tsv"
+    "$PACK" conda-check --package "$W/pack1.conda" --conda-manifest "$W/pack1.manifest.json" --payload "$LIBPKG" --expect-subdir linux-64 \
+        --names "$W/more_names.tsv" --name-prefix komira_ --mojo-pin "$pin" --out "$W/check.marker" 2> "$W/check_otherlist.err" && problems="$problems check-accepted-another-approved-list"
+    grep -q 'approved_names_sha256' "$W/check_otherlist.err" || problems="$problems other-list-text"
+    # the recomputation an uploader does from names.tsv at the release commit is the manifest's value
+    want_names=$(grep -vE '^(#|$)' "$NAMES" | cut -f1 | LC_ALL=C sort | sha256sum | cut -c1-64)
+    [ "$(jq -r .approved_names_sha256 "$MANIFEST")" = "$want_names" ] || problems="$problems approved-names-recomputation-differs"
+fi
 if [ -n "$problems" ]; then fail "packer:$problems (see $W)"; else
-    pass "packer: komira_pack gives byte-identical packages from one payload (and the rule's), changes only the package for a changed payload; conda-check accepts it and refuses a different payload, an unlisted name, another subdir, a corrupt zip and an unstamped release"
+    pass "packer: komira_pack gives byte-identical packages from one payload (and the rule's), changes only the package for a changed payload; conda-check accepts it and refuses a different payload, an unlisted name, another subdir, a corrupt zip and an unstamped release; a release needs its source commit and a positive commit time, a stamped pack without a commit or with a short one is refused, the approved list is bound into the manifest and recomputable with shell tools"
 fi
 
 # ---- pin --------------------------------------------------------------------
@@ -214,6 +271,20 @@ else
     fail "controls: a fixture that must build did not, or its run requirements are wrong (see $W/ctl_listed.log)"
 fi
 
+# A package outside the tests cell that names its own approved list is refused.
+SW=packaging/conda/zz_swapped_list_test
+trap 'rm -rf "$ROOT/$SW"' EXIT
+mkdir -p "$ROOT/$SW" && cp tools/build/tests/negative/conda_pkgs/names.tsv "$ROOT/$SW/names.tsv" &&
+    printf 'load("@komira//tools/build/package:conda.bzl", "conda_package")\n\nconda_package(\n    name = "komira_neg_listed",\n    lib = "tests//negative/conda:komira_neg_listed",\n    names = "names.tsv",\n    summary = "fixture",\n)\n' > "$ROOT/$SW/BUCK"
+red refuse_swapped_list "states a list other than the approved one" "//$SW:komira_neg_listed"
+rm -rf "${ROOT:?}/$SW"
+# The approved-names lint is an input of the package, so a direct build runs it.
+if "$BUCK2" cquery "deps($PKG)" 2> "$W/cquery_lint.err" | grep -qF 'names_lint'; then
+    pass "lint: //packaging/conda:names_lint is a dependency of $PKG, so a direct build of the package runs it"
+else
+    fail "lint: names_lint is not among the dependencies of $PKG (see $W/cquery_lint.err)"
+fi
+
 # ---- lint -------------------------------------------------------------------
 if "$BUCK2" build //packaging/conda:names_lint > "$W/names_lint.log" 2>&1; then
     pass "lint: //packaging/conda:names_lint is green"
@@ -231,19 +302,24 @@ if [ -n "$problems" ]; then fail "lint: names_bad did not name:$problems (see $W
 
 # ---- stamp ------------------------------------------------------------------
 red release_refuses_unstamped "was never stamped" "${PKG}[release_check]"
+red release_has_no_unstamped_file "was never stamped" "${PKG}[release]"
+red release_refuses_stamp_without_commit "must carry --commit" "${PKG}[release]" -c komira.package_stamp=9 -c komira.package_timestamp_ms=86400000
 # A stamp no earlier run used, so the packing actions execute and the check
 # below sees them (a cached run would list nothing, which proves nothing).
 N_STAMP=$((100000 + RANDOM))
-STAMP="-c komira.package_stamp=$N_STAMP -c komira.package_timestamp_ms=1700000000000"
+C_STAMP=89abcdef0123456789abcdef0123456789abcdef
+STAMP="-c komira.package_stamp=$N_STAMP -c komira.package_commit=$C_STAMP -c komira.package_timestamp_ms=86400000"
 # shellcheck disable=SC2086 # STAMP is a list of words
-if "$BUCK2" build $STAMP "${PKG}[release_check]" > "$W/stamp_check.log" 2>&1; then
+if "$BUCK2" build $STAMP "${PKG}[release]" > "$W/stamp_check.log" 2>&1; then
     # No compile re-ran for a new stamp: the executed actions are packing, and only that.
     "$BUCK2" log what-ran --skip-cache-hits > "$W/stamp_whatran.txt" 2>&1
     if grep -q 'conda_pack' "$W/stamp_whatran.txt" && ! grep -qE 'mojo_(precompile|build|gated)' "$W/stamp_whatran.txt"; then
         # shellcheck disable=SC2086
-        s_manifest=$("$BUCK2" build $STAMP "${PKG}[manifest]" --materializations all --show-full-output 2> "$W/stamp_manifest.log" | sed -n 's/^[^ ]* //p' | tail -n 1)
-        if jq -e --arg v "0.1.$N_STAMP" '.version == $v and .stamped == true and .file_name == "komira_encoding-\($v)-0.conda"' "$s_manifest" > /dev/null; then
-            pass "stamp: -c komira.package_stamp=$N_STAMP gives 0.1.$N_STAMP (release_check green, manifest, file name) and the new stamp re-ran only the packing actions, no compile"
+        s_manifest=$("$BUCK2" build $STAMP "${PKG}[release][manifest]" --materializations all --show-full-output 2> "$W/stamp_manifest.log" | sed -n 's/^[^ ]* //p' | tail -n 1)
+        s_file=$("$BUCK2" build $STAMP "${PKG}[release][file]" --materializations all --show-full-output 2>> "$W/stamp_manifest.log" | sed -n 's/^[^ ]* //p' | tail -n 1)
+        if jq -e --arg v "0.1.$N_STAMP" --arg c "$C_STAMP" '.version == $v and .stamped == true and .source_commit == $c and .file_name == "komira_encoding-\($v)-0.conda"' "$s_manifest" > /dev/null &&
+            [ "$(jq -r .sha256 "$s_manifest")" = "$(sha256sum < "$s_file" | cut -c1-64)" ]; then
+            pass "stamp: -c komira.package_stamp=$N_STAMP gives 0.1.$N_STAMP ([release] green: manifest with its source commit, file name, sha256 of the file) and the new stamp re-ran only the packing actions, no compile"
         else
             fail "stamp: the stamped manifest is not version 0.1.$N_STAMP (see $W/stamp_manifest.log)"
         fi
@@ -251,7 +327,7 @@ if "$BUCK2" build $STAMP "${PKG}[release_check]" > "$W/stamp_check.log" 2>&1; th
         fail "stamp: a new stamp re-ran a Mojo action, or no packing action ran (see $W/stamp_whatran.txt)"
     fi
 else
-    fail "stamp: a stamped build is not accepted by release_check (see $W/stamp_check.log)"
+    fail "stamp: a stamped build is not accepted by [release] (see $W/stamp_check.log)"
 fi
 
 R="$W/repo"
@@ -264,19 +340,20 @@ g() { GIT_AUTHOR_NAME=test GIT_AUTHOR_EMAIL=test@example.invalid GIT_COMMITTER_N
 commit() { # message, epoch
     g add -A && GIT_AUTHOR_DATE="$2 +0000" GIT_COMMITTER_DATE="$2 +0000" g commit -q -m "$1"
 }
-g init -q -b main && commit one 1700000100 &&
-    echo d > "$R/docs/a.md" && commit docs-only 1700000200 &&
-    echo b > "$R/src/x/b.mojo" && commit src 1700000300 &&
-    echo r > "$R/src/x/README.md" && mkdir -p "$R/.github" && echo w > "$R/.github/w.yml" && commit md-and-github-only 1700000400
+g init -q -b main && commit one 100000100 &&
+    echo d > "$R/docs/a.md" && commit docs-only 100000200 &&
+    echo b > "$R/src/x/b.mojo" && commit src 100000300 &&
+    echo r > "$R/src/x/README.md" && mkdir -p "$R/.github" && echo w > "$R/.github/w.yml" && commit md-and-github-only 100000400
 v() { sh "$R/tools/build/package/release_version.sh" "$@" 2>&1; }
 problems=""
-[ "$(v HEAD~2)" = "$(printf 'version=0.3.1\nbuck_args=-c komira.package_stamp=1 -c komira.package_timestamp_ms=1700000100000')" ] || problems="$problems docs-only-commit:[$(v HEAD~2 | tr '\n' ' ')]"
-[ "$(v HEAD~1)" = "$(printf 'version=0.3.3\nbuck_args=-c komira.package_stamp=3 -c komira.package_timestamp_ms=1700000300000')" ] || problems="$problems source-commit:[$(v HEAD~1 | tr '\n' ' ')]"
+c1=$(g rev-parse HEAD~3) c3=$(g rev-parse HEAD~1)
+[ "$(v HEAD~2)" = "$(printf 'version=0.3.1\ncommit=%s\nbuck_args=-c komira.package_stamp=1 -c komira.package_commit=%s -c komira.package_timestamp_ms=100000100000' "$c1" "$c1")" ] || problems="$problems docs-only-commit:[$(v HEAD~2 | tr '\n' ' ')]"
+[ "$(v HEAD~1)" = "$(printf 'version=0.3.3\ncommit=%s\nbuck_args=-c komira.package_stamp=3 -c komira.package_commit=%s -c komira.package_timestamp_ms=100000300000' "$c3" "$c3")" ] || problems="$problems source-commit:[$(v HEAD~1 | tr '\n' ' ')]"
 [ "$(v HEAD)" = "$(v HEAD~1)" ] || problems="$problems documentation-commit-changed-the-version"
 git clone -q --depth 1 "file://$R" "$W/shallow" 2> /dev/null && cp -r "$R/tools" "$W/shallow/" &&
     sh "$W/shallow/tools/build/package/release_version.sh" > "$W/shallow.out" 2>&1 && problems="$problems shallow-clone-accepted"
 grep -q 'shallow clone' "$W/shallow.out" || problems="$problems shallow-refusal-text"
-[ -z "$problems" ] && pass "stamp: release_version.sh gives 0.3.<count to the last non-documentation commit> and its timestamp, ignores docs/, *.md and .github/, refuses a shallow clone" ||
+[ -z "$problems" ] && pass "stamp: release_version.sh gives 0.3.<count to the last non-documentation commit>, that commit and its timestamp, ignores docs/, *.md and .github/, refuses a shallow clone" ||
     fail "stamp: release_version.sh:$problems"
 
 # ---- uncached ---------------------------------------------------------------
@@ -314,7 +391,7 @@ else
 fi
 
 # ---- install ----------------------------------------------------------------
-if [ "$install" = 1 ] && command -v pixi > /dev/null && curl -fsS -o /dev/null -I https://repo.prefix.dev/max-nightly/linux-64/repodata.json 2> /dev/null; then
+if [ "$install" = 1 ] && command -v pixi > /dev/null && curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null; then
     C="$W/channel"
     mkdir -p "$C/linux-64" "$C/noarch" "$W/with" "$W/without"
     cp "$CONDA" "$C/linux-64/komira_encoding-0.1.0-0.conda"
@@ -338,7 +415,7 @@ def main():
 EOF
     for variant in with without; do
         {
-            printf '[workspace]\nname = "komira-conda-test"\nchannels = ["file://%s", "https://repo.prefix.dev/max-nightly", "conda-forge"]\nplatforms = ["linux-64"]\n\n[dependencies]\n' "$C"
+            printf '[workspace]\nname = "komira-conda-test"\nchannels = ["file://%s", "https://conda.modular.com/max", "conda-forge"]\nplatforms = ["linux-64"]\n\n[dependencies]\n' "$C"
             if [ "$variant" = with ]; then printf 'komira_encoding = "==0.1.0"\n'; else printf 'mojo-compiler = "==%s"\n' "$pin"; fi
         } > "$W/$variant/pixi.toml"
         cp "$W/hello.mojo" "$W/$variant/hello.mojo"
@@ -363,7 +440,7 @@ EOF
         pass "install: pixi installs $PKG from a file:// channel with mojo-compiler ==$pin, \`mojo run\` of a program importing it (no -I) prints deadbeef and 3q2+7w==, and the same project without it cannot import it"
     fi
 else
-    echo "SKIP  conda install ($([ "$install" = 1 ] || echo '--no-install'; command -v pixi > /dev/null || echo 'no pixi'; [ "$install" = 0 ] || curl -fsS -o /dev/null -I https://repo.prefix.dev/max-nightly/linux-64/repodata.json 2> /dev/null || echo 'no network'))"
+    echo "SKIP  conda install ($([ "$install" = 1 ] || echo '--no-install'; command -v pixi > /dev/null || echo 'no pixi'; [ "$install" = 0 ] || curl -fsSL -o /dev/null -I https://conda.modular.com/max/linux-64/repodata.json 2> /dev/null || echo 'no network'))"
 fi
 
 if [ "$fails" = 0 ] && [ -z "${KOMIRA_TEST_KEEP:-}" ]; then rm -rf "$W"; else echo "logs: $W"; fi

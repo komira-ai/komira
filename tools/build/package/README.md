@@ -122,7 +122,7 @@ the greeting ([formats.sh](../tests/functional/formats.sh)).
 for linux-64: one file, `lib/mojo/<name>.mojoc`, where the compiler already
 looks. `komira_pack conda` writes the zip, the two tars and the JSON, and
 `komira_pack conda-check` reads the result back and refuses what is wrong;
-the package is not published until that check has passed. The name, the run
+nothing is uploaded, and an uploader reads only the `[release]` sub-target, which exists only after the release check (stamped, with its source commit) passed. The name, the run
 requirements, the subdir and the version are derived, a name must be in the
 approved list, and the bytes are reproducible. The layout, the version scheme and the
 approved list: [packaging/conda](../../../packaging/conda/README.md). The version

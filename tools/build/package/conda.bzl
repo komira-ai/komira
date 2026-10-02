@@ -26,23 +26,38 @@ library:
     time, is refused;
   * the version is `<prefix>.<N>`: the prefix is the one line of
     `packaging/conda/VERSION_PREFIX`; N is `-c komira.package_stamp=<N>` (0, the
-    default, is an unstamped build that the release check refuses).
-    `tools/build/package/release_version.sh` prints N and the timestamp.
+    default, is an unstamped build that the release check refuses), and the
+    source commit the stamp came from is `-c komira.package_commit=<sha>`.
+    `tools/build/package/release_version.sh` prints all three and the timestamp;
+  * the approved list is the repository's own, and a `conda_package` that names
+    another (`names =`) is refused outside the `tests` cell, so a package cannot
+    be checked against a list that is not the reviewed one.
 
-Sub-targets (what a publisher reads):
+Sub-targets. THE OUTPUT CONTRACT: an uploader reads `[release]` and nothing
+else.
 
-    [default] [file]  <name>.conda
-    [digest]          one line, `sha256:<hex>` of that file
-    [manifest]        JSON, sorted keys: schema, artifact_type, name, version,
-                      subdir, build, build_number, file_name (the channel's
-                      file name), sha256, size, payload_path, payload_sha256,
-                      depends, mojo_pin, stamped, label, approved_names_sha256
-    [check]           the marker of `komira_pack conda-check`: the three above
-                      are copies made after it passed
-    [release_check]   the same check, also refusing an unstamped version
+    [release]         <name>.conda, a copy made after [release_check] passed:
+                      it does not exist for an unstamped build, a stamp without
+                      its source commit, or a non-positive commit time. Nested:
+      [release][file]      the same file
+      [release][manifest]  JSON, sorted keys: schema, artifact_type, name,
+                           version, subdir, build, build_number, file_name (the
+                           channel's file name), sha256, size, payload_path,
+                           payload_sha256, depends, mojo_pin, stamped,
+                           source_commit, label, approved_names_sha256
+      [release][digest]    one line, `sha256:<hex>` of that file
+    [release_check]   the marker of `komira_pack conda-check --require-stamped`
+    [default] [file] [manifest] [digest]
+                      DEVELOPMENT outputs, built whether or not stamped (an
+                      unstamped one is `<prefix>.0`, claiming a permanent
+                      version if uploaded). Never read by an uploader; a
+                      manifest with `stamped: false` is refused, whatever it
+                      was read from.
+    [check]           the marker of `komira_pack conda-check` (it also takes the
+                      approved-names lint as an input, so a build runs it)
 
-The bytes are reproducible: the sha256 is the package's identity. Nothing is
-uploaded. Design and the reasons for each choice: packaging/conda/README.md.
+The bytes are reproducible under one condition (README.md, "Reproducibility"):
+the sha256 is the package's identity. Nothing is uploaded. Design and the reasons for each choice: packaging/conda/README.md.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -81,6 +96,8 @@ def _conda_package_impl(ctx):
     payload = lib[DefaultInfo].default_outputs[0]
     sources = lib[DefaultInfo].sub_targets["src"][DefaultInfo].default_outputs[0]
     subdir = _subdir(ctx)
+    if ctx.attrs.names_custom and ctx.label.cell != "tests":
+        fail("{}: names = ... states a list other than the approved one (packaging/conda/names.tsv). Only the tests cell does that, for its fixtures; a published package is checked against the reviewed list".format(ctx.label))
 
     pack = ctx.attrs._pack[RunInfo]
     names = ctx.attrs.names
@@ -105,6 +122,7 @@ def _conda_package_impl(ctx):
             ctx.attrs.stamp,
             "--timestamp-ms",
             ctx.attrs.timestamp_ms,
+            ["--commit", ctx.attrs.commit] if ctx.attrs.commit else [],
             "--subdir",
             subdir,
             "--mojo-pin",
@@ -135,6 +153,8 @@ def _conda_package_impl(ctx):
         identifier = name,
     )
 
+    lint = ctx.attrs.names_lint[DefaultInfo].default_outputs if ctx.attrs.names_lint else []
+
     def check(marker_name, extra):
         marker = ctx.actions.declare_output(marker_name)
         ctx.actions.run(
@@ -158,6 +178,8 @@ def _conda_package_impl(ctx):
                 extra,
                 "--out",
                 marker.as_output(),
+                # The approved-names lint is an input: a build of this package runs it.
+                hidden = lint,
             ),
             category = "conda_check",
             identifier = marker_name,
@@ -192,6 +214,32 @@ def _conda_package_impl(ctx):
         category = "conda_join",
         identifier = name,
     )
+
+    # [release]: the same three, copied only after the RELEASE check passed
+    # (stamped, with its source commit and a positive commit time). This is the
+    # only thing an uploader reads.
+    rel = ctx.actions.declare_output("release/" + name + ".conda")
+    rel_manifest = ctx.actions.declare_output("release/" + name + ".manifest.json")
+    rel_digest = ctx.actions.declare_output("release/" + name + ".digest")
+    ctx.actions.run(
+        cmd_args(
+            bb,
+            "sh",
+            "-euc",
+            '"$1" cp "$2" "$3"; "$1" cp "$4" "$5"; "$1" cp "$6" "$7"',
+            "sh",
+            bb,
+            raw,
+            rel.as_output(),
+            raw_manifest,
+            rel_manifest.as_output(),
+            raw_digest,
+            rel_digest.as_output(),
+            hidden = [release_checked],
+        ),
+        category = "conda_release_join",
+        identifier = name,
+    )
     return [DefaultInfo(
         default_output = out,
         sub_targets = {
@@ -199,6 +247,14 @@ def _conda_package_impl(ctx):
             "digest": [DefaultInfo(default_output = out_digest)],
             "file": [DefaultInfo(default_output = out)],
             "manifest": [DefaultInfo(default_output = out_manifest)],
+            "release": [DefaultInfo(
+                default_output = rel,
+                sub_targets = {
+                    "digest": [DefaultInfo(default_output = rel_digest)],
+                    "file": [DefaultInfo(default_output = rel)],
+                    "manifest": [DefaultInfo(default_output = rel_manifest)],
+                },
+            )],
             "release_check": [DefaultInfo(default_output = release_checked)],
         },
     )]
@@ -206,9 +262,16 @@ def _conda_package_impl(ctx):
 _conda_package = rule(
     impl = _conda_package_impl,
     attrs = {
+        # The source commit of the stamp (-c komira.package_commit), "" if none.
+        "commit": attrs.string(default = ""),
         "lib": attrs.dep(providers = [MojoInfo]),
         # The approved names. Only a test of the refusals names another list.
         "names": attrs.source(default = "komira//packaging/conda:names.tsv"),
+        # Set by the macro when the target states its own list.
+        "names_custom": attrs.bool(default = False),
+        # The approved-list lint, an input of both checks (unset only with a
+        # fixture list, which the lint does not describe).
+        "names_lint": attrs.option(attrs.dep(), default = None),
         "stamp": attrs.string(),
         "subdir": attrs.string(),
         "summary": attrs.string(),
@@ -224,11 +287,17 @@ def conda_package(**kwargs):
     """The `.conda` of a Mojo library; see the module documentation.
 
     N and the commit timestamp come from the configuration
-    (`-c komira.package_stamp=57 -c komira.package_timestamp_ms=...`): they are
+    (`-c komira.package_stamp=57 -c komira.package_commit=<sha>
+    -c komira.package_timestamp_ms=...`): they are
     read here, in the macro, so they key only the packages and never a
     compile.
     """
+    custom = "names" in kwargs
+    if not custom:
+        kwargs["names_lint"] = "komira//packaging/conda:names_lint"
     _conda_package(
+        commit = read_config("komira", "package_commit", ""),
+        names_custom = custom,
         stamp = read_config("komira", "package_stamp", "0"),
         subdir = select({
             "komira//tools/build/platforms:is_linux_x86_64": "linux-64",

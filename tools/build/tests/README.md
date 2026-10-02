@@ -640,11 +640,15 @@ is refused with its reason (a name or dependency outside the approved list, no
 prefix, a target not named for the import name, no tests, a run-time `dlopen`,
 native code) and the two controls build; the approved-list lint is green on
 the real list and red naming each defect on a bad one; the version comes from the
-configuration and an unstamped build is refused by the release check, without
-re-running a compile; `release_version.sh` counts to the last non-documentation
-commit in a scratch repository; two uncached builds in fresh daemons give the
-same sha256 (skipped with `--no-uncached`); and a `pixi` project whose channel is
-the built file served from `file://` installs it with the pinned compiler and
+configuration and an unstamped build, a stamp without its source commit and a
+non-positive commit time are refused by the release check, `[release]` exists
+only for a stamped one, and a new stamp re-runs no compile; a package outside
+the tests cell naming its own approved list is refused, and the approved-names
+lint is a dependency of the package; `release_version.sh` counts to the last
+non-documentation commit in a scratch repository and prints that commit; two uncached builds in fresh daemons give the
+same sha256 in one isolation directory (skipped with `--no-uncached`); and a
+`pixi` project whose channel is the built file served from `file://` installs
+it, with the compiler from Modular's `max` channel, and
 `mojo run` of a program importing it prints the right bytes, while the same
 project without it cannot (skipped with `--no-install`, without `pixi`, or
 without network). See [packaging/conda](../../../packaging/conda/README.md).
