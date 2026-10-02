@@ -68,8 +68,9 @@ trait GcsSigningClock(Movable, Deinitable):
     """The wall clock a `GcsV4Signer` signs at, in whole seconds since the
     Unix epoch (UTC). Supplied by the caller; the signer reads it once per
     mint. The same shape as komira_aws_core's `AwsClock`: an `Int`, and no
-    raising (an instant outside the years 0000..9999 is refused by the
-    stamp rendering, not by the clock)."""
+    raising. The signer refuses an instant of 0 or less (a clock that could
+    not be read); an instant past the year 9999 is refused by the stamp
+    rendering."""
 
     def now_unix_seconds(mut self) -> Int:
         ...
@@ -92,8 +93,9 @@ struct SystemSigningClock(GcsSigningClock, ImplicitlyCopyable):
 
     A V4 signature is checked against the server's clock, so a signer in a
     deployed process signs at this one. It is a wall clock, not a monotonic
-    one: two reads may go backwards if the host's time is stepped. It reads
-    no environment and holds no state."""
+    one: two reads may go backwards if the host's time is stepped. If the
+    host clock cannot be read it reports 0, and the signer refuses to mint
+    at that instant. It reads no environment and holds no state."""
 
     def now_unix_seconds(mut self) -> Int:
         return Int(now_unix_ms() // 1000)
@@ -160,9 +162,17 @@ struct GcsV4Signer[C: GcsSigningClock](ObjectUrlSigner):
         check_presign_ttl(ttl_seconds)
         if len(key.as_bytes()) == 0:
             raise Error("gcs v4 signer: refusing to sign an empty key")
-        var stamps = gcs_v4_stamps_from_unix_seconds(
-            Int64(self._clock.now_unix_seconds())
-        )
+        var now = self._clock.now_unix_seconds()
+        if now <= 0:
+            # komira_clock reports 0 when the host clock cannot be read. A
+            # URL signed at the epoch is already expired; refuse here rather
+            # than let the service reject it far from the cause.
+            raise Error(
+                "gcs v4 signer: refusing to sign at the non-positive instant "
+                + String(now)
+                + " (a clock that cannot be read reports 0)"
+            )
+        var stamps = gcs_v4_stamps_from_unix_seconds(Int64(now))
         var url = gcs_v4_signed_url(
             self._scheme,
             method,

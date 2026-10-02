@@ -27,7 +27,9 @@
 #   GATE 8  the key path is never normalized (`a//b`, `a/./b`, `a/../b` are
 #           three objects), and `&` is encoded while `/` is not.
 #   GATE 9  containment: the bucket is the signer's; an empty bucket, a
-#           bucket holding `/`, and an empty key are refused.
+#           bucket holding `/`, and an empty key are refused. So is a clock
+#           reading of 0 or less (the system clock's read failure), rather
+#           than minting a URL that is already expired.
 #   GATE 10 an emulator authority keeps its port in the URL.
 #   GATE 11 known answers: for every published vector this signer can make
 #           (GET or PUT of an object, path style, the default host, no extra
@@ -214,6 +216,9 @@ def test_gate4_expiry_is_the_signing_instant_plus_ttl() raises:
 
 comptime _TTL_REFUSAL = "presign: refusing a TTL"
 comptime _SIGNER_REFUSAL = "gcs v4 signer: refusing"
+comptime _INSTANT_REFUSAL = (
+    "gcs v4 signer: refusing to sign at the non-positive instant"
+)
 
 
 def _refuses_ttl(ttl: Int, upload: Bool) raises -> Bool:
@@ -374,6 +379,23 @@ def _refuses_bucket(var account: GcsV4ServiceAccount, bucket: String) raises -> 
     return False
 
 
+def _refuses_instant(unix_seconds: Int, upload: Bool) raises -> Bool:
+    """Whether a signer whose clock reports `unix_seconds` refuses to mint,
+    with the signer's own non-positive-instant message."""
+    var gcs = GcsV4Signer(
+        _account(), String(_BUCKET), FixedSigningClock(unix_seconds)
+    )
+    try:
+        if upload:
+            _ = gcs.presign_upload(String(_KEY), _TTL)
+        else:
+            _ = gcs.presign_download(String(_KEY), _TTL)
+    except e:
+        assert_true(String(e).find(_INSTANT_REFUSAL) >= 0, String(e))
+        return True
+    return False
+
+
 def test_gate9_bucket_is_the_signers_and_empty_names_are_refused() raises:
     var account = _account()
     assert_true(_refuses_bucket(account.copy(), String("")))
@@ -391,6 +413,13 @@ def test_gate9_bucket_is_the_signers_and_empty_names_are_refused() raises:
         assert_true(String(e).find(_SIGNER_REFUSAL) >= 0, String(e))
         refused = True
     assert_true(refused)
+
+    # A clock that reports the epoch or earlier is refused on both verbs.
+    assert_true(_refuses_instant(0, False))
+    assert_true(_refuses_instant(0, True))
+    assert_true(_refuses_instant(-1, False))
+    # The control: the first positive instant mints.
+    assert_false(_refuses_instant(1, False))
 
 
 # -----------------------------------------------------------------------------
