@@ -1,0 +1,741 @@
+// The `DeploymentSpec`: the declarative unit of one app deployment, and the
+// template language of the deploy model.
+//
+// PLAIN proto3 messages, with no `(komira.db.*)` options, so the struct emitter
+// (`mojo_proto_library`) generates them with proto3-JSON and binary serde. This
+// is the language-neutral, versioned contract any proto-supporting producer can
+// emit (an LLM authoring tool, an SDK, a desktop app, a CI producer); the
+// applier (Mojo) is the single consumer of the generated type.
+//
+// WHY PROTO, NOT A DbStorable ROW: the `DeploymentSpec` is a cross-language
+// INTERFACE whose whole value is language-neutral production, so it accepts the
+// cost of regenerating the Mojo code on every compiler change. A persisted
+// per-app record is a separate hand-authored `DbStorable` envelope that carries
+// the serialized proto. This file is the WIRE CONTRACT only.
+//
+// SUPERSET OF A PLACEMENT. `DeploymentSpec` carries the same
+// name / namespace / containers / labels / account_ref that a placement speaks,
+// PLUS the fields that make a deploy infra-complete and declarative
+// (runtime_identity / secret_bindings / spot / stage_identity / served_ports /
+// lifecycle / prior_digest / compute / datastore / provider).
+//
+// THE INTENT FIELDS (the curated, PaaS-style vocabulary): the user (or their
+// LLM) declares INTENT via `container` (image + image_digest), `compute`
+// (serverless|serverful), `datastore` (none|serverless|dedicated, the
+// app-facing TYPE; an object store is the on-prem IMPL of SERVERLESS, not an
+// app-facing type), the ORTHOGONAL `datastore_analytics_replica` bool (on/off),
+// and `secret_bindings`. The applier DERIVES the lower-level fields
+// (`provider`, `runtime_identity`, `stage_identity`, `served_ports`,
+// `lifecycle`), RESOLVES the datastore IMPL per target platform, and applies
+// the platform defaults (`spot`, scale-to-zero, the sub-identity split). The
+// closed field set IS the scope boundary: the spec structurally has NO field
+// for a queue / DB / DNS / VPC, so "the deploy does not provision arbitrary
+// infra" is a TYPE-SYSTEM guarantee, not a policy.
+//
+// THE IMAGE DIGEST IS A FIELD, NOT BAKED IN: `Container.image_digest` is the
+// ONLY thing that changes between a deploy and its rollback. "update code =
+// re-apply with the new digest", "rollback = re-apply the prior digest".
+
+syntax = "proto3";
+
+package kci.deploy.v1;
+
+// ─── The compute INTENT (`compute`) ──────────────────────────────────────────
+//
+// The high-level compute intent the user declares. `provider` is DERIVED from
+// this × the target cloud: SERVERLESS → Cloud Run / Lambda / Functions;
+// SERVERFUL → VM / ECS / K8s Deployment.
+enum ComputeIntent {
+  // Proto3 requires a zero default. UNSPECIFIED ⇒ the applier treats the deploy
+  // as SERVERLESS (the Cloud Run default), a fail-safe.
+  COMPUTE_INTENT_UNSPECIFIED = 0;
+  // scale-to-zero, pay-per-use (Cloud Run / Lambda / Functions).
+  COMPUTE_INTENT_SERVERLESS = 1;
+  // always-on, spot-capable (VM / ECS / K8s Deployment).
+  COMPUTE_INTENT_SERVERFUL = 2;
+}
+
+// ─── The datastore NEED: the app-facing INTENT type (`datastore`) ────────────
+//
+// The model SEPARATES INTENT from IMPL. This enum is the app-facing datastore
+// INTENT (what the app declares it needs); the IMPL is resolved by the applier
+// per target PLATFORM, NOT encoded here:
+//   * NONE        no datastore.
+//   * SERVERLESS  an OLTP datastore, resolved per target: on cloud, the
+//                 provider's serverless DB (Firestore / DynamoDB / Cosmos);
+//                 on on-prem / K8s / air-gap, an object-store-backed SQL
+//                 store, because serverless cloud DBs do not exist there. See
+//                 `resolve_datastore_impl(need, provider)` in the applier
+//                 (`komira_gcp_bridge`).
+//   * DEDICATED   (FUTURE) a provisioned dedicated DB instance. Not yet
+//                 resolved by any applier.
+//
+// The ORTHOGONAL analytics-replica flag
+// (`DeploymentSpec.datastore_analytics_replica`) is a SEPARATE axis, not a
+// datastore TYPE: on cloud SERVERLESS (OLTP-only) it stands up a CDC→Iceberg
+// replica; on on-prem SERVERLESS (the object-store SQL store is already HTAP)
+// the replica is inherent (a no-op). Do NOT introduce a
+// SERVERLESS_WITH_REPLICA type: the replica is a bool.
+//
+// This axis stays INSIDE the scope boundary (a fixed, closed vocabulary, not an
+// arbitrary resource graph). It is provisioned as part of ensure-infra; the
+// connection resolves as a `secret_binding`.
+enum DatastoreNeed {
+  // OBJECTSTORE is not an app-facing TYPE: object-store SQL is HOW on-prem
+  // realizes SERVERLESS (serverless DBs are cloud-only), not a thing an app asks
+  // for. The impl choice lives in `resolve_datastore_impl(need, provider)`
+  // keyed on the target PLATFORM. Reserved so the wire number 3 and the name are
+  // never re-used for an incompatible meaning.
+  reserved 3;
+  reserved "DATASTORE_NEED_OBJECTSTORE";
+
+  // Proto3 zero default. UNSPECIFIED ⇒ NONE (no datastore).
+  DATASTORE_NEED_UNSPECIFIED = 0;
+  // no datastore.
+  DATASTORE_NEED_NONE = 1;
+  // an OLTP datastore. Resolved per target by the applier: cloud → the
+  // provider's serverless DB; on-prem / K8s → object-store SQL.
+  DATASTORE_NEED_SERVERLESS = 2;
+  // (FUTURE) a provisioned dedicated DB instance. Not yet applier-resolved.
+  DATASTORE_NEED_DEDICATED = 4;
+}
+
+// ─── The app's datastore FAMILY: the ORTHOGONAL axis ─────────────────────────
+//
+// `DatastoreNeed` × `DeployProvider` → `DatastoreImpl` answers "how does this
+// PLATFORM realize an OLTP datastore". It CANNOT answer "what KIND of store does
+// this APP actually construct", because that is a property of the app's binary,
+// not of the platform. `resolve_datastore_impl` maps SERVERLESS+cloud →
+// CLOUD_SERVERLESS_DB both for an app that opens a document DB and for an app
+// that opens a content-addressed object store. Discriminating the two by a
+// process-wide proxy (for example "is a document-DB index admin wired on this
+// deploy engine?") answers the same for every app, so one of the two
+// provisioning branches never runs.
+//
+// The FAMILY is that missing axis: declared per app on the app's catalog record
+// (the one place that already describes the app), RESOLVED at render time, and
+// CARRIED here so ensure-infra keys its shape on the APP. It is ORTHOGONAL to
+// both `datastore` (the intent) and the resolved impl: an app can need a
+// document DB, an object store, or BOTH.
+//
+// Get the answer from the app's DEPLOYED BINARY (what store does it
+// construct?), never from a doc or a lint's app→file map.
+enum DatastoreFamily {
+  // Proto3 zero default: NOT a family. A spec that declares a
+  // SERVERLESS-resolved datastore and leaves this UNSPECIFIED is
+  // under-specified: ensure-datastore cannot know whether to provision a
+  // document DB or an object store, so it REFUSES rather than silently
+  // provisioning neither.
+  DATASTORE_FAMILY_UNSPECIFIED = 0;
+  // The app constructs no durable store (for example a hello-world service).
+  DATASTORE_FAMILY_NONE = 1;
+  // The app opens the cloud's DOCUMENT DB (for example a Firestore database).
+  // Needs its composite indexes; needs NO bucket. Stamping a bucket on one of
+  // these lets a misconfigured app appear healthy.
+  DATASTORE_FAMILY_DOCUMENT_DB = 2;
+  // The app opens a CONTENT-ADDRESSED OBJECT STORE (for example a per-room
+  // delta log, a calendar CAS, mailbox message bodies, or a git object
+  // database). Such an app fails loudly at boot on a missing bucket name with
+  // NO fallback, so the deploy MUST provision the bucket AND pass the name the
+  // binary reads.
+  DATASTORE_FAMILY_OBJECT_STORE = 3;
+  // BOTH: document rows AND an object-store CAS in one app.
+  DATASTORE_FAMILY_DOCUMENT_DB_AND_OBJECT_STORE = 4;
+}
+
+// ─── The RESOLVED per-platform datastore IMPL ────────────────────────────────
+//
+// The RESOLVED per-platform datastore implementation the applier stands up for
+// a `DatastoreNeed` on a target platform: NOT an app-facing type (the app
+// declares a `DatastoreNeed`; the resolver picks one of these from the intent ×
+// the platform). The proto form of the code enum
+// `komira_gcp_bridge.DatastoreImpl`: the ordinals are IDENTICAL by construction
+// (NONE=0, CLOUD_SERVERLESS_DB=1, OBJECT_STORE_SQL=2, DEDICATED_DB=3), so a
+// translation between the two is value-preserving. Declared HERE, next to
+// `DatastoreNeed`: this file owns the datastore vocabulary.
+//
+// KEEP-IN-SYNC. The Mojo `DatastoreImpl` struct is the resolver's live value
+// type; this enum MIRRORS its ordinals. A change to either MUST be mirrored in
+// the other (the resolver's ordinals are the source of truth). NOTE the zero
+// value is NONE (not a separate UNSPECIFIED), matching the Mojo enum's
+// `NONE: Int = 0`: a resolved impl of "no datastore" is the safe proto3
+// default. Not yet consumed on the wire (the resolver returns the Mojo struct);
+// this is the schema for carrying a resolved impl across the wire.
+enum DatastoreImpl {
+  // No datastore: the app declared NONE (or UNSPECIFIED). The proto3 zero
+  // default (mirrors the Mojo `DatastoreImpl.NONE: Int = 0`).
+  DATASTORE_IMPL_NONE = 0;
+  // The cloud provider's serverless DB (Firestore / DynamoDB / Cosmos / Cloud
+  // SQL serverless): SERVERLESS on a CLOUD provider.
+  DATASTORE_IMPL_CLOUD_SERVERLESS_DB = 1;
+  // An object-store-backed SQL store: SERVERLESS on an on-prem / K8s / air-gap
+  // provider, where no cloud serverless DB exists.
+  DATASTORE_IMPL_OBJECT_STORE_SQL = 2;
+  // A provisioned dedicated DB instance: DEDICATED (future; not yet stood up by
+  // any applier). Present so the impl enum is total over the intent enum.
+  DATASTORE_IMPL_DEDICATED_DB = 3;
+}
+
+// ─── The inbound-delivery INTENT ─────────────────────────────────────────────
+//
+// WHAT the app needs from the outside world: a public push endpoint, a polled
+// drop, a full client-facing surface, or nothing. The app declares the INTENT;
+// the applier resolves HOW per target (`resolve_inbound_strategy`, a total
+// function over providers: a gateway edge on cloud, a DIRECT no-op realization
+// on on-prem, a polled object-store drop for WEBHOOK on on-prem). The proto
+// form of the code enum `komira_gcp_bridge.InboundNeed`: ordinals IDENTICAL by
+// construction (0=none 1=webhook 2=poll 3=client), so the translation is
+// value-preserving. Declared HERE, next to `DatastoreNeed`: this file owns the
+// intent vocabulary the app bundle reuses by import.
+enum InboundNeed {
+  // Proto3 zero default. UNSPECIFIED ⇒ no inbound (byte-identical for every
+  // bundle that omits the field).
+  INBOUND_NEED_UNSPECIFIED = 0;
+  // A public push webhook (a relay's delivery callback, a provider push).
+  // Composes an API_EDGE{SINGLE_PATH} node on cloud targets; demotes to a polled
+  // drop on on-prem.
+  INBOUND_NEED_WEBHOOK = 1;
+  // A polled object-store drop (the app pulls new inbound from a bucket).
+  INBOUND_NEED_POLL = 2;
+  // Real CLIENTS (web/desktop/mobile) reach the app's full REST surface.
+  // Composes an API_EDGE{CATCH_ALL, CLIENT_PASSTHROUGH} node, staged per wave
+  // (the `Wave.api_edge_enabled` toggle), realized per provider (a GCP gateway;
+  // a DIRECT no-op on K8S/LOCAL_COMPOSE).
+  INBOUND_NEED_CLIENT = 3;
+}
+
+// ─── THE NETWORK REACHABILITY OF THE SERVED COMPUTE ──────────────────────────
+//
+// WHO CAN OPEN A CONNECTION to the service, as distinct from who is AUTHORIZED
+// once connected. The two are independent controls: `AppSpec.public_invoker`
+// (field 24) decides the IAM half, and this enum decides the NETWORK half.
+//
+// Without it the network half is expressible nowhere: nothing writes an
+// ingress setting, so every service gets the platform's default (on Cloud Run,
+// public reach), while a design that depends on a service being
+// network-private has no channel to ask for it.
+//
+// THE VOCABULARY IS NEUTRAL, THE MAPPING IS EXPLICIT AND IN ONE PLACE. These
+// names say what the operator means; no vendor spelling appears here. The GCP
+// conformer translates them to Cloud Run v2 `IngressTraffic` in ONE named
+// function. The ordinals happen to line up 1:1 with that enum; that is
+// DELIBERATELY not relied on: a numeric coincidence is not a contract, and a
+// second cloud should have exactly one function to write.
+enum NetworkIngress {
+  // Proto3 zero default. UNSPECIFIED ⇒ THE DEPLOY STAMPS NOTHING: no ingress
+  // value is written onto the create/update body and no ingress path enters the
+  // update mask, so the platform's own default applies and every bundle that
+  // authors nothing composes and deploys BYTE-IDENTICALLY to one written before
+  // this enum existed.
+  //
+  // UNSPECIFIED IS NOT "PRIVATE", AND IT IS NOT NEUTRAL. On Cloud Run the
+  // unstamped default is PUBLIC network reach (`all`). A service that must not
+  // be publicly reachable has to STATE one of the values below; silence is a
+  // decision made by the platform, not by the bundle.
+  NETWORK_INGRESS_UNSPECIFIED = 0;
+  // Reachable from the public internet. The right value for a service DIALED
+  // DIRECTLY BY AN UNTRUSTED CLIENT, whose authorization therefore cannot live
+  // at the network layer at all (for example a relay: a browser peer has no
+  // OIDC identity to present, so its real gate is a per-session share token and
+  // a Noise_XX handshake inside the app). AUTHORED, never inherited: writing it
+  // down lets a reader tell "someone decided this" from "nobody set anything",
+  // which would otherwise be the same bytes.
+  NETWORK_INGRESS_PUBLIC = 1;
+  // Reachable ONLY from inside the deployment's own project/VPC boundary: no
+  // external load balancer, no public address. The tightest value; correct only
+  // when EVERY caller is provably inside that boundary.
+  NETWORK_INGRESS_INTERNAL = 2;
+  // Reachable from inside the boundary AND through the cloud's managed L7 load
+  // balancer. The right value for a backend that is FRONTED, by an LB serverless
+  // NEG or by a managed API gateway that terminates the public request and makes
+  // the backend hop itself. The public entry point is then the front-door
+  // object, which carries the routing, the certs and the edge auth policy.
+  NETWORK_INGRESS_INTERNAL_AND_LOAD_BALANCER = 3;
+}
+
+// ─── The provider (`provider`, DERIVED) ──────────────────────────────────────
+//
+// Which per-provider applier realizes the spec. DERIVED by the applier from
+// `compute` × the target cloud: the user does not set it directly.
+enum DeployProvider {
+  // Proto3 zero default. UNSPECIFIED ⇒ the applier derives it from `compute`.
+  DEPLOY_PROVIDER_UNSPECIFIED = 0;
+  DEPLOY_PROVIDER_CLOUD_RUN = 1;
+  DEPLOY_PROVIDER_LAMBDA = 2;
+  DEPLOY_PROVIDER_FUNCTIONS = 3;
+  DEPLOY_PROVIDER_ECS = 4;
+  DEPLOY_PROVIDER_K8S = 5;
+  DEPLOY_PROVIDER_GCE_VM = 6;
+  DEPLOY_PROVIDER_LOCAL_COMPOSE = 7;
+}
+
+// ─── The per-stage least-privilege sub-identity (`stage_identity`) ───────────
+//
+// Which sub-identity applies this unit: the per-stage least-privilege split. A
+// build Job uses BUILD; a deploy uses DEPLOY; a placement uses PLACEMENT.
+enum StageIdentity {
+  // Proto3 zero default. UNSPECIFIED ⇒ DEPLOY (the served-app default).
+  STAGE_IDENTITY_UNSPECIFIED = 0;
+  STAGE_IDENTITY_BUILD = 1;
+  STAGE_IDENTITY_DEPLOY = 2;
+  STAGE_IDENTITY_PLACEMENT = 3;
+}
+
+// ─── The lifecycle (`lifecycle`) ─────────────────────────────────────────────
+//
+// EPHEMERAL (apply → track → tear-down) vs PERSISTENT (apply → reconcile-on-
+// update): the FINITE/INFINITE Job kinds. A served app is PERSISTENT; a build /
+// gate / pipeline run is EPHEMERAL.
+enum DeployLifecycle {
+  // Proto3 zero default. UNSPECIFIED ⇒ PERSISTENT (the served-app default).
+  DEPLOY_LIFECYCLE_UNSPECIFIED = 0;
+  DEPLOY_LIFECYCLE_EPHEMERAL = 1;
+  DEPLOY_LIFECYCLE_PERSISTENT = 2;
+}
+
+// ─── One served port (`served_ports`) ────────────────────────────────────────
+//
+// One served-endpoint port a container exposes. An INFINITE app that serves an
+// endpoint carries one or more of these; a finite job carries none (empty
+// served_ports ⇒ finite job).
+message PortSpec {
+  // the optional symbolic name (e.g. "http"). Empty ⇒ unnamed.
+  string name = 1;
+  // the port the process listens on.
+  int32 container_port = 2;
+}
+
+// ─── One container env var (`containers`) ────────────────────────────────────
+message EnvVar {
+  string name = 1;
+  string value = 2;
+}
+
+// ─── One container (`container`) ─────────────────────────────────────────────
+//
+// One container within a deployment unit. THE IMAGE DIGEST IS A FIELD: `image`
+// is the image REFERENCE (repository + optional tag) and `image_digest` is the
+// resolved content digest (sha256:…), the ONLY thing that changes between a
+// deploy and its rollback. The applier is idempotent in the digest.
+message ContainerSpec {
+  // identifies the container within the unit (e.g. "supervisor", "web").
+  string name = 1;
+  // the image reference (repository + optional tag).
+  string image = 2;
+  // the resolved content digest (sha256:…): the single-digest invariant. Empty
+  // on a spec that has not yet resolved its digest.
+  string image_digest = 3;
+  // the optional entrypoint override (empty ⇒ image default).
+  repeated string command = 4;
+  // the container args.
+  repeated string args = 5;
+  // the container environment.
+  repeated EnvVar env = 6;
+  // the CPU request==limit quantity (e.g. "256m"). Empty ⇒ omit.
+  string cpu = 7;
+  // the memory request==limit quantity (e.g. "512Mi"). Empty ⇒ omit.
+  string memory = 8;
+  // the served ports this container exposes.
+  repeated PortSpec ports = 9;
+  // the ABSTRACT accelerator TIER this container requests, as a tier ORDINAL
+  // (0=UNSPECIFIED, 1=NONE, 2=SMALL, 3=LARGE), typed `int32` (NOT an imported
+  // enum) so `deploy_model.proto` imports no other proto: the same ordinal
+  // mirror `environment.proto`'s `int32 deploy_provider` uses to reuse
+  // `DeployProvider` without a cross-proto import. Importing a tier enum here
+  // would drag another proto into this widely-shared base proto, and into every
+  // package that bundles deploy_model.mojo. 0 (UNSPECIFIED) ⇒ no
+  // accelerator request ⇒ BYTE-IDENTICAL to a spec that omits it. NOT yet
+  // consumed by any applier; an applier maps the tier ordinal to a per-cloud
+  // SKU.
+  int32 accelerator = 10;
+}
+
+// ─── One key/value label ─────────────────────────────────────────────────────
+message Label {
+  string key = 1;
+  string value = 2;
+}
+
+// ─── One secret binding (`secret_bindings`) ──────────────────────────────────
+//
+// One secret this unit resolves at runtime (runtime-resolve, NOT env
+// injection). `handle` is the secret handle the app's code references;
+// `capability_node` is the capability node the injected `SecretRegistry` keys
+// on. The applier authorizes the app's runtime identity to resolve the binding
+// at ensure-infra. The VALUE never appears here: this is the durable record of
+// WHICH secrets the app is authorized for.
+message SecretBinding {
+  // the secret handle the app references (a name, never a value).
+  string handle = 1;
+  // the capability node the injected SecretRegistry keys on.
+  string capability_node = 2;
+  // ENSURE vs AUTHORIZE-ONLY (default false = authorize-only). When true, the
+  // deploy PROVISIONS the secret container (create-if-absent) keyed on `handle`
+  // and wires the ensure-secret value write (the release tool's SecretWriter
+  // path) for a secret that is NOT pre-seeded out of band. Compose emits a
+  // per-handle RESOURCE_KIND_SECRET create node that the accessor grant
+  // depends on, so the secret EXISTS before the grant's read-modify-write
+  // GetIamPolicy runs (else that policy read fails with NOT_FOUND). When false
+  // (the default), the binding is authorize-only: NO create node is emitted and
+  // the secret is adopted as pre-provisioned.
+  bool ensure = 3;
+
+  // WHOSE CREDENTIAL THIS IS (the custody axis).
+  //
+  // `ensure` says whether the deploy provisions the CONTAINER. It does NOT say
+  // whether the deploy may put a VALUE in it, and those are different questions
+  // with different answers. The rule "the deploy must never WRITE a customer
+  // credential" is not expressible as `ensure: false`, which conflates "do not
+  // write this" with "do not create this" and therefore also suppresses the
+  // container the accessor grant needs.
+  //
+  // This field separates the two. See `SecretCustody`.
+  SecretCustody custody = 4;
+}
+
+// ─── WHOSE CREDENTIAL a `SecretBinding` names (custody) ──────────────────────
+//
+// The scope rule this encodes: **the deploy must never write a CUSTOMER
+// credential.** It is a custody rule, not an anti-clobbering rule: re-writing a
+// value the customer owns is wrong even when the bytes are identical, because
+// the deploying system is not that credential's custodian.
+//
+// THE DISTINCTION THIS EXISTS TO MAKE. When the deploying party deploys into
+// the account it owns, a webhook secret or a vendor API token are not customer
+// credentials: they are that party's own credentials in its own project, and
+// the rule does not bar minting them. For a CUSTOMER's deploy the very same handles name the
+// customer's credentials and the rule does bar it. One bundle, two answers, so
+// neither the bundle alone nor the environment alone can decide it.
+//
+// It is decided by a CONJUNCTION, and both halves must hold before any value is
+// written (`may_seed_secret`, `komira_gcp_bridge`):
+//
+//   binding.custody == OPERATOR   AND   NOT ApplyContext.names_customer_env()
+//   \_____ this field _______/          \___ WHOSE ACCOUNT we act in _______/
+//
+// The second half is deliberately NOT a new declaration. It reads
+// `ApplyContext.assumable_role_ref`: non-empty means we assumed a role INTO
+// somebody else's account, which is the ground truth of "this is a customer
+// deploy" rather than a label someone can mis-set. A deploying system acting
+// in its own project uses `ApplyContext.self_deploy()` (empty ref).
+//
+// SEEDING FAILS CLOSED ON SILENCE: an undeclared binding is never auto-seeded,
+// because minting a credential is not a thing to do by default.
+//
+// BUT "NOT SEEDABLE" IS NOT "NEVER WRITTEN", AND THE DIFFERENCE IS REAL.
+// Bindings that do not declare custody carry 0, and their contract is an
+// UNCONDITIONAL write of whatever the deploying system sourced (an operator who
+// supplies a value for such a handle does so in order to write it; rotation is
+// the intent). So the WRITE REFUSAL (`must_not_write_secret`) fires only once
+// custody has actually been DECLARED, while the SEED permission
+// (`may_seed_secret`) fails closed on silence. Two predicates, deliberately not
+// each other's negation.
+enum SecretCustody {
+  // Proto3 zero default: UNDECLARED. Not seedable (silence never authorises
+  // minting), but NOT a write refusal either: a binding that does not declare
+  // custody keeps the unconditional-write behaviour byte-identically. Declare
+  // CUSTOMER explicitly when the intent is to FORBID writes.
+  SECRET_CUSTODY_UNSPECIFIED = 0;
+
+  // The CUSTOMER owns this credential (their vendor API token, their DKIM key,
+  // their OAuth client secret). NO deploy may write it, not the deploying
+  // party's and not the customer's own. It reaches the secret store through the customer's
+  // own connect/onboard flow, never through a bundle deploy.
+  //
+  // DECLARING THIS IS NOT THE SAME AS LEAVING IT UNSET. This value is ENFORCED
+  // at the write: the applier refuses even if the deploying system somehow
+  // holds a value for the handle. Without it, "the deploy never writes a
+  // customer credential" would be true only because the deploying system's
+  // secret source
+  // happens not to know such handles, a property of a config map that any
+  // addition to it would void in silence.
+  SECRET_CUSTODY_CUSTOMER = 1;
+
+  // A credential of the deploying party itself, created only when the deploy
+  // acts in the account that owns it. Such a deploy MAY create it and seed its
+  // first version.
+  //
+  // SEED, NOT ROTATE. A seeded handle is written ONLY when it has no version.
+  // A re-deploy ADOPTS the live version and adds nothing, asserted on the
+  // VERSION COUNT, because `:latest` resolving to the same bytes is not the same
+  // property and the count is what a silently-rotating credential moves. A
+  // credential that regenerates on every deploy is a silent outage.
+  SECRET_CUSTODY_OPERATOR = 2;
+
+  // The deploying party's MACHINE-MINTED credential, provisioned INTO the
+  // CUSTOMER's project. Seedable in EITHER account, because the deploy generates
+  // the value and no one else holds a copy to overwrite.
+  //
+  // THE ACCOUNT HALF OF THE OPERATOR RULE IS A PROXY, AND THIS IS THE CASE IT
+  // MIS-ANSWERS. `SECRET_CUSTODY_OPERATOR` is refused the moment the deploy acts
+  // in somebody else's project, which is right for a credential a VENDOR issued
+  // or a CUSTOMER typed. It is wrong for a per-organization inbound-webhook
+  // secret: that value is random bytes the deploy mints to authenticate inbound
+  // POSTs, and it has to live in the customer's project because that is where
+  // the customer's revision mounts it from. Under OPERATOR custody such a
+  // secret's container is created and granted, and nothing can ever write a
+  // version into it.
+  //
+  // DECLARING THIS IS AN ASSERTION ABOUT THE VALUE'S ORIGIN, NOT A CONVENIENCE.
+  // It says the deploy can regenerate this credential from nothing, so seeding
+  // it cannot destroy anyone's copy. Do NOT reach for it to make a stubborn
+  // vendor credential writable: for those the honest answer is still that the
+  // operator, or the customer's own connect flow, supplies the value.
+  //
+  // SEED, NOT ROTATE, and for this kind the difference is an outage rather than
+  // untidiness. The credential is registered with an inbound sender, so a
+  // second version on a re-deploy leaves `:latest` resolving and the revision
+  // healthy while every inbound POST is rejected with 401 against a value the
+  // sender no longer holds. The applier's `has_version` probe is what prevents
+  // it; the falsifier is the VERSION COUNT across a second apply, never a value
+  // comparison.
+  SECRET_CUSTODY_PLATFORM_MINTED = 3;
+}
+
+// ─── The DeploymentSpec: the declarative unit ────────────────────────────────
+//
+// The desired state the reconciler applies. A strict superset of a placement.
+message DeploymentSpec {
+  // ── the placement handle (name/namespace) ──
+  //
+  // the Environment's isolation unit.
+  string name = 1;
+  string namespace = 2;
+
+  // ── the container body (containers + image_digest) ──
+  //
+  // ≥ 1 container (co-location). The first container's image_digest is the
+  // single digest the deploy applies / rolls back.
+  repeated ContainerSpec containers = 3;
+
+  // the unit-level metadata (pod↔job correlation).
+  repeated Label labels = 4;
+
+  // the per-Job customer cloud account ref (the cloud connection id; a NAME,
+  // never a secret). The serverless placement conformer resolves it to the
+  // workload-identity handle and mints per Job. Empty ⇒ single-tenant.
+  string account_ref = 5;
+
+  // ── the intent fields ──
+  //
+  // the compute intent (serverless|serverful). DERIVES `provider`.
+  ComputeIntent compute = 6;
+  // the datastore INTENT (none|serverless|dedicated): the app-facing TYPE. The
+  // IMPL is resolved per target platform by the applier (SERVERLESS → cloud
+  // serverless DB / on-prem object-store SQL). Provisioned at ensure-infra.
+  DatastoreNeed datastore = 7;
+  // the secrets this unit resolves at runtime.
+  repeated SecretBinding secret_bindings = 8;
+
+  // ── the derived / lower fields (the applier derives these) ──
+  //
+  // which per-provider applier realizes it. DERIVED from `compute` × the target
+  // cloud.
+  DeployProvider provider = 9;
+  // the runtime service account the compute RUNS AS (the ensure-infra role).
+  string runtime_identity = 10;
+  // which sub-identity applies this (build|deploy|placement): the per-stage
+  // least-privilege split.
+  StageIdentity stage_identity = 11;
+  // the served-endpoint surface (empty ⇒ finite job).
+  repeated PortSpec served_ports = 12;
+  // ephemeral (apply→track→tear-down) vs persistent (apply→reconcile-on-update).
+  DeployLifecycle lifecycle = 13;
+  // spot-by-default, a cross-cutting deploy parameter. The applier applies
+  // spot=true by default for SERVERFUL compute.
+  bool spot = 14;
+
+  // ── the rollback field ──
+  //
+  // the last-good digest for rollback (re-apply this). proto3-optional so the
+  // FIRST-DEPLOY-NO-PRIOR case is representable: absent ⇒ no prior good state
+  // to restore ⇒ rollback fails and tears down.
+  optional string prior_digest = 15;
+
+  // ── the orthogonal analytics-replica flag (the replica AXIS) ──
+  //
+  // The ORTHOGONAL replica flag: a SEPARATE axis from the datastore INTENT
+  // `datastore`, NOT a datastore TYPE. When true the applier stands up an
+  // analytics replica of the OLTP datastore, resolved per target: on cloud
+  // SERVERLESS (OLTP-only) it provisions a CDC→Iceberg replica; on on-prem
+  // SERVERLESS (the object-store SQL store is already HTAP) the replica is
+  // INHERENT: no separate resource, the flag is a no-op. Meaningful only when
+  // `datastore` is SERVERLESS (or DEDICATED, future); ignored for NONE.
+  bool datastore_analytics_replica = 16;
+
+  // ── the retention field (lazy prune-at-deploy) ──
+  //
+  // How many of the newest resource VERSIONS (Cloud Run revisions) survive a
+  // forward deploy. On each successful create/update the engine's best-effort
+  // post-apply prune deletes older revisions beyond the newest `keep_last_n`
+  // (NEVER the serving revision). A DIFFERENT axis from the provider-neutral
+  // RETAIN_* retention (may-delete-on-teardown): keep_last_n bounds how many
+  // versions survive a forward deploy. proto3-optional so UNSET is
+  // representable. A non-versioned node ignores it (its prune verb is a no-op).
+  //
+  // DEFAULT RESOLUTION. A producer may resolve an unset bound to its own
+  // default (the release tool's bundle-composed path uses 5). A producer that
+  // passes UNSET gets no prune: the conformer no-ops on an unset bound
+  // (defensive: never surprise-delete). Do NOT read this field as "resolved on
+  // every deploy path".
+  optional int32 keep_last_n = 17;
+
+  // ── the datastore FAMILY axis ──
+  //
+  // The app's RESOLVED datastore family (see `DatastoreFamily`): the per-APP
+  // axis `datastore` × `provider` cannot express. The render resolves it off the
+  // app's catalog record and stamps it here; ensure-infra keys its provisioning
+  // SHAPE on THIS, never on a process-wide impl enum or on "is an index admin
+  // wired".
+  //
+  // UNSPECIFIED is the proto3 default, so a producer that does not set it is
+  // unchanged. ensure-datastore treats UNSPECIFIED + a SERVERLESS-resolved impl
+  // as a REFUSAL (fail fast and loud) rather than silently provisioning nothing.
+  DatastoreFamily datastore_family = 18;
+
+  // The OBJECT-STORE bucket NAME this app's binary reads, for an
+  // OBJECT_STORE-family app. THE SINGLE SOURCE OF TRUTH for that name on the
+  // deploy path: the render derives the name ONCE, then (a) passes this exact
+  // string to the app as the bucket setting the binary refuses to start without
+  // and (b) carries it here. ensure-datastore provisions THIS string verbatim,
+  // so the bucket it creates and the bucket the container opens are the same
+  // bytes, by construction.
+  //
+  // EMPTY for a DOCUMENT_DB / NONE family app (there is no bucket) and empty on
+  // the self/local verify path (no resolved deploy target ⇒ no project to name a
+  // bucket in). Empty + an OBJECT_STORE family on a real deploy is a REFUSAL,
+  // not a skip.
+  string object_store_bucket = 19;
+
+  // ── the inbound-delivery INTENT (the REACHABILITY axis) ──────────────────
+  //
+  // WHAT this app needs from the outside world. The same shape as `datastore`
+  // (field 7): an app-facing INTENT the applier resolves per target platform.
+  // `resolve_inbound_strategy(inbound, provider)` is the sibling of
+  // `resolve_datastore_impl`, and it needs BOTH this field and `provider`
+  // (field 9), which is why the pair belongs on the same message.
+  //
+  // WHY IT EXISTS. Without it, a deploy path that builds a `DeploymentSpec`
+  // (rather than an app bundle's `AppSpec.inbound`) has no field to carry the
+  // intent, composes no ingress, and an app that receives webhook pushes is
+  // deployed private and unreachable from the public internet.
+  //
+  // UNSPECIFIED is the proto3 default ⇒ a producer that does not set it
+  // composes a byte-identical (no-ingress) graph. WEBHOOK on a cloud provider
+  // composes the `WebhookIngress` node (a PUBLIC API Gateway fronting the
+  // PRIVATE backend with a SCOPED run.invoker grant, never `allUsers`, which an
+  // org policy rejects). An app that declares WEBHOOK and whose ingress cannot
+  // be composed FAILS the deploy: a silently-unreachable app is the defect, not
+  // a fallback.
+  //
+  // A render may DERIVE it rather than have it authored: an app that declares a
+  // webhook-authentication secret receives inbound webhook pushes by
+  // construction (that credential exists to authenticate exactly those POSTs),
+  // so no second per-app list has to be kept in sync.
+  InboundNeed inbound = 20;
+
+  // ── WHOSE FIRESTORE DATABASE THIS DEPLOYMENT'S DOCUMENTS LIVE IN ─────────
+  //
+  // The same shape as `object_store_bucket` (field 19), for the OTHER half of
+  // the datastore. The render resolves the id ONCE and then does BOTH: passes
+  // it as the database setting the binary reads, and carries it here, so
+  // ensure-datastore ENSURES the database the container OPENS, by construction
+  // rather than by two call sites agreeing.
+  //
+  // WHY IT TRAVELS ON THE SPEC. An engine that deploys apps into a CUSTOMER
+  // project builds its Firestore admin client ONCE at process boot, with its
+  // own database id baked in. Ensuring indexes through that client without a
+  // per-deployment database would ensure an app's shapes into the deploying
+  // system's own database: the boundary is the PROJECT. Carried on the SPEC, the id arrives
+  // with the deployment it belongs to and the boot-built client keeps none.
+  //
+  // EMPTY is legal and means "this deployment states no database": the ensure
+  // step then addresses the client's baked id, byte-identically to a producer
+  // that does not set it. An empty id on a DOCUMENT_DB-family spec that carries
+  // index shapes is a REFUSAL, not a skip; see `EnsureDatastore.ensure`.
+  string datastore_database = 21;
+
+  // ── THE INDEX SHAPES THIS DEPLOYMENT'S OWN DATABASE NEEDS ───────────────
+  //
+  // The SAME `BundleIndexTable` messages `AppSpec.index_tables`
+  // (app_bundle.proto field 29) carries: one schema, declared in this file so
+  // both engines can speak it.
+  //
+  // WHY THE SHAPES TRAVEL WITH THE DEPLOYMENT AND ARE NOT KNOWN TO THE ENGINE.
+  // A generic orchestration layer cannot know which tables an app has. An
+  // engine that holds an index manifest as a constant, in a branch that takes
+  // no app identity, provisions EVERY app (every customer's own app included)
+  // with that one application's schema; an engine that holds none deploys a
+  // stateful app with ZERO composite indexes, and its first list query fails
+  // with 400 FAILED_PRECONDITION. This field fixes both, precisely because
+  // nothing in any deploy-tool binary has to be edited to add a customer's
+  // table.
+  //
+  // `datastore_database` AND THIS FIELD ARE ONE ANSWER, NOT TWO. They are the
+  // two halves of "whose indexes, in whose database", and separating them is
+  // how a deploy ensures app A's shapes into app B's database.
+  // `EnsureIndexes.ensure` takes them as a pair for the same reason.
+  //
+  // EMPTY (the default) ⇒ nothing is ensured beyond the database itself, and a
+  // producer that does not set it renders byte-identically.
+  repeated BundleIndexTable datastore_index_tables = 22;
+}
+
+// ─── ONE indexed FIELD of a composite index ──────────────────────────────────
+//
+// Declared in this file because BOTH `AppSpec.index_tables` (the AUTHORED
+// intent, app_bundle.proto, which imports this file) and
+// `DeploymentSpec.datastore_index_tables` (the RENDERED deployment, above) must
+// carry it, and proto imports do not run both ways.
+//
+// The intent-tier mirror of `komira_gcp_bridge.IndexFieldSpec`. Firestore has
+// THREE field modes, not two: a field is either an ORDERED key (`desc` selects
+// the direction) or an ARRAY-MEMBERSHIP key (`array_contains`), never both, and
+// they are not interchangeable. An ASCENDING index on an array column is a
+// legal, DIFFERENT index that does not serve an `array-contains` query.
+// `validate` REFUSES `desc: true` together with `array_contains: true` for that
+// reason: the failure mode of allowing it is a useless index the cloud
+// accepts.
+message BundleIndexField {
+  // The column / field path this key indexes (e.g. "owner_id", "tags").
+  string col = 1;
+  // DESCENDING when true, ASCENDING when false. MEANINGLESS, and refused, when
+  // `array_contains` is true.
+  bool desc = 2;
+  // ARRAY-MEMBERSHIP mode (`arrayConfig: CONTAINS`), for a repeated column
+  // queried with `array-contains`. Default false = an ordered key.
+  bool array_contains = 3;
+}
+
+// ─── ONE declared composite index ────────────────────────────────────────────
+//
+// The intent-tier mirror of `komira_gcp_bridge.ResolvedIndexSpec`, MINUS its
+// two `unique` / `partial_where` guards. Those exist only so the Firestore
+// renderer can fail loud on a SQL-shaped index the backend cannot express;
+// there is deliberately no way to author one here, because the only thing
+// authoring one could achieve is a deploy that refuses itself.
+message BundleIndex {
+  // The index's stable name (e.g. "ix_task_owner_archived_id"). REQUIRED: it is
+  // how a re-deploy recognises the index it already created.
+  string name = 1;
+  // The ordered composite key. ORDER IS LOAD-BEARING (it is the index's prefix
+  // order, not a set) and REQUIRED to be non-empty.
+  repeated BundleIndexField fields = 2;
+  // The query scope. A closed vocabulary of two tokens, "SCOPE_COLLECTION" (the
+  // common case) or "SCOPE_COLLECTION_GROUP". EMPTY defaults to
+  // SCOPE_COLLECTION; anything else is REFUSED at validate rather than at the
+  // cloud.
+  string scope = 3;
+}
+
+// ─── ONE table's declared composite indexes ──────────────────────────────────
+//
+// The intent-tier mirror of `komira_gcp_bridge.TableIndexesSpec`. `table` IS
+// the collection group the indexes are created on.
+message BundleIndexTable {
+  // The table / collection-group name (e.g. "task", "widget"). REQUIRED.
+  string table = 1;
+  // The composite indexes on that table. REQUIRED to be non-empty: a table
+  // block with no indexes declares nothing while reading as though it did.
+  repeated BundleIndex indexes = 2;
+}

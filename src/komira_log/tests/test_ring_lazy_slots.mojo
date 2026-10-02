@@ -3,8 +3,8 @@
 # ring families that `EngineContext` construction allocates.
 # =============================================================================
 #
-# WHAT THIS PINS. `EngineContext.__init__` builds one `SpanPacketRingBuffer`
-# per worker pthread (obs tracer) and N+1 `LogRecordRing`s (log engine), all
+# WHAT THIS PINS. `EngineContext.__init__` builds one `SpanPacketRing`
+# per worker pthread (komira_trace tracer) and N+1 `LogRecordRing`s (log engine), all
 # unconditionally, and both families are documented as carrying ZERO traffic
 # unless explicitly enabled. Eagerly `create_prefilled`-ing each ring's full
 # backing store at construction would make a many-worker context zero-fill and
@@ -28,9 +28,9 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_obs.ring_buffer import OVERFLOW_BLOCK, OVERFLOW_DROP
-from komira_obs.packet_ring import SpanPacketRingBuffer
-from komira_obs.span_packet import SpanPacket
+from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK, OVERFLOW_DROP
+from komira_trace.span_ring import SpanPacketRing
+from komira_trace.span_packet import SpanPacket
 
 from komira_log.engine.record_ring import LogRecordRing
 from komira_log.engine.log_event_record import LogEventRecord
@@ -42,7 +42,7 @@ from komira_log.engine.log_event_record import LogEventRecord
 def test_span_packet_ring_slots_are_lazy() raises:
     """FAILS IF the ctor calls `create_prefilled(cap)`, so a
     fresh ring already had its 64 slots and `slots_allocated()` was True."""
-    var ring = SpanPacketRingBuffer(64, OVERFLOW_BLOCK)
+    var ring = SpanPacketRing(64, OVERFLOW_BLOCK)
     assert_equal(ring.capacity(), Int(64), "logical capacity is live at ctor")
     assert_false(
         ring.slots_allocated(), "fresh span ring must NOT own a backing store"
@@ -78,7 +78,7 @@ def test_log_record_ring_slots_are_lazy() raises:
 def test_span_ring_pop_empty_before_any_push() raises:
     """A never-pushed ring has no backing store; popping it must still be a
     clean empty, not a dereference of the absent store."""
-    var ring = SpanPacketRingBuffer(16, OVERFLOW_BLOCK)
+    var ring = SpanPacketRing(16, OVERFLOW_BLOCK)
     assert_false(ring.slots_allocated(), "no store yet")
     assert_true(ring.is_empty(), "fresh ring is empty")
     var maybe = ring.try_pop()
@@ -100,7 +100,7 @@ def test_log_ring_pop_empty_before_any_push() raises:
 def test_span_ring_round_trip_and_wrap() raises:
     """Push/pop round-trips a distinguishing field, and the index mask still
     wraps correctly past the capacity boundary with the deferred store."""
-    var ring = SpanPacketRingBuffer(4, OVERFLOW_BLOCK)
+    var ring = SpanPacketRing(4, OVERFLOW_BLOCK)
     # 3 full laps around a 4-slot ring: exercises `tail & (cap-1)` wrap.
     for i in range(12):
         var p = SpanPacket()
@@ -133,7 +133,7 @@ def test_log_ring_round_trip_and_wrap() raises:
 def test_span_ring_drop_policy_still_accounts() raises:
     """DROP-policy overflow accounting is driven by `_capacity`, which is live
     from construction — the deferred store must not change the full point."""
-    var ring = SpanPacketRingBuffer(4, OVERFLOW_DROP)
+    var ring = SpanPacketRing(4, OVERFLOW_DROP)
     for _ in range(4):
         assert_true(ring.try_push(SpanPacket()), "fills to capacity")
     assert_false(ring.try_push(SpanPacket()), "5th push on a 4-ring drops")

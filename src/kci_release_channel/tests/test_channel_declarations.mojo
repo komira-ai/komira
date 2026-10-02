@@ -10,8 +10,11 @@ from kci_release_channel import (
     ARTIFACT_TYPE_NPM,
     ARTIFACT_TYPE_OCI,
     ARTIFACT_TYPE_PYTHON,
+    CREDENTIAL_KIND_API_TOKEN,
+    CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING,
     VISIBILITY_PRIVATE,
     VISIBILITY_PUBLIC,
+    ChannelCredential,
     ChannelDeclaration,
     ChannelRepository,
     channel_names,
@@ -31,6 +34,7 @@ channel {
     artifact_type: OCI
     location: "registry.example.invalid/beta"
     push_identity: "publisher@example.invalid"
+    credential { kind: API_TOKEN secret_name: "BETA_REGISTRY_TOKEN" }
   }
 }
 channel: {
@@ -40,11 +44,13 @@ channel: {
     artifact_type: OCI
     location: "registry.example.invalid/stable"
     push_identity: "publisher@example.invalid"
+    credential: { kind: "API_TOKEN" secret_name: STABLE_REGISTRY_TOKEN }
   }
   repository: {
     artifact_type: PYTHON
     location: "https://packages.example.invalid/stable/simple"
     push_identity: "wheel-publisher@example.invalid"
+    credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }
 """
@@ -83,10 +89,23 @@ def test_repository_for_reads_every_field() raises:
         r.location, String("https://packages.example.invalid/stable/simple")
     )
     assert_equal(r.push_identity, String("wheel-publisher@example.invalid"))
+    var rc = r.declared_credential()
+    assert_true(rc.is_oidc_trusted_publishing())
+    assert_equal(rc.secret_name, String(""))
     var o = find_channel(decls, String("beta")).repository_for(
         String(ARTIFACT_TYPE_OCI)
     )
     assert_equal(o.location, String("registry.example.invalid/beta"))
+    var oc = o.declared_credential()
+    assert_true(oc.is_api_token())
+    assert_equal(oc.kind, String(CREDENTIAL_KIND_API_TOKEN))
+    assert_equal(oc.secret_name, String("BETA_REGISTRY_TOKEN"))
+    var so = find_channel(decls, String("stable")).repository_for(
+        String(ARTIFACT_TYPE_OCI)
+    )
+    assert_equal(
+        so.declared_credential().secret_name, String("STABLE_REGISTRY_TOKEN")
+    )
 
 
 def test_a_missing_repository_is_refused_not_defaulted() raises:
@@ -120,6 +139,11 @@ def test_constructed_declarations_validate() raises:
             String(ARTIFACT_TYPE_NPM),
             String("https://npm.example.invalid/edge"),
             String("publisher@example.invalid"),
+            Optional(
+                ChannelCredential(
+                    String(CREDENTIAL_KIND_API_TOKEN), String("NPM_TOKEN")
+                )
+            ),
         )
     )
     repos.append(
@@ -127,6 +151,11 @@ def test_constructed_declarations_validate() raises:
             String(ARTIFACT_TYPE_CONDA),
             String("https://conda.example.invalid/edge"),
             String("publisher@example.invalid"),
+            Optional(
+                ChannelCredential(
+                    String(CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING), String("")
+                )
+            ),
         )
     )
     var decls = List[ChannelDeclaration]()

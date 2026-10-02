@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The span tracer: per-worker span-packet rings, the Tracer, the name registry
+# lookups it shares with the exporter, and the JSONL span exporter, including
+# the one span-line formatter other packages call instead of copying.
+#
+# It depends on komira_core (`Slab[T]`), komira_spsc_ring (`SpscRing[T]`),
+# komira_name_registry (`NameRegistry`), komira_clock, komira_fork_join (its
+# tests fork real threads) and komira_atomic_alias (the atomic id counters). komira_runtime_paths
+# is declared because tests/test_jsonl_exporter.mojo takes its scratch directory
+# from `test_tmpdir()`. It must NOT depend on engine packages, on komira_log or
+# on komira_metrics: the engine takes a borrowed ref on a `Tracer` the embedder
+# constructed.
+mojo_library(
+    name = "komira_trace",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_core:komira_core",
+        "//src/komira_name_registry:komira_name_registry",
+        "//src/komira_fork_join:komira_fork_join",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_drain_throughput.mojo",
+        "tests/test_jsonl_exporter.mojo",
+        "tests/test_span_microbench.mojo",
+        "tests/test_span_record_pod.mojo",
+        "tests/test_tracer_basic.mojo",
+        "tests/test_tracer_name_bitset_collision.mojo",
+        "tests/test_tracer_parallelize.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
