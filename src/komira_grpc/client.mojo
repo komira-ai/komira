@@ -66,7 +66,7 @@ from komira_http.client.state_machine import ClientResponse
 from komira_http.client.url import Url
 from komira_http.transport.io_stream import Connector
 
-from komira_obs.clock import now_ns as _mono_now_ns
+from komira_clock import now_ns as _mono_now_ns
 
 from komira_connect.status import (
     GRPC_STATUS_INTERNAL,

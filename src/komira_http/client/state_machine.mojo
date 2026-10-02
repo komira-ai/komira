@@ -43,7 +43,7 @@
 from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
-from komira_obs.clock import now_ns as _system_now_ns
+from komira_clock import now_ns as _system_now_ns
 from komira_http.client.body import EmptyBody, RequestBody
 from komira_http.client.error import HttpError
 from komira_http.client.header_map import HeaderMap

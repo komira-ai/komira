@@ -33,7 +33,7 @@
 # `RequestMetric` carries `start_mono_ns` AND `end_mono_ns` as separate fields,
 # and the two are never subtracted on their way to a sink.
 #
-# ⚠ THE ENDPOINTS ARE MONOTONIC (`komira_obs.clock.now_ns`) — the same clock
+# ⚠ THE ENDPOINTS ARE MONOTONIC (`komira_clock.now_ns`) — the same clock
 # `LoggingMiddleware.before` already stamps into `ctx.start_ns`. Monotonic,
 # because a union taken over wall-clock stamps is corrupted by an NTP step, and
 # a step is exactly the event a billing system must not be sensitive to.
@@ -62,7 +62,7 @@
 from komira_http.codec.types import HttpRequest, HttpResponse
 from komira_http.middleware.logging import LogEntry
 from komira_http.middleware.middleware import Middleware, RequestContext
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================

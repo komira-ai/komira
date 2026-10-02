@@ -27,7 +27,8 @@
 #      defect in both. ⚠ The producer (`log_arg.StrArg.encode_into`) copies the
 #      caller's bytes RAW, so a `chr` decode makes an ASYMMETRIC codec pair.
 #   4. `engine/span_drain._json_escape` — the pass-through arm, i.e. a SPAN
-#      NAME in exported OTLP-shaped JSON.
+#      NAME in exported OTLP-shaped JSON. It is a wrapper over
+#      `komira_trace.exporter.json_escape`, which is the mutation site.
 #   5. `engine/merge._ts_key` and `_read_lines` — the log-merge k-way
 #      merge. ⚠ SEE THE DISPOSITION NOTE ON EACH: this module has no
 #      production importer in this package (only its tests), so these two are
@@ -469,7 +470,8 @@ def test_span_name_survives_json_escape_exactly() raises:
     (quote / backslash / control) are asserted in the SAME string so the
     run-copy rewrite cannot swallow one.
 
-    Killed by: restoring `out += chr(Int(c))` in `_json_escape`.
+    Killed by: restoring `out += chr(Int(c))` in `komira_trace.exporter.json_escape`
+    (reached through the `_json_escape` wrapper here).
     """
     var ks = _fixture()
     for i in range(len(ks)):
