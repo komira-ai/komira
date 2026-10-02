@@ -1,5 +1,5 @@
 # =============================================================================
-# test_serde_json_nonascii_roundtrip.mojo — JSON string non-ASCII byte fidelity.
+# test_proto_codec_json_nonascii_roundtrip.mojo — JSON string non-ASCII byte fidelity.
 # =============================================================================
 #
 # REGRESSION GUARD — the Latin-1<->UTF-8 double-encode. A message body
@@ -243,11 +243,11 @@ def test_ascii_and_escapes_preserved() raises:
 
 
 def main() raises:
-    print("test_serde_json_nonascii_roundtrip — JSON UTF-8 byte fidelity")
+    print("test_proto_codec_json_nonascii_roundtrip — JSON UTF-8 byte fidelity")
     test_serialize_emdash_verbatim()
     test_serialize_multibyte_verbatim()
     test_encode_decode_roundtrip_multibyte()
     test_decode_u_escape_emdash()
     test_decode_raw_utf8_verbatim()
     test_ascii_and_escapes_preserved()
-    print("test_serde_json_nonascii_roundtrip: ALL PASS")
+    print("test_proto_codec_json_nonascii_roundtrip: ALL PASS")

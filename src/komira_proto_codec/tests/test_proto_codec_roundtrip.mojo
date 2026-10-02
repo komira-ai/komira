@@ -1,5 +1,5 @@
 # =============================================================================
-# test_serde_roundtrip.mojo — komira_serde Serializable round-trip suite.
+# test_proto_codec_roundtrip.mojo — komira_proto_codec Serializable round-trip suite.
 # =============================================================================
 #
 # The `Serializable` round-trip must be identity on the test corpus for BOTH
@@ -20,7 +20,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     WireEncoder,
     WireDecoder,
@@ -619,7 +619,7 @@ def test_pooled_scratch_buffer_reuse() raises:
 
 
 def main() raises:
-    print("test_serde_roundtrip — Serializable round-trip gate")
+    print("test_proto_codec_roundtrip — Serializable round-trip gate")
     test_timestamp_roundtrip()
     test_dataset_roundtrip_with_optional()
     test_dataset_roundtrip_optional_absent()
@@ -630,4 +630,4 @@ def main() raises:
     test_pooled_scratch_buffer_reuse()
     test_tagged_repeated_and_map_roundtrip()
     test_tagged_empty_repeated_and_map()
-    print("test_serde_roundtrip: ALL PASS")
+    print("test_proto_codec_roundtrip: ALL PASS")

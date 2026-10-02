@@ -1,5 +1,5 @@
 # =============================================================================
-# test_serde_proto3_json_conformance.mojo — the proto3-JSON mapping
+# test_proto_codec_proto3_json_conformance.mojo — the proto3-JSON mapping
 # conformance gate: per-rule JSON byte-diff against reference vectors.
 # =============================================================================
 #
@@ -22,7 +22,7 @@
 #            ⛔ THE TWO DIRECTIONS ARE NOT ONE RULE; stating R7 without
 #            saying WHICH invites a fail-open on the decode half.
 #            The decode side is pinned by
-#            `test_serde_proto3_json_strictness.mojo`, not here.
+#            `test_proto_codec_proto3_json_strictness.mojo`, not here.
 #   R8 a nested message is a nested JSON object.
 #   R9 an empty message is `{}`.
 #
@@ -32,7 +32,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_serde import (
+from komira_proto_codec import (
     Serializable,
     WireEncoder,
     WireDecoder,
@@ -336,7 +336,7 @@ def test_r7_lower_camel_case_field_names() raises:
     a fail-open on the decode half. DECODE accepts the `json_name` AND
     the original `.proto` field name (canonical proto3-JSON parsers accept
     both) and REFUSES a document stating both spellings of one field; that
-    direction is pinned by `test_serde_proto3_json_strictness.mojo`. This
+    direction is pinned by `test_proto_codec_proto3_json_strictness.mojo`. This
     case asserts only the bytes on the way OUT — which is also what makes
     the strict decoder's round trip sound."""
     var probe = ConformanceProbe(
@@ -512,7 +512,7 @@ def _contains(haystack: String, needle: String) -> Bool:
 
 
 def main() raises:
-    print("test_serde_proto3_json_conformance — proto3-JSON mapping gate")
+    print("test_proto_codec_proto3_json_conformance — proto3-JSON mapping gate")
     test_r1_int64_uint64_as_string()
     test_r1_uint64_max_as_string()
     test_r2_int32_uint32_as_number()
@@ -526,4 +526,4 @@ def main() raises:
     test_full_probe_byte_exact()
     test_conformance_probe_roundtrip()
     test_base64_codec_direct()
-    print("test_serde_proto3_json_conformance: ALL PASS")
+    print("test_proto_codec_proto3_json_conformance: ALL PASS")

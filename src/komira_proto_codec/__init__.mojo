@@ -1,4 +1,4 @@
-"""`komira_serde` — the `Serializable` / `WireFormat` codec runtime.
+"""`komira_proto_codec` — the `Serializable` / `WireFormat` codec runtime.
 
 The Mojo-side substrate every generated message struct conforms to: a
 message is described ONCE (`Serializable`) and serializes as
@@ -21,10 +21,10 @@ Modules:
                        `decode_json` — top-level convenience entry points.
 
 Dependency direction (cycle-free):
-  komira_serde -> komira_protobuf  (ProtoBinaryWire backend)
-  komira_serde -> komira_json      (Proto3JsonWire backend)
-  komira_serde -> komira_encoding  (base64 for proto3-JSON `bytes`)
-  NOT komira_serde -> the gRPC runtime (which consumes this package)
+  komira_proto_codec -> komira_protobuf  (ProtoBinaryWire backend)
+  komira_proto_codec -> komira_json      (Proto3JsonWire backend)
+  komira_proto_codec -> komira_encoding  (base64 for proto3-JSON `bytes`)
+  NOT komira_proto_codec -> the gRPC runtime (which consumes this package)
 
 All three dependencies are small and have no dependencies of their own, so
 every generated client can import this package cheaply.

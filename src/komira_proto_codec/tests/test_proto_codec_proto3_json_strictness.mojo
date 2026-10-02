@@ -1,5 +1,5 @@
 # =============================================================================
-# test_serde_proto3_json_strictness.mojo — the proto3-JSON decoder REFUSES what
+# test_proto_codec_proto3_json_strictness.mojo — the proto3-JSON decoder REFUSES what
 # it cannot name, and ACCEPTS the original `.proto` field name.
 # =============================================================================
 #
@@ -56,7 +56,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_serde import (
+from komira_proto_codec import (
     ProtoEnum,
     Serializable,
     WireEncoder,
@@ -917,7 +917,7 @@ def test_s12_a_message_with_no_fields_accepts_no_key() raises:
 
 
 def main() raises:
-    print("test_serde_proto3_json_strictness:")
+    print("test_proto_codec_proto3_json_strictness:")
     test_s1_the_proto_field_name_decodes_like_the_json_name()
     test_s2_an_unknown_key_is_refused_naming_it()
     test_s3_an_unknown_key_is_refused_even_when_its_value_is_null()
@@ -930,4 +930,4 @@ def main() raises:
     test_s10_a_strict_decode_round_trips_an_encoded_message()
     test_s11_one_field_stated_under_two_spellings_is_refused()
     test_s12_a_message_with_no_fields_accepts_no_key()
-    print("test_serde_proto3_json_strictness: ALL PASS")
+    print("test_proto_codec_proto3_json_strictness: ALL PASS")
