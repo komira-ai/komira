@@ -16,7 +16,6 @@ from komira_gcp_core import (
     PageCursor,
     gcp_status_error,
     next_page_token,
-    percent_encode,
     with_page_token,
 )
 
@@ -183,8 +182,13 @@ def test_page_cursor_for_body_tokens() raises:
 
 
 def test_url_helpers() raises:
-    assert_equal(percent_encode("aZ09-._~"), "aZ09-._~")
-    assert_equal(percent_encode("a b/+=&?"), "a%20b%2F%2B%3D%26%3F")
+    # The token is percent-encoded through the one public seam that uses it:
+    # unreserved bytes pass through, everything else is %XX (upper-case hex).
+    assert_equal(with_page_token("https://h/x", "aZ09-._~"), "https://h/x?pageToken=aZ09-._~")
+    assert_equal(
+        with_page_token("https://h/x", "a b/+=&?"),
+        "https://h/x?pageToken=a%20b%2F%2B%3D%26%3F",
+    )
     assert_equal(with_page_token("https://h/x", ""), "https://h/x")
     assert_equal(with_page_token("https://h/x", "t"), "https://h/x?pageToken=t")
     assert_equal(with_page_token("https://h/x?a=1", "t"), "https://h/x?a=1&pageToken=t")

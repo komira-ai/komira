@@ -72,7 +72,7 @@ def _hex_digit(n: UInt8) -> String:
     return chr(Int(n) - 10 + ord("A"))
 
 
-def percent_encode(value: String) -> String:
+def _percent_encode(value: String) -> String:
     """RFC 3986 percent-encoding of everything but the unreserved set."""
     var out = String()
     for c in value.as_bytes():
@@ -89,7 +89,7 @@ def with_page_token(url: String, token: String) -> String:
     if token.byte_length() == 0:
         return url.copy()
     var sep = "&" if url.find("?") >= 0 else "?"
-    return url + sep + "pageToken=" + percent_encode(token)
+    return url + sep + "pageToken=" + _percent_encode(token)
 
 
 struct PageCursor(Copyable, Movable, Deinitable):

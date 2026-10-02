@@ -85,7 +85,6 @@ from .pagination import (
     DEFAULT_MAX_PAGES,
     PageCursor,
     next_page_token,
-    percent_encode,
     with_page_token,
 )
 from .retry import GcpRetryClassifier, gcp_retry_policy
