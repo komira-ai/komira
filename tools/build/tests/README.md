@@ -31,8 +31,8 @@ do:
   in a snapshot of the tree.
 
 A test with both halves keeps one package name in each, for example
-`tests//functional/known_failing` (a hold that works) and
-`tests//negative/known_failing` (the holds that must be refused).
+`tests//functional/test_data` (the test runtime contract that works) and
+`tests//negative/test_data` (the declarations and env that must go red).
 `functional/` and `negative/` are not packages themselves: their
 scripts belong to the root package of the cell, and are linted by `tests//:shell_lint`, which the root `//:tests_lints`
 names. At the top of this directory are the driver,
@@ -454,18 +454,6 @@ compiles (`tests//functional/s2n_probes`) and every other probe fails to, so a f
 define cannot be added or dropped without its probe agreeing. Neither test
 binary exports a dynamic symbol.
 
-## 27. Known-failing tests
-
-[`functional/known_failing`](functional/known_failing/BUCK): `held_ok` holds its failing test and
-builds, and that test's marker reads `HELD <label>`; in
-[`negative/known_failing`](negative/known_failing/BUCK), `held_passing` holds a
-test that passes and must fail with `LEDGER STALE`, naming the row;
-`unheld_red` holds one failing test and must still fail with
-`GATED TEST FAILED` on the other. Each `bad_*` target must fail at analysis
-with its own refusal: no issue, an issue that is not a GitHub issue
-reference, an empty reason, a key that is not a test, an unknown field,
-byte-identical reasons, every test held.
-
 ## 28. Compile watchdog
 
 [`watchdog/cases.sh`](functional/watchdog/cases.sh), a remote action
@@ -502,10 +490,8 @@ is also another's directory, a `test_data` key that is not a test, a
 runner-owned env name, an env name that is not a variable name. The gate test
 of `komira//tools/build/mojo/runtime_paths:komira_runtime_paths` (built with
 the examples) covers the executable-relative helpers.
-`runner_cases` also runs the runner on a held stand-in that kills itself:
-with SIGKILL (a memory limit's kill) it must exit 137 with `NO VERDICT` and
-no marker, so an executor retries it with more memory rather than caching
-`HELD`; with SIGABRT it is still `HELD`; unheld and SIGKILLed it is red, 137.
+`runner_cases` also runs the runner on a stand-in that kills itself: with
+SIGKILL it must exit 137 and with SIGABRT 134, each with no marker.
 
 ## 30. Optimization levels
 
