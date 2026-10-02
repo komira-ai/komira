@@ -10,8 +10,9 @@ load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 #
 # The CloudWatch Logs model is the pinned botocore one
 # (komira//third_party/botocore, models.bzl), read from the archive at build
-# time. model/ holds only this package's own inputs: a zero-byte model, a
-# tiny restXml model and a tiny awsJson model that declares SigV2. The tiny
+# time. model/ holds only this package's own inputs: a zero-byte model, tiny
+# restXml models (one for a golden, one per restXml refusal), a tiny Smithy
+# RPC v2 CBOR model and a tiny awsJson model that declares SigV2. The tiny
 # restJson1 model comes from komira//tools/build/proto-codegen/aws_rest_json
 # (model and digest in its model.bzl), where its pure-mode client is compiled
 # against the real runtime, which only the komira cell can depend on; this
@@ -142,19 +143,97 @@ aws_codegen_refusal(
     model = _LOGS_MODEL,
 )
 
-aws_codegen_refusal(
-    name = "refuse_unsupported_protocol",
-    expect = "rest-xml",
+# A restXml client of a tiny model, pure mode: a label after a literal
+# query, a header, the input's root element in its namespace holding a
+# scalar, a timestamp, a wrapped list with renamed items and a flattened
+# list of structures, a structure payload in its namespace, and the response
+# side of each.
+aws_codegen_golden(
+    name = "restxml_pure",
     gen_args = [
         "--model-sha256",
-        "5f457c555302b8e12a8b7def55eaf4e94510d3c19731c57325f10e4a91cad9ab",
+        "47dc951fe9a3275e5621a62760272d6bb58fb18a56de58f0c179f793882cba05",
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping,PutThing,SetConfig",
+        "--pure-only",
+        "--probe-import",
+        "komira_aws_tiny_xml.komira_aws_tiny_xml",
+    ],
+    golden = "golden/restxml_pure.mojo",
+    golden_probe = "golden/restxml_pure_probe.mojo",
+    model = "model/tiny_restxml.json",
+    module = "komira_aws_tiny_xml",
+)
+
+aws_codegen_refusal(
+    name = "refuse_unsupported_protocol",
+    expect = "declares protocol `smithy-rpc-v2-cbor`",
+    gen_args = [
+        "--model-sha256",
+        "fb3a13255e2b76eafa4fe45685528f9f63bbfd5327badab0387e9c0fdbfe6b4a",
         "--service",
         "tiny",
         "--operations",
         "Ping",
     ],
+    model = "model/tiny_rpcv2cbor.json",
+)
+
+# The `s3` customization is for S3's model only, and no other customization
+# exists.
+aws_codegen_refusal(
+    name = "refuse_s3_customization_on_another_service",
+    expect = "customization applies only to S3's restXml model",
+    gen_args = [
+        "--model-sha256",
+        "47dc951fe9a3275e5621a62760272d6bb58fb18a56de58f0c179f793882cba05",
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+        "--customization",
+        "s3",
+    ],
     model = "model/tiny_restxml.json",
 )
+
+aws_codegen_refusal(
+    name = "refuse_unknown_customization",
+    expect = "--customization `s4` is not one this generator has",
+    gen_args = [
+        "--model-sha256",
+        "47dc951fe9a3275e5621a62760272d6bb58fb18a56de58f0c179f793882cba05",
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+        "--customization",
+        "s4",
+    ],
+    model = "model/tiny_restxml.json",
+)
+
+# Each restXml refusal, by name: a model that reaches the feature is refused
+# before any file is written.
+[aws_codegen_refusal(
+    name = "refuse_restxml_" + kind,
+    expect = "REFUSED {}:".format(name),
+    gen_args = [
+        "--model-sha256",
+        sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+    ],
+    model = "model/tiny_restxml_{}.json".format(kind),
+) for kind, name, sha256 in [
+    ("attribute", "xml-attribute", "cab4c41d5f96e7099cdbbb22dc4ae0b5a3fc907325658a215af22b791db21672"),
+    ("map", "xml-map", "2c7c8b8cf092b522757e750b413d3b763156665502f36819789afca4a9780022"),
+    ("union", "union", "68021473fc6663bdfe2b6591199a2fe7822dd82b46b580c488606713db69dc3f"),
+]]
 
 # The generated client signs with SigV4 only: a supported protocol whose
 # model declares another signatureVersion is refused, naming the value.

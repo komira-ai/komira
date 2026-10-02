@@ -8,7 +8,7 @@
 //! aws-client-gen --model <service-2.json> --model-sha256 <hex>
 //!     --service <botocore id> --operations <Op>[,<Op>...]
 //!     --module <name> --out <file.mojo>
-//!     [--pure-only] [--emit-model-json]
+//!     [--pure-only] [--emit-model-json] [--customization s3]
 //!     [--overrides <manifest> [--hand-src <file.mojo>]...]
 //!     [--probe-out <_layout_probe.mojo> [--probe-import <dotted path>]]
 //!     [--endpoint-rules <endpoint-rule-set-1.json> --partitions <partitions.json>]
@@ -18,13 +18,17 @@
 //! and its partition table, always together) make the module resolve
 //! endpoints through the ruleset: both are embedded in it, and the header
 //! records the sha256 of each.
+//!
+//! `--customization s3` applies botocore's S3 response handling the model
+//! does not state (`emit_aws::S3_CUSTOMIZATION`); it is refused for any
+//! model but S3's.
 
 use std::path::PathBuf;
 
 use komira_proto_codegen::aws_in::lower_aws_service;
 use komira_proto_codegen::emit_aws::{
     emit_aws_module_with_endpoints, emit_layout_probe, AwsEmitOptions, AwsEndpointRules,
-    AwsProvenance,
+    AwsProvenance, S3_CUSTOMIZATION,
 };
 use komira_proto_codegen::json::parse;
 use komira_proto_codegen::overrides::AwsOverrides;
@@ -233,6 +237,16 @@ fn parse_args() -> Result<Args, String> {
             "--partitions" => partitions = Some(PathBuf::from(take(&mut i)?)),
             "--emit-model-json" => options.emit_model_json = true,
             "--pure-only" => options.pure_only = true,
+            "--customization" => {
+                let c = take(&mut i)?;
+                if c != S3_CUSTOMIZATION {
+                    return Err(format!(
+                        "--customization `{c}` is not one this generator has; the set is \
+                         `{S3_CUSTOMIZATION}`"
+                    ));
+                }
+                options.s3 = true;
+            }
             "--operations" => {
                 operations = Some(
                     take(&mut i)?

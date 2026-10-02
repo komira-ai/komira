@@ -53,15 +53,24 @@ pub struct AwsServiceMeta {
     pub service_full_name: String,
     pub service_abbreviation: Option<String>,
     pub global_endpoint: Option<String>,
-    /// `metadata.xmlNamespace` — the default XML namespace URI for
-    /// `rest-xml` request documents.
-    pub xml_namespace: Option<String>,
+    /// `metadata.xmlNamespace` — the default XML namespace for `rest-xml`
+    /// request documents.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     pub aws_query_compatible: bool,
     pub checksum_format: Option<String>,
     pub uid: String,
     /// The model's `clientContextParams`: endpoint-ruleset parameters a
     /// client is configured with, in declared order.
     pub client_context_params: Vec<AwsClientContextParam>,
+}
+
+/// An `xmlNamespace` trait: the namespace URI, and the prefix it is bound
+/// to (empty for the default namespace). botocore models spell it as an
+/// object (`{"uri": ..., "prefix": ...}`) or as the bare URI string.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AwsXmlNamespace {
+    pub prefix: String,
+    pub uri: String,
 }
 
 /// One `clientContextParams` entry: a ruleset parameter a client is
@@ -174,8 +183,8 @@ pub struct AwsMemberFacts {
     pub idempotency_token: bool,
     /// Member-level `flattened` (XML: no wrapper element around a list).
     pub flattened: bool,
-    /// Member-level `xmlNamespace.uri`.
-    pub xml_namespace: Option<String>,
+    /// Member-level `xmlNamespace`.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     /// `xmlAttribute: true` — serialise as an attribute, not an element.
     pub xml_attribute: bool,
     /// `streaming: true` on the member.
@@ -232,8 +241,8 @@ pub struct AwsShapeFacts {
     pub retryable: bool,
     /// Shape-level `locationName`.
     pub location_name: Option<String>,
-    /// Shape-level `xmlNamespace.uri`.
-    pub xml_namespace: Option<String>,
+    /// Shape-level `xmlNamespace`.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     /// The `payload` member name, for a structure that designates one.
     pub payload: Option<String>,
     /// The `required` list, verbatim (member names, not IR field names).
@@ -242,6 +251,8 @@ pub struct AwsShapeFacts {
     /// container element is elided in XML.
     pub flattened: bool,
     pub list_member_location_name: Option<String>,
+    /// For a `list`: the `xmlNamespace` on its `member` reference.
+    pub list_member_xml_namespace: Option<AwsXmlNamespace>,
     /// For a `map`: the key / value `locationName`s.
     pub map_key_location_name: Option<String>,
     pub map_value_location_name: Option<String>,
@@ -305,8 +316,8 @@ pub struct AwsOperationFacts {
     pub input_shape: Option<String>,
     /// `input.locationName` — the XML root element name for `rest-xml`.
     pub input_location_name: Option<String>,
-    /// `input.xmlNamespace.uri`.
-    pub input_xml_namespace: Option<String>,
+    /// `input.xmlNamespace`.
+    pub input_xml_namespace: Option<AwsXmlNamespace>,
     /// The AWS output shape name, or `None` (165 of 850 declare none).
     pub output_shape: Option<String>,
     pub result_wrapper: Option<String>,
@@ -799,6 +810,7 @@ impl<'a> AwsLowerer<'a> {
             f.element_shape = Some(member_shape_name(m, name)?);
             f.list_member_location_name =
                 m.get("locationName").and_then(Json::as_str).map(String::from);
+            f.list_member_xml_namespace = xml_ns(m.get("xmlNamespace"));
             // A member-level `flattened` on the list's own `member` node.
             if m.get("flattened").and_then(Json::as_bool) == Some(true) {
                 f.flattened = true;
@@ -1620,10 +1632,18 @@ fn as_i64(v: &Json) -> Option<i64> {
     }
 }
 
-fn xml_ns(v: Option<&Json>) -> Option<String> {
-    v.and_then(|x| x.get("uri"))
-        .and_then(Json::as_str)
-        .map(String::from)
+fn xml_ns(v: Option<&Json>) -> Option<AwsXmlNamespace> {
+    match v? {
+        Json::Str(uri) => Some(AwsXmlNamespace {
+            prefix: String::new(),
+            uri: uri.clone(),
+        }),
+        o @ Json::Object(_) => Some(AwsXmlNamespace {
+            prefix: o.get("prefix").and_then(Json::as_str).unwrap_or("").to_string(),
+            uri: o.get("uri").and_then(Json::as_str)?.to_string(),
+        }),
+        _ => None,
+    }
 }
 
 pub fn resolve_timestamp_format(

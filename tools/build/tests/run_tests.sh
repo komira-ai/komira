@@ -194,7 +194,9 @@
 #      GetLogEvents module, pure and client, a restJson1 client of a tiny
 #      model, and the layout probe of each, equal their text goldens byte for
 #      byte; the generator refuses an empty or missing operation list, an
-#      operation the model lacks, a protocol it does not implement, a
+#      operation the model lacks, a protocol it does not implement, a restXml
+#      model reaching a union, an XML attribute or a body map, the `s3`
+#      customization on another model or an unknown customization, a
 #      missing, malformed (not 64 lowercase hex digits) or wrong
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
@@ -228,7 +230,10 @@
 #      a pure-mode restJson1 client of a tiny model
 #      (komira//tools/build/proto-codegen/aws_rest_json), which builds only
 #      once its layout probe and a caller test of the requests it builds and
-#      the responses it reads pass.
+#      the responses it reads pass; and a pure-mode restXml client of a tiny
+#      S3-shaped model with the `s3` customization
+#      (komira//tools/build/proto-codegen/aws_rest_xml), likewise, against
+#      komira_aws_core and komira_xml.
 #      Exactly the package's files are generated, nothing of an operation not
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
@@ -951,6 +956,7 @@ fi
 # 36
 expect_green aws_client tests//functional/aws_client:
 expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
+expect_green aws_rest_xml //tools/build/proto-codegen/aws_rest_xml:
 expect_red aws_client_no_operations '`operations` is empty' tests//negative/aws_client:no_operations
 expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/aws_client:joined_operations
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/aws_client:no_runtime

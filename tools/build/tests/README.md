@@ -627,10 +627,13 @@ tools/build/tests/run_tests.sh --host-check-only
 [`functional/aws_codegen`](functional/aws_codegen/BUCK) runs
 `komira//tools/build/proto-codegen:aws-client-gen` over a copy of the
 CloudWatch Logs model as check actions ([`defs.bzl`](functional/aws_codegen/defs.bzl)).
-The GetLogEvents module, pure and client, and the layout probe of each, must
-equal their goldens under `golden/` byte for byte. The generator must refuse,
-naming the reason and writing no file: an empty or missing `--operations`, an
-operation the model lacks, a protocol it does not implement (rest-xml), a
+The GetLogEvents module, pure and client, a tiny restXml module (pure), and
+the layout probe of each, must equal their goldens under `golden/` byte for
+byte. The generator must refuse, naming the reason and writing no file: an
+empty or missing `--operations`, an operation the model lacks, a protocol it
+does not implement (smithy-rpc-v2-cbor), a restXml model that reaches a
+union, an XML attribute or a map in the body (each by its refusal name), the
+`s3` customization on a model other than S3's, an unknown customization, a
 missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
 or one digit short), one that is not the model's, a zero-byte model, and
 `--probe-import` without `--probe-out`.

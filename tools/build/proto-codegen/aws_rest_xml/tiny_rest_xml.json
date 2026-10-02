@@ -1,41 +1,39 @@
 {
  "version": "2.0",
  "metadata": {
-  "apiVersion": "2026-09-30",
-  "endpointPrefix": "tiny",
+  "apiVersion": "2026-10-02",
+  "endpointPrefix": "s3",
   "protocol": "rest-xml",
-  "serviceFullName": "Tiny Example Service",
-  "serviceId": "Tiny",
-  "signatureVersion": "v4",
-  "uid": "tiny-2026-09-30"
+  "serviceFullName": "Tiny restXml Example",
+  "serviceId": "S3",
+  "signatureVersion": "s3",
+  "auth": ["aws.auth#sigv4"],
+  "uid": "tiny-s3-2026-10-02"
  },
  "operations": {
-  "Ping": {
-   "name": "Ping",
-   "http": {"method": "GET", "requestUri": "/ping"},
-   "input": {"shape": "PingRequest"},
-   "output": {"shape": "PingResponse"}
-  },
   "PutThing": {
    "name": "PutThing",
    "http": {"method": "PUT", "requestUri": "/things/{Name}?thing"},
    "input": {
     "shape": "PutThingRequest",
     "locationName": "PutThingRequest",
-    "xmlNamespace": {"uri": "https://tiny.example.com/doc/2026-09-30/"}
+    "xmlNamespace": {"uri": "https://tiny.example.com/doc/"}
    },
    "output": {"shape": "PutThingResponse"}
   },
   "SetConfig": {
    "name": "SetConfig",
    "http": {"method": "PUT", "requestUri": "/config"},
-   "input": {"shape": "SetConfigRequest"},
-   "output": {"shape": "SetConfigResponse"}
+   "input": {"shape": "SetConfigRequest"}
+  },
+  "GetBlob": {
+   "name": "GetBlob",
+   "http": {"method": "GET", "requestUri": "/blob"},
+   "input": {"shape": "GetBlobRequest"},
+   "output": {"shape": "GetBlobResponse"}
   }
  },
  "shapes": {
-  "PingRequest": {"type": "structure", "members": {}},
-  "PingResponse": {"type": "structure", "members": {"Message": {"shape": "String"}}},
   "PutThingRequest": {
    "type": "structure",
    "required": ["Name"],
@@ -52,6 +50,7 @@
    "type": "structure",
    "members": {
     "ETag": {"shape": "String", "location": "header", "locationName": "ETag"},
+    "Expires": {"shape": "Timestamp", "location": "header", "locationName": "Expires"},
     "Size": {"shape": "Long"},
     "Tags": {"shape": "TagList"},
     "Parts": {"shape": "PartList", "flattened": true, "locationName": "Part"}
@@ -64,15 +63,16 @@
     "Config": {
      "shape": "Config",
      "locationName": "Config",
-     "xmlNamespace": {"uri": "https://tiny.example.com/doc/2026-09-30/"}
+     "xmlNamespace": {"uri": "https://tiny.example.com/doc/"}
     }
    },
    "payload": "Config"
   },
-  "SetConfigResponse": {
+  "GetBlobRequest": {"type": "structure", "members": {}},
+  "GetBlobResponse": {
    "type": "structure",
-   "members": {"Config": {"shape": "Config"}},
-   "payload": "Config"
+   "members": {"Body": {"shape": "Blob", "streaming": true}},
+   "payload": "Body"
   },
   "Config": {
    "type": "structure",
