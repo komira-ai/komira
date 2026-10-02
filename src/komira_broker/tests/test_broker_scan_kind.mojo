@@ -4,9 +4,10 @@
 #
 # `BrokerScanRuntime` is the tier-2 conformer the execution-time
 # resolve pass calls. Every test here drives it exactly the way that pass
-# does — `build_binding` -> `resolve_for_execution` (core) -> `open_scan` —
-# over the in-memory conditional store, with NO `EngineContext` and no
-# executor, so this file stays a light welded test of `komira_broker`.
+# does — `build_binding` -> `resolve_for_execution` (core) -> `drain_scan`
+# (`plan_splits`, then one `BrokerSplitReader` per partition) — over the
+# in-memory conditional store, with NO `EngineContext` and no executor, so
+# this file stays a light welded test of `komira_broker`.
 #
 # Pinned here, one test each:
 #   * the live tier is read, including its log-compacted chunks, a start offset
@@ -14,11 +15,15 @@
 #   * a produce between two executions is visible, while the plan's
 #     `structural_hash` and the cached binding's token stay put — and an
 #     execution resolved BEFORE the produce still reads its own snapshot;
-#   * KIP-74: the first segment is returned whole even over budget;
+#   * KIP-74: the first segment is returned whole even over the drain's
+#     byte budget, and over a partition budget the first segment of EACH
+#     partition is (the exemption is per split);
 #   * the last stable offset under an open transaction, then after commit and
 #     after abort;
 #   * a client-supplied LIVE token is always overwritten;
-#   * the byte budget is NOT in the fingerprint (and isolation IS);
+#   * the partition byte budget is NOT in the fingerprint (and isolation IS),
+#     and a binding naming `max_bytes` is refused, naming where the scan-wide
+#     budget went (`drain_scan(max_bytes=)`);
 #   * a range reaching the COMPACTED (Parquet) tier is refused by name, never
 #     clamped to the advanced `log_start`;
 #   * a binding whose topic columns disagree with the topic config (same
@@ -52,10 +57,11 @@ from komira_core.source.scan_params import ScanParams
 from komira_core.source.scan_resolver import resolve_for_execution
 from komira_core.source.source_variant import SourceVariant
 
-from komira_scan_resolver.scan_morsel_resolver import (
-    ScanMorselResolvers,
+from komira_scan_resolver.drain_scan import drain_scan
+from komira_scan_resolver.scan_source_resolver import (
     ScanOpened,
     ScanRequest,
+    ScanSourceResolvers,
 )
 
 from komira_broker.broker_core import (
@@ -220,7 +226,16 @@ def _run(rt: BrokerScanRuntime[_Store], params: ScanParams) raises -> ScanOpened
     """What the resolve pass does, minus the plan walk."""
     var cached = rt.build_binding(params)
     var exec_binding = resolve_for_execution(rt, cached)
-    return rt.open_scan(ScanRequest(exec_binding^))
+    return drain_scan(rt, ScanRequest(exec_binding^))
+
+
+def _run_budget(
+    rt: BrokerScanRuntime[_Store], params: ScanParams, max_bytes: Int64
+) raises -> ScanOpened:
+    """`_run`, with the drain's scan-wide byte budget."""
+    var cached = rt.build_binding(params)
+    var exec_binding = resolve_for_execution(rt, cached)
+    return drain_scan(rt, ScanRequest(exec_binding^), max_bytes=max_bytes)
 
 
 def _col_i64(o: ScanOpened, col: Int) raises -> List[Int64]:
@@ -362,19 +377,19 @@ def test_produce_between_executions_is_visible_and_the_key_does_not_move() raise
 
     var e1 = resolve_for_execution(rt, cached)
     assert_equal(e1.snapshot_token, UInt64(2), "token = HWM")
-    assert_equal(rt.open_scan(ScanRequest(e1.copy())).num_rows(), 2)
+    assert_equal(drain_scan(rt, ScanRequest(e1.copy())).num_rows(), 2)
 
     _produce(store, topic, Int64(0), [Int64(12), Int64(13), Int64(14)])
 
     var e2 = resolve_for_execution(rt, cached)
     assert_equal(e2.snapshot_token, UInt64(5), "the next execution sees the produce")
     _eq(
-        _col_i64(rt.open_scan(ScanRequest(e2.copy())), 0),
+        _col_i64(drain_scan(rt, ScanRequest(e2.copy())), 0),
         [Int64(10), Int64(11), Int64(12), Int64(13), Int64(14)],
         String("second execution"),
     )
     # The execution resolved BEFORE the produce still reads ITS snapshot.
-    assert_equal(rt.open_scan(ScanRequest(e1.copy())).num_rows(), 2)
+    assert_equal(drain_scan(rt, ScanRequest(e1.copy())).num_rows(), 2)
 
     # The cached binding never moved, and neither did the plan-cache key.
     assert_equal(cached.snapshot_token, UInt64(0))
@@ -404,9 +419,7 @@ def test_kip74_first_segment_is_returned_whole_over_budget() raises:
     var rt = _runtime(store)
 
     # A 1-byte total budget: the first segment still comes back, whole.
-    var p = _params(topic)
-    p.put_i64(String(BROKER_PARAM_MAX_BYTES), Int64(1))
-    var one = _run(rt, p)
+    var one = _run_budget(rt, _params(topic), Int64(1))
     _eq(_col_i64(one, 0), [Int64(1), Int64(2)], String("KIP-74 first batch"))
     assert_equal(
         one.resolved.get_i64(
@@ -423,12 +436,32 @@ def test_kip74_first_segment_is_returned_whole_over_budget() raises:
         "p1 returned nothing and resumes at its start",
     )
 
-    # A 1-byte PER-PARTITION budget: p0's first segment is the scan's first
-    # (exempt); p1's first segment is not, so p1 returns nothing.
+    # A 1-byte PER-PARTITION budget: each partition is read by its own split
+    # reader, and the exemption is the SPLIT's (a reader cannot see whether
+    # another split returned something first), so the first segment of EACH
+    # partition comes back whole. INVERTED from the single-pass scan, where
+    # p1's first segment was not exempt; `next_offset` says where each
+    # partition stopped either way.
     var q = _params(topic)
     q.put_i64(String(BROKER_PARAM_PARTITION_MAX_BYTES), Int64(1))
     var per = _run(rt, q)
-    _eq(_col_i64(per, 0), [Int64(1), Int64(2)], String("per-partition budget"))
+    _eq(
+        _col_i64(per, 0),
+        [Int64(1), Int64(2), Int64(7), Int64(8)],
+        String("per-partition budget: each partition's first segment"),
+    )
+    assert_equal(
+        per.resolved.get_i64(
+            broker_resolved_key(String(BROKER_RESOLVED_NEXT_OFFSET), Int64(0))
+        ),
+        Int64(2),
+    )
+    assert_equal(
+        per.resolved.get_i64(
+            broker_resolved_key(String(BROKER_RESOLVED_NEXT_OFFSET), Int64(1))
+        ),
+        Int64(2),
+    )
 
     # No budget: everything, p0 then p1.
     var whole = _run(rt, _params(topic))
@@ -528,7 +561,7 @@ def test_a_client_supplied_live_token_is_always_overwritten() raises:
     var forged = cached.with_snapshot_token(UInt64(999999))
     var e = resolve_for_execution(rt, forged)
     assert_equal(e.snapshot_token, UInt64(3), "resolved from the log, not the client")
-    assert_equal(rt.open_scan(ScanRequest(e^)).num_rows(), 3)
+    assert_equal(drain_scan(rt, ScanRequest(e^)).num_rows(), 3)
     # And one that under-states the HWM is overwritten too.
     var low = resolve_for_execution(rt, cached.with_snapshot_token(UInt64(1)))
     assert_equal(low.snapshot_token, UInt64(3))
@@ -541,7 +574,6 @@ def test_the_byte_budget_is_not_in_the_fingerprint() raises:
     var rt = _runtime(store)
     var base = rt.build_binding(_params(topic))
     var p = _params(topic)
-    p.put_i64(String(BROKER_PARAM_MAX_BYTES), Int64(4096))
     p.put_i64(String(BROKER_PARAM_PARTITION_MAX_BYTES), Int64(1024))
     p.put_i64(String(BROKER_PARAM_START_OFFSET), Int64(77))
     var budgeted = rt.build_binding(p)
@@ -586,6 +618,14 @@ def test_refusals_are_named() raises:
     foreign.kind_name = String("someone.elses.kind")
     with assert_raises(contains="refusing to resolve foreign kind"):
         _ = rt.resolve_snapshot(foreign)
+    # The scan-wide byte budget is the drain's now, not a binding param: a
+    # binding naming it is refused, and the message names where it went.
+    var whole = _params(topic)
+    whole.put_i64(String(BROKER_PARAM_MAX_BYTES), Int64(4096))
+    with assert_raises(contains="BROKER_SCAN_MAX_BYTES_IS_THE_DRAINS"):
+        _ = rt.build_binding(whole)
+    with assert_raises(contains="drain_scan(max_bytes=)"):
+        _ = rt.build_binding(whole)
 
 
 def test_the_erased_runtime_registers_under_its_kind() raises:
@@ -593,14 +633,14 @@ def test_the_erased_runtime_registers_under_its_kind() raises:
     var topic = String("erased")
     _write_config(store, topic, 1)
     _produce(store, topic, Int64(0), [Int64(4), Int64(2)])
-    var kinds = ScanMorselResolvers()
+    var kinds = ScanSourceResolvers()
     kinds.register(broker_scan_runtime(store.clone(), String(_CLUSTER)))
     assert_true(kinds.contains(broker_scan_kind_id()))
     ref r = kinds.get(broker_scan_kind_id())
     assert_equal(r.kind_name(), String(BROKER_SCAN_KIND_NAME))
     var cached = r.build_binding(_params(topic))
     var e = resolve_for_execution(r, cached)
-    _eq(_col_i64(r.open_scan(ScanRequest(e^)), 0), [Int64(4), Int64(2)], String("erased"))
+    _eq(_col_i64(drain_scan(r, ScanRequest(e^)), 0), [Int64(4), Int64(2)], String("erased"))
 
 
 # =============================================================================
@@ -677,7 +717,7 @@ def test_a_forged_binding_schema_is_refused_by_name() raises:
     var rt = _runtime(store)
     var cached = rt.build_binding(_params(topic))
     assert_equal(
-        rt.open_scan(ScanRequest(resolve_for_execution(rt, cached))).num_rows(),
+        drain_scan(rt, ScanRequest(resolve_for_execution(rt, cached))).num_rows(),
         2,
         "fixture: the honest binding reads",
     )
@@ -694,7 +734,7 @@ def test_a_forged_binding_schema_is_refused_by_name() raises:
     )
     var e1 = resolve_for_execution(rt, as_float)
     with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
-        _ = rt.open_scan(ScanRequest(e1^))
+        _ = drain_scan(rt, ScanRequest(e1^))
     var as_ts = cached.copy()
     as_ts.schema = Schema(
         names=[String("key"), String("value"), String(BROKER_PARTITION_COLUMN)],
@@ -708,7 +748,7 @@ def test_a_forged_binding_schema_is_refused_by_name() raises:
     )
     var e2 = resolve_for_execution(rt, as_ts)
     with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
-        _ = rt.open_scan(ScanRequest(e2^))
+        _ = drain_scan(rt, ScanRequest(e2^))
     # Same names AND type ids, different nullability: the check compares the
     # full structural identity (`schema_identity.mojo`), not the type id alone.
     var as_nullable = cached.copy()
@@ -724,7 +764,7 @@ def test_a_forged_binding_schema_is_refused_by_name() raises:
     )
     var e3 = resolve_for_execution(rt, as_nullable)
     with assert_raises(contains="BROKER_SCAN_SCHEMA_MISMATCH"):
-        _ = rt.open_scan(ScanRequest(e3^))
+        _ = drain_scan(rt, ScanRequest(e3^))
 
 
 # =============================================================================

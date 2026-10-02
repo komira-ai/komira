@@ -3,24 +3,35 @@
 # =============================================================================
 #
 # The multi-partition half of `test_broker_scan_kind.mojo` (same
-# shape: `build_binding` -> `resolve_for_execution` -> `open_scan` over the
+# shape: `build_binding` -> `resolve_for_execution` -> `drain_scan` over the
 # in-memory conditional store, NO `EngineContext`). Every byte budget here is
 # a MEASURED multiple of real segment sizes, so the budget's own arithmetic
 # can fail a test — a 1-byte budget only proves the first segment is exempt.
 #
+# THE SCAN-WIDE BUDGET IS THE DRAIN'S. `drain_scan(max_bytes=)` cuts between
+# polls, and a poll returns its first unit whole, so the cut overshoots by at
+# most one segment: it is not Kafka's exact fetch cut, and these tests do not
+# pin one. What they pin instead is that the cut is REPORTED exactly: the rows
+# returned for each partition are exactly `[start, next_offset.<p>)`
+# ("rows == cut"). The exact per-partition Kafka cut (`partition_max_bytes`)
+# is the split reader's, and is pinned exactly.
+#
 # Pinned here:
-#   * a TOTAL budget fitting exactly N>1 segments ends the scan in the middle
-#     of partition 0 and returns nothing from partition 1, even when
-#     partition 1's segment alone would still fit (the scan is FULL);
+#   * a drain budget that runs out inside partition 0 returns nothing from
+#     partition 1 (never opened), and every partition's rows are exactly
+#     `[start, next_offset.<p>)`. INVERTED from the single-pass scan, which
+#     refused partition 0's third segment at `2*S2 + S1`; the drain returns
+#     it (one segment of overshoot) and says so in `next_offset.0`;
 #   * a PER-PARTITION budget returns k segments from EACH partition (the
-#     partition's running count resets per partition);
+#     partition's running count resets per partition), exactly;
 #   * KIP-74 exempts the first NON-EMPTY partition's first segment, not
 #     partition 0's;
 #   * `start_offsets`: each partition starts at its own offset, re-ordered
 #     with the canonical partition list, and both refusals are named;
-#   * a MULTI-partition scan reads its own snapshot in `open_scan` (the stated
-#     exception on `ScanRequest`): a produce between resolve and open IS
-#     returned, and `high_watermark.<p>` is exactly what was read.
+#   * a MULTI-partition scan reads the snapshot its PLAN reads (the plan is
+#     the authority; the token is freshness only): a produce between resolve
+#     and plan IS returned, and `high_watermark.<p>` is exactly what was
+#     read.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
@@ -34,7 +45,8 @@ from komira_core.arrow.string_array import StringArray
 from komira_core.source.scan_params import ScanParams
 from komira_core.source.scan_resolver import resolve_for_execution
 
-from komira_scan_resolver.scan_morsel_resolver import ScanOpened, ScanRequest
+from komira_scan_resolver.drain_scan import drain_scan
+from komira_scan_resolver.scan_source_resolver import ScanOpened, ScanRequest
 
 from komira_broker.broker_core import (
     BrokerCore,
@@ -43,7 +55,6 @@ from komira_broker.broker_core import (
     _topic_config_key,
 )
 from komira_broker.broker_scan_binding import (
-    BROKER_PARAM_MAX_BYTES,
     BROKER_PARAM_PARTITION_MAX_BYTES,
     BROKER_PARAM_PARTITIONS,
     BROKER_PARAM_START_OFFSETS,
@@ -126,7 +137,8 @@ def _produce(store: _Store, topic: String, partition: Int64, keys: List[Int64]) 
 
 def _seg_sizes(store: _Store, topic: String, partition: Int64) raises -> List[Int64]:
     """The byte size the kind charges for each segment of a partition: the
-    length of the segment's IPC stream, read the way `open_scan` reads it."""
+    length of the segment's IPC stream, read the way the split reader reads
+    it."""
     var manifest = CasManifestStore[_Store](
         store=store.clone(),
         prefix=_manifest_prefix(String(_CLUSTER), topic, partition),
@@ -157,10 +169,12 @@ def _params(topic: String) -> ScanParams:
     return p^
 
 
-def _run(rt: BrokerScanRuntime[_Store], params: ScanParams) raises -> ScanOpened:
+def _run(
+    rt: BrokerScanRuntime[_Store], params: ScanParams, max_bytes: Int64 = -1
+) raises -> ScanOpened:
     var cached = rt.build_binding(params)
     var exec_binding = resolve_for_execution(rt, cached)
-    return rt.open_scan(ScanRequest(exec_binding^))
+    return drain_scan(rt, ScanRequest(exec_binding^), max_bytes=max_bytes)
 
 
 def _col_i64(o: ScanOpened, col: Int) raises -> List[Int64]:
@@ -201,11 +215,34 @@ def _rows_in(o: ScanOpened, p: Int64) raises -> Int64:
 
 
 # =============================================================================
-# 1. the TOTAL budget
+# 1. the DRAIN's budget: rows == cut
 # =============================================================================
 
 
-def test_total_budget_ends_the_scan_mid_partition() raises:
+def _keys_in(o: ScanOpened, p: Int64) raises -> List[Int64]:
+    """The keys returned for partition `p`, in order."""
+    var keys = _col_i64(o, 0)
+    var parts = _col_i64(o, 2)
+    var out = List[Int64]()
+    for i in range(len(keys)):
+        if parts[i] == p:
+            out.append(keys[i])
+    return out^
+
+
+def _assert_rows_are_the_cut(
+    o: ScanOpened, p: Int64, start: Int64, keys_at: List[Int64], what: String
+) raises:
+    """The rows returned for partition `p` are EXACTLY offsets
+    `[start, next_offset.<p>)`, whose keys are `keys_at[offset]`: a
+    continuation from `next_offset.<p>` neither skips nor repeats a row."""
+    var want = List[Int64]()
+    for off in range(Int(start), Int(_next(o, p))):
+        want.append(keys_at[off])
+    _eq(_keys_in(o, p), want, what + String(" (partition ") + String(p) + String(")"))
+
+
+def test_drain_budget_rows_are_exactly_the_reported_cut() raises:
     var store = _Store()
     var topic = String("tot")
     _write_config(store, topic, 2)
@@ -221,27 +258,44 @@ def test_total_budget_ends_the_scan_mid_partition() raises:
     var S2 = s0[0]
     var S1 = s1[0]
     assert_true(S1 < S2, "fixture: p1's one-row segment is smaller")
+    var p0_keys: List[Int64] = [
+        Int64(11), Int64(12), Int64(13), Int64(14), Int64(15), Int64(16)
+    ]
+    var p1_keys: List[Int64] = [Int64(21)]
     var rt = _runtime(store)
 
-    # 2*S2 + S1: p0's third segment (3*S2) does not fit, which ends the SCAN.
-    # p1's segment alone (2*S2 + S1) WOULD fit, so returning it would mean the
-    # total budget only ended partition 0.
-    var p = _params(topic)
-    p.put_i64(String(BROKER_PARAM_MAX_BYTES), 2 * S2 + S1)
-    var o = _run(rt, p)
+    # S2 + 1: the budget runs out INSIDE p0's second segment. The drain checks
+    # between polls, so that segment is returned whole (one segment of
+    # overshoot), p1 is never opened, and the cut says so.
+    var o1 = _run(rt, _params(topic), S2 + 1)
     _eq(
-        _col_i64(o, 0),
+        _col_i64(o1, 0),
         [Int64(11), Int64(12), Int64(13), Int64(14)],
-        String("two p0 segments, then the scan is full"),
+        String("two p0 segments, then the drain is spent"),
     )
-    assert_equal(_next(o, Int64(0)), Int64(4), "p0 resumes at its third segment")
-    assert_equal(_next(o, Int64(1)), Int64(0), "p1 returned nothing")
+    assert_equal(_next(o1, Int64(0)), Int64(4), "p0 resumes at its third segment")
+    assert_equal(_next(o1, Int64(1)), Int64(0), "p1 was never opened")
+    _assert_rows_are_the_cut(o1, Int64(0), Int64(0), p0_keys, String("S2+1"))
+    _assert_rows_are_the_cut(o1, Int64(1), Int64(0), p1_keys, String("S2+1"))
 
-    # EXACTLY 3*S2: all of p0 fits to the byte (the bound is inclusive), and
-    # p1's segment does not.
-    var q = _params(topic)
-    q.put_i64(String(BROKER_PARAM_MAX_BYTES), 3 * S2)
-    var o3 = _run(rt, q)
+    # 2*S2 + S1: INVERTED. The single-pass scan refused p0's third segment
+    # here (2*S2 left S1, less than S2); the drain is not spent after two
+    # segments, so it polls p0 again and the third comes back whole. p1 is
+    # never opened, and `next_offset` reports exactly that.
+    var o2 = _run(rt, _params(topic), 2 * S2 + S1)
+    _eq(
+        _col_i64(o2, 0),
+        [Int64(11), Int64(12), Int64(13), Int64(14), Int64(15), Int64(16)],
+        String("p0 whole, then the drain is spent"),
+    )
+    assert_equal(_next(o2, Int64(0)), Int64(6))
+    assert_equal(_next(o2, Int64(1)), Int64(0), "p1 returned nothing")
+    _assert_rows_are_the_cut(o2, Int64(0), Int64(0), p0_keys, String("2*S2+S1"))
+    _assert_rows_are_the_cut(o2, Int64(1), Int64(0), p1_keys, String("2*S2+S1"))
+
+    # EXACTLY 3*S2: all of p0 fits to the byte, the drain is spent, and p1 is
+    # not opened.
+    var o3 = _run(rt, _params(topic), 3 * S2)
     _eq(
         _col_i64(o3, 0),
         [Int64(11), Int64(12), Int64(13), Int64(14), Int64(15), Int64(16)],
@@ -251,11 +305,11 @@ def test_total_budget_ends_the_scan_mid_partition() raises:
     assert_equal(_next(o3, Int64(1)), Int64(0))
 
     # 3*S2 + S1: everything.
-    var r = _params(topic)
-    r.put_i64(String(BROKER_PARAM_MAX_BYTES), 3 * S2 + S1)
-    var everything = _run(rt, r)
+    var everything = _run(rt, _params(topic), 3 * S2 + S1)
     assert_equal(everything.num_rows(), 7)
     assert_equal(_next(everything, Int64(1)), Int64(1))
+    _assert_rows_are_the_cut(everything, Int64(0), Int64(0), p0_keys, String("all"))
+    _assert_rows_are_the_cut(everything, Int64(1), Int64(0), p1_keys, String("all"))
 
 
 # =============================================================================
@@ -295,11 +349,11 @@ def test_partition_budget_returns_k_segments_from_each_partition() raises:
     assert_equal(_next(o, Int64(0)), Int64(4))
     assert_equal(_next(o, Int64(1)), Int64(4))
 
-    # A total budget on top ends the scan inside p1: 2*S (p0) + S (p1).
+    # A drain budget on top ends the read inside p1: 2*S (p0) + S (p1). The
+    # segment p0's partition budget refused is not charged to the drain.
     var q = _params(topic)
     q.put_i64(String(BROKER_PARAM_PARTITION_MAX_BYTES), 2 * S)
-    q.put_i64(String(BROKER_PARAM_MAX_BYTES), 3 * S)
-    var oq = _run(rt, q)
+    var oq = _run(rt, q, 3 * S)
     _eq(
         _col_i64(oq, 0),
         [Int64(11), Int64(12), Int64(13), Int64(14), Int64(21), Int64(22)],
@@ -323,9 +377,7 @@ def test_kip74_exempts_the_first_non_empty_partition() raises:
     _produce(store, topic, Int64(1), [Int64(23), Int64(24)])
     var rt = _runtime(store)
 
-    var p = _params(topic)
-    p.put_i64(String(BROKER_PARAM_MAX_BYTES), Int64(1))
-    var o = _run(rt, p)
+    var o = _run(rt, _params(topic), Int64(1))
     _eq(_col_i64(o, 0), [Int64(21), Int64(22)], String("p1's first segment, whole"))
     assert_equal(_next(o, Int64(0)), Int64(0))
     assert_equal(_next(o, Int64(1)), Int64(2))
@@ -347,8 +399,7 @@ def test_kip74_exempts_the_first_non_empty_partition() raises:
     var r = _params(topic)
     r.put_str(String(BROKER_PARAM_PARTITIONS), String("0,1"))
     r.put_str(String(BROKER_PARAM_START_OFFSETS), String("2,0"))
-    r.put_i64(String(BROKER_PARAM_MAX_BYTES), Int64(1))
-    var o2 = _run(_runtime(store2), r)
+    var o2 = _run(_runtime(store2), r, Int64(1))
     _eq(_col_i64(o2, 0), [Int64(21), Int64(22)], String("p0 at its HWM"))
     assert_equal(_next(o2, Int64(0)), Int64(2))
     assert_equal(_next(o2, Int64(1)), Int64(2))
@@ -411,7 +462,7 @@ def test_start_offsets_follow_their_partition() raises:
 
 
 # =============================================================================
-# 5. the multi-partition snapshot (the stated exception on ScanRequest)
+# 5. the multi-partition snapshot: the plan is the authority
 # =============================================================================
 
 
@@ -427,10 +478,10 @@ def test_multi_partition_reads_its_own_snapshot_and_reports_it() raises:
     var e = resolve_for_execution(rt, cached)
     assert_equal(e.snapshot_token, UInt64(3), "the token is the SUM of HWMs")
 
-    # A produce lands between resolve and open.
+    # A produce lands between resolve and plan.
     _produce(store, topic, Int64(1), [Int64(22), Int64(23)])
 
-    var o = rt.open_scan(ScanRequest(e^))
+    var o = drain_scan(rt, ScanRequest(e^))
     _eq(
         _col_i64(o, 0),
         [Int64(11), Int64(12), Int64(21), Int64(22), Int64(23)],
@@ -446,7 +497,7 @@ def test_multi_partition_reads_its_own_snapshot_and_reports_it() raises:
 
 def main() raises:
     var suite = TestSuite()
-    suite.test[test_total_budget_ends_the_scan_mid_partition]()
+    suite.test[test_drain_budget_rows_are_exactly_the_reported_cut]()
     suite.test[test_partition_budget_returns_k_segments_from_each_partition]()
     suite.test[test_kip74_exempts_the_first_non_empty_partition]()
     suite.test[test_start_offsets_follow_their_partition]()

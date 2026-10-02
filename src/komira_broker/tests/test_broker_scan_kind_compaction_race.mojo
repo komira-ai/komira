@@ -5,19 +5,21 @@
 #
 # The compaction worker (`komira_broker_compaction`'s `compaction_worker.mojo`)
 # commits its `CompactedEntry` (step 6) and THEN advances the live `log_start`
-# (step 8), in the background, alongside scans. `open_scan` refuses a range
+# (step 8), in the background, alongside scans. The plan refuses a range
 # reaching the compacted (Parquet) tier by LISTing the compaction index, and
-# pass 2 clamps `start` to the `log_start` pass 1 read. If the LIST comes
-# first, steps 6-8 can land between an EMPTY LIST and the `log_start` read:
-# pass 2 then clamps to the moved `log_start` and returns only the live suffix,
-# with no error, reporting the prefix as if retention had deleted it.
+# raises `start` to the `log_start` it read. If the LIST comes first, steps
+# 6-8 can land between an EMPTY LIST and the `log_start` read: the plan then
+# starts at the moved `log_start` and the read returns only the live suffix,
+# with no error, reporting the prefix as if retention had deleted it. And the
+# window between the plan and a reader is not one call: a split reader
+# re-checks at open and before every segment, and refuses rather than clamps.
 #
 # `_CompactsMidScanStore` makes that interleaving deterministic. The FIRST
 # LIST under the partition's compaction-index prefix arms it; the next
 # operation OUTSIDE that prefix first lands the compaction (so the whole
 # compaction-index read linearizes before it, and every later read after it).
-# Whatever order `open_scan` reads in, it must either refuse by name or return
-# every offset from the requested start — never the suffix alone.
+# Whatever order `drain_scan` reads in, it must either refuse by name or
+# return every offset from the requested start — never the suffix alone.
 #
 # The compaction is PRE-COMPUTED: steps 6 and 8 run once, through the real
 # `CompactionIndex` / `CasManifestStore`, over a separate SHADOW store, and the
@@ -39,7 +41,8 @@ from komira_core.arrow.column import Column
 from komira_core.source.scan_params import ScanParams
 from komira_core.source.scan_resolver import resolve_for_execution
 
-from komira_scan_resolver.scan_morsel_resolver import ScanOpened, ScanRequest
+from komira_scan_resolver.drain_scan import drain_scan
+from komira_scan_resolver.scan_source_resolver import ScanOpened, ScanRequest
 
 from komira_broker.broker_core import (
     BrokerCore,
@@ -293,7 +296,7 @@ def test_a_compaction_landing_mid_scan_never_drops_the_prefix() raises:
     var got = List[Int64]()
     var log_start = Int64(-1)
     try:
-        var o = rt.open_scan(ScanRequest(exec_binding^))
+        var o = drain_scan(rt, ScanRequest(exec_binding^))
         got = _keys(o)
         log_start = o.resolved.get_i64(
             broker_resolved_key(String(BROKER_RESOLVED_LOG_START_OFFSET), Int64(0))
@@ -304,7 +307,7 @@ def test_a_compaction_landing_mid_scan_never_drops_the_prefix() raises:
             String("a refusal must name the compacted tier; got: ") + String(e),
         )
         refused = True
-    # Not vacuous: the compaction really landed inside this one open_scan.
+    # Not vacuous: the compaction really landed inside this one drain.
     assert_true(_has(inner, String(_FIRED)), "the compaction fired mid-scan")
     if not refused:
         # Every offset from 0, and the log_start that was actually read.

@@ -32,10 +32,11 @@
 #
 # A plan can be BUILT, TYPED, PUSHDOWN-QUERIED, EXPLAINED, CLONED, CACHE-KEYED
 # and RESOLVED against a registry owned by this package. Execution is tier 2
-# (`ScanMorselResolver`, `komira_scan_resolver`): the broker's conformer is
-# `BrokerScanRuntime` in `broker_scan_kind.mojo`, which resolves the LIVE token
-# and drains the partitions the binding names. No eager drain into an
-# in-memory source is provided; a topic is read through the plan.
+# (`ScanSourceResolver`, `komira_scan_resolver`): the broker's conformer is
+# `BrokerScanRuntime` in `broker_scan_kind.mojo`, which resolves the LIVE token,
+# plans one split per partition the binding names and opens a reader per
+# split. No eager drain into an in-memory source is provided; a topic is read
+# through the plan.
 #
 # ---------------------------------------------------------------------------
 # WHY THE SNAPSHOT POLICY IS `LIVE` — the interesting half
@@ -95,12 +96,15 @@ removed) or `read_uncommitted` (bounded by the high-watermark; Kafka's
 default). Stored ONLY when it is `read_committed`, so the default spelling and
 the omitted one are ONE binding. IN the fingerprint: it changes the rows."""
 comptime BROKER_PARAM_MAX_BYTES: String = "max_bytes"
-"""The byte budget for the whole scan, `-1`/absent = none.
-NOT in the fingerprint — a budget changes how much of the same relation one
-execution returns, not which relation it is. KIP-74 applies (see
-`broker_scan_kind.mojo`)."""
+"""NOT a param: refused by name (`BROKER_SCAN_MAX_BYTES_IS_THE_DRAINS`). The
+byte budget for a whole read spans every partition, so it belongs to the read
+that spans them: `drain_scan(max_bytes=)` (`komira_scan_resolver`). A binding
+carrying it would be silently ignored by every route that drains without one."""
 comptime BROKER_PARAM_PARTITION_MAX_BYTES: String = "partition_max_bytes"
-"""The byte budget per partition, `-1`/absent = none. NOT in the fingerprint."""
+"""The byte budget per partition, `-1`/absent = none. NOT in the fingerprint —
+a budget changes how much of the same relation one execution returns, not
+which relation it is. KIP-74 applies per partition (see
+`broker_split_reader.mojo`)."""
 
 comptime BROKER_ISOLATION_READ_COMMITTED: String = "read_committed"
 comptime BROKER_ISOLATION_READ_UNCOMMITTED: String = "read_uncommitted"
@@ -114,6 +118,11 @@ comptime BROKER_SCAN_UNKNOWN_PARAM: StaticString = "BROKER_SCAN_UNKNOWN_PARAM"
 """NAMED ERROR — a param key this kind does not define. Refused rather than
 ignored: a typo in `partition_max_bytes` would otherwise silently drop the
 budget."""
+comptime BROKER_SCAN_MAX_BYTES_IS_THE_DRAINS: StaticString = (
+    "BROKER_SCAN_MAX_BYTES_IS_THE_DRAINS"
+)
+"""NAMED ERROR — a binding names `max_bytes`. The scan-wide byte budget is
+`drain_scan(max_bytes=)`, not a binding param (`BROKER_PARAM_MAX_BYTES`)."""
 comptime BROKER_SCAN_BAD_PARAM: StaticString = "BROKER_SCAN_BAD_PARAM"
 """NAMED ERROR — a param with the wrong type or an unparsable value."""
 
@@ -328,13 +337,21 @@ def broker_topic_binding(params: ScanParams, var schema: Schema) raises -> ScanB
     """
     for i in range(params.num_params()):
         var k = params.key_at(i)
+        if k == String(BROKER_PARAM_MAX_BYTES):
+            raise Error(
+                String(BROKER_SCAN_MAX_BYTES_IS_THE_DRAINS)
+                + String(": ")
+                + String(BROKER_SCAN_KIND_NAME)
+                + String(" takes no 'max_bytes'; a byte budget for the whole")
+                + String(" read is drain_scan(max_bytes=), and one per partition")
+                + String(" is 'partition_max_bytes'")
+            )
         if not (
             k == String(BROKER_PARAM_TOPIC)
             or k == String(BROKER_PARAM_PARTITIONS)
             or k == String(BROKER_PARAM_START_OFFSET)
             or k == String(BROKER_PARAM_START_OFFSETS)
             or k == String(BROKER_PARAM_ISOLATION)
-            or k == String(BROKER_PARAM_MAX_BYTES)
             or k == String(BROKER_PARAM_PARTITION_MAX_BYTES)
         ):
             raise Error(
@@ -424,12 +441,6 @@ def broker_topic_binding(params: ScanParams, var schema: Schema) raises -> ScanB
                 + iso
                 + String("'")
             )
-    if params.has(String(BROKER_PARAM_MAX_BYTES)):
-        _require_tag(params, String(BROKER_PARAM_MAX_BYTES), PARAM_I64)
-        out.put_i64(
-            String(BROKER_PARAM_MAX_BYTES),
-            params.get_i64(String(BROKER_PARAM_MAX_BYTES)),
-        )
     if params.has(String(BROKER_PARAM_PARTITION_MAX_BYTES)):
         _require_tag(params, String(BROKER_PARAM_PARTITION_MAX_BYTES), PARAM_I64)
         out.put_i64(
@@ -468,8 +479,8 @@ def broker_scan_identity_corpus(var schema: Schema) raises -> ScanIdentityCorpus
     every registered kind the same question and checks the answer mechanically.
     That is the same layering this whole file is about, applied to the gate.
 
-    `fingerprint` folds (topic, partitions, isolation) and NOT `start_offset`,
-    `max_bytes` or `partition_max_bytes` — deliberately: an offset moves, and a
+    `fingerprint` folds (topic, partitions, isolation) and NOT `start_offset`
+    or `partition_max_bytes` — deliberately: an offset moves, and a
     byte budget changes how much of one relation an execution returns, not
     which relation it is. Those entries are here anyway: the audit's rule R2
     only constrains pairs the KIND's own fold separates, so they place no
@@ -516,7 +527,7 @@ def broker_scan_identity_corpus(var schema: Schema) raises -> ScanIdentityCorpus
         ),
     )
     c.add(
-        String("max_bytes"),
+        String("partition_max_bytes"),
         broker_topic_binding(
             _corpus_params(String("3"), String(""), Int64(1048576)), schema^
         ),
@@ -525,7 +536,7 @@ def broker_scan_identity_corpus(var schema: Schema) raises -> ScanIdentityCorpus
 
 
 def _corpus_params(
-    partitions: String, isolation: String, max_bytes: Int64
+    partitions: String, isolation: String, partition_max_bytes: Int64
 ) -> ScanParams:
     var p = ScanParams()
     p.put_str(String(BROKER_PARAM_TOPIC), String("orders"))
@@ -533,6 +544,6 @@ def _corpus_params(
     p.put_i64(String(BROKER_PARAM_START_OFFSET), Int64(1000))
     if isolation != String(""):
         p.put_str(String(BROKER_PARAM_ISOLATION), String(isolation))
-    if max_bytes >= Int64(0):
-        p.put_i64(String(BROKER_PARAM_MAX_BYTES), max_bytes)
+    if partition_max_bytes >= Int64(0):
+        p.put_i64(String(BROKER_PARAM_PARTITION_MAX_BYTES), partition_max_bytes)
     return p^
