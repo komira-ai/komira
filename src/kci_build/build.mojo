@@ -1,236 +1,179 @@
 # =============================================================================
-# src/kci_build/build.mojo -- build the whole publishable set in one buck2
-#   invocation, then read what it built from the build report.
+# src/kci_build/build.mojo -- one build per declared artifact, each into its
+#   own empty directory, then `release.json` last.
 # =============================================================================
 #
-#   <buck2> build -c komira.execution=remote [-c k=v ...] [--target-platforms P]
-#           --build-report <log_dir>/build_report.json
-#           <t1> <t1>[manifest] <t2> <t2>[manifest] ...
+# 1. Read the declarations (kci_artifact_declaration validates them).
+#    Refuse a `--work-dir` that is not a directory and a `--out-dir` that is
+#    not absent or empty, before anything runs.
+# 2. For each artifact, in declarations-file order, one at a time:
+#      a. create `<out>/<name>/` (empty by construction: `<out>` was empty
+#         and declaration names are unique);
+#      b. run `render_build_argv(decls, name, <out>/<name>)` through the
+#         `ProcessRunner`, cwd `--work-dir`, stdout and stderr to
+#         `<log>/<name>.stdout|.stderr`, timeout `--build-timeout-s`;
+#      c. a non-zero exit, a signal or a timeout is FAILED, naming the
+#         artifact, the command line and the end of stderr; a build that
+#         cannot be started is CANNOT_TELL; either way, stop;
+#      d. `kci_release_set.verify_member(name, <out>/<name>)`: REFUSED on
+#         any refusal; stop.
+# 3. Only when every artifact passed: compute the set hash and write
+#    `<out>/release.json` LAST. It is the commit marker: a run that stopped
+#    leaves member directories and no `release.json`, and `kci publish`
+#    refuses a directory without one.
 #
-# One invocation, so the farm builds the set in parallel. A run that fails
-# with a farm fault (`Failed to create build directory` ... `file exists`,
-# a known fault of the farm's workers, not of the build) has each target it
-# did not build rebuilt alone, up to `FARM_FAULT_ATTEMPTS` times, every
-# attempt logged separately. Any other failure is final: FAILED, naming the
-# failed targets and the log. After a successful build each target must
-# have exactly one default output and exactly one `[manifest]` output, or it
-# is REFUSED as not publishable.
+# Sequential, not concurrent: one buck2 daemon serves one repository and
+# blocks a second command with different args, so concurrency buys nothing
+# for buck2 and is a hazard for a build system kci does not know. The farm
+# still parallelises inside each build. Nothing here retries: a re-run is
+# cheap (the cache) and the empty-out-dir rule makes it safe.
+#
+# kci knows no build tool. "Never build locally" is the declarations' to
+# say (buck2's `-c komira.execution=remote` and the farm `--config-file` are
+# build-system args there), never a kci flag.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from std.os.path import isfile
-from std.pathlib import Path
+from std.os import listdir, makedirs
+from std.os.path import exists, isdir, realpath
 
-from kci_build.allowlist import PublishableEntry
-from kci_build.preflight import config_args, failure_text, log_spec
-from kci_build.report import TargetResult, read_build_report
+from kci_artifact_declaration import read_artifact_declarations, render_build_argv
+from kci_release_set import (
+    RELEASE_MANIFEST_NAME,
+    ReleaseMember,
+    release_manifest_of,
+    render_release_manifest,
+    verify_member,
+)
+
 from kci_build.request import (
     EXIT_CANNOT_TELL,
     EXIT_FAILED,
     EXIT_OK,
     EXIT_REFUSED,
-    FARM_FAULT_ATTEMPTS,
-    MANIFEST_SUB_TARGET,
     BuildOutcome,
     BuildRequest,
 )
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
 
 
-def is_farm_fault(stderr_text: String) -> Bool:
-    """True iff buck2's stderr reports the farm's build-directory fault."""
-    var low = stderr_text.lower()
-    return (
-        low.find(String("failed to create build directory")) >= 0
-        and low.find(String("file exists")) >= 0
-    )
+def _refused(why: String) -> BuildOutcome:
+    return BuildOutcome(EXIT_REFUSED, String("kci build: ") + why)
 
 
-def _read_or_empty(path: String) -> String:
-    try:
-        return Path(path).read_text()
-    except:
-        return String("")
+def _write(path: String, text: String) raises:
+    var f = open(path, "w")
+    f.write_bytes(text.as_bytes())
+    f.close()
 
 
-def _build_argv(req: BuildRequest, report_path: String, targets: List[String]) -> List[String]:
-    var a = List[String]()
-    a.append(String("build"))
-    a.extend(config_args(req))
-    a.append(String("--build-report"))
-    a.append(report_path.copy())
-    for i in range(len(targets)):
-        a.append(targets[i].copy())
-        a.append(targets[i] + String("[") + String(MANIFEST_SUB_TARGET) + String("]"))
-    return a^
-
-
-def _failed_list(results: List[TargetResult]) -> String:
-    var s = String("")
-    for i in range(len(results)):
-        if results[i].found and results[i].success:
-            continue
-        if s.byte_length() > 0:
-            s += String("; ")
-        s += results[i].target
-        if results[i].error.byte_length() > 0:
-            s += String(": ") + results[i].error
-        elif not results[i].found:
-            s += String(": not in the build report")
-    return s^
-
-
-struct _Attempt(Movable):
-    var outcome: BuildOutcome
-    var results: List[TargetResult]
-    var faulted: Bool
-
-    def __init__(out self, var outcome: BuildOutcome, var results: List[TargetResult], faulted: Bool):
-        self.outcome = outcome^
-        self.results = results^
-        self.faulted = faulted
-
-
-def _attempt[R: ProcessRunner](
-    req: BuildRequest, targets: List[String], name: String, mut runner: R
-) raises -> _Attempt:
-    """One buck2 build of `targets`. `outcome` is OK only when buck2
-    succeeded and its report was read; `faulted` says the failure was a
-    farm fault, so the failed targets may be rebuilt."""
-    var report = req.log_dir + String("/") + name + String("_report.json")
-    var spec = log_spec(req, _build_argv(req, report, targets), name, req.build_timeout_s)
-    var r = runner.run(spec)
-    var results = List[TargetResult]()
-    var report_error = String("")
-    if isfile(report):
-        try:
-            results = read_build_report(report, targets, String(MANIFEST_SUB_TARGET))
-        except e:
-            report_error = String(e)
-    else:
-        report_error = String("buck2 wrote no build report at '") + report + String("'")
-    if r.ok():
-        if report_error.byte_length() > 0:
-            return _Attempt(
-                BuildOutcome(
-                    EXIT_CANNOT_TELL,
-                    String("kci build: buck2 build succeeded but ") + report_error,
-                ),
-                results^,
-                False,
-            )
-        return _Attempt(BuildOutcome(EXIT_OK, String("")), results^, False)
-    var faulted = not r.timed_out and is_farm_fault(_read_or_empty(spec.stderr_path))
-    var why = String("kci build: buck2 build ") + failure_text(spec, r)
-    if len(results) > 0:
-        var failed = _failed_list(results)
-        if failed.byte_length() > 0:
-            why += String("\nfailed: ") + failed
-    return _Attempt(BuildOutcome(EXIT_FAILED, why^), results^, faulted)
-
-
-def _rebuild_alone[R: ProcessRunner](
-    req: BuildRequest, target: String, index: Int, mut runner: R
-) raises -> _Attempt:
-    """Rebuild one target after a farm fault, up to FARM_FAULT_ATTEMPTS
-    times; stop at the first success or at a failure that is not a fault."""
-    var one = List[String]()
-    one.append(target.copy())
-    var last = _Attempt(BuildOutcome(EXIT_FAILED, String("")), List[TargetResult](), True)
-    for attempt in range(1, FARM_FAULT_ATTEMPTS + 1):
-        var name = String("rebuild_") + String(index) + String("_attempt_") + String(attempt)
-        print(
-            String("kci build: farm fault; rebuilding ")
-            + target
-            + String(" alone (attempt ")
-            + String(attempt)
-            + String(" of ")
-            + String(FARM_FAULT_ATTEMPTS)
-            + String("), log ")
-            + req.log_dir
-            + String("/")
-            + name
-            + String(".stderr")
+def check_out_dir(out_dir: String) raises -> BuildOutcome:
+    """REFUSED unless `out_dir` is absent or an empty directory."""
+    if not exists(out_dir):
+        return BuildOutcome(EXIT_OK, String(""))
+    if not isdir(out_dir):
+        return _refused(String("--out-dir '") + out_dir + String("' is not a directory"))
+    if len(listdir(out_dir)) > 0:
+        return _refused(
+            String("--out-dir '")
+            + out_dir
+            + String("' is not empty: it becomes the release directory, and a file from an")
+            + String(" earlier run could ride along")
         )
-        last = _attempt(req, one, name, runner)
-        if last.outcome.ok() or not last.faulted:
-            return last^
-    last.outcome.message = (
-        String("kci build: ")
-        + target
-        + String(": the farm fault persisted through ")
-        + String(FARM_FAULT_ATTEMPTS)
-        + String(" rebuilds\n")
-        + last.outcome.message
-    )
-    return last^
-
-
-def build_targets[R: ProcessRunner](
-    req: BuildRequest, entries: List[PublishableEntry], mut runner: R, mut results: List[TargetResult]
-) raises -> BuildOutcome:
-    """Build every entry (see the file header). On OK, `results` holds one
-    publishable `TargetResult` per entry, in entry order."""
-    var targets = List[String]()
-    for i in range(len(entries)):
-        targets.append(entries[i].target.copy())
-    var first = _attempt(req, targets, String("build"), runner)
-    results = first.results.copy()
-    if not first.outcome.ok():
-        if not first.faulted:
-            return first.outcome.copy()
-        for i in range(len(targets)):
-            var built = False
-            for j in range(len(results)):
-                if results[j].target == targets[i] and results[j].found and results[j].success:
-                    built = True
-            if built:
-                continue
-            var again = _rebuild_alone(req, targets[i], i, runner)
-            if not again.outcome.ok():
-                return again.outcome.copy()
-            var replaced = False
-            for j in range(len(results)):
-                if results[j].target == targets[i]:
-                    results[j] = again.results[0].copy()
-                    replaced = True
-            if not replaced:
-                results.append(again.results[0].copy())
-    for i in range(len(targets)):
-        var found = False
-        for j in range(len(results)):
-            if results[j].target != targets[i]:
-                continue
-            found = True
-            ref tr = results[j]
-            var why = String("")
-            if not tr.found:
-                why = String("not in the build report")
-            elif not tr.success:
-                why = String("did not build: ") + tr.error
-            elif len(tr.default_outputs) != 1:
-                why = (
-                    String("has ")
-                    + String(len(tr.default_outputs))
-                    + String(" default outputs, not one package file")
-                )
-            elif len(tr.sub_outputs) != 1:
-                why = (
-                    String("has ")
-                    + String(len(tr.sub_outputs))
-                    + String(" [")
-                    + String(MANIFEST_SUB_TARGET)
-                    + String("] outputs, not one artifact manifest")
-                )
-            if why.byte_length() > 0:
-                return BuildOutcome(
-                    EXIT_REFUSED,
-                    String("kci build: ") + targets[i] + String(": not publishable: ") + why,
-                )
-        if not found:
-            return BuildOutcome(
-                EXIT_REFUSED,
-                String("kci build: ") + targets[i] + String(": not publishable: not in the build report"),
-            )
     return BuildOutcome(EXIT_OK, String(""))
+
+
+def _failure(name: String, spec: RunSpec, r: RunResult) -> BuildOutcome:
+    var why = (
+        String("kci build: artifact '")
+        + name
+        + String("': `")
+        + spec.command_line()
+        + String("` ")
+        + r.describe()
+        + String(" (stderr: ")
+        + spec.stderr_path
+        + String(")")
+    )
+    if r.stderr_tail.byte_length() > 0:
+        why += String("\n") + r.stderr_tail
+    return BuildOutcome(EXIT_FAILED, why^)
+
+
+def _member_line(m: ReleaseMember) -> String:
+    return (
+        m.manifest.name
+        + String("  ")
+        + m.manifest.version
+        + String("  ")
+        + m.build()
+        + String("  ")
+        + m.manifest.sha256_hex
+    )
+
+
+def build_release[R: ProcessRunner](req: BuildRequest, mut runner: R) -> BuildOutcome:
+    """Build every declared artifact (file header)."""
+    try:
+        var decls = read_artifact_declarations(req.declarations_file)
+        if not isdir(req.work_dir):
+            return _refused(String("--work-dir '") + req.work_dir + String("' is not a directory"))
+        var gate = check_out_dir(req.out_dir)
+        if not gate.ok():
+            return gate^
+        makedirs(req.out_dir, exist_ok=True)
+        makedirs(req.log_dir, exist_ok=True)
+        var out = realpath(req.out_dir)
+        var members = List[ReleaseMember]()
+        for i in range(len(decls.artifacts)):
+            var name = decls.artifacts[i].name.copy()
+            var dir = out + String("/") + name
+            makedirs(dir, exist_ok=False)
+            var argv = render_build_argv(decls, name, dir)
+            var rest = List[String]()
+            for k in range(1, len(argv)):
+                rest.append(argv[k].copy())
+            var spec = RunSpec(
+                argv[0].copy(),
+                rest^,
+                req.work_dir.copy(),
+                req.build_timeout_s,
+                req.log_dir + String("/") + name + String(".stdout"),
+                req.log_dir + String("/") + name + String(".stderr"),
+            )
+            print(String("kci build: building ") + name + String(": ") + spec.command_line())
+            var r: RunResult
+            try:
+                r = runner.run(spec)
+            except e:
+                return BuildOutcome(
+                    EXIT_CANNOT_TELL,
+                    String("kci build: artifact '")
+                    + name
+                    + String("': the build could not be started: ")
+                    + String(e),
+                )
+            if not r.ok():
+                return _failure(name, spec, r)
+            try:
+                members.append(verify_member(name, dir))
+            except e:
+                return _refused(String(e))
+        var release = release_manifest_of(members)
+        var text = render_release_manifest(release)
+        _write(out + String("/") + String(RELEASE_MANIFEST_NAME), text)
+        var outcome = BuildOutcome(
+            EXIT_OK,
+            String("kci build: ")
+            + String(len(members))
+            + String(" artifact(s) built and verified into ")
+            + out,
+        )
+        for i in range(len(members)):
+            outcome.lines.append(_member_line(members[i]))
+        outcome.lines.append(String("SET_HASH ") + release.set_hash)
+        outcome.set_hash = release.set_hash.copy()
+        return outcome^
+    except e:
+        return _refused(String(e))

@@ -1,160 +1,155 @@
 # =============================================================================
 # src/kci_build/tests/test_build_flags.mojo
-#   `kci build` flags: both spellings, defaults, and each refusal.
+#   Every `kci build` flag in both spellings, every refusal naming its flag,
+#   and every flag the buck2-specific verb had now refused as unknown.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_build import BUILD_USAGE, parse_build_flags
+from kci_build import BUILD_USAGE, DEFAULT_BUILD_TIMEOUT_S, parse_build_flags
 
 
-def _base() -> List[String]:
-    var a = List[String]()
-    a.append(String("--buck2"))
-    a.append(String("/opt/buck2"))
-    a.append(String("--repo-root=/repo"))
-    a.append(String("--publishable"))
-    a.append(String("release/publishable.txt"))
-    a.append(String("--probe-target"))
-    a.append(String("//tools/build/kci:farm_probe"))
-    a.append(String("--out-dir=out"))
-    a.append(String("--log-dir"))
-    a.append(String("logs"))
-    return a^
-
-
-def _with(var extra: List[String]) -> List[String]:
-    var a = _base()
-    a.extend(extra^)
-    return a^
-
-
-def _one(s: String) -> List[String]:
+def _args(*items: String) -> List[String]:
     var l = List[String]()
-    l.append(s)
+    for s in items:
+        l.append(String(s))
     return l^
 
 
-def _refusal(args: List[String]) raises -> String:
+def _full() -> List[String]:
+    return _args(
+        "--declarations", "release/decls.textproto",
+        "--work-dir", "/work/repo",
+        "--out-dir", "out",
+        "--log-dir", "logs",
+    )
+
+
+def _refusal(args: List[String]) -> String:
     try:
         _ = parse_build_flags(args)
     except e:
-        var s = String(e)
-        var nl = s.find(String("\n"))
-        assert_true(nl > 0)
-        assert_equal(String(s[byte = nl + 1 :]), String(BUILD_USAGE))
-        return String(s[byte = :nl])
+        return String(e)
     return String("<parsed>")
 
 
-def test_control_required_flags_and_defaults() raises:
-    var f = parse_build_flags(_base())
+def _expect(args: List[String], why: String) raises:
+    assert_equal(_refusal(args), String("kci build: ") + why + String("\n") + String(BUILD_USAGE))
+
+
+def test_every_flag_space_spelling() raises:
+    var a = _full()
+    a.append(String("--build-timeout-s"))
+    a.append(String("120"))
+    var f = parse_build_flags(a)
     assert_false(f.help)
-    ref r = f.request
-    assert_equal(r.buck2_path, String("/opt/buck2"))
-    assert_equal(r.repo_root, String("/repo"))
-    assert_equal(r.publishable_file, String("release/publishable.txt"))
-    assert_equal(r.probe_target, String("//tools/build/kci:farm_probe"))
-    assert_equal(r.out_dir, String("out"))
-    assert_equal(r.log_dir, String("logs"))
-    assert_equal(r.probe_timeout_s, 120)
-    assert_equal(r.build_timeout_s, 3600)
-    assert_equal(len(r.only), 0)
-    assert_equal(len(r.buck2_config), 0)
-    assert_equal(r.target_platforms, String(""))
+    assert_equal(f.request.declarations_file, String("release/decls.textproto"))
+    assert_equal(f.request.work_dir, String("/work/repo"))
+    assert_equal(f.request.out_dir, String("out"))
+    assert_equal(f.request.log_dir, String("logs"))
+    assert_equal(f.request.build_timeout_s, 120)
 
 
-def test_optional_and_repeatable_flags() raises:
-    var x = List[String]()
-    x.append(String("--only=//a:one"))
-    x.append(String("--only"))
-    x.append(String("//a:two"))
-    x.append(String("--buck2-config"))
-    x.append(String("build.jobs=8"))
-    x.append(String("--buck2-config=komira_re.linux_properties=pool=x"))
-    x.append(String("--target-platforms=//p:linux"))
-    x.append(String("--probe-timeout-s=30"))
-    x.append(String("--build-timeout-s"))
-    x.append(String("900"))
-    var f = parse_build_flags(_with(x^))
-    ref r = f.request
-    assert_equal(len(r.only), 2)
-    assert_equal(r.only[1], String("//a:two"))
-    assert_equal(len(r.buck2_config), 2)
-    assert_equal(r.buck2_config[1], String("komira_re.linux_properties=pool=x"))
-    assert_equal(r.target_platforms, String("//p:linux"))
-    assert_equal(r.probe_timeout_s, 30)
-    assert_equal(r.build_timeout_s, 900)
-
-
-def test_help_stops_parsing() raises:
-    var a = _one(String("--help"))
-    a.append(String("--nonsense"))
-    assert_true(parse_build_flags(a).help)
-
-
-def test_each_required_flag_is_named_when_missing() raises:
-    var names = List[String]()
-    names.append(String("--buck2"))
-    names.append(String("--repo-root"))
-    names.append(String("--publishable"))
-    names.append(String("--probe-target"))
-    names.append(String("--out-dir"))
-    names.append(String("--log-dir"))
-    for n in range(len(names)):
-        var a = List[String]()
-        var b = _base()
-        var i = 0
-        while i < len(b):
-            if b[i] == names[n]:
-                i += 2
-                continue
-            if b[i].startswith(names[n] + String("=")):
-                i += 1
-                continue
-            a.append(b[i].copy())
-            i += 1
-        assert_equal(_refusal(a), String("kci build: ") + names[n] + String(" is required"))
-
-
-def test_refusals() raises:
-    assert_equal(_refusal(_with(_one(String("--log-dir=again")))), String("kci build: --log-dir is given twice"))
-    assert_equal(_refusal(_with(_one(String("--color=always")))), String("kci build: unknown flag '--color'"))
-    assert_equal(_refusal(_with(_one(String("stray")))), String("kci build: unexpected argument 'stray'"))
-    assert_equal(_refusal(_with(_one(String("--only")))), String("kci build: --only needs a value"))
-    assert_equal(_refusal(_with(_one(String("--only= ")))), String("kci build: --only has an EMPTY value"))
-    assert_equal(
-        _refusal(_with(_one(String("--only=//a/...")))),
-        String("kci build: --only '//a/...' is a pattern, not one target"),
-    )
-    var twice = List[String]()
-    twice.append(String("--only=//a:b"))
-    twice.append(String("--only=//a:b"))
-    assert_equal(_refusal(_with(twice^)), String("kci build: --only //a:b is given twice"))
-    assert_equal(
-        _refusal(_with(_one(String("--buck2-config=nokey")))),
-        String("kci build: --buck2-config 'nokey' is not key=value"),
-    )
-    assert_equal(
-        _refusal(_with(_one(String("--buck2-config=komira.execution=local")))),
-        String("kci build: --buck2-config may not set komira.execution: kci build always builds on the farm"),
-    )
-    assert_equal(
-        _refusal(_with(_one(String("--buck2-config=kci.probe_nonce=1")))),
-        String("kci build: --buck2-config may not set kci.probe_nonce: kci build sets it"),
-    )
-    var bads = List[String]()
-    bads.append(String("0"))
-    bads.append(String("-5"))
-    bads.append(String("1.5"))
-    bads.append(String("9999999999"))
-    for i in range(len(bads)):
-        assert_equal(
-            _refusal(_with(_one(String("--build-timeout-s=") + bads[i]))),
-            String("kci build: --build-timeout-s must be a positive whole number of seconds; got '")
-            + bads[i]
-            + String("'"),
+def test_every_flag_equals_spelling() raises:
+    var f = parse_build_flags(
+        _args(
+            "--declarations=d.textproto",
+            "--work-dir=/w",
+            "--out-dir=/o",
+            "--log-dir=/l",
+            "--build-timeout-s=7",
         )
+    )
+    assert_equal(f.request.declarations_file, String("d.textproto"))
+    assert_equal(f.request.work_dir, String("/w"))
+    assert_equal(f.request.out_dir, String("/o"))
+    assert_equal(f.request.log_dir, String("/l"))
+    assert_equal(f.request.build_timeout_s, 7)
+
+
+def test_timeout_default() raises:
+    assert_equal(parse_build_flags(_full()).request.build_timeout_s, DEFAULT_BUILD_TIMEOUT_S)
+    assert_equal(DEFAULT_BUILD_TIMEOUT_S, 3600)
+
+
+def test_help() raises:
+    assert_true(parse_build_flags(_args("--help")).help)
+
+
+def _without(flag: String) -> List[String]:
+    var full = _full()
+    var out = List[String]()
+    var i = 0
+    while i < len(full):
+        if full[i] == flag:
+            i += 2
+            continue
+        out.append(full[i].copy())
+        i += 1
+    return out^
+
+
+def test_each_required_flag() raises:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir"]:
+        _expect(_without(String(f)), String(f) + String(" is required"))
+
+
+def test_each_flag_given_twice() raises:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--build-timeout-s"]:
+        var a = _full()
+        a.append(String(f) + String("=/x1"))
+        a.append(String(f) + String("=/x2"))
+        if String(f) == "--build-timeout-s":
+            a = _full()
+            a.append(String("--build-timeout-s=1"))
+            a.append(String("--build-timeout-s=2"))
+        _expect(a, String(f) + String(" is given twice"))
+
+
+def test_each_flag_with_an_empty_value() raises:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--build-timeout-s"]:
+        _expect(_args(String(f) + String("=")), String(f) + String(" has an EMPTY value"))
+        _expect(_args(String(f), String("  ")), String(f) + String(" has an EMPTY value"))
+
+
+def test_each_flag_with_no_value() raises:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--build-timeout-s"]:
+        _expect(_args(String(f)), String(f) + String(" needs a value"))
+
+
+def test_positional_argument() raises:
+    _expect(_args("//src/x:y"), String("unexpected argument '//src/x:y'"))
+
+
+def test_work_dir_must_be_absolute() raises:
+    var a = _without(String("--work-dir"))
+    a.append(String("--work-dir"))
+    a.append(String("repo"))
+    _expect(
+        a,
+        String("--work-dir 'repo' is not an absolute path: it is the cwd every build resolves against"),
+    )
+
+
+def test_timeout_must_be_a_positive_integer() raises:
+    for v in ["0", "-1", "1.5", "x", "1234567890"]:
+        var a = _full()
+        a.append(String("--build-timeout-s=") + String(v))
+        _expect(
+            a,
+            String("--build-timeout-s must be a positive whole number of seconds; got '")
+            + String(v) + String("'"),
+        )
+
+
+def test_every_deleted_flag_is_unknown() raises:
+    for f in [
+        "--buck2", "--repo-root", "--publishable", "--only", "--buck2-config",
+        "--target-platforms", "--probe-target", "--probe-timeout-s",
+    ]:
+        var a = _full()
+        a.append(String(f) + String("=x"))
+        _expect(a, String("unknown flag '") + String(f) + String("'"))
 
 
 def main() raises:

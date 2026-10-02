@@ -1,37 +1,56 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
-# The `kci build` verb: build the targets on the publishable list on the farm,
-# in one buck2 invocation, check every package against its artifact manifest
-# (type, file name, sha256) and lay the set out for `kci publish`. A preflight
-# refuses a buckconfig that names no farm and proves the farm executes before
-# anything is built; there is no local fallback. buck2 is started through the
-# ProcessRunner seam: SupervisorRunner (komira_supervisor) for real runs,
-# ScriptedRunner for tests. Nothing here names a farm, a channel or an
-# account: all of that comes from the files and flags of the run.
+# The `kci build` verb: for each artifact of the declarations file
+# (kci_artifact_declaration), in file order and one at a time, create an
+# EMPTY directory under --out-dir, run the declared build system's rendered
+# argv into it, and check what it left with kci_release_set.verify_member
+# (the same checks `kci publish` re-runs); when every artifact passed, write
+# release.json (members + set hash) LAST, as the commit marker. kci knows no
+# build tool: the program, its args and "build on the farm" are the
+# declarations file's. The process is started through the ProcessRunner
+# seam: SupervisorRunner (komira_supervisor) for real runs, ScriptedRunner
+# for tests. Nothing here names a farm, a channel or an account.
+#
+# Recorded once, as the design asked: whether `-c komira.execution=remote`
+# with no reachable farm fails rather than falls back is NOT measured by
+# this change (it needs the farm taken away); it stays UNVERIFIED, and a
+# farm that is down is expected to fail the first build (FAILED, with
+# buck2's stderr), never to build locally unnoticed.
 #
 # The welded tests drive ScriptedRunner over files they write under
 # TEST_TMPDIR, plus SupervisorRunner over /bin/sh: no buck2, no network.
 mojo_library(
-    name = "kci_build",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    name = "kci_build_lib",
+    import_name = "kci_build",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
     deps = [
+        "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
-        "//src/kci_release_channel:kci_release_channel",
-        "//src/komira_crypto:komira_crypto",
+        "//src/kci_release_set:kci_release_set",
         "//src/komira_json:komira_json",
         "//src/komira_supervisor:komira_supervisor",
     ],
     test_srcs = [
-        # the publishable list: every refusal by line, --only narrowing
-        "tests/test_build_publishable_list.mojo",
-        # every flag, both spellings, each refusal naming its flag
+        # every flag, both spellings, each refusal naming its flag; deleted flags are unknown
         "tests/test_build_flags.mojo",
-        # buck2's build report: cell-qualified keys, sub-target outputs, failures
-        "tests/test_build_report.mojo",
-        # the whole verb over ScriptedRunner: preflight, build, rebuilds, verify, emit
+        # the whole verb over ScriptedRunner: argv, order, empty dirs, every stop, release.json last
         "tests/test_build_flow.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout
         "tests/test_supervisor_runner.mojo",
     ],
+    test_data = {
+        "tests/test_build_flow.mojo": {
+            "src/kci_artifact_declaration/example.textproto": "//src/kci_artifact_declaration:example.textproto",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# `kci build` as a standalone binary, until the kci binary dispatches its
+# `build` verb to the same `build_main`.
+mojo_binary(
+    name = "kci_build",
+    srcs = ["main/kci_build_main.mojo"],
+    deps = [":kci_build_lib"],
     visibility = ["PUBLIC"],
 )

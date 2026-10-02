@@ -3,37 +3,32 @@
 #   `BuildRequest` before anything is read or run.
 # =============================================================================
 #
-#   --buck2 <path>              the buck2 binary (absolute path)
-#   --repo-root <dir>           the repository to build in (buck2's cwd)
-#   --publishable <file>        the publishable list (allowlist.mojo)
-#   [--only <target>]           build only this listed target (repeatable)
-#   [--buck2-config <k=v>]      passed as `-c k=v` (repeatable)
-#   [--target-platforms <p>]    passed as `--target-platforms p`
-#   --probe-target <target>     the farm probe target (preflight.mojo)
-#   [--probe-timeout-s <n>]     default 120
-#   [--build-timeout-s <n>]     default 3600
-#   --out-dir <dir>             absent or empty; packages + manifests go here
-#   --log-dir <dir>             buck2's output and build reports go here
+#   --declarations <file>      the artifact declarations
+#                              (kci_artifact_declaration): what to build, and
+#                              with which program and args
+#   --work-dir <abs dir>       the cwd of every build (an absolute path)
+#   --out-dir <dir>            absent or empty; becomes the release directory
+#   --log-dir <dir>            each build's stdout and stderr go here
+#   [--build-timeout-s <n>]    per artifact; default 3600
 #   [--help]
 #
+# Flags only: nothing is read from the environment. Every build-system
+# spelling (which buck2, which config file, which platforms) is an arg in
+# the declarations file, not a flag here.
+#
 # A value may follow its flag as the next argument or after `=`. A missing
-# required flag, a flag given twice (other than the repeatable two), an
-# unknown flag, an empty value, a positional argument and a timeout that is
-# not a positive integer are each refused, naming the flag. So is a
-# `--buck2-config` that sets `komira.execution` (kci build always builds on
-# the farm) or `kci.probe_nonce` (kci build sets it).
+# required flag, a flag given twice, an unknown flag, an empty value, a
+# positional argument, a `--work-dir` that is not an absolute path and a
+# timeout that is not a positive integer are each refused, naming the flag.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_build.allowlist import label_problem
 from kci_build.request import BuildRequest
 
 comptime BUILD_USAGE: String = (
-    "usage: kci build --buck2 <path> --repo-root <dir> --publishable <file>"
-    " [--only <target> ...] [--buck2-config <k=v> ...] [--target-platforms <p>]"
-    " --probe-target <target> [--probe-timeout-s <n>] [--build-timeout-s <n>]"
-    " --out-dir <dir> --log-dir <dir>"
+    "usage: kci build --declarations <file> --work-dir <abs dir> --out-dir <dir>"
+    " --log-dir <dir> [--build-timeout-s <n>]"
 )
 
 
@@ -56,17 +51,11 @@ def _refuse(why: String) raises:
 
 def _is_value_flag(name: String) -> Bool:
     return (
-        name == "--buck2"
-        or name == "--repo-root"
-        or name == "--publishable"
-        or name == "--only"
-        or name == "--buck2-config"
-        or name == "--target-platforms"
-        or name == "--probe-target"
-        or name == "--probe-timeout-s"
-        or name == "--build-timeout-s"
+        name == "--declarations"
+        or name == "--work-dir"
         or name == "--out-dir"
         or name == "--log-dir"
+        or name == "--build-timeout-s"
     )
 
 
@@ -78,34 +67,23 @@ def _set_once(mut slot: String, name: String, var value: String) raises:
 
 def _positive_int(name: String, value: String) raises -> Int:
     var b = value.as_bytes()
+    var why = name + String(" must be a positive whole number of seconds; got '") + value + String("'")
     if len(b) == 0 or len(b) > 9:
-        _refuse(name + String(" must be a positive whole number of seconds; got '") + value + String("'"))
+        _refuse(why)
     var n = 0
     for i in range(len(b)):
         if b[i] < UInt8(48) or b[i] > UInt8(57):
-            _refuse(name + String(" must be a positive whole number of seconds; got '") + value + String("'"))
+            _refuse(why)
         n = n * 10 + Int(b[i] - UInt8(48))
     if n == 0:
-        _refuse(name + String(" must be a positive whole number of seconds; got '") + value + String("'"))
+        _refuse(why)
     return n
-
-
-def _check_config(kv: String) raises:
-    var eq = kv.find(String("="))
-    if eq <= 0:
-        _refuse(String("--buck2-config '") + kv + String("' is not key=value"))
-    var key = String(kv[byte = :eq])
-    if key == "komira.execution":
-        _refuse(String("--buck2-config may not set komira.execution: kci build always builds on the farm"))
-    if key == "kci.probe_nonce":
-        _refuse(String("--buck2-config may not set kci.probe_nonce: kci build sets it"))
 
 
 def parse_build_flags(args: List[String]) raises -> BuildFlags:
     """Parse `args` (the arguments AFTER the verb). RAISES on every refusal
     in the file header, with the usage line appended."""
     var flags = BuildFlags()
-    var probe_timeout = String("")
     var build_timeout = String("")
     var i = 0
     while i < len(args):
@@ -132,50 +110,30 @@ def parse_build_flags(args: List[String]) raises -> BuildFlags:
         if value.strip().byte_length() == 0:
             _refuse(name + String(" has an EMPTY value"))
         ref r = flags.request
-        if name == "--buck2":
-            _set_once(r.buck2_path, name, value^)
-        elif name == "--repo-root":
-            _set_once(r.repo_root, name, value^)
-        elif name == "--publishable":
-            _set_once(r.publishable_file, name, value^)
-        elif name == "--only":
-            var problem = label_problem(value)
-            if problem.byte_length() > 0:
-                _refuse(String("--only '") + value + String("' ") + problem)
-            for j in range(len(r.only)):
-                if r.only[j] == value:
-                    _refuse(String("--only ") + value + String(" is given twice"))
-            r.only.append(value^)
-        elif name == "--buck2-config":
-            _check_config(value)
-            r.buck2_config.append(value^)
-        elif name == "--target-platforms":
-            _set_once(r.target_platforms, name, value^)
-        elif name == "--probe-target":
-            _set_once(r.probe_target, name, value^)
-        elif name == "--probe-timeout-s":
-            _set_once(probe_timeout, name, value^)
-        elif name == "--build-timeout-s":
-            _set_once(build_timeout, name, value^)
+        if name == "--declarations":
+            _set_once(r.declarations_file, name, value^)
+        elif name == "--work-dir":
+            _set_once(r.work_dir, name, value^)
         elif name == "--out-dir":
             _set_once(r.out_dir, name, value^)
-        else:
+        elif name == "--log-dir":
             _set_once(r.log_dir, name, value^)
+        else:
+            _set_once(build_timeout, name, value^)
     ref r = flags.request
-    if r.buck2_path.byte_length() == 0:
-        _refuse(String("--buck2 is required"))
-    if r.repo_root.byte_length() == 0:
-        _refuse(String("--repo-root is required"))
-    if r.publishable_file.byte_length() == 0:
-        _refuse(String("--publishable is required"))
-    if r.probe_target.byte_length() == 0:
-        _refuse(String("--probe-target is required"))
+    if r.declarations_file.byte_length() == 0:
+        _refuse(String("--declarations is required"))
+    if r.work_dir.byte_length() == 0:
+        _refuse(String("--work-dir is required"))
+    if not r.work_dir.startswith(String("/")):
+        _refuse(
+            String("--work-dir '") + r.work_dir
+            + String("' is not an absolute path: it is the cwd every build resolves against")
+        )
     if r.out_dir.byte_length() == 0:
         _refuse(String("--out-dir is required"))
     if r.log_dir.byte_length() == 0:
         _refuse(String("--log-dir is required"))
-    if probe_timeout.byte_length() > 0:
-        r.probe_timeout_s = _positive_int(String("--probe-timeout-s"), probe_timeout)
     if build_timeout.byte_length() > 0:
         r.build_timeout_s = _positive_int(String("--build-timeout-s"), build_timeout)
     return flags^
