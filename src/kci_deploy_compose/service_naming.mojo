@@ -22,7 +22,7 @@
 # name is how a registry key comes to exist that is no service's name.
 # =============================================================================
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     AppBundle,
     AppKind,
     AppSpec,

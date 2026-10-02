@@ -58,12 +58,12 @@ over proto values, no I/O, no clock, no randomness. The run id is MINTED by the
 caller (a shell `mint_run_id`, a CI job id) and only ever VALIDATED here.
 """
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceKind,
     ResourceNode,
 )
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     AppBundle,
     AppKind,
     AppSpec,

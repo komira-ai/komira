@@ -58,17 +58,17 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 
 from kci_deploy_compose.compose_api import compose_api
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceKind,
     ServerlessComputeSpec,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     NameScope,
     CloudVariant,
     DatastoreCollection,
@@ -96,7 +96,7 @@ from komira_rpc_bundle.app_bundle import (
     SecuredInboundRoute,
     WebRouteRule,
 )
-from komira_rpc_bundle.deploy_model import (
+from kci_bundle_proto.deploy_model import (
     BundleIndexTable,
     InboundNeed,
     NetworkIngress,

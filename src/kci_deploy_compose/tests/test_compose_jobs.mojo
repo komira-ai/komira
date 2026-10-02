@@ -48,7 +48,7 @@ from kci_deploy_compose.compose_api import (
     _job_runtime_identity,
 )
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceKind,
     ResourceNode,
@@ -56,7 +56,7 @@ from full_manifest_rpc.full_manifest import (
     Capability,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     # `AppSpec.name_scope` (field 37) — UNSPECIFIED here: the authored name IS
     # the service name.
     NameScope,
@@ -91,7 +91,7 @@ from komira_rpc_bundle.app_bundle import (
     WebRouteRule,
     SecuredInboundRoute,
 )
-from komira_rpc_bundle.deploy_model import (
+from kci_bundle_proto.deploy_model import (
     BundleIndexTable,
     DatastoreNeed,
     InboundNeed,

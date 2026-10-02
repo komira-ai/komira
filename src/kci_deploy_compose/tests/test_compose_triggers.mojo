@@ -23,7 +23,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_serde import encode_proto, decode_proto
+from komira_proto_codec import encode_proto, decode_proto
 
 from kci_deploy_compose.compose_api import (
     CLOUD_GCP,
@@ -33,7 +33,7 @@ from kci_deploy_compose.compose_api import (
 )
 from kci_deploy_compose.content_address import content_address
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceNode,
     ResourceKind,
@@ -46,7 +46,7 @@ from full_manifest_rpc.full_manifest import (
     ResolvedPackagePublished,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     # jobs (12) / crons (13) — constructed EMPTY by every fixture below.
     JobSpec,
     CronSpec,

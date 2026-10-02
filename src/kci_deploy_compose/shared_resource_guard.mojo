@@ -99,7 +99,7 @@ Pure + deterministic: proto values in, `String`s out. No I/O, no clock, no
 randomness. ZERO UnsafePointer, no wildcard origin.
 """
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceKind,
     ResourceNode,

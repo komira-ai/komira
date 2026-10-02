@@ -42,13 +42,13 @@ from kci_deploy_compose.compose_api import (
 )
 from kci_deploy_compose.param_resolve import param_marker_token
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     Capability,
     FullManifest,
     ResourceKind,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     NameScope,
     CloudVariant,
     DatastoreCollection,
@@ -80,7 +80,7 @@ from komira_rpc_bundle.app_bundle import (
     EdgeCallerClass,
     ParamMarker,
 )
-from komira_rpc_bundle.deploy_model import (
+from kci_bundle_proto.deploy_model import (
     BundleIndexTable,
     InboundNeed,
     NetworkIngress,

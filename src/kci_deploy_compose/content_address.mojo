@@ -31,11 +31,11 @@
 # fault. ZERO UnsafePointer, ZERO wildcard origin.
 # =============================================================================
 
-from komira_serde import encode_proto
+from komira_proto_codec import encode_proto
 from komira_crypto.sha256 import sha256
 from komira_crypto.hex import hex_lower_array_32
 
-from full_manifest_rpc.full_manifest import FullManifest
+from kci_manifest_proto.full_manifest import FullManifest
 
 
 # The address is prefixed `sha256:` so the algorithm is self-describing on the

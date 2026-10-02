@@ -75,7 +75,7 @@
 # node it is about. ZERO UnsafePointer, ZERO wildcard origin.
 # =============================================================================
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     Capability,
     GrantScope,
     GrantScopeClass,

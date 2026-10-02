@@ -35,7 +35,7 @@ from std.testing import assert_equal, assert_true
 from kci_deploy_compose.compose_api import compose_api
 from kci_deploy_compose.content_address import content_address
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceNode,
     ResourceKind,
@@ -43,7 +43,7 @@ from full_manifest_rpc.full_manifest import (
     Capability,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     # `AppSpec.name_scope` (field 37) — UNSPECIFIED here: the authored name IS
     # the service name.
     NameScope,
@@ -78,7 +78,7 @@ from komira_rpc_bundle.app_bundle import (
     Wave,
     WebRouteRule,
 )
-from komira_rpc_bundle.deploy_model import (
+from kci_bundle_proto.deploy_model import (
     BundleIndexTable,
     ComputeIntent,
     DatastoreNeed,

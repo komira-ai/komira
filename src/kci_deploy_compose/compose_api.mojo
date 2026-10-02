@@ -65,7 +65,7 @@ from kci_deploy_compose.grant_scope import (
     grant_scope_for,
 )
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceNode,
     ResourceKind,
@@ -101,7 +101,7 @@ from full_manifest_rpc.full_manifest import (
     # disambiguate from the app_bundle one).
     WebRouteRule as FMWebRouteRule,
     # What a route rule ASSERTS about its paths (ROUTE / DENY / DEFAULT) —
-    # IDENTICALLY-NAMED intent-tier enum imported below from `komira_rpc_bundle`
+    # IDENTICALLY-NAMED intent-tier enum imported below from `kci_bundle_proto`
     # (the two proto files declare it INDEPENDENTLY with identical ordinals by
     # construction, like SourceKind/RegistryKind).
     WebRouteDisposition as FMWebRouteDisposition,
@@ -161,7 +161,7 @@ from full_manifest_rpc.full_manifest import (
     DnsRecordSpec,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     AppBundle,
     AppKind,
     ImageRef,
@@ -190,7 +190,7 @@ from komira_rpc_bundle.app_bundle import (
     ValueFrom,
     # The intent-tier trigger enums, aliased to disambiguate from the
     # IDENTICALLY-NAMED standalone-tier `SourceKind` / `RegistryKind` imported
-    # above from `full_manifest_rpc` (the two proto files declare the enums
+    # above from `kci_manifest_proto` (the two proto files declare the enums
     # INDEPENDENTLY with identical ordinals by construction). The `Bundle*`
     # alias keeps the ctor cascade unambiguous so a translate reads the RIGHT
     # tier's arm.
@@ -230,7 +230,7 @@ from komira_rpc_bundle.app_bundle import (
     # THE INTENT-TIER DATASTORE COLLECTION SHAPES
     # (`AppSpec.datastore_collections`, field 35), aliased to disambiguate from
     # the IDENTICALLY-NAMED RESOLVED-tier `DatastoreAccessPath` imported above
-    # from `full_manifest_rpc` (the `Bundle*` alias convention — the standing of
+    # from `kci_manifest_proto` (the `Bundle*` alias convention — the standing of
     # `BundleBucketSpec` beside `ResolvedBucketSpec`). `DatastoreCollection`
     # itself does not collide with `DatastoreCollectionSpec`; it is aliased for
     # the same reason its sibling is, so the ctor cascade in
@@ -250,7 +250,7 @@ from komira_rpc_bundle.app_bundle import (
     # must spell the Optional's type.
     IngressSpec,
 )
-from komira_rpc_bundle.deploy_model import DatastoreNeed, InboundNeed
+from kci_bundle_proto.deploy_model import DatastoreNeed, InboundNeed
 
 
 # The symbolic carry-through form written into a ServerlessCompute node's
@@ -4601,7 +4601,7 @@ def resolve_cloud_variant(
     members (the image, the ingress, the datastore shapes). The key is the cloud
     POSTURE, not the env name.
 
-    `cloud` is the mirrored `komira.deploy.v1.Cloud` ordinal this composition was
+    `cloud` is the mirrored `kci.deploy.v1.Cloud` ordinal this composition was
     called with — the SAME parameter that already gates the per-cloud grant nodes
     below, read off `EnvBinding.cloud` by the deploy driver. Keying on it rather
     than on the env NAME is the point: several AWS envs (a personal one, a

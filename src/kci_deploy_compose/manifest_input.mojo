@@ -36,7 +36,7 @@
 # supplied manifest must EARN them rather than inherit them.
 #
 # ── THE FORMAT: proto3-canonical JSON, and why ───────────────────────────────
-#  1. THE SCHEMA IS THE PARSER. `full_manifest_rpc` generates a real
+#  1. THE SCHEMA IS THE PARSER. `kci_manifest_proto` generates a real
 #     proto3-JSON decoder from `full_manifest.proto`. A hand-rolled parser for a
 #     22-arm oneof that grows ADDITIVELY would be a second grammar to keep in
 #     sync, and the day it drifted the reader would silently mean something the
@@ -50,7 +50,7 @@
 #     about the addressing contract.
 #
 # ── WHAT THE DECODER ENFORCES, AND WHAT IS LEFT FOR THIS FILE ────────────────
-# `komira_serde`'s proto3-JSON decoder is STRICT:
+# `komira_proto_codec`'s proto3-JSON decoder is STRICT:
 #
 #   * an unknown JSON key is a REFUSAL naming the key, its JSON path, its
 #     source LINE and the message's accepted vocabulary.
@@ -85,14 +85,14 @@
 # refusal. ZERO UnsafePointer, ZERO wildcard origin.
 # =============================================================================
 
-from komira_serde import (
+from komira_proto_codec import (
     JsonValue,
     decode_json,
     encode_json,
     parse_json_value,
 )
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceKind,
     ResourceNode,
@@ -304,7 +304,7 @@ def _refuse_unconsumed_keys(
     dropped, or this guard refuses the exact spelling the codec fix exists
     to admit.
 
-    AND IT IS NOT THE UNKNOWN-KEY GUARD. `komira_serde`'s decoder
+    AND IT IS NOT THE UNKNOWN-KEY GUARD. `komira_proto_codec`'s decoder
     refuses an unrecognised key itself now, with a better locator than this
     (token + JSON path + source LINE + the message's accepted vocabulary), so
     an unknown key never reaches here — nor does a message-level duplicate.
@@ -674,7 +674,7 @@ def _refuse_content_address_mismatch(manifest: FullManifest) raises:
 
     AND IT IS AN ADDRESS OVER **OUR** CANONICAL ENCODING. The preimage is
     `encode_proto` with the field cleared; a foreign encoder that orders map
-    entries differently (protoc sorts them; `komira_serde` preserves insertion
+    entries differently (protoc sorts them; `komira_proto_codec` preserves insertion
     order) produces a different address for the same logical manifest, and
     editing the key ORDER of a `config.values` map in the JSON changes it too.
     The refusal says so rather than implying tampering."""

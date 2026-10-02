@@ -64,7 +64,7 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     EgressMode,
     IngressRule,
     ResourceKind,

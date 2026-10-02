@@ -18,11 +18,11 @@ mojo_library(
     name = "kci_deploy_compose",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/full_manifest_rpc:full_manifest_rpc",
+        "//src/kci_bundle_proto:kci_bundle_proto",
+        "//src/kci_manifest_proto:kci_manifest_proto",
         "//src/kci_params:kci_params",
         "//src/komira_crypto:komira_crypto",
-        "//src/komira_rpc_bundle:komira_rpc_bundle",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_svcref:komira_svcref",
     ],
     test_srcs = [

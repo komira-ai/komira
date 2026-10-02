@@ -61,7 +61,7 @@ from kci_params import (
     PARAM_KIND_SECRET_REFERENCE,
     render_app_param_argv,
 )
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     AppParameter,
     AppSpec,
     ParamMarker,

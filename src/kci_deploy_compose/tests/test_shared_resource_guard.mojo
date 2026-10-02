@@ -60,7 +60,7 @@ from kci_deploy_compose.shared_resource_guard import (
     unreadable_sibling,
 )
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     Capability,
     FullManifest,
     GrantSpec,
@@ -73,7 +73,7 @@ from full_manifest_rpc.full_manifest import (
     ServiceAccountSpec,
 )
 
-from komira_rpc_bundle.app_bundle import (
+from kci_bundle_proto.app_bundle import (
     # `AppSpec.name_scope` (field 37) — UNSPECIFIED here: the authored name IS
     # the service name.
     NameScope,
@@ -107,7 +107,7 @@ from komira_rpc_bundle.app_bundle import (
     SecuredInboundRoute,
     WebRouteRule,
 )
-from komira_rpc_bundle.deploy_model import (
+from kci_bundle_proto.deploy_model import (
     BundleIndexTable,
     InboundNeed,
     NetworkIngress,

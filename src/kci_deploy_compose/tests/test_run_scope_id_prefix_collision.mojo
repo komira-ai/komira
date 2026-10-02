@@ -68,7 +68,7 @@ from kci_deploy_compose.run_scope import (
     run_scope_violations,
 )
 
-from full_manifest_rpc.full_manifest import (
+from kci_manifest_proto.full_manifest import (
     FullManifest,
     ResourceNode,
     ResourceKind,
