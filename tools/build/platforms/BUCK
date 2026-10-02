@@ -1,35 +1,50 @@
+load(":defs.bzl", "komira_host_platform")
+load(":table.bzl", "constraints", "registered_names")
+
 # Platforms only. Nothing here names a service or a worker property set: the
 # execution platforms that use these configurations are declared in
 # //tools/build/platforms/default for a standalone checkout (local, or remote
 # when `.buckconfig.local` names a service), and by any repository that
 # mounts komira.
 
-# The two platforms komira builds for. Each is also the configuration of the
-# one execution platform per OS that runs actions (registered by
-# `komira_execution_platforms` or `komira_local_execution_platforms` in
-# defs.bzl), so a tool built to run in an action is configured exactly like
-# a target built for that OS. See README.md.
-
-# Target platform for everything in this repo (see `[parser]` in .buckconfig),
-# and the configuration of the linux execution platform.
-platform(
-    name = "linux-x86_64",
-    constraint_values = [
-        "prelude//os/constraints:linux",
-        "prelude//cpu/constraints:x86_64",
-    ],
-    visibility = ["PUBLIC"],
-)
-
-# Target platform for macOS on Apple silicon: `--target-platforms
+# One platform per registered row of the platform table (table.bzl), named
+# for the row: `linux-x86_64`, `darwin-arm64`. A row komira reserves
+# (`registered = False`, today `linux-arm64`) has no platform here: it is not a
+# build key. Each is also the configuration of the one execution platform of
+# that (os, cpu) that runs actions (registered by `komira_execution_platforms`
+# or `komira_local_execution_platforms` in defs.bzl), so a tool built to run in
+# an action is configured exactly like a target built for that platform. See
+# README.md.
+#
+# `linux-x86_64` is the target platform for everything in this repo run from a
+# Linux x86_64 client (see `host` below, and `[parser]` in .buckconfig), and the
+# configuration of the linux execution platform. `darwin-arm64` is the target
+# platform for macOS on Apple silicon: `--target-platforms
 # komira//tools/build/platforms:darwin-arm64`, and the configuration of the
 # macOS execution platform, registered only when one is configured; see
 # README.md, "macOS".
-platform(
-    name = "darwin-arm64",
+[
+    platform(
+        name = name,
+        constraint_values = constraints(name),
+        visibility = ["PUBLIC"],
+    )
+    for name in registered_names()
+]
+
+# The default target platform: the client's own (`[parser]` in .buckconfig).
+komira_host_platform(
+    name = "host",
+    visibility = ["PUBLIC"],
+)
+
+# Selectable form of linux-x86_64: what conda_package derives its subdir from
+# (tools/build/package/conda.bzl).
+config_setting(
+    name = "is_linux_x86_64",
     constraint_values = [
-        "prelude//os/constraints:macos",
-        "prelude//cpu/constraints:arm64",
+        "prelude//os/constraints:linux",
+        "prelude//cpu/constraints:x86_64",
     ],
     visibility = ["PUBLIC"],
 )

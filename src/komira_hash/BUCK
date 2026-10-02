@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Canonical byte-wise FNV-1a, 32 and 64 bit, with the published constants. No
+# deps, so the name registry and the observability packages share one
+# definition without depending on each other.
+mojo_library(
+    name = "komira_hash",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_fnv1a.mojo"],
+    visibility = ["PUBLIC"],
+)
