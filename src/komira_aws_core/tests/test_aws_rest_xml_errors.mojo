@@ -85,11 +85,15 @@ def test_bare_error_form() raises:
     )
     _err(b^, "BucketNotEmpty", "m", "body-id")
     # x-amzn-RequestId comes before x-amz-request-id.
-    var h = AwsResponse.of_text(412, "<Error><Code>PreconditionFailed</Code></Error>")
+    var h = AwsResponse.of_text(
+        412, "<Error><Code>PreconditionFailed</Code></Error>"
+    )
     h.add_header("X-Amz-Request-Id", "s3-id")
     h.add_header("x-amzn-requestid", "amzn-id")
     _err(h^, "PreconditionFailed", "", "amzn-id")
-    # The document in S3's namespace reads the same.
+    # The document in S3's namespace reads the same, matched by local
+    # name. botocore differs here: it compares the namespaced root tag
+    # with "Error" and reads code "" (see aws_xml.mojo's header).
     var ns = AwsResponse.of_text(
         403,
         '<Error xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
@@ -126,7 +130,9 @@ def test_cleaning() raises:
     for _ in range(AWS_ERROR_MESSAGE_MAX_BYTES + 10):
         long += "m"
     var l = aws_rest_xml_error(
-        AwsResponse.of_text(400, "<Error><Message>" + long + "</Message></Error>")
+        AwsResponse.of_text(
+            400, "<Error><Message>" + long + "</Message></Error>"
+        )
     )
     assert_equal(l.message.byte_length(), AWS_ERROR_MESSAGE_MAX_BYTES)
     # A code or message element holding elements is no text.

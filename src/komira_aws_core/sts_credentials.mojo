@@ -309,6 +309,10 @@ def parse_sts_credentials(
     status, is refused naming the STS error code and message."""
     var root = _parse_body(action, resp)
     if root.local == "ErrorResponse" or resp.status != 200:
+        # The body is parsed again inside aws_xml_error_info; this is the
+        # error path only. A CredentialHttpResponse carries no headers, so
+        # no x-amzn-RequestId is passed: the request id, unused in the
+        # message, comes from the body or is "".
         var err = aws_xml_error_info(
             resp.status, bytes_of(resp.body), String("")
         )

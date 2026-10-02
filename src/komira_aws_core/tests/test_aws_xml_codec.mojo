@@ -32,6 +32,7 @@ from komira_aws_core import (
     aws_xml_get_attr,
     aws_xml_get_blob,
     aws_xml_get_bool,
+    aws_xml_get_f32,
     aws_xml_get_f64,
     aws_xml_get_int,
     aws_xml_get_string,
@@ -300,6 +301,26 @@ def _name_refused(name: String) raises:
     raise Error("element name '" + name + "' was written")
 
 
+def _attr_refused(name: String) raises:
+    var w = XmlWriter()
+    aws_xml_start(w, "A")
+    try:
+        aws_xml_attr(w, name, "v")
+    except:
+        return
+    raise Error("attribute name '" + name + "' was written")
+
+
+def _body_refused(var w: XmlWriter, why: String) raises:
+    var req = AwsRequest(String("PUT"), String("/"))
+    try:
+        aws_xml_set_body(req, w)
+    except e:
+        assert_true(String(e).find("namespace-well-formed") >= 0, String(e))
+        return
+    raise Error("a body with " + why + " was set")
+
+
 def test_write_refusals() raises:
     # [NS] no undeclaring, the reserved prefixes, one colon at most.
     _ns_refused("", "")
@@ -307,12 +328,50 @@ def test_write_refusals() raises:
     _ns_refused("xmlns", "urn:x")
     _ns_refused("xml", "urn:x")
     _ns_refused("a:b", "urn:x")
+    _ns_refused("1p", "urn:x")
+    # [NS] the xml and xmlns namespace names cannot be declared.
+    _ns_refused("", "http://www.w3.org/XML/1998/namespace")
+    _ns_refused("p", "http://www.w3.org/XML/1998/namespace")
+    _ns_refused("", "http://www.w3.org/2000/xmlns/")
+    _ns_refused("p", "http://www.w3.org/2000/xmlns/")
     # Names that would break the document.
     _name_refused("")
     _name_refused("a b")
     _name_refused("a<b")
     _name_refused("a/b")
     _name_refused('a"b')
+    # [NS] a QName: NCNames, one ':' between them.
+    _name_refused("1a")
+    _name_refused("-a")
+    _name_refused(".a")
+    _name_refused("a!b")
+    _name_refused("a;b")
+    _name_refused("a::b")
+    _name_refused(":a")
+    _name_refused("a:")
+    _name_refused("a:1b")
+    _attr_refused("1a")
+    _attr_refused("a:b:c")
+    # A namespace is declared by aws_xml_namespace, never as an attribute.
+    _attr_refused("xmlns")
+    _attr_refused("xmlns:p")
+    # The body is read back: an undeclared prefix and a duplicate
+    # attribute are refused before the body is set.
+    var u = XmlWriter()
+    aws_xml_start(u, "p:A")
+    aws_xml_end(u)
+    _body_refused(u^, "an undeclared element prefix")
+    var ua = XmlWriter()
+    aws_xml_start(ua, "A")
+    aws_xml_attr(ua, "q:v", "1")
+    aws_xml_end(ua)
+    _body_refused(ua^, "an undeclared attribute prefix")
+    var d = XmlWriter()
+    aws_xml_start(d, "A")
+    aws_xml_attr(d, "v", "1")
+    aws_xml_attr(d, "v", "2")
+    aws_xml_end(d)
+    _body_refused(d^, "a duplicate attribute")
     # A value XML cannot carry (a C0 control) is refused by the writer.
     var w = XmlWriter()
     aws_xml_start(w, "A")
@@ -354,7 +413,9 @@ def test_read_scalars() raises:
         + "<N>NaN</N><P>Infinity</P><M>-Infinity</M>"
         + "<B>Zm9v</B><EB/><Ts>2026-09-15T12:00:00.5Z</Ts>"
         + "<Hd>Tue, 15 Sep 2026 12:00:00 GMT</Hd><Ep>1789473600</Ep>"
-        + "<Ent>a&amp;b&#x41;</Ent><Cd><![CDATA[<raw>]]></Cd></Out>"
+        + "<Ent>a&amp;b&#x41;</Ent><Cd><![CDATA[<raw>]]></Cd>"
+        + "<Wb>\n  Zm9v\r\n  YmFy\n</Wb><Fm>3.4028234663852886e38</Fm>"
+        + "<Fi>-Infinity</Fi></Out>"
     )
     # [BC] a string is its text as written; an empty element is "".
     assert_equal(aws_xml_get_string(d, "S").value(), "  spaced  ")
@@ -385,15 +446,24 @@ def test_read_scalars() raises:
     assert_equal(len(blob), 3)
     assert_equal(blob[0], UInt8(0x66))
     assert_equal(len(aws_xml_get_blob(d, "EB").value()), 0)
+    # Base64 wrapped across lines: XML whitespace inside it is dropped.
+    var wrapped = aws_xml_get_blob(d, "Wb").value().copy()
+    assert_equal(len(wrapped), 6)
+    assert_equal(wrapped[3], UInt8(0x62))
+    # A float at the edge of the Float32 range, and the word -Infinity.
+    assert_true(aws_xml_get_f32(d, "Fm").value() > Float32(3.4e38))
+    assert_true(aws_xml_get_f32(d, "Fi").value() < Float32(-3.4e38))
     # [XT] each timestamp format.
-    assert_equal(aws_xml_get_ts(d, "Ts", AWS_TS_ISO8601).value(), _INSTANT + 0.5)
+    assert_equal(
+        aws_xml_get_ts(d, "Ts", AWS_TS_ISO8601).value(), _INSTANT + 0.5
+    )
     assert_equal(aws_xml_get_ts(d, "Hd", AWS_TS_RFC822).value(), _INSTANT)
     assert_equal(aws_xml_get_ts(d, "Ep", AWS_TS_UNIX).value(), _INSTANT)
 
 
 def _scalar_refused(body: String, kind: String) raises:
     var kinds: List[String] = [
-        "bool", "i32", "i8", "f64", "blob", "iso", "http", "string"
+        "bool", "i32", "i8", "f64", "f32", "blob", "iso", "http", "string"
     ]
     var known = False
     for i in range(len(kinds)):
@@ -412,6 +482,8 @@ def _scalar_refused(body: String, kind: String) raises:
             _ = aws_xml_int_of(n, 8)
         elif kind == "f64":
             _ = aws_xml_f64_of(n)
+        elif kind == "f32":
+            _ = aws_xml_f32_of(n)
         elif kind == "blob":
             _ = aws_xml_blob_of(n)
         elif kind == "iso":
@@ -442,6 +514,10 @@ def test_read_refusals() raises:
     _scalar_refused("<a><v>nan</v></a>", "f64")
     _scalar_refused("<a><v>0x10</v></a>", "f64")
     _scalar_refused("<a><v/></a>", "f64")
+    # A finite float beyond the Float32 range is not read as an infinity.
+    _scalar_refused("<a><v>3.5e38</v></a>", "f32")
+    _scalar_refused("<a><v>-3.5e38</v></a>", "f32")
+    _scalar_refused("<a><v>1e400</v></a>", "f32")
     # [64] padded standard base64.
     _scalar_refused("<a><v>Zm9</v></a>", "blob")
     _scalar_refused("<a><v>Zm9v!</v></a>", "blob")
@@ -486,7 +562,8 @@ def test_read_lists() raises:
     assert_equal(len(n), 2)
     assert_equal(n[1], "y")
     # A present, empty wrapper is the empty list; no element is None.
-    assert_equal(len(aws_xml_get_string_list(d, "EmptyW", "member", False).value()), 0)
+    var empty_w = aws_xml_get_string_list(d, "EmptyW", "member", False)
+    assert_equal(len(empty_w.value()), 0)
     assert_false(Bool(aws_xml_get_string_list(d, "Absent", "member", False)))
     # [XT] flattened: every element named for the member, in order, even
     # when other members come between.
@@ -520,14 +597,21 @@ def test_read_maps() raises:
     assert_equal(len(m), 2)
     assert_equal(m["a"], "3")
     assert_equal(m["b"], "2")
-    var named = aws_xml_get_string_map(d, "Named", "K", "V", False).value().copy()
+    var named = aws_xml_get_string_map(
+        d, "Named", "K", "V", False
+    ).value().copy()
     assert_equal(named["k"], "v")
     # [XT] flattened.
-    var fl = aws_xml_get_string_map(d, "Fl", "key", "value", True).value().copy()
+    var fl = aws_xml_get_string_map(
+        d, "Fl", "key", "value", True
+    ).value().copy()
     assert_equal(len(fl), 2)
     assert_equal(fl["y"], "Y")
-    assert_equal(len(aws_xml_get_string_map(d, "EmptyM", "key", "value", False).value()), 0)
-    assert_false(Bool(aws_xml_get_string_map(d, "Absent", "key", "value", False)))
+    var empty_m = aws_xml_get_string_map(d, "EmptyM", "key", "value", False)
+    assert_equal(len(empty_m.value()), 0)
+    assert_false(
+        Bool(aws_xml_get_string_map(d, "Absent", "key", "value", False))
+    )
     # [BC] an entry with a child that is neither key nor value is refused,
     # and so is one with no value.
     try:
@@ -603,7 +687,9 @@ def test_round_trip() raises:
     assert_equal(aws_xml_get_int(d, "I", 32).value(), Int64(-2147483648))
     assert_equal(aws_xml_get_f64(d, "D").value(), -0.125)
     assert_true(aws_xml_get_f64(d, "Inf").value() > 1.0e308)
-    assert_equal(aws_xml_get_ts(d, "T", AWS_TS_ISO8601).value(), _INSTANT + 0.125)
+    assert_equal(
+        aws_xml_get_ts(d, "T", AWS_TS_ISO8601).value(), _INSTANT + 0.125
+    )
     var b = aws_xml_get_blob(d, "B").value().copy()
     assert_equal(len(b), 3)
     assert_equal(b[1], UInt8(0xFF))

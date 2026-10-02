@@ -18,11 +18,18 @@
 # when it has none -- the body default restXml states. Text is escaped by
 # the writer. A string is read as written, whitespace included; every other
 # scalar is read with leading and trailing XML whitespace (SP, TAB, CR, LF)
-# removed, as botocore's readers do (Python's int() and float() strip it),
-# and then as strictly as aws_text.mojo reads it. An empty element is the
-# empty string, the empty blob, and refused for every other scalar; an
-# ABSENT element is no value (`None`). A scalar element that holds child
-# elements is refused.
+# removed, and then as strictly as aws_text.mojo reads it. For numbers that
+# is botocore's reading too (Python's int() and float() strip it). For a
+# boolean it is this module's choice: botocore compares the untrimmed text
+# with "true" and reads anything else, "TRUE" and "1" included, as false;
+# here those are refused. A float (Float32) is refused when its decimal
+# text is finite and beyond the Float32 range, rather than read as an
+# infinity. A blob's text has XML whitespace removed from anywhere in it
+# before it is decoded, so base64 wrapped across lines reads (botocore's
+# base64.b64decode skips line breaks too); any other byte outside the
+# base64 alphabet is refused. An empty element is the empty string, the
+# empty blob, and refused for every other scalar; an ABSENT element is no
+# value (`None`). A scalar element that holds child elements is refused.
 #
 # Structures. A member is an element named by its xmlName (the member name
 # when none). Elements are matched by LOCAL name, whatever their namespace,
@@ -46,15 +53,25 @@
 # botocore refuses one ("Unknown tag"). A later entry for the same key
 # replaces an earlier one.
 #
+# Names. Every element, attribute and prefix name written is held to
+# Namespaces in XML 1.0 [7] QName (an NCName, or two joined by one ':'),
+# and `aws_xml_set_body` reads the finished document back with komira_xml
+# and refuses one that is not namespace-well-formed (an undeclared prefix,
+# a duplicate attribute), so no body is signed that no reader would accept.
+#
 # Attributes (xmlAttribute) are written on the structure's start tag as
 # given; a name with a prefix ("xsi:type") needs that prefix declared with
-# `aws_xml_namespace`. Read back, an unprefixed name matches an attribute in
-# no namespace, a prefixed one ("p:local") an attribute with that local name
-# in a namespace, whatever prefix the document gave it -- botocore's rule
-# (it rewrites `{uri}local` to the model's prefix before matching).
+# `aws_xml_namespace`, and a namespace declaration is written only by
+# `aws_xml_namespace` (`aws_xml_attr` refuses "xmlns" and "xmlns:*").
+# Read back, an unprefixed name matches an attribute in no namespace, a
+# prefixed one ("p:local") an attribute with that local name in a
+# namespace, whatever prefix the document gave it -- botocore's rule (it
+# rewrites `{uri}local` to the model's prefix before matching).
 #
 # Namespaces (xmlNamespace): `aws_xml_namespace` writes `xmlns="uri"`, or
-# `xmlns:prefix="uri"`, on the element just started.
+# `xmlns:prefix="uri"`, on the element just started. It refuses the
+# reserved prefixes and the two reserved namespace names (the xml and
+# xmlns namespaces), which no element may be put in by a declaration.
 #
 # Errors. `aws_rest_xml_error` reads the restXml error forms
 # (https://smithy.io/2.0/aws/protocols/aws-restxml-protocol.html,
@@ -66,11 +83,17 @@
 #
 # and, as botocore's RestXMLParser does (`_do_error_parse`), takes the HTTP
 # status as the code of a response whose body is empty (a HEAD) or is not
-# XML. A body that is XML but names no code has code "". The request id is
-# the `x-amzn-RequestId` header, else `x-amz-request-id` (S3), else the
-# body's <RequestId> (botocore's `_populate_response_metadata`, then the
-# body). Code and message are cleaned and capped as aws_codec.mojo cleans
-# them; nothing else is read from the body, which can hold a secret.
+# XML. A body that is XML but names no code has code "". One divergence
+# from botocore: a root <Error> in a namespace (`<Error xmlns="...">`) is
+# read as the bare <Error> form, matched by local name like every other
+# element here. botocore (`_parse_error_from_body`) compares the root's tag
+# with its namespace, so such a root falls to its merge path and yields
+# code "" -- reading the code the service sent is the more useful answer.
+# The request id is the `x-amzn-RequestId` header, else `x-amz-request-id`
+# (S3), else the body's <RequestId> (botocore's
+# `_populate_response_metadata`, then the body). Code and message are
+# cleaned and capped as aws_codec.mojo cleans them; nothing else is read
+# from the body, which can hold a secret.
 #
 # `aws_xml_body_is_error` is S3's 200-with-<Error> check
 # (botocore/handlers.py `_looks_like_special_case_error`): a 200 whose body
@@ -108,31 +131,84 @@ from .aws_text import (
 # -----------------------------------------------------------------------------
 
 
+comptime _XML_NS = "http://www.w3.org/XML/1998/namespace"
+comptime _XMLNS_NS = "http://www.w3.org/2000/xmlns/"
+
+
+def _is_ncname_start(cp: Int) -> Bool:
+    """XML 1.0 [4] NameStartChar, less ':' (Namespaces in XML [4] NCName)."""
+    return (
+        (cp >= 0x41 and cp <= 0x5A)
+        or (cp >= 0x61 and cp <= 0x7A)
+        or cp == 0x5F
+        or (cp >= 0xC0 and cp <= 0xD6)
+        or (cp >= 0xD8 and cp <= 0xF6)
+        or (cp >= 0xF8 and cp <= 0x2FF)
+        or (cp >= 0x370 and cp <= 0x37D)
+        or (cp >= 0x37F and cp <= 0x1FFF)
+        or (cp >= 0x200C and cp <= 0x200D)
+        or (cp >= 0x2070 and cp <= 0x218F)
+        or (cp >= 0x2C00 and cp <= 0x2FEF)
+        or (cp >= 0x3001 and cp <= 0xD7FF)
+        or (cp >= 0xF900 and cp <= 0xFDCF)
+        or (cp >= 0xFDF0 and cp <= 0xFFFD)
+        or (cp >= 0x10000 and cp <= 0xEFFFF)
+    )
+
+
+def _is_ncname_char(cp: Int) -> Bool:
+    """XML 1.0 [4a] NameChar, less ':'."""
+    return (
+        _is_ncname_start(cp)
+        or cp == 0x2D
+        or cp == 0x2E
+        or (cp >= 0x30 and cp <= 0x39)
+        or cp == 0xB7
+        or (cp >= 0x300 and cp <= 0x36F)
+        or (cp >= 0x203F and cp <= 0x2040)
+    )
+
+
 def _check_name(name: String, what: StaticString) raises:
-    """An element, attribute or prefix name the generator passes. Only what
-    would break the document is refused: an empty name, and a byte that
-    cannot appear in an XML name (space, control, quote, '<', '>', '&',
-    '=', '/')."""
+    """An element, attribute or prefix name the generator passes, held to
+    Namespaces in XML 1.0 [7] QName: an NCName, or a prefix NCName and a
+    local NCName joined by one ':'."""
     var b = name.as_bytes()
     if len(b) == 0:
         raise Error("an AWS XML " + String(what) + " name is empty")
-    for i in range(len(b)):
-        var c = b[i]
-        if (
-            c <= UInt8(0x20)
-            or c == UInt8(0x7F)
-            or c == UInt8(0x22)
-            or c == UInt8(0x27)
-            or c == UInt8(0x3C)
-            or c == UInt8(0x3E)
-            or c == UInt8(0x26)
-            or c == UInt8(0x3D)
-            or c == UInt8(0x2F)
-        ):
-            raise Error(
-                "the AWS XML " + String(what) + " name '" + name
-                + "' holds a byte no XML name can"
-            )
+    var i = 0
+    var part_start = True
+    var colons = 0
+    var ok = True
+    while i < len(b) and ok:
+        # A String is well-formed UTF-8: decode one code point.
+        var c = Int(b[i])
+        var cp = c
+        var w = 1
+        if c >= 0xF0:
+            cp = c & 0x07
+            w = 4
+        elif c >= 0xE0:
+            cp = c & 0x0F
+            w = 3
+        elif c >= 0xC0:
+            cp = c & 0x1F
+            w = 2
+        for k in range(1, w):
+            cp = (cp << 6) | (Int(b[i + k]) & 0x3F)
+        if cp == 0x3A:
+            colons += 1
+            ok = not part_start and colons == 1
+            part_start = True
+        else:
+            ok = _is_ncname_start(cp) if part_start else _is_ncname_char(cp)
+            part_start = False
+        i += w
+    if not ok or part_start:
+        raise Error(
+            "the AWS XML " + String(what) + " name '" + name
+            + "' is not an XML qualified name"
+        )
 
 
 def aws_xml_start(mut w: XmlWriter, name: String) raises:
@@ -151,9 +227,12 @@ def aws_xml_namespace(mut w: XmlWriter, prefix: String, uri: String) raises:
     """The xmlNamespace trait on the element just started: `xmlns="uri"`
     when `prefix` is "", else `xmlns:prefix="uri"`. Refuses an empty `uri`
     (Namespaces in XML 1.0 cannot undeclare a prefix), the reserved
-    prefixes `xml` and `xmlns`, and a prefix holding ':'."""
+    prefixes `xml` and `xmlns`, a prefix holding ':', and the xml and
+    xmlns namespace names (Namespaces in XML 1.0 section 3)."""
     if uri.byte_length() == 0:
         raise Error("an AWS XML namespace has an empty uri")
+    if uri == _XML_NS or uri == _XMLNS_NS:
+        raise Error("the AWS XML namespace '" + uri + "' is reserved")
     if prefix.byte_length() == 0:
         w.attr("xmlns", uri)
         return
@@ -167,8 +246,13 @@ def aws_xml_namespace(mut w: XmlWriter, prefix: String, uri: String) raises:
 
 def aws_xml_attr(mut w: XmlWriter, name: String, text: String) raises:
     """An xmlAttribute member, as its text (aws_text.mojo's `aws_text_*`
-    for a non-string scalar), on the element just started."""
+    for a non-string scalar), on the element just started. Refuses "xmlns"
+    and "xmlns:*": a namespace is declared by `aws_xml_namespace`."""
     _check_name(name, "attribute")
+    if name == "xmlns" or name.startswith("xmlns:"):
+        raise Error(
+            "the AWS XML attribute '" + name + "' is a namespace declaration"
+        )
     w.attr(name, text)
 
 
@@ -288,8 +372,19 @@ def aws_xml_write_string_map(
 
 def aws_xml_set_body(mut req: AwsRequest, mut w: XmlWriter) raises:
     """Sets `req.body` to the document `w` holds. Refuses one with an
-    element still open."""
-    req.set_body_text(w.finish())
+    element still open, and one komira_xml does not read back as a
+    namespace-well-formed document (an undeclared prefix, a duplicate
+    attribute). A writer that wrote nothing sets the empty body."""
+    var doc = w.finish()
+    if doc.byte_length() > 0:
+        try:
+            _ = parse_xml(doc)
+        except e:
+            raise Error(
+                "the AWS XML body is not a namespace-well-formed document: "
+                + String(e)
+            )
+    req.set_body_text(doc)
 
 
 # -----------------------------------------------------------------------------
@@ -356,16 +451,46 @@ def aws_xml_f64_of(node: XmlNode) raises -> Float64:
     return aws_f64_from_text(_scalar_trimmed(node))
 
 
+# The largest finite Float32, FLT_MAX.
+comptime _F32_MAX = 3.4028234663852886e38
+
+
 def aws_xml_f32_of(node: XmlNode) raises -> Float32:
-    return Float32(aws_f64_from_text(_scalar_trimmed(node)))
+    """A float. Refuses decimal text beyond the Float32 range: it is not
+    read as an infinity ("Infinity" and "-Infinity" are)."""
+    var t = _scalar_trimmed(node)
+    var v = aws_f64_from_text(t)
+    if (
+        t != "Infinity"
+        and t != "-Infinity"
+        and (v > _F32_MAX or v < -_F32_MAX)
+    ):
+        raise Error("an AWS float is beyond the Float32 range")
+    return Float32(v)
 
 
 def aws_xml_blob_of(node: XmlNode) raises -> List[UInt8]:
-    """A blob from its base64 text; an empty element is the empty blob."""
-    var t = _scalar_trimmed(node)
-    if t.byte_length() == 0:
+    """A blob from its base64 text, XML whitespace (SP, TAB, CR, LF)
+    anywhere in it removed first, so wrapped base64 reads; an empty element
+    is the empty blob."""
+    if len(node.children) > 0:
+        raise Error(
+            "the AWS XML scalar <" + node.local + "> holds child elements"
+        )
+    var src = node.text.as_bytes()
+    var kept = List[UInt8]()
+    for i in range(len(src)):
+        var c = src[i]
+        if (
+            c != UInt8(0x20)
+            and c != UInt8(0x09)
+            and c != UInt8(0x0D)
+            and c != UInt8(0x0A)
+        ):
+            kept.append(c)
+    if len(kept) == 0:
         return List[UInt8]()
-    return aws_blob_from_base64(t)
+    return aws_blob_from_base64(String(unsafe_from_utf8=Span(kept)))
 
 
 def aws_xml_ts_of(node: XmlNode, fmt: Int) raises -> Float64:
