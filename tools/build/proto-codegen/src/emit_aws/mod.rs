@@ -1556,7 +1556,10 @@ impl<'a> AwsEmitter<'a> {
         self.line("\"\"\"A non-2xx as an `Error`.");
         self.blank();
         self.line("    ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the");
-        self.line("    parsed short `__type` token and message ride out. A generated client");
+        self.line(&format!(
+            "    {} and message ride out. A generated client",
+            self.binding.error_code_doc()
+        ));
         self.line("    cannot know which of its shapes carry a secret, so the discipline is");
         self.line("    unconditional — the `secrets_manager_client._sm_error` rule, applied");
         self.line("    everywhere because the generator has no way to make the exception.\"\"\"");
@@ -1678,6 +1681,68 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
         out.push(String::new());
     }
     out
+}
+
+// ---------------------------------------------------------------------------
+// The host prefix: protocol-independent, shared by every binding.
+
+impl AwsEmitter<'_> {
+    /// The Mojo expression for an `endpoint.hostPrefix`, substituting each
+    /// `{member}` placeholder with the input's `hostLabel` member. The
+    /// template is the same in every protocol; a binding decides only
+    /// whether its request builder applies it.
+    ///
+    /// ⚠ A HOST LABEL IS A MEMBER, NOT A CONSTANT. `AwsJson11EndpointTraitWithHostLabel`
+    /// declares `hostPrefix: "{foo}.bar."`, and a generator that emitted the
+    /// template verbatim would send a request to the literal host `{foo}.bar.…`
+    /// — a DNS failure naming a brace.
+    pub(super) fn host_prefix_expr(&self, hp: &str, input_fq: &str) -> Result<String, String> {
+        let mut parts: Vec<String> = Vec::new();
+        let mut lit = String::new();
+        let mut rest = hp;
+        while let Some(i) = rest.find('{') {
+            lit.push_str(&rest[..i]);
+            let j = rest[i..].find('}').ok_or_else(|| {
+                format!("emit_aws: unterminated `{{` in hostPrefix `{hp}`")
+            })? + i;
+            let member = &rest[i + 1..j];
+            if !lit.is_empty() {
+                parts.push(format!("String(\"{}\")", escape(&lit)));
+                lit.clear();
+            }
+            let msg = self
+                .messages
+                .values()
+                .find(|m| m.fq_name == input_fq)
+                .ok_or_else(|| format!("emit_aws: no input message {input_fq}"))?;
+            let field = msg
+                .fields
+                .iter()
+                .find(|f| self.wire_name(msg, f) == member)
+                .ok_or_else(|| {
+                    format!(
+                        "emit_aws: hostPrefix `{hp}` names `{{{member}}}`, and the input \
+                         shape `{}` has no such member. A host label that resolves to \
+                         nothing is a request to a host with a literal brace in it.",
+                        msg.name
+                    )
+                })?;
+            parts.push(if self.required(msg, field) {
+                format!("input.{}.copy()", field.name)
+            } else {
+                format!("input.{}.value()", field.name)
+            });
+            rest = &rest[j + 1..];
+        }
+        lit.push_str(rest);
+        if !lit.is_empty() {
+            parts.push(format!("String(\"{}\")", escape(&lit)));
+        }
+        if parts.is_empty() {
+            parts.push("String(\"\")".to_string());
+        }
+        Ok(parts.join(" + "))
+    }
 }
 
 #[cfg(test)]

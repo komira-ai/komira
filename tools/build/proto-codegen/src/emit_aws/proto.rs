@@ -112,6 +112,9 @@ pub(super) trait Binding: Sync {
     /// The Mojo expressions, over `res: HttpResult`, for a failed call's
     /// error code and message.
     fn error_code_and_message(&self) -> (&'static str, &'static str);
+    /// What the error builder's docstring calls the code it extracts, as the
+    /// phrase before "and message ride out".
+    fn error_code_doc(&self) -> &'static str;
 }
 
 static AWS_JSON_CODEC: AwsJsonCodec = AwsJsonCodec;
@@ -179,16 +182,32 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
 /// The `auth` value that names SigV4.
 pub const SIGV4_AUTH: &str = "aws.auth#sigv4";
 
-/// The generated client signs with SigV4 and nothing else, so a model must
-/// say SigV4: `signatureVersion` `v4`, or `s3` (S3's own name for SigV4
-/// with its payload and path rules) when the model's `auth` list also names
-/// [`SIGV4_AUTH`]. Any other value (`v2`, `s3` alone, `bearer`, `v4a`) is
-/// refused by name: a request signed with the wrong scheme is rejected by
-/// the service as a signature mismatch, which points at the credential.
+/// The generated client signs with SigV4 and nothing else, so a model's
+/// SERVICE-LEVEL metadata must say SigV4: `signatureVersion` `v4`, or `s3`
+/// (S3's own name for SigV4 with its payload and path rules). When the
+/// model carries an `auth` list it is the authority — botocore resolves the
+/// signer from `auth` ahead of `signatureVersion` — so a non-empty `auth`
+/// must name [`SIGV4_AUTH`] in both cases, and `s3` needs it unconditionally.
+/// Any other value (`v2`, `s3` alone, `bearer`, `v4a`, or `v4` beside an
+/// `auth` of `sigv4a` only) is refused by name: a request signed with the
+/// wrong scheme is rejected by the service as a signature mismatch, which
+/// points at the credential.
+///
+/// ⚠ This reads the service metadata only. A per-operation `authtype` or
+/// `auth` (an anonymous or bearer operation inside a SigV4 service) is not
+/// checked here, and such an operation is signed with SigV4 like the rest.
 pub fn check_signature_version(meta: &AwsServiceMeta) -> Result<(), String> {
+    let auth_names_sigv4 = meta.auth.iter().any(|a| a == SIGV4_AUTH);
     match meta.signature_version.as_str() {
-        "v4" => Ok(()),
-        "s3" if meta.auth.iter().any(|a| a == SIGV4_AUTH) => Ok(()),
+        "v4" if meta.auth.is_empty() || auth_names_sigv4 => Ok(()),
+        "v4" => Err(format!(
+            "emit_aws: service `{}` declares signatureVersion `v4`, and its `auth` \
+             list {:?} does not name `{SIGV4_AUTH}`. A non-empty `auth` decides the \
+             signer ahead of `signatureVersion`; the generated client signs with \
+             SigV4 and nothing else.",
+            meta.service, meta.auth
+        )),
+        "s3" if auth_names_sigv4 => Ok(()),
         "s3" => Err(format!(
             "emit_aws: service `{}` declares signatureVersion `s3`, and its `auth` \
              list {:?} does not name `{SIGV4_AUTH}`. `s3` is accepted only as SigV4, \
@@ -260,6 +279,21 @@ mod tests {
     fn signature_version_v4_is_accepted() {
         assert!(check_signature_version(&meta("json", None, "v4", &[])).is_ok());
         assert!(check_signature_version(&meta("json", None, "v4", &[SIGV4_AUTH])).is_ok());
+    }
+
+    #[test]
+    fn signature_version_v4_beside_an_auth_without_sigv4_is_refused() {
+        for auth in [&["aws.auth#sigv4a"][..], &["smithy.api#httpBearerAuth"][..]] {
+            let e = check_signature_version(&meta("json", None, "v4", auth))
+                .err()
+                .expect("refused");
+            assert!(e.contains("signatureVersion `v4`"), "{e}");
+            assert!(e.contains(SIGV4_AUTH), "{e}");
+        }
+        assert!(
+            check_signature_version(&meta("json", None, "v4", &["aws.auth#sigv4a", SIGV4_AUTH]))
+                .is_ok()
+        );
     }
 
     #[test]

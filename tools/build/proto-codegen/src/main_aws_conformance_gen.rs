@@ -68,12 +68,34 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     if protocols.is_empty() {
         return Err("at least one --protocol is required".into());
     }
+    for p in &protocols {
+        driver_protocol(p)?;
+    }
     Ok(Args {
         corpus: corpus.ok_or("--corpus is required")?,
         protocols,
         ignore_list: ignore_list.ok_or("--ignore-list is required")?,
         out: out.ok_or("--out is required")?,
     })
+}
+
+/// The protocol `--protocol <p>` drives, refused unless the driver can run it.
+///
+/// ⚠ THE DRIVER ITSELF IS awsJson-SHAPED, whatever the suites are: its `main`
+/// records every actual as a `JsonValue`, and its error cases read the code
+/// and message with `aws_error_code_from_body` / `aws_error_message_from_body`.
+/// Those names come from the json protocol's preamble, so a suite of another
+/// protocol is refused here until the driver stops depending on them, rather
+/// than emitting a driver whose own imports are missing.
+fn driver_protocol(p: &str) -> Result<AwsProtocol, String> {
+    match AwsProtocol::from_botocore(p) {
+        Some(AwsProtocol::Json) => Ok(AwsProtocol::Json),
+        Some(_) => Err(format!(
+            "--protocol `{p}`: the conformance driver records results as JsonValue \
+             and reads errors with the awsJson helpers, so it drives `json` only"
+        )),
+        None => Err(format!("--protocol `{p}` is not a botocore protocol name")),
+    }
 }
 
 fn main() {
@@ -243,7 +265,10 @@ fn run(args: &Args) -> Result<(), String> {
     let mut all_refused = refused.clone();
     all_refused.extend(undriveable.iter().cloned());
     let mut whole = driver_header(&suites, &all_refused, n_cases, n_skipped, &args.protocols);
-    whole.push_str(&pure_preamble(AwsProtocol::Json, true));
+    // Every --protocol was checked by `driver_protocol`, so they share one
+    // preamble: the union of one row set is that set.
+    let protocol = driver_protocol(args.protocols.iter().next().expect("one --protocol"))?;
+    whole.push_str(&pure_preamble(protocol, true));
     whole.push_str(&bodies);
     whole.push_str(&driver_main);
     std::fs::write(&args.out, &whole)
