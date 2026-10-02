@@ -110,6 +110,25 @@ def test_build_system_refusals() raises:
         _bs(exe = String("buck2 --isolation-dir x")) + _art(),
         String("build system 'buck2' executable 'buck2 --isolation-dir x' holds whitespace"),
     )
+    # Every whitespace byte, not only the space: a tab, a newline and a CR
+    # (textproto escapes, decoded by the lexer) are each refused.
+    _expect(
+        _bs(exe = String("buck2\\tx")) + _art(),
+        String("build system 'buck2' executable 'buck2\tx' holds whitespace"),
+    )
+    _expect(
+        _bs(exe = String("buck2\\nx")) + _art(),
+        String("build system 'buck2' executable 'buck2\nx' holds whitespace"),
+    )
+    _expect(
+        _bs(exe = String("buck2\\rx")) + _art(),
+        String("build system 'buck2' executable 'buck2\rx' holds whitespace"),
+    )
+    # An uppercase letter after the first byte is refused too.
+    _expect(
+        _bs(name = String("aB")) + _art(bs = String("aB")),
+        String("build system 'aB' name is not [a-z][a-z0-9_]*"),
+    )
     _expect(
         _bs(exe = String("./buck2")) + _art(),
         String(
@@ -142,6 +161,10 @@ def test_artifact_refusals() raises:
     _expect(
         _bs() + _art(name = String("komira-json")),
         String("artifact 'komira-json' name is not [a-z][a-z0-9_]*"),
+    )
+    _expect(
+        _bs() + _art(name = String("aB")),
+        String("artifact 'aB' name is not [a-z][a-z0-9_]*"),
     )
     _expect(_bs() + _art() + _art(), String("artifact 'a' is declared twice"))
     _expect(_bs() + _art(bs = String("")), String("artifact 'a' names no build_system"))
@@ -212,6 +235,8 @@ def test_name_predicate() raises:
     assert_true(is_valid_declaration_name(String("komira_json")))
     assert_true(is_valid_declaration_name(String("b2")))
     assert_false(is_valid_declaration_name(String("komira-json")))
+    assert_false(is_valid_declaration_name(String("komiraJson")))
+    assert_false(is_valid_declaration_name(String("aB")))
     assert_false(is_valid_declaration_name(String("_x")))
     assert_false(is_valid_declaration_name(String("2b")))
     assert_false(is_valid_declaration_name(String("")))

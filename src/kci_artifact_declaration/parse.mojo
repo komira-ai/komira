@@ -8,18 +8,23 @@
 #   build_systems {
 #     name: "buck2"
 #     executable: "buck2"
+#     args: "build"
 #     args: "--config-file"
 #     args: "/etc/kci/remote.buckconfig"
 #   }
 #   artifacts {
 #     name: "komira_json"
 #     build_system: "buck2"
-#     args: "build"
 #     args: "//src/komira_json:komira_json_conda[release]"
 #     args: "--out"
 #     args: "{out_dir}"
 #     allowed_channels: "public"
 #   }
+#
+# which kci renders as `buck2 build --config-file /etc/kci/remote.buckconfig
+# //src/komira_json:komira_json_conda[release] --out <dir>`. `build` belongs in
+# the build system's args: they come first, and buck2 takes `--config-file`
+# only after the subcommand (`buck2 --config-file P build ...` is refused).
 #
 # Every value is a quoted string (the schema has no enum and no number). A
 # `:` before a `{` is optional, as in textproto; `#` starts a comment.
