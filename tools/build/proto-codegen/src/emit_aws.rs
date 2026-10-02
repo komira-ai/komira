@@ -2293,3 +2293,21 @@ fn wrap(s: &str, width: usize) -> Vec<String> {
     }
     out
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn json_runtime_is_komira_json_in_every_mode() {
+        let rows: Vec<&AwsImport> = AWS_IMPORTS
+            .iter()
+            .filter(|row| row.names.contains(&"JsonValue"))
+            .collect();
+        assert_eq!(rows.len(), 1, "exactly one row imports JsonValue");
+        let row = rows[0];
+        assert_eq!(row.module, "komira_json");
+        assert_eq!(row.names, &["JsonValue", "parse_json_value"]);
+        assert_eq!(row.mode, AwsImportMode::Always);
+    }
+}
