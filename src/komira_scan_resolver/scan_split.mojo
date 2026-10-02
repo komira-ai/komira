@@ -9,8 +9,10 @@
 #
 # A `SplitReader` reads ONE split. It is polled, and every poll answers ROWS (a
 # batch, and the position after it), IDLE (nothing now, the split has not
-# reached its stop) or END (the split reached its stop and is never polled
-# again). The position after any poll is a resume point: reopening the split
+# reached its stop) or END (the split is never polled again: it reached its
+# stop, or a stop the reader enforces, such as a per-split byte budget, ended
+# it short of it). END short of the stop is a CUT: `position` is where the
+# rest of the split starts. The position after any poll is a resume point: reopening the split
 # with `start` set to it reads exactly the rest.
 #
 # A bounded read is the same thing with every split's `stop` set. `drain_scan`
@@ -155,8 +157,10 @@ struct ScanSplit(Copyable, Movable, Deinitable):
     written as a position before reading, so a reader enforces it itself and
     answers END. `drain_scan` reads only splits whose `stop` is set.
 
-    `after` lists split keys that must reach END before this one is opened
-    (a partition created by splitting or merging others reads after them).
+    `after` lists split keys that must reach their stops before this one is
+    opened (a partition created by splitting or merging others reads after
+    them). A split whose reader answered END short of its stop is cut, not
+    finished, and its dependents are not opened.
 
     `est_rows` / `est_bytes` are scheduling hints, -1 when unknown. Nothing
     may depend on them for correctness.
@@ -263,7 +267,8 @@ struct DrainedSplit(Copyable, Movable, Deinitable):
     `position` is the resume point after the last poll of the split, or its
     `start` when the drain never opened it. `cut` is True when the drain
     stopped before the split's stop: the row limit or the byte budget ran out
-    in it or before it. A continuation reads the split from `position`; a
+    in it or before it, its reader answered END short of its stop (a stop the
+    reader enforces), or a split it reads `after` was cut. A continuation reads the split from `position`; a
     split that is not `cut` has nothing left to read.
 
     What `ScanSourceResolver.resolve_drained` receives, one per planned split,
@@ -294,7 +299,9 @@ comptime SPLIT_POLL_IDLE: UInt8 = 1
 """Nothing to read now, and the split has not reached its stop. Poll again
 later; `position` is unchanged."""
 comptime SPLIT_POLL_END: UInt8 = 2
-"""The split reached its stop. Never polled again."""
+"""Never polled again: the split reached its stop, or a stop the reader
+enforces (a per-split byte budget) ended it short of it. `position` is where
+the rest of the split starts, so END short of the stop is a cut."""
 
 
 struct SplitPoll(Movable, Deinitable):
