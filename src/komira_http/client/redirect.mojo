@@ -22,6 +22,7 @@
 #       - Authorization
 #       - Cookie / Set-Cookie
 #       - Proxy-Authorization
+#       - X-Amz-Security-Token / X-Goog-Api-Key / X-Goog-User-Project
 #       - WWW-Authenticate (mirror)
 #   * Loop detection: if a URL is seen twice in one chain → raise.
 #   * max_redirects exceeded → raise HttpError.
@@ -68,6 +69,10 @@ comptime _SENSITIVE_HEADER_COOKIE: String = "Cookie"
 comptime _SENSITIVE_HEADER_SET_COOKIE: String = "Set-Cookie"
 comptime _SENSITIVE_HEADER_PROXY_AUTHORIZATION: String = "Proxy-Authorization"
 comptime _SENSITIVE_HEADER_WWW_AUTHENTICATE: String = "WWW-Authenticate"
+# Cloud credentials that ride in a header rather than `Authorization`.
+comptime _SENSITIVE_HEADER_AMZ_SECURITY_TOKEN: String = "X-Amz-Security-Token"
+comptime _SENSITIVE_HEADER_GOOG_API_KEY: String = "X-Goog-Api-Key"
+comptime _SENSITIVE_HEADER_GOOG_USER_PROJECT: String = "X-Goog-User-Project"
 
 
 def _strip_sensitive_headers(mut headers: HeaderMap):
@@ -78,6 +83,9 @@ def _strip_sensitive_headers(mut headers: HeaderMap):
     headers.remove(_SENSITIVE_HEADER_SET_COOKIE)
     headers.remove(_SENSITIVE_HEADER_PROXY_AUTHORIZATION)
     headers.remove(_SENSITIVE_HEADER_WWW_AUTHENTICATE)
+    headers.remove(_SENSITIVE_HEADER_AMZ_SECURITY_TOKEN)
+    headers.remove(_SENSITIVE_HEADER_GOOG_API_KEY)
+    headers.remove(_SENSITIVE_HEADER_GOOG_USER_PROJECT)
 
 
 # =============================================================================
@@ -134,6 +142,18 @@ def _extract_location(ref headers: HeaderMap) raises -> Url:
 # =============================================================================
 # §5 — Url ↔ String canonicalization.
 # =============================================================================
+
+
+def _url_redacted(ref u: Url) -> String:
+    """`scheme://host[:port]/path` only, for error text: no userinfo and no
+    query, because a presigned `Location` carries its signature in the query
+    and an error message ends up in logs."""
+    var out = String(u.scheme) + String("://") + String(u.host)
+    var port_val = u.effective_port()
+    var default_port: UInt16 = UInt16(443) if u.is_https() else UInt16(80)
+    if port_val != default_port:
+        out = out + String(":") + String(Int(port_val))
+    return out + String(u.path)
 
 
 def _url_string(ref u: Url) -> String:
@@ -325,6 +345,15 @@ struct RedirectLayer[Inner: HttpService](
             var new_url = _extract_location(resp.headers)
             var new_url_str = _url_string(new_url)
 
+            # Never follow an https -> http downgrade: a 307/308 would replay
+            # the request (body included) in cleartext.
+            if prev_url.is_https() and not new_url.is_https():
+                raise Error(
+                    "HttpError[PROTOCOL_STATUS]: redirect from https to "
+                    "http refused (scheme downgrade) to "
+                    + _url_redacted(new_url)
+                )
+
             # Loop detection.
             var seen_n = seen_urls.__len__()
             var seen_i = 0
@@ -332,7 +361,7 @@ struct RedirectLayer[Inner: HttpService](
                 if seen_urls[seen_i] == new_url_str:
                     raise Error(
                         "HttpError[PROTOCOL_STATUS]: redirect loop "
-                        "detected at " + new_url_str
+                        "detected at " + _url_redacted(new_url)
                     )
                 seen_i = seen_i + 1
             seen_urls.append(new_url_str)

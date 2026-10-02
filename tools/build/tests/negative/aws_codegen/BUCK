@@ -1,0 +1,30 @@
+load("//functional/aws_codegen:defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
+
+# Planted defects for tests//functional/aws_codegen; each must fail its build
+# (run_tests.sh, test 34).
+
+_LOGS = [
+    "--model-sha256",
+    "24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2",
+    "--service",
+    "logs",
+    "--operations",
+    "GetLogEvents",
+]
+
+# The pure module compared with the client golden: the comparison goes red.
+aws_codegen_golden(
+    name = "golden_differs",
+    gen_args = _LOGS + ["--pure-only"],
+    golden = "//functional/aws_codegen:logs_client_golden",
+    model = "//functional/aws_codegen:logs_model",
+    module = "komira_aws_logs",
+)
+
+# A refusal check over inputs the generator accepts goes red.
+aws_codegen_refusal(
+    name = "accepted",
+    expect = "anything",
+    gen_args = _LOGS,
+    model = "//functional/aws_codegen:logs_model",
+)
