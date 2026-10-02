@@ -12,6 +12,8 @@
 #   --expect-set-hash <64 hex>   the set hash that was approved
 #   [--claim-new-name <name>]    a name this run may claim for the first
 #                                time (repeat for several)
+#   [--concurrency <n>]          how many members upload at once, 1..16
+#                                (default 4); never changes the outcome
 #   --report <file>              where the JSON report is written
 #   [--require-environment <name>]  OIDC only: the job's `environment` claim
 #   [--dry-run]                  steps 0 and 1 only: reads, no write
@@ -20,15 +22,15 @@
 # A value may follow its flag as the next argument or after `=`. Every flag
 # not in brackets is required, and a missing one is refused naming the flag.
 # A flag given twice (other than `--claim-new-name`), a claim given twice, an
-# unknown flag, an EMPTY value, a positional argument and an
-# `--expect-set-hash` that is not 64 lowercase hex are each refused too.
+# unknown flag, an EMPTY value, a positional argument, an `--expect-set-hash`
+# that is not 64 lowercase hex and a `--concurrency` that is not a decimal
+# integer in 1..16 are each refused too.
 # Every refusal here is exit 2, before any file is read or any request sent.
 #
 # GONE: `--credential` (the channel's repository declares its credential, and
 # nothing on the command line may override it) and `--approved-names` (the
 # names an upload may claim are the ones the channel already holds plus
-# `--claim-new-name`). Both are now unknown flags. There is no
-# `--concurrency` (see `run.mojo`'s header: uploads are sequential).
+# `--claim-new-name`). Both are now unknown flags.
 #
 # ⛔ NO SECRET IN ARGV: no flag takes a token.
 #
@@ -38,13 +40,15 @@
 from kci_pkg_upload.identity import ascii_lower
 
 from .verify import is_lower_hex_64
+from .workers import DEFAULT_CONCURRENCY, MAX_CONCURRENCY, MIN_CONCURRENCY
 
 
 comptime PUBLISH_USAGE: String = (
     "usage: kci publish --declarations <file> --artifacts <release dir>"
     " --channels <file> --channel <name> --release-version <file>"
     " --expect-set-hash <64 hex> [--claim-new-name <name> ...]"
-    " --report <file> [--require-environment <name>] [--dry-run]"
+    " [--concurrency <n>] --report <file> [--require-environment <name>]"
+    " [--dry-run]"
 )
 
 
@@ -61,6 +65,7 @@ struct PublishFlags(Copyable, Movable):
     var release_version_file: String
     var expect_set_hash: String
     var claims: List[String]
+    var concurrency: Int
     var report_file: String
     var require_environment: String
     var dry_run: Bool
@@ -74,6 +79,7 @@ struct PublishFlags(Copyable, Movable):
         self.release_version_file = String("")
         self.expect_set_hash = String("")
         self.claims = List[String]()
+        self.concurrency = DEFAULT_CONCURRENCY
         self.report_file = String("")
         self.require_environment = String("")
         self.dry_run = False
@@ -93,6 +99,7 @@ def _value_flags() -> List[String]:
     f.append(String("--release-version"))
     f.append(String("--expect-set-hash"))
     f.append(String("--claim-new-name"))
+    f.append(String("--concurrency"))
     f.append(String("--report"))
     f.append(String("--require-environment"))
     return f^
@@ -104,12 +111,36 @@ def _set_once(mut slot: String, name: String, var value: String) raises:
     slot = value^
 
 
+def _concurrency(value: String) raises -> Int:
+    """A decimal integer in MIN_CONCURRENCY..MAX_CONCURRENCY, digits only."""
+    var b = value.as_bytes()
+    var n = 0
+    var ok = len(b) > 0 and len(b) <= 3
+    for k in range(len(b)):
+        if b[k] < UInt8(48) or b[k] > UInt8(57):
+            ok = False
+            break
+        n = n * 10 + Int(b[k] - UInt8(48))
+    if not ok or n < MIN_CONCURRENCY or n > MAX_CONCURRENCY:
+        _refuse(
+            String("--concurrency must be a whole number from ")
+            + String(MIN_CONCURRENCY)
+            + String(" to ")
+            + String(MAX_CONCURRENCY)
+            + String("; got '")
+            + value
+            + String("'")
+        )
+    return n
+
+
 def parse_publish_flags(args: List[String]) raises -> PublishFlags:
     """Parse `args` (the arguments AFTER the program or verb name). RAISES
     on every refusal in the file header, with the usage line appended."""
     var flags = PublishFlags()
     var known = _value_flags()
     var dry_run_seen = False
+    var concurrency_seen = False
     var i = 0
     while i < len(args):
         var a = args[i].copy()
@@ -171,6 +202,11 @@ def parse_publish_flags(args: List[String]) raises -> PublishFlags:
                 if ascii_lower(flags.claims[k]) == ascii_lower(value):
                     _refuse(String("--claim-new-name '") + value + String("' is given twice"))
             flags.claims.append(value^)
+        elif name == "--concurrency":
+            if concurrency_seen:
+                _refuse(String("--concurrency is given twice"))
+            concurrency_seen = True
+            flags.concurrency = _concurrency(value)
         elif name == "--report":
             _set_once(flags.report_file, name, value^)
         else:

@@ -9,7 +9,8 @@ requirement closure, and the set hash against `--expect-set-hash`. Step 1 reads
 the channel by DOWNLOAD (other bytes under one of our file names stops the run;
 a name the channel has never held must be claimed). Steps 2 to 4 upload the
 members still missing, read every member back, and only then publish the
-metapackage. Step 6 writes one JSON report; the exit code says which verdict.
+metapackage; the missing members upload on up to `--concurrency` worker
+threads. Step 6 writes one JSON report; the exit code says which verdict.
 
   * flags.mojo            `parse_publish_flags` -> `PublishFlags`
   * release_version.mojo  the `--release-version` file
@@ -17,13 +18,14 @@ metapackage. Step 6 writes one JSON report; the exit code says which verdict.
   * verify.mojo           lockstep, closure, set hash (0.3 to 0.5)
   * plan.mojo             targets, file states, step 1's verdict, claims
   * channel_state.mojo    step 1's reads (by download; name listings)
-  * upload.mojo           the channel credential, steps 2 to 4
+  * upload.mojo           the channel credential, steps 2 to 4, the workers
+  * workers.mojo          what one more worker needs: transport, sleeper
   * index.mojo            step 5, report-only
   * report.mojo           the report and the exit codes
   * run.mojo              `run_publish`: steps 1 to 6
   * cli.mojo              `publish_main` and `publish_flow`
   * scripted_channel.mojo `ScriptedChannel`, an in-memory channel (tests)
-  * pause.mojo            `UsleepSleeper`
+  * pause.mojo            `UsleepSleeper`, `NoWaitSleeper` (tests)
 
 This package names no channel, account or organisation: all of that comes from
 the files and flags it is given.
@@ -51,11 +53,21 @@ from .plan import (
     FileState,
     PublishTarget,
     approved_names_for,
+    holds_only_ours,
+    is_held,
     plan_from_state,
     resolve_targets,
 )
 from .channel_state import read_channel, read_file_state
-from .upload import PublishCredential, RunOptions
+from .upload import PublishCredential, RunOptions, upload_members
+from .workers import (
+    DEFAULT_CONCURRENCY,
+    MAX_CONCURRENCY,
+    MIN_CONCURRENCY,
+    ChannelTransport,
+    HttpChannelTransport,
+    WorkerSleeper,
+)
 from .report import (
     EXIT_ALREADY_PUBLISHED,
     EXIT_CANNOT_TELL,
@@ -72,5 +84,5 @@ from .report import (
 )
 from .run import run_publish
 from .scripted_channel import ScriptedChannel
-from .pause import UsleepSleeper
+from .pause import NoWaitSleeper, UsleepSleeper
 from .cli import NoSecretStore, publish_flow, publish_main, publish_main_with_store

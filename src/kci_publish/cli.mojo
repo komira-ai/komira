@@ -44,7 +44,6 @@ from std.pathlib import Path
 
 from komira_http.client.tls_connector import TlsConnector, build_public_ca_tls_connector
 from komira_http.transport.kernel_tcp import KernelTcpConnector
-from komira_retry import Sleeper
 from komira_secret_store import SecretStore, SecretValue
 
 from kci_artifact_declaration import read_artifact_declarations
@@ -52,7 +51,6 @@ from kci_pkg_upload import (
     SURFACE_PREFIX_DEV,
     AnonymousCredential,
     GithubOidcCredential,
-    HttpPkgTransport,
     PkgTransport,
     RegistrySet,
     StaticTokenCredential,
@@ -82,6 +80,7 @@ from .report import (
 )
 from .run import run_publish
 from .upload import PublishCredential, RunOptions
+from .workers import ChannelTransport, HttpChannelTransport, WorkerSleeper
 from .verify import (
     require_closure,
     require_conda_only,
@@ -174,14 +173,17 @@ def _refused(var p_report: PublishReport, code: Int, why: String) -> PublishRepo
     return r^
 
 
-def _flow[T: PkgTransport, U: PkgTransport, S: SecretStore, W: Sleeper](
+def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper](
     flags: PublishFlags,
     mut registry: RegistrySet[T, PublishCredential],
     var oidc_t: U,
     mut store: S,
-    opts: RunOptions,
+    run_opts: RunOptions,
     mut sleeper: W,
 ) -> PublishReport:
+    # --concurrency is the flag's, always (validated to 1..16 by the parser).
+    var opts = run_opts.copy()
+    opts.concurrency = flags.concurrency
     var p: PreparedRelease
     try:
         p = prepare_release(flags)
@@ -260,7 +262,7 @@ def _flow[T: PkgTransport, U: PkgTransport, S: SecretStore, W: Sleeper](
         return _refused(base^, EXIT_FAILED, String("kci publish: the channel's credential: ") + String(e))
 
 
-def publish_flow[T: PkgTransport, U: PkgTransport, S: SecretStore, W: Sleeper](
+def publish_flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper](
     flags: PublishFlags,
     mut registry: RegistrySet[T, PublishCredential],
     var oidc_t: U,
@@ -285,7 +287,7 @@ def publish_flow[T: PkgTransport, U: PkgTransport, S: SecretStore, W: Sleeper](
 
 
 comptime _Conn = TlsConnector[KernelTcpConnector]
-comptime _Http = HttpPkgTransport[_Conn]
+comptime _Http = HttpChannelTransport[_Conn]
 
 
 def _mk_connector(host: String) -> _Conn:

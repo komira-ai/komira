@@ -10,31 +10,25 @@
 #      request, and the channel's credential is never asked for a write
 #      value (no OIDC exchange);
 #   2. the write credential is resolved ONCE (`PublishCredential.arm`), then
-#      each member still absent is uploaded (`upload.mojo`); the first member
-#      that does not end present-same stops the run;
-#   3. EVERY member is downloaded back and compared;
+#      every member still absent is uploaded by up to `--concurrency` workers
+#      (`upload.mojo`, `upload_members`). EVERY such member is attempted; when
+#      any of them does not end present-same the run stops after all of them
+#      returned, with the worst outcome's exit code (7 over 4 over 9 over 5),
+#      and the metapackage is not attempted;
+#   3. the barrier: when every worker has returned, EVERY member is
+#      downloaded back and compared;
 #   4. only then the metapackage, uploaded (or found present-same) and read
 #      back;
 #   5. report-only: is each file in its subdir's repodata yet (`index.mojo`);
 #   6. the report (`report.mojo`).
 #
-# ⚠ NOT CONCURRENT, DELIBERATELY (a stated deviation from the design, which
-# asks for up to N workers on komira_async, each with its own registry set).
-# komira_async's fork-join (`parallel_fork_join`) runs a `ChunkWork` whose
-# `process` takes an immutable `self` and recovers its typed input and output
-# by bitcast, and every `HttpPkgTransport` exchange builds its own
-# `BlockingRuntime`; running those inside the dispatcher's worker threads is
-# unmeasured. A publish uploads a handful of files, so the members go one
-# after another on the calling thread, which is the design's
-# `--concurrency 1` path, and there is no `--concurrency` flag that would
-# claim more. Every per-file rule (settle, bounded retry, read-back barrier,
-# metapackage last) is independent of the thread count.
+# `--concurrency 1` and `--concurrency 4` end in the same channel state and
+# the same report: which thread uploads a member never changes what happens
+# to it (each member has its own retries, its own settle, its own slot).
 #
 # Encapsulation: owned values; the registry set and the credential source are
 # borrowed `mut`. No pointer, no wildcard origin.
 # =============================================================================
-
-from komira_retry import Sleeper
 
 from kci_pkg_upload import (
     SURFACE_PREFIX_DEV,
@@ -82,8 +76,10 @@ from .upload import (
     PublishCredential,
     RunOptions,
     upload_file,
+    upload_members,
     read_back_all,
 )
+from .workers import ChannelTransport, WorkerSleeper
 
 
 def _exit_of_verdict(verdict: Int) -> Int:
@@ -110,6 +106,21 @@ def _exit_of_file(result: Int) -> Int:
     return EXIT_PUBLISHED
 
 
+def _step_two_rank(code: Int) -> Int:
+    """Step 2's precedence when several members did not end present-same:
+    other bytes (a person's decision) over a definitive refusal over a
+    member still missing over one that could not be read."""
+    if code == EXIT_STOP_DIFFERENT_BYTES:
+        return 4
+    if code == EXIT_FAILED:
+        return 3
+    if code == EXIT_PARTIAL:
+        return 2
+    if code == EXIT_CANNOT_TELL:
+        return 1
+    return 0
+
+
 def _read_back_rank(code: Int) -> Int:
     """Step 3's precedence: a mismatch over a missing member over an
     unreadable one."""
@@ -128,7 +139,7 @@ def _record(mut r: PublishReport, i: Int, o: FileOutcome):
     r.lines.append(o.line.copy())
 
 
-def run_publish[T: PkgTransport, S: RegistryCredential, W: Sleeper](
+def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     targets: List[PublishTarget],
     claims: List[String],
     mut registry: RegistrySet[T, PublishCredential],
@@ -187,6 +198,7 @@ def run_publish[T: PkgTransport, S: RegistryCredential, W: Sleeper](
             var host = repo_host(targets[0].coordinate.repo)
             var auth = source.authorization(SURFACE_PREFIX_DEV, host)
             registry.credential().arm(auth^)
+        var jobs = List[Int]()
         for i in range(len(targets)):
             if targets[i].is_metapackage:
                 continue
@@ -194,16 +206,23 @@ def run_publish[T: PkgTransport, S: RegistryCredential, W: Sleeper](
                 r.files[i].action = String("skipped")
                 r.lines.append(String("SKIPPED ") + targets[i].where() + String(" -- already present, identical"))
                 continue
-            var o = upload_file(registry, targets[i], names, opts, sleeper)
-            _record(r, i, o)
-            if o.result != FILE_DONE:
-                r.exit_code = _exit_of_file(o.result)
-                for j in range(i + 1, len(targets)):
-                    if channel_read.states[j].kind == STATE_ABSENT:
-                        r.files[j].action = String("not-attempted")
-                        r.lines.append(String("NOT-ATTEMPTED ") + targets[j].where())
-                r.finish_line()
-                return r^
+            jobs.append(i)
+        var outcomes = upload_members(registry, targets, jobs, names, opts, sleeper)
+        var step_two = EXIT_PUBLISHED
+        for k in range(len(jobs)):
+            _record(r, jobs[k], outcomes[k])
+            if outcomes[k].result != FILE_DONE:
+                var code = _exit_of_file(outcomes[k].result)
+                if _step_two_rank(code) > _step_two_rank(step_two):
+                    step_two = code
+        if step_two != EXIT_PUBLISHED:
+            for i in range(len(targets)):
+                if targets[i].is_metapackage:
+                    r.files[i].action = String("not-attempted")
+                    r.lines.append(String("NOT-ATTEMPTED ") + targets[i].where() + String(" -- the metapackage is published only after every member reads back"))
+            r.exit_code = step_two
+            r.finish_line()
+            return r^
         # ── step 3 ───────────────────────────────────────────────────────────
         var back = read_back_all(registry, targets)
         var worst = EXIT_PUBLISHED

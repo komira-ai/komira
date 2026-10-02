@@ -14,8 +14,11 @@
 #
 # NAMES come from the repodata listings (`kci_pkg_upload`'s
 # `RegistrySet.package_names`) of every subdir the set publishes to and of
-# `noarch`. A listing that was not read leaves `names_read` False, and the
-# run cannot tell which names are new: it is never read as "no names".
+# `noarch`, with every file each one lists. A listing that was not read
+# leaves `names_read` False, and the run cannot tell which names are new: it
+# is never read as "no names". The listings are NOT the only evidence that a
+# name is held: `plan.mojo`'s `is_held` also counts a set file that the
+# download found present, since the listing can lag it.
 #
 # Encapsulation: owned values; the registry set is borrowed `mut` for the
 # call. No pointer, no wildcard origin.
@@ -102,10 +105,13 @@ def read_channel[T: PkgTransport, C: RegistryCredential](
             for k in range(len(listing.names)):
                 if not out.holds_name(listing.names[k]):
                     out.names.append(listing.names[k].copy())
+            for k in range(len(listing.files)):
+                out.listed_files.append(subdirs[s] + String("/") + listing.files[k])
         except e:
             details.append(subdirs[s] + String(": ") + String(e))
     if len(details) > 0:
         out.names_read = False
         out.names = List[String]()
+        out.listed_files = List[String]()
         out.names_detail = String("; ").join(details)
     return out^

@@ -24,14 +24,37 @@
 # planned an upload stores and answers 201), per fetch (`fail_fetch_once`;
 # `other_bytes_on_fetch`, the n-th fetch of a file serves other bytes), and
 # per subdir listing (`fail_listing`, every time). Every request is
-# recorded verbatim, in order.
+# recorded verbatim, in order, with the thread that sent it.
 #
-# Layout: owned lists. No pointer field.
+# A LAGGING INDEX (`lag_index`): from then on a stored file is served by
+# download but left out of `repodata.json` until `catch_up_index`, which is
+# the channel state the contract's "repodata may lag" is about. `put_unlisted`
+# stores one such file directly.
+#
+# ONE CHANNEL, SEVERAL WORKERS. `run_publish` uploads members from several
+# threads, each with its own transport (`for_worker`). Every handle of one
+# channel shares ONE server behind an `ArcPointer` (true shared ownership:
+# the run's own handle and each worker's), and `exchange` runs under the
+# server's spin lock, so concurrent requests are serialised and recorded in
+# the order they were served. The inspection methods read without the lock:
+# call them only when no worker is running (after `run_publish` returned).
+# `rendezvous_uploads(n)` makes each of the first `n` uploads wait (outside
+# the lock, bounded) until all `n` have arrived, which only concurrent
+# workers can satisfy; `missed_rendezvous` counts the waits that ran out.
+#
+# Layout: one `ArcPointer` to the shared server; the server holds owned lists
+# and two atomics. No raw pointer, no wildcard origin.
 # =============================================================================
 
+from std.ffi import external_call
+from std.memory import ArcPointer
+
+from komira_atomic_alias import AtomicI64, AtomicU8
 from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 
 from kci_pkg_upload import PkgRequest, PkgResponse, PkgTransport, content_identity_of
+
+from .workers import ChannelTransport
 
 
 comptime UPLOAD_STORE: Int = 0
@@ -86,8 +109,11 @@ def _slice_text(b: List[UInt8], start: Int, end: Int) -> String:
     return s^
 
 
-struct ScriptedChannel(PkgTransport, Movable):
-    """See the file header."""
+struct _ChannelServer(Movable):
+    """The one server every `ScriptedChannel` handle of a channel shares.
+    Reached only through `ScriptedChannel`.
+
+    Layout: owned lists, Ints and two atomics. No pointer field."""
 
     var _host: String
     var _channel: String
@@ -103,7 +129,14 @@ struct ScriptedChannel(PkgTransport, Movable):
     var _swap_paths: List[String]
     var _swap_nth: List[Int]
     var _calls: List[PkgRequest]
-    var force_requests: Int
+    var _call_threads: List[UInt64]
+    var _unlisted: List[String]
+    var _lagging: Bool
+    var _force_requests: Int
+    var _lock: AtomicU8
+    var _arrivals: AtomicI64
+    var _rendezvous: Int
+    var _missed: AtomicI64
 
     def __init__(out self, var host: String, var channel: String, var upload_subdir: String):
         self._host = host^
@@ -120,7 +153,14 @@ struct ScriptedChannel(PkgTransport, Movable):
         self._swap_paths = List[String]()
         self._swap_nth = List[Int]()
         self._calls = List[PkgRequest]()
-        self.force_requests = 0
+        self._call_threads = List[UInt64]()
+        self._unlisted = List[String]()
+        self._lagging = False
+        self._force_requests = 0
+        self._lock = AtomicU8(UInt8(0))
+        self._arrivals = AtomicI64(Int64(0))
+        self._rendezvous = 0
+        self._missed = AtomicI64(Int64(0))
 
     # ── setup ────────────────────────────────────────────────────────────────
     def put(mut self, subdir: String, file: String, var data: List[UInt8]):
@@ -227,7 +267,7 @@ struct ScriptedChannel(PkgTransport, Movable):
         var prefix = subdir + String("/")
         var conda = String("")
         for i in range(len(self._paths)):
-            if self._paths[i].startswith(prefix):
+            if self._paths[i].startswith(prefix) and not self._is_unlisted(self._paths[i]):
                 if conda.byte_length() > 0:
                     conda += String(",")
                 var file = String(self._paths[i][byte = prefix.byte_length() :])
@@ -264,6 +304,19 @@ struct ScriptedChannel(PkgTransport, Movable):
         )
         return r^
 
+    def _is_unlisted(self, p: String) -> Bool:
+        for i in range(len(self._unlisted)):
+            if self._unlisted[i] == p:
+                return True
+        return False
+
+    def _store(mut self, var p: String, var data: List[UInt8]):
+        """Store an upload; while the index lags it is not listed yet."""
+        if self._lagging:
+            self._unlisted.append(p.copy())
+        self._paths.append(p^)
+        self._blobs.append(data^)
+
     def _says_force(self, req: PkgRequest) -> Bool:
         if req.path.find(String("force")) >= 0:
             return True
@@ -277,12 +330,14 @@ struct ScriptedChannel(PkgTransport, Movable):
                 return True
         return False
 
-    def exchange(mut self, req: PkgRequest) raises -> PkgResponse:
+    def serve(mut self, req: PkgRequest, thread: UInt64) raises -> PkgResponse:
+        """One request, under the caller's lock (see `ScriptedChannel`)."""
         self._calls.append(req.copy())
+        self._call_threads.append(thread)
         if req.host != self._host:
             raise Error(String("ScriptedChannel: a request to an unexpected host '") + req.host + String("'"))
         if self._says_force(req):
-            self.force_requests += 1
+            self._force_requests += 1
             return PkgResponse(400)
         if req.method == HTTP_METHOD_GET:
             var root = String("/") + self._channel + String("/")
@@ -348,18 +403,179 @@ struct ScriptedChannel(PkgTransport, Movable):
             return PkgResponse(403)
         if kind == UPLOAD_STORE_OTHER_BYTES:
             if self._index(p) < 0:
-                self._paths.append(p^)
-                self._blobs.append(_bytes(String("someone else's bytes")))
+                self._store(p^, _bytes(String("someone else's bytes")))
             return PkgResponse(409)
         if kind == UPLOAD_STORE_ANSWER_409:
             if self._index(p) < 0:
-                self._paths.append(p^)
-                self._blobs.append(data^)
+                self._store(p^, data^)
             return PkgResponse(409)
         if self._index(p) >= 0:
             return PkgResponse(409)
-        self._paths.append(p^)
-        self._blobs.append(data^)
+        self._store(p^, data^)
         if kind == UPLOAD_STORE_LOSE_ANSWER:
             raise Error("ScriptedChannel: connection reset after the bytes were stored")
         return PkgResponse(201)
+
+
+def _thread_id() -> UInt64:
+    """The calling thread's pthread identity (an opaque number)."""
+    return external_call["pthread_self", UInt64]()
+
+
+comptime _RENDEZVOUS_POLLS: Int = 2000
+"""How many 1 ms polls one of the first `rendezvous_uploads(n)` uploads
+waits for the others before it gives up and counts a miss (2 s)."""
+
+
+struct ScriptedChannel(ChannelTransport, Movable):
+    """See the file header: a handle of a shared in-memory channel.
+
+    Layout: one `ArcPointer[_ChannelServer]`. No raw pointer field."""
+
+    # SAFETY: shared ownership is the point -- the run's handle and every
+    # worker's handle serve one channel. Mutation goes through `exchange`
+    # (under the server's lock) or a setup method (before any worker runs).
+    var _s: ArcPointer[_ChannelServer]
+
+    def __init__(out self, var host: String, var channel: String, var upload_subdir: String):
+        self._s = ArcPointer[_ChannelServer](_ChannelServer(host^, channel^, upload_subdir^))
+
+    def __init__(out self, *, share: ArcPointer[_ChannelServer]):
+        self._s = ArcPointer[_ChannelServer](copy=share)
+
+    def for_worker(mut self) raises -> Self:
+        """Another handle of the SAME channel, for one more worker."""
+        return ScriptedChannel(share=self._s)
+
+    # ── setup (before the run) ──────────────────────────────────────────────
+    def put(mut self, subdir: String, file: String, var data: List[UInt8]):
+        """Store `data` as `<subdir>/<file>` (replacing: setup, not upload)."""
+        self._s[].put(subdir, file, data^)
+
+    def put_unlisted(mut self, subdir: String, file: String, var data: List[UInt8]):
+        """Store `data` as `<subdir>/<file>`, served by download but not yet
+        in the repodata (an index that has not caught up)."""
+        self._s[].put(subdir, file, data^)
+        self._s[]._unlisted.append(subdir + String("/") + file)
+
+    def lag_index(mut self):
+        """From now on an upload is stored and served, but not listed."""
+        self._s[]._lagging = True
+
+    def catch_up_index(mut self):
+        """List every stored file; uploads are listed at once again."""
+        self._s[]._lagging = False
+        self._s[]._unlisted = List[String]()
+
+    def list_without_file(mut self, subdir: String, file: String, var sha256_hex: String):
+        """List `<subdir>/<file>` in the repodata with no file behind it."""
+        self._s[].list_without_file(subdir, file, sha256_hex^)
+
+    def plan_upload(mut self, var file: String, kind: Int):
+        """The next upload of `file` behaves as `kind` (FIFO per file)."""
+        self._s[].plan_upload(file^, kind)
+
+    def fail_fetch_once(mut self, subdir: String, file: String):
+        self._s[].fail_fetch_once(subdir, file)
+
+    def other_bytes_on_fetch(mut self, subdir: String, file: String, nth: Int):
+        """The `nth` (1-based) GET of `<subdir>/<file>` serves other bytes."""
+        self._s[].other_bytes_on_fetch(subdir, file, nth)
+
+    def fail_listing(mut self, var subdir: String):
+        self._s[].fail_listing(subdir^)
+
+    def rendezvous_uploads(mut self, n: Int):
+        """Each of the next `n` uploads waits until all `n` have arrived."""
+        self._s[]._rendezvous = n
+        self._s[]._arrivals = AtomicI64(Int64(0))
+
+    # ── inspection (only when no worker is running) ─────────────────────────
+    def holds(self, subdir: String, file: String) -> Bool:
+        return self._s[].holds(subdir, file)
+
+    def call_count(self) -> Int:
+        return self._s[].call_count()
+
+    def call(self, i: Int) -> PkgRequest:
+        return self._s[].call(i)
+
+    def call_thread(self, i: Int) -> UInt64:
+        """The thread that sent request `i`."""
+        return self._s[]._call_threads[i]
+
+    def upload_count(self, file: String) -> Int:
+        """How many upload requests named `file`."""
+        return self._s[].upload_count(file)
+
+    def last_upload_call(self, file: String) -> Int:
+        """The index of the last upload request naming `file`, or -1."""
+        return self._s[].last_upload_call(file)
+
+    def first_upload_call(self, file: String) -> Int:
+        return self._s[].first_upload_call(file)
+
+    def last_fetch_call(self, subdir: String, file: String) -> Int:
+        return self._s[].last_fetch_call(subdir, file)
+
+    def write_count(self) -> Int:
+        return self._s[].write_count()
+
+    def force_request_count(self) -> Int:
+        """How many requests said `force` (each answered 400)."""
+        return self._s[]._force_requests
+
+    def missed_rendezvous(self) -> Int:
+        return Int(self._s[]._missed.load())
+
+    def stored_paths(self) -> List[String]:
+        """Every stored `<subdir>/<file>`, sorted bytewise."""
+        var out = List[String]()
+        for i in range(len(self._s[]._paths)):
+            var p = self._s[]._paths[i].copy()
+            var at = len(out)
+            for k in range(len(out)):
+                if p < out[k]:
+                    at = k
+                    break
+            out.insert(at, p^)
+        return out^
+
+    # ── the server ──────────────────────────────────────────────────────────
+    def _wait_for_rendezvous(mut self, req: PkgRequest):
+        """Outside the lock: one of the first `n` uploads waits for the rest."""
+        if req.method != HTTP_METHOD_POST or self._s[]._rendezvous <= 0:
+            return
+        var arrived = Int(self._s[]._arrivals.fetch_add(Int64(1))) + 1
+        if arrived > self._s[]._rendezvous:
+            return
+        for _ in range(_RENDEZVOUS_POLLS):
+            if Int(self._s[]._arrivals.load()) >= self._s[]._rendezvous:
+                return
+            # `usleep`, not `std.time.sleep`: see pause.mojo's header.
+            _ = external_call["usleep", Int32](UInt32(1000))
+        _ = self._s[]._missed.fetch_add(Int64(1))
+
+    def _acquire(mut self):
+        # SAFETY: a test-and-set spin lock over the shared server; every
+        # critical section is one in-memory request.
+        while True:
+            var expected = UInt8(0)
+            if self._s[]._lock.compare_exchange(expected, UInt8(1)):
+                return
+
+    def _release(mut self):
+        var expected = UInt8(1)
+        _ = self._s[]._lock.compare_exchange(expected, UInt8(0))
+
+    def exchange(mut self, req: PkgRequest) raises -> PkgResponse:
+        self._wait_for_rendezvous(req)
+        var me = _thread_id()
+        self._acquire()
+        try:
+            var r = self._s[].serve(req, me)
+            self._release()
+            return r^
+        except e:
+            self._release()
+            raise e^

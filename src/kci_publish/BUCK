@@ -6,8 +6,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # ran, then lockstep, the requirement closure and the set hash, before any
 # request. The channel is read by download; a file present with other bytes, an
 # unclaimed new name, or a listing that could not be read stops the run with
-# nothing written. Then the missing members are uploaded (never with `force`),
-# every member is read back, and the metapackage goes last. The credential is
+# nothing written. Then the missing members are uploaded by up to
+# `--concurrency` worker threads (komira_fork_join; never with `force`), every
+# member is read back, and the metapackage goes last. The credential is
 # the channel's own (kci_release_channel), resolved once. One JSON report.
 # Nothing here names a channel, an account or an organisation.
 #
@@ -24,6 +25,8 @@ mojo_library(
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_release_channel:kci_release_channel",
         "//src/kci_release_set:kci_release_set",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http:komira_http",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
@@ -42,7 +45,8 @@ mojo_library(
         "tests/test_publish_set_hash.mojo",
         # 1: by download; other bytes = 7, unclaimed new name = 8, all same = 6, unread = 5
         "tests/test_publish_channel_state.mojo",
-        # 2-4: once per attempt, settle, bounded retry, read-back barrier, metapackage last
+        # 2-4: once per attempt, settle, bounded retry, read-back barrier, metapackage last;
+        # --concurrency 1 and 4 end in the same state; workers really run in parallel
         "tests/test_publish_run.mojo",
         # 2: no request of any scenario says force
         "tests/test_publish_never_force.mojo",

@@ -6,7 +6,7 @@
 #   header or form-part header says `force`, and the channel counted no
 #   force request.
 #
-# Hermetic: ScriptedChannel; RecordingSleeper; no network.
+# Hermetic: ScriptedChannel; NoWaitSleeper; no network.
 # =============================================================================
 
 from std.ffi import external_call
@@ -27,7 +27,7 @@ from kci_publish.scripted_channel import (
     UPLOAD_STORE_LOSE_ANSWER,
     UPLOAD_STORE_OTHER_BYTES,
 )
-from komira_retry import RecordingSleeper
+from kci_publish import NoWaitSleeper
 
 
 def _root(tag: String) raises -> String:
@@ -94,10 +94,10 @@ def _scenario(t: List[PublishTarget], kind: Int, name: String) raises -> Int:
     var reg = RegistrySet[ScriptedChannel, PublishCredential](ch^, c^)
     var src = ScriptedCredential()
     src.serve(SURFACE_PREFIX_DEV, String("Bearer pfx-test-token"))
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = run_publish(t, List[String](), reg, src, False, RunOptions(2, 0, 3, 0, 0, 1, 0), sl, PublishReport())
     ref got = reg.transport()
-    assert_equal(got.force_requests, 0, name)
+    assert_equal(got.force_request_count(), 0, name)
     var posts = 0
     for i in range(got.call_count()):
         var req = got.call(i)

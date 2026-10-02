@@ -6,14 +6,15 @@
 #
 # ROWS
 #   (1) every flag parses as `--flag value` and as `--flag=value`;
-#       `--claim-new-name` repeats; `--dry-run` and `--require-environment`
-#       are optional;
+#       `--claim-new-name` repeats; `--dry-run`, `--require-environment` and
+#       `--concurrency` (default 4, 1..16) are optional;
 #   (2) each required flag missing is refused naming it (all at once);
-#   (3) `--credential`, `--approved-names` and `--concurrency` are unknown
+#   (3) `--credential` and `--approved-names` are unknown
 #       flags; so is anything else;
 #   (4) a value flag given twice, a claim given twice (any case), an EMPTY
-#       value, a positional argument, `--dry-run=x`, and an
-#       `--expect-set-hash` that is not 64 lowercase hex are refused;
+#       value, a positional argument, `--dry-run=x`, an `--expect-set-hash`
+#       that is not 64 lowercase hex, and a `--concurrency` outside 1..16 or
+#       not a whole number are refused;
 #   (5) `--help` wins and checks nothing else.
 #
 # Pure: no file is read.
@@ -82,6 +83,8 @@ def test_every_flag_both_spellings() raises:
     extra.append(String("--require-environment"))
     extra.append(String("release"))
     extra.append(String("--dry-run"))
+    extra.append(String("--concurrency"))
+    extra.append(String("2"))
     var f = parse_publish_flags(_with(extra^))
     assert_equal(f.declarations_file, String("decls.textproto"))
     assert_equal(f.artifacts_dir, String("release"))
@@ -95,9 +98,15 @@ def test_every_flag_both_spellings() raises:
     assert_equal(f.claims[1], String("komira"))
     assert_equal(f.require_environment, String("release"))
     assert_true(f.dry_run)
+    assert_equal(f.concurrency, 2)
     var g = parse_publish_flags(_base())
     assert_false(g.dry_run)
     assert_equal(len(g.claims), 0)
+    assert_equal(g.concurrency, 4, String("--concurrency defaults to 4"))
+    var lo = parse_publish_flags(_with(_one(String("--concurrency=1"))))
+    assert_equal(lo.concurrency, 1)
+    var hi = parse_publish_flags(_with(_one(String("--concurrency=16"))))
+    assert_equal(hi.concurrency, 16)
     print("  test_every_flag_both_spellings: PASS")
 
 
@@ -148,7 +157,6 @@ def test_missing_flags_are_named() raises:
 def test_deleted_flags_are_unknown() raises:
     _refused(_with(_two(String("--credential"), String("oidc"))), String("unknown flag '--credential'"))
     _refused(_with(_two(String("--approved-names"), String("a.txt"))), String("unknown flag '--approved-names'"))
-    _refused(_with(_two(String("--concurrency"), String("4"))), String("unknown flag '--concurrency'"))
     _refused(_with(_one(String("--force"))), String("unknown flag '--force'"))
     print("  test_deleted_flags_are_unknown: PASS")
 
@@ -165,6 +173,15 @@ def test_each_refusal_names_its_flag() raises:
     _refused(_with(_one(String("stray"))), String("unexpected argument 'stray'"))
     _refused(_with(_one(String("--dry-run=yes"))), String("--dry-run takes no value"))
     _refused(_with(_two(String("--dry-run"), String("--dry-run"))), String("--dry-run is given twice"))
+    _refused(_with(_one(String("--concurrency=0"))), String("--concurrency must be a whole number from 1 to 16; got '0'"))
+    _refused(_with(_one(String("--concurrency=17"))), String("--concurrency must be a whole number from 1 to 16; got '17'"))
+    _refused(_with(_one(String("--concurrency=4x"))), String("--concurrency must be a whole number from 1 to 16; got '4x'"))
+    _refused(_with(_one(String("--concurrency=-1"))), String("--concurrency must be a whole number from 1 to 16; got '-1'"))
+    _refused(_with(_one(String("--concurrency="))), String("--concurrency has an EMPTY value"))
+    _refused(
+        _with(_two(String("--concurrency=2"), String("--concurrency=3"))),
+        String("--concurrency is given twice"),
+    )
     var short = List[String]()
     short.append(String("--expect-set-hash=abc"))
     var a = List[String]()

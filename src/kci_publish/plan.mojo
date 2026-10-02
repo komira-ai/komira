@@ -16,17 +16,29 @@
 #      naming every such file. Nothing is uploaded;
 #   2. any file or name listing that could not be read: exit 5. A listing that
 #      was not read never makes a name "new";
-#   3. NEW NAMES: a set name with no file in any listed subdir (the set's
-#      subdir and `noarch`) is a claim. Each needs `--claim-new-name`; an
-#      unclaimed new name, a claim for a name the channel already holds, or a
-#      claim for a name not in the set: STOP, exit 8;
+#   3. NEW NAMES. A set name is HELD when the channel has any file of it:
+#      a listing (the set's subdir and `noarch`) names one, OR one of the
+#      set's own files under that name read present-same / present-different
+#      BY DOWNLOAD at step 1. The download counts because it is the
+#      authoritative read: the repodata can lag an upload, and a re-run after
+#      a partial publish must not see its own uploads as "new" just because
+#      the index has not caught up. A set name that is not held is NEW, a
+#      claim, and needs `--claim-new-name`; an unclaimed new name is STOP,
+#      exit 8. A claim for a name not in the set is STOP, exit 8. A claim for
+#      a HELD name is SATISFIED when everything the channel holds under it is
+#      this set's own files, each read present-same (the claim was made by an
+#      earlier run of this same release, which then stopped or finished), so
+#      re-running the same command is stable whatever the index shows; a
+#      claim for a name held by any OTHER file is STOP, exit 8 (it is not
+#      new);
 #   4. every file present and identical: nothing to do, exit 6;
 #   5. otherwise PROCEED: the members still absent are uploaded, then the
 #      metapackage.
 #
 # `approved_names_for(targets, channel_read, claims)` -- the uploader's last gate
 #   (`kci_pkg_upload.ApprovedNames`), built from the set names the channel
-#   already holds plus the claims. Never read from a file.
+#   already holds (the same HELD rule) plus the claims. Never read from a
+#   file.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -35,6 +47,7 @@ from kci_pkg_upload import (
     SUBSTRATE_PREFIX_DEV_CONDA,
     ApprovedNames,
     PackageCoordinate,
+    conda_package_name_of_file,
     prefix_dev_repo_of_location,
 )
 from kci_pkg_upload.identity import ascii_lower
@@ -120,22 +133,25 @@ struct FileState(Copyable, Movable):
 
 
 struct ChannelRead(Copyable, Movable):
-    """Step 1's reads: one state per target (same order) and the package
-    names the channel holds in the listed subdirs (lowercase).
-    `names_read` False means some listing was not read; `names_detail` says
-    which.
+    """Step 1's reads: one state per target (same order), the package names
+    the listed subdirs hold (lowercase) and every file they list
+    (`<subdir>/<file>`). `names_read` False means some listing was not read;
+    `names_detail` says which, and `names` and `listed_files` are then empty
+    and mean nothing.
 
     Layout: owned values only. No pointer field."""
 
     var states: List[FileState]
     var names_read: Bool
     var names: List[String]
+    var listed_files: List[String]
     var names_detail: String
 
     def __init__(out self):
         self.states = List[FileState]()
         self.names_read = True
         self.names = List[String]()
+        self.listed_files = List[String]()
         self.names_detail = String("")
 
     def holds_name(self, name: String) -> Bool:
@@ -244,13 +260,59 @@ def listed_subdirs(targets: List[PublishTarget]) -> List[String]:
     return out^
 
 
+def is_held(targets: List[PublishTarget], channel_read: ChannelRead, name: String) -> Bool:
+    """Whether the channel has any file of `name` (see the file header): a
+    listing names it, or one of the set's files under it read present by
+    download at step 1."""
+    if channel_read.holds_name(name):
+        return True
+    var want = ascii_lower(name)
+    for i in range(len(targets)):
+        if ascii_lower(targets[i].coordinate.distribution) != want:
+            continue
+        var k = channel_read.states[i].kind
+        if k == STATE_SAME or k == STATE_DIFFERENT:
+            return True
+    return False
+
+
+def holds_only_ours(targets: List[PublishTarget], channel_read: ChannelRead, name: String) -> Bool:
+    """Whether everything the channel holds under `name` is this set's own
+    files, each read present-same by download: every listed file of `name`
+    is one of the set's files, and every set file of `name` is present-same.
+    """
+    var want = ascii_lower(name)
+    var ours = List[String]()
+    for i in range(len(targets)):
+        if ascii_lower(targets[i].coordinate.distribution) != want:
+            continue
+        if channel_read.states[i].kind != STATE_SAME:
+            return False
+        ours.append(targets[i].where())
+    if len(ours) == 0:
+        return False
+    for f in range(len(channel_read.listed_files)):
+        ref p = channel_read.listed_files[f]
+        var slash = p.rfind(String("/"))
+        var file = String(p[byte = slash + 1 :]) if slash >= 0 else p.copy()
+        if conda_package_name_of_file(file) != want:
+            continue
+        var mine = False
+        for k in range(len(ours)):
+            if ours[k] == p:
+                mine = True
+        if not mine:
+            return False
+    return True
+
+
 def new_names(targets: List[PublishTarget], channel_read: ChannelRead) -> List[String]:
-    """The set names the channel holds no file of (lowercase, each once).
-    Meaningful only when `read.names_read`."""
+    """The set names the channel holds no file of, by listing or by download
+    (lowercase, each once). Meaningful only when `read.names_read`."""
     var out = List[String]()
     for i in range(len(targets)):
         var n = ascii_lower(targets[i].coordinate.distribution)
-        if channel_read.holds_name(n):
+        if is_held(targets, channel_read, n):
             continue
         var seen = False
         for j in range(len(out)):
@@ -307,6 +369,7 @@ def plan_from_state(
     if len(cannot.lines) > 0:
         return cannot^
     var stop = StepOneVerdict(VERDICT_STOP_NEW_NAME)
+    var satisfied = List[String]()
     var fresh = new_names(targets, channel_read)
     for i in range(len(fresh)):
         var claimed = False
@@ -329,12 +392,20 @@ def plan_from_state(
                 + claims[j]
                 + String("' is not a package of this release set")
             )
-        elif channel_read.holds_name(claims[j]):
-            stop.lines.append(
-                String("STOP claim: --claim-new-name '")
-                + claims[j]
-                + String("' is already in the channel; it is not new")
-            )
+        elif is_held(targets, channel_read, claims[j]):
+            if holds_only_ours(targets, channel_read, claims[j]):
+                satisfied.append(
+                    String("CLAIM --claim-new-name '")
+                    + claims[j]
+                    + String("' is satisfied: the channel holds only this release's own file(s)")
+                    + String(" of it, identical (an earlier run of this release claimed it)")
+                )
+            else:
+                stop.lines.append(
+                    String("STOP claim: --claim-new-name '")
+                    + claims[j]
+                    + String("' is already in the channel; it is not new")
+                )
     if len(stop.lines) > 0:
         return stop^
     var all_same = True
@@ -343,9 +414,14 @@ def plan_from_state(
             all_same = False
     if all_same:
         var done = StepOneVerdict(VERDICT_ALREADY_PUBLISHED)
+        for k in range(len(satisfied)):
+            done.lines.append(satisfied[k].copy())
         done.lines.append(String("already published: every file is in the channel, identical"))
         return done^
-    return StepOneVerdict(VERDICT_PROCEED)
+    var go = StepOneVerdict(VERDICT_PROCEED)
+    for k in range(len(satisfied)):
+        go.lines.append(satisfied[k].copy())
+    return go^
 
 
 def approved_names_for(
@@ -357,7 +433,7 @@ def approved_names_for(
     var added = List[String]()
     for i in range(len(targets)):
         var n = ascii_lower(targets[i].coordinate.distribution)
-        if not channel_read.holds_name(n):
+        if not is_held(targets, channel_read, n):
             continue
         var seen = False
         for j in range(len(added)):

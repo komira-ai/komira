@@ -24,6 +24,7 @@ from std.testing import assert_equal, assert_true
 
 from kci_pkg_upload import RegistrySet
 from kci_publish import (
+    NoWaitSleeper,
     EXIT_REFUSED,
     NoSecretStore,
     PublishCredential,
@@ -41,7 +42,6 @@ from kci_publish.release_fixture import (
 )
 from kci_publish.verify import require_set_hash
 from kci_pkg_upload import ScriptedPkgTransport
-from komira_retry import RecordingSleeper
 
 
 comptime _WRONG: String = "abababababababababababababababababababababababababababababababab"
@@ -108,7 +108,7 @@ def test_a_wrong_expectation_sends_nothing() raises:
         PublishCredential(),
     )
     var store = NoSecretStore()
-    var sleeper = RecordingSleeper()
+    var sleeper = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, RunOptions(), sleeper)
     assert_equal(rep.exit_code, EXIT_REFUSED)
     assert_true(rep.has_line_containing(String("--expect-set-hash is ") + String(_WRONG)))

@@ -33,6 +33,7 @@ from komira_secret_store import StaticSecretStore
 
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
+    NoWaitSleeper,
     EXIT_FAILED,
     EXIT_PUBLISHED,
     EXIT_REFUSED,
@@ -51,7 +52,6 @@ from kci_publish.release_fixture import (
     ExampleRelease,
     write_text_file,
 )
-from komira_retry import RecordingSleeper
 
 
 comptime _TOKEN: String = "pfx-flow-secret-0123456789abcdef"
@@ -116,7 +116,7 @@ def test_dry_run_public_api_token() raises:
     var f = _flags(String("dry_pub"), String("example-stable"), True)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
     var store = NoSecretStore()
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
     assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
     assert_true(rep.has_line_containing(String("DRY RUN: nothing was uploaded; 3 file(s) would be")))
@@ -131,7 +131,7 @@ def test_dry_run_public_oidc_mints_nothing() raises:
     var f = _flags(String("dry_oidc"), String("example-oidc"), True)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
     var store = NoSecretStore()
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
     assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
     assert_equal(reg.transport().write_count(), 0)
@@ -143,7 +143,7 @@ def test_dry_run_private_oidc_is_refused() raises:
     var f = _flags(String("dry_poidc"), String("example-oidc-private"), True)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc-private")), PublishCredential())
     var store = NoSecretStore()
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
     assert_equal(rep.exit_code, EXIT_REFUSED)
     assert_true(rep.has_line_containing(String("is PRIVATE and publishes with OIDC only")))
@@ -156,7 +156,7 @@ def test_dry_run_private_api_token_reads_with_the_token() raises:
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-private")), PublishCredential())
     var store = StaticSecretStore()
     store.put(String(EXAMPLE_TOKEN_SECRET), String(_TOKEN))
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
     assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
     assert_equal(reg.transport().write_count(), 0)
@@ -172,7 +172,7 @@ def test_require_environment_needs_an_oidc_channel() raises:
     f.require_environment = String("release")
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
     var store = NoSecretStore()
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
     assert_equal(rep.exit_code, EXIT_REFUSED)
     assert_true(rep.has_line_containing(String("does not publish with OIDC trusted publishing")))
@@ -184,7 +184,7 @@ def test_an_unresolvable_secret_fails_before_any_write() raises:
     var f = _flags(String("nosecret"), String("example-stable"), False)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-stable")), PublishCredential())
     var store = NoSecretStore()
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, _opts(), sl)
     assert_equal(rep.exit_code, EXIT_FAILED, String("\n").join(rep.lines))
     assert_true(rep.has_line_containing(String(EXAMPLE_TOKEN_SECRET)))

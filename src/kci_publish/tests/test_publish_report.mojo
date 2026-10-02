@@ -29,6 +29,7 @@ from komira_secret_store import StaticSecretStore
 
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
+    NoWaitSleeper,
     EXIT_ALREADY_PUBLISHED,
     EXIT_CANNOT_TELL,
     EXIT_FAILED,
@@ -54,7 +55,6 @@ from kci_publish.release_fixture import (
     write_text_file,
 )
 from kci_publish.report import verdict_name
-from komira_retry import RecordingSleeper
 
 
 comptime _TOKEN: String = "pfx-report-secret-0123456789abcdefghij"
@@ -107,7 +107,7 @@ def _flow(f: PublishFlags, var ch: ScriptedChannel) -> PublishReport:
     var reg = RegistrySet[ScriptedChannel, PublishCredential](ch^, PublishCredential())
     var store = StaticSecretStore()
     store.put(String(EXAMPLE_TOKEN_SECRET), String(_TOKEN))
-    var sl = RecordingSleeper()
+    var sl = NoWaitSleeper()
     return publish_flow(f, reg, ScriptedPkgTransport(), store, RunOptions(2, 0, 2, 0, 0, 2, 0), sl)
 
 

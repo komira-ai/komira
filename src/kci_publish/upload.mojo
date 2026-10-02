@@ -10,8 +10,20 @@
 # secret name, or an OIDC exchange) before the first write. A request for any
 # other surface or host is refused before it is sent.
 #
-# STEP 2, PER MEMBER (`upload_file`), in the order `resolve_targets` gave
-# (libraries by fewer set-internal requirements first):
+# STEP 2 (`upload_members`): the members still absent go into one queue, in
+# the order `resolve_targets` gave (libraries by fewer set-internal
+# requirements first; a stable order, never a correctness rule), and
+# min(`--concurrency`, queue length) workers pull from it on their own
+# threads (`komira_fork_join`). Each worker owns its own `RegistrySet`: a
+# transport from `ChannelTransport.for_worker` and a COPY of the credential
+# that was resolved ONCE before the first write (`PublishCredential
+# .for_worker`), so no request state is shared between threads. EVERY member
+# in the queue is attempted, whatever another member's upload answered: the
+# step-3 barrier is "every member's upload has returned", and a run with
+# `--concurrency 1` must end in the same state as one with 4. Each outcome is
+# written to the member's own slot; the run reads them after the join.
+#
+# PER MEMBER (`upload_file`):
 #   * already present-same at step 1: not uploaded;
 #   * one upload request per attempt, then `settle`: re-read BY DOWNLOAD,
 #     polling while the channel lags, until present-same or
@@ -24,11 +36,12 @@
 #         bounded backoff (komira_retry `Backoff`). After the last attempt:
 #         absent is PARTIAL (exit 9), cannot-tell is exit 5;
 #   * a definitive refusal (400 and the other rejections, 401/403): FAILED
-#     (exit 4). No later file is attempted.
+#     (exit 4). The other members are still attempted; the metapackage is
+#     not.
 #   ⛔ NEVER `force`: `kci_pkg_upload.PrefixDevRegistry` has no parameter that
 #   sends it, and the welded tests assert it over every recorded request.
 #
-# STEP 3 (`read_back_all`): after the last member upload, EVERY member is
+# STEP 3 (`read_back_all`): after every worker has returned, EVERY member is
 # downloaded again, uploaded or not, and its sha256 compared. A mismatch is
 # exit 10, a member still absent exit 9, an unreadable one exit 5, and the
 # metapackage is not uploaded.
@@ -36,16 +49,18 @@
 # STEP 4: only then the metapackage, by the same `upload_file`, and its own
 # read-back.
 #
-# Members are uploaded one after another on the calling thread. The design
-# asks for up to N concurrent workers on komira_async; that is NOT done here
-# (see `run.mojo`'s header for why), and no flag pretends otherwise.
-#
 # Encapsulation: owned values; the registry set is borrowed `mut` for each
-# call. No pointer, no wildcard origin.
+# call. The worker pool is reached by the threads through one
+# `Pointer[_Pool, origin]` (a tracked borrow of a local that outlives the
+# join); each thread writes only its own worker slot and the outcome slots it
+# dequeued. No raw pointer, no wildcard origin.
 # =============================================================================
 
+from std.memory import Pointer
 from std.pathlib import Path
 
+from komira_atomic_alias import AtomicI64
+from komira_fork_join import ForkJoinBody, fork_join
 from komira_retry import Backoff, Jitter, Sleeper, SplitMix64Rng
 
 from kci_pkg_upload import (
@@ -63,6 +78,13 @@ from kci_pkg_upload import (
 from kci_pkg_upload.credential import refuse_other_host, refuse_surface
 
 from .channel_state import read_file_state
+from .workers import (
+    DEFAULT_CONCURRENCY,
+    MAX_CONCURRENCY,
+    MIN_CONCURRENCY,
+    ChannelTransport,
+    WorkerSleeper,
+)
 from .plan import (
     STATE_ABSENT,
     STATE_CANNOT_TELL,
@@ -78,7 +100,8 @@ struct RunOptions(Copyable, Movable):
     downloads `read_back_wait_ms` apart; an upload is attempted up to
     `upload_attempts` times with a backoff from `retry_initial_ms` to
     `retry_max_ms`; the index check polls up to `index_polls` times
-    `index_wait_ms` apart.
+    `index_wait_ms` apart; step 2 runs up to `concurrency` upload workers
+    (`--concurrency`, clamped to 1..16).
 
     Layout: Ints. No pointer field."""
 
@@ -90,6 +113,7 @@ struct RunOptions(Copyable, Movable):
     var index_polls: Int
     var index_wait_ms: Int64
     var seed: UInt64
+    var concurrency: Int
 
     def __init__(
         out self,
@@ -101,6 +125,7 @@ struct RunOptions(Copyable, Movable):
         index_polls: Int = 6,
         index_wait_ms: Int64 = 10_000,
         seed: UInt64 = 0x6B6369,
+        concurrency: Int = DEFAULT_CONCURRENCY,
     ):
         self.read_back_attempts = read_back_attempts if read_back_attempts > 0 else 1
         self.read_back_wait_ms = read_back_wait_ms
@@ -110,6 +135,12 @@ struct RunOptions(Copyable, Movable):
         self.index_polls = index_polls if index_polls > 0 else 1
         self.index_wait_ms = index_wait_ms
         self.seed = seed
+        var n = concurrency
+        if n < MIN_CONCURRENCY:
+            n = MIN_CONCURRENCY
+        if n > MAX_CONCURRENCY:
+            n = MAX_CONCURRENCY
+        self.concurrency = n
 
 
 struct PublishCredential(RegistryCredential, Movable):
@@ -154,6 +185,18 @@ struct PublishCredential(RegistryCredential, Movable):
 
     def is_armed(self) -> Bool:
         return self._armed
+
+    def for_worker(self) -> PublishCredential:
+        """A copy for one upload worker: the same (surface, host) binding and
+        the same values, resolved once by the run, never again."""
+        var c = PublishCredential()
+        c._surface = self._surface
+        c._host = self._host.copy()
+        c._read = self._read.copy()
+        c._write = self._write.copy()
+        c._armed = self._armed
+        c._configured = self._configured
+        return c^
 
     def authorization(mut self, surface: Int, host: String) raises -> String:
         if not self._configured:
@@ -311,3 +354,101 @@ def read_back_all[T: PkgTransport, C: RegistryCredential](
             continue
         out.append(read_file_state(registry, targets[i]))
     return out^
+
+
+struct _Worker[T: ChannelTransport, W: WorkerSleeper](Movable):
+    """One worker's own state: its registry set and its sleeper.
+
+    Layout: owned values. No pointer field."""
+
+    var registry: RegistrySet[Self.T, PublishCredential]
+    var sleeper: Self.W
+
+    def __init__(out self, var registry: RegistrySet[Self.T, PublishCredential], var sleeper: Self.W):
+        self.registry = registry^
+        self.sleeper = sleeper^
+
+
+struct _Pool[T: ChannelTransport, W: WorkerSleeper](Movable):
+    """Step 2's queue: `jobs` (target indices, in upload order), the next
+    job to take, one worker per thread and one outcome per job.
+
+    Layout: owned lists, an atomic and owned values. No pointer field."""
+
+    var targets: List[PublishTarget]
+    var jobs: List[Int]
+    var names: ApprovedNames
+    var opts: RunOptions
+    var next: AtomicI64
+    var workers: List[_Worker[Self.T, Self.W]]
+    var outcomes: List[FileOutcome]
+
+    def __init__(
+        out self,
+        var targets: List[PublishTarget],
+        var jobs: List[Int],
+        var names: ApprovedNames,
+        var opts: RunOptions,
+    ):
+        self.targets = targets^
+        self.jobs = jobs^
+        self.names = names^
+        self.opts = opts^
+        self.next = AtomicI64(Int64(0))
+        self.workers = List[_Worker[Self.T, Self.W]]()
+        self.outcomes = List[FileOutcome]()
+        for _ in range(len(self.jobs)):
+            self.outcomes.append(
+                FileOutcome(FILE_FAILED, String("not-attempted"), STATE_ABSENT, String("NOT-ATTEMPTED"))
+            )
+
+
+struct _UploadBody[T: ChannelTransport, W: WorkerSleeper, o: MutOrigin](ForkJoinBody):
+    """What each worker thread runs: take the next job until none is left.
+
+    Layout: one tracked `Pointer` to the run's local pool. No raw pointer."""
+
+    var pool: Pointer[_Pool[Self.T, Self.W], Self.o]
+
+    def __init__(out self, pool: Pointer[_Pool[Self.T, Self.W], Self.o]):
+        self.pool = pool
+
+    def run(self, tid: Int) raises:
+        # PARALLELIZE-BOUNDARY: thread `tid` writes only `workers[tid]` and
+        # the `outcomes[k]` of the jobs `k` it took from the atomic counter
+        # (each `k` is taken by exactly one thread). Neither list is resized
+        # while the threads run. Everything else is read only.
+        ref p = self.pool[]
+        while True:
+            var k = Int(p.next.fetch_add(Int64(1)))
+            if k >= len(p.jobs):
+                return
+            ref w = p.workers[tid]
+            p.outcomes[k] = upload_file(w.registry, p.targets[p.jobs[k]], p.names, p.opts, w.sleeper)
+
+
+def upload_members[T: ChannelTransport, W: WorkerSleeper](
+    mut registry: RegistrySet[T, PublishCredential],
+    targets: List[PublishTarget],
+    jobs: List[Int],
+    names: ApprovedNames,
+    opts: RunOptions,
+    sleeper: W,
+) raises -> List[FileOutcome]:
+    """Step 2: upload `targets[jobs[k]]` for every `k` on min(concurrency,
+    len(jobs)) workers (see the file header); return the outcomes in `jobs`
+    order. `registry`'s credential must already be armed: it is copied, never
+    resolved again. RAISES only when a worker cannot be made or started;
+    nothing is uploaded then."""
+    var pool = _Pool[T, W](targets.copy(), jobs.copy(), names.copy(), opts.copy())
+    var n = opts.concurrency
+    if n > len(jobs):
+        n = len(jobs)
+    for _ in range(n):
+        var reg = RegistrySet[T, PublishCredential](
+            registry.transport().for_worker(), registry.credential().for_worker()
+        )
+        pool.workers.append(_Worker[T, W](reg^, sleeper.for_worker()))
+    var body = _UploadBody(Pointer(to=pool))
+    fork_join(body, n)
+    return pool.outcomes.copy()
