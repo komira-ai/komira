@@ -17,6 +17,16 @@ The `version` that a bundle carries is an attribute of that bundle's
 repository can carry different versions, and the build checks only that the
 string is a plain version (`0.1.0`, `1.2.3+build.4`).
 
+## Conda packages
+
+A Mojo library builds into a conda package for linux-64 with `conda_package`:
+one file, `lib/mojo/<name>.mojoc`, which the compiler finds on its default
+import path. The build writes the file, its sha256 and a manifest; it uploads
+nothing. A package may be published only if its name is in the approved list,
+and a name and version in a registry are permanent in practice, so the
+first upload is gated. The layout, the version scheme (`<prefix>.<N>`) and the
+list are in [packaging/conda](../packaging/conda/README.md).
+
 ## Pinning komira from another repository
 
 A repository that builds Mojo with komira's rules names komira as its `komira`
@@ -36,7 +46,8 @@ These parts of a release machine's publish step are not described here
 because the libraries that implement them are not part of this repository
 yet:
 
-- Conda packages and Python wheels of the Mojo libraries.
+- The upload of conda packages, their other platforms (linux-aarch64 and
+  macOS) and Python wheels of the Mojo libraries.
 - Package channels, and the rules for which writers each channel admits.
 - Copying and promoting a container image between registries by digest.
 - A release version shared by every artifact, and the procedure for cutting

@@ -2,7 +2,8 @@
 # conda.sh -- tests of the conda packages (tools/build/package/conda.bzl, and
 # `komira_pack conda` / `conda-check` behind it), on //packaging/conda:komira_encoding.
 #
-# usage: tools/build/tests/functional/conda.sh [--no-uncached] [--no-install]   (from anywhere; BUCK2 overrides)
+# usage: tools/build/tests/functional/conda.sh [--no-uncached] [--no-install]   (from anywhere; BUCK2 overrides;
+#        KOMIRA_TEST_KEEP=1 keeps the scratch directory, with every log, after a pass)
 #
 #   shape      the .conda is read with tools that are not the writer's: unzip
 #              (three stored members, in order), zstd (both streams valid), tar
@@ -30,8 +31,8 @@
 #              the packing actions); release_version.sh counts first-parent
 #              commits to the last non-documentation commit, in a scratch repo,
 #              and refuses a shallow clone.
-#   uncached   two builds in two fresh daemons with --no-remote-cache give the
-#              same sha256, and it is the warm build's (skipped with --no-uncached).
+#   uncached   two builds in two fresh daemons with --no-remote-cache, one isolation
+#              directory, give the same sha256 (skipped with --no-uncached).
 #   install    a pixi project whose channel is the built file served from a
 #              file:// directory (its repodata.json is written here) installs it
 #              with the pinned compiler, and `mojo run` of a program importing
@@ -81,9 +82,9 @@ red() { # name, required text, target [buck2 args...]: the build must fail with 
 
 # ---- shape ----------------------------------------------------------------
 CONDA=$(out_of "$PKG")
-MANIFEST=$(out_of "$PKG[manifest]")
-DIGEST=$(out_of "$PKG[digest]")
-CHECK=$(out_of "$PKG[check]")
+MANIFEST=$(out_of "${PKG}[manifest]")
+DIGEST=$(out_of "${PKG}[digest]")
+CHECK=$(out_of "${PKG}[check]")
 LIBPKG=$(out_of //src/komira_encoding:komira_encoding)
 if [ -z "$CONDA" ] || [ -z "$MANIFEST" ] || [ -z "$DIGEST" ] || [ -z "$CHECK" ] || [ -z "$LIBPKG" ]; then
     fail "shape: cannot build $PKG and its sub-targets (see $W/build.log)"
@@ -229,18 +230,18 @@ done
 if [ -n "$problems" ]; then fail "lint: names_bad did not name:$problems (see $W/names_bad.log)"; else pass "lint: a list with every defect, and a BUCK file declaring another package and swapping the list, is red naming each"; fi
 
 # ---- stamp ------------------------------------------------------------------
-red release_refuses_unstamped "was never stamped" "$PKG[release_check]"
+red release_refuses_unstamped "was never stamped" "${PKG}[release_check]"
 # A stamp no earlier run used, so the packing actions execute and the check
 # below sees them (a cached run would list nothing, which proves nothing).
 N_STAMP=$((100000 + RANDOM))
 STAMP="-c komira.package_stamp=$N_STAMP -c komira.package_timestamp_ms=1700000000000"
 # shellcheck disable=SC2086 # STAMP is a list of words
-if "$BUCK2" build $STAMP "$PKG[release_check]" > "$W/stamp_check.log" 2>&1; then
+if "$BUCK2" build $STAMP "${PKG}[release_check]" > "$W/stamp_check.log" 2>&1; then
     # No compile re-ran for a new stamp: the executed actions are packing, and only that.
     "$BUCK2" log what-ran --skip-cache-hits > "$W/stamp_whatran.txt" 2>&1
     if grep -q 'conda_pack' "$W/stamp_whatran.txt" && ! grep -qE 'mojo_(precompile|build|gated)' "$W/stamp_whatran.txt"; then
         # shellcheck disable=SC2086
-        s_manifest=$("$BUCK2" build $STAMP "$PKG[manifest]" --materializations all --show-full-output 2> "$W/stamp_manifest.log" | sed -n 's/^[^ ]* //p' | tail -n 1)
+        s_manifest=$("$BUCK2" build $STAMP "${PKG}[manifest]" --materializations all --show-full-output 2> "$W/stamp_manifest.log" | sed -n 's/^[^ ]* //p' | tail -n 1)
         if jq -e --arg v "0.1.$N_STAMP" '.version == $v and .stamped == true and .file_name == "komira_encoding-\($v)-0.conda"' "$s_manifest" > /dev/null; then
             pass "stamp: -c komira.package_stamp=$N_STAMP gives 0.1.$N_STAMP (release_check green, manifest, file name) and the new stamp re-ran only the packing actions, no compile"
         else
@@ -279,30 +280,34 @@ grep -q 'shallow clone' "$W/shallow.out" || problems="$problems shallow-refusal-
     fail "stamp: release_version.sh:$problems"
 
 # ---- uncached ---------------------------------------------------------------
+# Two builds in two fresh daemons with --no-remote-cache, one after the other
+# in ONE isolation directory. Not two directories, as bundle.sh uses: a `.mojoc`
+# records the path of the sources it was compiled from
+# (buck-out/<isolation dir>/art/...), so the same library built under two
+# isolation directory names is two different files that differ only in that
+# name. A release builds under the default directory, always the same.
 if [ "$uncached" = 1 ]; then
-    for side in a b; do
-        (timeout 1500 "$BUCK2" --isolation-dir "komira_tests_conda_$side" build --no-remote-cache "$PKG" --materializations all --show-full-output \
-            > "$W/uncached_$side.out" 2> "$W/uncached_$side.log"; echo "$?" > "$W/uncached_$side.rc") &
-    done
-    wait
     problems=""
-    for side in a b; do
-        if [ "$(cat "$W/uncached_$side.rc")" != 0 ]; then
-            problems="$problems build-$side-failed"
+    for n in 1 2; do
+        timeout 2400 "$BUCK2" --isolation-dir komira_tests_conda build --no-remote-cache "$PKG" --materializations all --show-full-output \
+            > "$W/uncached_$n.out" 2> "$W/uncached_$n.log"
+        rc=$?
+        "$BUCK2" --isolation-dir komira_tests_conda kill > /dev/null 2>&1
+        if [ "$rc" != 0 ]; then
+            problems="$problems build-$n-failed"
         else
-            f=$(sed -n 's/^[^ ]* //p' "$W/uncached_$side.out" | tail -n 1)
-            echo "$(sha256sum < "$f" | cut -c1-64)" > "$W/sha_$side.txt"
+            f=$(sed -n 's/^[^ ]* //p' "$W/uncached_$n.out" | tail -n 1)
+            cp -L "$f" "$W/uncached_$n.conda"
+            sha256sum < "$W/uncached_$n.conda" | cut -c1-64 > "$W/sha_$n.txt"
             if [ "${KOMIRA_CHECKS_MODE:-remote}" = local ]; then ran='Commands: [0-9]+ \(cached: 0, remote: 0, local: [1-9]'; else ran='Commands: [0-9]+ \(cached: 0, remote: [1-9]'; fi
-            grep -qE "$ran" "$W/uncached_$side.log" || problems="$problems build-$side-did-not-execute"
+            grep -qE "$ran" "$W/uncached_$n.log" || problems="$problems build-$n-did-not-execute"
         fi
     done
-    if [ -z "$problems" ]; then
-        [ "$(cat "$W/sha_a.txt")" = "$(cat "$W/sha_b.txt")" ] || problems=" differ: $(cat "$W/sha_a.txt") $(cat "$W/sha_b.txt")"
-        [ "$(cat "$W/sha_a.txt")" = "$file_sha" ] || problems="$problems differs-from-the-cached-build"
+    if [ -z "$problems" ] && [ "$(cat "$W/sha_1.txt")" != "$(cat "$W/sha_2.txt")" ]; then
+        problems=" differ: $(cat "$W/sha_1.txt") $(cat "$W/sha_2.txt")"
     fi
-    for side in a b; do "$BUCK2" --isolation-dir "komira_tests_conda_$side" kill > /dev/null 2>&1; done
     if [ -n "$problems" ]; then fail "uncached:$problems (see $W)"; else
-        pass "uncached: two uncached builds in two fresh daemons give $PKG sha256 $(cat "$W/sha_a.txt"), the cached build's ($(grep -oE 'Commands: [0-9]+' "$W/uncached_a.log" | head -n 1) actions run)"
+        pass "uncached: two uncached builds in two fresh daemons give $PKG sha256 $(cat "$W/sha_1.txt") ($(grep -oE 'Commands: [0-9]+' "$W/uncached_1.log" | head -n 1) actions each, none cached)"
     fi
 else
     echo "SKIP  conda uncached (--no-uncached)"
@@ -361,5 +366,5 @@ else
     echo "SKIP  conda install ($([ "$install" = 1 ] || echo '--no-install'; command -v pixi > /dev/null || echo 'no pixi'; [ "$install" = 0 ] || curl -fsS -o /dev/null -I https://repo.prefix.dev/max-nightly/linux-64/repodata.json 2> /dev/null || echo 'no network'))"
 fi
 
-if [ "$fails" = 0 ]; then rm -rf "$W"; else echo "logs: $W"; fi
+if [ "$fails" = 0 ] && [ -z "${KOMIRA_TEST_KEEP:-}" ]; then rm -rf "$W"; else echo "logs: $W"; fi
 [ "$fails" = 0 ]

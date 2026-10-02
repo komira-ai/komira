@@ -58,7 +58,15 @@ Sub-targets of every package target:
 | `[check]` | the marker of `komira_pack conda-check`, which reads the package back (zip, both zstd streams, both tars, every property below); the three files above are copies made after it passed |
 | `[release_check]` | the same check, also refusing a version that was never stamped |
 
-The bytes are reproducible: the file's sha256 is the package's identity. The
+The bytes are reproducible, so the file's sha256 is the package's identity,
+with one condition that comes from the compiler, not from the packing: a
+`.mojoc` records the path of the sources it was compiled from
+(`buck-out/<isolation dir>/art/...`), so the same library built under two
+different `--isolation-dir` names is two different files. Packing is a pure
+function of the payload (the same `.mojoc` always gives the same package, and
+only the payload's own bytes differ otherwise). Build a release under the
+default isolation directory, always, and upload the file that build produced.
+The
 `.conda` is a zip of three stored members (`metadata.json`, `pkg-*.tar.zst`,
 `info-*.tar.zst`); the tars are the deterministic ones `komira_pack` already
 writes; the zstd streams are made of raw blocks, valid zstd that no encoder
