@@ -18,6 +18,7 @@
 # =============================================================================
 
 from komira_json import JsonValue, JSON_STRING, parse_json_bytes
+from komira_gcp_core._text import _percent_encode
 from komira_gcp_core.status import MAX_PARSE_DEPTH
 
 
@@ -56,40 +57,13 @@ def next_page_token(body: List[UInt8]) raises -> String:
     return v.as_string()
 
 
-def _is_unreserved(b: UInt8) -> Bool:
-    var c = Int(b)
-    return (
-        (c >= ord("A") and c <= ord("Z"))
-        or (c >= ord("a") and c <= ord("z"))
-        or (c >= ord("0") and c <= ord("9"))
-        or c == ord("-") or c == ord(".") or c == ord("_") or c == ord("~")
-    )
-
-
-def _hex_digit(n: UInt8) -> String:
-    if n < 10:
-        return chr(Int(n) + ord("0"))
-    return chr(Int(n) - 10 + ord("A"))
-
-
-def _percent_encode(value: String) -> String:
-    """RFC 3986 percent-encoding of everything but the unreserved set."""
-    var out = String()
-    for c in value.as_bytes():
-        if _is_unreserved(c):
-            out += chr(Int(c))
-        else:
-            out += "%" + _hex_digit(c >> 4) + _hex_digit(c & 0x0F)
-    return out^
-
-
 def with_page_token(url: String, token: String) -> String:
     """`url` with `pageToken=<token>` appended (percent-encoded); `url`
     unchanged for an empty token (the first page)."""
     if token.byte_length() == 0:
         return url.copy()
     var sep = "&" if url.find("?") >= 0 else "?"
-    return url + sep + "pageToken=" + _percent_encode(token)
+    return url + sep + "pageToken=" + _percent_encode(token, keep_slash=False)
 
 
 struct PageCursor(Copyable, Movable, Deinitable):

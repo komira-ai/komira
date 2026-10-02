@@ -11,7 +11,8 @@
 # destroyed and is recoverable by any process that allocates over the
 # stack slot.
 #
-# This module provides ONE canonical `zeroize_inline_array[N]` helper.
+# This module provides ONE canonical `zeroize_inline_array[N]` helper (plus
+# its UInt32 / UInt64 forms, and `zeroize_list` for a `List[UInt8]`).
 # Every Sha256 / Hmac / Aead / KeySchedule conformer in `komira_crypto`
 # calls into this helper from its `__del__(deinit self)`.
 #
@@ -142,3 +143,25 @@ def zeroize_inline_array_u64[N: Int](mut a: Array[UInt64, N]):
             UnsafePointer(to=a).bitcast[UInt8](),
             UInt(N * 8),
         )
+
+
+@always_inline
+def zeroize_list(mut a: List[UInt8]):
+    """No-elide secure-zero for the elements of a `List[UInt8]`, for key
+    bytes held in a growable buffer (the DER `rsa_pkcs8_der_from_pem`
+    returns). Zeroes `len(a)` bytes and leaves the length alone; a caller
+    that also wants the list empty clears it afterwards.
+
+    Same libc calls and SAFETY discipline as `zeroize_inline_array[N]`: the
+    pointer is `a`'s own buffer, valid for `len(a)` initialized bytes while
+    `a` is borrowed mutably, and it does not leave this call.
+    """
+    var n = len(a)
+    if n == 0:
+        return
+    comptime if CompilationTarget.is_macos():
+        var _e = external_call["memset_s", Int](
+            a.unsafe_ptr(), UInt(n), Int(0), UInt(n)
+        )
+    else:
+        external_call["explicit_bzero", NoneType](a.unsafe_ptr(), UInt(n))
