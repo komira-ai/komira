@@ -6,7 +6,8 @@
 #
 # The broker runs entirely on the object store (compute and storage are
 # decoupled), so this package depends only on komira_broker, komira_http,
-# komira_proto_codec, komira_async, engine_rpc and the object-store traits: no
+# komira_proto_codec, komira_async, komira_supervisor_proto,
+# komira_broker_proto and the object-store traits: no
 # database, no Kubernetes client, no job store.
 #
 # WHAT THIS DOES (one broker heartbeat round):
@@ -47,10 +48,12 @@ from komira_broker import (
 )
 from komira_objectstore.store import CloneableConditionalWriteStore
 
-# The GENERATED engine.proto messages (`engine_rpc`).
-from engine_rpc.engine import (
+# The GENERATED supervisor and broker proto messages.
+from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
     HeartbeatResponse as PbHeartbeatResponse,
+)
+from komira_broker_proto.broker import (
     NodeLoad as PbNodeLoad,
     ClusterConfig as PbClusterConfig,
     BrokerClusterMap as PbBrokerClusterMap,

@@ -76,9 +76,11 @@ from komira_objectstore.store import (
 from komira_http import HttpMethod, HttpRequest, HttpResponse
 from komira_http.transport.dispatch import SuspendableDispatcher
 
-from engine_rpc.engine import (
+from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
     HeartbeatResponse as PbHeartbeatResponse,
+)
+from komira_broker_proto.broker import (
     ClusterConfig as PbClusterConfig,
     BrokerClusterMap as PbBrokerClusterMap,
     NodeEndpoint as PbNodeEndpoint,

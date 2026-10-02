@@ -49,10 +49,12 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
 
 from komira_http import HttpMethod, HttpRequest
 
-from engine_rpc.engine import (
+from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,
-    NodeLoad as PbNodeLoad,
     JobPhase as PbJobPhase,
+)
+from komira_broker_proto.broker import (
+    NodeLoad as PbNodeLoad,
 )
 from komira_proto_codec import encode_proto
 
