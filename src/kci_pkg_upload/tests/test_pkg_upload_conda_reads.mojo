@@ -26,11 +26,12 @@
 #       excerpt's byte bound quotes no prefix of it (repodata 403 and 5xx, the
 #       file GET 403);
 #   (7) package_names: the names of BOTH listings, lowercased, sorted, once
-#       each, read from `/<channel>/<subdir>/repodata.json`; a 404 is ABSENT
+#       each, and every listed file name as listed (`files_of(name)` picks a
+#       name's), read from `/<channel>/<subdir>/repodata.json`; a 404 is ABSENT
 #       with no name; a listing that was not read (not an object, neither
 #       key, an entry that is not an object, a key that is not
 #       <name>-<version>-<build>, a 5xx, a transport fault) is UNKNOWN with NO
-#       name and `holds` RAISES on it, never answering "not held"; a 403 is
+#       name and `holds` / `files_of` RAISE on it, never answering "not held"; a 403 is
 #       AUTH_REFUSED; PyPI has no subdir listing and a malformed subdir is a
 #       local fault — both RAISE with ZERO requests.
 #
@@ -323,6 +324,18 @@ def test_package_names_from_both_listings() raises:
     assert_true(n.holds(String("Komira-Probe")))
     assert_true(n.holds(String("old-lib")))
     assert_false(n.holds(String("komira")))
+    # the files, as listed (not lowercased), sorted, each once; per name
+    assert_equal(len(n.files), 4)
+    assert_equal(n.files[0], String("Old-Lib-0.1-0.tar.bz2"))
+    assert_equal(n.files[1], String("a-lib-9-0.conda"))
+    assert_equal(n.files[2], String("komira-probe-1.2.3-h0123abc_0.conda"))
+    assert_equal(n.files[3], String("komira-probe-1.2.4-h0123abc_0.conda"))
+    var probe = n.files_of(String("Komira-Probe"))
+    assert_equal(len(probe), 2)
+    assert_equal(probe[0], String("komira-probe-1.2.3-h0123abc_0.conda"))
+    assert_equal(probe[1], String("komira-probe-1.2.4-h0123abc_0.conda"))
+    assert_equal(len(n.files_of(String("old-lib"))), 1)
+    assert_equal(len(n.files_of(String("komira"))), 0, String("a name prefix is not the name"))
     var req = rs.transport().call(0)
     assert_equal(req.host, String("prefix.dev"))
     assert_equal(req.path, String("/example-channel/noarch/repodata.json"))
@@ -334,6 +347,7 @@ def test_package_names_from_both_listings() raises:
     var empty = _names(t2^)
     assert_equal(empty.kind, READ_PRESENT, empty.detail)
     assert_equal(len(empty.names), 0)
+    assert_equal(len(empty.files), 0)
     assert_false(empty.holds(String("komira-probe")))
 
     # 404: the subdir holds no repodata, so no name; ABSENT is a read answer.
@@ -360,6 +374,14 @@ def _assert_names_not_read(var r: PkgResponse, expect_kind: Int) raises:
         raised = True
         assert_true(String(e).find(String("not read")) >= 0, String(e))
     assert_true(raised, String("holds() answered from a listing that was not read"))
+    assert_equal(len(n.files), 0, n.detail)
+    var raised_files = False
+    try:
+        _ = n.files_of(String("komira-probe"))
+    except e:
+        raised_files = True
+        assert_true(String(e).find(String("not read")) >= 0, String(e))
+    assert_true(raised_files, String("files_of() answered from a listing that was not read"))
 
 
 def test_package_names_never_empty_from_a_listing_not_read() raises:
