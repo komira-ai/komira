@@ -804,7 +804,7 @@ fn decimal(s: []const u8) bool {
 }
 
 /// The version of every package: the Mojo compiler version they are built
-/// with (CEO decision), so a conda version: it starts with a digit and holds
+/// with, pinned by the platform table, so a conda version: it starts with a digit and holds
 /// letters, digits, `.`, `_` and `+` only (a `-` would make the file name
 /// ambiguous).
 fn compilerVersion(v: []const u8) []const u8 {
