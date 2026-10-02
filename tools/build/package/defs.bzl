@@ -27,6 +27,7 @@ Sub-targets: `[test_launcher]` is the same launcher built with the test hook
 the bundle. `[launcher]` is the shipped one.
 """
 
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:providers.bzl", "MojoProgramInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
@@ -169,8 +170,8 @@ _mojo_bundle = rule(
 )
 
 def mojo_bundle(**kwargs):
-    # Compiling the launcher and copying files: light work.
-    _mojo_bundle(exec_compatible_with = ["komira//tools/build/platforms:light"], **kwargs)
+    # Compiling the launcher and copying files, with linux x86_64 tools.
+    _mojo_bundle(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 def _level_test_impl(ctx):
     bb = ctx.attrs._busybox[DefaultInfo].default_outputs[0]
@@ -248,7 +249,7 @@ def bundle_tarball(**kwargs):
     Entries sorted, mtime 0, uid/gid 0, modes 0755/0644; the same bundle
     gives the same bytes.
     """
-    _bundle_tarball(exec_compatible_with = ["komira//tools/build/platforms:light"], **kwargs)
+    _bundle_tarball(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 # manifest: the base image manifest (linux/amd64); manifest_digest: its pinned
 # digest (komira_pack checks it); config: its config blob; layers: its layer
@@ -321,6 +322,7 @@ def oci_base(name, registry, repository, manifest, manifest_file, config, layers
 
 def _oci_image_impl(ctx):
     b = ctx.attrs.bundle[BundleInfo]
+    # komira-limit:image-linux-x86-64-only
     if b.platform != "linux-x86_64":
         fail("{}: an image of a {} bundle; only linux-x86_64 (linux/amd64) is supported".format(ctx.label, b.platform))
     if not regex_match("^[a-z0-9]+([._/-][a-z0-9]+)*$", ctx.attrs.repository):
@@ -386,7 +388,7 @@ def oci_image(**kwargs):
     plus a Docker `manifest.json`, which `docker load` reads; `[digest]`
     holds the manifest digest. Nothing is pushed.
     """
-    _oci_image(exec_compatible_with = ["komira//tools/build/platforms:light"], **kwargs)
+    _oci_image(exec_compatible_with = LINUX_X86_64, **kwargs)
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
