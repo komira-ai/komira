@@ -32,7 +32,10 @@
 # listings (`<name>-<version>-<build>.conda|.tar.bz2`, split at the last two
 # `-`, the name lowercased: a conda name is lowercase). A publisher uses it to
 # tell a name it is CLAIMING for the first time from one the channel already
-# holds, so the same discipline holds, in the other direction: a listing that
+# holds. It also keeps every listed FILE name (`files`, `files_of(name)`), so
+# a publisher can tell a name that only its own earlier upload holds (a re-run
+# after a partial publish) from a name somebody else's file holds. The same
+# discipline holds, in the other direction: a listing that
 # was not read yields NO names and the kind UNKNOWN, never an empty PRESENT
 # that would read as "every name is new":
 #   * a key with neither extension, or not `<name>-<version>-<build>`, is
@@ -241,6 +244,10 @@ struct NameListing(Copyable, Movable, Deinitable):
                has no repodata (404), so no name. Any other kind: the listing
                was NOT read, and `names` is EMPTY and means nothing.
       names  — lowercase, sorted bytewise, each once.
+      files  — every file name the listing holds (both formats), exactly as
+               listed, sorted bytewise, each once. EMPTY unless READ_PRESENT.
+               A publisher asks `files_of(name)` to tell a name only its OWN
+               earlier upload holds from one somebody else's file holds.
       detail — for a human, when the kind is not READ_PRESENT.
 
     Layout: Ints and owned values. No pointer field."""
@@ -248,6 +255,7 @@ struct NameListing(Copyable, Movable, Deinitable):
     var kind: Int
     var status: Int
     var names: List[String]
+    var files: List[String]
     var detail: String
 
     def __init__(
@@ -255,11 +263,13 @@ struct NameListing(Copyable, Movable, Deinitable):
         kind: Int,
         status: Int,
         var names: List[String],
+        var files: List[String],
         var detail: String,
     ):
         self.kind = kind
         self.status = status
         self.names = names^
+        self.files = files^
         self.detail = detail^
 
     def was_read(self) -> Bool:
@@ -286,6 +296,25 @@ struct NameListing(Copyable, Movable, Deinitable):
         return False
 
 
+    def files_of(self, name: String) raises -> List[String]:
+        """The listed file names whose package name is `name` (compared
+        lowercased), in `files` order. RAISES when the listing was not read,
+        for the same reason as `holds`."""
+        if not self.was_read():
+            raise Error(
+                String("kci_pkg_upload: asked which files of '")
+                + name
+                + String("' a subdir holds from a listing that was not read: ")
+                + self.detail
+            )
+        var want = ascii_lower(name)
+        var out = List[String]()
+        for i in range(len(self.files)):
+            if conda_package_name_of_file(self.files[i]) == want:
+                out.append(self.files[i].copy())
+        return out^
+
+
 def conda_package_name_of_file(file_name: String) -> String:
     """The package name of a conda file name `<name>-<version>-<build>.conda`
     (or `.tar.bz2`), lowercased; EMPTY when the file name has neither
@@ -308,7 +337,7 @@ def conda_package_name_of_file(file_name: String) -> String:
 
 
 def _names_unknown(got: GetResult, var detail: String) -> NameListing:
-    return NameListing(READ_UNKNOWN, got.response.status, List[String](), detail^)
+    return NameListing(READ_UNKNOWN, got.response.status, List[String](), List[String](), detail^)
 
 
 def _insert_sorted_unique(mut names: List[String], var name: String):
@@ -328,12 +357,13 @@ def classify_repodata_names(
     """Turn one repodata GET into the set of package names it lists (see the
     file header). Never raises: every fault is a kind."""
     if not got.ok:
-        return NameListing(READ_UNKNOWN, 0, List[String](), got.detail.copy())
+        return NameListing(READ_UNKNOWN, 0, List[String](), List[String](), got.detail.copy())
     var status = got.response.status
     if status == 404:
         return NameListing(
             READ_ABSENT,
             status,
+            List[String](),
             List[String](),
             String("the channel answered 404 for ") + got.host + got.path,
         )
@@ -341,6 +371,7 @@ def classify_repodata_names(
         return NameListing(
             READ_AUTH_REFUSED,
             status,
+            List[String](),
             List[String](),
             withhold_if_echoes(
                 String("the channel answered ")
@@ -352,7 +383,7 @@ def classify_repodata_names(
         )
     if status == 429:
         return NameListing(
-            READ_RATE_LIMITED, status, List[String](), String("the channel answered 429")
+            READ_RATE_LIMITED, status, List[String](), List[String](), String("the channel answered 429")
         )
     if status != 200:
         return _names_unknown(
@@ -379,6 +410,7 @@ def classify_repodata_names(
         keys.append(String(CONDA_PACKAGES_KEY))
         var read_one = False
         var names = List[String]()
+        var files = List[String]()
         for k in range(len(keys)):
             if not doc.has(keys[k]):
                 continue
@@ -410,13 +442,14 @@ def classify_repodata_names(
                         + String(".conda or .tar.bz2: its names cannot be told"),
                     )
                 _insert_sorted_unique(names, name^)
+                _insert_sorted_unique(files, file_name.copy())
         if not read_one:
             return _names_unknown(
                 got,
                 String("the repodata has neither a 'packages' nor a")
                 + String(" 'packages.conda' listing: its names cannot be read"),
             )
-        return NameListing(READ_PRESENT, status, names^, String(""))
+        return NameListing(READ_PRESENT, status, names^, files^, String(""))
     except e:
         return _names_unknown(
             got, String("the repodata could not be read: ") + String(e)
