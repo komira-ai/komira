@@ -24,6 +24,8 @@
 
 from komira_encoding import base64_decode
 
+from komira_gcp_core._text import _from_utf8_bytes
+
 
 comptime PEM_PKCS8_PRIVATE_KEY_LABEL: StaticString = "PRIVATE KEY"
 """The RFC 7468 section 10 label of an unencrypted PKCS#8 PrivateKeyInfo."""
@@ -34,11 +36,6 @@ comptime _ENCRYPTED_PKCS8_LABEL: StaticString = "ENCRYPTED PRIVATE KEY"
 comptime _BEGIN: StaticString = "-----BEGIN "
 comptime _END: StaticString = "-----END "
 comptime _DASHES: StaticString = "-----"
-
-
-def _from_bytes(b: List[UInt8]) -> String:
-    """A String from bytes cut from a String only at ASCII bytes."""
-    return String(unsafe_from_utf8=Span(b))
 
 
 def _trim_line(line: Span[UInt8, _]) -> List[UInt8]:
@@ -103,7 +100,7 @@ def _label(line: List[UInt8], prefix: StaticString) raises -> String:
     var out = List[UInt8](capacity=len(line) - p - d)
     for i in range(p, len(line) - d):
         out.append(line[i])
-    return _from_bytes(out)
+    return _from_utf8_bytes(out)
 
 
 def pem_decode(pem: String, label: String) raises -> List[UInt8]:

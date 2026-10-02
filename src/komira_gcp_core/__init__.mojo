@@ -49,6 +49,8 @@ komira_retry):
                       `pkcs8_private_key_der_from_pem` for the `private_key`
                       of a service-account key file (base64 from
                       komira_encoding).
+  - _text.mojo      : private, not re-exported: the package's one RFC 3986
+                      percent-encoder (`pageToken`, the V4 path and query).
 
 Nothing in this package reads the environment or opens a socket.
 """
@@ -115,7 +117,6 @@ from .v4_sign import (
     gcs_v4_canonical_path,
     gcs_v4_canonical_query,
     gcs_v4_credential_scope,
-    gcs_v4_percent_encode,
     gcs_v4_sign_string_to_sign,
     gcs_v4_signed_url,
     gcs_v4_stamps_from_unix_seconds,

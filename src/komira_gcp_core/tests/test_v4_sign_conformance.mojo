@@ -49,7 +49,6 @@ from komira_gcp_core import (
     gcs_v4_canonical_path,
     gcs_v4_canonical_query,
     gcs_v4_credential_scope,
-    gcs_v4_percent_encode,
     gcs_v4_signed_url,
     gcs_v4_stamps_from_unix_seconds,
     gcs_v4_string_to_sign,
@@ -412,18 +411,31 @@ def test_path_is_encoded_but_never_normalized() raises:
     assert_equal(gcs_v4_canonical_path(""), "/")
 
 
+def _q(value: String) -> String:
+    """The canonical query of one parameter `k=<value>`."""
+    var q = List[GcsV4QueryParam]()
+    q.append(GcsV4QueryParam("k", value))
+    return gcs_v4_canonical_query(q)
+
+
 def test_percent_encoding_is_unreserved_only() raises:
-    assert_equal(gcs_v4_percent_encode("aA0-._~", True), "aA0-._~")
-    assert_equal(gcs_v4_percent_encode(" ", True), "%20")
-    assert_equal(gcs_v4_percent_encode("%", True), "%25")
-    assert_equal(gcs_v4_percent_encode("=", True), "%3D")
-    assert_equal(gcs_v4_percent_encode("+", True), "%2B")
-    assert_equal(gcs_v4_percent_encode("/", True), "%2F")
-    assert_equal(gcs_v4_percent_encode("/", False), "/")
+    # Through the path and the query, the two places the encoder is used.
+    assert_equal(_q("aA0-._~"), "k=aA0-._~")
+    assert_equal(_q(" "), "k=%20")
+    assert_equal(_q("%"), "k=%25")
+    assert_equal(_q("="), "k=%3D")
+    assert_equal(_q("+"), "k=%2B")
+    # `/` is encoded in a query and kept in a path.
+    assert_equal(_q("/"), "k=%2F")
+    assert_equal(gcs_v4_canonical_path("/a b/%"), "/a%20b/%25")
+    # A query name is encoded like a value.
+    var named = List[GcsV4QueryParam]()
+    named.append(GcsV4QueryParam("a/b c", "v"))
+    assert_equal(gcs_v4_canonical_query(named), "a%2Fb%20c=v")
     # U+00E9 is two UTF-8 octets, so two escapes, upper-case hex.
-    assert_equal(gcs_v4_percent_encode("é", True), "%C3%A9")
+    assert_equal(_q("é"), "k=%C3%A9")
     # A four-octet code point.
-    assert_equal(gcs_v4_percent_encode("\U0001F600", False), "%F0%9F%98%80")
+    assert_equal(gcs_v4_canonical_path("/\U0001F600"), "/%F0%9F%98%80")
 
 
 def test_query_sorts_by_name_then_value() raises:

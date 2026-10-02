@@ -64,6 +64,8 @@ from komira_crypto import (
     sha256_string,
 )
 
+from komira_gcp_core._text import _from_utf8_bytes, _percent_encode
+
 
 # -----------------------------------------------------------------------------
 # Constants
@@ -192,12 +194,6 @@ struct GcsV4Stamps(ImplicitlyCopyable, Copyable, Movable, Deinitable):
 # -----------------------------------------------------------------------------
 
 
-def _from_bytes(b: List[UInt8]) -> String:
-    """A String from bytes that are valid UTF-8 by construction: ASCII
-    output of the encoder, or input bytes cut only at ASCII bytes."""
-    return String(unsafe_from_utf8=Span(b))
-
-
 def _is_ws(c: UInt8) -> Bool:
     return c == UInt8(0x20) or c == UInt8(0x09)
 
@@ -210,7 +206,7 @@ def _ascii_lower(s: String) -> String:
         if c >= UInt8(0x41) and c <= UInt8(0x5A):
             c += 0x20
         out.append(c)
-    return _from_bytes(out)
+    return _from_utf8_bytes(out)
 
 
 def _trim_ws(s: String) -> String:
@@ -225,7 +221,7 @@ def _trim_ws(s: String) -> String:
     var out = List[UInt8](capacity=j - i)
     for k in range(i, j):
         out.append(b[k])
-    return _from_bytes(out)
+    return _from_utf8_bytes(out)
 
 
 def _collapse_inner_ws(s: String) -> String:
@@ -246,64 +242,19 @@ def _collapse_inner_ws(s: String) -> String:
         else:
             out.append(c)
             prev_ws = False
-    return _from_bytes(out)
+    return _from_utf8_bytes(out)
 
 
 # -----------------------------------------------------------------------------
-# Percent-encoding
+# Canonical path (line 2)
 # -----------------------------------------------------------------------------
 #
 # The encode set comes from the vectors, not from the prose. The
 # canonical-requests page lists a reserved set to encode, which would leave
 # a space and `%` alone; vector "Query Parameter Encoding" sends
 # `~ ._-%=/é0Aa` and expects `~%20._-%25%3D%2F%C3%A90Aa`: everything outside
-# the RFC 3986 unreserved set is encoded, octet by octet of the UTF-8.
-#
-# komira_aws_core has `uri_encode` with the same rule. It is not imported:
-# this package does not depend on the AWS core.
-
-
-def _is_unreserved(c: UInt8) -> Bool:
-    """RFC 3986 section 2.3 unreserved: ALPHA / DIGIT / `-` / `.` / `_` / `~`."""
-    return (
-        (c >= UInt8(0x41) and c <= UInt8(0x5A))
-        or (c >= UInt8(0x61) and c <= UInt8(0x7A))
-        or (c >= UInt8(0x30) and c <= UInt8(0x39))
-        or c == UInt8(0x2D)
-        or c == UInt8(0x2E)
-        or c == UInt8(0x5F)
-        or c == UInt8(0x7E)
-    )
-
-
-def _hex_upper_digit(v: UInt8) -> UInt8:
-    return v + 0x30 if v < 10 else v - 10 + 0x41
-
-
-def gcs_v4_percent_encode(input: String, encode_slash: Bool) -> String:
-    """RFC 3986 percent-encoding of the UTF-8 bytes of `input`, upper-case
-    hex, every byte outside the unreserved set encoded.
-
-    `encode_slash=False` keeps `/` (a path); `encode_slash=True` encodes it
-    as `%2F` (a query name or value: vector "Query Parameter Ordering" encodes
-    the value `/foo` as `%2Ffoo`). A non-ASCII character is one escape per
-    octet: `é` is `%C3%A9`."""
-    var b = input.as_bytes()
-    var out = List[UInt8](capacity=len(b))
-    for i in range(len(b)):
-        var c = b[i]
-        if _is_unreserved(c) or (not encode_slash and c == UInt8(0x2F)):
-            out.append(c)
-        else:
-            out.append(UInt8(0x25))
-            out.append(_hex_upper_digit(c >> 4))
-            out.append(_hex_upper_digit(c & 0x0F))
-    return _from_bytes(out)
-
-
-# -----------------------------------------------------------------------------
-# Canonical path (line 2)
-# -----------------------------------------------------------------------------
+# the RFC 3986 unreserved set is encoded, octet by octet of the UTF-8
+# (`_text._percent_encode`, the package's one encoder).
 
 
 def gcs_v4_canonical_path(path: String) -> String:
@@ -311,7 +262,7 @@ def gcs_v4_canonical_path(path: String) -> String:
     above). An empty path is `/`."""
     if path.byte_length() == 0:
         return String("/")
-    return gcs_v4_percent_encode(path, False)
+    return _percent_encode(path, keep_slash=True)
 
 
 # -----------------------------------------------------------------------------
@@ -346,8 +297,8 @@ def gcs_v4_canonical_query(params: List[GcsV4QueryParam]) -> String:
     for i in range(len(params)):
         encoded.append(
             GcsV4QueryParam(
-                gcs_v4_percent_encode(params[i].name, True),
-                gcs_v4_percent_encode(params[i].value, True),
+                _percent_encode(params[i].name, keep_slash=False),
+                _percent_encode(params[i].value, keep_slash=False),
             )
         )
     _sort_query(encoded)
