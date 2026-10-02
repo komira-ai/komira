@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:proto.bzl", "proto_srcs")
 load(":defs.bzl", "gen_check", "tests_check")
 
 # gcp_client (tools/build/cloud/gcp.bzl) over a fixture API, with the stub
-# komira_serde of ../proto as the runtime. `buck2 build
+# komira_proto_codec of ../proto as the runtime. `buck2 build
 # tests//functional/gcp_client:` builds each library, which runs its welded
 # tests (the generated layout probe first), each gen_check and each
 # tests_check. proto_tests.sh (sourced by run_tests.sh) builds this package
@@ -32,7 +32,7 @@ gcp_client(
     proto_deps = [":shop_deps"],
     protos = ["example/shop/v1/shop.proto"],
     test_srcs = ["test_shop.mojo"],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 # The absence check: DeleteItem and what only it reaches are not emitted,
@@ -74,7 +74,7 @@ gcp_client(
         "GetItemRequest",
         ".example.shop.v1.Item",
     ],
-    deps = ["//functional/proto:komira_serde"],
+    deps = ["//functional/proto:komira_proto_codec"],
 )
 
 gen_check(
