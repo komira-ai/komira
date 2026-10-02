@@ -19,7 +19,8 @@
 #   GATE 4  the expiry is the clock's instant plus the TTL, and the clock is
 #           read exactly once per mint.
 #   GATE 5  the codebase's TTL ceiling binds (below GCS's own 7 days) and
-#           refuses rather than clamps; a refused mint reads no clock.
+#           refuses rather than clamps, with the policy's own message; a
+#           refused mint reads no clock.
 #   GATE 6  a fixed clock gives byte-identical URLs; another instant does not.
 #   GATE 7  the signer's URL is exactly komira_gcp_core's gcs_v4_signed_url
 #           over the path-style path, with `host` the only signed header.
@@ -28,11 +29,16 @@
 #   GATE 9  containment: the bucket is the signer's; an empty bucket, a
 #           bucket holding `/`, and an empty key are refused.
 #   GATE 10 an emulator authority keeps its port in the URL.
+#   GATE 11 known answers: for every published vector this signer can make
+#           (GET or PUT of an object, path style, the default host, no extra
+#           header or query parameter), the conformer mints the published
+#           URL byte for byte, at the vector's own timestamp. The set of
+#           such vectors is pinned, so a filter that selects nothing fails.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_json import parse_json_value
+from komira_json import JsonValue, parse_json_value
 
 from komira_gcp_core import (
     GCS_V4_DEFAULT_HOST,
@@ -57,33 +63,36 @@ from komira_objectstore_gcs import (
 )
 
 
+comptime _VECTORS = "conformance/storage/v1/v4_signatures.json"
 comptime _ACCOUNT = "conformance/storage/v1/test_service_account.not-a-test.json"
 comptime _BUCKET: StaticString = "repo-bucket"
 comptime _KEY: StaticString = "alpha.git/lfs/objects/9f/86/9f86d081884c7d65"
 comptime _TTL: Int = 300
-comptime _FIXED_NOW: Int64 = 1790000000  # 20260921T141320Z
+comptime _FIXED_NOW: Int = 1790000000  # 20260921T141320Z
 
 
 struct SteppingClock(GcsSigningClock):
     """Reports `start`, then `start + 1`, ... one second per read, so the
     instant a mint reports says how many reads came before it."""
 
-    var next: Int64
+    var next: Int
 
-    def __init__(out self, start: Int64):
+    def __init__(out self, start: Int):
         self.next = start
 
-    def now_unix_seconds(mut self) raises -> Int64:
+    def now_unix_seconds(mut self) -> Int:
         var t = self.next
         self.next += 1
         return t
 
 
+def _read_text(path: String) raises -> String:
+    with open(path, "r") as f:
+        return f.read()
+
+
 def _account() raises -> GcsV4ServiceAccount:
-    var text: String
-    with open(_ACCOUNT, "r") as f:
-        text = f.read()
-    var a = parse_json_value(text)
+    var a = parse_json_value(_read_text(_ACCOUNT))
     var der = pkcs8_private_key_der_from_pem(a.get("private_key").as_string())
     return GcsV4ServiceAccount(a.get("client_email").as_string(), der^)
 
@@ -175,7 +184,7 @@ def test_gate1_2_3_generic_mint_scopes_each_verb() raises:
 def test_gate4_expiry_is_the_signing_instant_plus_ttl() raises:
     var gcs = _gcs()
     var u = gcs.presign_download(String(_KEY), _TTL)
-    assert_equal(u.expires_unix_seconds, _FIXED_NOW + Int64(_TTL))
+    assert_equal(u.expires_unix_seconds, Int64(_FIXED_NOW + _TTL))
     assert_equal(
         _query_value(u.url, "X-Goog-Date"), String("20260921T141320Z")
     )
@@ -191,8 +200,8 @@ def test_gate4_expiry_is_the_signing_instant_plus_ttl() raises:
     )
     var first = stepping.presign_download(String(_KEY), _TTL)
     var second = stepping.presign_upload(String(_KEY), _TTL)
-    assert_equal(first.expires_unix_seconds, _FIXED_NOW + Int64(_TTL))
-    assert_equal(second.expires_unix_seconds, _FIXED_NOW + 1 + Int64(_TTL))
+    assert_equal(first.expires_unix_seconds, Int64(_FIXED_NOW + _TTL))
+    assert_equal(second.expires_unix_seconds, Int64(_FIXED_NOW + 1 + _TTL))
     assert_equal(
         _query_value(second.url, "X-Goog-Date"), String("20260921T141321Z")
     )
@@ -203,14 +212,23 @@ def test_gate4_expiry_is_the_signing_instant_plus_ttl() raises:
 # -----------------------------------------------------------------------------
 
 
+comptime _TTL_REFUSAL = "presign: refusing a TTL"
+comptime _SIGNER_REFUSAL = "gcs v4 signer: refusing"
+
+
 def _refuses_ttl(ttl: Int, upload: Bool) raises -> Bool:
+    """Whether the mint is refused BY THE TTL POLICY. The signer is built
+    outside the `try`, so a missing key file fails the test rather than
+    passing as a refusal, and only the policy's own message counts:
+    komira_gcp_core refuses a TTL of 0 too, with a different message."""
     var gcs = _gcs()
     try:
         if upload:
             _ = gcs.presign_upload(String(_KEY), ttl)
         else:
             _ = gcs.presign_download(String(_KEY), ttl)
-    except:
+    except e:
+        assert_true(String(e).find(_TTL_REFUSAL) >= 0, String(e))
         return True
     return False
 
@@ -241,11 +259,12 @@ def test_gate5_policy_ceiling_refuses_rather_than_clamps() raises:
     var refused = False
     try:
         _ = stepping.presign_download(String(_KEY), PRESIGN_MAX_TTL_SECONDS + 1)
-    except:
+    except e:
+        assert_true(String(e).find(_TTL_REFUSAL) >= 0, String(e))
         refused = True
     assert_true(refused)
     var after = stepping.presign_download(String(_KEY), _TTL)
-    assert_equal(after.expires_unix_seconds, _FIXED_NOW + Int64(_TTL))
+    assert_equal(after.expires_unix_seconds, Int64(_FIXED_NOW + _TTL))
 
 
 # -----------------------------------------------------------------------------
@@ -291,7 +310,7 @@ def test_gate7_signer_url_is_the_core_signed_url() raises:
         List[GcsV4QueryParam](),
         _account(),
         String("auto"),
-        gcs_v4_stamps_from_unix_seconds(_FIXED_NOW),
+        gcs_v4_stamps_from_unix_seconds(Int64(_FIXED_NOW)),
         _TTL,
     )
     assert_equal(got.url, want)
@@ -344,25 +363,32 @@ def test_gate8_object_key_paths_are_never_normalized() raises:
 # -----------------------------------------------------------------------------
 
 
-def _refuses_bucket(bucket: String) raises -> Bool:
+def _refuses_bucket(var account: GcsV4ServiceAccount, bucket: String) raises -> Bool:
+    """Whether the signer refuses `bucket` at construction, with its own
+    message. The account is loaded by the caller, outside the `try`."""
     try:
-        _ = GcsV4Signer(_account(), bucket, FixedSigningClock(_FIXED_NOW))
-    except:
+        _ = GcsV4Signer(account^, bucket, FixedSigningClock(_FIXED_NOW))
+    except e:
+        assert_true(String(e).find(_SIGNER_REFUSAL) >= 0, String(e))
         return True
     return False
 
 
 def test_gate9_bucket_is_the_signers_and_empty_names_are_refused() raises:
-    assert_true(_refuses_bucket(String("")))
-    assert_true(_refuses_bucket(String("repo-bucket/other")))
-    assert_true(_refuses_bucket(String("/repo-bucket")))
+    var account = _account()
+    assert_true(_refuses_bucket(account.copy(), String("")))
+    assert_true(_refuses_bucket(account.copy(), String("repo-bucket/other")))
+    assert_true(_refuses_bucket(account.copy(), String("/repo-bucket")))
+    # The control: a plain bucket name is accepted with the same account.
+    assert_false(_refuses_bucket(account^, String(_BUCKET)))
 
     var gcs = _gcs()
     assert_equal(gcs.bucket(), String(_BUCKET))
     var refused = False
     try:
         _ = gcs.presign_upload(String(""), _TTL)
-    except:
+    except e:
+        assert_true(String(e).find(_SIGNER_REFUSAL) >= 0, String(e))
         refused = True
     assert_true(refused)
 
@@ -387,6 +413,122 @@ def test_gate10_emulator_authority_keeps_its_port() raises:
     assert_false(u.url.startswith(String("https://")))
 
 
+# -----------------------------------------------------------------------------
+# GATE 11: known answers. The conformer's own URL against Google's.
+# -----------------------------------------------------------------------------
+
+
+def _days_from_civil(y_in: Int, m: Int, d: Int) -> Int:
+    """Days since the Unix epoch of a proleptic Gregorian date (H. Hinnant,
+    "chrono-Compatible Low-Level Date Algorithms"), written independently of
+    the signer's stamp rendering."""
+    var y = y_in - 1 if m <= 2 else y_in
+    var era = y // 400  # `//` floors; no truncation adjustment
+    var yoe = y - era * 400
+    var mp = m - 3 if m > 2 else m + 9
+    var doy = (153 * mp + 2) // 5 + d - 1
+    var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
+    return era * 146097 + doe - 719468
+
+
+def _field(ts: String, start: Int, end: Int) raises -> Int:
+    return Int(String(ts[byte=start:end]))
+
+
+def _unix_from_rfc3339(ts: String) raises -> Int:
+    """`YYYY-MM-DDTHH:MM:SSZ`, the form of every vector's `timestamp`, as
+    unix seconds."""
+    assert_equal(ts.byte_length(), 20, "timestamp " + ts)
+    assert_true(ts.endswith("Z"), "timestamp " + ts)
+    var days = _days_from_civil(
+        _field(ts, 0, 4), _field(ts, 5, 7), _field(ts, 8, 10)
+    )
+    return (
+        days * 86400
+        + _field(ts, 11, 13) * 3600
+        + _field(ts, 14, 16) * 60
+        + _field(ts, 17, 19)
+    )
+
+
+def _str(v: JsonValue, key: String) raises -> String:
+    """`v[key]` as a string, or "" when absent."""
+    if not v.has(key):
+        return String()
+    return v.get(key).as_string()
+
+
+def _is_signer_shaped(t: JsonValue) raises -> Bool:
+    """Whether a published vector is a request this signer makes: GET or PUT
+    of a named object, path style, https to the default host, no header but
+    `host`, no extra query parameter, and a TTL inside our ceiling."""
+    var method = _str(t, "method")
+    if method != "GET" and method != "PUT":
+        return False
+    if _str(t, "scheme") != "https":
+        return False
+    if _str(t, "object").byte_length() == 0:
+        return False
+    var not_ours: List[String] = [
+        "urlStyle",
+        "bucketBoundHostname",
+        "hostname",
+        "clientEndpoint",
+        "emulatorHostname",
+        "universeDomain",
+        "headers",
+        "queryParameters",
+    ]
+    for i in range(len(not_ours)):
+        if t.has(not_ours[i]):
+            return False
+    return Int(t.get("expiration").as_int64()) <= PRESIGN_MAX_TTL_SECONDS
+
+
+# The published vectors the signer reproduces at the pinned commit, by
+# description. Update it with the pin of //third_party/googleapis_conformance_tests.
+def _expected_matches() -> List[String]:
+    return [
+        "Simple GET",
+        "Simple PUT",
+        "Vary expiration and timestamp",
+        "Vary bucket and object",
+        "Forward Slashes should not be stripped",
+    ]
+
+
+def test_gate11_signer_mints_googles_published_urls() raises:
+    var doc = parse_json_value(_read_text(_VECTORS))
+    var tests = doc.get("signingV4Tests")
+    var account = _account()
+    var matched = List[String]()
+    for i in range(tests.array_len()):
+        var t = tests.element_at(i)
+        if not _is_signer_shaped(t):
+            continue
+        var description = _str(t, "description")
+        var signer = GcsV4Signer(
+            account.copy(),
+            _str(t, "bucket"),
+            FixedSigningClock(_unix_from_rfc3339(_str(t, "timestamp"))),
+        )
+        var key = _str(t, "object")
+        var ttl = Int(t.get("expiration").as_int64())
+        var got: PresignedUrl
+        if _str(t, "method") == "GET":
+            got = signer.presign_download(key, ttl)
+        else:
+            got = signer.presign_upload(key, ttl)
+        assert_equal(got.url, _str(t, "expectedUrl"), description)
+        matched.append(description)
+
+    # The filter is pinned too: a filter that selects nothing cannot pass.
+    var want = _expected_matches()
+    assert_equal(len(matched), len(want), "signer-shaped vectors")
+    for i in range(len(want)):
+        assert_equal(matched[i], want[i])
+
+
 def main() raises:
     test_gate1_2_3_generic_mint_scopes_each_verb()
     test_gate4_expiry_is_the_signing_instant_plus_ttl()
@@ -396,4 +538,5 @@ def main() raises:
     test_gate8_object_key_paths_are_never_normalized()
     test_gate9_bucket_is_the_signers_and_empty_names_are_refused()
     test_gate10_emulator_authority_keeps_its_port()
+    test_gate11_signer_mints_googles_published_urls()
     print("PASS test_gcs_presign_portability")

@@ -6,9 +6,17 @@
 #
 # SHAPE.
 #   * Bound to ONE bucket at construction; the trait's `key` is the object key
-#     within that bucket, the same string a `ConditionalWriteStore` verb takes.
-#     A caller holding a key cannot reach another bucket through it: the
-#     bucket is the signer's field, and a bucket name holding `/` is refused.
+#     within that bucket. A caller holding a key cannot reach another bucket
+#     through it: the bucket is the signer's field, and a bucket name holding
+#     `/` is refused.
+#   * The key is an OPAQUE OBJECT NAME, signed byte for byte and never
+#     `Path`-normalized, as Google's own clients sign it (the published vector
+#     "Forward Slashes should not be stripped" keeps a leading `/`). For a key
+#     in `Path`'s normal form (what `Path.parse(key).raw()` returns) it is the
+#     object `GcsConditionalStore` addresses. A key that `Path.parse` would
+#     rewrite (a leading `/`, a `//`, a `.` or `..` segment) names a
+#     DIFFERENT object here than through the store: `a//b` signs object
+#     `a//b`, where the store reads and writes `a/b`.
 #   * PATH STYLE: `<scheme>://<host>/<bucket>/<key>`. Virtual-hosted style is
 #     equally signable (komira_gcp_core takes the authority and the path
 #     separately) but needs a DNS-compatible bucket name, which a customer's
@@ -57,19 +65,21 @@ comptime GCS_V4_DEFAULT_LOCATION: StaticString = "auto"
 trait GcsSigningClock(Movable, Deinitable):
     """The wall clock a `GcsV4Signer` signs at, in whole seconds since the
     Unix epoch (UTC). Supplied by the caller; the signer reads it once per
-    mint."""
+    mint. The same shape as komira_aws_core's `AwsClock`: an `Int`, and no
+    raising (an instant outside the years 0000..9999 is refused by the
+    stamp rendering, not by the clock)."""
 
-    def now_unix_seconds(mut self) raises -> Int64:
+    def now_unix_seconds(mut self) -> Int:
         ...
 
 
 @fieldwise_init
-struct FixedSigningClock(GcsSigningClock, ImplicitlyCopyable, Copyable, Movable):
+struct FixedSigningClock(GcsSigningClock, ImplicitlyCopyable):
     """A clock stopped at one instant: every mint signs at `unix_seconds`."""
 
-    var unix_seconds: Int64
+    var unix_seconds: Int
 
-    def now_unix_seconds(mut self) raises -> Int64:
+    def now_unix_seconds(mut self) -> Int:
         return self.unix_seconds
 
 
@@ -135,7 +145,7 @@ struct GcsV4Signer[C: GcsSigningClock](ObjectUrlSigner):
         if len(key.as_bytes()) == 0:
             raise Error("gcs v4 signer: refusing to sign an empty key")
         var stamps = gcs_v4_stamps_from_unix_seconds(
-            self._clock.now_unix_seconds()
+            Int64(self._clock.now_unix_seconds())
         )
         var url = gcs_v4_signed_url(
             self._scheme,
