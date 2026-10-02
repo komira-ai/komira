@@ -17,17 +17,17 @@ from std.testing import assert_true
 from std.time import perf_counter_ns
 
 from komira_spsc_ring.spsc_ring import OVERFLOW_DROP
-from komira_spawn_join import spawn_join, SpawnJoinBody
+from komira_fork_join import fork_join, ForkJoinBody
 from komira_trace.tracer import Tracer
 from komira_trace.exporter import CapturingExporter
 
 
 # =============================================================================
-# THE FORK-JOIN -- real pthreads, through `komira_spawn_join`.
+# THE FORK-JOIN -- real pthreads, through `komira_fork_join`.
 #
 # MOJO 1.0.0 removed `parallelize` from the stdlib. A serial loop was NOT taken:
 # this file MEASURES concurrent ingestion, so the producers must really run at
-# once. `spawn_join` raises if a thread cannot be started, so a thread that
+# once. `fork_join` raises if a thread cannot be started, so a thread that
 # never ran cannot be mistaken for a fast one. Every worker touches only its own
 # `worker_id=tid` ring, which is the disjointness this gate asserts.
 # =============================================================================
@@ -40,7 +40,7 @@ comptime N_WORKERS = 10
 comptime EVENTS_PER_WORKER = 1_000
 
 
-struct _ProducerBody[o: Origin[mut=True]](SpawnJoinBody):
+struct _ProducerBody[o: Origin[mut=True]](ForkJoinBody):
     """One producer thread per tid, emitting `iters` spans into its own ring."""
 
     var tracer: Pointer[Tracer, Self.o]
@@ -74,7 +74,7 @@ def run_drain_throughput() raises -> Float64:
     # by spinning a single drain pass between producer dispatches.
     var t_start = perf_counter_ns()
 
-    spawn_join(
+    fork_join(
         _ProducerBody(Pointer(to=tracer), EVENTS_PER_WORKER), N_WORKERS
     )
 
