@@ -1,5 +1,5 @@
 # =============================================================================
-# test_spawn_join.mojo -- spawn_join: N threads, one body, joined before return
+# test_fork_join.mojo -- fork_join: N threads, one body, joined before return
 # =============================================================================
 #
 # Verifies:
@@ -20,8 +20,8 @@ from std.testing import assert_equal, assert_true, assert_false
 from std.time import sleep
 
 from komira_atomic_alias import AtomicI64
-from komira_spawn_join import SpawnJoinBody, spawn_join
-from komira_spawn_join._pthread import pthread_self_id as thread_self
+from komira_fork_join import ForkJoinBody, fork_join
+from komira_fork_join._pthread import pthread_self_id as thread_self
 
 
 comptime MAX_THREADS = 16
@@ -46,7 +46,7 @@ struct _Cells(Movable):
             self.idents.append(UInt64(0))
 
 
-struct _Body[o: MutOrigin](SpawnJoinBody):
+struct _Body[o: MutOrigin](ForkJoinBody):
     var cells: Pointer[_Cells, Self.o]
     # tids >= fail_from raise; fail_from = -1 means nobody raises.
     var fail_from: Int
@@ -70,7 +70,7 @@ def test_each_tid_once_and_distinct_threads() raises:
     var n = 8
     var cells = _Cells(n)
     var body = _Body(Pointer(to=cells))
-    spawn_join(body, n)
+    fork_join(body, n)
     var expect = 0
     for t in range(n):
         assert_equal(cells.runs[t].load(), Int64(1), "tid ran exactly once")
@@ -93,16 +93,16 @@ def test_each_tid_once_and_distinct_threads() raises:
 def test_zero_one_negative() raises:
     var cells = _Cells(4)
     var body = _Body(Pointer(to=cells))
-    spawn_join(body, 0)
+    fork_join(body, 0)
     assert_equal(cells.sum.load(), Int64(0), "n=0 runs nothing")
     for t in range(4):
         assert_equal(cells.runs[t].load(), Int64(0), "n=0 ran no tid")
-    spawn_join(body, 1)
+    fork_join(body, 1)
     assert_equal(cells.runs[0].load(), Int64(1), "n=1 runs tid 0")
     assert_equal(cells.runs[1].load(), Int64(0), "n=1 runs only tid 0")
     var raised = False
     try:
-        spawn_join(body, -1)
+        fork_join(body, -1)
     except e:
         raised = True
         assert_true("n must be >= 0" in String(e), "names the cause")
@@ -116,13 +116,13 @@ def test_one_raising_body_joins_all_then_raises() raises:
     var body = _Body(Pointer(to=cells), 3)
     var raised = False
     try:
-        spawn_join(body, n)
+        fork_join(body, n)
     except e:
         raised = True
         # tids 3, 4 and 5 raise; the lowest wins and the count is appended.
         assert_true("body failed on tid 3" in String(e), "lowest tid's error")
         assert_true("3 of 6 workers failed" in String(e), "count appended")
-    assert_true(raised, "a raising body raises out of spawn_join")
+    assert_true(raised, "a raising body raises out of fork_join")
     for t in range(n):
         assert_equal(cells.runs[t].load(), Int64(1), "every thread still ran")
     print("  test_one_raising_body_joins_all_then_raises PASS")
@@ -134,7 +134,7 @@ def test_single_failure_has_no_count_suffix() raises:
     var body = _Body(Pointer(to=cells), 3)
     var raised = False
     try:
-        spawn_join(body, n)
+        fork_join(body, n)
     except e:
         raised = True
         assert_equal(String(e), String("body failed on tid 3"), "plain message")
@@ -148,7 +148,7 @@ def test_two_raising_bodies_lowest_tid_wins() raises:
     var body = _Body(Pointer(to=cells), 3)  # tids 3 and 4
     var raised = False
     try:
-        spawn_join(body, n)
+        fork_join(body, n)
     except e:
         raised = True
         var msg = String(e)
@@ -160,7 +160,7 @@ def test_two_raising_bodies_lowest_tid_wins() raises:
 
 
 def main() raises:
-    print("test_spawn_join")
+    print("test_fork_join")
     print("===============")
     test_each_tid_once_and_distinct_threads()
     test_zero_one_negative()
