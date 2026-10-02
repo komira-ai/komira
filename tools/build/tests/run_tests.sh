@@ -187,6 +187,11 @@
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
 #      go red (tests//negative/aws_codegen).
+#  34a. Conda packages: see tools/build/tests/functional/conda.sh (the package is
+#       read back with unzip, zstd, tar and jq; the refusals; the approved-list
+#       lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
+#       install from a file:// channel and a Mojo program importing the library,
+#       skipped with --no-install).
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]
@@ -221,11 +226,6 @@
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
 #      (tests//negative/aws_client).
-#  37. Conda packages: see tools/build/tests/functional/conda.sh (the package is
-#      read back with unzip, zstd, tar and jq; the refusals; the approved-list
-#      lint; the stamp; two uncached builds, skipped with --no-uncached; a pixi
-#      install from a file:// channel and a Mojo program importing the library,
-#      skipped with --no-install).
 set -uo pipefail
 
 umbrella=1
@@ -848,6 +848,19 @@ expect_green aws_codegen tests//functional/aws_codegen:
 expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
 expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
 
+# 34a
+conda_args=()
+[ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda "*) pass "${line#PASS  }" ;;
+        "FAIL  conda "*) fail "${line#FAIL  } (see $LOG/conda.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda.log"
+grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
+
 # 35
 RT=tests//negative/rust_test
 if "$BUCK2" build //tools/build/proto-codegen:komira_proto_codegen_unit --show-full-simple-output > "$LOG/rust_test_unit.txt" 2> "$LOG/rust_test_unit.log"; then
@@ -899,19 +912,6 @@ expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` i
 expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/aws_client:hand_src_not_mojo
 expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/aws_client:hand_src_clashes
 expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/aws_client:service_unreadable
-
-# 37
-conda_args=()
-[ "$uncached" = 1 ] || conda_args+=(--no-uncached)
-BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
-while IFS= read -r line; do
-    case "$line" in
-        "PASS  conda "*) pass "${line#PASS  }" ;;
-        "FAIL  conda "*) fail "${line#FAIL  } (see $LOG/conda.log)" ;;
-        "SKIP  "*) echo "$line" ;;
-    esac
-done < "$LOG/conda.log"
-grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
 
 # 9
 if [ "$MODE" = local ]; then
