@@ -49,11 +49,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      # Without both worker property sets a checkout builds locally, on this
+      # Without the linux property set a checkout builds locally, on this
       # runner (tools/build/platforms/default); refuse rather than do that.
       - name: the runner's buckconfig names the farm
         run: |
-          for key in light_properties mojo_compile_properties; do
+          for key in linux_properties; do
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
               { echo "the runner's buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
