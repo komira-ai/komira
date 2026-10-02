@@ -30,7 +30,7 @@ from std.testing import assert_equal, assert_true, assert_false
 from komira_log.levels import LEVEL_INFO, LEVEL_WARN, LEVEL_ERROR, LEVEL_DEBUG
 from komira_log.log_arg import ArgI64, ArgU64, ArgF64, ArgStr, ArgBool, Field
 
-from komira_obs.ring_buffer import OVERFLOW_BLOCK, OVERFLOW_DROP
+from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK, OVERFLOW_DROP
 
 from komira_log.engine.log_event_record import (
     LogEventRecord,

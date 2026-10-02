@@ -3,14 +3,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The async runtime: the per-core reactor (epoll on Linux, kqueue on macOS),
 # the worker pool and fork-join dispatcher, channels, timers, cancellation,
-# async sync primitives, and the local filesystem layer the readers use. It
+# and async sync primitives. It
 # depends on komira_core (collections, Arrow types, the POSIX wrappers),
 # komira_atomic_alias and komira_log (the worker loop drains its per-core log
 # ring). komira_runtime_paths is declared because several tests take their
 # scratch directory from `test_tmpdir()`.
 
 # The reactor's C side: signal handling, socket and filesystem wrappers with
-# fixed arity, the directory walkers, and the scheduler-trace counters.
+# fixed arity, and the scheduler-trace counters.
 staged_files(
     name = "posix_shim_files",
     srcs = [
@@ -54,12 +54,8 @@ mojo_library(
         "tests/test_cancellation_state_machine.mojo",
         "tests/test_cancellation_torn_cascade.mojo",
         "tests/test_channel_smoke.mojo",
-        "tests/test_cloud_lazy_hive_prune.mojo",
         "tests/test_connection_registry.mojo",
         "tests/test_cross_pthread_happens_before.mojo",
-        "tests/test_dns_addrinfo_offsets.mojo",
-        "tests/test_dns_literal.mojo",
-        "tests/test_dns_resolve.mojo",
         "tests/test_epoll_cycle_regression.mojo",
         "tests/test_epoll_double_add_eexist.mojo",
         "tests/test_erased_frame_drop.mojo",
@@ -68,13 +64,10 @@ mojo_library(
         "tests/test_errors_smoke.mojo",
         "tests/test_eventfd_wake.mojo",
         "tests/test_fd_no_leak_after_runtime_drop.mojo",
-        "tests/test_file_discovery.mojo",
         "tests/test_fj_claim_dispatch.mojo",
         "tests/test_fn_chain_authoring_poc.mojo",
         "tests/test_for_each_morsel.mojo",
-        "tests/test_fs_path_bytes_non_ascii.mojo",
         "tests/test_gcp_cloud_run_runtime.mojo",
-        "tests/test_glob_engine.mojo",
         "tests/test_hot_shard_metrics.mojo",
         "tests/test_http_server_high_concurrency.mojo",
         "tests/test_http_server_slow_writer.mojo",
@@ -88,11 +81,6 @@ mojo_library(
         "tests/test_local_dispatcher_barrier_never_wedges.mojo",
         "tests/test_local_dispatcher_stale_shard_generation.mojo",
         "tests/test_local_dispatcher_wid_mask_no_alias.mojo",
-        "tests/test_local_fs_list_dir_shallow.mojo",
-        "tests/test_local_fs_list_recursive.mojo",
-        "tests/test_local_fs_read_at_mmap.mojo",
-        "tests/test_local_fs_trait_elaboration.mojo",
-        "tests/test_local_fs_write_at.mojo",
         "tests/test_local_io_block.mojo",
         "tests/test_local_spawner.mojo",
         "tests/test_local_spawner_drop_no_leak.mojo",
@@ -112,11 +100,8 @@ mojo_library(
         "tests/test_park_on_fds.mojo",
         "tests/test_parked_frame_demux_scaling.mojo",
         "tests/test_parked_morsel_slab.mojo",
-        "tests/test_partition_predicate_split.mojo",
-        "tests/test_path_discovery.mojo",
         "tests/test_plumbing_walkthrough.mojo",
         "tests/test_primitives_smoke.mojo",
-        "tests/test_pruned_hive_discovery.mojo",
         "tests/test_raii_ergonomics.mojo",
         "tests/test_reactor_completion_queue_smoke.mojo",
         "tests/test_reactor_park_no_lost_wakeup.mojo",
