@@ -5,7 +5,7 @@
 #
 # SCOPE. The POLICY (retry budget, errno classification, anti-spin, the loss
 # counters) is tested once, where it lives, in
-# `komira_obs/tests/test_log_write_retry_and_loss_accounting.mojo`. This file
+# `tests/test_log_write_retry_and_loss_accounting.mojo`. This file
 # tests the two things that can only be wrong HERE:
 #
 #   1. that `LogSink._write_all_fd` and `StderrSink._write_all` ARE WIRED to it
