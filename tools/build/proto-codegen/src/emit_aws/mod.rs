@@ -9,6 +9,8 @@
 //!   the protocol and signing-scheme checks.
 //! - `json_codec`: the JSON body codec.
 //! - `rpc`: the awsJson RPC binding.
+//! - `rest`: the REST binding (restJson1): URI labels and query, headers,
+//!   prefix headers, the payload, the response status, and restJson1 errors.
 //! - [`endpoint`]: endpoint resolution through the service's endpoint
 //!   ruleset, emitted when the generator is given one.
 
@@ -22,10 +24,11 @@ use crate::overrides::AwsOverrides;
 pub mod endpoint;
 mod json_codec;
 pub mod proto;
+mod rest;
 mod rpc;
 
 pub use endpoint::AwsEndpointRules;
-pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS};
+pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS};
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -38,14 +41,14 @@ pub struct AwsEmitOptions {
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "3";
+pub const AWS_GENERATOR_VERSION: &str = "4";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -145,6 +148,36 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &[
+            "AwsRestUri",
+            "aws_blob_from_base64",
+            "aws_bool_from_text",
+            "aws_f64_from_text",
+            "aws_header_field",
+            "aws_header_http_date_list",
+            "aws_header_http_date_list_from",
+            "aws_header_list",
+            "aws_header_list_from",
+            "aws_i32_from_text",
+            "aws_i64_from_text",
+            "aws_media_from_text",
+            "aws_prefix_headers",
+            "aws_response_code",
+            "aws_set_prefix_headers",
+            "aws_text_blob",
+            "aws_text_bool",
+            "aws_text_f32",
+            "aws_text_f64",
+            "aws_text_int",
+            "aws_text_media",
+            "aws_text_ts",
+            "aws_ts_from_text",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: REST_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
             "AwsCredential",
             "AwsCredsSource",
             "AwsEndpoint",
@@ -155,6 +188,12 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         ],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_rest_json_error"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: &[AwsProtocol::RestJson],
     },
     AwsImport {
         module: AWS_CORE,
@@ -186,13 +225,14 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
 /// order, holding every name that `pure_only` needs. Rows that share a
 /// module merge into one statement.
 pub fn aws_import_section(protocol: AwsProtocol, pure_only: bool) -> String {
-    aws_import_section_with(protocol, pure_only, false)
+    aws_import_section_for(&[protocol], pure_only, false)
 }
 
-/// [`aws_import_section`], with the [`AwsImportMode::EndpointRules`] rows
-/// when `endpoint_rules` is set.
-pub fn aws_import_section_with(
-    protocol: AwsProtocol,
+/// [`aws_import_section`] for a module holding code of several protocols:
+/// every row that applies to any of `protocols`, each once, with the
+/// [`AwsImportMode::EndpointRules`] rows when `endpoint_rules` is set.
+pub fn aws_import_section_for(
+    protocols: &[AwsProtocol],
     pure_only: bool,
     endpoint_rules: bool,
 ) -> String {
@@ -204,7 +244,7 @@ pub fn aws_import_section_with(
         if !endpoint_rules && row.mode == AwsImportMode::EndpointRules {
             continue;
         }
-        if !row.protocols.contains(&protocol) {
+        if !row.protocols.iter().any(|p| protocols.contains(p)) {
             continue;
         }
         match groups.iter_mut().find(|(m, _)| *m == row.module) {
@@ -706,8 +746,8 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_imports(&mut self) {
-        let section = aws_import_section_with(
-            self.protocol,
+        let section = aws_import_section_for(
+            &[self.protocol],
             self.options.pure_only,
             self.endpoint_rules.is_some(),
         );
@@ -1247,13 +1287,18 @@ impl<'a> AwsEmitter<'a> {
             .unwrap_or_else(|_| f.json_name.clone())
     }
 
+    /// The member's name in the model (not its `locationName`).
+    fn member_name(&self, msg: &IrMessage, f: &IrField) -> String {
+        self.facts
+            .member(&msg.fq_name, &f.name)
+            .map(|m| m.member_name.clone())
+            .unwrap_or_else(|_| f.json_name.clone())
+    }
+
 
     /// The model-stated constraint on one member, or `None`.
     fn member_constraint(&self, msg: &IrMessage, f: &IrField) -> Option<MemberConstraint> {
         if self.is_boxed(msg, f) {
-            return None;
-        }
-        if self.timestamp_format(msg, f).is_some() {
             return None;
         }
         let member = self.facts.member(&msg.fq_name, &f.name).ok()?;
@@ -1362,19 +1407,30 @@ impl<'a> AwsEmitter<'a> {
     /// drift apart across the four sites that ask (the union arity check,
     /// `to_aws_json`, `to_model_json`, and the box's own setter).
     fn presence_test(&self, msg: &IrMessage, f: &IrField) -> String {
+        self.presence_test_on("self", msg, f)
+    }
+
+    /// [`Self::presence_test`] for a member of `base` rather than of `self`
+    /// (a request builder's `input`).
+    fn presence_test_on(&self, base: &str, msg: &IrMessage, f: &IrField) -> String {
         if self.is_boxed(msg, f) {
-            format!("len(self.{}) > 0", f.name)
+            format!("len({base}.{}) > 0", f.name)
         } else {
-            format!("self.{}", f.name)
+            format!("{base}.{}", f.name)
         }
     }
 
     /// The Mojo expression that READS a present non-required member.
     fn optional_access(&self, msg: &IrMessage, f: &IrField) -> String {
+        self.optional_access_on("self", msg, f)
+    }
+
+    /// [`Self::optional_access`] for a member of `base`.
+    fn optional_access_on(&self, base: &str, msg: &IrMessage, f: &IrField) -> String {
         if self.is_boxed(msg, f) {
-            format!("self.{}[0]", f.name)
+            format!("{base}.{}[0]", f.name)
         } else {
-            format!("self.{}.value()", f.name)
+            format!("{base}.{}.value()", f.name)
         }
     }
 
@@ -1547,8 +1603,10 @@ impl<'a> AwsEmitter<'a> {
         self.line("for _i in range(len(req.header_names)):");
         self.push();
         self.line("var n = req.header_names[_i].copy()");
-        self.line("if n == String(\"Content-Type\"):");
+        self.line("if n.lower() == String(\"content-type\"):");
         self.push();
+        self.line("# Header names are case-insensitive, and the substrate refuses an");
+        self.line("# `extra` Content-Type in any case.");
         self.line("# The substrate takes the content type as its own argument and");
         self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
         self.line("# again here would emit it twice and break the signature.");
@@ -1658,6 +1716,9 @@ impl<'a> AwsEmitter<'a> {
         self.line("    cannot know which of its shapes carry a secret, so the discipline is");
         self.line("    unconditional — the `secrets_manager_client._sm_error` rule, applied");
         self.line("    everywhere because the generator has no way to make the exception.\"\"\"");
+        if let Some(binding) = self.binding.error_info_binding() {
+            self.line(binding);
+        }
         let (code_expr, msg_expr) = self.binding.error_code_and_message();
         self.line(&format!("var code = {code_expr}"));
         self.line(&format!("var msg = {msg_expr}"));
@@ -1679,10 +1740,11 @@ impl<'a> AwsEmitter<'a> {
     }
 }
 
-/// The import block + shared helper every generated PURE module needs. The
-/// conformance driver emits this ONCE ahead of 44 concatenated suites.
-pub fn pure_preamble(protocol: AwsProtocol, with_model_json: bool) -> String {
-    let mut em = aws_import_section(protocol, true);
+/// The import block + shared helper every generated PURE module of
+/// `protocols` needs. The conformance driver emits this ONCE ahead of its
+/// concatenated suites.
+pub fn pure_preamble(protocols: &[AwsProtocol], with_model_json: bool) -> String {
+    let mut em = aws_import_section_for(protocols, true, false);
     em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");
@@ -1905,6 +1967,62 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The client-mode module of a one-operation awsJson model whose input
+    /// and output each hold `Stamps`, a list of timestamps.
+    fn json_module_with_a_list_of_timestamps() -> String {
+        let model = crate::json::parse(
+            r#"{"version": "2.0",
+                "metadata": {"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"},
+                "operations": {"Op": {"name": "Op",
+                    "http": {"method": "POST", "requestUri": "/"},
+                    "input": {"shape": "In"}, "output": {"shape": "Out"}}},
+                "shapes": {"In": {"type": "structure",
+                                  "members": {"Stamps": {"shape": "Stamps"}}},
+                           "Out": {"type": "structure",
+                                   "members": {"Stamps": {"shape": "Stamps"}}},
+                           "Stamps": {"type": "list", "member": {"shape": "Stamp"}},
+                           "Stamp": {"type": "timestamp"}}}"#,
+        )
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let options = AwsEmitOptions {
+            omit_preamble: true,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None)
+            .unwrap()
+            .source
+    }
+
+    #[test]
+    fn an_aws_json_list_of_timestamps_is_epoch_seconds_on_the_wire() {
+        // awsJson's timestamps are epoch-seconds numbers, so the elements are
+        // held as Float64 and written and read by the timestamp codec, not as
+        // JSON strings.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(src.contains("List[Float64]"), "{src}");
+        assert!(!src.contains("List[String]"), "{src}");
+        assert!(src.contains("aws_ts_to_json("), "{src}");
+        assert!(src.contains("aws_ts_from_json("), "{src}");
+    }
+
+    #[test]
+    fn send_finds_the_content_type_header_in_any_case() {
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(src.contains("if n.lower() == String(\"content-type\"):"), "{src}");
+        assert!(!src.contains("if n == String(\"Content-Type\"):"), "{src}");
     }
 
     #[test]
