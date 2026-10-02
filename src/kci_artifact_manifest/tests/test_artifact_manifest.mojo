@@ -21,6 +21,8 @@ comptime _HASH = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcd
 
 
 def _conda(extra: String = String("")) -> String:
+    # `metadata` is required on a CONDA manifest, so the fixture carries it,
+    # last, where the renderer writes it; `extra` goes in before it.
     return (
         String('{"artifact_type":"CONDA","name":"example-pkg","version":"1.2.3",')
         + String('"subdir":"linux-64","file":"linux-64/example-pkg-1.2.3-h0_0.conda",')
@@ -28,7 +30,7 @@ def _conda(extra: String = String("")) -> String:
         + String(_HASH)
         + String('"')
         + extra
-        + String("}")
+        + String(',"metadata":"metadata.json"}')
     )
 
 
@@ -59,6 +61,8 @@ def test_control_conda_parses_and_resolves() raises:
     assert_equal(m.file_path, String("out/linux-64/example-pkg-1.2.3-h0_0.conda"))
     assert_equal(m.file_name(), String("example-pkg-1.2.3-h0_0.conda"))
     assert_equal(m.sha256_hex, String(_HASH))
+    assert_equal(m.metadata, String("metadata.json"))
+    assert_equal(m.metadata_path, String("out/metadata.json"))
 
 
 def test_control_python_parses_and_resolves() raises:
@@ -118,8 +122,29 @@ def test_refusals_name_the_manifest_and_the_key() raises:
         String("artifact manifest 'out/m.json': a CONDA 'file' must end in .conda"),
     )
     assert_equal(
-        _refusal(_conda(String(',"metadata":"M"'))),
-        String("artifact manifest 'out/m.json': 'metadata' belongs to a PYTHON artifact"),
+        _refusal(_conda().replace(String('"metadata.json"'), String('"sub/metadata.json"'))),
+        String(
+            "artifact manifest 'out/m.json': a CONDA 'metadata' is a file name"
+            " next to the manifest, not a path"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"metadata.json"'), String('".."'))),
+        String(
+            "artifact manifest 'out/m.json': a CONDA 'metadata' is a file name"
+            " next to the manifest, not a path"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"metadata.json"'), String('"."'))),
+        String(
+            "artifact manifest 'out/m.json': a CONDA 'metadata' is a file name"
+            " next to the manifest, not a path"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"metadata.json"'), String('""'))),
+        String("artifact manifest 'out/m.json': 'metadata' is EMPTY"),
     )
     assert_equal(
         _refusal(_python().replace(String('"file"'), String('"subdir":"x","file"'))),
@@ -128,8 +153,8 @@ def test_refusals_name_the_manifest_and_the_key() raises:
     assert_equal(
         _refusal(_conda().replace(String('"CONDA"'), String('"OCI"'))),
         String(
-            "artifact manifest 'out/m.json': artifact_type 'OCI' has no artifact"
-            " manifest (CONDA or PYTHON)"
+            "artifact manifest 'out/m.json': artifact_type 'OCI' is not"
+            " published by kci publish (CONDA or PYTHON)"
         ),
     )
     assert_equal(
@@ -147,6 +172,25 @@ def test_render_round_trips_conda() raises:
     assert_equal(back.file_path, m.file_path)
     assert_equal(back.subdir, m.subdir)
     assert_equal(back.sha256_hex, m.sha256_hex)
+
+
+def test_conda_metadata_is_required_and_found_next_to_the_manifest() raises:
+    # Without the key a CONDA manifest is refused, naming the manifest and
+    # the key, like a PYTHON manifest without it.
+    assert_equal(
+        _refusal(_conda().replace(String(',"metadata":"metadata.json"'), String(""))),
+        String("artifact manifest 'out/m.json': a CONDA artifact needs 'metadata'"),
+    )
+    # With it, the name resolves in the manifest's own directory, and the
+    # renderer writes it back last, in the header's key order.
+    var text = _conda()
+    var m = parse_artifact_manifest(text, String("out/m.json"))
+    assert_equal(m.metadata, String("metadata.json"))
+    assert_equal(m.metadata_path, String("out/metadata.json"))
+    var rendered = render_artifact_manifest(m)
+    assert_equal(rendered, text + String("\n"))
+    var back = parse_artifact_manifest(rendered, String("/abs/dir/m.json"))
+    assert_equal(back.metadata_path, String("/abs/dir/metadata.json"))
 
 
 def test_render_round_trips_python() raises:
@@ -171,6 +215,18 @@ def test_render_refuses_what_the_parser_would() raises:
     except e:
         refused = String(e).find(String("'sha256'")) >= 0
     assert_true(refused)
+
+
+def test_file_name_reads_file_path_when_file_is_unset() raises:
+    # kci_publish's plan tests build a manifest by hand and set only
+    # `file_path`; the registry name must still come out of it.
+    var m = ArtifactManifest(String("hand"))
+    m.artifact_type = String("CONDA")
+    m.file_path = String("/pkgs/linux-64/example-pkg-1.2.3-h0_0.conda")
+    assert_equal(m.file_name(), String("example-pkg-1.2.3-h0_0.conda"))
+    var bare = ArtifactManifest(String("hand"))
+    bare.file_path = String("example_pkg-1.2.3-py3-none-any.whl")
+    assert_equal(bare.file_name(), String("example_pkg-1.2.3-py3-none-any.whl"))
 
 
 def test_is_sha256_hex() raises:

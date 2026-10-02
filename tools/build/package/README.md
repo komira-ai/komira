@@ -115,3 +115,25 @@ carry no time; JSON keys are sorted and every timestamp is
 1970-01-01T00:00:00Z. Two uncached builds give the same tarball and the same
 image digest ([bundle.sh](../tests/functional/bundle.sh)), and `docker run` of the loaded image prints
 the greeting ([formats.sh](../tests/functional/formats.sh)).
+
+## Conda packages
+
+`conda_package` ([`conda.bzl`](conda.bzl)) packages a Mojo library as a `.conda`
+for linux-64: one file, `lib/mojo/<name>.mojoc`, where the compiler already
+looks. The `mojo_library` macro declares it (`<name>_conda`) for every library,
+so nobody writes one and no list of names lives in the build.
+`komira_pack conda` writes the zip, the two tars and the JSON into a directory
+(the `.conda`, `manifest.json` in kci's artifact-manifest format, whose
+`metadata` names the `metadata.json` next to it),
+`komira_pack conda-meta` writes the metapackage from the members' manifests, and
+`komira_pack conda-check` reads either back and refuses what is wrong; nothing is
+uploaded, and an uploader reads only the `[release]` sub-target, which exists only
+after the release check (stamped, with its source commit) passed. The name, the run
+requirements, the subdir and the version are derived, a library that cannot be
+packaged keeps a target that builds as a refusal, and the bytes are reproducible.
+`conda_manifest_kci` ([`manifest_probe/BUCK`](manifest_probe/BUCK)) is the build
+gate between the two: it builds one real package and reads its manifest with
+kci's parser, so `buck2 build //...` fails if the packer and kci disagree.
+[`list_conda_targets.sh`](list_conda_targets.sh) prints the package targets. The layout,
+the version scheme and the metapackage: [packaging/conda](../../../packaging/conda/README.md). The version
+a release carries comes from [`release_version.sh`](release_version.sh).

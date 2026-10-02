@@ -11,7 +11,7 @@ load(":census.bzl", "darwin_host_census")
 # `--target-platforms komira//tools/build/platforms:darwin-arm64`.
 darwin_host_census(
     name = "host_census",
-    target_compatible_with = ["prelude//os/constraints:macos"],
+    target_compatible_with = ["prelude//os/constraints:macos"],  # komira-limit:darwin-host-census-test
 )
 
 shell_lint(
