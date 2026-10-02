@@ -8,6 +8,9 @@
 # test reads each one and fails if any names getenv, setenv, `_read_env`,
 # komira_core_ffi or an `external_call`. There is no exempt file. The scan is
 # not vacuous: it must see the signer and every other source the package has.
+# The scan is per package and does not follow imports: SystemSigningClock
+# reads the host clock through komira_clock (an `external_call` to
+# clock_gettime, outside this scan), which reads no environment either.
 # =============================================================================
 
 from std.os import listdir

@@ -7,11 +7,13 @@
 #
 #   1  a read is a plausible current instant: after 2026-09-01T00:00:00Z
 #      (a fixed instant before this code existed) and before 2100-01-01.
-#      Two reads are NOT asserted to be ordered: a wall clock may be stepped.
-#   2  a GcsV4Signer over it mints, and the mint's expiry is the instant it
-#      read plus the TTL, bracketed by reads of the same clock taken before
-#      and after the mint (each bracket allows one second of slack for a
-#      step between reads).
+#   2  a GcsV4Signer over it mints at one reading of that clock: the URL's
+#      X-Goog-Date is the stamp of the reported expiry minus the TTL, and
+#      X-Goog-Expires is the TTL. That instant lies between reads of the
+#      same clock taken before and after the mint, within one second either
+#      side. The bracket ASSUMES the host clock is not stepped by more than
+#      one second during the mint; under a monotonic clock it holds with no
+#      slack, since all three reads truncate to whole seconds.
 #
 # The key is Google's published inactive dummy service account, read from the
 # pinned conformance archive staged at conformance/.
@@ -22,7 +24,10 @@ from std.testing import assert_equal, assert_true
 from komira_crypto import rsa_pkcs8_der_from_pem
 from komira_json import parse_json_value
 
-from komira_gcp_core import GcsV4ServiceAccount
+from komira_gcp_core import (
+    GcsV4ServiceAccount,
+    gcs_v4_stamps_from_unix_seconds,
+)
 from komira_objectstore_gcs import GcsV4Signer, SystemSigningClock
 
 
@@ -39,6 +44,20 @@ def _account() raises -> GcsV4ServiceAccount:
     var a = parse_json_value(text)
     var der = rsa_pkcs8_der_from_pem(a.get("private_key").as_string())
     return GcsV4ServiceAccount(a.get("client_email").as_string(), der^)
+
+
+def _query_value(url: String, name: String) -> String:
+    """The raw value of query parameter `name` in `url`, or "" if absent."""
+    var q = url.find("?")
+    if q < 0:
+        return String()
+    var query = String(url[byte = q + 1 :])
+    for part in query.split("&"):
+        var p = String(part)
+        var eq = p.find("=")
+        if eq >= 0 and String(p[byte=:eq]) == name:
+            return String(p[byte = eq + 1 :])
+    return String()
 
 
 def test_reads_a_plausible_now() raises:
@@ -71,7 +90,12 @@ def test_signer_signs_at_the_wall_clock() raises:
         + ".."
         + String(after),
     )
-    assert_true(signed_at > _AFTER, "signed before 2026-09-01")
+    # The stamps and the expiry come from the same reading.
+    assert_equal(
+        _query_value(url.url, "X-Goog-Date"),
+        gcs_v4_stamps_from_unix_seconds(Int64(signed_at)).datetime_z,
+    )
+    assert_equal(_query_value(url.url, "X-Goog-Expires"), String(_TTL))
 
 
 def main() raises:
