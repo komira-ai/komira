@@ -15,7 +15,7 @@ mojo_proto_library(
     name = "kci_manifest_proto",
     srcs = ["full_manifest.proto"],
     import_prefix = "kci/manifest/v1",
-    deps = ["//src/komira_serde:komira_serde"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],
 )
 
@@ -34,6 +34,6 @@ mojo_test(
     srcs = ["tests/test_web_frontend_content_store.mojo"],
     deps = [
         ":kci_manifest_proto",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_proto_codec:komira_proto_codec",
     ],
 )

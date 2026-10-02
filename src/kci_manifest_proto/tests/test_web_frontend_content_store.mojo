@@ -20,7 +20,7 @@
 #      does not depend on whether the codec writes a default-valued field.
 # =============================================================================
 
-from komira_serde import decode_json, decode_proto, encode_json, encode_proto
+from komira_proto_codec import decode_json, decode_proto, encode_json, encode_proto
 from std.testing import assert_equal, assert_true
 
 from kci_manifest_proto.full_manifest import (
