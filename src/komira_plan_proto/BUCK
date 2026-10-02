@@ -12,8 +12,8 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # consumer.
 #
 # Reach the surface via:
-#   from komira_rpc_plan.plan import WirePlan, WirePlanEnvelope, ...
-#   from komira_rpc_plan.plan_vocabulary import PlanTag, ExprTag, ...
+#   from komira_plan_proto.plan import WirePlan, WirePlanEnvelope, ...
+#   from komira_plan_proto.plan_vocabulary import PlanTag, ExprTag, ...
 #
 # The generated `plan_vocabulary` module is a second Mojo view of the
 # vocabulary, generated at build time from `plan_vocabulary.proto`. It is not
@@ -23,7 +23,7 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # The generated constants exist so the `.proto` is typed for the other
 # languages that read it, which name `PlanTag` rather than a bare `uint32`.
 mojo_proto_library(
-    name = "komira_rpc_plan",
+    name = "komira_plan_proto",
     srcs = [
         "plan.proto",
         "plan_vocabulary.proto",
