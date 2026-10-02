@@ -524,14 +524,14 @@ struct QueryIR(Copyable, Movable, Deinitable):
       top_k:           the `size` bound (number of ranked hits to return).
       analyzer_config: the field's analyzer (the symmetry carrier; must be TEXT).
       generation:      the metastore seam — the manifest generation
-                       (SearchMetastore.generation() = num_chunks) the resolution
-                       caller stamps so a re-query AFTER a publish gets a DIFFERENT
-                       fingerprint (CSE-collision safety, see the search
-                       runtime's Searcher). Defaults to 0 (no metastore wired
-                       into the in-memory SearchCore path); a defaulted trailing
-                       field so a QueryIR(field, text, top_k, cfg) caller is
-                       unaffected. Folded into Searcher.fingerprint() at the
-                       RESERVED slot.
+                       (SearchMetastore.generation() = num_chunks) this query
+                       reads. It is a SNAPSHOT, not identity: the
+                       `komira.search.index` scan kind stamps the generation it
+                       resolved for the execution (LIVE: re-read per execution;
+                       or the caller's pin) -- the scan's plan identity folds a
+                       pinned generation only. A defaulted trailing field (0) so
+                       a QueryIR(field, text, top_k, cfg) caller is unaffected.
+                       SearchCore.search does not read it.
       _filter:         the ACCEPTED fast-field pushed-down conjunction,
                        held as `Optional[ArcPointer[Expr]]` (None = no filter).
                        The single apply site (SearchCore.search) reads it via

@@ -2,22 +2,28 @@
 # test_search_source_conformance.mojo — the search source-edge proof
 # =============================================================================
 #
-# The MorselSourceImpl CONFORMANCE proof: drives SearchMorselSource.next_morsel(0)
-# returning the 1 HitBatch Morsel then None (the single-shot Atomic cursor + EOF),
-# plus the Searcher SourceLike plan-spec surface (schema / estimate_rows /
-# fingerprint) and the fingerprint-distinctness guard (folding the
-# AnalyzerConfig discriminating fields into the FNV hash so two queries with the
-# same text but different configs do NOT collide in the plan cache).
+# What a search scan reads from one split, and the plan-side surface of that
+# scan. The single-shot morsel reader this file used to drive is retired: the
+# `komira.search.index` kind reads a split with `search_split_hits`, so the
+# reader cases now pin that function, and the plan-side cases pin the kind's
+# `ScanBinding` (the retired `Searcher` spec's successor). EXECUTOR-FREE: an
+# in-memory split, no engine.
 #
 # Coverage:
-#   1.  SearchMorselSource.from_spec(Searcher) -> next_morsel(0) returns the one
-#       HitBatch Morsel; next_morsel(0) again returns None (single-pass EOF).
-#   2.  the HitBatch Morsel carries the ranked hits (schema-tag-guarded).
-#   3.  output_schema / row_count_hint / partition_hint / capabilities.
-#   4.  Searcher SourceLike: schema / estimate_rows (== top_k) / supports_pushdown.
-#   5.  fingerprint distinctness: same query_text, DIFFERENT AnalyzerConfig
-#       -> DIFFERENT fingerprint. Also: different query_text -> different; same
-#       everything -> same (stable across copy()).
+#   1.  search_split_hits(SearchCore, QueryIR) returns the ranked hits, and
+#       running it twice over one core returns the same rows (the core is
+#       read, never consumed).
+#   2.  the hit batch matches the hit schema (`_score Float64`, `_id Int64`,
+#       `_source STRING`), and `top_k` bounds the rows.
+#   3.  a query that matches nothing is an empty batch of the same schema.
+#   4.  the kind binding's surface: schema == the hit schema, no row estimate,
+#       and a split with no fast-fields pushes no conjunct
+#       (FastFieldPushdownGate).
+#   5.  identity distinctness: same query_text, DIFFERENT AnalyzerConfig
+#       -> DIFFERENT binding identity (folded as the kind's `analyzer_fp`
+#       param, so two scans with the same text but different configs do NOT
+#       collide in the plan cache). Also: different query_text -> different;
+#       same everything -> same (stable across copy()).
 # =============================================================================
 
 from std.testing import (
@@ -30,10 +36,7 @@ from std.testing import (
 
 from komira_core.arrow.arrow_types import ArrowType
 from komira_core.arrow.record_batch import RecordBatch
-
-# Import Morsel directly: this conformance test IS an engine-protocol test (it
-# drives the MorselSourceImpl seam).
-from komira_morsel.morsel import Morsel
+from komira_core.source.scan_binding import ScanBinding
 
 from komira_search.analyzer import (
     AnalyzedField,
@@ -45,8 +48,15 @@ from komira_search.inverted import InvertedIndexBuilder
 from komira_search.term_dict import TermDictBuilder
 from komira_search.split import serialize_split, DocStoreBuilder
 
-from komira_search_runtime.search_source import Searcher, SearchMorselSource
-from komira_search.source import QueryIR
+from komira_core.plan.expr import Expr, BIN_EQ
+from komira_core.plan.scalar_value import ScalarValue
+from komira_search_runtime.search_source import (
+    FastFieldPushdownGate,
+    analyzer_config_fingerprint,
+    search_split_hits,
+)
+from komira_search_runtime.search_scan_kind import search_scan_binding
+from komira_search.source import QueryIR, SearchCore
 
 
 # -----------------------------------------------------------------------------
@@ -93,145 +103,163 @@ def _id_at(imm batch: RecordBatch, row: Int) raises -> Int64:
     return Int64(arr.get(row))
 
 
-# =============================================================================
-# Case 1 + 2 — next_morsel single-shot: one HitBatch Morsel, then None.
-# =============================================================================
+def _source_at(imm batch: RecordBatch, row: Int) raises -> String:
+    return String(batch.column_at(2).as_string().get(row))
 
 
-def test_01_next_morsel_single_shot_then_eof() raises:
-    var bytes = _build_split(1)
-    var q = QueryIR(String("body"), String("alpha"), 10, _text_cfg())
-    var spec = Searcher(bytes^, String("split-1"), String("logs"), q^)
-    var reader = SearchMorselSource.from_spec(spec)
-
-    # FIRST claim returns the one HitBatch Morsel.
-    var first = reader.next_morsel(0)
-    assert_true(Bool(first))
-    var morsel: Morsel = first.take()
-    assert_equal(morsel.batch.num_columns(), 3)
-    assert_equal(morsel.batch.num_rows(), 3)
-    # ranked: doc 1 (tf=2) first, then docs 0 and 2 (tf=1, tie -> lower id first).
-    assert_equal(Int(_id_at(morsel.batch, 0)), 1)
-    assert_equal(Int(_id_at(morsel.batch, 1)), 0)
-    assert_equal(Int(_id_at(morsel.batch, 2)), 2)
-
-    # SECOND claim sees c >= 1 -> single-pass EOF (None).
-    var second = reader.next_morsel(0)
-    assert_false(Bool(second))
-    # ... and stays None on every subsequent claim.
-    var third = reader.next_morsel(0)
-    assert_false(Bool(third))
-
-
-# =============================================================================
-# Case 3 — output_schema / row_count_hint / partition_hint / capabilities.
-# =============================================================================
-
-
-def test_03_reader_metadata() raises:
-    var bytes = _build_split(3)
-    var q = QueryIR(String("body"), String("alpha"), 10, _text_cfg())
-    var spec = Searcher(bytes^, String("split-3"), String("logs"), q^)
-    var reader = SearchMorselSource.from_spec(spec)
-
-    var sch = reader.output_schema()
-    assert_equal(sch.num_columns(), 3)
-    assert_true(sch.field_arrow_type(0) == ArrowType.FLOAT64)
-    assert_true(sch.field_arrow_type(1) == ArrowType.INT64)
-    assert_true(sch.field_arrow_type(2) == ArrowType.STRING)
-
-    # 3 matching docs -> row_count_hint == 3.
-    assert_equal(reader.row_count_hint(), 3)
-    # a single split is one logical partition.
-    assert_equal(reader.partition_hint(), 1)
-    # no hooks advertised.
-    var caps = reader.capabilities()
-    assert_false(caps.supports_projection)
-    assert_false(caps.supports_decode_filter)
-    assert_false(caps.supports_dynamic_filter)
-    assert_false(caps.supports_as_source)
-
-
-# =============================================================================
-# Case 4 — Searcher SourceLike surface: schema / estimate_rows / pushdown.
-# =============================================================================
-
-
-def test_04_searcher_sourcelike_surface() raises:
-    var bytes = _build_split(4)
-    var q = QueryIR(String("body"), String("alpha"), 7, _text_cfg())
-    var spec = Searcher(bytes^, String("split-4"), String("logs"), q^)
-
-    # schema == the hit schema.
-    var sch = spec.schema()
+def _assert_hit_schema(imm batch: RecordBatch) raises:
+    var sch = batch.schema.copy()
     assert_equal(sch.num_columns(), 3)
     assert_equal(sch.field_name(0), String("_score"))
     assert_equal(sch.field_name(1), String("_id"))
     assert_equal(sch.field_name(2), String("_source"))
-    # estimate_rows == top_k.
-    assert_equal(spec.estimate_rows(), 7)
+    assert_true(sch.field_arrow_type(0) == ArrowType.FLOAT64)
+    assert_true(sch.field_arrow_type(1) == ArrowType.INT64)
+    assert_true(sch.field_arrow_type(2) == ArrowType.STRING)
 
 
 # =============================================================================
-# Case 5 — fingerprint distinctness (the plan-cache collision class).
+# Case 1 — the ranked hits, and a core that is read, not consumed.
 # =============================================================================
 
 
-def test_05_fingerprint_folds_analyzer_config() raises:
-    var bytes_a = _build_split(5)
-    var bytes_b = _build_split(5)
+def test_01_split_hits_are_ranked_and_repeatable() raises:
+    var core = SearchCore(_build_split(1))
+    var q = QueryIR(String("body"), String("alpha"), 10, _text_cfg())
 
-    # Two Searchers, SAME query_text, but DIFFERENT AnalyzerConfig:
+    var first = search_split_hits(core, q)
+    assert_equal(first.num_columns(), 3)
+    assert_equal(first.num_rows(), 3)
+    # ranked: doc 1 (tf=2) first, then docs 0 and 2 (tf=1, tie -> lower id first).
+    assert_equal(Int(_id_at(first, 0)), 1)
+    assert_equal(Int(_id_at(first, 1)), 0)
+    assert_equal(Int(_id_at(first, 2)), 2)
+    assert_equal(_source_at(first, 0), String("d1"))
+
+    # The same core answers again, with the same rows.
+    var second = search_split_hits(core, q)
+    assert_equal(second.num_rows(), 3)
+    for r in range(3):
+        assert_equal(_id_at(second, r), _id_at(first, r))
+        assert_equal(_source_at(second, r), _source_at(first, r))
+
+
+# =============================================================================
+# Case 2 — the hit schema, and top_k bounds the rows.
+# =============================================================================
+
+
+def test_02_hit_schema_and_top_k() raises:
+    var core = SearchCore(_build_split(2))
+    var full = search_split_hits(
+        core, QueryIR(String("body"), String("alpha"), 10, _text_cfg())
+    )
+    _assert_hit_schema(full)
+
+    var top1 = search_split_hits(
+        core, QueryIR(String("body"), String("alpha"), 1, _text_cfg())
+    )
+    _assert_hit_schema(top1)
+    assert_equal(top1.num_rows(), 1)
+    assert_equal(Int(_id_at(top1, 0)), 1, "the best-ranked hit survives")
+
+
+# =============================================================================
+# Case 3 — no match is an empty batch with the hit schema.
+# =============================================================================
+
+
+def test_03_no_match_is_an_empty_hit_batch() raises:
+    var core = SearchCore(_build_split(3))
+    var none = search_split_hits(
+        core, QueryIR(String("body"), String("omega"), 10, _text_cfg())
+    )
+    assert_equal(none.num_rows(), 0)
+    _assert_hit_schema(none)
+
+
+# =============================================================================
+# Case 4 — the plan-side surface of a search scan: the kind binding + the gate.
+# (Converted from the retired `Searcher` SourceLike surface. `estimate_rows ==
+# top_k` has no successor: a scan has no top_k, and the binding reports -1,
+# "unknown".)
+# =============================================================================
+
+
+def test_04_search_scan_binding_surface() raises:
+    var bytes = _build_split(4)
+    var b = search_scan_binding(
+        String("logs"),
+        String("body"),
+        String("alpha"),
+        analyzer_config_fingerprint(_text_cfg()),
+    )
+
+    # schema == the hit schema.
+    var sch = b.source_schema()
+    assert_equal(sch.num_columns(), 3)
+    assert_equal(sch.field_name(0), String("_score"))
+    assert_equal(sch.field_name(1), String("_id"))
+    assert_equal(sch.field_name(2), String("_source"))
+    assert_equal(b.estimate_rows(), -1)
+
+    # This split carries no fast-fields: the gate lowers nothing.
+    var gate = FastFieldPushdownGate.from_split_bytes(bytes)
+    assert_equal(gate.num_fast_fields(), 0)
+    var pred = Expr.binary(
+        BIN_EQ,
+        Expr.col_ref(String("status")),
+        Expr.literal(ScalarValue.from_string(String("active"))),
+    )
+    assert_false(gate.supports_filter_pushdown(pred))
+
+
+# =============================================================================
+# Case 5 — identity distinctness (the plan-cache collision class).
+# =============================================================================
+
+
+def _binding_for(text: String, cfg: AnalyzerConfig) raises -> ScanBinding:
+    return search_scan_binding(
+        String("logs"), String("body"), text, analyzer_config_fingerprint(cfg)
+    )
+
+
+def test_05_identity_folds_analyzer_config() raises:
+    # SAME query_text, but DIFFERENT AnalyzerConfig:
     #   cfg_default = text() (lowercase + fold + english stopwords)
     #   cfg_nostop  = text() but remove_stopwords = False
-    # They normalize a query to DIFFERENT term sets -> MUST NOT CSE-collide.
+    # They normalize a query to DIFFERENT term sets -> MUST NOT collide.
     var cfg_default = AnalyzerConfig.text("body")
     var cfg_nostop = AnalyzerConfig(
         String("body"), FIELD_CLASS_TEXT, True, True, False, String("")
     )
-
-    var q_default = QueryIR(
-        String("body"), String("the alpha"), 10, cfg_default^
-    )
-    var q_nostop = QueryIR(
-        String("body"), String("the alpha"), 10, cfg_nostop^
-    )
-
-    var spec_default = Searcher(
-        bytes_a^, String("split-5"), String("logs"), q_default^
-    )
-    var spec_nostop = Searcher(
-        bytes_b^, String("split-5"), String("logs"), q_nostop^
-    )
+    var b_default = _binding_for(String("the alpha"), cfg_default)
+    var b_nostop = _binding_for(String("the alpha"), cfg_nostop)
 
     assert_not_equal(
-        spec_default.fingerprint(),
-        spec_nostop.fingerprint(),
+        analyzer_config_fingerprint(cfg_default),
+        analyzer_config_fingerprint(cfg_nostop),
     )
+    assert_not_equal(b_default.fingerprint, b_nostop.fingerprint)
+    assert_not_equal(b_default.identity_hash(), b_nostop.identity_hash())
 
 
-def test_05b_fingerprint_distinct_and_stable() raises:
-    var ba = _build_split(6)
-    var bb = _build_split(6)
-    var bc = _build_split(6)
-    var q1 = QueryIR(
-        String("body"), String("alpha"), 10, AnalyzerConfig.text("body")
-    )
-    var q2 = QueryIR(
-        String("body"), String("beta"), 10, AnalyzerConfig.text("body")
-    )  # different text
+def test_05b_identity_distinct_and_stable() raises:
+    var cfg = AnalyzerConfig.text("body")
+    var b1 = _binding_for(String("alpha"), cfg)
+    var b2 = _binding_for(String("beta"), cfg)  # different text
+    # different query_text -> different identity.
+    assert_not_equal(b1.fingerprint, b2.fingerprint)
+    assert_not_equal(b1.identity_hash(), b2.identity_hash())
 
-    var s1 = Searcher(ba^, String("split-6"), String("logs"), q1^)
-    var s2 = Searcher(bb^, String("split-6"), String("logs"), q2^)
-    # different query_text -> different fingerprint.
-    assert_not_equal(s1.fingerprint(), s2.fingerprint())
-
-    # same everything -> same fingerprint, STABLE across copy().
-    var q1b = QueryIR(String("body"), String("alpha"), 10, AnalyzerConfig.text("body"))
-    var s1b = Searcher(bc^, String("split-6"), String("logs"), q1b^)
-    assert_equal(s1.fingerprint(), s1b.fingerprint())
-    var s1_copy = s1.copy()
-    assert_equal(s1.fingerprint(), s1_copy.fingerprint())
+    # same everything -> same identity, STABLE across copy().
+    var b1b = _binding_for(String("alpha"), cfg)
+    assert_equal(b1.fingerprint, b1b.fingerprint)
+    assert_equal(b1.identity_hash(), b1b.identity_hash())
+    var b1_copy = b1.copy()
+    assert_equal(b1.fingerprint, b1_copy.fingerprint)
+    assert_equal(b1.identity_hash(), b1_copy.identity_hash())
 
 
 def main() raises:
