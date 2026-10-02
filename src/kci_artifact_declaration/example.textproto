@@ -4,18 +4,19 @@
 #
 # kci runs, per artifact, with D a fresh EMPTY directory:
 #   buck2 build --config-file /etc/kci/remote.buckconfig <target> --out D
-# and ships what the `*.kci_manifest.json` files left in D describe.
+# and ships what the ONE `manifest.json` left at the top of D describes (its
+# `name` must equal the artifact's `name` below, exactly).
 #
 # `build` is in the build system's args, not the artifacts': the build
 # system's args come first, and buck2 takes `--config-file` only after the
 # subcommand (`buck2 --config-file P build` is refused: "unexpected argument").
 #
 # `buck2 build --out D` copies the ONE default output of the ONE target
-# named: a directory output's contents land directly in D, a single file
-# lands in D under its own name. So each target below must have, as its
-# default output, a directory holding the artifact and its kci manifest.
-# (conda_package's `[release]` is not that yet: its default output is the
-# `.conda` alone, and its `.manifest.json` is the packer's own format.)
+# named: a directory output's contents land directly in D. A conda_package's
+# `[release]` (tools/build/package/conda.bzl) is that directory:
+# `komira_encoding-<version>-0.conda`, `manifest.json` (kci artifact-manifest
+# format, `name` "komira_encoding") and `metadata.json`. It exists only for a
+# stamped build, so an unstamped one fails here rather than shipping.
 
 build_systems {
   name: "buck2"
@@ -28,7 +29,7 @@ build_systems {
 artifacts {
   name: "komira_encoding"
   build_system: "buck2"
-  args: "//packaging/conda:komira_encoding[release]"
+  args: "//src/komira_encoding:komira_encoding_conda[release]"
   args: "--out"
   args: "{out_dir}"
   allowed_channels: "public"

@@ -27,6 +27,10 @@
 # artifact depends on the artifact's TYPE, which only the built manifest
 # states, so that check is kci publish's.
 #
+# What a build LEFT (exactly one `manifest.json` at the top of `{out_dir}`,
+# whose `name` is the declaration's, exactly) is checked by contract.mojo's
+# `require_one_manifest` and `require_manifest_name`, after the build.
+#
 # Not here, by design (kci publish, over the built manifests): every
 # declared artifact built, versions in lockstep, a metapackage after its
 # members, requirement closure over the set and its channel.

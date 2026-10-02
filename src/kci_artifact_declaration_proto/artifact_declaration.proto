@@ -15,26 +15,33 @@
 // with every occurrence of the literal token `{out_dir}` in any argument
 // replaced by that directory's absolute path. `{out_dir}` is the only
 // placeholder; any other `{<identifier>}` is refused (a brace not around
-// an identifier is passed through as written). The build must leave in that
-// directory the artifact files and one kci artifact manifest per artifact
-// (the format of //src/kci_artifact_manifest), each named
-// `<anything>.kci_manifest.json`. kci ships exactly what those manifests
-// describe: the artifact type, name, version, platform, file, sha256 and
-// metadata all come from the built manifest, never from this file. A build
-// that exits non-zero, or leaves no manifest, is refused.
+// an identifier is passed through as written).
+//
+// ONE ARTIFACT PER DECLARATION. The build must leave, at the top of that
+// directory, EXACTLY ONE kci artifact manifest (the format of
+// //src/kci_artifact_manifest), named `manifest.json`, plus the files it
+// names (for a CONDA artifact: the `.conda` and `metadata.json`, both next
+// to it). kci refuses a build that leaves no `manifest.json` there, a
+// listing that names it more than once, and a manifest whose `name` is not
+// the declaration's `name`, compared exactly (byte for byte: no case
+// folding, no trimming, no `-`/`_` equivalence). kci ships exactly what
+// that manifest describes: the artifact type, version, platform, file,
+// sha256 and metadata all come from it, never from this file. A build that
+// exits non-zero is refused.
 //
 // Buck2 needs no special code: a build system `buck2` with args
 // `["build", "--config-file", "/etc/kci/remote.buckconfig"]` and artifact
-// args `["//packaging/conda:foo[release]", "--out", "{out_dir}"]`. The
-// subcommand belongs in the build system's args because those come first and
-// buck2 accepts `--config-file` only after the subcommand. What
-// `buck2 build --out <existing dir>` copies is the ONE default output of the
-// ONE target named: a single file lands in the directory under its own
-// name, the CONTENTS of a directory output land directly in it (files
-// already there are kept, which is why kci starts from an empty one), and
-// two or more default outputs, or two targets, are refused ("choice of
-// output is ambiguous"). So the target's default output must be a DIRECTORY
-// holding the artifact and its kci manifest.
+// args `["//src/komira_encoding:komira_encoding_conda[release]", "--out",
+// "{out_dir}"]`. The subcommand belongs in the build system's args because
+// those come first and buck2 accepts `--config-file` only after the
+// subcommand. What `buck2 build --out <existing dir>` copies is the ONE
+// default output of the ONE target named: a single file lands in the
+// directory under its own name, the CONTENTS of a directory output land
+// directly in it (files already there are kept, which is why kci starts
+// from an empty one), and two or more default outputs, or two targets, are
+// refused ("choice of output is ambiguous"). A `conda_package`'s
+// `[release]` is such a directory: `<name>-<version>-0.conda`,
+// `manifest.json` and `metadata.json` (tools/build/package/conda.bzl).
 //
 // Set-level rules (every declared artifact built, versions in lockstep, a
 // metapackage published after its members, each package's requirements
@@ -75,9 +82,9 @@ message BuildSystem {
 }
 
 message ArtifactDeclaration {
-  // kci's handle for the artifact (selection, logs, refusals);
-  // `[a-z][a-z0-9_]*`, unique among the artifacts. The published name is the
-  // built manifest's `name`.
+  // The artifact's name; `[a-z][a-z0-9_]*`, unique among the artifacts.
+  // The built `manifest.json`'s `name` must equal it exactly, so this is the
+  // published name too (a conda package's name has the same syntax).
   string name = 1;
 
   // The release channels (names in the channels file) this artifact may be

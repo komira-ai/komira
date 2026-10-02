@@ -4,8 +4,9 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 # what kci builds and publishes. A file declares build systems (a program and
 # the flags it always gets) and artifacts (a name, the channels it may go to,
 # the build system that builds it and the args appended for it). kci knows no
-# build tool by name; the contract (an empty `{out_dir}`, one kci artifact
-# manifest per artifact left in it) is in the .proto. Standalone: the .proto
+# build tool by name; the contract (an empty `{out_dir}`; one artifact per
+# declaration, so exactly one kci artifact manifest, `manifest.json`, left at
+# its top, whose `name` is the declaration's) is in the .proto. Standalone: the .proto
 # imports no other proto.
 #
 #   from kci_artifact_declaration_proto.artifact_declaration import (

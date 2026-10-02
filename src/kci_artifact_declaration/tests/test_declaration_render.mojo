@@ -1,7 +1,8 @@
 # =============================================================================
 # src/kci_artifact_declaration/tests/test_declaration_render.mojo
-#   The argv kci runs for one artifact, `{out_dir}` substitution, and the
-#   example declarations file.
+#   The argv kci runs for one artifact, `{out_dir}` substitution, the
+#   example declarations file, and the two refusals over what a build left
+#   (exactly one `manifest.json`; its `name` the declaration's, exactly).
 # =============================================================================
 #
 # `render_build_argv` is pure: these cases compare argv lists exactly and
@@ -17,12 +18,14 @@ from kci_artifact_declaration_proto.artifact_declaration import (
     BuildSystem,
 )
 from kci_artifact_declaration import (
-    KCI_MANIFEST_SUFFIX,
+    KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
     parse_artifact_declarations,
     placeholders_in,
     read_artifact_declarations,
     render_build_argv,
+    require_manifest_name,
+    require_one_manifest,
 )
 
 
@@ -49,7 +52,7 @@ def _refusal(decls: ArtifactDeclarations, artifact: String, out_dir: String) -> 
 
 def test_contract_words() raises:
     assert_equal(String(OUT_DIR_PLACEHOLDER), String("{out_dir}"))
-    assert_equal(String(KCI_MANIFEST_SUFFIX), String(".kci_manifest.json"))
+    assert_equal(String(KCI_MANIFEST_NAME), String("manifest.json"))
 
 
 def test_example_file_renders_the_buck2_build() raises:
@@ -61,7 +64,7 @@ def test_example_file_renders_the_buck2_build() raises:
             "build",
             "--config-file",
             "/etc/kci/remote.buckconfig",
-            "//packaging/conda:komira_encoding[release]",
+            "//src/komira_encoding:komira_encoding_conda[release]",
             "--out",
             "/work/out/komira_encoding",
         ),
@@ -118,6 +121,74 @@ def test_placeholders_in() raises:
         _argv("{a}", "{out_dir}", "{_b}"),
     )
     _expect_argv(placeholders_in(String("{{out_dir}}")), _argv("{out_dir}"))
+
+
+def _one_manifest_refusal(declaration: String, top_level: List[String]) -> String:
+    try:
+        require_one_manifest(declaration, top_level)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def _name_refusal(declaration: String, manifest_name: String) -> String:
+    try:
+        require_manifest_name(declaration, manifest_name)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def test_exactly_one_manifest_at_the_top() raises:
+    # The layout of a conda_package's [release] directory.
+    assert_equal(
+        _one_manifest_refusal(
+            String("komira_encoding"),
+            _argv("komira_encoding-0.1.0-0.conda", "manifest.json", "metadata.json"),
+        ),
+        String("<accepted>"),
+    )
+    var none = String(
+        "artifact 'komira_encoding': the build left no manifest.json at the top"
+        " of its output directory"
+    )
+    assert_equal(_one_manifest_refusal(String("komira_encoding"), List[String]()), none)
+    # The retired naming is not a manifest any more, and neither is a
+    # near-miss or a manifest one level down.
+    assert_equal(
+        _one_manifest_refusal(
+            String("komira_encoding"),
+            _argv("komira_encoding.kci_manifest.json", "Manifest.json", "manifest.json ", "pkg/manifest.json"),
+        ),
+        none,
+    )
+    assert_equal(
+        _one_manifest_refusal(String("a"), _argv("manifest.json", "x", "manifest.json")),
+        String(
+            "artifact 'a': the output directory lists manifest.json 2 times;"
+            " one artifact per declaration means exactly one"
+        ),
+    )
+
+
+def test_manifest_name_is_the_declaration_name_exactly() raises:
+    assert_equal(_name_refusal(String("komira_encoding"), String("komira_encoding")), String("<accepted>"))
+    var wrong = List[String]()
+    wrong.append(String("komira_json"))
+    wrong.append(String("Komira_encoding"))
+    wrong.append(String("komira-encoding"))
+    wrong.append(String(" komira_encoding"))
+    wrong.append(String("komira_encoding "))
+    wrong.append(String("komira_encodin"))
+    wrong.append(String("komira_encoding_conda"))
+    wrong.append(String(""))
+    for i in range(len(wrong)):
+        assert_equal(
+            _name_refusal(String("komira_encoding"), wrong[i]),
+            String("artifact 'komira_encoding': the built manifest's name '")
+            + wrong[i]
+            + String("' is not the declaration's name (compared exactly)"),
+        )
 
 
 def main() raises:
