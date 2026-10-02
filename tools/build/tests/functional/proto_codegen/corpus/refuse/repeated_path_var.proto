@@ -1,0 +1,15 @@
+syntax = "proto3";
+
+package komira.test.refuse.repeated_path_var;
+
+import "google/api/annotations.proto";
+
+service S {
+  rpc M(Req) returns (Req) {
+    option (google.api.http) = { get: "/v1/{names}" };
+  }
+}
+
+message Req {
+  repeated string names = 1;
+}
