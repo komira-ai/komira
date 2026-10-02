@@ -27,13 +27,13 @@
 #   6. test_merged_split_hides_inputs_across_shards: a merged split in `_base`
 #      hides its inputs even when they live in other writers' shards.
 #
-# Pointers: the only UnsafePointer uses are the pthread void* ABI arguments and
-# the heap-stable per-writer results read after join, as in
-# test_search_metastore_concurrent.mojo.
+# Pointers: UnsafePointer appears only in the pthread void* ABI arguments. Each
+# writer's results slot is an ArcPointer shared with the main thread, which
+# reads it after join. No struct field holds a raw pointer or an address.
 # =============================================================================
 
 from std.ffi import external_call
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from std.memory import ArcPointer, OwnedPointer, UnsafePointer, alloc
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -263,9 +263,9 @@ struct _WriterArg(Movable, Deinitable):
     var shard_id: String
     var node_id: Int64
     var num_publishes: Int64
-    # # SAFETY: address of a heap-stable `_WriterResults` owned by the main
-    # thread (kept alive until join). Plain Int — no wildcard field.
-    var results_addr: Int
+    # This writer's own results slot, shared with the main thread, which
+    # reads it only after joining this thread.
+    var results: ArcPointer[_WriterResults]
 
     def __init__(
         out self,
@@ -273,13 +273,13 @@ struct _WriterArg(Movable, Deinitable):
         var shard_id: String,
         node_id: Int64,
         num_publishes: Int64,
-        results_addr: Int,
+        var results: ArcPointer[_WriterResults],
     ):
         self.store = store^
         self.shard_id = shard_id^
         self.node_id = node_id
         self.num_publishes = num_publishes
-        self.results_addr = results_addr
+        self.results = results^
 
 
 def _writer_entry(
@@ -298,14 +298,9 @@ def _writer_entry(
 
 
 def _run_writer(mut arg: _WriterArg) raises:
-    # SAFETY (pthread launch): the results address is a main-thread
-    # OwnedPointer[_WriterResults] pointee, alive until the main thread joins.
-    # DISJOINTNESS: writer touches ONLY its own slot AND
-    # its OWN shard sub-lineage (the per-worker grain — zero cross-writer slot
-    # contention by construction).
-    var results_ptr = UnsafePointer[_WriterResults, MutUntrackedOrigin](
-        unsafe_from_address=arg.results_addr
-    )
+    # Each writer appends only to its own results slot and publishes only to
+    # its own shard sub-lineage, so writers never contend on a slot; the main
+    # thread reads the slots after every writer has been joined.
     # Build a SearchMetastore over THIS writer's shard sub-lineage (a clone of
     # the shared store). Distinct shard_id per writer -> disjoint _HEAD slots.
     var lineage = shard_manifest_prefix(_META, arg.shard_id)
@@ -330,7 +325,7 @@ def _run_writer(mut arg: _WriterArg) raises:
         except e:
             failed = Int64(1)
             _ = e
-        results_ptr[].records.append(
+        arg.results[].records.append(
             _PubRecord(seq, Int64(seed), attempts, failed)
         )
         i += Int64(1)
@@ -371,16 +366,15 @@ def _run_k_shard_stress(k: Int, publishes_per_node: Int64) raises:
 
     var shared = SharedInMemoryConditionalStore()
 
-    var results = Slab[OwnedPointer[_WriterResults]]()
+    var results = Slab[ArcPointer[_WriterResults]]()
     for _w in range(k):
-        results.append(OwnedPointer[_WriterResults](_WriterResults()))
+        results.append(ArcPointer[_WriterResults](_WriterResults()))
     var tids = List[Int64]()
     for _w in range(k):
         tids.append(Int64(0))
 
     var w = 0
     while w < k:
-        var addr = Int(UnsafePointer(to=results[w][]))
         # Each writer gets a DISTINCT shard_id (the per-worker grain).
         var shard_id = make_shard_id(String("node"), w)
         var arg = _WriterArg(
@@ -388,7 +382,7 @@ def _run_k_shard_stress(k: Int, publishes_per_node: Int64) raises:
             shard_id=shard_id^,
             node_id=Int64(w + 1),  # node ids 1..k (seed base node*1000).
             num_publishes=publishes_per_node,
-            results_addr=addr,
+            results=results[w].copy(),
         )
         var rc = _spawn_writer(arg^, tids[w])
         if rc != Int32(0):

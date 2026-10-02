@@ -28,13 +28,13 @@
 # no-gap property on the bare manifest store; this test drives it through
 # summary encoding, `publish` and `list_live_splits()`.
 #
-# Pointers: the only UnsafePointer uses are the pthread void* ABI arguments and
-# the heap-stable per-writer results read after join, as in that test. No
-# struct field holds a wildcard-origin pointer.
+# Pointers: UnsafePointer appears only in the pthread void* ABI arguments. Each
+# writer's results slot is an ArcPointer shared with the main thread, which
+# reads it after join. No struct field holds a raw pointer or an address.
 # =============================================================================
 
 from std.ffi import external_call
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from std.memory import ArcPointer, OwnedPointer, UnsafePointer, alloc
 from std.testing import (
     TestSuite,
     assert_equal,
@@ -226,9 +226,9 @@ struct _WriterArg(Movable, Deinitable):
     var prefix: String
     var node_id: Int64
     var num_publishes: Int64
-    # # SAFETY: address of a heap-stable `_WriterResults` owned by the main
-    # thread (kept alive until join). Plain Int — no wildcard field.
-    var results_addr: Int
+    # This writer's own results slot, shared with the main thread, which
+    # reads it only after joining this thread.
+    var results: ArcPointer[_WriterResults]
 
     def __init__(
         out self,
@@ -236,13 +236,13 @@ struct _WriterArg(Movable, Deinitable):
         var prefix: String,
         node_id: Int64,
         num_publishes: Int64,
-        results_addr: Int,
+        var results: ArcPointer[_WriterResults],
     ):
         self.store = store^
         self.prefix = prefix^
         self.node_id = node_id
         self.num_publishes = num_publishes
-        self.results_addr = results_addr
+        self.results = results^
 
 
 def _writer_entry(
@@ -261,12 +261,8 @@ def _writer_entry(
 
 
 def _run_writer(mut arg: _WriterArg) raises:
-    # SAFETY (pthread launch): the results address is a main-thread
-    # OwnedPointer[_WriterResults] pointee, alive until the main thread joins.
-    # DISJOINTNESS: writer touches ONLY its own slot.
-    var results_ptr = UnsafePointer[_WriterResults, MutUntrackedOrigin](
-        unsafe_from_address=arg.results_addr
-    )
+    # Each writer appends only to its own slot; the main thread reads the
+    # slots after every writer has been joined.
     # The store is a SHARED handle (Arc to one map) — all K writers contend on
     # the SAME index's metastore. Build a SearchMetastore over this handle.
     var manifest = CasManifestStore[SharedInMemoryConditionalStore](
@@ -292,7 +288,7 @@ def _run_writer(mut arg: _WriterArg) raises:
         except e:
             failed = Int64(1)
             _ = e
-        results_ptr[].records.append(
+        arg.results[].records.append(
             _PubRecord(seq, Int64(seed), attempts, failed)
         )
         i += Int64(1)
@@ -334,22 +330,21 @@ def _run_k_node_stress(k: Int, publishes_per_node: Int64) raises:
     var shared = SharedInMemoryConditionalStore()
     var prefix = String("index/logs/meta")
 
-    var results = Slab[OwnedPointer[_WriterResults]]()
+    var results = Slab[ArcPointer[_WriterResults]]()
     for _w in range(k):
-        results.append(OwnedPointer[_WriterResults](_WriterResults()))
+        results.append(ArcPointer[_WriterResults](_WriterResults()))
     var tids = List[Int64]()
     for _w in range(k):
         tids.append(Int64(0))
 
     var w = 0
     while w < k:
-        var addr = Int(UnsafePointer(to=results[w][]))
         var arg = _WriterArg(
             store=shared.clone(),
             prefix=prefix.copy(),
             node_id=Int64(w + 1),  # node ids 1..k (seed base node*1000).
             num_publishes=publishes_per_node,
-            results_addr=addr,
+            results=results[w].copy(),
         )
         var rc = _spawn_writer(arg^, tids[w])
         if rc != Int32(0):
