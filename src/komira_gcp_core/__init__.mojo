@@ -45,10 +45,6 @@ komira_retry):
                       (komira_crypto) and `gcs_v4_signed_url`. Pure: the
                       signing time is a parameter
                       (`gcs_v4_stamps_from_unix_seconds`).
-  - pem.mojo        : PEM armor to DER (`pem_decode`), and
-                      `pkcs8_private_key_der_from_pem` for the `private_key`
-                      of a service-account key file (base64 from
-                      komira_encoding).
   - _text.mojo      : private, not re-exported: the package's one RFC 3986
                       percent-encoder (`pageToken`, the V4 path and query).
 
@@ -121,9 +117,4 @@ from .v4_sign import (
     gcs_v4_signed_url,
     gcs_v4_stamps_from_unix_seconds,
     gcs_v4_string_to_sign,
-)
-from .pem import (
-    PEM_PKCS8_PRIVATE_KEY_LABEL,
-    pem_decode,
-    pkcs8_private_key_der_from_pem,
 )

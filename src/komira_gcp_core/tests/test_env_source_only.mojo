@@ -104,7 +104,7 @@ def test_scan() raises:
         )
     assert_true(saw_token, "token.mojo was not staged")
     assert_true(saw_v4, "v4_sign.mojo was not staged")
-    assert_true(scanned >= 8, "only " + String(scanned) + " sources staged")
+    assert_true(scanned >= 7, "only " + String(scanned) + " sources staged")
 
 
 def main() raises:

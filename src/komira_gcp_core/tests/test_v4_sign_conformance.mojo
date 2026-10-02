@@ -37,7 +37,11 @@
 
 from std.testing import assert_equal, assert_false, assert_true
 
-from komira_crypto import hex_lower_array_32, sha256_string
+from komira_crypto import (
+    hex_lower_array_32,
+    pkcs8_private_key_der_from_pem,
+    sha256_string,
+)
 from komira_json import JsonValue, parse_json_value
 
 from komira_gcp_core import (
@@ -53,7 +57,6 @@ from komira_gcp_core import (
     gcs_v4_signed_url,
     gcs_v4_stamps_from_unix_seconds,
     gcs_v4_string_to_sign,
-    pkcs8_private_key_der_from_pem,
 )
 
 
