@@ -95,6 +95,20 @@ def test_crlf_indentation_split_body_and_surrounding_text() raises:
         ),
         _der(),
     )
+    # RFC 7468 `eol = CRLF / CR / LF`: lines that end in a lone CR, with
+    # explanatory text before and after, and a body split over two lines.
+    var cr = "a key follows\r-----BEGIN X-----\rMAMC\rAQU=\r-----END X-----\rmore\r"
+    _assert_bytes(pem_decode(cr, "X"), _der())
+    assert_equal(pem_label(cr), "X")
+    # Mixed conventions in one file.
+    _assert_bytes(
+        pem_decode("-----BEGIN X-----\rMAMC\nAQU=\r\n-----END X-----\n", "X"),
+        _der(),
+    )
+    # Positions count every byte of a lone-CR file: the END line is at 27.
+    _expect(
+        "-----BEGIN X-----\rMAMCAQU=\r-----END Y-----\r", "X", "InvalidBoundary", 27
+    )
 
 
 def test_lax_body_whitespace() raises:
@@ -171,10 +185,21 @@ def test_pem_label_names_the_first_block() raises:
 def test_no_armor() raises:
     _expect(_BODY, "PRIVATE KEY", "InvalidBoundary", 8)
     _expect("", "PRIVATE KEY", "InvalidBoundary", 0)
-    # A boundary without the trailing space is not a BEGIN line.
-    _expect("-----BEGIN-----\n", "", "InvalidBoundary", 16)
+    # A line that opens with five dashes before the block is a boundary or
+    # an error, never explanatory text, even when a good block follows: a
+    # BEGIN without its space, a dash line that is no boundary, a BEGIN
+    # with the label glued on.
+    _expect("-----BEGIN-----\n" + _block("X", _BODY), "X", "InvalidBoundary", 0)
+    _expect("-----FOO-----\n" + _block("X", _BODY), "X", "InvalidBoundary", 0)
+    _expect("t\n  -----BEGINX\n" + _block("X", _BODY), "X", "InvalidBoundary", 4)
+    _expect("-----\n" + _block("X", _BODY), "X", "InvalidBoundary", 0)
     # An END line before any BEGIN.
     _expect("text\n-----END X-----\n" + _block("X", _BODY), "X", "InvalidBoundary", 5)
+    # Fewer than five dashes, or dashes later in the line, are text.
+    _assert_bytes(
+        pem_decode("----BEGIN X-----\na ----- b\n" + _block("X", _BODY), "X"),
+        _der(),
+    )
 
 
 def test_label_mismatch_is_not_skipped() raises:
@@ -223,13 +248,16 @@ def test_end_line_rules() raises:
     # No END at all.
     var open = "-----BEGIN PRIVATE KEY-----\n" + _BODY + "\n"
     _expect(open, "PRIVATE KEY", "InvalidBoundary", open.byte_length())
-    # A second BEGIN before the END.
-    _expect(
-        "-----BEGIN PRIVATE KEY-----\n" + _BODY + "\n" + _block("PRIVATE KEY", _BODY),
-        "PRIVATE KEY",
-        "InvalidBoundary",
-        37,
+    # A second BEGIN before the END, and a dash line that is no boundary:
+    # each is named as what it is, not as a missing END.
+    var nested = (
+        "-----BEGIN PRIVATE KEY-----\n" + _BODY + "\n" + _block("PRIVATE KEY", _BODY)
     )
+    _expect(nested, "PRIVATE KEY", "InvalidBoundary", 37)
+    assert_true("unexpected boundary inside the block" in _outcome(nested, "PRIVATE KEY"))
+    var dashes = "-----BEGIN X-----\n" + _BODY + "\n-----\n-----END X-----\n"
+    _expect(dashes, "X", "InvalidBoundary", 27)
+    assert_true("unexpected boundary inside the block" in _outcome(dashes, "X"))
     # A malformed END.
     _expect(
         "-----BEGIN X-----\n" + _BODY + "\n-----END X----\n",
@@ -286,10 +314,11 @@ def test_errors_carry_no_input_byte() raises:
 
 
 def test_encode_known_answer() raises:
-    assert_equal(
-        pem_encode("PRIVATE KEY", _der()),
-        "-----BEGIN PRIVATE KEY-----\nMAMCAQU=\n-----END PRIVATE KEY-----\n",
-    )
+    var want = "-----BEGIN PRIVATE KEY-----\nMAMCAQU=\n-----END PRIVATE KEY-----\n"
+    assert_equal(pem_encode("PRIVATE KEY", _der()), want)
+    # The exported label constants are taken as they are, no conversion.
+    assert_equal(pem_encode(PEM_LABEL_PRIVATE_KEY, _der()), want)
+    _assert_bytes(pem_decode(want, PEM_LABEL_PRIVATE_KEY), _der())
 
 
 def test_encode_wraps_at_64_and_round_trips() raises:
