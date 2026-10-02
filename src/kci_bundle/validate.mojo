@@ -2343,7 +2343,7 @@ def _check_run_container(
 # plane may reserve one organization for its own machines, and a test role must
 # never be provisioned into it. Which id that is belongs to the control plane's
 # identity store, not to this package (which depends on `kci_bundle_proto` +
-# `komira_serde` and nothing else), so `validate_bundle` takes it as the
+# `komira_proto_codec` and nothing else), so `validate_bundle` takes it as the
 # `reserved_org_id` argument. A caller that links the identity store should pass
 # the id it declares, so the refusal checks the authority rather than a copy.
 # An EMPTY value means the control plane reserves no org, and the check is off.
@@ -4002,7 +4002,7 @@ def validate_bundle(
     # False for the same UNSPECIFIED bundle, deliberately; that is the safe arm.
     # (The release CLI's tenancy rule states the identical rule for the deploy
     # path and cannot be imported here — this package's dep line is
-    # `kci_bundle_proto` + `komira_serde` only.)
+    # `kci_bundle_proto` + `komira_proto_codec` only.)
     var is_control_plane_tenancy = (
         bundle.tenancy.value == Tenancy.TENANCY_CONTROL_PLANE
     )

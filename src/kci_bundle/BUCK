@@ -4,13 +4,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # comment-preserving patch of a `komira.deploy.textproto` intent bundle, all
 # coded against the generated `kci_bundle_proto.app_bundle.AppBundle` schema
 # (no parallel model). Pure and zero-I/O; its only dependencies are the
-# generated schema and the `komira_serde` runtime that schema imports.
+# generated schema and the `komira_proto_codec` runtime that schema imports.
 mojo_library(
     name = "kci_bundle",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_bundle_proto:kci_bundle_proto",
-        "//src/komira_serde:komira_serde",
+        "//src/komira_proto_codec:komira_proto_codec",
     ],
     test_srcs = [
         "tests/test_bundle_tenancy_field.mojo",
