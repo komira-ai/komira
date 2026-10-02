@@ -6,8 +6,8 @@ mojo_binary and mojo_test are unchanged; what differs is what each field holds:
   busybox   tools/build/mojo/darwin/busybox.sh, the busybox calling convention over the
             operating system's /bin and /usr/bin (there is no static busybox
             for macOS).
-  compiler  the osx-arm64 compiler closure, unpacked on a linux `light`
-            worker like the linux one, by the same unpacker.
+  compiler  the osx-arm64 compiler closure, unpacked by a linux action
+            like the linux one, by the same unpacker.
   link      a `mojo_darwin_link` directory: the `cc` the compiler finds on
             PATH, host_identity.sh, and `macos_hosts`, the host identities a
             compile may run on.
@@ -97,7 +97,6 @@ def _mojo_darwin_toolchain_impl(ctx):
             watchdog_sample_secs = ctx.attrs.watchdog_sample_secs,
             gate_runner = one(ctx.attrs.gate_runner),
             run_check = one(ctx.attrs._run_check),
-            numa_guard = one(ctx.attrs._numa_guard),
             launcher = one(ctx.attrs.launcher),
             runtime = one(ctx.attrs.runtime),
         ),
@@ -120,7 +119,6 @@ mojo_darwin_toolchain_rule = rule(
         # The compile watchdog of darwin/mojo_wrapper.sh, as mojo_toolchain's.
         "watchdog_idle_secs": attrs.int(default = 300),
         "watchdog_sample_secs": attrs.int(default = 30),
-        "_numa_guard": attrs.dep(default = "komira//tools/build/mojo:numa_guard.sh"),
         "_run_check": attrs.dep(default = "komira//tools/build/mojo:run_check.sh"),
         "_wrapper": attrs.dep(default = "komira//tools/build/mojo/darwin:mojo_wrapper.sh"),
     },

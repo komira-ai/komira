@@ -12,7 +12,7 @@
 #   log_event_record — the POD fixed-stride on-ring record (kind/level/site_id/
 #                      timestamp/corr_id/arg-blob).
 #   site_dictionary  — comptime FNV-1a site-ID + the decoder dictionary.
-#   record_ring      — per-core SPSC ring of records (generalized obs ring) +
+#   record_ring      — per-core SPSC ring of records (a thin wrapper over `komira_spsc_ring`'s `SpscRing`) +
 #                      the string-arg spill arena.
 #   calibration      — raw-tick timestamp + the drain-side wall-time anchor.
 #   emit             — the comptime `emit_record[fmt, module, *ArgTs]` hot path.

@@ -14,7 +14,7 @@
 # or a report that ends with "read it with: gcloud logging read ..." points at
 # a real artifact with no tool behind it, so every diagnosis of that class
 # becomes a hand-rolled curl or a raw cloud command. This package is the tool,
-# shared by every validator and by the deploy tool (`komira_ci`).
+# shared by every validator and by the deploy tool (`kci`).
 #
 # TWO FAMILIES, ONE RENDERER.
 #

@@ -1,26 +1,46 @@
 """Execution platforms: local by default, remote when `.buckconfig.local` asks.
 
-Each execution platform realizes one of the abstract configurations in
-//tools/build/platforms (`exec-light`, `exec-mojo`, `exec-mojo-multi-numa`).
+There is one execution platform per OS: `linux-x86_64`, and `darwin-arm64`
+when macOS workers are configured. Each is registered under the label, and
+with the configuration, of the target platform of the same name in
+//tools/build/platforms, so a tool built to run in an action is configured
+exactly like a target built for that OS. Nothing here says which worker of a
+remote service runs an action: that is the service's choice, made from the
+one property set of the platform.
 
 - `komira_local_execution_platforms`: every action runs on this machine.
   No service, no property set. Linux x86_64 hosts only.
 - `komira_execution_platforms`: every action runs remotely, on workers whose
-  property sets are read from `.buckconfig.local`
-  (`[komira_re] <key> = key=value,...`), so that no service address or pool
-  name is committed.
+  property set is read from `.buckconfig.local`
+  (`[komira_re] linux_properties = key=value,...`, and
+  `darwin_properties` for macOS), so that no service address or worker
+  property is committed.
 - `komira_default_execution_platforms`: the first when `[komira_re]` names no
   worker property set, the second when it does. A standalone checkout
   registers this one (//tools/build/platforms/default).
 
-Both kinds register each platform under the label of the abstract
-configuration it realizes, so a target's configuration, its output paths and
-the commands of its actions are the same whichever kind runs them. Only the
-executor differs, and a remote action's digest (command, inputs, property
-set) is the one a remote-only checkout computes.
+Both kinds register the same labels and configurations, so a target's
+configuration, its output paths and the commands of its actions are the same
+whichever kind runs them. Only the executor differs, and a remote action's
+digest (command, inputs, property set) is the one a remote-only checkout
+computes.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+
+# The constraints of each OS's execution platform, for `exec_compatible_with`
+# of a target whose actions run a binary built for that OS (every toolchain
+# action runs linux x86_64 binaries, including the unpacking of the macOS
+# toolchain, which only moves bytes).
+LINUX_X86_64 = [
+    "prelude//os/constraints:linux",
+    "prelude//cpu/constraints:x86_64",
+]
+
+DARWIN_ARM64 = [
+    "prelude//os/constraints:macos",
+    "prelude//cpu/constraints:arm64",
+]
 
 def re_properties(key, required = True):
     """Parse `[komira_re] <key>` into a dict.
@@ -48,12 +68,12 @@ def _remote_platforms_impl(ctx):
     platforms = []
     for name, (constraints_dep, props) in zip(ctx.attrs.names, zip(ctx.attrs.constraints, ctx.attrs.properties)):
         platforms.append(ExecutionPlatformInfo(
-            # Named after the abstract platform it realizes, not after this
-            # target: the name keys the configuration of every exec dep (the
-            # toolchain) and so appears in their output paths and in every
+            # Named after the platform whose configuration it uses, not after
+            # this target: the configuration keys every exec dep (the
+            # toolchain), so it appears in their output paths and in every
             # command that reads them. A repository mounting komira declares
-            # its own execution platform; naming both after
-            # `komira//tools/build/platforms:<name>` keeps its action keys
+            # its own execution platforms; naming both after
+            # `komira//tools/build/platforms:<os>-<cpu>` keeps its action keys
             # equal to a standalone checkout's.
             label = constraints_dep.label.raw_target(),
             configuration = constraints_dep[PlatformInfo].configuration,
@@ -73,8 +93,8 @@ def _local_platforms_impl(ctx):
     platforms = []
     for constraints_dep in ctx.attrs.constraints:
         platforms.append(ExecutionPlatformInfo(
-            # Same label and configuration as the remote platform realizing the
-            # same abstract configuration (see _remote_platforms_impl).
+            # Same label and configuration as the remote platform of the same
+            # OS (see _remote_platforms_impl).
             label = constraints_dep.label.raw_target(),
             configuration = constraints_dep[PlatformInfo].configuration,
             executor_config = CommandExecutorConfig(
@@ -102,26 +122,30 @@ remote_execution_platforms = rule(
 )
 
 # Registration order matters: a target that states no execution constraint
-# gets the first platform, so `exec-mojo` comes first (an unconstrained action
-# lands on a worker able to run anything komira runs). Mojo targets state
-# `mojo_compile` + `numa_single` through their toolchain; toolchain unpack and
-# copy targets state `light`.
-#
-# The macOS arm64 platform comes LAST: a platform added later must never become
-# the first match of an action that states no os. (Every komira target states
-# its os through its toolchain; the order keeps it so for anything that does
-# not.)
-_EXEC_PLATFORMS = [
-    ("mojo_compile", "komira//tools/build/platforms:exec-mojo"),
-    ("light", "komira//tools/build/platforms:exec-light"),
-    ("mojo_compile_multi_numa", "komira//tools/build/platforms:exec-mojo-multi-numa"),
-    ("mojo_compile_darwin", "komira//tools/build/platforms:exec-mojo-darwin-arm64"),
-]
+# gets the first platform, so linux comes first. The macOS arm64 platform
+# comes LAST: a platform added later must never become the first match of an
+# action that states no os. (Every komira target states its os through its
+# toolchain; the order keeps it so for anything that does not.)
+_LINUX_PLATFORM = "komira//tools/build/platforms:linux-x86_64"
+_DARWIN_PLATFORM = "komira//tools/build/platforms:darwin-arm64"
+
+# `[komira_re]` key of the linux execution platform's property set: the exact
+# REAPI properties the service routes every linux action by.
+LINUX_PROPERTIES_KEY = "linux_properties"
 
 # `[komira_re]` key of the macOS arm64 execution platform's property set: the
-# exact REAPI properties its workers advertise (e.g. `pool=macos`), like
-# every other set.
-DARWIN_PROPERTIES_KEY = "darwin_mojo_compile_properties"
+# exact REAPI properties its workers advertise (e.g. `pool=macos`).
+DARWIN_PROPERTIES_KEY = "darwin_properties"
+
+# Keys of an earlier layout, which split linux actions by worker class and
+# NUMA placement. A `.buckconfig.local` still naming one is refused, naming
+# the key that replaces it, rather than read as half a configuration.
+_RETIRED_KEYS = {
+    "darwin_mojo_compile_properties": DARWIN_PROPERTIES_KEY,
+    "light_properties": LINUX_PROPERTIES_KEY,
+    "mojo_compile_multi_numa_properties": None,
+    "mojo_compile_properties": LINUX_PROPERTIES_KEY,
+}
 
 # `[komira_re]` key naming the macOS hosts those workers run on: the value
 # tools/build/mojo/darwin/host_identity.sh prints on each (the SDK version,
@@ -156,9 +180,9 @@ def darwin_properties_refusal(props, hosts):
     property would match any worker.
     """
     if not props:
-        return "`mojo_compile_darwin` must name at least one worker property; got {}".format(props)
+        return "`darwin` must name at least one worker property; got {}".format(props)
     if not hosts:
-        return ("`mojo_compile_darwin` is set ({}), but `[komira_re] {}` of the root cell names no " +
+        return ("`darwin` is set ({}), but `[komira_re] {}` of the root cell names no " +
                 "macOS host. Set it to what tools/build/mojo/darwin/host_identity.sh prints on each " +
                 "worker, separated by spaces.").format(props, DARWIN_HOSTS_KEY)
     for h in hosts:
@@ -166,50 +190,31 @@ def darwin_properties_refusal(props, hosts):
             return "`[komira_re] {}`: `{}` is not a host identity (<sdk version>-<digest>)".format(DARWIN_HOSTS_KEY, h)
     return None
 
-def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_numa = None, mojo_compile_darwin = None, visibility = None):
-    """Registers komira's execution platforms, given their worker property sets.
+def komira_execution_platforms(name, linux, darwin = None, visibility = None):
+    """Registers komira's remote execution platforms, given their worker property sets.
 
-    Each argument is the exact REAPI platform property dict of the workers that
-    realize that configuration. `mojo_compile_multi_numa` is optional: when it
-    is None no platform provides `numa_multi`, and a target that requires it
-    fails to configure ("no compatible execution platform") instead of running
-    on a single-NUMA worker. Give it only for workers that span more than one
-    NUMA node. `mojo_compile_darwin` is optional too: macOS arm64 workers
-    that build darwin-arm64 targets; it needs the root cell's
-    `[komira_re] darwin_macos_hosts` (see DARWIN_HOSTS_KEY), and without it
-    no darwin-arm64 Mojo target can configure.
+    `linux` is the exact REAPI platform property dict every linux action
+    carries; the service picks the worker. `darwin` is optional: the property
+    dict of macOS arm64 workers that build darwin-arm64 targets; it needs the
+    root cell's `[komira_re] darwin_macos_hosts` (see DARWIN_HOSTS_KEY), and
+    without it no darwin-arm64 Mojo target can configure.
     """
-    if mojo_compile_multi_numa != None and mojo_compile_multi_numa == mojo_compile:
-        # The same property set routes to the same workers: a numa_multi run
-        # would land on the single-NUMA pool. (The run itself also refuses a
-        # worker it finds with fewer nodes; this catches the mistake at load.)
-        fail("komira_execution_platforms: `mojo_compile_multi_numa` must name workers " +
-             "spanning more than one NUMA node, but it equals `mojo_compile` ({})".format(mojo_compile))
-    if mojo_compile_darwin != None:
+    if not linux:
+        fail("komira_execution_platforms: `linux` must name at least one worker property; got {}".format(linux))
+    names = ["linux"]
+    constraints = [_LINUX_PLATFORM]
+    properties = [linux]
+    if darwin != None:
         # A macOS action must never match a linux worker, nor the reverse.
-        if mojo_compile_darwin in (light, mojo_compile, mojo_compile_multi_numa):
-            fail("komira_execution_platforms: `mojo_compile_darwin` must name macOS workers, " +
-                 "but it equals a linux property set ({})".format(mojo_compile_darwin))
-        refusal = darwin_properties_refusal(mojo_compile_darwin, darwin_macos_hosts())
+        if darwin == linux:
+            fail("komira_execution_platforms: `darwin` must name macOS workers, " +
+                 "but it equals the linux property set ({})".format(darwin))
+        refusal = darwin_properties_refusal(darwin, darwin_macos_hosts())
         if refusal:
             fail("komira_execution_platforms: " + refusal)
-    props = {
-        "light": light,
-        "mojo_compile": mojo_compile,
-        "mojo_compile_darwin": mojo_compile_darwin,
-        "mojo_compile_multi_numa": mojo_compile_multi_numa,
-    }
-    names = []
-    constraints = []
-    properties = []
-    for key, platform in _EXEC_PLATFORMS:
-        if props[key] == None:
-            if key in ("mojo_compile_multi_numa", "mojo_compile_darwin"):
-                continue
-            fail("komira_execution_platforms: `{}` is required".format(key))
-        names.append(key)
-        constraints.append(platform)
-        properties.append(props[key])
+        names.append("darwin")
+        constraints.append(_DARWIN_PLATFORM)
+        properties.append(darwin)
     remote_execution_platforms(
         name = name,
         names = names,
@@ -218,38 +223,29 @@ def komira_execution_platforms(name, light, mojo_compile, mojo_compile_multi_num
         visibility = visibility,
     )
 
-# The abstract configurations a local host realizes, in registration order
-# (the first is the default of an action that states no constraint; see
-# _EXEC_PLATFORMS). Not `exec-mojo-multi-numa`: nothing here knows how many
-# NUMA nodes the host has, and a target requiring more than one must fail to
-# configure rather than run on a host that may have one. Not
-# `exec-mojo-darwin-arm64`: every toolchain action is a linux x86_64 binary.
-_LOCAL_EXEC_PLATFORMS = [
-    "komira//tools/build/platforms:exec-mojo",
-    "komira//tools/build/platforms:exec-light",
-]
-
 def local_host_refusal():
     """Why this host cannot run komira's actions locally, or None."""
     host = host_info()
     if host.os.is_linux and host.arch.is_x86_64:
         return None
     return ("local execution runs the pinned linux x86_64 toolchain on this machine, " +
-            "which is not Linux x86_64. Use a remote-execution service: copy " +
-            ".buckconfig.local.example to .buckconfig.local and fill it in " +
+            "which is not Linux x86_64, so this checkout cannot build here yet. Build " +
+            "on a Linux x86_64 machine, or point it at a remote-execution service: " +
+            "copy .buckconfig.local.example to .buckconfig.local and fill it in " +
             "(DEVELOPMENT.md, step 3).")
 
 def komira_local_execution_platforms(name, visibility = None):
-    """Registers komira's execution platforms on this machine.
+    """Registers komira's execution platform on this machine: linux x86_64.
 
-    Every action runs locally. Fails on a host that is not Linux x86_64.
+    Every action runs locally. Fails on a host that is not Linux x86_64. No
+    macOS platform: every toolchain action is a linux x86_64 binary.
     """
     refusal = local_host_refusal()
     if refusal:
         fail("komira_local_execution_platforms: " + refusal)
     local_execution_platforms(
         name = name,
-        constraints = _LOCAL_EXEC_PLATFORMS,
+        constraints = [_LINUX_PLATFORM],
         visibility = visibility,
     )
 
@@ -261,12 +257,10 @@ def komira_local_execution_platforms(name, visibility = None):
 EXECUTION_MODES = ("auto", "local", "remote")
 
 # The `[komira_re]` keys whose presence opts a checkout into remote execution.
-# Any one of them does: the two required sets then fail, naming the missing
-# one, instead of a partly filled-in section building on this machine.
+# Any one of them does: the required linux set then fails, naming itself,
+# instead of a partly filled-in section building on this machine.
 _REMOTE_KEYS = (
-    "light_properties",
-    "mojo_compile_properties",
-    "mojo_compile_multi_numa_properties",
+    LINUX_PROPERTIES_KEY,
     DARWIN_PROPERTIES_KEY,
     DARWIN_HOSTS_KEY,
 )
@@ -278,8 +272,19 @@ _REMOTE_KEYS = (
 # its own.
 _RE_CLIENT_KEYS = ("address", "engine_address", "cas_address", "action_cache_address")
 
+def _refuse_retired_keys():
+    for old in sorted(_RETIRED_KEYS):
+        if read_config("komira_re", old, "").strip():
+            new = _RETIRED_KEYS[old]
+            fail(("`[komira_re] {}` is no longer read: komira registers one execution platform " +
+                  "per OS and says nothing about worker classes or NUMA placement. {}").format(
+                old,
+                "Rename it to `{}` (one property set for every action of that OS).".format(new) if new else "Delete it.",
+            ))
+
 def execution_mode():
     """`local` or `remote`: where a standalone checkout's actions run."""
+    _refuse_retired_keys()
     mode = read_config("komira", "execution", "auto").strip() or "auto"
     if mode not in EXECUTION_MODES:
         fail("`[komira] execution`: expected one of {}, got `{}`".format(EXECUTION_MODES, mode))
@@ -292,13 +297,23 @@ def execution_mode():
     if named:
         fail(("`[buck2_re_client] {}` names a remote-execution service, but `[komira_re]` " +
               "names no worker property set ({}), so it is not clear whether to build here " +
-              "or there. Set `[komira_re] light_properties` and `mojo_compile_properties` " +
-              "to build remotely (.buckconfig.local.example), or pass " +
-              "`-c komira.execution=local` to build on this machine.").format(
+              "or there. Set `[komira_re] {}` to build remotely (.buckconfig.local.example), " +
+              "or pass `-c komira.execution=local` to build on this machine.").format(
             named[0],
-            ", ".join(_REMOTE_KEYS[:2]),
+            LINUX_PROPERTIES_KEY,
+            LINUX_PROPERTIES_KEY,
         ))
     return "local"
+
+def _linux_properties():
+    props = re_properties(LINUX_PROPERTIES_KEY, required = False)
+    if props:
+        return props
+    fail(("remote execution is selected (`[komira] execution = remote`, or a `[komira_re]` " +
+          "key is set; check `buck2 audit config komira` for the file it comes from, " +
+          "such as a ~/.buckconfig.d file), but `[komira_re] {}` is not set. Set it " +
+          "(.buckconfig.local.example), or build on this machine with " +
+          "`-c komira.execution=local`.").format(LINUX_PROPERTIES_KEY))
 
 def komira_default_execution_platforms(name, visibility = None):
     """Local execution platforms, or remote ones when `.buckconfig.local` names workers.
@@ -311,10 +326,8 @@ def komira_default_execution_platforms(name, visibility = None):
         return
     komira_execution_platforms(
         name = name,
-        light = re_properties("light_properties"),
-        mojo_compile = re_properties("mojo_compile_properties"),
-        mojo_compile_multi_numa = re_properties("mojo_compile_multi_numa_properties", required = False),
-        mojo_compile_darwin = re_properties(DARWIN_PROPERTIES_KEY, required = False),
+        linux = _linux_properties(),
+        darwin = re_properties(DARWIN_PROPERTIES_KEY, required = False),
         visibility = visibility,
     )
 

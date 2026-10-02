@@ -38,7 +38,7 @@ from komira_log.pattern_layout import (
     render_json_line,
     select_log_layout,
 )
-from komira_obs.structured_log import (
+from komira_log.structured_log import (
     SEVERITY_DEBUG,
     SEVERITY_DEFAULT,
     SEVERITY_ERROR,
@@ -46,8 +46,8 @@ from komira_obs.structured_log import (
     SEVERITY_WARNING,
     emit_structured_line,
     gcp_severity_for_level,
-    json_escape,
 )
+from komira_trace.exporter import json_escape
 
 
 # -----------------------------------------------------------------------------
@@ -179,28 +179,25 @@ def test_every_level_maps_to_a_google_severity() raises:
 
 
 # =============================================================================
-# 3. ANTI-DRIFT. The map lives in komira_obs and the numbering in komira_log.
+# 3. ANTI-DRIFT. The map and the numbering live in one package.
 # =============================================================================
 
 
-def test_severity_map_agrees_with_komira_log_levels() raises:
-    """`gcp_severity_for_level` takes a RAW `UInt8` because `komira_log`
-    depends on `komira_obs` and not the other way round — importing
-    `komira_log.levels` there would invert the dep edge. The cost of that is a
-    numbering duplicated across a package boundary, and this test is the price
-    paid for it: it imports BOTH and asserts them pairwise, so renumbering
-    `levels.mojo` cannot silently re-point every severity by one.
+def test_severity_map_agrees_with_levels() raises:
+    """`gcp_severity_for_level` takes a RAW `UInt8` and compares it with the
+    constants in `levels.mojo`. This test pins the numbering against literals,
+    so renumbering `levels.mojo` cannot silently re-point every severity by one.
 
     The literal `UInt8`s on the right are deliberate. Writing
     `gcp_severity_for_level(LEVEL_WARN)` on both sides would be vacuous — it
-    would pass under ANY renumbering. What has to hold is that komira_log's
-    CONSTANTS still have the VALUES komira_obs hard-codes."""
-    assert_equal(Int(LEVEL_TRACE), 0, "komira_log LEVEL_TRACE is 0")
-    assert_equal(Int(LEVEL_DEBUG), 1, "komira_log LEVEL_DEBUG is 1")
-    assert_equal(Int(LEVEL_INFO), 2, "komira_log LEVEL_INFO is 2")
-    assert_equal(Int(LEVEL_WARN), 3, "komira_log LEVEL_WARN is 3")
-    assert_equal(Int(LEVEL_ERROR), 4, "komira_log LEVEL_ERROR is 4")
-    assert_equal(Int(LEVEL_OFF), 5, "komira_log LEVEL_OFF is 5")
+    would pass under ANY renumbering. What has to hold is that the CONSTANTS
+    still have the VALUES the wire protocol's callers hand in."""
+    assert_equal(Int(LEVEL_TRACE), 0, "LEVEL_TRACE is 0")
+    assert_equal(Int(LEVEL_DEBUG), 1, "LEVEL_DEBUG is 1")
+    assert_equal(Int(LEVEL_INFO), 2, "LEVEL_INFO is 2")
+    assert_equal(Int(LEVEL_WARN), 3, "LEVEL_WARN is 3")
+    assert_equal(Int(LEVEL_ERROR), 4, "LEVEL_ERROR is 4")
+    assert_equal(Int(LEVEL_OFF), 5, "LEVEL_OFF is 5")
 
     # And the map, addressed by komira_log's own constants, still answers with
     # Google's spelling for each.
@@ -219,7 +216,7 @@ def test_severity_map_agrees_with_komira_log_levels() raises:
     assert_equal(
         String(gcp_severity_for_level(LEVEL_ERROR)), String("ERROR"), "ERROR"
     )
-    print("  test_severity_map_agrees_with_komira_log_levels PASS")
+    print("  test_severity_map_agrees_with_levels PASS")
 
 
 # =============================================================================
@@ -501,7 +498,7 @@ def test_the_deployed_platform_fact_selects_json_and_an_override_wins() raises:
 def test_non_ascii_survives_byte_exact() raises:
     """`chr` maps a CODE POINT to its UTF-8 ENCODING, so `out += chr(Int(b))`
     RE-ENCODES every byte >= 0x80 into two. `interpolate`, `env_filter` and
-    `komira_obs.structured_log.json_escape`'s pass-through arm must all copy
+    `komira_trace.exporter.json_escape`'s pass-through arm must all copy
     bytes instead, which is why it is asserted here and not only in
     `test_log_bytes_non_ascii`.
 
@@ -682,7 +679,7 @@ def main() raises:
     print("== test_log_json_severity ==")
     test_warn_maps_to_warning()
     test_every_level_maps_to_a_google_severity()
-    test_severity_map_agrees_with_komira_log_levels()
+    test_severity_map_agrees_with_levels()
     test_one_line_of_valid_json_for_a_hostile_message()
     test_fields_become_keys_and_a_value_may_contain_equals()
     test_a_field_may_not_shadow_the_layouts_own_keys()

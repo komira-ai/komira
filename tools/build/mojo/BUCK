@@ -7,8 +7,6 @@ export_file(name = "gate_runner.sh", visibility = ["PUBLIC"])
 
 export_file(name = "run_check.sh", visibility = ["PUBLIC"])
 
-export_file(name = "numa_guard.sh", visibility = ["PUBLIC"])
-
 export_file(name = "conda_unpack.zig", src = "tools/conda_unpack.zig", visibility = ["PUBLIC"])
 
 export_file(name = "launch.sh", visibility = ["PUBLIC"])

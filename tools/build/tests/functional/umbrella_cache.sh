@@ -41,7 +41,7 @@
 # Its `app//platforms:default` must register only remote platforms, and the
 # same targets must resolve to the same execution configurations as test 18
 # pins; with `[komira] execution = remote`, a `[komira_re]` missing
-# light_properties, or mojo_compile_properties, must refuse, naming the key
+# linux_properties must refuse, naming the key
 # (analysis only; nothing runs).
 #
 # The remote-execution settings come from `.buckconfig.local` in the repo root,
@@ -195,20 +195,18 @@ b2_rootcfg audit providers "$EP" > "$W/rootcfg.providers.txt" 2>&1 ||
     die "rootcfg: cannot read the providers of $EP (see $W/rootcfg.providers.txt)"
 n_platforms=$(grep -c 'executor_config=' "$W/rootcfg.providers.txt")
 n_local=$(grep -c 'executor: Local(' "$W/rootcfg.providers.txt")
-labels=$(grep -oE '^ +label=komira//tools/build/platforms:exec-[a-z0-9-]+' "$W/rootcfg.providers.txt" | sed 's/.*://' | tr '\n' ' ')
+labels=$(grep -oE '^ +label=komira//tools/build/platforms:[a-z0-9_-]+' "$W/rootcfg.providers.txt" | sed 's/.*://' | tr '\n' ' ')
 [ "$n_platforms" -gt 0 ] && [ "$n_local" = 0 ] ||
     die "rootcfg: $EP registers $n_platforms platforms, $n_local of them local-only; want >0 and 0 (see $W/rootcfg.providers.txt)"
-for p in exec-mojo exec-light; do
-    case " $labels" in *" $p "*) ;;
-        *) die "rootcfg: registered platforms are [$labels], want $p among them (see $W/rootcfg.providers.txt)" ;; esac
-done
+case " $labels" in *" linux-x86_64 "*) ;;
+    *) die "rootcfg: registered platforms are [$labels], want linux-x86_64 among them (see $W/rootcfg.providers.txt)" ;; esac
 EXPECT_RESOLUTION="
-komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-komira//tools/build/examples:hellopkg komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-toolchains//:mojo komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-komira//tools/build/toolchains:zig komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
-komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4"
+komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/examples:hellopkg komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+toolchains//:mojo komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/toolchains:zig komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be"
 want=$(printf '%s\n' "$EXPECT_RESOLUTION" | sed '/^$/d' | LC_ALL=C sort)
 mapfile -t targets < <(printf '%s\n' "$want" | cut -d' ' -f1)
 b2_rootcfg audit execution-platform-resolution "${targets[@]}" > "$W/rootcfg.resolution.txt" 2>&1 ||
@@ -217,15 +215,14 @@ got=$(awk '/^[^ ].* \(.*\):$/ { t = $1; next }
     t != "" && /^    Execution platform configuration: / { print t, $4; t = "" }' "$W/rootcfg.resolution.txt" | LC_ALL=C sort)
 [ "$got" = "$want" ] ||
     die "rootcfg: resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ') (see $W/rootcfg.resolution.txt)"
-for key in light_properties mojo_compile_properties; do
-    if b2_rootcfg audit providers -c komira.execution=remote -c "komira_re.$key=" "$EP" > "$W/rootcfg.no_$key.txt" 2>&1; then
-        die "rootcfg: [komira] execution = remote without [komira_re] $key registered platforms (see $W/rootcfg.no_$key.txt)"
-    elif ! grep -qF "\`[komira_re] $key\` is not set" "$W/rootcfg.no_$key.txt"; then
-        die "rootcfg: [komira] execution = remote without [komira_re] $key failed without naming it (see $W/rootcfg.no_$key.txt)"
-    fi
-done
+key=linux_properties
+if b2_rootcfg audit providers -c komira.execution=remote -c "komira_re.$key=" "$EP" > "$W/rootcfg.no_$key.txt" 2>&1; then
+    die "rootcfg: [komira] execution = remote without [komira_re] $key registered platforms (see $W/rootcfg.no_$key.txt)"
+elif ! grep -qF "\`[komira_re] $key\` is not set" "$W/rootcfg.no_$key.txt"; then
+    die "rootcfg: [komira] execution = remote without [komira_re] $key failed without naming it (see $W/rootcfg.no_$key.txt)"
+fi
 b2_rootcfg kill > /dev/null 2>&1
-echo "      root .buckconfig: a consumer with the remote settings in its root .buckconfig registers $n_platforms remote platforms, resolves $(printf '%s\n' "$want" | wc -l) targets to the pinned configurations, and refuses execution = remote without light_properties or mojo_compile_properties"
+echo "      root .buckconfig: a consumer with the remote settings in its root .buckconfig registers $n_platforms remote platforms, resolves $(printf '%s\n' "$want" | wc -l) targets to the pinned configurations, and refuses execution = remote without linux_properties"
 
 build() { # checkout, invocation number, targets...
     local d=$1 i=$2; shift 2
