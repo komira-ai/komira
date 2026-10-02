@@ -958,6 +958,79 @@ mod tests {
         }
     }
 
+    /// A one-operation restJson1 client module whose label `{Bucket}` is
+    /// also the ruleset's `Bucket`, emitted with `r` or without a ruleset.
+    fn emit_rest_json(r: Option<&AwsEndpointRules>) -> String {
+        let m = parse(
+            r#"{"version": "2.0",
+                "metadata": {"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "protocol": "rest-json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "uid": "tiny-2026-10-02"},
+                "operations": {"Op": {"name": "Op",
+                    "http": {"method": "GET", "requestUri": "/{Bucket}"},
+                    "input": {"shape": "In"},
+                    "staticContextParams": {"DisableSession": {"value": true}}}},
+                "shapes": {"In": {"type": "structure", "required": ["Bucket"],
+                                  "members": {"Bucket": {"shape": "Str",
+                                      "location": "uri", "locationName": "Bucket",
+                                      "contextParam": {"name": "Bucket"}}}},
+                           "Str": {"type": "string"}}}"#,
+        )
+        .unwrap();
+        let lowering = lower_aws_service(&m, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny").unwrap();
+        let prov = AwsProvenance { model_key: "tiny/2026-10-02", model_sha256: "m" };
+        emit_aws_module_with_endpoints(
+            &lowering,
+            &AwsOverrides::empty(),
+            "tiny",
+            AwsEmitOptions::default(),
+            Some(prov),
+            r,
+        )
+        .unwrap()
+        .source
+    }
+
+    #[test]
+    fn a_rest_json_client_resolves_through_its_ruleset() {
+        let src = emit_rest_json(Some(&rules(S3_LIKE)));
+        // The REST binding's client import and the interpreter, side by side.
+        assert!(src.contains("    aws_rest_json_error,\n"));
+        assert!(src.contains("    EndpointRuleSet,\n"));
+        assert!(src.contains(&format!("#   endpoints    : ruleset sha256 {}", "r".repeat(64))));
+        // The REST request builder is there, and so is the resolver, binding
+        // the label member and the operation's static parameter.
+        assert!(src.contains("AwsRestUri"));
+        let body = &src[src.find("def resolve_op_endpoint(").unwrap()..];
+        let mut at = 0;
+        for want in [
+            "var params = config.endpoint_params()",
+            "params.set_string(String(\"Bucket\"), input.bucket)",
+            "params.set_bool(String(\"DisableSession\"), True)",
+            "var outcome = rules.resolve(params)",
+        ] {
+            let i = body[at..].find(want).unwrap_or_else(|| panic!("`{want}` missing or out of order"));
+            at += i + want.len();
+        }
+    }
+
+    #[test]
+    fn a_rest_json_client_without_a_ruleset_keeps_the_static_host() {
+        let src = emit_rest_json(None);
+        for absent in ["EndpointRuleSet", "EndpointConfig", "§E", "resolve_op_endpoint"] {
+            assert!(!src.contains(absent), "{absent}");
+        }
+        let header = &src[..src.find("\n\n").unwrap()];
+        for want in [
+            "#   endpoints    : NO RULESET. Requests go to the static service host,",
+            "#                  - Op: contextParam Bucket -> Bucket; staticContextParams",
+        ] {
+            assert!(header.contains(want), "`{want}` missing from\n{header}");
+        }
+        assert!(src.contains("resolve_endpoint(self._endpoint_override, tiny_host("));
+    }
+
     #[test]
     fn omit_preamble_mode_refuses_a_ruleset() {
         let m = model("", MEMBERS, "");
