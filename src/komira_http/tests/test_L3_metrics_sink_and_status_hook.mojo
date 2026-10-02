@@ -58,7 +58,7 @@ from komira_http.middleware.status_hook import (
     render_usage_body,
 )
 from komira_http.transport.scripted import ScriptedConnector, ScriptedStream
-from komira_obs.clock import now_ns as _now_ns
+from komira_clock import now_ns as _now_ns
 
 
 # =============================================================================
