@@ -12,6 +12,10 @@ traits.
   * `GcsFs[B]` (gcs_fs.mojo) — the `FileSystem` read conformer over the seam.
   * `GCS_ERR_*` / `gcs_store_error_kind_from_message` (errors.mojo) — the
     reader for the `StoreError[<KIND>]` message every backend raises.
+  * `GcsV4Signer[C]` (signer.mojo) — the `ObjectUrlSigner` conformer: V4
+    signed URLs (komira_gcp_core's GOOG4-RSA-SHA256) for one bucket, signed
+    at the instant a caller-supplied `GcsSigningClock` reports.
+    `FixedSigningClock` is a clock stopped at one instant.
 
 A production backend (google.storage.v2 over gRPC) is another conformer of
 `GcsStorageBackend`; it does not live in this package.
@@ -31,3 +35,10 @@ from .errors import (
 )
 from .fake_backend import FakeGcsStorageBackend
 from .gcs_fs import GcsFileHandle, GcsFs, GcsWriteFile
+from .signer import (
+    GCS_SIGNER_CLOUD,
+    GCS_V4_DEFAULT_LOCATION,
+    FixedSigningClock,
+    GcsSigningClock,
+    GcsV4Signer,
+)

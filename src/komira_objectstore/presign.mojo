@@ -173,7 +173,7 @@ trait ObjectUrlSigner(Movable, Deinitable):
     it into their own URL shape (bucket prefix, container, path style).
 
     Conformers in tree:
-      * `komira_gcp_gcs.GcsV4Signer`      — GOOG4-RSA-SHA256
+      * `komira_objectstore_gcs.GcsV4Signer` — GOOG4-RSA-SHA256
       * `komira_aws_s3.S3PresignSigner`   — AWS4-HMAC-SHA256
       * `komira_azure_blob.AzureSasSigner`— Azure service SAS
     """
