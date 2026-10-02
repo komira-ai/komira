@@ -509,7 +509,7 @@ struct BatchHeader(Movable, Deinitable):
     The server uses this to detect compression and locate the records bytes
     WITHOUT this zero-dep module having to decompress: it reads the codec id,
     slices `[records_pos : records_pos + records_len]`, decompresses (if
-    compressed) via the parquet codec, and calls `parse_records_from_span`
+    compressed) with a page codec, and calls `parse_records_from_span`
     over the plaintext."""
 
     var base_offset: Int64

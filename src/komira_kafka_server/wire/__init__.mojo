@@ -5,16 +5,15 @@ Source of truth: the Apache Kafka binary protocol spec
 
 This subpackage is a pure-bytes WIRE EDGE: framing + primitive types + the
 request/response message schemas encode/decode. It is kept SEPARATE from the
-broker cores (komira_broker) exactly like the [Format] codec edge — the codec
-translates Kafka wire <-> Mojo values; the broker core operates on
-RecordBatch + offset.
+broker cores (komira_broker): the codec translates Kafka wire bytes to and
+from Mojo values, and the broker core operates on RecordBatch + offset.
 
 Dependency DAG: komira_kafka_server.wire imports nothing outside itself (pure
-bytes). The
-broker/server layer that wires it up sources a Metadata response's partition
-count from BrokerTopicConfig.num_partitions (komira_broker) and hands it to
-`encode_metadata_response_v1` as a plain Int — the codec never imports the
-broker, so the wire edge stays decoupled.
+bytes). The broker/server layer that wires it up sources a Metadata
+response's partition count from BrokerTopicConfig.num_partitions
+(komira_broker) and hands it to the `encode_metadata_response_*` encoders as a
+plain Int — the codec never imports the broker, so the wire edge stays
+decoupled.
 
 Modules:
   * wire.mojo            — KafkaEncoder / KafkaDecoder + all primitive types
@@ -24,8 +23,8 @@ Modules:
                            encapsulated cursor.
   * messages.mojo        — request-header parse, response-header encode,
                            ApiVersions request/response, Metadata
-                           request/response v1, and the INT32 length-prefix
-                           framing.
+                           request/response v1 through v9, and the INT32
+                           length-prefix framing.
   * crc32c.mojo          — CRC-32C (Castagnoli) over a byte span.
   * record_batch_v2.mojo — the Kafka v2 RecordBatch (KIP-98) codec +
                            zigzag varint/varlong.

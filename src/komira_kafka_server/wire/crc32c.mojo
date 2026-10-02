@@ -7,12 +7,13 @@
 # onward. Kafka uses CRC-32C (reflected polynomial 0x82F63B78), NOT the
 # IEEE-802.3 CRC-32.
 #
-# HARDWARE INTRINSIC: the CRC is computed
-# with the CPU's native CRC32C instruction where available —
-#   * aarch64: `llvm.aarch64.crc32c{b,h,w,x}` (ARMv8 CRC extension; universal
-#     on Apple Silicon + all server-class ARMv8.1+).
-#   * x86_64:  `llvm.x86.sse42.crc32.32.{8,64}` (SSE4.2 `crc32` instruction).
-# A portable table-driven path is the fallback for any other target. This is
+# HARDWARE INTRINSIC: on two targets the CRC is computed with the CPU's native
+# CRC32C instruction —
+#   * x86-64:      `llvm.x86.sse42.crc32.32.{8,64}` (SSE4.2 `crc32` instruction).
+#   * macOS arm64: `llvm.aarch64.crc32c{b,h,w,x}` (ARMv8 CRC extension, present
+#     on every Apple Silicon CPU).
+# Every other target, including Linux aarch64, takes the portable
+# table-driven path. This is
 # NOT an FFI call — the intrinsic lowers to a single CPU instruction per 1/8
 # bytes, so a Produce/Fetch hot path pays no library-dispatch overhead.
 #
@@ -59,7 +60,7 @@ def _hw_crc32c_u64(acc: UInt32, v: UInt64) -> UInt32:
 
 
 # -----------------------------------------------------------------------------
-# Table fallback (portable; not used on aarch64 / x86_64).
+# Table fallback (portable; used on every target except x86-64 and macOS arm64).
 # -----------------------------------------------------------------------------
 
 
@@ -81,8 +82,9 @@ def _crc32c_table_entry(byte_val: Int) -> UInt32:
 
 def crc32c_span(data: Span[UInt8, _]) -> UInt32:
     """CRC-32C (Castagnoli, reflected, init 0xFFFFFFFF, xorout 0xFFFFFFFF) over
-    `data`. Uses the hardware CRC32C instruction on aarch64 / x86_64; a
-    table-driven fallback on any other target. No pointer crosses the boundary
+    `data`. Uses the hardware CRC32C instruction on x86-64 and macOS arm64,
+    and a table-driven fallback on every other target (Linux aarch64
+    included). No pointer crosses the boundary
     — the span is indexed bytewise."""
     var n = len(data)
     var crc = UInt32(0xFFFFFFFF)
