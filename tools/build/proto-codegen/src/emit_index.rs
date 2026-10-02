@@ -359,7 +359,7 @@ mod tests {
                 scalar_field("created_at", 15, ScalarKind::Int64, Label::Single),
                 scalar_field("updated_at", 16, ScalarKind::Int64, Label::Single),
                 scalar_field("last_heartbeat_at", 13, ScalarKind::Int64, Label::Optional),
-                scalar_field("org_id", 21, ScalarKind::Bytes, Label::Single),
+                scalar_field("owner_id", 21, ScalarKind::Bytes, Label::Single),
                 // repeated scalar -> TEXT[] (Logical::TextArray)
                 scalar_field("labels", 17, ScalarKind::String, Label::Repeated),
                 // map -> JSONB
@@ -615,7 +615,7 @@ mod tests {
             ("jobs".into(), vec![("phase".into(), false), ("created_at".into(), false)]),
             ("jobs".into(), vec![("phase".into(), false), ("updated_at".into(), false)]),
             ("jobs".into(), vec![("phase".into(), false), ("last_heartbeat_at".into(), false)]),
-            ("jobs".into(), vec![("org_id".into(), false), ("phase".into(), false), ("created_at".into(), false)]),
+            ("jobs".into(), vec![("owner_id".into(), false), ("phase".into(), false), ("created_at".into(), false)]),
         ]
     }
 
@@ -626,9 +626,9 @@ mod tests {
             idx(&[("phase", false), ("created_at", false)]),
             idx(&[("phase", false), ("updated_at", false)]),
             idx(&[("phase", false), ("last_heartbeat_at", false)]),
-            idx(&[("org_id", false), ("phase", false), ("created_at", false)]),
+            idx(&[("owner_id", false), ("phase", false), ("created_at", false)]),
             idx(&[("phase", false), ("created_at", true)]),
-            idx(&[("org_id", false), ("created_at", true)]),
+            idx(&[("owner_id", false), ("created_at", true)]),
         ]);
         let emit = resolve_index_emit(&model, &opts).expect("resolve");
 

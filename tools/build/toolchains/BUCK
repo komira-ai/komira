@@ -1,3 +1,4 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
@@ -77,14 +78,14 @@ oci_base(
 
 # ---- Unpacked by remote actions ---------------------------------------------
 
-# Unpacking and copying run on `light` workers. The Mojo toolchains below
-# state `mojo_compile` + a NUMA constraint; a toolchain's
-# `exec_compatible_with` binds every target that uses it, so each Mojo target
-# builds on an execution platform providing both.
+# Unpacking and copying run linux x86_64 binaries, so they state the linux
+# execution platform's constraints. A toolchain's `exec_compatible_with`
+# binds every target that uses it, so each Mojo target builds on the
+# execution platform of the OS its toolchain states.
 
 zig_dist(
     name = "zig",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":zig_linux_x86_64.tar.xz",
     busybox = ":busybox",
     strip_prefix = "zig-linux-x86_64-0.12.0",
@@ -93,7 +94,7 @@ zig_dist(
 
 zig_exe(
     name = "conda_unpack",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
     zig = ":zig",
@@ -102,7 +103,7 @@ zig_exe(
 
 conda_closure(
     name = "mojo_compiler",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     libs = {
         "lib/libgcc_s.so.1": ":libgcc_15.3.0_linux-64.conda",
         "lib/libstdc++.so.6": ":libstdcxx_15.3.0_linux-64.conda",
@@ -117,7 +118,7 @@ conda_closure(
 # tools/build/tests/run_tests.sh fails if this list and that record disagree.
 mojo_runtime(
     name = "mojo_runtime",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     busybox = ":busybox",
     compiler = ":mojo_compiler",
     libs = [
@@ -130,8 +131,7 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
-# The Mojo toolchains built from these (`toolchains//:mojo` and
-# `toolchains//:mojo_multi_numa`) are declared by `komira_mojo_toolchains` in
+# The Mojo toolchain built from these (`toolchains//:mojo`) is declared by `komira_mojo_toolchains` in
 # defs.bzl, which komira_toolchains calls from the `toolchains` cell of the
 # repository at the project root: tools/build/cells/toolchains/BUCK in a standalone checkout.
 
@@ -139,10 +139,10 @@ mojo_runtime(
 
 # The compiler driver of the C/C++ toolchain (komira_cxx_toolchains in
 # defs.bzl): runs zig's clang, flattening nested response files, which zig
-# refuses. Built on `light` workers.
+# refuses.
 zig_exe(
     name = "zig_cc_launcher",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:zig_cc_launcher.zig",
     busybox = ":busybox",
     zig = ":zig",

@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "komira_aws_logs_hand.logs_overrides",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override: it exercises the hand_srcs and overrides plumbing of aws_client, not a behaviour of CloudWatch Logs."
+    }
+  ]
+}

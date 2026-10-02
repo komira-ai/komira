@@ -1,4 +1,4 @@
-"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test, mojo_multi_numa_test.
+"""Mojo rules for Buck2: mojo_library, mojo_binary, mojo_test.
 
 Every action runs the hermetic toolchain from `toolchains//:mojo` through
 `mojo_wrapper.sh`; see that file for the environment the compiler sees.
@@ -22,7 +22,7 @@ staged source directory can never shadow a package.
 """
 
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
-load(":providers.bzl", "MojoGateRunInfo", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
+load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
 def _toolchain(ctx):
@@ -525,13 +525,12 @@ def _runnable(ctx, tc, exe):
     # downloads the binary and its runtime libraries only.
     return run_dir, cmd_args(run_dir.project(name), hidden = run_dir)
 
-def _run_check(ctx, tc, command, guard = []):
+def _run_check(ctx, tc, command):
     # Runs the RunInfo command itself, in a remote action with no library
     # path, so a runnable directory that cannot start on its own fails here.
-    # The action runs on this target's execution platform. `guard` is an
-    # argv prefix that must let the run start (mojo_multi_numa_test).
+    # The action runs on this target's execution platform.
     out = ctx.actions.declare_output(ctx.label.name + ".stdout")
-    args = guard + [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
+    args = [tc.busybox, "sh", tc.run_check, tc.busybox, command, out.as_output()]
     if ctx.attrs.expected_stdout != None:
         args.append(ctx.actions.write(ctx.label.name + ".expected", ctx.attrs.expected_stdout))
     ctx.actions.run(cmd_args(args), category = "mojo_run_check")
@@ -546,8 +545,6 @@ def _binary_impl(ctx):
     tc, exe = _executable(ctx, "mojo_build")
     run_dir, command = _runnable(ctx, tc, exe)
     shared = _shared(ctx, tc)
-    # Built only when a mojo_multi_numa_test runs this binary as its test.
-    test_root, test_binary = _test_root(ctx, ctx.label.name + ".testroot", exe, {})
     return [
         DefaultInfo(
             default_output = exe,
@@ -558,7 +555,7 @@ def _binary_impl(ctx):
             },
         ),
         RunInfo(args = command),
-        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir, test_root = test_root, test_binary = test_binary, test_env = []),
+        MojoRunnableInfo(binary = exe.basename, command = command, run_dir = run_dir),
         MojoProgramInfo(name = ctx.label.name, shared = shared, runtime = tc.runtime, target_cpu = tc.target_cpu),
     ]
 
@@ -608,7 +605,7 @@ def _test_impl(ctx):
         # `buck2 run` of a test runs its binary directly, from the runnable
         # directory; `buck2 test` runs it through the gate runner on RE.
         RunInfo(args = run_command),
-        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir, test_root = root, test_binary = staged, test_env = env_args),
+        MojoRunnableInfo(binary = exe.basename, command = run_command, run_dir = run_dir),
         ExternalRunnerTestInfo(
             type = "mojo",
             command = [command],
@@ -629,79 +626,8 @@ mojo_test_rule = rule(
     },
 )
 
-# ---- mojo_multi_numa_test ---------------------------------------------------
-#
-# Buck2 picks one execution platform per TARGET, so every action of a target
-# (its compile, its gated tests, its run check) runs on the same kind of
-# worker. A run that needs a worker spanning more than one NUMA node is
-# therefore its own target: `binary` (a mojo_binary or mojo_test) is compiled
-# by its own target on the default single-NUMA platform, and this target only
-# RUNS it, on a platform providing `komira//tools/build/platforms:numa_multi`.
-#
-# Two refusals, because the constraint alone is only a claim:
-#   - The toolchain is private and states `numa_multi`, so the requirement
-#     cannot be dropped from a BUCK file. When no registered execution
-#     platform provides `numa_multi`, the target fails to configure.
-#   - Every run (the build's run check and the `buck2 test` command) starts
-#     through numa_guard.sh, which exits 3 unless the action can use at least
-#     `numa_nodes` NUMA nodes -- online, with memory, and allowed by its own
-#     cpuset, affinity mask and memory binding. A platform whose property set
-#     routes to a single-NUMA worker therefore goes red, not green.
-
-def _multi_numa_test_impl(ctx):
-    tc = ctx.attrs._toolchain[MojoToolchainInfo]
-    runnable = ctx.attrs.binary[MojoRunnableInfo]
-    if ctx.attrs.numa_nodes < 2:
-        fail("mojo_multi_numa_test: numa_nodes must be at least 2, got {}".format(ctx.attrs.numa_nodes))
-    guard = [tc.busybox, "sh", tc.numa_guard, tc.busybox, str(ctx.attrs.numa_nodes), "--"]
-    # Building the target runs the binary (a build action on the multi-NUMA
-    # platform): it must start with no library path, exit 0, and print
-    # `expected_stdout` when that is set.
-    stdout = _run_check(ctx, tc, runnable.command, guard)
-    # `buck2 test` runs the binary as a test, exactly as mojo_test does: from
-    # its staged tree (bin/<name>, with the data and env of a mojo_test), with
-    # private scratch. gate_runner puts <dir>/lib on the library path; the
-    # runnable directory holds lib/, so the compiler is not an input of the run.
-    gate_run = cmd_args(
-        tc.busybox,
-        "sh",
-        tc.gate_runner,
-        tc.busybox,
-        runnable.run_dir,
-        str(ctx.label.raw_target()),
-        runnable.test_binary,
-        "/dev/null",
-        runnable.test_env,
-        hidden = runnable.test_root,
-    )
-    test_command = cmd_args(guard, gate_run)
-    return [
-        DefaultInfo(default_output = stdout),
-        RunInfo(args = runnable.command),
-        MojoGateRunInfo(command = gate_run),
-        ExternalRunnerTestInfo(
-            type = "mojo",
-            command = [test_command],
-            labels = ctx.attrs.labels,
-        ),
-    ]
-
-mojo_multi_numa_test_rule = rule(
-    impl = _multi_numa_test_impl,
-    attrs = {
-        "binary": attrs.dep(providers = [MojoRunnableInfo]),
-        # When set, building this target fails unless the run's stdout equals it.
-        "expected_stdout": attrs.option(attrs.string(), default = None),
-        "labels": attrs.list(attrs.string(), default = []),
-        # The run refuses to start on a worker where it can use fewer nodes.
-        "numa_nodes": attrs.int(default = 2),
-        "_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_multi_numa", providers = [MojoToolchainInfo]),
-    },
-)
-
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_binary = declares_docs(mojo_binary_rule)
 mojo_library = declares_docs(mojo_library_rule)
-mojo_multi_numa_test = declares_docs(mojo_multi_numa_test_rule)
 mojo_test = declares_docs(mojo_test_rule)
