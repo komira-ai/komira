@@ -118,8 +118,22 @@ def test_refusals_name_the_manifest_and_the_key() raises:
         String("artifact manifest 'out/m.json': a CONDA 'file' must end in .conda"),
     )
     assert_equal(
-        _refusal(_conda(String(',"metadata":"M"'))),
-        String("artifact manifest 'out/m.json': 'metadata' belongs to a PYTHON artifact"),
+        _refusal(_conda(String(',"metadata":"sub/metadata.json"'))),
+        String(
+            "artifact manifest 'out/m.json': a CONDA 'metadata' is a file name"
+            " next to the manifest, not a path"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda(String(',"metadata":".."'))),
+        String(
+            "artifact manifest 'out/m.json': a CONDA 'metadata' is a file name"
+            " next to the manifest, not a path"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda(String(',"metadata":""'))),
+        String("artifact manifest 'out/m.json': 'metadata' is EMPTY"),
     )
     assert_equal(
         _refusal(_python().replace(String('"file"'), String('"subdir":"x","file"'))),
@@ -147,6 +161,23 @@ def test_render_round_trips_conda() raises:
     assert_equal(back.file_path, m.file_path)
     assert_equal(back.subdir, m.subdir)
     assert_equal(back.sha256_hex, m.sha256_hex)
+
+
+def test_conda_metadata_is_optional_and_found_next_to_the_manifest() raises:
+    # Without the key a CONDA manifest parses as before, both fields empty.
+    var bare = parse_artifact_manifest(_conda(), String("out/m.json"))
+    assert_equal(bare.metadata, String(""))
+    assert_equal(bare.metadata_path, String(""))
+    # With it, the name resolves in the manifest's own directory, and the
+    # renderer writes it back last, in the header's key order.
+    var text = _conda(String(',"metadata":"metadata.json"'))
+    var m = parse_artifact_manifest(text, String("out/m.json"))
+    assert_equal(m.metadata, String("metadata.json"))
+    assert_equal(m.metadata_path, String("out/metadata.json"))
+    var rendered = render_artifact_manifest(m)
+    assert_equal(rendered, text + String("\n"))
+    var back = parse_artifact_manifest(rendered, String("/abs/dir/m.json"))
+    assert_equal(back.metadata_path, String("/abs/dir/metadata.json"))
 
 
 def test_render_round_trips_python() raises:

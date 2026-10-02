@@ -9,10 +9,13 @@
 #    "subdir": "linux-64",                CONDA only: the channel subdir
 #    "file": "linux-64/example-pkg-1.2.3-h0_0.conda",
 #    "sha256": "<64 hex>",                the file's sha256, as built
-#    "metadata": "METADATA"}              PYTHON only: the wheel's METADATA
+#    "metadata": "METADATA"}              PYTHON: the wheel's METADATA (required)
+#                                         CONDA: the build's metadata.json (optional)
 #
 # `file` and `metadata` are paths; a relative one is relative to the
-# directory holding the manifest. Every value is a string. A missing required
+# directory holding the manifest. A CONDA `metadata` is optional and, when
+# given, is a bare file name: the file sits next to the manifest, so copying
+# the manifest's directory (as `kci build` does) cannot separate the two. Every value is a string. A missing required
 # key, a key that does not belong to the artifact type, an unknown key, a
 # non-string or empty value and a sha256 that is not 64 lowercase hex
 # characters are each refused, naming the manifest and the key.
@@ -35,7 +38,8 @@ struct ArtifactManifest(Copyable, Movable, Deinitable):
 
     `file` and `metadata` are the paths as written in the manifest;
     `file_path` and `metadata_path` are the same paths resolved against the
-    manifest's directory. `source` names the manifest in every refusal.
+    manifest's directory. A CONDA manifest without `metadata` leaves both
+    empty. `source` names the manifest in every refusal.
 
     Layout: owned Strings. No pointer field."""
 
@@ -176,7 +180,18 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
         if not doc.has(String("subdir")):
             _refuse(source, String("a CONDA artifact needs 'subdir'"))
         if doc.has(String("metadata")):
-            _refuse(source, String("'metadata' belongs to a PYTHON artifact"))
+            m.metadata = _string_member(doc, String("metadata"), source)
+            if (
+                m.metadata.find(String("/")) >= 0
+                or m.metadata == "."
+                or m.metadata == ".."
+            ):
+                _refuse(
+                    source,
+                    String("a CONDA 'metadata' is a file name next to the")
+                    + String(" manifest, not a path"),
+                )
+            m.metadata_path = _resolve(base, m.metadata)
         m.subdir = _string_member(doc, String("subdir"), source)
         if m.subdir == "noarch":
             _refuse(
@@ -232,7 +247,7 @@ def render_artifact_manifest(m: ArtifactManifest) raises -> String:
         doc.set_member(String("subdir"), JsonValue.from_string(m.subdir.copy()))
     doc.set_member(String("file"), JsonValue.from_string(m.file.copy()))
     doc.set_member(String("sha256"), JsonValue.from_string(m.sha256_hex.copy()))
-    if m.artifact_type == ARTIFACT_TYPE_PYTHON:
+    if m.artifact_type == ARTIFACT_TYPE_PYTHON or m.metadata.byte_length() > 0:
         doc.set_member(String("metadata"), JsonValue.from_string(m.metadata.copy()))
     var text = doc.serialize() + String("\n")
     # The renderer checks its own output: a value the parser would refuse
