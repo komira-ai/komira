@@ -107,7 +107,7 @@ digest and names exactly the downloaded blobs.
 Both formats are written by `komira_pack` ([`komira_pack.zig`](pack/komira_pack.zig)), a
 static executable built by the pinned zig and run with no shell. It holds
 its output in memory until it exits, up to about three times the bundle's
-size at peak, which sets the size of bundle a `light` worker can pack. The
+size at peak, which sets the size of bundle a worker can pack. The
 bytes
 depend only on the bundle and the base: tar entries are sorted, with
 directories listed, mtime and uid/gid 0 and modes 0755/0644; gzip headers
