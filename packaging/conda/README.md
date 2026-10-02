@@ -246,7 +246,7 @@ a `file://` channel.
 ## Version
 
 **The version of every package is the version of the Mojo compiler the
-repository pins** (CEO decision), so `mojo-compiler ==<version>` and the
+repository pins**, so `mojo-compiler ==<version>` and the
 package's own version are one number, and a compiler bump re-versions and
 rebuilds every package (expected). The compiler's version is stated once, in
 the platform table's pin of the linux-64 compiler

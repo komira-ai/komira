@@ -13,7 +13,7 @@
 #   buck_args=-c komira.package_stamp=<N> -c komira.package_commit=<C> -c komira.package_timestamp_ms=<ms>
 #
 # The VERSION of every package is the version of the Mojo compiler the
-# repository pins (CEO decision: a compiler bump re-versions and rebuilds every
+# repository pins (a compiler bump re-versions and rebuilds every
 # package). It is read from the platform table's pin of the linux-64 compiler
 # (tools/build/platforms/table.bzl) AT C, the one place it is stated; the pin
 # names it in its asset name and in its URL, and a pin whose two disagree is
