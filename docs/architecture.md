@@ -38,7 +38,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | [`komira_zlib`](../src/komira_zlib/) | a zero-dependency FFI facade over libz, so a consumer that needs only zlib framing does not depend on a file-format reader. |
 | [`komira_protobuf`](../src/komira_protobuf/) | a general-purpose Protocol Buffers wire codec (reader, writer, wire types), not tied to any one message set. |
 | [`komira_xml`](../src/komira_xml/) | a general XML codec: reader, tree, writer and escaping. |
-| [`komira_encoding`](../src/komira_encoding/) | binary-to-text encodings, base64, base64url, base32 and hex, in pure Mojo with no dependencies; decoding is strict and names the byte position of what it rejects. |
+| [`komira_encoding`](../src/komira_encoding/) | binary-to-text encodings, base64, base64url, base32 and hex, and RFC 7468 PEM armor, in pure Mojo with no dependencies; decoding is strict and names the byte position of what it rejects. |
 | [`komira_json`](../src/komira_json/) | a small dependency-free JSON library (RFC 8259): a tagged `JsonValue`, a strict non-recursive parser with a nesting-depth limit, and direct-byte writers. |
 | [`komira_textproto`](../src/komira_textproto/) | a zero-dependency textproto lexer: typed tokens (so a quoted brace never equals a brace) and a cursor for hand-written parsers. |
 | [`komira_kafka_server`](../src/komira_kafka_server/) | a Kafka-protocol server for the komira broker. Today it holds only its wire codec (`komira_kafka_server.wire`: framing, primitive types, the v2 RecordBatch with CRC-32C, request and response schemas); connection handling and dispatch arrive in the same package. |
