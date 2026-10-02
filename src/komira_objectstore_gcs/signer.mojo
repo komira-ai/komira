@@ -30,7 +30,8 @@
 # to the signature. The signer reads it from a caller-supplied
 # `GcsSigningClock`, ONCE per mint, and derives both the stamps and the
 # reported `expires_unix_seconds` from that one reading. A fixed clock makes
-# every mint byte-reproducible.
+# every mint byte-reproducible. `SystemGcsSigningClock` is the production
+# conformer, over komira_clock's wall clock; `FixedSigningClock` is for tests.
 #
 # BOUNDS. Every mint first applies komira_objectstore's TTL policy
 # (`check_presign_ttl`, at most PRESIGN_MAX_TTL_SECONDS), which is far below
@@ -39,6 +40,7 @@
 # ENCAPSULATION: no UnsafePointer, no wildcard origin; values only.
 # =============================================================================
 
+from komira_clock import now_unix_ms
 from komira_gcp_core import (
     GCS_V4_DEFAULT_HOST,
     GcsV4Header,
@@ -81,6 +83,20 @@ struct FixedSigningClock(GcsSigningClock, ImplicitlyCopyable):
 
     def now_unix_seconds(mut self) -> Int:
         return self.unix_seconds
+
+
+@fieldwise_init
+struct SystemGcsSigningClock(GcsSigningClock, ImplicitlyCopyable):
+    """The production clock: the process wall clock (komira_clock's
+    `now_unix_ms`, `CLOCK_REALTIME`), truncated to whole seconds.
+
+    A V4 signature is checked against the server's clock, so a signer in a
+    deployed process signs at this one. It is a wall clock, not a monotonic
+    one: two reads may go backwards if the host's time is stepped. It reads
+    no environment and holds no state."""
+
+    def now_unix_seconds(mut self) -> Int:
+        return Int(now_unix_ms() // 1000)
 
 
 def _check_bucket(bucket: String) raises:
