@@ -103,10 +103,20 @@ struct PypiLegacyRegistry(Deinitable):
     ) raises -> UploadOutcome:
         """POST the legacy upload. RAISES only for a local fault before the
         request: a malformed coordinate or METADATA, or a credential that
-        refuses `PYPI_UPLOAD`. A transport fault is UNKNOWN."""
+        refuses `PYPI_UPLOAD` or presents none for it. A transport fault is
+        UNKNOWN."""
         refuse_malformed_file_name(f.coordinate)
         var target = pypi_upload_target(f.coordinate.repo)
         var authorization = cred.authorization(SURFACE_PYPI_UPLOAD)
+        if authorization.byte_length() == 0:
+            raise Error(
+                String("kci_pkg_upload: an upload to ")
+                + f.coordinate.repo
+                + String(
+                    " needs a credential, and the one given presents none for"
+                    " PYPI_UPLOAD. The request was not sent"
+                )
+            )
         var req = build_legacy_upload_request(
             target.host, target.path, f, authorization
         )

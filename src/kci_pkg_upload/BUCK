@@ -9,7 +9,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # Deps: komira_http (the HTTPS transport and its redirect policy), komira_async
 # (the blocking runtime the transport drives), komira_crypto (digests),
-# komira_encoding (base64) and komira_json (index listings).
+# komira_encoding (base64), komira_json (listings and token exchanges) and
+# komira_secret_store (tokens held as zeroizing values, resolved by name).
 #
 # Every welded test drives a scripted transport: no socket, no network. The
 # fidelity test reads the `uv publish` recordings under tests/fidelity.
@@ -22,6 +23,7 @@ mojo_library(
         "//src/komira_encoding:komira_encoding",
         "//src/komira_http:komira_http",
         "//src/komira_json:komira_json",
+        "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
         # an upload is claimed only under a name the caller approved
@@ -34,6 +36,8 @@ mojo_library(
         "tests/test_pkg_upload_credential_dispatch.mojo",
         # repodata reads: kinds, the 303 off-host, ABSENT only from a read listing
         "tests/test_pkg_upload_conda_reads.mojo",
+        # trusted publishing: ID-token request, both exchanges, every refusal
+        "tests/test_pkg_upload_github_oidc_credential.mojo",
         # the HTTPS transport elaborates (nothing dials)
         "tests/test_pkg_upload_http_transport_elaborates.mojo",
         # field-by-field identity; NO_COMMON_FIELD is never MATCH
@@ -44,6 +48,8 @@ mojo_library(
         "tests/test_pkg_upload_prefix_dev.mojo",
         # read_back / presence / fetch; 404 is ABSENT, never a raise
         "tests/test_pkg_upload_reads.mojo",
+        # one token by file or secret name, on one surface; anonymous never uploads
+        "tests/test_pkg_upload_static_token_credential.mojo",
         # byte for byte what `uv publish` sends (loopback recordings)
         "tests/test_pkg_upload_uv_fidelity.mojo",
     ],

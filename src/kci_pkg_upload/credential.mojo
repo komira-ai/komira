@@ -21,6 +21,11 @@
 # on the surface, not the host: the warehouse arm takes any host, so a
 # coordinate's substrate decides which surface is asked for.
 #
+# THE CREDENTIALS: `StaticTokenCredential` (one long-lived token, by file path
+# or secret name), `GithubOidcCredential` (trusted publishing from a GitHub
+# Actions job), `AnonymousCredential` (public reads) and `ScriptedCredential`
+# (the test double).
+#
 # ⛔ A CREDENTIAL IS NEVER PRINTED. No type here is `Writable` / `Stringable`,
 # and no refusal quotes a token.
 #
@@ -98,6 +103,26 @@ def bearer_authorization(token: String) raises -> String:
             " as if no credential were configured"
         )
     return String("Bearer ") + token
+
+
+# =============================================================================
+# AnonymousCredential — presents nothing.
+# =============================================================================
+
+
+struct AnonymousCredential(RegistryCredential, Deinitable):
+    """Presents NO credential on any surface: `authorization` is EMPTY, which
+    a read sends as no `Authorization` header at all. For reading a public
+    registry without resolving a secret. Every upload arm refuses an EMPTY
+    authorization before the request, so this credential can never upload.
+
+    Layout: no fields."""
+
+    def __init__(out self):
+        pass
+
+    def authorization(mut self, surface: Int) raises -> String:
+        return String("")
 
 
 # =============================================================================

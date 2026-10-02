@@ -23,8 +23,11 @@ WHAT IS IN HERE:
   * `Presence` / `ReadBack` / `Fetched` / `UploadOutcome` (outcome.mojo).
   * `PkgTransport` + `ScriptedPkgTransport` + `HttpPkgTransport[C]`
     (transport.mojo) — a one-method seam; the double records the exact wire.
-  * `RegistryCredential`, keyed by SURFACE, + `ScriptedCredential`
-    (credential.mojo).
+  * `RegistryCredential`, keyed by SURFACE (credential.mojo), and its
+    conformers: `StaticTokenCredential` (one token from a file path or a
+    secret name), `GithubOidcCredential` (trusted publishing from a GitHub
+    Actions job: the job's OIDC token exchanged for an upload token),
+    `AnonymousCredential` (public reads) and `ScriptedCredential` (tests).
   * the legacy upload form and its classification (core_metadata.mojo,
     legacy_upload.mojo).
   * `PypiLegacyRegistry` (pypi.org, TestPyPI) and `PrefixDevRegistry` (a
@@ -37,10 +40,11 @@ WHAT IS IN HERE:
     anything else, so a name nobody approved is never claimed.
 
 This package names no channel, account or organisation: every location, name
-list and credential arrives from the caller.
+list and credential arrives from the caller. The one environment read is the
+GitHub Actions OIDC handshake (`GithubOidcCredential.from_actions_env`).
 
-Depends on komira_http, komira_async, komira_crypto, komira_encoding and
-komira_json.
+Depends on komira_http, komira_async, komira_crypto, komira_encoding,
+komira_json and komira_secret_store.
 
 Encapsulation: owned values and seam conformers only. No UnsafePointer
 crosses a module boundary; no wildcard origin; no unsafe_from_address.
@@ -106,6 +110,7 @@ from .transport import (
 from .credential import (
     SURFACE_PREFIX_DEV,
     SURFACE_PYPI_UPLOAD,
+    AnonymousCredential,
     RegistryCredential,
     ScriptedCredential,
     bearer_authorization,
@@ -113,6 +118,13 @@ from .credential import (
 )
 
 from .approved_names import ApprovedNames
+from .github_oidc_credential import (
+    GithubOidcCredential,
+    OidcClaims,
+    decode_jwt_claims,
+    prefix_dev_audience,
+)
+from .static_token_credential import StaticTokenCredential
 from .prefix_dev_registry import PrefixDevRegistry, prefix_dev_repo_of_location
 from .pypi_registry import PypiLegacyRegistry
 from .registry_set import RegistrySet
