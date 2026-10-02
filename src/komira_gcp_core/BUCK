@@ -8,11 +8,21 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   status     - the google.rpc.Status error envelope (never echoes a body);
 #   pagination - the PURE paging pieces (`PageCursor`, `next_page_token`);
 #   retry      - `GcpRetryClassifier` and `gcp_retry_policy` for komira_retry.
+# and the Cloud Storage V4 signing primitives:
+#   v4_sign    - GOOG4-RSA-SHA256 canonicalization, string to sign, RSA
+#                signature and signed URL; the signing time is a parameter;
+#   pem        - PEM armor to DER, for a service-account key's PKCS#8 key.
 # Generic pieces come from dependencies: server bodies (and their UTF-8
 # validation) from komira_json; retry policy, backoff, loop and the clock
-# seam from komira_retry. It never imports a generated module, reads no
+# seam from komira_retry; SHA-256 and RSA from komira_crypto (AWS-LC); base64
+# from komira_encoding. It never imports a generated module, reads no
 # environment and opens no socket, and owns no transport: the one transport
 # seam is komira_http's `Connector`.
+#
+# test_v4_sign_conformance runs Google's published V4 signing vectors and
+# signs with their published dummy key. Neither is copied here: both are read
+# from the conformance-tests archive //third_party/googleapis_conformance_tests
+# pins by sha256, and staged at conformance/.
 #
 # Still to come, in order: P18a-2 (pure, no http) - service-account key file
 # parse, the RS256 JWT assertion, the authorized_user refresh form, the
@@ -21,10 +31,18 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # stack) - the token sources that send those over a `Connector`, plus the
 # send/decide/sleep retry loop. P21b - the paging loop in the generated
 # logging client. P18b depends on P18a-2.
+_CONFORMANCE_FILES = [
+    "LICENSE",
+    "storage/v1/test_service_account.not-a-test.json",
+    "storage/v1/v4_signatures.json",
+]
+
 mojo_library(
     name = "komira_gcp_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
     ],
@@ -33,6 +51,14 @@ mojo_library(
         "tests/test_gcp_pagination.mojo",
         "tests/test_gcp_retry.mojo",
         "tests/test_gcp_token.mojo",
+        "tests/test_pem.mojo",
+        "tests/test_v4_sign_conformance.mojo",
     ],
+    test_data = {
+        "tests/test_v4_sign_conformance.mojo": {
+            "conformance/" + f: "//third_party/googleapis_conformance_tests:files[{}]".format(f)
+            for f in _CONFORMANCE_FILES
+        },
+    },
     visibility = ["PUBLIC"],
 )
