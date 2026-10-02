@@ -2,12 +2,12 @@
 
 komira is written in [Mojo](https://www.modular.com/mojo) and built with
 [Buck2](https://buck2.build) and a hermetic toolchain: the Mojo compiler, zig
-and the file utilities every action uses are pinned downloads. A fresh clone
-builds on your own Linux x86_64 machine by default (see
-[DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees) for what has
-been checked locally so far).
-If you have a remote-execution service that speaks the Bazel Remote Execution
-API, such as Buildbarn, you can opt in to building there instead.
+and the file utilities every action uses are pinned downloads.
+
+> **Supported today: Linux x86_64.** A fresh clone builds on that machine
+> with no build service. Native builds on macOS (Apple silicon) and Linux
+> arm64 are being added: a Mac will build on its own, with no build service.
+> Until then, on a Mac you can install and run `./buck2` and read the code.
 
 The build tooling (Mojo rules, a hermetic toolchain, execution platforms,
 examples and end-to-end tests) lives in [`tools/build/`](tools/build/).
@@ -24,24 +24,21 @@ On Linux x86_64, with `curl` and `zstd` installed:
 [`./buck2`](buck2) fetches the buck2 release pinned in [`tools/buck2`](tools/buck2)
 once, verifies it, and caches it under `~/.cache/komira/buck2/`.
 
-A local Mojo compile has not yet been measured: so far these commands have
-run only against a remote-execution service
-([DEVELOPMENT.md](DEVELOPMENT.md#what-a-local-build-guarantees)).
-
-To build on a remote-execution service instead (from Linux x86_64 or macOS
-arm64), copy `.buckconfig.local.example` to `.buckconfig.local` and fill in your
-service and its worker properties; the same commands then run every action
-there.
+On one Linux x86_64 workstation, from a clean checkout, `hello` took 23 seconds
+including the toolchain download, one library and its tests 5 seconds, and
+`//src/...` about 10 minutes; see
+[what a local build guarantees](DEVELOPMENT.md#what-a-local-build-guarantees).
+Step by step: [getting started](docs/getting-started.md).
 
 [DEVELOPMENT.md](DEVELOPMENT.md) explains each step, what a local build does
-and does not guarantee (Buck2 does not sandbox local actions), what to put in
-`.buckconfig.local`, and what to do when something goes wrong.
+and does not guarantee (Buck2 does not sandbox local actions), how to run the checks, an optional section for people who run a
+remote-execution service, and what to do when something goes wrong.
 
 ## Documentation
 
 | read | for |
 |---|---|
-| [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: `./buck2` and the pinned release, local builds and what they guarantee, `.buckconfig.local` and a remote-execution service, running the checks, the host floor, caching, troubleshooting |
+| [DEVELOPMENT.md](DEVELOPMENT.md) | developer setup: `./buck2` and the pinned release, local builds and what they guarantee, running the checks, remote execution for those who run a service, the host floor, caching, troubleshooting |
 | [tools/build/README.md](tools/build/README.md) | a map of the build tooling, and how another repository uses komira, as a git external cell or a submodule |
 | [tools/build/mojo/README.md](tools/build/mojo/README.md) | the Mojo rules: `mojo_library`, `mojo_binary`, `mojo_test` |
 | [tools/build/platforms/README.md](tools/build/platforms/README.md) | target platforms, execution platforms and toolchain selection; local or remote execution |
@@ -52,7 +49,7 @@ and does not guarantee (Buck2 does not sandbox local actions), what to put in
 | [docs/knowledge_graph.md](docs/knowledge_graph.md) | the knowledge graph: not here yet (it returns as a Mojo tool) |
 | [docs/index.md](docs/index.md) | the canonical docs, and what each is the authority for |
 | [tools/build/examples/](tools/build/examples/) | small targets using each rule |
-| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module directly under `src/`, protos in `src/proto/`, the SDKs in `src/*_sdk/`, tooling in `tools/` |
+| [DEVELOPMENT.md#repository-layout](DEVELOPMENT.md#repository-layout) | the repository layout: every Mojo module directly under `src/`, tooling in `tools/` |
 | [third_party/](third_party/) | C and C++ libraries built from pinned source archives, for Mojo code to call |
 
 ## License
