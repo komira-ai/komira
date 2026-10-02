@@ -30,7 +30,7 @@
 # to the signature. The signer reads it from a caller-supplied
 # `GcsSigningClock`, ONCE per mint, and derives both the stamps and the
 # reported `expires_unix_seconds` from that one reading. A fixed clock makes
-# every mint byte-reproducible. `SystemGcsSigningClock` is the production
+# every mint byte-reproducible. `SystemSigningClock` is the production
 # conformer, over komira_clock's wall clock; `FixedSigningClock` is for tests.
 #
 # BOUNDS. Every mint first applies komira_objectstore's TTL policy
@@ -86,7 +86,7 @@ struct FixedSigningClock(GcsSigningClock, ImplicitlyCopyable):
 
 
 @fieldwise_init
-struct SystemGcsSigningClock(GcsSigningClock, ImplicitlyCopyable):
+struct SystemSigningClock(GcsSigningClock, ImplicitlyCopyable):
     """The production clock: the process wall clock (komira_clock's
     `now_unix_ms`, `CLOCK_REALTIME`), truncated to whole seconds.
 

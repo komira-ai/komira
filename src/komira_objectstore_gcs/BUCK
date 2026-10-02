@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `FileSystem` read conformer over the seam (`GcsFs`), and the StoreError kind
 # reader; and the `ObjectUrlSigner` conformer (`GcsV4Signer`) over
 # komira_gcp_core's V4 signing, on a caller-supplied clock (the production
-# one, `SystemGcsSigningClock`, is komira_clock's wall clock). The
+# one, `SystemSigningClock`, is komira_clock's wall clock). The
 # google.storage.v2 gRPC backend is a separate conformer of the object-verb
 # seam and lands with the gRPC client.
 #

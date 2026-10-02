@@ -15,7 +15,7 @@ traits.
   * `GcsV4Signer[C]` (signer.mojo) — the `ObjectUrlSigner` conformer: V4
     signed URLs (komira_gcp_core's GOOG4-RSA-SHA256) for one bucket, signed
     at the instant a caller-supplied `GcsSigningClock` reports.
-    `SystemGcsSigningClock` is the process wall clock (komira_clock), the
+    `SystemSigningClock` is the process wall clock (komira_clock), the
     one a deployed signer uses; `FixedSigningClock` is a clock stopped at one
     instant, for tests.
 
@@ -43,5 +43,5 @@ from .signer import (
     FixedSigningClock,
     GcsSigningClock,
     GcsV4Signer,
-    SystemGcsSigningClock,
+    SystemSigningClock,
 )

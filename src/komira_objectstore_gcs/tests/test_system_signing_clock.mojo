@@ -2,7 +2,7 @@
 # komira_objectstore_gcs/tests/test_system_signing_clock.mojo
 # =============================================================================
 #
-# SystemGcsSigningClock, the production `GcsSigningClock`: the process wall
+# SystemSigningClock, the production `GcsSigningClock`: the process wall
 # clock in whole seconds.
 #
 #   1  a read is a plausible current instant: after 2026-09-01T00:00:00Z
@@ -23,7 +23,7 @@ from komira_crypto import rsa_pkcs8_der_from_pem
 from komira_json import parse_json_value
 
 from komira_gcp_core import GcsV4ServiceAccount
-from komira_objectstore_gcs import GcsV4Signer, SystemGcsSigningClock
+from komira_objectstore_gcs import GcsV4Signer, SystemSigningClock
 
 
 comptime _ACCOUNT = "conformance/storage/v1/test_service_account.not-a-test.json"
@@ -42,7 +42,7 @@ def _account() raises -> GcsV4ServiceAccount:
 
 
 def test_reads_a_plausible_now() raises:
-    var clock = SystemGcsSigningClock()
+    var clock = SystemSigningClock()
     var now = clock.now_unix_seconds()
     assert_true(
         now > _AFTER, "wall clock reads " + String(now) + ", before 2026-09-01"
@@ -53,9 +53,9 @@ def test_reads_a_plausible_now() raises:
 
 
 def test_signer_signs_at_the_wall_clock() raises:
-    var probe = SystemGcsSigningClock()
+    var probe = SystemSigningClock()
     var signer = GcsV4Signer(
-        _account(), String("repo-bucket"), SystemGcsSigningClock()
+        _account(), String("repo-bucket"), SystemSigningClock()
     )
     var before = probe.now_unix_seconds()
     var url = signer.presign_download(String("a/b"), _TTL)
