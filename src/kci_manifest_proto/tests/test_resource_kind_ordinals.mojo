@@ -48,7 +48,7 @@
 
 from std.testing import assert_equal, assert_true, assert_not_equal
 
-from full_manifest_rpc.full_manifest import ResourceKind
+from kci_manifest_proto.full_manifest import ResourceKind
 
 
 # The ordinal each kind is declared at, restated. Order is ordinal order.
