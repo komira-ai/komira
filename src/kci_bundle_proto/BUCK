@@ -14,7 +14,7 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 #       ComputeIntent, DatastoreNeed, SecretBinding,
 #   )
 #
-# Struct-only (no RPC client), so `komira_serde` is the only runtime dep. A
+# Struct-only (no RPC client), so `komira_proto_codec` is the only runtime dep. A
 # generated package has no tests of its own: it is gated through the tests of
 # the libraries that depend on it.
 mojo_proto_library(
@@ -23,6 +23,6 @@ mojo_proto_library(
     import_prefix = "kci/bundle/v1",
     proto_deps = ["//src/kci_deploy_model_proto:kci_deploy_model_proto"],
     bundle_proto_deps = True,
-    deps = ["//src/komira_serde:komira_serde"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],
 )
