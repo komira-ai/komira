@@ -9,12 +9,12 @@ load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 #   )
 # The `.proto` has the import path `kci/deploy/v1/provider.proto`, which
 # is the descriptor's file name and the `# Source:` line of the generated
-# `provider.mojo`. The generated code imports `komira_serde`, its only
+# `provider.mojo`. The generated code imports `komira_proto_codec`, its only
 # runtime dependency.
 mojo_proto_library(
     name = "kci_provider_proto",
     srcs = ["provider.proto"],
     import_prefix = "kci/deploy/v1",
-    deps = ["//src/komira_serde:komira_serde"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],
 )
