@@ -7,7 +7,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # status-code retry policy, and `GrpcClient`, which drives all of it over a
 # komira_http HttpClient with a bounded re-issue on a peer's not-processed
 # proof. The envelope, status and codec primitives come from komira_connect,
-# the server side; komira_obs supplies the monotonic clock behind the re-issue
+# the server side; komira_clock supplies the monotonic clock behind the re-issue
 # wall budget.
 #
 # Every test is hermetic: a scripted connector stands in for the network.
@@ -16,9 +16,9 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
         "//src/komira_connect:komira_connect",
         "//src/komira_http:komira_http",
-        "//src/komira_obs:komira_obs",
     ],
     test_srcs = [
         "tests/test_L5_error.mojo",

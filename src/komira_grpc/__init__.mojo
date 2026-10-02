@@ -18,7 +18,7 @@ Dependency direction (cycle-free):
   komira_grpc -> komira_connect  (envelope / status / 3 codecs / deadline)
   komira_grpc -> komira_http     (HttpClient + Body + HeaderMap)
   komira_grpc -> komira_async    (Reactor / CancellationToken / Runtime)
-  komira_grpc -> komira_obs      (the monotonic clock behind the re-issue bound)
+  komira_grpc -> komira_clock    (the monotonic clock behind the re-issue bound)
 
 The client operates on opaque message bytes; message (de)serialization is the
 generated stub's concern, so this package does not depend on a codec.
