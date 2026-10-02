@@ -11,18 +11,21 @@
 #       artifact_type: OCI
 #       location: "registry.example.invalid/beta"
 #       push_identity: "publisher@example.invalid"
+#       credential { kind: API_TOKEN  secret_name: "BETA_REGISTRY_TOKEN" }
 #     }
 #   }
 #
 # `channel` is the only top-level field; `name`, `visibility` and `repository`
-# (repeated) the only channel fields; `artifact_type`, `location` and
-# `push_identity` the only repository fields. A `:` before a `{` is optional,
+# (repeated) the only channel fields; `artifact_type`, `location`,
+# `push_identity` and `credential` (at most once) the only repository fields;
+# `kind` and `secret_name` the only credential fields. A `:` before a `{` is optional,
 # as in textproto. A scalar may be quoted or bare.
 #
 # Every refusal from this file starts `channels file: line N:` (lexer and
 # token-cursor refusals included). The parser refuses: an unknown field at
-# any level, a scalar field set twice, a `channel` or `repository` block that
-# is never closed, and a file declaring no channel.
+# any level, a scalar field set twice, a `credential` block set twice, a
+# `channel`, `repository` or `credential` block that is never closed, and a
+# file declaring no channel.
 # Everything else (names, visibility, artifact types, empty values, sharing)
 # is `validate_channel_declarations`, which runs on the parsed list before it
 # is returned, so a parsed list is always a valid one.
@@ -39,6 +42,7 @@ from komira_textproto import (
     lex,
 )
 
+from .channel_credential import ChannelCredential
 from .channel_declaration import (
     ChannelDeclaration,
     ChannelRepository,
@@ -98,6 +102,43 @@ def _channel_label(name: String, ordinal: Int) -> String:
     return String("channel #") + String(ordinal)
 
 
+def _parse_credential(
+    mut c: TokenCursor, where: String, open_line: Int
+) raises -> ChannelCredential:
+    var kind = String("")
+    var secret_name = String("")
+    var seen_kind = False
+    var seen_secret = False
+    var label = String("the credential of ") + where
+    while True:
+        if c.at_end():
+            _refuse_unclosed(open_line, label)
+        if c.is_kind(TOKEN_RBRACE):
+            _ = c.expect(TOKEN_RBRACE)
+            break
+        var f = c.expect(TOKEN_WORD)
+        if f.text == "kind":
+            if seen_kind:
+                _refuse_twice(f.line, f.text, label)
+            kind = _scalar(c, f.text)
+            seen_kind = True
+        elif f.text == "secret_name":
+            if seen_secret:
+                _refuse_twice(f.line, f.text, label)
+            secret_name = _scalar(c, f.text)
+            seen_secret = True
+        else:
+            raise Error(
+                _at(f.line)
+                + String("unknown field '")
+                + f.text
+                + String("' in ")
+                + label
+                + String(" (expected kind, secret_name)")
+            )
+    return ChannelCredential(kind^, secret_name^)
+
+
 def _parse_repository(
     mut c: TokenCursor, where: String, open_line: Int
 ) raises -> ChannelRepository:
@@ -107,6 +148,7 @@ def _parse_repository(
     var seen_type = False
     var seen_location = False
     var seen_identity = False
+    var credential = Optional[ChannelCredential](None)
     var label = String("a repository of ") + where
     while True:
         if c.at_end():
@@ -130,6 +172,11 @@ def _parse_repository(
                 _refuse_twice(f.line, f.text, label)
             push_identity = _scalar(c, f.text)
             seen_identity = True
+        elif f.text == "credential":
+            if credential:
+                _refuse_twice(f.line, f.text, label)
+            var cred_line = _open_block(c)
+            credential = Optional(_parse_credential(c, label, cred_line))
         else:
             raise Error(
                 _at(f.line)
@@ -137,9 +184,12 @@ def _parse_repository(
                 + f.text
                 + String("' in ")
                 + label
-                + String(" (expected artifact_type, location, push_identity)")
+                + String(" (expected artifact_type, location, push_identity,")
+                + String(" credential)")
             )
-    return ChannelRepository(artifact_type^, location^, push_identity^)
+    return ChannelRepository(
+        artifact_type^, location^, push_identity^, credential^
+    )
 
 
 def _parse_channel(
