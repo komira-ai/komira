@@ -2,8 +2,9 @@
 # test_search_scan_kind.mojo -- the `komira.search.index` scan kind.
 # EXECUTOR-FREE: no EngineContext, no query
 # engine -- the kind is driven through core's tier-1 entry point
-# (`resolve_for_execution`) and its own tier-2 `open_scan`, over an in-memory
-# catalog.
+# (`resolve_for_execution`), its own split plan and readers, and
+# `drain_scan` (the bounded read the old `open_scan` was), over an in-memory
+# catalog. Every row assertion that held for `open_scan` holds for the drain.
 #
 # Pins:
 #   * the kind name is `komira.search.index`;
@@ -16,6 +17,12 @@
 #   * a no-query scan returns every live document, re-resolved per
 #     execution; a stopword-only query still matches nothing;
 #   * fast-field conjuncts of a request predicate are lowered into the search;
+#   * the plan is one bounded split per live split, `<index>/<ordinal>`, and
+#     discovery is refused by name; a reader returns a split's hits in one
+#     poll and then END, a resumed reader reads exactly the rest (concrete and
+#     erased), and a row limit cuts inside a split at the top-ranked rows;
+#   * a foreign, mis-versioned or malformed position and a split key that is
+#     not one of the scan's are refused by name;
 #   * the identity corpus passes core's audit;
 #   * refusals are by name (unknown index, analyzer drift at bind AND at
 #     execution, foreign kind,
@@ -52,10 +59,18 @@ from komira_core.source.scan_params import ScanParams
 from komira_core.source.scan_resolver import resolve_for_execution
 from komira_core.source.source_variant import SourceVariant
 
-from komira_scan_resolver.scan_morsel_resolver import (
+from komira_scan_resolver.drain_scan import drain_scan
+from komira_scan_resolver.scan_source_resolver import (
     SCAN_BINDING_MISSING_PARAMS,
+    SCAN_READ_MODE_NOT_SUPPORTED,
     ScanOpened,
     ScanRequest,
+)
+from komira_scan_resolver.scan_split import (
+    SCAN_RESOLVER_FOREIGN_KIND,
+    SCAN_SPLIT_POSITION_VERSION,
+    ScanSplit,
+    SplitPosition,
 )
 
 from komira_search.analyzer import AnalyzerConfig
@@ -63,6 +78,11 @@ from komira_search.sink import SearchSink
 from komira_search.source import QueryIR, SearchCore
 
 from komira_search_runtime.search_source import analyzer_config_fingerprint
+from komira_search_runtime.search_split_reader import (
+    SEARCH_SPLIT_POSITION_INVALID,
+    SEARCH_SPLIT_POSITION_VERSION,
+    search_split_position,
+)
 from komira_search_runtime.search_scan_kind import (
     InMemorySearchIndexCatalog,
     SEARCH_ANALYZER_MISMATCH,
@@ -71,12 +91,14 @@ from komira_search_runtime.search_scan_kind import (
     SEARCH_INDEX_UNKNOWN,
     SEARCH_RESOLVED_GENERATION,
     SEARCH_SCAN_KIND_NAME,
+    SEARCH_SPLIT_KEY_INVALID,
     SearchScanRuntime,
     search_scan_binding,
     search_scan_descriptor,
     search_scan_identity_corpus,
     search_scan_kind_id,
     search_scan_runtime,
+    search_split_key,
 )
 
 
@@ -234,7 +256,7 @@ def _assert_rows(got: List[String], want: List[String], what: String) raises:
 
 def _open(rt: _Runtime, binding: ScanBinding) raises -> ScanOpened:
     var exec_binding = resolve_for_execution(rt, binding)
-    return rt.open_scan(ScanRequest(exec_binding^))
+    return drain_scan(rt, ScanRequest(exec_binding^))
 
 
 def _source_col(opened: ScanOpened) raises -> List[String]:
@@ -293,7 +315,7 @@ def test_the_erased_kind_serves_the_same_rows() raises:
     var b = r.build_binding(_params(Optional(String("alpha"))))
     var exec_binding = resolve_for_execution(r, b)
     assert_equal(exec_binding.snapshot_token, UInt64(1))
-    var opened = r.open_scan(ScanRequest(exec_binding^))
+    var opened = drain_scan(r, ScanRequest(exec_binding^))
     _assert_rows(
         _rows_of(opened), _direct_rows(_split_a(), String("alpha")), "erased"
     )
@@ -312,7 +334,7 @@ def test_the_generation_is_re_resolved_per_execution() raises:
 
     var e1 = resolve_for_execution(rt, cached)
     assert_equal(e1.snapshot_token, UInt64(1))
-    var o1 = rt.open_scan(ScanRequest(e1^))
+    var o1 = drain_scan(rt, ScanRequest(e1^))
     assert_equal(o1.num_rows(), 2)
     assert_equal(
         o1.resolved.get_i64(String(SEARCH_RESOLVED_GENERATION)), Int64(1)
@@ -321,7 +343,7 @@ def test_the_generation_is_re_resolved_per_execution() raises:
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var e2 = resolve_for_execution(rt, cached)
     assert_equal(e2.snapshot_token, UInt64(2), "the SAME plan re-resolves")
-    var o2 = rt.open_scan(ScanRequest(e2^))
+    var o2 = drain_scan(rt, ScanRequest(e2^))
     assert_equal(o2.num_rows(), 3, "the published split is visible")
     assert_equal(
         o2.resolved.get_i64(String(SEARCH_RESOLVED_GENERATION)), Int64(2)
@@ -370,7 +392,7 @@ def test_a_stated_generation_is_a_pin() raises:
 
     var e = resolve_for_execution(rt, pinned)
     assert_equal(e.snapshot_token, UInt64(1), "the pin, not the current gen")
-    var o = rt.open_scan(ScanRequest(e^))
+    var o = drain_scan(rt, ScanRequest(e^))
     _assert_rows(
         _rows_of(o), _direct_rows(_split_a(), String("alpha")), "pinned at 1"
     )
@@ -451,7 +473,7 @@ def test_fast_field_conjuncts_are_lowered_into_the_search() raises:
         ),
     )
     var e = resolve_for_execution(rt, b)
-    var o = rt.open_scan(ScanRequest(e^, predicate=Optional(pred^)))
+    var o = drain_scan(rt, ScanRequest(e^, predicate=Optional(pred^)))
     var want = _concat(
         _direct_rows(
             _split_a(),
@@ -473,7 +495,7 @@ def test_a_limit_caps_the_rows() raises:
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var e = resolve_for_execution(rt, rt.build_binding(_params(None)))
-    var o = rt.open_scan(ScanRequest(e^, limit=Int64(2)))
+    var o = drain_scan(rt, ScanRequest(e^, limit=Int64(2)))
     assert_equal(o.num_rows(), 2)
 
 
@@ -531,7 +553,7 @@ def test_analyzer_drift_is_refused_by_name() raises:
 
 def test_analyzer_drift_is_refused_at_execution() raises:
     # The EXECUTION-time arm, not build_binding's: a binding built elsewhere
-    # (a cached plan) against another analyzer reaches `open_scan` without
+    # (a cached plan) against another analyzer reaches the drain without
     # passing `build_binding`, and must be refused there by name -- else it
     # silently matches a different term set. The binding is made directly
     # with `search_scan_binding`, so `build_binding`'s check never runs.
@@ -551,7 +573,7 @@ def test_analyzer_drift_is_refused_at_execution() raises:
         var msg = String(err)
         assert_true(String(SEARCH_ANALYZER_MISMATCH) in msg, msg)
         assert_true("logs" in msg, msg)
-    assert_true(raised, "open_scan refuses a binding built on another analyzer")
+    assert_true(raised, "the drain refuses a binding built on another analyzer")
 
 
 def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
@@ -583,7 +605,7 @@ def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
     )
     var raised2 = False
     try:
-        _ = r.open_scan(ScanRequest(foreign^))
+        _ = drain_scan(r, ScanRequest(foreign^))
     except err:
         raised2 = True
     assert_true(raised2, "a foreign kind is refused")
@@ -591,7 +613,7 @@ def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
 
 # =============================================================================
 # `field` is optional: derive one, refuse many, honour
-# a stated one. Executor-free: the kind's own build_binding + open_scan.
+# a stated one. Executor-free: the kind's own build_binding + drain_scan.
 # =============================================================================
 
 
@@ -713,6 +735,218 @@ def test_a_derived_field_is_the_explicit_fields_identity() raises:
     assert_not_equal(c.bindings[other].fingerprint, c.bindings[base].fingerprint)
 
 
+
+# =============================================================================
+# The split plan and the split reader.
+# =============================================================================
+
+
+def _batch_rows(batch: RecordBatch) raises -> List[String]:
+    var out = List[String]()
+    for r in range(batch.num_rows()):
+        out.append(_row(batch, r))
+    return out^
+
+
+def _tail(xs: List[String], start: Int) -> List[String]:
+    var out = List[String]()
+    for i in range(start, len(xs)):
+        out.append(xs[i])
+    return out^
+
+
+def _request(rt: _Runtime, query: Optional[String]) raises -> ScanRequest:
+    return ScanRequest(resolve_for_execution(rt, rt.build_binding(_params(query))))
+
+
+def test_the_plan_is_one_bounded_split_per_live_split() raises:
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    _ = rt.catalog_mut().publish(String("logs"), _split_b())
+    var req = _request(rt, Optional(String("alpha")))
+    var plan = rt.plan_splits(req)
+    assert_true(plan.complete, "a generation's split set never grows")
+    assert_equal(plan.num_splits(), 2, "one split per live split")
+    assert_equal(plan.splits[0].split_key, search_split_key(String("logs"), 0))
+    assert_equal(plan.splits[1].split_key, String("logs/1"))
+    for i in range(plan.num_splits()):
+        assert_true(plan.splits[i].is_bounded(), "every split has a stop")
+        assert_true(plan.splits[i].start != plan.splits[i].stop.value())
+    assert_equal(
+        plan.resolved.get_i64(String(SEARCH_RESOLVED_GENERATION)), Int64(2)
+    )
+    var raised = False
+    try:
+        _ = rt.discover_splits(req, List[String]())
+    except err:
+        raised = True
+        var msg = String(err)
+        assert_true(String(SCAN_READ_MODE_NOT_SUPPORTED) in msg, msg)
+        assert_true(String(SEARCH_SCAN_KIND_NAME) in msg, msg)
+    assert_true(raised, "a bounded kind has no splits to discover")
+
+
+def test_a_reader_returns_its_split_in_one_poll_then_end() raises:
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    var req = _request(rt, Optional(String("alpha")))
+    var plan = rt.plan_splits(req)
+    var reader = rt.open_split(req, plan.splits[0])
+    var p1 = reader.poll(-1, -1)
+    assert_true(p1.is_rows())
+    _assert_rows(
+        _batch_rows(p1.batch.value()),
+        _direct_rows(_split_a(), String("alpha")),
+        "one poll is the whole split",
+    )
+    assert_true(p1.position == plan.splits[0].stop.value(), "read to its stop")
+    assert_equal(p1.source_bytes, Int64(len(_split_a())))
+    var p2 = reader.poll(-1, -1)
+    assert_true(p2.is_end(), "then END")
+    assert_true(p2.position == plan.splits[0].stop.value())
+
+
+def _resume_case(query: String, what: String) raises:
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    var want = _direct_rows(_split_a(), query)
+    assert_true(len(want) >= 2, what + ": the case needs two ranks")
+    var req = _request(rt, Optional(query))
+    var plan = rt.plan_splits(req)
+    var reader = rt.open_split(req, plan.splits[0])
+    var first = reader.poll(1, -1)
+    var top = List[String]()
+    top.append(String(want[0]))
+    _assert_rows(_batch_rows(first.batch.value()), top, what + ": the top rank")
+    assert_true(
+        first.position != plan.splits[0].stop.value(), what + ": not at stop"
+    )
+    var resumed = rt.open_split(
+        req, plan.splits[0].resumed_at(first.position.copy())
+    )
+    var rest = resumed.poll(-1, -1)
+    _assert_rows(_batch_rows(rest.batch.value()), _tail(want, 1), what + ": rest")
+    assert_true(resumed.poll(-1, -1).is_end(), what + ": then END")
+
+    # The erased reader, one rank per poll, reads the same ranks in order.
+    var cat = _catalog()
+    _ = cat.publish(String("logs"), _split_a())
+    var r = search_scan_runtime(cat^)
+    var ereq = ScanRequest(
+        resolve_for_execution(r, r.build_binding(_params(Optional(query))))
+    )
+    var eplan = r.plan_splits(ereq)
+    var er = r.open_split(ereq, eplan.splits[0])
+    var got = List[String]()
+    var polls = 0
+    while True:
+        var p = er.poll(1, -1)
+        if p.is_end():
+            break
+        polls += 1
+        assert_true(polls <= len(want) + 1, what + ": the reader ends")
+        if p.batch:
+            var rows = _batch_rows(p.batch.value())
+            for i in range(len(rows)):
+                got.append(String(rows[i]))
+    _assert_rows(got, want, what + ": erased, one rank per poll")
+
+
+def test_a_resumed_split_reads_exactly_the_rest() raises:
+    _resume_case(String("alpha"), String("term query"))
+    _resume_case(String(""), String("no-query scan"))
+
+
+def test_a_limit_cut_keeps_the_top_ranked_rows() raises:
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    _ = rt.catalog_mut().publish(String("logs"), _split_b())
+    var e = resolve_for_execution(rt, rt.build_binding(_params(None)))
+    var o = drain_scan(rt, ScanRequest(e^, limit=Int64(4)))
+    var want = _direct_rows(_split_a(), String(""))
+    var b_rows = _direct_rows(_split_b(), String(""))
+    want.append(String(b_rows[0]))
+    _assert_rows(_rows_of(o), want, "the limit cuts split B after its top rank")
+    assert_equal(o.resolved.get_i64(String(SEARCH_RESOLVED_GENERATION)), Int64(2))
+
+
+def _end(id: UInt32) -> Optional[SplitPosition]:
+    return Optional(search_split_position(id, True, 0))
+
+
+def _expect_open_refused(
+    rt: _Runtime, req: ScanRequest, split: ScanSplit, name: String, what: String
+) raises:
+    var raised = False
+    try:
+        _ = rt.open_split(req, split)
+    except err:
+        raised = True
+        assert_true(name in String(err), what + ": " + String(err))
+    assert_true(raised, what + " is refused")
+
+
+def test_a_bad_position_or_split_key_is_refused_by_name() raises:
+    var rt = _Runtime(_catalog())
+    _ = rt.catalog_mut().publish(String("logs"), _split_a())
+    var req = _request(rt, Optional(String("alpha")))
+    var id = search_scan_kind_id()
+    _expect_open_refused(
+        rt,
+        req,
+        ScanSplit(
+            String("logs/0"), search_split_position(id + 1, False, 0), _end(id)
+        ),
+        String(SCAN_RESOLVER_FOREIGN_KIND),
+        "another kind's position",
+    )
+    var p = search_split_position(id, False, 0)
+    _expect_open_refused(
+        rt,
+        req,
+        ScanSplit(
+            String("logs/0"),
+            SplitPosition(id, SEARCH_SPLIT_POSITION_VERSION + 1, p.bytes.copy()),
+            _end(id),
+        ),
+        String(SCAN_SPLIT_POSITION_VERSION),
+        "another position version",
+    )
+    var short = List[UInt8]()
+    short.append(0)
+    _expect_open_refused(
+        rt,
+        req,
+        ScanSplit(
+            String("logs/0"),
+            SplitPosition(id, SEARCH_SPLIT_POSITION_VERSION, short^),
+            _end(id),
+        ),
+        String(SEARCH_SPLIT_POSITION_INVALID),
+        "a malformed position",
+    )
+    _expect_open_refused(
+        rt,
+        req,
+        ScanSplit(String("logs/0"), p.copy(), Optional(p.copy())),
+        String(SEARCH_SPLIT_POSITION_INVALID),
+        "a stop short of the split's end",
+    )
+    # Another index, no ordinal, not a number, and an ordinal past the
+    # generation's splits.
+    var keys = List[String]()
+    keys.append(String("audit/0"))
+    keys.append(String("logs/"))
+    keys.append(String("logs/x"))
+    keys.append(String("logs/1"))
+    for i in range(len(keys)):
+        _expect_open_refused(
+            rt,
+            req,
+            ScanSplit(String(keys[i]), p.copy(), _end(id)),
+            String(SEARCH_SPLIT_KEY_INVALID),
+            String("split key '") + keys[i] + String("'"),
+        )
 
 
 def main() raises:

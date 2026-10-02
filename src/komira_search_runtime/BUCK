@@ -8,7 +8,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # depends on an engine.
 #
 # Both welded tests are executor-free: they build splits in memory and drive
-# the kind through core's `resolve_for_execution` and its own `open_scan`.
+# the kind through core's `resolve_for_execution`, its split plan and readers,
+# and `drain_scan`.
 mojo_library(
     name = "komira_search_runtime",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

@@ -10,7 +10,10 @@
 #     and identity corpus (a `ScanBinding` over {index, field, query,
 #     analyzer_fp}, generation LIVE or pinned); `SearchIndexCatalog`, the
 #     store seam, with the in-process `InMemorySearchIndexCatalog`; and
-#     `SearchScanRuntime`, the tier-2 `ScanMorselResolver` an engine executes.
+#     `SearchScanRuntime`, the tier-2 `ScanSourceResolver` an engine executes
+#     (one split per split object live at the resolved generation).
+#   * search_split_reader.mojo -- `SearchSplitReader`, which reads one split's
+#     hits by rank, and the kind's split-position encoding.
 #   * search_source.mojo -- what the kind reads a split with:
 #     `search_split_hits` (one query over one split, checked against the hit
 #     schema), `FastFieldPushdownGate` (which predicate conjuncts the split's
@@ -26,7 +29,7 @@
 #
 # Build DAG (cycle-free, no engine):
 #   komira_search_runtime -> komira_search         (SearchCore / QueryIR / hit_schema)
-#   komira_search_runtime -> komira_scan_resolver  (ScanMorselResolver / ScanRequest)
+#   komira_search_runtime -> komira_scan_resolver  (ScanSourceResolver / ScanRequest)
 #   komira_search_runtime -> komira_core           (ScanBinding / RecordBatch / Expr)
 # =============================================================================
 
@@ -34,6 +37,10 @@ from .search_source import (
     FastFieldPushdownGate,
     analyzer_config_fingerprint,
     search_split_hits,
+)
+from .search_split_reader import (
+    SEARCH_SPLIT_POSITION_VERSION,
+    SearchSplitReader,
 )
 from .search_scan_kind import (
     InMemorySearchIndexCatalog,
@@ -45,6 +52,7 @@ from .search_scan_kind import (
     search_scan_identity_corpus,
     search_scan_kind_id,
     search_scan_runtime,
+    search_split_key,
 )
 
 # Re-export the pure-core surface for ergonomics (a single import home).

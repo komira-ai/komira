@@ -15,8 +15,19 @@
 #   * `SearchIndexCatalog` -- the trait a store implements so the kind can ask
 #     "which generation is live" and "which splits were live at generation g";
 #     `InMemorySearchIndexCatalog` is the in-process conformer;
-#   * `SearchScanRuntime[C]` -- the tier-2 `ScanMorselResolver` the engine
-#     executes, and `search_scan_runtime(catalog^)`, which erases it.
+#   * `SearchScanRuntime[C]` -- the tier-2 `ScanSourceResolver` the engine
+#     executes, and `search_scan_runtime(catalog^)`, which erases it. Its
+#     splits are read by `SearchSplitReader` (`search_split_reader.mojo`).
+#
+# THE SPLITS. A scan reads one split per split object live at the resolved
+# generation, in publish order, keyed `<index>/<ordinal>` (the ordinal is the
+# split's place in publish order, stable for every generation that has it).
+# Each runs from rank 0 to the end of its hits, so every split is bounded and
+# the plan is complete: the kind is BOUNDED, and `discover_splits` is refused
+# by name. `plan_splits` is the execution's one read of the catalog (the
+# analyzer check and the split count); the plan's `resolved` is
+# `{generation}`. The row `limit` is not the kind's: `drain_scan` applies it
+# across splits, and a reader honours what is left of it per poll.
 #
 # THE SNAPSHOT. The generation is a LIVE snapshot by default: the plan carries
 # token 0, identity excludes it (so the plan cache hits across a publish), and
@@ -46,8 +57,8 @@
 # nothing -- `match` semantics are unchanged.
 #
 # SCOPE, STATED SO NOBODY OVERREADS IT
-#   * `open_scan` DRAINS every live split into resident batches; it does not
-#     stream morsels into the walker.
+#   * the bounded read is `drain_scan` (komira_scan_resolver), which reads
+#     every split into resident batches; nothing here streams into a walker.
 #   * `_id` is SPLIT-LOCAL (a split's doc-id space), exactly as `SearchCore`
 #     returns it; two splits can carry the same `_id`.
 #   * Fast-field conjuncts in `ScanRequest.predicate` are LOWERED into
@@ -59,14 +70,9 @@
 #     in-memory catalog is what in-process registration and the tests use.
 #
 # ENCAPSULATION: no UnsafePointer anywhere in this file; the erasure is
-# `ErasedScanMorselResolver.erase[R]` (komira_scan_resolver), which owns its
-# SAFETY.
+# `ErasedScanSourceResolver` (komira_scan_resolver), which owns its SAFETY.
 # =============================================================================
 
-from std.memory import ArcPointer
-
-from komira_core.arrow.record_batch import RecordBatch
-from komira_core.collections.slab import Slab
 from komira_core.plan.expr import Expr, BIN_AND
 from komira_core.plan.expr_helpers import flatten_and_conjuncts
 from komira_core.source.pushdown_gate import PushdownGate
@@ -85,11 +91,16 @@ from komira_core.source.scan_params import (
     param_hash_string,
 )
 
-from komira_scan_resolver.scan_morsel_resolver import (
-    ErasedScanMorselResolver,
-    ScanMorselResolver,
-    ScanOpened,
+from komira_scan_resolver.scan_source_resolver import (
+    ErasedScanSourceResolver,
     ScanRequest,
+    ScanSourceResolver,
+    refuse_discover_splits,
+)
+from komira_scan_resolver.scan_split import (
+    ScanSplit,
+    ScanSplitPlan,
+    SplitDelta,
 )
 
 from komira_search.analyzer import AnalyzerConfig
@@ -99,7 +110,13 @@ from komira_search.split import SplitView
 from .search_source import (
     FastFieldPushdownGate,
     analyzer_config_fingerprint,
-    search_split_hits,
+)
+from .search_split_reader import (
+    SEARCH_SPLIT_POSITION_INVALID,
+    SEARCH_SPLIT_POSITION_VERSION,
+    SearchSplitReader,
+    decode_search_split_position,
+    search_split_position,
 )
 
 
@@ -126,7 +143,13 @@ comptime SEARCH_PARAM_GENERATION: String = "generation"
 """OPTIONAL. Present = a PINNED read at that generation; absent = LIVE."""
 
 comptime SEARCH_RESOLVED_GENERATION: String = "generation"
-"""The `ScanOpened.resolved` key: the generation this execution read."""
+"""The `ScanSplitPlan.resolved` (and so `ScanOpened.resolved`) key: the
+generation this execution read."""
+
+comptime SEARCH_SPLIT_KEY_INVALID: StaticString = "SEARCH_SPLIT_KEY_INVALID"
+"""NAMED ERROR -- a split handed to `open_split` whose key is not
+`<index>/<ordinal>` for the scan's index, or whose ordinal is not a split of
+the resolved generation."""
 
 comptime SEARCH_INDEX_UNKNOWN: StaticString = "SEARCH_INDEX_UNKNOWN"
 """NAMED ERROR -- the catalog holds no index of that name (or no such field)."""
@@ -345,6 +368,39 @@ trait SearchIndexCatalog(Movable, Deinitable):
     ) raises -> List[List[UInt8]]:
         ...
 
+    def split_count_at(self, index: String, generation: Int64) raises -> Int:
+        """How many splits were live at `generation`, refused as `splits_at`
+        refuses. What `plan_splits` reads. The default copies every split; a
+        catalog that can count without copying overrides it."""
+        return len(self.splits_at(index, generation))
+
+    def split_at(
+        self, index: String, generation: Int64, ordinal: Int
+    ) raises -> List[UInt8]:
+        """The bytes of the `ordinal`-th split live at `generation` (publish
+        order). What `open_split` reads. Refused as `splits_at` refuses, and
+        `SEARCH_SPLIT_KEY_INVALID` for an ordinal out of range. The default
+        copies every split; a catalog that can fetch one overrides it."""
+        var every = self.splits_at(index, generation)
+        _check_ordinal(index, generation, ordinal, len(every))
+        return every[ordinal].copy()
+
+
+def _check_ordinal(index: String, generation: Int64, ordinal: Int, n: Int) raises:
+    if ordinal < 0 or ordinal >= n:
+        raise Error(
+            String(SEARCH_SPLIT_KEY_INVALID)
+            + String(": index '")
+            + index
+            + String("' has ")
+            + String(n)
+            + String(" splits at generation ")
+            + String(generation)
+            + String("; split ")
+            + String(ordinal)
+            + String(" is not one of them")
+        )
+
 
 @fieldwise_init
 struct _CatalogIndex(Copyable, Movable, Deinitable):
@@ -457,6 +513,13 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
     def splits_at(
         self, index: String, generation: Int64
     ) raises -> List[List[UInt8]]:
+        var at = self._generation_or_raise(index, generation)
+        var out = List[List[UInt8]]()
+        for i in range(Int(generation)):
+            out.append(self._indexes[at].splits[i].copy())
+        return out^
+
+    def _generation_or_raise(self, index: String, generation: Int64) raises -> Int:
         var at = self._find_or_raise(index)
         var n = Int64(len(self._indexes[at].splits))
         if generation < Int64(0) or generation > n:
@@ -470,10 +533,19 @@ struct InMemorySearchIndexCatalog(SearchIndexCatalog, Movable, Deinitable):
                 + String(generation)
                 + String(" cannot be read")
             )
-        var out = List[List[UInt8]]()
-        for i in range(Int(generation)):
-            out.append(self._indexes[at].splits[i].copy())
-        return out^
+        return at
+
+    def split_count_at(self, index: String, generation: Int64) raises -> Int:
+        """Generation `g` sees splits `[0, g)`: `g` of them."""
+        _ = self._generation_or_raise(index, generation)
+        return Int(generation)
+
+    def split_at(
+        self, index: String, generation: Int64, ordinal: Int
+    ) raises -> List[UInt8]:
+        var at = self._generation_or_raise(index, generation)
+        _check_ordinal(index, generation, ordinal, Int(generation))
+        return self._indexes[at].splits[ordinal].copy()
 
 
 # =============================================================================
@@ -501,12 +573,14 @@ def _lower_fast_field_conjuncts(
 
 
 struct SearchScanRuntime[C: SearchIndexCatalog](
-    ScanMorselResolver, Movable, Deinitable
+    ScanSourceResolver, Movable, Deinitable
 ):
     """`komira.search.index`, executable. Owns its catalog.
 
     Tier-2 bindings are UNBOUND (no registry slot), so `epoch` answers
     `SCAN_EPOCH_NONE` and `is_bound` False."""
+
+    comptime Reader = SearchSplitReader
 
     var _catalog: Self.C
 
@@ -580,17 +654,23 @@ struct SearchScanRuntime[C: SearchIndexCatalog](
             gen,
         )
 
-    def open_scan(self, req: ScanRequest) raises -> ScanOpened:
-        """Drain every split live at the binding's generation. Each split is
-        read by `search_split_hits` over `QueryIR(field, query,
-        top_k=<the split's doc count>)`, so every matching doc of the split is
-        returned, ranked -- the same rows `SearchCore.search` returns for that
-        QueryIR. `req.limit`, when set, caps the rows returned."""
-        ref binding = req.binding
-        self._refuse_foreign(binding, String("open_scan"))
+    def position_version(self) -> UInt8:
+        return SEARCH_SPLIT_POSITION_VERSION
+
+    def _generation_of(self, binding: ScanBinding) -> Int64:
+        """The generation an execution of `binding` reads. The token IS the
+        generation: resolved LIVE by `resolve_for_execution`, or the stated
+        pin. It is never re-resolved here, so the rows and the reported
+        snapshot cannot disagree."""
+        if binding.params.has(String(SEARCH_PARAM_GENERATION)):
+            return binding.params.get_i64(String(SEARCH_PARAM_GENERATION))
+        return Int64(binding.snapshot_token)
+
+    def _checked_analyzer(self, binding: ScanBinding) raises -> AnalyzerConfig:
+        """The index field's analyzer, refused by name when it is not the one
+        the plan was built against (`SEARCH_ANALYZER_MISMATCH`)."""
         var index = binding.params.get_str(String(SEARCH_PARAM_INDEX))
         var field = binding.params.get_str(String(SEARCH_PARAM_FIELD))
-        var text = binding.params.get_str(String(SEARCH_PARAM_QUERY))
         var cfg = self._catalog.analyzer(index, field)
         _check_analyzer(
             index,
@@ -598,43 +678,145 @@ struct SearchScanRuntime[C: SearchIndexCatalog](
             binding.params.get_u64(String(SEARCH_PARAM_ANALYZER_FP)),
             analyzer_config_fingerprint(cfg),
         )
-        # The token IS the generation: resolved LIVE by `resolve_for_execution`
-        # or the stated pin. It is never re-resolved here, so the rows and the
-        # reported snapshot cannot disagree.
-        var generation = Int64(binding.snapshot_token)
-        if binding.params.has(String(SEARCH_PARAM_GENERATION)):
-            generation = binding.params.get_i64(String(SEARCH_PARAM_GENERATION))
-        var splits = self._catalog.splits_at(index, generation)
-        var out = Slab[RecordBatch]()
-        var remaining = Int(req.limit)
-        for si in range(len(splits)):
-            if req.has_limit() and remaining <= 0:
-                break
-            var view = SplitView.parse(splits[si].copy())
-            var lowered: Optional[Expr] = None
-            if req.predicate:
-                lowered = _lower_fast_field_conjuncts(
-                    req.predicate.value(), FastFieldPushdownGate(view)
+        return cfg^
+
+    def plan_splits(self, req: ScanRequest) raises -> ScanSplitPlan:
+        """One split per split live at the binding's generation, in publish
+        order, each from rank 0 to its end. Refuses a foreign binding, analyzer
+        drift and a generation the catalog cannot serve, each by name."""
+        ref binding = req.binding
+        self._refuse_foreign(binding, String("plan_splits"))
+        _ = self._checked_analyzer(binding)
+        var index = binding.params.get_str(String(SEARCH_PARAM_INDEX))
+        var generation = self._generation_of(binding)
+        var n = self._catalog.split_count_at(index, generation)
+        var kind_id = search_scan_kind_id()
+        var splits = List[ScanSplit](capacity=n)
+        for i in range(n):
+            splits.append(
+                ScanSplit(
+                    search_split_key(index, i),
+                    search_split_position(kind_id, False, 0),
+                    Optional(search_split_position(kind_id, True, 0)),
                 )
-            var core = SearchCore.from_view(view^)
-            var top_k = core.doc_count()
-            if req.has_limit() and remaining < top_k:
-                top_k = remaining
-            var q = QueryIR(
-                field.copy(),
-                text.copy(),
-                top_k,
-                cfg.copy(),
-                generation,
-                lowered^,
-                match_all=(text == ""),
             )
-            var batch = search_split_hits(core, q)
-            remaining -= batch.num_rows()
-            out.append(batch^)
         var resolved = ScanParams()
         resolved.put_i64(String(SEARCH_RESOLVED_GENERATION), generation)
-        return ScanOpened(ArcPointer(out^), resolved^)
+        return ScanSplitPlan(splits^, True, resolved^)
+
+    def discover_splits(
+        self, req: ScanRequest, known: List[String]
+    ) raises -> SplitDelta:
+        """A scan reads the splits of ONE generation; there is nothing to
+        discover (`SCAN_READ_MODE_NOT_SUPPORTED`)."""
+        return refuse_discover_splits(String(SEARCH_SCAN_KIND_NAME))
+
+    def open_split(
+        self, req: ScanRequest, split: ScanSplit
+    ) raises -> SearchSplitReader:
+        """A reader over `split`: its bytes at the binding's generation, the
+        query analyzed with the index's analyzer, and the request predicate's
+        fast-field conjuncts lowered into the search (`ScanRequest`: a hint;
+        the engine keeps the whole filter). Each split's hits are the rows
+        `SearchCore.search` returns for `QueryIR(field, query, top_k=<the
+        split's doc count>)`, ranked. Refuses a foreign binding, analyzer
+        drift, a split key that is not one of this scan's, and a position that
+        is foreign, mis-versioned or malformed, each by name."""
+        ref binding = req.binding
+        self._refuse_foreign(binding, String("open_split"))
+        var kind_id = search_scan_kind_id()
+        var kind_name = String(SEARCH_SCAN_KIND_NAME)
+        split.start.require_kind(
+            kind_id,
+            SEARCH_SPLIT_POSITION_VERSION,
+            kind_name,
+            String("start of '") + split.split_key + String("'"),
+        )
+        var start = decode_search_split_position(
+            split.start, String("start of '") + split.split_key + String("'")
+        )
+        if split.stop:
+            ref stop = split.stop.value()
+            stop.require_kind(
+                kind_id,
+                SEARCH_SPLIT_POSITION_VERSION,
+                kind_name,
+                String("stop of '") + split.split_key + String("'"),
+            )
+            var at = decode_search_split_position(
+                stop, String("stop of '") + split.split_key + String("'")
+            )
+            if not at.done:
+                raise Error(
+                    String(SEARCH_SPLIT_POSITION_INVALID)
+                    + String(": split '")
+                    + split.split_key
+                    + String("' stops at a rank; a search split is read to")
+                    + String(" its end")
+                )
+        var cfg = self._checked_analyzer(binding)
+        var index = binding.params.get_str(String(SEARCH_PARAM_INDEX))
+        var generation = self._generation_of(binding)
+        var ordinal = _split_ordinal(index, split.split_key)
+        var bytes = self._catalog.split_at(index, generation, ordinal)
+        var n_bytes = len(bytes)
+        var view = SplitView.parse(bytes^)
+        var lowered: Optional[Expr] = None
+        if req.predicate:
+            lowered = _lower_fast_field_conjuncts(
+                req.predicate.value(), FastFieldPushdownGate(view)
+            )
+        var core = SearchCore.from_view(view^)
+        return SearchSplitReader(
+            core^,
+            kind_id,
+            binding.params.get_str(String(SEARCH_PARAM_FIELD)),
+            binding.params.get_str(String(SEARCH_PARAM_QUERY)),
+            cfg^,
+            generation,
+            lowered^,
+            start,
+            n_bytes,
+        )
+
+
+def search_split_key(index: String, ordinal: Int) -> String:
+    """The key of the `ordinal`-th split (publish order) of `index`."""
+    return index + String("/") + String(ordinal)
+
+
+def _split_ordinal(index: String, key: String) raises -> Int:
+    """The ordinal `search_split_key(index, ordinal)` wrote into `key`;
+    `SEARCH_SPLIT_KEY_INVALID` for any other key."""
+    var prefix = index + String("/")
+    var kb = key.as_bytes()
+    var pb = prefix.as_bytes()
+    var ok = len(kb) > len(pb)
+    if ok:
+        for i in range(len(pb)):
+            if kb[i] != pb[i]:
+                ok = False
+                break
+    var ordinal = 0
+    if ok:
+        for i in range(len(pb), len(kb)):
+            var c = Int(kb[i])
+            if c < 48 or c > 57 or (i - len(pb)) > 15:
+                ok = False
+                break
+            ordinal = ordinal * 10 + (c - 48)
+    if not ok:
+        raise Error(
+            String(SEARCH_SPLIT_KEY_INVALID)
+            + String(": '")
+            + key
+            + String("' is not a split key of index '")
+            + index
+            + String("' (want '")
+            + prefix
+            + String("<ordinal>')")
+        )
+    return ordinal
 
 
 def _render_fields(fields: List[String]) -> String:
@@ -683,6 +865,6 @@ def _check_analyzer(
 
 def search_scan_runtime[
     C: SearchIndexCatalog
-](var catalog: C) -> ErasedScanMorselResolver:
+](var catalog: C) -> ErasedScanSourceResolver:
     """The registrable form: `ctx.register_scan_kind(search_scan_runtime(c^))`."""
-    return ErasedScanMorselResolver.erase(SearchScanRuntime[C](catalog^))
+    return ErasedScanSourceResolver(SearchScanRuntime[C](catalog^))
