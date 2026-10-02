@@ -1,0 +1,17 @@
+<AssumeRoleResponse xmlns="https://sts.amazonaws.com/doc/2011-06-15/">
+  <AssumeRoleResult>
+    <AssumedRoleUser>
+      <Arn>arn:aws:sts::123456789012:assumed-role/example-role/komira-test</Arn>
+      <AssumedRoleId>AROAEXAMPLEROLEID:komira-test</AssumedRoleId>
+    </AssumedRoleUser>
+    <Credentials>
+      <AccessKeyId>ASIAASSUMEDROLEEXAMPL</AccessKeyId>
+      <SecretAccessKey>FAKEassumedRoleSecretKeyEXAMPLEKEY000000</SecretAccessKey>
+      <SessionToken>FAKE-ASSUME-ROLE-SESSION-TOKEN</SessionToken>
+      <Expiration>2026-09-15T12:30:00Z</Expiration>
+    </Credentials>
+  </AssumeRoleResult>
+  <ResponseMetadata>
+    <RequestId>00000000-0000-4000-8000-000000000002</RequestId>
+  </ResponseMetadata>
+</AssumeRoleResponse>
