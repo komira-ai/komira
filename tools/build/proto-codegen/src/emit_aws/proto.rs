@@ -115,8 +115,14 @@ pub(super) trait Binding: Sync {
     fn default_content_type(&self, em: &AwsEmitter) -> String;
     /// Docstring lines the client's `send` adds after the generic ones.
     fn send_notes(&self) -> &'static [&'static str];
-    /// The Mojo expressions, over `res: HttpResult`, for a failed call's
-    /// error code and message.
+    /// A statement the error builder runs before reading the code and the
+    /// message, binding what both read so the response is parsed once.
+    fn error_info_binding(&self) -> Option<&'static str> {
+        None
+    }
+    /// The Mojo expressions, over `res: HttpResult` (and what
+    /// `error_info_binding` binds), for a failed call's error code and
+    /// message.
     fn error_code_and_message(&self) -> (&'static str, &'static str);
     /// What the error builder's docstring calls the code it extracts, as the
     /// phrase before "and message ride out".

@@ -87,11 +87,12 @@ impl Binding for AwsRestJson {
         ]
     }
 
+    fn error_info_binding(&self) -> Option<&'static str> {
+        Some("var info = aws_rest_json_error(res.to_response())")
+    }
+
     fn error_code_and_message(&self) -> (&'static str, &'static str) {
-        (
-            "aws_rest_json_error(res.to_response()).code.copy()",
-            "aws_rest_json_error(res.to_response()).message.copy()",
-        )
+        ("info.code.copy()", "info.message.copy()")
     }
 
     fn error_code_doc(&self) -> &'static str {
@@ -344,6 +345,10 @@ impl AwsEmitter<'_> {
         }
 
         // `endpoint.hostPrefix`, with its `hostLabel` members substituted.
+        // Not reached today: the front-end refuses an operation with a host
+        // prefix (host-prefix) because the generated `send` does not apply
+        // `req.host_prefix` yet. It is kept so lifting that refusal is the
+        // only change the builder needs, as in the awsJson binding.
         if let Some(hp) = &facts.host_prefix {
             let expr = self.host_prefix_expr(hp, &m.input.fq_name)?;
             self.line(&format!("req.host_prefix = {expr}"));

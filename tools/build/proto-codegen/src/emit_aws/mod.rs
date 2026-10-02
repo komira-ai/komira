@@ -44,7 +44,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "3";
+pub const AWS_GENERATOR_VERSION: &str = "4";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -1513,8 +1513,10 @@ impl<'a> AwsEmitter<'a> {
         self.line("for _i in range(len(req.header_names)):");
         self.push();
         self.line("var n = req.header_names[_i].copy()");
-        self.line("if n == String(\"Content-Type\"):");
+        self.line("if n.lower() == String(\"content-type\"):");
         self.push();
+        self.line("# Header names are case-insensitive, and the substrate refuses an");
+        self.line("# `extra` Content-Type in any case.");
         self.line("# The substrate takes the content type as its own argument and");
         self.line("# puts it in BOTH the signed set and the wire headers. Passing it");
         self.line("# again here would emit it twice and break the signature.");
@@ -1624,6 +1626,9 @@ impl<'a> AwsEmitter<'a> {
         self.line("    cannot know which of its shapes carry a secret, so the discipline is");
         self.line("    unconditional — the `secrets_manager_client._sm_error` rule, applied");
         self.line("    everywhere because the generator has no way to make the exception.\"\"\"");
+        if let Some(binding) = self.binding.error_info_binding() {
+            self.line(binding);
+        }
         let (code_expr, msg_expr) = self.binding.error_code_and_message();
         self.line(&format!("var code = {code_expr}"));
         self.line(&format!("var msg = {msg_expr}"));
@@ -1872,6 +1877,62 @@ mod tests {
                 }
             }
         }
+    }
+
+    /// The client-mode module of a one-operation awsJson model whose input
+    /// and output each hold `Stamps`, a list of timestamps.
+    fn json_module_with_a_list_of_timestamps() -> String {
+        let model = crate::json::parse(
+            r#"{"version": "2.0",
+                "metadata": {"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"},
+                "operations": {"Op": {"name": "Op",
+                    "http": {"method": "POST", "requestUri": "/"},
+                    "input": {"shape": "In"}, "output": {"shape": "Out"}}},
+                "shapes": {"In": {"type": "structure",
+                                  "members": {"Stamps": {"shape": "Stamps"}}},
+                           "Out": {"type": "structure",
+                                   "members": {"Stamps": {"shape": "Stamps"}}},
+                           "Stamps": {"type": "list", "member": {"shape": "Stamp"}},
+                           "Stamp": {"type": "timestamp"}}}"#,
+        )
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let options = AwsEmitOptions {
+            omit_preamble: true,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None)
+            .unwrap()
+            .source
+    }
+
+    #[test]
+    fn an_aws_json_list_of_timestamps_is_epoch_seconds_on_the_wire() {
+        // awsJson's timestamps are epoch-seconds numbers, so the elements are
+        // held as Float64 and written and read by the timestamp codec, not as
+        // JSON strings.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(src.contains("List[Float64]"), "{src}");
+        assert!(!src.contains("List[String]"), "{src}");
+        assert!(src.contains("aws_ts_to_json("), "{src}");
+        assert!(src.contains("aws_ts_from_json("), "{src}");
+    }
+
+    #[test]
+    fn send_finds_the_content_type_header_in_any_case() {
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(src.contains("if n.lower() == String(\"content-type\"):"), "{src}");
+        assert!(!src.contains("if n == String(\"Content-Type\"):"), "{src}");
     }
 
     #[test]

@@ -13,7 +13,7 @@
 #   model sha256 : 75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee
 #   operations   : GetThing, PutThing, SetConfig
 #   shapes       : 8 messages, 0 enums
-#   generator    : aws-client-gen version 3
+#   generator    : aws-client-gen version 4
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -946,7 +946,9 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
         ))
         for _i in range(len(req.header_names)):
             var n = req.header_names[_i].copy()
-            if n == String("Content-Type"):
+            if n.lower() == String("content-type"):
+                # Header names are case-insensitive, and the substrate refuses an
+                # `extra` Content-Type in any case.
                 # The substrate takes the content type as its own argument and
                 # puts it in BOTH the signed set and the wire headers. Passing it
                 # again here would emit it twice and break the signature.
@@ -999,8 +1001,9 @@ def _komira_aws_tiny_rest_error(op: String, res: HttpResult) -> Error:
         cannot know which of its shapes carry a secret, so the discipline is
         unconditional — the `secrets_manager_client._sm_error` rule, applied
         everywhere because the generator has no way to make the exception."""
-    var code = aws_rest_json_error(res.to_response()).code.copy()
-    var msg = aws_rest_json_error(res.to_response()).message.copy()
+    var info = aws_rest_json_error(res.to_response())
+    var code = info.code.copy()
+    var msg = info.message.copy()
     return Error(
         String("TinyRestTinyRest.")
         + op

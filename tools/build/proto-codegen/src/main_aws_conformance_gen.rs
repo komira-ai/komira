@@ -625,15 +625,16 @@ fn emit_input_case(
     o.line(&format!("var _req = {fp}_build_{method}_request({var})"));
     // MIRRORS the generated `send` (emit_aws/mod.rs), which this driver cannot
     // call without a connector: the unsigned request's headers go to the
-    // signer as `extra`, except a header named exactly `Content-Type`, which
-    // is its own argument, and the endpoint is resolved WITHOUT
-    // `_req.host_prefix`, because `send` does not apply it (the front-end
-    // refuses an operation with a host prefix, by name, until it does).
+    // signer as `extra`, except a header named Content-Type in any case
+    // (header names are case-insensitive), which is its own argument, and
+    // the endpoint is resolved WITHOUT `_req.host_prefix`, because `send`
+    // does not apply it (the front-end refuses an operation with a host
+    // prefix, by name, until it does).
     o.line("var _ct = String(\"\")");
     o.line("var _extra = List[Header]()");
     o.line("for _i in range(len(_req.header_names)):");
     o.indent += 1;
-    o.line("if _req.header_names[_i] == String(\"Content-Type\"):");
+    o.line("if _req.header_names[_i].lower() == String(\"content-type\"):");
     o.line("    _ct = _req.header_values[_i].copy()");
     o.line("else:");
     o.line("    _extra.append(Header(_req.header_names[_i].copy(), _req.header_values[_i].copy()))");
