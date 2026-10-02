@@ -960,8 +960,8 @@ struct JsonDecoder(WireDecoder):
     # A well-known-type FIELD whose JSON value is `null` never reaches
     # `read_message`: `next_field()` skips it as ABSENT, which is right for
     # every WKT but one. The spec reads `null` in a `google.protobuf.Value`
-    # FIELD as NULL_VALUE; here such a field decodes as absent (pinned by
-    # komira_wkt's test_wkt_plain_arms). A null INSIDE a Struct, a
+    # FIELD as NULL_VALUE; here such a field decodes as absent (an open
+    # limit, komira-ai/komira#62). A null INSIDE a Struct, a
     # ListValue or a map<string, Value> is a NULL_VALUE.
 
     # -- the unknown-token refusals ---------------------------------------

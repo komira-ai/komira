@@ -13,7 +13,7 @@
 # byte-identical to an ordinary embedded message (one golden, below).
 # =============================================================================
 
-from std.testing import assert_equal, assert_true, assert_false, assert_raises
+from std.testing import assert_equal, assert_true, assert_raises
 
 from komira_proto_codec import (
     Serializable,
@@ -33,6 +33,7 @@ from komira_wkt import (
     Struct,
     Value,
     Int64Value,
+    VALUE_KIND_NULL,
     VALUE_KIND_NUMBER,
     VALUE_KIND_STRING,
 )
@@ -244,17 +245,11 @@ def test_plain_element_and_map_value_are_canonical() raises:
     assert_equal(encode_json[ShapesMsg](back), text)
 
 
-def test_value_null_field_decodes_as_absent() raises:
-    """PINS TODAY'S BEHAVIOUR, which is NOT the spec's: a singular
-    `google.protobuf.Value` field set to JSON `null` should read as
-    NULL_VALUE, but `next_field()` drops a null-valued key before the field's
-    type is known, so the field decodes as ABSENT. Tracked upstream as an
-    issue (komira-ai/komira#62); when it is fixed this assertion flips."""
-    var m = decode_json[ShapesMsg](String('{"v":null}'))
-    assert_false(Bool(m.v))
-    # A null INSIDE a Struct / map<string, Value> is a NULL_VALUE.
+def test_null_inside_a_struct_is_a_null_value() raises:
+    """A null INSIDE a Struct / map<string, Value> is a NULL_VALUE entry."""
     var n = decode_json[ShapesMsg](String('{"attrs":{"z":null}}'))
     assert_equal(len(n.attrs), 1)
+    assert_equal(n.attrs[String("z")].kind, VALUE_KIND_NULL)
 
 
 # =============================================================================
@@ -335,7 +330,7 @@ def main() raises:
     test_plain_read_message_reads_canonical_json()
     test_plain_arms_binary_golden()
     test_plain_element_and_map_value_are_canonical()
-    test_value_null_field_decodes_as_absent()
+    test_null_inside_a_struct_is_a_null_value()
     test_top_level_encode_json_is_canonical()
     test_top_level_decode_json_is_canonical()
     test_value_with_no_kind_refuses_to_write()

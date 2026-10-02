@@ -672,13 +672,13 @@ def test_any_json_and_binary() raises:
 def test_timestamp_json_refusals() raises:
     var bad = List[String]()
     bad.append(String('{"timestamp":"2026-10-01T00:00:00Zjunk"}'))
-    bad.append(String('{"timestamp":"2026-13-01T00:00:00Z"}'))
-    bad.append(String('{"timestamp":"2026-02-30T00:00:00Z"}'))
-    # February's length is DERIVED: 2026 is not a leap year, 1900 is a
+    bad.append(String('{"timestamp":"2027-13-01T00:00:00Z"}'))
+    bad.append(String('{"timestamp":"2027-02-30T00:00:00Z"}'))
+    # February's length is DERIVED: 2027 is not a leap year, 2100 is a
     # century that is not one; and a 30-day month has no 31st.
-    bad.append(String('{"timestamp":"2026-02-29T00:00:00Z"}'))
-    bad.append(String('{"timestamp":"1900-02-29T00:00:00Z"}'))
-    bad.append(String('{"timestamp":"2026-04-31T00:00:00Z"}'))
+    bad.append(String('{"timestamp":"2027-02-29T00:00:00Z"}'))
+    bad.append(String('{"timestamp":"2100-02-29T00:00:00Z"}'))
+    bad.append(String('{"timestamp":"2027-04-31T00:00:00Z"}'))
     bad.append(String('{"timestamp":"2026-10-01T24:00:00Z"}'))
     bad.append(String('{"timestamp":"2026-10-01T00:60:00Z"}'))
     bad.append(String('{"timestamp":"0000-01-01T00:00:00Z"}'))
@@ -686,16 +686,16 @@ def test_timestamp_json_refusals() raises:
     for i in range(len(bad)):
         with assert_raises():
             _ = decode_json[LogEntryLike](bad[i])
-    # ... and the leap days that DO exist are accepted: 2024 (divisible by
-    # 4) and 2000 (a century divisible by 400).
+    # ... and the leap days that DO exist are accepted: 2028 (divisible by
+    # 4) and 2400 (a century divisible by 400).
     var leap = decode_json[LogEntryLike](
-        String('{"timestamp":"2024-02-29T00:00:00Z"}')
+        String('{"timestamp":"2028-02-29T00:00:00Z"}')
     )
-    assert_equal(leap.timestamp.value().seconds, Int64(1709164800))
+    assert_equal(leap.timestamp.value().seconds, Int64(1835395200))
     var leap400 = decode_json[LogEntryLike](
-        String('{"timestamp":"2000-02-29T00:00:00Z"}')
+        String('{"timestamp":"2400-02-29T00:00:00Z"}')
     )
-    assert_equal(leap400.timestamp.value().seconds, Int64(951782400))
+    assert_equal(leap400.timestamp.value().seconds, Int64(13574563200))
     # An offset is accepted on input and normalized to UTC.
     var e = decode_json[LogEntryLike](
         String('{"timestamp":"2026-10-01T02:30:00.5+02:30"}')
@@ -784,7 +784,7 @@ def test_wkt_refusals_name_the_json_path() raises:
     the plain field, the repeated element's index, the map entry's key."""
     with assert_raises(contains="at $.timestamp"):
         _ = decode_json[LogEntryLike](
-            String('{"timestamp":"2026-13-01T00:00:00Z"}')
+            String('{"timestamp":"2027-13-01T00:00:00Z"}')
         )
     with assert_raises(contains="at $.checkpoints[1]"):
         _ = decode_json[LogEntryLike](
@@ -794,7 +794,7 @@ def test_wkt_refusals_name_the_json_path() raises:
         _ = decode_json[StampMapLike](
             String(
                 '{"stamps":{"ok":"1970-01-01T00:00:00Z",'
-                + '"late":"2026-04-31T00:00:00Z"}}'
+                + '"late":"2027-04-31T00:00:00Z"}}'
             )
         )
     # The good map round-trips, so the refusal above is the value's fault.
