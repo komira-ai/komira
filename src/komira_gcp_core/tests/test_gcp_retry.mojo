@@ -229,6 +229,25 @@ def test_retry_info_is_the_server_delay() raises:
     assert_equal(parse_gcp_status("GET", "S", 503, _envelope("UNAVAILABLE")).retry_delay_ms, -1)
 
 
+def test_throttle_keeps_the_retry_info_delay() raises:
+    # Quota errors are where Google sends RetryInfo most. A 429
+    # RESOURCE_EXHAUSTED made retryable with also_retry is a THROTTLE, and the
+    # verdict must still carry the server's 3.5s, so decide waits that long
+    # even when the jittered backoff would be 0.
+    var c = GcpRetryClassifier()
+    c.also_retry(CODE_RESOURCE_EXHAUSTED)
+    var err = parse_gcp_status("GET", "S", 429, _envelope("RESOURCE_EXHAUSTED", "3.5s"))
+    assert_equal(err.retry_delay_ms, 3500)
+    var v = c.classify(err)
+    assert_true(v.retryable)
+    assert_true(v.throttled, "RESOURCE_EXHAUSTED is a throttle")
+    assert_equal(v.server_delay_ms, 3500)
+    var lo = FixedRng(0)
+    var d = gcp_retry_policy().decide(1, 0, v, lo)
+    assert_true(d.retry)
+    assert_equal(d.delay_ms, 3500)
+
+
 def test_duration_to_ms() raises:
     assert_equal(duration_to_ms("0s"), 0)
     assert_equal(duration_to_ms("1s"), 1000)
@@ -307,6 +326,7 @@ def main() raises:
     test_attempt_limit_and_deadline()
     test_policy_refuses_nonsense()
     test_retry_info_is_the_server_delay()
+    test_throttle_keeps_the_retry_info_delay()
     test_duration_to_ms()
     test_retry_loop_sleeps_on_the_injected_sleeper()
     test_retry_loop_returns_a_non_retryable_failure_at_once()
