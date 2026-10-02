@@ -1,0 +1,26 @@
+# The limits of the build that exist today: every place it states, in a rule or a refusal, that it builds for one platform only.
+# Each is declared at its site by a `komira-limit:<id>` marker (a comment on the `target_compatible_with` line, or beside the
+# refusal) and listed here with the PR that deletes it. tools/build/tests/functional/platform_table/limits_retired.sh checks, from git, that the two agree:
+#   - a `target_compatible_with` line with no marker, a marker with no row, and a row with no marker, are each refused;
+#   - a row whose `retired_by` PR has merged (a commit subject on main contains `[native-pr:<n>]`) while its marker still
+#     exists is refused, naming the row and the site.
+# `retired_by` is `native-pr:<n>` (the PR of the native-platform plan, tools/build/platforms/README.md) or `never`, which
+# needs a reason that starts `product:`. Delete a row in the PR that deletes its marker. Columns are tab-separated.
+id	retired_by	reason
+aws-lc-x86-64-linux	native-pr:8a	third_party/aws-lc/BUCK: the assembly lists are x86_64 ELF; aarch64 and Mach-O lists come with the spike
+cxx-toolchain-x86-64	native-pr:4	tools/build/toolchains/defs.bzl: the C/C++ toolchain is the linux-x86_64 one; one per row
+darwin-gate-runner	native-pr:2b	tools/build/toolchains/darwin/BUCK: the macOS gate runner is unpacked by a linux x86_64 tool
+darwin-host-census-test	native-pr:12	tools/build/tests/functional/darwin/BUCK: tests host identity, which PR 12 deletes
+darwin-launcher	native-pr:2b	tools/build/toolchains/darwin/BUCK: the macOS launcher is built by the unpack tier
+darwin-link	native-pr:3	tools/build/toolchains/darwin/BUCK: the host-identity link; zig links macOS from PR 3
+darwin-mojo	native-pr:12	tools/build/toolchains/darwin/BUCK: the macOS toolchain is its own package until the toolchains are row-driven and the package is deleted
+darwin-mojo-compiler	native-pr:12	tools/build/toolchains/darwin/BUCK: as darwin-mojo
+darwin-mojo-runtime	native-pr:12	tools/build/toolchains/darwin/BUCK: as darwin-mojo
+image-linux-x86-64-only	never	product: OCI images, bundles and the launcher are Linux server products (tools/build/package/defs.bzl); the table's `bundles` field says it per row
+linux-arm64-unregistered	native-pr:14	tools/build/platforms/table.bzl: the linux-arm64 row is declared and pinned but not a build key until the bring-up PR flips it
+mojo-toolchain-x86-64	native-pr:14	tools/build/toolchains/defs.bzl: no Mojo toolchain exists for a row that is not registered; arm64 gets one when it is brought up
+proto-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the protoc toolchain is the linux-x86_64 one; one per row
+run-tests-linux-x86-64-client	native-pr:11a	tools/build/tests/run_tests.sh: the suite runs Linux x86_64 binaries and ELF tools on the client
+rust-toolchain-x86-64	native-pr:5	tools/build/toolchains/defs.bzl: the Rust toolchain is the linux-x86_64 one; one per row
+s2n-tls-x86-64-linux	native-pr:8b	third_party/s2n-tls/BUCK: depends on aws-lc, which is x86_64 Linux only until PR 8a
+snappy-x86-64-v3	native-pr:6	third_party/snappy/BUCK: config.h hardcodes x86_64 Linux at x86-64-v3

@@ -8,36 +8,40 @@
 # `.buckconfig.local` is gitignored and never copied) into a scratch clone and
 # runs buck2 there with its own daemon, no user or system buckconfig
 # (BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG) and HOME in the scratch directory,
-# so nothing on this machine can configure a remote service. Steps 1-4 only
-# resolve configuration and build nothing; step 5 builds toolchain targets on
-# this machine. On a Linux x86_64 host:
+# so nothing on this machine can configure a remote service. Steps 1-3 only
+# resolve configuration and build nothing; steps 4 and 5 build on this machine. On a Linux x86_64 host:
 #   1. `[build] execution_platforms` is komira//tools/build/platforms/default:default,
-#      and every platform it registers has a local executor and no remote one:
-#      exactly exec-mojo and exec-light, in that order.
-#   2. Mojo targets (a binary, a library, a test, the Mojo toolchain) resolve
-#      to exec-mojo and toolchain unpack/copy targets to exec-light, with the
-#      configuration hashes that run_tests.sh test 18 pins: local and
-#      remote builds configure every target identically.
-#   3. A target requiring numa_multi fails to configure: a local host is
-#      never assumed to span NUMA nodes.
-#   4. `-c komira.execution=remote` refuses, naming `[komira_re]`; a
+#      and it registers exactly one platform, linux-x86_64, with a local
+#      executor and no remote one.
+#   2. Mojo targets (a binary, a library, a test, the Mojo toolchain) and
+#      toolchain unpack/copy targets resolve to it, with the configuration
+#      hash that run_tests.sh test 18 pins: local and remote builds configure
+#      every target identically.
+#   3. `-c komira.execution=remote` refuses, naming `[komira_re]`; a
 #      `[buck2_re_client]` address, engine_address, cas_address or
 #      action_cache_address with no `[komira_re]`
 #      refuses (fail closed: a misspelled or missing `[komira_re]` must not
-#      build here), naming both ways out; a `[komira_re]` missing
-#      light_properties refuses, naming it; `-c komira.execution=local` still
+#      build here), naming both ways out; a retired `[komira_re]` key
+#      (mojo_compile_properties) refuses, naming its replacement; `-c komira.execution=local` still
 #      builds here with a service named; `[komira] execution = remote` in a
 #      user ~/.buckconfig.local refuses; and an unknown `komira.execution`
 #      refuses, naming the modes.
-#   5. Toolchain actions run locally, concurrently, with an empty host PATH:
+#   4. Toolchain actions run locally, concurrently, with an empty host PATH:
 #      zig unpacked, then two zig programs (conda_unpack, zig_cc_launcher)
 #      built at once (about 45 MB downloaded; no Mojo compile). Local actions
 #      share the checkout root as their working directory, so this fails if
 #      they share scratch space.
-# On any other host, (1) is replaced by the refusal that names the host and
+#   5. With an empty `.buckconfig.local` (no keys), `build
+#      komira//tools/build/examples:hello` succeeds with every action local,
+#      from an empty environment and `PATH`, and the binary prints its greeting.
+#   6. The proto_check self-test cases (tools/vendor/googleapis) build
+#      concurrently on this machine with the action cache off, as `build //...`
+#      runs them; each keeps its scratch in its own directory, so none deletes
+#      another's.
+# On a macOS arm64 host (1) is replaced by the one local darwin-arm64 platform; on any other host, by the refusal that names the host and
 # `.buckconfig.local`.
 #
-# Only (5) executes anything, and only on Linux x86_64.
+# Only (4), (5) and (6) execute anything, and only on Linux x86_64.
 #
 # Scratch goes under $TMPDIR (a disk directory where /tmp is memory); it is
 # deleted on exit, pass or fail, unless KEEP_SCRATCH=1. Needs git; what-ran is
@@ -80,9 +84,20 @@ got_ep=$(b2 audit config build.execution_platforms --style simple 2> "$W/ep.err"
 [ "$got_ep" = "$EP" ] || die "[build] execution_platforms is '$got_ep', not $EP (see $W/ep.err)"
 
 if [ "$(uname -s)/$(uname -m)" != Linux/x86_64 ]; then
+    # The platform table (tools/build/platforms/table.bzl) decides: a host that
+    # matches a registered row registers that row, locally; any other host is
+    # refused, naming why and `.buckconfig.local`.
+    if [ "$(uname -s)/$(uname -m)" = Darwin/arm64 ]; then
+        b2 audit providers "$EP" > "$W/providers.txt" 2>&1 || die "on Darwin/arm64, cannot read the providers of $EP (see $W/providers.txt)"
+        labels=$(grep -oE '^ +label=komira//tools/build/platforms:[a-z0-9_-]+' "$W/providers.txt" | sed 's/.*://' | tr '\n' ' ')
+        [ "$labels" = "darwin-arm64 " ] && [ "$(grep -c 'executor: Local(' "$W/providers.txt")" = 1 ] ||
+            die "on Darwin/arm64, the local platforms are [$labels], want one local darwin-arm64 (see $W/providers.txt)"
+        echo "PASS  local default: on Darwin/arm64 a fresh clone registers the one local platform of its own row, darwin-arm64"
+        exit 0
+    fi
     if b2 audit providers "$EP" > "$W/providers.txt" 2>&1; then
         die "on $(uname -s)/$(uname -m), $EP registered platforms instead of refusing (see $W/providers.txt)"
-    elif ! grep -qF 'which is not Linux x86_64' "$W/providers.txt" || ! grep -qF '.buckconfig.local' "$W/providers.txt"; then
+    elif ! grep -qE 'no platform row matches this host|reserves a row' "$W/providers.txt" || ! grep -qF '.buckconfig.local' "$W/providers.txt"; then
         die "on $(uname -s)/$(uname -m), $EP failed without naming the host and .buckconfig.local (see $W/providers.txt)"
     fi
     echo "PASS  local default: on $(uname -s)/$(uname -m) a fresh clone refuses local execution and points to .buckconfig.local"
@@ -93,24 +108,23 @@ fi
 b2 audit providers "$EP" > "$W/providers.txt" 2>&1 || die "cannot read the providers of $EP (see $W/providers.txt)"
 n_platforms=$(grep -c 'executor_config=' "$W/providers.txt")
 n_local=$(grep -c 'executor: Local(' "$W/providers.txt")
-labels=$(grep -oE '^ +label=komira//tools/build/platforms:exec-[a-z0-9-]+' "$W/providers.txt" | sed 's/.*://' | tr '\n' ' ')
-[ "$n_platforms" = 2 ] && [ "$n_local" = 2 ] ||
-    die "$EP registers $n_platforms platforms, $n_local of them local-only; want 2 and 2 (see $W/providers.txt)"
-[ "$labels" = "exec-mojo exec-light " ] || die "registered platforms are [$labels], want [exec-mojo exec-light] in that order"
+labels=$(grep -oE '^ +label=komira//tools/build/platforms:[a-z0-9_-]+' "$W/providers.txt" | sed 's/.*://' | tr '\n' ' ')
+[ "$n_platforms" = 1 ] && [ "$n_local" = 1 ] ||
+    die "$EP registers $n_platforms platforms, $n_local of them local-only; want 1 and 1 (see $W/providers.txt)"
+[ "$labels" = "linux-x86_64 " ] || die "registered platforms are [$labels], want [linux-x86_64]"
 ! grep -qiE 'remote_execution_properties|executor: Remote|RemoteEnabled|Hybrid' "$W/providers.txt" ||
     die "a registered platform names a remote executor or properties (see $W/providers.txt)"
 
-# 2, 3
+# 2
 EXPECT="
-komira//tools/build/examples:hello komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-komira//tools/build/examples:hellopkg komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-toolchains//:mojo komira//tools/build/platforms:exec-mojo#a37dd214722ae04e
-komira//tools/build/toolchains:zig komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
-komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
-komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
-komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:exec-light#6dbe0803a8efd9e4
-tests//functional/numa:hello_multi_numa FAILED"
+komira//tools/build/examples:hello komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/examples:hellopkg komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/examples:test_hellopkg komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+toolchains//:mojo komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/toolchains:zig komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/toolchains:conda_unpack komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/toolchains:mojo_compiler komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be
+komira//tools/build/toolchains:mojo_runtime komira//tools/build/platforms:linux-x86_64#03cc1a891c89e4be"
 want=$(printf '%s\n' "$EXPECT" | sed '/^$/d' | LC_ALL=C sort)
 mapfile -t targets < <(printf '%s\n' "$want" | cut -d' ' -f1)
 b2 audit execution-platform-resolution "${targets[@]}" > "$W/resolution.txt" 2>&1 ||
@@ -120,19 +134,17 @@ got=$(awk '/^[^ ].* \(.*\):$/ { t = $1; next }
     t != "" && /^  Failed to configure/ { print t, "FAILED"; t = "" }' "$W/resolution.txt" | LC_ALL=C sort)
 [ "$got" = "$want" ] ||
     die "resolution differs: $(diff <(printf '%s\n' "$want") <(printf '%s\n' "$got") | grep '^[<>]' | tr '\n' ' ') (see $W/resolution.txt)"
-grep -qF 'exec_compatible_with requires `komira//tools/build/platforms:numa_multi` but it was not satisfied' "$W/resolution.txt" ||
-    die "the multi-NUMA refusal does not name numa_multi (see $W/resolution.txt)"
 grep -q "linux-x86_64#03cc1a891c89e4be" "$W/resolution.txt" ||
     die "the target configuration is not linux-x86_64#03cc1a891c89e4be (see $W/resolution.txt)"
 
-# 4
+# 3
 if b2 audit providers -c komira.execution=remote "$EP" > "$W/forced_remote.txt" 2>&1; then
     die "-c komira.execution=remote registered platforms with no [komira_re] (see $W/forced_remote.txt)"
-elif ! grep -qF '`[komira_re] light_properties` is not set' "$W/forced_remote.txt"; then
+elif ! grep -qF '`[komira_re] linux_x86_64_properties` is not set' "$W/forced_remote.txt"; then
     die "-c komira.execution=remote failed without naming [komira_re] (see $W/forced_remote.txt)"
 fi
-# A service named without worker property sets, or a partly filled-in
-# [komira_re], refuses instead of building here; `-c komira.execution=local`
+# A service named without a worker property set, or a retired [komira_re]
+# key, refuses instead of building here; `-c komira.execution=local`
 # still builds here.
 RE_ADDR=grpc://re.example.invalid:8980
 for key in address engine_address cas_address action_cache_address; do
@@ -143,15 +155,28 @@ for key in address engine_address cas_address action_cache_address; do
         die "[buck2_re_client] $key with no [komira_re] failed without naming both ways out (see $W/re_client_$key.txt)"
     fi
 done
-if b2 audit providers -c komira_re.mojo_compile_properties=pool=mojo "$EP" > "$W/partial_re.txt" 2>&1; then
-    die "a [komira_re] without light_properties registered platforms (see $W/partial_re.txt)"
-elif ! grep -qF '`[komira_re] light_properties` is not set' "$W/partial_re.txt"; then
-    die "a [komira_re] without light_properties failed without naming it (see $W/partial_re.txt)"
+if b2 audit providers -c komira_re.mojo_compile_properties=pool=mojo "$EP" > "$W/retired_re.txt" 2>&1; then
+    die "a retired [komira_re] mojo_compile_properties registered platforms (see $W/retired_re.txt)"
+elif ! grep -qF '`[komira_re] mojo_compile_properties` is no longer read' "$W/retired_re.txt" ||
+    ! grep -qF 'Rename it to `linux_x86_64_properties`' "$W/retired_re.txt"; then
+    die "a retired [komira_re] mojo_compile_properties failed without naming linux_x86_64_properties (see $W/retired_re.txt)"
 fi
+# The keys that named a platform by its OS alone are retired the same way: one
+# key per (os, cpu), and the refusal names the key that replaces it.
+for pair in linux_properties:linux_x86_64_properties darwin_properties:darwin_arm64_properties; do
+    old=${pair%%:*}
+    new=${pair##*:}
+    if b2 audit providers -c "komira_re.$old=pool=retired-check" "$EP" > "$W/retired_$old.txt" 2>&1; then
+        die "a retired [komira_re] $old registered platforms (see $W/retired_$old.txt)"
+    elif ! grep -qF "\`[komira_re] $old\` is no longer read" "$W/retired_$old.txt" ||
+        ! grep -qF "Rename it to \`$new\`" "$W/retired_$old.txt"; then
+        die "a retired [komira_re] $old failed without naming $new (see $W/retired_$old.txt)"
+    fi
+done
 b2 audit providers -c "buck2_re_client.engine_address=$RE_ADDR" -c komira.execution=local "$EP" > "$W/forced_local.txt" 2>&1 ||
     die "-c komira.execution=local with a service named did not register platforms (see $W/forced_local.txt)"
-[ "$(grep -c 'executor: Local(' "$W/forced_local.txt")" = 2 ] ||
-    die "-c komira.execution=local with a service named did not register the two local platforms (see $W/forced_local.txt)"
+[ "$(grep -c 'executor: Local(' "$W/forced_local.txt")" = 1 ] ||
+    die "-c komira.execution=local with a service named did not register the local platform (see $W/forced_local.txt)"
 # `[komira] execution = remote` in a user buckconfig makes a checkout with no
 # .buckconfig.local refuse: how a machine that must never build locally says
 # so (DEVELOPMENT.md, step 3). Its own daemon, reading the user config.
@@ -159,7 +184,7 @@ mkdir -p "$W/home_user"
 printf '[komira]\n  execution = remote\n' > "$W/home_user/.buckconfig.local"
 if (cd "$C" && env HOME="$W/home_user" "$BUCK2" --isolation-dir user_cfg audit providers "$EP") > "$W/user_cfg.txt" 2>&1; then
     die "[komira] execution = remote in ~/.buckconfig.local registered platforms instead of refusing (see $W/user_cfg.txt)"
-elif ! grep -qF '`[komira_re] light_properties` is not set' "$W/user_cfg.txt"; then
+elif ! grep -qF '`[komira_re] linux_x86_64_properties` is not set' "$W/user_cfg.txt"; then
     die "[komira] execution = remote in ~/.buckconfig.local failed without naming [komira_re] (see $W/user_cfg.txt)"
 fi
 (cd "$C" && env HOME="$W/home_user" "$BUCK2" --isolation-dir user_cfg kill) > /dev/null 2>&1
@@ -169,7 +194,16 @@ elif ! grep -qF '`[komira] execution`: expected one of' "$W/bad_mode.txt"; then
     die "-c komira.execution=farm failed without naming the modes (see $W/bad_mode.txt)"
 fi
 
-# 5
+# what-ran is read by the inspect tool: the caller's (run_tests.sh exports
+# INSPECT_BIN), else built here, in the clone, on this machine.
+if [ -z "${INSPECT_BIN:-}" ] || [ ! -x "$INSPECT_BIN" ]; then
+    dir=$(b2 build 'komira//tools/build/inspect:inspect[runnable]' --materializations all \
+        --show-full-simple-output 2> "$W/inspect_build.log" | tail -n 1)
+    [ -n "$dir" ] && [ -x "$dir/inspect" ] || die "cannot build komira//tools/build/inspect:inspect (see $W/inspect_build.log)"
+    export INSPECT_BIN="$dir/inspect"
+fi
+
+# 4
 # The daemon takes its environment from the client that starts it, and local
 # actions inherit it: start it with nothing but HOME.
 b2 kill > /dev/null 2>&1
@@ -190,4 +224,44 @@ else
 fi
 case "$ran" in '' | *[!0-9]*) die "local build: ${ran:-cannot read $W/local_what_ran.json}" ;; esac
 
-echo "PASS  local default: a fresh clone registers only local platforms (exec-mojo, exec-light); $(printf '%s\n' "$want" | grep -c '#') targets resolve to them with the pinned configuration hashes, numa_multi does not configure, forcing remote names [komira_re], a service named without [komira_re] refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH"
+# 5
+# The newcomer's command: a `.buckconfig.local` with no keys (what copying the
+# example and deleting its lines leaves, or what a stranger's editor creates)
+# is the same as none. `build //tools/build/examples:hello` runs the lint
+# validations of its graph as well as the compile, all on this machine,
+# concurrently, from a daemon with an empty environment and `PATH`; then the
+# binary runs. This is the case that failed when lint actions shared one
+# scratch directory (`rm`, `head` and `grep` "not found": a sibling action had
+# deleted the applet links).
+b2 kill > /dev/null 2>&1
+: > "$C/.buckconfig.local"
+if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+        "$BUCK2" build komira//tools/build/examples:hello) > "$W/hello_build.log" 2>&1; then
+    die "an empty .buckconfig.local: build komira//tools/build/examples:hello failed on this machine (see $W/hello_build.log)"
+fi
+b2 log what-ran --format json > "$W/hello_what_ran.json" 2>&1 || die "cannot read what-ran of the hello build"
+acts=$(whatran_actions "$W/hello_what_ran.json") || die "cannot read $W/hello_what_ran.json"
+execs=$(printf '%s\n' "$acts" | awk -F '\t' 'NF { print tolower($2) }' | LC_ALL=C sort -u | paste -sd, -)
+if [ -z "$acts" ] || [ "$execs" != local ]; then
+    die "hello build: executors ${execs:-none}, want only local (see $W/hello_what_ran.json)"
+fi
+out=$(cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+    "$BUCK2" run komira//tools/build/examples:hello 2> "$W/hello_run.err") || die "running hello failed (see $W/hello_run.err)"
+[ "$out" = "hello from mojo" ] || die "hello printed '$out', not 'hello from mojo'"
+
+# 6
+# The cases of the proto_check self-test, built together, local, with the cache
+# off. They once shared one scratch directory under the checkout root, and a
+# case deleted its siblings' ("No such file or directory" reading the check's
+# stderr), so `build //...` failed on a clean clone while each case passed alone.
+b2 kill > /dev/null 2>&1
+if ! (cd "$C" && env -i HOME="$W/home" BUCK2_TEST_SKIP_DEFAULT_EXTERNAL_CONFIG=true PATH=/nonexistent \
+        "$BUCK2" build --local-only --no-remote-cache komira//tools/vendor/googleapis:proto_check_selftest) > "$W/proto_check.log" 2>&1; then
+    die "the proto_check self-test cases failed when built together (see $W/proto_check.log)"
+fi
+b2 log what-ran --format json > "$W/proto_check_what_ran.json" 2>&1 || die "cannot read what-ran of the proto_check build"
+acts=$(whatran_actions "$W/proto_check_what_ran.json") || die "cannot read $W/proto_check_what_ran.json"
+cases=$(printf '%s\n' "$acts" | awk -F '\t' '$1 ~ /^proto_check_case/' | grep -c .)
+[ "$cases" -ge 3 ] || die "only $cases proto_check_case actions ran, want at least 3, one per case (see $W/proto_check_what_ran.json)"
+
+echo "PASS  local default: a fresh clone registers only the local linux-x86_64 platform; $(printf '%s\n' "$want" | grep -c '#') targets resolve to it with the pinned configuration hash, forcing remote names [komira_re], a service named without [komira_re] or a retired [komira_re] key refuses; $ran toolchain actions ran locally, concurrently, with an empty PATH, with an empty .buckconfig.local hello builds and runs locally, and $cases proto_check_case actions built together"

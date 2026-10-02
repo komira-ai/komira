@@ -1,0 +1,9 @@
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
+# The linux-x86_64 golden (golden.sh, linux-x86_64.golden): run by
+# tools/build/tests/functional/platform_table/check.sh.
+shell_lint(
+    name = "shell_lint",
+    srcs = ["golden.sh"],
+    visibility = ["komira//:tests_lints"],
+)

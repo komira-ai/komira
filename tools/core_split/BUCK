@@ -1,0 +1,37 @@
+# The gates of the komira_core split (README.md). Everything here is deleted
+# with komira_core.
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+load(":defs.bzl", "core_frozen", "map_total")
+
+core_frozen(
+    name = "core_frozen",
+    package = "//src/komira_core:doc_tree",
+    directory = "src/komira_core",
+    record = "core.sha256",
+)
+
+core_frozen(
+    name = "libc_frozen",
+    package = "//src/komira_core_ffi:doc_tree",
+    directory = "src/komira_core_ffi",
+    record = "libc.sha256",
+)
+
+map_total(
+    name = "map_total",
+    package = "//src/komira_core:doc_tree",
+    directory = "src/komira_core",
+    record = "split_map.tsv",
+)
+
+map_total(
+    name = "libc_map_total",
+    package = "//src/komira_core_ffi:doc_tree",
+    directory = "src/komira_core_ffi",
+    record = "libc_rename_map.tsv",
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = ["no_mixed_closure.sh"],
+)
