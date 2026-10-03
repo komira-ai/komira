@@ -1,5 +1,5 @@
 # =============================================================================
-# test_mem_faulty_variant.mojo: the faulty mem cloud, and the cell's side.
+# test_fake_faulty_variant.mojo: the faulty fake cloud, and the cell's side.
 # =============================================================================
 #
 # 1. READ LAG: with reads one step behind every create and delete, applies
@@ -10,10 +10,10 @@
 # 2. A PRE-EXISTING FOREIGN OBJECT: an object of a wanted name made outside
 #    kci refuses the apply before any change; adopting it by name stamps it,
 #    and the run after is a no-op.
-# 3. THE CELL'S SETTINGS AND TRUST on mem: an unknown setting and a bad
+# 3. THE CELL'S SETTINGS AND TRUST on fake: an unknown setting and a bad
 #    public mechanism refuse the graph; `none` chooses no mechanism, and a
 #    public service is then refused at validate time; the cell's principal
-#    is what `trust_check` accepts; mem-lite takes no public mechanism.
+#    is what `trust_check` accepts; fake-limited takes no public mechanism.
 # 4. THE REST OF THE INTERFACE: bootstrap resources (the state store
 #    first), whoami, trust_render, and list_owned (filtered to the cell,
 #    with the run that made each object).
@@ -44,7 +44,7 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Resource, ResourceList
 
-from kci_cloud_mem import MemCloud, MemLiteCloud
+from kci_cloud_fake import FakeCloud, FakeLimitedCloud
 
 
 def _has(haystack: String, needle: String) -> Bool:
@@ -72,14 +72,14 @@ def _graph() -> String:
 
 def _reg() raises -> Clouds:
     var reg = Clouds(Catalog.v1())
-    reg.add(describe(MemCloud()))
-    reg.add(describe(MemLiteCloud()))
+    reg.add(describe(FakeCloud()))
+    reg.add(describe(FakeLimitedCloud()))
     return reg^
 
 
 def test_read_lag_never_creates_twice_and_converges() raises:
     var reg = _reg()
-    var mem = MemCloud(read_lag=1)
+    var fake = FakeCloud(read_lag=1)
     var store = InMemoryStateStore()
     var creds = Creds.none()
     var graph = _list(_graph())
@@ -88,14 +88,14 @@ def test_read_lag_never_creates_twice_and_converges() raises:
     while True:
         runs += 1
         assert_true(runs <= 6, "the cell converges within a few runs")
-        var o = apply_resources(reg, mem, _ctx(), graph, creds, store)
+        var o = apply_resources(reg, fake, _ctx(), graph, creds, store)
         if o.ok():
             break
         failures += 1
     assert_true(failures >= 1, "a read one step behind does fail a run part-way")
     for id in ["web/run", "api/run", "api/public", "web/uses/api"]:
-        assert_equal(mem.store[].creates_of(String(id)), 1, String(id) + " was created once")
-    var o2 = apply_resources(reg, mem, _ctx(), graph, creds, store)
+        assert_equal(fake.store[].creates_of(String(id)), 1, String(id) + " was created once")
+    var o2 = apply_resources(reg, fake, _ctx(), graph, creds, store)
     assert_true(o2.ok())
     for k in range(len(o2.applied)):
         assert_equal(o2.applied[k].verb, VERB_NOOP, o2.applied[k].logical_id + " settled")
@@ -104,15 +104,15 @@ def test_read_lag_never_creates_twice_and_converges() raises:
     # first teardown fails loud on it; a re-run finishes. Nothing is left.
     var tries = 0
     var loud = False
-    while mem.live_count() > 0 or tries == 0:
+    while fake.live_count() > 0 or tries == 0:
         tries += 1
         assert_true(tries <= 6, "the teardown converges")
         try:
-            _ = destroy_resources(reg, mem, _ctx(), graph, creds, store)
+            _ = destroy_resources(reg, fake, _ctx(), graph, creds, store)
         except e:
             loud = _has(String(e), "STILL PRESENT") or loud
     assert_true(loud, "a delete the read cannot confirm yet fails loud")
-    assert_equal(mem.live_count(), 0)
+    assert_equal(fake.live_count(), 0)
     print("  test_read_lag_never_creates_twice_and_converges: PASS")
 
 
@@ -120,24 +120,24 @@ def test_a_pre_existing_foreign_object_is_refused_then_adopted() raises:
     var reg = _reg()
     var foreign = List[String]()
     foreign.append(String("api/run"))
-    var mem = MemCloud(foreign=foreign)
+    var fake = FakeCloud(foreign=foreign)
     var store = InMemoryStateStore()
     var creds = Creds.none()
-    var o = apply_resources(reg, mem, _ctx(), _list(_graph()), creds, store)
+    var o = apply_resources(reg, fake, _ctx(), _list(_graph()), creds, store)
     assert_true(o.refused(), "refused before any change")
     assert_true(_has(o.error.value(), "api/run: foreign"), o.error.value())
-    assert_equal(len(mem.store[].calls), 0, "not one call")
-    assert_equal(mem.live_count(), 1, "only the foreign object exists")
+    assert_equal(len(fake.store[].calls), 0, "not one call")
+    assert_equal(fake.live_count(), 1, "only the foreign object exists")
 
     var adopt = _ctx()
     adopt.scope.adopt.append(String("api/run"))
-    var a = apply_resources(reg, mem, adopt, _list(_graph()), creds, store)
+    var a = apply_resources(reg, fake, adopt, _list(_graph()), creds, store)
     assert_true(a.ok(), a.error.value() if a.error else String(""))
     for k in range(len(a.applied)):
         if a.applied[k].logical_id == "api/run":
             assert_equal(a.applied[k].verb, VERB_UPDATE, "stamped, then converged")
-    assert_equal(mem.store[].creates_of(String("api/run")), 0, "never re-created")
-    var again = apply_resources(reg, mem, _ctx(), _list(_graph()), creds, store)
+    assert_equal(fake.store[].creates_of(String("api/run")), 0, "never re-created")
+    var again = apply_resources(reg, fake, _ctx(), _list(_graph()), creds, store)
     assert_true(again.ok())
     for k in range(len(again.applied)):
         assert_equal(again.applied[k].verb, VERB_NOOP, again.applied[k].logical_id)
@@ -146,7 +146,7 @@ def test_a_pre_existing_foreign_object_is_refused_then_adopted() raises:
 
 def test_the_cells_settings_and_trust() raises:
     var reg = _reg()
-    var mem = MemCloud()
+    var fake = FakeCloud()
     var store = InMemoryStateStore()
     var creds = Creds.none()
 
@@ -155,7 +155,7 @@ def test_the_cells_settings_and_trust() raises:
     bad.settings.append(Setting(String("zone"), String("x")))
     var msg = String("")
     try:
-        _ = plan_resources(reg, mem, bad, _list(_graph()), creds, store)
+        _ = plan_resources(reg, fake, bad, _list(_graph()), creds, store)
     except e:
         msg = String(e)
     assert_true(_has(msg, '"teleport" is not invoker, gateway or none'), msg)
@@ -165,29 +165,29 @@ def test_the_cells_settings_and_trust() raises:
     none.settings.append(Setting(String("public_mechanism"), String("none")))
     var msg2 = String("")
     try:
-        _ = apply_resources(reg, mem, none, _list(_graph()), creds, store)
+        _ = apply_resources(reg, fake, none, _list(_graph()), creds, store)
     except e:
         msg2 = String(e)
     assert_true(_has(msg2, 'resource "api" field service.public: this cell\'s settings choose no public mechanism'), msg2)
-    assert_equal(mem.live_count(), 0)
+    assert_equal(fake.live_count(), 0)
 
     var gw = _ctx()
     gw.settings.append(Setting(String("public_mechanism"), String("gateway")))
     gw.settings.append(Setting(String("principal"), String("deployer")))
-    var o = apply_resources(reg, mem, gw, _list(_graph()), creds, store)
+    var o = apply_resources(reg, fake, gw, _list(_graph()), creds, store)
     assert_true(o.ok())
-    var i = mem.store[].find(String("api/public"))
-    assert_true(_has(mem.store[].digests[i], "mechanism=gateway"), mem.store[].digests[i])
-    assert_equal(len(mem.trust_check(Creds(String("deployer")), gw.scope)), 0)
-    var tf = mem.trust_check(Creds(String("someone")), gw.scope)
+    var i = fake.store[].find(String("api/public"))
+    assert_true(_has(fake.store[].digests[i], "mechanism=gateway"), fake.store[].digests[i])
+    assert_equal(len(fake.trust_check(Creds(String("deployer")), gw.scope)), 0)
+    var tf = fake.trust_check(Creds(String("someone")), gw.scope)
     assert_equal(len(tf), 1)
     assert_true(_has(tf[0].reason, "not the cell's principal \"deployer\""), tf[0].reason)
-    assert_true(_has(mem.trust_render(gw.scope), "cell blue of shop is deployed by deployer"))
+    assert_true(_has(fake.trust_render(gw.scope), "cell blue of shop is deployed by deployer"))
 
-    var lite = MemLiteCloud()
-    var lite_ctx = _ctx()
-    lite_ctx.settings.append(Setting(String("public_mechanism"), String("invoker")))
-    var f = lite.configure(lite_ctx)
+    var limited = FakeLimitedCloud()
+    var limited_ctx = _ctx()
+    limited_ctx.settings.append(Setting(String("public_mechanism"), String("invoker")))
+    var f = limited.configure(limited_ctx)
     assert_equal(len(f), 1)
     assert_true(_has(f[0].reason, "no public ingress"), f[0].reason)
     print("  test_the_cells_settings_and_trust: PASS")
@@ -195,20 +195,20 @@ def test_the_cells_settings_and_trust() raises:
 
 def test_bootstrap_whoami_and_list_owned() raises:
     var reg = _reg()
-    var mem = MemCloud()
+    var fake = FakeCloud()
     var store = InMemoryStateStore()
-    var boot = mem.bootstrap_resources(String("shop"), String("blue"))
+    var boot = fake.bootstrap_resources(String("shop"), String("blue"))
     assert_equal(len(boot), 2)
     assert_equal(boot[0].kind, "state-store", "the state store is created first")
     assert_equal(boot[0].name, "shop-blue-ledger")
-    var me = mem.whoami(Creds(String("deployer")))
+    var me = fake.whoami(Creds(String("deployer")))
     assert_equal(me.principal, "deployer")
-    assert_equal(me.account, "mem:mem")
-    assert_equal(mem.whoami(Creds.none()).principal, "mem-anonymous")
+    assert_equal(me.account, "fake:fake")
+    assert_equal(fake.whoami(Creds.none()).principal, "fake-anonymous")
 
-    var o = apply_resources(reg, mem, _ctx(), _list(_graph()), Creds.none(), store)
+    var o = apply_resources(reg, fake, _ctx(), _list(_graph()), Creds.none(), store)
     assert_true(o.ok())
-    var owned = mem.list_owned(Creds.none(), _ctx().scope)
+    var owned = fake.list_owned(Creds.none(), _ctx().scope)
     assert_equal(len(owned), 4, "web/run, web/uses/api, api/run, api/public")
     var saw_grant = False
     for k in range(len(owned)):
@@ -218,14 +218,14 @@ def test_bootstrap_whoami_and_list_owned() raises:
             saw_grant = True
     assert_true(saw_grant, "a role with a slash is decoded exactly")
     var green = CellScope(String("shop"), String("green"))
-    assert_equal(len(mem.list_owned(Creds.none(), green)), 0, "another cell owns nothing here")
+    assert_equal(len(fake.list_owned(Creds.none(), green)), 0, "another cell owns nothing here")
     print("  test_bootstrap_whoami_and_list_owned: PASS")
 
 
 def main() raises:
-    print("test_mem_faulty_variant")
+    print("test_fake_faulty_variant")
     test_read_lag_never_creates_twice_and_converges()
     test_a_pre_existing_foreign_object_is_refused_then_adopted()
     test_the_cells_settings_and_trust()
     test_bootstrap_whoami_and_list_owned()
-    print("ALL kci_cloud_mem FAULTY VARIANT TESTS PASSED")
+    print("ALL kci_cloud_fake FAULTY VARIANT TESTS PASSED")

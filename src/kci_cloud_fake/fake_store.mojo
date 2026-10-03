@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_cloud_mem/mem_store.mojo: the memory a reference cloud deploys to.
+# kci_cloud_fake/fake_store.mojo: the memory a fake cloud deploys to.
 # =============================================================================
 #
 # What exists (per engine node: its kind, digest, the URL it serves, whether
@@ -35,7 +35,7 @@
 from kci_reconciler import Label
 
 
-struct MemView(Copyable, Movable, Deinitable):
+struct FakeView(Copyable, Movable, Deinitable):
     """What one read of a name sees."""
 
     var present: Bool
@@ -68,7 +68,7 @@ struct MemView(Copyable, Movable, Deinitable):
         self.extra = copy.extra.copy()
 
 
-struct MemStore(Movable):
+struct FakeStore(Movable):
     var ids: List[String]
     var kinds: List[String]
     var digests: List[String]
@@ -88,7 +88,7 @@ struct MemStore(Movable):
     var _hidden: List[String]
     var _hidden_left: List[Int]
     var _ghosts: List[String]
-    var _ghost_views: List[MemView]
+    var _ghost_views: List[FakeView]
     var _ghost_left: List[Int]
 
     def __init__(
@@ -116,7 +116,7 @@ struct MemStore(Movable):
         self._hidden = List[String]()
         self._hidden_left = List[Int]()
         self._ghosts = List[String]()
-        self._ghost_views = List[MemView]()
+        self._ghost_views = List[FakeView]()
         self._ghost_left = List[Int]()
         for i in range(len(foreign)):
             self.plant(foreign[i], String("foreign"))
@@ -128,8 +128,8 @@ struct MemStore(Movable):
                 return i
         return -1
 
-    def _view(self, i: Int) -> MemView:
-        var v = MemView()
+    def _view(self, i: Int) -> FakeView:
+        var v = FakeView()
         v.present = True
         v.kind = self.kinds[i].copy()
         v.digest = self.digests[i].copy()
@@ -140,12 +140,12 @@ struct MemStore(Movable):
         v.extra = self.extras[i].copy()
         return v^
 
-    def read(mut self, id: String) -> MemView:
+    def read(mut self, id: String) -> FakeView:
         """One read, eventually consistent under `read_lag`."""
         for h in range(len(self._hidden)):
             if self._hidden[h] == id and self._hidden_left[h] > 0:
                 self._hidden_left[h] -= 1
-                return MemView()
+                return FakeView()
         var i = self.find(id)
         if i >= 0:
             return self._view(i)
@@ -153,7 +153,7 @@ struct MemStore(Movable):
             if self._ghosts[g] == id and self._ghost_left[g] > 0:
                 self._ghost_left[g] -= 1
                 return self._ghost_views[g].copy()
-        return MemView()
+        return FakeView()
 
     def _admit(mut self, verb: String, id: String) raises:
         """Count one mutating call; raise, without acting, if it is the one
@@ -161,7 +161,7 @@ struct MemStore(Movable):
         self._attempts += 1
         if self.fail_at_call > 0 and self._attempts == self.fail_at_call:
             raise Error(
-                String("mem: injected fault on call ")
+                String("fake: injected fault on call ")
                 + String(self._attempts)
                 + String(" (")
                 + verb
@@ -230,7 +230,7 @@ struct MemStore(Movable):
                 self._insert(id, kind, digest, url, labels, annotation)
                 self.calls.append(String("create ") + id)
         if self.find(id) >= 0:
-            raise Error(String("mem: ALREADY_EXISTS: ") + id)
+            raise Error(String("fake: ALREADY_EXISTS: ") + id)
         self._insert(id, kind, digest, url, labels, annotation)
         self.calls.append(String("create ") + id)
 
@@ -238,7 +238,7 @@ struct MemStore(Movable):
         self._admit(String("update"), id)
         var i = self.find(id)
         if i < 0:
-            raise Error(String("mem: NOT_FOUND: ") + id)
+            raise Error(String("fake: NOT_FOUND: ") + id)
         self.calls.append(String("update ") + id)
         self.digests[i] = digest
         self.urls[i] = url
@@ -248,7 +248,7 @@ struct MemStore(Movable):
         self._admit(String("relabel"), id)
         var i = self.find(id)
         if i < 0:
-            raise Error(String("mem: NOT_FOUND: ") + id)
+            raise Error(String("fake: NOT_FOUND: ") + id)
         self.calls.append(String("relabel ") + id)
         self.labels[i] = labels.copy()
         self.annotations[i] = annotation
@@ -281,19 +281,19 @@ struct MemStore(Movable):
     def tamper(mut self, id: String) raises:
         var i = self.find(id)
         if i < 0:
-            raise Error(String("mem: cannot tamper with absent node ") + id)
+            raise Error(String("fake: cannot tamper with absent node ") + id)
         self.digests[i] = String("changed-out-of-band")
 
     def tamper_unmodelled(mut self, id: String) raises:
         var i = self.find(id)
         if i < 0:
-            raise Error(String("mem: cannot tamper with absent node ") + id)
+            raise Error(String("fake: cannot tamper with absent node ") + id)
         self.extras[i] = String("team=payments")
 
     def fail(mut self, id: String) raises:
         var i = self.find(id)
         if i < 0:
-            raise Error(String("mem: cannot fail absent node ") + id)
+            raise Error(String("fake: cannot fail absent node ") + id)
         self.failed[i] = True
 
     def creates_of(self, id: String) -> Int:

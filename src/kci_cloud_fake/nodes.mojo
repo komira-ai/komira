@@ -1,8 +1,8 @@
 # =============================================================================
-# kci_cloud_mem/nodes.mojo: the engine node the reference clouds realize.
+# kci_cloud_fake/nodes.mojo: the engine node the fake clouds realize.
 # =============================================================================
 #
-# One node type, `MemNode`, realized from a `LoweredNode` (data):
+# One node type, `FakeNode`, realized from a `LoweredNode` (data):
 #
 #   * kind `run`       `<id>/run`: the running thing of a service or a job.
 #                      Its desired digest renders every modelled field (the
@@ -46,15 +46,15 @@ from kci_reconciler import (
 )
 from kci_cloud import LoweredNode, standard_identity_of, standard_label_rule
 
-from kci_cloud_mem.mem_store import MemStore, MemView
+from kci_cloud_fake.fake_store import FakeStore, FakeView
 
 
-def mem_url(resource_id: String) -> String:
-    return String("mem://") + resource_id
+def fake_url(resource_id: String) -> String:
+    return String("fake://") + resource_id
 
 
-def mem_host(resource_id: String) -> String:
-    return resource_id + String(".mem")
+def fake_host(resource_id: String) -> String:
+    return resource_id + String(".fake")
 
 
 def _plan(id: String, live: ResourceStatus) -> ChangeAction:
@@ -69,7 +69,7 @@ def _plan(id: String, live: ResourceStatus) -> ChangeAction:
     return ChangeAction(id, verb, why, RETAIN_DELETE)
 
 
-def _unmanaged(v: MemView) -> String:
+def _unmanaged(v: FakeView) -> String:
     if v.extra.byte_length() == 0:
         return String("")
     return String("label ") + v.extra + String(" (not modelled; left as it is)")
@@ -86,8 +86,8 @@ def static_digest(node: LoweredNode) raises -> String:
     return d.text()
 
 
-struct MemNode(EngineResource, Movable, Deinitable):
-    var _store: ArcPointer[MemStore]
+struct FakeNode(EngineResource, Movable, Deinitable):
+    var _store: ArcPointer[FakeStore]
     var _id: String
     var _owner: String
     var _kind: String
@@ -99,7 +99,7 @@ struct MemNode(EngineResource, Movable, Deinitable):
     var _is_bound: Bool
     var _wanted: Bool
 
-    def __init__(out self, store: ArcPointer[MemStore], node: LoweredNode) raises:
+    def __init__(out self, store: ArcPointer[FakeStore], node: LoweredNode) raises:
         self._store = store.copy()
         self._id = node.id.copy()
         self._owner = node.owner.copy()
@@ -122,7 +122,7 @@ struct MemNode(EngineResource, Movable, Deinitable):
 
     def _url(self) -> String:
         if self._serves:
-            return mem_url(self._owner)
+            return fake_url(self._owner)
         return String("")
 
     def logical_id(mut self) -> String:
@@ -145,7 +145,7 @@ struct MemNode(EngineResource, Movable, Deinitable):
                 RES_FAILED,
                 self._id,
                 v.digest,
-                String("mem: the node failed to become ready"),
+                String("fake: the node failed to become ready"),
                 v.url,
                 String(""),
                 stamp,
@@ -220,7 +220,7 @@ struct MemNode(EngineResource, Movable, Deinitable):
         if not v.present:
             return o^
         o.set(String("URL"), v.url)
-        o.set(String("HOST"), mem_host(self._owner))
+        o.set(String("HOST"), fake_host(self._owner))
         return o^
 
     def owner(mut self) -> String:

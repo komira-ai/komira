@@ -1,8 +1,9 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The in-memory reference clouds: "mem" (complete) and "mem-lite"
-# (partial: no job, no public ingress). The executable specification of a
-# cloud, the offline test double, and the offline proof that a graph a
+# The fake clouds: "fake" (complete) and "fake-limited" (deliberately
+# partial: no job, no public ingress). Fakes, not mocks: working,
+# lightweight in-memory clouds that really deploy. The executable
+# specification of a cloud, the offline test double, and the offline proof that a graph a
 # cloud cannot host is refused before anything is created. They honour the
 # ownership labels, and a faulty variant (failure at call k, read lag, a
 # pre-existing foreign object, a raced create) runs offline.
@@ -10,7 +11,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_proto_codec is here for the welded tests, which read graphs in the
 # proto3 JSON form an author writes.
 mojo_library(
-    name = "kci_cloud_mem",
+    name = "kci_cloud_fake",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_cloud:kci_cloud",
@@ -19,9 +20,9 @@ mojo_library(
         "//src/komira_proto_codec:komira_proto_codec",
     ],
     test_srcs = [
-        "tests/test_mem_conformance.mojo",
-        "tests/test_mem_faulty_variant.mojo",
-        "tests/test_mem_lite_refuses_offline.mojo",
+        "tests/test_fake_conformance.mojo",
+        "tests/test_fake_faulty_variant.mojo",
+        "tests/test_fake_limited_refuses_offline.mojo",
     ],
     visibility = ["PUBLIC"],
 )

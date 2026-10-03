@@ -1,26 +1,26 @@
 # =============================================================================
-# test_mem_lite_refuses_offline.mojo: THE OFFLINE REFUSAL PROOF.
+# test_fake_limited_refuses_offline.mojo: THE OFFLINE REFUSAL PROOF.
 # =============================================================================
 #
 # One author file: a `service` with a public URL that may CALL a scheduled
-# `job`. "mem" hosts it. "mem-lite" cannot, twice over: it has no adapter for
+# `job`. "fake" hosts it. "fake-limited" cannot, twice over: it has no adapter for
 # `job` (NOT_YET) and no public ingress (a shape of `service` it cannot
 # host). With no cloud and no credentials:
 #
 #   1. validate reports BOTH reasons, in one pass, in the exact text below;
-#   2. plan, apply and destroy on mem-lite are each refused, and afterwards
-#      mem-lite's call log is EMPTY and nothing exists: not one create, not
-#      even for the `service` mem-lite could otherwise host;
-#   3. the same file applies on mem (5 nodes: the run, public and grant
+#   2. plan, apply and destroy on fake-limited are each refused, and afterwards
+#      fake-limited's call log is EMPTY and nothing exists: not one create, not
+#      even for the `service` fake-limited could otherwise host;
+#   3. the same file applies on fake (5 nodes: the run, public and grant
 #      roles of the service, the run and schedule roles of the job), so the
 #      refusal is about the graph and the cloud, not a broken file;
-#   4. a file mem-lite CAN host (an internal service, no job) applies on it,
-#      so mem-lite is a working cloud, not one that refuses everything;
-#   5. a value above a cloud limit is refused the same way on mem.
+#   4. a file fake-limited CAN host (an internal service, no job) applies on it,
+#      so fake-limited is a working cloud, not one that refuses everything;
+#   5. a value above a cloud limit is refused the same way on fake.
 #
 #   6. A CLOUD-BOUND SHAPE FAILS EARLY: v1 of the catalog declares no
 #      CLOUD_BOUND type, so this case builds a catalog that marks `job`
-#      CLOUD_BOUND and a mem-lite that declares it ABSENT_BY_DESIGN; the same
+#      CLOUD_BOUND and a fake-limited that declares it ABSENT_BY_DESIGN; the same
 #      file is refused, naming the bound type and the cloud that hosts it,
 #      with zero calls served.
 # =============================================================================
@@ -51,7 +51,7 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Resource, ResourceList
 
-from kci_cloud_mem import MemLiteCloud, MemCloud
+from kci_cloud_fake import FakeLimitedCloud, FakeCloud
 
 
 def _has(haystack: String, needle: String) -> Bool:
@@ -79,28 +79,28 @@ def _ctx() -> CellContext:
 
 def _clouds() raises -> Clouds:
     var reg = Clouds(Catalog.v1())
-    reg.add(describe(MemCloud()))
-    reg.add(describe(MemLiteCloud()))
+    reg.add(describe(FakeCloud()))
+    reg.add(describe(FakeLimitedCloud()))
     return reg^
 
 
 comptime EXPECTED = (
-    'kci: cannot apply this graph to cloud "mem-lite". Nothing was created.\n'
-    '  resource "api" field service.public: mem-lite has no public ingress; it hosts'
-    " internal services only (citation: kci_cloud_mem: reference limits)\n"
-    '  resource "nightly": job (PORTABLE): no adapter in cloud "mem-lite"'
-    " (NOT_YET: mem-lite has no run-to-completion runner)\n"
-    "      clouds built into this kci that implement it: mem"
+    'kci: cannot apply this graph to cloud "fake-limited". Nothing was created.\n'
+    '  resource "api" field service.public: fake-limited has no public ingress; it hosts'
+    " internal services only (citation: kci_cloud_fake: reference limits)\n"
+    '  resource "nightly": job (PORTABLE): no adapter in cloud "fake-limited"'
+    " (NOT_YET: fake-limited has no run-to-completion runner)\n"
+    "      clouds built into this kci that implement it: fake"
 )
 
 
-def test_mem_lite_refuses_before_anything_is_created() raises:
+def test_fake_limited_refuses_before_anything_is_created() raises:
     var reg = _clouds()
-    var lite = MemLiteCloud()
+    var limited = FakeLimitedCloud()
     var resources = _list(_file())
 
-    var findings = validate_for(reg, lite, resources)
-    assert_equal(refusal_text(lite.cloud_id(), findings), String(EXPECTED))
+    var findings = validate_for(reg, limited, resources)
+    assert_equal(refusal_text(limited.cloud_id(), findings), String(EXPECTED))
 
     var creds = Creds.none()
     var store = InMemoryStateStore()
@@ -108,62 +108,62 @@ def test_mem_lite_refuses_before_anything_is_created() raises:
         var raised = False
         try:
             if verb == 0:
-                _ = plan_resources(reg, lite, _ctx(), resources, creds, store)
+                _ = plan_resources(reg, limited, _ctx(), resources, creds, store)
             elif verb == 1:
-                _ = apply_resources(reg, lite, _ctx(), resources, creds, store)
+                _ = apply_resources(reg, limited, _ctx(), resources, creds, store)
             else:
-                _ = destroy_resources(reg, lite, _ctx(), resources, creds, store)
+                _ = destroy_resources(reg, limited, _ctx(), resources, creds, store)
         except e:
             raised = True
             assert_equal(String(e), String(EXPECTED))
         assert_true(raised, String("verb ") + String(verb) + " was refused")
-    assert_equal(len(lite.store[].calls), 0, "mem-lite served no call at all")
-    assert_equal(lite.live_count(), 0, "and nothing exists on it")
+    assert_equal(len(limited.store[].calls), 0, "fake-limited served no call at all")
+    assert_equal(limited.live_count(), 0, "and nothing exists on it")
     var key = ResourceKey(String("shop"), String("blue"), String("api/run"))
     assert_equal(store.total_intents(key), 0, "no intent was written")
-    print("  test_mem_lite_refuses_before_anything_is_created: PASS")
+    print("  test_fake_limited_refuses_before_anything_is_created: PASS")
 
 
-def test_the_same_file_applies_on_mem() raises:
+def test_the_same_file_applies_on_fake() raises:
     var reg = _clouds()
-    var mem = MemCloud()
+    var fake = FakeCloud()
     var store = InMemoryStateStore()
-    var outcome = apply_resources(reg, mem, _ctx(), _list(_file()), Creds.none(), store)
+    var outcome = apply_resources(reg, fake, _ctx(), _list(_file()), Creds.none(), store)
     assert_true(outcome.ok())
     # api/run, api/public, api/uses/nightly, nightly/run, nightly/schedule
     assert_equal(len(outcome.applied), 5)
-    assert_equal(mem.live_count(), 5)
-    assert_true(mem.store[].find(String("api/uses/nightly")) >= 0, "the grant exists")
-    assert_true(mem.store[].find(String("api/public")) >= 0, "the public role exists")
-    var i = mem.store[].find(String("nightly/schedule"))
-    assert_true(_has(mem.store[].digests[i], "|cron=0 3 * * *|tz=UTC"), mem.store[].digests[i])
-    print("  test_the_same_file_applies_on_mem: PASS")
+    assert_equal(fake.live_count(), 5)
+    assert_true(fake.store[].find(String("api/uses/nightly")) >= 0, "the grant exists")
+    assert_true(fake.store[].find(String("api/public")) >= 0, "the public role exists")
+    var i = fake.store[].find(String("nightly/schedule"))
+    assert_true(_has(fake.store[].digests[i], "|cron=0 3 * * *|tz=UTC"), fake.store[].digests[i])
+    print("  test_the_same_file_applies_on_fake: PASS")
 
 
-def test_mem_lite_hosts_what_it_can() raises:
+def test_fake_limited_hosts_what_it_can() raises:
     var reg = _clouds()
-    var lite = MemLiteCloud()
+    var limited = FakeLimitedCloud()
     var store = InMemoryStateStore()
     var ok = String(
         '{"resource":[{"id":"api","service":{"image":{"digest":"sha256:a1"},'
         '"port":8080,"internal":{}}}]}'
     )
-    var outcome = apply_resources(reg, lite, _ctx(), _list(ok), Creds.none(), store)
+    var outcome = apply_resources(reg, limited, _ctx(), _list(ok), Creds.none(), store)
     assert_true(outcome.ok())
     # api/run, and api/public turned off (internal): nothing to remove
     assert_equal(len(outcome.applied), 2)
-    assert_equal(lite.live_count(), 1)
-    print("  test_mem_lite_hosts_what_it_can: PASS")
+    assert_equal(limited.live_count(), 1)
+    print("  test_fake_limited_hosts_what_it_can: PASS")
 
 
 def test_a_limit_is_refused_the_same_way() raises:
     var reg = _clouds()
-    var mem = MemCloud()
+    var fake = FakeCloud()
     var long = _file().replace('"timezone":"UTC"}', '"timezone":"UTC"},"timeout":"90000s"')
     var store = InMemoryStateStore()
     var raised = False
     try:
-        _ = apply_resources(reg, mem, _ctx(), _list(long), Creds.none(), store)
+        _ = apply_resources(reg, fake, _ctx(), _list(long), Creds.none(), store)
     except e:
         raised = True
         assert_true(
@@ -175,7 +175,7 @@ def test_a_limit_is_refused_the_same_way() raises:
             String(e),
         )
     assert_true(raised, "a job above the limit is refused")
-    assert_equal(len(mem.store[].calls), 0, "before anything is created")
+    assert_equal(len(fake.store[].calls), 0, "before anything is created")
     print("  test_a_limit_is_refused_the_same_way: PASS")
 
 
@@ -194,38 +194,38 @@ def _bound_job_catalog() raises -> Catalog:
 
 def test_a_cloud_bound_shape_fails_early() raises:
     var clouds = Clouds(_bound_job_catalog())
-    clouds.add(describe(MemCloud()))
-    clouds.add(describe(MemLiteCloud(job_absence=ABSENT_BY_DESIGN)))
-    var lite = MemLiteCloud(job_absence=ABSENT_BY_DESIGN)
+    clouds.add(describe(FakeCloud()))
+    clouds.add(describe(FakeLimitedCloud(job_absence=ABSENT_BY_DESIGN)))
+    var limited = FakeLimitedCloud(job_absence=ABSENT_BY_DESIGN)
     var internal_only = _file().replace('"public":{}', '"internal":{}')
     var resources = _list(internal_only)
-    var text = refusal_text(lite.cloud_id(), validate_for(clouds, lite, resources))
+    var text = refusal_text(limited.cloud_id(), validate_for(clouds, limited, resources))
     assert_equal(
         text,
         String(
-            'kci: cannot apply this graph to cloud "mem-lite". Nothing was created.\n'
-            '  resource "nightly": job (CLOUD_BOUND): no adapter in cloud "mem-lite"'
-            " (ABSENT_BY_DESIGN: mem-lite will never run jobs)\n"
-            "      clouds built into this kci that implement it: mem"
+            'kci: cannot apply this graph to cloud "fake-limited". Nothing was created.\n'
+            '  resource "nightly": job (CLOUD_BOUND): no adapter in cloud "fake-limited"'
+            " (ABSENT_BY_DESIGN: fake-limited will never run jobs)\n"
+            "      clouds built into this kci that implement it: fake"
         ),
     )
     var store = InMemoryStateStore()
     var raised = False
     try:
-        _ = apply_resources(clouds, lite, _ctx(), resources, Creds.none(), store)
+        _ = apply_resources(clouds, limited, _ctx(), resources, Creds.none(), store)
     except e:
         raised = True
         assert_equal(String(e), text)
     assert_true(raised, "apply of a cloud-bound shape on a cloud without it is refused")
-    assert_equal(len(lite.store[].calls), 0, "before any call is served")
-    assert_equal(lite.live_count(), 0)
+    assert_equal(len(limited.store[].calls), 0, "before any call is served")
+    assert_equal(limited.live_count(), 0)
 
     # ABSENT_BY_DESIGN is not legal against the v1 catalog, where job is
     # PORTABLE: the declaration rule still holds.
     var v1 = Clouds(Catalog.v1())
     var refused = False
     try:
-        v1.add(describe(MemLiteCloud(job_absence=ABSENT_BY_DESIGN)))
+        v1.add(describe(FakeLimitedCloud(job_absence=ABSENT_BY_DESIGN)))
     except e:
         refused = True
         assert_true(_has(String(e), "ABSENT_BY_DESIGN is legal only for a CLOUD_BOUND type"), String(e))
@@ -234,10 +234,10 @@ def test_a_cloud_bound_shape_fails_early() raises:
 
 
 def main() raises:
-    print("test_mem_lite_refuses_offline")
-    test_mem_lite_refuses_before_anything_is_created()
-    test_the_same_file_applies_on_mem()
-    test_mem_lite_hosts_what_it_can()
+    print("test_fake_limited_refuses_offline")
+    test_fake_limited_refuses_before_anything_is_created()
+    test_the_same_file_applies_on_fake()
+    test_fake_limited_hosts_what_it_can()
     test_a_limit_is_refused_the_same_way()
     test_a_cloud_bound_shape_fails_early()
-    print("ALL kci_cloud_mem OFFLINE REFUSAL TESTS PASSED")
+    print("ALL kci_cloud_fake OFFLINE REFUSAL TESTS PASSED")

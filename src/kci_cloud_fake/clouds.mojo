@@ -1,18 +1,18 @@
 # =============================================================================
-# kci_cloud_mem/clouds.mojo: the two in-memory reference clouds.
+# kci_cloud_fake/clouds.mojo: the two fake clouds (working, in memory; not mocks).
 # =============================================================================
 #
-#   * `MemCloud` ("mem")           hosts every catalog type. It is the
+#   * `FakeCloud` ("fake")                  hosts every catalog type. It is the
 #     executable specification of a complete cloud and the offline test
 #     double for everything above the cloud module.
-#   * `MemLiteCloud` ("mem-lite")  is a PARTIAL cloud: it does not host
-#     `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a catalog
-#     that marks `job` CLOUD_BOUND) and it has no public ingress, so a
+#   * `FakeLimitedCloud` ("fake-limited")   is DELIBERATELY PARTIAL: it does
+#     not host `job` (NOT_YET by default; ABSENT_BY_DESIGN when built for a
+#     catalog that marks `job` CLOUD_BOUND) and it has no public ingress, so a
 #     `service` with a public URL is a shape it cannot host. It exists to
 #     prove, with no real cloud, that a graph a cloud cannot host is refused,
 #     in full, before anything is lowered or created.
 #
-# Both deploy into a `MemStore` and lower identically, to DATA, with the
+# Both deploy into a `FakeStore` and lower identically, to DATA, with the
 # COMPLETE fixed set of roles of each type (the closed world):
 #   service -> `<id>/run`, `<id>/public` (wanted iff `public {}`), and
 #              `<id>/uses/<target>` per `Uses` line
@@ -27,14 +27,14 @@
 # THE CELL'S SETTINGS (`configure`): `public_mechanism` (`invoker` or
 # `gateway`, default `invoker`; `none` chooses none, and validate then
 # refuses a public service) and `principal` (the only deploy identity
-# `trust_check` accepts; unset accepts any). mem-lite takes `principal` only.
+# `trust_check` accepts; unset accepts any). fake-limited takes `principal` only.
 #
-# The id each answers to is a constructor argument (default "mem" /
-# "mem-lite") so the conformance kit can run them under a random id and
+# The id each answers to is a constructor argument (default "fake" /
+# "fake-limited") so the conformance kit can run them under a random id and
 # catch any code that keyed on the spelling. `fail_at_call`, `read_lag` and
-# `foreign` build the faulty variant (see `MemStore`).
+# `foreign` build the faulty variant (see `FakeStore`).
 #
-# ⚠ The limits below are the REFERENCE clouds' own, chosen to be
+# ⚠ The limits below are the FAKE clouds' own, chosen to be
 # exercisable; they cite this package, not any real cloud.
 # =============================================================================
 
@@ -78,11 +78,11 @@ from kci_cloud import (
 )
 from kci_resource_proto.resource import Image, Resource, SecretRef, Size, Value
 
-from kci_cloud_mem.mem_store import MemStore
-from kci_cloud_mem.nodes import MemNode
+from kci_cloud_fake.fake_store import FakeStore
+from kci_cloud_fake.nodes import FakeNode
 
 
-comptime MEM_CITATION = "kci_cloud_mem: reference limits"
+comptime FAKE_CITATION = "kci_cloud_fake: reference limits"
 comptime JOB_TIMEOUT_MAX_SECONDS: Int = 86400
 comptime REQUEST_TIMEOUT_MAX_SECONDS: Int = 3600
 
@@ -297,7 +297,7 @@ def _common_limits(r: Resource, mut out: List[Finding]):
                     String("above this cloud's request limit of ")
                     + String(REQUEST_TIMEOUT_MAX_SECONDS)
                     + String("s"),
-                    String(MEM_CITATION),
+                    String(FAKE_CITATION),
                 )
             )
         if (
@@ -311,7 +311,7 @@ def _common_limits(r: Resource, mut out: List[Finding]):
                     r.id,
                     String("service.scale"),
                     String("max is below min"),
-                    String(MEM_CITATION),
+                    String(FAKE_CITATION),
                 )
             )
     elif r._oneof0_case == 2:
@@ -325,7 +325,7 @@ def _common_limits(r: Resource, mut out: List[Finding]):
                     String("above this cloud's job limit of ")
                     + String(JOB_TIMEOUT_MAX_SECONDS)
                     + String("s"),
-                    String(MEM_CITATION),
+                    String(FAKE_CITATION),
                 )
             )
 
@@ -337,7 +337,7 @@ def _label(labels: List[Label], key: String) -> String:
     return String("")
 
 
-def _owned(store: ArcPointer[MemStore], scope: CellScope) -> List[OwnedRecord]:
+def _owned(store: ArcPointer[FakeStore], scope: CellScope) -> List[OwnedRecord]:
     """Every object whose stamp names this machine and cell (true state: a
     list, not a lagging read)."""
     var out = List[OwnedRecord]()
@@ -360,7 +360,7 @@ def _owned(store: ArcPointer[MemStore], scope: CellScope) -> List[OwnedRecord]:
             OwnedRecord(
                 s.kinds[i].copy(),
                 s.ids[i].copy(),
-                String("mem"),
+                String("fake"),
                 String("none"),
                 String(s.created[i]),
                 run^,
@@ -412,17 +412,17 @@ def _setting_finding(key: String, why: String) -> Finding:
     return Finding(FINDING_CELL, String("(cell)"), String("settings.") + key, why)
 
 
-struct MemCloud(ConformanceTarget, Movable):
-    """The complete in-memory cloud."""
+struct FakeCloud(ConformanceTarget, Movable):
+    """The complete fake cloud."""
 
     var _id: String
     var _mechanism: String
     var _principal: String
-    var store: ArcPointer[MemStore]
+    var store: ArcPointer[FakeStore]
 
     def __init__(
         out self,
-        id: String = String("mem"),
+        id: String = String("fake"),
         fail_at_call: Int = 0,
         read_lag: Int = 0,
         foreign: List[String] = List[String](),
@@ -430,7 +430,7 @@ struct MemCloud(ConformanceTarget, Movable):
         self._id = id
         self._mechanism = String("invoker")
         self._principal = String("")
-        self.store = ArcPointer[MemStore](MemStore(fail_at_call, read_lag, foreign))
+        self.store = ArcPointer[FakeStore](FakeStore(fail_at_call, read_lag, foreign))
 
     def cloud_id(self) -> CloudId:
         return CloudId(self._id)
@@ -486,7 +486,7 @@ struct MemCloud(ConformanceTarget, Movable):
         return _lower(r, self._mechanism)
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
-        return ErasedResource.erase(MemNode(self.store, node))
+        return ErasedResource.erase(FakeNode(self.store, node))
 
     def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
         return _bootstrap(machine, cell)
@@ -503,8 +503,8 @@ struct MemCloud(ConformanceTarget, Movable):
     def whoami(mut self, creds: Creds) raises -> Principal:
         var who = creds.token.copy()
         if who.byte_length() == 0:
-            who = String("mem-anonymous")
-        return Principal(who^, String("mem:") + self._id)
+            who = String("fake-anonymous")
+        return Principal(who^, String("fake:") + self._id)
 
     def trust_render(self, scope: CellScope) -> String:
         var who = self._principal.copy()
@@ -564,8 +564,8 @@ struct MemCloud(ConformanceTarget, Movable):
         return self.store[].creates_of(logical_id)
 
 
-struct MemLiteCloud(ConformanceTarget, Movable):
-    """The partial in-memory cloud: no `job`, no public ingress.
+struct FakeLimitedCloud(ConformanceTarget, Movable):
+    """The deliberately partial fake cloud: no `job`, no public ingress.
 
     `job_absence` is how it declares the missing `job`: NOT_YET (the default,
     for the v1 catalog, where `job` is PORTABLE) or ABSENT_BY_DESIGN (for a
@@ -575,11 +575,11 @@ struct MemLiteCloud(ConformanceTarget, Movable):
     var _id: String
     var _job_absence: Int
     var _principal: String
-    var store: ArcPointer[MemStore]
+    var store: ArcPointer[FakeStore]
 
     def __init__(
         out self,
-        id: String = String("mem-lite"),
+        id: String = String("fake-limited"),
         job_absence: Int = NOT_YET,
         fail_at_call: Int = 0,
         read_lag: Int = 0,
@@ -588,7 +588,7 @@ struct MemLiteCloud(ConformanceTarget, Movable):
         self._id = id
         self._job_absence = job_absence
         self._principal = String("")
-        self.store = ArcPointer[MemStore](MemStore(fail_at_call, read_lag, foreign))
+        self.store = ArcPointer[FakeStore](FakeStore(fail_at_call, read_lag, foreign))
 
     def cloud_id(self) -> CloudId:
         return CloudId(self._id)
@@ -605,11 +605,11 @@ struct MemLiteCloud(ConformanceTarget, Movable):
         var l = List[Absence]()
         if self._job_absence == ABSENT_BY_DESIGN:
             l.append(
-                Absence(FIELD_JOB, ABSENT_BY_DESIGN, String("mem-lite will never run jobs"))
+                Absence(FIELD_JOB, ABSENT_BY_DESIGN, String("fake-limited will never run jobs"))
             )
         else:
             l.append(
-                Absence(FIELD_JOB, NOT_YET, String("mem-lite has no run-to-completion runner"))
+                Absence(FIELD_JOB, NOT_YET, String("fake-limited has no run-to-completion runner"))
             )
         return l^
 
@@ -622,7 +622,7 @@ struct MemLiteCloud(ConformanceTarget, Movable):
                 self._principal = st.value.copy()
             elif st.key == "public_mechanism":
                 out.append(
-                    _setting_finding(st.key, String("mem-lite has no public ingress to choose"))
+                    _setting_finding(st.key, String("fake-limited has no public ingress to choose"))
                 )
             else:
                 out.append(_setting_finding(st.key, String("not a setting of this cloud")))
@@ -640,8 +640,8 @@ struct MemLiteCloud(ConformanceTarget, Movable):
                     FINDING_LIMIT,
                     r.id,
                     String("service.public"),
-                    String("mem-lite has no public ingress; it hosts internal services only"),
-                    String(MEM_CITATION),
+                    String("fake-limited has no public ingress; it hosts internal services only"),
+                    String(FAKE_CITATION),
                 )
             )
         return out^
@@ -653,7 +653,7 @@ struct MemLiteCloud(ConformanceTarget, Movable):
         return _lower(r, String(""))
 
     def realize(mut self, node: LoweredNode) raises -> ErasedResource:
-        return ErasedResource.erase(MemNode(self.store, node))
+        return ErasedResource.erase(FakeNode(self.store, node))
 
     def bootstrap_resources(self, machine: String, cell: String) -> List[BootstrapItem]:
         return _bootstrap(machine, cell)
@@ -670,8 +670,8 @@ struct MemLiteCloud(ConformanceTarget, Movable):
     def whoami(mut self, creds: Creds) raises -> Principal:
         var who = creds.token.copy()
         if who.byte_length() == 0:
-            who = String("mem-anonymous")
-        return Principal(who^, String("mem:") + self._id)
+            who = String("fake-anonymous")
+        return Principal(who^, String("fake:") + self._id)
 
     def trust_render(self, scope: CellScope) -> String:
         var who = self._principal.copy()
