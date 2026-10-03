@@ -2,40 +2,57 @@
 # src/kci_cli/args.mojo -- the `kci` command line: ONE parser for every verb.
 # =============================================================================
 #
-#   kci run [--machine <file>] --stage <S> --revision-id <commit>
+#   kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]...
+#           [--plan] --revision-id <commit>
 #           --run-id <id> --attempt <n> [--context <key=value>]...
 #           --release-dir <dir> [--result-file <file>]
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
-#           [--plan] [--expect-set-hash <hex>] [--claim-new-name <name>]...
+#           [--expect-set-hash <hex>] [--claim-new-name <name>]...
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>]
 #   kci ci check [--machine <file>] --workflow <file> [--result-file <file>]
 #   kci --help
 #
 # `kci run --stage S` is THE verb for stages: it runs every step of stage S
-# of the machine file, in order. There is no per-kind verb and no alias (the
-# CEO's ruling): what a stage does is the machine file's to say. `ci check`
-# is a utility that changes nothing.
+# of the machine file, in order. There is no per-kind verb and no alias:
+# what a stage does is the machine file's to say. `ci check` is a utility
+# that changes nothing.
 #
-# The machine file is `--machine`, or `DEFAULT_MACHINE_FILE` when the flag
-# is absent (a relative path is relative to the directory kci is started
-# in). That default is spelled here only.
+# The machine file is `--machine`, or kci_contract's `DEFAULT_MACHINE_FILE`
+# (`release/machine.textproto`) when the flag is absent; a relative path is
+# relative to the directory kci is started in.
+#
+# OPERATION SELECTION. Exactly two flags select what a run does, and both
+# are positive:
+#
+#   --only step:<name> | validation:<name>   (repeatable) run only these;
+#             the run is SELECTIVE and is never reported as a full one
+#             (kci_contract selection.mojo). The grammar is checked by
+#             `selectors_of` before anything is read (KCI-E-SELECTOR,
+#             exit 2); a selector naming nothing in the stage is refused
+#             after the machine file is read (KCI-E-SELECTOR-NO-MATCH, 3).
+#   --plan    a dry run of the whole stage: a BUILD step resolves and
+#             renders and builds nothing; a PUBLISH step checks and reads
+#             and writes nothing.
+#
+# Every other flag is an input, never a selector.
 #
 # Which flags a stage takes depends on its steps, so `parse_kci_args` checks
 # only what the command line alone can say (unknown flags, values, flags
 # given twice, flags of another verb, the flags every run needs), and
 # `require_stage_flags` checks the rest once the stage is resolved:
 #
-#   a BUILD step     needs --work-dir and --log-dir; --build-timeout-s optional
-#   a PUBLISH step   needs --expect-set-hash and --release-version; --plan,
-#                    --claim-new-name, --concurrency, --secret-store optional
-#   no step of that kind   its flags are refused
+#   a selected BUILD step    needs --work-dir and --log-dir; --build-timeout-s
+#                            optional
+#   a selected PUBLISH step  needs --expect-set-hash and --release-version;
+#                            --claim-new-name, --concurrency, --secret-store
+#                            optional
+#   no selected step of that kind   its flags are refused
 #
-# `--plan` is a PUBLISH step's flag: the step makes every check and reads the
-# channel, and writes nothing to it. (A BUILD step changes nothing outside
-# this machine either way; a plan of a BUILD step is not a thing yet.)
+# Only the SELECTED steps count (every step, without `--only`).
 #
-# Every refusal here is a usage error (kci_contract's KCI-E-USAGE, exit 2).
+# Every refusal here is a usage error (kci_contract's KCI-E-USAGE, exit 2;
+# a malformed `--only` is KCI-E-SELECTOR, also exit 2).
 # `--run-id`, `--attempt` and `--context` follow kci_contract's grammar; kci
 # reads no CI-vendor environment variable for any of them.
 #
@@ -43,17 +60,18 @@
 # =============================================================================
 
 from kci_contract import (
+    DEFAULT_MACHINE_FILE,
+    STEP_KIND_BUILD,
+    STEP_KIND_PUBLISH,
     ContextEntry,
     RunIdentity,
+    Selector,
     parse_attempt,
     parse_context_arg,
+    parse_selectors,
     require_full_commit_id,
 )
-from kci_stage_graph import Stage
-
-comptime DEFAULT_MACHINE_FILE: String = "release/machine.textproto"
-"""The machine file `kci run` and `kci ci check` read when `--machine` is
-absent: next to release/artifacts.textproto and release/channels.textproto."""
+from kci_stage_graph import Selection, Stage
 
 comptime CLI_VERB_RUN: String = "run"
 comptime CLI_VERB_CI_CHECK: String = "ci check"
@@ -61,15 +79,18 @@ comptime CLI_VERB_HELP: String = "help"
 
 comptime KCI_USAGE: String = (
     "usage:\n"
-    "  kci run [--machine <file>] --stage <S> --revision-id <commit> --run-id <id> --attempt <n>\n"
+    "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan]\n"
+    "          --revision-id <commit> --run-id <id> --attempt <n>\n"
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>]\n"
-    "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a stage with a BUILD step)\n"
-    "          [--plan] --expect-set-hash <hex> --release-version <file>\n"
-    "          [--claim-new-name <name>]... [--concurrency <n>] [--secret-store <none|env>]  (a PUBLISH step)\n"
+    "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
+    "          --expect-set-hash <hex> --release-version <file>\n"
+    "          [--claim-new-name <name>]... [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
     "  kci ci check [--machine <file>] --workflow <file> [--result-file <file>]\n"
     "  kci --help\n"
     "kci run --stage S runs every step of stage S of the machine file, in order.\n"
-    "--machine defaults to release/machine.textproto. --plan: a PUBLISH step checks and reads, and writes nothing.\n"
+    "--machine defaults to release/machine.textproto.\n"
+    "--only runs only the named steps (or validations): a SELECTIVE run, never reported as a full one.\n"
+    "--plan: a dry run; a BUILD step builds nothing, a PUBLISH step checks and reads and writes nothing.\n"
     "kci ci check holds a CI workflow to the machine file's stages.\n"
     "--secret-store: how a channel credential's secret NAME is resolved: none (default) refuses;\n"
     "env reads the environment variable of that name."
@@ -124,6 +145,7 @@ struct KciCommand(Copyable, Movable):
     var concurrency: Int
     var store: SecretStoreChoice
     var workflow: String
+    var only: List[String]
     var seen: List[String]
 
     def __init__(out self):
@@ -146,6 +168,7 @@ struct KciCommand(Copyable, Movable):
         self.concurrency = 0
         self.store = SecretStoreChoice.NONE
         self.workflow = String("")
+        self.only = List[String]()
         self.seen = List[String]()
 
     def given(self, flag: String) -> Bool:
@@ -169,7 +192,10 @@ def usage_error(why: String) -> Error:
 # The flags of `run`, by the kind of step that takes them, and of `ci check`.
 def _run_common_flags() -> List[String]:
     var l = List[String]()
-    for f in ["--machine", "--stage", "--revision-id", "--run-id", "--attempt", "--context", "--release-dir", "--result-file"]:
+    for f in [
+        "--machine", "--stage", "--only", "--plan", "--revision-id", "--run-id", "--attempt", "--context",
+        "--release-dir", "--result-file",
+    ]:
         l.append(String(f))
     return l^
 
@@ -183,7 +209,7 @@ def build_flags() -> List[String]:
 
 def publish_flags() -> List[String]:
     var l = List[String]()
-    for f in ["--plan", "--expect-set-hash", "--claim-new-name", "--release-version", "--concurrency", "--secret-store"]:
+    for f in ["--expect-set-hash", "--claim-new-name", "--release-version", "--concurrency", "--secret-store"]:
         l.append(String(f))
     return l^
 
@@ -203,7 +229,7 @@ def _member(xs: List[String], x: String) -> Bool:
 
 
 def _repeatable(flag: String) -> Bool:
-    return flag == String("--context") or flag == String("--claim-new-name")
+    return flag == String("--context") or flag == String("--claim-new-name") or flag == String("--only")
 
 
 def _boolean(flag: String) -> Bool:
@@ -240,6 +266,8 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.result_file = value.copy()
     elif flag == String("--stage"):
         cmd.stage = value.copy()
+    elif flag == String("--only"):
+        cmd.only.append(value.copy())
     elif flag == String("--revision-id"):
         try:
             require_full_commit_id(String("--revision-id"), value)
@@ -369,30 +397,47 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
     return cmd^
 
 
-def require_stage_flags(cmd: KciCommand, stage: Stage) raises:
-    """The flags of the step kinds stage `stage` holds, and only those (file
-    header). Raises a usage error."""
-    var has_build = stage.has_kind(String("BUILD"))
-    var has_publish = stage.has_kind(String("PUBLISH"))
+def selectors_of(cmd: KciCommand) raises -> List[Selector]:
+    """Every `--only`, parsed (kci_contract `parse_selectors`): raises on a
+    malformed selector or the same one twice. The caller records the
+    refusal as KCI-E-SELECTOR (exit 2) before anything is read."""
+    return parse_selectors(cmd.only)
+
+
+def _selected_kind(stage: Stage, sel: Selection, kind: String) -> Bool:
+    for i in range(len(stage.steps)):
+        if sel.steps[i] and stage.steps[i].kind == kind:
+            return True
+    return False
+
+
+def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
+    """The flags of the step kinds the SELECTED steps of `stage` hold, and
+    only those (file header). Raises a usage error."""
+    var has_build = _selected_kind(stage, sel, String(STEP_KIND_BUILD))
+    var has_publish = _selected_kind(stage, sel, String(STEP_KIND_PUBLISH))
+    var which = String("stage '") + stage.name + String("'")
+    var has = String(" has")
+    var holds_no = String(" has no")
+    if len(cmd.only) > 0:
+        which = String("the steps --only selects in stage '") + stage.name + String("'")
+        has = String(" include")
+        holds_no = String(" hold no")
     var bf = build_flags()
     var pf = publish_flags()
     if has_build:
         for f in ["--work-dir", "--log-dir"]:
             if not cmd.given(String(f)):
-                raise usage_error(String("stage '") + stage.name + String("' has a BUILD step: kci run needs ") + String(f))
+                raise usage_error(which + has + String(" a BUILD step: kci run needs ") + String(f))
     else:
         for i in range(len(bf)):
             if cmd.given(bf[i]):
-                raise usage_error(
-                    bf[i] + String(" is a BUILD step's flag, and stage '") + stage.name + String("' has no BUILD step")
-                )
+                raise usage_error(bf[i] + String(" is a BUILD step's flag, and ") + which + holds_no + String(" BUILD step"))
     if has_publish:
         for f in ["--expect-set-hash", "--release-version"]:
             if not cmd.given(String(f)):
-                raise usage_error(String("stage '") + stage.name + String("' has a PUBLISH step: kci run needs ") + String(f))
+                raise usage_error(which + has + String(" a PUBLISH step: kci run needs ") + String(f))
     else:
         for i in range(len(pf)):
             if cmd.given(pf[i]):
-                raise usage_error(
-                    pf[i] + String(" is a PUBLISH step's flag, and stage '") + stage.name + String("' has no PUBLISH step")
-                )
+                raise usage_error(pf[i] + String(" is a PUBLISH step's flag, and ") + which + holds_no + String(" PUBLISH step"))
