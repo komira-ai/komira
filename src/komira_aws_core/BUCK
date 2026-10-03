@@ -23,7 +23,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   - the interpreter of the endpoint rulesets AWS publishes as data
 #     (endpoint_rules.mojo, over partitions.json), which reads no
 #     environment: every input is a parameter
-#   - s3_wire.mojo: the two S3 header values no model states
+#   - endpoint_signing.mojo, which turns an endpoint the ruleset chose into
+#     what the signer takes, refusing an auth scheme it cannot sign
+#   - s3_wire.mojo: the S3 header values no model states, and the CRC32
+#     request checksum
 #
 # The chain reads only the STANDARD AWS SDK environment variables and shared
 # files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
@@ -105,6 +108,7 @@ mojo_library(
         "tests/test_creds_source.mojo",
         "tests/test_endpoint_resolution.mojo",
         "tests/test_endpoint_rules_library.mojo",
+        "tests/test_endpoint_signing.mojo",
         "tests/test_env_source_only.mojo",
         "tests/test_s3_endpoint_rules.mojo",
         "tests/test_s3_wire.mojo",

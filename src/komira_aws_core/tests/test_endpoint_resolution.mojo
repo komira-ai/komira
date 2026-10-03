@@ -154,6 +154,26 @@ def test_parse_endpoint_url() raises:
                 assert_true(m.find("pw") < 0, "the URL leaked into the error")
 
 
+def test_root_target_with_a_query() raises:
+    # botocore joins the endpoint and the request path before it appends
+    # the query (`prepare_request_dict`, botocore/awsrequest.py), so the root
+    # path keeps the endpoint path exactly with a query too: an S3
+    # path-style bucket endpoint `https://h/bucket` lists `/bucket?list-type=2`,
+    # never `/bucket/?list-type=2`.
+    var e = AwsEndpoint.parse("https://h.example.com/bucket", "T")
+    assert_equal(e.target_for("/?list-type=2"), "/bucket?list-type=2")
+    assert_equal(e.target_for("/?uploads"), "/bucket?uploads")
+    assert_equal(e.target_for("/q?x=1"), "/bucket/q?x=1")
+    assert_equal(
+        e.url_for("/?delete"), "https://h.example.com/bucket?delete"
+    )
+    e = AwsEndpoint.parse("https://h.example.com/bucket/", "T")
+    assert_equal(e.target_for("/?list-type=2"), "/bucket/?list-type=2")
+    e = AwsEndpoint.parse("https://bucket.h.example.com", "T")
+    assert_equal(e.target_for("/?list-type=2"), "/?list-type=2")
+    assert_equal(e.target_for("/"), "/")
+
+
 def test_host_prefix_and_resolve() raises:
     var e = AwsEndpoint.https("data.mediastore.us-east-1.amazonaws.com")
     assert_equal(e.with_host_prefix("").host, e.host)
@@ -356,6 +376,7 @@ def test_fips_and_dual_stack_switches() raises:
 def main() raises:
     test_partition_table()
     test_parse_endpoint_url()
+    test_root_target_with_a_query()
     test_host_prefix_and_resolve()
     test_service_env_var_name()
     test_configured_endpoint_precedence()

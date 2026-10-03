@@ -66,6 +66,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | module | what it is |
 |---|---|
 | [`komira_aws_core`](../src/komira_aws_core/) | the one hand-written AWS core under the generated AWS clients: the credential value, SigV4 signing (headers and presigned URLs), the SDK default credential chain and region resolution, the shared config file parser, and the network-backed credential providers as request builders and response parsers. |
+| [`komira_aws_s3`](../src/komira_aws_s3/) | the Amazon S3 client, generated at build time from botocore's pinned S3 model (no source is committed): each operation's request builder and response parser, and its endpoint resolved through S3's published endpoint ruleset. Pure: it opens no connection and reads no environment; a caller signs a built request with `komira_aws_core`. |
 | [`komira_gcp_core`](../src/komira_gcp_core/) | the one hand-written core of the Google Cloud SDK: the token-source seam, status-to-error mapping, a retry classifier and page-token helpers the generated `komira_gcp_<service>` clients compose. It defines no request type and no send loop. |
 
 ### CI and deploy (`kci`)
@@ -78,6 +79,7 @@ A library `kci` owns is named `kci_<x>`.
 | [`kci_artifact_declaration_proto`](../src/kci_artifact_declaration_proto/) | the declarations schema (`kci.release.v1`): `ArtifactDeclarations` holds `BuildSystem`s (name, executable, args) and `ArtifactDeclaration`s (name, build system, args). No enum and no kind of artifact; the build contract (one artifact per declaration: exactly one `manifest.json` at the top of `{out_dir}`, its `name` the declaration's) is stated in the `.proto`. |
 | [`kci_logs`](../src/kci_logs/) | reads the logs behind a failed step: a pipeline run's stage logs, and a terminated cloud unit's container output. |
 | [`kci_params`](../src/kci_params/) | the generic managed-app parameter mechanism: one declaration that the deploy renderer turns into argv, the app parses at startup, and the control plane stores opaquely. |
+| [`kci_reconciler`](../src/kci_reconciler/) | the deploy engine core: reconciles a graph of desired resources against the live cloud (plan, apply, rollback, destroy) over a write-ahead intent store, with typed outputs flowing from one node into the next. It names no cloud: a cloud adapter supplies the nodes. Only a resource this apply created is unwound on rollback, and a failed resource is updated, not refused. |
 | [`kci_validator_report`](../src/kci_validator_report/) | the one report library every validator shares. It produces evidence, not authorization: the gate stays the exit code and the build graph. |
 | [`kci_validator_rows`](../src/kci_validator_rows/) | the positional row-accounting model every managed-app validator shares, so a run that emitted only a prefix of its rows cannot report PASS. |
 | [`kci_release_channel`](../src/kci_release_channel/) | release-channel declarations: a publish destination (a name, a visibility and one repository per artifact type), its lookups and validation, and the channels-file parser. |
@@ -163,7 +165,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 
 | layer | coming with |
 |---|---|
-| HTTP, databases, object stores, file-system discovery, gRPC | komira_http, komira_db, komira_objectstore, komira_grpc |
+| HTTP, databases, object stores, file-system discovery, gRPC | komira_http_core, komira_http_client, komira_http_server, komira_db, komira_objectstore, komira_grpc |
 | storage formats: Parquet, text and row formats, Iceberg and CDC, serverless Postgres | komira_parquet, komira_csv, komira_iceberg, komira_pgstore |
 | execution and operators: pipelines and morsel dispatch, aggregation, joins, sort, top-N, window | the engine libraries |
 | plan and optimizer: logical and physical planning, the plan wire format, the query optimizer | komira_compiler, komira_optimizer |
@@ -171,7 +173,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | runtime: the async runtime, the job agent and supervisor | komira_async, komira_agent |
 | observability: logging and telemetry | komira_log |
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
-| cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, are in `src/`) |
+| cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, and the generated `komira_aws_s3`, are in `src/`) |
 | CI and deploy: the bundle model, apply, validate and rollout, the command line itself | kci (its `kci_*` libraries above are in `src/`) |
 | message broker: connection handling and request dispatch | komira_kafka_server (its wire codec is in `src/`) |
 | packaging: the shared-library ABI, the release machine | komira_so and the packaging rules |

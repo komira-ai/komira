@@ -31,7 +31,7 @@ Output layout of a target `L` with import name `I`:
 
 The generation half (`stage_proto_srcs`, `proto_closure`, `select_generated`,
 `generate_proto_dir`) is public, for rules that compile the generated files
-themselves through `mojo_library` (gcp_client, tools/build/cloud/gcp.bzl).
+themselves through `mojo_library` (mojo_gcp_client, tools/build/cloud/gcp.bzl).
 
 protoc and the plugin come from `toolchains//:mojo_proto`. Options reach
 the plugin as `--mojo_opt` arguments, never from a file, so they are part of

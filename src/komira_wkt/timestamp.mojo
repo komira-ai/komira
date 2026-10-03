@@ -21,10 +21,16 @@
 # two-field protobuf-binary path (correct + round-trip-safe on
 # `PbEncoder`/`PbDecoder`).
 #
-# The civil-date conversion is the standard branch-free algorithm (Howard
-# Hinnant, "chrono-Compatible Low-Level Date Algorithms"). It is kept
-# self-contained here so `komira_wkt` needs no more than `komira_proto_codec`.
+# The calendar arithmetic and the RFC 3339 text are komira_datetime's; this
+# file adds the protobuf range (years 0001..9999) and the 0 / 3 / 6 / 9
+# fraction-digit rule.
 # =============================================================================
+
+from komira_datetime import (
+    Timestamp as UtcInstant,
+    format_rfc3339,
+    parse_rfc3339,
+)
 
 from komira_proto_codec import (
     Serializable,
@@ -111,102 +117,29 @@ struct Timestamp(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
                 "WktError: Timestamp nanos outside [0, 999999999]: "
                 + String(nanos)
             )
-        # The day index and the seconds-of-day, floor-divided so a negative
-        # epoch (a pre-1970 timestamp) lands on the correct civil day.
-        var days = _floor_div(secs, 86400)
-        var sod = secs - days * 86400
-        var ymd = _civil_from_days(days)
-        var hh = sod // 3600
-        var mm = (sod % 3600) // 60
-        var ss = sod % 60
-        var out = String("")
-        out += _pad4(ymd[0])
-        out += "-"
-        out += _pad2(ymd[1])
-        out += "-"
-        out += _pad2(ymd[2])
-        out += "T"
-        out += _pad2(hh)
-        out += ":"
-        out += _pad2(mm)
-        out += ":"
-        out += _pad2(ss)
-        out += _frac_suffix(nanos)
-        out += "Z"
-        return out
+        # Nine fraction digits, cut to the shortest group of three that is
+        # exact: the proto3 JSON rule of 0, 3, 6 or 9 digits.
+        return format_rfc3339(UtcInstant(secs, nanos), 9, 3)
 
     @staticmethod
     def from_proto3_json(text: String) raises -> Self:
         """Parse the RFC-3339 string form (the raw scalar text, unquoted).
 
-        Accepts `YYYY-MM-DDTHH:MM:SS[.fff]Z`. A trailing `Z` is required
-        (proto3-canonical Timestamps are always UTC)."""
-        var b = _bytes_of(text)
-        var n = len(b)
-        if n < 20:
-            raise Error("WktError: Timestamp JSON too short: " + text)
-        var year = _parse_uint(b, 0, 4)
-        _expect(b, 4, 0x2D, text)  # '-'
-        var month = _parse_uint(b, 5, 2)
-        _expect(b, 7, 0x2D, text)  # '-'
-        var day = _parse_uint(b, 8, 2)
-        _expect(b, 10, 0x54, text)  # 'T'
-        var hh = _parse_uint(b, 11, 2)
-        _expect(b, 13, 0x3A, text)  # ':'
-        var mm = _parse_uint(b, 14, 2)
-        _expect(b, 16, 0x3A, text)  # ':'
-        var ss = _parse_uint(b, 17, 2)
-        # Optional fractional seconds.
-        var nanos = 0
-        var idx = 19
-        if idx < n and b[idx] == 0x2E:  # '.'
-            idx += 1
-            var frac_start = idx
-            while idx < n and b[idx] >= 0x30 and b[idx] <= 0x39:
-                idx += 1
-            var frac_digits = idx - frac_start
-            if frac_digits == 0 or frac_digits > 9:
-                raise Error("WktError: bad Timestamp fraction: " + text)
-            var frac_val = _parse_uint(b, frac_start, frac_digits)
-            # Scale the fraction up to nanoseconds (9 digits).
-            var scale = 1
-            for _ in range(9 - frac_digits):
-                scale *= 10
-            nanos = frac_val * scale
-        # The zone: `Z`, or a `+hh:mm` / `-hh:mm` offset (RFC 3339 allows
-        # one on input; the canonical OUTPUT is always `Z`). It must be the
-        # LAST thing in the string: `...Zjunk` is not a timestamp.
-        var offset = 0
-        if idx < n and b[idx] == 0x5A:  # 'Z'
-            idx += 1
-        elif idx < n and (b[idx] == 0x2B or b[idx] == 0x2D):  # '+' / '-'
-            var sign = 1 if b[idx] == 0x2B else -1
-            if idx + 6 > n:
-                raise Error("WktError: bad Timestamp offset: " + text)
-            var oh = _parse_uint(b, idx + 1, 2)
-            _expect(b, idx + 3, 0x3A, text)  # ':'
-            var om = _parse_uint(b, idx + 4, 2)
-            if oh > 23 or om > 59:
-                raise Error("WktError: bad Timestamp offset: " + text)
-            offset = sign * (oh * 3600 + om * 60)
-            idx += 6
-        else:
-            raise Error(
-                "WktError: Timestamp needs a 'Z' or +hh:mm zone: " + text
-            )
-        if idx != n:
-            raise Error("WktError: trailing bytes after Timestamp: " + text)
-        if year < 1 or month < 1 or month > 12:
-            raise Error("WktError: Timestamp date out of range: " + text)
-        if day < 1 or day > _days_in_month(year, month):
-            raise Error("WktError: Timestamp day out of range: " + text)
-        if hh > 23 or mm > 59 or ss > 59:
-            raise Error("WktError: Timestamp time out of range: " + text)
-        var days = _days_from_civil(year, month, day)
-        var secs = days * 86400 + hh * 3600 + mm * 60 + ss - offset
-        if secs < _TS_MIN_SECONDS or secs > _TS_MAX_SECONDS:
+        Accepts `YYYY-MM-DDTHH:MM:SS[.f{1,9}]` and a zone: `Z`, or a
+        `+hh:mm` / `-hh:mm` offset (RFC 3339 allows one on input; the
+        canonical OUTPUT is always `Z`), which is applied. `T` and `Z` must
+        be upper case; a leap second (`:60`) is refused. The instant must
+        lie in 0001-01-01T00:00:00Z..9999-12-31T23:59:59.999999999Z; the
+        range bounds the instant, not the written year, so a year-0000 local
+        time whose offset carries it into 0001 is accepted."""
+        var ts: UtcInstant
+        try:
+            ts = parse_rfc3339(text, allow_lowercase=False)
+        except e:
+            raise Error("WktError: bad Timestamp (" + String(e) + "): " + text)
+        if ts.seconds < _TS_MIN_SECONDS or ts.seconds > _TS_MAX_SECONDS:
             raise Error("WktError: Timestamp outside 0001..9999: " + text)
-        return Self(Int64(secs), Int32(nanos))
+        return Self(Int64(ts.seconds), Int32(ts.nanos))
 
     # -- `Proto3JsonWkt`: the codec arms call these ----------------------
 
@@ -357,54 +290,12 @@ struct Duration(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
 
 
 # =============================================================================
-# Self-contained helpers — civil-date conversion + decimal formatting.
+# Decimal helpers of the Duration form.
 # =============================================================================
 
 
-@always_inline
-def _floor_div(a: Int, b: Int) -> Int:
-    """Floor division — rounds toward negative infinity (`a // b` in Mojo on
-    `Int` truncates toward zero; a pre-1970 epoch needs the floor)."""
-    var q = a // b
-    if (a % b != 0) and ((a < 0) != (b < 0)):
-        q -= 1
-    return q
-
-
-def _days_from_civil(y: Int, m: Int, d: Int) -> Int:
-    """Days since 1970-01-01 for a proleptic-Gregorian (y, m, d).
-
-    Howard Hinnant's branch-free algorithm — exact for the full Int range."""
-    var yy = y - (1 if m <= 2 else 0)
-    var era = (yy if yy >= 0 else yy - 399) // 400
-    var yoe = yy - era * 400
-    var doy = (153 * (m + (-3 if m > 2 else 9)) + 2) // 5 + d - 1
-    var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-    return era * 146097 + doe - 719468
-
-
-def _civil_from_days(z_in: Int) -> Array[Int, 3]:
-    """The proleptic-Gregorian (year, month, day) for a days-since-1970
-    index. The inverse of `_days_from_civil` (Howard Hinnant)."""
-    var z = z_in + 719468
-    var era = (z if z >= 0 else z - 146096) // 146097
-    var doe = z - era * 146097
-    var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
-    var y = yoe + era * 400
-    var doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
-    var mp = (5 * doy + 2) // 153
-    var d = doy - (153 * mp + 2) // 5 + 1
-    var m = mp + (3 if mp < 10 else -9)
-    var year = y + (1 if m <= 2 else 0)
-    var out = Array[Int, 3](fill=0)
-    out[0] = year
-    out[1] = m
-    out[2] = d
-    return out^
-
-
 def _frac_suffix(nanos: Int) -> String:
-    """The fractional-seconds suffix for an RFC-3339 / Duration string.
+    """The fractional-seconds suffix of a Duration string.
 
     Empty if `nanos == 0`; otherwise `.fff` (3 digits), `.ffffff` (6), or
     `.fffffffff` (9) — the shortest length that represents `nanos` exactly,
@@ -427,32 +318,6 @@ def _frac_suffix(nanos: Int) -> String:
     for i in range(keep):
         digits += String(tmp[i])
     return String(".") + digits
-
-
-def _days_in_month(y: Int, m: Int) -> Int:
-    """The number of days in month `m` (1..12) of proleptic-Gregorian year
-    `y`."""
-    if m == 2:
-        var leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
-        return 29 if leap else 28
-    if m == 4 or m == 6 or m == 9 or m == 11:
-        return 30
-    return 31
-
-
-def _pad2(v: Int) -> String:
-    """A non-negative `Int` as a 2-digit zero-padded decimal."""
-    if v < 10:
-        return String("0") + String(v)
-    return String(v)
-
-
-def _pad4(v: Int) -> String:
-    """A non-negative `Int` as a 4-digit zero-padded decimal (the year)."""
-    var s = String(v)
-    while s.byte_length() < 4:
-        s = String("0") + s
-    return s
 
 
 def _bytes_of(s: String) -> List[UInt8]:
@@ -479,9 +344,3 @@ def _parse_uint(b: List[UInt8], start: Int, count: Int) raises -> Int:
             raise Error("WktError: expected a decimal digit")
         v = v * 10 + Int(c - 0x30)
     return v
-
-
-def _expect(b: List[UInt8], idx: Int, ch: UInt8, ctx: String) raises:
-    """Assert `b[idx]` is the literal byte `ch` (a date-string separator)."""
-    if idx >= len(b) or b[idx] != ch:
-        raise Error("WktError: malformed date/time string: " + ctx)

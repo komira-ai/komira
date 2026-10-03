@@ -26,9 +26,16 @@
 //     file; no resource carries the name of a stage.
 //   * The `raw` escape hatch. Field 90 of `Resource.body` is left free for
 //     it; it is specified separately and not built yet.
-//   * Secrets and retention. Both serve types v1 does not have (a secret
-//     resource; data-bearing resources). `Value` field 4 and `Resource` field
-//     3 are held for them.
+//   * A secret RESOURCE, and secret values. A service or a job receives a
+//     secret that already exists BY NAME (`SecretRef`); kci never reads,
+//     writes or stores the value. No `Value` ever carries a secret: `Value`
+//     field 4 stays held.
+//   * Retention. It serves data-bearing types v1 does not have; `Resource`
+//     field 3 is held for it.
+//
+// TWO MEANINGS OF "PLATFORM". `--platform=<id>` picks the deploy target (the
+// adapter set kci links). `ArtifactPlatform` is an OS and a CPU: which build
+// of an artifact a service or job runs. They are unrelated.
 //
 // Field numbers are what is stored. They are pinned as literal wire bytes by
 // the welded tests in tests/; renumbering a field is protoc-legal and decodes
@@ -53,7 +60,7 @@ enum Portability {
 }
 
 extend google.protobuf.MessageOptions {
-  // Marks each of the ten type messages below.
+  // Marks each resource type message below (v1: `Service`, `Job`).
   Portability portability = 50001;
   // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
   // output it does not expose is refused when the graph is loaded.
@@ -71,8 +78,8 @@ enum Output {
 }
 
 // A reference to another resource of the same list. With neither arm of
-// `output` set it names the resource itself (as in `Uses.target`,
-// `Domain.serves`); with `standard` set it names one value the resource
+// `output` set it names the resource itself (as in `Uses.target`); with
+// `standard` set it names one value the resource
 // produces at apply time. `named` is reserved for the escape hatch's own
 // outputs and is refused for every other producer.
 message Ref {
@@ -83,9 +90,9 @@ message Ref {
   }
 }
 
-// What a consumer may do to a resource. Each type accepts its own subset.
-// 2 to 6 are held for READ, WRITE, READ_WRITE, SEND and RECEIVE, which only
-// the later data types accept.
+// What a consumer may do to a resource. v1 has one access, CALL, which both
+// v1 types accept. 2 to 6 are held for READ, WRITE, READ_WRITE, SEND and
+// RECEIVE, which only the later data types accept.
 enum Access {
   ACCESS_UNSET = 0;
   CALL = 1;
@@ -100,8 +107,8 @@ message Uses {
 }
 
 // A configuration value: a literal, a release machine parameter, or a value
-// another resource produces. 4 is held for a reference to a `secret`
-// resource.
+// another resource produces. All three are plain (not secret) values. 4 is
+// held; a secret never rides a `Value` (see `SecretRef`).
 message Value {
   oneof v {
     string literal = 1;
@@ -118,13 +125,54 @@ message ActionOutput {
   string name = 2;
 }
 
+// The OS of an artifact build. v1 declares one value.
+enum Os {
+  OS_UNSET = 0;
+  LINUX = 1;
+}
+
+// The CPU of an artifact build. v1 declares one value.
+enum Cpu {
+  CPU_UNSET = 0;
+  X86_64 = 1;
+}
+
+// Which build of an artifact: an OS and a CPU (not a cloud; see "TWO
+// MEANINGS OF PLATFORM" above). Artifacts are built per platform, so an
+// `Image` states the one it needs.
+//
+// An unset field means its v1 default: `os` LINUX, `cpu` X86_64. That
+// default is fixed; declaring more values later does not move it, because
+// stored lists rely on it. In v1, linux x86_64 is the only platform a
+// reader accepts: any other value (one a later schema declares, or an
+// undeclared number) is refused when the graph is validated, before anything
+// is created.
+message ArtifactPlatform {
+  Os os = 1;
+  Cpu cpu = 2;
+}
+
 // What to run: a build action's output, or a literal content digest. Never a
-// mutable tag.
+// mutable tag. `platform` says which build: the action output of that
+// platform, or, for a digest, that the digest is of that platform's single
+// image (not a multi-platform index).
 message Image {
   oneof source {
     ActionOutput output = 1;
     string digest = 2;
   }
+  ArtifactPlatform platform = 3;
+}
+
+// A secret that already exists in the target environment's secret store,
+// named, never valued. kci passes the NAME to the platform, which makes the
+// secret's current value available to the container at run time; the value
+// is never in this file, in kci's state or in kci's memory. Creating or
+// rotating the secret is outside v1 (there is no secret resource). The map
+// key of a `secret_env` field is the environment variable the container
+// reads it from.
+message SecretRef {
+  string name = 1;
 }
 
 // ---- one entry of a deploy action's list --------------------------------------
@@ -168,7 +216,7 @@ message Scale {
   uint32 max = 2;
 }
 
-// ---- the ten types ---------------------------------------------------------------
+// ---- the v1 types: service and job -------------------------------------------------
 
 // A container that answers requests, scales (to zero if allowed) and may have
 // a public URL.
@@ -195,6 +243,10 @@ message Service {
     Internal internal = 11;
   }
 
+  // Secrets this service receives by name, keyed by environment variable.
+  // A key must not also appear in `env`.
+  map<string, SecretRef> secret_env = 12;
+
   // Reachable from outside the graph at a URL.
   message Public {}
   // No public URL; callable by other resources of this graph. Not a
@@ -211,6 +263,12 @@ message Job {
   Size size = 3;
   uint32 max_retries = 4;
   google.protobuf.Duration timeout = 5;
+  // Plain values only, as on `Service.env`: a literal, a parameter or
+  // another resource's output. Secrets go in `secret_env`.
+  map<string, Value> env = 6;
+  // Secrets this job receives by name, keyed by environment variable. A key
+  // must not also appear in `env`.
+  map<string, SecretRef> secret_env = 7;
 
   oneof trigger {
     OnDemand on_demand = 10;
