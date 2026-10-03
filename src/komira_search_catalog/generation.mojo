@@ -15,10 +15,12 @@
 # durable records keep what a deletion would otherwise erase:
 #
 #   * `<lineage>/_GENERATION_FLOOR`. Before `SearchMetastore.reap_chunk`
-#     deletes chunk `s`, it raises the floor to at least `s + 1`. The
-#     lineage's generation is max(listed head + 1, floor).
+#     reaps chunk `s` (which lets a later prefix advance delete it), it
+#     raises the floor to at least `s + 1`. The lineage's generation is
+#     max(listed head + 1, floor).
 #   * `<index>/meta/_RETIRED_SHARDS`. Before `reap_drained_shards` deletes a
-#     writer shard, it records that shard's final generation here. The index
+#     writer shard's objects, it records that shard's final generation here.
+#     Readers of the live split set skip a shard recorded here. The index
 #     generation counts each shard id once, as max(live, recorded), plus the
 #     recorded value of every shard that is gone.
 #
@@ -41,7 +43,14 @@
 # is still counting the same shard live.
 # =============================================================================
 
-from komira_objectstore import ConditionalWriteStore, WritePrecondition
+from komira_objectstore import (
+    ConditionalWriteStore,
+    LogStart,
+    WritePrecondition,
+    decode_log_start,
+    encode_log_start,
+    log_start_key,
+)
 from komira_objectstore.cas_manifest import is_not_found, is_precondition
 from komira_objectstore.path import Path
 
@@ -298,6 +307,51 @@ def record_retired_shard[
         try:
             _ = store.conditional_put(
                 key, encode_retired_shards(r), _precondition_for(cur)
+            )
+            return
+        except e:
+            if not is_precondition(String(e)):
+                raise e^
+    raise Error(
+        "komira_search_catalog: lost the compare-and-swap on "
+        + key.raw()
+        + " "
+        + String(_CAS_ATTEMPTS)
+        + " times"
+    )
+
+
+# -----------------------------------------------------------------------------
+# The lineage's log start
+# -----------------------------------------------------------------------------
+#
+# `<lineage>/_LOG_START` is komira_objectstore's retention pointer: chunks
+# below its sequence number may be gone, and a reader that recovers the head
+# by LIST starts there. A chunk at or above it must exist, so the catalog
+# advances it before deleting anything at or above the old value. It is
+# written here, not through `CasManifestStore.advance_log_start`, because
+# that verb's caller reads the pointer GET-then-HEAD, and a compare-and-swap
+# keyed on an etag read after the body can move the pointer backwards over
+# chunks another reaper has already deleted.
+
+
+def advance_log_start_to[
+    S: ConditionalWriteStore
+](
+    store: S, lineage_prefix: String, seq: Int64, offset: Int64
+) raises -> None:
+    """Make the lineage's log start at least `seq` (with `offset` as the
+    absolute offset of chunk `seq`). Never moves it backwards."""
+    var key = log_start_key(lineage_prefix)
+    for _ in range(_CAS_ATTEMPTS):
+        var cur = _read_versioned(store, key)
+        if cur.present and decode_log_start(cur.body, cur.etag).log_start_seq >= seq:
+            return
+        try:
+            _ = store.conditional_put(
+                key,
+                encode_log_start(LogStart(offset, seq, String(""))),
+                _precondition_for(cur),
             )
             return
         except e:

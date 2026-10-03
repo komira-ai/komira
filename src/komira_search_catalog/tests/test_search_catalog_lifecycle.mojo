@@ -18,16 +18,30 @@
 #   4. test_reap_is_fenced_against_a_publish_after_the_drained_check: a publish
 #      that lands in a writer shard after the reaper has decided the shard is
 #      drained must survive the reap.
-#   5. test_reap_never_deletes_a_key_it_did_not_list_first: the same late
-#      publish on a shard the fence cannot see (its chunks were reaped before
-#      generation floors existed, so the seal lands on a free slot) still
-#      survives, because the reaper only deletes keys it listed before the
-#      drained check.
+#   5. test_reap_fences_the_writer_slot_without_a_floor: the same late
+#      publish on a shard whose generation floor is gone is still fenced,
+#      because reaping chunks never makes the lineage look shorter.
+#   6. test_publish_into_a_retired_shard_is_refused and
+#      test_publish_that_loses_its_slot_to_a_seal_is_refused: once the reaper
+#      has sealed a shard, a publish into it (warm writer, cold handle, or one
+#      that loses its slot to the seal mid-reap) raises `[SHARD_RETIRED]`
+#      instead of landing past the seal, nothing it wrote is visible, and the
+#      caller's re-publish into a fresh shard is the only copy.
+#   7. test_reaping_a_chunk_below_the_top_keeps_cold_reads_whole and
+#      test_cold_read_racing_a_prefix_reap_is_not_torn: reaping chunks in any
+#      order, and a cold read racing the reap of a prefix, never make a cold
+#      reader report a torn lineage, and the live set and generation stay
+#      right.
+#
+# Every visibility claim is checked through the catalog's read path
+# (`list_live_splits_across_shards` or `SearchMetastore.list_live_splits`),
+# not by looking at objects in the store.
 #
 # Everything runs against the in-memory stores, with no network. `_HookStore`
-# wraps the shared in-memory store to stage the two interleavings a single
-# thread cannot otherwise reach: a store error on one key, and a publish that
-# lands at an exact point inside the reaper.
+# wraps the shared in-memory store to stage what a single thread cannot
+# otherwise reach: a store error on one key, a publish that lands at an exact
+# point inside the reaper, and a reap that lands inside a cold reader's head
+# recovery.
 # =============================================================================
 
 from std.testing import (
@@ -45,10 +59,13 @@ from komira_objectstore import (
     ObjectMeta,
     RetryPolicy,
     SharedInMemoryConditionalStore,
+    LogStart,
     WritePrecondition,
     chunk_key,
     encode_chunk,
+    encode_log_start,
     decode_chunk_body,
+    tombstone_key,
 )
 from komira_objectstore.path import Path
 from komira_objectstore.store import (
@@ -67,6 +84,7 @@ from komira_search_catalog.split_summary import (
 from komira_search_catalog.metastore import (
     SearchMetastore,
     generation_across_shards,
+    is_shard_retired,
     list_live_splits_across_shards,
     make_shard_id,
     shard_manifest_prefix,
@@ -90,6 +108,13 @@ def _uuid_eq(a: Array[UInt8, 16], b: Array[UInt8, 16]) -> Bool:
         if a[i] != b[i]:
             return False
     return True
+
+
+def _has_uuid(live: List[SplitSummary], u: Array[UInt8, 16]) -> Bool:
+    for i in range(len(live)):
+        if _uuid_eq(live[i].split_uuid, u):
+            return True
+    return False
 
 
 def _summary(seed: Int, doc_count: Int64) -> SplitSummary:
@@ -128,7 +153,8 @@ def _count_under(store: SharedInMemoryConditionalStore, prefix: String) raises -
 # _HookStore: the shared in-memory store plus two staged interleavings.
 #
 #   * LIST of exactly `list_trigger` first creates `inject_path` with
-#     `inject_bytes` (If-None-Match, so it fires at most once), then lists.
+#     `inject_bytes` (If-None-Match, so it fires at most once), deletes every
+#     key in `trigger_deletes` (deleting an absent key succeeds), then lists.
 #     The reaper's drained check LISTs `<shard>/tombstones/` as its last step,
 #     so a trigger there lands a write after the check has looked at the
 #     manifest.
@@ -152,6 +178,7 @@ struct _HookStore(
     var _inject_bytes: List[UInt8]
     var _fail_get_path: String
     var _fail_msg: String
+    var _trigger_deletes: List[String]
 
     def __init__(
         out self,
@@ -161,6 +188,7 @@ struct _HookStore(
         var inject_bytes: List[UInt8],
         var fail_get_path: String,
         var fail_msg: String,
+        var trigger_deletes: List[String] = List[String](),
     ):
         self._inner = inner^
         self._list_trigger = list_trigger^
@@ -168,6 +196,7 @@ struct _HookStore(
         self._inject_bytes = inject_bytes^
         self._fail_get_path = fail_get_path^
         self._fail_msg = fail_msg^
+        self._trigger_deletes = trigger_deletes^
 
     def clone(self) -> Self:
         return Self(
@@ -177,6 +206,7 @@ struct _HookStore(
             self._inject_bytes.copy(),
             self._fail_get_path.copy(),
             self._fail_msg.copy(),
+            self._trigger_deletes.copy(),
         )
 
     def head(self, path: Path) raises -> ObjectMeta:
@@ -196,6 +226,8 @@ struct _HookStore(
             except e:
                 if String(e).find("precondition") < 0:
                     raise e^
+            for i in range(len(self._trigger_deletes)):
+                self._inner.delete(Path.parse(self._trigger_deletes[i]))
         return self._inner.list_with_delimiter(prefix)
 
     def coalesce_policy(self) -> CoalescePolicy:
@@ -312,13 +344,15 @@ def test_generation_survives_reaping_the_top_chunk() raises:
         + String(g1),
     )
 
-    # A publish still moves it. (It goes to another shard: publishing into
-    # this one would leave chunk 2 as a hole below chunk 3, and a cold
-    # reader's head recovery refuses a lineage with a hole.)
-    var other = _shard_meta(store, make_shard_id(String("node"), 9))
-    _ = other.publish(_summary(3, Int64(2)))
+    # A publish into the same shard still moves it, and a cold reader sees
+    # every split that is still live, with nothing torn.
+    _ = w.publish(_summary(3, Int64(2)))
     var g2 = generation_across_shards(store, _META, String("logs"))
     assert_true(g2 > g1, "a publish after the reap moves the generation")
+    var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 3, "splits 0, 1 and 3 are live")
+    assert_true(_has_uuid(live, _uuid(3)), "the new publish is visible")
+    assert_false(_has_uuid(live, _uuid(2)), "the reaped split is not")
 
     _ = store^
 
@@ -380,8 +414,8 @@ def test_generation_survives_draining_and_reaping_a_shard() raises:
     assert_equal(r.shards_reaped, 1, "the drained writer shard is reaped")
     assert_equal(
         _count_under(store, shard_manifest_prefix(_META, shard_id)),
-        0,
-        "nothing is left under the reaped shard",
+        2,
+        "only the terminal seal and the log start that points at it remain",
     )
     var g3 = generation_across_shards(store, _META, String("logs"))
     assert_true(
@@ -438,26 +472,45 @@ def test_reap_is_fenced_against_a_publish_after_the_drained_check() raises:
         String(""),
     )
     var r = reap_drained_shards(hooks, _META, String("logs"))
-
-    # The published chunk is still there and still holds the split.
-    var raw = inner.get(Path.parse(late_key))
-    var got = decode_split_summary(decode_chunk_body(raw))
-    assert_true(_uuid_eq(got.split_uuid, _uuid(77)), "the late publish survived")
     assert_equal(r.shards_reaped, 0, "a shard that took a publish is not reaped")
+    assert_equal(r.shards_fenced, 1, "the seal lost the slot to the publish")
 
-    # Once the late split is retired and reaped too, the shard is drained for
-    # real and the next sweep removes it.
+    # The late split is visible to a cold reader of the whole index.
+    var live = list_live_splits_across_shards(inner, _META, String("logs"))
+    assert_equal(len(live), 1, "only the late split is live")
+    assert_true(_has_uuid(live, _uuid(77)), "the late publish is visible")
+
+    # The writer's warm handle lost slot 2 to that publish; its next publish
+    # finds the true tail and is visible too.
+    _ = w.publish(_summary(78, Int64(1)))
+    live = list_live_splits_across_shards(inner, _META, String("logs"))
+    assert_equal(len(live), 2, "both late splits are live")
+    assert_true(_has_uuid(live, _uuid(78)), "the writer's next publish is visible")
+
+    # Once both are retired and reaped too, the shard is drained for real and
+    # the next sweep retires it.
     var w2 = _shard_meta(inner, shard_id)
     w2.retire_at(Int64(2), Int64(0))
+    w2.retire_at(Int64(3), Int64(0))
     assert_true(w2.reap_chunk(Int64(2), _GRACE_MS, _GRACE_MS), "chunk 2 reaped")
+    assert_true(w2.reap_chunk(Int64(3), _GRACE_MS, _GRACE_MS), "chunk 3 reaped")
     var r2 = reap_drained_shards(_plain_hooks(inner), _META, String("logs"))
     assert_equal(r2.shards_reaped, 1, "the drained shard is reaped")
-    assert_equal(_count_under(inner, lineage), 0, "nothing is left behind")
+    assert_equal(
+        _count_under(inner, lineage),
+        2,
+        "only the terminal seal and the log start that points at it remain",
+    )
+    assert_equal(
+        len(list_live_splits_across_shards(inner, _META, String("logs"))),
+        0,
+        "nothing is live",
+    )
 
     _ = inner^
 
 
-def test_reap_never_deletes_a_key_it_did_not_list_first() raises:
+def test_reap_fences_the_writer_slot_without_a_floor() raises:
     var inner = SharedInMemoryConditionalStore()
     var shard_id = make_shard_id(String("node"), 3)
     var lineage = shard_manifest_prefix(_META, shard_id)
@@ -468,8 +521,9 @@ def test_reap_never_deletes_a_key_it_did_not_list_first() raises:
     w.retire_at(Int64(1), Int64(0))
     assert_true(w.reap_chunk(Int64(0), _GRACE_MS, _GRACE_MS), "chunk 0 reaped")
     assert_true(w.reap_chunk(Int64(1), _GRACE_MS, _GRACE_MS), "chunk 1 reaped")
-    # A shard drained before generation floors existed has none, so the
-    # reaper reads generation 0 and seals slot 0, not the writer's slot 2.
+    # Without the generation floor the reaper still has to find the writer's
+    # next slot, 2: reaping a chunk never leaves the lineage looking shorter
+    # than it was.
     inner.delete(Path.parse(lineage + "/_GENERATION_FLOOR"))
 
     var late_key = chunk_key(lineage, Int64(2)).raw()
@@ -482,10 +536,199 @@ def test_reap_never_deletes_a_key_it_did_not_list_first() raises:
         String(""),
     )
     var r = reap_drained_shards(hooks, _META, String("logs"))
-    assert_equal(r.shards_reaped, 1, "the unfenced shard is reaped")
-    var raw = inner.get(Path.parse(late_key))
-    var got = decode_split_summary(decode_chunk_body(raw))
-    assert_true(_uuid_eq(got.split_uuid, _uuid(88)), "the late publish survived")
+    assert_equal(r.shards_reaped, 0, "the publish at slot 2 fences the reap")
+    var live = list_live_splits_across_shards(inner, _META, String("logs"))
+    assert_equal(len(live), 1, "only the late split is live")
+    assert_true(_has_uuid(live, _uuid(88)), "the late publish is visible")
+
+    _ = inner^
+
+
+# =============================================================================
+# 6. A publish into a retired shard is refused.
+# =============================================================================
+
+
+def _drain(mut w: SearchMetastore[SharedInMemoryConditionalStore], n: Int) raises:
+    for i in range(n):
+        w.retire_at(Int64(i), Int64(0))
+    for i in range(n):
+        assert_true(
+            w.reap_chunk(Int64(i), _GRACE_MS, _GRACE_MS),
+            "chunk " + String(i) + " reaped",
+        )
+
+
+def test_publish_into_a_retired_shard_is_refused() raises:
+    var store = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 4)
+    var w = _shard_meta(store, shard_id)
+    _ = w.publish(_summary(1, Int64(2)))
+    _ = w.publish(_summary(2, Int64(2)))
+    _drain(w, 2)
+    var r = reap_drained_shards(store, _META, String("logs"))
+    assert_equal(r.shards_reaped, 1, "the drained shard is retired")
+    var g0 = generation_across_shards(store, _META, String("logs"))
+
+    # The writer is still alive. Its warm handle's next slot is the seal.
+    var refused = False
+    try:
+        _ = w.publish(_summary(3, Int64(2)))
+    except e:
+        refused = is_shard_retired(String(e))
+    assert_true(refused, "the publish is refused as a retired shard")
+    # The refusal is terminal for the handle ...
+    with assert_raises(contains="[SHARD_RETIRED]"):
+        _ = w.publish(_summary(3, Int64(2)))
+    # ... and for a fresh handle on the same shard, which finds the seal on
+    # top of the lineage.
+    var cold = _shard_meta(store, shard_id)
+    with assert_raises(contains="[SHARD_RETIRED]"):
+        _ = cold.publish(_summary(3, Int64(2)))
+
+    # Nothing became visible, nothing is torn, and the caller's re-publish
+    # into a fresh shard is visible to the index read.
+    assert_equal(
+        len(list_live_splits_across_shards(store, _META, String("logs"))),
+        0,
+        "the refused publishes are not visible",
+    )
+    var fresh = _shard_meta(store, make_shard_id(String("node"), 5))
+    _ = fresh.publish(_summary(3, Int64(2)))
+    var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 1, "exactly one copy of the re-published split")
+    assert_true(_has_uuid(live, _uuid(3)), "the re-publish is visible")
+    var g1 = generation_across_shards(store, _META, String("logs"))
+    assert_true(g1 > g0, "the re-publish moves the generation")
+
+    # A later sweep leaves the retired shard alone.
+    var r2 = reap_drained_shards(store, _META, String("logs"))
+    assert_equal(r2.shards_reaped, 0, "a retired shard is not reaped twice")
+    assert_equal(
+        generation_across_shards(store, _META, String("logs")),
+        g1,
+        "a second sweep does not move the generation",
+    )
+
+    _ = store^
+
+
+def test_publish_that_loses_its_slot_to_a_seal_is_refused() raises:
+    # The reaper has sealed the writer's next slot and not yet deleted
+    # anything (it crashed there, or is still running). The writer's publish
+    # loses slot 2 to the seal; it must not land at slot 3 and report success.
+    var store = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 6)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+    var w = _shard_meta(store, shard_id)
+    _ = w.publish(_summary(1, Int64(2)))
+    _ = w.publish(_summary(2, Int64(2)))
+    _drain(w, 2)
+    _ = store.conditional_put(
+        chunk_key(lineage, Int64(2)),
+        encode_chunk(List[UInt8](), Int64(0)),
+        WritePrecondition.if_none_match_star(),
+    )
+
+    with assert_raises(contains="[SHARD_RETIRED]"):
+        _ = w.publish(_summary(3, Int64(2)))
+    assert_equal(
+        len(list_live_splits_across_shards(store, _META, String("logs"))),
+        0,
+        "the refused publish is not visible",
+    )
+
+    # The next sweep finishes the shard; the index read stays whole, and the
+    # re-publish into a fresh shard is the only copy.
+    var r = reap_drained_shards(store, _META, String("logs"))
+    assert_equal(r.shards_reaped, 1, "the next sweep retires the shard")
+    var fresh = _shard_meta(store, make_shard_id(String("node"), 7))
+    _ = fresh.publish(_summary(3, Int64(2)))
+    var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 1, "exactly one copy of the re-published split")
+    assert_true(_has_uuid(live, _uuid(3)), "the re-publish is visible")
+
+    _ = store^
+
+
+# =============================================================================
+# 7. Reaping chunks out of order keeps cold reads whole.
+# =============================================================================
+
+
+def test_reaping_a_chunk_below_the_top_keeps_cold_reads_whole() raises:
+    var store = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 8)
+    var w = _shard_meta(store, shard_id)
+    for i in range(4):
+        _ = w.publish(_summary(10 + i, Int64(2)))
+    var g0 = generation_across_shards(store, _META, String("logs"))
+
+    # Compaction retired a split in the middle of the lineage.
+    w.retire_at(Int64(1), Int64(0))
+    assert_true(w.reap_chunk(Int64(1), _GRACE_MS, _GRACE_MS), "chunk 1 reaped")
+    var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 3, "splits 10, 12 and 13 are live")
+    assert_false(_has_uuid(live, _uuid(11)), "the reaped split is gone")
+    var g1 = generation_across_shards(store, _META, String("logs"))
+    assert_true(g1 >= g0, "reaping chunk 1 lowered the generation")
+
+    # Then the oldest one: chunks 0 and 1 are now a reaped prefix.
+    w.retire_at(Int64(0), Int64(0))
+    assert_true(w.reap_chunk(Int64(0), _GRACE_MS, _GRACE_MS), "chunk 0 reaped")
+    var cold = _shard_meta(store, shard_id)
+    var cold_live = cold.list_live_splits()
+    assert_equal(len(cold_live), 2, "a cold shard read lists 12 and 13")
+    assert_true(_has_uuid(cold_live, _uuid(12)), "split 12 is live")
+    assert_true(_has_uuid(cold_live, _uuid(13)), "split 13 is live")
+    assert_equal(cold.generation(), Int64(4), "the shard generation is 4")
+    var g2 = generation_across_shards(store, _META, String("logs"))
+    assert_true(g2 >= g1, "reaping chunk 0 lowered the generation")
+
+    # The writer keeps publishing into the same shard.
+    _ = w.publish(_summary(14, Int64(2)))
+    live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 3, "splits 12, 13 and 14 are live")
+    assert_true(_has_uuid(live, _uuid(14)), "the new publish is visible")
+    assert_true(
+        generation_across_shards(store, _META, String("logs")) > g2,
+        "the new publish moves the generation",
+    )
+
+    _ = store^
+
+
+def test_cold_read_racing_a_prefix_reap_is_not_torn() raises:
+    # A reaper advances the log start and deletes chunk 0 after a cold reader
+    # has read the log start but before it reads the chunks. The reader must
+    # retry against the new log start, not report a torn lineage.
+    var inner = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 9)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+    var w = _shard_meta(inner, shard_id)
+    for i in range(3):
+        _ = w.publish(_summary(20 + i, Int64(2)))
+    w.retire_at(Int64(0), Int64(0))
+
+    # What reap_chunk(0) and its prefix advance write, staged inside the
+    # reader's LIST of the manifest.
+    var deletes = List[String]()
+    deletes.append(chunk_key(lineage, Int64(0)).raw())
+    deletes.append(tombstone_key(lineage, Int64(0)).raw())
+    var hooks = _HookStore(
+        inner.clone(),
+        lineage + "/manifest/",
+        lineage + "/_LOG_START",
+        encode_log_start(LogStart(Int64(2), Int64(1), String(""))),
+        String(""),
+        String(""),
+        deletes^,
+    )
+    var reader = _shard_meta(hooks, shard_id)
+    var live = reader.list_live_splits()
+    assert_equal(len(live), 2, "splits 21 and 22 are live")
+    assert_true(_has_uuid(live, _uuid(21)), "split 21 is live")
+    assert_true(_has_uuid(live, _uuid(22)), "split 22 is live")
 
     _ = inner^
 

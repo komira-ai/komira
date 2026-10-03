@@ -8,8 +8,8 @@ sub-lineages. It is the store behind the `SearchIndexCatalog` seam of
   * metastore: `SearchMetastore[Storage]`, which publishes, lists, retires
     and reaps splits on one append-only manifest lineage, and the
     cross-shard read over per-writer sub-lineages.
-  * shard_reaper: `reap_drained_shards`, the reaper for drained writer
-    shards.
+  * shard_reaper: `reap_drained_shards`, which retires drained writer
+    shards; a publish into a retired shard raises `[SHARD_RETIRED]`.
   * generation: the durable records (a per-lineage generation floor and the
     index's retired-shards record) that keep the generation from going down
     when chunks and drained shards are reaped.
@@ -31,6 +31,8 @@ from .split_summary import (
 from .metastore import (
     SearchMetastore,
     ShardedLiveSplitEntry,
+    SHARD_RETIRED_MARKER,
+    is_shard_retired,
     make_shard_id,
     is_reserved_shard_id,
     shard_manifest_prefix,

@@ -4,8 +4,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `SearchIndexCatalog` seam of komira_search_scan: the `SplitSummary` record
 # and its binary codec, `SearchMetastore` over one append-only manifest
 # lineage (publish, list, retire, reap), the cross-shard read over per-writer
-# sub-lineages, the reaper for drained writer shards, and the records that
-# keep the generation from going down. Generic over komira_objectstore's
+# sub-lineages, the reaper that retires drained writer shards, and the
+# records that keep the generation from going down. Generic over komira_objectstore's
 # conditional-write stores; it names no cloud client.
 #
 # The welded tests run against the in-memory stores, with no network. One
@@ -16,8 +16,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # its slab collection. The third covers the retire and reap end of a split's
 # life: a store error that only names "404" is raised, not taken for a
 # reaped chunk, the generation never goes down while chunks and drained
-# shards are reaped, and a publish that lands in a shard after the reaper
-# found it drained survives the reap.
+# shards are reaped, a publish that lands in a shard after the reaper found
+# it drained survives the reap, a publish into a retired shard is refused
+# and its re-publish into a fresh shard is the only copy, and reaping
+# chunks in any order never leaves a lineage a cold reader refuses.
 mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

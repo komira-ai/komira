@@ -40,8 +40,14 @@ from komira_objectstore import (
     AppendResult,
     CasManifestStore,
     ConditionalWriteStore,
+    ManifestHead,
     RetryPolicy,
+    chunk_key,
     decode_chunk_body,
+    decode_chunk_record_count,
+    decode_head,
+    head_key,
+    tombstone_key,
 )
 from komira_objectstore.cas_manifest import is_not_found
 from komira_objectstore.store import CloneableConditionalWriteStore
@@ -54,6 +60,7 @@ from komira_objectstore.sublineage_shard_keys import (
 )
 
 from komira_search_catalog.generation import (
+    advance_log_start_to,
     generation_floor_key,
     decode_generation_floor,
     raise_generation_floor,
@@ -68,6 +75,64 @@ from komira_search_catalog.split_summary import (
     make_merged_split_summary,
     make_split_summary,
 )
+
+
+# =============================================================================
+# Chunk bodies that are not splits
+# =============================================================================
+#
+# Besides an encoded `SplitSummary` (always more than one byte), a chunk body
+# is one of:
+#
+#   * a seal: empty. `reap_drained_shards` writes one at a drained writer
+#     shard's next slot, and a publish that finds itself past one rewrites its
+#     own chunk into one. A shard with a seal is retired for good: no publish
+#     into it succeeds, and the seal is never deleted, because deleting it
+#     would free the slot the shard's writer would publish into next.
+#   * a reaped stub: one zero byte. `reap_chunk` replaces a reaped chunk's
+#     body with it instead of deleting the chunk, so the lineage stays
+#     gapless; a stub is deleted only once the log start has moved past it.
+#
+# Replay skips both.
+
+comptime SHARD_RETIRED_MARKER = "[SHARD_RETIRED]"
+"""In the message of the error `SearchMetastore.publish` raises when the shard
+it publishes into has been retired by `reap_drained_shards`. Nothing the
+publish wrote is visible. The caller re-publishes into a fresh shard id (a
+retired shard id never accepts a publish again). Test with
+`is_shard_retired`."""
+
+comptime _TORN_LINEAGE = "torn manifest lineage"
+"""In the message `CasManifestStore` raises when a cold head recovery reads
+a missing chunk at or above the log start it read."""
+
+comptime _MAX_SEQ = Int64(0x7FFFFFFFFFFFFFFF)
+
+@always_inline
+def is_shard_retired(msg: String) -> Bool:
+    """True iff `msg` is the error of a publish into a retired shard."""
+    return msg.find(SHARD_RETIRED_MARKER) >= 0
+
+
+@always_inline
+def _is_seal(body: List[UInt8]) -> Bool:
+    return len(body) == 0
+
+
+@always_inline
+def _is_reaped_stub(body: List[UInt8]) -> Bool:
+    return len(body) == 1 and body[0] == UInt8(0)
+
+
+@always_inline
+def _is_split(body: List[UInt8]) -> Bool:
+    return len(body) > 1
+
+
+def _reaped_stub() -> List[UInt8]:
+    var b = List[UInt8]()
+    b.append(UInt8(0))
+    return b^
 
 
 # =============================================================================
@@ -94,6 +159,13 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
 
     var _manifest: CasManifestStore[Self.Storage]
     var _index_name: String
+    # The chunk this handle's last publish won, -1 before the first. When the
+    # head a publish starts from is this chunk, the slot after it was this
+    # handle's own next slot, so a first-attempt win there needs no check.
+    var _last_won: Int64
+    # Set once a publish found the shard retired; every later publish on this
+    # handle refuses without touching the store.
+    var _retired: Bool
 
     def __init__(
         out self,
@@ -104,6 +176,8 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         (`<index>/meta`, or a shard's sub-lineage prefix)."""
         self._manifest = manifest^
         self._index_name = index_name^
+        self._last_won = Int64(-1)
+        self._retired = False
 
     @always_inline
     def index_name(self) -> String:
@@ -121,9 +195,100 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
 
         The chunk's record count is `summary.doc_count`; the substrate uses it
         for offset bookkeeping only, since splits are keyed by UUID inside the
-        body. Returns the `AppendResult` (chunk_seq, etag, attempts)."""
+        body. Returns the `AppendResult` (chunk_seq, etag, attempts).
+
+        Raises an error carrying `SHARD_RETIRED_MARKER` (test with
+        `is_shard_retired`) when `reap_drained_shards` has retired this
+        lineage. Nothing the publish wrote is then visible, and the caller
+        re-publishes into a fresh shard id.
+
+        Retirement check: the reaper retires a shard by creating a seal at
+        the writer's next slot, the same create-if-absent a publish does.
+        When the head this publish starts from is the chunk this handle last
+        won and the append wins the slot right after it, that slot was free,
+        so no seal is involved and there is nothing to check (the writer's
+        steady state, no extra request). Otherwise the publish either lost a
+        slot or started from a head it did not write, so it reads the chunks
+        below the one it won, newest first, down to the first one that
+        exists: a seal there means the publish landed past it. The publish
+        then rewrites its own chunk into a seal, which no reader returns, and
+        raises."""
+        if self._retired:
+            raise Error(self._retired_message())
         var body = encode_split_summary(summary)
-        return self._manifest.append(body^, summary.doc_count)
+        # A cold head recovery can race a reaper that advances the log start
+        # and deletes the chunks below it; the recovery then reports a torn
+        # lineage. Nothing was written, so retry: once unconditionally, then
+        # only while the log start keeps moving. A lineage that stays torn
+        # raises.
+        var last_log_start = Int64(-2)
+        while True:
+            try:
+                var pre = self._manifest.read_head()
+                var r = self._manifest.append(body, summary.doc_count)
+                self._refuse_if_past_a_seal(pre.chunk_seq, r.chunk_seq)
+                self._last_won = r.chunk_seq
+                return r^
+            except e:
+                if String(e).find(_TORN_LINEAGE) < 0:
+                    raise e^
+                var ls = self._manifest.read_log_start().log_start_seq
+                if ls == last_log_start:
+                    raise e^
+                last_log_start = ls
+
+    def _retired_message(self) -> String:
+        return (
+            "komira_search_catalog: "
+            + SHARD_RETIRED_MARKER
+            + " the lineage "
+            + self._manifest.prefix()
+            + " was retired by reap_drained_shards; publish into a fresh"
+            " shard"
+        )
+
+    def _refuse_if_past_a_seal(mut self, pre_seq: Int64, won: Int64) raises:
+        """The retirement check of `publish` (see there)."""
+        if won == pre_seq + Int64(1) and (
+            pre_seq < Int64(0) or pre_seq == self._last_won
+        ):
+            return
+        var prefix = self._manifest.prefix()
+        var log_start = self._manifest.read_log_start().log_start_seq
+        if won < log_start:
+            # A slot below the log start belongs to a reaped prefix, which no
+            # reader replays. Reachable only if a head object older than the
+            # log start was trusted; refuse rather than report a publish
+            # nobody will see.
+            raise Error(
+                "komira_search_catalog: publish won chunk "
+                + String(won)
+                + " below the log start "
+                + String(log_start)
+                + " of "
+                + prefix
+                + "; it is not visible, publish again"
+            )
+        var seq = won - Int64(1)
+        while seq >= log_start:
+            var below = self._read_body_if_present(seq)
+            if not below:
+                seq -= Int64(1)
+                continue
+            if _is_seal(below.value()):
+                self._manifest.rewrite_chunk_body(won, List[UInt8]())
+                self._retired = True
+                raise Error(self._retired_message())
+            return
+
+    def _read_body_if_present(self, chunk_seq: Int64) raises -> Optional[List[UInt8]]:
+        """The chunk's body, or None when the store proves it absent."""
+        try:
+            return Optional(self._manifest.read_chunk(chunk_seq))
+        except e:
+            if is_not_found(String(e)):
+                return None
+            raise e^
 
     def _replay_live_entries(self) raises -> List[LiveSplitEntry]:
         """Replay the window [log_start_seq, head] and decode each chunk,
@@ -139,7 +304,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         split published since; nothing later repairs that. `read_head_fresh()`
         answers from the local cache on a warm handle and LISTs the bucket on
         a cold one, so readers always see the true tail."""
-        var head = self._manifest.read_head_fresh()
+        var head = self._read_head_settled()
         var out = List[LiveSplitEntry]()
         if head.chunk_seq < Int64(0):
             return out^  # empty manifest (no publishes yet)
@@ -152,10 +317,9 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
             if not _contains(dead, seq):
                 try:
                     var chunk = self._manifest.read_chunk(seq)
-                    # An empty body is the fence seal `reap_drained_shards`
-                    # writes, never a split (an encoded summary is never
-                    # empty). One a crashed reaper left behind is skipped.
-                    if len(chunk) > 0:
+                    # Seals and reaped stubs are not splits (see the block
+                    # above `SearchMetastore`).
+                    if _is_split(chunk):
                         out.append(
                             LiveSplitEntry(seq, decode_split_summary(chunk))
                         )
@@ -168,10 +332,31 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
                     # split would silently drop out of every query.
                     if not is_not_found(String(e)):
                         raise e^
-                    # Reaped after the head was read: neither tombstoned nor
-                    # readable. Skip the gap.
+                    # Deleted after the log start was read: a reaped stub
+                    # below a log start a reaper has since moved. Skip.
             seq += Int64(1)
         return out^
+
+    def _read_head_settled(self) raises -> ManifestHead:
+        """`read_head_fresh()`, retried when a cold head recovery races a
+        reaper. Recovery reads the log start, LISTs, then reads every chunk
+        from the log start up; a reaper that advances the log start and
+        deletes the chunks below it in between makes recovery report a torn
+        lineage. A reaper only deletes below a log start it has already
+        advanced, so a retry reads the new one. Retried once
+        unconditionally, then only while the log start keeps moving; a
+        lineage that stays torn raises."""
+        var last_log_start = Int64(-2)
+        while True:
+            try:
+                return self._manifest.read_head_fresh()
+            except e:
+                if String(e).find(_TORN_LINEAGE) < 0:
+                    raise e^
+                var ls = self._manifest.read_log_start().log_start_seq
+                if ls == last_log_start:
+                    raise e^
+                last_log_start = ls
 
     def list_live_splits(self) raises -> List[SplitSummary]:
         """The live split set, in publish order.
@@ -213,8 +398,8 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         whenever the catalog changes; otherwise a query issued after a
         publish could be answered from a plan cached before it. It also never
         goes down: a cold reader finds the head by LISTing chunks, and reaping
-        deletes chunks, so `reap_chunk` first raises the floor to cover the
-        chunk it deletes (see generation.mojo). The floor is read after the
+        can delete chunks, so `reap_chunk` first raises the floor to cover
+        the chunk it reaps (see generation.mojo). The floor is read after the
         head, which is the order that argument needs.
 
         Reads `read_head_fresh()` for the same reason as
@@ -224,7 +409,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         costs a LIST rather than a GET, which the query path already pays in
         the replay; a writer's warm handle stays at zero requests for the
         head. The floor costs one GET."""
-        var from_head = self._manifest.read_head_fresh().chunk_seq + Int64(1)
+        var from_head = self._read_head_settled().chunk_seq + Int64(1)
         var floor = self._generation_floor()
         if floor > from_head:
             return floor
@@ -278,24 +463,50 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         Raises not-found if the chunk is already gone; a reaper treats that as
         "the split object was already reaped"."""
         var chunk = self._manifest.read_chunk(chunk_seq)
+        if not _is_split(chunk):
+            # A reaped stub: a reaper got through `reap_chunk`'s rewrite and
+            # stopped before dropping the tombstone. Same answer as a
+            # deleted chunk.
+            raise Error(
+                "komira_search_catalog: chunk "
+                + String(chunk_seq)
+                + " of "
+                + self._manifest.prefix()
+                + " was already reaped: not_found"
+            )
         return decode_split_summary(chunk).object_key
 
     def reap_chunk(mut self, chunk_seq: Int64, now_ms: Int64, grace_ms: Int64) raises -> Bool:
-        """Delete a tombstoned chunk and its tombstone marker once
-        `now_ms - schedule_ts >= grace_ms`. The grace period must exceed the
-        longest query, so a query that picked up the split before it was
-        retired can still read it.
+        """Reap a tombstoned chunk once `now_ms - schedule_ts >= grace_ms`.
+        The grace period must exceed the longest query, so a query that
+        picked up the split before it was retired can still read it.
 
-        Returns True if the chunk is gone (reaped now, or already reaped),
-        False if the grace period has not elapsed yet; the caller leaves the
-        tombstone for a later run.
+        Returns True if the chunk is reaped (now, or already), False if the
+        grace period has not elapsed yet; the caller leaves the tombstone for
+        a later run.
 
-        Two reapers may race. The manifest store's `reap` raises when the
-        tombstone is already gone; this method treats that, and a chunk that
-        was never tombstoned, as done. Any other error propagates.
+        Reaping does not delete the chunk. A cold reader recovers the head by
+        reading every chunk from the log start up and refuses a missing one
+        as a torn lineage, and compaction retires chunks in any order, so a
+        deleted chunk below the top would break every cold read of the
+        index. Instead:
 
-        This deletes only the manifest chunk. The split object at
-        `summary.object_key` is deleted by the caller on the same grace
+          1. Raise the generation floor to cover the chunk (generation.mojo).
+          2. Replace its body with a reaped stub, which replay skips. Its
+             record count is kept, so offsets do not move.
+          3. Drop the tombstone.
+          4. Advance the log start over the run of reaped stubs it now
+             starts with, then delete those stubs. A chunk is deleted only
+             once the log start is past it.
+
+        The advance stops below the durable head object's next slot. A cold
+        writer that trusts that object (it can lag the true tail) publishes
+        into the slot after it; were that slot below the log start, the
+        publish would land where no reader looks.
+
+        Two reapers may race; every step is idempotent and the log start only
+        moves forward. This deletes only manifest chunks. The split object
+        at `summary.object_key` is deleted by the caller on the same grace
         check, using the store it holds."""
         var sched: Int64
         try:
@@ -307,24 +518,74 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
             raise e^
         if now_ms - sched < grace_ms:
             return False  # grace period not over; keep the tombstone.
-        # The chunk is about to stop being listed. Raise the floor to cover it
-        # first, so a reader that recovers the head by LIST cannot compute a
-        # lower generation than one that still saw this chunk.
         var prefix = self._manifest.prefix()
         raise_generation_floor(
             self._manifest.store_mut(), prefix, chunk_seq + Int64(1)
         )
         try:
-            self._manifest.reap(chunk_seq)
+            self._manifest.rewrite_chunk_body(chunk_seq, _reaped_stub())
         except e:
-            # Another reaper got there first: the tombstone is gone and the
-            # chunk with it.
-            if is_not_found(String(e)) or String(e).find(
-                "not ScheduledForDelete"
-            ) >= 0:
-                return True
-            raise e^
+            # Another reaper got there first and the log start has already
+            # moved past the chunk.
+            if not is_not_found(String(e)):
+                raise e^
+        self._manifest.store_mut().delete(tombstone_key(prefix, chunk_seq))
+        self._advance_past_reaped_prefix()
         return True
+
+    def _advance_past_reaped_prefix(mut self) raises:
+        """Step 4 of `reap_chunk`. A reaper racing this one may move the log
+        start first; the walk then stops at a chunk it already deleted, and
+        the advance never moves the log start backwards."""
+        var prefix = self._manifest.prefix()
+        var ls = self._manifest.read_log_start()
+        var start = ls.log_start_seq
+        var offset = ls.log_start_offset
+        if start < Int64(0):
+            start = Int64(0)
+            offset = Int64(0)
+        var cap = self._durable_head_next_slot()
+        var seq = start
+        while seq < cap:
+            var raw = self._read_raw_if_present(seq)
+            if not raw:
+                break
+            if not _is_reaped_stub(decode_chunk_body(raw.value())):
+                break
+            offset += decode_chunk_record_count(raw.value())
+            seq += Int64(1)
+        if seq == start:
+            return
+        advance_log_start_to(self._manifest.store_mut(), prefix, seq, offset)
+        for q in range(Int(start), Int(seq)):
+            self._manifest.store_mut().delete(chunk_key(prefix, Int64(q)))
+
+    def _durable_head_next_slot(self) raises -> Int64:
+        """The slot after the durable head object's chunk, or no bound when
+        there is no head object (a cold handle then recovers by LIST, which
+        starts at the log start)."""
+        try:
+            var raw = self._manifest.get_object(
+                head_key(self._manifest.prefix()).raw()
+            )
+            return decode_head(raw).chunk_seq + Int64(1)
+        except e:
+            if is_not_found(String(e)):
+                return _MAX_SEQ
+            raise e^
+
+    def _read_raw_if_present(self, chunk_seq: Int64) raises -> Optional[List[UInt8]]:
+        """The encoded chunk (record count and body), or None when absent."""
+        try:
+            return Optional(
+                self._manifest.get_object(
+                    chunk_key(self._manifest.prefix(), chunk_seq).raw()
+                )
+            )
+        except e:
+            if is_not_found(String(e)):
+                return None
+            raise e^
 
 
 @always_inline
@@ -448,12 +709,20 @@ def list_live_splits_across_shards_with_seq[
     mixed one from both; there are no duplicates because each split is
     published to exactly one lineage.
 
+    Shards `reap_drained_shards` has retired are skipped.
+
     Order is deterministic: discovered shards in LIST order, then the
     unsharded lineage."""
     var union = List[ShardedLiveSplitEntry]()
 
+    # A retired shard holds only seals and reaped stubs and never accepts
+    # another publish, so it has nothing to contribute; skipping it keeps the
+    # read cost from growing with every writer shard ever reaped.
+    var retired = read_retired_shards(storage, index_meta_prefix)
     var shard_ids = _discover_shard_ids(storage, index_meta_prefix)
     for i in range(len(shard_ids)):
+        if retired.find(shard_ids[i]) >= 0:
+            continue
         var lineage_prefix = shard_manifest_prefix(
             index_meta_prefix, shard_ids[i]
         )
