@@ -9,8 +9,8 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 # welded tests (the generated layout probe, then the caller's), and their
 # gen_checks and tests_checks: komira_aws_logs, and komira_aws_logs_hand,
 # which adds a hand_srcs module and the overrides manifest naming it.
-# run_tests.sh (test 35) builds this package, the generation of a client-mode
-# client in ../aws_client_mode, and runs each target of
+# run_tests.sh (test 35) builds this package and ../aws_client_mode (a
+# client-mode client over the same stubs), and runs each target of
 # ../../negative/mojo_aws_client as an expect_red.
 #
 # GetLogEvents' error shapes are memberless in the pinned model, so the
@@ -21,8 +21,10 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 # The runtime is STUBS, kept by hand: a library of this cell cannot depend
 # on a mojo_library of the komira cell (each cell's MojoPkgTSet is a
 # different type), so the real komira_aws_core and komira_json cannot be
-# deps here. stub/komira_aws_core declares every name the generated module
-# imports, with the real core's signatures (bodies as bytes, AwsResponse);
+# deps here. stub/komira_aws_core declares every name a generated awsJson
+# module imports in either mode, with the real core's signatures (bodies as
+# bytes, AwsResponse, HttpResult; its docstring says which are implemented);
+# stub/komira_http_core is the Connector trait client-mode code names;
 # stub/komira_json is a minimal JSON value and parser with komira_json's
 # layout and the part of its API that code calls. Generated code is built
 # against the real core and komira_json in the komira cell, by the AWS
@@ -46,13 +48,26 @@ mojo_library(
 )
 
 mojo_library(
+    name = "komira_http_core",
+    srcs = [
+        "stub/komira_http_core/__init__.mojo",
+        "stub/komira_http_core/transport/__init__.mojo",
+        "stub/komira_http_core/transport/io_stream.mojo",
+    ],
+    visibility = ["//functional/aws_client_mode:"],
+)
+
+mojo_library(
     name = "komira_aws_core",
     srcs = ["stub/komira_aws_core/__init__.mojo"],
     visibility = [
         "//functional/aws_client_mode:",
         "//negative/mojo_aws_client:",
     ],
-    deps = [":komira_json"],
+    deps = [
+        ":komira_http_core",
+        ":komira_json",
+    ],
 )
 
 # GetLogEvents only, pure: the module kci_logs needs first.

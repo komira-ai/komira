@@ -372,7 +372,7 @@ to it. Every refusal of the rule is at analysis. The module docstring of
 [`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
 [`tests//functional/mojo_aws_client`](../tests/functional/mojo_aws_client/BUCK),
 [`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
-(client mode, at generation only),
+(client mode),
 [`tests//negative/mojo_aws_client`](../tests/negative/mojo_aws_client/BUCK) and, for
 endpoint rulesets,
 [`../proto-codegen/aws_endpoint_rules`](../proto-codegen/aws_endpoint_rules/BUCK)
