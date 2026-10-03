@@ -19,7 +19,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests parse and refuse synthetic files in memory, assert each
 # refusal by its message, round-trip the parsed value on the proto binary
 # wire with every field number pinned as bytes, and render argvs exactly,
-# including from `example.textproto`, staged as test data.
+# including from `example.textproto`, staged as test data. One more reads the
+# repository's own release/artifacts.textproto through the same reader, so a
+# release file kci would refuse fails this library's build.
 mojo_library(
     name = "kci_artifact_declaration",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -32,9 +34,14 @@ mojo_library(
         "tests/test_declaration_parse.mojo",
         "tests/test_declaration_render.mojo",
         "tests/test_declaration_validate.mojo",
+        "tests/test_release_artifacts_file.mojo",
     ],
     test_data = {
         "tests/test_declaration_render.mojo": ["example.textproto"],
+        # The repository's own release declarations (release/BUCK).
+        "tests/test_release_artifacts_file.mojo": {
+            "artifacts.textproto": "//release:artifacts.textproto",
+        },
     },
     visibility = ["PUBLIC"],
 )
