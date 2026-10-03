@@ -1,0 +1,79 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+
+# The `kci build` verb: derive the release stamp from git at --revision-id
+# (a full commit id that must be the checkout's HEAD, in a full-history
+# clone; refused otherwise, before any build), then for each artifact of the
+# declarations file (kci_artifact_declaration), in file order and one at a
+# time (a metapackage declared last reads its members under {release_dir}),
+# create an
+# EMPTY directory under --out-dir, run the declared build system's rendered
+# argv into it, and check what it left with kci_release_set.verify_member
+# (the same checks `kci publish` re-runs); when every artifact passed, write
+# release.json (members + set hash) LAST, as the commit marker. kci knows no
+# build tool: the program, its args and "build on the farm" are the
+# declarations file's. The process is started through the ProcessRunner
+# seam: SupervisorRunner (komira_supervisor) for real runs, ScriptedRunner
+# for tests. Nothing here names a farm, a channel or an account.
+#
+# Recorded once, as the design asked: does `-c komira.execution=remote` with
+# no reachable farm fail rather than fall back to local? MEASURED 2026-10-02
+# on linux-x86_64, in a scratch isolation dir, with the RE endpoint overridden
+# so no farm answers:
+#
+#   ./buck2 --isolation-dir kci-noremote-probe build -c komira.execution=remote \
+#     -c buck2_re_client.engine_address=grpc://kci-no-farm.invalid:30980 \
+#     -c buck2_re_client.action_cache_address=grpc://kci-no-farm.invalid:30980 \
+#     -c buck2_re_client.cas_address=grpc://kci-no-farm.invalid:30980 \
+#     //tools/build/examples:hello
+#
+# (and again with all three at grpc://127.0.0.1:1, a refused port). Observed:
+# it NEVER fell back. Every status line was a remote stage (`zig_unpack
+# [re_execute]`, `zig_build_exe [re_upload]`), no action ran locally, and
+# nothing was built. But it did not FAIL either: after 240 s (.invalid) and
+# 200 s (refused port) buck2 was still waiting, and the client was stopped
+# by `timeout` (exit 124). That matches the documented contract
+# (tools/build/platforms/README.md, "Remote workers": every platform
+# `komira_execution_platforms` registers "runs remotely only (local
+# execution disabled)"). So for kci build: a farm that is down never builds
+# locally unnoticed; the first build stalls until `--build-timeout-s` ends
+# it, and kci reports it FAILED ("timed out"), naming the artifact.
+#
+# The welded tests drive ScriptedRunner over files they write under
+# TEST_TMPDIR, plus SupervisorRunner over /bin/sh: no buck2, no network.
+mojo_library(
+    name = "kci_build_lib",
+    import_name = "kci_build",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    deps = [
+        "//src/kci_artifact_declaration:kci_artifact_declaration",
+        "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_release_set:kci_release_set",
+        "//src/komira_json:komira_json",
+        "//src/komira_supervisor:komira_supervisor",
+    ],
+    test_srcs = [
+        # every flag, both spellings, each refusal naming its flag; deleted flags are unknown
+        "tests/test_build_flags.mojo",
+        # the whole verb over ScriptedRunner: argv, order, empty dirs, every stop, release.json last
+        "tests/test_build_flow.mojo",
+        # --revision-id against the checkout, the stamp from git, every refusal
+        "tests/test_revision.mojo",
+        # SupervisorRunner over /bin/sh: output files, exit codes, the timeout
+        "tests/test_supervisor_runner.mojo",
+    ],
+    test_data = {
+        "tests/test_build_flow.mojo": {
+            "src/kci_artifact_declaration/example.textproto": "//src/kci_artifact_declaration:example.textproto",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+# `kci build` as a standalone binary, until the kci binary dispatches its
+# `build` verb to the same `build_main`.
+mojo_binary(
+    name = "kci_build",
+    srcs = ["main/kci_build_main.mojo"],
+    deps = [":kci_build_lib"],
+    visibility = ["PUBLIC"],
+)

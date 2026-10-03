@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Host resolution above the socket layer: the DNS resolver and the IpAddr and
+# SockAddr value types. It imports `komira_async.reactor.socket_setup` (the
+# loopback helper) and nothing else outside the standard library, so its one
+# dependency is komira_async. TCP stays in komira_async.
+mojo_library(
+    name = "komira_net",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+    ],
+    test_srcs = [
+        "tests/test_dns_addrinfo_offsets.mojo",
+        "tests/test_dns_literal.mojo",
+        "tests/test_dns_resolve.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

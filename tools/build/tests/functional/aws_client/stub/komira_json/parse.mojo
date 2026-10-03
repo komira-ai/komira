@@ -1,4 +1,5 @@
-"""A minimal JSON parser: `parse_json_value`, as komira_json's parse.mojo.
+"""A minimal JSON parser: `parse_json_value` and `parse_json_bytes`, as
+komira_json's parse.mojo.
 
 Strings support the `\\"`, `\\\\`, `\\/`, `\\n`, `\\t` and `\\r` escapes (no
 `\\u`, which the fixture's bodies do not use, and which is refused rather
@@ -172,3 +173,15 @@ def parse_json_value(
     if p.pos != len(p.b):
         raise Error(String("JsonError: trailing bytes at ") + String(p.pos))
     return v^
+
+
+def parse_json_bytes(
+    b: List[UInt8], max_depth: Int = JSON_DEFAULT_MAX_DEPTH
+) raises -> JsonValue:
+    """`parse_json_value` of a body held as bytes. Simplified: any byte above
+    0x7F is refused (komira_json validates UTF-8 instead); the fixture's
+    bodies are ASCII."""
+    for i in range(len(b)):
+        if b[i] > UInt8(0x7F):
+            raise Error(String("JsonError: non-ASCII byte at ") + String(i))
+    return parse_json_value(String(unsafe_from_utf8=Span(b)), max_depth)

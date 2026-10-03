@@ -6,7 +6,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the args appended for it). Reads a declarations file (textproto) into the
 # generated `kci.release.v1.ArtifactDeclarations`, validates it, and renders
 # the argv that builds one artifact into an output
-# directory (`{out_dir}` substituted). One artifact per declaration: it also
+# directory (the six placeholders substituted in one pass: `{out_dir}`,
+# `{release_dir}` and the git-derived stamp `{revision_id}`,
+# `{source_commit}`, `{build_number}`, `{timestamp_ms}`; artifacts build in
+# file order, so a metapackage declared last reads its members' manifests
+# under `{release_dir}`). One artifact per declaration: it also
 # holds the two refusals over what a build left (exactly one `manifest.json`
 # at the top of the directory; its `name` equal to the declaration's,
 # exactly). Pure: it runs no process and reads no directory; `kci build`
@@ -34,3 +38,7 @@ mojo_library(
     },
     visibility = ["PUBLIC"],
 )
+
+# The example declarations file, for tests in other packages that render from
+# it (kci_build's flow test stages it as test data).
+export_file(name = "example.textproto", visibility = ["PUBLIC"])
