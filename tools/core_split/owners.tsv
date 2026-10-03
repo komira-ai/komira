@@ -45,7 +45,6 @@ komira_objectstore	origin/lib/komira_objectstore
 komira_obs	origin/lib/komira_obs
 komira_oci	origin/lib/komira_oci
 komira_orc	origin/lib/komira_orc
-komira_pg	origin/lib/komira_pg
 komira_placement	origin/lib/komira_placement
 komira_plan_proto	origin/lib/komira_rpc_plan
 komira_plan_wire	origin/lib/komira_plan_wire

@@ -1,19 +1,37 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The Postgres driver for komira_db: `PgDatabase` conforms to the
-# backend-generic `SqlDatabase` trait over the komira_pg wire client, and
+# backend-generic `SqlDatabase` trait over the wire client in `wire/`, and
 # `PgPool` is the `Pool[PgDatabase]` specialization.
 #
-# This package has no tests of its own yet (test_srcs is deliberately absent);
-# compiling the library is its gate.
+# `wire/` is the native Postgres pgwire-v3 client: SCRAM-SHA-256 authentication
+# over TLS 1.3 (s2n, through komira_http's TLS layer), the simple and extended
+# query protocols with binary-format codecs for a closed OID set, and
+# poll-shaped query and transaction operations driven by a komira_async
+# reactor.
+#
+# The tests (all under wire/tests) need no database server: SCRAM and codec
+# vectors, hand-built rows, host resolution through /etc/hosts, and the
+# poll-shaped read frame driven over a local socketpair.
 
 mojo_library(
     name = "komira_db_postgres",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["wire/tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
         "//src/komira_db:komira_db",
-        "//src/komira_pg:komira_pg",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_net:komira_net",
+    ],
+    test_srcs = [
+        "wire/tests/test_binary_codec.mojo",
+        "wire/tests/test_dns_resolve_pg_host.mojo",
+        "wire/tests/test_pg_query_op_poll.mojo",
+        "wire/tests/test_pg_tx_op_sequence.mojo",
+        "wire/tests/test_pgrow_accumulation.mojo",
+        "wire/tests/test_scram_and_pgwire.mojo",
     ],
     visibility = ["PUBLIC"],
 )
