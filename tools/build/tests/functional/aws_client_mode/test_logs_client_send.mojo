@@ -125,20 +125,24 @@ def test_send_hands_the_transport() raises:
     assert_equal(res.header(String("x-stub-s3-200-error")), "false")
     # The caller's HTTP config, here the defaults: no containing deadline.
     assert_equal(res.header(String("x-stub-context-ceiling-us")), "0")
+    assert_equal(res.header(String("x-stub-request-timeout-us")), "0")
 
 
 def test_send_hands_on_the_callers_http_config() raises:
     # The config the caller built the client with reaches the transport
-    # unchanged on every send: the client keeps no config of its own.
+    # unchanged on every send: the client keeps no config of its own. Both
+    # fields are set, to different values, so neither can stand in for the
+    # other.
     var client = _Client(
         _mk_connector,
-        HttpClientConfig.for_serving_ceiling(4_500_000),
+        HttpClientConfig(request_timeout_us=1_234_567, context_ceiling_us=4_500_000),
         _creds(),
         String("us-west-2"),
     )
     for _ in range(2):
         var res = client.send(build_get_log_events_request(_request()))
         assert_equal(res.header(String("x-stub-context-ceiling-us")), "4500000")
+        assert_equal(res.header(String("x-stub-request-timeout-us")), "1234567")
 
 
 def test_send_keeps_the_session_token() raises:

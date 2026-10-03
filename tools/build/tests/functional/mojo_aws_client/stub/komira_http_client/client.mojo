@@ -5,7 +5,8 @@ generated client takes it (its constructor's `http_config`) and hands it to
 Of the real config only the two fields a caller's choice between its
 constructors sets are kept: `context_ceiling_us`, the deadline of the
 request the process serves inside (0 when there is none), and
-`request_timeout_us`, the per-request budget (0 selects the 600 s default).
+`request_timeout_us`, the per-request budget (0 selects the client's
+default).
 `for_serving_ceiling` records the ceiling and, unlike the real one, derives
 no budget from it, so `request_timeout_us` stays 0 here: no code of this
 cell sends a request. The stub `send_sigv4_signed_request` echoes both
