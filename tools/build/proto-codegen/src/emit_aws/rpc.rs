@@ -136,6 +136,6 @@ impl Binding for AwsJsonRpc {
     }
 
     fn error_code_doc(&self) -> &'static str {
-        "awsJson error code (`aws_json_error_info`)"
+        "awsJson error code"
     }
 }

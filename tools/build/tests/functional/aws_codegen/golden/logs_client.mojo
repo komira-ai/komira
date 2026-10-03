@@ -59,8 +59,7 @@ from komira_aws_core import (
     AwsResponse,
     aws_blob_from_json,
     aws_error_code,
-    aws_error_code_from_body,
-    aws_error_message_from_body,
+    aws_json_error_info,
     aws_is_error_status,
     aws_f64_from_json,
     aws_json_blob,
@@ -79,7 +78,6 @@ from komira_aws_core import (
     HttpResult,
     resolve_endpoint,
     send_sigv4_signed_request,
-    aws_json_error_info,
 )
 from komira_json import (
     JsonValue,
@@ -824,7 +822,7 @@ def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
     """A non-2xx as an `Error`.
 
         ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the
-        awsJson error code (`aws_json_error_info`) and message ride out. A generated client
+        awsJson error code and message ride out. A generated client
         cannot know which of its shapes carry a secret, so the discipline is
         unconditional — the `secrets_manager_client._sm_error` rule, applied
         everywhere because the generator has no way to make the exception."""

@@ -53,7 +53,9 @@ pub struct AwsEmitOptions {
 ///   has an output shape whose payload is not a blob or a string
 ///   (`_should_handle_200_error`). `parse_<op>_response` raises it in the
 ///   client's text for an HTTP 500 (`<Service>.<Op> failed: HTTP 500 <code>
-///   <message>`).
+///   <message>`). In client mode each such operation's verb also passes
+///   `s3_200_error=True` to `send_sigv4_signed_request`, which then retries
+///   the answer as the 500 botocore's `_update_status_code` makes it.
 /// - `handle_expires_header`: an `Expires` header that is not a valid date
 ///   leaves the member unset, and the rest of the response still parses.
 /// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
@@ -96,6 +98,9 @@ pub enum AwsImportMode {
     Always,
     /// Client mode only: anything that touches the transport.
     ClientOnly,
+    /// Pure mode only: what a caller with its own transport reads a response
+    /// with, which a client's own error builder does not call.
+    PureOnly,
     /// A module generated with an endpoint ruleset, in either mode: the
     /// ruleset interpreter (see [`endpoint`]).
     EndpointRules,
@@ -167,8 +172,14 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &["aws_error_code_from_body", "aws_error_message_from_body"],
-        mode: AwsImportMode::Always,
+        mode: AwsImportMode::PureOnly,
         protocols: JSON_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_json_error_info"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: &[AwsProtocol::Json],
     },
     AwsImport {
         module: AWS_CORE,
@@ -264,12 +275,6 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         ],
         mode: AwsImportMode::Always,
         protocols: XML_BODY_PROTOCOLS,
-    },
-    AwsImport {
-        module: AWS_CORE,
-        names: &["aws_json_error_info"],
-        mode: AwsImportMode::ClientOnly,
-        protocols: &[AwsProtocol::Json],
     },
     AwsImport {
         module: AWS_CORE,
@@ -378,6 +383,9 @@ pub fn aws_import_section_with(
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
         if pure_only && row.mode == AwsImportMode::ClientOnly {
+            continue;
+        }
+        if !pure_only && row.mode == AwsImportMode::PureOnly {
             continue;
         }
         if !endpoint_rules && row.mode == AwsImportMode::EndpointRules {
@@ -1832,10 +1840,19 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
 
         // -- the send primitive ------------------------------------------
-        if ruleset {
-            self.line("def send(mut self, var req: AwsRequest, target: AwsSigningTarget) raises -> HttpResult:");
+        let s3_flag = if self.options.s3 {
+            ", s3_200_error: Bool = False"
         } else {
-            self.line("def send(mut self, var req: AwsRequest) raises -> HttpResult:");
+            ""
+        };
+        if ruleset {
+            self.line(&format!(
+                "def send(mut self, var req: AwsRequest, target: AwsSigningTarget{s3_flag}) raises -> HttpResult:"
+            ));
+        } else {
+            self.line(&format!(
+                "def send(mut self, var req: AwsRequest{s3_flag}) raises -> HttpResult:"
+            ));
         }
         self.push();
         let mut doc: Vec<String> = vec![
@@ -1856,6 +1873,11 @@ impl<'a> AwsEmitter<'a> {
             doc.push("    `target` is where the endpoint ruleset sent this call and how it".to_string());
             doc.push("    is signed (`aws_signing_target`): its endpoint, signing name and".to_string());
             doc.push("    region, and the headers the endpoint adds.".to_string());
+        }
+        if self.options.s3 {
+            doc.push(String::new());
+            doc.push("    `s3_200_error`: S3 can answer this operation with a 200 whose".to_string());
+            doc.push("    body is an `<Error>`, which the send then retries as a 500.".to_string());
         }
         if let Some(last) = doc.last_mut() {
             last.push_str("\"\"\"");
@@ -1915,6 +1937,9 @@ impl<'a> AwsEmitter<'a> {
         self.line("content_type^,");
         self.line("req.body.copy(),");
         self.line("extra^,");
+        if self.options.s3 {
+            self.line("s3_200_error=s3_200_error,");
+        }
         self.pop();
         self.line(")");
         self.pop();
@@ -1966,6 +1991,11 @@ impl<'a> AwsEmitter<'a> {
                 ));
             }
             let fp = self.fn_prefix();
+            let s3_200 = if self.s3_send_reads_200_error(m, &facts)? {
+                ", s3_200_error=True"
+            } else {
+                ""
+            };
             self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
             if ruleset {
                 self.line("var target = aws_signing_target(");
@@ -1978,9 +2008,9 @@ impl<'a> AwsEmitter<'a> {
                 self.line(&format!("String({p}_SERVICE),"));
                 self.pop();
                 self.line(")");
-                self.line("var res = self.send(req^, target)");
+                self.line(&format!("var res = self.send(req^, target{s3_200})"));
             } else {
-                self.line("var res = self.send(req^)");
+                self.line(&format!("var res = self.send(req^{s3_200})"));
             }
             self.line("if not aws_is_error_status(res.status):");
             self.push();
@@ -2393,6 +2423,22 @@ mod tests {
         assert!(imports.contains("    aws_json_error_info,\n"), "{imports}");
         assert!(!aws_import_section(AwsProtocol::Json, true).contains("aws_json_error_info"));
         assert!(!aws_import_section(AwsProtocol::RestJson, false).contains("aws_json_error_info"));
+        // Grouped with the other error readers, ahead of the transport's
+        // types.
+        assert!(
+            imports.find("aws_json_error_info").unwrap() < imports.find("AwsCredential").unwrap(),
+            "{imports}"
+        );
+        // A client's error builder reads through its protocol's error info,
+        // so a client module does not import the body readers; a pure
+        // module keeps them for a caller with its own transport.
+        for p in JSON_BODY_PROTOCOLS {
+            assert!(!aws_import_section(*p, false).contains("aws_error_code_from_body"), "{p:?}");
+            assert!(aws_import_section(*p, true).contains("aws_error_code_from_body"), "{p:?}");
+        }
+        // The builder's doc line stays inside the block's wrap.
+        let doc = builder.lines().find(|l| l.contains("ride out")).unwrap();
+        assert!(doc.len() <= 80, "{doc}");
     }
 
     #[test]

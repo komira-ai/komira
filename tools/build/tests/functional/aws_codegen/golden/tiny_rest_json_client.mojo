@@ -31,8 +31,6 @@ from komira_aws_core import (
     AwsResponse,
     aws_blob_from_json,
     aws_error_code,
-    aws_error_code_from_body,
-    aws_error_message_from_body,
     aws_is_error_status,
     aws_f64_from_json,
     aws_json_blob,
