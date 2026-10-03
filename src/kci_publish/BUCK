@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The `kci publish` verb: publish the release set `kci build` left in a release
 # directory to a conda channel, or refuse it whole. Step 0 re-verifies every
@@ -18,7 +18,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 mojo_library(
     name = "kci_publish_lib",
     import_name = "kci_publish",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
@@ -55,14 +55,5 @@ mojo_library(
         # dry run reads only, mints nothing; the credential is the channel's
         "tests/test_publish_flow.mojo",
     ],
-    visibility = ["PUBLIC"],
-)
-
-# `kci publish` as a standalone binary, until the kci binary dispatches its
-# `publish` verb to the same `publish_main`.
-mojo_binary(
-    name = "kci_publish",
-    srcs = ["main/kci_publish_main.mojo"],
-    deps = [":kci_publish_lib"],
     visibility = ["PUBLIC"],
 )

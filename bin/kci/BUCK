@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+
+# kci: ONE binary, the `build` and `publish` verbs. A thin shell: argv goes to
+# kci_cli.kci_main, which composes the secret store and calls kci_build or
+# kci_publish. All logic and every test live in those libraries.
+mojo_binary(
+    name = "kci",
+    srcs = ["main.mojo"],
+    deps = ["//src/kci_cli:kci_cli"],
+    visibility = ["PUBLIC"],
+)

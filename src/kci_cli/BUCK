@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The `kci` command line: kci's own options (--secret-store), the verb
+# (`build` or `publish`), then one call into kci_build or kci_publish with
+# the verb's arguments, unread. A thin shell over the libraries: the only
+# thing it decides is which SecretStore resolves a secret NAME
+# (komira_secret_env for `--secret-store=env`). bin/kci is its `main`.
+#
+# The welded tests: argv parsing and usage refusals; dispatch over a
+# recording fake; the real verbs reaching their libraries (each --help and
+# usage refusal, and the composed store resolving the channel's secret by
+# name), every publish run stopping before any request.
+mojo_library(
+    name = "kci_cli",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_build:kci_build_lib",
+        "//src/kci_publish:kci_publish_lib",
+        "//src/komira_secret_env:komira_secret_env",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        # kci's options, the verb, pass-through, every usage refusal
+        "tests/test_kci_args.mojo",
+        # argv -> exactly one verb call; exit codes; usage/--help call nothing
+        "tests/test_kci_dispatch.mojo",
+        # the real verbs: --help, usage refusals, the store resolves by name
+        "tests/test_kci_library_wiring.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

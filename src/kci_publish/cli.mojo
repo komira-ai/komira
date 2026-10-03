@@ -32,8 +32,9 @@
 # `GithubOidcCredential.from_actions_env`, and only for an OIDC channel
 # outside a dry run.
 #
-# The standalone binary carries no secret store (`NoSecretStore` refuses by
-# name); a host binary that has one calls `publish_main_with_store`.
+# The kci binary (bin/kci, kci_cli) calls `publish_main_with_store` with the
+# store its --secret-store composed; `publish_main` runs with
+# `NoSecretStore`, which refuses by name.
 #
 # Encapsulation: owned values and generic seams. No pointer, no wildcard
 # origin.
@@ -139,7 +140,7 @@ def prepare_release(flags: PublishFlags) raises -> PreparedRelease:
 
 
 struct NoSecretStore(SecretStore, Movable):
-    """The standalone binary's store: it holds nothing, and says so. Layout:
+    """A store that holds nothing, and says so. Layout:
     no fields."""
 
     def __init__(out self):
@@ -147,9 +148,9 @@ struct NoSecretStore(SecretStore, Movable):
 
     def resolve(mut self, secret_ref: String) raises -> SecretValue:
         raise Error(
-            String("this kci publish binary has no secret store to resolve '")
+            String("kci publish was given no secret store to resolve '")
             + secret_ref
-            + String("'; run kci publish from a binary that carries one, or use a channel")
+            + String("'; run it through a store that carries it, or use a channel")
             + String(" whose credential is OIDC trusted publishing")
         )
 
@@ -323,6 +324,6 @@ def publish_main_with_store[S: SecretStore](args: List[String], mut store: S) ->
 
 
 def publish_main(args: List[String]) -> Int:
-    """`kci publish` as the standalone binary runs it (no secret store)."""
+    """`kci publish` with no secret store (`NoSecretStore`)."""
     var store = NoSecretStore()
     return publish_main_with_store(args, store)

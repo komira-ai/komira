@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The `kci build` verb: derive the release stamp from git at --revision-id
 # (a full commit id that must be the checkout's HEAD, in a full-history
@@ -43,7 +43,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 mojo_library(
     name = "kci_build_lib",
     import_name = "kci_build",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
@@ -66,14 +66,5 @@ mojo_library(
             "src/kci_artifact_declaration/example.textproto": "//src/kci_artifact_declaration:example.textproto",
         },
     },
-    visibility = ["PUBLIC"],
-)
-
-# `kci build` as a standalone binary, until the kci binary dispatches its
-# `build` verb to the same `build_main`.
-mojo_binary(
-    name = "kci_build",
-    srcs = ["main/kci_build_main.mojo"],
-    deps = [":kci_build_lib"],
     visibility = ["PUBLIC"],
 )
