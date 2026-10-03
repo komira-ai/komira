@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_publish/inputs.mojo -- contract step 0.1 and 0.2: the release
-#   directory `kci build` left, checked member by member over the bytes on
+#   directory a BUILD step left, checked member by member over the bytes on
 #   disk, before anything is read from a channel.
 # =============================================================================
 #
@@ -11,7 +11,7 @@
 #   - a declared artifact with no `<dir>/<name>/` (every declared artifact
 #     ships: a partial release cannot publish);
 #   - each member's own refusals: `kci_release_set.verify_member`, the SAME
-#     function `kci build` ran when the build finished (one manifest, its name
+#     function a BUILD step ran when the build finished (one manifest, its name
 #     the declaration's, bare `file`/`metadata`, nothing else at the top, the
 #     file's sha256 and size, the conda metadata agreeing with the manifest);
 #   - `release.json` missing, unparsable, or not exactly what the members
@@ -19,7 +19,7 @@
 #     set hash holds both). It is a commit marker and a convenience, never
 #     an authority: everything publish uses is recomputed from the member
 #     directories. Whether that identity is the one this run publishes
-#     (--revision-id, the action's platform) is the flow's check.
+#     (--revision-id, the step's platform) is the flow's check.
 #
 # Contract 0.6 holds structurally: `verify_member` reads only inside the
 # member's own directory (bare names), and this file reads nothing else but
@@ -127,7 +127,7 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
         refusals.append(
             String("the release directory holds no ")
             + String(RELEASE_MANIFEST_NAME)
-            + String(": kci build writes it last, so the build did not finish")
+            + String(": the BUILD step writes it last, so the build did not finish")
         )
     if len(refusals) > 0:
         _refuse_all(refusals)
@@ -146,7 +146,7 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
             + recorded.set_hash
             + String(", the members give ")
             + recomputed.set_hash
-            + String("): the directory changed after kci build finished")
+            + String("): the directory changed after the BUILD step finished")
         )
         _refuse_all(refusals)
     return LoadedRelease(dir.copy(), members^, recomputed^)

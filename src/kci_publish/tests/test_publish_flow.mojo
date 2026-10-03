@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_publish/tests/test_publish_flow.mojo -- the whole action: the dry
+# src/kci_publish/tests/test_publish_flow.mojo -- the whole step: the dry
 #   run reads and never writes, the credential is the channel's own, an OIDC
 #   channel publishes only from its stage, and the RUNNING record comes
 #   before the first request.
@@ -91,12 +91,12 @@ def _bytes(s: String) -> List[UInt8]:
     return out^
 
 
-def _flags(tag: String, channel: String, dry_run: Bool) raises -> PublishRequest:
-    return write_example_inputs(ExampleRelease(), _root(tag), channel, dry_run)
+def _flags(tag: String, channel: String, plan: Bool) raises -> PublishRequest:
+    return write_example_inputs(ExampleRelease(), _root(tag), channel, plan)
 
 
 struct _Rec(Movable):
-    """The result and the recorder one action wrote into."""
+    """The result and the recorder one step wrote into."""
 
     var result: KciRunResult
     var rec: MemoryRecorder
@@ -143,10 +143,10 @@ def test_dry_run_public_api_token() raises:
     assert_true(reg.transport().call_count() > 0, String("a dry run reads"))
     assert_equal(reg.transport().write_count(), 0)
     _all_anonymous(reg)
-    assert_true(got.result.dry_run)
+    assert_true(got.result.plan)
     assert_equal(len(got.result.artifacts), 3)
     for i in range(3):
-        assert_equal(got.result.artifacts[i].action, String(ARTIFACT_WOULD_UPLOAD))
+        assert_equal(got.result.artifacts[i].effect, String(ARTIFACT_WOULD_UPLOAD))
     print("  test_dry_run_public_api_token: PASS")
 
 
@@ -193,7 +193,7 @@ def test_dry_run_private_api_token_reads_with_the_token() raises:
 
 
 def test_an_oidc_channel_publishes_only_from_its_stage() raises:
-    # the push identity names environment `prod`; this action runs in `build`
+    # the push identity names environment `prod`; this step runs in `build`
     var f = _flags(String("stage"), String("example-oidc"), False)
     f.stage = String("build")
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
@@ -202,7 +202,7 @@ def test_an_oidc_channel_publishes_only_from_its_stage() raises:
     var rep = _flow(f, reg, store, got)
     assert_equal(rep.exit_code(), EXIT_REFUSED, String("\n").join(rep.lines))
     assert_equal(rep.error_id, String(ERROR_STAGE_ENVIRONMENT))
-    assert_true(rep.has_line_containing(String("names environment 'prod'; this PUBLISH action runs in stage 'build'")))
+    assert_true(rep.has_line_containing(String("names environment 'prod'; this PUBLISH step runs in stage 'build'")))
     assert_equal(reg.transport().call_count(), 0)
     assert_equal(len(got.rec.records), 0)
     assert_equal(got.result.error.id, String(ERROR_STAGE_ENVIRONMENT))

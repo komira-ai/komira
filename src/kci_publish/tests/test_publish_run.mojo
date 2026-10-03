@@ -328,7 +328,7 @@ def _final_state(t: List[PublishTarget], scenario: Int, concurrency: Int) raises
             + String(" before=")
             + String(rep.files[i].state_before)
             + String(" action=")
-            + rep.files[i].action
+            + rep.files[i].effect
             + String(" after=")
             + String(rep.files[i].state_after)
             + String(" indexed=")

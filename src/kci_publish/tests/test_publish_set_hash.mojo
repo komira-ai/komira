@@ -13,7 +13,7 @@
 #   (2) one member's bytes changed (and its manifest and metadata with it,
 #       so the member verifies): the recomputed hash is another, and the
 #       approved one is refused;
-#   (3) the whole action with a wrong `--expect-set-hash`: REFUSED (exit 3,
+#   (3) the whole step with a wrong `--expect-set-hash`: REFUSED (exit 3,
 #       KCI-E-SET-HASH), the line names both hashes, nothing was recorded as
 #       RUNNING, and the channel saw ZERO requests (no read, no write) and
 #       the credential was never asked.

@@ -127,7 +127,7 @@ def test_release_json_is_a_marker_never_an_authority() raises:
     r.omit_release_json = True
     var d = _root(String("nojson"))
     r.write(d)
-    _refused(r, d, String("holds no release.json: kci build writes it last"))
+    _refused(r, d, String("holds no release.json: the BUILD step writes it last"))
 
     var good = ExampleRelease()
     var d2 = _root(String("stale"))

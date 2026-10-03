@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_publish/tests/test_publish_platform.mojo -- the release identity a
-#   PUBLISH action publishes: the revision and the platform, and where it
+#   PUBLISH step publishes: the revision and the platform, and where it
 #   reads the release from.
 # =============================================================================
 #
@@ -9,10 +9,10 @@
 #       full commit id is REFUSED (KCI-E-REVISION-MISMATCH) with ZERO
 #       requests and no RUNNING record; an abbreviated one is REFUSED
 #       (KCI-E-REVISION);
-#   (2) the action's platform must be one kci releases: a reserved one
+#   (2) the step's platform must be one kci releases: a reserved one
 #       (darwin-arm64) and the member-only `noarch` are REFUSED
 #       (KCI-E-PLATFORM), zero requests;
-#   (3) the action reads `<release-dir>/<platform>/`: a release written at
+#   (3) the step reads `<release-dir>/<platform>/`: a release written at
 #       the top of `--release-dir` (no platform directory) is REFUSED
 #       (KCI-E-MEMBER), zero requests;
 #   (4) every file lands in its platform's conda subdir (linux-x86_64 ->
@@ -82,8 +82,8 @@ def _channel() -> ScriptedChannel:
     return ch^
 
 
-def _req(tag: String, dry_run: Bool = True) raises -> PublishRequest:
-    return write_example_inputs(ExampleRelease(), _root(tag), String("example-stable"), dry_run)
+def _req(tag: String, plan: Bool = True) raises -> PublishRequest:
+    return write_example_inputs(ExampleRelease(), _root(tag), String("example-stable"), plan)
 
 
 def _refused_before_anything(
@@ -153,7 +153,7 @@ def test_files_land_in_the_platforms_subdir() raises:
     var result = KciRunResult(String("run"), String("publish"))
     var rec = MemoryRecorder()
     # an API-token channel; the store refuses, so make it a dry run's reads only
-    req.dry_run = True
+    req.plan = True
     var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), store, RunOptions(), sl)
     assert_equal(rep.exit_code(), EXIT_OK, String("\n").join(rep.lines))
     for i in range(len(rep.files)):
@@ -162,7 +162,8 @@ def test_files_land_in_the_platforms_subdir() raises:
     for i in range(len(result.artifacts)):
         assert_equal(result.artifacts[i].platform, String("linux-x86_64"))
         assert_equal(result.artifacts[i].revision, r.revision)
-    assert_equal(result.actions[0].platform, String("linux-x86_64"))
+    assert_equal(result.steps[0].platform, String("linux-x86_64"))
+    assert_equal(result.steps[0].name, String("publish"))
     assert_equal(result.platform, String("linux-x86_64"))
     assert_equal(result.revision, r.revision)
     print("  test_files_land_in_the_platforms_subdir: PASS")

@@ -8,7 +8,7 @@
 #      listed subdir's names; `plan_from_state` decides: STOP_DIFFERENT_BYTES,
 #      CANNOT_TELL, STOP_NEW_NAME or ALREADY_PUBLISHED stop here with NO write
 #      request;
-#   --dry-run stops here too, printing what steps 2 to 4 would do: no write
+#   --plan stops here too, printing what steps 2 to 4 would do: no write
 #      request, and the channel's credential is never asked for a write
 #      value (no OIDC exchange);
 #   2. the write credential is resolved ONCE (`PublishCredential.arm`), then
@@ -138,7 +138,7 @@ def _read_back_rank(code: String) -> Int:
 
 
 def _record(mut r: PublishReport, i: Int, o: FileOutcome):
-    r.files[i].action = o.action.copy()
+    r.files[i].effect = o.action.copy()
     r.files[i].state_after = o.state_after
     r.lines.append(o.line.copy())
 
@@ -148,7 +148,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     claims: List[String],
     mut registry: RegistrySet[T, PublishCredential],
     mut source: S,
-    dry_run: Bool,
+    plan: Bool,
     opts: RunOptions,
     mut sleeper: W,
     var r: PublishReport,
@@ -156,7 +156,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     """Steps 1 to 6 (see the file header). `source` is asked ONCE for the
     write value, and only when the registry's credential is not armed yet
     and something is to be uploaded. Never raises."""
-    r.dry_run = dry_run
+    r.plan = plan
     r.files = List[FileRow]()
     for i in range(len(targets)):
         r.files.append(FileRow(targets[i]))
@@ -184,7 +184,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         if channel_read.states[i].kind == STATE_ABSENT:
             to_upload += 1
         r.lines.append(word + targets[i].where() + String(" sha256=") + targets[i].sha256_hex)
-    if dry_run:
+    if plan:
         r.lines.append(
             String("DRY RUN: nothing was uploaded; ")
             + String(to_upload)
@@ -213,7 +213,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
             if targets[i].is_metapackage:
                 continue
             if channel_read.states[i].kind == STATE_SAME:
-                r.files[i].action = String("skipped")
+                r.files[i].effect = String("skipped")
                 r.lines.append(String("SKIPPED ") + targets[i].where() + String(" -- already present, identical"))
                 continue
             jobs.append(i)
@@ -228,7 +228,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         if step_two != REASON_PUBLISHED:
             for i in range(len(targets)):
                 if targets[i].is_metapackage:
-                    r.files[i].action = String("not-attempted")
+                    r.files[i].effect = String("not-attempted")
                     r.lines.append(String("NOT-ATTEMPTED ") + targets[i].where() + String(" -- the metapackage is published only after every member reads back"))
             r.end(step_two.copy())
             return r^
@@ -260,7 +260,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         if worst != REASON_PUBLISHED:
             for i in range(len(targets)):
                 if targets[i].is_metapackage:
-                    r.files[i].action = String("not-attempted")
+                    r.files[i].effect = String("not-attempted")
                     r.lines.append(String("NOT-ATTEMPTED ") + targets[i].where() + String(" -- the metapackage is published only after every member reads back"))
             r.end(worst.copy())
             return r^
@@ -270,7 +270,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
                 continue
             if channel_read.states[i].kind == STATE_SAME:
                 var s = read_file_state(registry, targets[i])
-                r.files[i].action = String("skipped")
+                r.files[i].effect = String("skipped")
                 r.files[i].state_after = s.kind
                 if s.kind != STATE_SAME:
                     r.lines.append(String("READ-BACK ") + targets[i].where() + String(": ") + state_name(s.kind))
