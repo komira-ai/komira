@@ -9,8 +9,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # which dispatches a plan over handles, imports this package; this package
 # does not execute plans.
 #
-# komira_runtime_paths is the tests': the local arm's read takes its scratch
-# directory from `test_tmpdir()`.
+# komira_runtime_paths is a library dep only because mojo_library has no
+# test-only deps: test_fs_handle_local_read takes its scratch directory from
+# `test_tmpdir()`. Do not drop it as unused.
 #
 # The tests are hermetic, no socket: test_fs_handle_arms (each arm
 # constructs and clones with its tag, nothing dialed: the production S3
@@ -18,9 +19,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (the wrap and the arm test, and None for a file system that is not an arm's
 # type), test_fs_handle_local_read (a real file read through the local arm),
 # test_fs_handle_s3_read (the S3 arm read through komira_http_core's
-# ScriptedConnector), test_fs_handle_descriptor (a descriptor's tag, and the
-# named errors for GCS, Azure and an unknown scheme) and test_no_env_reads
-# (the package's sources read no environment).
+# ScriptedConnector, a wrapped built store kept, and the production arm
+# refusing a plaintext http:// endpoint), test_fs_handle_descriptor (a
+# descriptor's tag, the named errors for GCS, Azure and an unknown scheme,
+# and a komira_core descriptor resolved by its scheme code) and
+# test_no_env_reads (the package's sources read no environment).
 mojo_library(
     name = "komira_fs_registry",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

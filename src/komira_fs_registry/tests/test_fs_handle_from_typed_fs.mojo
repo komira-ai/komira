@@ -62,7 +62,7 @@ def test_arm_types() raises:
 def test_local_fs_wraps_with_the_local_tag() raises:
     var h = fs_handle_from_typed_fs(LocalFs[NoopSink].from_root("/data"))
     assert_true(Bool(h))
-    assert_equal(h.value().tag, FS_SCHEME_FILE)
+    assert_equal(h.value().tag(), FS_SCHEME_FILE)
     assert_true(h.value().is_local())
     assert_true(Bool(h.value().local_ref()))
 
@@ -73,7 +73,7 @@ def test_prod_s3_fs_wraps_with_the_s3_tag() raises:
     )
     var h = fs_handle_from_typed_fs(fs^)
     assert_true(Bool(h))
-    assert_equal(h.value().tag, FS_SCHEME_S3)
+    assert_equal(h.value().tag(), FS_SCHEME_S3)
     assert_true(h.value().is_s3())
     assert_equal(h.value().s3_ref().value().bucket(), "lake")
 
