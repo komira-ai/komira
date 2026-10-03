@@ -3,15 +3,20 @@
 # whose streams parse each HTTP request the store sends (through the
 # generated client, komira_aws_core's signer and komira_http_client) and
 # answer it as S3 does: ranged and suffix GETs, HEAD, ListObjectsV2 with a
-# delimiter and continuation, If-Match. No socket.
+# delimiter and continuation, If-Match, PutObject, DeleteObject and the
+# multipart upload verbs. No socket.
 #
 # The fake also counts: a factory may give it a request budget, and every
 # request past it is answered 403 RequestBudgetSpent (a HEAD's 403 has no
 # body to carry the code, so the rows spend budgets with GETs), so a verb
-# that sends more requests than it should fails. And it may be given a trap, a key
-# fragment: any request whose target names it is answered 403
+# that sends more requests than it should fails. It may be given a trap, a
+# key fragment: any request whose target names it is answered 403
 # TrappedKeyRead, so a verb that touches an object or prefix it should not
-# fails, naming it.
+# fails, naming it. It may be told to refuse one part number, or every
+# completion, with 403 InjectedFault. And once a write verb has run it
+# keeps what the write verbs did (uploads created and still open, parts
+# held, completions, aborts, PutObjects, deletes) as the object
+# `~fake/writes`, which a row reads through the file system.
 #
 # Rows: construction dials nothing; the accessors (bucket, handle key,
 # prefetch depth, random read, scheme, options); read_at (exact bytes, a
@@ -19,11 +24,18 @@
 # read_footer (one request, the tail and the object's size, a window past
 # the object, a window below the trailer, an object too small); file_size;
 # list (bare keys, every page); is_dir (a prefix, a key, a sibling that
-# shares the prefix); list_dir_shallow (directories then files, the
-# placeholder skipped, the bucket root); read_ranges_prefetched (input
-# order, a zero-length range, near ranges in one request, one version of an
-# object overwritten during the fetch); the writes refused; a clone with its
-# own store.
+# shares the prefix, the bucket root, an empty bucket); list_dir_shallow
+# (directories then files, the placeholder skipped, the bucket root);
+# read_ranges_prefetched (input order, a zero-length range, a range past
+# the object, near ranges in one request, one version of an object
+# overwritten during the fetch); writes (an object below one part is one
+# PutObject and open_write sends nothing; an empty object; an object of
+# several parts written in pieces that straddle them, and one of whole
+# parts, each one multipart upload with no upload left open; a failed part
+# and a failed completion each abort the upload and leave no object, and
+# the handle is refused after; abort_write with and without a part sent;
+# append, create-exclusive and pwrite_at refused); delete (an object, an
+# absent key) and the fsyncs; a clone with its own store.
 #
 # Then the Hive partition prune over S3Fs: komira_fs's PrunedHiveDiscovery
 # with `region == us`, over a bucket whose `region=eu` partition is
@@ -94,8 +106,33 @@ struct FakeS3State(Movable):
     var overwrite_after_reads: Int
     var reads: Int
     var requests: Int
+    # Multipart uploads, by index (the id is `up-<index>`): the object name,
+    # and whether it is still open; and their parts, flat.
+    var upload_names: List[String]
+    var upload_open: List[Bool]
+    var part_upload: List[Int]
+    var part_number: List[Int]
+    var part_bodies: List[List[UInt8]]
+    var part_etags: List[String]
+    # UploadPart of this part number is answered 403 InjectedFault. -1 for
+    # never.
+    var fail_part: Int
+    # CompleteMultipartUpload is answered 403 InjectedFault.
+    var fail_complete: Bool
+    # What the write verbs did, in `~fake/writes` once any has run.
+    var puts: Int
+    var completed: Int
+    var aborted: Int
+    var deletes: Int
 
-    def __init__(out self, max_requests: Int, var trap: String, overwrite_after_reads: Int):
+    def __init__(
+        out self,
+        max_requests: Int,
+        var trap: String,
+        overwrite_after_reads: Int,
+        fail_part: Int,
+        fail_complete: Bool,
+    ):
         self.names = List[String]()
         self.bodies = List[List[UInt8]]()
         self.etags = List[String]()
@@ -105,6 +142,63 @@ struct FakeS3State(Movable):
         self.overwrite_after_reads = overwrite_after_reads
         self.reads = 0
         self.requests = 0
+        self.upload_names = List[String]()
+        self.upload_open = List[Bool]()
+        self.part_upload = List[Int]()
+        self.part_number = List[Int]()
+        self.part_bodies = List[List[UInt8]]()
+        self.part_etags = List[String]()
+        self.fail_part = fail_part
+        self.fail_complete = fail_complete
+        self.puts = 0
+        self.completed = 0
+        self.aborted = 0
+        self.deletes = 0
+
+    def remove(mut self, name: String):
+        var at = self.find(name)
+        if at >= 0:
+            _ = self.names.pop(at)
+            _ = self.bodies.pop(at)
+            _ = self.etags.pop(at)
+
+    def open_uploads(self) -> Int:
+        var n = 0
+        for i in range(len(self.upload_open)):
+            if self.upload_open[i]:
+                n += 1
+        return n
+
+    def parts_held(self) -> Int:
+        """Parts stored for uploads still open."""
+        var n = 0
+        for i in range(len(self.part_upload)):
+            if self.upload_open[self.part_upload[i]]:
+                n += 1
+        return n
+
+    def note_writes(mut self):
+        """Records what the write verbs did as the object `~fake/writes` of
+        bucket `lake`, which a test reads through the file system."""
+        _ = self.put(
+            String("lake/~fake/writes"),
+            _bytes(
+                String("created=")
+                + String(len(self.upload_names))
+                + " open="
+                + String(self.open_uploads())
+                + " parts_held="
+                + String(self.parts_held())
+                + " completed="
+                + String(self.completed)
+                + " aborted="
+                + String(self.aborted)
+                + " puts="
+                + String(self.puts)
+                + " deletes="
+                + String(self.deletes)
+            ),
+        )
 
     def find(self, name: String) -> Int:
         for i in range(len(self.names)):
@@ -268,6 +362,8 @@ def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
     var request_line = String(lines[0]).split(" ")
     var method = String(request_line[0])
     var target = String(request_line[1])
+    var body = List[UInt8]()
+    body.extend(Span(written)[end + 4 : n])
     var is_head = method == "HEAD"
     if st.max_requests >= 0 and st.requests > st.max_requests:
         return _error(403, "Forbidden", "RequestBudgetSpent", is_head)
@@ -296,6 +392,22 @@ def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
             return _list(st, bucket, query)
         return _error(400, "Bad Request", "NotImplemented", is_head)
     var name = s3_url_decode(_sub(path, 1, path.byte_length()))
+    if method == "POST" or (method == "PUT" and query.find("uploadId=") >= 0) or (
+        method == "DELETE" and query.find("uploadId=") >= 0
+    ):
+        var answer = _multipart(st, method, name, query, body^)
+        st.note_writes()
+        return answer^
+    if method == "PUT":
+        var etag = st.put(name, body^)
+        st.puts += 1
+        st.note_writes()
+        return _response(200, "OK", String("ETag: ") + etag + "\r\n", List[UInt8](), False)
+    if method == "DELETE":
+        st.remove(name)
+        st.deletes += 1
+        st.note_writes()
+        return _response(204, "No Content", "", List[UInt8](), False)
     var at = st.find(name)
     if method == "GET" or is_head:
         if at < 0:
@@ -310,6 +422,94 @@ def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
             _ = st.put(name, changed^)
         return answer^
     return _error(405, "Method Not Allowed", "MethodNotAllowed", is_head)
+
+
+def _xml_text(s: String, tag: String) -> String:
+    """The text of the first `<tag>` element of `s`, "" when absent, with
+    the quote entities decoded."""
+    var open_tag = String("<") + tag + ">"
+    var a = s.find(open_tag)
+    if a < 0:
+        return String("")
+    a += open_tag.byte_length()
+    var b = s.find(String("</") + tag + ">", a)
+    if b < 0:
+        return String("")
+    return _sub(s, a, b).replace("&quot;", '"').replace("&#34;", '"')
+
+
+def _multipart(
+    mut st: FakeS3State, method: String, name: String, query: String, var body: List[UInt8]
+) raises -> List[UInt8]:
+    """CreateMultipartUpload (POST ?uploads), UploadPart (PUT ?partNumber
+    &uploadId), CompleteMultipartUpload (POST ?uploadId) and
+    AbortMultipartUpload (DELETE ?uploadId) of the object `name`."""
+    if method == "POST" and query.find("uploads") >= 0:
+        var id = len(st.upload_names)
+        st.upload_names.append(name)
+        st.upload_open.append(True)
+        return _response(
+            200,
+            "OK",
+            "Content-Type: application/xml\r\n",
+            _bytes(
+                String("<InitiateMultipartUploadResult><UploadId>up-")
+                + String(id)
+                + "</UploadId></InitiateMultipartUploadResult>"
+            ),
+            False,
+        )
+    var id_text = _query(query, "uploadId")
+    if not id_text.startswith("up-"):
+        return _error(404, "Not Found", "NoSuchUpload", False)
+    var id = Int(_sub(id_text, 3, id_text.byte_length()))
+    if id >= len(st.upload_names) or not st.upload_open[id] or st.upload_names[id] != name:
+        return _error(404, "Not Found", "NoSuchUpload", False)
+    if method == "DELETE":
+        st.upload_open[id] = False
+        st.aborted += 1
+        return _response(204, "No Content", "", List[UInt8](), False)
+    if method == "PUT":
+        var number = Int(_query(query, "partNumber"))
+        if number == st.fail_part:
+            return _error(403, "Forbidden", "InjectedFault", False)
+        var etag = String('"p-') + String(id) + "-" + String(number) + '"'
+        st.part_upload.append(id)
+        st.part_number.append(number)
+        st.part_bodies.append(body^)
+        st.part_etags.append(etag)
+        return _response(200, "OK", String("ETag: ") + etag + "\r\n", List[UInt8](), False)
+    # POST ?uploadId: the completion, its parts in the order listed.
+    if st.fail_complete:
+        return _error(403, "Forbidden", "InjectedFault", False)
+    var doc = String(unsafe_from_utf8=Span(body))
+    var listed = doc.split("<Part>")
+    var whole = List[UInt8]()
+    for i in range(1, len(listed)):
+        var entry = String(listed[i])
+        var number = Int(_xml_text(entry, "PartNumber"))
+        var etag = _xml_text(entry, "ETag")
+        var found = -1
+        for p in range(len(st.part_upload)):
+            if st.part_upload[p] == id and st.part_number[p] == number:
+                found = p
+        if found < 0 or st.part_etags[found] != etag:
+            return _error(400, "Bad Request", "InvalidPart", False)
+        whole.extend(Span(st.part_bodies[found]))
+    st.upload_open[id] = False
+    st.completed += 1
+    var etag = st.put(name, whole^)
+    return _response(
+        200,
+        "OK",
+        "Content-Type: application/xml\r\n",
+        _bytes(
+            String("<CompleteMultipartUploadResult><ETag>")
+            + _xml_escape(etag)
+            + "</ETag></CompleteMultipartUploadResult>"
+        ),
+        False,
+    )
 
 
 def _read(st: FakeS3State, at: Int, range_: String, is_head: Bool) raises -> List[UInt8]:
@@ -403,9 +603,16 @@ struct FakeS3Connector(Connector, Movable, Deinitable):
 
     var _state: ArcPointer[FakeS3State]
 
-    def __init__(out self, max_requests: Int = -1, trap: String = "", overwrite_after_reads: Int = -1):
+    def __init__(
+        out self,
+        max_requests: Int = -1,
+        trap: String = "",
+        overwrite_after_reads: Int = -1,
+        fail_part: Int = -1,
+        fail_complete: Bool = False,
+    ):
         self._state = ArcPointer[FakeS3State](
-            FakeS3State(max_requests, trap, overwrite_after_reads)
+            FakeS3State(max_requests, trap, overwrite_after_reads, fail_part, fail_complete)
         )
 
     def seed(mut self, key: String, body: String):
@@ -530,7 +737,7 @@ def test_accessors() raises:
     assert_equal(_Fs.SCHEME, FS_SCHEME_S3)
     assert_true(_Fs.SUPPORTS_LAZY_HIVE)
     assert_false(_Fs.SUPPORTS_PARALLEL_WRITES)
-    assert_equal(fs.options().prefetch_max_inflight, 0)
+    assert_equal(fs.options().prefetch_max_inflight(), 0)
     # A handle and the file system move whole.
     var moved_handle = handle^
     assert_equal(moved_handle.key(), "data/file.parquet")
@@ -546,7 +753,7 @@ def test_accessors() raises:
         S3FsOptions(prefetch_max_inflight=4, prefetch_depth=32),
     )
     assert_equal(express.prefetch_depth(), 32)
-    assert_equal(express.options().prefetch_max_inflight, 4)
+    assert_equal(express.options().prefetch_max_inflight(), 4)
 
 
 # =============================================================================
@@ -691,7 +898,8 @@ def _two_far_ranges() -> List[Tuple[Int64, Int64]]:
 
 def test_a_prefetch_reads_one_version() raises:
     # Two ranges too far apart to coalesce are two GETs. Untouched, both
-    # land, with any in-flight bound.
+    # land. (A bound of 1 is recorded only: the sends are serial with any
+    # bound, so the bytes are the same.)
     var fs = _Fs.built(
         "lake",
         _config(),
@@ -744,6 +952,18 @@ def test_is_dir() raises:
     assert_false(fs.is_dir("t/a"))
     assert_false(fs.is_dir("events"))
     assert_false(fs.is_dir("nothing"))
+    # The empty path is the bucket root, which holds keys.
+    assert_true(fs.is_dir(""))
+
+
+def _mk_empty() raises -> FakeS3Connector:
+    return FakeS3Connector()
+
+
+def test_is_dir_of_an_empty_bucket() raises:
+    var fs = _fs(_mk_empty)
+    assert_false(fs.is_dir(""))
+    assert_false(fs.is_dir("t"))
 
 
 def test_list_dir_shallow() raises:
@@ -778,10 +998,197 @@ def test_list_dir_shallow() raises:
 # =============================================================================
 
 
-def test_writes_are_refused() raises:
-    var fs = _fs(_mk_tree_budget_0)
-    with assert_raises(contains="S3Fs does not write"):
-        _ = fs.open_write("w/new", WriteMode.create_truncate())
+comptime _PART = 5 * 1024 * 1024  # S3's smallest part
+
+
+def _pattern(n: Int, seed: Int) -> List[UInt8]:
+    var out = List[UInt8](capacity=n)
+    for i in range(n):
+        out.append(UInt8((i * 7 + seed) % 251))
+    return out^
+
+
+def _small_parts() raises -> S3FsOptions:
+    return S3FsOptions(upload_part_bytes=_PART)
+
+
+def _fs_parts(mk: def () raises thin -> FakeS3Connector) raises -> _Fs:
+    return _Fs.built("lake", _config(), mk, _creds(), FixedClock(1790000000), _small_parts())
+
+
+def _writes(fs: _Fs) raises -> String:
+    """What the fake's write verbs did (`FakeS3State.note_writes`)."""
+    var f = fs.open("~fake/writes")
+    return _buf_text(fs.read_at(f, 0, Int64(fs.file_size("~fake/writes"))))
+
+
+def _assert_object(fs: _Fs, key: String, expected: List[UInt8]) raises:
+    assert_equal(fs.file_size(key), len(expected))
+    var f = fs.open(key)
+    var got = fs.read_at(f, 0, Int64(len(expected)))
+    var view = got.view_range_ro(0, got.len()).into_span()
+    for i in range(len(expected)):
+        if view[i] != expected[i]:
+            raise Error(String("byte ") + String(i) + " of " + key + " differs")
+
+
+def _mk_writes_budget_2() raises -> FakeS3Connector:
+    return FakeS3Connector(max_requests=2)
+
+
+def test_a_small_object_is_one_put() raises:
+    # open_write sends nothing; the bytes go in ONE PutObject at close, and
+    # a read of them is the second request of a budget of two.
+    var fs = _fs(_mk_writes_budget_2)
+    var w = fs.open_write("w/small", WriteMode.create_truncate())
+    assert_equal(w.key(), "w/small")
+    assert_equal(fs.write_at(w, Span(_bytes("hello, "))), 7)
+    assert_equal(fs.write_at(w, Span(_bytes("world"))), 5)
+    assert_equal(fs.write_at(w, Span(List[UInt8]())), 0)
+    assert_equal(w.bytes_written(), 12)
+    assert_equal(w.upload_id(), "")
+    fs.close_write(w^)
+    var f = fs.open("w/small")
+    assert_equal(_buf_text(fs.read_at(f, 0, 12)), "hello, world")
+    with assert_raises(contains="RequestBudgetSpent"):
+        _ = fs.read_at(f, 0, 1)
+
+
+def test_an_empty_object() raises:
+    var fs = _fs(_mk_empty)
+    var w = fs.open_write("w/empty", WriteMode.create_truncate())
+    fs.close_write(w^)
+    assert_equal(fs.file_size("w/empty"), 0)
+    assert_equal(_writes(fs), "created=0 open=0 parts_held=0 completed=0 aborted=0 puts=1 deletes=0")
+
+
+def test_a_large_object_is_a_multipart_upload() raises:
+    # 2 parts and 7 bytes, written in pieces that straddle the part
+    # boundaries: each full part is sent as it fills, the first creating
+    # the upload; close sends the 7 bytes as the last part and completes.
+    var fs = _fs_parts(_mk_empty)
+    var total = 2 * _PART + 7
+    var data = _pattern(total, 3)
+    var w = fs.open_write("w/large", WriteMode.create_truncate())
+    var piece = 1024 * 1024 + 3
+    var at = 0
+    while at < total:
+        var take = min(piece, total - at)
+        assert_equal(fs.write_at(w, Span(data)[at : at + take]), Int64(take))
+        at += take
+        if at < _PART:
+            assert_equal(w.upload_id(), "")
+    assert_equal(w.upload_id(), "up-0")
+    assert_equal(w.parts_sent(), 2)
+    assert_equal(w.bytes_written(), Int64(total))
+    fs.close_write(w^)
+    _assert_object(fs, "w/large", data)
+    assert_equal(_writes(fs), "created=1 open=0 parts_held=0 completed=1 aborted=0 puts=0 deletes=0")
+
+
+def test_an_object_of_whole_parts_sends_no_empty_part() raises:
+    # Exactly two parts: both are sent by write_at, and close only completes.
+    var fs = _fs_parts(_mk_empty)
+    var data = _pattern(2 * _PART, 5)
+    var w = fs.open_write("w/whole", WriteMode.create_truncate())
+    _ = fs.write_at(w, Span(data))
+    assert_equal(w.parts_sent(), 2)
+    fs.close_write(w^)
+    _assert_object(fs, "w/whole", data)
+    assert_equal(_writes(fs), "created=1 open=0 parts_held=0 completed=1 aborted=0 puts=0 deletes=0")
+
+
+def _mk_fail_part_2() raises -> FakeS3Connector:
+    return FakeS3Connector(fail_part=2)
+
+
+def test_a_failed_part_aborts_the_upload() raises:
+    var fs = _fs_parts(_mk_fail_part_2)
+    var w = fs.open_write("w/failed", WriteMode.create_truncate())
+    with assert_raises(contains="InjectedFault"):
+        _ = fs.write_at(w, Span(_pattern(2 * _PART, 1)))
+    # The upload was aborted before the error was raised, and its part
+    # dropped; the handle is refused from then on.
+    assert_equal(_writes(fs), "created=1 open=0 parts_held=0 completed=0 aborted=1 puts=0 deletes=0")
+    with assert_raises(contains="S3Fs.write_at: the upload of w/failed failed and was aborted"):
+        _ = fs.write_at(w, Span(_bytes("x")))
+    with assert_raises(contains="S3Fs.close_write: the upload of w/failed failed and was aborted"):
+        fs.close_write(w^)
+    with assert_raises(contains="StoreError[NOT_FOUND]"):
+        _ = fs.file_size("w/failed")
+    # abort_write after a failure sends nothing more.
+    var v = fs.open_write("w/failed", WriteMode.create_truncate())
+    with assert_raises(contains="InjectedFault"):
+        _ = fs.write_at(v, Span(_pattern(2 * _PART, 1)))
+    fs.abort_write(v^)
+    assert_equal(_writes(fs), "created=2 open=0 parts_held=0 completed=0 aborted=2 puts=0 deletes=0")
+
+
+def _mk_fail_complete() raises -> FakeS3Connector:
+    return FakeS3Connector(fail_complete=True)
+
+
+def test_a_failed_completion_aborts_the_upload() raises:
+    var fs = _fs_parts(_mk_fail_complete)
+    var w = fs.open_write("w/incomplete", WriteMode.create_truncate())
+    _ = fs.write_at(w, Span(_pattern(_PART + 1, 2)))
+    with assert_raises(contains="StoreError[PERMISSION_DENIED] CompleteMultipartUpload"):
+        fs.close_write(w^)
+    assert_equal(_writes(fs), "created=1 open=0 parts_held=0 completed=0 aborted=1 puts=0 deletes=0")
+    with assert_raises(contains="StoreError[NOT_FOUND]"):
+        _ = fs.file_size("w/incomplete")
+
+
+def _mk_writes_budget_0() raises -> FakeS3Connector:
+    return FakeS3Connector(max_requests=0)
+
+
+def test_abort_write() raises:
+    # A part sent: the upload is aborted, and no object is made.
+    var fs = _fs_parts(_mk_empty)
+    var w = fs.open_write("w/aborted", WriteMode.create_truncate())
+    _ = fs.write_at(w, Span(_pattern(_PART + 9, 4)))
+    assert_equal(w.parts_sent(), 1)
+    fs.abort_write(w^)
+    assert_equal(_writes(fs), "created=1 open=0 parts_held=0 completed=0 aborted=1 puts=0 deletes=0")
+    with assert_raises(contains="StoreError[NOT_FOUND]"):
+        _ = fs.file_size("w/aborted")
+    # No part sent: nothing to abort, and nothing is sent.
+    var quiet = _fs_parts(_mk_writes_budget_0)
+    var v = quiet.open_write("w/never", WriteMode.create_truncate())
+    _ = quiet.write_at(v, Span(_bytes("buffered")))
+    quiet.abort_write(v^)
+    with assert_raises(contains="RequestBudgetSpent"):
+        _ = quiet.read_footer("d/digits", 8)
+
+
+def test_refused_writes() raises:
+    var fs = _fs(_mk_writes_budget_0)
+    with assert_raises(contains="S3Fs.open_write: an S3 object cannot be appended to (WriteMode.append): w/a"):
+        _ = fs.open_write("w/a", WriteMode.append())
+    with assert_raises(contains="S3Fs.open_write: WriteMode.create_exclusive is not supported"):
+        _ = fs.open_write("w/a", WriteMode.create_exclusive())
+    var w = fs.open_write("w/a", WriteMode.create_truncate())
+    with assert_raises(contains="S3Fs.pwrite_at: S3 has no disjoint-range concurrent write"):
+        _ = fs.pwrite_at(w, 0, Span(_bytes("x")))
+    # Nothing above sent a request: the budget's first is refused.
+    with assert_raises(contains="RequestBudgetSpent"):
+        fs.close_write(w^)
+
+
+def test_delete() raises:
+    var fs = _fs(_mk_tree)
+    fs.delete("t/a")
+    with assert_raises(contains="StoreError[NOT_FOUND]"):
+        _ = fs.file_size("t/a")
+    assert_equal(len(fs.list("t/")), 6)
+    # An absent key: deleted already, not an error.
+    fs.delete("t/a")
+    fs.delete("never/was")
+    assert_equal(_writes(fs), "created=0 open=0 parts_held=0 completed=0 aborted=0 puts=0 deletes=3")
+    # Durable at write: the fsyncs do nothing, and send nothing.
+    fs.fsync_file("t/b")
+    fs.fsync_dir("t")
 
 
 def test_a_clone_builds_its_own_store() raises:
@@ -908,7 +1315,16 @@ def main() raises:
     test_list_is_recursive_bare_keys()
     test_is_dir()
     test_list_dir_shallow()
-    test_writes_are_refused()
+    test_is_dir_of_an_empty_bucket()
+    test_a_small_object_is_one_put()
+    test_an_empty_object()
+    test_a_large_object_is_a_multipart_upload()
+    test_an_object_of_whole_parts_sends_no_empty_part()
+    test_a_failed_part_aborts_the_upload()
+    test_a_failed_completion_aborts_the_upload()
+    test_abort_write()
+    test_refused_writes()
+    test_delete()
     test_a_clone_builds_its_own_store()
     test_a_pruned_partition_is_never_read()
     test_the_trap_is_live()

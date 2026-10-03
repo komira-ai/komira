@@ -13,14 +13,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # multipart, S3ConditionalStore (one bucket as a
 # CloneableConditionalWriteStore and RangeFetchStore), S3PresignSigner
 # (an ObjectUrlSigner over komira_aws_core's sigv4_presign) and S3Fs (one
-# bucket as komira_fs's read-only FileSystem: listings, ranged reads of one
-# object version, one-request footers; its settings in S3FsOptions).
+# bucket as komira_fs's FileSystem: listings, ranged reads with one object
+# version per prefetched fetch, one-request footers, multipart writes,
+# delete; its settings in S3FsOptions).
 #
-# komira_core is a dependency for one type: the ByteView of
-# komira_objectstore's RangeFetchStore signature, and S3Fs's buffers.
-# komira_async is the tests': the fake S3 connector implements
-# komira_http_core's Connector over its reactor and runtime.
-# komira_runtime_paths is test_s3_fs_clone's scratch directory.
+# komira_core supplies the ByteView of komira_objectstore's RangeFetchStore
+# signature, and S3Fs's buffers, Slab and FS_SCHEME_S3. komira_async is the
+# tests': the fake S3 connector implements komira_http_core's Connector over
+# its reactor and runtime.
 #
 # The tests are hermetic, no socket: komira_http_core's ScriptedConnector
 # (S3's answers, one stream per request), a fake S3 connector in the tests
@@ -38,11 +38,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ConditionalRequestConflict), test_s3_presign (presigned URLs against an
 # independent SigV4 query signer at fixed 2026 clocks), test_s3_fs (S3Fs
 # over the fake, which can also refuse requests past a budget or into a
-# trapped key: one request per footer, near ranges in one request, one
-# version per fetch, listings, and a Hive partition prune that never reads
-# the pruned partition), test_s3_fs_clone (LocalFs and S3Fs clones; an S3Fs
-# clone builds its own store), test_s3_fs_options (S3FsOptions) and
-# test_no_env_reads (the package's sources read no environment).
+# trapped key, and serves multipart uploads with injected faults: one
+# request per footer, near ranges in one request, one version per fetch,
+# listings, writes as one PutObject or a multipart upload, an upload
+# aborted on failure, delete, and a Hive partition prune that never reads
+# the pruned partition), test_s3_fs_clone (an S3Fs clone builds its own
+# store), test_s3_fs_options (S3FsOptions) and test_no_env_reads (the
+# package's sources read no environment).
+#
+# test_s3_conditional_store and test_s3_fs each hold a fake S3: a test here
+# is built from its one source file, so the two cannot share a module
+# without a library of their own. They differ in what they serve (the
+# conditional PutObject and its 409; budgets, traps, suffix ranges and
+# multipart), and a change to S3's answers is made in both.
 mojo_library(
     name = "komira_objectstore_s3",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -55,7 +63,6 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_retry:komira_retry",
-        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
         "tests/test_no_env_reads.mojo": {

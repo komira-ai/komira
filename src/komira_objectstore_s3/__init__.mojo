@@ -15,10 +15,10 @@ komira_objectstore store, built on the generated `komira_aws_s3` client.
   range fetch) over the generated client's `<op>_with` sends.
 - `conditional_store.mojo`: `S3ConditionalStore[C, T, K]`, one bucket as a
   `CloneableConditionalWriteStore` and `RangeFetchStore`.
-- `s3_fs.mojo`: `S3Fs[C, T, K]`, one bucket as komira_fs's read-only
-  `FileSystem` (listing, shallow listing, ranged reads of one object
-  version, one-request footers), with `S3FsOptions`, `S3FileHandle` and
-  `S3WriteFile`.
+- `s3_fs.mojo`: `S3Fs[C, T, K]`, one bucket as komira_fs's `FileSystem`
+  (listing, shallow listing, ranged reads with one object version per
+  prefetched fetch, one-request footers, multipart writes, delete), with
+  `S3FsOptions`, `S3FileHandle` and `S3WriteFile`.
 - `presign.mojo`: `S3PresignSigner[T, K]`, presigned GET and PUT URLs as an
   `ObjectUrlSigner`, over komira_aws_core's `sigv4_presign`, signing only
   `host`.
@@ -58,4 +58,15 @@ from .store import (
 )
 from .conditional_store import S3ConditionalStore
 from .presign import S3PresignSigner, S3_UNSIGNED_PAYLOAD
-from .s3_fs import S3FileHandle, S3Fs, S3FsOptions, S3WriteFile, S3_FS_ALL_RANGES
+from .s3_fs import (
+    S3FileHandle,
+    S3Fs,
+    S3FsOptions,
+    S3WriteFile,
+    S3_FS_ALL_RANGES,
+    S3_FS_DEFAULT_PART_BYTES,
+    S3_FS_DEFAULT_UPLOAD_MAX_INFLIGHT,
+    S3_FS_UPLOAD_MAX_INFLIGHT_CAP,
+    S3_MAX_PART_BYTES,
+    S3_MIN_PART_BYTES,
+)
