@@ -3,9 +3,10 @@
 #   commit `--revision-id` names, before any build runs.
 # =============================================================================
 #
-# `kci build --revision-id <C>` takes the release commit as a FULL commit id
-# (40 lowercase hex; an abbreviated id is refused by the flag parser, because
-# it names a commit only while no other commit shares its prefix). Here, in
+# A BUILD action takes the release commit (`--revision-id <C>`) as a FULL
+# commit id (40 lowercase hex; an abbreviated id is refused before anything
+# runs, because it names a commit only while no other commit shares its
+# prefix). Here, in
 # `--work-dir`, through the same `ProcessRunner` as the builds (argv, never a
 # shell; stdout to `<log>/_git_<k>.stdout`, a name no artifact can take:
 # declaration names start with a letter), kci runs, in order:
@@ -28,7 +29,8 @@
 # commit and refuses a difference, so if the two ever disagree no package of
 # the run is shipped.
 #
-# Refused (REFUSED, naming what was found, before any build):
+# Refused (REFUSED, error KCI-E-REVISION, naming what was found, before any
+# build):
 #   * a SHALLOW clone: the first-parent count there is the clone's depth,
 #     not the history's, so N would be wrong. kci does not deepen the clone
 #     (that would be a network fetch inside a build verb); the job checks out
@@ -41,7 +43,8 @@
 #   * C with no commit touching anything but documentation;
 #   * any git command that exits non-zero (not a git checkout, an unknown
 #     commit), or prints something that is not one line of the expected shape.
-# A git that cannot be started, or that times out, is CANNOT_TELL.
+# A git that cannot be started, or that times out, is INDETERMINATE (error
+# KCI-E-CANNOT-TELL).
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -50,7 +53,15 @@ from std.pathlib import Path
 
 from kci_artifact_declaration import ReleaseStamp
 
-from kci_build.request import EXIT_CANNOT_TELL, EXIT_OK, EXIT_REFUSED, BuildRequest
+from kci_contract import (
+    ERROR_CANNOT_TELL,
+    ERROR_REVISION,
+    OUTCOME_INDETERMINATE,
+    OUTCOME_REFUSED,
+    OUTCOME_SUCCEEDED,
+)
+
+from kci_build.request import BuildRequest
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
 
 comptime GIT_PROGRAM: String = "git"
@@ -61,26 +72,30 @@ comptime GIT_TIMEOUT_S: Int = 300
 
 
 struct StampResult(Copyable, Movable):
-    """A derived stamp, or why there is none (`exit_code` != EXIT_OK).
+    """A derived stamp, or why there is none (`outcome` is not SUCCEEDED;
+    `error_id` says which kind of stop).
 
     Layout: owned values only. No pointer field."""
 
-    var exit_code: Int
+    var outcome: String
+    var error_id: String
     var message: String
     var stamp: Optional[ReleaseStamp]
 
-    def __init__(out self, exit_code: Int, var message: String):
-        self.exit_code = exit_code
+    def __init__(out self, var outcome: String, var error_id: String, var message: String):
+        self.outcome = outcome^
+        self.error_id = error_id^
         self.message = message^
         self.stamp = None
 
     def __init__(out self, var stamp: ReleaseStamp):
-        self.exit_code = EXIT_OK
+        self.outcome = String(OUTCOME_SUCCEEDED)
+        self.error_id = String("")
         self.message = String("")
         self.stamp = stamp^
 
     def ok(self) -> Bool:
-        return self.exit_code == EXIT_OK
+        return self.outcome == OUTCOME_SUCCEEDED
 
 
 def _argv(*xs: String) -> List[String]:
@@ -107,7 +122,9 @@ struct _Git(Movable):
         self.stop = None
 
     def _refuse(mut self, why: String):
-        self.stop = StampResult(EXIT_REFUSED, String("kci build: --revision-id: ") + why)
+        self.stop = StampResult(
+            String(OUTCOME_REFUSED), String(ERROR_REVISION), String("kci build: --revision-id: ") + why
+        )
 
     def line[R: ProcessRunner](mut self, mut runner: R, var args: List[String]) -> String:
         """The one line `git <args>` printed (trailing newline removed), or
@@ -130,14 +147,16 @@ struct _Git(Movable):
             r = runner.run(spec)
         except e:
             self.stop = StampResult(
-                EXIT_CANNOT_TELL,
+                String(OUTCOME_INDETERMINATE),
+                String(ERROR_CANNOT_TELL),
                 String("kci build: --revision-id: `") + spec.command_line()
                 + String("` could not be started: ") + String(e),
             )
             return String("")
         if r.timed_out:
             self.stop = StampResult(
-                EXIT_CANNOT_TELL,
+                String(OUTCOME_INDETERMINATE),
+                String(ERROR_CANNOT_TELL),
                 String("kci build: --revision-id: `") + spec.command_line() + String("` timed out"),
             )
             return String("")
@@ -152,7 +171,8 @@ struct _Git(Movable):
             text = Path(spec.stdout_path).read_text()
         except e:
             self.stop = StampResult(
-                EXIT_CANNOT_TELL,
+                String(OUTCOME_INDETERMINATE),
+                String(ERROR_CANNOT_TELL),
                 String("kci build: --revision-id: the output of `") + spec.command_line()
                 + String("` cannot be read: ") + String(e),
             )
@@ -195,7 +215,7 @@ def _positive_decimal(s: String) -> Int:
 
 def derive_release_stamp[R: ProcessRunner](req: BuildRequest, mut runner: R) -> StampResult:
     """The stamp of `req.revision_id` (file header). `req.log_dir` must
-    exist; `req.revision_id` was checked by the flag parser."""
+    exist; `run_build` checked `req.revision_id` is a full commit id."""
     var rev = req.revision_id.copy()
     var git = _Git(req.work_dir.copy(), req.log_dir.copy())
     var shallow = git.line(runner, _argv("rev-parse", "--is-shallow-repository"))
@@ -258,4 +278,6 @@ def derive_release_stamp[R: ProcessRunner](req: BuildRequest, mut runner: R) -> 
     try:
         return StampResult(ReleaseStamp(rev^, source^, n, ts * 1000))
     except e:
-        return StampResult(EXIT_REFUSED, String("kci build: --revision-id: ") + String(e))
+        return StampResult(
+            String(OUTCOME_REFUSED), String(ERROR_REVISION), String("kci build: --revision-id: ") + String(e)
+        )

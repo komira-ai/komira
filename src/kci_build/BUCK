@@ -1,19 +1,24 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The `kci build` verb: derive the release stamp from git at --revision-id
-# (a full commit id that must be the checkout's HEAD, in a full-history
-# clone; refused otherwise, before any build), then for each artifact of the
+# One BUILD action of a stage (`kci run --stage S`, or its alias `kci build
+# --stage S`; the kci binary's one parser and the machine file make the
+# request): check the release identity (--revision-id a full commit id that
+# must be the checkout's HEAD, in a full-history clone; the platform one kci
+# releases), record the run's RUNNING result (kci_contract) before the first
+# effect, derive the release stamp from git, then for each artifact of the
 # declarations file (kci_artifact_declaration), in file order and one at a
 # time (a metapackage declared last reads its members under {release_dir}),
-# create an
-# EMPTY directory under --out-dir, run the declared build system's rendered
-# argv into it, and check what it left with kci_release_set.verify_member
-# (the same checks `kci publish` re-runs); when every artifact passed, write
-# release.json (members + set hash) LAST, as the commit marker. kci knows no
-# build tool: the program, its args and "build on the farm" are the
-# declarations file's. The process is started through the ProcessRunner
-# seam: SupervisorRunner (komira_supervisor) for real runs, ScriptedRunner
-# for tests. Nothing here names a farm, a channel or an account.
+# create an EMPTY directory under <--release-dir>/<platform>/, run the
+# declared build system's rendered argv into it, and check what it left with
+# kci_release_set.verify_member (the same checks `kci publish` re-runs) and
+# the manifest's platform; when every artifact passed, write release.json
+# (major 2: revision, platform, produced_by, members, set hash) LAST, as the
+# commit marker. The outcome is a kci_contract outcome word and error id; no
+# exit number is spelled here. kci knows no build tool: the program, its args
+# and "build on the farm" are the declarations file's. The process is started
+# through the ProcessRunner seam: SupervisorRunner (komira_supervisor) for
+# real runs, ScriptedRunner for tests. Nothing here names a farm, a channel or
+# an account.
 #
 # Recorded once, as the design asked: does `-c komira.execution=remote` with
 # no reachable farm fail rather than fall back to local? MEASURED 2026-10-02
@@ -38,23 +43,25 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # locally unnoticed; the first build stalls until `--build-timeout-s` ends
 # it, and kci reports it FAILED ("timed out"), naming the artifact.
 #
-# The welded tests drive ScriptedRunner over files they write under
-# TEST_TMPDIR, plus SupervisorRunner over /bin/sh: no buck2, no network.
+# The welded tests drive ScriptedRunner and MemoryRecorder over files they
+# write under TEST_TMPDIR, plus SupervisorRunner over /bin/sh: no buck2, no
+# network.
 mojo_library(
     name = "kci_build_lib",
     import_name = "kci_build",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_artifact_declaration:kci_artifact_declaration",
+        "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
+        "//src/kci_contract:kci_contract",
         "//src/kci_release_set:kci_release_set",
         "//src/komira_json:komira_json",
         "//src/komira_supervisor:komira_supervisor",
     ],
     test_srcs = [
-        # every flag, both spellings, each refusal naming its flag; deleted flags are unknown
-        "tests/test_build_flags.mojo",
-        # the whole verb over ScriptedRunner: argv, order, empty dirs, every stop, release.json last
+        # the whole action over ScriptedRunner: argv, order, empty dirs, every stop with its
+        # outcome and error id, release.json v2 last, RUNNING before the first effect
         "tests/test_build_flow.mojo",
         # --revision-id against the checkout, the stamp from git, every refusal
         "tests/test_revision.mojo",
@@ -66,14 +73,5 @@ mojo_library(
             "src/kci_artifact_declaration/example.textproto": "//src/kci_artifact_declaration:example.textproto",
         },
     },
-    visibility = ["PUBLIC"],
-)
-
-# `kci build` as a standalone binary, until the kci binary dispatches its
-# `build` verb to the same `build_main`.
-mojo_binary(
-    name = "kci_build",
-    srcs = ["main/kci_build_main.mojo"],
-    deps = [":kci_build_lib"],
     visibility = ["PUBLIC"],
 )
