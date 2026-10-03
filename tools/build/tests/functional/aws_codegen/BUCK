@@ -8,8 +8,8 @@ load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 #
 # The CloudWatch Logs model is the pinned botocore one
 # (komira//third_party/botocore, models.bzl), read from the archive at build
-# time. model/ holds only this package's own inputs: a zero-byte model and a
-# tiny restXml model.
+# time. model/ holds only this package's own inputs: a zero-byte model, a
+# tiny restXml model and a tiny awsJson model that declares SigV2.
 
 _LOGS_SHA256 = botocore_model("logs").sha256
 _LOGS_MODEL = botocore_model("logs").model
@@ -91,6 +91,22 @@ aws_codegen_refusal(
         "Ping",
     ],
     model = "model/tiny_restxml.json",
+)
+
+# The generated client signs with SigV4 only: a supported protocol whose
+# model declares another signatureVersion is refused, naming the value.
+aws_codegen_refusal(
+    name = "refuse_unsupported_signature_version",
+    expect = "declares signatureVersion `v2`",
+    gen_args = [
+        "--model-sha256",
+        "56681d4dc86cab752222bdb3f4111c0f706d83937a2f128c19c35de10a1c4fe2",
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+    ],
+    model = "model/tiny_json_sigv2.json",
 )
 
 # The digest is checked against the bytes: the right model with another
