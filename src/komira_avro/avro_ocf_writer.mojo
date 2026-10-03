@@ -84,10 +84,10 @@ from .varint_encode import (
 # consumes a `RowOutput` (the row-native write-path carrier produced by the
 # row-streaming pipeline) and emits Avro OCF bytes DIRECTLY, with no
 # row->columnar->row round-trip. `komira_avro` importing
-# `komira_eval.row_format` is acyclic — `komira_eval` never imports
-# `komira_avro` (the same edge `komira_json` -> `komira_eval` has).
-from komira_eval.row_format.row_output import RowOutput
-from komira_eval.row_format.row_block import (
+# `komira_row_format` is acyclic — `komira_row_format` never imports
+# `komira_avro` (the same edge `komira_json` -> `komira_row_format` has).
+from komira_row_format.row_output import RowOutput
+from komira_row_format.row_block import (
     DT_I64,
     DT_F64,
     DT_I32,

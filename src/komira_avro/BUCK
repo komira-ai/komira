@@ -15,7 +15,7 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_core:komira_core",
         "//src/komira_fs:komira_fs",
-        "//src/komira_eval:komira_eval",
+        "//src/komira_row_format:komira_row_format",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
