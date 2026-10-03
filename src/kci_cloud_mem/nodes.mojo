@@ -1,18 +1,25 @@
 # =============================================================================
-# kci_cloud_mem/nodes.mojo: the engine nodes the reference clouds lower to.
+# kci_cloud_mem/nodes.mojo: the engine node the reference clouds realize.
 # =============================================================================
 #
-#   * `MemRunNode`   `<id>/run`: the running thing of a service or a job. Its
-#                    desired digest is a canonical rendering of everything the
-#                    author set, with each `Ref` value replaced by the value it
-#                    resolved to; with a reference not yet bound it has NO
-#                    digest (UNBOUND), never a placeholder. A service exposes
-#                    URL and HOST once it exists.
-#   * `MemGrantNode` `<id>/uses/<target>`: one `Uses` line, ordered after both
-#                    ends.
+# One node type, `MemNode`, realized from a `LoweredNode` (data):
 #
-# Every node's `owner()` is the authored resource id, as kci_cloud's
-# lowering contract requires.
+#   * kind `run`       `<id>/run`: the running thing of a service or a job.
+#                      Its desired digest renders every modelled field (the
+#                      lowered node's `desired` fields, defaults filled in),
+#                      then each `Ref` value as it resolved; with a reference
+#                      not yet bound it has NO digest (UNBOUND), never a
+#                      placeholder. A service's run node exposes URL and HOST.
+#   * kind `public`    `<id>/public`: the public ingress of a service, by the
+#                      mechanism the cell chose at validate time.
+#   * kind `schedule`  `<id>/schedule`: the trigger of a scheduled job.
+#   * kind `grant`     `<id>/uses/<target>`: one `Uses` line.
+# A role the file turned off is the same node with `wanted` False.
+#
+# Every node is born stamped (`create_owned` writes the standard label rule's
+# labels and the provenance annotation in the one create call), reads its
+# stamp back from the labels, reports an out-of-band value on an unmodelled
+# field as an unmanaged difference, and never puts provenance in its digest.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -21,6 +28,9 @@ from kci_reconciler import (
     ChangeAction,
     Creds,
     InputRef,
+    Label,
+    ModelledDigest,
+    OwnerStamp,
     Outputs,
     Resource as EngineResource,
     ResolvedInputs,
@@ -34,8 +44,9 @@ from kci_reconciler import (
     VERB_UPDATE,
     unbound_error,
 )
+from kci_cloud import LoweredNode, standard_identity_of, standard_label_rule
 
-from kci_cloud_mem.mem_store import MemStore
+from kci_cloud_mem.mem_store import MemStore, MemView
 
 
 def mem_url(resource_id: String) -> String:
@@ -44,14 +55,6 @@ def mem_url(resource_id: String) -> String:
 
 def mem_host(resource_id: String) -> String:
     return resource_id + String(".mem")
-
-
-def _failed(id: String, digest: String, url: String) -> ResourceStatus:
-    """A present node in the failed state: it exists and does not run what
-    the file asks. The engine updates it (a fixed spec is the way out)."""
-    return ResourceStatus(
-        RES_FAILED, id, digest, String("mem: the node failed to become ready"), url
-    )
 
 
 def _plan(id: String, live: ResourceStatus) -> ChangeAction:
@@ -66,84 +69,130 @@ def _plan(id: String, live: ResourceStatus) -> ChangeAction:
     return ChangeAction(id, verb, why, RETAIN_DELETE)
 
 
-struct MemRunNode(EngineResource, Movable, Deinitable):
+def _unmanaged(v: MemView) -> String:
+    if v.extra.byte_length() == 0:
+        return String("")
+    return String("label ") + v.extra + String(" (not modelled; left as it is)")
+
+
+def static_digest(node: LoweredNode) raises -> String:
+    """The digest of a lowered node's own desired fields, in order (the
+    `serves` field is how the node behaves, not state)."""
+    var d = ModelledDigest(node.kind)
+    for i in range(len(node.desired)):
+        if node.desired[i].key == "serves":
+            continue
+        d.field(node.desired[i].key, node.desired[i].value)
+    return d.text()
+
+
+struct MemNode(EngineResource, Movable, Deinitable):
     var _store: ArcPointer[MemStore]
-    var _resource: String
+    var _id: String
+    var _owner: String
+    var _kind: String
     var _static: String
     var _serves: Bool
+    var _deps: List[String]
     var _refs: List[InputRef]
     var _bound: List[String]
     var _is_bound: Bool
+    var _wanted: Bool
 
-    def __init__(
-        out self,
-        store: ArcPointer[MemStore],
-        resource: String,
-        static: String,
-        serves: Bool,
-        var refs: List[InputRef],
-    ):
+    def __init__(out self, store: ArcPointer[MemStore], node: LoweredNode) raises:
         self._store = store.copy()
-        self._resource = resource
-        self._static = static
-        self._serves = serves
-        self._refs = refs^
+        self._id = node.id.copy()
+        self._owner = node.owner.copy()
+        self._kind = node.kind.copy()
+        self._static = static_digest(node)
+        self._serves = node.field(String("serves")) == "true"
+        self._deps = node.depends_on.copy()
+        self._refs = node.inputs.copy()
         self._bound = List[String]()
         self._is_bound = len(self._refs) == 0
-
-    def _id(self) -> String:
-        return self._resource + String("/run")
+        self._wanted = node.wanted
 
     def _desired_digest(self) raises -> String:
         if not self._is_bound:
-            raise unbound_error(self._id(), self._refs[0])
+            raise unbound_error(self._id, self._refs[0])
         var d = self._static.copy()
         for i in range(len(self._refs)):
             d += String("|") + self._refs[i].field + String("=") + self._bound[i]
         return d^
 
+    def _url(self) -> String:
+        if self._serves:
+            return mem_url(self._owner)
+        return String("")
+
     def logical_id(mut self) -> String:
-        return self._id()
+        return self._id.copy()
 
     def depends_on(mut self) -> List[String]:
-        return List[String]()
+        return self._deps.copy()
 
     def retention(mut self) -> Int:
         return RETAIN_DELETE
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
-        var id = self._id()
-        var i = self._store[].find(id)
-        if i < 0:
+        var v = self._store[].read(self._id)
+        if not v.present:
             return ResourceStatus.absent()
-        if self._store[].is_failed(i):
-            return _failed(id, self._store[].digests[i], self._store[].urls[i])
+        var stamp = standard_identity_of(v.labels)
+        var extra = _unmanaged(v)
+        if v.failed:
+            return ResourceStatus(
+                RES_FAILED,
+                self._id,
+                v.digest,
+                String("mem: the node failed to become ready"),
+                v.url,
+                String(""),
+                stamp,
+                extra,
+            )
         if not self._is_bound:
-            # A PRESENCE read: `destroy_graph` reads every node without
-            # binding its inputs, and only asks whether it exists. With no
-            # bound inputs there is no desired digest to compare, so the node
-            # is reported present and unmatched, never as matching.
-            return ResourceStatus.drifted(id, self._store[].digests[i], self._store[].urls[i])
+            # A presence read: with no bound inputs there is no desired digest
+            # to compare, so the node is reported present and unmatched.
+            return ResourceStatus.drifted(self._id, v.digest, v.url, String(""), stamp, extra)
         var want = self._desired_digest()
-        if self._store[].digests[i] == want:
-            return ResourceStatus.matched(id, want, self._store[].urls[i])
-        return ResourceStatus.drifted(id, self._store[].digests[i], self._store[].urls[i])
+        if v.digest == want:
+            return ResourceStatus.matched(self._id, want, v.url, String(""), stamp, extra)
+        return ResourceStatus.drifted(self._id, v.digest, v.url, String(""), stamp, extra)
+
+    def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        var v = self._store[].read(self._id)
+        if not v.present:
+            return ResourceStatus.absent()
+        return ResourceStatus.drifted(
+            self._id, String(""), v.url, String(""), standard_identity_of(v.labels)
+        )
 
     def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
-        return _plan(self._id(), live)
-
-    def _url(self) -> String:
-        if self._serves:
-            return mem_url(self._resource)
-        return String("")
+        return _plan(self._id, live)
 
     def create(mut self, creds: Creds) raises -> String:
-        var id = self._id()
-        self._store[].put(String("create"), id, self._desired_digest(), self._url())
-        return id^
+        self._store[].create(
+            self._id, self._kind, self._desired_digest(), self._url(), List[Label](), String("")
+        )
+        return self._id.copy()
+
+    def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
+        var labels = standard_label_rule(stamp)
+        var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
+        self._store[].create(
+            self._id, self._kind, self._desired_digest(), self._url(), labels, note
+        )
+        return self._id.copy()
+
+    def adopt_owned(
+        mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
+    ) raises:
+        var note = stamp.provenance.run_id + String("@") + stamp.provenance.revision
+        self._store[].relabel(physical_id, standard_label_rule(stamp), note)
 
     def update(mut self, creds: Creds) raises:
-        self._store[].put(String("update"), self._id(), self._desired_digest(), self._url())
+        self._store[].update(self._id, self._desired_digest(), self._url())
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
         self._store[].remove(physical_id)
@@ -158,7 +207,7 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
         var vals = List[String]()
         for i in range(len(self._refs)):
             vals.append(
-                resolved.value_of(self._id(), self._refs[i].producer, self._refs[i].output)
+                resolved.value_of(self._id, self._refs[i].producer, self._refs[i].output)
             )
         self._bound = vals^
         self._is_bound = True
@@ -167,77 +216,18 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
         var o = Outputs()
         if not self._serves:
             return o^
-        var i = self._store[].find(self._id())
-        if i < 0:
+        var v = self._store[].read(self._id)
+        if not v.present:
             return o^
-        o.set(String("URL"), self._store[].urls[i])
-        o.set(String("HOST"), mem_host(self._resource))
+        o.set(String("URL"), v.url)
+        o.set(String("HOST"), mem_host(self._owner))
         return o^
 
     def owner(mut self) -> String:
-        return self._resource.copy()
+        return self._owner.copy()
 
+    def stamps_ownership(mut self) -> Bool:
+        return True
 
-struct MemGrantNode(EngineResource, Movable, Deinitable):
-    var _store: ArcPointer[MemStore]
-    var _resource: String
-    var _target: String
-    var _access: String
-
-    def __init__(
-        out self,
-        store: ArcPointer[MemStore],
-        resource: String,
-        target: String,
-        access: String,
-    ):
-        self._store = store.copy()
-        self._resource = resource
-        self._target = target
-        self._access = access
-
-    def _id(self) -> String:
-        return self._resource + String("/uses/") + self._target
-
-    def logical_id(mut self) -> String:
-        return self._id()
-
-    def depends_on(mut self) -> List[String]:
-        var d = List[String]()
-        d.append(self._resource + String("/run"))
-        d.append(self._target + String("/run"))
-        return d^
-
-    def retention(mut self) -> Int:
-        return RETAIN_DELETE
-
-    def read_status(mut self, creds: Creds) raises -> ResourceStatus:
-        var id = self._id()
-        var i = self._store[].find(id)
-        if i < 0:
-            return ResourceStatus.absent()
-        if self._store[].is_failed(i):
-            return _failed(id, self._store[].digests[i], String(""))
-        if self._store[].digests[i] == self._access:
-            return ResourceStatus.matched(id, self._access)
-        return ResourceStatus.drifted(id, self._store[].digests[i])
-
-    def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
-        return _plan(self._id(), live)
-
-    def create(mut self, creds: Creds) raises -> String:
-        var id = self._id()
-        self._store[].put(String("create"), id, self._access, String(""))
-        return id^
-
-    def update(mut self, creds: Creds) raises:
-        self._store[].put(String("update"), self._id(), self._access, String(""))
-
-    def delete(mut self, physical_id: String, creds: Creds) raises:
-        self._store[].remove(physical_id)
-
-    def converge_mode(mut self, live: ResourceStatus) raises -> Int:
-        return CONVERGE_IN_PLACE
-
-    def owner(mut self) -> String:
-        return self._resource.copy()
+    def wanted(mut self) -> Bool:
+        return self._wanted

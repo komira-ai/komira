@@ -11,8 +11,9 @@
 #   2. plan, apply and destroy on mem-lite are each refused, and afterwards
 #      mem-lite's call log is EMPTY and nothing exists: not one create, not
 #      even for the `service` mem-lite could otherwise host;
-#   3. the same file applies on mem (3 nodes), so the refusal is about the
-#      graph and the cloud, not a broken file;
+#   3. the same file applies on mem (5 nodes: the run, public and grant
+#      roles of the service, the run and schedule roles of the job), so the
+#      refusal is about the graph and the cloud, not a broken file;
 #   4. a file mem-lite CAN host (an internal service, no job) applies on it,
 #      so mem-lite is a working cloud, not one that refuses everything;
 #   5. a value above a cloud limit is refused the same way on mem.
@@ -27,13 +28,14 @@
 from std.testing import assert_equal, assert_true
 
 from komira_proto_codec import decode_json
-from kci_reconciler import Creds, InMemoryStateStore
+from kci_reconciler import CellScope, Creds, InMemoryStateStore, Provenance, ResourceKey
 from kci_cloud import (
     ABSENT_BY_DESIGN,
     ACCESS_CALL,
     CLOUD_BOUND,
     Catalog,
     CatalogType,
+    CellContext,
     FIELD_JOB,
     FIELD_SERVICE,
     OUTPUT_HOST,
@@ -71,6 +73,10 @@ def _file() -> String:
     )
 
 
+def _ctx() -> CellContext:
+    return CellContext(CellScope(String("shop"), String("blue"), Provenance(String("run-1"), String("rev-1"))))
+
+
 def _clouds() raises -> Clouds:
     var reg = Clouds(Catalog.v1())
     reg.add(describe(MemCloud()))
@@ -102,18 +108,19 @@ def test_mem_lite_refuses_before_anything_is_created() raises:
         var raised = False
         try:
             if verb == 0:
-                _ = plan_resources(reg, lite, resources, creds)
+                _ = plan_resources(reg, lite, _ctx(), resources, creds, store)
             elif verb == 1:
-                _ = apply_resources(reg, lite, resources, creds, store)
+                _ = apply_resources(reg, lite, _ctx(), resources, creds, store)
             else:
-                _ = destroy_resources(reg, lite, resources, creds, store)
+                _ = destroy_resources(reg, lite, _ctx(), resources, creds, store)
         except e:
             raised = True
             assert_equal(String(e), String(EXPECTED))
         assert_true(raised, String("verb ") + String(verb) + " was refused")
     assert_equal(len(lite.store[].calls), 0, "mem-lite served no call at all")
     assert_equal(lite.live_count(), 0, "and nothing exists on it")
-    assert_equal(store.physical_id_for(String("api/run")), "", "no intent was written")
+    var key = ResourceKey(String("shop"), String("blue"), String("api/run"))
+    assert_equal(store.total_intents(key), 0, "no intent was written")
     print("  test_mem_lite_refuses_before_anything_is_created: PASS")
 
 
@@ -121,12 +128,14 @@ def test_the_same_file_applies_on_mem() raises:
     var reg = _clouds()
     var mem = MemCloud()
     var store = InMemoryStateStore()
-    var outcome = apply_resources(reg, mem, _list(_file()), Creds.none(), store)
+    var outcome = apply_resources(reg, mem, _ctx(), _list(_file()), Creds.none(), store)
     assert_true(outcome.ok())
-    assert_equal(len(outcome.applied), 3)
-    assert_equal(mem.live_count(), 3)
+    # api/run, api/public, api/uses/nightly, nightly/run, nightly/schedule
+    assert_equal(len(outcome.applied), 5)
+    assert_equal(mem.live_count(), 5)
     assert_true(mem.store[].find(String("api/uses/nightly")) >= 0, "the grant exists")
-    var i = mem.store[].find(String("nightly/run"))
+    assert_true(mem.store[].find(String("api/public")) >= 0, "the public role exists")
+    var i = mem.store[].find(String("nightly/schedule"))
     assert_true(_has(mem.store[].digests[i], "|cron=0 3 * * *|tz=UTC"), mem.store[].digests[i])
     print("  test_the_same_file_applies_on_mem: PASS")
 
@@ -139,9 +148,10 @@ def test_mem_lite_hosts_what_it_can() raises:
         '{"resource":[{"id":"api","service":{"image":{"digest":"sha256:a1"},'
         '"port":8080,"internal":{}}}]}'
     )
-    var outcome = apply_resources(reg, lite, _list(ok), Creds.none(), store)
+    var outcome = apply_resources(reg, lite, _ctx(), _list(ok), Creds.none(), store)
     assert_true(outcome.ok())
-    assert_equal(len(outcome.applied), 1)
+    # api/run, and api/public turned off (internal): nothing to remove
+    assert_equal(len(outcome.applied), 2)
     assert_equal(lite.live_count(), 1)
     print("  test_mem_lite_hosts_what_it_can: PASS")
 
@@ -153,7 +163,7 @@ def test_a_limit_is_refused_the_same_way() raises:
     var store = InMemoryStateStore()
     var raised = False
     try:
-        _ = apply_resources(reg, mem, _list(long), Creds.none(), store)
+        _ = apply_resources(reg, mem, _ctx(), _list(long), Creds.none(), store)
     except e:
         raised = True
         assert_true(
@@ -202,7 +212,7 @@ def test_a_cloud_bound_shape_fails_early() raises:
     var store = InMemoryStateStore()
     var raised = False
     try:
-        _ = apply_resources(clouds, lite, resources, Creds.none(), store)
+        _ = apply_resources(clouds, lite, _ctx(), resources, Creds.none(), store)
     except e:
         raised = True
         assert_equal(String(e), text)

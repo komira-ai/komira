@@ -2,9 +2,13 @@
 # test_mem_conformance.mojo
 # =============================================================================
 #
-# 1. "mem" passes the kci_cloud conformance kit on a graph with every v1
-#    shape: a public service, an internal service reading the first one's URL
-#    and HOST, a scheduled job, and two `Uses` grants.
+# 1. "mem" passes the kci_cloud conformance kit (all eleven steps: label
+#    stamping, an idempotent re-apply under a new provenance, the tamper
+#    pair, failed then fixed, role removal, destroy of a graph with a
+#    reference, foreign refusal and adoption, two interleaved applies) on a
+#    graph with every v1 shape: a public service, an internal service reading
+#    the first one's URL and HOST, a scheduled job, and two `Uses` grants;
+#    the roles turned off are api's public ingress and web's grant.
 # 2. RENAME INVARIANCE: the same kit passes with mem registered under a
 #    random id, so nothing above the cloud adapter keyed on the spelling "mem".
 # 3. "mem-lite" passes the kit on the graph it can host.
@@ -15,9 +19,14 @@
 # 5. EVERY MODELLED FIELD IS IN THE DIGEST: a job's `env` and `secret_env`
 #    (a reference: store, name, version) are updates when they change;
 #    writing the default image platform out is not a change.
-# 6. THE FAULTY VARIANT: a cloud call refused mid-apply leaves a PARTIAL
-#    outcome (what landed, what is pending); the next apply finishes the
-#    graph without re-creating what landed, and the one after is a no-op.
+# 6. THE FAULTY VARIANT, failure at call k: a cloud call refused mid-apply
+#    leaves a PARTIAL outcome (what landed, what is pending); the next apply
+#    finishes the graph without re-creating what landed, and the one after is
+#    a no-op. (Read lag and a pre-existing foreign object:
+#    test_mem_faulty_variant.)
+# 7. LOWERING IS DATA: the golden JSON of a small lowering, every modelled
+#    field with its default filled in, and the turned-off schedule role.
+# 8. A DEFAULT WRITTEN OUT IS NOT A CHANGE (port 8080, scale 0..10).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -25,8 +34,11 @@ from std.testing import assert_equal, assert_true
 from komira_proto_codec import decode_json
 from kci_reconciler import (
     AppliedNode,
+    CellScope,
     Creds,
     InMemoryStateStore,
+    Provenance,
+    ResourceKey,
     VERB_KNOWN_AFTER_APPLY,
     VERB_CREATE,
     VERB_NOOP,
@@ -35,9 +47,12 @@ from kci_reconciler import (
 from kci_cloud import (
     ApplyOutcome,
     Catalog,
+    CellContext,
     Clouds,
     apply_resources,
     describe,
+    lower_data,
+    lowering_json,
     plan_resources,
     run_conformance,
 )
@@ -61,17 +76,30 @@ def _done(outcome: ApplyOutcome) raises -> List[AppliedNode]:
     return outcome.applied.copy()
 
 
-def _full(api_port: String) -> String:
+def _ctx() -> CellContext:
+    return CellContext(CellScope(String("shop"), String("blue"), Provenance(String("run-1"), String("rev-1"))))
+
+
+def _full(api_port: String, roles_on: Bool = True) -> String:
+    """`roles_on` False turns two roles off: api's public ingress (api is made
+    internal) and web's grant on api."""
+    var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
+    var exposure = String('"public":{}')
+    if not roles_on:
+        web_uses = String('"uses":[]},')
+        exposure = String('"internal":{}')
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"port":8080,"internal":{},')
         + String('"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}},')
         + String('"API_HOST":{"ref":{"resource":"api","standard":"HOST"}},')
         + String('"MODE":{"literal":"fast"}}},')
-        + String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
+        + web_uses
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":')
         + api_port
-        + String(',"public":{},"requestTimeout":"30s","scale":{"min":0,"max":3}},')
+        + String(",")
+        + exposure
+        + String(',"requestTimeout":"30s","scale":{"min":0,"max":3}},')
         + String('"uses":[{"target":{"resource":"nightly"},"access":"CALL"}]},')
         + String('{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"maxRetries":1,')
         + String('"schedule":{"cron":"0 3 * * *","timezone":"UTC"}}}')
@@ -79,12 +107,17 @@ def _full(api_port: String) -> String:
     )
 
 
-def _lite(api_port: String) -> String:
+def _lite(api_port: String, roles_on: Bool = True) -> String:
+    """`roles_on` False removes web's grant on api (mem-lite has no public
+    ingress to turn off)."""
+    var web_uses = String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
+    if not roles_on:
+        web_uses = String('"uses":[]},')
     return (
         String('{"resource":[')
         + String('{"id":"web","service":{"image":{"digest":"sha256:c3"},"internal":{},')
         + String('"env":{"API_URL":{"ref":{"resource":"api","standard":"URL"}}}},')
-        + String('"uses":[{"target":{"resource":"api"},"access":"CALL"}]},')
+        + web_uses
         + String('{"id":"api","service":{"image":{"digest":"sha256:a1"},"port":')
         + api_port
         + String(',"internal":{}}}')
@@ -96,7 +129,10 @@ def test_mem_passes_the_kit() raises:
     var reg = Clouds(Catalog.v1())
     reg.add(describe(MemCloud()))
     var mem = MemCloud()
-    run_conformance(reg, mem, _list(_full("8080")), _list(_full("9090")), String("api/run"))
+    run_conformance(
+        reg, mem, _ctx(), _list(_full("8080")), _list(_full("9090")),
+        _list(_full("9090", False)), String("api/run"),
+    )
     print("  test_mem_passes_the_kit: PASS")
 
 
@@ -106,7 +142,10 @@ def test_mem_under_a_random_id_passes_the_kit() raises:
     reg.add(describe(MemCloud(id)))
     reg.add(describe(MemLiteCloud(String("q-90c2"))))
     var renamed = MemCloud(id)
-    run_conformance(reg, renamed, _list(_full("8080")), _list(_full("9090")), String("web/run"))
+    run_conformance(
+        reg, renamed, _ctx(), _list(_full("8080")), _list(_full("9090")),
+        _list(_full("9090", False)), String("web/run"),
+    )
     print("  test_mem_under_a_random_id_passes_the_kit: PASS")
 
 
@@ -114,7 +153,10 @@ def test_mem_lite_passes_the_kit_on_what_it_hosts() raises:
     var reg = Clouds(Catalog.v1())
     reg.add(describe(MemLiteCloud()))
     var lite = MemLiteCloud()
-    run_conformance(reg, lite, _list(_lite("8080")), _list(_lite("9090")), String("api/run"))
+    run_conformance(
+        reg, lite, _ctx(), _list(_lite("8080")), _list(_lite("9090")),
+        _list(_lite("9090", False)), String("api/run"),
+    )
     print("  test_mem_lite_passes_the_kit_on_what_it_hosts: PASS")
 
 
@@ -127,24 +169,27 @@ def test_values_flow_through_mem() raises:
     var creds = Creds.none()
     var store = InMemoryStateStore()
 
-    var plan = plan_resources(reg, mem, _list(_full("8080")), creds)
+    var plan = plan_resources(reg, mem, _ctx(), _list(_full("8080")), creds, store)
     for i in range(len(plan)):
         if plan[i].logical_id == "web/run":
             assert_equal(plan[i].verb, VERB_KNOWN_AFTER_APPLY, "web reads api's URL")
         elif plan[i].logical_id == "api/run":
             assert_equal(plan[i].verb, VERB_CREATE)
 
-    _ = _done(apply_resources(reg, mem, _list(_full("8080")), creds, store))
+    _ = _done(apply_resources(reg, mem, _ctx(), _list(_full("8080")), creds, store))
     var w = mem.store[].find(String("web/run"))
     var d = mem.store[].digests[w].copy()
     assert_true(_has(d, "|service.env.API_HOST=api.mem"), d)
     assert_true(_has(d, "|service.env.API_URL=mem://api"), d)
     assert_true(_has(d, "|service.env.MODE=fast"), d)
     assert_equal(
-        store.outputs_for(String("api/run")).get(String("URL")).value(), "mem://api"
+        store.outputs_for(ResourceKey(String("shop"), String("blue"), String("api/run")))
+        .get(String("URL"))
+        .value(),
+        "mem://api",
     )
 
-    var again = _done(apply_resources(reg, mem, _list(_full("9090")), creds, store))
+    var again = _done(apply_resources(reg, mem, _ctx(), _list(_full("9090")), creds, store))
     for i in range(len(again)):
         if again[i].logical_id == "api/run":
             assert_equal(again[i].verb, VERB_UPDATE, "the port changed")
@@ -182,7 +227,7 @@ def test_job_env_and_secrets_are_modelled() raises:
     var mem = MemCloud()
     var creds = Creds.none()
     var store = InMemoryStateStore()
-    _ = _done(apply_resources(reg, mem, _list(_job("a", "1", "")), creds, store))
+    _ = _done(apply_resources(reg, mem, _ctx(), _list(_job("a", "1", "")), creds, store))
     var i = mem.store[].find(String("nightly/run"))
     var d = mem.store[].digests[i].copy()
     assert_true(_has(d, "|job.env.MODE=a"), d)
@@ -190,16 +235,16 @@ def test_job_env_and_secrets_are_modelled() raises:
     assert_true(_has(d, "@linux/amd64"), d)
 
     var same = _done(
-        apply_resources(reg, mem, _list(_job("a", "1", "linux/amd64")), creds, store)
+        apply_resources(reg, mem, _ctx(), _list(_job("a", "1", "linux/amd64")), creds, store)
     )
     assert_equal(
         _verb_of(same, String("nightly/run")),
         VERB_NOOP,
         "writing the default platform out is not a change",
     )
-    var env = _done(apply_resources(reg, mem, _list(_job("b", "1", "")), creds, store))
+    var env = _done(apply_resources(reg, mem, _ctx(), _list(_job("b", "1", "")), creds, store))
     assert_equal(_verb_of(env, String("nightly/run")), VERB_UPDATE, "a job env change is an update")
-    var sec = _done(apply_resources(reg, mem, _list(_job("b", "2", "")), creds, store))
+    var sec = _done(apply_resources(reg, mem, _ctx(), _list(_job("b", "2", "")), creds, store))
     assert_equal(
         _verb_of(sec, String("nightly/run")), VERB_UPDATE, "a new secret version is an update"
     )
@@ -214,24 +259,73 @@ def test_a_fault_mid_apply_is_partial_then_recovers() raises:
     var creds = Creds.none()
     var store = InMemoryStateStore()
     var graph = _list(_full("8080"))
-    var first = apply_resources(reg, mem, graph, creds, store)
+    var first = apply_resources(reg, mem, _ctx(), graph, creds, store)
     assert_true(first.partial(), "one node landed, then the cloud refused a call")
     assert_true(_has(first.error.value(), "mem: injected fault on call 2"), first.error.value())
-    assert_equal(len(first.landed), 1)
+    var landed_id = String("")
+    var created = 0
+    for k in range(len(first.landed)):
+        if first.landed[k].verb == VERB_CREATE:
+            created += 1
+            landed_id = first.landed[k].logical_id.copy()
+    assert_equal(created, 1, "exactly one create landed")
     assert_true(len(first.pending) >= 1)
     assert_equal(mem.live_count(), 1, "what landed is live, nothing else")
-    var landed_id = first.landed[0].logical_id.copy()
 
-    var second = _done(apply_resources(reg, mem, graph, creds, store))
+    var second = _done(apply_resources(reg, mem, _ctx(), graph, creds, store))
     for k in range(len(second)):
         if second[k].logical_id == landed_id:
             assert_equal(second[k].verb, VERB_NOOP, landed_id + " is not re-created")
-        else:
-            assert_equal(second[k].verb, VERB_CREATE, second[k].logical_id)
-    var third = _done(apply_resources(reg, mem, graph, creds, store))
+    assert_equal(mem.store[].creates_of(landed_id), 1, "created once")
+    var third = _done(apply_resources(reg, mem, _ctx(), graph, creds, store))
     for k in range(len(third)):
         assert_equal(third[k].verb, VERB_NOOP, third[k].logical_id + " settled")
     print("  test_a_fault_mid_apply_is_partial_then_recovers: PASS")
+
+
+def test_lowering_is_data_golden() raises:
+    var mem = MemCloud()
+    var json = String(
+        '{"resource":['
+        '{"id":"api","service":{"image":{"digest":"sha256:a1"},"public":{}}},'
+        '{"id":"nightly","job":{"image":{"digest":"sha256:b2"},"onDemand":{}}}'
+        "]}"
+    )
+    var got = lowering_json(lower_data(mem, _list(json)))
+    var want = (
+        String("[\n")
+        + String('  {"id":"api/run","owner":"api","kind":"run","wanted":true,"depends_on":[],"inputs":[],')
+        + String('"desired":{"img":"sha256:a1@linux/amd64","port":"8080","size":"1000m/512MB","scale":"0..10",')
+        + String('"health":"","timeout":"60s0n","concurrency":"0","serves":"true"}},\n')
+        + String('  {"id":"api/public","owner":"api","kind":"public","wanted":true,"depends_on":["api/run"],')
+        + String('"inputs":[],"desired":{"mechanism":"invoker"}},\n')
+        + String('  {"id":"nightly/run","owner":"nightly","kind":"run","wanted":true,"depends_on":[],"inputs":[],')
+        + String('"desired":{"img":"sha256:b2@linux/amd64","size":"1000m/512MB","retries":"0",')
+        + String('"timeout":"600s0n","serves":"false"}},\n')
+        + String('  {"id":"nightly/schedule","owner":"nightly","kind":"schedule","wanted":false,')
+        + String('"depends_on":["nightly/run"],"inputs":[],"desired":{}}\n')
+        + String("]")
+    )
+    assert_equal(got, want)
+    assert_equal(mem.live_count(), 0, "lowering touched nothing")
+    print("  test_lowering_is_data_golden: PASS")
+
+
+def test_a_default_written_out_is_not_a_change() raises:
+    var reg = Clouds(Catalog.v1())
+    reg.add(describe(MemCloud()))
+    var mem = MemCloud()
+    var store = InMemoryStateStore()
+    var bare = String('{"resource":[{"id":"api","service":{"image":{"digest":"sha256:a1"},"internal":{}}}]}')
+    var spelled = String(
+        '{"resource":[{"id":"api","service":{"image":{"digest":"sha256:a1","platform":"linux/amd64"},'
+        '"port":8080,"scale":{"min":0,"max":10},"requestTimeout":"60s","internal":{}}}]}'
+    )
+    _ = _done(apply_resources(reg, mem, _ctx(), _list(bare), Creds.none(), store))
+    var again = _done(apply_resources(reg, mem, _ctx(), _list(spelled), Creds.none(), store))
+    for k in range(len(again)):
+        assert_equal(again[k].verb, VERB_NOOP, again[k].logical_id + ": a default written out")
+    print("  test_a_default_written_out_is_not_a_change: PASS")
 
 
 def main() raises:
@@ -242,4 +336,6 @@ def main() raises:
     test_values_flow_through_mem()
     test_job_env_and_secrets_are_modelled()
     test_a_fault_mid_apply_is_partial_then_recovers()
+    test_lowering_is_data_golden()
+    test_a_default_written_out_is_not_a_change()
     print("ALL kci_cloud_mem CONFORMANCE TESTS PASSED")
