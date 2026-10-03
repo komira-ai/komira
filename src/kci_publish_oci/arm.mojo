@@ -122,7 +122,7 @@ struct ImagePublish(Copyable, Movable):
 
 
 def _refused(error_id: String, why: String) -> ImagePublish:
-    return ImagePublish(String(OUTCOME_REFUSED), error_id.copy(), String("kci publish image: ") + why)
+    return ImagePublish(String(OUTCOME_REFUSED), error_id.copy(), String("PUBLISH step (image): ") + why)
 
 
 def _outcome_of(code: Int) -> String:
@@ -203,7 +203,7 @@ def publish_layout[T: OciTransport](
         var p = ImagePublish(
             String(OUTCOME_SUCCEEDED),
             String(""),
-            String("kci publish image: plan: would push ") + layout.manifest_digest + String(" to ")
+            String("PUBLISH step (image): plan: would push ") + layout.manifest_digest + String(" to ")
             + registry + String("/") + repository + String(":") + revision + String("; nothing was sent"),
         )
         _row(p, layout, registry, repository, revision, platform)
@@ -212,7 +212,7 @@ def publish_layout[T: OciTransport](
     var r = pusher.push(layout, registry, repository, revision)
     var outcome = _outcome_of(r.outcome)
     var id = String("")
-    var message = String("kci publish image: ") + push_outcome_name(r.outcome) + String(" ") + r.reference()
+    var message = String("PUBLISH step (image): ") + push_outcome_name(r.outcome) + String(" ") + r.reference()
     if not r.is_success():
         id = String(ERROR_IMAGE_PUSH)
         message += String(": ") + r.detail

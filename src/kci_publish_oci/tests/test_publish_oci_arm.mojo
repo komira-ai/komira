@@ -74,6 +74,9 @@ def _expect(p: ImagePublish, outcome: String, code: Int, error_id: String) raise
     assert_equal(p.exit_code(), code, p.message)
     assert_equal(p.error_id, error_id, p.message)
     assert_equal(p.message.find(String(_SECRET)), -1, p.message)
+    # Every message names the step (`kci run --stage S` is the one verb for
+    # stages), never a removed verb.
+    assert_true(p.message.startswith(String("PUBLISH step (image): ")), p.message)
 
 
 def test_uploaded_then_identical_repush_is_noop_exit_0() raises:
