@@ -12,10 +12,22 @@
 #
 # A platform is an (os, cpu) pair. The names are the row names of the
 # build's platform table (tools/build/platforms/table.bzl), so the repository
-# has one platform vocabulary. A RELEASE (a run of `kci build` or `kci
-# publish`) is for exactly one released platform; a member of a release is
+# has one platform vocabulary. A RELEASE (what a BUILD step makes and a
+# PUBLISH step publishes) is for exactly one released platform; a member is
 # for that platform or `noarch`. A reserved platform is refused with its
 # reason, so naming one is a clear "not yet", never "unknown".
+#
+# A platform is OS + CPU and nothing else. An OCI image names the same pair
+# in its own spelling, `os/arch` (`linux/amd64`); `oci_platform_of` and
+# `platform_of_oci` translate at the image boundary only, so the machine
+# file, the declarations and the release directory keep one spelling. Both
+# directions refuse a spelling they do not know, and `noarch` has no OCI
+# spelling (an image always runs on one OS and CPU).
+#
+#   platform       OCI
+#   linux-x86_64   linux/amd64
+#   darwin-arm64   darwin/arm64
+#   linux-arm64    linux/arm64
 #
 # Pure functions over owned values; no pointer.
 # =============================================================================
@@ -131,3 +143,40 @@ def platform_of_conda_subdir(subdir: String) raises -> String:
         if t[i].conda_subdir == subdir:
             return t[i].name.copy()
     raise Error(String("conda subdir '") + subdir + String("' is not a kci platform's subdir"))
+
+
+def _oci_pairs() -> List[String]:
+    """`<platform> <os/arch>` per row of the OCI table (file header)."""
+    var out = List[String]()
+    out.append(String(PLATFORM_LINUX_X86_64) + String(" linux/amd64"))
+    out.append(String(PLATFORM_DARWIN_ARM64) + String(" darwin/arm64"))
+    out.append(String(PLATFORM_LINUX_ARM64) + String(" linux/arm64"))
+    return out^
+
+
+def oci_platform_of(platform: String) raises -> String:
+    """The OCI `os/arch` of `platform` (`linux-x86_64` -> `linux/amd64`);
+    refuses a platform with no OCI spelling (an unknown one, or `noarch`)."""
+    var t = _oci_pairs()
+    for i in range(len(t)):
+        var parts = t[i].split(String(" "))
+        if String(parts[0]) == platform:
+            return String(parts[1])
+    raise Error(
+        String("platform '") + platform
+        + String("' has no OCI os/arch (one of: linux-x86_64 darwin-arm64 linux-arm64)")
+    )
+
+
+def platform_of_oci(os_arch: String) raises -> String:
+    """The platform whose OCI `os/arch` is `os_arch` (`linux/amd64` ->
+    `linux-x86_64`); refuses a spelling not in the table."""
+    var t = _oci_pairs()
+    for i in range(len(t)):
+        var parts = t[i].split(String(" "))
+        if String(parts[1]) == os_arch:
+            return String(parts[0])
+    raise Error(
+        String("OCI platform '") + os_arch
+        + String("' is not a kci platform (one of: linux/amd64 darwin/arm64 linux/arm64)")
+    )

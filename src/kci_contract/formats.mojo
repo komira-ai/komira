@@ -24,8 +24,7 @@
 # action writes (manifest.json, metadata.json): such a value in an action's
 # inputs makes every run a cache miss and the package bytes differ per run.
 #
-# The names below are v1 placeholders a design revision may rename; they are
-# spelled here only.
+# The names are spelled here only.
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
@@ -45,11 +44,9 @@ comptime FORMAT_ARTIFACT_MANIFEST: String = "kci.artifact_manifest"
 comptime FORMAT_CONDA_METADATA: String = "kci.conda_metadata"
 """`metadata.json` next to a conda package (written by the package build)."""
 comptime FORMAT_RELEASE_SET: String = "kci.release_set"
-"""`release.json`, the last file `kci build` writes into a release directory."""
+"""`release.json`, the last file a BUILD step writes into a release directory."""
 comptime FORMAT_RESULT: String = "kci.result"
 """The result document every verb writes with `--result-file`."""
-comptime FORMAT_STAGES: String = "kci.stages"
-"""What `kci stages` prints: the machine file's stages for a driver."""
 
 comptime SCHEMA_VERSION_KEY: String = "schema_version"
 comptime FORMAT_KEY: String = "format"
@@ -85,7 +82,6 @@ def format_table() -> List[FormatRow]:
     # read: a release directory is rebuilt, never carried across kci versions.
     t.append(FormatRow(String(FORMAT_RELEASE_SET), String(KIND_PRODUCED), 2, 2))
     t.append(FormatRow(String(FORMAT_RESULT), String(KIND_PRODUCED), 1, 1))
-    t.append(FormatRow(String(FORMAT_STAGES), String(KIND_PRODUCED), 1, 1))
     return t^
 
 
