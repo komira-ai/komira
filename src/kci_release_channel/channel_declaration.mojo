@@ -95,6 +95,32 @@ struct ChannelRepository(Copyable, Movable):
         return self.credential.value().copy()
 
 
+comptime _ENVIRONMENT_MARK: String = ":environment:"
+
+
+def push_identity_environment(repo: ChannelRepository) -> String:
+    """The CI environment a trusted-publishing push identity names, or "".
+
+    For OIDC_TRUSTED_PUBLISHING the push identity is the subject claim of the
+    CI's identity token; GitHub's for a job in an environment is
+    `repo:<owner>/<repo>:environment:<name>`. This returns `<name>`: the one
+    stage (and GitHub environment) whose job may publish here, so kci can
+    refuse a publish from any other stage. "" for an API_TOKEN repository, a
+    repository with no credential, and a subject that names no environment
+    (or an empty one, or one holding `:`)."""
+    if not repo.credential:
+        return String("")
+    if not repo.credential.value().is_oidc_trusted_publishing():
+        return String("")
+    var at = repo.push_identity.rfind(String(_ENVIRONMENT_MARK))
+    if at < 0:
+        return String("")
+    var env = String(repo.push_identity[byte = at + String(_ENVIRONMENT_MARK).byte_length() :])
+    if env.byte_length() == 0 or env.find(String(":")) >= 0:
+        return String("")
+    return env^
+
+
 struct ChannelDeclaration(Copyable, Movable):
     """One release channel. See the module header."""
 

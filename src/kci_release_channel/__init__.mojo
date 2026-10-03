@@ -34,6 +34,7 @@ from kci_release_channel.channel_declaration import (
     channel_names,
     find_channel,
     is_valid_channel_name,
+    push_identity_environment,
     validate_channel_declarations,
 )
 from kci_release_channel.parse import parse_channels_file
