@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/described_resource.mojo — the RESOURCE DESCRIPTOR and the generic
+# kci_reconciler/described_resource.mojo — the RESOURCE DESCRIPTOR and the generic
 #   driver that turns one into a `Resource`. The answer to "we cannot autogen the
 #   CDK-like layer, so how do we stop hand-writing the same boilerplate for every resource".
 # =============================================================================
@@ -104,7 +104,7 @@
 # deps, and nothing else. Mojo 1.0.0b2 (def-only).
 # =============================================================================
 
-from kci_iac.resource import (
+from kci_reconciler.resource import (
     Resource,
     ResourceStatus,
     ChangeAction,
@@ -115,9 +115,9 @@ from kci_iac.resource import (
     VERB_NOOP,
     VERB_UPDATE,
 )
-from kci_iac.fault_domain import FAULT_UNSET
-from kci_iac.erased_resource import ErasedResource
-from kci_iac.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.fault_domain import FAULT_UNSET
+from kci_reconciler.erased_resource import ErasedResource
+from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
 
 
 # =============================================================================
@@ -274,7 +274,7 @@ trait ResourceDescriptor(Movable, Deinitable):
         node."""
         return String("")
 
-    # ---- apply-time value flow (kci_iac/outputs.mojo) ----------------------
+    # ---- apply-time value flow (kci_reconciler/outputs.mojo) ----------------
 
     def input_refs(self, spec: Self.Spec) -> List[InputRef]:
         """DEFAULT: none — the values this spec reads from other nodes."""

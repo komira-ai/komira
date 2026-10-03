@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/graph.mojo — the ResourceGraph (the DAG of erased resource nodes)
+# kci_reconciler/graph.mojo — the ResourceGraph (the DAG of erased resource nodes)
 #   + Kahn topo-sort of the resource-graph deploy engine.
 # =============================================================================
 #
@@ -31,7 +31,7 @@
 
 from komira_core.collections.slab import Slab
 
-from kci_iac.erased_resource import ErasedResource
+from kci_reconciler.erased_resource import ErasedResource
 
 
 # =============================================================================

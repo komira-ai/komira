@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/outputs.mojo — APPLY-TIME VALUE FLOW between nodes.
+# kci_reconciler/outputs.mojo — APPLY-TIME VALUE FLOW between nodes.
 # =============================================================================
 #
 # A node may PRODUCE named values once it exists (a URL, a host, an address, a

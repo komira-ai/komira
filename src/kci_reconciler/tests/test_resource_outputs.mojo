@@ -27,7 +27,7 @@
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true, assert_false
 
-from kci_iac import (
+from kci_reconciler import (
     Resource,
     ResourceStatus,
     ChangeAction,
@@ -50,7 +50,7 @@ from kci_iac import (
     VERB_NOOP,
     VERB_KNOWN_AFTER_APPLY,
 )
-from kci_iac.described_resource import ResourceDescriptor, make_described_node
+from kci_reconciler.described_resource import ResourceDescriptor, make_described_node
 
 
 def _has(haystack: String, needle: String) -> Bool:

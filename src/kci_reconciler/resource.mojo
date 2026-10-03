@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/resource.mojo — the provider-neutral RESOURCE abstraction of the
+# kci_reconciler/resource.mojo — the provider-neutral RESOURCE abstraction of the
 #   resource-graph deploy engine (open-core; no cloud, provider or deployment
 #   coupling).
 # =============================================================================
@@ -31,8 +31,8 @@
 
 # The trait's `fault_domain` default. Importing ONE constant from a leaf module
 # that imports nothing keeps this file's dependency surface at zero cycles.
-from kci_iac.fault_domain import FAULT_UNSET
-from kci_iac.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.fault_domain import FAULT_UNSET
+from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
 
 
 # =============================================================================
@@ -50,7 +50,9 @@ replace, a v1-unsupported REPLACE — see CONVERGE_REPLACE)."""
 comptime RES_CONVERGING: Int = 3
 """The live resource is reconciling toward the desired spec (not yet settled)."""
 comptime RES_FAILED: Int = 4
-"""The live resource is in a failed terminal state."""
+"""The live resource is in a failed terminal state. It exists and does not run
+what the file asks, so apply treats it like a drift: an in-place update (a
+fixed image after a bad one) is how it recovers."""
 
 
 # =============================================================================
@@ -488,7 +490,7 @@ trait Resource(Movable, Deinitable):
         """A PURE diff: given the live status (from `read_status`), return the
         ChangeAction that would converge this resource — WITHOUT mutating anything
         (no I/O, no side effect). RES_ABSENT -> VERB_CREATE; RES_PRESENT_MATCHED ->
-        VERB_NOOP; RES_PRESENT_DRIFTED -> VERB_UPDATE (IN_PLACE) or VERB_REPLACE
+        VERB_NOOP; RES_PRESENT_DRIFTED or RES_FAILED -> VERB_UPDATE (IN_PLACE) or VERB_REPLACE
         (needs replace). The engine's `plan_graph` collects these for a dry-run;
         `apply_graph` re-reads live and acts, it does not replay this."""
         ...
@@ -512,7 +514,7 @@ trait Resource(Movable, Deinitable):
         ...
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
-        """HOW a drift (RES_PRESENT_DRIFTED) is converged: CONVERGE_IN_PLACE (the
+        """HOW a drift (RES_PRESENT_DRIFTED, or RES_FAILED) is converged: CONVERGE_IN_PLACE (the
         v1-supported update) or a RAISE for a drift that genuinely needs a REPLACE
         (delete-then-create). v1 has NO replace path — a conformer that returns
         CONVERGE_REPLACE, or raises here, makes the engine surface a clear
@@ -541,7 +543,7 @@ trait Resource(Movable, Deinitable):
 
     def fault_domain(mut self, verb: String) raises -> Int:
         """WHOSE FAULT is a failure of `verb` ON THIS NODE — a FAULT_* code
-        (`kci_iac.fault_domain`). `verb` is the `Resource` verb that raised:
+        (`kci_reconciler.fault_domain`). `verb` is the `Resource` verb that raised:
         `read_status` / `create` / `update` / `delete`.
 
         DEFAULT = `FAULT_UNSET`, WHICH READS AS **OURS**. A conformer that has
@@ -579,7 +581,7 @@ trait Resource(Movable, Deinitable):
         `mut self` (the erasure-shape rationale — see `logical_id`)."""
         return FAULT_UNSET
 
-    # ---- apply-time value flow (kci_iac/outputs.mojo) ----------------------
+    # ---- apply-time value flow (kci_reconciler/outputs.mojo) ----------------
     #
     # ⚠ EVERY ONE OF THESE HAS A DEFAULT, AND EVERY ONE IS FORWARDED BY
     # `ErasedResource`. A defaulted verb that the erased facade does not forward

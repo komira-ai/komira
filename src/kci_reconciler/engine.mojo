@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/engine.mojo — the reconcile VERBS of the resource-graph deploy
+# kci_reconciler/engine.mojo — the reconcile VERBS of the resource-graph deploy
 #   engine, driving a ResourceGraph over a StateStore + Creds (provider-neutral).
 # =============================================================================
 #
@@ -8,18 +8,22 @@
 #     `plan(read_status())` — READ-ONLY (no mutation). The dry-run.
 #   * apply_graph(graph, creds, store) -> List[AppliedNode]. Topo order; per node:
 #     record_or_adopt_intent -> read_status -> (MATCHED: adopt / ABSENT: create /
-#     DRIFTED: converge_mode IN_PLACE -> update, else RAISE "REPLACE unsupported")
-#     -> confirm -> append AppliedNode -> outputs. The forward apply, with write-ahead
-#     recovery (a crashed apply is re-driven by adopting the surviving intents).
+#     DRIFTED or FAILED: converge_mode IN_PLACE -> update, else RAISE "REPLACE
+#     unsupported") -> confirm -> append AppliedNode -> outputs. The forward
+#     apply, with write-ahead recovery (a crashed apply is re-driven by adopting
+#     the surviving intents). A FAILED live resource is updatable: the fix for a
+#     bad image is the next apply with a good one.
 #   * rollback_create(graph, applied, creds, store). REVERSE order over `applied`;
 #     SKIP RETAIN_KEEP (never delete a kept resource) and SKIP RETAIN_UNDELETABLE
-#     (no delete capability exists); SKIP VERB_NOOP (we ADOPTED
-#     it — live already matched and we mutated nothing, so it is not ours to
-#     unwind); SKIP already_confirmed (the node predated us — we did not create it,
-#     so we must not delete it); else delete + mark_reaped. A delete failure
-#     raises-and-stops (fail-loud). ⚠ The VERB_NOOP skip is NOT redundant with
+#     (no delete capability exists); SKIP every node this apply did not CREATE
+#     (VERB_NOOP: we adopted it; VERB_UPDATE: it existed before this apply and we
+#     only changed it, so deleting it would destroy a pre-existing resource);
+#     SKIP already_confirmed (the node predated us — we did not create it, so we
+#     must not delete it); else delete + mark_reaped. A delete failure
+#     raises-and-stops (fail-loud). ⚠ The verb skip is NOT redundant with
 #     already_confirmed: on a FIRST apply against a pre-existing resource there is
-#     no prior intent, so already_confirmed is False while the verb is NOOP.
+#     no prior intent, so already_confirmed is False while the verb is NOOP or
+#     UPDATE.
 #   * destroy_graph(graph, creds, store, force_delete_data=False)
 #       -> List[UndeletableSkip]. REVERSE topo
 #     order; SKIP RETAIN_KEEP (unless force_delete_data — the `--delete-data`
@@ -42,7 +46,7 @@
 # THE RETAIN_KEEP INVARIANT (shared-resource retention).
 # rollback_create + destroy_graph SKIP any node whose `retention()` is
 # RETAIN_KEEP — the engine NEVER deletes a standing / shared resource (the
-# environment-shared bucket, the WIF pool, the VPC). That is the whole reason
+# cell-shared bucket, the WIF pool, the VPC). That is the whole reason
 # retention is a first-class node property.
 #
 # ★ AND THE RETAIN_UNDELETABLE INVARIANT, WHICH IS A DIFFERENT ONE.
@@ -71,7 +75,7 @@
 # across destroy and recreate. Mojo 1.0.0b2.
 # =============================================================================
 
-from kci_iac.resource import (
+from kci_reconciler.resource import (
     ResourceStatus,
     ChangeAction,
     Creds,
@@ -93,20 +97,20 @@ from kci_iac.resource import (
     VERB_DELETE,
     VERB_KNOWN_AFTER_APPLY,
 )
-from kci_iac.outputs import (
+from kci_reconciler.outputs import (
     InputRef,
     Outputs,
     ResolvedInputs,
     unbound_error,
 )
-from kci_iac.fault_domain import (
+from kci_reconciler.fault_domain import (
     FAULT_UNSET,
     fault_error,
     fault_domain_of_error,
     fault_message_of_error,
 )
-from kci_iac.state import StateStore, IntentTicket
-from kci_iac.graph import ResourceGraph, topo_sort, reverse_order
+from kci_reconciler.state import StateStore, IntentTicket
+from kci_reconciler.graph import ResourceGraph, topo_sort, reverse_order
 
 # The ambient (process-global) structured-log facade — the no-`ctx`/no-threaded-
 # handle reach the best-effort prune swallow uses to emit a breadcrumb WITHOUT
@@ -173,7 +177,7 @@ struct UndeletableSkip(Copyable, Movable, Deinitable):
     not; that is strictly worse than the raise this replaces, because a raise at
     least stopped. So `destroy_graph` hands every skip back — `logical_id` names
     the node, `reason` carries the CONFORMER's own words — and the caller renders
-    them. The engine cannot print: `kci_iac` is provider- AND IO-neutral by
+    them. The engine cannot print: `kci_reconciler` is provider- AND IO-neutral by
     construction (no reporter, no logger on the verb surface), so the record is
     the only honest carrier.
 
@@ -193,7 +197,7 @@ def undeletable_report_lines(
     """The teardown's UNDELETABLE report, as LINES — one shared rendering for
     every caller of `destroy_graph`, and EMPTY when nothing was skipped.
 
-    ⛔ A PURE FUNCTION RETURNING STRINGS, BECAUSE `kci_iac` DOES NO IO. The
+    ⛔ A PURE FUNCTION RETURNING STRINGS, BECAUSE `kci_reconciler` DOES NO IO. The
     engine layer has no reporter, no logger on its verb surface and no cloud; a
     renderer that printed would put an output policy in the neutral layer. It
     lives here anyway rather than in each caller because the sentence an operator
@@ -223,7 +227,7 @@ def undeletable_report_lines(
     lines.append(
         String(
             "  ⚠ THE TEARDOWN COMPLETED — every other node was reaped or kept by"
-            " policy — but the environment is NOT empty. Each resource above was"
+            " policy — but the cell is NOT empty. Each resource above was"
             " SKIPPED WITHOUT BEING READ, so this is a statement about what was"
             " attempted, not about what still exists. Their intent records are"
             " deliberately LEFT INTACT (never marked reaped) so nothing is"
@@ -363,7 +367,7 @@ def _node_fault_domain(
     mut graph: ResourceGraph, idx: Int, verb: String, inner: String
 ) -> Int:
     """WHOSE FAULT this node's `verb` failure is — the engine's resolution of the
-    two carriers, in precedence order (`kci_iac.fault_domain`).
+    two carriers, in precedence order (`kci_reconciler.fault_domain`).
 
       1. THE RAISE SITE, if it stated one (`fault_error(FAULT_CUSTOMER, ...)`
          leaves our canonical token on the front of `inner`). A site that knew
@@ -492,7 +496,7 @@ def apply_graph_tracked[
     On a raise:
       * `landed`  — every node this apply already acted on, in APPLY ORDER, with
                     the verb it issued. These are the mutations that are LIVE in
-                    the environment right now.
+                    the cell right now.
       * `pending` — the logical ids the topo order had NOT reached, in the order
                     they would have run. These did NOT land. The failing node is
                     the FIRST entry (it was reached and did not complete).
@@ -500,7 +504,7 @@ def apply_graph_tracked[
     ⛔ THERE IS NO ROLLBACK ON THIS PATH, AND THAT IS A STATEMENT ABOUT THE
     ENGINE, NOT AN OMISSION HERE. `rollback_create` exists in this file, but no
     deploy verb calls it to unwind a partial apply. A failed apply therefore
-    leaves the environment HALF-CONFIGURED — for example, a service converges
+    leaves the cell HALF-CONFIGURED — for example, a service converges
     while the secret-access grants ordered after the failing node never land, so
     the service comes up and is refused on both of its secret reads.
 
@@ -526,13 +530,17 @@ def apply_graph_tracked[
              physical_id (or the store's confirmed id if the live read did not
              surface one).
            * RES_ABSENT           -> CREATE: `create(creds)` -> the physical id.
-           * RES_PRESENT_DRIFTED  -> converge_mode(live):
+           * RES_PRESENT_DRIFTED / RES_FAILED -> converge_mode(live):
                - CONVERGE_IN_PLACE -> `update(creds)`. The physical id is the live
                  physical_id.
                - else (CONVERGE_REPLACE / a raise) -> RAISE "CONVERGE_REPLACE
                  unsupported in v1" (the typed hole — no surprise teardown).
-           * RES_CONVERGING / RES_FAILED -> RAISE (the live resource is not in a
-             reconcilable steady state for a v1 apply — fail-loud).
+             A FAILED resource is treated as drifted: it exists, it does not
+             run what the file asks, and an update is the way out (a fixed
+             image after a bad one). Refusing it would leave a console edit as
+             the only recovery.
+           * RES_CONVERGING -> RAISE (the live resource is still reconciling
+             toward some state; a v1 apply does not wait for it — fail-loud).
       4. confirm(ticket, physical_id) — heal the intent to CONFIRMED.
       5. append AppliedNode(logical_id, physical_id, retention, already_confirmed,
          verb, served_endpoint) — `served_endpoint` is the served node's live
@@ -622,8 +630,10 @@ def apply_graph_tracked[
                     ),
                 )
             verb = VERB_CREATE
-        elif live.phase == RES_PRESENT_DRIFTED:
-            # DRIFTED: converge in place, or fail-loud on a replace-needing drift.
+        elif live.phase == RES_PRESENT_DRIFTED or live.phase == RES_FAILED:
+            # DRIFTED, or FAILED (a failed resource is updatable: the next
+            # apply with a fixed spec is how it recovers): converge in place,
+            # or fail-loud on a replace-needing drift.
             var mode = graph.node(idx).converge_mode(live)
             if mode == CONVERGE_IN_PLACE:
                 try:
@@ -647,22 +657,23 @@ def apply_graph_tracked[
                 raise Error(
                     String("apply_graph: node '")
                     + lid
-                    + String("' drifted and its converge_mode is CONVERGE_REPLACE")
+                    + String("' drifted (or failed) and its converge_mode is")
+                    + String(" CONVERGE_REPLACE")
                     + String(" — REPLACE (delete-then-create) is UNSUPPORTED in v1")
                     + String(" (the typed hole; the engine refuses to guess a")
                     + String(" destructive teardown). Resolve the drift out of")
                     + String(" band or extend the engine with a replace path.")
                 )
         else:
-            # CONVERGING / FAILED: not a reconcilable steady state for a v1 apply.
+            # CONVERGING (or an unknown phase): not a state a v1 apply acts on.
             raise Error(
                 String("apply_graph: node '")
                 + lid
                 + String("' read a non-steady live phase (")
                 + String(live.phase)
-                + String(") — the engine reconciles absent/matched/drifted; a")
-                + String(" converging/failed resource must settle (or be")
-                + String(" resolved) before apply. ")
+                + String(") — the engine reconciles absent/matched/drifted/")
+                + String("failed; a converging resource must settle before")
+                + String(" apply. ")
                 + live.message
             )
 
@@ -695,7 +706,7 @@ def apply_graph_tracked[
                 log.warn[
                     "retention prune failed (best-effort; deploy continues):"
                     " node={} verb={} err={}",
-                    "kci_iac",
+                    "kci_reconciler",
                 ](
                     ArgStr(lid.copy()),
                     ArgI64(Int64(verb)),
@@ -776,8 +787,11 @@ def rollback_create[
 
       * SKIP RETAIN_KEEP — the engine NEVER deletes a kept / shared resource (the
         shared-bucket-retention invariant).
-      * SKIP VERB_NOOP — this apply ADOPTED the resource (the live read reported
-        RES_PRESENT_MATCHED and we mutated NOTHING), so it is not ours to unwind.
+      * SKIP every verb but VERB_CREATE — VERB_NOOP: this apply ADOPTED the
+        resource (the live read reported RES_PRESENT_MATCHED and we mutated
+        NOTHING); VERB_UPDATE: the resource EXISTED before this apply (the live
+        read reported it drifted or failed) and we only changed it. Neither is
+        a create of ours, so neither is ours to unwind.
       * SKIP already_confirmed — the intent PREDATED this apply (we did NOT create
         the resource, so we must not delete it; unwinding OUR apply must not reap a
         resource a prior apply owns).
@@ -801,12 +815,19 @@ def rollback_create[
     Falsified by `tests/test_resource_graph_engine.mojo`'s
     `test_rollback_never_deletes_an_adopted_node_on_first_apply`.
 
-    ⚠ THE SKIP IS NARROW BY DESIGN: only VERB_NOOP. A node this apply genuinely
+    ⛔ AND THE SAME HOLDS FOR VERB_UPDATE. On a first apply against a
+    pre-existing resource that DRIFTED, the ticket again reports
+    already_confirmed=False and §3 issues `update`; in a run whose state store
+    is new (a scratch cell, a lost store) that is every resource the apply
+    touched. Deleting it would turn "a later node failed" into "the service
+    that was running before this deploy is gone". An updated node's prior
+    state is a `rollback_update` concern (a wrapper's), never a delete.
+    Falsified by `test_rollback_never_deletes_an_updated_node`.
+
+    ⚠ ONLY A CREATE IS UNWOUND, AND IT STILL IS. A node this apply genuinely
     CREATED (VERB_CREATE) is still deleted — a fix that stopped all rollback
     deletion would replace a data-loss bug with an orphan-resource bug, and that
-    node's arm is asserted by the same falsifier. VERB_UPDATE is likewise NOT
-    skipped: this function is rollback of CREATES, and an updated node's prior
-    state is a `rollback_update` concern (below), not a reason to leave it.
+    node's arm is asserted by both falsifiers.
 
     A delete failure RAISES and STOPS (fail-loud — a half-rolled-back state is
     surfaced, not silently continued; the surviving reaped/un-reaped intents let a
@@ -831,11 +852,12 @@ def rollback_create[
             # which is the verb an operator invokes deliberately.
             i -= 1
             continue
-        if node.verb == VERB_NOOP:
-            # ADOPTED: the live read matched and this apply mutated nothing, so the
-            # resource is not ours to unwind. This arm covers the FIRST apply, where
-            # `already_confirmed` is False because no prior intent exists — see the
-            # docstring. Deleting here destroys a pre-existing customer resource.
+        if node.verb != VERB_CREATE:
+            # NOT A CREATE OF OURS. VERB_NOOP: adopted, nothing mutated.
+            # VERB_UPDATE: the resource existed before this apply; we changed
+            # it, we did not make it. This arm covers the FIRST apply, where
+            # `already_confirmed` is False because no prior intent exists — see
+            # the docstring. Deleting here destroys a pre-existing resource.
             i -= 1
             continue
         if node.already_confirmed:

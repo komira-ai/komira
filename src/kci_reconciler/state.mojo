@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/state.mojo — the write-ahead intent STATE seam of the resource-
+# kci_reconciler/state.mojo — the write-ahead intent STATE seam of the resource-
 #   graph deploy engine (provider-neutral; the minimal durable-state contract for
 #   partial-apply RECOVERY).
 # =============================================================================
@@ -49,7 +49,7 @@
 # =============================================================================
 
 from std.memory import OwnedPointer
-from kci_iac.outputs import Outputs
+from kci_reconciler.outputs import Outputs
 
 
 # =============================================================================

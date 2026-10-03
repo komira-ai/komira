@@ -1,4 +1,4 @@
-"""`kci_iac` — the provider-neutral RESOURCE-GRAPH deploy engine core.
+"""`kci_reconciler` — the provider-neutral RESOURCE-GRAPH deploy engine core.
 
   (open-core; no cloud, provider or deployment coupling).
 
@@ -33,11 +33,11 @@ WHAT LIVES HERE (the four concerns):
                            `destroy_graph`) + `AppliedNode`.
 
 A per-provider conformer (a GCP CloudRunService, an AWS Lambda, an on-prem unit)
-is a SEPARATE package that imports `kci_iac` and implements `Resource`; the
+is a SEPARATE package that imports `kci_reconciler` and implements `Resource`; the
 engine core here names NO provider. Mojo 1.0.0b2 (def-only).
 """
 
-from kci_iac.resource import (
+from kci_reconciler.resource import (
     Resource,
     ResourceStatus,
     ChangeAction,
@@ -60,14 +60,14 @@ from kci_iac.resource import (
     VERB_DELETE,
     VERB_KNOWN_AFTER_APPLY,
 )
-from kci_iac.outputs import (
+from kci_reconciler.outputs import (
     InputRef,
     Outputs,
     ResolvedInputs,
     UNBOUND_TOKEN,
     unbound_error,
 )
-from kci_iac.fault_domain import (
+from kci_reconciler.fault_domain import (
     FAULT_UNSET,
     FAULT_OURS,
     FAULT_CUSTOMER,
@@ -82,14 +82,14 @@ from kci_iac.fault_domain import (
     fault_domain_of_error,
     fault_message_of_error,
 )
-from kci_iac.erased_resource import ErasedResource
-from kci_iac.graph import (
+from kci_reconciler.erased_resource import ErasedResource
+from kci_reconciler.graph import (
     ResourceGraph,
     topo_sort,
     dag_topo_order,
     reverse_order,
 )
-from kci_iac.state import (
+from kci_reconciler.state import (
     StateStore,
     IntentTicket,
     InMemoryStateStore,
@@ -97,7 +97,7 @@ from kci_iac.state import (
     INTENT_CONFIRMED,
     INTENT_REAPED,
 )
-from kci_iac.engine import (
+from kci_reconciler.engine import (
     AppliedNode,
     UndeletableSkip,
     undeletable_report_lines,

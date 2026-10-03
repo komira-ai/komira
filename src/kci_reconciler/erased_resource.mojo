@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/erased_resource.mojo — the RUNTIME-erased `Resource` facade of the
+# kci_reconciler/erased_resource.mojo — the RUNTIME-erased `Resource` facade of the
 #   resource-graph deploy engine (so the graph holds a homogeneous
 #   `Slab[ErasedResource]` of N distinct concrete conformer types).
 # =============================================================================
@@ -48,8 +48,8 @@
 
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
-from kci_iac.outputs import InputRef, Outputs, ResolvedInputs
-from kci_iac.resource import (
+from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.resource import (
     Resource,
     ResourceStatus,
     ChangeAction,
@@ -131,7 +131,7 @@ comptime _FaultDomainFn = def (
     String,  # the Resource verb that raised
 ) raises thin -> Int
 
-# The apply-time value-flow verbs (kci_iac/outputs.mojo). Each has a trait
+# The apply-time value-flow verbs (kci_reconciler/outputs.mojo). Each has a trait
 # default, which is exactly why each needs its entry: without one the facade
 # answers with the DEFAULT for every node of a real graph.
 comptime _InputRefsFn = def (

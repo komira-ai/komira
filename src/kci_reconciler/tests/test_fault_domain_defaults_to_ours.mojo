@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/tests/test_fault_domain_defaults_to_ours.mojo — the FALSIFIER for
+# kci_reconciler/tests/test_fault_domain_defaults_to_ours.mojo — the FALSIFIER for
 #   "an unclassified deploy error is OUR responsibility".
 # =============================================================================
 #
@@ -29,7 +29,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from kci_iac import (
+from kci_reconciler import (
     Resource,
     ResourceStatus,
     ChangeAction,

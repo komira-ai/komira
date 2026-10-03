@@ -11,9 +11,9 @@ kci_deploy_compose	origin/lib/komira_deploy_compose
 kci_deploy_model_proto	origin/lib/deploy_model_rpc
 kci_edge	origin/lib/komira_edge
 kci_environment_proto	origin/lib/environment_rpc
-kci_iac	origin/lib/komira_iac
 kci_manifest_proto	origin/lib/full_manifest_rpc
 kci_provider_proto	origin/lib/provider_rpc
+kci_reconciler	origin/lib/komira_iac
 kci_revision	origin/lib/komira_ci_revision
 kci_secret_writer	origin/lib/komira_secret_writer
 komira_async	origin/lib/komira_async
