@@ -169,7 +169,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 
 | layer | coming with |
 |---|---|
-| HTTP, databases, object stores, file-system discovery, gRPC | komira_http_core, komira_http_client, komira_http_server, komira_db, komira_objectstore, komira_grpc |
+| HTTP, databases, object stores, file-system discovery, gRPC | komira_http_core, komira_http_client, komira_http_server, komira_db, komira_db_postgres, komira_db_sqlite, komira_objectstore, komira_grpc |
 | storage formats: Parquet, text and row formats, Iceberg and CDC, serverless Postgres | komira_parquet, komira_csv, komira_iceberg, komira_pgstore |
 | execution and operators: pipelines and morsel dispatch, aggregation, joins, sort, top-N, window | the engine libraries |
 | plan and optimizer: logical and physical planning, the plan wire format, the query optimizer | komira_compiler, komira_optimizer |
