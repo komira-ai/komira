@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Postgres driver for komira_db: `PgDatabase` conforms to the
+# backend-generic `SqlDatabase` trait over the komira_pg wire client, and
+# `PgPool` is the `Pool[PgDatabase]` specialization.
+#
+# This package has no tests of its own yet (test_srcs is deliberately absent);
+# compiling the library is its gate.
+
+mojo_library(
+    name = "komira_db_postgres",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_db:komira_db",
+        "//src/komira_pg:komira_pg",
+    ],
+    visibility = ["PUBLIC"],
+)

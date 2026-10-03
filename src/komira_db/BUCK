@@ -2,13 +2,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # Backend-generic, schema-driven database abstraction: the `Database` /
 # `SqlDatabase` traits that generated DbStorable code compiles against, the
-# backend-neutral structured ops and their shared SQL rendering, the sqlite
-# (in-process libsqlite3 FFI) and Postgres (komira_pg) drivers, the migration
-# runner, and a generic connection pool.
+# backend-neutral structured ops and their shared SQL rendering, the migration
+# runner, and a generic connection pool. The drivers live in
+# komira_db_postgres and komira_db_sqlite.
 #
 # The tests need no database server: the pool tests drive a mock resource and
 # a scripted HTTP/1.1 keep-alive transport through the generic `Pool[T]`.
-# A binary that reaches the sqlite driver must link libsqlite3 (`-lsqlite3`).
 
 mojo_library(
     name = "komira_db",
@@ -16,10 +15,10 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_core:komira_core",
-        # Imported only by tests/test_h1_keepalive_pooled_conn.mojo.
+        # Imported only by tests/test_h1_keepalive_pooled_conn.mojo. mojo_library
+        # has no test-only dependency attribute, so these stay in `deps` for now.
         "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
-        "//src/komira_pg:komira_pg",
         "//src/komira_json:komira_json",
         "//src/komira_uuid:komira_uuid",
     ],
