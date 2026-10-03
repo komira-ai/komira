@@ -6,13 +6,14 @@ Services keep durable state in tables, such as job queues, sessions and deployme
 
 This doc governs two libraries:
 
-- `komira_db` (`src/komira_db`): the `Database` and `SqlDatabase` traits, the operation value types and their shared SQL rendering, the `DbStorable` row-type contract and `Store`, `MigrationRunner`, the generic `Pool`, and the value carriers. It holds two drivers: `SqliteDatabase`, over `libsqlite3`, and `PgDatabase`, with `PgPool`, over `komira_pg`.
-- `komira_pg` (`src/komira_pg`): a Postgres client for wire protocol version 3. It does SSLRequest and TLS, SCRAM-SHA-256, the extended query protocol with a binary codec, and poll-shaped query and transaction operations. `komira_db` imports it.
+- `komira_db` (`src/komira_db`): the `Database` and `SqlDatabase` traits, the operation value types and their shared SQL rendering, the `DbStorable` row-type contract and `Store`, `MigrationRunner`, the generic `Pool`, and the value carriers. It holds no driver and depends on neither backend.
+- `komira_db_postgres` (`src/komira_db_postgres`): the Postgres driver, `PgDatabase` and `PgPool`, and its wire client under `wire/`: a Postgres client for wire protocol version 3. It does SSLRequest and TLS, SCRAM-SHA-256, the extended query protocol with a binary codec, and poll-shaped query and transaction operations. It depends on `komira_db`.
+- `komira_db_sqlite` (`src/komira_db_sqlite`): the SQLite driver, `SqliteDatabase`, over `libsqlite3`. It depends on `komira_db`.
 
 Out of scope:
 
 - Drivers for backends other than SQLite and Postgres. The traits are written so that a document or key-value backend can conform, but no such driver is in this tree.
-- The async runtime that supplies the reactor every I/O method takes, and the HTTP client that supplies the s2n TLS wrapper `komira_pg` uses: `komira_async` and `komira_http`.
+- The async runtime that supplies the reactor every I/O method takes, and the HTTP client that supplies the s2n TLS wrapper `komira_db_postgres` uses: `komira_async` and `komira_http`.
 - The primitives behind SCRAM: [crypto and TLS](crypto_and_tls.md#which-primitives-does-komira_crypto-provide).
 - Code generation of row types. The generator lives under `tools/build/proto-codegen` (`emit_dbstorable.rs`), not in `komira_db`. No checked-in `src/` type conforms to `DbStorable` yet, and no `komira_db` test exercises a conformer.
 
@@ -22,8 +23,8 @@ A row type describes a table. A store generic over `DB: Database` calls the ten 
 
 ```
 row type (DbStorable) ─► store generic over [DB: Database] ──► begin/commit/rollback + ten structured ops
-   ├─ SqliteDatabase ─┐ SqlDatabase: sql_neutral_ops renders SQL ──► sqlite/ffi.mojo ──► libsqlite3
-   └─ PgDatabase ─────┘                                          ──► komira_pg ──► TLS ──► Postgres
+   ├─ SqliteDatabase ─┐ SqlDatabase: sql_neutral_ops renders SQL ──► komira_db_sqlite/ffi.mojo ──► libsqlite3
+   └─ PgDatabase ─────┘                                          ──► komira_db_postgres/wire ──► TLS ──► Postgres
 ```
 
 Every I/O method of the two traits takes the caller's reactor, `mut reactor: Reactor[RT.Sink]`, for a runtime `RT` the caller chooses. The Postgres client parks its socket I/O on that reactor. `SqliteDatabase` calls `libsqlite3` synchronously on the caller's thread and ignores the reactor.
@@ -71,11 +72,11 @@ Table names, column names and phase values are spliced into the SQL text. Only `
 
 ### How does the SQLite driver work?
 
-`SqliteDatabase` owns one `sqlite3*` connection to a file or to `":memory:"`. `sqlite/ffi.mojo` declares the C functions with `external_call`, and only `sqlite_driver.mojo` imports it. A binary that reaches the driver links the system `libsqlite3` with `-lsqlite3`. Values bind natively: a UUID as a 16-byte blob, integers and timestamps as integers, bytes as a blob, and everything else, including a text array in its `{a,b,c}` literal form, as text. Results are rendered back to `DbRow`'s canonical text by storage class, and a 16-byte blob is read as a UUID. Every call runs synchronously on the caller's thread. `begin` issues `BEGIN IMMEDIATE`. `arm_for_concurrent_use` sets a busy timeout through the C API, then sets WAL mode, then reads both settings back and raises if either did not take. Nothing in this tree calls it.
+`SqliteDatabase` owns one `sqlite3*` connection to a file or to `":memory:"`. `ffi.mojo` in `komira_db_sqlite` declares the C functions with `external_call`, and only `sqlite_driver.mojo` imports it. A binary that reaches the driver links the system `libsqlite3` with `-lsqlite3`, which the `:sqlite3` target of `komira_db_sqlite` carries. Values bind natively: a UUID as a 16-byte blob, integers and timestamps as integers, bytes as a blob, and everything else, including a text array in its `{a,b,c}` literal form, as text. Results are rendered back to `DbRow`'s canonical text by storage class, and a 16-byte blob is read as a UUID. Every call runs synchronously on the caller's thread. `begin` issues `BEGIN IMMEDIATE`. `arm_for_concurrent_use` sets a busy timeout through the C API, then sets WAL mode, then reads both settings back and raises if either did not take. Nothing in this tree calls it.
 
 ### How does the Postgres client connect and run a query?
 
-`PgConnection.connect` (`komira_pg/connection.mojo`) opens TCP on the caller's reactor and sends an SSLRequest. On an `'S'` reply, `pg_reactor_connect` (`pg_tls.mojo`) runs a TLS handshake under s2n's `default_tls13` policy, through the s2n client in `komira_http`. The connection then sends a StartupMessage and completes SCRAM-SHA-256 (`scram.mojo`). The client nonce is 24 bytes from the system CSPRNG, base64-encoded, and the server nonce must start with it. The client proof uses PBKDF2-HMAC-SHA-256, and the server signature is compared in constant time. A server that refuses TLS, answers the startup with anything other than an SASL request, or sends a wrong signature makes `connect` raise.
+`PgConnection.connect` (`komira_db_postgres/wire/connection.mojo`) opens TCP on the caller's reactor and sends an SSLRequest. On an `'S'` reply, `pg_reactor_connect` (`pg_tls.mojo`) runs a TLS handshake under s2n's `default_tls13` policy, through the s2n client in `komira_http`. The connection then sends a StartupMessage and completes SCRAM-SHA-256 (`scram.mojo`). The client nonce is 24 bytes from the system CSPRNG, base64-encoded, and the server nonce must start with it. The client proof uses PBKDF2-HMAC-SHA-256, and the server signature is compared in constant time. A server that refuses TLS, answers the startup with anything other than an SASL request, or sends a wrong signature makes `connect` raise.
 
 `PgDatabase.execute` and `query` run each statement through the extended protocol. `prepare` sends Parse and Describe, `execute_prepared` or `query_prepared` sends Bind, Execute and Sync, and `close_prepared` closes the statement, all on each call. Bind sends every parameter in binary format and requests every result column in binary, and the codec covers ten type OIDs (`pg_types.mojo`): BOOL, BYTEA, INT4, INT8, TEXT, VARCHAR, UUID, JSONB, TIMESTAMPTZ and TEXT[]. Parse declares no parameter types, so the server infers each `$N` type from the statement. `_oid_for_logical` maps each logical type to one of the ten, and tags a float or text value TEXT. `_render_pg_cell` decodes the ten and returns any other column's raw binary body as text (see limits). `begin`, `commit` and `rollback` run `BEGIN`, `COMMIT` and `ROLLBACK` through the simple-query path.
 
@@ -141,7 +142,7 @@ Two operations serve handlers that must not block a worker. `PgQueryOp` (`pg_que
 
 ### Why does the Postgres client support only SCRAM, TLS and ten types?
 
-**Decision.** `komira_pg` requires TLS, authenticates only with SCRAM-SHA-256, and binds and decodes a closed set of ten type OIDs in binary format.
+**Decision.** the `komira_db_postgres` wire client requires TLS, authenticates only with SCRAM-SHA-256, and binds and decodes a closed set of ten type OIDs in binary format.
 
 **Because.** Binary format makes each type a fixed-width or raw-byte codec, with no text parsing and no ambiguity in timestamps. A server that offers only another authentication method fails loudly.
 
@@ -169,11 +170,12 @@ Two operations serve handlers that must not block a worker. `PgQueryOp` (`pg_que
 | `src/komira_db/neutral_ops.mojo` | operation value types | `Pred`, `Filter`, `Order`, `DbColVal`, `classify_raw_expr`, `derive_pod_name` |
 | `src/komira_db/sql_neutral_ops.mojo` | SQL rendering of the ten operations | `sql_op_query_rows`, `sql_op_claim_rows`, `render_where` |
 | `src/komira_db/db_value.mojo`, `db_row.mojo`, `db_uuid.mojo`, `timestamptz.mojo`, `proto_json.mojo` | values, rows and nested-field JSON | `DbValue`, `DbRow`, `DbRows`, `Uuid`, `Timestamptz`, `to_proto_json` |
-| `src/komira_db/sqlite_driver.mojo`, `sqlite/ffi.mojo` | the SQLite driver | `SqliteDatabase` |
-| `src/komira_db/pg_driver.mojo`, `pg_pool.mojo`, `pool.mojo` | the Postgres driver and pools | `PgDatabase`, `PgPool`, `Pool`, `PooledResource` |
+| `src/komira_db_sqlite/sqlite_driver.mojo`, `ffi.mojo` | the SQLite driver | `SqliteDatabase` |
+| `src/komira_db_postgres/pg_driver.mojo`, `pg_pool.mojo` | the Postgres driver and its pool | `PgDatabase`, `PgPool` |
+| `src/komira_db/pool.mojo` | the generic pool | `Pool`, `PooledResource` |
 | `src/komira_db/migration.mojo`, `blocking.mojo` | migrations, and blocking wrappers that run a call on a one-shot runtime | `MigrationRunner`, `Migration`, `db_blocking_query` |
-| `src/komira_pg/connection.mojo`, `pg_tls.mojo`, `scram.mojo`, `pgwire.mojo` | connect, TLS, SCRAM, framing | `PgConfig`, `PgConnection`, `pg_reactor_connect`, `verify_server_signature` |
-| `src/komira_pg/pg_types.mojo`, `pg_binary.mojo`, `pg_query_op.mojo`, `pg_tx_op.mojo` | types, binary codec, poll-shaped operations | `PgValue`, `PgRow`, `PgQueryOp`, `PgTxAsyncOp` |
+| `src/komira_db_postgres/wire/connection.mojo`, `pg_tls.mojo`, `scram.mojo`, `pgwire.mojo` | connect, TLS, SCRAM, framing | `PgConfig`, `PgConnection`, `pg_reactor_connect`, `verify_server_signature` |
+| `src/komira_db_postgres/wire/pg_types.mojo`, `pg_binary.mojo`, `pg_query_op.mojo`, `pg_tx_op.mojo` | types, binary codec, poll-shaped operations | `PgValue`, `PgRow`, `PgQueryOp`, `PgTxAsyncOp` |
 
 Entry points:
 
@@ -187,10 +189,10 @@ Each library lists its test files in `test_srcs` in its `BUCK` file, so building
 | Test | Covers |
 |---|---|
 | `src/komira_db/tests/test_generic_pool_non_pg`, `test_h1_keepalive_pooled_conn` | `Pool` over a mock resource and over HTTP/1 keep-alive connections: eager connect, no resource held across an idle park, no reconnect on reuse, an abandoned frame returning its resource, and a dead connection discarded and redialed |
-| `src/komira_pg/tests/test_scram_and_pgwire`, `test_binary_codec`, `test_pgrow_accumulation` | the RFC 7677 SCRAM vector, PBKDF2, the CSPRNG nonce, message framing and parsing, the binary codec, row accumulation |
-| `src/komira_pg/tests/test_pg_query_op_poll`, `test_pg_tx_op_sequence`, `test_dns_resolve_pg_host` | the poll-shaped query and transaction operations, host name resolution |
+| `src/komira_db_postgres/wire/tests/test_scram_and_pgwire`, `test_binary_codec`, `test_pgrow_accumulation` | the RFC 7677 SCRAM vector, PBKDF2, the CSPRNG nonce, message framing and parsing, the binary codec, row accumulation |
+| `src/komira_db_postgres/wire/tests/test_pg_query_op_poll`, `test_pg_tx_op_sequence`, `test_dns_resolve_pg_host` | the poll-shaped query and transaction operations, host name resolution |
 
-Run: `./buck2 build //src/komira_db:komira_db //src/komira_pg:komira_pg`.
+Run: `./buck2 build //src/komira_db:komira_db //src/komira_db_postgres:komira_db_postgres //src/komira_db_sqlite:komira_db_sqlite`.
 
 Not tested: no test in this tree reaches a Postgres server or SQLite. Nothing tests `SqliteDatabase`, `PgDatabase`, the SQL rendering in `sql_neutral_ops.mojo`, `MigrationRunner`, `Store` or `DbRow`, so every invariant above that names no test is unenforced here.
 
@@ -204,5 +206,6 @@ Not tested: no test in this tree reaches a Postgres server or SQLite. Nothing te
 - **Limit: Postgres has no float codec.** A float parameter goes out as its decimal text bytes tagged TEXT, under the binary format code, which is not a binary float body for a `DOUBLE PRECISION` or `REAL` column. `_render_pg_cell` returns any column outside the ten type OIDs as its raw binary body tagged `LOGICAL_TEXT`. No test writes a float to Postgres.
 - **Limit: the pool is single-threaded.** `Pool.checkout` raises when every slot is in use, where a multi-threaded pool would wait.
 - **Limit: the SQLite driver has no busy timeout unless a caller arms it.** Nothing in this tree calls `arm_for_concurrent_use`.
-- **Limit: SQLite links the system library.** A binary that reaches `SqliteDatabase` must link `libsqlite3` itself, because no target here provides it.
-- **Open question: should `komira_db` keep both drivers in one library?** A binary that needs only `PgDatabase` still compiles the SQLite driver, and any binary that reaches the SQLite driver links `libsqlite3`.
+- **Limit: the SQLite link is unverified.** `komira_db_sqlite` carries the `-lsqlite3` link flag on its `:sqlite3` target. No test exercises the link, and whether the hermetic C toolchain finds the system library has not been tested.
+- **Open item: dialect arms still live in `komira_db`.** The SQL renderer inside `komira_db` still branches on the `"pg"` and `"sqlite"` dialect tags, so the neutral package knows both backends by name.
+- **Open item: no test exercises the SQLite driver, and `komira_db_postgres` has tests only for its wire client.** Neither driver's `SqlDatabase` conformance is tested against a database.
