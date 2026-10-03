@@ -1,5 +1,5 @@
 # =============================================================================
-# authz_port.mojo — the neutral authorization interface.
+# authz_api.mojo — the neutral authorization interface.
 # =============================================================================
 #
 # `AuthzPort` is the neutral authorization seam: "can `principal` do `action`
