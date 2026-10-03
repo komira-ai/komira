@@ -54,7 +54,7 @@
 from std.os import getenv
 
 from komira_encoding import base64_url_decode
-from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
+from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 from komira_json import JSON_STRING, JsonValue, parse_json_value, write_json_string
 from komira_secret_store import SecretValue
 

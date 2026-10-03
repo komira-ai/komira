@@ -48,7 +48,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_obs.ring_buffer import OVERFLOW_BLOCK
+from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK
 
 from komira_log.levels import LEVEL_INFO
 from komira_log.log_arg import ARG_STR, ARG_I64, ArgI64, ArgStr

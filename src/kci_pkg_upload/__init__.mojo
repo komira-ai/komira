@@ -43,8 +43,8 @@ This package names no channel, account or organisation: every location, name
 list and credential arrives from the caller. The one environment read is the
 GitHub Actions OIDC handshake (`GithubOidcCredential.from_actions_env`).
 
-Depends on komira_http, komira_async, komira_crypto, komira_encoding,
-komira_json and komira_secret_store.
+Depends on komira_http_client, komira_http_core, komira_async,
+komira_crypto, komira_encoding, komira_json and komira_secret_store.
 
 Encapsulation: owned values and seam conformers only. No UnsafePointer
 crosses a module boundary; no wildcard origin; no unsafe_from_address.
