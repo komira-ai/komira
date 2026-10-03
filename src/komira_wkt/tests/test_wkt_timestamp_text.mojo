@@ -44,15 +44,14 @@ def test_pre_epoch_output() raises:
     assert_equal(_out(-3600, 0), String("1969-12-31T23:00:00Z"))
     assert_equal(_out(-86400, 0), String("1969-12-31T00:00:00Z"))
     assert_equal(_out(-86401, 0), String("1969-12-30T23:59:59Z"))
-    assert_equal(_out(-14182940, 0), String("1969-07-20T20:17:40Z"))
+    assert_equal(_out(-1000000, 0), String("1969-12-20T10:13:20Z"))
     assert_equal(_out(-2208988800, 0), String("1900-01-01T00:00:00Z"))
 
 
 def test_leap_day_output() raises:
     """29 February exists in years divisible by 4, except centuries not
-    divisible by 400 (1900 and 2100 have none; 1600, 2000 and 2400 do)."""
-    assert_equal(_out(951825600, 0), String("2000-02-29T12:00:00Z"))
-    assert_equal(_out(1709164800, 0), String("2024-02-29T00:00:00Z"))
+    divisible by 400 (1900 and 2100 have none; 1600 and 2400 do)."""
+    assert_equal(_out(1835395200, 0), String("2028-02-29T00:00:00Z"))
     assert_equal(_out(-2203891201, 0), String("1900-02-28T23:59:59Z"))
     assert_equal(_out(-2203891200, 0), String("1900-03-01T00:00:00Z"))
     assert_equal(_out(4107542399, 0), String("2100-02-28T23:59:59Z"))
@@ -114,47 +113,59 @@ def test_offsets_input() raises:
     _check_in(String("1970-01-01T00:00:00+01:00"), -3600, 0)
     _check_in(String("1969-12-31T19:00:00-05:00"), 0, 0)
     _check_in(String("1970-01-01T00:59:59.25+01:00"), -1, 250000000)
-    _check_in(String("2000-03-01T05:30:00+05:30"), 951868800, 0)
+    _check_in(String("2028-03-01T05:30:00+05:30"), 1835481600, 0)
     _check_in(String("0001-01-01T01:00:00+01:00"), -62135596800, 0)
     _check_in(
         String("9999-12-31T22:59:59.999999999-01:00"), 253402300799, 999999999
     )
     _check_in(String("1970-01-01T00:00:00-00:00"), 0, 0)
+    # The range bounds the instant, not the written year: a year-0000 local
+    # time whose offset lands it in 0001 is accepted.
+    _check_in(String("0000-12-31T23:30:00-01:00"), -62135595000, 0)
     # The offset carries these outside the range.
-    with assert_raises(contains="Timestamp"):
+    with assert_raises(contains="outside 0001..9999"):
         _ = Timestamp.from_proto3_json(String("0001-01-01T00:30:00+01:00"))
-    with assert_raises(contains="Timestamp"):
+    with assert_raises(contains="outside 0001..9999"):
         _ = Timestamp.from_proto3_json(String("9999-12-31T23:00:00-01:00"))
 
 
 def test_refused_input() raises:
-    """A day that does not exist, a time out of range, a date outside the
-    range, a fraction of no digits or of more than nine, and a missing zone
+    """A day that does not exist, a time out of range, a fraction of no
+    digits or of more than nine, a missing zone and a lower-case `t` or `z`
     are refused, each naming the Timestamp."""
     var bad = List[String]()
-    bad.append(String("2001-02-29T00:00:00Z"))
+    bad.append(String("2027-02-29T00:00:00Z"))
     bad.append(String("1900-02-29T00:00:00Z"))
     bad.append(String("2100-02-29T00:00:00Z"))
-    bad.append(String("2024-04-31T00:00:00Z"))
-    bad.append(String("2024-13-01T00:00:00Z"))
-    bad.append(String("2024-00-01T00:00:00Z"))
-    bad.append(String("2024-01-00T00:00:00Z"))
-    bad.append(String("2024-01-01T24:00:00Z"))
-    bad.append(String("2024-01-01T00:60:00Z"))
-    bad.append(String("2024-01-01T23:59:60Z"))
-    bad.append(String("0000-12-31T23:59:59Z"))
-    bad.append(String("2024-01-01T00:00:00.Z"))
-    bad.append(String("2024-01-01T00:00:00.1234567890Z"))
-    bad.append(String("2024-01-01T00:00:00"))
-    bad.append(String("2024-01-01T00:00:00Zjunk"))
-    bad.append(String("2024-01-01T00:00:00+24:00"))
-    bad.append(String("2024-01-01T00:00:00+01"))
-    bad.append(String("2024-01-01 00:00:00Z"))
-    bad.append(String("2024-01-01"))
+    bad.append(String("2027-04-31T00:00:00Z"))
+    bad.append(String("2027-13-01T00:00:00Z"))
+    bad.append(String("2027-00-01T00:00:00Z"))
+    bad.append(String("2027-01-00T00:00:00Z"))
+    bad.append(String("2027-01-01T24:00:00Z"))
+    bad.append(String("2027-01-01T00:60:00Z"))
+    bad.append(String("2027-01-01T23:59:60Z"))
+    bad.append(String("2027-01-01T00:00:00.Z"))
+    bad.append(String("2027-01-01T00:00:00.1234567890Z"))
+    bad.append(String("2027-01-01T00:00:00"))
+    bad.append(String("2027-01-01T00:00:00Zjunk"))
+    bad.append(String("2027-01-01T00:00:00+24:00"))
+    bad.append(String("2027-01-01T00:00:00+01"))
+    bad.append(String("2027-01-01 00:00:00Z"))
+    bad.append(String("2027-01-01"))
     bad.append(String(""))
+    # `T` and `Z` must be upper case in the proto3 JSON form.
+    bad.append(String("2027-01-01t00:00:00Z"))
+    bad.append(String("2027-01-01T00:00:00z"))
     for i in range(len(bad)):
         with assert_raises(contains="Timestamp"):
             _ = Timestamp.from_proto3_json(bad[i])
+
+
+def test_year_range_input() raises:
+    """A well-formed instant before 0001 is refused by the range check, not
+    by the parser."""
+    with assert_raises(contains="outside 0001..9999"):
+        _ = Timestamp.from_proto3_json(String("0000-12-31T23:59:59Z"))
 
 
 def test_round_trip() raises:
@@ -166,7 +177,7 @@ def test_round_trip() raises:
     secs.append(-86401)
     secs.append(-1)
     secs.append(0)
-    secs.append(951825600)
+    secs.append(1835438400)
     secs.append(4107542399)
     secs.append(253402300799)
     var nanos = List[Int]()
@@ -188,5 +199,6 @@ def main() raises:
     test_pre_epoch_input()
     test_offsets_input()
     test_refused_input()
+    test_year_range_input()
     test_round_trip()
     print("test_wkt_timestamp_text: all tests passed")

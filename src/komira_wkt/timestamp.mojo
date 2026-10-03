@@ -129,7 +129,9 @@ struct Timestamp(Proto3JsonWkt, Copyable, Movable, ImplicitlyCopyable):
         `+hh:mm` / `-hh:mm` offset (RFC 3339 allows one on input; the
         canonical OUTPUT is always `Z`), which is applied. `T` and `Z` must
         be upper case; a leap second (`:60`) is refused. The instant must
-        lie in 0001-01-01T00:00:00Z..9999-12-31T23:59:59.999999999Z."""
+        lie in 0001-01-01T00:00:00Z..9999-12-31T23:59:59.999999999Z; the
+        range bounds the instant, not the written year, so a year-0000 local
+        time whose offset carries it into 0001 is accepted."""
         var ts: UtcInstant
         try:
             ts = parse_rfc3339(text, allow_lowercase=False)
