@@ -29,6 +29,7 @@ mojo_library(
         "//src/komira_fork_join:komira_fork_join",
         "//src/komira_http:komira_http",
         "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
         "//src/komira_retry:komira_retry",
         "//src/komira_secret_store:komira_secret_store",
     ],

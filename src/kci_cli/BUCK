@@ -16,6 +16,7 @@ mojo_library(
     deps = [
         "//src/kci_build:kci_build_lib",
         "//src/kci_publish:kci_publish_lib",
+        "//src/komira_libc:komira_libc",
         "//src/komira_secret_env:komira_secret_env",
         "//src/komira_secret_store:komira_secret_store",
     ],
@@ -27,5 +28,9 @@ mojo_library(
         # the real verbs: --help, usage refusals, the store resolves by name
         "tests/test_kci_library_wiring.mojo",
     ],
+    test_env = {
+        # resolved by name through --secret-store=env's store
+        "KCI_CLI_TEST_SECRET": "kci-cli-test-value",
+    },
     visibility = ["PUBLIC"],
 )

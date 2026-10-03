@@ -19,7 +19,9 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import getenv, makedirs
+from std.os import makedirs
+
+from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_true
 
 from kci_publish.inputs import load_release
@@ -33,9 +35,9 @@ from kci_artifact_declaration import parse_artifact_declarations
 
 
 def _root(tag: String) raises -> String:
-    var base = getenv("TEST_TMPDIR")
+    var base = _read_env("TEST_TMPDIR")
     if base.byte_length() == 0:
-        base = getenv("TMPDIR")
+        base = _read_env("TMPDIR")
     if base.byte_length() == 0:
         raise Error("neither TEST_TMPDIR nor TMPDIR is set")
     var d = base + String("/pin_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))

@@ -53,7 +53,7 @@ comptime KCI_USAGE: String = (
 )
 
 
-struct SecretStoreChoice(Copyable, Movable, Equatable):
+struct SecretStoreChoice(ImplicitlyCopyable, Movable, Equatable):
     """Which `SecretStore` the shell composes for a verb. Layout: one Int."""
 
     var kind: Int
@@ -132,7 +132,7 @@ def parse_kci_args(args: List[String]) raises -> KciInvocation:
                 i += 1
                 value = args[i]
             else:
-                value = String(a[byte = len(String("--secret-store=")):])
+                value = String(a[byte = String("--secret-store=").byte_length() :])
             inv.store = _store_choice(value)
             i += 1
             continue

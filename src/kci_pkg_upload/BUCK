@@ -23,6 +23,7 @@ mojo_library(
         "//src/komira_encoding:komira_encoding",
         "//src/komira_http:komira_http",
         "//src/komira_json:komira_json",
+        "//src/komira_libc:komira_libc",
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [

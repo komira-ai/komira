@@ -5,8 +5,8 @@
 #
 #   build    -> kci_build.build_main (its SupervisorRunner for the builds and
 #               for git). No secret is resolved.
-#   publish  -> kci_publish.publish_main_with_store over the store the shell
-#               composed from --secret-store:
+#   publish  -> kci_publish.publish_main_with_store over
+#               `ComposedSecretStore`, the store --secret-store chose:
 #                 none  RefusingSecretStore: resolves nothing; a channel whose
 #                       credential is an API token is refused naming the
 #                       secret and the option that would resolve it;
@@ -46,6 +46,26 @@ struct RefusingSecretStore(SecretStore, Movable):
         )
 
 
+struct ComposedSecretStore(SecretStore, Movable):
+    """The one store type `publish` is given: `--secret-store=env` resolves
+    through `EnvSecretStore[ProcessEnv]`, `none` refuses through
+    `RefusingSecretStore`. Constructing either reads nothing (ProcessEnv
+    holds no state). Layout: a Bool and the env store; no pointer."""
+
+    var _use_env: Bool
+    var _env: EnvSecretStore[ProcessEnv]
+
+    def __init__(out self, choice: SecretStoreChoice):
+        self._use_env = choice == SecretStoreChoice.ENV
+        self._env = EnvSecretStore[ProcessEnv](ProcessEnv())
+
+    def resolve(mut self, secret_ref: String) raises -> SecretValue:
+        if self._use_env:
+            return self._env.resolve(secret_ref)
+        var none = RefusingSecretStore()
+        return none.resolve(secret_ref)
+
+
 struct LibraryVerbs(KciVerbs, Movable):
     """The verbs as the kci binary runs them. Layout: no fields."""
 
@@ -56,11 +76,8 @@ struct LibraryVerbs(KciVerbs, Movable):
         return build_main(args)
 
     def publish(mut self, args: List[String], store: SecretStoreChoice) -> Int:
-        if store == SecretStoreChoice.ENV:
-            var env = EnvSecretStore[ProcessEnv](ProcessEnv())
-            return publish_main_with_store(args, env)
-        var none = RefusingSecretStore()
-        return publish_main_with_store(args, none)
+        var composed = ComposedSecretStore(store)
+        return publish_main_with_store(args, composed)
 
 
 def kci_main(args: List[String]) -> Int:
