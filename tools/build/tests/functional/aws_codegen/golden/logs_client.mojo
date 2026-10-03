@@ -746,7 +746,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         way to bound it. A process serving requests under a platform deadline
         passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling
         in microseconds; a process with no containing deadline (a job, a CLI,
-        a test) passes `HttpClientConfig.defaults()`, whose budget is 600 s."""
+        a test) passes `HttpClientConfig.defaults()`."""
 
     var _mk_connector: def () raises thin -> Self.C
     # Handed to `send_sigv4_signed_request` on every send, unchanged.

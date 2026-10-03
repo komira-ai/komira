@@ -1778,7 +1778,7 @@ impl<'a> AwsEmitter<'a> {
         self.line("    way to bound it. A process serving requests under a platform deadline");
         self.line("    passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling");
         self.line("    in microseconds; a process with no containing deadline (a job, a CLI,");
-        self.line("    a test) passes `HttpClientConfig.defaults()`, whose budget is 600 s.\"\"\"");
+        self.line("    a test) passes `HttpClientConfig.defaults()`.\"\"\"");
         self.blank();
         let ruleset = self.endpoint_rules.is_some();
         let cfg = format!("{}EndpointConfig", self.prefix);
