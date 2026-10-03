@@ -27,7 +27,7 @@
 # reason). So the two recursive `Value` fields — `struct_value` and
 # `list_value` — are stored as `List[Struct]` / `List[ListValue]` holding
 # 0-or-1 elements. A `List` is a finitely-sized pointer+len+cap regardless
-# of element type — it breaks the cycle and keeps the struct trivially
+# of element type — it breaks the cycle and keeps the struct
 # `Copyable`.
 #
 # -- The `Value` oneof --------------------------------------------------------
@@ -116,6 +116,19 @@ struct Value(Proto3JsonWkt, Copyable, Movable):
     var list_value: List[ListValue]
 
     # -- constructors -----------------------------------------------------
+
+    # An explicit copy constructor: a synthesized one may be treated as
+    # trivial for some layouts, after which `List.copy()` memcpys the
+    # elements and the copy shares their heap buffers with the original.
+    # This one copies every field (the boxes copy through `Struct` and
+    # `ListValue`'s own copy constructors).
+    def __init__(out self, *, copy: Self):
+        self.kind = copy.kind
+        self.number_value = copy.number_value
+        self.string_value = copy.string_value.copy()
+        self.bool_value = copy.bool_value
+        self.struct_value = copy.struct_value.copy()
+        self.list_value = copy.list_value.copy()
 
     @staticmethod
     def null() -> Self:
@@ -300,6 +313,14 @@ struct Struct(Proto3JsonWkt, Copyable, Movable):
         """An empty `Struct` (`{}`)."""
         return Self(List[String](), List[Value]())
 
+    # An explicit copy constructor: a synthesized one may be treated as
+    # trivial for a struct with an explicit `__deinit__`, after which
+    # `List.copy()` memcpys the elements and the copy shares their heap
+    # buffers with the original. This one copies every field.
+    def __init__(out self, *, copy: Self):
+        self.keys = copy.keys.copy()
+        self.values = copy.values.copy()
+
     def put(mut self, key: String, var value: Value):
         """Set `key` to `value`. `Struct.fields` is a `map<string, Value>`,
         so a key already present is REPLACED in place (last write wins, and
@@ -403,6 +424,13 @@ struct ListValue(Proto3JsonWkt, Copyable, Movable):
     def new() -> Self:
         """An empty `ListValue` (`[]`)."""
         return Self(List[Value]())
+
+    # An explicit copy constructor: a synthesized one may be treated as
+    # trivial for a struct with an explicit `__deinit__`, after which
+    # `List.copy()` memcpys the elements and the copy shares their heap
+    # buffers with the original. This one copies every field.
+    def __init__(out self, *, copy: Self):
+        self.values = copy.values.copy()
 
     def add(mut self, var value: Value):
         """Append a `Value` to the array."""
