@@ -71,6 +71,11 @@ from komira_crypto import (
     sha256_string,
 )
 
+from komira_datetime import (
+    fields_from_seconds,
+    format_basic_date,
+    format_basic_datetime,
+)
 from komira_gcp_core._text import _from_utf8_bytes, _percent_encode
 
 
@@ -193,25 +198,18 @@ struct GcsV4Stamps(ImplicitlyCopyable, Copyable, Movable, Deinitable):
         four-digit field of the X-Goog-Date format); any other instant
         raises."""
         var total = Int(unix_seconds)
-        # Floor division, so an instant before 1970 lands on the right day.
-        var days = total // 86400
-        var sod = total - days * 86400
-        var ymd = _civil_from_days(days)
-        if ymd[0] < 0 or ymd[0] > 9999:
+        # komira_datetime floors, so an instant before 1970 lands on the
+        # right day. It refuses a year outside 0000-9999 in its own words;
+        # the year is checked here first so the refusal names the signer.
+        var year = fields_from_seconds(total).year
+        if year < 0 or year > 9999:
             raise Error(
                 "gcs v4: unix time "
                 + String(unix_seconds)
                 + " is outside years 0000-9999"
             )
-        self.short_date = _pad(ymd[0], 4) + _pad(ymd[1], 2) + _pad(ymd[2], 2)
-        self.datetime_z = (
-            self.short_date
-            + "T"
-            + _pad(sod // 3600, 2)
-            + _pad((sod % 3600) // 60, 2)
-            + _pad(sod % 60, 2)
-            + "Z"
-        )
+        self.datetime_z = format_basic_datetime(total)
+        self.short_date = format_basic_date(total)
         self.unix_seconds = unix_seconds
 
 
@@ -759,32 +757,6 @@ def gcs_v4_signed_url(
 # -----------------------------------------------------------------------------
 # Time stamps
 # -----------------------------------------------------------------------------
-
-
-def _civil_from_days(z_in: Int) -> Tuple[Int, Int, Int]:
-    """Days since the Unix epoch to (year, month, day), proleptic Gregorian
-    (H. Hinnant, "chrono-Compatible Low-Level Date Algorithms")."""
-    var z = z_in + 719468
-    # Mojo's `//` floors, so no truncation adjustment for a negative z.
-    var era = z // 146097
-    var doe = z - era * 146097
-    var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
-    var y = yoe + era * 400
-    var doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
-    var mp = (5 * doy + 2) // 153
-    var d = doy - (153 * mp + 2) // 5 + 1
-    var m = mp + 3 if mp < 10 else mp - 9
-    var year = y + 1 if m <= 2 else y
-    return Tuple[Int, Int, Int](year, m, d)
-
-
-def _pad(v: Int, width: Int) -> String:
-    var s = String(v)
-    var out = String()
-    for _ in range(width - s.byte_length()):
-        out += "0"
-    out += s
-    return out^
 
 
 def gcs_v4_stamps_from_unix_seconds(unix_seconds: Int64) raises -> GcsV4Stamps:

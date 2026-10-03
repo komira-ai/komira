@@ -899,6 +899,36 @@ impl<'a> DbEmitter<'a> {
         // needed to keep the two-blank-line separation every other struct here
         // gets.
         self.emit_explicit_deinit();
+        self.emit_explicit_copy_ctor(msg);
+        self.pop_indent();
+        self.blank();
+    }
+
+    /// An explicit copy constructor for the nested struct, so it is never
+    /// trivially copyable. The nested struct is `Copyable`, and on Mojo 1.0.0
+    /// the synthesized copy of a struct with an explicit `__deinit__` can be
+    /// treated as trivial for some layouts, after which `List.copy()` copies
+    /// the elements with a memcpy and the copy shares its String buffers with
+    /// the original (see `emit.rs`, `emit_explicit_copy_ctor`). The DbStorable
+    /// row and the DbSchema row are `Movable` only and are never copied.
+    fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
+        self.line("# Explicit so the struct is never trivially copyable: Mojo 1.0.0 can");
+        self.line("# synthesize a trivial copy for some layouts, and `List.copy()` would");
+        self.line("# then share String buffers between the copy and the original.");
+        self.line("def __init__(out self, *, copy: Self):");
+        self.push_indent();
+        let names: Vec<&str> = msg
+            .fields
+            .iter()
+            .filter(|f| f.oneof_index.is_none())
+            .map(|f| f.name.as_str())
+            .collect();
+        if names.is_empty() {
+            self.line("pass");
+        }
+        for n in names {
+            self.line(&format!("self.{n} = copy.{n}.copy()"));
+        }
         self.pop_indent();
         self.blank();
     }
@@ -1358,6 +1388,33 @@ mod mojo_100_deinit_tests {
                 &body[..end]
             );
         }
+    }
+
+    #[test]
+    fn the_nested_copyable_struct_has_an_explicit_copy_constructor() {
+        let (model, opts) = model_and_opts();
+        let src = emit_db_model(&model, &opts).remove(0).1;
+        let at = src
+            .find("struct Payload(Copyable, Movable):")
+            .unwrap_or_else(|| panic!("nested struct missing; got:\n{src}"));
+        let body = &src[at..];
+        let end = body[1..].find("\nstruct ").map(|i| i + 1).unwrap_or(body.len());
+        let body = &body[..end];
+        assert!(
+            body.contains("def __init__(out self, *, copy: Self):"),
+            "a Copyable struct with an explicit __deinit__ must not rely on a \
+             synthesized copy (trivial on some layouts, Mojo 1.0.0); got:\n{body}"
+        );
+        assert!(
+            body.contains(".copy()"),
+            "every field is copied by its own copy; got:\n{body}"
+        );
+        // Only the Copyable struct gets one: the rows are Movable only.
+        assert_eq!(
+            src.matches("def __init__(out self, *, copy: Self):").count(),
+            1,
+            "only the nested Copyable struct carries a copy constructor; got:\n{src}"
+        );
     }
 
     #[test]
