@@ -75,6 +75,7 @@ from komira_aws_core import (
     aws_xml_write_ts,
     aws_rest_xml_error,
     aws_xml_body_is_error,
+    s3_apply_request_checksum,
 )
 from komira_xml import (
     XmlNode,

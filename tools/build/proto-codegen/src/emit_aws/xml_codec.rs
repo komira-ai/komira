@@ -943,9 +943,17 @@ mod tests {
                         "http": {{"method": "GET", "requestUri": "/t"}},
                         "input": {{"shape": "In"}}, "output": {{"shape": "TextOut"}}}},
                     "Drop": {{"name": "Drop", "http": {{"method": "DELETE", "requestUri": "/d"}},
-                        "input": {{"shape": "In"}}}}}},
+                        "input": {{"shape": "In"}}}},
+                    "Put": {{"name": "Put", "http": {{"method": "PUT", "requestUri": "/p"}},
+                        "input": {{"shape": "PutIn"}},
+                        "httpChecksum": {{"requestAlgorithmMember": "ChecksumAlgorithm",
+                            "requestChecksumRequired": false}}}}}},
                 "shapes": {{
                     "In": {{"type": "structure", "members": {{}}}},
+                    "PutIn": {{"type": "structure", "payload": "Body", "members": {{
+                        "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                            "locationName": "x-amz-sdk-checksum-algorithm"}},
+                        "Body": {{"shape": "Bytes"}}}}}},
                     "HeadOut": {{"type": "structure", "members": {{
                         "Expires": {{"shape": "Ts", "location": "header", "locationName": "Expires"}},
                         "Size": {{"shape": "Str"}}}}}},
@@ -964,7 +972,7 @@ mod tests {
         let lowering = lower_aws_service(
             &model,
             "s3",
-            &["Head", "Get", "GetBytes", "GetText", "Drop"].map(String::from),
+            &["Head", "Get", "GetBytes", "GetText", "Drop", "Put"].map(String::from),
             "s3.json",
             "aws.s3",
         )?;
@@ -1011,6 +1019,25 @@ mod tests {
         // Nor for an operation with no output shape (`Drop`).
         assert!(!parser(&src, "s3_parse_drop_response").contains("aws_xml_body_is_error"), "{src}");
         assert_eq!(src.matches("if aws_xml_body_is_error(resp):").count(), 1, "{src}");
+    }
+
+    /// The text of the request builder `name` in `src`.
+    fn builder<'a>(src: &'a str, name: &str) -> &'a str {
+        parser(src, name)
+    }
+
+    #[test]
+    fn s3_sends_the_request_checksum_where_the_model_names_its_algorithm_member() {
+        let src = emit_s3("S3").unwrap();
+        // After the body is set, with the header the member is bound to.
+        let put = builder(&src, "s3_build_put_request");
+        let body = put.find("req.body = ").expect("the body");
+        let sum = put
+            .find("s3_apply_request_checksum(req, String(\"x-amz-sdk-checksum-algorithm\"))")
+            .expect("the checksum");
+        assert!(body < sum && sum < put.find("return req^").expect("return"), "{put}");
+        // Nowhere else: no other operation names an algorithm member.
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
     }
 
     #[test]

@@ -18,9 +18,6 @@ ruleset, `endpoint-rule-set-1.json` beside the model, is
 `botocore_model("logs").partitions`. Both are sub-targets of BUCK's
 `:endpoint_rules`, the one place the archive's endpoint files are read
 (`botocore_endpoint_file`).
-
-BOTOCORE_ENDPOINT_ONLY names the services whose endpoint files are read with
-no client generated from their model: service -> api version.
 """
 
 BOTOCORE_MODELS = {
@@ -29,21 +26,19 @@ BOTOCORE_MODELS = {
         api_version = "2014-03-28",
         sha256 = "b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30",
     ),
-}
-
-# S3: its ruleset and endpoint test cases are run through komira_aws_core's
-# interpreter and a generated test client, and its model is the reference
-# the test client's bindings are checked against.
-BOTOCORE_ENDPOINT_ONLY = {
-    "s3": "2006-03-01",
+    # Amazon S3 (//src/komira_aws_s3). Its ruleset and endpoint test cases
+    # are also run through komira_aws_core's interpreter and a generated
+    # test client, whose bindings are checked against this model.
+    "s3": struct(
+        api_version = "2006-03-01",
+        sha256 = "429763d64912af5edae4c7a0f20a8ac3e6fecf734cde5fc465016bc8badcdef9",
+    ),
 }
 
 def _api_version(service):
     if service in BOTOCORE_MODELS:
         return BOTOCORE_MODELS[service].api_version
-    if service in BOTOCORE_ENDPOINT_ONLY:
-        return BOTOCORE_ENDPOINT_ONLY[service]
-    fail("botocore service `{}` is in neither BOTOCORE_MODELS nor BOTOCORE_ENDPOINT_ONLY".format(service))
+    fail("botocore service `{}` is not in BOTOCORE_MODELS".format(service))
 
 def botocore_model_path(service):
     """The model's path in the archive, under its top directory."""

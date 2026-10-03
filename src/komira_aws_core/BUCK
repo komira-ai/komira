@@ -25,7 +25,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #     environment: every input is a parameter
 #   - endpoint_signing.mojo, which turns an endpoint the ruleset chose into
 #     what the signer takes, refusing an auth scheme it cannot sign
-#   - s3_wire.mojo: the two S3 header values no model states
+#   - s3_wire.mojo: the S3 header values no model states, and the CRC32
+#     request checksum
 #
 # The chain reads only the STANDARD AWS SDK environment variables and shared
 # files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
