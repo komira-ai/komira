@@ -30,9 +30,9 @@
 # `409 ConditionalRequestConflict` ("A conflicting conditional operation is
 # currently in progress against this resource. Please try again."). Nothing
 # was written; the caller must read again and retry, which is what a 412
-# asks of it too. Classified as anything else (as the earlier S3 layer did:
-# any other 4xx was MALFORMED), a compare-and-swap loop that retries only a
-# lost precondition stops on it: the append fails instead of retrying.
+# asks of it too. A 409 classified as MALFORMED would end a compare-and-swap
+# loop that retries only a lost precondition: the append would fail instead
+# of retrying.
 # tests/test_s3_conditional_store.mojo drives komira_objectstore's
 # CasManifestStore into exactly that answer. Its message carries the word
 # `precondition` because that is what the CAS substrate's retry reads.

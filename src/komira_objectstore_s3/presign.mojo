@@ -134,8 +134,8 @@ struct S3PresignSigner[T: AwsCredsSource, K: AwsClock & Movable & Deinitable](Ob
         """The URL for `method` (GET or PUT) on `key`, with no cap of this
         codebase on `expires_seconds` (SigV4's own bound of 1 s to 7 days
         still holds). The trait verbs call it after `check_presign_ttl`;
-        a test calls it to sign AWS's published example, which is valid
-        for a day."""
+        a test calls it directly to sign a custom-endpoint PUT and to check
+        the method refusal."""
         if key.byte_length() == 0:
             raise Error("S3PresignSigner: refusing to sign an empty key")
         if method != "GET" and method != "PUT":

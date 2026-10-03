@@ -53,8 +53,8 @@ def test_config_defaults_and_refusals() raises:
 
 
 def test_config_custom_endpoint_is_path_style() raises:
-    # Each former environment knob of the earlier S3 layer is a parameter
-    # here: the endpoint, the addressing, the in-flight bound.
+    # The endpoint, the addressing and the planned concurrency are
+    # constructor parameters.
     var c = S3Config(
         "us-east-1",
         endpoint="http://127.0.0.1:9000",

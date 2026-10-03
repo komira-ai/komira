@@ -1,9 +1,9 @@
 # The package reads no environment: every setting is an S3Config field or a
-# type parameter (the credential source, the clock), where the earlier S3
-# layer read environment variables for its signing clock, its in-flight
-# bound and its MinIO endpoint (named below). The package's sources are staged as this test's
-# data, at src/<file>; the test reads each one and fails if any names a way
-# to read the environment or the FFI a read would go through.
+# type parameter (the credential source, the clock). The package's sources
+# are staged as this test's data, at src/<file>; the test reads each one and
+# fails if any names a way to read the environment or the FFI a read would
+# go through, and checks that the files it read are every staged one.
+from std.os import listdir
 from std.testing import assert_equal, assert_true
 
 
@@ -43,10 +43,6 @@ def test_no_environment_read() raises:
         "aws_endpoint_config",
         "komira_core_ffi",
         "external_call",
-        "S3_AMZ_DATE",
-        "S3_SHORT_DATE",
-        "PREFETCH_MAX_INFLIGHT",
-        "MINIO_E2E_",
     ]
     var files = materialize[_FILES]()
     for i in range(len(files)):
@@ -60,6 +56,16 @@ def test_no_environment_read() raises:
 
 
 def test_the_scan_saw_the_package() raises:
+    # Every staged source is one the scan reads: a new file joins _FILES.
+    var files = materialize[_FILES]()
+    var staged = listdir(String("src"))
+    assert_equal(len(staged), len(files), "src/ holds a file the scan does not read")
+    for i in range(len(staged)):
+        var known = False
+        for j in range(len(files)):
+            if staged[i] == files[j]:
+                known = True
+        assert_true(known, "src/" + staged[i] + " is staged but not scanned")
     # Not vacuous: each file is the package's, whole.
     assert_equal(_count(_read("config.mojo"), "\nstruct S3Config("), 1)
     assert_equal(_count(_read("store.mojo"), "\nstruct S3Store["), 1)
