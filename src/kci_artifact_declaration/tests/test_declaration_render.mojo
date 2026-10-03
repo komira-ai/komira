@@ -1,7 +1,9 @@
 # =============================================================================
 # src/kci_artifact_declaration/tests/test_declaration_render.mojo
-#   The argv kci runs for one artifact, `{out_dir}` substitution, the
-#   example declarations file, and the two refusals over what a build left
+#   The argv kci runs for one artifact: the six placeholders substituted in
+#   one pass, `{out_dir}` derived as `<release_dir>/<artifact>`, the stamp's
+#   own refusals, the example declarations file (two libraries' build system
+#   plus the metapackage last), and the two refusals over what a build left
 #   (exactly one `manifest.json`; its `name` the declaration's, exactly).
 # =============================================================================
 #
@@ -18,15 +20,30 @@ from kci_artifact_declaration_proto.artifact_declaration import (
     BuildSystem,
 )
 from kci_artifact_declaration import (
+    BUILD_NUMBER_PLACEHOLDER,
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
+    RELEASE_DIR_PLACEHOLDER,
+    REVISION_ID_PLACEHOLDER,
+    SOURCE_COMMIT_PLACEHOLDER,
+    TIMESTAMP_MS_PLACEHOLDER,
+    ReleaseStamp,
+    known_placeholders,
     parse_artifact_declarations,
     placeholders_in,
     read_artifact_declarations,
     render_build_argv,
+    require_full_commit_id,
     require_manifest_name,
     require_one_manifest,
 )
+
+comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
+
+
+def _stamp() raises -> ReleaseStamp:
+    return ReleaseStamp(String(_REV), String(_SRC), 154, 1790994309000)
 
 
 def _argv(*xs: String) -> List[String]:
@@ -42,9 +59,9 @@ def _expect_argv(got: List[String], want: List[String]) raises:
         assert_equal(got[i], want[i])
 
 
-def _refusal(decls: ArtifactDeclarations, artifact: String, out_dir: String) -> String:
+def _refusal(decls: ArtifactDeclarations, artifact: String, release_dir: String) raises -> String:
     try:
-        _ = render_build_argv(decls, artifact, out_dir)
+        _ = render_build_argv(decls, artifact, release_dir, _stamp())
     except e:
         return String(e)
     return String("<rendered>")
@@ -52,19 +69,67 @@ def _refusal(decls: ArtifactDeclarations, artifact: String, out_dir: String) -> 
 
 def test_contract_words() raises:
     assert_equal(String(OUT_DIR_PLACEHOLDER), String("{out_dir}"))
+    assert_equal(String(RELEASE_DIR_PLACEHOLDER), String("{release_dir}"))
+    assert_equal(String(REVISION_ID_PLACEHOLDER), String("{revision_id}"))
+    assert_equal(String(SOURCE_COMMIT_PLACEHOLDER), String("{source_commit}"))
+    assert_equal(String(BUILD_NUMBER_PLACEHOLDER), String("{build_number}"))
+    assert_equal(String(TIMESTAMP_MS_PLACEHOLDER), String("{timestamp_ms}"))
+    _expect_argv(
+        known_placeholders(),
+        _argv(
+            "{out_dir}", "{release_dir}", "{revision_id}", "{source_commit}",
+            "{build_number}", "{timestamp_ms}",
+        ),
+    )
     assert_equal(String(KCI_MANIFEST_NAME), String("manifest.json"))
 
 
-def test_example_file_renders_the_buck2_build() raises:
+def test_example_file_renders_the_stamped_library_then_the_metapackage() raises:
     var d = read_artifact_declarations(String("src/kci_artifact_declaration/example.textproto"))
+    # File order is build order: the library, then the metapackage last.
+    assert_equal(len(d.artifacts), 2)
+    assert_equal(d.artifacts[0].name, String("komira_encoding"))
+    assert_equal(d.artifacts[1].name, String("komira_all"))
     _expect_argv(
-        render_build_argv(d, String("komira_encoding"), String("/work/out/komira_encoding")),
+        render_build_argv(d, String("komira_encoding"), String("/work/rel"), _stamp()),
         _argv(
             "buck2",
             "build",
+            "-c",
+            "komira.package_stamp=154",
+            "-c",
+            "komira.package_commit=f0e1d2c3b4a5968778695a4b3c2d1e0f12345678",
+            "-c",
+            "komira.package_timestamp_ms=1790994309000",
             "//src/komira_encoding:komira_encoding_conda[release]",
             "--out",
-            "/work/out/komira_encoding",
+            "/work/rel/komira_encoding",
+        ),
+    )
+    _expect_argv(
+        render_build_argv(d, String("komira_all"), String("/work/rel"), _stamp()),
+        _argv(
+            "buck2",
+            "run",
+            "//tools/build/package:komira_pack",
+            "--",
+            "conda-meta",
+            "--name",
+            "komira_all",
+            "--member-manifest",
+            "/work/rel/komira_encoding/manifest.json",
+            "--license",
+            "Apache-2.0",
+            "--summary",
+            "Every komira library of one release.",
+            "--home",
+            "https://github.com/komira-ai/komira",
+            "--extra-file",
+            "info/licenses/LICENSE=LICENSE",
+            "--label",
+            "kci build a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "--out-dir",
+            "/work/rel/komira_all",
         ),
     )
 
@@ -76,28 +141,60 @@ def _file() -> String:
         + String("artifacts {\n  name: \"a\"\n  build_system: \"tool\"\n")
         + String("  args: \"x{out_dir}y{out_dir}z\"\n  args: \"{}\"\n  args: \"{k: 1}\"\n")
         + String("  args: \"{out_dir\"\n}\n")
-        + String("artifacts {\n  name: \"b\"\n  build_system: \"tool\"\n  args: \"plain\"\n}\n")
+        + String("artifacts {\n  name: \"b\"\n  build_system: \"tool\"\n  args: \"plain\"\n")
+        + String("  args: \"{release_dir}|{revision_id}|{source_commit}|{build_number}|{timestamp_ms}\"\n")
+        + String("  args: \"{{build_number}}\"\n}\n")
     )
 
 
 def test_substitution_in_build_system_and_artifact_args() raises:
     var d = parse_artifact_declarations(_file(), String("decl.textproto"))
     _expect_argv(
-        render_build_argv(d, String("a"), String("/o")),
-        _argv("/opt/tool/bin/tool", "--root=/o/root", "run", "x/oy/oz", "{}", "{k: 1}", "{out_dir"),
+        render_build_argv(d, String("a"), String("/r"), _stamp()),
+        _argv("/opt/tool/bin/tool", "--root=/r/a/root", "run", "x/r/ay/r/az", "{}", "{k: 1}", "{out_dir"),
     )
     # The executable and the order are the build system's; only the
-    # artifact's own args differ between artifacts.
+    # artifact's own args differ between artifacts. Every stamp value lands
+    # as written; a doubled brace keeps its outer braces.
     _expect_argv(
-        render_build_argv(d, String("b"), String("/p q")),
-        _argv("/opt/tool/bin/tool", "--root=/p q/root", "run", "plain"),
+        render_build_argv(d, String("b"), String("/p q"), _stamp()),
+        _argv(
+            "/opt/tool/bin/tool",
+            "--root=/p q/b/root",
+            "run",
+            "plain",
+            "/p q|a1b2c3d4e5f60718293a4b5c6d7e8f9012345678|f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
+            "|154|1790994309000",
+            "{154}",
+        ),
+    )
+
+
+def test_substitution_is_one_pass() raises:
+    # A release directory whose own name holds placeholders: substituted
+    # once, never again.
+    var d = parse_artifact_declarations(_file(), String("decl.textproto"))
+    _expect_argv(
+        render_build_argv(d, String("b"), String("/x{out_dir}{build_number}"), _stamp()),
+        _argv(
+            "/opt/tool/bin/tool",
+            "--root=/x{out_dir}{build_number}/b/root",
+            "run",
+            "plain",
+            "/x{out_dir}{build_number}|a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            "|f0e1d2c3b4a5968778695a4b3c2d1e0f12345678|154|1790994309000",
+            "{154}",
+        ),
     )
 
 
 def test_render_refusals() raises:
     var d = parse_artifact_declarations(_file(), String("decl.textproto"))
-    assert_equal(_refusal(d, String("a"), String("out")), String("out_dir 'out' is not an absolute path"))
-    assert_equal(_refusal(d, String("a"), String("")), String("out_dir '' is not an absolute path"))
+    var tail = String("' is not an absolute path (other than '/', with no trailing '/')")
+    assert_equal(_refusal(d, String("a"), String("out")), String("release_dir 'out") + tail)
+    assert_equal(_refusal(d, String("a"), String("")), String("release_dir '") + tail)
+    assert_equal(_refusal(d, String("a"), String("/")), String("release_dir '/") + tail)
+    assert_equal(_refusal(d, String("a"), String("/r/")), String("release_dir '/r/") + tail)
     assert_equal(_refusal(d, String("nope"), String("/o")), String("no artifact 'nope' is declared"))
     # A value that never went through the validator.
     var systems = List[BuildSystem]()
@@ -108,6 +205,62 @@ def test_render_refusals() raises:
         _refusal(raw, String("a"), String("/o")),
         String("artifact 'a': build_system 'zz' is not declared"),
     )
+    # An unknown placeholder in a value that never went through the
+    # validator is refused, not passed through.
+    var systems2 = List[BuildSystem]()
+    systems2.append(BuildSystem(String("t"), String("t"), List[String]()))
+    var artifacts2 = List[ArtifactDeclaration]()
+    artifacts2.append(ArtifactDeclaration(String("a"), String("t"), _argv("{out_dir}", "{nope}")))
+    var raw2 = ArtifactDeclarations(systems2^, artifacts2^)
+    assert_equal(_refusal(raw2, String("a"), String("/o")), String("unknown placeholder '{nope}'"))
+
+
+def _stamp_refusal(rev: String, src: String, n: Int, ts: Int) -> String:
+    try:
+        _ = ReleaseStamp(rev, src, n, ts)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def test_stamp_refusals() raises:
+    assert_equal(_stamp_refusal(String(_REV), String(_SRC), 1, 1), String("<accepted>"))
+    var bad = List[String]()
+    bad.append(String("a1b2c3d"))  # abbreviated
+    bad.append(String(String(_REV)[byte = 0:39]))  # 39
+    bad.append(String(_REV) + String("0"))  # 41
+    bad.append(String("A1B2C3D4E5F60718293A4B5C6D7E8F9012345678"))  # upper case
+    bad.append(String("g1b2c3d4e5f60718293a4b5c6d7e8f9012345678"))  # not hex
+    bad.append(String(""))
+    for i in range(len(bad)):
+        var why = (
+            String("' is not a full commit id (exactly 40 lowercase hex digits; an")
+            + String(" abbreviated id is refused)")
+        )
+        assert_equal(
+            _stamp_refusal(bad[i], String(_SRC), 1, 1), String("revision_id '") + bad[i] + why
+        )
+        assert_equal(
+            _stamp_refusal(String(_REV), bad[i], 1, 1), String("source_commit '") + bad[i] + why
+        )
+    assert_equal(_stamp_refusal(String(_REV), String(_SRC), 0, 1), String("build_number 0 is not positive"))
+    assert_equal(_stamp_refusal(String(_REV), String(_SRC), -3, 1), String("build_number -3 is not positive"))
+    assert_equal(_stamp_refusal(String(_REV), String(_SRC), 1, 0), String("timestamp_ms 0 is not positive"))
+
+
+def test_full_commit_id() raises:
+    require_full_commit_id(String("x"), String(_SRC))
+    try:
+        require_full_commit_id(String("--revision-id"), String("f0e1d2c"))
+        assert_equal(String("accepted"), String("refused"))
+    except e:
+        assert_equal(
+            String(e),
+            String(
+                "--revision-id 'f0e1d2c' is not a full commit id (exactly 40 lowercase hex"
+                " digits; an abbreviated id is refused)"
+            ),
+        )
 
 
 def test_placeholders_in() raises:
