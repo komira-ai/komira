@@ -60,7 +60,7 @@ from komira_core.collections.string_column_view import (
     BinaryColumnView,
     StringColumnView,
 )
-from komira_core.eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     canonical_bits_f64,
     canonicalize_f32,
 )
