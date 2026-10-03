@@ -29,6 +29,7 @@ from komira_objectstore.sublineage_shard_keys import (
 
 from komira_search_catalog.generation import (
     advance_log_start_to,
+    read_log_start_seq,
     read_retired_shards,
     record_retired_shard,
 )
@@ -72,8 +73,23 @@ from komira_search_catalog.metastore import SearchMetastore
 #      publish is the create-if-absent of the same slot, so exactly one of
 #      the two wins. If the publish already took it, the create fails with a
 #      precondition error and the shard is left alone.
-#   5. Advance the shard's log start to `g`, so a cold reader or writer
-#      replays the shard from the seal and never looks below it.
+#   5. Re-read the log start. If it is past `g`, the drained check is stale:
+#      the reaper stalled after it, and meanwhile the writer published at
+#      `g`, compaction retired that chunk, and `reap_chunk` stubbed it,
+#      advanced the log start past it and deleted it. The seal won only
+#      because the slot was empty again. The writer's handle now publishes
+#      above `g` without a check, so retiring the shard would hide those
+#      publishes. The shard counts as fenced and is left alone; the seal
+#      stays, and is harmless, because replay and the publish check never
+#      look below the log start. Otherwise advance the shard's log start to
+#      `g`, so a cold reader or writer replays the shard from the seal and
+#      never looks below it.
+#      The re-read is sufficient because a chunk is deleted only after the
+#      log start has been advanced past it (`reap_chunk`'s prefix advance,
+#      and step 7 below, after this step): if slot `g` was written and
+#      deleted since step 2, the log start is already above `g`. A publish
+#      at `g` after the seal loses the slot to it, so nothing can be written
+#      at `g` between the seal and the re-read.
 #   6. Record the shard's final generation, `g + 1` (the seal is a chunk),
 #      in the index's `_RETIRED_SHARDS` record. The index generation does not
 #      drop, and readers skip the shard from now on.
@@ -124,7 +140,8 @@ struct DrainedShardReapResult(
                        lineage and retired shards are never counted).
       shards_reaped:   drained shards deleted.
       shards_fenced:   drained shards left alone because a publish took the
-                       fenced slot after the drained check.
+                       fenced slot after the drained check, or because the
+                       slot had been written and reaped since the check.
       objects_deleted: objects deleted across the reaped shards. The seals
                        and the log start of a retired shard stay.
     """
@@ -284,6 +301,9 @@ def reap_drained_shards[
         except e:
             if not is_precondition(String(e)):
                 raise e^
+            fenced += 1
+            continue
+        if read_log_start_seq(storage, lineage_prefix) > g:
             fenced += 1
             continue
         # The offset is bookkeeping only for search; the seal's is the

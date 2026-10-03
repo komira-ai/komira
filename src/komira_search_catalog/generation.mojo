@@ -335,6 +335,16 @@ def record_retired_shard[
 # chunks another reaper has already deleted.
 
 
+def read_log_start_seq[
+    S: ConditionalWriteStore
+](store: S, lineage_prefix: String) raises -> Int64:
+    """The lineage's log start sequence number; 0 when it has none."""
+    var cur = _read_versioned(store, log_start_key(lineage_prefix))
+    if not cur.present:
+        return Int64(0)
+    return decode_log_start(cur.body, cur.etag).log_start_seq
+
+
 def advance_log_start_to[
     S: ConditionalWriteStore
 ](

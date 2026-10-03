@@ -31,6 +31,11 @@
 #      that crashed before recording the shard, or written by a concurrent
 #      reaper, survives the next sweep, so the writer's warm publish is
 #      refused instead of succeeding below the log start of a retired shard.
+#      test_a_stale_seal_below_the_log_start_does_not_retire_the_shard: a
+#      reaper that stalls after its drained check, while the writer publishes
+#      into the fenced slot and that chunk is retired, reaped and deleted
+#      below an advanced log start, wins the now-empty slot. It must not
+#      retire the shard, and the writer's next publish stays visible.
 #   7. test_reaping_a_chunk_below_the_top_keeps_cold_reads_whole and
 #      test_cold_read_racing_a_prefix_reap_is_not_torn: reaping chunks in any
 #      order, and a cold read racing the reap of a prefix, never make a cold
@@ -64,9 +69,12 @@ from komira_objectstore import (
     RetryPolicy,
     SharedInMemoryConditionalStore,
     LogStart,
+    ManifestHead,
     WritePrecondition,
     chunk_key,
     encode_chunk,
+    encode_head,
+    head_key,
     encode_log_start,
     decode_chunk_body,
     tombstone_key,
@@ -159,9 +167,10 @@ def _count_under(store: SharedInMemoryConditionalStore, prefix: String) raises -
 #   * LIST of exactly `list_trigger` first creates `inject_path` with
 #     `inject_bytes` (If-None-Match, so it fires at most once), deletes every
 #     key in `trigger_deletes` (deleting an absent key succeeds), then lists.
-#     The reaper's drained check LISTs `<shard>/tombstones/` as its last step,
-#     so a trigger there lands a write after the check has looked at the
-#     manifest.
+#     It then writes every `trigger_puts[i]` with `trigger_bodies[i]`
+#     unconditionally. An empty `inject_path` skips the inject. The reaper's
+#     drained check LISTs `<shard>/tombstones/` as its last step, so a
+#     trigger there lands writes after the check has looked at the manifest.
 #   * GET / ranged GET of exactly `fail_get_path` raises `fail_msg`.
 #
 # Every field is plain owned data; `clone()` copies them and shares the inner
@@ -183,6 +192,8 @@ struct _HookStore(
     var _fail_get_path: String
     var _fail_msg: String
     var _trigger_deletes: List[String]
+    var _trigger_puts: List[String]
+    var _trigger_bodies: List[List[UInt8]]
 
     def __init__(
         out self,
@@ -193,6 +204,8 @@ struct _HookStore(
         var fail_get_path: String,
         var fail_msg: String,
         var trigger_deletes: List[String] = List[String](),
+        var trigger_puts: List[String] = List[String](),
+        var trigger_bodies: List[List[UInt8]] = List[List[UInt8]](),
     ):
         self._inner = inner^
         self._list_trigger = list_trigger^
@@ -201,6 +214,8 @@ struct _HookStore(
         self._fail_get_path = fail_get_path^
         self._fail_msg = fail_msg^
         self._trigger_deletes = trigger_deletes^
+        self._trigger_puts = trigger_puts^
+        self._trigger_bodies = trigger_bodies^
 
     def clone(self) -> Self:
         return Self(
@@ -211,6 +226,8 @@ struct _HookStore(
             self._fail_get_path.copy(),
             self._fail_msg.copy(),
             self._trigger_deletes.copy(),
+            self._trigger_puts.copy(),
+            self._trigger_bodies.copy(),
         )
 
     def head(self, path: Path) raises -> ObjectMeta:
@@ -221,17 +238,22 @@ struct _HookStore(
             self._list_trigger.byte_length() > 0
             and prefix.raw() == self._list_trigger
         ):
-            try:
-                _ = self._inner.conditional_put(
-                    Path.parse(self._inject_path),
-                    self._inject_bytes,
-                    WritePrecondition.if_none_match_star(),
-                )
-            except e:
-                if String(e).find("precondition") < 0:
-                    raise e^
+            if self._inject_path.byte_length() > 0:
+                try:
+                    _ = self._inner.conditional_put(
+                        Path.parse(self._inject_path),
+                        self._inject_bytes,
+                        WritePrecondition.if_none_match_star(),
+                    )
+                except e:
+                    if String(e).find("precondition") < 0:
+                        raise e^
             for i in range(len(self._trigger_deletes)):
                 self._inner.delete(Path.parse(self._trigger_deletes[i]))
+            for i in range(len(self._trigger_puts)):
+                _ = self._inner.put(
+                    Path.parse(self._trigger_puts[i]), self._trigger_bodies[i]
+                )
         return self._inner.list_with_delimiter(prefix)
 
     def coalesce_policy(self) -> CoalescePolicy:
@@ -706,6 +728,115 @@ def test_a_sweep_never_deletes_an_earlier_seal() raises:
     assert_true(_has_uuid(live, _uuid(3)), "the re-publish is visible")
 
     _ = store^
+
+
+def _lineage_objects(
+    store: SharedInMemoryConditionalStore, lineage: String
+) raises -> Dict[String, List[UInt8]]:
+    """Every object under `<lineage>/` (the in-memory store lists flat)."""
+    var out = Dict[String, List[UInt8]]()
+    var listed = store.list_with_delimiter(Path.parse(lineage + "/"))
+    for i in range(len(listed.objects)):
+        var key = listed.objects[i].location
+        out[key] = store.get(Path.parse(key))
+    return out^
+
+
+def test_a_stale_seal_below_the_log_start_does_not_retire_the_shard() raises:
+    # The reaper reads generation 2 and passes the drained check, then
+    # stalls. Meanwhile the writer publishes at slot 2, compaction retires
+    # that chunk, and reap_chunk stubs it, advances the log start to 3 and
+    # deletes it. The reaper wakes; slot 2 is empty again, so its seal wins.
+    # Recording the shard as retired then would hide every later publish:
+    # the writer's warm handle publishes at slot 3, above that seal and the
+    # log start, without a check.
+    var inner = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 12)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+    var w = _shard_meta(inner, shard_id)
+    _ = w.publish(_summary(1, Int64(2)))
+    _ = w.publish(_summary(2, Int64(2)))
+    _drain(w, 2)
+
+    # Run the writer's side for real, record what it changed, and roll the
+    # lineage back to the state the reaper's drained check saw. The writer's
+    # warm handle keeps its view of slot 2 as its last chunk.
+    var before = _lineage_objects(inner, lineage)
+    _ = w.publish(_summary(3, Int64(2)))
+    # The writer's durable head object catches up with its tail, as its
+    # deferred head advance does on a bounded cadence. Until it does, the
+    # prefix advance stops below slot 2 and the reaper's seal loses the slot.
+    var tail = w._read_head_settled()
+    assert_equal(tail.chunk_seq, Int64(2), "the writer's tail is chunk 2")
+    _ = inner.put(
+        head_key(lineage),
+        encode_head(ManifestHead(tail.chunk_seq, tail.next_offset, String(""))),
+    )
+    w.retire_at(Int64(2), Int64(0))
+    assert_true(w.reap_chunk(Int64(2), _GRACE_MS, _GRACE_MS), "chunk 2 reaped")
+    var after = _lineage_objects(inner, lineage)
+    assert_false(
+        chunk_key(lineage, Int64(2)).raw() in after,
+        "the writer's chunk 2 was deleted below the advanced log start",
+    )
+    var puts = List[String]()
+    var bodies = List[List[UInt8]]()
+    for e in after.items():
+        puts.append(e.key)
+        bodies.append(e.value.copy())
+    var deletes = List[String]()
+    for e in before.items():
+        if not e.key in after:
+            deletes.append(e.key)
+    for e in after.items():
+        if e.key in before:
+            _ = inner.put(Path.parse(e.key), before[e.key])
+        else:
+            inner.delete(Path.parse(e.key))
+
+    # The writer's side lands inside the reaper, after its drained check.
+    var hooks = _HookStore(
+        inner.clone(),
+        lineage + "/tombstones/",
+        String(""),
+        List[UInt8](),
+        String(""),
+        String(""),
+        deletes^,
+        puts^,
+        bodies^,
+    )
+    var r = reap_drained_shards(hooks, _META, String("logs"))
+
+    # The shard must not have been retired, so the writer's warm publish
+    # lands above the log start and is visible to the index read.
+    _ = w.publish(_summary(4, Int64(2)))
+    var live = list_live_splits_across_shards(inner, _META, String("logs"))
+    assert_true(
+        _has_uuid(live, _uuid(4)),
+        "stale-seal warm publish: publish SUCCEEDED but split is NOT visible"
+        + " (reaped " + String(r.shards_reaped)
+        + " fenced " + String(r.shards_fenced) + ")",
+    )
+    assert_equal(len(live), 1, "only the warm publish is live")
+    assert_equal(r.shards_reaped, 0, "a stale drained check retired the shard")
+    assert_equal(r.shards_fenced, 1, "the stale seal counts as fenced")
+
+    # Once that split is drained too, a fresh sweep retires the shard.
+    var w2 = _shard_meta(inner, shard_id)
+    w2.retire_at(Int64(3), Int64(0))
+    assert_true(w2.reap_chunk(Int64(3), _GRACE_MS, _GRACE_MS), "chunk 3 reaped")
+    var r2 = reap_drained_shards(_plain_hooks(inner), _META, String("logs"))
+    assert_equal(r2.shards_reaped, 1, "the drained shard is retired")
+    assert_equal(
+        len(list_live_splits_across_shards(inner, _META, String("logs"))),
+        0,
+        "nothing is live",
+    )
+    with assert_raises(contains="[SHARD_RETIRED]"):
+        _ = w.publish(_summary(5, Int64(2)))
+
+    _ = inner^
 
 
 # =============================================================================
