@@ -4,7 +4,7 @@
 #
 # Which cloud a stage deploys to comes from its cell (the cell's `cloud`,
 # `--cloud=<id>` on the command line), and the id is a string a cloud
-# adapter reports about itself (`gcp`, `aws`, `mem`). "Platform" is not this:
+# adapter reports about itself (`gcp`, `aws`, `fake`). "Platform" is not this:
 # a platform is an OS and a CPU. Nothing may branch on what the id SAYS: the
 # only operations are equality (with the clouds built into kci, with a state
 # header) and printing. So the type offers exactly those two, and no
