@@ -1,0 +1,86 @@
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# Amazon S3: a restXml client generated at build time from botocore's S3
+# model (//third_party/botocore, pinned by sha256; nothing of it is copied
+# here), in pure mode: each operation's request builder and response
+# parser, and its endpoint resolved through S3's published endpoint ruleset
+# and partition table, embedded in the module. No transport; a caller signs
+# a built request with komira_aws_core's build_sigv4_signed_request.
+#
+# The `s3` customization applies what botocore does to S3 beyond the model:
+# a 200 whose body is an <Error> is raised as an HTTP 500, an `Expires`
+# header that is not a date is left unset, PutObject and UploadPart send
+# the CRC32 request checksum current AWS SDKs send by default, and the
+# bucket is left to the endpoint ruleset, which puts it in the host or in
+# the endpoint's path.
+# Addressing follows the ruleset: virtual host unless the bucket cannot be a
+# host name or `S3EndpointConfig.force_path_style` is set, which a caller
+# of a custom endpoint (LocalStack, MinIO) sets.
+#
+# `operations` is the operations an object store needs, each with its own
+# rows in the tests below; an operation joins the list with its tests. Of
+# S3's other operations, the generator refuses by name those that require a
+# request checksum (`checksum-required`: DeleteObjects, PutBucket*,
+# PutObjectAcl, PutObjectTagging and the like), those reading `Grantee`'s
+# XML attribute (`xml-attribute`: GetBucketAcl, GetBucketLogging,
+# GetObjectAcl, RestoreObject), SelectObjectContent (`eventstream`) and
+# WriteGetObjectResponse (`host-prefix`).
+#
+# Left to the caller, which botocore does for S3 in handlers beyond the
+# model: SSE-C (`SSECustomerKey` is sent as given, so a caller passes it
+# base64-encoded and sets `SSECustomerKeyMD5`; botocore's `sse_md5` does
+# both), and `x-amz-meta-*` values, which must be ASCII (botocore's
+# `validate_ascii_metadata` refuses others; here only CR and LF are).
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the S3 API reference (no upstream test body is copied):
+# test_s3_requests (the requests the engine's operations build, exactly),
+# test_s3_responses (their responses, the 200-with-<Error> case and the
+# error forms), test_s3_endpoints (virtual-host and path-style addressing,
+# a custom endpoint, and the signed request of each HTTP method, against the
+# signatures AWS publishes for its SigV4 examples where one exists) and
+# test_no_env_reads (the generated module reads no environment).
+
+_S3 = botocore_model("s3")
+
+mojo_aws_client(
+    name = "komira_aws_s3",
+    customizations = ["s3"],
+    endpoint_rules = _S3.endpoint_rules,
+    mode = "pure",
+    model = _S3.model,
+    model_sha256 = _S3.sha256,
+    operations = [
+        "AbortMultipartUpload",
+        "CompleteMultipartUpload",
+        "CopyObject",
+        "CreateMultipartUpload",
+        "DeleteObject",
+        "GetObject",
+        "HeadObject",
+        "ListBuckets",
+        "ListObjects",
+        "ListObjectsV2",
+        "PutObject",
+        "UploadPart",
+    ],
+    partitions = _S3.partitions,
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "gen/" + f: ":komira_aws_s3_gen[{}]".format(f)
+            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_s3.mojo"]
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_s3_endpoints.mojo",
+        "tests/test_s3_requests.mojo",
+        "tests/test_s3_responses.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_xml:komira_xml",
+    ],
+)

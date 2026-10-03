@@ -27,12 +27,17 @@ from komira_aws_core import (
     AwsPayloadSigning,
     AwsRequest,
     CredentialHttpRequest,
+    EMPTY_PAYLOAD_SHA256,
     FixedClock,
     Header,
+    SigV4SigningContext,
+    amz_date_from_unix,
     aws_token_string,
     aws_ts_from_token,
     build_sigv4_signed_request,
+    is_s3_signing_name,
     resolve_endpoint,
+    sigv4_sign_payload_hash,
 )
 
 
@@ -157,6 +162,63 @@ def test_s3_get() raises:
         clock,
     )
     _golden(req, "s3_get_object.request")
+
+
+def _path_signature(service: String, uri: String, s3_rules: Bool) raises -> String:
+    """The Authorization of a body-less GET of `uri` signed directly, with
+    the S3 rules (path as sent, payload header) or the default ones."""
+    var headers = List[Header]()
+    headers.append(Header(String("Host"), String("b.example.com")))
+    var ctx = SigV4SigningContext(
+        _cred(),
+        String("us-west-2"),
+        service,
+        amz_date_from_unix(_NOW),
+        sign_payload_header=s3_rules,
+        normalize_path=not s3_rules,
+        uri_encode_path=not s3_rules,
+    )
+    return sigv4_sign_payload_hash(
+        String("GET"), uri, headers, String(EMPTY_PAYLOAD_SHA256), ctx
+    ).authorization
+
+
+def test_s3_signing_names() raises:
+    # botocore's S3_SIGNING_NAMES all sign with S3's rules: the path as
+    # sent (`a%20b` and the `./` neither re-encoded nor removed) and
+    # x-amz-content-sha256. Any other name encodes the path again.
+    var uri = String("/k/./a%20b.txt")
+    var names: List[String] = ["s3", "s3-outposts", "s3-object-lambda", "s3express", "logs"]
+    for i in range(len(names)):
+        var clock = FixedClock(_NOW)
+        var none = List[UInt8]()
+        var req = build_sigv4_signed_request(
+            String("GET"),
+            _cred(),
+            String("us-west-2"),
+            names[i],
+            AwsEndpoint.https("b.example.com"),
+            uri,
+            String(""),
+            Span(none),
+            List[Header](),
+            clock,
+        )
+        var s3 = names[i] != "logs"
+        assert_equal(is_s3_signing_name(names[i]), s3)
+        assert_equal(
+            req.header("Authorization"), _path_signature(names[i], uri, s3), names[i]
+        )
+        assert_equal(
+            req.header("x-amz-content-sha256"),
+            String(EMPTY_PAYLOAD_SHA256) if s3 else String(""),
+            names[i],
+        )
+    # The two rules give different signatures for this path.
+    assert_true(
+        _path_signature(String("s3"), uri, True)
+        != _path_signature(String("s3"), uri, False)
+    )
 
 
 def test_base_path_endpoint() raises:
@@ -584,6 +646,7 @@ def main() raises:
     test_aws_json_sqs()
     test_localstack_temporary_credential()
     test_s3_get()
+    test_s3_signing_names()
     test_base_path_endpoint()
     test_content_length_on_bodyless_requests()
     test_payload_hashed()

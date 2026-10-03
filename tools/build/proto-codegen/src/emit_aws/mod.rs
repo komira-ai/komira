@@ -9,8 +9,12 @@
 //!   the protocol and signing-scheme checks.
 //! - `json_codec`: the JSON body codec.
 //! - `rpc`: the awsJson RPC binding.
-//! - `rest`: the REST binding (restJson1): URI labels and query, headers,
-//!   prefix headers, the payload, the response status, and restJson1 errors.
+//! - `rest`: the REST binding (restJson1 and restXml): URI labels and query,
+//!   headers, prefix headers, the payload, the response status, and the
+//!   restJson1 and restXml errors.
+//! - `xml_codec`: the restXml body codec.
+//! - [`endpoint`]: endpoint resolution through the service's endpoint
+//!   ruleset, emitted when the generator is given one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,12 +23,15 @@ use crate::ir::{IrEnum, IrField, IrMessage, IrMethod, IrType, Label, ScalarKind}
 use crate::lower::{recursion_breaking_edges_under, ContainerInlining};
 use crate::overrides::AwsOverrides;
 
+pub mod endpoint;
 mod json_codec;
 pub mod proto;
 mod rest;
 mod rpc;
+mod xml_codec;
 
-pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS};
+pub use endpoint::AwsEndpointRules;
+pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS, XML_BODY_PROTOCOLS};
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -33,18 +40,44 @@ pub struct AwsEmitOptions {
     pub emit_model_json: bool,
     pub pure_only: bool,
     pub omit_preamble: bool,
+    /// The `s3` customization (see [`S3_CUSTOMIZATION`]): refused unless the
+    /// model's serviceId is `S3` and its protocol is restXml.
+    pub s3: bool,
 }
+
+/// The `s3` customization: what botocore does to S3 beyond the
+/// model, each from `botocore/handlers.py` at the pinned tag.
+///
+/// - `_handle_200_error`: a 200 response whose body is an `<Error>` (or is
+///   not XML) is an error, handled as an HTTP 500, for every operation that
+///   has an output shape whose payload is not a blob or a string
+///   (`_should_handle_200_error`). `parse_<op>_response` raises it in the
+///   client's text for an HTTP 500 (`<Service>.<Op> failed: HTTP 500 <code>
+///   <message>`).
+/// - `handle_expires_header`: an `Expires` header that is not a valid date
+///   leaves the member unset, and the rest of the response still parses.
+/// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
+///   (botocore/httpchecksum.py, under the default `when_supported`): an
+///   operation whose `httpChecksum` names a `requestAlgorithmMember`
+///   (PutObject, UploadPart) sends `x-amz-checksum-crc32` and the algorithm
+///   header, `CRC32` when the caller chose none, unless the caller set an
+///   `x-amz-checksum-*` header (`s3_apply_request_checksum`).
+/// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
+///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
+///   puts the bucket in the URL it chooses (`rest_request_uri` in
+///   `rest.rs`).
+pub const S3_CUSTOMIZATION: &str = "s3";
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json", "rest-xml"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "4";
+pub const AWS_GENERATOR_VERSION: &str = "5";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -58,6 +91,20 @@ pub enum AwsImportMode {
     Always,
     /// Client mode only: anything that touches the transport.
     ClientOnly,
+    /// A module generated with an endpoint ruleset, in either mode: the
+    /// ruleset interpreter (see [`endpoint`]).
+    EndpointRules,
+    /// A module that renders values in botocore's MODEL convention (the
+    /// conformance driver's), when its protocol's body is not JSON: that
+    /// convention is JSON, so it needs the JSON runtime the body does not.
+    ModelJson,
+    /// A module generated with the `s3` customization, in either mode: the
+    /// 200-with-`<Error>` check its parsers make.
+    S3,
+    /// Client mode, or a pure module generated with the `s3` customization:
+    /// the error reader, which the client's error builder and the `s3`
+    /// 200-with-`<Error>` check both call.
+    ClientOrS3,
 }
 
 /// One `from <module> import <names>` group of [`AWS_IMPORTS`].
@@ -184,15 +231,91 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     },
     AwsImport {
         module: AWS_CORE,
+        names: &[
+            "aws_xml_blob_of",
+            "aws_xml_bool_of",
+            "aws_xml_child",
+            "aws_xml_end",
+            "aws_xml_f32_of",
+            "aws_xml_f64_of",
+            "aws_xml_int_of",
+            "aws_xml_list_items",
+            "aws_xml_namespace",
+            "aws_xml_parse",
+            "aws_xml_set_body",
+            "aws_xml_start",
+            "aws_xml_string_of",
+            "aws_xml_ts_of",
+            "aws_xml_write_blob",
+            "aws_xml_write_bool",
+            "aws_xml_write_f32",
+            "aws_xml_write_f64",
+            "aws_xml_write_int",
+            "aws_xml_write_string",
+            "aws_xml_write_ts",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
         names: &["aws_rest_json_error"],
         mode: AwsImportMode::ClientOnly,
         protocols: &[AwsProtocol::RestJson],
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_rest_xml_error"],
+        mode: AwsImportMode::ClientOrS3,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_xml_body_is_error", "s3_apply_request_checksum"],
+        mode: AwsImportMode::S3,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "aws_json_bool",
+            "aws_json_f32",
+            "aws_json_f64",
+            "aws_json_i32",
+            "aws_json_i64",
+            "aws_json_string",
+        ],
+        mode: AwsImportMode::ModelJson,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "AwsPartitionSet",
+            "EndpointParams",
+            "EndpointRuleSet",
+            "ResolvedEndpoint",
+        ],
+        mode: AwsImportMode::EndpointRules,
+        protocols: ALL_PROTOCOLS,
     },
     AwsImport {
         module: "komira_json",
         names: &["JsonValue", "parse_json_bytes", "parse_json_value"],
         mode: AwsImportMode::Always,
         protocols: JSON_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_json",
+        names: &["JsonValue"],
+        mode: AwsImportMode::ModelJson,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_xml",
+        names: &["XmlNode", "XmlWriter"],
+        mode: AwsImportMode::Always,
+        protocols: XML_BODY_PROTOCOLS,
     },
     AwsImport {
         module: "komira_http_core.transport.io_stream",
@@ -207,22 +330,59 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
 /// order, holding every name that `pure_only` needs. Rows that share a
 /// module merge into one statement.
 pub fn aws_import_section(protocol: AwsProtocol, pure_only: bool) -> String {
-    aws_import_section_for(&[protocol], pure_only)
+    aws_import_section_for(&[protocol], pure_only, false)
 }
 
 /// [`aws_import_section`] for a module holding code of several protocols:
-/// every row that applies to any of `protocols`, each once.
-pub fn aws_import_section_for(protocols: &[AwsProtocol], pure_only: bool) -> String {
+/// every row that applies to any of `protocols`, each once, with the
+/// [`AwsImportMode::EndpointRules`] rows when `endpoint_rules` is set.
+pub fn aws_import_section_for(
+    protocols: &[AwsProtocol],
+    pure_only: bool,
+    endpoint_rules: bool,
+) -> String {
+    aws_import_section_with(protocols, pure_only, endpoint_rules, false, false)
+}
+
+/// [`aws_import_section_for`], with the [`AwsImportMode::ModelJson`] rows
+/// when `model_json` is set and the [`AwsImportMode::S3`] rows when `s3` is
+/// (the `s3` customization). A name two applying rows both hold is imported
+/// once, where its first row puts it.
+pub fn aws_import_section_with(
+    protocols: &[AwsProtocol],
+    pure_only: bool,
+    endpoint_rules: bool,
+    model_json: bool,
+    s3: bool,
+) -> String {
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
         if pure_only && row.mode == AwsImportMode::ClientOnly {
+            continue;
+        }
+        if !endpoint_rules && row.mode == AwsImportMode::EndpointRules {
+            continue;
+        }
+        if !model_json && row.mode == AwsImportMode::ModelJson {
+            continue;
+        }
+        if !s3 && row.mode == AwsImportMode::S3 {
+            continue;
+        }
+        if pure_only && !s3 && row.mode == AwsImportMode::ClientOrS3 {
             continue;
         }
         if !row.protocols.iter().any(|p| protocols.contains(p)) {
             continue;
         }
         match groups.iter_mut().find(|(m, _)| *m == row.module) {
-            Some((_, names)) => names.extend_from_slice(row.names),
+            Some((_, names)) => {
+                for n in row.names {
+                    if !names.contains(n) {
+                        names.push(*n);
+                    }
+                }
+            }
             None => groups.push((row.module, row.names.to_vec())),
         }
     }
@@ -298,6 +458,28 @@ pub fn emit_aws_module(
     options: AwsEmitOptions,
     provenance: Option<AwsProvenance<'_>>,
 ) -> Result<AwsEmitted, String> {
+    emit_aws_module_with_endpoints(lowering, overrides, module_name, options, provenance, None)
+}
+
+/// [`emit_aws_module`], resolving endpoints through `endpoint_rules` when it
+/// is given: the module embeds the ruleset and gets an endpoint config and a
+/// `resolve_<op>_endpoint` per operation ([`endpoint`]). Every binding of the
+/// model is checked against the ruleset first. Refused in `omit_preamble`
+/// mode, whose concatenated modules have no header to record it in.
+pub fn emit_aws_module_with_endpoints(
+    lowering: &AwsLowering,
+    overrides: &AwsOverrides,
+    module_name: &str,
+    options: AwsEmitOptions,
+    provenance: Option<AwsProvenance<'_>>,
+    endpoint_rules: Option<&AwsEndpointRules>,
+) -> Result<AwsEmitted, String> {
+    if endpoint_rules.is_some() && options.omit_preamble {
+        return Err(format!(
+            "emit_aws: module `{module_name}` is given an endpoint ruleset in \
+             omit_preamble mode, which has no header to record it in"
+        ));
+    }
     if provenance.is_none() && !options.omit_preamble {
         return Err(format!(
             "emit_aws: module `{module_name}` has a header but no provenance; the \
@@ -305,9 +487,23 @@ pub fn emit_aws_module(
         ));
     }
     let selected = select_protocol(&lowering.service)?;
+    if options.s3
+        && (lowering.service.service_id != "S3" || selected.protocol != AwsProtocol::RestXml)
+    {
+        return Err(format!(
+            "emit_aws: the `{S3_CUSTOMIZATION}` customization is refused unless the model's \
+             serviceId is `S3` and its protocol is restXml, and service `{}` has serviceId \
+             `{}` and protocol `{}`",
+            lowering.service.service, lowering.service.service_id, lowering.service.protocol
+        ));
+    }
+    if selected.protocol == AwsProtocol::RestXml {
+        xml_codec::check_rest_xml_features(&lowering.facts)?;
+    }
     overrides.check_against(lowering)?;
 
     let mut em = AwsEmitter::new(lowering, overrides, module_name, selected, options)?;
+    em.endpoint_rules = endpoint_rules;
     em.provenance = provenance.map(|p| (p.model_key.to_string(), p.model_sha256.to_string()));
     let source = em.emit()?;
     Ok(AwsEmitted {
@@ -401,6 +597,8 @@ struct AwsEmitter<'a> {
     validating: BTreeSet<String>,
     /// `(model key, model sha256)` for the header.
     provenance: Option<(String, String)>,
+    /// The endpoint ruleset, when endpoints resolve through one.
+    endpoint_rules: Option<&'a AwsEndpointRules>,
     /// Non-parameterised top-level structs, in emission order.
     structs: Vec<String>,
     /// Parameterised top-level structs.
@@ -475,6 +673,7 @@ impl<'a> AwsEmitter<'a> {
             by_fq,
             validating: BTreeSet::new(),
             provenance: None,
+            endpoint_rules: None,
             structs: Vec::new(),
             parameterised: Vec::new(),
             out: String::new(),
@@ -535,8 +734,15 @@ impl<'a> AwsEmitter<'a> {
         // `emit_message` and `emit_operations` both ask, and a shape's answer
         // depends on shapes emitted after it, so it cannot be decided inline.
         self.validating = self.validating_set();
+        if let Some(rules) = self.endpoint_rules {
+            self.check_endpoint_bindings(rules)?;
+        }
         if !self.options.omit_preamble {
-            self.emit_header();
+            let unapplied = match self.endpoint_rules {
+                Some(_) => Vec::new(),
+                None => self.unapplied_endpoint_bindings()?,
+            };
+            self.emit_header(&unapplied);
             self.emit_imports();
         }
         self.emit_constants();
@@ -549,13 +755,16 @@ impl<'a> AwsEmitter<'a> {
             self.emit_bytes_helper();
         }
         self.emit_operations()?;
+        if let Some(rules) = self.endpoint_rules {
+            self.emit_endpoint_section(rules)?;
+        }
         if !self.options.pure_only {
             self.emit_client()?;
         }
         Ok(std::mem::take(&mut self.out))
     }
 
-    fn emit_header(&mut self) {
+    fn emit_header(&mut self, unapplied_endpoint_bindings: &[String]) {
         let n_messages = self.lowering.model.files[0].messages.len();
         let n_enums = self.lowering.model.files[0].enums.len();
         let ops: Vec<String> = self
@@ -584,6 +793,30 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("#   model key    : {model_key}"));
         self.line(&format!("#   model sha256 : {model_sha256}"));
         self.line(&format!("#   operations   : {}", ops.join(", ")));
+        if let Some(rules) = self.endpoint_rules {
+            self.line(&format!(
+                "#   endpoints    : ruleset sha256 {}",
+                rules.ruleset_sha256
+            ));
+            self.line(&format!(
+                "#                  partitions sha256 {}",
+                rules.partitions_sha256
+            ));
+        } else if !unapplied_endpoint_bindings.is_empty() {
+            // Generated without the service's ruleset (mojo_aws_client's
+            // `endpoint_rules`): requests go to the static service host, and
+            // what the model binds into the ruleset is said here, not dropped
+            // silently.
+            self.line("#   endpoints    : NO RULESET. Requests go to the static service host,");
+            self.line("#                  and these endpoint bindings of the model are NOT");
+            self.line("#                  applied (mojo_aws_client `endpoint_rules` applies them):");
+            for b in unapplied_endpoint_bindings {
+                for (i, l) in wrap(b, 58).iter().enumerate() {
+                    let lead = if i == 0 { "-" } else { " " };
+                    self.line(&format!("#                  {lead} {l}"));
+                }
+            }
+        }
         self.line(&format!(
             "#   shapes       : {} messages, {} enums",
             n_messages,
@@ -594,6 +827,14 @@ impl<'a> AwsEmitter<'a> {
             "#   mode         : {}",
             if self.options.pure_only { "pure (no transport)" } else { "client" }
         ));
+        if self.options.s3 {
+            self.line("#   customize    : s3 (botocore handlers.py: 200-with-<Error> as an");
+            self.line("#                  error, an invalid Expires header left unset)");
+            if self.endpoint_rules.is_some() {
+                self.line("#                  and a leading /{Bucket} dropped from each path:");
+                self.line("#                  the endpoint ruleset puts the bucket in the URL");
+            }
+        }
         self.line("#");
         if !self.options.pure_only {
             self.line("# THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport");
@@ -660,7 +901,13 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_imports(&mut self) {
-        let section = aws_import_section(self.protocol, self.options.pure_only);
+        let section = aws_import_section_with(
+            &[self.protocol],
+            self.options.pure_only,
+            self.endpoint_rules.is_some(),
+            self.options.emit_model_json,
+            self.options.s3,
+        );
         self.out.push_str(&section);
         self.blank();
         self.blank();
@@ -1654,7 +1901,7 @@ impl<'a> AwsEmitter<'a> {
 /// `protocols` needs. The conformance driver emits this ONCE ahead of its
 /// concatenated suites.
 pub fn pure_preamble(protocols: &[AwsProtocol], with_model_json: bool) -> String {
-    let mut em = aws_import_section_for(protocols, true);
+    let mut em = aws_import_section_with(protocols, true, false, with_model_json, false);
     em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");
@@ -1847,8 +2094,12 @@ mod tests {
 
     #[test]
     fn no_other_protocol_imports_the_json_runtime() {
+        // Only the MODEL-convention rows, which a client module never takes.
         for p in ALL_PROTOCOLS.iter().filter(|p| !JSON_BODY_PROTOCOLS.contains(p)) {
-            for row in rows_for(*p) {
+            for row in rows_for(*p)
+                .into_iter()
+                .filter(|row| row.mode != AwsImportMode::ModelJson)
+            {
                 assert_ne!(row.module, "komira_json", "{p:?}");
                 assert!(
                     !row.names.iter().any(|n| n.contains("json")),
@@ -1861,6 +2112,54 @@ mod tests {
                 assert!(!aws_import_section(*p, pure_only).contains("komira_json"), "{p:?}");
             }
         }
+    }
+
+    #[test]
+    fn rest_xml_takes_the_xml_runtime_and_json_only_for_the_model_convention() {
+        let p = AwsProtocol::RestXml;
+        for pure_only in [true, false] {
+            let s = aws_import_section(p, pure_only);
+            assert!(s.contains("from komira_xml import (\n    XmlNode,\n    XmlWriter,\n)"), "{s}");
+            assert!(s.contains("    aws_xml_write_string,"), "{s}");
+            assert!(!s.contains("komira_json"), "{s}");
+            let m = aws_import_section_with(&[p], pure_only, false, true, false);
+            assert!(m.contains("from komira_json import JsonValue"), "{m}");
+            assert!(m.contains("    aws_json_f64,"), "{m}");
+        }
+        // A client reads restXml errors; a pure module only with the `s3`
+        // customization, whose 200-with-<Error> check raises one. Only that
+        // customization takes the check itself.
+        let plain_pure = aws_import_section(p, true);
+        assert!(!plain_pure.contains("aws_rest_xml_error"), "{plain_pure}");
+        assert!(!plain_pure.contains("aws_xml_body_is_error"), "{plain_pure}");
+        let plain_client = aws_import_section(p, false);
+        assert!(plain_client.contains("    aws_rest_xml_error,"), "{plain_client}");
+        assert!(!plain_client.contains("aws_xml_body_is_error"), "{plain_client}");
+        for pure_only in [true, false] {
+            let s3 = aws_import_section_with(&[p], pure_only, false, false, true);
+            assert!(s3.contains("    aws_rest_xml_error,\n    aws_xml_body_is_error,\n"), "{s3}");
+        }
+        // The model rows add nothing a JSON-body module does not already
+        // import: the section is the same text with and without them.
+        for p in JSON_BODY_PROTOCOLS {
+            assert_eq!(
+                aws_import_section_with(&[*p], true, false, true, false),
+                aws_import_section(*p, true)
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_two_rows_hold_is_imported_once() {
+        let s = aws_import_section_with(
+            &[AwsProtocol::Json, AwsProtocol::RestXml],
+            true,
+            false,
+            true,
+            false,
+        );
+        assert_eq!(s.matches("    JsonValue,").count(), 1, "{s}");
+        assert_eq!(s.matches("    aws_json_f64,").count(), 1, "{s}");
     }
 
     #[test]

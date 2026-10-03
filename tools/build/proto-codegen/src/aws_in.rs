@@ -53,12 +53,40 @@ pub struct AwsServiceMeta {
     pub service_full_name: String,
     pub service_abbreviation: Option<String>,
     pub global_endpoint: Option<String>,
-    /// `metadata.xmlNamespace` — the default XML namespace URI for
-    /// `rest-xml` request documents.
-    pub xml_namespace: Option<String>,
+    /// `metadata.xmlNamespace` — the default XML namespace for `rest-xml`
+    /// request documents.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     pub aws_query_compatible: bool,
     pub checksum_format: Option<String>,
     pub uid: String,
+    /// The model's `clientContextParams`: endpoint-ruleset parameters a
+    /// client is configured with, in declared order.
+    pub client_context_params: Vec<AwsClientContextParam>,
+}
+
+/// An `xmlNamespace` trait: the namespace URI, and the prefix it is bound
+/// to (empty for the default namespace). botocore models spell it as an
+/// object (`{"uri": ..., "prefix": ...}`) or as the bare URI string.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AwsXmlNamespace {
+    pub prefix: String,
+    pub uri: String,
+}
+
+/// One `clientContextParams` entry: a ruleset parameter a client is
+/// configured with, and its model type (`boolean` or `string`).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AwsClientContextParam {
+    pub name: String,
+    pub ty: String,
+}
+
+/// The value of one `staticContextParams` entry: the ruleset parameter an
+/// operation always resolves its endpoint with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AwsStaticValue {
+    Bool(bool),
+    Str(String),
 }
 
 // ===========================================================================
@@ -155,8 +183,8 @@ pub struct AwsMemberFacts {
     pub idempotency_token: bool,
     /// Member-level `flattened` (XML: no wrapper element around a list).
     pub flattened: bool,
-    /// Member-level `xmlNamespace.uri`.
-    pub xml_namespace: Option<String>,
+    /// Member-level `xmlNamespace`.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     /// `xmlAttribute: true` — serialise as an attribute, not an element.
     pub xml_attribute: bool,
     /// `streaming: true` on the member.
@@ -172,8 +200,8 @@ pub struct AwsMemberFacts {
     pub boxed: bool,
     pub deprecated: bool,
     pub deprecated_message: Option<String>,
-    /// `contextParam.name` — an endpoint-ruleset input. Recorded rather
-    /// than dropped even though the generator reads no ruleset.
+    /// `contextParam.name` — the endpoint-ruleset parameter this input
+    /// member binds.
     pub context_param: Option<String>,
     /// True when this member is the shape's designated `payload`.
     pub is_payload: bool,
@@ -213,8 +241,8 @@ pub struct AwsShapeFacts {
     pub retryable: bool,
     /// Shape-level `locationName`.
     pub location_name: Option<String>,
-    /// Shape-level `xmlNamespace.uri`.
-    pub xml_namespace: Option<String>,
+    /// Shape-level `xmlNamespace`.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     /// The `payload` member name, for a structure that designates one.
     pub payload: Option<String>,
     /// The `required` list, verbatim (member names, not IR field names).
@@ -223,6 +251,8 @@ pub struct AwsShapeFacts {
     /// container element is elided in XML.
     pub flattened: bool,
     pub list_member_location_name: Option<String>,
+    /// For a `list`: the `xmlNamespace` on its `member` reference.
+    pub list_member_xml_namespace: Option<AwsXmlNamespace>,
     /// For a `map`: the key / value `locationName`s.
     pub map_key_location_name: Option<String>,
     pub map_value_location_name: Option<String>,
@@ -286,8 +316,8 @@ pub struct AwsOperationFacts {
     pub input_shape: Option<String>,
     /// `input.locationName` — the XML root element name for `rest-xml`.
     pub input_location_name: Option<String>,
-    /// `input.xmlNamespace.uri`.
-    pub input_xml_namespace: Option<String>,
+    /// `input.xmlNamespace`.
+    pub input_xml_namespace: Option<AwsXmlNamespace>,
     /// The AWS output shape name, or `None` (165 of 850 declare none).
     pub output_shape: Option<String>,
     pub result_wrapper: Option<String>,
@@ -313,6 +343,12 @@ pub struct AwsOperationFacts {
     /// `endpoint.hostPrefix` — a per-operation host prefix.
     pub host_prefix: Option<String>,
     pub http_checksum: Option<AwsHttpChecksum>,
+    /// `staticContextParams`: ruleset parameters this operation always
+    /// resolves its endpoint with, in declared order.
+    pub static_context_params: Vec<(String, AwsStaticValue)>,
+    /// `operationContextParams`: ruleset parameters taken from the input by
+    /// a path (`{"path": "A.B"}`), as (parameter, path), in declared order.
+    pub operation_context_params: Vec<(String, String)>,
 }
 
 /// The `httpChecksum` trait, flattened.
@@ -727,7 +763,7 @@ impl<'a> AwsLowerer<'a> {
             fault: flag(s, "fault"),
             retryable: s.get("retryable").is_some(),
             location_name: str_of(s, "locationName"),
-            xml_namespace: xml_ns(s.get("xmlNamespace")),
+            xml_namespace: xml_ns(s.get("xmlNamespace"), &format!("shape `{name}`"))?,
             payload: str_of(s, "payload"),
             required: s
                 .get("required")
@@ -774,6 +810,8 @@ impl<'a> AwsLowerer<'a> {
             f.element_shape = Some(member_shape_name(m, name)?);
             f.list_member_location_name =
                 m.get("locationName").and_then(Json::as_str).map(String::from);
+            f.list_member_xml_namespace =
+                xml_ns(m.get("xmlNamespace"), &format!("the member of list `{name}`"))?;
             // A member-level `flattened` on the list's own `member` node.
             if m.get("flattened").and_then(Json::as_bool) == Some(true) {
                 f.flattened = true;
@@ -1118,7 +1156,10 @@ impl<'a> AwsLowerer<'a> {
             declared_index: idx,
             idempotency_token: flag(mo, "idempotencyToken"),
             flattened: flag(mo, "flattened"),
-            xml_namespace: xml_ns(mo.get("xmlNamespace")),
+            xml_namespace: xml_ns(
+                mo.get("xmlNamespace"),
+                &format!("member `{owner}.{mname}`"),
+            )?,
             xml_attribute: flag(mo, "xmlAttribute"),
             streaming: flag(mo, "streaming"),
             event_payload: flag(mo, "eventpayload"),
@@ -1289,7 +1330,10 @@ impl<'a> AwsLowerer<'a> {
                 .and_then(|i| i.get("locationName"))
                 .and_then(Json::as_str)
                 .map(String::from),
-            input_xml_namespace: op.get("input").and_then(|i| xml_ns(i.get("xmlNamespace"))),
+            input_xml_namespace: xml_ns(
+                op.get("input").and_then(|i| i.get("xmlNamespace")),
+                &format!("the input of operation `{op_name}`"),
+            )?,
             output_shape: output_shape.map(String::from),
             result_wrapper: op
                 .get("output")
@@ -1345,22 +1389,9 @@ impl<'a> AwsLowerer<'a> {
                     .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
                     .unwrap_or_default(),
             }),
+            static_context_params: static_context_params(op, op_name)?,
+            operation_context_params: operation_context_params(op, op_name)?,
         };
-        // DROPPED, deliberately and named: `staticContextParams` (78
-        // operations) and `operationContextParams` (5). They bind values
-        // into an ENDPOINT RULESET, and the generator reads no ruleset —
-        // there is nothing for them to parameterise, and inventing a
-        // representation for an absent consumer is how a wrong default gets
-        // established. `contextParam` (the per-MEMBER half, 179 members) IS
-        // recorded, because it costs one string.
-        if op.get("staticContextParams").is_some() || op.get("operationContextParams").is_some() {
-            self.note(format!(
-                "operation `{op_name}`: staticContextParams / operationContextParams \
-                 DROPPED — they are endpoint-ruleset inputs and the generator reads no \
-                 ruleset (see third_party/botocore/models.bzl)"
-            ));
-        }
-
         let body = self.body_designator(op_name, input_shape, &path_params)?;
         self.facts.operations.insert(op_name.to_string(), facts);
 
@@ -1474,11 +1505,86 @@ fn lower_metadata(root: &JsonObject, service: &str) -> Result<AwsServiceMeta, St
         service_full_name: need("serviceFullName")?,
         service_abbreviation: str_of(m, "serviceAbbreviation"),
         global_endpoint: str_of(m, "globalEndpoint"),
-        xml_namespace: xml_ns(m.get("xmlNamespace")),
+        xml_namespace: xml_ns(m.get("xmlNamespace"), "the service metadata")?,
         aws_query_compatible: m.get("awsQueryCompatible").is_some(),
         checksum_format: str_of(m, "checksumFormat"),
         uid: need("uid")?,
+        client_context_params: client_context_params(root)?,
     })
+}
+
+/// The model's `clientContextParams` (a top-level object of the model, not
+/// of `metadata`), in declared order.
+fn client_context_params(root: &JsonObject) -> Result<Vec<AwsClientContextParam>, String> {
+    let Some(v) = root.get("clientContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v
+        .as_object()
+        .ok_or("AWS service model `clientContextParams` is not an object")?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let ty = spec
+            .get("type")
+            .and_then(Json::as_str)
+            .ok_or_else(|| format!("clientContextParams `{name}` has no `type`"))?;
+        out.push(AwsClientContextParam {
+            name: name.clone(),
+            ty: ty.to_ascii_lowercase(),
+        });
+    }
+    Ok(out)
+}
+
+/// An operation's `staticContextParams`, in declared order. A value that is
+/// neither a boolean nor a string is refused: no other kind occurs in the
+/// pinned models, and the emitter binds only these two.
+fn static_context_params(
+    op: &Json,
+    op_name: &str,
+) -> Result<Vec<(String, AwsStaticValue)>, String> {
+    let Some(v) = op.get("staticContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v.as_object().ok_or_else(|| {
+        format!("operation `{op_name}`: `staticContextParams` is not an object")
+    })?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let value = match spec.get("value") {
+            Some(Json::Bool(b)) => AwsStaticValue::Bool(*b),
+            Some(Json::Str(s)) => AwsStaticValue::Str(s.clone()),
+            _ => {
+                return Err(format!(
+                    "aws front-end: REFUSED static-context-param: operation `{op_name}` \
+                     binds the endpoint parameter `{name}` to a value that is neither a \
+                     boolean nor a string"
+                ))
+            }
+        };
+        out.push((name.clone(), value));
+    }
+    Ok(out)
+}
+
+/// An operation's `operationContextParams`, as (parameter, path), in
+/// declared order. The path is kept as written; the emitter decides which
+/// paths it can bind.
+fn operation_context_params(op: &Json, op_name: &str) -> Result<Vec<(String, String)>, String> {
+    let Some(v) = op.get("operationContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v.as_object().ok_or_else(|| {
+        format!("operation `{op_name}`: `operationContextParams` is not an object")
+    })?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let path = spec.get("path").and_then(Json::as_str).ok_or_else(|| {
+            format!("operation `{op_name}`: operationContextParams `{name}` has no `path`")
+        })?;
+        out.push((name.clone(), path.to_string()));
+    }
+    Ok(out)
 }
 
 /// The generated client struct's name — `serviceId` with non-alphanumerics
@@ -1533,10 +1639,36 @@ fn as_i64(v: &Json) -> Option<i64> {
     }
 }
 
-fn xml_ns(v: Option<&Json>) -> Option<String> {
-    v.and_then(|x| x.get("uri"))
-        .and_then(Json::as_str)
-        .map(String::from)
+/// The `xmlNamespace` trait `v` of `what` (`None` when absent): the bare
+/// URI string, or an object with a string `uri` and an optional string
+/// `prefix`. Any other spelling is an error naming `what`, so a namespace
+/// is never dropped from a document without notice.
+fn xml_ns(v: Option<&Json>, what: &str) -> Result<Option<AwsXmlNamespace>, String> {
+    let malformed = || {
+        format!(
+            "aws front-end: the `xmlNamespace` of {what} is neither a URI string nor an \
+             object with a string `uri` and an optional string `prefix`"
+        )
+    };
+    match v {
+        None => Ok(None),
+        Some(Json::Str(uri)) => Ok(Some(AwsXmlNamespace {
+            prefix: String::new(),
+            uri: uri.clone(),
+        })),
+        Some(o @ Json::Object(_)) => {
+            let uri = o.get("uri").and_then(Json::as_str).ok_or_else(malformed)?;
+            let prefix = match o.get("prefix") {
+                None => "",
+                Some(p) => p.as_str().ok_or_else(malformed)?,
+            };
+            Ok(Some(AwsXmlNamespace {
+                prefix: prefix.to_string(),
+                uri: uri.to_string(),
+            }))
+        }
+        Some(_) => Err(malformed()),
+    }
 }
 
 pub fn resolve_timestamp_format(
@@ -1715,6 +1847,32 @@ mod tests {
     }
 
     #[test]
+    fn xml_namespace_is_a_string_or_a_uri_object_with_an_optional_prefix() {
+        let ns = |src: &str| xml_ns(Some(&crate::json::parse(src).unwrap()), "x");
+        let want = |prefix: &str, uri: &str| {
+            Some(AwsXmlNamespace {
+                prefix: prefix.to_string(),
+                uri: uri.to_string(),
+            })
+        };
+        assert_eq!(xml_ns(None, "x").unwrap(), None);
+        assert_eq!(ns(r#""urn:a""#).unwrap(), want("", "urn:a"));
+        assert_eq!(ns(r#"{"uri": "urn:a"}"#).unwrap(), want("", "urn:a"));
+        assert_eq!(ns(r#"{"prefix": "p", "uri": "urn:a"}"#).unwrap(), want("p", "urn:a"));
+        for bad in [r#"{"prefix": "p"}"#, r#"{"uri": 5}"#, r#"{"uri": "u", "prefix": 1}"#, "7"] {
+            let e = ns(bad).unwrap_err();
+            assert!(e.contains("the `xmlNamespace` of x is neither"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_xml_namespace_is_refused_naming_where_it_is() {
+        let e = lower_tiny(&tiny_model(r#", "xmlNamespace": {"prefix": "p"}"#, "", "Str"))
+            .unwrap_err();
+        assert!(e.contains("the `xmlNamespace` of the service metadata"), "{e}");
+    }
+
+    #[test]
     fn a_document_shape_is_a_named_refusal() {
         assert_eq!(refusal_of(&tiny_model("", "", "Doc")).as_deref(), Some("document"));
     }
@@ -1797,6 +1955,40 @@ mod tests {
     fn a_custom_error_code_outside_query_compatible_lowers() {
         let op = r#", "errors": [{"shape": "Coded"}]"#;
         lower_tiny(&tiny_model("", op, "Str")).unwrap();
+    }
+
+    #[test]
+    fn endpoint_context_params_are_carried() {
+        let op = r#", "staticContextParams": {"A": {"value": true}, "B": {"value": "x"}},
+                     "operationContextParams": {"C": {"path": "M"}}"#;
+        let mut m = tiny_model("", op, "Str");
+        if let Json::Object(root) = &mut m {
+            let ccp = crate::json::parse(r#"{"D": {"type": "Boolean"}}"#).unwrap();
+            root.insert("clientContextParams".to_string(), ccp);
+        }
+        let l = lower_tiny(&m).unwrap();
+        let f = l.facts.operation("Op").unwrap();
+        assert_eq!(
+            f.static_context_params,
+            vec![
+                ("A".to_string(), AwsStaticValue::Bool(true)),
+                ("B".to_string(), AwsStaticValue::Str("x".to_string())),
+            ]
+        );
+        assert_eq!(f.operation_context_params, vec![("C".to_string(), "M".to_string())]);
+        assert_eq!(
+            l.service.client_context_params,
+            vec![AwsClientContextParam { name: "D".into(), ty: "boolean".into() }]
+        );
+    }
+
+    #[test]
+    fn a_static_context_param_of_another_kind_is_a_named_refusal() {
+        let op = r#", "staticContextParams": {"A": {"value": ["x"]}}"#;
+        assert_eq!(
+            refusal_of(&tiny_model("", op, "Str")).as_deref(),
+            Some("static-context-param")
+        );
     }
 
     #[test]

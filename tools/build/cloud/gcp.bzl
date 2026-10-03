@@ -1,6 +1,6 @@
-"""gcp_client: a Google Cloud client generated from `.proto` files at build time.
+"""mojo_gcp_client: a Google Cloud client generated from `.proto` files at build time.
 
-    gcp_client(
+    mojo_gcp_client(
         name = "komira_gcp_logging",
         protos = [...],                 # .proto files of this package (may be empty)
         proto_deps = [...],             # proto_srcs / mojo_proto_library targets
@@ -36,7 +36,7 @@ holding either, `=` or whitespace is refused here rather than mis-split.
 Protocol. `protocol` is the wire protocol of the generated service code,
 passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
 HTTP, the default) or "grpc"; any other value is refused naming the
-accepted ones. gcp_client does not wire the gRPC transport runtime or its
+accepted ones. mojo_gcp_client does not wire the gRPC transport runtime or its
 token-metadata hook yet, so a target that emits a service is refused for
 any protocol but "rest". `messages_only = True` takes "grpc": the plugin
 branches on the protocol only for service code, so the output is the same
@@ -65,7 +65,7 @@ Sources. `protos` takes source paths of `.proto` files only, never a label
 (`<stem>.mojo`) are derived from those paths, so anything else is refused.
 
 Every refusal happens at analysis, in `<name>_gen`, so a BUCK file with one
-wrong gcp_client still loads.
+wrong mojo_gcp_client still loads.
 """
 
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
@@ -86,7 +86,7 @@ load(
 _LIST_SEPARATOR = "+"
 _LAYOUT_PROBE = "_layout_probe.mojo"
 
-# Values of `protocol`, and the ones gcp_client wires service code for.
+# Values of `protocol`, and the ones mojo_gcp_client wires service code for.
 _PROTOCOLS = ["rest", "grpc"]
 _WIRED_PROTOCOLS = ["rest"]
 
@@ -115,11 +115,11 @@ def _gcp_client_gen_impl(ctx):
     if ctx.attrs.runtime_dep_count == 0:
         fail("{}: `deps` is empty. The generated code imports its runtime (komira_proto_codec, komira_wkt, ...); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if not ctx.attrs.roots and not ctx.attrs.methods:
-        fail("{}: neither `roots` nor `methods` is set. A gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
+        fail("{}: neither `roots` nor `methods` is set. A mojo_gcp_client generates the closure of the messages and methods it names, never a whole API".format(ctx.label))
     if ctx.attrs.protocol not in _PROTOCOLS:
         fail("{}: `protocol` `{}` is not one of {}".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _PROTOCOLS])))
     if ctx.attrs.protocol not in _WIRED_PROTOCOLS and not ctx.attrs.messages_only:
-        fail("{}: `protocol = \"{}\"` with a service to emit: gcp_client does not wire that protocol's transport runtime or its token-metadata hook yet; service code is wired for {} (`messages_only = True` takes any protocol)".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _WIRED_PROTOCOLS])))
+        fail("{}: `protocol = \"{}\"` with a service to emit: mojo_gcp_client does not wire that protocol's transport runtime or its token-metadata hook yet; service code is wired for {} (`messages_only = True` takes any protocol)".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _WIRED_PROTOCOLS])))
     _check_items(ctx, "roots", ctx.attrs.roots)
     _check_items(ctx, "methods", ctx.attrs.methods)
     if ctx.attrs.bundle_proto_deps and not ctx.attrs.bundle_only:
@@ -237,4 +237,4 @@ def _gcp_client(
         **(vis | kwargs)
     )
 
-gcp_client = declares_docs(_gcp_client)
+mojo_gcp_client = declares_docs(_gcp_client)

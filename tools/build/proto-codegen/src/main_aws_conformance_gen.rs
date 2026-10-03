@@ -10,8 +10,8 @@
 //! emitted by the real emitter; the driver's `main` prints one actuals
 //! record per case (the format `aws_conformance::ActualsFile::parse`
 //! reads). A case botocore's ignore list skips is not driven. A case the
-//! generator cannot build (its suite does not lower, or the driver cannot
-//! construct its input) becomes a `refused` record carrying the error text,
+//! generator cannot build (its suite does not lower or emit, or the driver
+//! cannot construct its input) becomes a `refused` record carrying the error text,
 //! so the harness can tell a named refusal from a defect.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -82,19 +82,21 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 /// The protocol `--protocol <p>` drives, refused unless the driver can run it.
 ///
 /// ⚠ THE DRIVER RECORDS EVERY ACTUAL AS A `JsonValue` (komira_json), whatever
-/// the suites are, so it needs the JSON runtime in its preamble; the JSON-body
-/// protocols import it, and a suite of any other protocol is refused here
-/// until the driver stops depending on it. An error case reads the code and
-/// message as its protocol's client does: awsJson from the body
-/// (`aws_error_code_from_body` / `aws_error_message_from_body`), restJson1
-/// with `aws_rest_json_error`.
+/// the suites are, so it needs the JSON runtime in its preamble: the JSON-body
+/// protocols import it, and the MODEL-convention rows import it for restXml.
+/// An error case reads the code and message as its protocol's client does:
+/// awsJson from the body (`aws_error_code_from_body` /
+/// `aws_error_message_from_body`), restJson1 with `aws_rest_json_error`,
+/// restXml with `aws_rest_xml_error`.
 fn driver_protocol(p: &str) -> Result<AwsProtocol, String> {
     match AwsProtocol::from_botocore(p) {
-        Some(proto @ (AwsProtocol::Json | AwsProtocol::RestJson)) => Ok(proto),
+        Some(proto @ (AwsProtocol::Json | AwsProtocol::RestJson | AwsProtocol::RestXml)) => {
+            Ok(proto)
+        }
         Some(_) => Err(format!(
-            "--protocol `{p}`: the conformance driver records results as JsonValue \
-             and reads errors as awsJson and restJson1 clients do, so it drives \
-             `json` and `rest-json` only"
+            "--protocol `{p}`: the conformance driver reads errors as awsJson, \
+             restJson1 and restXml clients do, so it drives `json`, `rest-json` \
+             and `rest-xml` only"
         )),
         None => Err(format!("--protocol `{p}` is not a botocore protocol name")),
     }
@@ -249,9 +251,12 @@ fn run(args: &Args) -> Result<(), String> {
         return Err(format!("the corpus holds no suite for --protocol {missing:?}"));
     }
 
+    // A suite the emitter refuses is refused case by case, as one the
+    // front-end refuses is.
     let mut bodies = String::new();
-    for s in &suites {
-        let (_, src) = emit_aws_client(
+    let mut emitted: Vec<Suite> = Vec::new();
+    for s in suites {
+        let r = emit_aws_client(
             &s.lowering,
             &AwsOverrides::empty(),
             &s.module,
@@ -259,10 +264,22 @@ fn run(args: &Args) -> Result<(), String> {
                 emit_model_json: true,
                 pure_only: true,
                 omit_preamble: true,
+                s3: false,
             },
-        )?;
-        bodies.push_str(&src);
+        );
+        match r {
+            Ok((_, src)) => {
+                bodies.push_str(&src);
+                emitted.push(s);
+            }
+            Err(e) => {
+                for (key, _) in &s.cases {
+                    refused.push((key.clone(), e.clone()));
+                }
+            }
+        }
     }
+    let suites = emitted;
     let (driver_main, undriveable) = emit_driver(&suites, &refused, &args.protocols)?;
     let mut all_refused = refused.clone();
     all_refused.extend(undriveable.iter().cloned());
@@ -452,6 +469,9 @@ fn driver_header(
     o.line("    build_sigv4_signed_request,");
     if protocols.contains("rest-json") {
         o.line("    aws_rest_json_error,");
+    }
+    if protocols.contains("rest-xml") {
+        o.line("    aws_rest_xml_error,");
     }
     o.line(")");
     o.line("");
@@ -737,11 +757,15 @@ fn emit_output_case(
     // MIRRORS the generated client's error builder (`_<module>_error` in
     // emit_aws/mod.rs, the code and message expressions of the protocol's
     // binding): awsJson reads the body only, restJson1 the X-Amzn-Errortype
-    // header and then the body. The builder is not called, so a defect in it
-    // would not show here.
+    // header and then the body, restXml the <Error> element. The builder is
+    // not called, so a defect in it would not show here.
     o.line("if aws_is_error_status(_resp.status):");
     o.indent += 1;
-    if s.lowering.service.protocol == "rest-json" {
+    if s.lowering.service.protocol == "rest-xml" {
+        o.line("var _ei = aws_rest_xml_error(_resp)");
+        o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(_ei.code))");
+        o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(_ei.message))");
+    } else if s.lowering.service.protocol == "rest-json" {
         o.line("var _ei = aws_rest_json_error(_resp)");
         o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(_ei.code))");
         o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(_ei.message))");
