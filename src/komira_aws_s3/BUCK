@@ -18,22 +18,29 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 # host name or `S3EndpointConfig.force_path_style` is set, which a caller
 # of a custom endpoint (LocalStack, MinIO) sets.
 #
-# `operations` is every S3 operation the generator emits. The others are
-# refused by the generator, by name, and are not listed: the operations
-# that require a request checksum (`checksum-required`: DeleteObjects,
-# PutBucket*, PutObjectAcl, PutObjectTagging and the like), those reading `Grantee`'s XML attribute (`xml-attribute`:
-# GetBucketAcl, GetBucketLogging, GetObjectAcl, RestoreObject),
-# SelectObjectContent (`eventstream`) and WriteGetObjectResponse
-# (`host-prefix`).
+# `operations` is the operations an object store needs, each with its own
+# rows in the tests below; an operation joins the list with its tests. Of
+# S3's other operations, the generator refuses by name those that require a
+# request checksum (`checksum-required`: DeleteObjects, PutBucket*,
+# PutObjectAcl, PutObjectTagging and the like), those reading `Grantee`'s
+# XML attribute (`xml-attribute`: GetBucketAcl, GetBucketLogging,
+# GetObjectAcl, RestoreObject), SelectObjectContent (`eventstream`) and
+# WriteGetObjectResponse (`host-prefix`).
+#
+# Left to the caller, which botocore does for S3 in handlers beyond the
+# model: SSE-C (`SSECustomerKey` is sent as given, so a caller passes it
+# base64-encoded and sets `SSECustomerKeyMD5`; botocore's `sse_md5` does
+# both), and `x-amz-meta-*` values, which must be ASCII (botocore's
+# `validate_ascii_metadata` refuses others; here only CR and LF are).
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the S3 API reference (no upstream test body is copied):
 # test_s3_requests (the requests the engine's operations build, exactly),
 # test_s3_responses (their responses, the 200-with-<Error> case and the
 # error forms), test_s3_endpoints (virtual-host and path-style addressing,
-# a custom endpoint, and the signed request, against the signatures AWS
-# publishes for its SigV4 examples) and test_no_env_reads (the generated
-# module reads no environment).
+# a custom endpoint, and the signed request of each HTTP method, against the
+# signatures AWS publishes for its SigV4 examples where one exists) and
+# test_no_env_reads (the generated module reads no environment).
 
 _S3 = botocore_model("s3")
 
@@ -48,86 +55,15 @@ aws_client(
         "AbortMultipartUpload",
         "CompleteMultipartUpload",
         "CopyObject",
-        "CreateBucket",
         "CreateMultipartUpload",
-        "CreateSession",
-        "DeleteBucket",
-        "DeleteBucketAnalyticsConfiguration",
-        "DeleteBucketCors",
-        "DeleteBucketEncryption",
-        "DeleteBucketIntelligentTieringConfiguration",
-        "DeleteBucketInventoryConfiguration",
-        "DeleteBucketLifecycle",
-        "DeleteBucketMetadataConfiguration",
-        "DeleteBucketMetadataTableConfiguration",
-        "DeleteBucketMetricsConfiguration",
-        "DeleteBucketOwnershipControls",
-        "DeleteBucketPolicy",
-        "DeleteBucketReplication",
-        "DeleteBucketTagging",
-        "DeleteBucketWebsite",
         "DeleteObject",
-        "DeleteObjectAnnotation",
-        "DeleteObjectTagging",
-        "DeletePublicAccessBlock",
-        "GetBucketAbac",
-        "GetBucketAccelerateConfiguration",
-        "GetBucketAnalyticsConfiguration",
-        "GetBucketCors",
-        "GetBucketEncryption",
-        "GetBucketIntelligentTieringConfiguration",
-        "GetBucketInventoryConfiguration",
-        "GetBucketLifecycle",
-        "GetBucketLifecycleConfiguration",
-        "GetBucketLocation",
-        "GetBucketMetadataConfiguration",
-        "GetBucketMetadataTableConfiguration",
-        "GetBucketMetricsConfiguration",
-        "GetBucketNotification",
-        "GetBucketNotificationConfiguration",
-        "GetBucketOwnershipControls",
-        "GetBucketPolicy",
-        "GetBucketPolicyStatus",
-        "GetBucketReplication",
-        "GetBucketRequestPayment",
-        "GetBucketTagging",
-        "GetBucketVersioning",
-        "GetBucketWebsite",
         "GetObject",
-        "GetObjectAnnotation",
-        "GetObjectAttributes",
-        "GetObjectLegalHold",
-        "GetObjectLockConfiguration",
-        "GetObjectRetention",
-        "GetObjectTagging",
-        "GetObjectTorrent",
-        "GetPublicAccessBlock",
-        "HeadBucket",
         "HeadObject",
-        "ListBucketAnalyticsConfigurations",
-        "ListBucketIntelligentTieringConfigurations",
-        "ListBucketInventoryConfigurations",
-        "ListBucketMetricsConfigurations",
         "ListBuckets",
-        "ListDirectoryBuckets",
-        "ListMultipartUploads",
-        "ListObjectAnnotations",
-        "ListObjectVersions",
         "ListObjects",
         "ListObjectsV2",
-        "ListParts",
-        "PutBucketAbac",
-        "PutBucketAccelerateConfiguration",
-        "PutBucketAnalyticsConfiguration",
-        "PutBucketIntelligentTieringConfiguration",
-        "PutBucketInventoryConfiguration",
-        "PutBucketMetricsConfiguration",
-        "PutBucketNotificationConfiguration",
         "PutObject",
-        "PutObjectAnnotation",
-        "RenameObject",
         "UploadPart",
-        "UploadPartCopy",
     ],
     partitions = _S3.partitions,
     test_data = {

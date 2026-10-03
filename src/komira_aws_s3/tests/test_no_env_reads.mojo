@@ -1,9 +1,10 @@
 # The generated client reads no environment: every input is a parameter,
 # the endpoint ones included (S3EndpointConfig). The three generated files
 # are staged as this test's data, at gen/<file>; the test reads each one and
-# fails if any names a way to read the environment, or reaches the FFI a
-# read would go through. komira_aws_core's test_env_source_only holds the
-# same line for the core, where the one read site is its EnvSource.
+# fails if any names a way to read the environment, reaches the FFI a read
+# would go through, or takes the core's ruleset-free endpoint path.
+# komira_aws_core's test_env_source_only holds the same line for the core,
+# where the one read site is its EnvSource.
 from std.testing import assert_equal, assert_true
 
 
@@ -33,8 +34,12 @@ def test_no_environment_read() raises:
         "ProcessEnv",
         "komira_core_ffi",
         "external_call",
+        # Not a read: komira_aws_core's endpoint path for a client with no
+        # ruleset (an override, else https://<host>), whose override a
+        # caller takes from the environment through aws_endpoint_config.
+        # This module resolves every endpoint through S3's ruleset over
+        # S3EndpointConfig, and must not take that path around it.
         "resolve_endpoint(",
-        "aws_default_region",
     ]
     var files: List[String] = [
         "__init__.mojo",
