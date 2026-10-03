@@ -11,7 +11,10 @@ use super::{ts_const, AwsEmitter};
 use crate::ir::{IrField, IrMessage, IrType, Label, ScalarKind};
 
 /// The JSON body codec, shared by every protocol whose body is a JSON
-/// document. Only awsJson (`json`) reaches it today.
+/// document: awsJson (`json`) and restJson1 (`rest-json`). A REST binding
+/// writes and reads the body members of an operation's top-level shapes
+/// itself, through `emit_json_member_write` and the `emit_json_read_*`
+/// pair, and every nested shape through the methods emitted here.
 pub(super) struct AwsJsonCodec;
 
 impl BodyCodec for AwsJsonCodec {
@@ -24,9 +27,13 @@ impl BodyCodec for AwsJsonCodec {
             em.line("    names neither member.");
             em.blank();
         }
-        if is_synthetic {
+        if is_synthetic && em.protocol == super::AwsProtocol::Json {
             em.line("    SYNTHESISED: the operation declares no shape here. awsJson still");
             em.line("    requires `{}` on the wire, which is what this empty struct emits.");
+            em.blank();
+        } else if is_synthetic {
+            em.line("    SYNTHESISED: the operation declares no shape here, so its request");
+            em.line("    or response binds nothing and has no body.");
             em.blank();
         }
         em.line("    Required members are plain fields taken by `__init__`; every other");
@@ -89,34 +96,44 @@ impl AwsEmitter<'_> {
             self.pop();
         }
         for f in &msg.fields {
-            let wire = self.wire_name(msg, f);
-            if self.required(msg, f) {
-                let access = if self.is_boxed(msg, f) {
-                    format!("self.{}[0]", f.name)
-                } else {
-                    format!("self.{}", f.name)
-                };
-                let expr = self.to_json_expr(msg, f, &access, "obj", &wire)?;
-                if let Some(e) = expr {
-                    self.line(&format!(
-                        "obj.set_member(String(\"{wire}\"), {e})"
-                    ));
-                }
-            } else {
-                self.line(&format!("if {}:", self.presence_test(msg, f)));
-                self.push();
-                let access = self.optional_access(msg, f);
-                let expr = self.to_json_expr(msg, f, &access, "obj", &wire)?;
-                if let Some(e) = expr {
-                    self.line(&format!(
-                        "obj.set_member(String(\"{wire}\"), {e})"
-                    ));
-                }
-                self.pop();
-            }
+            self.emit_json_member_write(msg, f, "self", "obj")?;
         }
         self.line("return obj^");
         self.pop();
+        Ok(())
+    }
+
+    /// The statements that put member `f` of `{base}` (a value of `msg`)
+    /// into the JSON object `{obj}`, under its wire name: unconditionally for
+    /// a required member, behind its presence test otherwise.
+    pub(super) fn emit_json_member_write(
+        &mut self,
+        msg: &IrMessage,
+        f: &IrField,
+        base: &str,
+        obj: &str,
+    ) -> Result<(), String> {
+        let wire = self.wire_name(msg, f);
+        if self.required(msg, f) {
+            let access = if self.is_boxed(msg, f) {
+                format!("{base}.{}[0]", f.name)
+            } else {
+                format!("{base}.{}", f.name)
+            };
+            let expr = self.to_json_expr(msg, f, &access, obj, &wire)?;
+            if let Some(e) = expr {
+                self.line(&format!("{obj}.set_member(String(\"{wire}\"), {e})"));
+            }
+        } else {
+            self.line(&format!("if {}:", self.presence_test_on(base, msg, f)));
+            self.push();
+            let access = self.optional_access_on(base, msg, f);
+            let expr = self.to_json_expr(msg, f, &access, obj, &wire)?;
+            if let Some(e) = expr {
+                self.line(&format!("{obj}.set_member(String(\"{wire}\"), {e})"));
+            }
+            self.pop();
+        }
         Ok(())
     }
 
@@ -265,30 +282,9 @@ impl AwsEmitter<'_> {
             .filter(|f| self.required(msg, f))
             .cloned()
             .collect();
+        let what = format!("{ty}.from_aws_json");
         for f in &required {
-            let wire = self.wire_name(msg, f);
-            let local = format!("_r_{}", f.name);
-            if self.needs_no_nullary(f) {
-                self.line(&format!(
-                    "if not v.has(String(\"{wire}\")) or v.get(String(\"{wire}\")).is_null():"
-                ));
-                self.push();
-                self.line(&format!(
-                    "raise Error(\"{}.from_aws_json: required member `{wire}` is absent from the response.\")",
-                    self.ty_name(&msg.mojo_name)
-                ));
-                self.pop();
-                let expr = self.scalar_from_json(msg, f, &f.ty, &format!("v.get(String(\"{wire}\"))"))?;
-                self.line(&format!("var {local} = {expr}"));
-                continue;
-            }
-            self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
-            self.line(&format!(
-                "if v.has(String(\"{wire}\")) and not v.get(String(\"{wire}\")).is_null():"
-            ));
-            self.push();
-            self.read_into(msg, f, &local, &wire)?;
-            self.pop();
+            self.emit_json_read_required(msg, f, &what)?;
         }
         let args: Vec<String> = required
             .iter()
@@ -299,23 +295,69 @@ impl AwsEmitter<'_> {
             if self.required(msg, f) {
                 continue;
             }
-            let wire = self.wire_name(msg, f);
-            let local = format!("_v_{}", f.name);
-            self.line(&format!(
-                "if v.has(String(\"{wire}\")) and not v.get(String(\"{wire}\")).is_null():"
-            ));
-            self.push();
-            if self.needs_no_nullary(f) {
-                let expr = self.scalar_from_json(msg, f, &f.ty, &format!("v.get(String(\"{wire}\"))"))?;
-                self.line(&format!("var {local} = {expr}"));
-            } else {
-                self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
-                self.read_into(msg, f, &local, &wire)?;
-            }
-            self.line(&format!("out.set_{}({local}^)", f.name));
-            self.pop();
+            self.emit_json_read_optional(msg, f)?;
         }
         self.line("return out^");
+        self.pop();
+        Ok(())
+    }
+
+    /// The statements that read required member `f` of `msg` from the JSON
+    /// object `v` into the local `_r_<field>`, a constructor argument. A
+    /// member with no nullary value (a structure) that is absent is raised,
+    /// naming `what`; any other absent member keeps its default.
+    pub(super) fn emit_json_read_required(
+        &mut self,
+        msg: &IrMessage,
+        f: &IrField,
+        what: &str,
+    ) -> Result<(), String> {
+        let wire = self.wire_name(msg, f);
+        let local = format!("_r_{}", f.name);
+        if self.needs_no_nullary(f) {
+            self.line(&format!(
+                "if not v.has(String(\"{wire}\")) or v.get(String(\"{wire}\")).is_null():"
+            ));
+            self.push();
+            self.line(&format!(
+                "raise Error(\"{what}: required member `{wire}` is absent from the response.\")"
+            ));
+            self.pop();
+            let expr = self.scalar_from_json(msg, f, &f.ty, &format!("v.get(String(\"{wire}\"))"))?;
+            self.line(&format!("var {local} = {expr}"));
+            return Ok(());
+        }
+        self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
+        self.line(&format!(
+            "if v.has(String(\"{wire}\")) and not v.get(String(\"{wire}\")).is_null():"
+        ));
+        self.push();
+        self.read_into(msg, f, &local, &wire)?;
+        self.pop();
+        Ok(())
+    }
+
+    /// The statements that read optional member `f` of `msg` from the JSON
+    /// object `v` and set it on `out` when it is present and not `null`.
+    pub(super) fn emit_json_read_optional(
+        &mut self,
+        msg: &IrMessage,
+        f: &IrField,
+    ) -> Result<(), String> {
+        let wire = self.wire_name(msg, f);
+        let local = format!("_v_{}", f.name);
+        self.line(&format!(
+            "if v.has(String(\"{wire}\")) and not v.get(String(\"{wire}\")).is_null():"
+        ));
+        self.push();
+        if self.needs_no_nullary(f) {
+            let expr = self.scalar_from_json(msg, f, &f.ty, &format!("v.get(String(\"{wire}\"))"))?;
+            self.line(&format!("var {local} = {expr}"));
+        } else {
+            self.line(&format!("var {local} = {}", self.default_expr(msg, f)?));
+            self.read_into(msg, f, &local, &wire)?;
+        }
+        self.line(&format!("out.set_{}({local}^)", f.name));
         self.pop();
         Ok(())
     }
@@ -330,19 +372,21 @@ impl AwsEmitter<'_> {
         self.line("    in, and it is NOT the wire convention — see `to_aws_json`.\"\"\"");
         self.line("var obj = JsonValue.empty_object()");
         for f in &msg.fields {
-            let wire = self.wire_name(msg, f);
+            // Keyed by the MEMBER name, which is what a case's `params` and
+            // `result` use; the wire name (`locationName`) is the body's.
+            let key = self.member_name(msg, f);
             if self.required(msg, f) {
                 let access = if self.is_boxed(msg, f) {
                     format!("self.{}[0]", f.name)
                 } else {
                     format!("self.{}", f.name)
                 };
-                self.model_json_member(msg, f, &access, &wire)?;
+                self.model_json_member(msg, f, &access, &key)?;
             } else {
                 self.line(&format!("if {}:", self.presence_test(msg, f)));
                 self.push();
                 let access = self.optional_access(msg, f);
-                self.model_json_member(msg, f, &access, &wire)?;
+                self.model_json_member(msg, f, &access, &key)?;
                 self.pop();
             }
         }
