@@ -5,7 +5,7 @@
 #
 # WHY A MIRROR (the layering rule):
 #   `PartitionPredicate` / `PartitionConstraint` live in
-#   `komira_async.fs.pruned_hive_discovery`. The physical-plan node that
+#   `komira_fs.pruned_hive_discovery`. The physical-plan node that
 #   reaches the materialize site — `ParquetSourceData`
 #   (`komira_core.plan.physical_plan`) — carries the predicate by value
 #   (the dir-scan-Hive discriminant). But `komira_async` DEPENDS ON
@@ -18,7 +18,7 @@
 #
 # OP-CODE IDENTITY: the PART_OP_* byte constants below are
 # BYTE-IDENTICAL to the `_OP_*` constants in
-# `komira_async.fs.pruned_hive_discovery`
+# `komira_fs.pruned_hive_discovery`
 # (EQ=0, IN=1, LT=2, LE=3, GT=4, GE=5, NE=6, OTHER=7). The bridge is therefore
 # a trivial per-field copy with an Int<->UInt8 cast on `op` only — NO remap.
 #
@@ -38,7 +38,7 @@ from ..arrow.arrow_types import ArrowType
 
 
 # Op codes — BYTE-IDENTICAL to the `_OP_*` constants in
-# `komira_async.fs.pruned_hive_discovery`. The bridge relies
+# `komira_fs.pruned_hive_discovery`. The bridge relies
 # on these matching EXACTLY so the only transform is the Int<->UInt8 cast.
 comptime PART_OP_EQ: UInt8 = 0
 comptime PART_OP_IN: UInt8 = 1
