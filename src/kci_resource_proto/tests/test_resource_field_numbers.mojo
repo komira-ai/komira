@@ -28,6 +28,13 @@
 # types, 90 for the escape hatch, `Resource` 3, `Value` 4) decode as unknown
 # today, so nothing else has taken them; the retired field 4 is ignored; and
 # every enum's ordinals in both directions, held values undeclared.
+#
+# THE FIELDS ADDED AFTER THE FIRST DRAFT, each pinned the same two ways:
+# `Image.platform` 3 (`ArtifactPlatform` 1 os, 2 cpu), `SecretRef` 1 name,
+# `Service.secret_env` 12, `Job.env` 6 and `Job.secret_env` 7. And
+# `test_added_numbers_are_kept` restates them with decode and encode ONLY, so
+# it compiles against a schema without them and fails there at run time: a
+# number the schema does not declare is dropped on re-encode.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -35,13 +42,17 @@ from std.testing import assert_equal, assert_true
 from komira_proto_codec import decode_proto, encode_proto
 from kci_resource_proto.resource import (
     Access,
+    ArtifactPlatform,
+    Cpu,
     Image,
     Job,
+    Os,
     Output,
     Portability,
     Ref,
     Resource,
     ResourceList,
+    SecretRef,
     Service,
     Uses,
     Value,
@@ -104,6 +115,13 @@ def _hex(b: List[UInt8]) -> String:
 # fixed field, or a length-delimited record whose canonical content is empty)
 # is dropped, recursively. What this cannot see (an empty sub-message, such as
 # `public {}`) is pinned by the named-field and oneof-case assertions instead.
+#
+# ⚠ AND IT WRITES A MESSAGE'S PLAIN FIELDS BEFORE ITS ONEOF FIELDS (an
+# `Image` with a digest and a platform comes out as 3 then 2). Protobuf fixes
+# the order of records only WITHIN one field number (a repeated field), so the
+# canonical form also sorts each level's records by field number, stably:
+# records of different fields compare in any order, a repeated field's
+# elements keep theirs.
 
 
 def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
@@ -121,8 +139,33 @@ def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
 
 
 def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
-    """`b` as a message with every zero-valued record dropped, recursively.
-    False when `b` does not parse as a message (it is then compared raw)."""
+    """`b` as a message with every zero-valued record dropped, recursively,
+    and its records sorted stably by field number. False when `b` does not
+    parse as a message (it is then compared raw)."""
+    var fields = List[Int]()
+    var records = List[List[UInt8]]()
+    if not _canon_records(b, fields, records):
+        return False
+    # Stable insertion sort by field number: equal numbers keep their order.
+    var order = List[Int]()
+    for i in range(len(fields)):
+        var j = len(order)
+        order.append(i)
+        while j > 0 and fields[order[j - 1]] > fields[i]:
+            order[j] = order[j - 1]
+            j -= 1
+        order[j] = i
+    for k in range(len(order)):
+        ref rec = records[order[k]]
+        for x in range(len(rec)):
+            out.append(rec[x])
+    return True
+
+
+def _canon_records(
+    b: List[UInt8], mut fields: List[Int], mut records: List[List[UInt8]]
+) -> Bool:
+    """The non-zero records of `b`, each canonicalized, in wire order."""
     var pos = 0
     var ok = True
     while pos < len(b):
@@ -135,8 +178,11 @@ def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
             if not ok:
                 return False
             if v != 0:
-                _varint(out, tag)
-                _varint(out, v)
+                var rec = List[UInt8]()
+                _varint(rec, tag)
+                _varint(rec, v)
+                fields.append(Int(tag >> 3))
+                records.append(rec^)
         elif wt == _LEN:
             var n = Int(_read_varint(b, pos, ok))
             if not ok or pos + n > len(b):
@@ -149,10 +195,13 @@ def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
             if not _canon(content, inner):
                 inner = content^
             if len(inner) > 0:
-                _varint(out, tag)
-                _varint(out, UInt64(len(inner)))
+                var rec = List[UInt8]()
+                _varint(rec, tag)
+                _varint(rec, UInt64(len(inner)))
                 for k in range(len(inner)):
-                    out.append(inner[k])
+                    rec.append(inner[k])
+                fields.append(Int(tag >> 3))
+                records.append(rec^)
         elif wt == 1 or wt == 5:
             var width = 8 if wt == 1 else 4
             if pos + width > len(b):
@@ -162,9 +211,12 @@ def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
                 if b[pos + k] != 0:
                     nonzero = True
             if nonzero:
-                _varint(out, tag)
+                var rec = List[UInt8]()
+                _varint(rec, tag)
                 for k in range(width):
-                    out.append(b[pos + k])
+                    rec.append(b[pos + k])
+                fields.append(Int(tag >> 3))
+                records.append(rec^)
             pos += width
         else:
             return False
@@ -249,6 +301,33 @@ def _image_digest(digest: String) -> List[UInt8]:
     return b^
 
 
+def _platform(os: Int, cpu: Int) -> List[UInt8]:
+    var b = List[UInt8]()
+    _uint(b, 1, UInt64(os))
+    _uint(b, 2, UInt64(cpu))
+    return b^
+
+
+def _secret(name: String) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, name)
+    return b^
+
+
+def _entry(key: String, value: List[UInt8]) -> List[UInt8]:
+    """One map entry: 1 key, 2 value (a message)."""
+    var b = List[UInt8]()
+    _str(b, 1, key)
+    _msg(b, 2, value)
+    return b^
+
+
+def _literal(s: String) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, s)
+    return b^
+
+
 # ---- references -------------------------------------------------------------------
 
 
@@ -312,7 +391,8 @@ def test_value_arms() raises:
     assert_equal(v3.ref_.value().resource, "jobs")
     _same(encode_proto(v3), rf, "Value.ref")
 
-    # 4 is held for a secret reference: undeclared today, so unknown.
+    # 4 is held: a secret never rides a Value (it is a `SecretRef` on the
+    # service or job). Undeclared today, so unknown.
     var sec = List[UInt8]()
     _msg(sec, 4, _ref("stripe_key"))
     var v4 = decode_proto[Value](sec.copy())
@@ -336,7 +416,90 @@ def test_image_arms() raises:
     assert_equal(cd._oneof0_case, 2)
     assert_equal(cd.digest.value(), "sha256:cd")
     _same(encode_proto(cd), d, "Image.digest")
+
+    # No platform: the field is absent (a reader takes the v1 default).
+    assert_true(not Bool(cd.platform), "Image.platform is unset when not written")
     print("  test_image_arms: PASS")
+
+
+def test_image_platform() raises:
+    """Image: 3 platform, beside either source arm. ArtifactPlatform: 1 os,
+    2 cpu."""
+    var p = _platform(Os.LINUX, Cpu.X86_64)
+    var ap = decode_proto[ArtifactPlatform](p.copy())
+    assert_equal(ap.os.value, Os.LINUX, "ArtifactPlatform field 1 is `os`")
+    assert_equal(ap.cpu.value, Cpu.X86_64, "ArtifactPlatform field 2 is `cpu`")
+    _same(encode_proto(ap), p, "ArtifactPlatform")
+
+    # os and cpu are told apart by number, not by a shared value.
+    var swapped = List[UInt8]()
+    _uint(swapped, 2, UInt64(Cpu.X86_64))
+    var only_cpu = decode_proto[ArtifactPlatform](swapped.copy())
+    assert_equal(only_cpu.os.value, Os.OS_UNSET, "field 2 does not fill `os`")
+    assert_equal(only_cpu.cpu.value, Cpu.X86_64)
+
+    var o = List[UInt8]()
+    _msg(o, 1, _action_output("build", "api_image"))
+    _msg(o, 3, _platform(Os.LINUX, Cpu.X86_64))
+    var io = decode_proto[Image](o.copy())
+    assert_equal(io._oneof0_case, 1, "platform does not touch the source arm")
+    assert_equal(io.output.value().name, "api_image")
+    assert_equal(io.platform.value().os.value, Os.LINUX)
+    assert_equal(io.platform.value().cpu.value, Cpu.X86_64)
+    _same(encode_proto(io), o, "Image.output + platform")
+
+    var d = List[UInt8]()
+    _str(d, 2, "sha256:ef")
+    _msg(d, 3, _platform(Os.LINUX, Cpu.X86_64))
+    var idg = decode_proto[Image](d.copy())
+    assert_equal(idg._oneof0_case, 2)
+    assert_equal(idg.digest.value(), "sha256:ef")
+    assert_equal(idg.platform.value().cpu.value, Cpu.X86_64)
+    _same(encode_proto(idg), d, "Image.digest + platform")
+
+    # An undeclared value survives decode as its number: the schema cannot
+    # refuse it, the validate phase does (linux x86_64 only in v1).
+    var other = decode_proto[ArtifactPlatform](_platform(2, 2))
+    assert_equal(other.os.value, 2)
+    assert_equal(other.cpu.value, 2)
+    print("  test_image_platform: PASS")
+
+
+def test_secret_ref() raises:
+    """SecretRef: 1 name. One field, and it is a name."""
+    var b = _secret("db_password")
+    var s = decode_proto[SecretRef](b.copy())
+    assert_equal(s.name, "db_password")
+    _same(encode_proto(s), b, "SecretRef")
+
+    var held = List[UInt8]()
+    _str(held, 1, "db_password")
+    _str(held, 2, "not-a-field")
+    var sh = decode_proto[SecretRef](held.copy())
+    _same(encode_proto(sh), b, "SecretRef has no field 2")
+    print("  test_secret_ref: PASS")
+
+
+def test_added_numbers_are_kept() raises:
+    """Decode and encode only, nothing read by name: every number added after
+    the first draft must survive a round trip. Against a schema that lacks one
+    it is unknown, dropped on re-encode, and this fails."""
+    var img = List[UInt8]()
+    _str(img, 2, "sha256:01")
+    _msg(img, 3, _platform(1, 1))
+    _same(encode_proto(decode_proto[Image](img.copy())), img, "Image 3")
+
+    var svc = List[UInt8]()
+    _uint(svc, 2, 8080)
+    _msg(svc, 12, _entry("DB_PASSWORD", _secret("db_password")))
+    _same(encode_proto(decode_proto[Service](svc.copy())), svc, "Service 12")
+
+    var job = List[UInt8]()
+    _str(job, 2, "report")
+    _msg(job, 6, _entry("MODE", _literal("full")))
+    _msg(job, 7, _entry("API_TOKEN", _secret("api_token")))
+    _same(encode_proto(decode_proto[Job](job.copy())), job, "Job 6 and 7")
+    print("  test_added_numbers_are_kept: PASS")
 
 
 # ---- Resource and its body arms --------------------------------------------------
@@ -450,11 +613,12 @@ def test_resource_header_fields() raises:
     print("  test_resource_header_fields: PASS")
 
 
-# ---- the ten types ---------------------------------------------------------------
+# ---- the v1 types: service and job -------------------------------------------------
 
 
 def test_service() raises:
-    """Service: 1 image .. 9 max_concurrency; oneof { 10 public, 11 internal }."""
+    """Service: 1 image .. 9 max_concurrency; oneof { 10 public, 11 internal };
+    12 secret_env."""
     var env_value = List[UInt8]()
     _msg(env_value, 3, _ref_out("jobs", Output.HOST))
     var env_entry = List[UInt8]()
@@ -473,6 +637,7 @@ def test_service() raises:
     _msg(b, 8, _duration(30))
     _uint(b, 9, 80)
     _empty(b, 10)
+    _msg(b, 12, _entry("DB_PASSWORD", _secret("db_password")))
     var s = decode_proto[Service](b.copy())
     assert_equal(s.image.value().output.value().action, "build")
     assert_equal(s.image.value().output.value().name, "api_image")
@@ -493,6 +658,9 @@ def test_service() raises:
     assert_equal(Int(s.max_concurrency), 80)
     assert_equal(s._oneof0_case, 1, "field 10 is `public`")
     assert_true(Bool(s.public), "field 10 is `public`")
+    assert_equal(len(s.secret_env), 1, "field 12 is `secret_env`")
+    assert_equal(s.secret_env["DB_PASSWORD"].name, "db_password")
+    assert_true("DB_PASSWORD" not in s.env, "a secret is not an env value")
     _same(encode_proto(s), b, "Service (public)")
 
     var i = List[UInt8]()
@@ -506,7 +674,10 @@ def test_service() raises:
 
 
 def test_job() raises:
-    """Job: 1 image .. 5 timeout; oneof { 10 on_demand, 11 schedule }."""
+    """Job: 1 image .. 5 timeout; 6 env, 7 secret_env; oneof { 10 on_demand,
+    11 schedule }."""
+    var env_ref = List[UInt8]()
+    _msg(env_ref, 3, _ref_out("api", Output.URL))
     var sched = List[UInt8]()
     _str(sched, 1, "0 3 * * *")
     _str(sched, 2, "UTC")
@@ -516,6 +687,9 @@ def test_job() raises:
     _msg(b, 3, _size(250, 128))
     _uint(b, 4, 2)
     _msg(b, 5, _duration(900))
+    _msg(b, 6, _entry("MODE", _literal("full")))
+    _msg(b, 6, _entry("API_URL", env_ref))
+    _msg(b, 7, _entry("API_TOKEN", _secret("api_token")))
     _msg(b, 11, sched)
     var j = decode_proto[Job](b.copy())
     assert_equal(j.image.value()._oneof0_case, 2, "Image field 2 is `digest`")
@@ -524,6 +698,12 @@ def test_job() raises:
     assert_equal(Int(j.size.value().cpu_millis), 250)
     assert_equal(Int(j.max_retries), 2)
     assert_equal(Int(j.timeout.value().seconds), 900)
+    assert_equal(len(j.env), 2, "field 6 is `env`")
+    assert_equal(j.env["MODE"].literal.value(), "full")
+    assert_equal(j.env["API_URL"].ref_.value().resource, "api")
+    assert_equal(j.env["API_URL"].ref_.value().standard.value().value, Output.URL)
+    assert_equal(len(j.secret_env), 1, "field 7 is `secret_env`")
+    assert_equal(j.secret_env["API_TOKEN"].name, "api_token")
     assert_equal(j._oneof0_case, 2, "field 11 is `schedule`")
     assert_equal(j.schedule.value().cron, "0 3 * * *")
     assert_equal(j.schedule.value().timezone, "UTC")
@@ -581,6 +761,16 @@ def test_enum_ordinals() raises:
         _enum_row(Portability(n).json_name(), port[n], n, "Portability")
         assert_equal(Portability.from_json_name(port[n]).value, n)
     assert_equal(Portability(3).json_name(), "3", "Portability has three values")
+
+    # The artifact platform: v1 declares linux and x86_64 only.
+    _enum_row(Os(0).json_name(), "OS_UNSET", 0, "Os")
+    _enum_row(Os(1).json_name(), "LINUX", 1, "Os")
+    assert_equal(Os.from_json_name("LINUX").value, 1)
+    assert_equal(Os(2).json_name(), "2", "Os has two values in v1")
+    _enum_row(Cpu(0).json_name(), "CPU_UNSET", 0, "Cpu")
+    _enum_row(Cpu(1).json_name(), "X86_64", 1, "Cpu")
+    assert_equal(Cpu.from_json_name("X86_64").value, 1)
+    assert_equal(Cpu(2).json_name(), "2", "Cpu has two values in v1")
     print("  test_enum_ordinals: PASS")
 
 
@@ -590,6 +780,9 @@ def main() raises:
     test_uses()
     test_value_arms()
     test_image_arms()
+    test_image_platform()
+    test_secret_ref()
+    test_added_numbers_are_kept()
     test_resource_body_arms_are_10_and_11()
     test_held_body_numbers_are_undeclared()
     test_fields_3_and_4_are_not_declared()
