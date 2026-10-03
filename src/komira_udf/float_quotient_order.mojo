@@ -7,7 +7,7 @@
 # without a dependency on `komira_core`. It moves to `komira_column_kernels`
 # with the `komira_core` split.
 #
- WHAT THIS FILE IS FOR
+# WHAT THIS FILE IS FOR
 # =====================
 #
 # A hash table's contract is `a == b  =>  hash(a) == hash(b)`, and an
