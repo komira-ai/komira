@@ -9,7 +9,7 @@
 #
 #   R1  the workflow's job ids are exactly the machine file's stage names
 #       (a job no stage names, a stage no job runs)
-#   R2  each job runs in the CI environment named like its id
+#   R2  each job runs in the GitHub environment named like its id
 #       (`environment: <id>`, or `environment: {name: <id>}` as a block)
 #   R3  each job's `needs` is exactly its stage's `after` (none for none)
 #   R4  `id-token: write` is in a job's own `permissions` exactly when its
@@ -24,14 +24,21 @@
 #   R7  `workflow_dispatch` takes an input `revision` (the commit a manual
 #       run releases)
 #   R8  every `uses:` is pinned to a full 40-hex commit id
+#   R9  no `kci run` carries `--only`: a release job runs its whole stage,
+#       so its result is a FULL run, never a selective one
+#   R10 each `kci run` reads the machine file being checked: a `--machine`
+#       must name that file, and a `kci run` without one reads the default
+#       (kci_contract's DEFAULT_MACHINE_FILE), which must then be that file.
+#       Paths are compared as written, after dropping a leading `./`
 #
 # How `kci run` is found (R5): each `run:` block is split into shell words
 # (a line ending in `\` continues; quotes around a word are dropped); an
 # invocation is a word in COMMAND position (the first word of a line, or
 # right after `;` `&&` `||` `|` `then` `do` `else` `exec` `!`, or after a
 # word ending in `;`) whose last `/`-separated part is `kci`, followed by
-# the word `run`. So `echo "... kci run ..."` is not one. Its `--stage` is
-# the next word, or `--stage=<v>`.
+# the word `run`. So `echo "... kci run ..."` is not one. Its arguments run
+# to the end of the line or the next `;` `&&` `||` `|`; `--stage`,
+# `--machine` and `--only` take the next word, or `=<v>`.
 #
 # A workflow the restricted reader cannot read raises (`cannot tell:`,
 # workflow_reader.mojo): the caller reports INDETERMINATE, never a pass.
@@ -39,6 +46,7 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
+from kci_contract import DEFAULT_MACHINE_FILE
 from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
 from kci_stage_graph import Stage, StageGraph, joined_names
 
@@ -152,13 +160,21 @@ def _is_kci(word: String) -> Bool:
 
 
 struct KciRunCall(Copyable, Movable):
-    """One `kci run` found in a job: the `--stage` value ("" when absent).
-    Layout: an owned String. No pointer field."""
+    """One `kci run` found in a job: the `--stage` value ("" when absent),
+    the `--machine` value (`has_machine` False when absent), and whether it
+    carries any `--only`.
+    Layout: owned Strings and Bools. No pointer field."""
 
     var stage: String
+    var machine: String
+    var has_machine: Bool
+    var has_only: Bool
 
     def __init__(out self, var stage: String):
         self.stage = stage^
+        self.machine = String("")
+        self.has_machine = False
+        self.has_only = False
 
 
 def _command_position(w: List[String], j: Int) -> Bool:
@@ -184,21 +200,64 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                 continue
             if not _command_position(w, j):
                 continue
-            var stage = String("")
-            var k = j + 2
-            while k < len(w):
-                if w[k] == String("--stage") and k + 1 < len(w):
-                    stage = w[k + 1].copy()
-                    break
-                if w[k].startswith(String("--stage=")):
-                    stage = String(w[k][byte = 8:])
-                    break
+            var args = _call_args(w, j + 2)
+            var call = KciRunCall(String(""))
+            var seen_stage = False
+            var k = 0
+            while k < len(args):
+                var a = args[k].copy()
+                var value = String("")
+                var has_value = False
+                var flag = a.copy()
+                var eq = a.find(String("="))
+                if a.startswith(String("--")) and eq > 0:
+                    flag = String(a[byte=0:eq])
+                    value = String(a[byte = eq + 1 :])
+                    has_value = True
+                elif k + 1 < len(args):
+                    value = args[k + 1].copy()
+                    has_value = True
+                if flag == String("--stage") and has_value:
+                    if not seen_stage:
+                        call.stage = value.copy()
+                        seen_stage = True
+                elif flag == String("--machine") and has_value:
+                    call.machine = value.copy()
+                    call.has_machine = True
+                elif flag == String("--only"):
+                    call.has_only = True
                 k += 1
-            while stage.endswith(String(";")):
-                var trimmed = String(stage[byte = 0 : stage.byte_length() - 1])
-                stage = trimmed^
-            out.append(KciRunCall(stage^))
+            out.append(call^)
     return out^
+
+
+def _call_args(w: List[String], start: Int) -> List[String]:
+    """The words of one invocation from `start`: up to the end of the line,
+    a separator word, or a word ending in `;` (kept, without the `;`)."""
+    var out = List[String]()
+    var k = start
+    while k < len(w):
+        var word = w[k].copy()
+        if word == String(";") or word == String("&&") or word == String("||") or word == String("|"):
+            break
+        var last = word.endswith(String(";"))
+        while word.endswith(String(";")):
+            var trimmed = String(word[byte = 0 : word.byte_length() - 1])
+            word = trimmed^
+        if word.byte_length() > 0:
+            out.append(word^)
+        if last:
+            break
+        k += 1
+    return out^
+
+
+def _path(p: String) -> String:
+    var s = p.copy()
+    while s.startswith(String("./")):
+        var rest = String(s[byte=2:])
+        s = rest^
+    return s^
 
 
 # ---- the rules -------------------------------------------------------------------
@@ -265,7 +324,13 @@ def _id_token_write(doc: WorkflowDoc, perms: Int) -> Bool:
 
 
 def _check_job(
-    doc: WorkflowDoc, job_id: String, job: Int, st: Stage, needs_token: Bool, mut findings: List[String]
+    doc: WorkflowDoc,
+    job_id: String,
+    job: Int,
+    st: Stage,
+    needs_token: Bool,
+    machine_path: String,
+    mut findings: List[String],
 ):
     var where = _at(doc, job) + String("job '") + job_id + String("'")
     # R2
@@ -334,11 +399,34 @@ def _check_job(
                 where + String(": R5: `kci run --stage ") + s + String("` in job '") + job_id
                 + String("'; each job runs its own stage, written literally")
             )
+    # R9, R10
+    for i in range(len(calls)):
+        ref call = calls[i]
+        if call.has_only:
+            findings.append(
+                where + String(": R9: `kci run` carries --only; a release job runs its whole stage")
+                + String(" (a FULL run), never a selection")
+            )
+        if call.has_machine:
+            if _path(call.machine) != _path(machine_path):
+                findings.append(
+                    where + String(": R10: `kci run --machine ") + call.machine
+                    + String("` reads another machine file than the one checked (") + machine_path + String(")")
+                )
+        elif _path(String(DEFAULT_MACHINE_FILE)) != _path(machine_path):
+            findings.append(
+                where + String(": R10: `kci run` gives no --machine, so it reads the default ")
+                + String(DEFAULT_MACHINE_FILE) + String(", not the machine file checked (") + machine_path
+                + String(")")
+            )
 
 
-def check_workflow_doc(doc: WorkflowDoc, g: StageGraph, token_stages: List[String]) -> List[String]:
+def check_workflow_doc(
+    doc: WorkflowDoc, g: StageGraph, token_stages: List[String], machine_path: String
+) -> List[String]:
     """Every disagreement between `doc` and `g` (file header); empty when
-    they agree."""
+    they agree. `machine_path` is the machine file `g` was read from, as the
+    caller named it (R10)."""
     var findings = List[String]()
     var root = 0
     # R6, R7
@@ -382,14 +470,16 @@ def check_workflow_doc(doc: WorkflowDoc, g: StageGraph, token_stages: List[Strin
         if found < 0:
             findings.append(String("R1: stage '") + st.name + String("' has no job of the same id"))
             continue
-        _check_job(doc, job_ids[found], job_nodes[found], st, _member(token_stages, st.name), findings)
+        _check_job(doc, job_ids[found], job_nodes[found], st, _member(token_stages, st.name), machine_path, findings)
     # R8
     _collect_uses(doc, root, findings)
     return findings^
 
 
-def check_workflow(workflow_text: String, g: StageGraph, token_stages: List[String]) raises -> List[String]:
+def check_workflow(
+    workflow_text: String, g: StageGraph, token_stages: List[String], machine_path: String
+) raises -> List[String]:
     """`check_workflow_doc` over a workflow's text. Raises `cannot tell:` when
     the restricted reader cannot read it."""
     var doc = read_workflow(workflow_text)
-    return check_workflow_doc(doc, g, token_stages)
+    return check_workflow_doc(doc, g, token_stages, machine_path)
