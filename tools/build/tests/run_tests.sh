@@ -119,8 +119,9 @@
 #      (tests//functional/location_path).
 #  22. Rust rules, and rustc's host floor: see
 #      tools/build/tests/rust_tests.sh.
-#  23. mojo_proto_library and mojo_db_proto_library, and deterministic
-#      generation across two uncached
+#  23. mojo_proto_library and mojo_db_proto_library, mojo_gcp_client (REST
+#      and gRPC service clients), protoc-gen-mojo's text goldens, and
+#      deterministic generation across two uncached
 #      builds (skipped with --no-uncached; about 16 minutes): see
 #      tools/build/tests/proto_tests.sh.
 #  24. The macOS arm64 target and execution platform: registration only when

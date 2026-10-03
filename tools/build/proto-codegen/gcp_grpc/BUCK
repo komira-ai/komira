@@ -1,0 +1,41 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# A Google Cloud gRPC client (mojo_gcp_client, `protocol = "grpc"`) of a tiny
+# API, example/tiny/v1/tiny.proto: one method of each streaming shape. It is
+# compiled against the real runtime, which only the komira cell can depend
+# on: komira_grpc's GrpcClient, komira_gcp_core's token source and status
+# mapping, komira_proto_codec, and komira_http_client for the test's
+# scripted connector.
+#
+# The library is gated by its layout probe and test_tiny_grpc, which drives
+# every method over a ScriptedConnector: each call carries exactly one
+# `authorization: Bearer <token>` from the client's GcpTokenSource, fetched
+# for that call; a gRPC status is raised as komira_gcp_core's error with its
+# google.rpc.Code and without the server's text. The text of the generated
+# module is held to a golden over the same shapes in
+# tests//functional/proto_codegen (tiny_grpc_gcp), and the generated files
+# and welded tests to exact sets in tests//functional/mojo_gcp_client.
+# run_tests.sh builds this package (test 23).
+mojo_gcp_client(
+    name = "komira_gcp_tiny_grpc",
+    bundle_only = [],
+    bundle_proto_deps = False,
+    methods = [
+        "TinyService.GetThing",
+        "TinyService.WatchThings",
+        "TinyService.UploadThings",
+        "TinyService.SyncThings",
+    ],
+    protocol = "grpc",
+    protos = ["example/tiny/v1/tiny.proto"],
+    test_srcs = ["test_tiny_grpc.mojo"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_grpc:komira_grpc",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+)
