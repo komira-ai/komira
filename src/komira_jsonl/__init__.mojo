@@ -26,7 +26,7 @@ the `json_extract` kernel, and the JSON / JSONL writers (`json_writer`).
 Dependency direction (cycle-free):
   komira_jsonl -> komira_core (Arrow types, SIMD primitives, sources)
   komira_jsonl -> komira_async (parallel fork-join for JSONL parse)
-  komira_jsonl -> komira_eval (row-format output for the row-native writer)
+  komira_jsonl -> komira_row_format (row-format output for the row-native writer)
 """
 
 from komira_jsonl.json_compatible import JsonCompatible

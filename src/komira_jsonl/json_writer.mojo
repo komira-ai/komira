@@ -72,12 +72,12 @@ from komira_jsonl.encode import (
 )
 
 # JSONL row-native write: the row-native JSONL emitter reads cells
-# DIRECTLY off `RowOutput`'s `RowBlock`s. Importing `komira_eval.row_format`
-# from `komira_jsonl` is acyclic — `komira_eval` does NOT import
+# DIRECTLY off `RowOutput`'s `RowBlock`s. Importing `komira_row_format`
+# from `komira_jsonl` is acyclic — `komira_row_format` does NOT import
 # `komira_jsonl` (the row_output/row_block carriers never reach back into
 # the JSON package).
-from komira_eval.row_format.row_output import RowOutput
-from komira_eval.row_format.row_block import (
+from komira_row_format.row_output import RowOutput
+from komira_row_format.row_block import (
     DT_I64,
     DT_F64,
     DT_I32,

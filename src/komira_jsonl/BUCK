@@ -4,7 +4,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # typed value parsers, schema inference, the columnar JSONL materializer
 # (serial and fork-join parallel over komira_async), the streaming JSONL
 # source, the `json_extract` kernel, and the JSON / JSONL writers (columnar
-# batches and the row format from komira_eval). komira_runtime_paths is
+# batches and the row format from komira_row_format). komira_runtime_paths is
 # declared because tests/test_read_json_batch_e2e.mojo takes its scratch
 # directory from `test_tmpdir()`.
 mojo_library(
@@ -13,7 +13,7 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_core:komira_core",
-        "//src/komira_eval:komira_eval",
+        "//src/komira_row_format:komira_row_format",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_srcs = [
