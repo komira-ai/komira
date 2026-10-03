@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pgwire.mojo — pgwire-v3 message framing
+# komira_db_postgres/wire/pgwire.mojo — pgwire-v3 message framing
 # =============================================================================
 #
 # Postgres frontend/backend protocol v3 message encode/decode.

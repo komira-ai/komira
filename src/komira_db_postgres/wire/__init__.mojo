@@ -1,4 +1,4 @@
-"""`komira_pg` — native Postgres pgwire-v3 client (SCRAM-SHA-256 over TLS).
+"""`komira_db_postgres.wire` — native Postgres pgwire-v3 client (SCRAM-SHA-256 over TLS).
 
 Opens a TCP connection, negotiates TLS 1.3 (with the SSLRequest preamble),
 completes SCRAM-SHA-256 authentication, runs simple and extended-protocol

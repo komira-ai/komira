@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pg_tls.mojo — Postgres SSLRequest preamble + TLS over the reactor
+# komira_db_postgres/wire/pg_tls.mojo — Postgres SSLRequest preamble + TLS over the reactor
 # =============================================================================
 #
 # The pg wire transport rides the shared `komira_async` reactor primitives: a
@@ -64,7 +64,7 @@ from komira_http_core.tls.s2n_shim import (
     s2n_strerror_message,
 )
 
-from komira_pg.pgwire import encode_ssl_request
+from komira_db_postgres.wire.pgwire import encode_ssl_request
 
 
 # -----------------------------------------------------------------------------

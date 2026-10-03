@@ -1,7 +1,7 @@
-"""komira_pg — SCRAM-SHA-256 + pgwire codec unit tests.
+"""komira_db_postgres.wire — SCRAM-SHA-256 + pgwire codec unit tests.
 
 Checks the RFC 7677 §3 SCRAM vector (must stay byte-exact) against the
-`komira_pg` package surface (compute_scram_client + verify_server_signature,
+`komira_db_postgres.wire` package surface (compute_scram_client + verify_server_signature,
 which route through komira_crypto's PBKDF2), plus pgwire codec encode/decode
 goldens (the message set the simple-query SELECT 1 path uses) and a PBKDF2
 KAT.
@@ -9,13 +9,13 @@ KAT.
 No network, no database server — pure value + crypto. Always runs.
 """
 
-from komira_pg.scram import (
+from komira_db_postgres.wire.scram import (
     compute_scram_client,
     verify_server_signature,
     scram_field,
     make_client_nonce,
 )
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pgwire import (
     encode_ssl_request,
     encode_startup,
     encode_sasl_initial,
@@ -33,7 +33,7 @@ from komira_pg.pgwire import (
     auth_subcode,
     AUTH_SASL,
 )
-from komira_pg.pg_types import row_from_data_message
+from komira_db_postgres.wire.pg_types import row_from_data_message
 from komira_encoding import base64_encode, base64_decode
 from komira_crypto.pbkdf2 import pbkdf2_hmac_sha256_32, pbkdf2_hmac_sha256
 
@@ -446,7 +446,7 @@ def _append_field(mut buf: List[UInt8], field_type: UInt8, value: String):
 
 def main() raises:
     print("=========================================================")
-    print(" komira_pg — SCRAM + pgwire codec unit tests")
+    print(" komira_db_postgres.wire — SCRAM + pgwire codec unit tests")
     print("=========================================================")
     var failures = 0
     test_scram_rfc7677_vector(failures)
@@ -465,4 +465,4 @@ def main() raises:
         print(" RESULT:", failures, "CHECK(S) FAILED")
     print("=========================================================")
     if failures != 0:
-        raise Error("komira_pg unit checks failed")
+        raise Error("komira_db_postgres.wire unit checks failed")

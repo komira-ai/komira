@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/tests/test_pg_tx_op_sequence.mojo — the reusable poll-shaped
+# komira_db_postgres/wire/tests/test_pg_tx_op_sequence.mojo — the reusable poll-shaped
 # multi-statement TX op: the statement SEQUENCE + the ROLLBACK path.
 # =============================================================================
 # `PgTxAsyncOp` runs an application WRITE as a multi-statement transaction
@@ -30,7 +30,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_pg import (
+from komira_db_postgres.wire import (
     PgTxAsyncOp,
     TxStep,
     PreparedStatement,

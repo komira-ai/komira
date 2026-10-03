@@ -1,4 +1,4 @@
-"""komira_pg PgRow multi-row accumulation regression guard.
+"""komira_db_postgres.wire PgRow multi-row accumulation regression guard.
 
 NO NETWORK. This pins the flat-storage fix for the multi-row (>=N) SIGSEGV in
 `PgConnection.query`. BEFORE the fix, `PgRow` stored its per-column bytes as a
@@ -26,7 +26,7 @@ This test builds the rows by hand (no live Postgres), exercising:
   * repeated build+teardown (50 trials) to surface any double-free / leak.
 """
 
-from komira_pg.pg_types import PgRow, PgRows
+from komira_db_postgres.wire.pg_types import PgRow, PgRows
 
 
 def _make_row(row_idx: Int, ncols: Int) -> PgRow:
@@ -125,6 +125,6 @@ def test_pgrow_accumulation() raises:
 
 
 def main() raises:
-    print("== komira_pg PgRow accumulation regression guard ==")
+    print("== komira_db_postgres.wire PgRow accumulation regression guard ==")
     test_pgrow_accumulation()
     print("== PASSED ==")
