@@ -23,7 +23,7 @@ from komira_eval.expr_executor_mvp import (
     Q6Result,
     execute_q6_filter_and_sum,
 )
-from komira_core.eval.selection_vector import RowSelectionVector
+from komira_core.eval.selection_vector_row import RowSelectionVector
 
 
 # -----------------------------------------------------------------------------
