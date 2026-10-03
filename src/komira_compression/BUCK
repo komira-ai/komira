@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Byte-stream codec trait and the eight codec implementations.
+mojo_library(
+    name = "komira_compression",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//third_party/snappy:snappy",
+    ],
+    test_srcs = [
+        "tests/test_lz4_raw_conformer_roundtrip.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

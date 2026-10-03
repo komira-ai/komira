@@ -7,7 +7,9 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 # archive is fetched at build time, checked against its sha256, and the files
 # below extracted from it. A newer pin is `_COMMIT` and `_SHA256` here, plus
 # `_EXPECTED_VECTORS` (and, if upstream fixes it, the named self-contradictory
-# vector) in //src/komira_gcp_core:tests/test_v4_sign_conformance.mojo.
+# vector) in //src/komira_gcp_core:tests/test_v4_sign_conformance.mojo, and
+# `_expected_matches` (the vectors GcsV4Signer can mint) in
+# //src/komira_objectstore_gcs:tests/test_gcs_presign_portability.mojo.
 _COMMIT = "998891a8dae00df121e460420cceb0abfc4e2ea1"
 _SHA256 = "30cdaffa051cc7273eca430ce2f47db534de2aea83b409176b9ff887946e9471"
 
@@ -17,8 +19,8 @@ pinned_file(
     sha256 = _SHA256,
 )
 
-# Test data of //src/komira_gcp_core, one directory staged whole (the list
-# below is the only list of these files):
+# Test data of //src/komira_gcp_core and //src/komira_objectstore_gcs, one
+# directory staged whole (the list below is the only list of these files):
 #   storage/v1/v4_signatures.json - the Cloud Storage V4 signed-URL vectors;
 #   storage/v1/test_service_account.not-a-test.json - the vectors' signing
 #     key, a service account Google publishes as an inactive dummy ("This is

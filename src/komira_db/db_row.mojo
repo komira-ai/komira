@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # `DbRow` is the untyped surface the typed `DbStorable.from_row`
-# reads through. It re-surfaces `komira_pg.PgRow`'s flat, relocation-safe layout
+# reads through. It re-surfaces `komira_db_postgres.wire.PgRow`'s flat, relocation-safe layout
 # (the untyped row is PgRow lightly re-surfaced): per-column
 # bytes are ONE flat `_data: List[UInt8]` + an `_offsets: List[Int]` table (len
 # ncols+1), plus `_nulls` / per-column logical type tags — NOT a doubly-nested

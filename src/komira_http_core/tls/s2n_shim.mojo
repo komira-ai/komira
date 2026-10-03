@@ -560,7 +560,7 @@ struct _S2nConfigHandle(Movable, Deinitable):
 
     # SAFETY: opaque s2n_config_t pointer. Stored as `S2nOpaquePtr` =
     # `UnsafePointer[NoneType, _S2N_FFI_ORIGIN]` — the CONCRETE
-    # `StaticConstantOrigin` FFI origin (the `komira_db/sqlite/ffi.mojo`
+    # `StaticConstantOrigin` FFI origin (the `komira_db_sqlite/ffi.mojo`
     # `_FFI_ORIGIN` precedent), NOT the banned `MutExternalOrigin` wildcard.
     # stale-pointer fix: the wildcard origin defeated
     # ASAP-destruction tracking across the `TlsConfig`/`TlsConnection` move,

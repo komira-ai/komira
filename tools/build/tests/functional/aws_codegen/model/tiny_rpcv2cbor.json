@@ -1,0 +1,25 @@
+{
+ "version": "2.0",
+ "metadata": {
+  "apiVersion": "2026-09-30",
+  "endpointPrefix": "tiny",
+  "protocol": "smithy-rpc-v2-cbor",
+  "serviceFullName": "Tiny Example Service",
+  "serviceId": "Tiny",
+  "signatureVersion": "v4",
+  "uid": "tiny-2026-09-30"
+ },
+ "operations": {
+  "Ping": {
+   "name": "Ping",
+   "http": {"method": "GET", "requestUri": "/ping"},
+   "input": {"shape": "PingRequest"},
+   "output": {"shape": "PingResponse"}
+  }
+ },
+ "shapes": {
+  "PingRequest": {"type": "structure", "members": {}},
+  "PingResponse": {"type": "structure", "members": {"Message": {"shape": "String"}}},
+  "String": {"type": "string"}
+ }
+}

@@ -16,12 +16,21 @@
 # request id the `x-amzn-RequestId` header, which is where botocore's JSON
 # parser reads it (`_inject_response_metadata`).
 #
+# An awsQueryCompatible service (SQS) also names an error's legacy query
+# code in an `x-amzn-query-error` header, `<code>;<Sender|Receiver>`, and
+# that code, `aws_query_error_code`, wins over both when the header has
+# that form: an error whose `__type` is `QueueDoesNotExist` has code
+# `AWS.SimpleQueueService.NonExistentQueue`. botocore's JSON parser does
+# the same (`_do_query_compatible_error_parsing`), and it is the Go v2
+# SDK's error code. The shape name stays readable from the body through
+# `aws_error_code_from_body`.
+#
 # A response that names no code has code "". botocore's JSON parser puts
 # the status there instead (`str(status_code)`); here the status is already
 # `status`, and a code that is a number would match no modeled error.
 # =============================================================================
 
-from ._text import has_control
+from ._text import has_control, sub
 from .aws_codec import (
     aws_error_code,
     aws_error_code_from_body,
@@ -80,11 +89,25 @@ def aws_request_id(resp: AwsResponse, header: String) -> String:
     return v
 
 
+def aws_query_error_code(resp: AwsResponse) -> String:
+    """The legacy query code of an awsQueryCompatible error: the cleaned
+    text before the `;` of an `x-amzn-query-error` header of the form
+    `<code>;<type>`, "" when the header is absent or has another form."""
+    if not resp.has_header(String("x-amzn-query-error")):
+        return String("")
+    var v = resp.header(String("x-amzn-query-error"))
+    var semi = v.find(";")
+    if semi <= 0 or v.find(";", semi + 1) >= 0:
+        return String("")
+    return aws_error_code(sub(v, 0, semi))
+
+
 def aws_json_error_info(resp: AwsResponse) -> AwsErrorInfo:
     """The `AwsErrorInfo` of an awsJson response: the code from
-    `X-Amzn-Errortype`, else from the body, "" when neither names one."""
-    var code = String("")
-    if resp.has_header(String("X-Amzn-Errortype")):
+    `x-amzn-query-error`, else `X-Amzn-Errortype`, else the body, "" when
+    none names one."""
+    var code = aws_query_error_code(resp)
+    if code.byte_length() == 0 and resp.has_header(String("X-Amzn-Errortype")):
         code = aws_error_code(resp.header(String("X-Amzn-Errortype")))
     if code.byte_length() == 0:
         code = aws_error_code_from_body(resp.body)
