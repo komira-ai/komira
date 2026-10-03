@@ -1,8 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# One BUILD action of a stage (`kci run --stage S`, or its alias `kci build
-# --stage S`; the kci binary's one parser and the machine file make the
-# request): check the release identity (--revision-id a full commit id that
+# One BUILD step of a stage (`kci run --stage S`; the kci binary's one parser
+# and the machine file make the request): check the release identity (--revision-id a full commit id that
 # must be the checkout's HEAD, in a full-history clone; the platform one kci
 # releases), record the run's RUNNING result (kci_contract) before the first
 # effect, derive the release stamp from git, then for each artifact of the
@@ -10,7 +9,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # time (a metapackage declared last reads its members under {release_dir}),
 # create an EMPTY directory under <--release-dir>/<platform>/, run the
 # declared build system's rendered argv into it, and check what it left with
-# kci_release_set.verify_member (the same checks `kci publish` re-runs) and
+# kci_release_set.verify_member (the same checks a PUBLISH step re-runs) and
 # the manifest's platform; when every artifact passed, write release.json
 # (major 2: revision, platform, produced_by, members, set hash) LAST, as the
 # commit marker. The outcome is a kci_contract outcome word and error id; no
@@ -39,7 +38,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # by `timeout` (exit 124). That matches the documented contract
 # (tools/build/platforms/README.md, "Remote workers": every platform
 # `komira_execution_platforms` registers "runs remotely only (local
-# execution disabled)"). So for kci build: a farm that is down never builds
+# execution disabled)"). So for a BUILD step: a farm that is down never builds
 # locally unnoticed; the first build stalls until `--build-timeout-s` ends
 # it, and kci reports it FAILED ("timed out"), naming the artifact.
 #
@@ -60,7 +59,7 @@ mojo_library(
         "//src/komira_supervisor:komira_supervisor",
     ],
     test_srcs = [
-        # the whole action over ScriptedRunner: argv, order, empty dirs, every stop with its
+        # the whole step over ScriptedRunner: argv, order, empty dirs, every stop with its
         # outcome and error id, release.json v2 last, RUNNING before the first effect
         "tests/test_build_flow.mojo",
         # --revision-id against the checkout, the stamp from git, every refusal
