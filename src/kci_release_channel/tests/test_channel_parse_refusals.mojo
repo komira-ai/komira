@@ -10,9 +10,15 @@
 
 from std.testing import TestSuite, assert_equal
 
-from kci_release_channel import parse_channels_file
+from kci_release_channel import ChannelDeclaration, parse_channels_file
 
 comptime _ID = "publisher@example.invalid"
+
+
+def _parse(text: String) raises -> List[ChannelDeclaration]:
+    """`parse_channels_file` over `text` with `schema_version: 1` prepended on
+    its FIRST line, so no line number a refusal names moves."""
+    return parse_channels_file(String("schema_version: 1 ") + text)
 
 
 def _repo(artifact_type: String, location: String, identity: String) -> String:
@@ -44,7 +50,7 @@ def _channel(name: String, visibility: String, body: String) -> String:
 
 def _refusal(text: String) -> String:
     try:
-        _ = parse_channels_file(text)
+        _ = _parse(text)
     except e:
         return String(e)
     return String("<no refusal>")
@@ -62,7 +68,7 @@ def test_control_the_fixture_parses() raises:
     ) + _channel(
         String("stable"), String("PUBLIC"), _oci(String("registry.example.invalid/stable"))
     )
-    assert_equal(len(parse_channels_file(text)), 2)
+    assert_equal(len(_parse(text)), 2)
 
 
 def test_duplicate_channel_name() raises:
@@ -198,7 +204,7 @@ def test_unknown_field_in_a_repository() raises:
 def test_unknown_top_level_field() raises:
     _assert_refused(
         String("environment { name: \"beta\" }\n"),
-        String("line 1: unknown top-level field 'environment' (expected channel)"),
+        String("line 1: unknown top-level field 'environment' (expected schema_version, channel)"),
     )
 
 
@@ -317,6 +323,63 @@ def test_a_whitespace_only_location_or_identity_is_empty() raises:
         String("channel 'beta' declares an empty push_identity for its OCI repository"),
     )
 
+
+
+# ── schema_version: read before any other field. ─────────────────────────────
+
+
+def _raw_refusal(text: String) -> String:
+    try:
+        _ = parse_channels_file(text)
+    except e:
+        return String(e)
+    return String("<no refusal>")
+
+
+def _one_channel() -> String:
+    return _channel(String("beta"), String("PRIVATE"), _oci(String("registry.example.invalid/beta")))
+
+
+def test_schema_version_missing() raises:
+    assert_equal(
+        _raw_refusal(_one_channel()),
+        String("channels file: no schema_version; add `schema_version: 1` (this kci reads kci.channels up to major 1)"),
+    )
+
+
+def test_schema_version_of_a_newer_kci_wins_over_its_new_fields() raises:
+    # A major-2 file may use a field this kci does not know; the refusal
+    # names the version, not the field.
+    assert_equal(
+        _raw_refusal(String("schema_version: 2\nchannel { name: \"beta\" retention_days: 30 }\n")),
+        String("channels file: schema_version 2 needs a newer kci (this kci reads kci.channels up to major 1)"),
+    )
+
+
+def test_schema_version_set_twice() raises:
+    assert_equal(
+        _raw_refusal(String("schema_version: 1\n") + _one_channel() + String("schema_version: 1\n")),
+        String("channels file: line 12: field 'schema_version' is set twice (first on line 1)"),
+    )
+
+
+def test_schema_version_not_an_integer() raises:
+    assert_equal(
+        _raw_refusal(String("schema_version: \"1\"\n") + _one_channel()),
+        String("channels file: line 1: schema_version is not a decimal integer (expected `schema_version: <major>`)"),
+    )
+
+
+def test_schema_version_inside_a_channel_is_unknown() raises:
+    _assert_refused(
+        _channel(String("beta"), String("PRIVATE"), String("  schema_version: 1\n") + _oci(String("registry.example.invalid/beta"))),
+        String("unknown field 'schema_version' in channel 'beta'"),
+    )
+
+
+def test_schema_version_anywhere_at_the_top_level() raises:
+    var decls = parse_channels_file(_one_channel() + String("schema_version: 1\n"))
+    assert_equal(len(decls), 1)
 
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
