@@ -128,7 +128,8 @@ trait ConformanceTarget(CloudAdapter):
         ...
 
     def creates_of(self, logical_id: String) -> Int:
-        """How many creates of node `logical_id` the cloud has served."""
+        """How many creates of node `logical_id` the cloud has served over
+        its lifetime (the kit compares counts before and after a step)."""
         ...
 
 
@@ -390,7 +391,11 @@ def run_conformance[
     if cloud.live_count() != 0:
         raise _fail("foreign", String("the adopted graph was not destroyed"))
 
-    # 11. two interleaved applies
+    # 11. two interleaved applies (create counts are the cloud's lifetime
+    # totals, so each is compared with its count before this step)
+    var before = List[Int]()
+    for k in range(len(lowered)):
+        before.append(cloud.creates_of(lowered[k].id))
     var store11 = InMemoryStateStore()
     cloud.race_next_create()
     var o11 = apply_resources(clouds, cloud, ctx, base, creds, store11)
@@ -399,16 +404,21 @@ def run_conformance[
     var hit = cloud.raced()
     if hit.byte_length() == 0:
         raise _fail("race", String("the cloud never raced a create"))
-    if cloud.creates_of(hit) != 1:
+    var hit_before = 0
+    for k in range(len(lowered)):
+        if lowered[k].id == hit:
+            hit_before = before[k]
+    if cloud.creates_of(hit) - hit_before != 1:
         raise _fail(
             "race",
-            hit + String(" was created ") + String(cloud.creates_of(hit)) + String(" times"),
+            hit + String(" was created ") + String(cloud.creates_of(hit) - hit_before)
+            + String(" times"),
         )
     var a11 = _applied("race", apply_resources(clouds, cloud, ctx, base, creds, store11))
     for i in range(len(a11)):
         if a11[i].logical_id == hit and a11[i].verb != VERB_NOOP:
             raise _fail("race", hit + String(" was not adopted by the re-run"))
-    if cloud.creates_of(hit) != 1:
+    if cloud.creates_of(hit) - hit_before != 1:
         raise _fail("race", hit + String(" was created twice"))
     _all_noop("race", _applied("race", apply_resources(clouds, cloud, ctx, base, creds, store11)))
     _ = destroy_resources(clouds, cloud, ctx, base, creds, store11)
