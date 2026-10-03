@@ -7,7 +7,7 @@
 #
 # THE PACKAGE-DAG DECISION (keep komira_search light).
 # -----------------------------------------------------------------------------
-# `komira_search` depends only on komira_core + komira_eval (+ komira_lz4).
+# `komira_search` depends only on komira_core (+ komira_lz4).
 # The scan-kind contract (`ScanSourceResolver`) lives in komira_scan_resolver,
 # which depends on komira_core alone. This package joins the two and adds
 # nothing else: it does not depend on the morsel layer or on any engine, so a
