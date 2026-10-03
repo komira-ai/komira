@@ -297,6 +297,53 @@ def _is_2xx_created(status: Int) -> Bool:
     return status == 200 or status == 201
 
 
+comptime _MAX_CHALLENGE_BYTES: Int = 512
+
+
+def _printable(text: String, limit: Int) -> String:
+    """`text` cut to `limit` bytes with every non-printable byte dropped, so a
+    registry's header cannot smuggle a line break into a message."""
+    var out = String("")
+    var n = text.byte_length()
+    if n > limit:
+        n = limit
+    for i in range(n):
+        var c = UInt8(ord(text[byte=i]))
+        if c >= UInt8(32) and c < UInt8(127):
+            out += String(text[byte = i : i + 1])
+    return out^
+
+
+def _refusal_words(
+    registry: String, repository: String, resp: OciResponse
+) -> String:
+    """Why a 401/403 happened, in words an operator can act on: the scope a
+    push needs and the registry's own challenge. It is built from the
+    response and the repository name ONLY; the credential is never read."""
+    var msg = (
+        String("the registry ")
+        + registry
+        + String(" refused the credential (HTTP ")
+        + String(resp.status)
+        + String("): pushing needs the scope 'repository:")
+        + repository
+        + String(
+            ":pull,push'. This client sends the credential it was given and"
+            " does not perform a token exchange; supply one with that scope."
+        )
+    )
+    var challenge = _printable(
+        resp.header(String("www-authenticate")), _MAX_CHALLENGE_BYTES
+    )
+    if challenge.byte_length() > 0:
+        msg += String(" The registry's challenge: ") + challenge
+    return msg^
+
+
+def _is_auth_refusal(status: Int) -> Bool:
+    return status == 401 or status == 403
+
+
 struct LayoutPusher[T: OciTransport](Movable, Deinitable):
     """Pushes a verified `OciLayout` to one registry repository.
 
@@ -340,6 +387,57 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
     ) -> PushResult:
         """Push `layout` to `registry`/`repository` and tag it `tag`. Never
         raises: every end state is a `PushResult.outcome`."""
+        return self._push(layout, registry, repository, tag, False)
+
+    def push_by_digest(
+        mut self,
+        layout: OciLayout,
+        registry: String,
+        repository: String,
+        expected_digest: String,
+    ) -> PushResult:
+        """Push `layout` to `registry`/`repository@<expected_digest>` with NO
+        tag. `expected_digest` is the digest the caller pinned (a
+        `repo@sha256:...` destination); it is checked against the layout's own
+        root BEFORE any request is made, because a push cannot change a digest
+        and a mismatch is a wrong destination, not a transport problem. The
+        image is read back by digest. Never raises."""
+        var r = PushResult(
+            registry.copy(),
+            repository.copy(),
+            layout.manifest_digest.copy(),
+            layout.platform(),
+            String(""),
+        )
+        try:
+            validate_digest_format(expected_digest, String("the pinned digest"))
+        except e:
+            r.outcome = PUSH_REFUSED
+            r.detail = String(e)
+            return r^
+        if expected_digest != layout.manifest_digest:
+            r.outcome = PUSH_REFUSED
+            r.detail = (
+                String("the destination pins ")
+                + expected_digest
+                + String(" but the layout's image is ")
+                + layout.manifest_digest
+                + String(
+                    ". A push cannot change a digest; refusing before any"
+                    " registry call."
+                )
+            )
+            return r^
+        return self._push(layout, registry, repository, String(""), True)
+
+    def _push(
+        mut self,
+        layout: OciLayout,
+        registry: String,
+        repository: String,
+        tag: String,
+        by_digest: Bool,
+    ) -> PushResult:
         var r = PushResult(
             registry.copy(),
             repository.copy(),
@@ -348,7 +446,8 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             tag.copy(),
         )
         try:
-            validate_oci_tag(tag)
+            if not by_digest:
+                validate_oci_tag(tag)
             _validate_repository(repository)
             _validate_registry(registry)
         except e:
@@ -356,8 +455,10 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             r.detail = String(e)
             return r^
 
-        # 1. the tag, before anything is sent.
-        var tag0 = self._read_tag(registry, repository, tag)
+        # 1. the tag, before anything is sent (a digest-only push has none).
+        var tag0 = _TagRead(_TAG_ABSENT, String(""), String(""))
+        if not by_digest:
+            tag0 = self._read_tag(registry, repository, tag)
         if tag0.state == _TAG_UNREADABLE:
             r.outcome = PUSH_FAILED
             r.detail = String("could not read the tag before pushing: ") + tag0.note
@@ -388,6 +489,8 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             elif head.status != 404:
                 r.outcome = PUSH_FAILED
                 r.detail = String("HEAD manifest returned HTTP ") + String(head.status)
+                if _is_auth_refusal(head.status):
+                    r.detail += String(": ") + _refusal_words(registry, repository, head)
                 return r^
         except e:
             r.outcome = PUSH_FAILED
@@ -412,6 +515,15 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
                 r.outcome = mstep.outcome
                 r.detail = mstep.detail.copy()
                 return r^
+
+        if by_digest:
+            # No tag to add. The manifest was already there, or we just PUT it.
+            r.outcome = PUSH_NOOP if manifest_present else PUSH_UPLOADED
+            var rb0 = self._read_back(registry, repository, String(""), layout.manifest_digest)
+            if not rb0.ok:
+                r.outcome = rb0.outcome
+                r.detail = rb0.detail.copy()
+            return r^
 
         # 5. the tag.
         var tstep = self._put_tag(layout, registry, repository, tag)
@@ -509,7 +621,13 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
                 return _TagRead(
                     _TAG_UNREADABLE,
                     String(""),
-                    String("HEAD tag returned HTTP ") + String(head.status),
+                    String("HEAD tag returned HTTP ")
+                    + String(head.status)
+                    + (
+                        String(": ") + _refusal_words(registry, repository, head)
+                        if _is_auth_refusal(head.status)
+                        else String("")
+                    ),
                 )
             var d = head.header(String("docker-content-digest"))
             if d.byte_length() > 0:
@@ -557,9 +675,12 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
                 result.blobs_skipped += 1
                 return _Step()
             if hr.status != 404:
+                var why = String("")
+                if _is_auth_refusal(hr.status):
+                    why = String(": ") + _refusal_words(registry, repository, hr)
                 return _Step.stop(
                     PUSH_FAILED,
-                    String("HEAD blob ") + blob.digest + String(" returned HTTP ") + String(hr.status),
+                    String("HEAD blob ") + blob.digest + String(" returned HTTP ") + String(hr.status) + why,
                 )
         except e:
             return _Step.stop(
@@ -578,11 +699,15 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
                 )
                 var sr = self._call(start)
                 if sr.status != 202:
+                    var why = String("")
+                    if _is_auth_refusal(sr.status):
+                        why = String(": ") + _refusal_words(registry, repository, sr)
                     return _Step.stop(
                         PUSH_FAILED,
                         String("opening an upload session returned HTTP ")
                         + String(sr.status)
-                        + String(" (expected 202)"),
+                        + String(" (expected 202)")
+                        + why,
                     )
                 location = sr.header(String("location"))
             except e:
@@ -615,13 +740,29 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             put.with_body(data^)
             self._auth.apply(put)
             var status = -1
+            var confirmed = String("")
+            var refusal = String("")
             try:
                 var pr = self._transport.send(put^)
                 status = pr.status
+                confirmed = pr.header(String("docker-content-digest"))
+                if _is_auth_refusal(status):
+                    refusal = String(": ") + _refusal_words(registry, repository, pr)
             except e:
                 status = -1
 
             if status == 201:
+                # An ABSENT header is accepted (the URL already named the
+                # digest); a PRESENT one that names other content is not.
+                if confirmed.byte_length() > 0 and confirmed != blob.digest:
+                    return _Step.stop(
+                        PUSH_FAILED,
+                        String("the registry stored blob ")
+                        + blob.digest
+                        + String(" under a DIFFERENT digest ")
+                        + _printable(confirmed, 128)
+                        + String(" (Docker-Content-Digest); the content address was not preserved"),
+                    )
                 result.blobs_uploaded += 1
                 result.bytes_uploaded += blob.size
                 return _Step()
@@ -642,7 +783,7 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             if not transient:
                 return _Step.stop(
                     PUSH_FAILED,
-                    String("PUT blob ") + blob.digest + String(" returned HTTP ") + String(status),
+                    String("PUT blob ") + blob.digest + String(" returned HTTP ") + String(status) + refusal,
                 )
             self._backoff(session_try + 1)
         return _Step.stop(
@@ -672,7 +813,15 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             if not _is_2xx_created(resp.status):
                 return _Step.stop(
                     PUSH_FAILED,
-                    String("PUT manifest ") + reference + String(" returned HTTP ") + String(resp.status),
+                    String("PUT manifest ")
+                    + reference
+                    + String(" returned HTTP ")
+                    + String(resp.status)
+                    + (
+                        String(": ") + _refusal_words(registry, repository, resp)
+                        if _is_auth_refusal(resp.status)
+                        else String("")
+                    ),
                 )
             var confirmed = resp.header(String("docker-content-digest"))
             if confirmed.byte_length() > 0 and confirmed != layout.manifest_digest:
@@ -792,6 +941,8 @@ struct LayoutPusher[T: OciTransport](Movable, Deinitable):
             return _Step.stop(
                 PUSH_INDETERMINATE, String("read-back failed: ") + String(e)
             )
+        if tag.byte_length() == 0:
+            return _Step()
         var t = self._read_tag(registry, repository, tag)
         if t.state != _TAG_PRESENT or t.digest != digest:
             return _Step.stop(

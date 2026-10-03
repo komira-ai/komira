@@ -50,6 +50,8 @@ def write_test_layout(
     os_name: String = String("linux"),
     architecture: String = String("amd64"),
     declared_first_layer_size: Int = -1,
+    descriptor_media_type: String = String("default"),
+    manifest_media_type: String = String("default"),
 ) raises -> String:
     """Write a single-image layout at `dir` holding `layers` (their bytes are
     the layer blobs verbatim). Returns the manifest digest.
@@ -86,10 +88,23 @@ def write_test_layout(
             + String(size)
             + String("\n    }")
         )
+    # "default" = the OCI manifest type; "" = the field is OMITTED.
+    var own_type = manifest_media_type.copy()
+    if own_type == String("default"):
+        own_type = String(MEDIA_TYPE_OCI_MANIFEST)
+    var own_field = String("")
+    if own_type.byte_length() > 0:
+        own_field = String('  "mediaType": "') + own_type + String('",\n')
+    var desc_type = descriptor_media_type.copy()
+    if desc_type == String("default"):
+        desc_type = String(MEDIA_TYPE_OCI_MANIFEST)
+    var desc_field = String("")
+    if desc_type.byte_length() > 0:
+        desc_field = String('      "mediaType": "') + desc_type + String('",\n')
     var manifest = _bytes(
-        String('{\n  "schemaVersion": 2,\n  "mediaType": "')
-        + String(MEDIA_TYPE_OCI_MANIFEST)
-        + String('",\n  "config": {\n    "mediaType": "application/vnd.oci.image.config.v1+json",\n    "digest": "')
+        String('{\n  "schemaVersion": 2,\n')
+        + own_field
+        + String('  "config": {\n    "mediaType": "application/vnd.oci.image.config.v1+json",\n    "digest": "')
         + config_digest
         + String('",\n    "size": ')
         + String(len(config))
@@ -101,9 +116,9 @@ def write_test_layout(
     Path(dir + String("/index.json")).write_bytes(
         Span(
             _bytes(
-                String('{\n  "schemaVersion": 2,\n  "manifests": [\n    {\n      "mediaType": "')
-                + String(MEDIA_TYPE_OCI_MANIFEST)
-                + String('",\n      "digest": "')
+                String('{\n  "schemaVersion": 2,\n  "manifests": [\n    {\n')
+                + desc_field
+                + String('      "digest": "')
                 + manifest_digest
                 + String('",\n      "size": ')
                 + String(len(manifest))

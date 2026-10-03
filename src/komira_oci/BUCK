@@ -25,6 +25,7 @@ mojo_library(
         "tests/test_oci_location.mojo",
         "tests/test_oci_push_basic.mojo",
         "tests/test_oci_push_faults.mojo",
+        "tests/test_oci_push_hardening.mojo",
         "tests/test_oci_push_tags.mojo",
     ],
     visibility = ["PUBLIC"],

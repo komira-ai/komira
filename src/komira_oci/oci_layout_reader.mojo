@@ -416,11 +416,32 @@ def read_oci_layout(dir: String) raises -> OciLayout:
                 " manifest"
             )
         )
+    # The Content-Type a registry validates the manifest against is stated by
+    # the descriptor, by the manifest itself, or both; when both, they must
+    # agree, and when neither does there is nothing to PUT it under.
     var media_type = manifest_blob.media_type.copy()
-    if media_type.byte_length() == 0 and manifest_doc.has(String("mediaType")):
-        media_type = manifest_doc.get(String("mediaType")).as_string()
+    var own_media_type = String("")
+    if manifest_doc.has(String("mediaType")):
+        own_media_type = manifest_doc.get(String("mediaType")).as_string()
+    if media_type.byte_length() > 0 and own_media_type.byte_length() > 0:
+        if media_type != own_media_type:
+            raise Error(
+                String("oci layout: the manifest says it is '")
+                + own_media_type
+                + String("' but its index.json descriptor says '")
+                + media_type
+                + String("'; refusing to choose between them")
+            )
     if media_type.byte_length() == 0:
-        media_type = String(MEDIA_TYPE_OCI_MANIFEST)
+        media_type = own_media_type^
+    if media_type.byte_length() == 0:
+        raise Error(
+            String(
+                "oci layout: the manifest states no mediaType and neither does"
+                " its index.json descriptor; refusing to guess the"
+                " Content-Type a registry validates it against"
+            )
+        )
     if (
         media_type != String(MEDIA_TYPE_OCI_MANIFEST)
         and media_type != String(MEDIA_TYPE_DOCKER_MANIFEST)

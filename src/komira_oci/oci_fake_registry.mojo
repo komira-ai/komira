@@ -62,6 +62,11 @@ struct FakeOciRegistry(OciTransport, Movable, Deinitable):
     var location_mode: Int
     var omit_digest_header_on_head: Bool
     var required_authorization: String
+    # What a 401 for a wrong credential carries in `WWW-Authenticate`.
+    var www_authenticate: String
+    # The `Docker-Content-Digest` a blob PUT answers with: "" = the right one,
+    # "omit" = no header, anything else = that value verbatim.
+    var blob_put_digest_header: String
     var _expire_new_sessions: Int
 
     # ---- storage ----
@@ -105,6 +110,8 @@ struct FakeOciRegistry(OciTransport, Movable, Deinitable):
         self.location_mode = LOCATION_RELATIVE
         self.omit_digest_header_on_head = False
         self.required_authorization = String("")
+        self.www_authenticate = String("")
+        self.blob_put_digest_header = String("")
         self._expire_new_sessions = 0
         self._blob_repo = List[String]()
         self._blob_digest = List[String]()
@@ -274,7 +281,12 @@ struct FakeOciRegistry(OciTransport, Movable, Deinitable):
             self.required_authorization.byte_length() > 0
             and request.header_value(String("authorization")) != self.required_authorization
         ):
-            return _plain(401)
+            var denied = OciResponse(401)
+            if self.www_authenticate.byte_length() > 0:
+                denied.with_header(
+                    String("www-authenticate"), self.www_authenticate.copy()
+                )
+            return denied^
         if not request.path.startswith(String("/v2/")):
             return _plain(404)
         var rest = String(request.path[byte=4:])
@@ -366,7 +378,13 @@ struct FakeOciRegistry(OciTransport, Movable, Deinitable):
         self._sess_live[idx] = False
         _ = self.seed_blob(repo, body)
         var r = OciResponse(201)
-        r.with_header(String("docker-content-digest"), digest^)
+        if self.blob_put_digest_header.byte_length() == 0:
+            r.with_header(String("docker-content-digest"), digest^)
+        elif self.blob_put_digest_header != String("omit"):
+            r.with_header(
+                String("docker-content-digest"),
+                self.blob_put_digest_header.copy(),
+            )
         return r^
 
     def _put_manifest(
