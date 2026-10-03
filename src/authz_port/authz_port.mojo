@@ -30,7 +30,7 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http.middleware import AuthedUser
+from komira_http_server.middleware import AuthedUser
 
 
 # =============================================================================

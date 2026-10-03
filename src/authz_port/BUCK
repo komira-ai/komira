@@ -10,7 +10,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
-        "//src/komira_http:komira_http",
+        "//src/komira_http_server:komira_http_server",
     ],
     visibility = ["PUBLIC"],
 )
