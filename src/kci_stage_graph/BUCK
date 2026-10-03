@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The machine file (format `kci.machine`): a release machine's stages, in
+# order, and the steps of each (BUILD, PUBLISH; DEPLOY and step validations
+# are reserved and refused). `kci run --stage S` runs one stage; kci_ci_check holds a CI
+# workflow to the same graph.
+#
+# Deps: the textproto lexer and kci_contract (the format's schema_version,
+# the step kinds, the platform table). Pure: it parses text it is given.
+#
+# The welded tests: every refusal by its message, and the authored field
+# names pinned as a golden list (a rename is a visible edit of that test).
+mojo_library(
+    name = "kci_stage_graph",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_contract:kci_contract",
+        "//src/komira_textproto:komira_textproto",
+    ],
+    test_srcs = [
+        # a valid file read back; every refusal, each naming its line
+        "tests/test_stage_graph_parse.mojo",
+        # the authored field names, golden
+        "tests/test_stage_graph_field_names.mojo",
+        # `kci run --only` against one stage: match, no-match, scope, order
+        "tests/test_stage_selection.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
