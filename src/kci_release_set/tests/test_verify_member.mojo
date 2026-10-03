@@ -18,7 +18,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_crypto import hex_lower_array_32, sha256_string
 from komira_json import JsonValue, parse_json_value
 
-from kci_release_set import verify_member
+from kci_release_set import member_platform, verify_member
 
 comptime _NAME = "komira_name_registry"
 comptime _FILE = "komira_name_registry-0.1.7-0.conda"
@@ -366,6 +366,27 @@ def test_python_is_accepted_without_conda_metadata() raises:
     assert_false(m.has_conda)
     assert_equal(m.build(), String(""))
     assert_equal(m.kind(), String(""))
+
+
+def test_a_members_platform_is_its_manifests() raises:
+    # A PYTHON wheel whose manifest says `noarch` is a noarch member of a
+    # linux-x86_64 release, not a linux-x86_64 one: the manifest states the
+    # platform (kci_artifact_manifest), and release.json records that one.
+    var d = _root(String("python_noarch")) + String("/") + String(_NAME)
+    makedirs(d, exist_ok=True)
+    var wheel = String("komira_name_registry-0.1.7-py3-none-any.whl")
+    _write(d + String("/") + wheel, String(_CONTENT))
+    _write(d + String("/METADATA"), String("Metadata-Version: 2.1\n"))
+    _write(
+        d + String("/manifest.json"),
+        _manifest(file=wheel, artifact_type=String("PYTHON"), metadata=String("METADATA")),
+    )
+    var m = verify_member(String(_NAME), d)
+    assert_equal(m.manifest.platform, String("noarch"))
+    assert_equal(member_platform(m, String("linux-x86_64")), String("noarch"))
+    # a CONDA member is its manifest's platform too
+    var c = verify_member(String(_NAME), _good(String("conda_platform")))
+    assert_equal(member_platform(c, String("linux-x86_64")), String("linux-x86_64"))
 
 
 def main() raises:
