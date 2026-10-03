@@ -33,7 +33,7 @@ from komira_core.plan.expr import (
     BIN_EQ,
 )
 from komira_core.plan.scalar_value import ScalarValue
-from komira_eval.runtime_expr import (
+from komira_kernels.runtime_expr import (
     EXPR_AND,
     EXPR_COL,
     EXPR_EQ_I64,

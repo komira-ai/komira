@@ -101,7 +101,7 @@ from komira_core.plan.col_expr import col
 from komira_core.plan.scalar_value import ScalarValue
 from komira_core.eval.arithmetic import eval_div, eval_div_scalar
 from komira_compiler.compiler_eval_column import _eval_column_expr
-from komira_eval.expr_interpreter import (
+from komira_kernels.expr_interpreter import (
     interpret_expr,
     RowContext,
     EVAL_KIND_NULL,
@@ -266,7 +266,7 @@ def test_plan_route_mod_by_zero_is_NULL_and_a_nonzero_divisor_computes() raises:
         Python / Mojo `%`  (FLOOR-mod, sign of the DIVISOR)  -> 1, **+1**, 0
 
     Mojo's `%` is floor-mod (--
-    `komira_eval/temporal_extract._dayofweek_from_days`), so row 1 is the row
+    `komira_kernels/temporal_extract._dayofweek_from_days`), so row 1 is the row
     that says which rule the engine implements, and the naive spelling is the
     WRONG one by 3.
     """

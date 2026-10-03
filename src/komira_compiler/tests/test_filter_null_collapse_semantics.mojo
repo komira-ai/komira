@@ -44,7 +44,7 @@ from komira_core.arrow.column import Column
 from komira_core.arrow.schema import Schema, SchemaBuilder, Field
 from komira_core.arrow.arrow_types import ArrowType
 from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_eval.selection_vector import SelectionVector
+from komira_core.eval.selection_vector import SelectionVector
 
 from komira_core.plan.expr import (
     Expr,

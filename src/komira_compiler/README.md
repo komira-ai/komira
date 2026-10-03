@@ -9,8 +9,9 @@ the runtime calls to filter and project record batches.
 ```
 komira_compiler -> komira_core   (LogicalPlan, Expr, StatsProvider trait,
                                   ScalarValue, Arrow arrays, helpers)
-komira_compiler -> komira_eval   (selection vectors, scalar/SIMD kernels,
-                                  the row-mode RuntimeExpr AST)
+komira_compiler -> komira_kernels (scalar/SIMD kernels, the row-mode
+                                  RuntimeExpr; selection vectors come from
+                                  komira_core.eval)
 komira_compiler -> komira_jsonl   (the `json_extract` kernel)
 ```
 

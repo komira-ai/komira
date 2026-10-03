@@ -34,7 +34,7 @@
 # Executing the inner plan needs a `EngineContext`, but the execution
 # entry (`komira_sdk.materialize` / `komira_sdk.session`) lives in the
 # SDK, and `komira_compiler/*` cannot import `komira_sdk` (the build
-# graph is `komira_sdk -> komira_compiler -> {komira_core, komira_eval}`;
+# graph is `komira_sdk -> komira_compiler -> {komira_core, komira_kernels}`;
 # a reverse-import is a layering inversion).
 #
 # The execution capability is injected at the `optimize` boundary, in a

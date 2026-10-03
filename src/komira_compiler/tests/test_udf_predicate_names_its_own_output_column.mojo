@@ -93,7 +93,7 @@ from komira_core.arrow.record_batch import RecordBatch
 from komira_core.arrow.schema import Schema, SchemaBuilder, Field
 from komira_core.arrow.arrow_types import ArrowType
 from komira_core.arrow.owned_aligned_buffer import OwnedAlignedBuffer
-from komira_eval.selection_vector import SelectionVector
+from komira_core.eval.selection_vector import SelectionVector
 
 from komira_core.plan.expr import Expr, BIN_ADD, BIN_GT
 from komira_core.plan.expr_udf_sites import udf_call_column_key

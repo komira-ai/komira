@@ -19,7 +19,7 @@ from komira_core.arrow.bitmap import Bitmap
 from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.io.heap_region import HeapRegion
 from komira_core.arrow.schema import Schema
-from komira_eval.selection_vector import SelectionVector
+from komira_core.eval.selection_vector import SelectionVector
 from komira_core.collections.slab import Slab
 
 from komira_core.plan.expr import (

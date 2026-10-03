@@ -3,8 +3,9 @@
 The compiler tier depends ONLY on:
   - komira_core   (PhysicalPlan IR, StatsProvider trait, ScalarValue,
                     LogicalPlan, Expr, AggExpr, helpers)
-  - komira_eval   (selection vectors + scalar/SIMD primitives reached
-                    through compiler_eval_predicate._eval_predicate)
+  - komira_kernels (scalar/SIMD primitives reached through
+                    compiler_eval_predicate._eval_predicate; selection
+                    vectors come from komira_core.eval)
 
 The compiler MUST NOT depend on the engine, komira_parquet, or
 komira_sdk (direct or transitive); its BUCK `deps` enforce this.

@@ -34,7 +34,7 @@ from komira_core.plan.expr import (
 from komira_core.plan.col_expr import col, date_to_days
 from komira_compiler.compiler_eval_column import _eval_column_expr
 
-from komira_eval.temporal_extract import (
+from komira_kernels.temporal_extract import (
     extract_year_date32,
     extract_month_date32,
     extract_day_date32,

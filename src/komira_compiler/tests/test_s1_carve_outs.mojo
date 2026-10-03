@@ -9,7 +9,7 @@
 #   Expr.cast_to_arrow constructor + _eval_cast arm wiring.
 #
 # S1.string-numeric-cast — STRING<->numeric parse / format kernels
-#   in komira_eval/cast_to_varchar_kernels.mojo.
+#   in komira_kernels/cast_to_varchar_kernels.mojo.
 #
 # Each test below was written BEFORE the production code passed (TDD-shaped)
 # and validates a single direction / edge case.
@@ -27,7 +27,7 @@ from komira_core.io.heap_region import HeapRegion
 from komira_core.plan.expr import Expr
 from komira_core.plan.expr_walk import walk_expr_field, ExecColRefFields
 from komira_compiler.compiler_eval_column import _eval_column_expr
-from komira_eval.cast_to_varchar_kernels import (
+from komira_kernels.cast_to_varchar_kernels import (
     i64_from_str, i32_from_str, f64_from_str, f32_from_str,
     i64_to_str, i32_to_str, f64_to_str, f32_to_str,
     cast_string_to_int64, cast_string_to_float64,

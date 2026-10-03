@@ -84,7 +84,7 @@ from komira_core.plan.scalar_value import (
 )
 from komira_core.arrow.schema import Schema
 
-from komira_eval.runtime_expr import (
+from komira_kernels.runtime_expr import (
     RuntimeExpr,
     EXPR_AND,
     EXPR_COL,

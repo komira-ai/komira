@@ -18,7 +18,7 @@ from komira_core.arrow.schema import Schema, SchemaBuilder, Field
 from komira_core.arrow.arrow_types import ArrowType
 from komira_core.arrow.column import Column
 from komira_core.collections.slab import Slab
-from komira_eval.selection_vector import SelectionVector
+from komira_core.eval.selection_vector import SelectionVector
 from komira_core.eval.comparison import eval_gt, eval_lt, eval_eq
 
 from komira_core.plan.expr import (

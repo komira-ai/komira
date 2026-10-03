@@ -21,7 +21,7 @@ from komira_core.arrow import PrimitiveArray, BooleanArray, Bitmap
 from komira_core.arrow.column import Column
 from komira_core.arrow.arrow_types import ArrowType
 from komira_core.arrow.schema import Schema, SchemaBuilder, Field, RecordBatch, RecordBatchBuilder
-from komira_eval import eval_and, eval_or, eval_not, eval_cast
+from komira_core.eval import eval_and, eval_or, eval_not, eval_cast
 from komira_core.plan.expr import Expr, BIN_ADD, BIN_MUL
 from komira_core.plan.scalar_value import ScalarValue
 from komira_compiler.compiler_eval_column import _eval_column_expr

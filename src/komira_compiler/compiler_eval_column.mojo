@@ -34,7 +34,7 @@ from komira_core.arrow.arrow_types import ArrowType
 # file's only col-vs-col comparison is `_col_cmp_nullable`, which is the
 # validity-honouring entry point; importing the raw ones back would re-open the
 # arm-by-arm choice that closed.
-from komira_eval.comparison_kleene import (
+from komira_kernels.comparison_kleene import (
     eval_col_gt_nullable, eval_col_lt_nullable, eval_col_eq_nullable,
     eval_col_ne_nullable, eval_col_le_nullable, eval_col_ge_nullable,
     kleene_cmp_finalize, NullPolicy,
@@ -55,7 +55,7 @@ from komira_core.io.heap_region import HeapRegion
 # add/sub at the BINARY_OP eval site.  Equality (BIN_EQ) is reachable for
 # free via the eq kernel; only ADD/SUB need a column-level allocator.
 from komira_core.arrow import IntervalMonthDayNanoArray
-from komira_eval import (
+from komira_core.eval import (
     add_interval_mdn,
     sub_interval_mdn,
     eval_eq_interval_mdn,
@@ -71,7 +71,7 @@ from komira_core.eval.decimal_cast import (
     string_to_decimal_i128,
 )
 # The string <-> numeric cast kernels.
-from komira_eval.cast_to_varchar_kernels import (
+from komira_kernels.cast_to_varchar_kernels import (
     cast_string_to_int64,
     cast_string_to_int32,
     cast_string_to_float64,
@@ -82,7 +82,7 @@ from komira_eval.cast_to_varchar_kernels import (
     cast_float32_to_string,
 )
 # Temporal extract (year/month/day/...).
-from komira_eval.temporal_extract import (
+from komira_kernels.temporal_extract import (
     extract_year_date32,
     extract_month_date32,
     extract_day_date32,
@@ -436,7 +436,7 @@ def _column_to_float64(
 # to `eval_col_gt_nullable`, logical `a = [NULL(100), 5, 200]` vs `b = [1,50,1]`:
 # row 0 (UNKNOWN) comes back data=1/valid — SELECTED as a TRUE — and row 2
 # (genuinely 200>1) comes back data=0/NULL — DROPPED as UNKNOWN. Wrong in BOTH
-# directions in one call. The mechanism lives in `komira_eval/comparison_kleene.mojo`
+# directions in one call. The mechanism lives in `komira_kernels/comparison_kleene.mojo`
 # (the offset block above `_validity_byte`), with its own offset-validity test.
 # The offset is a PARAMETER of the mechanism, so
 # `_col_cmp_nullable` is offset-correct for BOTH dispatchers without this file
@@ -879,7 +879,7 @@ def _eval_col_vs_col_promoted(
 #    PROJECTION ARM.
 # =============================================================================
 #
-# `BIN_MOD` (op 4) had an interpreter kernel (`komira_eval/expr_interpreter`)
+# `BIN_MOD` (op 4) had an interpreter kernel (`komira_kernels/expr_interpreter`)
 # and two generated kernel templates (IDs 64/65) and NO arm here, so `mod(a,b)`
 # BOUND and could not RUN: `unsupported int64 scalar binary op: 4` on the
 # col-vs-literal ladder and `unsupported int64 binary op: 4` on the col-vs-col
@@ -908,7 +908,7 @@ def _eval_col_vs_col_promoted(
 #   * DuckDB v1.5.3 `-17 % 5` = **-2** — TRUNCATED, remainder takes the sign of
 #     the DIVIDEND (C's rule).
 #   * Mojo's `%` is **FLOOR-mod** — and written down in
-#     `komira_eval/temporal_extract._dayofweek_from_days`, where the same fact
+#     `komira_kernels/temporal_extract._dayofweek_from_days`, where the same fact
 #     is load-bearing in the OPPOSITE direction. `-17 % 5` there is **3**.
 # So the language's own operator is the WRONG answer here by 5, and the two
 # conventions agree on every non-negative dividend — which is exactly why the

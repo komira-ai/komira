@@ -42,7 +42,7 @@ from komira_core.eval.string_comparison import (
     eval_large_string_like,
 )
 from komira_core.eval.arithmetic import eval_and, eval_or, eval_not
-from komira_eval.comparison_kleene import (
+from komira_kernels.comparison_kleene import (
     NullPolicy,
     kleene_cmp_finalize,
     kleene_cmp_finalize_scalar,
@@ -56,8 +56,8 @@ from komira_core.eval.dict_filter import (
     dict_filter_eval_bool_mask,
     dict_filter_eval_bool_mask_column,
 )
-from komira_eval.match_fn import MatchFn
-from komira_eval.builtin_match_fns import (
+from komira_kernels.match_fn import MatchFn
+from komira_kernels.builtin_match_fns import (
     LtI64, LeI64, GtI64, GeI64, EqI64, NeI64,
     LtF64, LeF64, GtF64, GeF64, EqF64, NeF64,
 )
@@ -669,7 +669,7 @@ def _eval_col_vs_col(
 # =============================================================================
 #
 # STRUCTURAL MIRROR of `dict_filter_eval_bool_mask` (the production STRING-dict
-# filter-over-codes path, `komira_eval/dict_filter.mojo`). The string kernel:
+# filter-over-codes path, `komira_core/eval/dict_filter.mojo`). The string kernel:
 #   Phase 1: evaluate the predicate against the D dictionary ENTRIES -> a
 #            D-sized keep-bit buffer (`dict_match`).
 #   Phase 2: scan the N per-row CODES against the keep-bit buffer, packing one
@@ -2216,7 +2216,7 @@ def _eval_predicate(expr: Expr, batch: RecordBatch) raises -> BooleanArray:
             # LARGE_STRING
             # predicate parity.  Pre-fix, this branch fell into the else and
             # raised — making any predicate on a LARGE_STRING column impossible.
-            # The Int64-offset kernels in komira_eval.string_comparison share
+            # The Int64-offset kernels in komira_core.eval.string_comparison share
             # one `@parameter fn _string_*_kernel[OffsetType]` body with the
             # StringArray path; byte-identical semantics, only the offset
             # element width differs.
