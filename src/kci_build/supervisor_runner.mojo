@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_build/supervisor_runner.mojo -- `ProcessRunner` over
-#   komira_supervisor: the one place `kci build` starts a real process.
+#   komira_supervisor: the one place the BUILD step starts a real process.
 # =============================================================================
 #
 # The child inherits this process's environment unchanged: kci adds no
@@ -11,7 +11,7 @@
 #
 # After the child exits, the pipes are read until both reach EOF, or until
 # nothing has arrived for `_LINGER_TICKS` ticks: a grandchild that inherited a
-# pipe (a build daemon, say) must not keep `kci build` waiting forever.
+# pipe (a build daemon, say) must not keep the BUILD step waiting forever.
 #
 # Pauses use `usleep`, not `std.time.sleep`: the latter declares `nanosleep`
 # with a signature that clashes with komira_async's at link time.

@@ -76,7 +76,7 @@ def _slash(dir: String) -> String:
 
 def _refuse_all(refusals: List[String]) raises:
     raise Error(
-        String("kci publish: the release directory is refused:\n  ")
+        String("PUBLISH step: the release directory is refused:\n  ")
         + String("\n  ").join(refusals)
     )
 
@@ -85,7 +85,7 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
     """Contract steps 0.1 and 0.2 (see the file header)."""
     if not isdir(dir):
         raise Error(
-            String("kci publish: the release directory '") + dir + String("' is not a directory")
+            String("PUBLISH step: the release directory '") + dir + String("' is not a directory")
         )
     var base = _slash(dir)
     var refusals = List[String]()

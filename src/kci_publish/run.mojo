@@ -138,7 +138,7 @@ def _read_back_rank(code: String) -> Int:
 
 
 def _record(mut r: PublishReport, i: Int, o: FileOutcome):
-    r.files[i].effect = o.action.copy()
+    r.files[i].effect = o.effect.copy()
     r.files[i].state_after = o.state_after
     r.lines.append(o.line.copy())
 

@@ -60,7 +60,7 @@ def guard_for_subdir(subdir: String) -> String:
 
 def _refuse(what: String, refusals: List[String]) raises:
     raise Error(
-        String("kci publish: ")
+        String("PUBLISH step: ")
         + what
         + String(" refused:\n  ")
         + String("\n  ").join(refusals)
@@ -76,7 +76,7 @@ def require_conda_only(members: List[ReleaseMember]) raises:
                 + members[i].declaration
                 + String("' is ")
                 + members[i].manifest.artifact_type
-                + String("; kci publish publishes CONDA packages only")
+                + String("; a PUBLISH step publishes CONDA packages only")
             )
     if len(refusals) > 0:
         _refuse(String("the release set is"), refusals)
@@ -170,7 +170,7 @@ def require_closure(members: List[ReleaseMember]) raises:
     var guard = guard_for_subdir(subdir)
     if guard.byte_length() == 0:
         refusals.append(
-            String("subdir '") + subdir + String("' has no platform guard in kci publish's table")
+            String("subdir '") + subdir + String("' has no platform guard in the PUBLISH step's table")
         )
         _refuse(String("requirement closure"), refusals)
     var compiler_pin = String(MOJO_COMPILER_PACKAGE) + String(" ==") + version

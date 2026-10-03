@@ -178,7 +178,7 @@ struct PublishCredential(RegistryCredential, Movable):
         an upload needs a credential."""
         if write_authorization.byte_length() == 0:
             raise Error(
-                "kci publish: the channel's credential resolved to nothing; an upload needs one"
+                "PUBLISH step: the channel's credential resolved to nothing; an upload needs one"
             )
         self._write = write_authorization^
         self._armed = True
@@ -200,10 +200,10 @@ struct PublishCredential(RegistryCredential, Movable):
 
     def authorization(mut self, surface: Int, host: String) raises -> String:
         if not self._configured:
-            raise Error("kci publish: the channel credential is not configured; the request was not sent")
+            raise Error("PUBLISH step: the channel credential is not configured; the request was not sent")
         if surface != self._surface:
-            refuse_surface(String("kci publish's channel credential"), surface)
-        refuse_other_host(String("kci publish's channel credential"), surface, host, self._host)
+            refuse_surface(String("the PUBLISH step's channel credential"), surface)
+        refuse_other_host(String("the PUBLISH step's channel credential"), surface, host, self._host)
         if self._armed:
             return self._write.copy()
         return self._read.copy()
@@ -217,19 +217,19 @@ comptime FILE_CANNOT_TELL: Int = 4
 
 
 struct FileOutcome(Copyable, Movable):
-    """What step 2 or 4 did with one file: a FILE_* result, the action word
+    """What step 2 or 4 did with one file: a FILE_* result, the effect word
     for the report, the state it ended in, and a line for a human.
 
     Layout: Ints and owned Strings. No pointer field."""
 
     var result: Int
-    var action: String
+    var effect: String
     var state_after: Int
     var line: String
 
-    def __init__(out self, result: Int, var action: String, state_after: Int, var line: String):
+    def __init__(out self, result: Int, var effect: String, state_after: Int, var line: String):
         self.result = result
-        self.action = action^
+        self.effect = effect^
         self.state_after = state_after
         self.line = line^
 

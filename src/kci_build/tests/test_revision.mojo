@@ -47,7 +47,7 @@ from kci_build import (
 
 comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
-comptime _PREFIX = "kci build: --revision-id: "
+comptime _PREFIX = "BUILD step: --revision-id: "
 
 
 def _fresh(tag: String) raises -> String:
@@ -194,7 +194,7 @@ def test_a_shallow_clone_is_refused() raises:
         + String("/repo' is a SHALLOW clone: the first-parent commit count there is the clone's")
         + String(" depth, not the history's, so the build number would be wrong; check out")
         + String(" with full history (actions/checkout fetch-depth: 0, or")
-        + String(" `git fetch --unshallow`) and run kci build again"),
+        + String(" `git fetch --unshallow`) and run `kci run --stage <stage>` again"),
     )
     assert_equal(len(g.calls), 1)
 

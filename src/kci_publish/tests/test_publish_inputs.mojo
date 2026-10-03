@@ -143,9 +143,38 @@ def test_release_json_is_a_marker_never_an_authority() raises:
     print("  test_release_json_is_a_marker_never_an_authority: PASS")
 
 
+def test_refusals_name_the_step_not_a_removed_verb() raises:
+    # `kci run --stage S` is the one verb for stages: a refusal names the
+    # PUBLISH step, never a removed verb.
+    var r = ExampleRelease()
+    var d = _root(String("noverb"))
+    r.write(d)
+    var missing = d + String("/no_such_release_dir")
+    var raised = False
+    try:
+        _ = example_loaded(r, missing)
+    except e:
+        raised = True
+        assert_true(String(e).startswith(String("PUBLISH step: the release directory '")), String(e))
+    assert_true(raised)
+
+    var d2 = _root(String("noverb_stray"))
+    r.write(d2)
+    makedirs(d2 + String("/komira_stray"), exist_ok=True)
+    raised = False
+    try:
+        _ = example_loaded(r, d2)
+    except e:
+        raised = True
+        assert_true(String(e).startswith(String("PUBLISH step: the release directory is refused:")), String(e))
+    assert_true(raised)
+    print("  test_refusals_name_the_step_not_a_removed_verb: PASS")
+
+
 def main() raises:
     test_control_loads()
     test_every_declared_artifact_and_nothing_else()
     test_each_member_is_verified_over_its_bytes()
     test_release_json_is_a_marker_never_an_authority()
+    test_refusals_name_the_step_not_a_removed_verb()
     print("test_publish_inputs: ALL PASS")
