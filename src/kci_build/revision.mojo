@@ -123,7 +123,7 @@ struct _Git(Movable):
 
     def _refuse(mut self, why: String):
         self.stop = StampResult(
-            String(OUTCOME_REFUSED), String(ERROR_REVISION), String("kci build: --revision-id: ") + why
+            String(OUTCOME_REFUSED), String(ERROR_REVISION), String("BUILD step: --revision-id: ") + why
         )
 
     def line[R: ProcessRunner](mut self, mut runner: R, var args: List[String]) -> String:
@@ -149,7 +149,7 @@ struct _Git(Movable):
             self.stop = StampResult(
                 String(OUTCOME_INDETERMINATE),
                 String(ERROR_CANNOT_TELL),
-                String("kci build: --revision-id: `") + spec.command_line()
+                String("BUILD step: --revision-id: `") + spec.command_line()
                 + String("` could not be started: ") + String(e),
             )
             return String("")
@@ -157,7 +157,7 @@ struct _Git(Movable):
             self.stop = StampResult(
                 String(OUTCOME_INDETERMINATE),
                 String(ERROR_CANNOT_TELL),
-                String("kci build: --revision-id: `") + spec.command_line() + String("` timed out"),
+                String("BUILD step: --revision-id: `") + spec.command_line() + String("` timed out"),
             )
             return String("")
         if not r.ok():
@@ -173,7 +173,7 @@ struct _Git(Movable):
             self.stop = StampResult(
                 String(OUTCOME_INDETERMINATE),
                 String(ERROR_CANNOT_TELL),
-                String("kci build: --revision-id: the output of `") + spec.command_line()
+                String("BUILD step: --revision-id: the output of `") + spec.command_line()
                 + String("` cannot be read: ") + String(e),
             )
             return String("")
@@ -226,7 +226,7 @@ def derive_release_stamp[R: ProcessRunner](req: BuildRequest, mut runner: R) -> 
                 + String("' is a SHALLOW clone: the first-parent commit count there is the clone's")
                 + String(" depth, not the history's, so the build number would be wrong; check out")
                 + String(" with full history (actions/checkout fetch-depth: 0, or")
-                + String(" `git fetch --unshallow`) and run kci build again")
+                + String(" `git fetch --unshallow`) and run `kci run --stage <stage>` again")
             )
         else:
             git._refuse(
@@ -279,5 +279,5 @@ def derive_release_stamp[R: ProcessRunner](req: BuildRequest, mut runner: R) -> 
         return StampResult(ReleaseStamp(rev^, source^, n, ts * 1000))
     except e:
         return StampResult(
-            String(OUTCOME_REFUSED), String(ERROR_REVISION), String("kci build: --revision-id: ") + String(e)
+            String(OUTCOME_REFUSED), String(ERROR_REVISION), String("BUILD step: --revision-id: ") + String(e)
         )

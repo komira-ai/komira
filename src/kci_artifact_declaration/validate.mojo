@@ -27,7 +27,7 @@
 # whose `name` is the declaration's, exactly) is checked by contract.mojo's
 # `require_one_manifest` and `require_manifest_name`, after the build.
 #
-# Not here, by design (kci publish, over the built manifests): every
+# Not here, by design (the PUBLISH step, over the built manifests): every
 # declared artifact built, versions in lockstep, exactly one metapackage
 # whose members are every library (a recommendation the CEO has not
 # answered; contract.mojo), requirement closure over the set.

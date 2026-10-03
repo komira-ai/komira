@@ -29,14 +29,14 @@
 # `metadata` is required for both artifact types. `file` and `metadata` are
 # paths; a relative one is relative to the directory holding the manifest.
 # A CONDA `metadata` is a bare file name: the file sits next to the
-# manifest, so copying the manifest's directory (as `kci build` does)
+# manifest, so copying the manifest's directory (as the BUILD step does)
 # cannot separate the two. Every value but `schema_version` is a string. A
 # missing required key, a key given twice, a key that does not belong to the
 # artifact type, a non-string or empty value and a sha256 that is not 64
 # lowercase hex characters are each refused, naming the manifest and the key.
 #
 # `render_artifact_manifest` writes the same format back, keys in the order
-# above, so what `kci build` writes is exactly what `kci publish` reads.
+# above, so what the BUILD step writes is exactly what the PUBLISH step reads.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -97,7 +97,7 @@ struct ArtifactManifest(Copyable, Movable, Deinitable):
 
         It is read from `file_path`, the path whose bytes get uploaded, and
         not from `file`, so the name and the bytes cannot come from two
-        different fields. A parsed manifest and `kci build` set both, and
+        different fields. A parsed manifest and the BUILD step set both, and
         both give the same last segment; a caller that builds a manifest by
         hand and sets only `file_path` still gets the right name."""
         var slash = self.file_path.rfind(String("/"))
@@ -263,9 +263,9 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
             source,
             String("artifact_type '")
             + m.artifact_type
-            # kci_publish's welded test matches this wording by its text;
-            # keep it unchanged so that verb can switch to this package.
-            + String("' is not published by kci publish (CONDA or PYTHON)"),
+            # Names the PUBLISH step: `kci run --stage S` is the one verb
+            # for stages.
+            + String("' is not published by the PUBLISH step (CONDA or PYTHON)"),
         )
     return m^
 

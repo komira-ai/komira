@@ -2,8 +2,8 @@
 
 usage: parse_manifest <manifest.json>...
 
-For each path: `read_artifact_manifest` (the parser `kci publish` uses), then
-`render_artifact_manifest` (the writer `kci build` uses); prints one line
+For each path: `read_artifact_manifest` (the parser the PUBLISH step uses), then
+`render_artifact_manifest` (the writer the BUILD step uses); prints one line
 
     OK <type> <name> <version> <subdir> <file> <sha256> metadata=<metadata> metadata_path=<metadata_path> render-identical=<yes|no>
 
