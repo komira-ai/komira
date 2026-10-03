@@ -149,6 +149,17 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
                 if t.signing_name != "logs" or t.signing_region != region:
                     why = "signs as " + t.signing_name + "/" + t.signing_region
                     return False
+            else:
+                # A custom endpoint needs no region to resolve, and there is
+                # then none to sign with.
+                try:
+                    _ = aws_signing_target(got, String(""), String("logs"))
+                    why = "signed with no region"
+                    return False
+                except e:
+                    if String(e).find("no signing region") < 0:
+                        why = "signing refused with: " + String(e)
+                        return False
         except e:
             why = "raised: " + String(e)
             return False

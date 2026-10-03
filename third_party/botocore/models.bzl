@@ -26,7 +26,8 @@ BOTOCORE_MODELS = {
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
     ),
-    # Amazon CloudWatch Logs (//src/komira_aws_logs).
+    # Amazon CloudWatch Logs (//src/komira_aws_logs), also the worked
+    # example of mojo_aws_client's docstring (//tools/build/cloud:aws.bzl).
     "logs": struct(
         api_version = "2014-03-28",
         sha256 = "b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30",
