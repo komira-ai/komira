@@ -819,15 +819,14 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
             extra^,
         )
 
-    def send_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B, conditional: Bool = False) raises -> HttpResult:
+    def send_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`send`, over the transport, signing clock, retry loop and budget
             given (`komira_aws_core.send_sigv4_signed_request_with`) instead of a
             connector from this client's factory, the wall clock and the
             standard retry loop. It returns the response, successful or not.
 
-            `conditional`: the request carries a precondition (`If-Match`,
-            `If-None-Match`) whose answer a resend can change, so it is resent
-            only when the service cannot have acted on it."""
+            A request carrying `If-Match` or `If-None-Match` is resent only
+            when the service cannot have acted on it (`aws_request_is_conditional`)."""
         var cred = self._creds_source.credentials()
         var extra = List[Header]()
         var content_type = String(String(
@@ -858,7 +857,6 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
             content_type^,
             req.body.copy(),
             extra^,
-            conditional=conditional,
         )
 
     def get_log_events(mut self, input: CloudWatchLogsGetLogEventsRequest) raises -> CloudWatchLogsGetLogEventsResponse:
@@ -869,11 +867,11 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
             return parse_get_log_events_response(res^.into_response())
         raise _komira_aws_logs_error(String("GetLogEvents"), res)
 
-    def get_log_events_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: CloudWatchLogsGetLogEventsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B, conditional: Bool = False) raises -> HttpResult:
+    def get_log_events_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: CloudWatchLogsGetLogEventsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
         """`GetLogEvents` over the given seams (`send_with`): the response, successful
             or not. `parse_get_log_events_response` reads a successful one."""
         var req = build_get_log_events_request(input)
-        return self.send_with(req^, transport, clock, retry, budget, conditional=conditional)
+        return self.send_with(req^, transport, clock, retry, budget)
 
 
 def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:

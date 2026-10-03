@@ -1071,9 +1071,9 @@ mod tests {
             let end = rest[1..].find("\n    def ").map_or(rest.len(), |e| e + 1);
             &rest[..end]
         };
-        assert!(with("head").contains("conditional=conditional, s3_200_error=True)\n"), "{src}");
+        assert!(with("head").contains("budget, s3_200_error=True)\n"), "{src}");
         for name in ["get", "get_bytes", "get_text", "drop", "put", "purge"] {
-            assert!(with(name).contains("conditional=conditional)\n"), "{name}: {src}");
+            assert!(with(name).contains("budget)\n"), "{name}: {src}");
         }
         assert_eq!(src.matches("s3_200_error=True").count(), 2, "{src}");
         // A pure module has no send.

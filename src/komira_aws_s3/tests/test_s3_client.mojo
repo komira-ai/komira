@@ -11,7 +11,8 @@
 # per call, threading the one credential source through them with
 # `into_creds_source`, as a bootstrap threads one through several clients.
 #
-# Rows: a conditional PutObject that loses the race (412), a ranged
+# Rows: a conditional PutObject that loses the race (412), and one not
+# resent after a 500 though the plain verb states no precondition, a ranged
 # GetObject (206), two ListObjectsV2 pages, CreateMultipartUpload,
 # UploadPart and CompleteMultipartUpload, an AbortMultipartUpload of an
 # upload that is gone (404 NoSuchUpload), and a HeadObject 404 (no body).
@@ -138,6 +139,26 @@ def _mk_412() raises -> ScriptedConnector:
     )
 
 
+def _mk_500_then_412() raises -> ScriptedConnector:
+    var c = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            "<Error><Code>InternalError</Code></Error>",
+            "Content-Type: application/xml\r\n",
+        )
+    )
+    c.arm_next(
+        _answer(
+            412,
+            "Precondition Failed",
+            "<Error><Code>PreconditionFailed</Code></Error>",
+            "Content-Type: application/xml\r\n",
+        )
+    )
+    return c^
+
+
 def _mk_206() raises -> ScriptedConnector:
     return ScriptedConnector.with_stream(
         _answer(
@@ -246,6 +267,19 @@ def test_conditional_put_loses_the_race() raises:
     # A 412 is the answer, not a fault: raised once, never retried, with
     # its code for the caller that turns it into "already exists".
     with assert_raises(contains="PutObject failed: HTTP 412 PreconditionFailed"):
+        _ = client.put_object(input)
+
+
+def test_plain_conditional_put_is_not_resent_after_a_500() raises:
+    # The plain verb states nothing about its precondition: the send reads
+    # the If-Match off the request, so a 500 that S3 may have answered
+    # having applied the write is returned as it is. Resent, the write
+    # would come back 412 and read as a lost race.
+    var client = _client(_mk_500_then_412, _creds())
+    var input = S3PutObjectRequest(String("lake"), String("manifest.json"))
+    input.set_body(_bytes(String('{"v":2}')))
+    input.set_if_match(String('"e1"'))
+    with assert_raises(contains="PutObject failed: HTTP 500 InternalError"):
         _ = client.put_object(input)
 
 
@@ -507,9 +541,7 @@ def test_verbs_over_injected_seams() raises:
     put.set_body(_bytes(String("{}")))
     put.set_if_match(String('"e1"'))
     var loop = _loop()
-    var res = client.put_object_with(
-        put, transport, clock, loop, budget, conditional=True
-    )
+    var res = client.put_object_with(put, transport, clock, loop, budget)
     assert_equal(res.status, 500)
     assert_equal(len(loop.sleeper().slept), 0)
     # Unconditional, the same 500 is retried (the next answer is the 200).
@@ -531,6 +563,7 @@ def test_verbs_over_injected_seams() raises:
 
 def main() raises:
     test_conditional_put_loses_the_race()
+    test_plain_conditional_put_is_not_resent_after_a_500()
     test_verbs_over_injected_seams()
     test_ranged_get_206()
     test_list_two_pages()

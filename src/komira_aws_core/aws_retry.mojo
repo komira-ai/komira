@@ -75,8 +75,9 @@
 # operations as replaceable) or when the caller states that the operation
 # is safe to repeat (`retry_safe`, for an operation whose model makes it so,
 # such as an idempotency token the caller set), and is not conditional: a
-# request carrying a precondition (`If-Match`, `If-None-Match`, which
-# `send_sigv4_signed_request_with` is told by `conditional`) is never
+# write carrying a precondition (an `If-Match` or `If-None-Match` header on
+# any method but GET and HEAD, `aws_request_is_conditional`, which
+# `send_sigv4_signed_request_with` reads off the request) is never
 # retry-safe, because a resend of one the service applied is answered 412,
 # and the caller would take its own write for a lost race. botocore resends every
 # operation, POST included, which can repeat an awsJson write (an SQS
@@ -104,6 +105,7 @@ from komira_retry import Backoff, Jitter, RetryClassifier, RetryPolicy, Verdict
 
 from ._text import sub
 from .creds_source import AWS_CREDENTIAL_MANDATORY_REFRESH_SECONDS
+from .sigv4 import Header
 
 
 # botocore: `DEFAULT_MAX_ATTEMPTS` of standard mode, every send counted.
@@ -147,6 +149,19 @@ def aws_method_is_idempotent(method: String) -> Bool:
         or method == "PUT"
         or method == "DELETE"
     )
+
+
+def aws_request_is_conditional(method: String, headers: List[Header]) -> Bool:
+    """Whether a request is a conditional write: its method is not GET or
+    HEAD and it carries an `If-Match` or `If-None-Match` header (the name
+    in any case). A resend of one the service applied is answered 412."""
+    if method == "GET" or method == "HEAD":
+        return False
+    for i in range(len(headers)):
+        var name = headers[i].name.lower()
+        if name == "if-match" or name == "if-none-match":
+            return True
+    return False
 
 
 def aws_is_throttling_code(code: String) -> Bool:

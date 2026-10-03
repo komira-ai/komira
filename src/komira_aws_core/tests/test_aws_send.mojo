@@ -14,7 +14,9 @@
 # at a later X-Amz-Date), the attempt limit and its exact backoff for a
 # fixed seed, a throttle and a dial failure resent for a POST, a 500 and a
 # dropped response not resent for a POST (and resent for a PUT), a
-# conditional PUT not resent after a 500 but resent after a throttle, S3's
+# conditional PUT not resent after a 500 but resent after a throttle (the
+# precondition read off its headers, in any case; a conditional GET is
+# resent), S3's
 # 200-with-<Error> retried for an operation that can answer one and read as
 # a 200 for one that cannot, a 4xx returned as it is, the budget, the
 # request as it reached the wire (komira_aws_core's AwsEchoConnector), and
@@ -42,6 +44,7 @@ from komira_aws_core import (
     Header,
     HttpResult,
     aws_json_error_info,
+    aws_request_is_conditional,
     aws_response_error_code,
     aws_standard_retry_policy,
     send_sigv4_signed_request,
@@ -164,9 +167,14 @@ def _send[X: AwsHttpTransport](
     uri: String,
     body: String = "",
     s3_200_error: Bool = False,
-    conditional: Bool = False,
+    precondition: String = "",
+    etag: String = "",
 ) raises -> HttpResult:
+    # `precondition`, when set, is a header name sent with the value `etag`.
     var budget = NoBudget()
+    var extra = List[Header]()
+    if precondition.byte_length() > 0:
+        extra.append(Header(precondition, etag))
     return send_sigv4_signed_request_with(
         t,
         clock,
@@ -180,9 +188,8 @@ def _send[X: AwsHttpTransport](
         uri,
         String("application/x-amz-json-1.0") if service == "sqs" else String(""),
         _bytes(body),
-        List[Header](),
+        extra,
         s3_200_error=s3_200_error,
-        conditional=conditional,
     )
 
 
@@ -321,11 +328,56 @@ def test_a_conditional_put_is_not_resent_after_a_500() raises:
     var loop = _loop()
     var res = _send(
         t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
-        conditional=True,
+        precondition="If-Match", etag='"e1"',
     )
     assert_equal(res.status, 500)
     assert_equal(len(t.sent), 1)
     assert_equal(len(loop.sleeper().slept), 0)
+
+
+def test_a_precondition_is_read_off_the_headers() raises:
+    # The send reads the precondition off the request itself, so a caller
+    # cannot forget to say so: the header's name in any case, either
+    # precondition, on any method but GET and HEAD.
+    var h = List[Header]()
+    assert_false(aws_request_is_conditional(String("PUT"), h))
+    h.append(Header(String("x-amz-meta-if-match"), String("*")))
+    assert_false(aws_request_is_conditional(String("PUT"), h))
+    h.append(Header(String("iF-nOnE-mAtCh"), String("*")))
+    assert_true(aws_request_is_conditional(String("PUT"), h))
+    assert_true(aws_request_is_conditional(String("POST"), h))
+    assert_true(aws_request_is_conditional(String("DELETE"), h))
+    assert_false(aws_request_is_conditional(String("GET"), h))
+    assert_false(aws_request_is_conditional(String("HEAD"), h))
+    # A lower-case If-None-Match on a PUT is held to the same rule end to
+    # end: not resent after a 500.
+    var c = ScriptedConnector.with_stream(
+        _response(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
+    )
+    c.arm_next(_response(200, "OK", ""))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = _send(
+        t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
+        precondition="if-none-match", etag="*",
+    )
+    assert_equal(res.status, 500)
+    assert_equal(len(t.sent), 1)
+    # A conditional GET is a read: resent after the same 500.
+    var g = ScriptedConnector.with_stream(
+        _response(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
+    )
+    g.arm_next(_response(200, "OK", "x"))
+    var tg = _transport(g^)
+    var clock2 = SteppingClock(_T0, 1)
+    var loop2 = _loop()
+    var got = _send(
+        tg, clock2, loop2, String("GET"), String("s3"), String("/b/k"),
+        precondition="If-Match", etag='"e1"',
+    )
+    assert_equal(got.status, 200)
+    assert_equal(len(tg.sent), 2)
 
 
 def test_a_conditional_put_is_resent_after_a_throttle() raises:
@@ -340,7 +392,7 @@ def test_a_conditional_put_is_resent_after_a_throttle() raises:
     var loop = _loop()
     var res = _send(
         t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
-        conditional=True,
+        precondition="If-Match", etag='"e1"',
     )
     assert_equal(res.status, 200)
     assert_equal(len(t.sent), 2)
@@ -568,6 +620,7 @@ def main() raises:
     test_a_post_is_resent_after_a_failed_dial()
     test_a_post_is_not_resent_after_a_500()
     test_a_conditional_put_is_not_resent_after_a_500()
+    test_a_precondition_is_read_off_the_headers()
     test_a_conditional_put_is_resent_after_a_throttle()
     test_a_dropped_response()
     test_s3_200_with_error_is_retried()

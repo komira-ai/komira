@@ -1992,7 +1992,7 @@ impl<'a> AwsEmitter<'a> {
         let seam_args = "mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B";
         let target_arg = if ruleset { ", target: AwsSigningTarget" } else { "" };
         self.line(&format!(
-            "def send_with[{seams}](mut self, var req: AwsRequest{target_arg}, {seam_args}, conditional: Bool = False{s3_flag}) raises -> HttpResult:"
+            "def send_with[{seams}](mut self, var req: AwsRequest{target_arg}, {seam_args}{s3_flag}) raises -> HttpResult:"
         ));
         self.push();
         self.line("\"\"\"`send`, over the transport, signing clock, retry loop and budget");
@@ -2003,9 +2003,8 @@ impl<'a> AwsEmitter<'a> {
         self.line("    connector from this client's factory, the wall clock and the");
         self.line("    standard retry loop. It returns the response, successful or not.");
         self.blank();
-        self.line("    `conditional`: the request carries a precondition (`If-Match`,");
-        self.line("    `If-None-Match`) whose answer a resend can change, so it is resent");
-        self.line("    only when the service cannot have acted on it.\"\"\"");
+        self.line("    A request carrying `If-Match` or `If-None-Match` is resent only");
+        self.line("    when the service cannot have acted on it (`aws_request_is_conditional`).\"\"\"");
         self.emit_send_assembly(ruleset);
         self.line("return send_sigv4_signed_request_with(");
         self.push();
@@ -2014,7 +2013,6 @@ impl<'a> AwsEmitter<'a> {
         self.line("retry,");
         self.line("budget,");
         self.emit_send_args(ruleset, &p);
-        self.line("conditional=conditional,");
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
         }
@@ -2096,7 +2094,7 @@ impl<'a> AwsEmitter<'a> {
             // response: a caller that branches on the status (a 412, a 206)
             // or owns its clock and retry loop reads it with the parser.
             self.line(&format!(
-                "def {verb}_with[{seams}](mut self, input: {in_ty}, {seam_args}, conditional: Bool = False) raises -> HttpResult:"
+                "def {verb}_with[{seams}](mut self, input: {in_ty}, {seam_args}) raises -> HttpResult:"
             ));
             self.push();
             self.line(&format!(
@@ -2110,7 +2108,7 @@ impl<'a> AwsEmitter<'a> {
             self.emit_op_request(m, ruleset, &p);
             let tgt = if ruleset { "target, " } else { "" };
             self.line(&format!(
-                "return self.send_with(req^, {tgt}transport, clock, retry, budget, conditional=conditional{s3_200})"
+                "return self.send_with(req^, {tgt}transport, clock, retry, budget{s3_200})"
             ));
             self.pop();
             self.blank();

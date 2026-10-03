@@ -81,6 +81,7 @@ from .aws_retry import (
     AwsAttempt,
     AwsRetryClassifier,
     aws_method_is_idempotent,
+    aws_request_is_conditional,
     aws_standard_retry_policy,
 )
 from .aws_xml import aws_xml_body_is_error, aws_xml_error_info
@@ -282,7 +283,6 @@ def send_sigv4_signed_request_with[
     retry_safe: Bool = False,
     s3_200_error: Bool = False,
     payload: AwsPayloadSigning = AwsPayloadSigning.hashed(),
-    conditional: Bool = False,
 ) raises -> HttpResult:
     """`send_sigv4_signed_request` over the given seams (module header).
 
@@ -294,16 +294,15 @@ def send_sigv4_signed_request_with[
     transport's error and why it was not retried. `retry_safe` states that
     the operation may be repeated though its method is not idempotent;
     `s3_200_error` that a 200 whose body is an <Error> is S3's error (the
-    module header). `conditional` states that the request carries a
-    precondition (`If-Match`, `If-None-Match`) whose answer a resend can
-    change: a conditional PUT the service applied before its answer was
-    lost is answered 412 when sent again, and the caller would take its own
-    write for a lost race. Such a request is not retry-safe whatever its
-    method or `retry_safe`, so it is resent only when the service cannot
-    have acted on it."""
+    module header). A write carrying a precondition, an `If-Match` or
+    `If-None-Match` among `extra` (`aws_request_is_conditional`), is not
+    retry-safe whatever its method or `retry_safe`: a conditional PUT the
+    service applied before its answer was lost is answered 412 when sent
+    again, and the caller would take its own write for a lost race. It is
+    resent only when the service cannot have acted on it."""
     var safe = (
         retry_safe or aws_method_is_idempotent(method)
-    ) and not conditional
+    ) and not aws_request_is_conditional(method, extra)
     var classifier = AwsRetryClassifier()
     retry.start()
     while True:

@@ -6,7 +6,8 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check")
 # 35) builds :komira_aws_logs_client_send_surface by name, never this
 # package's pattern. What is pinned is that `mode = "client"` reaches the
 # generator without `--pure-only`: the generated module carries the
-# signed-send surface, its komira_http_core import and the error builder
+# signed-send surface, its komira_http_core import, the send over injected
+# seams (`send_with`) with its komira_retry import, and the error builder
 # that reads an error's code and message through komira_aws_core's
 # aws_json_error_info. (Pure mode leaving all of that out is the `absent`
 # of ../mojo_aws_client's gen_check.) The client library itself is not
@@ -49,5 +50,9 @@ gen_check(
         "var info = aws_json_error_info(res.to_response())",
         "var code = info.code.copy()",
         "var msg = info.message.copy()",
+        "from komira_retry import (",
+        "    RetryLoop,",
+        "def send_with[",
+        "return send_sigv4_signed_request_with(",
     ],
 )

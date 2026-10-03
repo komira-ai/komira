@@ -159,6 +159,7 @@ from .aws_retry import (
     aws_is_transient_code,
     aws_is_transient_status,
     aws_method_is_idempotent,
+    aws_request_is_conditional,
     aws_standard_retry_policy,
     aws_transport_error_kind,
     aws_transport_error_unsent,
