@@ -157,8 +157,10 @@ gen_check(
 # komira_grpc and komira_gcp_core (which only the komira cell can depend on),
 # one method of each streaming shape. Exactly the package's files were
 # generated; the client takes a GcpTokenSource, runs the token hook in every
-# method and raises a gRPC status through komira_gcp_core. Its text is held
-# to a golden in ../proto_codegen (tiny_grpc_gcp).
+# method and raises a gRPC status through komira_gcp_core. Its tiny.mojo is
+# byte for byte the golden of ../proto_codegen (tiny_grpc_gcp), which is
+# generated from a second copy of the proto in the tests cell; this check is
+# what keeps the two copies the same API.
 _TINY_GRPC = "komira//tools/build/proto-codegen/gcp_grpc:komira_gcp_tiny_grpc"
 
 gen_check(
@@ -173,6 +175,7 @@ gen_check(
         "tiny.mojo",
     ],
     gen = _TINY_GRPC + "[gen]",
+    identical = {"tiny.mojo": "//functional/proto_codegen:tiny_grpc_gcp_golden"},
     present = [
         "from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error",
         "struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",

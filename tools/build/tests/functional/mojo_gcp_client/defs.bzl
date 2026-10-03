@@ -3,8 +3,9 @@
 `gen` is a generated directory, here a library's `[gen]` sub-target, so the
 check also proves mojo_library's `gen` attribute re-exports it. The action
 fails unless the directory holds exactly `files`, no file holds a string of
-`absent`, and some file holds each string of `present` (which keeps an
-absence check from passing over an empty output). `buck2 build` of the
+`absent`, some file holds each string of `present` (which keeps an
+absence check from passing over an empty output), and each file named in
+`identical` is byte for byte the file it maps to. `buck2 build` of the
 target IS the check. `tests_check` is described above its definition.
 """
 
@@ -12,7 +13,7 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:proto.bzl", "MojoProtoToolchainInfo")
 
 _CHECK = """
-BB="$1"; GEN="$2"; MARK="$3"; FILES="$4"; N="$5"; shift 5
+BB="$1"; GEN="$2"; MARK="$3"; FILES="$4"; N="$5"; M="$6"; shift 6
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
 got="$("$BB" ls -A "$GEN" | "$BB" sort | "$BB" tr '\\n' ' ')"
 if [ "$got" != "$FILES " ]; then
@@ -26,6 +27,13 @@ while [ "$N" -gt 0 ]; do
         exit 1
     fi
     shift; N=$((N - 1))
+done
+while [ "$M" -gt 0 ]; do
+    if ! "$BB" diff -u "$2" "$GEN/$1" >&2; then
+        echo "the generated $1 is not byte for byte $2" >&2
+        exit 1
+    fi
+    shift 2; M=$((M - 1))
 done
 for s in "$@"; do
     if ! "$BB" grep -rqF -- "$s" "$GEN"; then
@@ -53,7 +61,9 @@ def _gen_check_impl(ctx):
             mark.as_output(),
             " ".join(sorted(ctx.attrs.files)),
             str(len(ctx.attrs.absent)),
+            str(len(ctx.attrs.identical)),
             ctx.attrs.absent,
+            [cmd_args(name, src) for name, src in sorted(ctx.attrs.identical.items())],
             ctx.attrs.present,
         ),
         category = "gcp_client_gen_check",
@@ -66,6 +76,7 @@ _gen_check = rule(
         "absent": attrs.list(attrs.string(), default = []),
         "files": attrs.list(attrs.string()),
         "gen": attrs.source(allow_directory = True),
+        "identical": attrs.dict(attrs.string(), attrs.source(), default = {}),
         "present": attrs.list(attrs.string()),
         "_proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
     },

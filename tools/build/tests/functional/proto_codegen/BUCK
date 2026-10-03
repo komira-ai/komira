@@ -507,10 +507,12 @@ proto_codegen_golden(
 # corpus/example/tiny/v1/tiny.proto is the API of
 # komira//tools/build/proto-codegen/gcp_grpc, one method of each streaming
 # shape; that package compiles the same module against komira_grpc and
-# komira_gcp_core and tests it over a scripted connector. The client takes a GcpTokenSource, fixes classic gRPC,
-# runs the token hook (`authorization: Bearer <token>` on the call's
-# CallOptions) first in every method, and raises a gRPC status through
-# komira_gcp_core's gcp_grpc_status_error, outside the response decode.
+# komira_gcp_core and tests it over a scripted connector, and
+# ../mojo_gcp_client holds its generated tiny.mojo to this golden byte for
+# byte. The client takes a GcpTokenSource, fixes classic gRPC, runs the token
+# hook (`authorization: Bearer <token>` on the call's CallOptions) first in
+# every method, and raises a gRPC status through komira_gcp_core's
+# gcp_grpc_status_error, outside the response decode.
 proto_codegen_golden(
     name = "tiny_grpc_gcp",
     srcs = ["corpus/example/tiny/v1/tiny.proto"],
@@ -528,6 +530,15 @@ proto_codegen_golden(
         "self._authorize(opts)",
         "raise _gcp_grpc_error(String(\"/example.tiny.v1.TinyService/SyncThings\"), String(e))",
     ],
+)
+
+# For tests//functional/mojo_gcp_client, which holds the module the komira
+# cell compiles and tests to this golden, so the two proto copies cannot
+# drift apart unnoticed.
+export_file(
+    name = "tiny_grpc_gcp_golden",
+    src = "golden/tiny_grpc_gcp/tiny.mojo.golden",
+    visibility = ["//functional/mojo_gcp_client:"],
 )
 
 # A Google Cloud client speaks classic gRPC or REST, never Connect.
