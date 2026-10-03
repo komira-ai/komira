@@ -1,10 +1,12 @@
 # =============================================================================
-# komira_search_meta/metastore.mojo
-#   The search split registry: publish a split, list the live split set,
-#   retire and reap merged-away splits, and read across per-writer shards.
+# komira_search_catalog/metastore.mojo
+#   The durable split catalog of a search index: publish a split, list the
+#   live split set, retire and reap merged-away splits, and read across
+#   per-writer shards. It is the store behind komira_search_scan's
+#   `SearchIndexCatalog` seam.
 # =============================================================================
 #
-# The registry is not one mutable `meta.json` object. It is an append-only
+# The catalog is not one mutable `meta.json` object. It is an append-only
 # manifest lineage, `<index>/meta/manifest/<seq>.chunk`, managed by
 # `komira_objectstore.CasManifestStore`, and each chunk body is one encoded
 # `SplitSummary`. `SearchMetastore` adds only the payload and the replay
@@ -27,7 +29,7 @@
 # the split sets (`list_live_splits_across_shards`). The shard id and path
 # helpers live in `komira_objectstore.sublineage_shard_keys` so that other
 # indexes can shard the same way without depending on search; they are
-# imported here and stay reachable as `komira_search_meta.metastore.<name>`.
+# imported here and stay reachable as `komira_search_catalog.metastore.<name>`.
 #
 # No pointers cross this module's API; every value is owned data or a store
 # handle held by value.
@@ -50,7 +52,7 @@ from komira_objectstore.sublineage_shard_keys import (
     _discover_shard_ids,
 )
 
-from komira_search_meta.split_summary import (
+from komira_search_catalog.split_summary import (
     LiveSplitEntry,
     SPLIT_SUMMARY_VERSION,
     SplitSummary,
@@ -82,11 +84,11 @@ def _is_not_found(msg: String) -> Bool:
 struct SearchMetastore[Storage: ConditionalWriteStore](
     Movable, Deinitable
 ):
-    """The split registry for one manifest lineage (one index, or one shard
+    """The split catalog for one manifest lineage (one index, or one shard
     of an index). It holds the `CasManifestStore` by value plus the index
     name.
 
-    The life of a split in the registry:
+    The life of a split in the catalog:
       1. `publish` appends its summary; from then on it is live.
       2. Compaction publishes a merged split listing it as an input; readers
          now hide it.
@@ -120,7 +122,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         Ordering contract: the split object at `summary.object_key` must
         already be durably written before this call. Written first, a split
         that is never published is a harmless orphan: nothing references it
-        and a retention sweep can delete it. Published first, the registry
+        and a retention sweep can delete it. Published first, the catalog
         would point readers at an object that does not exist yet.
 
         The chunk's record count is `summary.doc_count`; the substrate uses it
@@ -201,7 +203,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         return out^
 
     def generation(self) raises -> Int64:
-        """The registry generation: head.chunk_seq + 1, the number of
+        """The catalog generation: head.chunk_seq + 1, the number of
         committed chunks. A query planner folds this into its plan-cache key,
         so it must change whenever the catalog changes; otherwise a query
         issued after a publish could be answered from a plan cached before

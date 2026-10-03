@@ -1,5 +1,7 @@
-"""`komira_search_meta` — the search split registry over a generic object
-store.
+"""`komira_search_catalog` — the durable split catalog of a search index:
+which splits are published, retired and merged, across per-writer
+sub-lineages. It is the store behind the `SearchIndexCatalog` seam of
+`komira_search_scan`, built over a generic object store.
 
   * split_summary: `SplitSummary`, the catalog record for one published
     split, and its dependency-free binary codec.

@@ -51,7 +51,7 @@ from komira_objectstore import (
     head_key,
 )
 
-from komira_search_meta.metastore import (
+from komira_search_catalog.metastore import (
     SplitSummary,
     make_split_summary,
     make_merged_split_summary,
