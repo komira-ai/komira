@@ -40,7 +40,7 @@ def test_system_rng_two_instances_diverge_across_a_clock_tick() raises:
     rate.**
 
     The mechanism is the CLOCK GRANULARITY, not the RNG. `SystemRng.new()`
-    seeds from `komira_obs.clock.now_ns()`, which on macOS is
+    seeds from `komira_clock.now_ns()`, which on macOS is
     `clock_gettime_nsec_np(CLOCK_UPTIME_RAW)` — the raw mach timer, whose
     timebase on Apple Silicon is 125/3 ns, i.e. **one tick ≈ 41.7 ns**. Two
     adjacent `SystemRng.new()` calls take far less than one tick, so they read

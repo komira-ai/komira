@@ -36,7 +36,7 @@
 
 from std.builtin.swap import swap
 
-from komira_obs.clock import now_ns as _system_now_ns
+from komira_clock import now_ns as _system_now_ns
 
 from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
@@ -515,7 +515,7 @@ struct RecvRingBody[S: IoStream](
     var _trailers_emitted: Bool
 
     # THE BODY'S OWN ABSOLUTE WALL-CLOCK DEADLINE (microseconds, same
-    # monotonic epoch as `komira_obs.clock.now_ns`), or `_NO_DEADLINE`.
+    # monotonic epoch as `komira_clock.now_ns`), or `_NO_DEADLINE`.
     #
     # WARNING: IT RIDES THE BODY, NOT THE CALL SITE, AND THAT IS THE WHOLE
     # DESIGN. `collect_body` deliberately does NOT take a deadline parameter.
@@ -786,7 +786,7 @@ struct RecvRingBody[S: IoStream](
 
     def set_deadline_us(mut self, us: Int):
         """Stamp this body's
-        ABSOLUTE wall-clock deadline (microseconds on `komira_obs.clock`'s
+        ABSOLUTE wall-clock deadline (microseconds on `komira_clock`'s
         monotonic epoch). Called by `OutboundDriver` at every site that
         constructs a body over a live stream; `poll_frame` enforces it.
 
