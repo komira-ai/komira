@@ -1,4 +1,4 @@
-"""komira_broker_coord: the broker-node coordinator, with no database.
+"""komira_broker_coordinator: the broker-node coordinator, with no database.
 
 The minimal control service for a multi-node broker. It serves the
 broker-heartbeat endpoint over an HttpServer and persists the partition
@@ -18,7 +18,7 @@ Dependencies (cycle-free):
                        broker cluster map types)
   komira_objectstore   (CloneableConditionalWriteStore trait)
   komira_clock         (now_unix_ms, the wall clock)
-None of these depends back on komira_broker_coord: it is a leaf above the
+None of these depends back on komira_broker_coordinator: it is a leaf above the
 broker.
 """
 

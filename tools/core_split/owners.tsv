@@ -20,7 +20,7 @@ komira_async	origin/lib/komira_async
 komira_avro	origin/lib/komira_avro
 komira_aws_core	origin/main
 komira_broker	origin/lib/komira_broker
-komira_broker_coord	origin/lib/komira_broker_coord
+komira_broker_coordinator	origin/lib/komira_broker_coordinator
 komira_compiler	origin/lib/komira_compiler
 komira_connect	origin/lib/komira_connect
 komira_crypto	origin/lib/komira_crypto-encoding
