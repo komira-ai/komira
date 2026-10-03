@@ -5,7 +5,7 @@
 # socket-free parser shape +
 # §7.0 typed surfaces.
 #
-# This parser is symmetric to komira_http/codec/h1/parser.mojo's
+# This parser is symmetric to komira_http_core/codec/h1/parser.mojo's
 # `parse_request_head` but operates on the response side:
 #   request side  : METHOD path HTTP/1.1\r\n + headers
 #   response side : HTTP/1.1 status reason\r\n + headers

@@ -110,7 +110,7 @@ This token marks that stronger fact, and it is emitted from ONE branch —
 name it rides on, it is a PROOF and not a label. ⛔ Do not emit it anywhere
 that has not established `_write_cursor == 0`.
 
-Read by `komira_http.client.client._h1_pooled_retry_is_safe`."""
+Read by `komira_http_client.client._h1_pooled_retry_is_safe`."""
 
 comptime OUTBOUND_STATE_TLS_HANDSHAKING: UInt8 = 1
 """RESERVED — TLS handshake state. Driver enters here when
@@ -1566,7 +1566,7 @@ struct OutboundDriver(Movable, Deinitable):
     # op-id registration. Nothing about this driver needed that mechanism —
     # it parks on exactly ONE fd, which is the op-id path's whole domain —
     # and using it cost two properties that
-    # `komira_http.transport.stream_park.park_on_pending` now supplies:
+    # `komira_http_core.transport.stream_park.park_on_pending` now supplies:
     #
     #   * `park_on_fds` returns `epoll_wait`'s raw event count on the SHARED
     #     reactor epoll fd, so a FOREIGN fd's readiness ended this park and

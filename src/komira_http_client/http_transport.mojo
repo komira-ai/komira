@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/client/http_transport.mojo
+# komira_http_client/http_transport.mojo
 #   The VENDOR-NEUTRAL HTTP round-trip SEAM — the `HttpTransport` trait, the
 #   `TransportResponse` {status, body} POD, the method tags, the two recording
 #   TEST DOUBLES (`ScriptedTransport` / `SharedScriptedTransport`), AND the
@@ -13,7 +13,7 @@
 # production over `TlsHttpTransport` (public-CA TLS, HTTP/1.1).
 #
 # ⚠ WHY `TransportResponse` AND NOT `HttpResponse`. `HttpResponse` is the
-# SERVER-side response type in `komira_http/codec/types.mojo`, and a client
+# SERVER-side response type in `komira_http_core/codec/types.mojo`, and a client
 # that also serves HTTP holds both types at once. `TransportResponse` says
 # exactly what it is — the `HttpTransport` seam's return value — and collides
 # with nothing.

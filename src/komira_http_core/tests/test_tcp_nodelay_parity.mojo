@@ -160,5 +160,5 @@ def main() raises:
     test_kernel_tcp_connector_sets_tcp_nodelay()
     print("  test_kernel_tcp_connector_sets_tcp_nodelay OK")
     print(
-        "PASS komira_http.client test_tcp_nodelay_parity"
+        "PASS komira_http_client test_tcp_nodelay_parity"
     )

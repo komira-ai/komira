@@ -1279,7 +1279,7 @@ struct RecvRingBody[S: IoStream](
                           tell a short body from an empty one.
 
         `state` is the raw `_DECODE_STATE_*` ordinal from
-        `komira_http/codec/h1/chunked.mojo` §1. It is a number because those
+        `komira_http_core/codec/h1/chunked.mojo` §1. It is a number because those
         constants are module-private there; rendering it as a NAME wants a
         `state_name()` on `ChunkedDecoder`, which is that module's change to
         make. The four named numbers above are self-describing and are what

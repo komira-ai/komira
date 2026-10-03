@@ -3176,7 +3176,7 @@ def allocate_client_stream_id_or_raise(
 #
 # Its body — the bounded slice, invariant (ii)'s re-poll, the buffered-
 # plaintext guard, the `ready` vs idle return, and asking the stream for the
-# wait direction — IS `komira_http.transport.stream_park.park_on_pending`,
+# wait direction — IS `komira_http_core.transport.stream_park.park_on_pending`,
 # which is now the only way any driver in this repo waits on a stream. It was
 # the ONE of the four park helpers that already asked the conformer; the
 # collapse moved that property to the other two rather than copying it.

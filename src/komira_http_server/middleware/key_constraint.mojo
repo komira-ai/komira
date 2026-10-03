@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/middleware/key_constraint.mojo — the credential ATTENUATION POD.
+# komira_http_server/middleware/key_constraint.mojo — the credential ATTENUATION POD.
 # =============================================================================
 #
 # `KeyConstraint` is what a CONSTRAINED credential (an `spk_` API key) puts on

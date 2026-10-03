@@ -2,7 +2,7 @@
 already had.
 
 ⭐ THE POINT, in one sentence: the existing `AutoAdvancingClock` /
-`IncrementingClock` idiom (`komira_http/tests/test_timeout_layer.mojo:64-199`)
+`IncrementingClock` idiom (`komira_http_client/tests/test_timeout_layer.mojo:64-199`)
 advances on EVERY `now_us()` call, so a client that BUSY-POLLS reads the clock
 more often than one that parks and is therefore REWARDED with elapsed time it
 never spent. A promptness assertion written against it passes for the spinner.

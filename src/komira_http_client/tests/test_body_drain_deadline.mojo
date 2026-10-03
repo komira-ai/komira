@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/tests/test_body_drain_deadline.mojo
+# komira_http_client/tests/test_body_drain_deadline.mojo
 #   THE REQUEST'S WALL-CLOCK BUDGET MUST BOUND THE BODY DRAIN, NOT ONLY THE
 #   HEAD.
 # =============================================================================
