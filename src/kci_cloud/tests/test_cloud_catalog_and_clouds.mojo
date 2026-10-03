@@ -1,18 +1,19 @@
 # =============================================================================
-# test_platform_catalog_and_registry.mojo
+# test_cloud_catalog_and_clouds.mojo
 # =============================================================================
 #
 # 1. The catalog table agrees with the generated code where generated code can
 #    answer: a body decoded from wire field N maps back to N, every exposed
 #    output is a value of `Output`, every accepted access a value of `Access`.
 # 2. The declaration rule: every catalog type implemented or declared absent,
-#    exactly once; ABSENT_BY_DESIGN only for PLATFORM_BOUND; NOT_YET only for
-#    PORTABLE; a complete platform has no NOT_YET; nothing outside the
-#    catalog. v1 has no PLATFORM_BOUND type, so the bound rows here are a
-#    synthetic catalog row (field 19, the number held for a later bound type),
+#    exactly once; ABSENT_BY_DESIGN only for CLOUD_BOUND; NOT_YET only for
+#    PORTABLE; a complete cloud has no NOT_YET; nothing outside the
+#    catalog. v1 has no CLOUD_BOUND type, so the bound rows here are a
+#    synthetic catalog row (field 18, a number held for a later type),
 #    which is exactly how the rule must already hold when one is added.
-# 3. The registry refuses a duplicate id and an illegal declaration at add.
-# 4. `PlatformId` compares by value.
+# 3. `Clouds` refuses a duplicate id and an illegal declaration at add, and
+#    `resolve` refuses an id that is not built in, suggesting the closest.
+# 4. `CloudId` compares by value.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -20,17 +21,17 @@ from std.testing import assert_equal, assert_true, assert_false
 from komira_proto_codec import decode_proto
 from kci_resource_proto.resource import Access, Output, Resource
 
-from kci_platform import (
+from kci_cloud import (
     Absence,
     Catalog,
     CatalogType,
-    PlatformEntry,
-    PlatformId,
-    Registry,
+    CloudEntry,
+    CloudId,
+    Clouds,
     ABSENT_BY_DESIGN,
     NOT_YET,
     PORTABLE,
-    PLATFORM_BOUND,
+    CLOUD_BOUND,
     FIELD_SERVICE,
     FIELD_JOB,
     body_field,
@@ -82,7 +83,7 @@ def test_catalog_names_are_generated_enum_values() raises:
     var c = Catalog.v1()
     for i in range(len(c.types)):
         ref t = c.types[i]
-        assert_true(t.portability == PORTABLE or t.portability == PLATFORM_BOUND)
+        assert_true(t.portability == PORTABLE or t.portability == CLOUD_BOUND)
         for k in range(len(t.exposes)):
             assert_true(
                 Output.is_known_json_name(t.exposes[k]) and t.exposes[k] != "OUTPUT_UNSET",
@@ -119,14 +120,14 @@ def test_catalog_refuses_unset_and_duplicates() raises:
 
 def _with_bound() raises -> Catalog:
     var c = Catalog.v1()
-    c.add(CatalogType(19, String("bound_thing"), PLATFORM_BOUND, List[String](), List[String]()))
+    c.add(CatalogType(18, String("bound_thing"), CLOUD_BOUND, List[String](), List[String]()))
     return c^
 
 
 def _entry(
     complete: Bool, var implemented: List[Int], var absences: List[Absence]
-) -> PlatformEntry:
-    return PlatformEntry(PlatformId(String("p")), complete, implemented^, absences^)
+) -> CloudEntry:
+    return CloudEntry(CloudId(String("p")), complete, implemented^, absences^)
 
 
 def _ints(a: Int, b: Int = -1) -> List[Int]:
@@ -142,13 +143,13 @@ def test_declaration_rules() raises:
 
     # legal: complete, hosts both portable types, bound type absent by design
     var ok = List[Absence]()
-    ok.append(Absence(19, ABSENT_BY_DESIGN, String("no such service here")))
+    ok.append(Absence(18, ABSENT_BY_DESIGN, String("no such service here")))
     assert_equal(len(declaration_problems(c, _entry(True, _ints(10, 11), ok^))), 0)
 
     # legal: not complete, a portable type not yet
     var later = List[Absence]()
     later.append(Absence(11, NOT_YET, String("no runner")))
-    later.append(Absence(19, ABSENT_BY_DESIGN, String("none")))
+    later.append(Absence(18, ABSENT_BY_DESIGN, String("none")))
     assert_equal(len(declaration_problems(c, _entry(False, _ints(10), later^))), 0)
 
     # a type nobody decided about
@@ -158,38 +159,38 @@ def test_declaration_rules() raises:
     # ABSENT_BY_DESIGN on a portable type
     var a1 = List[Absence]()
     a1.append(Absence(11, ABSENT_BY_DESIGN, String("x")))
-    a1.append(Absence(19, ABSENT_BY_DESIGN, String("x")))
+    a1.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     p = _joined(declaration_problems(c, _entry(False, _ints(10), a1^)))
     assert_true(_has(p, "'job' is PORTABLE; ABSENT_BY_DESIGN is legal only"), p)
 
     # NOT_YET on a bound type
     var a2 = List[Absence]()
-    a2.append(Absence(19, NOT_YET, String("x")))
+    a2.append(Absence(18, NOT_YET, String("x")))
     p = _joined(declaration_problems(c, _entry(False, _ints(10, 11), a2^)))
-    assert_true(_has(p, "'bound_thing' is PLATFORM_BOUND; NOT_YET is legal only"), p)
+    assert_true(_has(p, "'bound_thing' is CLOUD_BOUND; NOT_YET is legal only"), p)
 
     # complete, yet a portable type is not yet
     var a3 = List[Absence]()
     a3.append(Absence(11, NOT_YET, String("x")))
-    a3.append(Absence(19, ABSENT_BY_DESIGN, String("x")))
+    a3.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     p = _joined(declaration_problems(c, _entry(True, _ints(10), a3^)))
     assert_true(_has(p, "claims to be complete but does not host PORTABLE type 'job'"), p)
 
     # declared twice
     var a4 = List[Absence]()
     a4.append(Absence(11, NOT_YET, String("x")))
-    a4.append(Absence(19, ABSENT_BY_DESIGN, String("x")))
+    a4.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     p = _joined(declaration_problems(c, _entry(False, _ints(10, 11), a4^)))
     assert_true(_has(p, "'job' is declared more than once"), p)
 
     # outside the catalog
     var a5 = List[Absence]()
-    a5.append(Absence(19, ABSENT_BY_DESIGN, String("x")))
+    a5.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     a5.append(Absence(77, NOT_YET, String("x")))
     p = _joined(declaration_problems(c, _entry(True, _ints(10, 11), a5^)))
     assert_true(_has(p, "declares field 77 absent, which is not in the catalog"), p)
     var a6 = List[Absence]()
-    a6.append(Absence(19, ABSENT_BY_DESIGN, String("x")))
+    a6.append(Absence(18, ABSENT_BY_DESIGN, String("x")))
     var impl = _ints(10, 11)
     impl.append(40)
     p = _joined(declaration_problems(c, _entry(True, impl^, a6^)))
@@ -197,19 +198,19 @@ def test_declaration_rules() raises:
     print("  test_declaration_rules: PASS")
 
 
-def test_registry_refuses_at_add() raises:
-    var reg = Registry(Catalog.v1())
-    reg.add(PlatformEntry(PlatformId(String("a")), True, _ints(10, 11), List[Absence]()))
+def test_clouds_refuse_at_add() raises:
+    var reg = Clouds(Catalog.v1())
+    reg.add(CloudEntry(CloudId(String("a")), True, _ints(10, 11), List[Absence]()))
     var raised = False
     try:
-        reg.add(PlatformEntry(PlatformId(String("a")), True, _ints(10, 11), List[Absence]()))
+        reg.add(CloudEntry(CloudId(String("a")), True, _ints(10, 11), List[Absence]()))
     except e:
         raised = True
-        assert_true(_has(String(e), "linked twice"), String(e))
+        assert_true(_has(String(e), "built in twice"), String(e))
     assert_true(raised, "a duplicate id is refused")
     raised = False
     try:
-        reg.add(PlatformEntry(PlatformId(String("b")), True, _ints(10), List[Absence]()))
+        reg.add(CloudEntry(CloudId(String("b")), True, _ints(10), List[Absence]()))
     except e:
         raised = True
         assert_true(_has(String(e), "'job' is neither implemented"), String(e))
@@ -217,22 +218,59 @@ def test_registry_refuses_at_add() raises:
     assert_equal(len(reg.entries), 1)
     assert_equal(len(reg.implementers(FIELD_JOB)), 1)
     assert_equal(reg.implementers(FIELD_JOB)[0], "a")
-    print("  test_registry_refuses_at_add: PASS")
+    print("  test_clouds_refuse_at_add: PASS")
 
 
-def test_platform_id_compares_by_value() raises:
-    assert_true(PlatformId(String("x")) == PlatformId(String("x")))
-    assert_true(PlatformId(String("x")) != PlatformId(String("y")))
-    assert_equal(PlatformId(String("x")).text(), "x")
-    print("  test_platform_id_compares_by_value: PASS")
+def test_resolve_names_the_built_in_clouds() raises:
+    """There is no plugin path: an id that is not built in is refused, naming
+    every built-in cloud and the closest one when it is within two edits."""
+    var clouds = Clouds(Catalog.v1())
+    clouds.add(CloudEntry(CloudId(String("mem")), True, _ints(10, 11), List[Absence]()))
+    var lite = List[Absence]()
+    lite.append(Absence(11, NOT_YET, String("no runner")))
+    clouds.add(CloudEntry(CloudId(String("mem-lite")), False, _ints(10), lite^))
+    assert_true(clouds.resolve(String("mem-lite")) == CloudId(String("mem-lite")))
+    assert_equal(clouds.ids()[1], "mem-lite")
+
+    var raised = False
+    try:
+        _ = clouds.resolve(String("mme"))
+    except e:
+        raised = True
+        var t = String(e)
+        assert_true(
+            _has(t, 'kci: "mme" is not a cloud built into this kci (built in: mem, mem-lite)'),
+            t,
+        )
+        assert_true(_has(t, 'did you mean "mem"?'), t)
+    assert_true(raised, "a typo is refused")
+
+    raised = False
+    try:
+        _ = clouds.resolve(String("gcp"))
+    except e:
+        raised = True
+        var t = String(e)
+        assert_true(_has(t, "(built in: mem, mem-lite)"), t)
+        assert_false(_has(t, "did you mean"), "no suggestion when nothing is close: " + t)
+    assert_true(raised, "a cloud this kci was not built with is refused")
+    print("  test_resolve_names_the_built_in_clouds: PASS")
+
+
+def test_cloud_id_compares_by_value() raises:
+    assert_true(CloudId(String("x")) == CloudId(String("x")))
+    assert_true(CloudId(String("x")) != CloudId(String("y")))
+    assert_equal(CloudId(String("x")).text(), "x")
+    print("  test_cloud_id_compares_by_value: PASS")
 
 
 def main() raises:
-    print("test_platform_catalog_and_registry")
+    print("test_cloud_catalog_and_clouds")
     test_catalog_arms_match_the_wire()
     test_catalog_names_are_generated_enum_values()
     test_catalog_refuses_unset_and_duplicates()
     test_declaration_rules()
-    test_registry_refuses_at_add()
-    test_platform_id_compares_by_value()
-    print("ALL kci_platform CATALOG AND REGISTRY TESTS PASSED")
+    test_clouds_refuse_at_add()
+    test_resolve_names_the_built_in_clouds()
+    test_cloud_id_compares_by_value()
+    print("ALL kci_cloud CATALOG AND CLOUDS TESTS PASSED")

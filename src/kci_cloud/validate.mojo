@@ -1,42 +1,46 @@
 # =============================================================================
-# kci_platform/validate.mojo: the validate phase.
+# kci_cloud/validate.mojo: the validate phase.
 # =============================================================================
 #
 # Runs before anything is lowered, planned or created, and needs no
 # credentials. It collects EVERY finding in one pass, so an author sees all of
 # their problems at once:
 #
-#   1. GRAPH findings, true on every platform: ids (non-empty, unique, no
-#      `/`, which is the node-id separator), a type set, every `Ref` naming a
+#   1. GRAPH findings, true on every cloud: ids (unique, and of the id
+#      grammar `[a-z][a-z0-9-]{0,23}` with no trailing or doubled `-`, so
+#      never the node-id separator `/`), a type set, every `Ref` naming a
 #      resource of the list, an output the producer's type exposes, an access
-#      verb the target's type accepts, and values that are resolved (a build
+#      verb the target's type accepts, values that are resolved (a build
 #      output or a release parameter must have been substituted by the deploy
-#      facade before a platform ever sees the resource).
-#   2. COVERAGE findings: the chosen platform has no adapter for a type. The
-#      text carries the platform's typed absence and the linked platforms
+#      facade before a cloud ever sees the resource) in `env` of a service
+#      AND of a job, a variable set by `env` or by `secret_env` but not both,
+#      a secret reference with a name, and an image platform (OS + CPU) this
+#      kci deploys: v1 deploys `linux/amd64` only (empty means that).
+#   2. COVERAGE findings: the chosen cloud has no adapter for a type. The
+#      text carries the cloud's typed absence and the built-in clouds
 #      that do host the type.
-#   3. LIMIT findings: the platform hosts the type but refuses a value or a
-#      shape (`AdapterSet.check`), for example a public URL on a platform
+#   3. LIMIT findings: the cloud hosts the type but refuses a value or a
+#      shape (`CloudAdapter.check`), for example a public URL on a cloud
 #      with no public ingress.
 #
 # ⛔ A FINDING IS A REFUSAL OF THE WHOLE GRAPH. There is no "skip what the
-# platform cannot do": that turns "cannot do it yet" into a silently thinner
+# cloud cannot do": that turns "cannot do it yet" into a silently thinner
 # deploy.
 # =============================================================================
 
 from kci_resource_proto.resource import Resource, Ref, Value
 
-from kci_platform.adapter import (
-    AdapterSet,
+from kci_cloud.adapter import (
+    CloudAdapter,
     Finding,
     FINDING_GRAPH,
     FINDING_COVERAGE,
     FINDING_LIMIT,
     absence_word,
 )
-from kci_platform.catalog import Catalog, body_field, portability_word
-from kci_platform.platform_id import PlatformId
-from kci_platform.registry import Registry
+from kci_cloud.catalog import Catalog, body_field, portability_word
+from kci_cloud.cloud_id import CloudId
+from kci_cloud.clouds import Clouds
 
 
 def _index_of_id(resources: List[Resource], id: String) -> Int:
@@ -143,7 +147,7 @@ def _check_value(
                 String("release parameter \"")
                 + v.param.value()
                 + String(
-                    "\" is unresolved; parameters are substituted before a platform"
+                    "\" is unresolved; parameters are substituted before a cloud"
                     " sees the graph"
                 ),
             )
@@ -152,16 +156,75 @@ def _check_value(
     out.append(Finding(FINDING_GRAPH, owner, path, String("has no value")))
 
 
+comptime ID_MAX_BYTES = 24
+"""The longest resource id. Narrowing later breaks authors; widening is free."""
+
+comptime V1_IMAGE_PLATFORM = "linux/amd64"
+"""The one image platform (OS + CPU) v1 deploys. An empty `Image.platform`
+means this value."""
+
+
+def id_problem(id: String) -> String:
+    """Why `id` is not a legal resource id, or empty if it is. The grammar is
+    `[a-z][a-z0-9-]{0,23}`, with no trailing `-` and no `--`: a lowercase
+    letter first, then lowercase letters, digits and single dashes. It keeps
+    every id usable in a cloud name or label after a prefix, and it never
+    contains `/`, the engine's node-id separator."""
+    var b = id.as_bytes()
+    var n = len(b)
+    if n == 0:
+        return String("empty id")
+    if n > ID_MAX_BYTES:
+        return (
+            String("id is ")
+            + String(n)
+            + String(" bytes; at most ")
+            + String(ID_MAX_BYTES)
+        )
+    if Int(b[0]) < ord("a") or Int(b[0]) > ord("z"):
+        return String("an id starts with a lowercase letter (a-z)")
+    for i in range(n):
+        var c = Int(b[i])
+        var lower = c >= ord("a") and c <= ord("z")
+        var digit = c >= ord("0") and c <= ord("9")
+        if not lower and not digit and c != ord("-"):
+            return String("an id is lowercase letters, digits and '-' only")
+        if c == ord("-") and i > 0 and Int(b[i - 1]) == ord("-"):
+            return String("an id may not contain '--'")
+    if Int(b[n - 1]) == ord("-"):
+        return String("an id may not end with '-'")
+    return String("")
+
+
 def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding]):
-    """Shared by the two v1 types: an image must be a content digest by now."""
+    """Shared by the two v1 types: an image must be a content digest by now,
+    of the one platform v1 deploys."""
     var has = False
     var arm = 0
+    var platform = String("")
     if r._oneof0_case == 1 and Bool(r.service.value().image):
         has = True
         arm = r.service.value().image.value()._oneof0_case
+        platform = r.service.value().image.value().platform.copy()
     elif r._oneof0_case == 2 and Bool(r.job.value().image):
         has = True
         arm = r.job.value().image.value()._oneof0_case
+        platform = r.job.value().image.value().platform.copy()
+    if has and platform.byte_length() > 0 and platform != V1_IMAGE_PLATFORM:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path + String(".platform"),
+                String("platform \"")
+                + platform
+                + String("\" is not deployable: v1 deploys ")
+                + String(V1_IMAGE_PLATFORM)
+                + String(" only (an empty platform means ")
+                + String(V1_IMAGE_PLATFORM)
+                + String(")"),
+            )
+        )
     if not has or arm == 0:
         out.append(Finding(FINDING_GRAPH, owner, path, String("no image")))
     elif arm == 1:
@@ -178,25 +241,44 @@ def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding
         )
 
 
+def _check_secret(
+    owner: String,
+    path: String,
+    also_in_env: Bool,
+    name: String,
+    mut out: List[Finding],
+):
+    """One `secret_env` entry: a reference with a name, to a variable that
+    `env` does not also set (the container would get one of two values, and
+    which one is the cloud's choice, not the author's)."""
+    if also_in_env:
+        out.append(
+            Finding(
+                FINDING_GRAPH,
+                owner,
+                path,
+                String(
+                    "the variable is set by env and by secret_env; set it in one"
+                ),
+            )
+        )
+    if name.byte_length() == 0:
+        out.append(Finding(FINDING_GRAPH, owner, path, String("a secret reference with no name")))
+
+
 def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]:
-    """Every platform-independent finding of `resources`."""
+    """Every cloud-independent finding of `resources`."""
     var out = List[Finding]()
     for i in range(len(resources)):
         ref r = resources[i]
         var id = r.id.copy()
+        var bad_id = id_problem(id)
         if id.byte_length() == 0:
             out.append(
-                Finding(FINDING_GRAPH, String("#") + String(i), String("id"), String("empty id"))
+                Finding(FINDING_GRAPH, String("#") + String(i), String("id"), bad_id)
             )
-        elif id.find("/") >= 0:
-            out.append(
-                Finding(
-                    FINDING_GRAPH,
-                    id,
-                    String("id"),
-                    String("an id may not contain '/', the engine's node-id separator"),
-                )
-            )
+        elif bad_id.byte_length() > 0:
+            out.append(Finding(FINDING_GRAPH, id, String("id"), bad_id))
         for k in range(i):
             if resources[k].id == id and id.byte_length() > 0:
                 out.append(
@@ -231,6 +313,33 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
                     id,
                     String("service.env.") + entry.key,
                     entry.value,
+                    out,
+                )
+            for entry in svc.secret_env.items():
+                _check_secret(
+                    id,
+                    String("service.secret_env.") + entry.key,
+                    entry.key in svc.env,
+                    entry.value.name,
+                    out,
+                )
+        if field == 11:
+            ref job = r.job.value()
+            for entry in job.env.items():
+                _check_value(
+                    catalog,
+                    resources,
+                    id,
+                    String("job.env.") + entry.key,
+                    entry.value,
+                    out,
+                )
+            for entry in job.secret_env.items():
+                _check_secret(
+                    id,
+                    String("job.secret_env.") + entry.key,
+                    entry.key in job.env,
+                    entry.value.name,
                     out,
                 )
         for u in range(len(r.uses)):
@@ -287,21 +396,19 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
 
 
 def validate_for[
-    S: AdapterSet
-](registry: Registry, platform: S, resources: List[Resource]) raises -> List[Finding]:
-    """Every finding of `resources` on `platform`: graph, coverage, limits.
-    Raises only if `platform` was never registered (a wiring defect in
-    `main`, not a property of the graph)."""
-    var pid = platform.platform_id()
-    var e = registry.find(pid)
+    S: CloudAdapter
+](clouds: Clouds, cloud: S, resources: List[Resource]) raises -> List[Finding]:
+    """Every finding of `resources` on `cloud`: graph, coverage, limits.
+    Raises only if `cloud` is not one of `clouds` (`main` built an adapter
+    it did not list: a wiring defect, not a property of the graph); the
+    message is `Clouds.resolve`'s."""
+    var pid = cloud.cloud_id()
+    var e = clouds.find(pid)
     if e < 0:
-        raise Error(
-            String("platform \"")
-            + pid.text()
-            + String("\" is not registered; register every linked set in main")
-        )
-    ref entry = registry.entries[e]
-    var out = graph_findings(registry.catalog, resources)
+        _ = clouds.resolve(pid.text())  # raises, naming the built-in clouds
+        raise Error(String("unreachable: ") + pid.text())
+    ref entry = clouds.entries[e]
+    var out = graph_findings(clouds.catalog, resources)
     for i in range(len(resources)):
         ref r = resources[i]
         var field: Int
@@ -309,20 +416,20 @@ def validate_for[
             field = body_field(r)
         except:
             continue  # already a graph finding
-        var t = registry.catalog.index_of(field)
+        var t = clouds.catalog.index_of(field)
         if t < 0:
             continue
         if entry.implements(field):
-            var limits = platform.check(r)
+            var limits = cloud.check(r)
             for k in range(len(limits)):
                 out.append(limits[k].copy())
             continue
-        ref ct = registry.catalog.types[t]
+        ref ct = clouds.catalog.types[t]
         var why = String("no adapter")
         var a = entry.absence_of(field)
         if a:
             why = absence_word(a.value().kind) + String(": ") + a.value().reason
-        var hosts = registry.implementers(field)
+        var hosts = clouds.implementers(field)
         var listed = String("none")
         if len(hosts) > 0:
             listed = hosts[0].copy()
@@ -336,22 +443,22 @@ def validate_for[
                 ct.name
                 + String(" (")
                 + portability_word(ct.portability)
-                + String("): no adapter in platform \"")
+                + String("): no adapter in cloud \"")
                 + pid.text()
                 + String("\" (")
                 + why
-                + String(")\n      platforms linked into this kci that implement it: ")
+                + String(")\n      clouds built into this kci that implement it: ")
                 + listed,
             )
         )
     return out^
 
 
-def refusal_text(platform: PlatformId, findings: List[Finding]) -> String:
+def refusal_text(cloud: CloudId, findings: List[Finding]) -> String:
     """The one rendering of a refused graph."""
     var s = (
-        String("kci: cannot apply this graph to platform \"")
-        + platform.text()
+        String("kci: cannot apply this graph to cloud \"")
+        + cloud.text()
         + String("\". Nothing was created.")
     )
     for i in range(len(findings)):

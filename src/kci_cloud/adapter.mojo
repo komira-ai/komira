@@ -1,42 +1,46 @@
 # =============================================================================
-# kci_platform/adapter.mojo: the seam a platform implements.
+# kci_cloud/adapter.mojo: what a cloud adapter built into kci provides.
 # =============================================================================
 #
-# An ADAPTER SET is everything one platform knows: which catalog types it
-# hosts, why it does not host the others, what values it refuses, and how it
-# turns one authored resource into engine nodes. It is linked into the kci
-# binary statically; `main` is the one place that names the linked sets.
+# A CLOUD ADAPTER is everything kci knows about one cloud: which catalog
+# types it hosts, why it does not host the others, what values it refuses,
+# and how it turns one authored resource into engine nodes. Every adapter is
+# built into kci; `main` is the one place that lists them. This trait is an
+# INTERNAL module boundary that keeps kci testable against the in-memory
+# clouds. It is not a plugin interface and not frozen: it changes in an
+# ordinary pull request, together with every adapter.
 #
-# WHY ONE TRAIT PER SET AND NOT AN ERASED LIST OF PER-TYPE ADAPTERS. The
-# questions asked across platforms (which linked platform hosts a type, is a
-# declaration legal) need only DATA, so the registry holds a plain
-# description of each set (`registry.describe`). The one call that needs a
-# set's code, lowering, is made on the set the invocation chose, through a
-# generic function. So no function-pointer table is needed here; the engine's
-# `ErasedResource` remains the only erasure, one level down.
+# WHY ONE TRAIT PER CLOUD AND NOT AN ERASED LIST OF PER-TYPE ADAPTERS. The
+# questions asked across clouds (which built-in cloud hosts a type, is a
+# declaration legal) need only DATA, so `Clouds` holds a plain description
+# of each adapter (`clouds.describe`). The one call that needs an adapter's
+# code, lowering, is made on the adapter of the stage's cell, through a
+# generic function. So no function-pointer table is needed here; the
+# engine's `ErasedResource` remains the only erasure, one level down.
 #
 # THE CONTRACT, each held by a test in this package or by the conformance kit:
 #   * `implemented` and `absences` together name every catalog type exactly
-#     once (`registry.declaration_problems`): a new type forces a decision on
-#     every platform.
-#   * ABSENT_BY_DESIGN is legal only for a PLATFORM_BOUND type, NOT_YET only
-#     for a PORTABLE one, and a set that calls itself complete has no NOT_YET.
+#     once (`clouds.declaration_problems`): a new type forces a decision on
+#     every cloud.
+#   * ABSENT_BY_DESIGN is legal only for a CLOUD_BOUND type, NOT_YET only
+#     for a PORTABLE one, and an adapter that calls itself complete has no
+#     NOT_YET.
 #   * `check` is pure and returns EVERY finding for one resource; it is only
-#     asked about types the set implements.
+#     asked about types the adapter implements.
 #   * `lower` is pure (no network, no clock): resource in, nodes out, node ids
 #     `<resource id>/<role>`, every node's `owner()` the resource id.
 # =============================================================================
 
-from kci_iac import ResourceGraph
+from kci_reconciler import ResourceGraph
 from kci_resource_proto.resource import Resource
 
-from kci_platform.platform_id import PlatformId
+from kci_cloud.cloud_id import CloudId
 
 
 comptime ABSENT_BY_DESIGN: Int = 1
-"""This platform will not host the type; legal only for PLATFORM_BOUND."""
+"""This cloud will not host the type; legal only for CLOUD_BOUND."""
 comptime NOT_YET: Int = 2
-"""This platform does not host the type yet; legal only for PORTABLE."""
+"""This cloud does not host the type yet; legal only for PORTABLE."""
 
 
 def absence_word(kind: Int) -> String:
@@ -48,7 +52,7 @@ def absence_word(kind: Int) -> String:
 
 
 struct Absence(Copyable, Movable, Deinitable):
-    """A catalog type a platform does not host, and why."""
+    """A catalog type a cloud does not host, and why."""
 
     var field: Int
     var kind: Int
@@ -66,18 +70,18 @@ struct Absence(Copyable, Movable, Deinitable):
 
 
 comptime FINDING_GRAPH: Int = 1
-"""Wrong whatever the platform: an id, a reference, an access verb."""
+"""Wrong whatever the cloud: an id, a reference, an access verb."""
 comptime FINDING_COVERAGE: Int = 2
-"""The chosen platform has no adapter for the resource's type."""
+"""The chosen cloud has no adapter for the resource's type."""
 comptime FINDING_LIMIT: Int = 3
-"""The platform hosts the type but refuses one of its values or shapes."""
+"""The cloud hosts the type but refuses one of its values or shapes."""
 
 
 struct Finding(Copyable, Movable, Deinitable):
     """One reason a graph cannot be applied. `field_path` is where in the
     author's file (`service.request_timeout`); `citation` is where the limit
     is documented, and `unverified` says the citation was not checked
-    against the platform."""
+    against the cloud."""
 
     var kind: Int
     var resource_id: String
@@ -111,27 +115,27 @@ struct Finding(Copyable, Movable, Deinitable):
         self.unverified = copy.unverified
 
 
-trait AdapterSet(Movable):
-    """Everything one platform knows. See the file header for the contract."""
+trait CloudAdapter(Movable):
+    """Everything kci knows about one cloud. See the file header."""
 
-    def platform_id(self) -> PlatformId:
-        """The opaque id this set answers to on `--platform`."""
+    def cloud_id(self) -> CloudId:
+        """The opaque id of this cloud (a cell's `cloud`, `--cloud=<id>`)."""
         ...
 
     def complete(self) -> Bool:
-        """True iff the set claims to host every PORTABLE type."""
+        """True iff the adapter claims to host every PORTABLE type."""
         ...
 
     def implemented(self) -> List[Int]:
-        """The `Resource.body` field numbers this set lowers."""
+        """The `Resource.body` field numbers this adapter lowers."""
         ...
 
     def absences(self) -> List[Absence]:
-        """Every catalog type this set does not lower, each with a reason."""
+        """Every catalog type this adapter does not lower, each with a reason."""
         ...
 
     def check(self, r: Resource) -> List[Finding]:
-        """Every value or shape of `r` this platform refuses. Pure."""
+        """Every value or shape of `r` this cloud refuses. Pure."""
         ...
 
     def lower(mut self, r: Resource, mut graph: ResourceGraph) raises:

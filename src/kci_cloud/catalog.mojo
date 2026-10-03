@@ -1,10 +1,10 @@
 # =============================================================================
-# kci_platform/catalog.mojo: what the catalog DECLARES, as data a platform
-# library can read.
+# kci_cloud/catalog.mojo: what the catalog DECLARES, as data a cloud
+# adapter can read.
 # =============================================================================
 #
 # One row per `Resource.body` arm of `kci.resource.v1`: the arm's field
-# number (the key every adapter set reports coverage by), the type's name,
+# number (the key every cloud adapter reports coverage by), the type's name,
 # its portability marker, the outputs it exposes to a `Ref`, and the access
 # verbs a `Uses` line may ask of it.
 #
@@ -27,9 +27,9 @@ from kci_resource_proto.resource import Resource
 
 
 comptime PORTABLE: Int = 1
-"""Every complete platform hosts this type (`kci.resource.v1.PORTABLE`)."""
-comptime PLATFORM_BOUND: Int = 2
-"""Partial coverage is legitimate (`kci.resource.v1.PLATFORM_BOUND`)."""
+"""Every complete cloud hosts this type (`kci.resource.v1.PORTABLE`)."""
+comptime CLOUD_BOUND: Int = 2
+"""Partial coverage is legitimate (`kci.resource.v1.CLOUD_BOUND`)."""
 
 comptime FIELD_SERVICE: Int = 10
 """`Resource.body` field number of `service`."""
@@ -44,8 +44,8 @@ comptime ACCESS_CALL = "CALL"
 def portability_word(p: Int) -> String:
     if p == PORTABLE:
         return String("PORTABLE")
-    if p == PLATFORM_BOUND:
-        return String("PLATFORM_BOUND")
+    if p == CLOUD_BOUND:
+        return String("CLOUD_BOUND")
     return String("PORTABILITY_UNSET")
 
 
@@ -106,7 +106,7 @@ struct Catalog(Copyable, Movable, Deinitable):
         self.types = copy.types.copy()
 
     def add(mut self, var t: CatalogType) raises:
-        if t.portability != PORTABLE and t.portability != PLATFORM_BOUND:
+        if t.portability != PORTABLE and t.portability != CLOUD_BOUND:
             raise Error(
                 String("catalog: type '")
                 + t.name

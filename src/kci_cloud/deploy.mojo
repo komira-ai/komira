@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_platform/deploy.mojo: validate, lower, then hand the graph to the engine.
+# kci_cloud/deploy.mojo: validate, lower, then hand the graph to the engine.
 # =============================================================================
 #
 # The three verbs every command runs through. Each one validates FIRST and
@@ -13,45 +13,45 @@
 # resource it came from. A plan grouped by owner is only honest if that holds.
 # =============================================================================
 
-from kci_iac import (
+from kci_reconciler import (
     AppliedNode,
     ChangeAction,
     Creds,
     ResourceGraph,
     StateStore,
     UndeletableSkip,
-    apply_graph,
+    apply_graph_tracked,
     destroy_graph,
     plan_graph,
 )
 from kci_resource_proto.resource import Resource
 
-from kci_platform.adapter import AdapterSet
-from kci_platform.registry import Registry
-from kci_platform.validate import refusal_text, validate_for
+from kci_cloud.adapter import CloudAdapter
+from kci_cloud.clouds import Clouds
+from kci_cloud.validate import refusal_text, validate_for
 
 
 def refuse_unless_valid[
-    S: AdapterSet
-](registry: Registry, platform: S, resources: List[Resource]) raises:
-    var findings = validate_for(registry, platform, resources)
+    S: CloudAdapter
+](clouds: Clouds, cloud: S, resources: List[Resource]) raises:
+    var findings = validate_for(clouds, cloud, resources)
     if len(findings) > 0:
-        raise Error(refusal_text(platform.platform_id(), findings))
+        raise Error(refusal_text(cloud.cloud_id(), findings))
 
 
 def lower_resources[
-    S: AdapterSet
-](mut platform: S, resources: List[Resource]) raises -> ResourceGraph:
+    S: CloudAdapter
+](mut cloud: S, resources: List[Resource]) raises -> ResourceGraph:
     """Lower every resource and check the lowering contract."""
     var graph = ResourceGraph()
     for i in range(len(resources)):
         ref r = resources[i]
         var before = graph.num_nodes()
-        platform.lower(r, graph)
+        cloud.lower(r, graph)
         if graph.num_nodes() == before:
             raise Error(
-                String("platform \"")
-                + platform.platform_id().text()
+                String("cloud \"")
+                + cloud.cloud_id().text()
                 + String("\" lowered resource \"")
                 + r.id
                 + String("\" to no nodes")
@@ -62,8 +62,8 @@ def lower_resources[
             var own = graph.node(n).owner()
             if own != r.id or not lid.startswith(prefix):
                 raise Error(
-                    String("platform \"")
-                    + platform.platform_id().text()
+                    String("cloud \"")
+                    + cloud.cloud_id().text()
                     + String("\" broke the lowering contract on \"")
                     + r.id
                     + String("\": node \"")
@@ -78,45 +78,103 @@ def lower_resources[
 
 
 def plan_resources[
-    S: AdapterSet
+    S: CloudAdapter
 ](
-    registry: Registry, mut platform: S, resources: List[Resource], creds: Creds
+    clouds: Clouds, mut cloud: S, resources: List[Resource], creds: Creds
 ) raises -> List[ChangeAction]:
     """The dry run: validate, lower, `plan_graph`. Creates nothing."""
-    refuse_unless_valid(registry, platform, resources)
-    var graph = lower_resources(platform, resources)
+    refuse_unless_valid(clouds, cloud, resources)
+    var graph = lower_resources(cloud, resources)
     return plan_graph(graph, creds)
 
 
+struct ApplyOutcome(Movable, Deinitable):
+    """What an apply did, whether or not it finished.
+
+      * `error`   — None when every node converged; else the engine's error
+                    (it names the node, the verb and the fault domain).
+      * `applied` — every node, in apply order, when `error` is None; empty
+                    otherwise (use `landed`).
+      * `landed`  — the nodes this apply acted on before it stopped, in apply
+                    order, each with the verb it issued. On success it equals
+                    `applied`. These mutations are LIVE in the cell.
+      * `pending` — the nodes it never reached, in the order they would have
+                    run; the failing node is the first. Empty on success.
+
+    A caller that only got a bool (or only the error) could not tell "nothing
+    happened" from "half the graph is live": that is the PARTIAL outcome a
+    driver must not retry blindly, and these lists are how it is reported.
+    """
+
+    var applied: List[AppliedNode]
+    var landed: List[AppliedNode]
+    var pending: List[String]
+    var error: Optional[String]
+
+    def __init__(
+        out self,
+        var applied: List[AppliedNode],
+        var landed: List[AppliedNode],
+        var pending: List[String],
+        var error: Optional[String],
+    ):
+        self.applied = applied^
+        self.landed = landed^
+        self.pending = pending^
+        self.error = error^
+
+    def ok(self) -> Bool:
+        return not self.error
+
+    def partial(self) -> Bool:
+        """True iff the apply failed AFTER at least one node landed."""
+        return Bool(self.error) and len(self.landed) > 0
+
+
 def apply_resources[
-    S: AdapterSet, St: StateStore
+    S: CloudAdapter, St: StateStore
 ](
-    registry: Registry,
-    mut platform: S,
+    clouds: Clouds,
+    mut cloud: S,
     resources: List[Resource],
     creds: Creds,
     mut store: St,
-) raises -> List[AppliedNode]:
-    """Validate, lower, `apply_graph`."""
-    refuse_unless_valid(registry, platform, resources)
-    var graph = lower_resources(platform, resources)
-    return apply_graph(graph, creds, store)
+) raises -> ApplyOutcome:
+    """Validate, lower, then `apply_graph_tracked`.
+
+    RAISES only before any effect: a refused graph (the validate phase) or a
+    broken lowering contract. A failure inside the engine is NOT raised: it
+    is returned in the outcome with what landed and what is pending, so the
+    caller can report a partial apply instead of a bare failure."""
+    refuse_unless_valid(clouds, cloud, resources)
+    var graph = lower_resources(cloud, resources)
+    var landed = List[AppliedNode]()
+    var pending = List[String]()
+    var applied = List[AppliedNode]()
+    var error: Optional[String] = None
+    try:
+        applied = apply_graph_tracked(graph, creds, store, landed, pending)
+    except e:
+        error = String(e)
+    if error:
+        return ApplyOutcome(List[AppliedNode](), landed^, pending^, error^)
+    return ApplyOutcome(applied^, landed^, pending^, None)
 
 
 def destroy_resources[
-    S: AdapterSet, St: StateStore
+    S: CloudAdapter, St: StateStore
 ](
-    registry: Registry,
-    mut platform: S,
+    clouds: Clouds,
+    mut cloud: S,
     resources: List[Resource],
     creds: Creds,
     mut store: St,
 ) raises -> List[UndeletableSkip]:
     """Validate, lower, `destroy_graph` (reverse order, retention honoured).
-    A graph this platform cannot host cannot have been applied by it, so it
+    A graph this cloud cannot host cannot have been applied by it, so it
     is refused here too rather than half-lowered."""
-    refuse_unless_valid(registry, platform, resources)
-    var graph = lower_resources(platform, resources)
+    refuse_unless_valid(clouds, cloud, resources)
+    var graph = lower_resources(cloud, resources)
     return destroy_graph(graph, creds, store)
 
 
