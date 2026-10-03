@@ -49,6 +49,7 @@ from komira_aws_core import (
     s3_content_range_total,
     s3_copy_source,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
@@ -104,7 +105,9 @@ comptime _Client = S3S3Client[ScriptedConnector, StaticCredsSource]
 def _client(
     mk: def () raises thin -> ScriptedConnector, var creds: StaticCredsSource
 ) raises -> _Client:
-    return _Client(mk, creds^, String("us-east-1"), _config())
+    return _Client(
+        mk, HttpClientConfig.defaults(), creds^, String("us-east-1"), _config()
+    )
 
 
 # ---- the answers, one factory each ---------------------------------------------
@@ -328,7 +331,9 @@ def _mk_echo() raises -> AwsEchoConnector:
 
 
 def _echo() raises -> _Echo:
-    return _Echo(_mk_echo, _creds(), String("us-east-1"), _config())
+    return _Echo(
+        _mk_echo, HttpClientConfig.defaults(), _creds(), String("us-east-1"), _config()
+    )
 
 
 def _wire(e: Error) raises -> String:

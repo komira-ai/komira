@@ -38,9 +38,10 @@ named Host, Content-Type or Content-Length, in any case; CR or LF in a
 header, the path or the content type), calls the client's connector
 factory once, signs nothing, sends nothing and never retries, so it
 spends nothing from the retry quota. It answers with one `x-stub-*` header
-per argument it was given (of the credential, the access key id and
-whether a session token is set, never a secret; of the retry quota, what
-it holds; `s3_200_error` as "true" or "false"), the request body as
+per argument it was given (of the HTTP config, its `context_ceiling_us` and
+`request_timeout_us`; of the credential, the access key id and whether a
+session token is set, never a secret; of the retry quota, what it holds;
+`s3_200_error` as "true" or "false"), the request body as
 `x-stub-body` (ASCII only), then the `extra` headers as given, so that a
 caller's test can read what the generated `send` hands the transport. The
 status and body come from the endpoint host: `status-<NNN>.invalid`
@@ -63,6 +64,7 @@ not length-capped or checked for control bytes.
 """
 
 from komira_json import JsonValue, parse_json_value
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 
 comptime AWS_TS_UNIX: Int = 0
@@ -470,6 +472,7 @@ def send_sigv4_signed_request[
     C: Connector
 ](
     mk_connector: def () raises thin -> C,
+    http_config: HttpClientConfig,
     mut retry_quota: AwsRetryQuota,
     method: String,
     cred: AwsCredential,
@@ -521,6 +524,12 @@ def send_sigv4_signed_request[
             String("ResourceNotFoundException:http://internal.amazon.com/"),
         )
         res.add_header(String("x-amzn-RequestId"), String("req-0001"))
+    res.add_header(
+        String("x-stub-context-ceiling-us"), String(http_config.context_ceiling_us)
+    )
+    res.add_header(
+        String("x-stub-request-timeout-us"), String(http_config.request_timeout_us)
+    )
     res.add_header(String("x-stub-method"), method)
     res.add_header(String("x-stub-access-key-id"), cred.access_key_id)
     res.add_header(

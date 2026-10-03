@@ -95,6 +95,7 @@ mojo_aws_client(
     visibility = ["PUBLIC"],
     deps = [
         "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
         "//src/komira_http_core:komira_http_core",
         # Imported only by tests/test_s3_retry.mojo (its manual clock and
         # recording sleeper); the generated module does not import it.

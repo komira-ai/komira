@@ -84,7 +84,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "8";
+pub const AWS_GENERATOR_VERSION: &str = "9";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -342,6 +342,12 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         names: &["XmlNode", "XmlWriter"],
         mode: AwsImportMode::Always,
         protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_http_client.client",
+        names: &["HttpClientConfig"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: ALL_PROTOCOLS,
     },
     AwsImport {
         module: "komira_http_core.transport.io_stream",
@@ -1796,12 +1802,21 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
         self.line("    The connector factory is a `def () raises thin -> C` function");
         self.line("    pointer (a code pointer, no heap); the credential source is moved");
-        self.line("    in. No field is an `UnsafePointer`.\"\"\"");
+        self.line("    in. No field is an `UnsafePointer`.");
+        self.blank();
+        self.line("    `http_config` is the caller's and has no default: the HTTP client is");
+        self.line("    built inside `send_sigv4_signed_request`, so this argument is the only");
+        self.line("    way to bound it. A process serving requests under a platform deadline");
+        self.line("    passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling");
+        self.line("    in microseconds; a process with no containing deadline (a job, a CLI,");
+        self.line("    a test) passes `HttpClientConfig.defaults()`.\"\"\"");
         self.blank();
         let ruleset = self.endpoint_rules.is_some();
         let cfg = format!("{}EndpointConfig", self.prefix);
         let mn = self.module_name.clone();
         self.line("var _mk_connector: def () raises thin -> Self.C");
+        self.line("# Handed to `send_sigv4_signed_request` on every send, unchanged.");
+        self.line("var _http_config: HttpClientConfig");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
         self.line("# The retry quota this client's calls share (botocore's standard mode");
@@ -1830,6 +1845,7 @@ impl<'a> AwsEmitter<'a> {
         self.push();
         self.line("out self,");
         self.line("mk_connector: def () raises thin -> Self.C,");
+        self.line("http_config: HttpClientConfig,");
         self.line("var creds_source: Self.T,");
         self.line("region: String,");
         if ruleset {
@@ -1846,6 +1862,7 @@ impl<'a> AwsEmitter<'a> {
             self.push();
         }
         self.line("self._mk_connector = mk_connector");
+        self.line("self._http_config = http_config.copy()");
         self.line("self._creds_source = creds_source^");
         self.line("self._region = region");
         self.line("self._retry_quota = AwsRetryQuota()");
@@ -1955,6 +1972,7 @@ impl<'a> AwsEmitter<'a> {
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
+        self.line("self._http_config.copy(),");
         self.line("self._retry_quota,");
         self.line("req.method.copy(),");
         self.line("cred,");
@@ -2538,7 +2556,8 @@ mod tests {
         assert!(
             src.contains(
                 "        return send_sigv4_signed_request[Self.C](\n            \
-                 self._mk_connector,\n            self._retry_quota,\n"
+                 self._mk_connector,\n            self._http_config.copy(),\n            \
+                 self._retry_quota,\n"
             ),
             "{src}"
         );
