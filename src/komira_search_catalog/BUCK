@@ -9,10 +9,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # The welded tests run against the in-memory stores, with no network. One
 # drives the publish race between independent writers (a staged collision and
-# real OS threads), the other the per-writer sharded layout: first-attempt
-# appends, the cross-shard merge, generation, reads of unsharded indexes, and
-# merged splits hiding their inputs across shards. Both import komira_core
-# for its slab collection.
+# real OS threads), one the per-writer sharded layout: first-attempt appends,
+# the cross-shard merge, generation, reads of unsharded indexes, and merged
+# splits hiding their inputs across shards. Those two import komira_core for
+# its slab collection. The third covers the retire and reap end of a split's
+# life: a store error that only names "404" is raised, not taken for a
+# reaped chunk.
 mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -21,6 +23,7 @@ mojo_library(
         "//src/komira_objectstore:komira_objectstore",
     ],
     test_srcs = [
+        "tests/test_search_catalog_lifecycle.mojo",
         "tests/test_search_metastore_concurrent.mojo",
         "tests/test_search_sublineage_sharding.mojo",
     ],

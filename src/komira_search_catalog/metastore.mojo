@@ -42,6 +42,7 @@ from komira_objectstore import (
     RetryPolicy,
     decode_chunk_body,
 )
+from komira_objectstore.cas_manifest import is_not_found
 from komira_objectstore.path import Path
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_shard_keys import (
@@ -61,19 +62,6 @@ from komira_search_catalog.split_summary import (
     make_merged_split_summary,
     make_split_summary,
 )
-
-
-@always_inline
-def _is_not_found(msg: String) -> Bool:
-    """Classify a store error as "object absent". The manifest store's own
-    classifier is private, so this mirrors it. Replay uses it to skip a chunk
-    that was reaped after the head was read."""
-    return (
-        msg.find("not_found") >= 0
-        or msg.find("NotFound") >= 0
-        or msg.find("404") >= 0
-        or msg.find("NoSuchKey") >= 0
-    )
 
 
 # =============================================================================
@@ -162,7 +150,13 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
                         LiveSplitEntry(seq, decode_split_summary(chunk))
                     )
                 except e:
-                    if not _is_not_found(String(e)):
+                    # Only a proven absence is skipped. The store's error
+                    # names the object key, so matching a bare "404" would
+                    # also skip a permission or server failure on any key
+                    # that happens to contain those digits (an index name,
+                    # a writer pid in the shard id, chunk 404), and the
+                    # split would silently drop out of every query.
+                    if not is_not_found(String(e)):
                         raise e^
                     # Reaped after the head was read: neither tombstoned nor
                     # readable. Skip the gap.
@@ -275,7 +269,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         try:
             sched = self._manifest.tombstone_schedule_ts(chunk_seq)
         except e:
-            if _is_not_found(String(e)):
+            if is_not_found(String(e)):
                 # Not tombstoned: never scheduled, or already reaped.
                 return True
             raise e^
@@ -286,7 +280,7 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         except e:
             # Another reaper got there first: the tombstone is gone and the
             # chunk with it.
-            if _is_not_found(String(e)) or String(e).find(
+            if is_not_found(String(e)) or String(e).find(
                 "not ScheduledForDelete"
             ) >= 0:
                 return True
