@@ -11,19 +11,19 @@
 # unconditional put overwrites; get, get_range (exact, and a short read
 # refused), head and delete (an absent key is not an error); a listing with
 # a delimiter over several pages; get_ranges scattering coalesced ranges
-# into a caller's buffer in input order; a clone that builds its own store.
+# into a caller's buffer in input order, and reading one version of an
+# object overwritten during the fetch (412, not torn bytes); a clone that
+# builds its own store.
 #
 # Then each status S3 can answer a conditional PutObject with, as the named
 # StoreError kind a caller branches on (each over a ScriptedConnector):
 # 403, 404, 409 ConditionalRequestConflict, 412, 429, 500 and 503.
 #
-# Then komira_objectstore's CasManifestStore over S3 (the CAS writer whose
-# live MinIO stress showed appends failing for good under contention): when
-# S3 answers a conditional write with 409 ConditionalRequestConflict, as it
-# does when two conditional writes race on one key, the append must read
-# again and retry, as for a 412, not fail. The earlier S3 layer classified
-# any 4xx but 404, 403 and 412 as MALFORMED, so that append failed on its
-# first 409.
+# Then komira_objectstore's CasManifestStore over S3: when S3 answers a
+# conditional write with 409 ConditionalRequestConflict, as it does when two
+# conditional writes race on one key, the append reads again and retries, as
+# for a 412. A 409 classified as MALFORMED would end a compare-and-swap loop
+# that retries only a lost precondition.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
@@ -78,14 +78,21 @@ struct FakeS3State(Movable):
     # The next `conflicts` conditional PutObjects are answered 409
     # ConditionalRequestConflict, writing nothing.
     var conflicts: Int
+    # Once this many GETs and HEADs have been answered, the object the last
+    # one read is overwritten (its first byte changed, a new ETag), as by a
+    # writer racing a reader. -1 for never.
+    var overwrite_after_reads: Int
+    var reads: Int
     var requests: Int
 
-    def __init__(out self, conflicts: Int = 0):
+    def __init__(out self, conflicts: Int = 0, overwrite_after_reads: Int = -1):
         self.names = List[String]()
         self.bodies = List[List[UInt8]]()
         self.etags = List[String]()
         self.next_etag = 1
         self.conflicts = conflicts
+        self.overwrite_after_reads = overwrite_after_reads
+        self.reads = 0
         self.requests = 0
 
     def find(self, name: String) -> Int:
@@ -302,36 +309,49 @@ def _serve(mut st: FakeS3State, written: List[UInt8]) raises -> List[UInt8]:
     if method == "GET" or is_head:
         if at < 0:
             return _error(404, "Not Found", "NoSuchKey", is_head)
-        ref obj = st.bodies[at]
-        var etag_header = String("ETag: ") + st.etags[at] + "\r\n"
-        if range_.byte_length() > 0 and not is_head:
-            # bytes=a-b only: what S3ConditionalStore.get_range sends.
-            var spec = _sub(range_, 6, range_.byte_length())
-            var dash = spec.find("-")
-            var first = Int(_sub(spec, 0, dash))
-            var last = Int(_sub(spec, dash + 1, spec.byte_length()))
-            if first >= len(obj):
-                return _error(416, "Requested Range Not Satisfiable", "InvalidRange", False)
-            last = min(last, len(obj) - 1)
-            var part = List[UInt8]()
-            part.extend(Span(obj)[first : last + 1])
-            return _response(
-                206,
-                "Partial Content",
-                etag_header
-                + "Content-Range: bytes "
-                + String(first)
-                + "-"
-                + String(last)
-                + "/"
-                + String(len(obj))
-                + "\r\n",
-                part^,
-                False,
-            )
-        var whole = obj.copy()
-        return _response(200, "OK", etag_header, whole^, is_head)
+        if if_match.byte_length() > 0 and st.etags[at] != if_match:
+            return _error(412, "Precondition Failed", "PreconditionFailed", is_head)
+        var answer = _read(st, at, range_, is_head)
+        st.reads += 1
+        if st.reads == st.overwrite_after_reads:
+            var changed = st.bodies[at].copy()
+            changed[0] = changed[0] ^ UInt8(0x20)
+            _ = st.put(name, changed^)
+        return answer^
     return _error(405, "Method Not Allowed", "MethodNotAllowed", is_head)
+
+
+def _read(st: FakeS3State, at: Int, range_: String, is_head: Bool) raises -> List[UInt8]:
+    """The answer to a GET or HEAD of the object at `at`."""
+    ref obj = st.bodies[at]
+    var etag_header = String("ETag: ") + st.etags[at] + "\r\n"
+    if range_.byte_length() > 0 and not is_head:
+        # bytes=a-b only: what S3ConditionalStore.get_range sends.
+        var spec = _sub(range_, 6, range_.byte_length())
+        var dash = spec.find("-")
+        var first = Int(_sub(spec, 0, dash))
+        var last = Int(_sub(spec, dash + 1, spec.byte_length()))
+        if first >= len(obj):
+            return _error(416, "Requested Range Not Satisfiable", "InvalidRange", False)
+        last = min(last, len(obj) - 1)
+        var part = List[UInt8]()
+        part.extend(Span(obj)[first : last + 1])
+        return _response(
+            206,
+            "Partial Content",
+            etag_header
+            + "Content-Range: bytes "
+            + String(first)
+            + "-"
+            + String(last)
+            + "/"
+            + String(len(obj))
+            + "\r\n",
+            part^,
+            False,
+        )
+    var whole = obj.copy()
+    return _response(200, "OK", etag_header, whole^, is_head)
 
 
 struct FakeS3Stream(IoStream, Movable, Deinitable):
@@ -383,8 +403,14 @@ struct FakeS3Connector(Connector, Movable, Deinitable):
 
     var _state: ArcPointer[FakeS3State]
 
-    def __init__(out self, conflicts: Int = 0):
-        self._state = ArcPointer[FakeS3State](FakeS3State(conflicts))
+    def __init__(out self, conflicts: Int = 0, overwrite_after_reads: Int = -1):
+        self._state = ArcPointer[FakeS3State](
+            FakeS3State(conflicts, overwrite_after_reads)
+        )
+
+    def seed(mut self, name: String, var body: List[UInt8]):
+        """Stores `body` as `<bucket>/<key>` `name` before any request."""
+        _ = self._state[].put(name, body^)
 
     def connect[RT: Runtime](
         mut self, mut reactor: Reactor[RT.Sink], ip_be: UInt32, port: UInt16
@@ -526,6 +552,75 @@ def test_get_ranges() raises:
     assert_equal(res.total_fetched_bytes, 7)
 
 
+comptime _BIG = 1_100_010  # past the coalescing gap (1 MiB) between two ranges
+
+
+def _alphabet(n: Int) -> List[UInt8]:
+    var out = List[UInt8](capacity=n)
+    for i in range(n):
+        out.append(UInt8(0x61 + i % 26))
+    return out^
+
+
+def _mk_fake_overwritten_after_head() raises -> FakeS3Connector:
+    var c = FakeS3Connector(overwrite_after_reads=1)
+    c.seed("lake/r/obj", _alphabet(26))
+    return c^
+
+
+def _mk_fake_big() raises -> FakeS3Connector:
+    var c = FakeS3Connector()
+    c.seed("lake/r/big", _alphabet(_BIG))
+    return c^
+
+
+def _mk_fake_big_overwritten_after_get() raises -> FakeS3Connector:
+    var c = FakeS3Connector(overwrite_after_reads=1)
+    c.seed("lake/r/big", _alphabet(_BIG))
+    return c^
+
+
+def _two_far_ranges() raises -> RangeSet:
+    var ranges = RangeSet.empty()
+    ranges.append(GetRange.bounded(0, 3), 0)
+    ranges.append(GetRange.bounded(1_100_000, 1_100_003), 3)
+    return ranges^
+
+
+def test_a_range_fetch_reads_one_version() raises:
+    # Two ranges too far apart to coalesce are two GETs. Untouched, both
+    # land.
+    var b = _Fake.built("lake", _config(), _mk_fake_big, _creds(), FixedClock(1790000000))
+    var dst = List[UInt8](length=6, fill=UInt8(0))
+    var view = ByteView[origin_of(dst)](dst.unsafe_ptr(), 6)
+    _ = b.get_ranges(_p("r/big"), _two_far_ranges(), view)
+    _ = view
+    assert_equal(_text(dst), "abcstu")
+    # Overwritten after the first GET: the second carries the first one's
+    # ETag in If-Match, is answered 412, and the fetch raises rather than
+    # return bytes of two versions.
+    var g = _Fake.built(
+        "lake", _config(), _mk_fake_big_overwritten_after_get, _creds(), FixedClock(1790000000)
+    )
+    var dst2 = List[UInt8](length=6, fill=UInt8(0))
+    var view2 = ByteView[origin_of(dst2)](dst2.unsafe_ptr(), 6)
+    with assert_raises(contains="StoreError[PRECONDITION] GetObject s3://lake/r/big status=412"):
+        _ = g.get_ranges(_p("r/big"), _two_far_ranges(), view2)
+    _ = view2
+    # A suffix range sends a HEAD for the size first; overwritten after it,
+    # the GET carries the HEAD's ETag and is answered 412.
+    var h = _Fake.built(
+        "lake", _config(), _mk_fake_overwritten_after_head, _creds(), FixedClock(1790000000)
+    )
+    var ranges = RangeSet.empty()
+    ranges.append(GetRange.suffix(2), 0)
+    var dst3 = List[UInt8](length=2, fill=UInt8(0))
+    var view3 = ByteView[origin_of(dst3)](dst3.unsafe_ptr(), 2)
+    with assert_raises(contains="StoreError[PRECONDITION] GetObject s3://lake/r/obj status=412"):
+        _ = h.get_ranges(_p("r/obj"), ranges, view3)
+    _ = view3
+
+
 def test_clone_builds_its_own_store() raises:
     var s = _fake()
     _ = s.put(_p("c/k"), _bytes("v"))
@@ -546,7 +641,8 @@ def test_clone_builds_its_own_store() raises:
 def _mk_status[status: Int, code: StringLiteral]() raises -> ScriptedConnector:
     var stream = ScriptedStream.from_read_script(_error(status, "Status", String(code), False))
     var c = ScriptedConnector.with_stream(stream^)
-    # Retried statuses (500, 503, 429-SlowDown) get the same answer again.
+    # A throttle (503 SlowDown, 429) is resent even for a conditional write,
+    # and gets the same answer again; a conditional 500 is not resent.
     c.arm_next(ScriptedStream.from_read_script(_error(status, "Status", String(code), False)))
     c.arm_next(ScriptedStream.from_read_script(_error(status, "Status", String(code), False)))
     return c^
@@ -606,6 +702,7 @@ def main() raises:
     test_reads_and_delete()
     test_list_with_delimiter()
     test_get_ranges()
+    test_a_range_fetch_reads_one_version()
     test_clone_builds_its_own_store()
     test_each_status_is_a_named_error()
     print("OK")

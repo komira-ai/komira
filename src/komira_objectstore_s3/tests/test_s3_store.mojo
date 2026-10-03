@@ -6,14 +6,17 @@
 # Rows: HeadObject (200, 404 without a body, 403); GetObject whole; a ranged
 # GetObject (206 checked against the range asked for, a 206 that starts or
 # ends elsewhere, a 206 without a Content-Range, a 200 cut to the window,
-# an object that ends first); a suffix GetObject (206 and 200); a listing of
+# an object that ends first); a suffix GetObject (206 and 200, a suffix
+# longer than the object, a 206 that starts before the suffix); a listing of
 # two pages with common prefixes and URL-encoded keys decoded, and the
 # continuation guards (a truncated page without a token, a token repeated);
-# DeleteObject (204, an absent key, a refusal); a multipart upload (create,
-# a part, complete; an abort of an upload that is gone; part number and
-# part order refused; a CompleteMultipartUpload answered 200 with an
-# <Error>); a conditional PutObject (412, 409 race, an answer without an
-# ETag); and a 503 SlowDown retried. Retries wait 1 ms (the config's
+# DeleteObject (204, an absent key, a missing bucket, a refusal); a
+# multipart upload (create, a part, complete; an abort of an upload that is
+# gone and of one in a missing bucket; part number and part order refused;
+# a CompleteMultipartUpload answered 200 with an <Error>, not resent); a
+# conditional PutObject (412, 409 race, an answer without an ETag, a 500 not
+# resent while an unconditional one is, If-None-Match with an ETag refused);
+# and a 503 SlowDown retried. Retries wait 1 ms (the config's
 # policy), so no row waits long.
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
@@ -29,6 +32,7 @@ from komira_objectstore_s3 import (
 from komira_retry import Backoff, Jitter, RetryPolicy
 
 
+# S3's XML namespace: a fixed protocol constant, named in every S3 response.
 comptime _NS = 'xmlns="http://s3.amazonaws.com/doc/2006-03-01/"'
 comptime _Store = S3Store[ScriptedConnector, StaticCredsSource, FixedClock]
 
@@ -70,10 +74,13 @@ def _error(status: Int, reason: String, code: String, message: String = "m") -> 
     )
 
 
-def _store(mk: def () raises thin -> ScriptedConnector) raises -> _Store:
+def _store(
+    mk: def () raises thin -> ScriptedConnector,
+    endpoint: String = "http://127.0.0.1:9000",
+) raises -> _Store:
     var config = S3Config(
         "us-east-1",
-        endpoint="http://127.0.0.1:9000",
+        endpoint=endpoint,
         addressing=AddressingStyle.path(),
         retry=RetryPolicy(
             Backoff(initial_ms=1, multiplier=2.0, max_ms=2, jitter=Jitter.full()),
@@ -206,7 +213,21 @@ def _mk_suffix() raises -> ScriptedConnector:
     return _one(_answer(206, "Partial Content", "789", "Content-Range: bytes 7-9/10\r\n"))
 
 
+def _mk_suffix_too_early() raises -> ScriptedConnector:
+    return _one(_answer(206, "Partial Content", "0123456789", "Content-Range: bytes 0-9/10\r\n"))
+
+
 def test_get_suffix() raises:
+    # A 206 that ends at the object's last byte but starts before the
+    # suffix asked for is not the suffix.
+    var early = _store(_mk_suffix_too_early)
+    with assert_raises(contains="a suffix 206 that is not the object's tail: bytes 0-9/10"):
+        _ = early.get_suffix("lake", "k", 3)
+    # A suffix longer than the object is the whole object.
+    var whole = _store(_mk_suffix_too_early)
+    var w10 = whole.get_suffix("lake", "k", 20)
+    assert_equal(_text(w10.bytes), "0123456789")
+    assert_equal(w10.offset, 0)
     var s = _store(_mk_suffix)
     var tail = s.get_suffix("lake", "k", 3)
     assert_equal(_text(tail.bytes), "789")
@@ -308,6 +329,14 @@ def _mk_204() raises -> ScriptedConnector:
     return _one(_answer(204, "No Content", ""))
 
 
+def _mk_404_bucket() raises -> ScriptedConnector:
+    return _one(_error(404, "Not Found", "NoSuchBucket", "The specified bucket does not exist"))
+
+
+def _mk_404_bare() raises -> ScriptedConnector:
+    return _one(_answer(404, "Not Found", ""))
+
+
 def _mk_403_delete() raises -> ScriptedConnector:
     return _one(_error(403, "Forbidden", "AccessDenied", "Access Denied"))
 
@@ -317,6 +346,12 @@ def test_delete() raises:
     s.delete("lake", "k")
     var a = _store(_mk_404_key)
     a.delete("lake", "k")
+    var bare = _store(_mk_404_bare)
+    bare.delete("lake", "k")
+    # A missing bucket is not a deleted key: a wrong bucket or endpoint.
+    var nb = _store(_mk_404_bucket)
+    with assert_raises(contains="StoreError[NOT_FOUND] DeleteObject s3://lake/k status=404 s3_code=NoSuchBucket"):
+        nb.delete("lake", "k")
     var d = _store(_mk_403_delete)
     with assert_raises(contains="StoreError[PERMISSION_DENIED] DeleteObject s3://lake/k status=403 s3_code=AccessDenied"):
         d.delete("lake", "k")
@@ -357,12 +392,25 @@ def _mk_abort_gone() raises -> ScriptedConnector:
 
 def _mk_complete_200_error() raises -> ScriptedConnector:
     # S3 can fail the assembly after its 200: the body is an <Error>. The
-    # send reads it as a 500 and retries, three times in all.
+    # send reads it as a 500. CompleteMultipartUpload is a POST, so it is not
+    # sent again: the second answer, a success, is never read.
     var body = String("<Error><Code>InternalError</Code><Message>We encountered an internal error.</Message></Error>")
     var c = _one(_answer(200, "OK", body))
-    c.arm_next(_answer(200, "OK", body))
-    c.arm_next(_answer(200, "OK", body))
+    c.arm_next(
+        _answer(
+            200,
+            "OK",
+            String("<CompleteMultipartUploadResult ")
+            + _NS
+            + "><Bucket>lake</Bucket><Key>big.bin</Key>"
+            + "<ETag>&quot;whole-2&quot;</ETag></CompleteMultipartUploadResult>",
+        )
+    )
     return c^
+
+
+def _mk_abort_no_bucket() raises -> ScriptedConnector:
+    return _one(_error(404, "Not Found", "NoSuchBucket", "The specified bucket does not exist"))
 
 
 def test_multipart() raises:
@@ -377,6 +425,9 @@ def test_multipart() raises:
     assert_equal(done.etag, '"whole-2"')
     var a = _store(_mk_abort_gone)
     a.abort_multipart_upload("lake", "big.bin", "u-1")
+    var nb = _store(_mk_abort_no_bucket)
+    with assert_raises(contains="StoreError[NOT_FOUND] AbortMultipartUpload s3://lake/big.bin status=404 s3_code=NoSuchBucket"):
+        nb.abort_multipart_upload("lake", "big.bin", "u-1")
     with assert_raises(contains="part numbers are 1 to 10000, got 0"):
         _ = a.upload_part("lake", "big.bin", "u-1", 0, _bytes("x"))
     with assert_raises(contains="part numbers are 1 to 10000, got 10001"):
@@ -415,6 +466,18 @@ def _mk_409() raises -> ScriptedConnector:
     )
 
 
+def _mk_500_then_412() raises -> ScriptedConnector:
+    var c = _one(_error(500, "Internal Server Error", "InternalError", "We encountered an internal error."))
+    c.arm_next(_error(412, "Precondition Failed", "PreconditionFailed", "At least one of the pre-conditions you specified did not hold"))
+    return c^
+
+
+def _mk_500_then_put() raises -> ScriptedConnector:
+    var c = _one(_error(500, "Internal Server Error", "InternalError", "We encountered an internal error."))
+    c.arm_next(_answer(200, "OK", "", 'ETag: "e2"\r\n'))
+    return c^
+
+
 def _mk_put_no_etag() raises -> ScriptedConnector:
     return _one(_answer(200, "OK", ""))
 
@@ -436,6 +499,28 @@ def test_conditional_put() raises:
         _ = n.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.none())
     with assert_raises(contains="If-Match with an empty ETag"):
         _ = n.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.if_match(""))
+    # AWS's S3 takes If-None-Match on a PUT only as *: to its own endpoint
+    # an ETag is refused before anything is sent (the connector has no
+    # answer armed). test_s3_wire sends one to a custom endpoint.
+    var z = _store(_mk_head_404, endpoint="")
+    with assert_raises(contains="StoreError[MALFORMED] PutObject s3://lake/m.json: S3 takes If-None-Match on PutObject only as *"):
+        _ = z.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.if_none_match('"e1"'))
+
+
+def test_a_conditional_put_is_not_resent_after_a_500() raises:
+    # S3 may have applied the write before its 500: sent again, it would be
+    # answered 412 and read as a lost race. So the 500 is the answer, and
+    # the 412 armed after it is never read.
+    var c = _store(_mk_500_then_412)
+    with assert_raises(contains="StoreError[TRANSPORT] PutObject s3://lake/m.json status=500 s3_code=InternalError"):
+        _ = c.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.if_match('"e1"'))
+    var star = _store(_mk_500_then_412)
+    with assert_raises(contains="StoreError[TRANSPORT] PutObject s3://lake/m.json status=500 s3_code=InternalError"):
+        _ = star.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.if_none_match_star())
+    # Unconditional, the PUT is resent and the second answer is the result.
+    var u = _store(_mk_500_then_put)
+    var m = u.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.none())
+    assert_equal(m.etag, '"e2"')
 
 
 # ---- retries ---------------------------------------------------------------------
@@ -472,5 +557,6 @@ def main() raises:
     test_delete()
     test_multipart()
     test_conditional_put()
+    test_a_conditional_put_is_not_resent_after_a_500()
     test_retries()
     print("OK")

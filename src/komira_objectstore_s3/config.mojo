@@ -75,7 +75,9 @@ struct S3Config(Copyable, Movable, Deinitable):
       endpoints.
     - `retry`: the policy of every request's retry loop (attempts, backoff,
       deadline). komira_aws_core's classifier decides what is retried.
-    - `max_inflight`: the most requests one range fetch plans at once.
+    - `max_inflight`: the concurrency recorded in a range fetch's plan; the
+      requests are sent one at a time until komira_aws_core has a
+      non-blocking send.
     - `list_page_size`: `MaxKeys` of each ListObjectsV2 page.
     - `list_max_pages`: the pages one listing may read before it is refused.
     """

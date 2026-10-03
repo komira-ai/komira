@@ -23,9 +23,15 @@
 # its own store (S3ConditionalStore.clone).
 #
 # Each request runs komira_aws_core's retry loop under `S3Config.retry`. A
-# conditional PUT is sent with `conditional=True`: it is resent only when
-# S3 cannot have acted on it (a throttle, a request never sent), because a
-# resend of a write S3 applied is answered 412 and would read as a lost race.
+# conditional PUT carries its `If-Match` or `If-None-Match`, which the send
+# reads: it is resent only when S3 cannot have acted on it (a throttle, a
+# request never sent), because a resend of a write S3 applied is answered
+# 412 and would read as a lost race.
+#
+# A range fetch of several requests reads ONE version of the object: every
+# request after the first carries `If-Match` with the ETag the HEAD or the
+# first answer gave, so an object overwritten between two requests is
+# answered 412 and raises PRECONDITION instead of mixing two versions.
 #
 # THE SENDS BLOCK THEIR THREAD. komira_aws_core's send runs the HTTP client
 # on a blocking runtime. So `get_ranges_into` issues its coalesced requests
@@ -113,6 +119,14 @@ struct S3ListPage(Movable, Deinitable):
     var common_prefixes: List[String]
     var truncated: Bool
     var next_token: String
+
+
+@fieldwise_init
+struct _RangeRead(Movable, Deinitable):
+    """The bytes of one ranged GetObject and the ETag it answered with."""
+
+    var bytes: List[UInt8]
+    var etag: String
 
 
 @fieldwise_init
@@ -246,11 +260,17 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
     # ---- reads -------------------------------------------------------------
 
     def _get(
-        mut self, bucket: String, key: String, range_header: String
+        mut self,
+        bucket: String,
+        key: String,
+        range_header: String,
+        if_match: String = "",
     ) raises -> HttpResult:
         var input = S3GetObjectRequest(bucket, key)
         if range_header.byte_length() > 0:
             input.set_range_(range_header)
+        if if_match.byte_length() > 0:
+            input.set_if_match(if_match)
         var loop = aws_system_retry_loop(self._config.retry.copy())
         var budget = NoBudget()
         var res = self._client.get_object_with(
@@ -268,19 +288,38 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         return out.body.take()
 
     def get_range(
-        mut self, bucket: String, key: String, start: Int64, length: Int64
+        mut self,
+        bucket: String,
+        key: String,
+        start: Int64,
+        length: Int64,
+        if_match: String = "",
     ) raises -> List[UInt8]:
         """The bytes `[start, start + length)` (half-open), fewer only when
         the object ends first. The request is `Range: bytes=<start>-<last>`
         (ranges.mojo), and the answer is checked: a 206 must state the
         range asked for, and a 200 (a server that ignored the Range) is cut
-        to it. A zero length reads nothing and sends nothing."""
+        to it. A zero length reads nothing and sends nothing. `if_match`,
+        when set, is sent as `If-Match`: an object whose ETag differs is
+        answered 412 and raises PRECONDITION."""
+        return self._get_range(bucket, key, start, length, if_match).bytes.copy()
+
+    def _get_range(
+        mut self,
+        bucket: String,
+        key: String,
+        start: Int64,
+        length: Int64,
+        if_match: String,
+    ) raises -> _RangeRead:
+        """`get_range`, with the ETag of the answer ("" when it has none)."""
         if length == 0 and start >= 0:
-            return List[UInt8]()
+            return _RangeRead(List[UInt8](), String(""))
         var r = S3ByteRange.of_length(start, length)
-        var res = self._get(bucket, key, r.header())
+        var res = self._get(bucket, key, r.header(), if_match)
         var status = res.status
         var content_range = res.header(String("content-range"))
+        var etag = res.header(String("etag"))
         var out = parse_get_object_response(res^.into_response())
         var body = out.body.take() if out.body else List[UInt8]()
         if status == 206:
@@ -290,7 +329,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
                 s3_check_partial(r, s3_parse_content_range(content_range), len(body))
             except e:
                 raise s3_malformed("GetObject", bucket, key, String(e))
-            return body^
+            return _RangeRead(body^, etag^)
         # A 200: the whole object, from which the window is cut.
         if r.start >= Int64(len(body)):
             raise s3_malformed(
@@ -305,7 +344,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         var end = min(Int(r.end), len(body))
         var cut = List[UInt8](capacity=end - Int(r.start))
         cut.extend(Span(body)[Int(r.start) : end])
-        return cut^
+        return _RangeRead(cut^, etag^)
 
     def get_suffix(mut self, bucket: String, key: String, n: Int64) raises -> S3SuffixRead:
         """The last `n` bytes of an object in ONE request (`bytes=-<n>`),
@@ -325,7 +364,11 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
                 raise s3_malformed(
                     "GetObject", bucket, key, "a suffix 206 without the object's length"
                 )
-            if Int64(len(body)) != cr.last - cr.first + 1 or cr.last != cr.total - 1:
+            if (
+                Int64(len(body)) != cr.last - cr.first + 1
+                or cr.last != cr.total - 1
+                or cr.last - cr.first + 1 != min(n, cr.total)
+            ):
                 raise s3_malformed(
                     "GetObject", bucket, key, "a suffix 206 that is not the object's tail: " + content_range
                 )
@@ -351,24 +394,33 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         `dst_offsets[i]`, through komira_objectstore's coalescing plan (near
         ranges merged into one request). The result is indexed in INPUT
         order. An offset or suffix range needs the object's size, so a HEAD
-        is sent first when the set holds one. The requests are sent one
-        after another (module header); `max_concurrency` and
+        is sent first when the set holds one. Every request after the HEAD,
+        or after the first answer, carries `If-Match` with the ETag it gave,
+        so the bytes are one version of the object: one overwritten
+        meanwhile raises PRECONDITION. The requests are sent one after
+        another (module header); `max_concurrency` and
         `S3Config.max_inflight` bound the plan's concurrency field."""
         var n = ranges.num_ranges()
         var result = RangeFetchResult.with_capacity(n)
         if n == 0:
             return result^
         var object_size = Int64(-1)
+        var etag = String("")
         for i in range(n):
             if not ranges.ranges[i].is_bounded():
-                object_size = self.head(bucket, key).size
+                var meta = self.head(bucket, key)
+                object_size = meta.size
+                etag = meta.etag.copy()
                 break
         var policy = CoalescePolicy.default()
         policy.max_concurrency = max(1, min(max_concurrency, self._config.max_inflight))
         var plan = plan_coalesce(ranges, policy, object_size)
         for c in range(len(plan.coalesced)):
             ref span = plan.coalesced[c]
-            var bytes = self.get_range(bucket, key, span.start, span.length())
+            var read = self._get_range(bucket, key, span.start, span.length(), etag)
+            if etag.byte_length() == 0:
+                etag = read.etag.copy()
+            ref bytes = read.bytes
             for s in range(len(span.slices)):
                 ref sl = span.slices[s]
                 if sl.coalesced_offset + sl.length > len(bytes):
@@ -507,14 +559,20 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
 
     def delete(mut self, bucket: String, key: String) raises:
         """DeleteObject. Deleting an absent key succeeds: S3 answers 204,
-        and an S3-compatible server that answers 404 is read the same way."""
+        and an S3-compatible server that answers 404 NoSuchKey (or a 404
+        without a body) is read the same way. Any other 404, such as
+        NoSuchBucket, raises NOT_FOUND: the key was not deleted, the bucket
+        or endpoint is wrong."""
         var loop = aws_system_retry_loop(self._config.retry.copy())
         var budget = NoBudget()
         var res = self._client.delete_object_with(
             S3DeleteObjectRequest(bucket, key), self._transport, self._clock, loop, budget
         )
         if res.status == 404:
-            return
+            if len(res.body) == 0:
+                return
+            if aws_xml_error_info(404, res.body, String("")).code == "NoSuchKey":
+                return
         if _failed(res):
             raise self._fail("DeleteObject", bucket, key, res)
 
@@ -529,8 +587,14 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
 
           * `if_none_match_star()`  `If-None-Match: *`, create if absent;
           * `if_match(etag)`        `If-Match: <etag>`, compare and swap;
-          * `if_none_match(etag)`   `If-None-Match: <etag>`;
           * `none()`                no condition, create or overwrite.
+
+        `if_none_match(etag)` sends `If-None-Match: <etag>`, the
+        create-if-absent form of S3-compatible servers that do not take `*`,
+        so only to a custom endpoint (`S3Config.endpoint`). To AWS's own
+        endpoint it is refused as MALFORMED before anything is sent: S3's
+        PutObject takes `If-None-Match` only as `*`, and answers any other
+        value 501, which would read as a transport fault.
 
         A lost condition raises PRECONDITION (a 412, or the 409
         ConditionalRequestConflict of a race with another conditional
@@ -540,7 +604,6 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         compare-and-swap nothing to compare."""
         var input = S3PutObjectRequest(bucket, key)
         input.set_body(bytes.copy())
-        var conditional = not precond.is_none()
         if precond.is_if_match():
             if precond.etag.byte_length() == 0:
                 raise Error("S3Store.conditional_put: If-Match with an empty ETag")
@@ -548,13 +611,20 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         elif precond.is_if_none_match_star():
             input.set_if_none_match(String("*"))
         elif precond.is_if_none_match():
+            if self._config.endpoint.byte_length() == 0:
+                raise s3_malformed(
+                    "PutObject",
+                    bucket,
+                    key,
+                    "S3 takes If-None-Match on PutObject only as *, not an ETag",
+                )
             if precond.etag.byte_length() == 0:
                 raise Error("S3Store.conditional_put: If-None-Match with an empty ETag")
             input.set_if_none_match(precond.etag)
         var loop = aws_system_retry_loop(self._config.retry.copy())
         var budget = NoBudget()
         var res = self._client.put_object_with(
-            input, self._transport, self._clock, loop, budget, conditional=conditional
+            input, self._transport, self._clock, loop, budget
         )
         if _failed(res):
             raise self._fail("PutObject", bucket, key, res)
@@ -670,7 +740,8 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
         mut self, bucket: String, key: String, upload_id: String
     ) raises:
         """AbortMultipartUpload. An upload that is already gone (404
-        NoSuchUpload) counts as aborted: it is gone either way."""
+        NoSuchUpload) counts as aborted: it is gone either way. Any other
+        404, such as NoSuchBucket, raises NOT_FOUND."""
         var loop = aws_system_retry_loop(self._config.retry.copy())
         var budget = NoBudget()
         var res = self._client.abort_multipart_upload_with(
@@ -681,6 +752,7 @@ struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitab
             budget,
         )
         if res.status == 404:
-            return
+            if aws_xml_error_info(404, res.body, String("")).code == "NoSuchUpload":
+                return
         if _failed(res):
             raise self._fail("AbortMultipartUpload", bucket, key, res)

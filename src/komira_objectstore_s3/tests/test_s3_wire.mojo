@@ -3,13 +3,13 @@
 # code Echo) carrying the request head; the store raises it as a MALFORMED
 # StoreError whose s3_message is that head. So a row asserts the request
 # line (path-style: the bucket once, the key as the generated builder
-# encodes it), the query, the headers the verb sends (Range,
-# If-None-Match, If-Match) and the signature, through the generated client,
+# encodes it), the query, the headers the verb sends (Range, a ranged
+# read's If-Match, If-None-Match, If-Match) and the signature, through the generated client,
 # S3's endpoint ruleset and komira_aws_core's signer. No socket.
 #
-# The signing clock is the store's `K` parameter: a FixedClock here, where
-# the earlier S3 layer read the date from the environment. Two stores on two
-# fixed clocks sign at the two dates and no other.
+# The signing clock is the store's `K` parameter, a FixedClock here; nothing
+# reads the date from the environment. Two stores on two fixed clocks sign
+# at the two dates and no other.
 from std.testing import assert_equal, assert_true
 
 from komira_aws_core import AwsCredential, AwsEchoConnector, FixedClock, StaticCredsSource
@@ -91,6 +91,13 @@ def test_reads() raises:
     except e:
         _check(_wire(e), "GET /lake/data/a.parquet HTTP/1.1", "range: bytes=2-5")
     try:
+        _ = s.get_range("lake", "data/a.parquet", 2, 4, if_match='"e1"')
+        raise Error("the echo answered with a success")
+    except e:
+        _check(
+            _wire(e), "GET /lake/data/a.parquet HTTP/1.1", "range: bytes=2-5", 'if-match: "e1"'
+        )
+    try:
         _ = s.get_suffix("lake", "data/a.parquet", 8)
         raise Error("the echo answered with a success")
     except e:
@@ -131,6 +138,13 @@ def test_writes() raises:
         raise Error("the echo answered with a success")
     except e:
         _check(_wire(e), "PUT /lake/m.json HTTP/1.1", 'if-match: "e1"')
+    try:
+        # To a custom endpoint, the create-if-absent form of servers that
+        # do not take `*`.
+        _ = s.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.if_none_match('"e1"'))
+        raise Error("the echo answered with a success")
+    except e:
+        _check(_wire(e), "PUT /lake/m.json HTTP/1.1", 'if-none-match: "e1"')
     try:
         _ = s.conditional_put("lake", "m.json", _bytes("{}"), WritePrecondition.none())
         raise Error("the echo answered with a success")
