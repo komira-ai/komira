@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-`komira_objectstore` (`src/komira_objectstore`) gives stateful code a durable place to keep state in a bucket without a lock service. Its traits describe an object store whose conditional write (create-if-absent, or replace-if-version-matches) lets concurrent writers coordinate: a manifest chunk, a claim or a dedup record is an object whose creation exactly one writer wins. Around those traits the library ships local and in-memory conformers, the append-only CAS manifest, batching, compaction and sharding primitives built on the manifest, a presigned-URL seam, a readiness probe, and the object-store shuffle primitives.
+`komira_objectstore` (`src/komira_objectstore`) gives stateful code a durable place to keep state in a bucket without a lock service. Its traits describe an object store whose conditional write (create-if-absent, or replace-if-version-matches) lets concurrent writers coordinate: a manifest chunk, a claim or a dedup record is an object whose creation exactly one writer wins. Around those traits the library ships local and in-memory conformers, the append-only CAS manifest, batching, compaction and sharding primitives built on the manifest, a presigned-URL seam, and a readiness probe. The distributed shuffle is built on top of it, in its own package, `komira_shuffle`.
 
 The library imports `komira_core`, `komira_async` (the reactor, and the C shim that carries the manifest's process-wide lock), `komira_atomic_alias` and `komira_obs` (the metrics sink for list escalations).
 
@@ -18,7 +18,7 @@ Out of scope:
 stateful services (a log, a catalog, a table store, a search index)
         |
    CasManifestStore, CoalescingWindow, compact_once, ShardedLineage,
-   shuffle (sink, seal, claim, source)
+   the shuffle (komira_shuffle: sink, seal, claim, source)
         |
    ConditionalWriteStore conformers
    LocalFsConditionalStore | the in-memory twins | a cloud store's conformer
@@ -102,17 +102,9 @@ Marking the sentinel committed after a win is off by default (`_FINALIZE_ON_HOT_
 - `ShardedLineage` (`sharded_lineage.mojo`) is the domain-neutral shard layer: it mints writer shard ids, discovers live shards, pins a cross-shard snapshot and plans one dense offset assignment. `SubLineageBaseFold` (`sublineage_base_fold.mojo`) folds shard chunks into a dense `_base` manifest, and `sublineage_shard_keys.mojo` holds the shard-id and prefix helpers.
 - `object_store_reachable` (`store_readiness.mojo`) is the readiness check for services that keep state in a bucket: one delimiter listing under `STORE_READINESS_PROBE_PREFIX`. It never raises; any error returns false.
 
-### How does the object-store shuffle work?
+### Where is the shuffle?
 
-The shuffle moves rows from producers to reducers through a bucket, with keys under `{shuffle_id}/{step_id}/`:
-
-1. **Map.** `sink_shuffle_write` (`shuffle_sink.mojo`) assigns each row a partition with `HashPartitioner` (`shuffle_partitioner.mojo`): FNV-1a-64 of the key bytes, then the high `log2(R)` bits (`radix_partition` in `shuffle_radix.mojo`). R must be a power of two. It writes one `{producer_id}.seg` object holding every partition's bytes and a trailer with a `PartitionSlot` (offset, length, row count) for every partition, empty ones included. It then records a `ShuffleEntry` in the `_entries` manifest with `append_idempotent`, so a replayed producer adds no second entry.
-2. **Seal.** `seal_step` (`shuffle_seal_driver.mojo`), the one writer at the driver join, reads `_entries` with `read_head_authoritative`, collects the committed producers as a set, so a replayed producer counts once, and raises unless that set equals the expected set. If a seal is already present it returns that one; otherwise it writes a `StepComplete` seal to `_seal` with `append_idempotent`.
-3. **Claim.** `claim_partition` (`shuffle_claim.mojo`) creates `_claims/{partition_id}` with `If-None-Match: *` and returns false if another reducer created it first.
-4. **Reduce.** `read_shuffle_partition` (`shuffle_source.mojo`) waits (bounded by `max_park_iters`) for the seal, raises if the committed set is short of the expected set, skips zero-length slices, and fetches each remaining slice with `get_range`. It is the only public read path; nothing exposes `_entries`.
-5. **Retire.** `reclaim_floor` (`shuffle_retention.mojo`) is the minimum consumer cursor and raises on an empty cursor set. `reap_epoch` and `reap_epochs_below` delete what lies below it.
-
-`shuffle_codec.mojo` holds the little-endian integer and length-prefixed string encoders the entry and seal formats use.
+The object-store shuffle (map, seal, claim, reduce, retire) is the package `komira_shuffle`, which depends on this one and is not depended on by it. It uses only this library's public surface: `CasManifestStore` and its `RetryPolicy`, the `ConditionalWriteStore` conformers, `Path`, `WritePrecondition`, and `is_precondition` in `cas_manifest.mojo`, the public spelling of the lost-write check.
 
 ## Why is it built this way?
 
@@ -182,9 +174,6 @@ The shuffle moves rows from producers to reducers through a bucket, with keys un
 - **One creator per key.** Of concurrent create-if-absent writes to one key, exactly one succeeds. Enforced for manifest chunk slots by `test_cas_manifest_concurrent_offline.mojo`, which races 1, 2, 4, 8 and 16 OS threads appending to one manifest over `SharedInMemoryConditionalStore` and asserts one winner per chunk sequence. The sequential tests `test_contended_slot_one_winner` (`test_cas_manifest_property.mojo`) and `test_create_if_absent_then_412` (`test_local_fs_conditional_store.mojo`) check that a second create on an existing key raises a precondition error.
 - **Gapless manifest.** Successive appends take consecutive chunk sequences and round-trip their bodies verbatim. Enforced by `test_sequential_appends_are_gapless` and `test_body_round_trips_verbatim`.
 - **Absence is proved, not guessed.** `_is_not_found` in `cas_manifest.mojo` accepts only `StoreError[NOT_FOUND]`, `status=404`, `not_found`, `NotFound` or `NoSuchKey`, never a bare `404`, because chunk keys contain digits. Enforced by `test_cas_manifest_absence_is_anchored.mojo`.
-- **A claim fails closed, with one hole.** `claim_partition` returns false on a precondition failure and re-raises anything else. Enforced by `test_claim_partition_reraises_on_non_eexist_failure`. The hole: it classifies with `_is_precondition`, which matches a bare `412` (see limits).
-- **A reducer never under-reads.** `read_shuffle_partition` returns only after the seal lists every expected producer. Enforced by `test_phase_a_seal_blocks_on_absence_and_missing_set` and `test_phase_a_idempotent_replay_no_double_read`.
-- **Retention keeps what a consumer still needs.** Enforced by `test_lagging_consumer_pins_floor` and `test_reap_below_floor_retains_at_and_above` (`test_shuffle_retention_reaper.mojo`).
 
 ## Where is the code?
 
@@ -197,7 +186,6 @@ The shuffle moves rows from producers to reducers through a bucket, with keys un
 | `src/komira_objectstore/*_conditional_store.mojo`, `shared_in_memory_*_store.mojo` | local and in-memory conformers | `LocalFsConditionalStore`, `DelimiterFaithfulConditionalStore` |
 | `src/komira_objectstore/coalescing_window.mojo`, `compact_window.mojo` | batching and compaction | `CoalescingWindow`, `compact_once` |
 | `src/komira_objectstore/sharded_lineage.mojo`, `sublineage_*.mojo` | sharded lineages | `ShardedLineage`, `SubLineageBaseFold` |
-| `src/komira_objectstore/shuffle_*.mojo` | shuffle primitives | `sink_shuffle_write`, `seal_step`, `claim_partition`, `read_shuffle_partition` |
 | `src/komira_objectstore/presign.mojo`, `store_readiness.mojo` | presign trait, readiness | `ObjectUrlSigner`, `object_store_reachable` |
 
 Entry points:
@@ -207,7 +195,7 @@ Entry points:
 
 ## How is it tested?
 
-The library welds all 21 files in `src/komira_objectstore/tests/` through `test_srcs`, so building it runs them. Run: `./buck2 build //src/komira_objectstore:komira_objectstore`.
+The library welds all 16 files in `src/komira_objectstore/tests/` through `test_srcs`, so building it runs them. Run: `./buck2 build //src/komira_objectstore:komira_objectstore`.
 
 | Tests | Cover |
 |---|---|
@@ -216,14 +204,13 @@ The library welds all 21 files in `src/komira_objectstore/tests/` through `test_
 | `test_local_fs_*`, `test_delimiter_listing_byte_faithful` | local-directory and delimiter-faithful stores, listing |
 | `test_coalescing_window`, `test_compact_window` | `CoalescingWindow` and `compact_once` |
 | `test_sharded_lineage_kernel`, `test_sublineage_base_fold` | sharded lineages and the dense `_base` fold |
-| `test_shuffle_*` | claims, seals, continuous epochs and retention |
 
 Not tested here: the cloud conformers of `ConditionalWriteStore`, which belong to the cloud store libraries.
 
 ## What are its limits and open questions?
 
-- **Limit: the precondition check can misread a key.** `_is_precondition` in `cas_manifest.mojo` still matches a bare `412`, so an unrelated error about a key containing `412` reads as a lost race. Its neighbour `_is_not_found`'s docstring records this as deliberately left for a separate change. The manifest uses it, and so does `claim_partition` in `shuffle_claim.mojo`. A claim key is `{shuffle_id}/{step_id}/_claims/{partition_id}`, and a store whose HTTP-status errors name the key can return a 403 or 5xx on a claim whose key contains `412`, which returns false so that partition can be silently skipped.
-- **Limit: a local-directory `If-Match` is not atomic across processes.** It reads, compares and renames; `claim_partition` uses create-only writes to avoid that window.
+- **Limit: the precondition check can misread a key.** `_is_precondition` in `cas_manifest.mojo` still matches a bare `412`, so an unrelated error about a key containing `412` reads as a lost race. Its neighbour `_is_not_found`'s docstring records this as deliberately left for a separate change. The manifest uses it, and so does the shuffle's claim in `komira_shuffle` (through the public `is_precondition`).
+- **Limit: a local-directory `If-Match` is not atomic across processes.** It reads, compares and renames; the shuffle's claim uses create-only writes to avoid that window.
 - **Limit: listing semantics differ by conformer** (see [which conformer to use](#which-object-store-conformer-should-a-test-use)).
 - **Limit: unused surface.** `RangeFetchStore` and `ObjectStoreHttpStub` have no conformer in this library, `plan_coalesce` has no caller outside its test, and `RequestCore` has no user inside the library.
 - **Limit: stale header comments.** The `komira_objectstore` package docstring says the byte-fetch methods live with the HTTP-backed conformers, and the retry comment on `RetryPolicy.broker_contention` says 28 retries where the code uses 40.
