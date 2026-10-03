@@ -80,7 +80,7 @@ aws_client(
     deps = _RUNTIME,
     test_srcs = ["test_endpoint_bindings.mojo"],
     test_data = {"test_endpoint_bindings.mojo": _ENDPOINT_TESTS["s3"] | {
-        _S3_MODEL: botocore_endpoint_file(_S3_MODEL),
+        _S3_MODEL: botocore_model("s3").model,
         "model/endpoint_bindings.json": "model/endpoint_bindings.json",
     }},
 )
