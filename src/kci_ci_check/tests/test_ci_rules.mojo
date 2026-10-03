@@ -155,6 +155,15 @@ def test_kci_run_calls() raises:
     assert_equal(len(c), 2)
     assert_equal(c[0].stage, String("prod"))
     assert_equal(c[1].stage, String("build"))
+    # Only a word in command position is an invocation: text that mentions
+    # `kci run` is not one.
+    var said = kci_run_calls(String("echo \"DRY RUN: kci run --stage prod --plan\"\nprintf '%s' kci run\n"))
+    assert_equal(len(said), 0)
+    var chained = kci_run_calls(String("cd x && kci run --stage a; kci run --stage b\nif true; then kci run --stage c; fi\n"))
+    assert_equal(len(chained), 3)
+    assert_equal(chained[0].stage, String("a"))
+    assert_equal(chained[1].stage, String("b"))
+    assert_equal(chained[2].stage, String("c"))
 
 
 comptime _OIDC: String = (
