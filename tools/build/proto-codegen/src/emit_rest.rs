@@ -51,7 +51,7 @@ pub const GCP_STATUS_ERROR: &str = "gcp_status_error";
 pub fn rest_imports() -> &'static [&'static str] {
     &[
         "from komira_gcp_core import GcpTokenSource, gcp_status_error",
-        "from komira_proto_codec.proto3_json import JsonEncoder, JsonDecoder",
+        "from komira_proto_codec.codec import encode_json, decode_json_lenient",
         "from komira_http.client.client import (",
         "    HttpClient,",
         "    build_get_request,",
@@ -423,8 +423,12 @@ fn emit_rest_method(
     w.indent();
     w.line("resp_text = String(\"{}\")");
     w.dedent();
-    w.line("var dec = JsonDecoder.from_text_lenient(resp_text)");
-    w.line(&format!("return {resp_ty}.decode(dec)"));
+    // Through the codec, never `{resp_ty}.decode(JsonDecoder)`: a response
+    // that IS a well-known type (`Struct`, `Timestamp`, `Value`, ...) is that
+    // type's canonical JSON value, which only the codec's comptime branch
+    // reads. For any other message `decode_json_lenient` is the same
+    // `JsonDecoder.from_text_lenient` read.
+    w.line(&format!("return decode_json_lenient[{resp_ty}](resp_text)"));
     w.dedent();
     w.blank();
     Ok(())
@@ -569,16 +573,21 @@ fn emit_query_build(
 }
 
 /// Emit the JSON-body build. For `body: "*"` the whole `req` serializes; for a
-/// named field the single field's message serializes.
+/// named field the single field's message serializes. Both go through
+/// `komira_proto_codec.codec.encode_json`, so a well-known type writes its
+/// canonical JSON value.
 fn emit_body_build(
     w: &mut Writer,
     part: &FieldPartition,
     req_msg: &IrMessage,
 ) -> Result<(), String> {
-    w.line("var benc = JsonEncoder()");
+    // Through the codec's `encode_json`, never `<msg>.encode(JsonEncoder)`:
+    // a body field that IS a well-known type writes its canonical JSON
+    // value, which only the codec's comptime branch does. For any other
+    // message it is the same encode + `finish()`.
     match &part.body {
         BodyDesignator::Whole => {
-            w.line("req.encode(benc)");
+            w.line("var body_text = encode_json(req)");
         }
         BodyDesignator::Field(name) => {
             let fld = req_msg
@@ -595,18 +604,17 @@ fn emit_body_build(
             if stored_optional {
                 // Presence-guard: only serialize the body when the field is
                 // set; an unset body message emits an empty `{}`.
+                w.line("var body_text = String(\"{}\")");
                 w.line(&format!("if req.{name}:"));
                 w.indent();
-                w.line(&format!("req.{name}.value().encode(benc)"));
+                w.line(&format!("body_text = encode_json(req.{name}.value())"));
                 w.dedent();
             } else {
-                w.line(&format!("req.{name}.encode(benc)"));
+                w.line(&format!("var body_text = encode_json(req.{name})"));
             }
         }
         BodyDesignator::None => unreachable!("emit_body_build only on a body verb"),
     }
-    w.line("benc.finish()");
-    w.line("var body_text = benc^.into_string()");
     w.line("var body = BytesBody.from_str(body_text)");
     Ok(())
 }
@@ -951,7 +959,8 @@ mod tests {
         ));
         assert!(emit.source.contains("page_size="));
         assert!(emit.source.contains("build_get_request(url^, headers^)"));
-        assert!(emit.source.contains("GetReq.decode(dec)"));
+        assert!(emit.source.contains("return decode_json_lenient[GetReq](resp_text)"));
+        assert!(!emit.source.contains("JsonDecoder"));
     }
 
     #[test]
@@ -1088,11 +1097,11 @@ mod tests {
         let file = file_with(vec![book, req], svc.clone());
         let emit = emit_rest_service(&file, &svc).unwrap();
         // The named body field is a singular MESSAGE (stored `Optional[Book]`),
-        // so it serializes via `req.book.value().encode(benc)` guarded by a
-        // presence check — NOT `req.book.encode(benc)` (Optional has no
-        // `.encode`). The post constructor + Content-Type are emitted.
+        // so it serializes via `encode_json(req.book.value())` guarded by a
+        // presence check — NOT `encode_json(req.book)` (Optional is not
+        // Serializable). The post constructor + Content-Type are emitted.
         assert!(emit.source.contains("if req.book:"));
-        assert!(emit.source.contains("req.book.value().encode(benc)"));
+        assert!(emit.source.contains("body_text = encode_json(req.book.value())"));
         assert!(emit.source.contains("BytesBody.from_str(body_text)"));
         assert!(emit.source.contains("HttpMethod.post()"));
         assert!(emit.source.contains("Content-Type"));
@@ -1148,7 +1157,7 @@ mod tests {
         };
         let file = file_with(vec![req, out], svc.clone());
         let emit = emit_rest_service(&file, &svc).unwrap();
-        assert!(emit.source.contains("req.encode(benc)"));
+        assert!(emit.source.contains("var body_text = encode_json(req)"));
         assert!(emit.source.contains("BytesBody.from_str(body_text)"));
         assert!(emit.source.contains("HttpMethod.delete()"));
         assert!(emit.source.contains("Content-Type"));
@@ -1521,8 +1530,8 @@ mod tests {
         assert!(e.source.contains(
             "raise gcp_status_error(String(\"POST\"), String(\"M\"), status_int, resp_bytes)"
         ));
-        assert!(e.source.contains("JsonDecoder.from_text_lenient(resp_text)"));
-        assert!(!e.source.contains("JsonDecoder.from_text("));
+        assert!(e.source.contains("return decode_json_lenient[Req](resp_text)"));
+        assert!(!e.source.contains("decode_json["));
         // The import line states exactly the names the contract constants name.
         assert_eq!(
             rest_imports()[0],

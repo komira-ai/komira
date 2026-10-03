@@ -5,10 +5,10 @@ load(
     "botocore_model",
     "botocore_model_path",
 )
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 
 # Generated clients resolving their endpoints through an endpoint ruleset
-# (aws_client's `endpoint_rules`), compiled against the real komira_aws_core,
+# (mojo_aws_client's `endpoint_rules`), compiled against the real komira_aws_core,
 # with botocore's endpoint test cases run through the GENERATED code: the
 # config, the context-parameter bindings and `resolve_<op>_endpoint`. The
 # ruleset interpreter itself is komira_aws_core's subject (its
@@ -34,7 +34,7 @@ _LOGS = botocore_model("logs")
 
 # CloudWatch Logs, whose ruleset reads built-ins only: every one of
 # botocore's logs endpoint cases is resolved through the generated config.
-aws_client(
+mojo_aws_client(
     name = "logs_endpoints",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -60,7 +60,7 @@ _S3_MODEL = botocore_model_path("s3")
 
 _S3 = botocore_model("s3")
 
-aws_client(
+mojo_aws_client(
     name = "endpoint_bindings",
     model = "model/endpoint_bindings.json",
     model_sha256 = "c0ed1b711cd3530a143ddcde49578cf717b8dfca46d00e153e1956f4456b5773",

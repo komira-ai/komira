@@ -1,8 +1,8 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
-load("//functional/gcp_client:defs.bzl", "gen_check")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+load("//functional/mojo_gcp_client:defs.bzl", "gen_check")
 
-# aws_client in client mode, checked at GENERATION only. run_tests.sh (test
+# mojo_aws_client in client mode, checked at GENERATION only. run_tests.sh (test
 # 35) builds :komira_aws_logs_client_send_surface by name, never this
 # package's pattern: the client library itself does not compile here, since
 # client-mode code imports komira_http and the transport half of
@@ -11,19 +11,19 @@ load("//functional/gcp_client:defs.bzl", "gen_check")
 # generated module carries the signed-send surface, its komira_http import
 # and the error builder that reads an error's code and message through
 # komira_aws_core. (Pure mode leaving all of that out is the `absent` of
-# ../aws_client's gen_check.)
+# ../mojo_aws_client's gen_check.)
 
 _LOGS = botocore_model("logs")
 
-aws_client(
+mojo_aws_client(
     name = "komira_aws_logs_client",
     mode = "client",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
     operations = ["GetLogEvents"],
     deps = [
-        "//functional/aws_client:komira_aws_core",
-        "//functional/aws_client:komira_json",
+        "//functional/mojo_aws_client:komira_aws_core",
+        "//functional/mojo_aws_client:komira_json",
     ],
 )
 

@@ -48,8 +48,9 @@
 # line — in the revision spec, in the plan diff, in `describe` output.
 #
 # ── ⚠ AND THAT IS EXACTLY WHY SECRETS STAY REFERENCES ────────────────────────
-# argv is WORLD-READABLE: `/proc/<pid>/cmdline` is mode 0444, and the same string
-# lands in `ps`, in the Cloud Run revision spec, in every `describe` output and in
+# argv is readable by other processes on the same machine (e.g.
+# `/proc/<pid>/cmdline` on Linux, `ps` on any Unix), and the same string lands
+# in the Cloud Run revision spec, in every `describe` output and in
 # the plan diff. So a secret parameter renders the secret's NAME
 # (`projects/P/secrets/S/versions/latest`) and the app resolves the VALUE at boot
 # under its own workload identity. A resource name is not a capability — reading it
@@ -371,9 +372,9 @@ def _reject_literal_on_injected(decl: AppParamDecl) raises:
             + param_kind_label(decl.kind)
             + String(
                 ". An 'I' parameter's value is a secret or a per-run identity and"
-                " argv is world-readable (/proc/<pid>/cmdline is mode 0444, and"
-                " the same string lands in `ps`, the revision spec and the plan"
-                " diff). Declare it REFERENCE or SECRET_REFERENCE so the NAME"
+                " argv is readable by other processes on the same machine (e.g."
+                " /proc/<pid>/cmdline on Linux, ps on any Unix), and the same"
+                " string lands in the revision spec and the plan diff. Declare it REFERENCE or SECRET_REFERENCE so the NAME"
                 " travels and the app resolves the value at boot"
             )
         )

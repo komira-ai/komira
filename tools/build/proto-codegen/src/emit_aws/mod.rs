@@ -846,13 +846,13 @@ impl<'a> AwsEmitter<'a> {
                 rules.partitions_sha256
             ));
         } else if !unapplied_endpoint_bindings.is_empty() {
-            // Generated without the service's ruleset (aws_client's
+            // Generated without the service's ruleset (mojo_aws_client's
             // `endpoint_rules`): requests go to the static service host, and
             // what the model binds into the ruleset is said here, not dropped
             // silently.
             self.line("#   endpoints    : NO RULESET. Requests go to the static service host,");
             self.line("#                  and these endpoint bindings of the model are NOT");
-            self.line("#                  applied (aws_client `endpoint_rules` applies them):");
+            self.line("#                  applied (mojo_aws_client `endpoint_rules` applies them):");
             for b in unapplied_endpoint_bindings {
                 for (i, l) in wrap(b, 58).iter().enumerate() {
                     let lead = if i == 0 { "-" } else { " " };

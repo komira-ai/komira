@@ -1,5 +1,5 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 
 # Amazon S3: a restXml client generated at build time from botocore's S3
 # model (//third_party/botocore, pinned by sha256; nothing of it is copied
@@ -43,7 +43,7 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 
 _S3 = botocore_model("s3")
 
-aws_client(
+mojo_aws_client(
     name = "komira_aws_s3",
     customizations = ["s3"],
     endpoint_rules = _S3.endpoint_rules,
