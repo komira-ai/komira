@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Plan-time statistics: the StatsProvider trait, ColumnStats and TableStats, the physical-type tag, the exact/inexact/absent precision lattice, per-source statistics; the HyperLogLog cardinality sketch is added after the copy.
+mojo_library(
+    name = "komira_plan_stats",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_plan_expr:komira_plan_expr",
+    ],
+    visibility = ["PUBLIC"],
+)
