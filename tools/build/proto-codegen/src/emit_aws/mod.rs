@@ -9,8 +9,12 @@
 //!   the protocol and signing-scheme checks.
 //! - `json_codec`: the JSON body codec.
 //! - `rpc`: the awsJson RPC binding.
-//! - `rest`: the REST binding (restJson1): URI labels and query, headers,
-//!   prefix headers, the payload, the response status, and restJson1 errors.
+//! - `rest`: the REST binding (restJson1 and restXml): URI labels and query,
+//!   headers, prefix headers, the payload, the response status, and the
+//!   restJson1 and restXml errors.
+//! - `xml_codec`: the restXml body codec.
+//! - [`endpoint`]: endpoint resolution through the service's endpoint
+//!   ruleset, emitted when the generator is given one.
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -19,12 +23,15 @@ use crate::ir::{IrEnum, IrField, IrMessage, IrMethod, IrType, Label, ScalarKind}
 use crate::lower::{recursion_breaking_edges_under, ContainerInlining};
 use crate::overrides::AwsOverrides;
 
+pub mod endpoint;
 mod json_codec;
 pub mod proto;
 mod rest;
 mod rpc;
+mod xml_codec;
 
-pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS};
+pub use endpoint::AwsEndpointRules;
+pub use proto::{AwsProtocol, ALL_PROTOCOLS, JSON_BODY_PROTOCOLS, REST_PROTOCOLS, XML_BODY_PROTOCOLS};
 use proto::{select_protocol, Binding, BodyCodec};
 
 /// Emitter options.
@@ -33,18 +40,51 @@ pub struct AwsEmitOptions {
     pub emit_model_json: bool,
     pub pure_only: bool,
     pub omit_preamble: bool,
+    /// The `s3` customization (see [`S3_CUSTOMIZATION`]): refused unless the
+    /// model's serviceId is `S3` and its protocol is restXml.
+    pub s3: bool,
 }
+
+/// The `s3` customization: what botocore does to S3 beyond the
+/// model, each from `botocore/handlers.py` at the pinned tag.
+///
+/// - `_handle_200_error`: a 200 response whose body is an `<Error>` (or is
+///   not XML) is an error, handled as an HTTP 500, for every operation that
+///   has an output shape whose payload is not a blob or a string
+///   (`_should_handle_200_error`). `parse_<op>_response` raises it in the
+///   client's text for an HTTP 500 (`<Service>.<Op> failed: HTTP 500 <code>
+///   <message>`). In client mode each such operation's verb also passes
+///   `s3_200_error=True` to `send_sigv4_signed_request`, which then retries
+///   the answer as the 500 botocore's `_update_status_code` makes it.
+/// - `handle_expires_header`: an `Expires` header that is not a valid date
+///   leaves the member unset, and the rest of the response still parses.
+/// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
+///   (botocore/httpchecksum.py, under the default `when_supported`): an
+///   operation whose `httpChecksum` names a `requestAlgorithmMember` sends
+///   `x-amz-checksum-crc32` and the algorithm header, `CRC32` when the
+///   caller chose none, unless the caller set an `x-amz-checksum-*` header
+///   (`s3_apply_request_checksum`). That covers the operations where the
+///   checksum is optional (PutObject, UploadPart) and those where it is
+///   required (`requestChecksumRequired`: DeleteObjects, PutBucket* and the
+///   like), which are refused without the customization
+///   (`check_request_checksums`, applied by
+///   [`emit_aws_module_with_endpoints`]).
+/// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
+///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
+///   puts the bucket in the URL it chooses (`rest_request_uri` in
+///   `rest.rs`).
+pub const S3_CUSTOMIZATION: &str = "s3";
 
 /// The protocols this emitter implements, by botocore name. Anything else is
 /// refused.
-pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json"];
+pub const SUPPORTED_PROTOCOLS: &[&str] = &["json", "rest-json", "rest-xml"];
 
 /// The `jsonVersion` values this emitter implements.
 pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "4";
+pub const AWS_GENERATOR_VERSION: &str = "8";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -58,6 +98,26 @@ pub enum AwsImportMode {
     Always,
     /// Client mode only: anything that touches the transport.
     ClientOnly,
+    /// Pure mode only: what a caller with its own transport reads a response
+    /// with, which a client's own error builder does not call.
+    PureOnly,
+    /// A module generated with an endpoint ruleset, in either mode: the
+    /// ruleset interpreter (see [`endpoint`]).
+    EndpointRules,
+    /// A module that renders values in botocore's MODEL convention (the
+    /// conformance driver's), when its protocol's body is not JSON: that
+    /// convention is JSON, so it needs the JSON runtime the body does not.
+    ModelJson,
+    /// A module generated with the `s3` customization, in either mode: the
+    /// 200-with-`<Error>` check its parsers make.
+    S3,
+    /// Client mode, or a pure module generated with the `s3` customization:
+    /// the error reader, which the client's error builder and the `s3`
+    /// 200-with-`<Error>` check both call.
+    ClientOrS3,
+    /// Client mode of a module generated with an endpoint ruleset: what
+    /// turns the endpoint the ruleset chose into the signer's target.
+    ClientEndpointRules,
 }
 
 /// One `from <module> import <names>` group of [`AWS_IMPORTS`].
@@ -112,8 +172,14 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &["aws_error_code_from_body", "aws_error_message_from_body"],
-        mode: AwsImportMode::Always,
+        mode: AwsImportMode::PureOnly,
         protocols: JSON_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_json_error_info"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: &[AwsProtocol::Json],
     },
     AwsImport {
         module: AWS_CORE,
@@ -174,6 +240,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "AwsCredential",
             "AwsCredsSource",
             "AwsEndpoint",
+            "AwsRetryQuota",
             "Header",
             "HttpResult",
             "resolve_endpoint",
@@ -184,9 +251,79 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     },
     AwsImport {
         module: AWS_CORE,
+        names: &[
+            "aws_xml_blob_of",
+            "aws_xml_bool_of",
+            "aws_xml_child",
+            "aws_xml_end",
+            "aws_xml_f32_of",
+            "aws_xml_f64_of",
+            "aws_xml_int_of",
+            "aws_xml_list_items",
+            "aws_xml_namespace",
+            "aws_xml_parse",
+            "aws_xml_set_body",
+            "aws_xml_start",
+            "aws_xml_string_of",
+            "aws_xml_ts_of",
+            "aws_xml_write_blob",
+            "aws_xml_write_bool",
+            "aws_xml_write_f32",
+            "aws_xml_write_f64",
+            "aws_xml_write_int",
+            "aws_xml_write_string",
+            "aws_xml_write_ts",
+        ],
+        mode: AwsImportMode::Always,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
         names: &["aws_rest_json_error"],
         mode: AwsImportMode::ClientOnly,
         protocols: &[AwsProtocol::RestJson],
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_rest_xml_error"],
+        mode: AwsImportMode::ClientOrS3,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_xml_body_is_error", "s3_apply_request_checksum"],
+        mode: AwsImportMode::S3,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "aws_json_bool",
+            "aws_json_f32",
+            "aws_json_f64",
+            "aws_json_i32",
+            "aws_json_i64",
+            "aws_json_string",
+        ],
+        mode: AwsImportMode::ModelJson,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &[
+            "AwsPartitionSet",
+            "EndpointParams",
+            "EndpointRuleSet",
+            "ResolvedEndpoint",
+        ],
+        mode: AwsImportMode::EndpointRules,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["AwsSigningTarget", "aws_signing_target"],
+        mode: AwsImportMode::ClientEndpointRules,
+        protocols: ALL_PROTOCOLS,
     },
     AwsImport {
         module: "komira_json",
@@ -195,7 +332,19 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         protocols: JSON_BODY_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_http.transport.io_stream",
+        module: "komira_json",
+        names: &["JsonValue"],
+        mode: AwsImportMode::ModelJson,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_xml",
+        names: &["XmlNode", "XmlWriter"],
+        mode: AwsImportMode::Always,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_http_core.transport.io_stream",
         names: &["Connector"],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,
@@ -207,22 +356,65 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
 /// order, holding every name that `pure_only` needs. Rows that share a
 /// module merge into one statement.
 pub fn aws_import_section(protocol: AwsProtocol, pure_only: bool) -> String {
-    aws_import_section_for(&[protocol], pure_only)
+    aws_import_section_for(&[protocol], pure_only, false)
 }
 
 /// [`aws_import_section`] for a module holding code of several protocols:
-/// every row that applies to any of `protocols`, each once.
-pub fn aws_import_section_for(protocols: &[AwsProtocol], pure_only: bool) -> String {
+/// every row that applies to any of `protocols`, each once, with the
+/// [`AwsImportMode::EndpointRules`] rows when `endpoint_rules` is set.
+pub fn aws_import_section_for(
+    protocols: &[AwsProtocol],
+    pure_only: bool,
+    endpoint_rules: bool,
+) -> String {
+    aws_import_section_with(protocols, pure_only, endpoint_rules, false, false)
+}
+
+/// [`aws_import_section_for`], with the [`AwsImportMode::ModelJson`] rows
+/// when `model_json` is set and the [`AwsImportMode::S3`] rows when `s3` is
+/// (the `s3` customization). A name two applying rows both hold is imported
+/// once, where its first row puts it.
+pub fn aws_import_section_with(
+    protocols: &[AwsProtocol],
+    pure_only: bool,
+    endpoint_rules: bool,
+    model_json: bool,
+    s3: bool,
+) -> String {
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
         if pure_only && row.mode == AwsImportMode::ClientOnly {
+            continue;
+        }
+        if !pure_only && row.mode == AwsImportMode::PureOnly {
+            continue;
+        }
+        if !endpoint_rules && row.mode == AwsImportMode::EndpointRules {
+            continue;
+        }
+        if (pure_only || !endpoint_rules) && row.mode == AwsImportMode::ClientEndpointRules {
+            continue;
+        }
+        if !model_json && row.mode == AwsImportMode::ModelJson {
+            continue;
+        }
+        if !s3 && row.mode == AwsImportMode::S3 {
+            continue;
+        }
+        if pure_only && !s3 && row.mode == AwsImportMode::ClientOrS3 {
             continue;
         }
         if !row.protocols.iter().any(|p| protocols.contains(p)) {
             continue;
         }
         match groups.iter_mut().find(|(m, _)| *m == row.module) {
-            Some((_, names)) => names.extend_from_slice(row.names),
+            Some((_, names)) => {
+                for n in row.names {
+                    if !names.contains(n) {
+                        names.push(*n);
+                    }
+                }
+            }
             None => groups.push((row.module, row.names.to_vec())),
         }
     }
@@ -298,6 +490,28 @@ pub fn emit_aws_module(
     options: AwsEmitOptions,
     provenance: Option<AwsProvenance<'_>>,
 ) -> Result<AwsEmitted, String> {
+    emit_aws_module_with_endpoints(lowering, overrides, module_name, options, provenance, None)
+}
+
+/// [`emit_aws_module`], resolving endpoints through `endpoint_rules` when it
+/// is given: the module embeds the ruleset and gets an endpoint config and a
+/// `resolve_<op>_endpoint` per operation ([`endpoint`]). Every binding of the
+/// model is checked against the ruleset first. Refused in `omit_preamble`
+/// mode, whose concatenated modules have no header to record it in.
+pub fn emit_aws_module_with_endpoints(
+    lowering: &AwsLowering,
+    overrides: &AwsOverrides,
+    module_name: &str,
+    options: AwsEmitOptions,
+    provenance: Option<AwsProvenance<'_>>,
+    endpoint_rules: Option<&AwsEndpointRules>,
+) -> Result<AwsEmitted, String> {
+    if endpoint_rules.is_some() && options.omit_preamble {
+        return Err(format!(
+            "emit_aws: module `{module_name}` is given an endpoint ruleset in \
+             omit_preamble mode, which has no header to record it in"
+        ));
+    }
     if provenance.is_none() && !options.omit_preamble {
         return Err(format!(
             "emit_aws: module `{module_name}` has a header but no provenance; the \
@@ -305,9 +519,25 @@ pub fn emit_aws_module(
         ));
     }
     let selected = select_protocol(&lowering.service)?;
+    if options.s3
+        && (lowering.service.service_id != "S3" || selected.protocol != AwsProtocol::RestXml)
+    {
+        return Err(format!(
+            "emit_aws: the `{S3_CUSTOMIZATION}` customization is refused unless the model's \
+             serviceId is `S3` and its protocol is restXml, and service `{}` has serviceId \
+             `{}` and protocol `{}`",
+            lowering.service.service, lowering.service.service_id, lowering.service.protocol
+        ));
+    }
+    check_request_checksums(&lowering.facts, options)?;
+    check_modeled_retryable_errors(&lowering.facts, options)?;
+    if selected.protocol == AwsProtocol::RestXml {
+        xml_codec::check_rest_xml_features(&lowering.facts)?;
+    }
     overrides.check_against(lowering)?;
 
     let mut em = AwsEmitter::new(lowering, overrides, module_name, selected, options)?;
+    em.endpoint_rules = endpoint_rules;
     em.provenance = provenance.map(|p| (p.model_key.to_string(), p.model_sha256.to_string()));
     let source = em.emit()?;
     Ok(AwsEmitted {
@@ -316,6 +546,72 @@ pub fn emit_aws_module(
         structs: em.structs,
         parameterised: em.parameterised,
     })
+}
+
+/// REFUSED, by name (`checksum-required`): an operation whose every request
+/// must carry a checksum (`httpChecksumRequired`, or
+/// `httpChecksum.requestChecksumRequired`), unless the module sends one.
+/// Only the `s3` customization does, for an operation whose `httpChecksum`
+/// names a `requestAlgorithmMember` (`emit_s3_request_checksum` in
+/// `rest.rs`): botocore sends CRC32 there whether the checksum is required
+/// or only supported (`resolve_request_checksum_algorithm`), and so does the
+/// generated builder. Anywhere else the generated client sends none, and
+/// the service would reject every request.
+///
+/// That refusal is this generator's choice, not botocore's behaviour:
+/// botocore also sends `x-amz-checksum-crc32` (with no algorithm header)
+/// for `httpChecksumRequired` with no algorithm member, and for any
+/// service. No S3 operation in the pinned model is in that case: each one
+/// requiring a checksum names a `requestAlgorithmMember`.
+fn check_request_checksums(facts: &AwsFacts, options: AwsEmitOptions) -> Result<(), String> {
+    for (name, op) in facts.operations() {
+        if !op.request_checksum_required() {
+            continue;
+        }
+        let sent = options.s3
+            && op
+                .http_checksum
+                .as_ref()
+                .is_some_and(|c| c.request_algorithm_member.is_some());
+        if !sent {
+            return Err(format!(
+                "emit_aws: REFUSED checksum-required: operation `{name}` requires a \
+                 request checksum, and the generated client sends one only with the \
+                 `{S3_CUSTOMIZATION}` customization, for an operation whose httpChecksum \
+                 names a requestAlgorithmMember"
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// REFUSED, by name (`modeled-retryable`), in client mode: an operation that
+/// can return an error shape the model marks `retryable`. botocore's
+/// standard mode retries such an error (`ModeledRetryableChecker`), and the
+/// generated send (`send_sigv4_signed_request`) retries by status, error
+/// code and transport failure only, so the client would give up where
+/// botocore retries. A pure-mode module has no send and is not refused.
+fn check_modeled_retryable_errors(
+    facts: &AwsFacts,
+    options: AwsEmitOptions,
+) -> Result<(), String> {
+    if options.pure_only {
+        return Ok(());
+    }
+    for (name, op) in facts.operations() {
+        for fq in &op.errors {
+            let shape = fq.rsplit('#').next().unwrap_or(fq);
+            if facts.shape(shape)?.retryable {
+                return Err(format!(
+                    "emit_aws: REFUSED modeled-retryable: operation `{name}` can return \
+                     `{shape}`, which the model marks retryable; botocore's standard mode \
+                     retries it (ModeledRetryableChecker), and the generated send retries \
+                     by status, error code and transport failure only"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 /// The layout probe for `emitted`: one `size_of` per struct it declares.
@@ -401,6 +697,8 @@ struct AwsEmitter<'a> {
     validating: BTreeSet<String>,
     /// `(model key, model sha256)` for the header.
     provenance: Option<(String, String)>,
+    /// The endpoint ruleset, when endpoints resolve through one.
+    endpoint_rules: Option<&'a AwsEndpointRules>,
     /// Non-parameterised top-level structs, in emission order.
     structs: Vec<String>,
     /// Parameterised top-level structs.
@@ -475,6 +773,7 @@ impl<'a> AwsEmitter<'a> {
             by_fq,
             validating: BTreeSet::new(),
             provenance: None,
+            endpoint_rules: None,
             structs: Vec::new(),
             parameterised: Vec::new(),
             out: String::new(),
@@ -535,8 +834,15 @@ impl<'a> AwsEmitter<'a> {
         // `emit_message` and `emit_operations` both ask, and a shape's answer
         // depends on shapes emitted after it, so it cannot be decided inline.
         self.validating = self.validating_set();
+        if let Some(rules) = self.endpoint_rules {
+            self.check_endpoint_bindings(rules)?;
+        }
         if !self.options.omit_preamble {
-            self.emit_header();
+            let unapplied = match self.endpoint_rules {
+                Some(_) => Vec::new(),
+                None => self.unapplied_endpoint_bindings()?,
+            };
+            self.emit_header(&unapplied);
             self.emit_imports();
         }
         self.emit_constants();
@@ -549,13 +855,16 @@ impl<'a> AwsEmitter<'a> {
             self.emit_bytes_helper();
         }
         self.emit_operations()?;
+        if let Some(rules) = self.endpoint_rules {
+            self.emit_endpoint_section(rules)?;
+        }
         if !self.options.pure_only {
             self.emit_client()?;
         }
         Ok(std::mem::take(&mut self.out))
     }
 
-    fn emit_header(&mut self) {
+    fn emit_header(&mut self, unapplied_endpoint_bindings: &[String]) {
         let n_messages = self.lowering.model.files[0].messages.len();
         let n_enums = self.lowering.model.files[0].enums.len();
         let ops: Vec<String> = self
@@ -584,6 +893,30 @@ impl<'a> AwsEmitter<'a> {
         self.line(&format!("#   model key    : {model_key}"));
         self.line(&format!("#   model sha256 : {model_sha256}"));
         self.line(&format!("#   operations   : {}", ops.join(", ")));
+        if let Some(rules) = self.endpoint_rules {
+            self.line(&format!(
+                "#   endpoints    : ruleset sha256 {}",
+                rules.ruleset_sha256
+            ));
+            self.line(&format!(
+                "#                  partitions sha256 {}",
+                rules.partitions_sha256
+            ));
+        } else if !unapplied_endpoint_bindings.is_empty() {
+            // Generated without the service's ruleset (mojo_aws_client's
+            // `endpoint_rules`): requests go to the static service host, and
+            // what the model binds into the ruleset is said here, not dropped
+            // silently.
+            self.line("#   endpoints    : NO RULESET. Requests go to the static service host,");
+            self.line("#                  and these endpoint bindings of the model are NOT");
+            self.line("#                  applied (mojo_aws_client `endpoint_rules` applies them):");
+            for b in unapplied_endpoint_bindings {
+                for (i, l) in wrap(b, 58).iter().enumerate() {
+                    let lead = if i == 0 { "-" } else { " " };
+                    self.line(&format!("#                  {lead} {l}"));
+                }
+            }
+        }
         self.line(&format!(
             "#   shapes       : {} messages, {} enums",
             n_messages,
@@ -594,6 +927,14 @@ impl<'a> AwsEmitter<'a> {
             "#   mode         : {}",
             if self.options.pure_only { "pure (no transport)" } else { "client" }
         ));
+        if self.options.s3 {
+            self.line("#   customize    : s3 (botocore handlers.py: 200-with-<Error> as an");
+            self.line("#                  error, an invalid Expires header left unset)");
+            if self.endpoint_rules.is_some() {
+                self.line("#                  and a leading /{Bucket} dropped from each path:");
+                self.line("#                  the endpoint ruleset puts the bucket in the URL");
+            }
+        }
         self.line("#");
         if !self.options.pure_only {
             self.line("# THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport");
@@ -660,7 +1001,13 @@ impl<'a> AwsEmitter<'a> {
     }
 
     fn emit_imports(&mut self) {
-        let section = aws_import_section(self.protocol, self.options.pure_only);
+        let section = aws_import_section_with(
+            &[self.protocol],
+            self.options.pure_only,
+            self.endpoint_rules.is_some(),
+            self.options.emit_model_json,
+            self.options.s3,
+        );
         self.out.push_str(&section);
         self.blank();
         self.blank();
@@ -861,6 +1208,19 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
 
         // -- copy ----------------------------------------------------------
+        // An explicit copy constructor: the 1.0.0 compiler can report the
+        // synthesized one of a struct with an explicit `__deinit__` as
+        // trivial (it did for S3's `DeletedObject`: three `Optional[String]`
+        // and an `Optional[Bool]`), and `List.copy()` then copies the
+        // elements with memcpy, so two lists share each String buffer and
+        // the first one destroyed frees it under the other. A user-defined
+        // constructor is never trivial.
+        self.line("def __init__(out self, *, copy: Self):");
+        self.push();
+        self.line("\"\"\"Explicit, never bitwise: a List copies its elements with it.\"\"\"");
+        self.line("self = copy.copy()");
+        self.pop();
+        self.blank();
         self.line("def copy(self) -> Self:");
         self.push();
         self.line("\"\"\"Deep clone. Explicit, not implicit: every member is heap-owning.\"\"\"");
@@ -1438,17 +1798,33 @@ impl<'a> AwsEmitter<'a> {
         self.line("    pointer (a code pointer, no heap); the credential source is moved");
         self.line("    in. No field is an `UnsafePointer`.\"\"\"");
         self.blank();
+        let ruleset = self.endpoint_rules.is_some();
+        let cfg = format!("{}EndpointConfig", self.prefix);
+        let mn = self.module_name.clone();
         self.line("var _mk_connector: def () raises thin -> Self.C");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
-        self.line("# WHERE this client sends. `None` = real AWS (the host derived from");
-        self.line("# the region). A VALUE, never an ambient env var — see");
-        self.line(&format!(
-            "# `{}.AwsEndpoint`. This is what makes every verb this",
-            AWS_CORE
-        ));
-        self.line("# generator emits exercisable against a local emulator.");
-        self.line("var _endpoint_override: Optional[AwsEndpoint]");
+        self.line("# The retry quota this client's calls share (botocore's standard mode");
+        self.line("# keeps one per client): every retry spends from it, and a call that");
+        self.line("# succeeds refills it.");
+        self.line("var _retry_quota: AwsRetryQuota");
+        if ruleset {
+            self.line("# WHERE this client sends: the service's endpoint ruleset, resolved per");
+            self.line("# call over this configuration (`endpoint` for a local emulator,");
+            self.line("# `force_path_style`, FIPS, dual-stack). A VALUE, never an ambient env");
+            self.line("# var. The ruleset is loaded once, here.");
+            self.line(&format!("var _endpoint_config: {cfg}"));
+            self.line("var _rules: EndpointRuleSet");
+        } else {
+            self.line("# WHERE this client sends. `None` = real AWS (the host derived from");
+            self.line("# the region). A VALUE, never an ambient env var — see");
+            self.line(&format!(
+                "# `{}.AwsEndpoint`. This is what makes every verb this",
+                AWS_CORE
+            ));
+            self.line("# generator emits exercisable against a local emulator.");
+            self.line("var _endpoint_override: Optional[AwsEndpoint]");
+        }
         self.blank();
         self.line("def __init__(");
         self.push();
@@ -1456,14 +1832,33 @@ impl<'a> AwsEmitter<'a> {
         self.line("mk_connector: def () raises thin -> Self.C,");
         self.line("var creds_source: Self.T,");
         self.line("region: String,");
-        self.line("endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),");
-        self.pop();
-        self.line("):");
-        self.push();
+        if ruleset {
+            self.line(&format!("var endpoint_config: {cfg} = {cfg}(),"));
+            self.pop();
+            self.line(") raises:");
+            self.push();
+            self.line("\"\"\"`endpoint_config`'s region, when unset, is `region`.\"\"\"");
+            self.line(&format!("var rules = {mn}_endpoint_rules()"));
+        } else {
+            self.line("endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),");
+            self.pop();
+            self.line("):");
+            self.push();
+        }
         self.line("self._mk_connector = mk_connector");
         self.line("self._creds_source = creds_source^");
         self.line("self._region = region");
-        self.line("self._endpoint_override = endpoint_override.copy()");
+        self.line("self._retry_quota = AwsRetryQuota()");
+        if ruleset {
+            self.line("if not endpoint_config.region and region.byte_length() > 0:");
+            self.push();
+            self.line("endpoint_config.region = Optional[String](region)");
+            self.pop();
+            self.line("self._endpoint_config = endpoint_config^");
+            self.line("self._rules = rules^");
+        } else {
+            self.line("self._endpoint_override = endpoint_override.copy()");
+        }
         self.pop();
         self.blank();
         self.line("def into_creds_source(deinit self) -> Self.T:");
@@ -1481,7 +1876,20 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
 
         // -- the send primitive ------------------------------------------
-        self.line("def send(mut self, var req: AwsRequest) raises -> HttpResult:");
+        let s3_flag = if self.options.s3 {
+            ", s3_200_error: Bool = False"
+        } else {
+            ""
+        };
+        if ruleset {
+            self.line(&format!(
+                "def send(mut self, var req: AwsRequest, target: AwsSigningTarget{s3_flag}) raises -> HttpResult:"
+            ));
+        } else {
+            self.line(&format!(
+                "def send(mut self, var req: AwsRequest{s3_flag}) raises -> HttpResult:"
+            ));
+        }
         self.push();
         let mut doc: Vec<String> = vec![
             "\"\"\"Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call".to_string(),
@@ -1496,6 +1904,17 @@ impl<'a> AwsEmitter<'a> {
             doc.push(String::new());
             doc.extend(notes.iter().map(|l| l.to_string()));
         }
+        if ruleset {
+            doc.push(String::new());
+            doc.push("    `target` is where the endpoint ruleset sent this call and how it".to_string());
+            doc.push("    is signed (`aws_signing_target`): its endpoint, signing name and".to_string());
+            doc.push("    region, and the headers the endpoint adds.".to_string());
+        }
+        if self.options.s3 {
+            doc.push(String::new());
+            doc.push("    `s3_200_error`: S3 can answer this operation with a 200 whose".to_string());
+            doc.push("    body is an `<Error>`, which the send then retries as a 500.".to_string());
+        }
         if let Some(last) = doc.last_mut() {
             last.push_str("\"\"\"");
         }
@@ -1504,6 +1923,12 @@ impl<'a> AwsEmitter<'a> {
         }
         self.line("var cred = self._creds_source.credentials()");
         self.line("var extra = List[Header]()");
+        if ruleset {
+            self.line("for _i in range(len(target.header_names)):");
+            self.push();
+            self.line("extra.append(Header(target.header_names[_i].copy(), target.header_values[_i].copy()))");
+            self.pop();
+        }
         self.line("var content_type = String(String(" );
         self.push();
         let default_content_type = self.binding.default_content_type(self);
@@ -1530,18 +1955,28 @@ impl<'a> AwsEmitter<'a> {
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
+        self.line("self._retry_quota,");
         self.line("req.method.copy(),");
         self.line("cred,");
-        self.line("self._region.copy(),");
-        self.line(&format!("String({p}_SERVICE),"));
-        self.line(&format!(
-            "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
-            self.module_name
-        ));
+        if ruleset {
+            self.line("target.signing_region.copy(),");
+            self.line("target.signing_name.copy(),");
+            self.line("target.endpoint.copy(),");
+        } else {
+            self.line("self._region.copy(),");
+            self.line(&format!("String({p}_SERVICE),"));
+            self.line(&format!(
+                "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
+                self.module_name
+            ));
+        }
         self.line("req.uri.copy(),");
         self.line("content_type^,");
         self.line("req.body.copy(),");
         self.line("extra^,");
+        if self.options.s3 {
+            self.line("s3_200_error=s3_200_error,");
+        }
         self.pop();
         self.line(")");
         self.pop();
@@ -1593,8 +2028,27 @@ impl<'a> AwsEmitter<'a> {
                 ));
             }
             let fp = self.fn_prefix();
+            let s3_200 = if self.s3_send_reads_200_error(m, &facts)? {
+                ", s3_200_error=True"
+            } else {
+                ""
+            };
             self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
-            self.line("var res = self.send(req^)");
+            if ruleset {
+                self.line("var target = aws_signing_target(");
+                self.push();
+                self.line(&format!(
+                    "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, input),",
+                    m.name
+                ));
+                self.line("self._region.copy(),");
+                self.line(&format!("String({p}_SERVICE),"));
+                self.pop();
+                self.line(")");
+                self.line(&format!("var res = self.send(req^, target{s3_200})"));
+            } else {
+                self.line(&format!("var res = self.send(req^{s3_200})"));
+            }
             self.line("if not aws_is_error_status(res.status):");
             self.push();
             self.line(&format!("return {fp}parse_{}_response(res^.into_response())", m.name));
@@ -1654,7 +2108,7 @@ impl<'a> AwsEmitter<'a> {
 /// `protocols` needs. The conformance driver emits this ONCE ahead of its
 /// concatenated suites.
 pub fn pure_preamble(protocols: &[AwsProtocol], with_model_json: bool) -> String {
-    let mut em = aws_import_section_for(protocols, true);
+    let mut em = aws_import_section_with(protocols, true, false, with_model_json, false);
     em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");
@@ -1847,8 +2301,12 @@ mod tests {
 
     #[test]
     fn no_other_protocol_imports_the_json_runtime() {
+        // Only the MODEL-convention rows, which a client module never takes.
         for p in ALL_PROTOCOLS.iter().filter(|p| !JSON_BODY_PROTOCOLS.contains(p)) {
-            for row in rows_for(*p) {
+            for row in rows_for(*p)
+                .into_iter()
+                .filter(|row| row.mode != AwsImportMode::ModelJson)
+            {
                 assert_ne!(row.module, "komira_json", "{p:?}");
                 assert!(
                     !row.names.iter().any(|n| n.contains("json")),
@@ -1861,6 +2319,54 @@ mod tests {
                 assert!(!aws_import_section(*p, pure_only).contains("komira_json"), "{p:?}");
             }
         }
+    }
+
+    #[test]
+    fn rest_xml_takes_the_xml_runtime_and_json_only_for_the_model_convention() {
+        let p = AwsProtocol::RestXml;
+        for pure_only in [true, false] {
+            let s = aws_import_section(p, pure_only);
+            assert!(s.contains("from komira_xml import (\n    XmlNode,\n    XmlWriter,\n)"), "{s}");
+            assert!(s.contains("    aws_xml_write_string,"), "{s}");
+            assert!(!s.contains("komira_json"), "{s}");
+            let m = aws_import_section_with(&[p], pure_only, false, true, false);
+            assert!(m.contains("from komira_json import JsonValue"), "{m}");
+            assert!(m.contains("    aws_json_f64,"), "{m}");
+        }
+        // A client reads restXml errors; a pure module only with the `s3`
+        // customization, whose 200-with-<Error> check raises one. Only that
+        // customization takes the check itself.
+        let plain_pure = aws_import_section(p, true);
+        assert!(!plain_pure.contains("aws_rest_xml_error"), "{plain_pure}");
+        assert!(!plain_pure.contains("aws_xml_body_is_error"), "{plain_pure}");
+        let plain_client = aws_import_section(p, false);
+        assert!(plain_client.contains("    aws_rest_xml_error,"), "{plain_client}");
+        assert!(!plain_client.contains("aws_xml_body_is_error"), "{plain_client}");
+        for pure_only in [true, false] {
+            let s3 = aws_import_section_with(&[p], pure_only, false, false, true);
+            assert!(s3.contains("    aws_rest_xml_error,\n    aws_xml_body_is_error,\n"), "{s3}");
+        }
+        // The model rows add nothing a JSON-body module does not already
+        // import: the section is the same text with and without them.
+        for p in JSON_BODY_PROTOCOLS {
+            assert_eq!(
+                aws_import_section_with(&[*p], true, false, true, false),
+                aws_import_section(*p, true)
+            );
+        }
+    }
+
+    #[test]
+    fn a_name_two_rows_hold_is_imported_once() {
+        let s = aws_import_section_with(
+            &[AwsProtocol::Json, AwsProtocol::RestXml],
+            true,
+            false,
+            true,
+            false,
+        );
+        assert_eq!(s.matches("    JsonValue,").count(), 1, "{s}");
+        assert_eq!(s.matches("    aws_json_f64,").count(), 1, "{s}");
     }
 
     #[test]
@@ -1936,11 +2442,222 @@ mod tests {
     }
 
     #[test]
+    fn an_aws_json_client_reads_its_error_code_through_the_error_info() {
+        // The client's error builder takes the code aws_json_error_info
+        // reads: an awsQueryCompatible service's x-amzn-query-error code
+        // first, so an SQS QueueDoesNotExist is raised under its query code.
+        let src = json_module_with_a_list_of_timestamps();
+        let builder = &src[src.find("def _tiny_error(").unwrap()..];
+        for want in [
+            "    var info = aws_json_error_info(res.to_response())\n",
+            "    var code = info.code.copy()\n",
+            "    var msg = info.message.copy()\n",
+        ] {
+            assert!(builder.contains(want), "`{want}` missing");
+        }
+        assert!(!builder.contains("aws_error_code_from_body(res.body)"));
+        let imports = aws_import_section(AwsProtocol::Json, false);
+        assert!(imports.contains("    aws_json_error_info,\n"), "{imports}");
+        assert!(!aws_import_section(AwsProtocol::Json, true).contains("aws_json_error_info"));
+        assert!(!aws_import_section(AwsProtocol::RestJson, false).contains("aws_json_error_info"));
+        // Grouped with the other error readers, ahead of the transport's
+        // types.
+        assert!(
+            imports.find("aws_json_error_info").unwrap() < imports.find("AwsCredential").unwrap(),
+            "{imports}"
+        );
+        // A client's error builder reads through its protocol's error info,
+        // so a client module does not import the body readers; a pure
+        // module keeps them for a caller with its own transport.
+        for p in JSON_BODY_PROTOCOLS {
+            assert!(!aws_import_section(*p, false).contains("aws_error_code_from_body"), "{p:?}");
+            assert!(aws_import_section(*p, true).contains("aws_error_code_from_body"), "{p:?}");
+        }
+        // The builder's doc line stays inside the block's wrap.
+        let doc = builder.lines().find(|l| l.contains("ride out")).unwrap();
+        assert!(doc.len() <= 80, "{doc}");
+    }
+
+    #[test]
     fn every_protocol_gets_the_transport_in_client_mode_only() {
         for p in ALL_PROTOCOLS {
             assert!(!aws_import_section(*p, true).contains("Connector"), "{p:?}");
             assert!(aws_import_section(*p, false).contains("Connector"), "{p:?}");
             assert!(aws_import_section(*p, true).contains("    AwsRequest,"), "{p:?}");
         }
+    }
+
+    /// A one-operation model whose operation carries `checksum` (its
+    /// httpChecksum traits), emitted with or without the `s3`
+    /// customization. `protocol` is `rest-xml` (serviceId S3, so the
+    /// customization applies) or `json`.
+    fn emit_checksum_op(protocol: &str, checksum: &str, s3: bool) -> Result<String, String> {
+        let (service_id, extra_meta, method) = match protocol {
+            "json" => ("Tiny", r#", "jsonVersion": "1.0", "targetPrefix": "Tiny""#, "POST"),
+            _ => ("S3", "", "PUT"),
+        };
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
+                    "protocol": "{protocol}", "serviceFullName": "Tiny",
+                    "serviceId": "{service_id}", "signatureVersion": "v4",
+                    "uid": "tiny-2026-10-02"{extra_meta}}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "{method}", "requestUri": "/op"}},
+                    "input": {{"shape": "In"}}{checksum}}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{
+                    "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                        "locationName": "x-amz-sdk-checksum-algorithm"}},
+                    "A": {{"shape": "Str"}}}}}},
+                    "Str": {{"type": "string"}}}}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "s3",
+            &["Op".to_string()],
+            "s3.json",
+            "aws.s3",
+        )?;
+        let options = AwsEmitOptions {
+            pure_only: true,
+            omit_preamble: true,
+            s3,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_client(&lowering, &AwsOverrides::empty(), "s3", options).map(|(_, s)| s)
+    }
+
+    #[test]
+    fn a_client_keeps_one_retry_quota_and_spends_it_on_every_send() {
+        // botocore's standard mode keeps one retry quota per client; the
+        // generated client holds it and hands it to every send.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(src.contains("    var _retry_quota: AwsRetryQuota\n"), "{src}");
+        assert!(src.contains("        self._retry_quota = AwsRetryQuota()\n"), "{src}");
+        assert!(
+            src.contains(
+                "        return send_sigv4_signed_request[Self.C](\n            \
+                 self._mk_connector,\n            self._retry_quota,\n"
+            ),
+            "{src}"
+        );
+        assert_eq!(src.matches("self._retry_quota").count(), 2, "{src}");
+        for p in ALL_PROTOCOLS {
+            assert!(aws_import_section(*p, false).contains("    AwsRetryQuota,\n"), "{p:?}");
+            assert!(!aws_import_section(*p, true).contains("AwsRetryQuota"), "{p:?}");
+        }
+    }
+
+    /// The module of a one-operation awsJson model whose operation can
+    /// return `Busy`, an error shape with the given `retryable` trait (or
+    /// none, for "").
+    fn emit_with_error(retryable: &str, pure_only: bool) -> Result<String, String> {
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}, "output": {{"shape": "Out"}},
+                    "errors": [{{"shape": "Busy"}}]}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{}}}},
+                           "Out": {{"type": "structure", "members": {{}}}},
+                           "Busy": {{"type": "structure", "members": {{}},
+                                    "exception": true{retryable}}}}}}}"#
+        ))
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let options = AwsEmitOptions {
+            omit_preamble: true,
+            pure_only,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None).map(|e| e.source)
+    }
+
+    #[test]
+    fn a_modeled_retryable_error_is_refused_in_client_mode() {
+        // botocore retries an error the model marks retryable, and the
+        // generated send does not read the model: a client of such an
+        // operation would give up where botocore retries.
+        for retryable in [
+            r#", "retryable": {"throttling": false}"#,
+            r#", "retryable": {"throttling": true}"#,
+        ] {
+            let e = emit_with_error(retryable, false).unwrap_err();
+            assert_eq!(
+                crate::aws_conformance::refusal_name(&e).as_deref(),
+                Some("modeled-retryable"),
+                "{e}"
+            );
+            assert!(e.contains("operation `Op` can return `Busy`"), "{e}");
+            // A pure-mode module has no send.
+            emit_with_error(retryable, true).unwrap();
+        }
+        emit_with_error("", false).unwrap();
+    }
+
+    #[test]
+    fn a_required_checksum_is_refused_where_the_client_sends_none() {
+        let refusal = |protocol: &str, checksum: &str, s3: bool| {
+            let e = emit_checksum_op(protocol, checksum, s3).unwrap_err();
+            crate::aws_conformance::refusal_name(&e)
+        };
+        let required = r#", "httpChecksumRequired": true"#;
+        let with_member = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm",
+            "requestChecksumRequired": true}"#;
+        let no_member = r#", "httpChecksum": {"requestChecksumRequired": true}"#;
+        // Without the customization nothing computes one, in any protocol.
+        for (protocol, checksum) in [
+            ("rest-xml", with_member),
+            ("rest-xml", required),
+            ("json", with_member),
+            ("json", required),
+        ] {
+            assert_eq!(
+                refusal(protocol, checksum, false).as_deref(),
+                Some("checksum-required"),
+                "{protocol} {checksum}"
+            );
+        }
+        // With it, only where the model names the algorithm member: the
+        // older trait names none.
+        for checksum in [required, no_member] {
+            assert_eq!(
+                refusal("rest-xml", checksum, true).as_deref(),
+                Some("checksum-required"),
+                "{checksum}"
+            );
+        }
+        let src = emit_checksum_op("rest-xml", with_member, true).unwrap();
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
+        // An optional checksum is never refused. Without the customization
+        // none is sent; with it, only where the model names the algorithm
+        // member.
+        let optional = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm"}"#;
+        for checksum in [r#", "httpChecksumRequired": false"#, optional] {
+            let src = emit_checksum_op("rest-xml", checksum, false).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{src}");
+        }
+        for checksum in [
+            "",
+            r#", "httpChecksumRequired": false"#,
+            r#", "httpChecksum": {"requestChecksumRequired": false}"#,
+        ] {
+            let src = emit_checksum_op("rest-xml", checksum, true).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{checksum}: {src}");
+        }
+        let src = emit_checksum_op("rest-xml", optional, true).unwrap();
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
     }
 }

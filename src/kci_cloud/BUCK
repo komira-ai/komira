@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The clouds of the kci deploy side: the catalog's types as data, the
+# CloudAdapter trait every cloud built into kci implements (an internal
+# module boundary, not a plugin interface), Clouds (the closed list of
+# built-in clouds; every cloud declares every catalog type), the validate
+# phase (graph, coverage and limit findings, one pass, one refusal text),
+# plan / apply / destroy that validate before lowering, and the conformance
+# kit. Names no cloud; the in-memory reference clouds are kci_cloud_mem.
+#
+# komira_proto_codec is here for the welded tests, which read graphs in the
+# proto3 JSON form an author writes.
+mojo_library(
+    name = "kci_cloud",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_reconciler:kci_reconciler",
+        "//src/kci_resource_proto:kci_resource_proto",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+    test_srcs = [
+        "tests/test_cloud_catalog_and_clouds.mojo",
+        "tests/test_cloud_validate_and_deploy.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

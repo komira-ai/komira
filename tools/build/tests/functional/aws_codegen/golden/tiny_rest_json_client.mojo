@@ -13,7 +13,7 @@
 #   model sha256 : 75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee
 #   operations   : GetThing, PutThing, SetConfig
 #   shapes       : 8 messages, 0 enums
-#   generator    : aws-client-gen version 4
+#   generator    : aws-client-gen version 8
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -31,8 +31,6 @@ from komira_aws_core import (
     AwsResponse,
     aws_blob_from_json,
     aws_error_code,
-    aws_error_code_from_body,
-    aws_error_message_from_body,
     aws_is_error_status,
     aws_f64_from_json,
     aws_json_blob,
@@ -70,6 +68,7 @@ from komira_aws_core import (
     AwsCredential,
     AwsCredsSource,
     AwsEndpoint,
+    AwsRetryQuota,
     Header,
     HttpResult,
     resolve_endpoint,
@@ -81,7 +80,7 @@ from komira_json import (
     parse_json_bytes,
     parse_json_value,
 )
-from komira_http.transport.io_stream import Connector
+from komira_http_core.transport.io_stream import Connector
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +129,10 @@ struct TinyRestConfig(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         self.mode = Optional[String]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -193,6 +196,10 @@ struct TinyRestGetThingRequest(Copyable, Movable, Deinitable):
     def __init__(out self, var id: String):
         self.id = id^
         self.range_ = Optional[String]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -263,6 +270,10 @@ struct TinyRestGetThingResponse(Copyable, Movable, Deinitable):
         self.body = Optional[List[UInt8]]()
         self.length = Optional[Int64]()
         self.meta = Optional[Dict[String, String]]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -375,6 +386,10 @@ struct TinyRestPutThingRequest(Copyable, Movable, Deinitable):
         self.meta = Optional[Dict[String, String]]()
         self.note = Optional[String]()
         self.size = Optional[Int32]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -540,6 +555,10 @@ struct TinyRestPutThingResponse(Copyable, Movable, Deinitable):
         self.status = Optional[Int32]()
         self.created = Optional[Float64]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -620,6 +639,10 @@ struct TinyRestSetConfigRequest(Copyable, Movable, Deinitable):
     def __init__(out self):
         self.config = Optional[TinyRestConfig]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -680,6 +703,10 @@ struct TinyRestSetConfigResponse(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -729,6 +756,10 @@ struct TinyRestThingNotFound(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         self.message = Optional[String]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -905,6 +936,10 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
     var _mk_connector: def () raises thin -> Self.C
     var _creds_source: Self.T
     var _region: String
+    # The retry quota this client's calls share (botocore's standard mode
+    # keeps one per client): every retry spends from it, and a call that
+    # succeeds refills it.
+    var _retry_quota: AwsRetryQuota
     # WHERE this client sends. `None` = real AWS (the host derived from
     # the region). A VALUE, never an ambient env var — see
     # `komira_aws_core.AwsEndpoint`. This is what makes every verb this
@@ -921,6 +956,7 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
         self._mk_connector = mk_connector
         self._creds_source = creds_source^
         self._region = region
+        self._retry_quota = AwsRetryQuota()
         self._endpoint_override = endpoint_override.copy()
 
     def into_creds_source(deinit self) -> Self.T:
@@ -957,6 +993,7 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
                 extra.append(Header(n^, req.header_values[_i].copy()))
         return send_sigv4_signed_request[Self.C](
             self._mk_connector,
+            self._retry_quota,
             req.method.copy(),
             cred,
             self._region.copy(),
