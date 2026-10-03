@@ -138,7 +138,7 @@ comptime _STDERR: FileDescriptor = FileDescriptor(2)
 
 
 def _stop(outcome: String, error_id: String, why: String) -> BuildOutcome:
-    return BuildOutcome(outcome.copy(), error_id.copy(), String("kci build: ") + why)
+    return BuildOutcome(outcome.copy(), error_id.copy(), String("BUILD step: ") + why)
 
 
 def _refused(error_id: String, why: String) -> BuildOutcome:
@@ -350,7 +350,7 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
             return BuildOutcome(derived.outcome.copy(), derived.error_id.copy(), derived.message.copy())
         var stamp = derived.stamp.value().copy()
         print(
-            String("kci build: revision ") + stamp.revision_id + String(", platform ")
+            String("BUILD step: revision ") + stamp.revision_id + String(", platform ")
             + req.platform + String(", stamp commit ") + stamp.source_commit
             + String(", build number ") + String(stamp.build_number)
             + String(", commit time ") + String(stamp.timestamp_ms) + String(" ms"),
@@ -372,10 +372,10 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                     if k > 0:
                         line += String(" ")
                     line += argv[k]
-                print(String("kci build: plan: would build ") + name + String(": ") + line, file=_STDERR)
+                print(String("BUILD step: plan: would build ") + name + String(": ") + line, file=_STDERR)
                 would.append(name^)
             var o = BuildOutcome.succeeded(
-                String("kci build: plan: ") + String(len(would))
+                String("BUILD step: plan: ") + String(len(would))
                 + String(" artifact(s) would be built into ") + pdir + String("; nothing was built"),
             )
             for i in range(len(would)):
@@ -401,7 +401,7 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                 req.log_dir + String("/") + name + String(".stdout"),
                 req.log_dir + String("/") + name + String(".stderr"),
             )
-            print(String("kci build: building ") + name + String(": ") + spec.command_line(), file=_STDERR)
+            print(String("BUILD step: building ") + name + String(": ") + spec.command_line(), file=_STDERR)
             var r: RunResult
             try:
                 r = runner.run(spec)
@@ -461,7 +461,7 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
         var text = render_release_manifest(release)
         _write(out + String("/") + String(RELEASE_MANIFEST_NAME), text)
         var outcome = BuildOutcome.succeeded(
-            String("kci build: ")
+            String("BUILD step: ")
             + String(len(final))
             + String(" artifact(s) built and verified into ")
             + out,
@@ -532,7 +532,7 @@ def run_build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
         var lost = BuildOutcome(
             String(OUTCOME_INDETERMINATE),
             String(ERROR_CANNOT_TELL),
-            o.message + String("\nkci build: the result document could not record this step: ") + String(e),
+            o.message + String("\nBUILD step: the result document could not record this step: ") + String(e),
         )
         return lost^
     return o^

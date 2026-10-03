@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_build/runner.mojo -- the process-runner seam: how `kci build` runs
+# src/kci_build/runner.mojo -- the process-runner seam: how the BUILD step runs
 #   buck2 without knowing how a process is started.
 # =============================================================================
 #

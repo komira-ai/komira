@@ -472,7 +472,7 @@ def test_platform_dir_that_is_a_file_is_refused_with_zero_runs() raises:
     assert_equal(outcome.exit_code(), EXIT_USAGE)
     assert_equal(
         outcome.message,
-        String("kci build: --release-dir '") + req.release_dir + String("': '") + req.platform_dir()
+        String("BUILD step: --release-dir '") + req.release_dir + String("': '") + req.platform_dir()
         + String("' is not a directory"),
     )
     assert_equal(len(runner.calls), 0)
@@ -488,7 +488,7 @@ def test_missing_work_dir_is_refused_with_zero_runs() raises:
     assert_equal(outcome.exit_code(), EXIT_USAGE)
     assert_equal(
         outcome.message,
-        String("kci build: --work-dir '") + req.work_dir + String("' is not a directory"),
+        String("BUILD step: --work-dir '") + req.work_dir + String("' is not a directory"),
     )
     assert_equal(outcome.error_id, String(ERROR_USAGE))
     assert_equal(len(runner.calls), 0)
@@ -504,7 +504,7 @@ def test_relative_work_dir_is_refused_with_zero_runs() raises:
     assert_equal(outcome.error_id, String(ERROR_USAGE))
     assert_equal(
         outcome.message,
-        String("kci build: --work-dir 'repo' is not an absolute path: it is the cwd every build")
+        String("BUILD step: --work-dir 'repo' is not an absolute path: it is the cwd every build")
         + String(" resolves against"),
     )
     assert_equal(len(git.calls), 0)
@@ -536,12 +536,12 @@ def test_a_platform_kci_does_not_release_is_refused_before_anything() raises:
     var req = _request(root)
     req.platform = String("darwin-arm64")
     _refused_before_running(
-        String("plat"), req^, String(ERROR_PLATFORM), String("kci build: platform 'darwin-arm64' is not released")
+        String("plat"), req^, String(ERROR_PLATFORM), String("BUILD step: platform 'darwin-arm64' is not released")
     )
     var req2 = _request(_fresh(String("plat_noarch")))
     req2.platform = String("noarch")
     _refused_before_running(
-        String("plat_noarch"), req2^, String(ERROR_PLATFORM), String("kci build: platform 'noarch' is a member's platform")
+        String("plat_noarch"), req2^, String(ERROR_PLATFORM), String("BUILD step: platform 'noarch' is a member's platform")
     )
 
 
@@ -549,7 +549,7 @@ def test_an_abbreviated_revision_id_is_refused_before_anything() raises:
     var req = _request(_fresh(String("abbrev")))
     req.revision_id = String("a1b2c3d")
     _refused_before_running(
-        String("abbrev"), req^, String(ERROR_REVISION), String("kci build: --revision-id 'a1b2c3d' is not a full commit id")
+        String("abbrev"), req^, String(ERROR_REVISION), String("BUILD step: --revision-id 'a1b2c3d' is not a full commit id")
     )
 
 
@@ -579,7 +579,7 @@ def test_invalid_declarations_are_refused_with_zero_runs() raises:
     var outcome = _run(req, runner, git)
     assert_equal(outcome.exit_code(), EXIT_REFUSED)
     assert_equal(outcome.error_id, String(ERROR_DECLARATION))
-    assert_true(outcome.message.startswith(String("kci build: ")), outcome.message)
+    assert_true(outcome.message.startswith(String("BUILD step: ")), outcome.message)
     assert_equal(len(runner.calls), 0)
     assert_false(exists(req.platform_dir()))
 
@@ -632,7 +632,7 @@ def test_non_zero_exit_is_failed_naming_the_artifact() raises:
     assert_equal(r.code, EXIT_FAILED)
     assert_equal(r.error_id, String(ERROR_BUILD_FAILED))
     var msg = r.message.copy()
-    assert_true(msg.startswith(String("kci build: artifact 'komira_name_registry': `buck2 build ")), msg)
+    assert_true(msg.startswith(String("BUILD step: artifact 'komira_name_registry': `buck2 build ")), msg)
     assert_true(msg.find(String("` exit 2 (stderr: ") + req.log_dir + String("/komira_name_registry.stderr)")) >= 0, msg)
     assert_true(msg.endswith(String("\nError: action failed")), msg)
     assert_equal(r.remaining, 1)
@@ -668,7 +668,7 @@ def test_a_build_that_cannot_start_is_cannot_tell() raises:
     assert_equal(outcome.exit_code(), EXIT_CANNOT_TELL)
     assert_equal(
         outcome.message,
-        String("kci build: artifact 'komira_hash': the build could not be started:")
+        String("BUILD step: artifact 'komira_hash': the build could not be started:")
         + String(" cannot start 'buck2': errno 2"),
     )
     assert_equal(runner.calls, 1)
@@ -725,7 +725,7 @@ def _expect_refused(tag: String, which: Int, why: String) raises:
     var r = _first_refused(tag, which)
     assert_equal(r.code, EXIT_REFUSED, r.message)
     assert_equal(r.error_id, String(ERROR_MEMBER))
-    assert_equal(r.message, String("kci build: artifact 'komira_hash': ") + why)
+    assert_equal(r.message, String("BUILD step: artifact 'komira_hash': ") + why)
     assert_equal(r.remaining, 2)
     assert_false(exists(_release_json(r.req)))
 
@@ -811,7 +811,7 @@ def _log_dir_refused(tag: String, log_dir: String, shown: String) raises:
     assert_equal(outcome.error_id, String(ERROR_USAGE))
     assert_equal(
         outcome.message,
-        String("kci build: --log-dir '") + req.log_dir + String("' is --release-dir '") + req.release_dir
+        String("BUILD step: --log-dir '") + req.log_dir + String("' is --release-dir '") + req.release_dir
         + String("' or lies under it ('") + root + String("/") + shown + String("' in '")
         + req.release_dir
         + String("'): the release directory holds only the member directories and")
@@ -913,7 +913,7 @@ def test_a_stray_sibling_in_the_release_dir_is_refused() raises:
     assert_equal(r.code, EXIT_REFUSED, r.message)
     assert_equal(
         r.message,
-        String("kci build: the release directory '") + r.req.platform_dir()
+        String("BUILD step: the release directory '") + r.req.platform_dir()
         + String("' holds 'BUILD_SUMMARY.txt', which no declaration names: it holds only the")
         + String(" member directories and release.json (a build wrote outside its own directory)"),
     )
@@ -928,7 +928,7 @@ def test_a_later_build_rewriting_an_earlier_member_is_refused() raises:
     var now = _hash(_content(String("komira_hash")) + String(" v2"))
     assert_equal(
         r.message,
-        String("kci build: artifact 'komira_hash': its directory changed after it was verified")
+        String("BUILD step: artifact 'komira_hash': its directory changed after it was verified")
         + String(" (a later build wrote into it): was `komira_hash  1.0.0  ") + String(_BUILD)
         + String("  ") + was + String("`, now `komira_hash  1.0.0  ") + String(_BUILD)
         + String("  ") + now + String("`"),
@@ -942,7 +942,7 @@ def test_a_later_build_breaking_an_earlier_member_is_refused() raises:
     assert_equal(r.code, EXIT_REFUSED, r.message)
     assert_equal(
         r.message,
-        String("kci build: after every build ran, artifact 'komira_hash': the directory holds")
+        String("BUILD step: after every build ran, artifact 'komira_hash': the directory holds")
         + String(" 'stray.txt', which its manifest does not name; it holds exactly manifest.json,")
         + String(" the file and the metadata"),
     )
@@ -1010,7 +1010,7 @@ def _linked_first(tag: String, entry: String, why: String = String("")) raises:
             + String("' is a symlink: the directory holds regular files only, and a link can name")
             + String(" bytes outside the release directory")
         )
-    assert_equal(outcome.message, String("kci build: artifact 'komira_hash': ") + expected)
+    assert_equal(outcome.message, String("BUILD step: artifact 'komira_hash': ") + expected)
     assert_equal(runner.inner.remaining(), 2)
     assert_false(exists(_release_json(req)))
 
@@ -1082,7 +1082,7 @@ def test_plan_still_refuses_what_a_run_would_refuse() raises:
     req.plan = True
     req.revision_id = String("a1b2c3d")
     _refused_before_running(
-        String("plan_rev"), req^, String(ERROR_REVISION), String("kci build: --revision-id 'a1b2c3d' is not a full commit id")
+        String("plan_rev"), req^, String(ERROR_REVISION), String("BUILD step: --revision-id 'a1b2c3d' is not a full commit id")
     )
 
 
