@@ -1,18 +1,18 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The in-memory reference platforms: "mem" (complete) and "mem-lite"
+# The in-memory reference clouds: "mem" (complete) and "mem-lite"
 # (partial: no job, no public ingress). The executable specification of a
-# platform, the offline test double, and the offline proof that a graph a
-# platform cannot host is refused before anything is created.
+# cloud, the offline test double, and the offline proof that a graph a
+# cloud cannot host is refused before anything is created.
 #
 # komira_proto_codec is here for the welded tests, which read graphs in the
 # proto3 JSON form an author writes.
 mojo_library(
-    name = "kci_platform_mem",
+    name = "kci_cloud_mem",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_iac:kci_iac",
-        "//src/kci_platform:kci_platform",
+        "//src/kci_cloud:kci_cloud",
+        "//src/kci_reconciler:kci_reconciler",
         "//src/kci_resource_proto:kci_resource_proto",
         "//src/komira_proto_codec:komira_proto_codec",
     ],

@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_platform_mem/nodes.mojo: the engine nodes the reference platforms lower to.
+# kci_cloud_mem/nodes.mojo: the engine nodes the reference clouds lower to.
 # =============================================================================
 #
 #   * `MemRunNode`   `<id>/run`: the running thing of a service or a job. Its
@@ -11,13 +11,13 @@
 #   * `MemGrantNode` `<id>/uses/<target>`: one `Uses` line, ordered after both
 #                    ends.
 #
-# Every node's `owner()` is the authored resource id, as kci_platform's
+# Every node's `owner()` is the authored resource id, as kci_cloud's
 # lowering contract requires.
 # =============================================================================
 
 from std.memory import ArcPointer
 
-from kci_iac import (
+from kci_reconciler import (
     ChangeAction,
     Creds,
     InputRef,
@@ -27,6 +27,7 @@ from kci_iac import (
     ResourceStatus,
     CONVERGE_IN_PLACE,
     RES_ABSENT,
+    RES_FAILED,
     RETAIN_DELETE,
     VERB_CREATE,
     VERB_NOOP,
@@ -34,7 +35,7 @@ from kci_iac import (
     unbound_error,
 )
 
-from kci_platform_mem.mem_cloud import MemCloud
+from kci_cloud_mem.mem_store import MemStore
 
 
 def mem_url(resource_id: String) -> String:
@@ -43,6 +44,14 @@ def mem_url(resource_id: String) -> String:
 
 def mem_host(resource_id: String) -> String:
     return resource_id + String(".mem")
+
+
+def _failed(id: String, digest: String, url: String) -> ResourceStatus:
+    """A present node in the failed state: it exists and does not run what
+    the file asks. The engine updates it (a fixed spec is the way out)."""
+    return ResourceStatus(
+        RES_FAILED, id, digest, String("mem: the node failed to become ready"), url
+    )
 
 
 def _plan(id: String, live: ResourceStatus) -> ChangeAction:
@@ -58,7 +67,7 @@ def _plan(id: String, live: ResourceStatus) -> ChangeAction:
 
 
 struct MemRunNode(EngineResource, Movable, Deinitable):
-    var _cloud: ArcPointer[MemCloud]
+    var _store: ArcPointer[MemStore]
     var _resource: String
     var _static: String
     var _serves: Bool
@@ -68,13 +77,13 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
 
     def __init__(
         out self,
-        cloud: ArcPointer[MemCloud],
+        store: ArcPointer[MemStore],
         resource: String,
         static: String,
         serves: Bool,
         var refs: List[InputRef],
     ):
-        self._cloud = cloud.copy()
+        self._store = store.copy()
         self._resource = resource
         self._static = static
         self._serves = serves
@@ -104,19 +113,21 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         var id = self._id()
-        var i = self._cloud[].find(id)
+        var i = self._store[].find(id)
         if i < 0:
             return ResourceStatus.absent()
+        if self._store[].is_failed(i):
+            return _failed(id, self._store[].digests[i], self._store[].urls[i])
         if not self._is_bound:
             # A PRESENCE read: `destroy_graph` reads every node without
             # binding its inputs, and only asks whether it exists. With no
             # bound inputs there is no desired digest to compare, so the node
             # is reported present and unmatched, never as matching.
-            return ResourceStatus.drifted(id, self._cloud[].digests[i], self._cloud[].urls[i])
+            return ResourceStatus.drifted(id, self._store[].digests[i], self._store[].urls[i])
         var want = self._desired_digest()
-        if self._cloud[].digests[i] == want:
-            return ResourceStatus.matched(id, want, self._cloud[].urls[i])
-        return ResourceStatus.drifted(id, self._cloud[].digests[i], self._cloud[].urls[i])
+        if self._store[].digests[i] == want:
+            return ResourceStatus.matched(id, want, self._store[].urls[i])
+        return ResourceStatus.drifted(id, self._store[].digests[i], self._store[].urls[i])
 
     def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
         return _plan(self._id(), live)
@@ -128,14 +139,14 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
 
     def create(mut self, creds: Creds) raises -> String:
         var id = self._id()
-        self._cloud[].put(String("create"), id, self._desired_digest(), self._url())
+        self._store[].put(String("create"), id, self._desired_digest(), self._url())
         return id^
 
     def update(mut self, creds: Creds) raises:
-        self._cloud[].put(String("update"), self._id(), self._desired_digest(), self._url())
+        self._store[].put(String("update"), self._id(), self._desired_digest(), self._url())
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
-        self._cloud[].remove(physical_id)
+        self._store[].remove(physical_id)
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
         return CONVERGE_IN_PLACE
@@ -156,10 +167,10 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
         var o = Outputs()
         if not self._serves:
             return o^
-        var i = self._cloud[].find(self._id())
+        var i = self._store[].find(self._id())
         if i < 0:
             return o^
-        o.set(String("URL"), self._cloud[].urls[i])
+        o.set(String("URL"), self._store[].urls[i])
         o.set(String("HOST"), mem_host(self._resource))
         return o^
 
@@ -168,19 +179,19 @@ struct MemRunNode(EngineResource, Movable, Deinitable):
 
 
 struct MemGrantNode(EngineResource, Movable, Deinitable):
-    var _cloud: ArcPointer[MemCloud]
+    var _store: ArcPointer[MemStore]
     var _resource: String
     var _target: String
     var _access: String
 
     def __init__(
         out self,
-        cloud: ArcPointer[MemCloud],
+        store: ArcPointer[MemStore],
         resource: String,
         target: String,
         access: String,
     ):
-        self._cloud = cloud.copy()
+        self._store = store.copy()
         self._resource = resource
         self._target = target
         self._access = access
@@ -202,26 +213,28 @@ struct MemGrantNode(EngineResource, Movable, Deinitable):
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         var id = self._id()
-        var i = self._cloud[].find(id)
+        var i = self._store[].find(id)
         if i < 0:
             return ResourceStatus.absent()
-        if self._cloud[].digests[i] == self._access:
+        if self._store[].is_failed(i):
+            return _failed(id, self._store[].digests[i], String(""))
+        if self._store[].digests[i] == self._access:
             return ResourceStatus.matched(id, self._access)
-        return ResourceStatus.drifted(id, self._cloud[].digests[i])
+        return ResourceStatus.drifted(id, self._store[].digests[i])
 
     def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
         return _plan(self._id(), live)
 
     def create(mut self, creds: Creds) raises -> String:
         var id = self._id()
-        self._cloud[].put(String("create"), id, self._access, String(""))
+        self._store[].put(String("create"), id, self._access, String(""))
         return id^
 
     def update(mut self, creds: Creds) raises:
-        self._cloud[].put(String("update"), self._id(), self._access, String(""))
+        self._store[].put(String("update"), self._id(), self._access, String(""))
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
-        self._cloud[].remove(physical_id)
+        self._store[].remove(physical_id)
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
         return CONVERGE_IN_PLACE
