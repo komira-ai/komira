@@ -53,8 +53,9 @@ clients.
 - `endpoint_signing.mojo`: `aws_signing_target`, a resolved endpoint as the
   signer takes it (`AwsSigningTarget`: the `AwsEndpoint`, signing name and
   region, and headers), refusing an auth scheme this core cannot sign.
-- `s3_wire.mojo`: `s3_copy_source` and `s3_content_range_total`, the two S3
-  header values no model states.
+- `s3_wire.mojo`: `s3_copy_source`, `s3_content_range_total` and
+  `s3_apply_request_checksum` (over `s3_crc32` / `s3_checksum_crc32`), the
+  S3 header values no model states.
 """
 
 from .aws_codec import (
@@ -242,7 +243,14 @@ from .imds_credentials import (
     parse_imds_token,
 )
 from .partitions import AwsPartitionSet
-from .s3_wire import s3_content_range_total, s3_copy_source
+from .s3_wire import (
+    S3_DEFAULT_CHECKSUM_ALGORITHM,
+    s3_apply_request_checksum,
+    s3_checksum_crc32,
+    s3_content_range_total,
+    s3_copy_source,
+    s3_crc32,
+)
 from .shared_config import (
     AwsProfile,
     AwsProfileSet,
