@@ -13,7 +13,7 @@
 #   model sha256 : 7f960b9d0f5a4c8b06d4f3338c525c68bef960651af9318bae43810df3675a49
 #   operations   : GetBlob, GetBytes, GetPolicy, PutThing, SetConfig
 #   shapes       : 10 messages, 0 enums
-#   generator    : aws-client-gen version 5
+#   generator    : aws-client-gen version 6
 #   mode         : pure (no transport)
 #   customize    : s3 (botocore handlers.py: 200-with-<Error> as an
 #                  error, an invalid Expires header left unset)
@@ -132,6 +132,10 @@ struct S3Config(Copyable, Movable, Deinitable):
         self.enabled = Optional[Bool]()
         self.ratio = Optional[Float64]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -189,6 +193,10 @@ struct S3GetBlobRequest(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -230,6 +238,10 @@ struct S3GetBlobResponse(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         self.body = Optional[List[UInt8]]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -281,6 +293,10 @@ struct S3GetBytesResponse(Copyable, Movable, Deinitable):
     def __init__(out self):
         self.body = Optional[List[UInt8]]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -330,6 +346,10 @@ struct S3GetPolicyResponse(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         self.policy = Optional[String]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -383,6 +403,10 @@ struct S3Part(Copyable, Movable, Deinitable):
     def __init__(out self):
         self.number = Optional[Int32]()
         self.digest = Optional[List[UInt8]]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -457,6 +481,10 @@ struct S3PutThingRequest(Copyable, Movable, Deinitable):
         self.created = Optional[Float64]()
         self.tags = Optional[List[String]]()
         self.parts = Optional[List[S3Part]]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -564,6 +592,10 @@ struct S3PutThingResponse(Copyable, Movable, Deinitable):
         self.tags = Optional[List[String]]()
         self.parts = Optional[List[S3Part]]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -652,6 +684,10 @@ struct S3SetConfigRequest(Copyable, Movable, Deinitable):
     def __init__(out self, var config: S3Config):
         self.config = config^
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self(self.config.copy())
@@ -701,6 +737,10 @@ struct S3SetConfigResponse(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""

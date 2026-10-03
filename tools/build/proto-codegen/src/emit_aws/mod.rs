@@ -58,10 +58,15 @@ pub struct AwsEmitOptions {
 ///   leaves the member unset, and the rest of the response still parses.
 /// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
 ///   (botocore/httpchecksum.py, under the default `when_supported`): an
-///   operation whose `httpChecksum` names a `requestAlgorithmMember`
-///   (PutObject, UploadPart) sends `x-amz-checksum-crc32` and the algorithm
-///   header, `CRC32` when the caller chose none, unless the caller set an
-///   `x-amz-checksum-*` header (`s3_apply_request_checksum`).
+///   operation whose `httpChecksum` names a `requestAlgorithmMember` sends
+///   `x-amz-checksum-crc32` and the algorithm header, `CRC32` when the
+///   caller chose none, unless the caller set an `x-amz-checksum-*` header
+///   (`s3_apply_request_checksum`). That covers the operations where the
+///   checksum is optional (PutObject, UploadPart) and those where it is
+///   required (`requestChecksumRequired`: DeleteObjects, PutBucket* and the
+///   like), which are refused without the customization
+///   (`check_request_checksums`, applied by
+///   [`emit_aws_module_with_endpoints`]).
 /// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
 ///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
 ///   puts the bucket in the URL it chooses (`rest_request_uri` in
@@ -77,7 +82,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "5";
+pub const AWS_GENERATOR_VERSION: &str = "6";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -497,6 +502,7 @@ pub fn emit_aws_module_with_endpoints(
             lowering.service.service, lowering.service.service_id, lowering.service.protocol
         ));
     }
+    check_request_checksums(&lowering.facts, options)?;
     if selected.protocol == AwsProtocol::RestXml {
         xml_codec::check_rest_xml_features(&lowering.facts)?;
     }
@@ -512,6 +518,43 @@ pub fn emit_aws_module_with_endpoints(
         structs: em.structs,
         parameterised: em.parameterised,
     })
+}
+
+/// REFUSED, by name (`checksum-required`): an operation whose every request
+/// must carry a checksum (`httpChecksumRequired`, or
+/// `httpChecksum.requestChecksumRequired`), unless the module sends one.
+/// Only the `s3` customization does, for an operation whose `httpChecksum`
+/// names a `requestAlgorithmMember` (`emit_s3_request_checksum` in
+/// `rest.rs`): botocore sends CRC32 there whether the checksum is required
+/// or only supported (`resolve_request_checksum_algorithm`), and so does the
+/// generated builder. Anywhere else the generated client sends none, and
+/// the service would reject every request.
+///
+/// That refusal is this generator's choice, not botocore's behaviour:
+/// botocore also sends `x-amz-checksum-crc32` (with no algorithm header)
+/// for `httpChecksumRequired` with no algorithm member, and for any
+/// service. No S3 operation in the pinned model is in that case: each one
+/// requiring a checksum names a `requestAlgorithmMember`.
+fn check_request_checksums(facts: &AwsFacts, options: AwsEmitOptions) -> Result<(), String> {
+    for (name, op) in facts.operations() {
+        if !op.request_checksum_required() {
+            continue;
+        }
+        let sent = options.s3
+            && op
+                .http_checksum
+                .as_ref()
+                .is_some_and(|c| c.request_algorithm_member.is_some());
+        if !sent {
+            return Err(format!(
+                "emit_aws: REFUSED checksum-required: operation `{name}` requires a \
+                 request checksum, and the generated client sends one only with the \
+                 `{S3_CUSTOMIZATION}` customization, for an operation whose httpChecksum \
+                 names a requestAlgorithmMember"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The layout probe for `emitted`: one `size_of` per struct it declares.
@@ -1108,6 +1151,19 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
 
         // -- copy ----------------------------------------------------------
+        // An explicit copy constructor: the 1.0.0 compiler can report the
+        // synthesized one of a struct with an explicit `__deinit__` as
+        // trivial (it did for S3's `DeletedObject`: three `Optional[String]`
+        // and an `Optional[Bool]`), and `List.copy()` then copies the
+        // elements with memcpy, so two lists share each String buffer and
+        // the first one destroyed frees it under the other. A user-defined
+        // constructor is never trivial.
+        self.line("def __init__(out self, *, copy: Self):");
+        self.push();
+        self.line("\"\"\"Explicit, never bitwise: a List copies its elements with it.\"\"\"");
+        self.line("self = copy.copy()");
+        self.pop();
+        self.blank();
         self.line("def copy(self) -> Self:");
         self.push();
         self.line("\"\"\"Deep clone. Explicit, not implicit: every member is heap-owning.\"\"\"");
@@ -2241,5 +2297,100 @@ mod tests {
             assert!(aws_import_section(*p, false).contains("Connector"), "{p:?}");
             assert!(aws_import_section(*p, true).contains("    AwsRequest,"), "{p:?}");
         }
+    }
+
+    /// A one-operation model whose operation carries `checksum` (its
+    /// httpChecksum traits), emitted with or without the `s3`
+    /// customization. `protocol` is `rest-xml` (serviceId S3, so the
+    /// customization applies) or `json`.
+    fn emit_checksum_op(protocol: &str, checksum: &str, s3: bool) -> Result<String, String> {
+        let (service_id, extra_meta, method) = match protocol {
+            "json" => ("Tiny", r#", "jsonVersion": "1.0", "targetPrefix": "Tiny""#, "POST"),
+            _ => ("S3", "", "PUT"),
+        };
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
+                    "protocol": "{protocol}", "serviceFullName": "Tiny",
+                    "serviceId": "{service_id}", "signatureVersion": "v4",
+                    "uid": "tiny-2026-10-02"{extra_meta}}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "{method}", "requestUri": "/op"}},
+                    "input": {{"shape": "In"}}{checksum}}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{
+                    "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                        "locationName": "x-amz-sdk-checksum-algorithm"}},
+                    "A": {{"shape": "Str"}}}}}},
+                    "Str": {{"type": "string"}}}}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "s3",
+            &["Op".to_string()],
+            "s3.json",
+            "aws.s3",
+        )?;
+        let options = AwsEmitOptions {
+            pure_only: true,
+            omit_preamble: true,
+            s3,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_client(&lowering, &AwsOverrides::empty(), "s3", options).map(|(_, s)| s)
+    }
+
+    #[test]
+    fn a_required_checksum_is_refused_where_the_client_sends_none() {
+        let refusal = |protocol: &str, checksum: &str, s3: bool| {
+            let e = emit_checksum_op(protocol, checksum, s3).unwrap_err();
+            crate::aws_conformance::refusal_name(&e)
+        };
+        let required = r#", "httpChecksumRequired": true"#;
+        let with_member = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm",
+            "requestChecksumRequired": true}"#;
+        let no_member = r#", "httpChecksum": {"requestChecksumRequired": true}"#;
+        // Without the customization nothing computes one, in any protocol.
+        for (protocol, checksum) in [
+            ("rest-xml", with_member),
+            ("rest-xml", required),
+            ("json", with_member),
+            ("json", required),
+        ] {
+            assert_eq!(
+                refusal(protocol, checksum, false).as_deref(),
+                Some("checksum-required"),
+                "{protocol} {checksum}"
+            );
+        }
+        // With it, only where the model names the algorithm member: the
+        // older trait names none.
+        for checksum in [required, no_member] {
+            assert_eq!(
+                refusal("rest-xml", checksum, true).as_deref(),
+                Some("checksum-required"),
+                "{checksum}"
+            );
+        }
+        let src = emit_checksum_op("rest-xml", with_member, true).unwrap();
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
+        // An optional checksum is never refused. Without the customization
+        // none is sent; with it, only where the model names the algorithm
+        // member.
+        let optional = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm"}"#;
+        for checksum in [r#", "httpChecksumRequired": false"#, optional] {
+            let src = emit_checksum_op("rest-xml", checksum, false).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{src}");
+        }
+        for checksum in [
+            "",
+            r#", "httpChecksumRequired": false"#,
+            r#", "httpChecksum": {"requestChecksumRequired": false}"#,
+        ] {
+            let src = emit_checksum_op("rest-xml", checksum, true).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{checksum}: {src}");
+        }
+        let src = emit_checksum_op("rest-xml", optional, true).unwrap();
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
     }
 }

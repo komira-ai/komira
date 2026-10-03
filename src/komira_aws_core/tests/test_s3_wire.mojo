@@ -164,13 +164,13 @@ def test_crc32_vectors() raises:
 def test_checksum_default_is_crc32() raises:
     var req = AwsRequest(String("PUT"), String("/k"))
     req.body = _bytes(String("part three"))
-    s3_apply_request_checksum(req, String(_ALG))
+    s3_apply_request_checksum(req, String(_ALG), value_members=True)
     assert_equal(req.header(String(_ALG)), "CRC32")
     assert_equal(req.header(String("x-amz-checksum-crc32")), "L8IwAg==")
     assert_equal(len(req.header_names), 2)
     # An empty body has a checksum too.
     var empty = AwsRequest(String("PUT"), String("/k"))
-    s3_apply_request_checksum(empty, String(_ALG))
+    s3_apply_request_checksum(empty, String(_ALG), value_members=True)
     assert_equal(empty.header(String("x-amz-checksum-crc32")), "AAAAAA==")
 
 
@@ -178,7 +178,7 @@ def test_checksum_crc32_chosen() raises:
     var req = AwsRequest(String("PUT"), String("/k"))
     req.body = _bytes(String("x"))
     req.set_header(String(_ALG), String("crc32"))
-    s3_apply_request_checksum(req, String(_ALG))
+    s3_apply_request_checksum(req, String(_ALG), value_members=True)
     # The caller's value is kept as given.
     assert_equal(req.header(String(_ALG)), "crc32")
     assert_equal(req.header(String("x-amz-checksum-crc32")), "jNwWgw==")
@@ -189,7 +189,7 @@ def test_checksum_supplied_by_the_caller() raises:
     var req = AwsRequest(String("PUT"), String("/k"))
     req.body = _bytes(String("x"))
     req.set_header(String("X-Amz-Checksum-SHA256"), String("abc="))
-    s3_apply_request_checksum(req, String(_ALG))
+    s3_apply_request_checksum(req, String(_ALG), value_members=True)
     assert_false(req.has_header(String(_ALG)))
     assert_false(req.has_header(String("x-amz-checksum-crc32")))
     assert_equal(len(req.header_names), 1)
@@ -198,8 +198,25 @@ def test_checksum_supplied_by_the_caller() raises:
 def test_checksum_other_algorithm_refused() raises:
     var req = AwsRequest(String("PUT"), String("/k"))
     req.set_header(String(_ALG), String("SHA256"))
-    with assert_raises(contains="'SHA256' is not computed by this client"):
-        s3_apply_request_checksum(req, String(_ALG))
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA256' is not computed by this"
+            + " client (only CRC32 is); set its x-amz-checksum-sha256 member too"
+        )
+    ):
+        s3_apply_request_checksum(req, String(_ALG), value_members=True)
+    # An operation with no member for the value: nothing to set, so the
+    # refusal says only CRC32 can be sent.
+    var bare = AwsRequest(String("POST"), String("/?delete"))
+    bare.set_header(String(_ALG), String("SHA1"))
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA1' is not computed by this"
+            + " client (only CRC32 is); this operation has no member to carry"
+            + " another algorithm's checksum, so only CRC32 can be sent"
+        )
+    ):
+        s3_apply_request_checksum(bare, String(_ALG), value_members=False)
 
 
 def main() raises:

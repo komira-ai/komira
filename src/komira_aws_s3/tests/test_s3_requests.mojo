@@ -10,14 +10,18 @@
 # Checksums: PutObject and UploadPart carry the CRC32 request checksum
 # current AWS SDKs send by default: `x-amz-sdk-checksum-algorithm: CRC32`
 # and `x-amz-checksum-crc32`, the base64 of the body's CRC-32, big-endian
-# (the PutObject and UploadPart API references). Each expected value was
-# computed with zlib's crc32, an independent implementation.
+# (the PutObject and UploadPart API references). DeleteObjects requires a
+# request checksum (its API reference: Content-MD5 or an x-amz-checksum-*
+# header), and carries the same CRC32 one, as current AWS SDKs send there.
+# Each expected value was computed with zlib's crc32, an independent
+# implementation.
 #
 # Content-Type: a blob payload with no ContentType member set is sent as
 # `application/octet-stream`. That is the generator's choice, and differs
 # from botocore, which sends no Content-Type then; S3 accepts either and
 # stores the type it is given.
 from komira_aws_s3.komira_aws_s3 import (
+    S3_CHECKSUM_ALGORITHM_CRC32,
     S3_CHECKSUM_ALGORITHM_SHA256,
     S3_ENCODING_TYPE_URL,
     S3_METADATA_DIRECTIVE_REPLACE,
@@ -27,10 +31,13 @@ from komira_aws_s3.komira_aws_s3 import (
     S3CompletedPart,
     S3CopyObjectRequest,
     S3CreateMultipartUploadRequest,
+    S3Delete,
     S3DeleteObjectRequest,
+    S3DeleteObjectsRequest,
     S3GetObjectRequest,
     S3HeadObjectRequest,
     S3ListObjectsV2Request,
+    S3ObjectIdentifier,
     S3PutObjectRequest,
     S3UploadPartRequest,
     build_abort_multipart_upload_request,
@@ -38,6 +45,7 @@ from komira_aws_s3.komira_aws_s3 import (
     build_copy_object_request,
     build_create_multipart_upload_request,
     build_delete_object_request,
+    build_delete_objects_request,
     build_get_object_request,
     build_head_object_request,
     build_list_objects_v2_request,
@@ -201,7 +209,13 @@ def test_put_object_other_algorithm_refused() raises:
     var input = S3PutObjectRequest(String("lake"), String("k"))
     input.set_body(_bytes(String("x")))
     input.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_SHA256))
-    with assert_raises(contains="'SHA256' is not computed by this client"):
+    # PutObject has the member for that value, which the caller sets.
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA256' is not computed by this"
+            + " client (only CRC32 is); set its x-amz-checksum-sha256 member too"
+        )
+    ):
         _ = build_put_object_request(input)
 
 
@@ -399,6 +413,143 @@ def test_abort_multipart_upload() raises:
     assert_equal(len(req.body), 0)
 
 
+# ---- DeleteObjects ---------------------------------------------------------------
+
+
+comptime _DELETE_NS = '<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+# Thu, 01 Oct 2026 12:00:00 GMT
+comptime _T = Float64(1790856000.0)
+
+
+def _delete_of(key: String) -> S3Delete:
+    var objects = List[S3ObjectIdentifier]()
+    objects.append(S3ObjectIdentifier(key))
+    return S3Delete(objects^)
+
+
+def test_delete_objects() raises:
+    # POST ?delete with the <Delete> document of the API reference: one
+    # <Object> per key, in the order given, then <Quiet>.
+    var objects = List[S3ObjectIdentifier]()
+    objects.append(S3ObjectIdentifier(String("data/part-0.parquet")))
+    var versioned = S3ObjectIdentifier(String("data/part-1.parquet"))
+    versioned.set_version_id(String("3/L4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY"))
+    objects.append(versioned^)
+    var delete = S3Delete(objects^)
+    delete.set_quiet(True)
+    var req = build_delete_objects_request(
+        S3DeleteObjectsRequest(String("lake"), delete^)
+    )
+    assert_equal(req.method, "POST")
+    # `delete` is a query key with no value, and the bucket is the
+    # endpoint's.
+    assert_equal(req.uri, "/?delete")
+    assert_equal(req.header(String("Content-Type")), "application/xml")
+    assert_equal(
+        req.body_text(),
+        _DELETE_NS
+        + "<Object><Key>data/part-0.parquet</Key></Object>"
+        + "<Object><Key>data/part-1.parquet</Key>"
+        + "<VersionId>3/L4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY</VersionId></Object>"
+        + "<Quiet>true</Quiet></Delete>",
+    )
+    # The required checksum, of the document as sent.
+    _crc32_checksum(req, String("elTV8g=="))
+    assert_equal(_header_count(req), 3)
+
+
+def test_delete_objects_every_member() raises:
+    # A key with XML's special characters is escaped ('"' is not); the
+    # conditional members of an object (ETag, LastModifiedTime in RFC 822,
+    # Size past 2^32) follow its key, and Quiet unset is absent. The
+    # request's headers are its members.
+    var o = S3ObjectIdentifier(String('a&b<c>"d".txt'))
+    o.set_e_tag(String('"9b2cf535f27731c974343645a3985328"'))
+    o.set_last_modified_time(_T)
+    o.set_size(Int64(5368709120))
+    var objects = List[S3ObjectIdentifier]()
+    objects.append(o^)
+    var input = S3DeleteObjectsRequest(String("lake"), S3Delete(objects^))
+    input.set_mfa(String("arn:aws:iam::123456789012:mfa/user 123456"))
+    input.set_bypass_governance_retention(True)
+    input.set_expected_bucket_owner(String("123456789012"))
+    var req = build_delete_objects_request(input)
+    assert_equal(
+        req.body_text(),
+        _DELETE_NS
+        + "<Object><Key>a&amp;b&lt;c&gt;\"d\".txt</Key>"
+        + '<ETag>"9b2cf535f27731c974343645a3985328"</ETag>'
+        + "<LastModifiedTime>Thu, 01 Oct 2026 12:00:00 GMT</LastModifiedTime>"
+        + "<Size>5368709120</Size></Object></Delete>",
+    )
+    assert_equal(
+        req.header(String("x-amz-mfa")), "arn:aws:iam::123456789012:mfa/user 123456"
+    )
+    assert_equal(req.header(String("x-amz-bypass-governance-retention")), "true")
+    assert_equal(req.header(String("x-amz-expected-bucket-owner")), "123456789012")
+    _crc32_checksum(req, String("Fa9U/A=="))
+    assert_equal(_header_count(req), 6)
+
+
+def test_delete_objects_key_line_breaks() raises:
+    # A key holding a carriage return and a line feed (the API reference's
+    # ObjectIdentifier.Key warns of XML line-end handling): the CR is sent
+    # as the reference &#xD;, as a raw CR would be read back as nothing and
+    # name another key; the LF survives an XML parser and is sent as is.
+    var req = build_delete_objects_request(
+        S3DeleteObjectsRequest(String("lake"), _delete_of(String("logs/a\r\nb.txt")))
+    )
+    assert_equal(
+        req.body_text(),
+        _DELETE_NS + "<Object><Key>logs/a&#xD;\nb.txt</Key></Object></Delete>",
+    )
+    _crc32_checksum(req, String("RJ1tew=="))
+
+
+def test_delete_objects_checksum_algorithm() raises:
+    # CRC32 named by the caller is the default's checksum; the algorithm
+    # header is sent as given.
+    var input = S3DeleteObjectsRequest(
+        String("lake"), _delete_of(String("data/part-0.parquet"))
+    )
+    input.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_CRC32))
+    var named = build_delete_objects_request(input)
+    var implied = build_delete_objects_request(
+        S3DeleteObjectsRequest(
+            String("lake"), _delete_of(String("data/part-0.parquet"))
+        )
+    )
+    assert_equal(named.body_text(), implied.body_text())
+    assert_equal(
+        named.header(String("x-amz-checksum-crc32")),
+        implied.header(String("x-amz-checksum-crc32")),
+    )
+    assert_equal(named.header(String("x-amz-sdk-checksum-algorithm")), "CRC32")
+    # DeleteObjects has no member for another algorithm's value, and this
+    # client computes only CRC32: another algorithm is refused rather than
+    # sent with no checksum, which S3 rejects.
+    var other = S3DeleteObjectsRequest(
+        String("lake"), _delete_of(String("k"))
+    )
+    other.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_SHA256))
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA256' is not computed by this"
+            + " client (only CRC32 is); this operation has no member to carry"
+            + " another algorithm's checksum, so only CRC32 can be sent"
+        )
+    ):
+        _ = build_delete_objects_request(other)
+
+
+def test_delete_objects_refuses_an_empty_key() raises:
+    # Each ObjectIdentifier's Key has min length 1.
+    with assert_raises(contains="S3ObjectIdentifier.Key"):
+        _ = build_delete_objects_request(
+            S3DeleteObjectsRequest(String("lake"), _delete_of(String("")))
+        )
+
+
 def main() raises:
     test_get_object_closed_range()
     test_get_object_suffix_range()
@@ -420,4 +571,9 @@ def main() raises:
     test_upload_part()
     test_complete_multipart_upload()
     test_abort_multipart_upload()
+    test_delete_objects()
+    test_delete_objects_every_member()
+    test_delete_objects_key_line_breaks()
+    test_delete_objects_checksum_algorithm()
+    test_delete_objects_refuses_an_empty_key()
     print("OK")

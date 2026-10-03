@@ -10,22 +10,21 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 #
 # The `s3` customization applies what botocore does to S3 beyond the model:
 # a 200 whose body is an <Error> is raised as an HTTP 500, an `Expires`
-# header that is not a date is left unset, PutObject and UploadPart send
-# the CRC32 request checksum current AWS SDKs send by default, and the
-# bucket is left to the endpoint ruleset, which puts it in the host or in
-# the endpoint's path.
+# header that is not a date is left unset, an operation whose model names a
+# checksum algorithm member sends the CRC32 request checksum current AWS
+# SDKs send there (by default on PutObject and UploadPart, and always on
+# DeleteObjects, which requires one), and the bucket is left to the
+# endpoint ruleset, which puts it in the host or in the endpoint's path.
 # Addressing follows the ruleset: virtual host unless the bucket cannot be a
 # host name or `S3EndpointConfig.force_path_style` is set, which a caller
 # of a custom endpoint (LocalStack, MinIO) sets.
 #
 # `operations` is the operations an object store needs, each with its own
 # rows in the tests below; an operation joins the list with its tests. Of
-# S3's other operations, the generator refuses by name those that require a
-# request checksum (`checksum-required`: DeleteObjects, PutBucket*,
-# PutObjectAcl, PutObjectTagging and the like), those reading `Grantee`'s
-# XML attribute (`xml-attribute`: GetBucketAcl, GetBucketLogging,
-# GetObjectAcl, RestoreObject), SelectObjectContent (`eventstream`) and
-# WriteGetObjectResponse (`host-prefix`).
+# S3's other operations, the generator refuses by name those reading
+# `Grantee`'s XML attribute (`xml-attribute`: GetBucketAcl,
+# GetBucketLogging, GetObjectAcl, RestoreObject), SelectObjectContent
+# (`eventstream`) and WriteGetObjectResponse (`host-prefix`).
 #
 # Left to the caller, which botocore does for S3 in handlers beyond the
 # model: SSE-C (`SSECustomerKey` is sent as given, so a caller passes it
@@ -57,6 +56,7 @@ mojo_aws_client(
         "CopyObject",
         "CreateMultipartUpload",
         "DeleteObject",
+        "DeleteObjects",
         "GetObject",
         "HeadObject",
         "ListBuckets",

@@ -947,12 +947,25 @@ mod tests {
                     "Put": {{"name": "Put", "http": {{"method": "PUT", "requestUri": "/p"}},
                         "input": {{"shape": "PutIn"}},
                         "httpChecksum": {{"requestAlgorithmMember": "ChecksumAlgorithm",
-                            "requestChecksumRequired": false}}}}}},
+                            "requestChecksumRequired": false}}}},
+                    "Purge": {{"name": "Purge",
+                        "http": {{"method": "POST", "requestUri": "/p?purge"}},
+                        "input": {{"shape": "PurgeIn"}},
+                        "httpChecksum": {{"requestAlgorithmMember": "ChecksumAlgorithm",
+                            "requestChecksumRequired": true}}}}}},
                 "shapes": {{
                     "In": {{"type": "structure", "members": {{}}}},
+                    "PurgeIn": {{"type": "structure", "payload": "Purge", "members": {{
+                        "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                            "locationName": "x-amz-sdk-checksum-algorithm"}},
+                        "Purge": {{"shape": "PurgeDoc", "locationName": "Purge"}}}}}},
+                    "PurgeDoc": {{"type": "structure", "members": {{
+                        "Key": {{"shape": "Str"}}}}}},
                     "PutIn": {{"type": "structure", "payload": "Body", "members": {{
                         "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
                             "locationName": "x-amz-sdk-checksum-algorithm"}},
+                        "ChecksumSHA256": {{"shape": "Str", "location": "header",
+                            "locationName": "x-amz-checksum-sha256"}},
                         "Body": {{"shape": "Bytes"}}}}}},
                     "HeadOut": {{"type": "structure", "members": {{
                         "Expires": {{"shape": "Ts", "location": "header", "locationName": "Expires"}},
@@ -972,7 +985,7 @@ mod tests {
         let lowering = lower_aws_service(
             &model,
             "s3",
-            &["Head", "Get", "GetBytes", "GetText", "Drop", "Put"].map(String::from),
+            &["Head", "Get", "GetBytes", "GetText", "Drop", "Put", "Purge"].map(String::from),
             "s3.json",
             "aws.s3",
         )?;
@@ -1029,15 +1042,31 @@ mod tests {
     #[test]
     fn s3_sends_the_request_checksum_where_the_model_names_its_algorithm_member() {
         let src = emit_s3("S3").unwrap();
-        // After the body is set, with the header the member is bound to.
+        // After the body is set, with the header the member is bound to,
+        // and saying that the input has a member for a checksum value
+        // (`ChecksumSHA256`).
         let put = builder(&src, "s3_build_put_request");
         let body = put.find("req.body = ").expect("the body");
         let sum = put
-            .find("s3_apply_request_checksum(req, String(\"x-amz-sdk-checksum-algorithm\"))")
+            .find(
+                "s3_apply_request_checksum(req, \
+                 String(\"x-amz-sdk-checksum-algorithm\"), value_members=True)",
+            )
             .expect("the checksum");
         assert!(body < sum && sum < put.find("return req^").expect("return"), "{put}");
+        // A required checksum (`Purge`) is the same call, after its XML
+        // document is set; its input has no member for a value.
+        let purge = builder(&src, "s3_build_purge_request");
+        let body = purge.find("aws_xml_set_body(req, _w)").expect("the body");
+        let sum = purge
+            .find(
+                "s3_apply_request_checksum(req, \
+                 String(\"x-amz-sdk-checksum-algorithm\"), value_members=False)",
+            )
+            .expect("the checksum");
+        assert!(body < sum && sum < purge.find("return req^").expect("return"), "{purge}");
         // Nowhere else: no other operation names an algorithm member.
-        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 2, "{src}");
     }
 
     #[test]

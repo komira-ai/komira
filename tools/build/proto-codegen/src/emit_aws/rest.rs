@@ -551,8 +551,11 @@ impl AwsEmitter<'_> {
     /// `s3`: an operation whose `httpChecksum` names a
     /// `requestAlgorithmMember` sends the request checksum current AWS SDKs
     /// send by default (`when_supported`): `s3_apply_request_checksum`, over
-    /// the built body, with the header that member is bound to. Nothing
-    /// without the customization, or for an operation with no such member.
+    /// the built body, with the header that member is bound to. The same
+    /// call serves an operation that requires the checksum
+    /// (`requestChecksumRequired`), as botocore's does. Nothing without the
+    /// customization, or for an operation with no such member; one of those
+    /// that requires a checksum never gets here (`check_request_checksums`).
     fn emit_s3_request_checksum(
         &mut self,
         facts: &AwsOperationFacts,
@@ -583,9 +586,17 @@ impl AwsEmitter<'_> {
                 msg.name, facts.name
             ));
         }
+        // Whether the caller can carry another algorithm's value: an input
+        // member bound to an `x-amz-checksum-*` header (PutObject's
+        // ChecksumSHA256 and the like; DeleteObjects has none).
+        let value_members = members.iter().any(|m| {
+            m.location == AwsLocation::Header
+                && m.wire.to_ascii_lowercase().starts_with("x-amz-checksum-")
+        });
         self.line(&format!(
-            "s3_apply_request_checksum(req, String(\"{}\"))",
-            escape(&b.wire)
+            "s3_apply_request_checksum(req, String(\"{}\"), value_members={})",
+            escape(&b.wire),
+            if value_members { "True" } else { "False" }
         ));
         Ok(())
     }

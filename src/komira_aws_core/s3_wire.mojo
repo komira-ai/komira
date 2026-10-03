@@ -165,10 +165,15 @@ def s3_checksum_crc32(data: Span[UInt8, _]) -> String:
     return base64_encode(Span(be))
 
 
-def s3_apply_request_checksum(mut req: AwsRequest, algorithm_header: String) raises:
+def s3_apply_request_checksum(
+    mut req: AwsRequest, algorithm_header: String, *, value_members: Bool
+) raises:
     """Adds the request checksum of `req.body` to `req`, as botocore does
     by default for an operation whose checksum algorithm member is the
     header `algorithm_header` (`x-amz-sdk-checksum-algorithm`).
+    `value_members` is whether the operation's input has members for the
+    checksum values (`x-amz-checksum-*` headers), as PutObject's does and
+    DeleteObjects' does not.
 
     - A header named `x-amz-checksum-*` already set: nothing is added (the
       caller supplied the checksum).
@@ -176,7 +181,8 @@ def s3_apply_request_checksum(mut req: AwsRequest, algorithm_header: String) rai
       `x-amz-checksum-crc32` to the body's checksum.
     - The algorithm header `CRC32` (any case): `x-amz-checksum-crc32`.
     - Any other algorithm: refused, naming it. Only CRC32 is computed here;
-      a caller choosing another sets its checksum member as well."""
+      with `value_members` a caller choosing another sets its checksum
+      member as well, and without them only CRC32 can be sent."""
     for i in range(len(req.header_names)):
         if ascii_lower(req.header_names[i]).startswith("x-amz-checksum-"):
             return
@@ -185,14 +191,17 @@ def s3_apply_request_checksum(mut req: AwsRequest, algorithm_header: String) rai
         algorithm = String(S3_DEFAULT_CHECKSUM_ALGORITHM)
         req.set_header(algorithm_header, algorithm)
     if ascii_lower(algorithm) != "crc32":
-        raise Error(
-            "S3 request checksum algorithm '"
-            + algorithm
-            + "' is not computed by this client (only CRC32 is); set its"
-            + " x-amz-checksum-"
-            + ascii_lower(algorithm)
-            + " member too"
-        )
+        var why = String("' is not computed by this client (only CRC32 is); ")
+        if value_members:
+            why += (
+                "set its x-amz-checksum-" + ascii_lower(algorithm) + " member too"
+            )
+        else:
+            why += (
+                "this operation has no member to carry another algorithm's"
+                + " checksum, so only CRC32 can be sent"
+            )
+        raise Error("S3 request checksum algorithm '" + algorithm + why)
     req.set_header(
         String("x-amz-checksum-crc32"), s3_checksum_crc32(Span(req.body))
     )
