@@ -110,8 +110,9 @@ def topo_sort(mut graph: ResourceGraph) raises -> List[Int]:
     appears AFTER every node it depends on), via Kahn's algorithm:
 
       1. Build the adjacency (dep_idx -> dependent_idx) from each node's
-         `depends_on()`, resolving each dependency logical_id to its node index. A
-         dependency naming a logical_id NOT in the graph is a fail-loud error.
+         `depends_on()` AND the producers of its `input_refs()`, resolving each
+         logical_id to its node index. A dependency or a reference naming a
+         logical_id NOT in the graph is a fail-loud error.
       2. Compute in-degrees (how many deps each node has).
       3. Seed a queue with the in-degree-0 nodes (the roots), in INDEX order (so
          the order is deterministic — a stable topo order for a given graph).
@@ -158,6 +159,48 @@ def topo_sort(mut graph: ResourceGraph) raises -> List[Int]:
             # node i depends on dep_idx: i's in-degree +1; i is a dependent of dep_idx.
             in_degree[i] += 1
             dependents[dep_idx].append(i)
+        # A REFERENCE IS AN EDGE TOO. Each `input_refs` producer is ordered
+        # before the consumer, so an author never keeps a dependency list and a
+        # reference list in step. A ref to a producer already named in
+        # `depends_on` adds nothing; a ref to a node that is not in the graph is
+        # refused naming the field, because the value it would carry does not
+        # exist anywhere.
+        var refs = graph.node(i).input_refs()
+        for r in range(len(refs)):
+            ref ir = refs[r]
+            var prod_idx = graph.index_of(ir.producer)
+            if prod_idx < 0:
+                raise Error(
+                    String("topo_sort: node '")
+                    + graph.node(i).logical_id()
+                    + String("' field ")
+                    + ir.field
+                    + String(" reads output '")
+                    + ir.output
+                    + String("' of '")
+                    + ir.producer
+                    + String("', which is not a node in the graph (ref to a")
+                    + String(" missing resource)")
+                )
+            if prod_idx == i:
+                raise Error(
+                    String("topo_sort: node '")
+                    + graph.node(i).logical_id()
+                    + String("' field ")
+                    + ir.field
+                    + String(" reads its own output '")
+                    + ir.output
+                    + String("' (a self-cycle through a reference)")
+                )
+            var already = False
+            for k in range(len(dependents[prod_idx])):
+                if dependents[prod_idx][k] == i:
+                    already = True
+                    break
+            if already:
+                continue
+            in_degree[i] += 1
+            dependents[prod_idx].append(i)
 
     # ---- step 3+4: Kahn's queue (index-ordered for determinism) ----
     # `emitted[i]` marks a node already emitted; we re-scan for the lowest-index

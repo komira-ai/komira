@@ -21,6 +21,10 @@ WHAT LIVES HERE (the four concerns):
   * state.mojo           — the `StateStore` trait (write-ahead intent) +
                            `IntentTicket` + the `InMemoryStateStore` OSS default /
                            test double.
+  * outputs.mojo         — apply-time value flow: `Outputs` (what a node
+                           produced), `InputRef` (what a node reads from
+                           another; also a graph edge), `ResolvedInputs`, and
+                           the UNBOUND refusal.
   * fault_domain.mojo    — WHOSE FAULT a failure is (FAULT_* + the raise-site
                            token + `FaultAttribution`), with the unclassified
                            case reading as OURS.
@@ -54,6 +58,14 @@ from kci_iac.resource import (
     VERB_UPDATE,
     VERB_REPLACE,
     VERB_DELETE,
+    VERB_KNOWN_AFTER_APPLY,
+)
+from kci_iac.outputs import (
+    InputRef,
+    Outputs,
+    ResolvedInputs,
+    UNBOUND_TOKEN,
+    unbound_error,
 )
 from kci_iac.fault_domain import (
     FAULT_UNSET,
