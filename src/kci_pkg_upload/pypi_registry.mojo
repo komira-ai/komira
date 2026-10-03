@@ -20,7 +20,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from komira_http.client.redirect_policy import REDIRECT_RESOLVED, RedirectTarget
+from komira_http_client.redirect_policy import REDIRECT_RESOLVED, RedirectTarget
 
 from .coordinate import (
     PackageCoordinate,

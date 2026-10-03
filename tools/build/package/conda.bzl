@@ -24,17 +24,24 @@ library:
   * the name is `conda_name` of the library, else its import name (the `.mojoc`
     basename): lowercase letters, digits and `_`, starting with a letter;
   * the run requirements are the platform guard, the exact Mojo compiler pin,
-    and each DIRECT dependency of the library, by its published name, at the same
-    version (every package is lockstep, so the solver's closure is the build's);
+    and each DIRECT dependency of the library, by its published name, at the
+    same version AND the same build string (`name ==V BUILD`: every package of a
+    release is lockstep, so the solver's closure is the build's, and a second
+    build of a dependency in the channel cannot be chosen);
   * the subdir comes from the TARGET platform's constraints (a select), never an
     attribute: a package cannot say `osx-arm64` over a linux `.mojoc`;
   * the payload is the library's gated `.mojoc`, so the package cannot exist
     until the library's own welded tests pass;
-  * the version is `<prefix>.<N>`: the prefix is the one line of
-    `packaging/conda/VERSION_PREFIX`; N is `-c komira.package_stamp=<N>` (0, the
-    default, is an unstamped build that the release check refuses), and the
-    source commit the stamp came from is `-c komira.package_commit=<sha>`.
-    `tools/build/package/release_version.sh` prints all three and the timestamp.
+  * the version is the Mojo compiler version the library is built with
+    (`MOJO_COMPILER_VERSION` below, derived from the pinned compiler in the
+    platform table and stated nowhere else); the release iteration is the conda
+    BUILD NUMBER N, `-c komira.package_stamp=<N>` (0, the default, is an
+    unstamped build that the release check refuses), and the source commit it
+    came from is `-c komira.package_commit=<sha>`. The build string is
+    `h<first 8 hex of the commit>_<N>` and the file is
+    `<name>-<version>-<build string>.conda`.
+    `tools/build/package/release_version.sh` prints all of them and the
+    timestamp.
 
 A library that CANNOT be packaged (it links native code, has no tests, depends on
 a library with no package, opens a shared library by name at run time, or its name
@@ -50,13 +57,15 @@ declared.
 Output contract. A package is a DIRECTORY, and an uploader reads `[release]` and
 nothing else:
 
-    <name>-<version>-0.conda   the channel's file name
+    <name>-<version>-<build>.conda
+                               the channel's file name
     manifest.json              the artifact manifest, exactly the contract of
                                kci's kci_artifact_manifest: artifact_type
-                               (`CONDA`), name, version, subdir, file, sha256,
-                               metadata (`metadata.json`: the file below,
-                               named next to the manifest)
-    metadata.json              every other fact: kind, build, build_number, size,
+                               (`CONDA`), name, version (the compiler version),
+                               subdir, file, sha256, metadata (`metadata.json`:
+                               the file below, named next to the manifest)
+    metadata.json              every other fact: kind, build (string),
+                               build_number, size,
                                depends, mojo_pin, source_commit, stamped,
                                timestamp_ms, label, import_name, payload_path,
                                payload_sha256 (sorted compact JSON)
@@ -70,8 +79,8 @@ Sub-targets:
     [release_check]   the marker of `komira_pack conda-check --require-stamped`
     [default] [manifest] [metadata]
                       DEVELOPMENT outputs, built whether or not stamped (an
-                      unstamped one is `<prefix>.0`, claiming a permanent version
-                      if uploaded). Never read by an uploader.
+                      unstamped one is build number 0, build string
+                      `h00000000_0`, claiming a permanent name if uploaded). Never read by an uploader.
     [check]           the marker of `komira_pack conda-check`
 
 The bytes are reproducible under one condition (README.md, "Reproducibility"):
@@ -83,11 +92,31 @@ load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 load("@komira//tools/build/mojo:providers.bzl", "MojoInfo")
 load("@komira//tools/build/mojo:toolchain.bzl", "busybox_sh")
 load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "asset")
 
-# The Mojo compiler every package pins, exactly. tools/build/tests/functional/conda.sh
-# requires it equal the version of the pinned compiler package in
-# tools/build/toolchains/BUCK, so there is one statement of it.
-MOJO_COMPILER_PIN = "1.0.0"
+def _compiler_version():
+    # The version of the Mojo compiler the toolchain downloads, read from the
+    # platform table's pin (the one place it is stated: tools/build/toolchains
+    # fetches that same pin). The pin names it twice, in its asset name and in
+    # its URL; they must agree, or no package can be built.
+    pin = asset("linux-x86_64", "mojo_compiler")
+    head = "mojo_compiler_"
+    tail = "_linux-64.conda"
+    name = pin["name"]
+    if not (name.startswith(head) and name.endswith(tail)):
+        fail("the pinned compiler's asset name `{}` is not `mojo_compiler_<version>_linux-64.conda`".format(name))
+    version = name[len(head):-len(tail)]
+    if not version or not version[0].isdigit():
+        fail("the pinned compiler's version `{}` does not start with a digit".format(version))
+    want = "/mojo-compiler-{}-release.conda".format(version)
+    if not pin["url"].endswith(want):
+        fail("the pinned Mojo compiler disagrees with itself: its asset name says version {} but its URL `{}` does not end in `{}`. A package's version is the compiler version, so the pin must state one.".format(version, pin["url"], want))
+    return version
+
+# The Mojo compiler version: every package's version, and the exact compiler
+# every package requires (`mojo-compiler ==<it>`). Derived, never typed a second
+# time, so a package whose version is not the pinned compiler's cannot be built.
+MOJO_COMPILER_VERSION = _compiler_version()
 
 _LICENSE = "Apache-2.0"
 _HOME = "https://github.com/komira-ai/komira"
@@ -144,8 +173,6 @@ def _conda_package_impl(ctx):
             name,
             "--import-name",
             info.import_name,
-            "--version-prefix",
-            ctx.attrs._version_prefix,
             "--stamp",
             ctx.attrs.stamp,
             "--timestamp-ms",
@@ -154,7 +181,7 @@ def _conda_package_impl(ctx):
             "--subdir",
             subdir,
             "--mojo-pin",
-            MOJO_COMPILER_PIN,
+            MOJO_COMPILER_VERSION,
             "--license",
             _LICENSE,
             "--summary",
@@ -191,7 +218,7 @@ def _conda_package_impl(ctx):
             "--import-name",
             info.import_name,
             "--mojo-pin",
-            MOJO_COMPILER_PIN,
+            MOJO_COMPILER_VERSION,
         ]
         if payload != None:
             args += ["--payload", payload]
@@ -245,14 +272,13 @@ _conda_package = rule(
         "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
         "_license_file": attrs.source(default = "komira//:LICENSE"),
         "_pack": attrs.exec_dep(default = "komira//tools/build/package:komira_pack", providers = [RunInfo]),
-        "_version_prefix": attrs.source(default = "komira//packaging/conda:VERSION_PREFIX"),
     },
 )
 
 def conda_package(**kwargs):
     """The `.conda` of a Mojo library; see the module documentation.
 
-    N and the commit timestamp come from the configuration
+    The build number N and the commit timestamp come from the configuration
     (`-c komira.package_stamp=57 -c komira.package_commit=<sha>
     -c komira.package_timestamp_ms=...`): they are
     read here, in the macro, so they key only the packages and never a

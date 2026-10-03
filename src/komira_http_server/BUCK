@@ -1,0 +1,60 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The HTTP server over the komira_async reactor: accept loop, dispatch, serve_h2,
+# the connection, HttpServer, the middleware chain, the router, and the
+# serverless entry point. It depends on komira_http_core and not on
+# their scratch directory from `test_tmpdir()`.
+
+mojo_library(
+    name = "komira_http_server",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_core:komira_core",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_log:komira_log",
+        "//src/komira_uuid:komira_uuid",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_L0_transport_basic.mojo",
+        "tests/test_L2_codec_header_limits.mojo",
+        "tests/test_L2_h2_side_tables_regression.mojo",
+        "tests/test_L3_chain_composition.mojo",
+        "tests/test_L3_cors.mojo",
+        "tests/test_L3_error_mapper.mojo",
+        "tests/test_L3_error_propagation.mojo",
+        "tests/test_L3_logging.mojo",
+        "tests/test_L3_short_circuit.mojo",
+        "tests/test_L3_tracing.mojo",
+        "tests/test_L4_routing_basic.mojo",
+        "tests/test_chunked_request_body_dispatch.mojo",
+        "tests/test_cloudrun_bind_before_warmup.mojo",
+        "tests/test_e2e_bind_any_addr.mojo",
+        "tests/test_e2e_bring_up.mojo",
+        "tests/test_e2e_fault_attribution_socket.mojo",
+        "tests/test_e2e_full_chain.mojo",
+        "tests/test_e2e_malformed_inputs.mojo",
+        "tests/test_fault_attribution.mojo",
+        "tests/test_fault_report_emit_line_loss.mojo",
+        "tests/test_gcp_cloud_run_serve_stack.mojo",
+        "tests/test_middleware_in_dispatch_path.mojo",
+        "tests/test_route_pack.mojo",
+        "tests/test_serverless_entry.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
+# not only in the compile.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
+
+export_file(name = "middleware/metrics.mojo", visibility = ["PUBLIC"])

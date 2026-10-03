@@ -46,6 +46,8 @@
 # module boundary.
 # =============================================================================
 
+from std.builtin.rebind import downcast, rebind_var
+
 from komira_encoding import base64_encode, base64_decode
 from komira_json import (
     JsonValue,
@@ -62,6 +64,7 @@ from .wire_format import (
     FieldKey,
     ProtoEnum,
     Serializable,
+    Proto3JsonWkt,
     WireDecoder,
     WireEncoder,
 )
@@ -306,18 +309,37 @@ struct JsonEncoder(WireEncoder):
         self._end_field()
 
     # -- the embedded-message field (cross-trait recursion) ---------------
+    #
+    # A well-known type (`M: Proto3JsonWkt` -- Timestamp, Duration, Struct,
+    # a wrapper, Any, ...) is NOT written as its `{field: value}` object: the
+    # protobuf JSON mapping gives it a canonical form of its own
+    # (`"1970-01-01T00:00:01Z"`, `"1.5s"`, a free-form object, a bare
+    # scalar), which `write_proto3_json` appends whole. The branch is
+    # resolved at comptime, so this ONE arm is canonical whichever message
+    # type the generated body hands it -- there is no WKT-specific twin to
+    # forget to call. Same for the element arm and every read arm below.
 
     def write_message_field[
         M: Serializable
     ](mut self, field_no: Int, json_name: StringSlice, v: M) raises:
-        self._begin_field(json_name)
-        # Encode the child into its own JsonEncoder, then splice the bytes.
-        var child = JsonEncoder()
-        v.encode[JsonEncoder](child)
-        child.finish()
-        for i in range(len(child.buf)):
-            self.buf.append(child.buf[i])
-        self._end_field()
+        comptime if conforms_to(M, Proto3JsonWkt):
+            if self._map_phase == 1:
+                # proto3 forbids a message-typed map KEY; a WKT is a message.
+                raise Error(
+                    "JsonError: a well-known type cannot be a map key"
+                )
+            self._begin_field(json_name)
+            trait_downcast[Proto3JsonWkt](v).write_proto3_json(self.buf)
+            self._end_field()
+        else:
+            self._begin_field(json_name)
+            # Encode the child into its own JsonEncoder, then splice the bytes.
+            var child = JsonEncoder()
+            v.encode[JsonEncoder](child)
+            child.finish()
+            for i in range(len(child.buf)):
+                self.buf.append(child.buf[i])
+            self._end_field()
 
     # -- repeated (array) framing + element writers -----------------------
     #
@@ -420,13 +442,17 @@ struct JsonEncoder(WireEncoder):
     ](mut self, field_no: Int, v: M) raises:
         # A repeated-message element: emit the element separator, then splice
         # the child's bare object bytes (no field key — the key + brackets are
-        # owned by the enclosing `begin/end_list_field`).
+        # owned by the enclosing `begin/end_list_field`). A well-known type
+        # appends its canonical JSON value instead (see `write_message_field`).
         self._list_sep()
-        var child = JsonEncoder()
-        v.encode[JsonEncoder](child)
-        child.finish()
-        for i in range(len(child.buf)):
-            self.buf.append(child.buf[i])
+        comptime if conforms_to(M, Proto3JsonWkt):
+            trait_downcast[Proto3JsonWkt](v).write_proto3_json(self.buf)
+        else:
+            var child = JsonEncoder()
+            v.encode[JsonEncoder](child)
+            child.finish()
+            for i in range(len(child.buf)):
+                self.buf.append(child.buf[i])
 
     # -- map (object) framing --------------------------------------------
     #
@@ -735,10 +761,18 @@ struct JsonDecoder(WireDecoder):
         )
 
     def read_message[M: Serializable](mut self) raises -> M:
-        var sub_dec = JsonDecoder(
-            self._cur(), self._unknown, self._cur_path()
-        )
-        return M.decode[JsonDecoder](sub_dec)
+        comptime if conforms_to(M, Proto3JsonWkt):
+            # A well-known type reads its canonical JSON value (see
+            # `JsonEncoder.write_message_field`); a refusal names the field.
+            try:
+                return _read_wkt[M](self._cur())
+            except e:
+                raise Error(String(e) + " at " + self._cur_path())
+        else:
+            var sub_dec = JsonDecoder(
+                self._cur(), self._unknown, self._cur_path()
+            )
+            return M.decode[JsonDecoder](sub_dec)
 
     # -- repeated (array) decode ------------------------------------------
     #
@@ -851,12 +885,17 @@ struct JsonDecoder(WireDecoder):
         var arr = self._cur_array()
         var base = self._cur_path()
         for i in range(len(arr.children)):
-            var sub_dec = JsonDecoder(
-                arr.children[i].copy(),
-                self._unknown,
-                base + String("[") + String(i) + String("]"),
-            )
-            out.append(M.decode[JsonDecoder](sub_dec))
+            var path = base + String("[") + String(i) + String("]")
+            comptime if conforms_to(M, Proto3JsonWkt):
+                try:
+                    out.append(_read_wkt[M](arr.children[i]))
+                except e:
+                    raise Error(String(e) + " at " + path)
+            else:
+                var sub_dec = JsonDecoder(
+                    arr.children[i].copy(), self._unknown, path^
+                )
+                out.append(M.decode[JsonDecoder](sub_dec))
 
     # -- map (object) decode --------------------------------------------
     #
@@ -904,12 +943,26 @@ struct JsonDecoder(WireDecoder):
         var obj = self._cur_object()
         var base = self._cur_path()
         for i in range(len(obj.obj_keys)):
-            var sub_dec = JsonDecoder(
-                obj.children[i].copy(),
-                self._unknown,
-                base + String("[") + _quote(obj.obj_keys[i]) + String("]"),
+            var path = (
+                base + String("[") + _quote(obj.obj_keys[i]) + String("]")
             )
-            out[obj.obj_keys[i]] = V.decode[JsonDecoder](sub_dec)
+            comptime if conforms_to(V, Proto3JsonWkt):
+                try:
+                    out[obj.obj_keys[i]] = _read_wkt[V](obj.children[i])
+                except e:
+                    raise Error(String(e) + " at " + path)
+            else:
+                var sub_dec = JsonDecoder(
+                    obj.children[i].copy(), self._unknown, path^
+                )
+                out[obj.obj_keys[i]] = V.decode[JsonDecoder](sub_dec)
+
+    # A well-known-type FIELD whose JSON value is `null` never reaches
+    # `read_message`: `next_field()` skips it as ABSENT, which is right for
+    # every WKT but one. The spec reads `null` in a `google.protobuf.Value`
+    # FIELD as NULL_VALUE; here such a field decodes as absent (an open
+    # limit, komira-ai/komira#62). A null INSIDE a Struct, a
+    # ListValue or a map<string, Value> is a NULL_VALUE.
 
     # -- the unknown-token refusals ---------------------------------------
 
@@ -1206,4 +1259,10 @@ def _append_lit(mut buf: List[UInt8], lit: StringLiteral):
     var bytes = s.as_bytes()
     for i in range(len(bytes)):
         buf.append(bytes[i])
+
+
+def _read_wkt[M: Serializable](v: JsonValue) raises -> M:
+    """Read a well-known type `M` from its canonical JSON value. Only
+    instantiated under `comptime if conforms_to(M, Proto3JsonWkt)`."""
+    return rebind_var[M](downcast[M, Proto3JsonWkt].read_proto3_json(v))
 

@@ -7,7 +7,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # one substrate ladder every caller goes through. The package names no channel, account or organisation: locations,
 # approved names and credentials all come from the caller.
 #
-# Deps: komira_http (the HTTPS transport and its redirect policy), komira_async
+# Deps: komira_http_client (the HTTPS client and its redirect policy),
+# komira_http_core (methods, the connector seam), komira_async
 # (the blocking runtime the transport drives), komira_crypto (digests),
 # komira_encoding (base64), komira_json (listings and token exchanges) and
 # komira_secret_store (tokens held as zeroizing values, resolved by name).
@@ -21,7 +22,8 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
-        "//src/komira_http:komira_http",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
         "//src/komira_secret_store:komira_secret_store",
     ],

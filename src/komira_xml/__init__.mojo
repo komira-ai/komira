@@ -15,10 +15,15 @@
 #   xml_writer.mojo  a streaming writer over one output buffer
 #   xml_tree.mojo    an owned tree + a namespace-aware canonical form
 #
-# The rest-xml BINDING (flattened lists, xmlAttribute, xmlNamespace,
-# timestamps, blobs) is deliberately NOT here — it lives in
-# `komira_restxml`, so this package stays a plain XML codec that anything
-# can use.
+# A rest-xml BINDING (flattened lists, xmlAttribute, xmlNamespace,
+# timestamps, blobs) is deliberately NOT here — it lives in this package's
+# consumers, which depend on it, never the other way round, so this package
+# stays a plain XML codec that anything can use.
+#
+# STRICT ON INPUT. The reader and the tree refuse what is not a well-formed,
+# namespace-well-formed XML 1.0 document, and refuse every DTD, so no entity
+# beyond the five predefined ones can be expanded (no XXE). Nesting is bounded
+# by `XML_MAX_DEPTH`. See `xml_reader.mojo` and `xml_tree.mojo`.
 #
 # Encapsulation: no `UnsafePointer` crosses this module boundary.
 # =============================================================================
@@ -34,6 +39,7 @@ from .xml_escape import (
 from .xml_reader import (
     XML_END,
     XML_EOF,
+    XML_MAX_DEPTH,
     XML_START,
     XML_TEXT,
     XmlEvent,

@@ -47,11 +47,16 @@ def _read(name: String) raises -> String:
         return f.read()
 
 
+def _wire(req: CredentialHttpRequest) -> String:
+    """The request bytes as text (every request here has a text body)."""
+    return String(unsafe_from_utf8=Span(req.to_wire()))
+
+
 def _golden(req: CredentialHttpRequest, name: String) raises:
     var want = _read(name)
     # The goldens are CRLF on disk; nothing normalizes line ends.
     assert_true(want.find("\r\n") >= 0, name + " lost its CRLF line ends")
-    var got = req.to_wire()
+    var got = _wire(req)
     if got != want:
         raise Error(
             "request differs from " + name + "\n--- got ---\n" + got
@@ -132,7 +137,7 @@ def test_sts_assume_role_signed() raises:
         String("20260915T120000Z"),
     )
     _golden(req, "sts_assume_role.request")
-    assert_true(req.to_wire().find(_SECRET) < 0, "the secret is on the wire")
+    assert_true(_wire(req).find(_SECRET) < 0, "the secret is on the wire")
 
     var t = parse_sts_credentials(
         String("AssumeRole"),
