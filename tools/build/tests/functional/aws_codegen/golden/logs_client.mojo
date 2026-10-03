@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 3
+#   generator    : aws-client-gen version 4
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -764,7 +764,9 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         ))
         for _i in range(len(req.header_names)):
             var n = req.header_names[_i].copy()
-            if n == String("Content-Type"):
+            if n.lower() == String("content-type"):
+                # Header names are case-insensitive, and the substrate refuses an
+                # `extra` Content-Type in any case.
                 # The substrate takes the content type as its own argument and
                 # puts it in BOTH the signed set and the wire headers. Passing it
                 # again here would emit it twice and break the signature.
