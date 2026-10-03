@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 8
+#   generator    : aws-client-gen version 9
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -74,6 +74,7 @@ from komira_aws_core import (
     AwsCredential,
     AwsCredsSource,
     AwsEndpoint,
+    AwsRetryQuota,
     Header,
     HttpResult,
     resolve_endpoint,
@@ -753,6 +754,10 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
     var _http_config: HttpClientConfig
     var _creds_source: Self.T
     var _region: String
+    # The retry quota this client's calls share (botocore's standard mode
+    # keeps one per client): every retry spends from it, and a call that
+    # succeeds refills it.
+    var _retry_quota: AwsRetryQuota
     # WHERE this client sends. `None` = real AWS (the host derived from
     # the region). A VALUE, never an ambient env var — see
     # `komira_aws_core.AwsEndpoint`. This is what makes every verb this
@@ -771,6 +776,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         self._http_config = http_config.copy()
         self._creds_source = creds_source^
         self._region = region
+        self._retry_quota = AwsRetryQuota()
         self._endpoint_override = endpoint_override.copy()
 
     def into_creds_source(deinit self) -> Self.T:
@@ -811,6 +817,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         return send_sigv4_signed_request[Self.C](
             self._mk_connector,
             self._http_config.copy(),
+            self._retry_quota,
             req.method.copy(),
             cred,
             self._region.copy(),

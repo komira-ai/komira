@@ -1,4 +1,4 @@
-"""`kci_iac` — the provider-neutral RESOURCE-GRAPH deploy engine core.
+"""`kci_reconciler` — the provider-neutral RESOURCE-GRAPH deploy engine core.
 
   (open-core; no cloud, provider or deployment coupling).
 
@@ -21,19 +21,36 @@ WHAT LIVES HERE (the four concerns):
   * state.mojo           — the `StateStore` trait (write-ahead intent) +
                            `IntentTicket` + the `InMemoryStateStore` OSS default /
                            test double.
+  * outputs.mojo         — apply-time value flow: `Outputs` (what a node
+                           produced), `InputRef` (what a node reads from
+                           another; also a graph edge), `ResolvedInputs`, and
+                           the UNBOUND refusal.
   * fault_domain.mojo    — WHOSE FAULT a failure is (FAULT_* + the raise-site
                            token + `FaultAttribution`), with the unclassified
                            case reading as OURS.
+  * ownership.mojo       — the cell scope: `ResourceKey (machine, cell,
+                           resource)` (the store key), `OwnerStamp` (the
+                           identity an object carries, born with it),
+                           `Provenance` (annotations, never compared),
+                           `CellScope`, and the ownership rule (foreign and
+                           conflict refuse before any change).
+  * cell_walk.mojo       — the owned pre-flight, the closed-world removal
+                           rule and the confirmed-gone delete, shared by the
+                           verbs.
+  * digest.mojo          — `ModelledDigest`: every modelled field, never
+                           provenance.
   * engine.mojo          — the verbs (`plan_graph` / `apply_graph` /
                            `apply_graph_tracked` / `rollback_create` /
-                           `destroy_graph`) + `AppliedNode`.
+                           `destroy_graph`, and the owned forms
+                           `plan_graph_owned` / `apply_graph_owned` /
+                           `destroy_graph_owned`) + `AppliedNode`.
 
 A per-provider conformer (a GCP CloudRunService, an AWS Lambda, an on-prem unit)
-is a SEPARATE package that imports `kci_iac` and implements `Resource`; the
+is a SEPARATE package that imports `kci_reconciler` and implements `Resource`; the
 engine core here names NO provider. Mojo 1.0.0b2 (def-only).
 """
 
-from kci_iac.resource import (
+from kci_reconciler.resource import (
     Resource,
     ResourceStatus,
     ChangeAction,
@@ -54,8 +71,16 @@ from kci_iac.resource import (
     VERB_UPDATE,
     VERB_REPLACE,
     VERB_DELETE,
+    VERB_KNOWN_AFTER_APPLY,
 )
-from kci_iac.fault_domain import (
+from kci_reconciler.outputs import (
+    InputRef,
+    Outputs,
+    ResolvedInputs,
+    UNBOUND_TOKEN,
+    unbound_error,
+)
+from kci_reconciler.fault_domain import (
     FAULT_UNSET,
     FAULT_OURS,
     FAULT_CUSTOMER,
@@ -70,14 +95,14 @@ from kci_iac.fault_domain import (
     fault_domain_of_error,
     fault_message_of_error,
 )
-from kci_iac.erased_resource import ErasedResource
-from kci_iac.graph import (
+from kci_reconciler.erased_resource import ErasedResource
+from kci_reconciler.graph import (
     ResourceGraph,
     topo_sort,
     dag_topo_order,
     reverse_order,
 )
-from kci_iac.state import (
+from kci_reconciler.state import (
     StateStore,
     IntentTicket,
     InMemoryStateStore,
@@ -85,13 +110,40 @@ from kci_iac.state import (
     INTENT_CONFIRMED,
     INTENT_REAPED,
 )
-from kci_iac.engine import (
+from kci_reconciler.ownership import (
+    Label,
+    ResourceKey,
+    Provenance,
+    OwnerStamp,
+    CellScope,
+    KCI_SCHEME,
+    LABEL_MANAGED_BY,
+    LABEL_MACHINE,
+    LABEL_CELL,
+    LABEL_RESOURCE,
+    LABEL_ROLE,
+    LABEL_SCHEME,
+    MANAGED_BY_KCI,
+    REFUSED_TOKEN,
+    ownership_problem,
+)
+from kci_reconciler.digest import (
+    ModelledDigest,
+    is_provenance,
+    PROVENANCE_PREFIX,
+    PROVENANCE_RUN_ID,
+    PROVENANCE_REVISION,
+)
+from kci_reconciler.engine import (
     AppliedNode,
     UndeletableSkip,
     undeletable_report_lines,
     plan_graph,
+    plan_graph_owned,
     apply_graph,
     apply_graph_tracked,
+    apply_graph_owned,
     rollback_create,
     destroy_graph,
+    destroy_graph_owned,
 )

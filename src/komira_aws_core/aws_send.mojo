@@ -6,10 +6,13 @@
 # signs the request (`build_sigv4_signed_request`), sends it over
 # komira_http_client through the connector the client's factory makes, and
 # retries a failed attempt as `AwsRetryClassifier` and the AWS SDKs'
-# standard retry mode say (aws_retry.mojo). It returns the last response,
-# successful or not: a generated client raises a failed one with its own
-# error builder. When no response arrives and the failure is not retried,
-# it raises.
+# standard retry mode say (aws_retry.mojo), spending from the client's
+# `AwsRetryQuota`. Every operation is retried alike, whatever its method,
+# as botocore retries it, but for a conditional write the service may have
+# acted on (`aws_request_is_conditional`, read off the method and `extra`),
+# which is not resent. It returns the last response, successful or not:
+# a generated client raises a failed one with its own error builder. When
+# no response arrives and the failure is not retried, it raises.
 #
 # EVERY ATTEMPT IS SIGNED AGAIN, reading the clock again (`AwsClock`), so a
 # retry carries a fresh X-Amz-Date: a signature older than five minutes is
@@ -25,9 +28,14 @@
 # whose payload is not a blob or a string, so not GetObject, whose body may
 # be an object that is itself an XML document with an <Error> root.
 #
+# A DynamoDB response whose `x-amz-crc32` is not its body's CRC-32 is a
+# failed attempt too, a 200 included (botocore's `RetryDDBChecksumError`);
+# once no retry follows it is returned as it is.
+#
 # `send_sigv4_signed_request_with` is the same send over injected seams:
 # the transport (`AwsHttpTransport`), the signing clock, the retry loop (its
-# monotonic clock, sleeper and random source) and a retry budget. The
+# monotonic clock, sleeper and random source) and a retry budget (the
+# client's `AwsRetryQuota`, or any komira_retry `RetryBudget`). The
 # hermetic tests drive it with a scripted connector, a stepping clock and a
 # sleeper that records; `send_sigv4_signed_request` binds the process's
 # clocks and a blocking sleep.
@@ -45,7 +53,8 @@
 # A RESPONSE BODY IS BUFFERED WHOLE, up to komira_http_client's default cap
 # of 100 MiB (`HttpClientConfig.max_response_body_bytes`). A larger body,
 # such as an S3 GetObject of a bigger object without a Range, fails with
-# `HttpError[BODY_TOO_LARGE]` and is not retried; read such an object in
+# `HttpError[BODY_TOO_LARGE]`, which is raised at once, not retried: no
+# resend changes the size (botocore has no cap). Read such an object in
 # ranges.
 #
 # The retry loop runs on komira_clock's monotonic clock and waits in a
@@ -73,7 +82,6 @@ from komira_http_core.transport.io_stream import Connector
 from komira_clock import now_ns
 from komira_retry import (
     MonotonicClock,
-    NoBudget,
     RetryBudget,
     RetryLoop,
     RetryPolicy,
@@ -87,9 +95,12 @@ from .aws_codec import aws_is_error_status
 from .aws_error import aws_json_error_info
 from .aws_request import HttpResult
 from .aws_retry import (
+    AWS_DYNAMODB_CRC32_HEADER,
     AwsAttempt,
     AwsRetryClassifier,
-    aws_method_is_idempotent,
+    AwsRetryQuota,
+    aws_dynamodb_crc32_mismatch,
+    aws_request_is_conditional,
     aws_standard_retry_policy,
 )
 from .aws_xml import aws_xml_body_is_error, aws_xml_error_info
@@ -259,12 +270,19 @@ def aws_response_error_code(res: HttpResult) -> String:
     return aws_json_error_info(res.to_response()).code
 
 
-def _attempt_of(res: HttpResult, safe: Bool, s3_200_error: Bool) -> Optional[AwsAttempt]:
+def _attempt_of(
+    res: HttpResult, service: String, s3_200_error: Bool
+) -> Optional[AwsAttempt]:
     """The failed attempt `res` is, or None when it succeeded."""
+    var crc = service == "dynamodb" and aws_dynamodb_crc32_mismatch(
+        res.header(String(AWS_DYNAMODB_CRC32_HEADER)), res.body
+    )
     if aws_is_error_status(res.status):
-        return AwsAttempt.response(res.status, aws_response_error_code(res), safe)
+        return AwsAttempt.response(res.status, aws_response_error_code(res), crc)
     if s3_200_error and aws_xml_body_is_error(res.to_response()):
-        return AwsAttempt.response(500, aws_response_error_code(res), safe)
+        return AwsAttempt.response(500, aws_response_error_code(res), crc)
+    if crc:
+        return AwsAttempt.response(res.status, String(""), True)
     return None
 
 
@@ -299,7 +317,6 @@ def send_sigv4_signed_request_with[
     content_type: String,
     body: List[UInt8],
     extra: List[Header],
-    retry_safe: Bool = False,
     s3_200_error: Bool = False,
     payload: AwsPayloadSigning = AwsPayloadSigning.hashed(),
 ) raises -> HttpResult:
@@ -310,12 +327,14 @@ def send_sigv4_signed_request_with[
     `AwsRetryClassifier` and `retry` decides, sleeps and counts. Returns
     the first successful response, or the last failed one once no retry
     follows. Raises when the last attempt got no response, naming the
-    transport's error and why it was not retried. `retry_safe` states that
-    the operation may be repeated though its method is not idempotent;
-    `s3_200_error` that a 200 whose body is an <Error> is S3's error (the
-    module header)."""
-    var safe = retry_safe or aws_method_is_idempotent(method)
-    var classifier = AwsRetryClassifier()
+    transport's error and why it was not retried. `s3_200_error` states
+    that a 200 whose body is an <Error> is S3's error (the module
+    header). A conditional write (`aws_request_is_conditional` over
+    `method` and `extra`) is not resent once the service may have acted on
+    it."""
+    var classifier = AwsRetryClassifier(
+        service.copy(), conditional=aws_request_is_conditional(method, extra)
+    )
     retry.start()
     while True:
         var signed = build_sigv4_signed_request(
@@ -335,7 +354,7 @@ def send_sigv4_signed_request_with[
         var got = _send_once(transport, signed, error)
         if not got:
             var d = retry.after_outcome(
-                classifier, AwsAttempt.transport(error^, safe), budget
+                classifier, AwsAttempt.transport(error^), budget
             )
             if not d.retry:
                 raise Error(
@@ -346,7 +365,7 @@ def send_sigv4_signed_request_with[
                 )
             continue
         var res = got.take()
-        var failed = _attempt_of(res, safe, s3_200_error)
+        var failed = _attempt_of(res, service, s3_200_error)
         if not failed:
             retry.after_success(budget)
             return res^
@@ -358,6 +377,7 @@ def send_sigv4_signed_request_with[
 def send_sigv4_signed_request[C: Connector](
     mk_connector: def () raises thin -> C,
     http_config: HttpClientConfig,
+    mut retry_quota: AwsRetryQuota,
     method: String,
     cred: AwsCredential,
     region: String,
@@ -367,7 +387,6 @@ def send_sigv4_signed_request[C: Connector](
     content_type: String,
     body: List[UInt8],
     extra: List[Header],
-    retry_safe: Bool = False,
     s3_200_error: Bool = False,
 ) raises -> HttpResult:
     """Sign `method uri` for (`region`, `service`) with `cred`, send it to
@@ -375,19 +394,20 @@ def send_sigv4_signed_request[C: Connector](
     client built from `http_config` (the caller's; it has no default), and
     retry as the AWS SDKs' standard mode does (aws_retry.mojo): at most
     three sends, full jitter from 1 s, every attempt signed at the wall
-    clock's time. The
-    content type and every `extra` header are signed (signed_request.mojo).
-    `retry_safe` and `s3_200_error` are `send_sigv4_signed_request_with`'s.
-    Returns the last response; raises when the last attempt got none."""
+    clock's time, each retry paid for from `retry_quota`, the calling
+    client's; a conditional write is not resent once the service may have
+    acted on it. The content type and every `extra` header are signed
+    (signed_request.mojo). `s3_200_error` is
+    `send_sigv4_signed_request_with`'s. Returns the last response; raises
+    when the last attempt got none."""
     var transport = AwsConnectorTransport[C](http_config, mk_connector())
     var clock = SystemAwsClock()
     var loop = aws_system_retry_loop(aws_standard_retry_policy())
-    var budget = NoBudget()
     return send_sigv4_signed_request_with(
         transport,
         clock,
         loop,
-        budget,
+        retry_quota,
         method,
         cred,
         region,
@@ -397,6 +417,5 @@ def send_sigv4_signed_request[C: Connector](
         content_type,
         body,
         extra,
-        retry_safe=retry_safe,
         s3_200_error=s3_200_error,
     )

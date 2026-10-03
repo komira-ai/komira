@@ -4,8 +4,8 @@
 # awsQueryCompatible, so it names the error's legacy query code in an
 # `x-amzn-query-error` header beside the shape name in `__type`; the
 # client raises the query code, AWS.SimpleQueueService.NonExistentQueue, as
-# botocore and the Go v2 SDK report it. Both answers are a POST's, and the
-# error is a 400, so nothing is retried.
+# botocore and the Go v2 SDK report it. The error is a 400 naming no code
+# botocore retries, so nothing is retried.
 #
 # Then the GetQueueUrl request as it reached the wire: the client is given
 # komira_aws_core's AwsEchoConnector, whose answer is an awsJson error

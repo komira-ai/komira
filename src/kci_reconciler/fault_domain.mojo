@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/fault_domain.mojo — WHOSE FAULT a deploy error is, carried as
+# kci_reconciler/fault_domain.mojo — WHOSE FAULT a deploy error is, carried as
 #   DATA, with the unclassified case reading as OURS.
 # =============================================================================
 #

@@ -24,17 +24,24 @@
 # them from the generated code would agree with it by construction.
 #
 # ALSO PINNED: the two v1 `Resource.body` arms (10 service, 11 job) by number
-# AND by which field each fills; the HELD numbers (body 12 to 19 for the later
-# types, 90 for the escape hatch, `Resource` 3, `Value` 4) decode as unknown
-# today, so nothing else has taken them; the retired field 4 is ignored; and
-# every enum's ordinals in both directions, held values undeclared.
+# AND by which field each fills; the HELD numbers (body 12 to 18 for the later
+# types, 90 for the escape hatch, `Resource` 3, 5 and 6, `Value` 4, `Image` 4,
+# `Service` 13, `Job` 8) decode as unknown today, so nothing else has taken
+# them; the retired field 4 is ignored; and every enum's ordinals in both
+# directions, held values undeclared.
 #
 # THE FIELDS ADDED AFTER THE FIRST DRAFT, each pinned the same two ways:
-# `Image.platform` 3 (`ArtifactPlatform` 1 os, 2 cpu), `SecretRef` 1 name,
-# `Service.secret_env` 12, `Job.env` 6 and `Job.secret_env` 7. And
+# `Image.platform` 3 (an OCI-style string), `SecretRef` 1 name, 2 store and
+# 3 version, `Service.secret_env` 12, `Job.env` 6 and `Job.secret_env` 7. And
 # `test_added_numbers_are_kept` restates them with decode and encode ONLY, so
 # it compiles against a schema without them and fails there at run time: a
-# number the schema does not declare is dropped on re-encode.
+# number the schema does not declare is dropped on re-encode, and a number
+# whose wire shape changed does not decode to the same bytes.
+#
+# RENAMED, NUMBERS KEPT: `StepOutput { step = 1, name = 2 }` (was
+# `ActionOutput { action, name }`) and `Portability.CLOUD_BOUND = 2` (was
+# `PLATFORM_BOUND`). PRESENCE: `Scale.min`, `Job.max_retries`,
+# `SecretRef.store` and `SecretRef.version` tell "not written" from zero.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -42,18 +49,17 @@ from std.testing import assert_equal, assert_true
 from komira_proto_codec import decode_proto, encode_proto
 from kci_resource_proto.resource import (
     Access,
-    ArtifactPlatform,
-    Cpu,
     Image,
     Job,
-    Os,
     Output,
     Portability,
     Ref,
     Resource,
     ResourceList,
+    Scale,
     SecretRef,
     Service,
+    StepOutput,
     Uses,
     Value,
 )
@@ -282,16 +288,16 @@ def _scale(lo: Int, hi: Int) -> List[UInt8]:
     return b^
 
 
-def _action_output(action: String, name: String) -> List[UInt8]:
+def _step_output(step: String, name: String) -> List[UInt8]:
     var b = List[UInt8]()
-    _str(b, 1, action)
+    _str(b, 1, step)
     _str(b, 2, name)
     return b^
 
 
-def _image_from_action(action: String, name: String) -> List[UInt8]:
+def _image_from_step(step: String, name: String) -> List[UInt8]:
     var b = List[UInt8]()
-    _msg(b, 1, _action_output(action, name))
+    _msg(b, 1, _step_output(step, name))
     return b^
 
 
@@ -301,16 +307,17 @@ def _image_digest(digest: String) -> List[UInt8]:
     return b^
 
 
-def _platform(os: Int, cpu: Int) -> List[UInt8]:
-    var b = List[UInt8]()
-    _uint(b, 1, UInt64(os))
-    _uint(b, 2, UInt64(cpu))
-    return b^
-
-
 def _secret(name: String) -> List[UInt8]:
     var b = List[UInt8]()
     _str(b, 1, name)
+    return b^
+
+
+def _secret_pinned(name: String, store: String, version: String) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, name)
+    _str(b, 2, store)
+    _str(b, 3, version)
     return b^
 
 
@@ -401,12 +408,13 @@ def test_value_arms() raises:
 
 
 def test_image_arms() raises:
-    """Image: oneof source { 1 output, 2 digest }."""
+    """Image: oneof source { 1 output, 2 digest }. StepOutput: 1 step,
+    2 name."""
     var o = List[UInt8]()
-    _msg(o, 1, _action_output("build", "docs_bundle"))
+    _msg(o, 1, _step_output("build", "docs_bundle"))
     var c = decode_proto[Image](o.copy())
     assert_equal(c._oneof0_case, 1)
-    assert_equal(c.output.value().action, "build")
+    assert_equal(c.output.value().step, "build", "StepOutput field 1 is `step`")
     assert_equal(c.output.value().name, "docs_bundle")
     _same(encode_proto(c), o, "Image.output")
 
@@ -417,66 +425,73 @@ def test_image_arms() raises:
     assert_equal(cd.digest.value(), "sha256:cd")
     _same(encode_proto(cd), d, "Image.digest")
 
-    # No platform: the field is absent (a reader takes the v1 default).
-    assert_true(not Bool(cd.platform), "Image.platform is unset when not written")
+    # No platform: the field is empty (a reader takes the v1 default,
+    # linux/amd64).
+    assert_equal(cd.platform, "", "Image.platform is empty when not written")
+
+    var so = decode_proto[StepOutput](_step_output("images", "api_image"))
+    assert_equal(so.step, "images")
+    assert_equal(so.name, "api_image", "StepOutput field 2 is `name`")
     print("  test_image_arms: PASS")
 
 
 def test_image_platform() raises:
-    """Image: 3 platform, beside either source arm. ArtifactPlatform: 1 os,
-    2 cpu."""
-    var p = _platform(Os.LINUX, Cpu.X86_64)
-    var ap = decode_proto[ArtifactPlatform](p.copy())
-    assert_equal(ap.os.value, Os.LINUX, "ArtifactPlatform field 1 is `os`")
-    assert_equal(ap.cpu.value, Cpu.X86_64, "ArtifactPlatform field 2 is `cpu`")
-    _same(encode_proto(ap), p, "ArtifactPlatform")
-
-    # os and cpu are told apart by number, not by a shared value.
-    var swapped = List[UInt8]()
-    _uint(swapped, 2, UInt64(Cpu.X86_64))
-    var only_cpu = decode_proto[ArtifactPlatform](swapped.copy())
-    assert_equal(only_cpu.os.value, Os.OS_UNSET, "field 2 does not fill `os`")
-    assert_equal(only_cpu.cpu.value, Cpu.X86_64)
-
+    """Image: 3 platform, an OCI-style string, beside either source arm."""
     var o = List[UInt8]()
-    _msg(o, 1, _action_output("build", "api_image"))
-    _msg(o, 3, _platform(Os.LINUX, Cpu.X86_64))
+    _msg(o, 1, _step_output("build", "api_image"))
+    _str(o, 3, "linux/amd64")
     var io = decode_proto[Image](o.copy())
     assert_equal(io._oneof0_case, 1, "platform does not touch the source arm")
     assert_equal(io.output.value().name, "api_image")
-    assert_equal(io.platform.value().os.value, Os.LINUX)
-    assert_equal(io.platform.value().cpu.value, Cpu.X86_64)
+    assert_equal(io.platform, "linux/amd64", "Image field 3 is `platform`")
     _same(encode_proto(io), o, "Image.output + platform")
 
     var d = List[UInt8]()
     _str(d, 2, "sha256:ef")
-    _msg(d, 3, _platform(Os.LINUX, Cpu.X86_64))
+    _str(d, 3, "linux/amd64")
     var idg = decode_proto[Image](d.copy())
     assert_equal(idg._oneof0_case, 2)
     assert_equal(idg.digest.value(), "sha256:ef")
-    assert_equal(idg.platform.value().cpu.value, Cpu.X86_64)
+    assert_equal(idg.platform, "linux/amd64")
     _same(encode_proto(idg), d, "Image.digest + platform")
 
-    # An undeclared value survives decode as its number: the schema cannot
-    # refuse it, the validate phase does (linux x86_64 only in v1).
-    var other = decode_proto[ArtifactPlatform](_platform(2, 2))
-    assert_equal(other.os.value, 2)
-    assert_equal(other.cpu.value, 2)
+    # A platform this kci does not accept still decodes, verbatim: the schema
+    # cannot refuse it, the validate phase does (linux/amd64 only in v1).
+    var other = List[UInt8]()
+    _str(other, 2, "sha256:12")
+    _str(other, 3, "darwin/arm64")
+    var io2 = decode_proto[Image](other.copy())
+    assert_equal(io2.platform, "darwin/arm64")
+    _same(encode_proto(io2), other, "Image.platform other value")
     print("  test_image_platform: PASS")
 
 
 def test_secret_ref() raises:
-    """SecretRef: 1 name. One field, and it is a name."""
-    var b = _secret("db_password")
+    """SecretRef: 1 name, 2 store, 3 version; store and version have
+    presence. A reference, never a value."""
+    var b = _secret_pinned("db_password", "default", "7")
     var s = decode_proto[SecretRef](b.copy())
-    assert_equal(s.name, "db_password")
+    assert_equal(s.name, "db_password", "SecretRef field 1 is `name`")
+    assert_equal(s.store.value(), "default", "SecretRef field 2 is `store`")
+    assert_equal(s.version.value(), "7", "SecretRef field 3 is `version`")
     _same(encode_proto(s), b, "SecretRef")
 
-    var held = List[UInt8]()
-    _str(held, 1, "db_password")
-    _str(held, 2, "not-a-field")
+    # Not written: absent. Written empty: present and empty.
+    var bare = decode_proto[SecretRef](_secret("db_password"))
+    assert_true(not Bool(bare.store), "an unwritten store is absent")
+    assert_true(not Bool(bare.version), "an unwritten version is absent")
+    var e = List[UInt8]()
+    _str(e, 1, "db_password")
+    _str(e, 3, "")
+    var se = decode_proto[SecretRef](e.copy())
+    assert_true(Bool(se.version), "a version written empty is present")
+    assert_equal(se.version.value(), "")
+    assert_true(not Bool(se.store))
+
+    var held = _secret("db_password")
+    _str(held, 4, "not-a-field")
     var sh = decode_proto[SecretRef](held.copy())
-    _same(encode_proto(sh), b, "SecretRef has no field 2")
+    _same(encode_proto(sh), _secret("db_password"), "SecretRef has no field 4")
     print("  test_secret_ref: PASS")
 
 
@@ -486,8 +501,13 @@ def test_added_numbers_are_kept() raises:
     it is unknown, dropped on re-encode, and this fails."""
     var img = List[UInt8]()
     _str(img, 2, "sha256:01")
-    _msg(img, 3, _platform(1, 1))
+    _str(img, 3, "linux/amd64")
     _same(encode_proto(decode_proto[Image](img.copy())), img, "Image 3")
+
+    var sec = _secret_pinned("db_password", "default", "3")
+    _same(
+        encode_proto(decode_proto[SecretRef](sec.copy())), sec, "SecretRef 2 and 3"
+    )
 
     var svc = List[UInt8]()
     _uint(svc, 2, 8080)
@@ -544,13 +564,13 @@ def test_resource_body_arms_are_10_and_11() raises:
 
 
 def test_held_body_numbers_are_undeclared() raises:
-    """12 to 19 are held for the later types (worker, table, bucket, queue,
-    secret, site, domain, mail_relay) and 90 for the escape hatch. Today each
-    decodes as an unknown field: no arm set, dropped on re-encode. When a type
-    lands at its held number this test changes with it; anything else taking
-    one of these numbers is a mistake."""
+    """12 to 18 are held for the later types (worker, table, bucket, queue,
+    secret, site, domain) and 90 for the escape hatch. Today each decodes as
+    an unknown field: no arm set, dropped on re-encode. When a type lands at
+    its held number this test changes with it; anything else taking one of
+    these numbers is a mistake."""
     var held = List[Int]()
-    for n in range(12, 20):
+    for n in range(12, 19):
         held.append(n)
     held.append(90)
     var head = List[UInt8]()
@@ -585,6 +605,44 @@ def test_fields_3_and_4_are_not_declared() raises:
     assert_equal(_arm_of(r), "")
     _same(encode_proto(r), head, "fields 3 and 4 are unknown")
     print("  test_fields_3_and_4_are_not_declared: PASS")
+
+
+def test_reserved_now_built_later_numbers_are_undeclared() raises:
+    """The numbers held for shapes that land later as additions: `Resource` 5
+    (cloud_settings) and 6 (physical_name), `Image` 4 (artifact_ref), and the
+    `artifact_ref` arm of a later `source` on `Service` 13 and `Job` 8. Each
+    decodes as unknown today: dropped on re-encode."""
+    var rhead = List[UInt8]()
+    _str(rhead, 1, "r")
+    var rb = rhead.copy()
+    _empty(rb, 5)
+    _str(rb, 6, "kept-name")
+    _same(
+        encode_proto(decode_proto[Resource](rb.copy())),
+        rhead,
+        "Resource 5 and 6 are held",
+    )
+
+    var ihead = List[UInt8]()
+    _str(ihead, 2, "sha256:aa")
+    var ib = ihead.copy()
+    _empty(ib, 4)
+    var ii = decode_proto[Image](ib.copy())
+    assert_equal(ii._oneof0_case, 2, "Image 4 is not a source arm today")
+    _same(encode_proto(ii), ihead, "Image 4 is held")
+
+    var shead = List[UInt8]()
+    _uint(shead, 2, 8080)
+    var sb = shead.copy()
+    _empty(sb, 13)
+    _same(encode_proto(decode_proto[Service](sb.copy())), shead, "Service 13")
+
+    var jhead = List[UInt8]()
+    _str(jhead, 2, "report")
+    var jb = jhead.copy()
+    _empty(jb, 8)
+    _same(encode_proto(decode_proto[Job](jb.copy())), jhead, "Job 8")
+    print("  test_reserved_now_built_later_numbers_are_undeclared: PASS")
 
 
 def test_resource_header_fields() raises:
@@ -626,7 +684,7 @@ def test_service() raises:
     _msg(env_entry, 2, env_value)
 
     var b = List[UInt8]()
-    _msg(b, 1, _image_from_action("build", "api_image"))
+    _msg(b, 1, _image_from_step("build", "api_image"))
     _uint(b, 2, 8080)
     _str(b, 3, "serve")
     _str(b, 3, "--fast")
@@ -639,7 +697,7 @@ def test_service() raises:
     _empty(b, 10)
     _msg(b, 12, _entry("DB_PASSWORD", _secret("db_password")))
     var s = decode_proto[Service](b.copy())
-    assert_equal(s.image.value().output.value().action, "build")
+    assert_equal(s.image.value().output.value().step, "build")
     assert_equal(s.image.value().output.value().name, "api_image")
     assert_equal(Int(s.port), 8080)
     assert_equal(len(s.args), 2)
@@ -651,7 +709,7 @@ def test_service() raises:
     )
     assert_equal(Int(s.size.value().cpu_millis), 1000)
     assert_equal(Int(s.size.value().memory_mb), 512)
-    assert_equal(Int(s.scale.value().min), 1)
+    assert_equal(Int(s.scale.value().min.value()), 1)
     assert_equal(Int(s.scale.value().max), 20)
     assert_equal(s.health_path, "/healthz")
     assert_equal(Int(s.request_timeout.value().seconds), 30)
@@ -671,6 +729,25 @@ def test_service() raises:
     assert_true(Bool(si.internal), "field 11 is `internal`")
     _same(encode_proto(si), i, "Service (internal)")
     print("  test_service: PASS")
+
+
+def test_scale_min_has_presence() raises:
+    """Scale: 1 min (presence), 2 max. An explicit `min: 0` (scale to zero)
+    is a value; a Scale with no `min` written has none."""
+    var zero = List[UInt8]()
+    _uint(zero, 1, 0)
+    _uint(zero, 2, 5)
+    var z = decode_proto[Scale](zero.copy())
+    assert_true(Bool(z.min), "an explicit min of 0 is present")
+    assert_equal(Int(z.min.value()), 0)
+    assert_equal(Int(z.max), 5, "Scale field 2 is `max`")
+
+    var only_max = List[UInt8]()
+    _uint(only_max, 2, 5)
+    var m = decode_proto[Scale](only_max.copy())
+    assert_true(not Bool(m.min), "an unwritten min is absent")
+    _same(encode_proto(m), only_max, "Scale without min")
+    print("  test_scale_min_has_presence: PASS")
 
 
 def test_job() raises:
@@ -696,7 +773,7 @@ def test_job() raises:
     assert_equal(j.image.value().digest.value(), "sha256:ab")
     assert_equal(j.args[0], "report")
     assert_equal(Int(j.size.value().cpu_millis), 250)
-    assert_equal(Int(j.max_retries), 2)
+    assert_equal(Int(j.max_retries.value()), 2)
     assert_equal(Int(j.timeout.value().seconds), 900)
     assert_equal(len(j.env), 2, "field 6 is `env`")
     assert_equal(j.env["MODE"].literal.value(), "full")
@@ -715,7 +792,16 @@ def test_job() raises:
     var jd = decode_proto[Job](d.copy())
     assert_equal(jd._oneof0_case, 1, "field 10 is `on_demand`")
     assert_true(Bool(jd.on_demand))
+    assert_true(not Bool(jd.max_retries), "an unwritten max_retries is absent")
     _same(encode_proto(jd), d, "Job (on_demand)")
+
+    # An explicit "no retries" is a value, not the absence of one.
+    var nr = List[UInt8]()
+    _str(nr, 2, "once")
+    _uint(nr, 4, 0)
+    var jn = decode_proto[Job](nr.copy())
+    assert_true(Bool(jn.max_retries), "an explicit max_retries of 0 is present")
+    assert_equal(Int(jn.max_retries.value()), 0)
     print("  test_job: PASS")
 
 
@@ -732,8 +818,8 @@ def _enum_row(got_name: String, want_name: String, n: Int, what: String) raises:
 
 def test_enum_ordinals() raises:
     """Every enum value by number AND by name: the number is what is stored.
-    The held values (Output 3, 4; Access 2 to 6) render as bare numbers, i.e.
-    nothing has taken them."""
+    The held values (Output 3 to 5; Access 2 to 6) render as bare numbers,
+    i.e. nothing has taken them."""
     var outputs = List[String]()
     outputs.append("OUTPUT_UNSET")
     outputs.append("URL")
@@ -741,7 +827,7 @@ def test_enum_ordinals() raises:
     for n in range(len(outputs)):
         _enum_row(Output(n).json_name(), outputs[n], n, "Output")
         assert_equal(Output.from_json_name(outputs[n]).value, n)
-    for n in range(3, 5):
+    for n in range(3, 6):
         assert_equal(Output(n).json_name(), String(n), "Output value held")
 
     var access = List[String]()
@@ -756,21 +842,12 @@ def test_enum_ordinals() raises:
     var port = List[String]()
     port.append("PORTABILITY_UNSET")
     port.append("PORTABLE")
-    port.append("PLATFORM_BOUND")
+    port.append("CLOUD_BOUND")
     for n in range(len(port)):
         _enum_row(Portability(n).json_name(), port[n], n, "Portability")
         assert_equal(Portability.from_json_name(port[n]).value, n)
     assert_equal(Portability(3).json_name(), "3", "Portability has three values")
 
-    # The artifact platform: v1 declares linux and x86_64 only.
-    _enum_row(Os(0).json_name(), "OS_UNSET", 0, "Os")
-    _enum_row(Os(1).json_name(), "LINUX", 1, "Os")
-    assert_equal(Os.from_json_name("LINUX").value, 1)
-    assert_equal(Os(2).json_name(), "2", "Os has two values in v1")
-    _enum_row(Cpu(0).json_name(), "CPU_UNSET", 0, "Cpu")
-    _enum_row(Cpu(1).json_name(), "X86_64", 1, "Cpu")
-    assert_equal(Cpu.from_json_name("X86_64").value, 1)
-    assert_equal(Cpu(2).json_name(), "2", "Cpu has two values in v1")
     print("  test_enum_ordinals: PASS")
 
 
@@ -786,8 +863,10 @@ def main() raises:
     test_resource_body_arms_are_10_and_11()
     test_held_body_numbers_are_undeclared()
     test_fields_3_and_4_are_not_declared()
+    test_reserved_now_built_later_numbers_are_undeclared()
     test_resource_header_fields()
     test_service()
+    test_scale_min_has_presence()
     test_job()
     test_enum_ordinals()
     print("ALL kci.resource.v1 FIELD-NUMBER TESTS PASSED")

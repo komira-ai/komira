@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/resource.mojo — the provider-neutral RESOURCE abstraction of the
+# kci_reconciler/resource.mojo — the provider-neutral RESOURCE abstraction of the
 #   resource-graph deploy engine (open-core; no cloud, provider or deployment
 #   coupling).
 # =============================================================================
@@ -31,7 +31,9 @@
 
 # The trait's `fault_domain` default. Importing ONE constant from a leaf module
 # that imports nothing keeps this file's dependency surface at zero cycles.
-from kci_iac.fault_domain import FAULT_UNSET
+from kci_reconciler.fault_domain import FAULT_UNSET
+from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.ownership import OwnerStamp
 
 
 # =============================================================================
@@ -49,7 +51,9 @@ replace, a v1-unsupported REPLACE — see CONVERGE_REPLACE)."""
 comptime RES_CONVERGING: Int = 3
 """The live resource is reconciling toward the desired spec (not yet settled)."""
 comptime RES_FAILED: Int = 4
-"""The live resource is in a failed terminal state."""
+"""The live resource is in a failed terminal state. It exists and does not run
+what the file asks, so apply treats it like a drift: an in-place update (a
+fixed image after a bad one) is how it recovers."""
 
 
 # =============================================================================
@@ -83,7 +87,7 @@ comptime RETAIN_DELETE: Int = 0
 app-owned resource — its lifecycle is the deploy's)."""
 comptime RETAIN_KEEP: Int = 1
 """KEPT BY POLICY, AND OVERRIDABLE. The engine does not delete this resource in
-the ordinary course (a standing / shared resource — the environment-shared
+the ordinary course (a standing / shared resource — the cell-shared
 bootstrap bucket, the WIF pool, the VPC — provisioned once and only ever READ by a
 deploy), so rollback_create + destroy_graph SKIP it. An operator who has
 explicitly opted into destroying data-bearing / shared scope
@@ -163,7 +167,17 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
                         (a served node's live_digest IS its live image, but
                         the two are kept separate so a non-image node can still
                         carry a digest without implying a served image).
-    Flat-String value POD (all six fields are single-level owned Int/String —
+      * `stamp`       — the ownership IDENTITY the live object carries
+                        (`OwnerStamp.identity()`, decoded by the conformer from
+                        the object's labels), or empty when it carries none.
+                        Read only in an OWNED scope (engine.mojo); never part
+                        of `live_digest`.
+      * `unmanaged`   — a description of differences on fields kci does NOT
+                        model (a console-added label, a field the catalog has
+                        no word for). Reported by `plan` beside the verb and
+                        NEVER converged: kci owns every field it models and
+                        touches no other. Empty when there are none.
+    Flat-String value POD (all eight fields are single-level owned Int/String —
     no pointer field; never in a byte-slab)."""
 
     var phase: Int
@@ -175,6 +189,10 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
     # below) needs neither; a served node populates them in `read_status`.
     var endpoint: String
     var live_image: String
+    # The ownership and the unmodelled-difference fields, defaulted EMPTY for
+    # the same reason (a conformer that does not stamp never sets them).
+    var stamp: String
+    var unmanaged: String
 
     def __init__(
         out self,
@@ -184,17 +202,21 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
         message: String,
         endpoint: String = String(""),
         live_image: String = String(""),
+        stamp: String = String(""),
+        unmanaged: String = String(""),
     ):
-        """The flat POD ctor. `endpoint` + `live_image` default EMPTY so a
-        4-arg call (raw `ResourceStatus(phase, pid, digest, msg)` + the
-        factories) needs neither — a served node passes the two extra fields
-        explicitly."""
+        """The flat POD ctor. `endpoint` + `live_image` + `stamp` +
+        `unmanaged` default EMPTY so a 4-arg call (raw
+        `ResourceStatus(phase, pid, digest, msg)` + the factories) needs none
+        of them."""
         self.phase = phase
         self.physical_id = physical_id.copy()
         self.live_digest = live_digest.copy()
         self.message = message.copy()
         self.endpoint = endpoint.copy()
         self.live_image = live_image.copy()
+        self.stamp = stamp.copy()
+        self.unmanaged = unmanaged.copy()
 
     def is_absent(self) -> Bool:
         return self.phase == RES_ABSENT
@@ -221,10 +243,13 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
         live_digest: String,
         endpoint: String = String(""),
         live_image: String = String(""),
+        stamp: String = String(""),
+        unmanaged: String = String(""),
     ) -> ResourceStatus:
         """A present-matched status. `endpoint` + `live_image` default EMPTY
         for a non-served node; a served node passes its live served URL + image so
-        the STATUS subsystem can surface them."""
+        the STATUS subsystem can surface them. A stamping conformer passes the
+        live `stamp`; any conformer passes `unmanaged` differences."""
         return ResourceStatus(
             RES_PRESENT_MATCHED,
             physical_id,
@@ -232,6 +257,8 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
             String(""),
             endpoint,
             live_image,
+            stamp,
+            unmanaged,
         )
 
     @staticmethod
@@ -240,9 +267,12 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
         live_digest: String,
         endpoint: String = String(""),
         live_image: String = String(""),
+        stamp: String = String(""),
+        unmanaged: String = String(""),
     ) -> ResourceStatus:
         """A present-drifted status. `endpoint` + `live_image` default EMPTY
-        for a non-served node; a served node passes its live served URL + image."""
+        for a non-served node; a served node passes its live served URL + image.
+        `stamp` and `unmanaged` as for `matched`."""
         return ResourceStatus(
             RES_PRESENT_DRIFTED,
             physical_id,
@@ -250,6 +280,8 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
             String(""),
             endpoint,
             live_image,
+            stamp,
+            unmanaged,
         )
 
 
@@ -270,8 +302,14 @@ engine RAISES on this at apply time (the typed hole)."""
 comptime VERB_DELETE: Int = 4
 """The planned action: delete the resource (destroy / rollback)."""
 
+comptime VERB_KNOWN_AFTER_APPLY: Int = 5
+"""A DRY-RUN-ONLY verb: the node consumes a value a producer will only have
+after the producer is created or changed, so its desired state cannot be known
+yet. `plan_graph` reports it as "may change", never as a no-op, and does not
+read the node (its desired digest would be over an unresolved reference).
+`apply_graph` never returns it: at apply time the producer runs first."""
 
-@fieldwise_init
+
 struct ChangeAction(Copyable, Movable, Deinitable):
     """One planned change for a resource (the PURE diff `plan` returns):
       * `logical_id` — the graph-stable key of the resource this action targets.
@@ -281,12 +319,45 @@ struct ChangeAction(Copyable, Movable, Deinitable):
                        "digest sha256:.. -> sha256:.. drifted -> update").
       * `retention`  — the resource's RETAIN_* policy (so a plan reader can see
                        which nodes a destroy would skip).
+      * `owner`      — the id of the authored resource this node was lowered
+                       from (`Resource.owner`), so a plan can be grouped under
+                       what the author wrote. Empty for a node with no owner.
+                       `plan_graph` stamps it; a conformer's `plan` need not.
+      * `unmanaged`  — differences on fields kci does not model
+                       (`ResourceStatus.unmanaged`), printed beside the verb
+                       and never acted on. `plan_graph` copies it.
     Flat-String value POD."""
 
     var logical_id: String
     var verb: Int
     var reason: String
     var retention: Int
+    var owner: String
+    var unmanaged: String
+
+    def __init__(
+        out self,
+        logical_id: String,
+        verb: Int,
+        reason: String,
+        retention: Int,
+        owner: String = String(""),
+        unmanaged: String = String(""),
+    ):
+        self.logical_id = logical_id
+        self.verb = verb
+        self.reason = reason
+        self.retention = retention
+        self.owner = owner
+        self.unmanaged = unmanaged
+
+    def __init__(out self, *, copy: Self):
+        self.logical_id = copy.logical_id.copy()
+        self.verb = copy.verb
+        self.reason = copy.reason.copy()
+        self.retention = copy.retention
+        self.owner = copy.owner.copy()
+        self.unmanaged = copy.unmanaged.copy()
 
     def is_noop(self) -> Bool:
         return self.verb == VERB_NOOP
@@ -303,6 +374,9 @@ struct ChangeAction(Copyable, Movable, Deinitable):
     def is_delete(self) -> Bool:
         return self.verb == VERB_DELETE
 
+    def is_known_after_apply(self) -> Bool:
+        return self.verb == VERB_KNOWN_AFTER_APPLY
+
     def verb_name(self) -> StaticString:
         if self.verb == VERB_CREATE:
             return "create"
@@ -312,6 +386,8 @@ struct ChangeAction(Copyable, Movable, Deinitable):
             return "replace"
         if self.verb == VERB_DELETE:
             return "delete"
+        if self.verb == VERB_KNOWN_AFTER_APPLY:
+            return "known after apply"
         return "noop"
 
 
@@ -450,7 +526,7 @@ trait Resource(Movable, Deinitable):
         """A PURE diff: given the live status (from `read_status`), return the
         ChangeAction that would converge this resource — WITHOUT mutating anything
         (no I/O, no side effect). RES_ABSENT -> VERB_CREATE; RES_PRESENT_MATCHED ->
-        VERB_NOOP; RES_PRESENT_DRIFTED -> VERB_UPDATE (IN_PLACE) or VERB_REPLACE
+        VERB_NOOP; RES_PRESENT_DRIFTED or RES_FAILED -> VERB_UPDATE (IN_PLACE) or VERB_REPLACE
         (needs replace). The engine's `plan_graph` collects these for a dry-run;
         `apply_graph` re-reads live and acts, it does not replay this."""
         ...
@@ -474,7 +550,7 @@ trait Resource(Movable, Deinitable):
         ...
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
-        """HOW a drift (RES_PRESENT_DRIFTED) is converged: CONVERGE_IN_PLACE (the
+        """HOW a drift (RES_PRESENT_DRIFTED, or RES_FAILED) is converged: CONVERGE_IN_PLACE (the
         v1-supported update) or a RAISE for a drift that genuinely needs a REPLACE
         (delete-then-create). v1 has NO replace path — a conformer that returns
         CONVERGE_REPLACE, or raises here, makes the engine surface a clear
@@ -503,7 +579,7 @@ trait Resource(Movable, Deinitable):
 
     def fault_domain(mut self, verb: String) raises -> Int:
         """WHOSE FAULT is a failure of `verb` ON THIS NODE — a FAULT_* code
-        (`kci_iac.fault_domain`). `verb` is the `Resource` verb that raised:
+        (`kci_reconciler.fault_domain`). `verb` is the `Resource` verb that raised:
         `read_status` / `create` / `update` / `delete`.
 
         DEFAULT = `FAULT_UNSET`, WHICH READS AS **OURS**. A conformer that has
@@ -540,3 +616,127 @@ trait Resource(Movable, Deinitable):
 
         `mut self` (the erasure-shape rationale — see `logical_id`)."""
         return FAULT_UNSET
+
+    # ---- apply-time value flow (kci_reconciler/outputs.mojo) ----------------
+    #
+    # ⚠ EVERY ONE OF THESE HAS A DEFAULT, AND EVERY ONE IS FORWARDED BY
+    # `ErasedResource`. A defaulted verb that the erased facade does not forward
+    # is silently answered by THIS default for every node of a real graph (the
+    # graph only holds erased nodes), so a new verb here is a new vtable entry
+    # there, pinned by `test_resource_outputs`'s probe.
+
+    def input_refs(mut self) -> List[InputRef]:
+        """The values this node CONSUMES from other nodes. Each is a graph edge
+        (the producer is ordered first; a producer not in the graph is refused)
+        in addition to `depends_on`, so an author never has to keep a
+        dependency list and a reference list in step.
+
+        DEFAULT = NONE. `mut self` (the erasure-shape rationale — see
+        `logical_id`)."""
+        return List[InputRef]()
+
+    def bind_inputs(mut self, resolved: ResolvedInputs) raises:
+        """Receive the values of `input_refs`, one per ref, in declared order.
+        The engine calls this AFTER every producer has been applied (or, in a
+        dry run, read as unchanged) and BEFORE this node's `read_status`, so
+        the desired state the node is read and planned against holds real
+        values, never a placeholder.
+
+        DEFAULT = NO-OP, correct for a node with no `input_refs`."""
+        pass
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        """The named values this node PRODUCES, for the resource `physical_id`,
+        reading AS `creds` if it must read (a node created in this run has not
+        been read since it was created). Called after every apply of the node,
+        whatever the verb, so an adopted node's values are re-derived from its
+        latest live read rather than trusted from state (a value that drifted
+        in the cloud is seen).
+
+        DEFAULT = NONE."""
+        return Outputs()
+
+    def owner(mut self) -> String:
+        """The id of the authored resource this node was lowered from (one
+        authored resource lowers to several engine nodes). Stamped on every
+        `ChangeAction` by `plan_graph`, so a plan groups under what the author
+        wrote.
+
+        DEFAULT = EMPTY."""
+        return String("")
+
+    def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        """The live read TEARDOWN uses: is the resource there, and what is its
+        physical id. `destroy_graph` calls this, never `read_status`, because
+        teardown compares nothing against a desired state, and a consumer's
+        desired state may not be computable then: `destroy_graph` binds a
+        node's `input_refs` only from the outputs the store persisted, and a
+        store that persists none leaves the node unbound, where the digest
+        rule makes `desired_digest` raise `UNBOUND`.
+
+        ⛔ THE PHASE IS PRESENT-OR-ABSENT ONLY. An override answers ABSENT
+        exactly where `read_status` would (a real not-found, never a transient
+        or an AccessDenied) and otherwise a PRESENT phase carrying the physical
+        id; the matched/drifted distinction is not computed and must not be
+        planned on.
+
+        DEFAULT = `read_status(creds)`, correct for a node with no
+        `input_refs`. A node with references overrides it (the descriptor
+        driver does)."""
+        return self.read_status(creds)
+
+    # ---- ownership and the closed world (kci_reconciler/ownership.mojo) -----
+    #
+    # ⚠ Same rule as the value-flow verbs: every one has a default and every
+    # one is forwarded by `ErasedResource`, pinned by
+    # `test_ownership_and_cell_keys`'s probe.
+
+    def stamps_ownership(mut self) -> Bool:
+        """True iff this node implements `create_owned` (and `adopt_owned`)
+        and reports the live object's identity in `ResourceStatus.stamp`. An
+        OWNED apply refuses a graph holding a node that answers False, before
+        any change: a node that cannot stamp would create objects nobody can
+        later prove are kci's.
+
+        DEFAULT = FALSE."""
+        return False
+
+    def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
+        """Create the resource AS `creds` CARRYING `stamp` in the same call
+        (the identity as labels, or as the description's first line on an
+        object that cannot carry labels; the provenance as annotations), and
+        return its physical id. The owned scope's create: there is never a
+        moment when an object kci made exists without its stamp.
+
+        DEFAULT = REFUSE (the engine checks `stamps_ownership` first, so this
+        is reached only by a conformer that answers True and forgot it)."""
+        raise Error(
+            String("create_owned: node '")
+            + self.logical_id()
+            + String("' does not stamp ownership")
+        )
+
+    def adopt_owned(
+        mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
+    ) raises:
+        """Stamp the EXISTING unstamped object `physical_id` with `stamp`: the
+        explicit `--adopt <id>` takeover, and nothing else calls it.
+
+        DEFAULT = REFUSE."""
+        raise Error(
+            String("adopt_owned: node '")
+            + self.logical_id()
+            + String("' cannot adopt an existing object")
+        )
+
+    def wanted(mut self) -> Bool:
+        """False for a node the file no longer asks for: a role of an authored
+        resource that is now off (`public {}` turned `internal {}`, a removed
+        schedule or `uses` line). Lowering emits it anyway, so the closed set
+        of roles is converged: apply deletes the object if it is present AND
+        the store recorded it (and, in an owned scope, it carries this node's
+        stamp); a present object the store never recorded is left and
+        reported as leftover.
+
+        DEFAULT = TRUE."""
+        return True
