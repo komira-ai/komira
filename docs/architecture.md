@@ -66,6 +66,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 | module | what it is |
 |---|---|
 | [`komira_aws_core`](../src/komira_aws_core/) | the one hand-written AWS core under the generated AWS clients: the credential value, SigV4 signing (headers and presigned URLs), the SDK default credential chain and region resolution, the shared config file parser, and the network-backed credential providers as request builders and response parsers. |
+| [`komira_aws_s3`](../src/komira_aws_s3/) | the Amazon S3 client, generated at build time from botocore's pinned S3 model (no source is committed): each operation's request builder and response parser, and its endpoint resolved through S3's published endpoint ruleset. Pure: it opens no connection and reads no environment; a caller signs a built request with `komira_aws_core`. |
 | [`komira_gcp_core`](../src/komira_gcp_core/) | the one hand-written core of the Google Cloud SDK: the token-source seam, status-to-error mapping, a retry classifier and page-token helpers the generated `komira_gcp_<service>` clients compose. It defines no request type and no send loop. |
 
 ### CI and deploy (`kci`)
@@ -83,6 +84,20 @@ A library `kci` owns is named `kci_<x>`.
 | [`kci_release_channel`](../src/kci_release_channel/) | release-channel declarations: a publish destination (a name, a visibility and one repository per artifact type), its lookups and validation, and the channels-file parser. |
 | [`kci_secret_writer`](../src/kci_secret_writer/) | the write-only secret seam: the verb a deployer uses to write an app secret it is the source of, a capability distinct from `SecretStore` so the runtime resolve path cannot write. |
 | [`komira_validation_run`](../src/komira_validation_run/) | the validation-run correlator: the tag key under which a validation run stamps its identity on every billable cloud resource it creates, so cleanup acts only on what it can prove that run made. |
+
+### Test infrastructure
+
+Libraries a test uses to run against real infrastructure and prove it
+cleaned up. Each is configured by the test's own flags, and with no flags a
+test that needs one SKIPS with a reason (exit 77) instead of passing. The
+dependency order is the order of the rows.
+
+| module | what it is |
+|---|---|
+| [`komira_test_verdict`](../src/komira_test_verdict/) | the exit-code vocabulary of a test that can do more than pass or fail: `Verdict` (CLEAN 0, CANNOT_TELL 3, LEAK 6; the worst wins and every reason is kept) and SKIP (77) / CANNOT_TELL (3) with a reason, which end the process and are never exit 0. Standard library only. |
+| [`komira_test_run_id`](../src/komira_test_run_id/) | a per-run id minted inside the test process from the wall clock and 64 random bits, never derived from inputs, so a retry and its twin get disjoint resources; with the clock and random-source seams and their fakes. |
+| [`komira_test_minio`](../src/komira_test_minio/) | an embedded MinIO the test starts itself: pinned by sha256, a private temporary directory, a random root credential in 0600 files, random loopback-only ports, dies with the test. It hands back the endpoint, region and credentials-file path, and `stop()` returns a verdict. |
+| [`komira_test_bucket`](../src/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 
 ### Third-party code
 
@@ -157,7 +172,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 | runtime: the async runtime, the job agent and supervisor | komira_async, komira_agent |
 | observability: logging and telemetry | komira_log |
 | agents: MCP and local models | komira_mcp_server, komira_localmodel |
-| cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, are in `src/`) |
+| cloud: the generated AWS and Google Cloud service clients, infrastructure providers, the service registry | the cloud SDK libraries (their cores, `komira_aws_core` and `komira_gcp_core`, and the generated `komira_aws_s3`, are in `src/`) |
 | CI and deploy: the bundle model, apply, validate and rollout, the command line itself | kci (its `kci_*` libraries above are in `src/`) |
 | message broker: connection handling and request dispatch | komira_kafka_server (its wire codec is in `src/`) |
 | packaging: the shared-library ABI, the release machine | komira_so and the packaging rules |

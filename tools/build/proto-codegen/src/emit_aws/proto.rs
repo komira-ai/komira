@@ -8,8 +8,9 @@
 //! the client and its send.
 
 use super::json_codec::AwsJsonCodec;
-use super::rest::AwsRestJson;
+use super::rest::{AwsRestJson, AwsRestXml};
 use super::rpc::AwsJsonRpc;
+use super::xml_codec::AwsXmlCodec;
 use super::{AwsEmitter, SUPPORTED_JSON_VERSIONS, SUPPORTED_PROTOCOLS};
 use crate::aws_in::{AwsOperationFacts, AwsServiceMeta};
 use crate::ir::{IrMessage, IrMethod};
@@ -51,6 +52,11 @@ pub const JSON_BODY_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::Json, AwsProtocol
 /// query, headers, payload, status), and so whose generated code imports the
 /// REST binding runtime.
 pub const REST_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::RestJson, AwsProtocol::RestXml];
+
+/// The protocols whose request and response bodies are XML documents, and
+/// so whose generated code imports the `komira_xml` runtime and the core's
+/// restXml body codec.
+pub const XML_BODY_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::RestXml];
 
 impl AwsProtocol {
     /// The `metadata.protocol` spelling.
@@ -132,6 +138,8 @@ pub(super) trait Binding: Sync {
 static AWS_JSON_CODEC: AwsJsonCodec = AwsJsonCodec;
 static AWS_JSON_RPC: AwsJsonRpc = AwsJsonRpc;
 static AWS_REST_JSON: AwsRestJson = AwsRestJson;
+static AWS_XML_CODEC: AwsXmlCodec = AwsXmlCodec;
+static AWS_REST_XML: AwsRestXml = AwsRestXml;
 
 /// The protocol a service is emitted with: its codec and binding, and the
 /// `jsonVersion` an awsJson service dispatches on (empty otherwise).
@@ -152,7 +160,7 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
         _ => {
             return Err(format!(
                 "emit_aws: service `{}` declares protocol `{}`, and this emitter \
-                 implements only {:?} (awsJson1_0 / awsJson1_1, restJson1). It is REFUSED by name \
+                 implements only {:?} (awsJson1_0 / awsJson1_1, restJson1, restXml). It is REFUSED by name \
                  rather than emitted half-right: a `{}` client emitted by a `json` \
                  serializer produces requests that are syntactically valid and \
                  semantically wrong, which is the failure mode a conformance corpus \
@@ -184,6 +192,12 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
             protocol,
             codec: &AWS_JSON_CODEC,
             binding: &AWS_REST_JSON,
+            json_version: String::new(),
+        },
+        AwsProtocol::RestXml => SelectedProtocol {
+            protocol,
+            codec: &AWS_XML_CODEC,
+            binding: &AWS_REST_XML,
             json_version: String::new(),
         },
         other => {
@@ -280,7 +294,7 @@ mod tests {
 
     #[test]
     fn an_unsupported_protocol_is_refused_by_name() {
-        for name in ["rest-xml", "query", "ec2", "smithy-rpc-v2-cbor", "nope"] {
+        for name in ["query", "ec2", "smithy-rpc-v2-cbor", "nope"] {
             let e = select_protocol(&meta(name, None, "v4", &[])).err().expect("refused");
             assert!(e.contains(&format!("declares protocol `{name}`")), "{e}");
         }
@@ -295,6 +309,16 @@ mod tests {
             assert!(ALL_PROTOCOLS.contains(p));
         }
         assert!(JSON_BODY_PROTOCOLS.contains(&AwsProtocol::RestJson));
+    }
+
+    #[test]
+    fn rest_xml_is_the_xml_codec_behind_the_rest_binding() {
+        let s = select_protocol(&meta("rest-xml", None, "s3", &[SIGV4_AUTH])).expect("selected");
+        assert_eq!(s.protocol, AwsProtocol::RestXml);
+        assert!(s.json_version.is_empty());
+        assert!(REST_PROTOCOLS.contains(&AwsProtocol::RestXml));
+        assert!(XML_BODY_PROTOCOLS.contains(&AwsProtocol::RestXml));
+        assert!(!JSON_BODY_PROTOCOLS.contains(&AwsProtocol::RestXml));
     }
 
     #[test]

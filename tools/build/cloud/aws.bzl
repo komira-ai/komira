@@ -8,6 +8,7 @@
         model_sha256 = botocore_model("logs").sha256,
         operations = ["GetLogEvents"],
         mode = "pure",                  # or "client"
+        customizations = [],            # optional; "s3" for S3's model only
         # optional; set both or neither
         endpoint_rules = botocore_model("logs").endpoint_rules,
         partitions = botocore_model("logs").partitions,
@@ -66,11 +67,19 @@ file naming, per operation, the hand-written owner of its plain verb), and
 checks each named owner exists in them, and they are copied into the
 package next to the generated module. Each needs the other.
 
+Customizations. `customizations` is a closed set, checked here: `s3` applies
+botocore's S3 handling the model does not state (a 200 whose body is an
+<Error> is an error; an `Expires` header that is not a date is left unset;
+with `endpoint_rules`, a request path's leading `/{Bucket}` is dropped,
+because the ruleset puts the bucket in the URL), and the generator refuses
+it unless the model's serviceId is `S3` and its protocol is restXml.
+
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
-generated code imports its runtime (komira_aws_core, komira_json, and in
-client mode komira_http), which the caller names as `komira//`
-labels, or as stubs in a test. They are the library's `deps`, so they take
-what `mojo_library.deps` takes; `<name>_gen` sees only their count.
+generated code imports its runtime (komira_aws_core; komira_json for a JSON
+protocol, komira_xml for restXml; and in client mode komira_http), which
+the caller names as `komira//` labels, or as stubs in a test. They are the
+library's `deps`, so they take what `mojo_library.deps` takes; `<name>_gen`
+sees only their count.
 
 Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
 file with one wrong aws_client still loads.
@@ -147,7 +156,7 @@ def _aws_client_gen_impl(ctx):
             fail("{}: `operations` names `{}` twice".format(ctx.label, op))
         seen[op] = True
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, komira_json, and in client mode komira_http); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core; komira_json for a JSON protocol, komira_xml for restXml; and in client mode komira_http); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:
@@ -177,6 +186,8 @@ def _aws_client_gen_impl(ctx):
     ]
     if ctx.attrs.mode == "pure":
         gen_args.append("--pure-only")
+    for c in ctx.attrs.customizations:
+        gen_args += ["--customization", c]
     if ctx.attrs.endpoint_rules:
         gen_args += ["--endpoint-rules", ctx.attrs.endpoint_rules, "--partitions", ctx.attrs.partitions]
     if ctx.attrs.overrides:
@@ -217,6 +228,7 @@ def _aws_client_gen_impl(ctx):
 _aws_client_gen = rule(
     impl = _aws_client_gen_impl,
     attrs = {
+        "customizations": attrs.list(attrs.enum(["s3"]), default = []),
         "endpoint_rules": attrs.option(attrs.source(), default = None),
         "hand_src_paths": attrs.list(attrs.string(), default = []),
         "hand_srcs": attrs.list(attrs.source(), default = []),
@@ -245,6 +257,7 @@ def _aws_client(
         deps,
         mode = "pure",
         service = None,
+        customizations = [],
         endpoint_rules = None,
         partitions = None,
         overrides = None,
@@ -257,6 +270,7 @@ def _aws_client(
     vis = {"visibility": visibility} if visibility != None else {}
     _aws_client_gen(
         name = gen,
+        customizations = customizations,
         endpoint_rules = endpoint_rules,
         partitions = partitions,
         hand_src_paths = hand_srcs,
