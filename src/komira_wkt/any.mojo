@@ -67,6 +67,12 @@ struct Any(Proto3JsonWkt, Copyable, Movable):
         self.value = value^
         self.json_members = json_members^
 
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (see `structpb.mojo`)."""
+        self.type_url = copy.type_url.copy()
+        self.value = copy.value.copy()
+        self.json_members = copy.json_members.copy()
+
     @staticmethod
     def new() -> Self:
         """The empty `Any` (no type, no payload)."""

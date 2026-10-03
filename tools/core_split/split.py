@@ -33,7 +33,7 @@ class Core:
         if k in s.cache: return s.cache[k]
         t={}; s.cache[k]=t; f=s.keys[k]
         for m in STMT.finditer(masked(s.text(f))):
-            mod=m.group(2); r=s.resolve_mod(f,mod)
+            mod=modname_of(m); r=s.resolve_mod(f,mod)
             if r is None: continue
             for n in names_of(m): t[n]=r
         return t
@@ -44,7 +44,9 @@ class Core:
             sub=(r+'/'+n) if r!='__init__' else n
             if sub in s.keys: return sub
         return r
-STMT=re.compile(r'^([ \t]*)from[ \t]+(\S+)[ \t]+import[ \t]*(\([^)]*\)|[^\n]*)',re.M)
+# The module may have blanks after its leading dots: Mojo reads `from .. arrow.x` as `from ..arrow.x` (modname_of() drops them).
+STMT=re.compile(r'^([ \t]*)from[ \t]+(\.+[ \t]*[^\s(]+|\S+)[ \t]+import[ \t]*(\([^)]*\)|[^\n]*)',re.M)
+def modname_of(m): return re.sub(r'[ \t]','',m.group(2))
 def names_of(m):
     body=m.group(3)
     body=re.sub(r'#[^\n]*','',body).strip('() \t\n')
@@ -70,17 +72,17 @@ def derive(core_root,rows,pkg=None,ffi_rows=None):
     def rewrite(f,text):
         mt=masked(text); res=[]; last=0
         for m in STMT.finditer(mt):
-            r=core.resolve_mod(f,m.group(2))
+            r=core.resolve_mod(f,modname_of(m))
             if r is None: continue
             groups=collections.OrderedDict()
             for n in names_of(m):
                 nm=n.split(' as ')[0].strip(); t=core.symbol(r,nm)
-                if t not in dest: unresolved[(f,m.group(2),nm,t)]+=1; groups.setdefault('?',[]).append(n); continue
+                if t not in dest: unresolved[(f,modname_of(m),nm,t)]+=1; groups.setdefault('?',[]).append(n); continue
                 groups.setdefault(modname(*dest[t]),[]).append(n)
             res.append(text[last:m.start()]); last=m.end(); ind=m.group(1); orig=text[m.start():m.end()]
             if len(groups)==1:
                 (tm,_),=groups.items()
-                res.append(orig if tm=='?' else re.sub(r'from[ \t]+\S+',lambda _:'from '+tm,orig,count=1))
+                res.append(orig if tm=='?' else ind+'from '+tm+text[m.end(2):m.end()])
             else:
                 res.append('\n'.join('%sfrom %s import %s'%(ind,tm,', '.join(ns)) for tm,ns in groups.items()))
         res.append(text[last:]); return textual(''.join(res))
