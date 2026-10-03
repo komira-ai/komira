@@ -1,7 +1,7 @@
 # =============================================================================
 # src/kci_release_set/member.mojo -- one artifact's directory of a release,
-#   checked: what `kci build` refuses as soon as a build finishes and what
-#   `kci publish` re-checks over the bytes on disk. One function, so the two
+#   checked: what the BUILD step refuses as soon as a build finishes and what
+#   the PUBLISH step re-checks over the bytes on disk. One function, so the two
 #   cannot drift apart.
 # =============================================================================
 #
@@ -31,7 +31,7 @@
 #     with the manifest (`name`, `version`, `subdir`, `file_name` = `file`), or
 #     its `size` is not the file's, or it is not `stamped`.
 #
-# PYTHON is accepted as the manifest parser accepts it; `kci publish` refuses
+# PYTHON is accepted as the manifest parser accepts it; the PUBLISH step refuses
 # to publish it.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.

@@ -22,7 +22,7 @@
 # {name, sha256, version} and the compiler-version change of the packer adds
 # `build`; the reader accepts both and records whether it was there
 # (`MetaMember.has_build`). Whether a release may ship a row without it is
-# `kci publish`'s rule, not the reader's.
+# the PUBLISH step's rule, not the reader's.
 #
 # `format` and `schema_version` are read first (kci_contract's
 # `produced_header`): another format, or a major this kci does not read, is
