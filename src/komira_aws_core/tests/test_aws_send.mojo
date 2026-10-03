@@ -23,8 +23,8 @@
 # returned as it is, the budget and a client's retry quota across calls,
 # the request as it reached the wire (komira_aws_core's AwsEchoConnector),
 # and the free `send_sigv4_signed_request` through a connector factory,
-# with four sends to DynamoDB and three to any other service (it sleeps for
-# real there).
+# with three sends to every service, DynamoDB included (it sleeps for real
+# there).
 #
 # One row opens a socket: a POST to a closed loopback port through
 # komira_http_core's KernelTcpConnector, the production dial, so the
@@ -74,7 +74,9 @@ def _bytes(s: String) -> List[UInt8]:
     return out^
 
 
-def _response(status: Int, reason: String, body: String, extra: String = "") -> ScriptedStream:
+def _response(
+    status: Int, reason: String, body: String, extra: String = ""
+) -> ScriptedStream:
     """A scripted server answer, closing the connection after it."""
     var head = (
         String("HTTP/1.1 ")
@@ -131,7 +133,9 @@ struct Recording[X: AwsHttpTransport](AwsHttpTransport, Movable, Deinitable):
         return self.inner.send(req)
 
 
-def _transport(var c: ScriptedConnector) raises -> Recording[AwsConnectorTransport[ScriptedConnector]]:
+def _transport(
+    var c: ScriptedConnector,
+) raises -> Recording[AwsConnectorTransport[ScriptedConnector]]:
     return Recording(AwsConnectorTransport[ScriptedConnector](c^))
 
 
@@ -193,7 +197,9 @@ def _send[X: AwsHttpTransport](
 
 # An SQS SendMessage as its client sends it: an awsJson POST, which is not
 # idempotent.
-comptime _SEND_MESSAGE = '{"QueueUrl":"http://127.0.0.1:9000/queue/q","MessageBody":"m"}'
+comptime _SEND_MESSAGE = (
+    '{"QueueUrl":"http://127.0.0.1:9000/queue/q","MessageBody":"m"}'
+)
 
 
 def _send_message_target() -> List[Header]:
@@ -227,7 +233,11 @@ def test_one_success() raises:
 
 def test_503_retried_and_re_signed() raises:
     var c = ScriptedConnector.with_stream(
-        _response(503, "Service Unavailable", "<Error><Code>ServiceUnavailable</Code></Error>")
+        _response(
+            503,
+            "Service Unavailable",
+            "<Error><Code>ServiceUnavailable</Code></Error>",
+        )
     )
     c.arm_next(_response(200, "OK", ""))
     var t = _transport(c^)
@@ -337,8 +347,11 @@ def test_a_post_is_resent_after_a_500_and_a_503() raises:
         assert_equal(t.sent[i].method, "POST")
         assert_equal(_header(t.sent[i], "X-Amz-Target"), "AmazonSQS.SendMessage")
         assert_equal(String(unsafe_from_utf8=Span(t.sent[i].body)), _SEND_MESSAGE)
-    assert_true(_header(t.sent[0], "Authorization") != _header(t.sent[1], "Authorization"))
-    assert_true(_header(t.sent[1], "Authorization") != _header(t.sent[2], "Authorization"))
+    for i in range(2):
+        assert_true(
+            _header(t.sent[i], "Authorization")
+            != _header(t.sent[i + 1], "Authorization")
+        )
 
 
 def test_a_post_gives_up_after_max_attempts() raises:
@@ -564,7 +577,9 @@ def test_a_conditional_get_is_resent() raises:
     c2.arm_next(_response(200, "OK", ""))
     var t2 = _transport(c2^)
     var loop2 = _loop()
-    var res2 = _send(t2, clock, loop2, String("PUT"), String("s3"), String("/b/k"), "data")
+    var res2 = _send(
+        t2, clock, loop2, String("PUT"), String("s3"), String("/b/k"), "data"
+    )
     assert_equal(res2.status, 200)
     assert_equal(len(t2.sent), 2)
 
@@ -595,12 +610,13 @@ def _free_send_of(service: String) raises -> HttpResult:
     )
 
 
-def test_the_free_send_makes_the_services_attempts() raises:
-    # botocore's `_SERVICE_MAX_ATTEMPTS`: four sends to DynamoDB, three to
-    # any other service; the last answer is returned.
+def test_the_free_send_makes_three_attempts() raises:
+    # botocore's default `DEFAULT_MAX_ATTEMPTS` for every service: its
+    # `_SERVICE_MAX_ATTEMPTS` (four for DynamoDB) is read only behind the
+    # off-by-default `NEW_RETRIES_ENABLED`. The last answer is returned.
     var ddb = _free_send_of(String("dynamodb"))
     assert_equal(ddb.status, 500)
-    assert_equal(String(unsafe_from_utf8=Span(ddb.body)), "4")
+    assert_equal(String(unsafe_from_utf8=Span(ddb.body)), "3")
     var sqs = _free_send_of(String("sqs"))
     assert_equal(sqs.status, 500)
     assert_equal(String(unsafe_from_utf8=Span(sqs.body)), "3")
@@ -655,7 +671,9 @@ def test_a_dynamodb_checksum_mismatch_is_retried() raises:
     var t = _transport(c^)
     var clock = SteppingClock(_T0, 1)
     var loop = _loop()
-    var res = _send(t, clock, loop, String("POST"), String("dynamodb"), String("/"), "{}")
+    var res = _send(
+        t, clock, loop, String("POST"), String("dynamodb"), String("/"), "{}"
+    )
     assert_equal(res.status, 200)
     assert_equal(res.header(String("x-amz-crc32")), "49613676")
     assert_equal(len(t.sent), 2)
@@ -676,7 +694,9 @@ def test_a_dynamodb_checksum_mismatch_is_retried() raises:
     c3.arm_next(_response(200, "OK", body, "x-amz-crc32: 3\r\n"))
     var t3 = _transport(c3^)
     var loop3 = _loop()
-    var res3 = _send(t3, clock, loop3, String("POST"), String("dynamodb"), String("/"), "{}")
+    var res3 = _send(
+        t3, clock, loop3, String("POST"), String("dynamodb"), String("/"), "{}"
+    )
     assert_equal(res3.status, 200)
     assert_equal(res3.header(String("x-amz-crc32")), "3")
     assert_equal(len(t3.sent), 3)
@@ -792,7 +812,8 @@ def test_a_client_retry_quota() raises:
     assert_equal(len(t3.sent), 1)
     assert_equal(quota.available(), 0)
     # A call that succeeds first time puts back 1.
-    assert_equal(_quota_send(quota, ScriptedConnector.with_stream(_response(200, "OK", "{}"))).status, 200)
+    var ok = ScriptedConnector.with_stream(_response(200, "OK", "{}"))
+    assert_equal(_quota_send(quota, ok^).status, 200)
     assert_equal(quota.available(), 1)
 
 
@@ -926,7 +947,7 @@ def main() raises:
     test_a_budget_ends_retries()
     test_a_client_retry_quota()
     test_the_free_send_through_a_factory()
-    test_the_free_send_makes_the_services_attempts()
+    test_the_free_send_makes_three_attempts()
     test_the_request_on_the_wire()
     test_a_refused_kernel_dial_is_resent()
     print("OK")

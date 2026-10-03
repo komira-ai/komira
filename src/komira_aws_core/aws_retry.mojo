@@ -9,8 +9,8 @@
 # quota.
 #
 # This is botocore's standard mode, botocore/retries/standard.py (with
-# quota.py and special.py) at the release third_party/botocore pins, its
-# per-service attempt limits included (below). test_aws_retry reads those
+# quota.py and special.py) at the release third_party/botocore pins, as
+# that release runs by default (below). test_aws_retry reads those
 # files from the pinned archive (`:retries`) and checks every entry of
 # their lists and every constant below against them. botocore retries an
 # attempt when it was not the last one allowed and any of these holds,
@@ -19,7 +19,10 @@
 #   transient   the HTTP send raised (botocore: ConnectionError,
 #               HTTPClientError, which its HTTP session raises for every
 #               failure of a send, the dial and the TLS handshake, a refused
-#               certificate and an unknown host included); a status of
+#               certificate and an unknown host included; but for
+#               komira_http_client's `HttpError[BODY_TOO_LARGE]`, a response
+#               over its own cap, which botocore has no counterpart of and
+#               no resend changes); a status of
 #               `_TRANSIENT_STATUS_CODES` (500, 502, 503, 504); a code of
 #               `_TRANSIENT_ERROR_CODES` (RequestTimeout,
 #               RequestTimeoutException, PriorRequestNotComplete). S3's 200
@@ -37,6 +40,10 @@
 #   special     (special.py) STS's IDPCommunicationError; and a DynamoDB
 #               response whose `x-amz-crc32` header is not the CRC-32 of its
 #               body, a 200 included (`aws_dynamodb_crc32_mismatch`).
+#               botocore keys both on the model's service name; the send
+#               knows only the signing name, which DynamoDB Streams shares
+#               with DynamoDB, so a Streams response with a wrong
+#               `x-amz-crc32` is retried here where botocore returns it.
 #
 # There is no retry-safety rule by method: a POST that may have reached the
 # service (an SQS SendMessage, a DynamoDB UpdateItem, an S3
@@ -52,9 +59,10 @@
 # A resend of a conditional write the service applied is answered 412, and
 # the caller would take its own write for a lost race; the failed answer is
 # returned (or the transport's error raised) instead. It is still resent
-# after a throttle, after RequestTimeout and RequestTimeoutException (the
-# service never read the whole request), and after a transport error raised
-# before the request was sent (`aws_transport_error_unsent`):
+# after a throttle, after a 4xx naming RequestTimeout or
+# RequestTimeoutException (the service never read the whole request; with a
+# 5xx it is not resent), and after a transport error raised before the
+# request was sent (`aws_transport_error_unsent`):
 #
 #   not sent    the dial failed before a request byte was written:
 #               komira_http_client's `HttpError[CONNECT_FAILED]`,
@@ -75,23 +83,27 @@
 # ConnectTimeoutError and ReadTimeoutError). The quota holds 500
 # (`RetryQuota.INITIAL_CAPACITY`) per client; a call that succeeds (a 2xx)
 # puts back what its last retry cost, or 1 (`_NO_RETRY_INCREMENT`) when it
-# made none. Three sends in all (`DEFAULT_MAX_ATTEMPTS`), or the service's
-# own limit of `_SERVICE_MAX_ATTEMPTS` (4 for dynamodb and dynamodb-streams;
-# `aws_service_max_attempts`), waiting a uniform draw from
-# [0, min(2^(i-1), 20)] seconds before send i+1 (`ExponentialBackoff`,
-# `_BASE` 2, `_MAX_BACKOFF` 20). The pinned release reads
-# `_SERVICE_MAX_ATTEMPTS` in `register_retry_handler` on the path behind its
-# `NEW_RETRIES_ENABLED` switch; the rest of that path is not done here: a
-# non-throttle base of 0.05 s (0.025 s for DynamoDB), the
-# `x-amz-retry-after` header, a retry cost of 14, and the long-polling
-# operations' wait. A caller that wants another attempt limit passes
-# `aws_standard_retry_policy(n)` to `send_sigv4_signed_request_with`.
+# made none. Three sends in all (`DEFAULT_MAX_ATTEMPTS`), to every
+# service, waiting a uniform draw from [0, min(2^(i-1), 20)] seconds before
+# send i+1 (`ExponentialBackoff`, `_BASE` 2, `_MAX_BACKOFF` 20). A caller
+# that wants another attempt limit passes `aws_standard_retry_policy(n)` to
+# `send_sigv4_signed_request_with`.
+#
+# The pinned `register_retry_handler` also has a second path, behind its
+# `NEW_RETRIES_ENABLED` switch, which is off by default and which the
+# pinned file calls internal-only, for testing. NONE of that path is
+# followed here: not its per-service attempt limits
+# (`_SERVICE_MAX_ATTEMPTS`, 4 for DynamoDB and DynamoDB Streams), its
+# non-throttle base of 0.05 s (0.025 s for DynamoDB), its retry costs, its
+# `x-amz-retry-after` header, nor the long-polling operations' wait.
 #
 # An error shape the model marks `retryable` is retried by botocore too
 # (`ModeledRetryableChecker`). The send has no model; the client-mode
 # generator refuses an operation that can return one
 # (aws-client-gen, emit_aws), so no generated client depends on it.
 # =============================================================================
+
+from std.os import abort
 
 from komira_http_client.h2_client import is_h2_goaway_unprocessed
 from komira_http_client.state_machine import HTTP_NOTHING_WRITTEN_TOKEN
@@ -101,6 +113,7 @@ from komira_retry import (
     RetryBudget,
     RetryClassifier,
     RetryPolicy,
+    TokenBucket,
     Verdict,
 )
 
@@ -150,17 +163,6 @@ def aws_standard_retry_policy(
     )
 
 
-def aws_service_max_attempts(service: String) -> Int:
-    """The sends a call to `service` makes in all: botocore's
-    `_SERVICE_MAX_ATTEMPTS` (4 for dynamodb and dynamodb-streams, keyed by
-    the hyphenated service id), else `AWS_STANDARD_MAX_ATTEMPTS`. Both
-    DynamoDB services sign as `dynamodb`, so the signing name the send is
-    given finds the same limit."""
-    if service == "dynamodb" or service == "dynamodb-streams":
-        return 4
-    return AWS_STANDARD_MAX_ATTEMPTS
-
-
 def aws_request_is_conditional(method: String, headers: List[Header]) -> Bool:
     """Whether a request is a conditional write: its method is not GET or
     HEAD and it carries an `If-Match` or `If-None-Match` header (the name
@@ -176,31 +178,36 @@ def aws_request_is_conditional(method: String, headers: List[Header]) -> Bool:
 
 struct AwsRetryQuota(RetryBudget, Movable, Deinitable):
     """botocore's retry quota (`RetryQuota` under `RetryQuotaChecker`), one
-    per client: it starts at `AWS_RETRY_QUOTA_CAPACITY`; a retry spends its
-    cost and is not made when the quota holds less; a call that succeeds
-    puts back the cost of its last retry, or `AWS_NO_RETRY_INCREMENT` when
-    it made none, never above the capacity. Not thread-safe: a generated
-    client holds one and spends it in its `mut` send."""
+    per client: komira_retry's `TokenBucket`, which is that quota, holding
+    `AWS_RETRY_QUOTA_CAPACITY` and putting back `AWS_NO_RETRY_INCREMENT`
+    for a call that made no retry. Not thread-safe: a generated client
+    holds one and spends it in its `mut` send."""
 
-    var _available: Int
+    var _bucket: TokenBucket
 
     def __init__(out self):
-        self._available = AWS_RETRY_QUOTA_CAPACITY
+        self._bucket = _aws_token_bucket()
 
     def available(self) -> Int:
-        return self._available
+        return self._bucket.available()
 
     def try_spend(mut self, cost: Int) -> Bool:
-        if cost < 0 or cost > self._available:
-            return False
-        self._available -= cost
-        return True
+        return self._bucket.try_spend(cost)
 
     def on_success(mut self, last_retry_cost: Int):
-        var refill = (
-            last_retry_cost if last_retry_cost > 0 else AWS_NO_RETRY_INCREMENT
+        self._bucket.on_success(last_retry_cost)
+
+
+def _aws_token_bucket() -> TokenBucket:
+    """The quota's bucket. `TokenBucket` refuses a negative setting; both
+    constants are positive, so it never does here."""
+    try:
+        return TokenBucket(
+            capacity=AWS_RETRY_QUOTA_CAPACITY,
+            success_refill=AWS_NO_RETRY_INCREMENT,
         )
-        self._available = min(self._available + refill, AWS_RETRY_QUOTA_CAPACITY)
+    except e:
+        abort(String("AwsRetryQuota: ") + String(e))
 
 
 def aws_is_throttling_code(code: String) -> Bool:
@@ -235,6 +242,15 @@ def aws_is_transient_code(code: String) -> Bool:
 def aws_is_transient_status(status: Int) -> Bool:
     """botocore's `_TRANSIENT_STATUS_CODES` (standard mode)."""
     return status == 500 or status == 502 or status == 503 or status == 504
+
+
+def _is_unread_request_code(status: Int, code: String) -> Bool:
+    """A 4xx naming RequestTimeout or RequestTimeoutException: the service
+    timed out reading the request, so did not act on it. With a 5xx the
+    service may have acted on it."""
+    return not aws_is_transient_status(status) and (
+        code == "RequestTimeout" or code == "RequestTimeoutException"
+    )
 
 
 def aws_transport_error_kind(message: String) -> String:
@@ -375,11 +391,15 @@ struct AwsAttempt(Copyable, Movable):
 
 struct AwsRetryClassifier(RetryClassifier, Copyable, Movable):
     """botocore's standard-mode retry conditions over an `AwsAttempt` of a
-    call to `service` (the signing name: botocore's special cases name the
-    service by its endpoint prefix, which is the signing name of `sts` and
-    `dynamodb`), with the one exception of the module header: an attempt
-    of a `conditional` write (`aws_request_is_conditional`) that the service
-    may have acted on is not retried."""
+    call to `service`, the signing name, with the one exception of the
+    module header: an attempt of a `conditional` write
+    (`aws_request_is_conditional`) that the service may have acted on is
+    not retried. botocore's special cases name the service by the model's
+    service name; `sts` and `dynamodb` sign as themselves, but DynamoDB
+    Streams signs as `dynamodb` too, so its responses get the DynamoDB
+    checksum check (the module header's `special`). A
+    `HttpError[BODY_TOO_LARGE]` is not retried: the response is over this
+    client's own cap, which no resend changes (botocore has no cap)."""
 
     comptime Outcome = AwsAttempt
 
@@ -393,6 +413,11 @@ struct AwsRetryClassifier(RetryClassifier, Copyable, Movable):
     def classify(self, outcome: AwsAttempt) -> Verdict:
         if outcome.status < 0:
             var message = outcome.transport_error.copy()
+            if aws_transport_error_kind(message) == "BODY_TOO_LARGE":
+                return Verdict.stop(
+                    String("the response is over the client's body cap: ")
+                    + message
+                )
             if self.conditional and not aws_transport_error_unsent(message):
                 return Verdict.stop(
                     String("transport error after a conditional write may")
@@ -425,7 +450,9 @@ struct AwsRetryClassifier(RetryClassifier, Copyable, Movable):
             )
         else:
             return Verdict.stop(what^)
-        if self.conditional and not _is_unread_request_code(outcome.code):
+        if self.conditional and not _is_unread_request_code(
+            outcome.status, outcome.code
+        ):
             return Verdict.stop(
                 String("not resent, a conditional write the service may have")
                 + " applied: "
@@ -433,7 +460,3 @@ struct AwsRetryClassifier(RetryClassifier, Copyable, Movable):
             )
         return Verdict.transient(reason + what)
 
-
-def _is_unread_request_code(code: String) -> Bool:
-    """The service timed out reading the request, so did not act on it."""
-    return code == "RequestTimeout" or code == "RequestTimeoutException"

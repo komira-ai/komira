@@ -63,19 +63,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # //tools/build/proto-codegen:rest_xml_verdicts, and the corpus they were
 # written from. Welding it makes this library's build depend on that Rust
 # tool and its run over the corpus, as well as on the corpus itself.
-# test_aws_retry checks the retry classifier, policy, attempt limits and
+# test_aws_retry checks the retry classifier, policy, attempt limit and
 # quota against botocore's standard retry mode, reading
 # botocore/retries/standard.py, quota.py and special.py from the botocore
 # archive //third_party/botocore pins (`:retries`) and checking each of
 # their lists and constants, and the transport errors komira_http_client,
-# its kernel and TLS dials and name resolution raise (all retried, the
-# timeouts at their own cost; for a conditional write only those raised
-# before the request was sent).
+# its kernel and TLS dials and name resolution raise (all retried but a
+# body over the client's cap, the timeouts at their own cost; for a
+# conditional write only those raised before the request was sent).
 # test_aws_send sends over komira_http_client and a scripted connector (no
 # socket): retries, a POST resent after a 5xx and a dropped response, a
 # conditional write not resent after a 5xx or a dropped response but
 # resent after a throttle or a failed dial, re-signing at a later date,
-# the attempt limit and its backoff (four sends to DynamoDB), the quota,
+# the attempt limit and its backoff (three sends), the quota,
 # S3's 200-with-<Error>, the request on the wire (AwsEchoConnector), and
 # the connector-factory entry point; and one dial to a closed loopback
 # port through the kernel connector, so the classifier reads the text the
@@ -96,6 +96,17 @@ _ENDPOINT_RULES = {
         "botocore/data/partitions.json",
         "botocore/data/s3/2006-03-01/endpoint-rule-set-1.json",
         "tests/functional/endpoint-rules/s3/endpoint-tests-1.json",
+    ]
+}
+
+# botocore's standard retry mode, read as text by test_aws_retry from the
+# same archive, each staged at its path in it.
+_RETRIES = {
+    path: "//third_party/botocore:retries[{}]".format(path)
+    for path in [
+        "botocore/retries/quota.py",
+        "botocore/retries/special.py",
+        "botocore/retries/standard.py",
     ]
 }
 
@@ -164,14 +175,7 @@ mojo_library(
             "aws_c_auth": "//third_party/aws_c_auth:files",
         },
         "tests/test_s3_endpoint_rules.mojo": _ENDPOINT_RULES,
-        "tests/test_aws_retry.mojo": {
-            f: "//third_party/botocore:retries[{}]".format(f)
-            for f in [
-                "botocore/retries/quota.py",
-                "botocore/retries/special.py",
-                "botocore/retries/standard.py",
-            ]
-        },
+        "tests/test_aws_retry.mojo": _RETRIES,
         "tests/test_xml_canonical_differential.mojo": {
             "rest_xml_verdicts.tsv": "//tools/build/proto-codegen:rest_xml_verdicts",
         } | _REST_XML_CORPUS,

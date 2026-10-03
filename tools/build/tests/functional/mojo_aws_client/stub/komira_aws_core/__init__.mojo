@@ -25,7 +25,8 @@ The client half (the end of this file): `AwsCredential`, `AwsCredsSource`,
 `aws_json_error_info`, `resolve_endpoint` and `send_sigv4_signed_request`
 have the real core's types and signatures, and behave as the real ones do
 for what a generated client calls (`AwsRetryQuota` here is not a
-komira_retry budget: it starts at the real one's 500 and spends); `AwsEndpoint.https` checks nothing of the host. The real
+komira_retry budget: it starts at the real one's 500 and spends);
+`AwsEndpoint.https` checks nothing of the host. The real
 `send_sigv4_signed_request` is komira//src/komira_aws_core/aws_send.mojo
 (a connector factory, standard-mode retries, the signed request of
 signed_request.mojo); signed_request.mojo's header states the signature,

@@ -23,13 +23,14 @@
 #
 # S3's 200 whose body is an <Error> (botocore's `_handle_200_error`) is read
 # here as a 500 when the caller says the operation can answer one
-# (`s3_200_error`). A DynamoDB response whose `x-amz-crc32` is not its
-# body's CRC-32 is a failed attempt too, a 200 included (botocore's
-# `RetryDDBChecksumError`); once no retry follows it is returned as it
-# is. The generated S3 client says so for each operation botocore's
-# `_should_handle_200_error` names: one with an output shape whose payload
-# is not a blob or a string, so not GetObject, whose body may be an object
-# that is itself an XML document with an <Error> root.
+# (`s3_200_error`). The generated S3 client says so for each operation
+# botocore's `_should_handle_200_error` names: one with an output shape
+# whose payload is not a blob or a string, so not GetObject, whose body may
+# be an object that is itself an XML document with an <Error> root.
+#
+# A DynamoDB response whose `x-amz-crc32` is not its body's CRC-32 is a
+# failed attempt too, a 200 included (botocore's `RetryDDBChecksumError`);
+# once no retry follows it is returned as it is.
 #
 # `send_sigv4_signed_request_with` is the same send over injected seams:
 # the transport (`AwsHttpTransport`), the signing clock, the retry loop (its
@@ -47,9 +48,9 @@
 # A RESPONSE BODY IS BUFFERED WHOLE, up to komira_http_client's default cap
 # of 100 MiB (`HttpClientConfig.max_response_body_bytes`). A larger body,
 # such as an S3 GetObject of a bigger object without a Range, fails with
-# `HttpError[BODY_TOO_LARGE]`, which is retried as any failure of the HTTP
-# send is (botocore's HTTPClientError) and then raised; read such an object
-# in ranges.
+# `HttpError[BODY_TOO_LARGE]`, which is raised at once, not retried: no
+# resend changes the size (botocore has no cap). Read such an object in
+# ranges.
 #
 # The retry loop runs on komira_clock's monotonic clock and waits in a
 # reactor (`AwsReactorSleeper`), not on komira_retry's `SystemClock` and
@@ -91,7 +92,6 @@ from .aws_retry import (
     AwsRetryQuota,
     aws_dynamodb_crc32_mismatch,
     aws_request_is_conditional,
-    aws_service_max_attempts,
     aws_standard_retry_policy,
 )
 from .aws_xml import aws_xml_body_is_error, aws_xml_error_info
@@ -370,19 +370,16 @@ def send_sigv4_signed_request[C: Connector](
 ) raises -> HttpResult:
     """Sign `method uri` for (`region`, `service`) with `cred`, send it to
     `endpoint` over a connector `mk_connector` makes, and retry as the AWS
-    SDKs' standard mode does (aws_retry.mojo): at most three sends (four
-    to DynamoDB, `aws_service_max_attempts`), full jitter from 1 s, every
-    attempt signed at the wall clock's time, each retry paid for from
-    `retry_quota`, the calling client's; a conditional write is not resent
-    once the service may have acted on it. The content type and every
+    SDKs' standard mode does (aws_retry.mojo): at most three sends, full
+    jitter from 1 s, every attempt signed at the wall clock's time, each
+    retry paid for from `retry_quota`, the calling client's; a conditional
+    write is not resent once the service may have acted on it. The content type and every
     `extra` header are signed (signed_request.mojo).
     `s3_200_error` is `send_sigv4_signed_request_with`'s. Returns the last
     response; raises when the last attempt got none."""
     var transport = AwsConnectorTransport[C](mk_connector())
     var clock = SystemAwsClock()
-    var loop = aws_system_retry_loop(
-        aws_standard_retry_policy(aws_service_max_attempts(service))
-    )
+    var loop = aws_system_retry_loop(aws_standard_retry_policy())
     return send_sigv4_signed_request_with(
         transport,
         clock,

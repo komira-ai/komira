@@ -2,14 +2,15 @@
 # komira_aws_core/tests/test_aws_retry.mojo
 # =============================================================================
 #
-# AwsRetryClassifier, aws_standard_retry_policy, aws_service_max_attempts
-# and AwsRetryQuota against botocore's standard retry mode.
+# AwsRetryClassifier, aws_standard_retry_policy and AwsRetryQuota against
+# botocore's standard retry mode.
 # botocore/retries/standard.py, quota.py and special.py are read from the
 # botocore archive //third_party/botocore pins (`:retries`), staged at
 # their paths in it, and read as text (no Python runs): every entry of
 # `_THROTTLED_ERROR_CODES`, `_TRANSIENT_ERROR_CODES` and
 # `_TRANSIENT_STATUS_CODES`, the transient and timeout exception classes,
-# `DEFAULT_MAX_ATTEMPTS`, every entry of `_SERVICE_MAX_ATTEMPTS`, `_BASE`,
+# `DEFAULT_MAX_ATTEMPTS` (and that the per-service limits are read only on
+# the path behind the off-by-default `NEW_RETRIES_ENABLED`), `_BASE`,
 # `_MAX_BACKOFF`, `_RETRY_COST`, `_TIMEOUT_RETRY_REQUEST`,
 # `_NO_RETRY_INCREMENT`, the quota's `INITIAL_CAPACITY`, and the special
 # cases' services, code and header, are checked against the classifier,
@@ -18,10 +19,10 @@
 #
 # Then the transport errors, in the text the stack raises them with
 # (komira_http_client, its kernel and TLS dials, name resolution): every
-# one is retried, as botocore retries every failure of its HTTP send, and
-# the timeouts cost more; and for a conditional write, the one exception
-# (aws_retry.mojo's header), which of them were raised before the request
-# was sent and are still resent. test_aws_send dials a closed loopback port
+# one is retried, as botocore retries every failure of its HTTP send, but
+# a body over the client's own cap, and the timeouts cost more; and for a
+# conditional write, the one exception (aws_retry.mojo's header), which of
+# them were raised before the request was sent and are still resent. test_aws_send dials a closed loopback port
 # through the kernel connector, so the dial's own text is pinned there too.
 # =============================================================================
 
@@ -44,7 +45,6 @@ from komira_aws_core import (
     aws_is_transient_code,
     aws_is_transient_status,
     aws_request_is_conditional,
-    aws_service_max_attempts,
     aws_standard_retry_policy,
     aws_transport_error_is_timeout,
     aws_transport_error_kind,
@@ -167,7 +167,13 @@ def test_transient_codes_are_botocores(src: String) raises:
     # Not botocore's: an InternalError code is retried only by its status
     # (S3's 200-with-<Error> reaches the classifier as a 500), and a
     # precondition failure or a missing key stays an error.
-    for c in ["InternalError", "PreconditionFailed", "NoSuchKey", "NoSuchUpload", "AccessDenied"]:
+    for c in [
+        "InternalError",
+        "PreconditionFailed",
+        "NoSuchKey",
+        "NoSuchUpload",
+        "AccessDenied",
+    ]:
         assert_false(aws_is_transient_code(String(c)), c)
         assert_false(_verdict(400, String(c)).retryable, c)
     assert_true(_verdict(500, String("InternalError")).retryable)
@@ -211,24 +217,35 @@ def test_no_condition_reads_the_operation(src: String) raises:
 
 def test_policy_and_costs_are_botocores(src: String) raises:
     var p = aws_standard_retry_policy()
-    assert_equal(AWS_STANDARD_MAX_ATTEMPTS, _int_const(src, "DEFAULT_MAX_ATTEMPTS", False))
+    assert_equal(
+        AWS_STANDARD_MAX_ATTEMPTS,
+        _int_const(src, "DEFAULT_MAX_ATTEMPTS", False),
+    )
     assert_equal(p.max_attempts, AWS_STANDARD_MAX_ATTEMPTS)
     # ExponentialBackoff: rand(0, 1) * min(_BASE ** (attempt - 1),
     # _MAX_BACKOFF) seconds, so 1 s doubling up to the cap.
     var base = _int_const(src, "_BASE", True)
     assert_equal(p.backoff.multiplier, Float64(base))
     assert_equal(p.backoff.initial_ms, 1000)
-    assert_equal(p.backoff.max_ms, Int64(_int_const(src, "_MAX_BACKOFF", True) * 1000))
+    assert_equal(
+        p.backoff.max_ms, Int64(_int_const(src, "_MAX_BACKOFF", True) * 1000)
+    )
     assert_true(p.backoff.jitter.is_full())
     assert_equal(AWS_RETRY_COST, _int_const(src, "_RETRY_COST", True))
-    assert_equal(AWS_TIMEOUT_RETRY_COST, _int_const(src, "_TIMEOUT_RETRY_REQUEST", True))
+    assert_equal(
+        AWS_TIMEOUT_RETRY_COST,
+        _int_const(src, "_TIMEOUT_RETRY_REQUEST", True),
+    )
     # The credential's mandatory refresh window: 10 minutes.
     assert_equal(p.deadline_ms, 600_000)
     assert_equal(aws_standard_retry_policy(4).max_attempts, 4)
 
 
 def test_quota_is_botocores(src: String, quota_src: String) raises:
-    assert_equal(AWS_RETRY_QUOTA_CAPACITY, _int_const(quota_src, "INITIAL_CAPACITY", True))
+    assert_equal(
+        AWS_RETRY_QUOTA_CAPACITY,
+        _int_const(quota_src, "INITIAL_CAPACITY", True),
+    )
     assert_equal(AWS_NO_RETRY_INCREMENT, _int_const(src, "_NO_RETRY_INCREMENT", True))
     var q = AwsRetryQuota()
     assert_equal(q.available(), AWS_RETRY_QUOTA_CAPACITY)
@@ -264,7 +281,11 @@ def test_special_cases_are_botocores(special: String) raises:
     assert_equal(v.cost, AWS_RETRY_COST)
     assert_false(AwsRetryClassifier(String("s3")).classify(bad).retryable)
     # A DynamoDB 400 with a good checksum is an answer.
-    assert_false(_verdict(400, String("ConditionalCheckFailedException"), "dynamodb").retryable)
+    assert_false(
+        _verdict(
+            400, String("ConditionalCheckFailedException"), "dynamodb"
+        ).retryable
+    )
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -351,7 +372,6 @@ def test_every_transport_error_is_retried() raises:
         "DnsError[NXDOMAIN]: no such host 'nope.invalid' (EAI_NONAME)",
         "dns: malformed IPv4 literal '1.2.3'",
         "HttpError[URL_INVALID]: host",
-        "HttpError[BODY_TOO_LARGE]: limit",
         "something else",
     ]
     for i in range(len(errors)):
@@ -374,6 +394,10 @@ def test_every_transport_error_is_retried() raises:
         var v = _transport(timed_out[i])
         assert_true(v.retryable, timed_out[i])
         assert_equal(v.cost, AWS_TIMEOUT_RETRY_COST, timed_out[i])
+    # A body over komira_http_client's own cap: no resend changes its size.
+    var too_large = String("HttpError[BODY_TOO_LARGE]: limit")
+    assert_false(_transport(too_large).retryable)
+    assert_false(_conditional_transport(too_large).retryable)
 
 
 def test_a_post_classifies_as_any_request() raises:
@@ -390,30 +414,22 @@ def test_a_post_classifies_as_any_request() raises:
         assert_false(_verdict(s, String("")).retryable, String(s))
 
 
-def test_service_max_attempts_are_botocores(src: String) raises:
-    # `_SERVICE_MAX_ATTEMPTS`: each service it names gets its own attempt
-    # limit; every other service the standard mode's.
-    var start = _after(src, "_SERVICE_MAX_ATTEMPTS = {")
-    var end = src.find("}", start)
-    var entries = String(src[byte=start:end]).split(",")
-    var named = 0
-    for i in range(len(entries)):
-        var e = String(entries[i].strip())
-        if e.byte_length() == 0:
-            continue
-        var colon = e.find(":")
-        assert_true(colon > 0, e)
-        var names = _quoted(String(e[byte=0:colon]))
-        assert_equal(len(names), 1, e)
-        var n = Int(String(e[byte = colon + 1 :].strip()))
-        assert_equal(aws_service_max_attempts(names[0]), n, names[0])
-        assert_equal(aws_standard_retry_policy(n).max_attempts, n)
-        named += 1
-    assert_equal(named, 2)
-    for s in ["s3", "sqs", "logs", "sts", "dynamodbstreams", "DynamoDB", ""]:
-        assert_equal(
-            aws_service_max_attempts(String(s)), AWS_STANDARD_MAX_ATTEMPTS, s
-        )
+def test_the_attempt_limit_is_the_default_paths(src: String) raises:
+    # The pinned `register_retry_handler` reads `_SERVICE_MAX_ATTEMPTS`
+    # only on the path behind `NEW_RETRIES_ENABLED`, which is off by
+    # default; the default path takes `max_attempts or
+    # DEFAULT_MAX_ATTEMPTS` for every service, so DynamoDB gets three.
+    var handler = _after(src, "\ndef register_retry_handler(")
+    var gated = _after(src, "\n    if NEW_RETRIES_ENABLED:\n")
+    var stock = _after(src, "\n    else:\n")
+    assert_true(handler < gated and gated < stock)
+    var lookup = _after(src, "_SERVICE_MAX_ATTEMPTS[")
+    assert_true(gated < lookup and lookup < stock)
+    var limit = _after(
+        src, "max_attempts=max_attempts or DEFAULT_MAX_ATTEMPTS"
+    )
+    assert_true(stock < limit)
+    assert_equal(aws_standard_retry_policy().max_attempts, 3)
 
 
 def _conditional(status: Int, code: String) -> Verdict:
@@ -460,9 +476,13 @@ def test_a_conditional_write_the_service_may_have_applied_is_not_retried() raise
         var v = _conditional(503, String(c))
         assert_true(v.retryable, c)
         assert_true(v.throttled, c)
-    # The service never read the whole request: resent.
+    # The service never read the whole request: resent. With a 5xx it may
+    # have acted on it: not resent.
     for c in ["RequestTimeout", "RequestTimeoutException"]:
         assert_true(_conditional(400, String(c)).retryable, c)
+        assert_false(_conditional(500, String(c)).retryable, c)
+        assert_false(_conditional(503, String(c)).retryable, c)
+        assert_true(_verdict(503, String(c), "s3").retryable, c)
     # Answers a retry does not change, alike.
     assert_false(_conditional(412, String("PreconditionFailed")).retryable)
     # Not conditional: the same 500 is retried.
@@ -506,7 +526,6 @@ def test_a_conditional_write_is_resent_only_after_an_unsent_transport_error() ra
         "HttpError[RETRYABLE_TRANSPORT]: peer closed before any response byte",
         "HttpError[EOF_MID_RESPONSE]: eof",
         "HttpError[TIMEOUT]: request",
-        "HttpError[BODY_TOO_LARGE]: limit",
         "HttpError[H2_PROTOCOL]: GOAWAY received; stream 3 <= last_stream_id 3"
         " [h2-goaway-maybe-processed]",
         "something else",
@@ -525,7 +544,7 @@ def main() raises:
     test_transient_statuses_are_botocores(src)
     test_no_condition_reads_the_operation(src)
     test_policy_and_costs_are_botocores(src)
-    test_service_max_attempts_are_botocores(src)
+    test_the_attempt_limit_is_the_default_paths(src)
     test_quota_is_botocores(src, _read(_QUOTA))
     test_special_cases_are_botocores(_read(_SPECIAL))
     test_dynamodb_crc32()
