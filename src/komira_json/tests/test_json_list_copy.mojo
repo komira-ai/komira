@@ -3,19 +3,23 @@
 # ELEMENT.
 # =============================================================================
 #
-# Mojo 1.0.0 can treat a struct's synthesized copy constructor as trivial,
-# and `List.copy()` then copies the elements with a memcpy: the copy and the
-# original share their String and List buffers, dropping the copy frees them
-# under the original, and a same-size allocation reuses the freed buffer.
-# `JsonValue` is recursive (a `List[JsonValue]` of children) with String
-# fields and an explicit `__deinit__`, so every path that copies one is
-# checked here: `List.copy()` of scalars and of nested trees, `List.extend`,
-# `JsonValue(copy=...)`, and `.copy()`.
+# Mojo 1.0.0 can treat a struct's synthesized copy constructor as trivial
+# for some layouts of a struct with an explicit `__deinit__`, and
+# `List.copy()` then copies the elements with a memcpy: the copy and the
+# original share their String and List buffers, and dropping the copy frees
+# them under the original. JsonValue's current layout does not reproduce
+# this; the test guards a layout or compiler change that would.
 #
-# Every String below is longer than the inline capacity, so it owns a heap
-# buffer. Each case: build, copy, drop the copy, allocate same-size Strings
-# to reuse any freed buffer, then read the originals back. Every case runs
-# and each failing one is named.
+# The primary guard is compile-time: `main` asserts that JsonValue's copy
+# constructor and destructor are non-trivial, so `List` must call them per
+# element. The runtime cases are secondary coverage of every path that
+# copies a JsonValue: `List.copy()` of scalars and of nested trees,
+# `List.extend`, `JsonValue(copy=...)`, and `.copy()`. Each case builds,
+# copies, drops the copy, allocates same-size Strings to reuse any freed
+# String buffer, then reads the originals back. That reuse targets the
+# String size class only, so it detects shared `text` and key buffers; a
+# shared `children` or `obj_keys` buffer shows up only if the double free
+# crashes. Every case runs and each failing one is named.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -172,6 +176,13 @@ def check_copy_constructor() raises:
 
 
 def main() raises:
+    comptime assert not JsonValue.__copy_ctor_is_trivial, (
+        "JsonValue must have a non-trivial copy constructor: a trivial one"
+        " lets List.copy() memcpy elements and share their heap buffers"
+    )
+    comptime assert not JsonValue.__del__is_trivial, (
+        "JsonValue must have a non-trivial destructor: it owns heap buffers"
+    )
     var failed = 0
     try:
         check_list_of_strings()

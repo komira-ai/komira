@@ -80,11 +80,14 @@ struct JsonValue(Copyable, Movable):
     def __init__(out self, *, copy: Self):
         """Deep copy, field by field, recursing through `children`.
 
-        Explicit so the type never has a trivial copy constructor: Mojo
+        Spelled out so the copy constructor can never become trivial: Mojo
         1.0.0 can treat a synthesized one as trivial for some layouts of a
         struct with an explicit `__deinit__`, and `List.copy()` then
         memcpys the elements, sharing their heap buffers with the
-        originals (tests/test_json_list_copy.mojo)."""
+        originals. JsonValue's current layout does not trigger this (its
+        synthesized copy constructor is already non-trivial); this is a
+        defensive pin, and tests/test_json_list_copy.mojo asserts at
+        compile time that the copy constructor stays non-trivial."""
         self.kind = copy.kind
         self.bool_val = copy.bool_val
         self.text = copy.text.copy()
