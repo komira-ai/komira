@@ -1,0 +1,20 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Bloom, range, IN-list and constant filters and the selectivity tracker.
+mojo_library(
+    name = "komira_dynamic_filter",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+    ],
+    test_srcs = [
+        "tests/test_bloom_filter_simd_parity.mojo",
+        "tests/test_bloom_filter_unit.mojo",
+        "tests/test_bloom_in_list_filter.mojo",
+        "tests/test_bloom_merge_or_range_simd_parity.mojo",
+        "tests/test_bloom_range_filter.mojo",
+        "tests/test_bloom_selectivity_tracker.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
