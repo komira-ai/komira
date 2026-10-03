@@ -3,8 +3,11 @@
 #   release workflow, .github/workflows/kci.yml, held to its own machine file,
 #   release/machine.textproto: `kci ci check` finds nothing. A drift between
 #   the two (a renamed job or environment, a stage the workflow does not run,
-#   a pull_request trigger, an unpinned action) fails this test, and with it
-#   `./buck2 build //...` on every pull request.
+#   a pull_request trigger, an unpinned action, a `kci run` with --only or
+#   another machine file) fails this test, and with it `./buck2 build //...`
+#   on every pull request. The workflow's KCI_MACHINE (used only to skip a
+#   revision without a machine file) must be kci's default machine file,
+#   because no `kci` line of the workflow passes --machine.
 # =============================================================================
 #
 # The three files are staged as test data (BUCK): `kci.yml` (the root BUCK
@@ -14,7 +17,16 @@
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_ci_check import ChannelsFile, channels_paths, check_workflow, id_token_stages
+from kci_ci_check import (
+    NODE_SCALAR,
+    ChannelsFile,
+    channels_paths,
+    check_workflow,
+    id_token_stages,
+    kci_run_calls,
+    read_workflow,
+)
+from kci_contract import DEFAULT_MACHINE_FILE
 from kci_release_channel import find_channel, parse_channels_file, push_identity_environment
 from kci_stage_graph import StageGraph, parse_machine_file
 
@@ -61,12 +73,38 @@ def test_kci_yml_agrees_with_the_machine_file() raises:
     var tokens = id_token_stages(g, _channels())
     assert_equal(len(tokens), 1)
     assert_equal(tokens[0], String("prod"))
-    var findings = check_workflow(Path(String("kci.yml")).read_text(), g, tokens)
+    # the machine file checked is kci's default: every `kci run` reads it (R10)
+    var findings = check_workflow(Path(String("kci.yml")).read_text(), g, tokens, String(DEFAULT_MACHINE_FILE))
     if len(findings) > 0:
         var all = String("")
         for i in range(len(findings)):
             all += String("\n  ") + findings[i]
         raise Error(String(".github/workflows/kci.yml disagrees with release/machine.textproto:") + all)
+
+
+def test_kci_yml_runs_full_stages_from_the_default_machine_file() raises:
+    var doc = read_workflow(Path(String("kci.yml")).read_text())
+    var env = doc.child(0, String("env"))
+    var m = doc.child(env, String("KCI_MACHINE"))
+    assert_true(m >= 0 and doc.kind(m) == NODE_SCALAR, String("kci.yml sets no env KCI_MACHINE"))
+    assert_equal(doc.text(m), String(DEFAULT_MACHINE_FILE))
+    # every `kci run` of every job: no --only (a FULL run, R9), no --machine
+    # (the default, R10)
+    var jobs = doc.child(0, String("jobs"))
+    var nodes = doc.items(jobs)
+    var runs = 0
+    for j in range(len(nodes)):
+        var steps = doc.items(doc.child(nodes[j], String("steps")))
+        for i in range(len(steps)):
+            var r = doc.child(steps[i], String("run"))
+            if r < 0 or doc.kind(r) != NODE_SCALAR:
+                continue
+            var calls = kci_run_calls(doc.text(r))
+            for k in range(len(calls)):
+                runs += 1
+                assert_true(not calls[k].has_only, String("a kci run in kci.yml carries --only"))
+                assert_true(not calls[k].has_machine, String("a kci run in kci.yml passes --machine"))
+    assert_equal(runs, 2)
 
 
 def main() raises:

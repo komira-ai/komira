@@ -134,6 +134,8 @@ It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto). The workflow runs
 one job per stage; each job is named for its stage, runs in the GitHub
 environment of the same name, and runs exactly one `kci run --stage <its name>`.
+kci reads `release/machine.textproto` by convention (its one default path), so
+no line of the workflow names it; `--machine <path>` would override it.
 `kci ci check` holds the workflow to the machine file. It runs as a step of the
 `build` job and as the welded test
 `src/kci_ci_check/tests/test_repo_kci_yml.mojo`, so a drift between the two
@@ -154,7 +156,16 @@ files fails `./buck2 build //...`. Edit both together.
   and the artifact and result names carry it. A publishing run also requires
   `REVISION` to be on `main`'s history, so a manual run cannot publish an
   unmerged commit.
-- **One verb, one record.** Every kci invocation writes kci's result document
+- **One verb, whole stages.** `kci run --stage S` is the only verb that runs a
+  stage; there is no `kci build` or `kci publish`. `kci run` also takes
+  `--only step:<name>` / `--only validation:<name>` (repeatable) to run a
+  selection; such a run is recorded with `scope: SELECTIVE` and the selectors,
+  and its last stderr line is `kci: SELECTIVE run of stage S (...): <OUTCOME>
+  -- not a full run`, so it never reads as a full run. A selector that names
+  nothing in the stage is refused (exit 3). The release jobs never pass
+  `--only` (`kci ci check` rule R9), so every release run is a FULL run.
+  `--plan` is the dry run of a whole stage.
+- **One record.** Every kci invocation writes kci's result document
   (`--result-file`, format `kci.result`): RUNNING before the first effect and
   FINISHED on every exit. Each job uploads it whatever the outcome, as
   `kci-result-<job>-<REVISION>`. The run is identified by
@@ -179,15 +190,17 @@ files fails `./buck2 build //...`. Edit both together.
   published for the first time are named in the input `claim_new_names`; any
   other new name is refused.
 - **No secret.** The channel's credential is trusted publishing: the registry
-  trusts this repository, the workflow file `kci.yml` and the environment
-  `prod`, and kci exchanges the job's ID token itself. The stage that
-  publishes must be the environment the channel's push identity names (kci
+  trusts this repository, the workflow file `kci.yml` and the GitHub
+  environment `prod`, and kci exchanges the job's ID token itself. The stage
+  that publishes must be the GitHub environment the channel's push identity
+  names (kci
   refuses a token from any other). The `prod` job is a top-level job of
   `kci.yml` on purpose: a reusable-workflow call changes the token's workflow
   claim. Required reviewers and the deployment branch rule (`main`) on the
   environment `prod` are GitHub settings, outside this file. The environment
   `build` is created by GitHub on the first run and needs no setting.
-  Publishing and deploying are separate stages in separate environments.
+  Publishing and deploying are separate stages in separate GitHub
+  environments.
 - **Known residual:** the `prod` job runs the kci binary the `build` job made
   (it travels in the workflow artifact). How kci itself reaches the runner is
   an open design question.

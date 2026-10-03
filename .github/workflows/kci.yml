@@ -1,14 +1,17 @@
 # The release of komira's conda packages through kci (docs/ci.md, "kci.yml").
 #
-# HAND-WRITTEN. The machine file (release/machine.textproto, KCI_MACHINE below)
-# owns the stage graph; this file runs it, one job per stage, and `kci ci check`
+# HAND-WRITTEN. The machine file (release/machine.textproto: kci's default, so
+# no `kci` line names it) owns the stage graph; this file runs it, one job per
+# stage, and `kci ci check`
 # holds it to the machine file: a step of the build job, and the welded test
 # src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift fails
 # `./buck2 build //...` on every pull request. Edit both together. The rules:
 # each job's id and GitHub environment are its stage's name; its `needs` is the
 # stage's `after`; `id-token: write` only on the job whose stage publishes by
-# trusted publishing; each job runs exactly one `kci run --stage <its id>`;
-# no pull_request trigger; a `revision` input; every action pinned.
+# trusted publishing; each job runs exactly one `kci run --stage <its id>`,
+# never with `--only` (a release job runs its whole stage: a FULL run), and
+# reading the machine file being checked; no pull_request trigger; a
+# `revision` input; every action pinned.
 #
 #   build  on the farm runner (the same runner as ci.yml), in the environment
 #          `build`: builds bin/kci, checks this file against the machine file,
@@ -78,8 +81,10 @@ concurrency:
 
 env:
   # The release machine: its stages, and through them the declarations, the
-  # channels file and the channel. The one place this workflow names a path kci
-  # reads.
+  # channels file and the channel. kci reads it by convention (kci_contract's
+  # DEFAULT_MACHINE_FILE), so no `kci` line passes --machine; this name is used
+  # only by the step that skips a revision without one. The welded test
+  # test_repo_kci_yml holds it equal to kci's default.
   KCI_MACHINE: release/machine.textproto
   # The commit this run releases (THE REVISION, above).
   REVISION: ${{ inputs.revision || github.sha }}
@@ -139,7 +144,7 @@ jobs:
       - name: kci ci check
         if: steps.machine.outputs.release == 'true'
         run: |
-          "$RUNNER_TEMP/kci/kci" ci check --machine "$KCI_MACHINE" \
+          "$RUNNER_TEMP/kci/kci" ci check \
             --workflow .github/workflows/kci.yml \
             --result-file "$RUNNER_TEMP/kci-result-ci-check.json"
       # The declarations name the program `buck2`; the repository's is the
@@ -154,7 +159,7 @@ jobs:
       - name: kci run --stage build
         if: steps.machine.outputs.release == 'true'
         run: |
-          "$RUNNER_TEMP/kci/kci" run --stage build --machine "$KCI_MACHINE" \
+          "$RUNNER_TEMP/kci/kci" run --stage build \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
@@ -256,7 +261,7 @@ jobs:
             set -- "$@" --claim-new-name "$name"
           done
           if [ "$DRY_RUN" = true ]; then set -- "$@" --plan; fi
-          "$RUNNER_TEMP/kci/kci" run --stage prod --machine "$KCI_MACHINE" \
+          "$RUNNER_TEMP/kci/kci" run --stage prod \
             --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
             --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
             --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
