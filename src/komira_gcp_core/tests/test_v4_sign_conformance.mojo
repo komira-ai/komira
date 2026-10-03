@@ -42,6 +42,7 @@ from komira_crypto import (
     rsa_pkcs8_der_from_pem,
     sha256_string,
 )
+from komira_datetime import parse_rfc3339
 from komira_json import JsonValue, parse_json_value
 
 from komira_gcp_core import (
@@ -201,37 +202,17 @@ def _resolve_path(t: JsonValue) raises -> String:
     return "/" + _str(t, "bucket") + "/" + obj
 
 
-def _days_from_civil(y_in: Int, m: Int, d: Int) -> Int:
-    """Days since the Unix epoch of a proleptic Gregorian date (H. Hinnant,
-    "chrono-Compatible Low-Level Date Algorithms"): the inverse the signer's
-    stamps are checked against, written independently of it."""
-    var y = y_in - 1 if m <= 2 else y_in
-    var era = y // 400  # `//` floors; no truncation adjustment
-    var yoe = y - era * 400
-    var mp = m - 3 if m > 2 else m + 9
-    var doy = (153 * mp + 2) // 5 + d - 1
-    var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-    return era * 146097 + doe - 719468
-
-
-def _field(ts: String, start: Int, end: Int) raises -> Int:
-    return Int(String(ts[byte=start:end]))
-
-
 def _unix_from_rfc3339(ts: String) raises -> Int64:
     """`YYYY-MM-DDTHH:MM:SSZ`, the form of every vector's `timestamp`, as
-    unix seconds."""
+    unix seconds. komira_datetime reads it; the stamps it is turned back
+    into are pinned to literal strings in test_stamps_render_iso8601_basic,
+    and komira_datetime's own tests check its calendar against one walked
+    day by day."""
     assert_equal(ts.byte_length(), 20, "timestamp " + ts)
     assert_true(ts.endswith("Z"), "timestamp " + ts)
-    var days = _days_from_civil(
-        _field(ts, 0, 4), _field(ts, 5, 7), _field(ts, 8, 10)
-    )
-    return Int64(
-        days * 86400
-        + _field(ts, 11, 13) * 3600
-        + _field(ts, 14, 16) * 60
-        + _field(ts, 17, 19)
-    )
+    var t = parse_rfc3339(ts, allow_lowercase=False)
+    assert_equal(t.nanos, 0, "timestamp " + ts)
+    return Int64(t.seconds)
 
 
 def _vector(t: JsonValue) raises -> Vector:
@@ -805,7 +786,14 @@ def test_stamps_render_iso8601_basic() raises:
     for i in range(len(out_of_range)):
         try:
             _ = gcs_v4_stamps_from_unix_seconds(out_of_range[i])
-        except:
+        except e:
+            # The refusal is the signer's, naming the instant it was given.
+            assert_equal(
+                String(e),
+                "gcs v4: unix time "
+                + String(out_of_range[i])
+                + " is outside years 0000-9999",
+            )
             raised += 1
     assert_equal(raised, len(out_of_range), "a year outside 0000-9999")
 

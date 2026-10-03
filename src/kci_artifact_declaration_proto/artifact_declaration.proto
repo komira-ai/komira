@@ -16,8 +16,10 @@
 // with every placeholder in any argument replaced by its value, in one pass:
 //
 //   {out_dir}        this artifact's output directory, {release_dir}/<name>
-//   {release_dir}    the release directory: the output directory of every
-//                    artifact declared ABOVE, each built and verified
+//   {release_dir}    this platform's release directory,
+//                    <--release-dir>/<platform>: the output directory of
+//                    every artifact declared ABOVE, each built and verified
+//   {platform}       the platform the release is built for (`linux-x86_64`)
 //   {revision_id}    the release commit (`kci build --revision-id`, the full
 //                    40-hex id of the commit checked out)
 //   {source_commit}  the newest first-parent commit at or below it that
@@ -84,6 +86,13 @@ package kci.release.v1;
 message ArtifactDeclarations {
   repeated BuildSystem build_systems = 1;
   repeated ArtifactDeclaration artifacts = 2;
+
+  // The file's format major (kci_contract's format table,
+  // `kci.artifact_declarations`). Required: a file without it is refused
+  // naming the field to add, and a major this kci does not read is refused
+  // before any other field is read ("needs a newer kci"). Inside a major,
+  // fields are only ever added.
+  int32 schema_version = 3;
 }
 
 // A program kci runs to build an artifact, and the flags it always gets.

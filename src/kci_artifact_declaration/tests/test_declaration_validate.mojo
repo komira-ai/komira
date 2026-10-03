@@ -12,12 +12,19 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
+from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
 from kci_artifact_declaration import (
     is_valid_declaration_name,
     parse_artifact_declarations,
 )
 
 comptime _PREFIX = "decl.textproto: "
+
+
+def _parse(text: String) raises -> ArtifactDeclarations:
+    """`parse_artifact_declarations` over `text` with `schema_version: 1`
+    prepended on its FIRST line, so no line number a refusal names moves."""
+    return parse_artifact_declarations(String("schema_version: 1 ") + text, String("decl.textproto"))
 
 
 def _items(field: String, xs: String) -> String:
@@ -60,7 +67,7 @@ def _art(
 
 def _refusal(text: String) -> String:
     try:
-        _ = parse_artifact_declarations(text, String("decl.textproto"))
+        _ = _parse(text)
     except e:
         return String(e)
     return String("<parsed>")
@@ -146,7 +153,7 @@ def test_build_system_refusals() raises:
         _bs(args = String("build|--x={foo}")) + _art(),
         String(
             "build system 'buck2' arg '--x={foo}' holds the unknown placeholder"
-            " '{foo}' (known: {out_dir} {release_dir} {revision_id} {source_commit}"
+            " '{foo}' (known: {out_dir} {release_dir} {platform} {revision_id} {source_commit}"
             " {build_number} {timestamp_ms})"
         ),
     )
@@ -177,7 +184,7 @@ def test_artifact_refusals() raises:
         _bs() + _art(args = String("//pkg:a|--out|{OUT_DIR}")),
         String(
             "artifact 'a' arg '{OUT_DIR}' holds the unknown placeholder"
-            " '{OUT_DIR}' (known: {out_dir} {release_dir} {revision_id} {source_commit}"
+            " '{OUT_DIR}' (known: {out_dir} {release_dir} {platform} {revision_id} {source_commit}"
             " {build_number} {timestamp_ms})"
         ),
     )
@@ -190,12 +197,12 @@ def test_artifact_refusals() raises:
     )
 
 
-def test_the_six_placeholders_are_accepted_anywhere_in_args() raises:
-    # Each of the six, in a build system's args and in an artifact's, alone
+def test_the_seven_placeholders_are_accepted_anywhere_in_args() raises:
+    # Each of the seven, in a build system's args and in an artifact's, alone
     # and inside a longer arg: all accepted.
     assert_equal(
         _refusal(
-            _bs(args = String("build|-c|komira.package_stamp={build_number}|--x={release_dir}/m"))
+            _bs(args = String("build|-c|komira.package_stamp={build_number}|--x={release_dir}/m|--p={platform}"))
             + _art(
                 args = String(
                     "//pkg:a[release]|-c|komira.package_commit={source_commit}"
@@ -214,6 +221,7 @@ def test_the_six_placeholders_are_accepted_anywhere_in_args() raises:
     near.append(String("{commit}"))
     near.append(String("{timestamp}"))
     near.append(String("{releasedir}"))
+    near.append(String("{Platform}"))
     for i in range(len(near)):
         _expect(
             _bs() + _art(args = String("//pkg:a|--out|{out_dir}|") + near[i]),
@@ -222,7 +230,7 @@ def test_the_six_placeholders_are_accepted_anywhere_in_args() raises:
             + String("' holds the unknown placeholder '")
             + near[i]
             + String(
-                "' (known: {out_dir} {release_dir} {revision_id} {source_commit}"
+                "' (known: {out_dir} {release_dir} {platform} {revision_id} {source_commit}"
                 " {build_number} {timestamp_ms})"
             ),
         )
