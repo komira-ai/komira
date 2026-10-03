@@ -69,17 +69,17 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 
-from komira_http.client.client import HttpClient
-from komira_http.client.url import Url
-from komira_http.codec.h2.frame import (
+from komira_http_client.client import HttpClient
+from komira_http_client.url import Url
+from komira_http_core.codec.h2.frame import (
     SettingsEntry,
     encode_data_frame,
     encode_headers_frame,
     encode_settings_frame,
 )
-from komira_http.codec.h2.hpack import HpackEncoder, HpackHeader
-from komira_http.transport.io_stream import NEGOTIATED_HTTP_2
-from komira_http.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_http_core.codec.h2.hpack import HpackEncoder, HpackHeader
+from komira_http_core.transport.io_stream import NEGOTIATED_HTTP_2
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
 from komira_grpc import (
     CallOptions,

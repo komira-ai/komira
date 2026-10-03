@@ -86,7 +86,7 @@ from komira_connect.envelope import (
     write_envelope,
     write_envelope_header,
 )
-from komira_http.client.header_map import HeaderMap
+from komira_http_client.header_map import HeaderMap
 
 
 # =============================================================================

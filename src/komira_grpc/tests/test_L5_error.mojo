@@ -42,7 +42,7 @@ from komira_grpc import (
     grpc_error_from_http_non_200,
     from_connect_error_envelope,
 )
-from komira_http.client.header_map import HeaderMap
+from komira_http_client.header_map import HeaderMap
 from komira_connect.codec_connect_json import ConnectErrorEnvelope
 
 

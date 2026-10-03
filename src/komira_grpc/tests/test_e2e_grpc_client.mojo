@@ -42,9 +42,9 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 
-from komira_http.client.client import HttpClient
-from komira_http.client.url import Url
-from komira_http.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_http_client.client import HttpClient
+from komira_http_client.url import Url
+from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
 from komira_grpc import (
     GrpcClient,

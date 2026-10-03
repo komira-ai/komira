@@ -18,7 +18,8 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_clock:komira_clock",
         "//src/komira_connect:komira_connect",
-        "//src/komira_http:komira_http",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
     ],
     test_srcs = [
         "tests/test_L5_error.mojo",

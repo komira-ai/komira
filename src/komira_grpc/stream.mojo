@@ -62,7 +62,7 @@ from komira_connect.status import (
     GRPC_STATUS_OK,
     GRPC_STATUS_UNKNOWN,
 )
-from komira_http.client.header_map import HeaderMap
+from komira_http_client.header_map import HeaderMap
 
 
 # =============================================================================

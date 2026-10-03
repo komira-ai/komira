@@ -53,18 +53,18 @@ from komira_async.cancellation.token import CancellationToken
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http.client.body import BytesBody
-from komira_http.client.client import HttpClient, build_streaming_request
-from komira_http.client.h2_client import (
+from komira_http_client.body import BytesBody
+from komira_http_client.client import HttpClient, build_streaming_request
+from komira_http_client.h2_client import (
     is_h2_goaway_unprocessed,
     is_h2_retryable_transport,
 )
-from komira_http.client.header_map import HeaderMap
-from komira_http.client.request_writer import method_post
-from komira_http.client.response_body import RecvRingBody
-from komira_http.client.state_machine import ClientResponse
-from komira_http.client.url import Url
-from komira_http.transport.io_stream import Connector
+from komira_http_client.header_map import HeaderMap
+from komira_http_client.request_writer import method_post
+from komira_http_client.response_body import RecvRingBody
+from komira_http_client.state_machine import ClientResponse
+from komira_http_client.url import Url
+from komira_http_core.transport.io_stream import Connector
 
 from komira_clock import now_ns as _mono_now_ns
 
@@ -74,7 +74,7 @@ from komira_connect.status import (
     GRPC_STATUS_DEADLINE_EXCEEDED,
 )
 
-from komira_http.transport.grpc_emit import is_grpc_content_type
+from komira_http_core.transport.grpc_emit import is_grpc_content_type
 
 from komira_grpc.protocol import Protocol
 from komira_grpc.call_options import CallOptions
@@ -370,7 +370,7 @@ def _non_rpc_content_type(headers: HeaderMap) -> Optional[String]:
        surface that status — the status is the answer, and is strictly more
        informative than a header complaint about the envelope that carried it.
        Pinned by `test_unary_trailers_only_without_content_type_is_not_an_eof`.
-    2. The predicate is `komira_http.transport.grpc_emit.is_grpc_content_type`,
+    2. The predicate is `komira_http_core.transport.grpc_emit.is_grpc_content_type`,
        the SAME one the serve loop routes on — not a second list.
        It admits gRPC, gRPC-Web and Connect types, so it is correct for every
        `Protocol` conformer without a per-protocol table that would drift from
