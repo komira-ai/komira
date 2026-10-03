@@ -13,7 +13,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # under `{release_dir}`). One artifact per declaration: it also
 # holds the two refusals over what a build left (exactly one `manifest.json`
 # at the top of the directory; its `name` equal to the declaration's,
-# exactly). Pure: it runs no process and reads no directory; `kci build`
+# exactly). Pure: it runs no process and reads no directory; the BUILD step
 # does.
 #
 # The welded tests parse and refuse synthetic files in memory, assert each
