@@ -1,5 +1,5 @@
 # package	owner branch: the branch whose commits may rewrite that package's importers (the tool edits only files under src/<package>/ of packages owned by the branch it runs on)
-authz_port	origin/lib/authz_port
+komira_authz_api	origin/lib/komira_authz_api
 deploy_model_rpc	origin/lib/komira_deploy_compose
 komira_broker_proto	origin/lib/engine_rpc
 komira_supervisor_proto	origin/lib/engine_rpc

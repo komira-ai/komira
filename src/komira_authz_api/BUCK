@@ -3,14 +3,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The neutral authorization interface (`AuthzPort` + the POD `AuthzAction` /
 # `AuthzResource`) and its two store-free reference conformers. Deps are only
 # the transport primitives the `check[RT]` seam shape needs: komira_async
-# (Reactor / Runtime) and komira_http (`AuthedUser`, the principal). It welds
-# no test of its own; its consumers' tests exercise it.
+# (Reactor / Runtime) and komira_http_server (`AuthedUser`, the principal).
+# The welded tests pin the two reference conformers' decisions.
 mojo_library(
-    name = "authz_port",
-    srcs = glob(["**/*.mojo"]),
+    name = "komira_authz_api",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_http_server:komira_http_server",
+        "//src/komira_uuid:komira_uuid",
+    ],
+    test_srcs = [
+        "tests/test_allow_authenticated_authz.mojo",
+        "tests/test_deny_all_authz.mojo",
     ],
     visibility = ["PUBLIC"],
 )
