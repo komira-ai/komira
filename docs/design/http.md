@@ -33,7 +33,7 @@ client:  HttpClient[C].send_buffered ─► pool probe ─► (miss) resolve + C
 
 ### How does an HTTP server built on komira_http serve a request?
 
-`HttpServer[G]` (`src/komira_http/server.mojo`) owns one listener, one `Reactor[NoopSink]` (epoll on Linux, kqueue on macOS), a `Slab[ConnEntry]` of connections and a 4,096-byte read buffer (`REQ_BUF_BYTES`). `HttpServerConfig` sets the port (0 asks the kernel for one), the backlog (4,096), the parser limits and `Expect: 100-continue` handling, and binds to 127.0.0.1 unless built with `with_port_bind_any`. `G` is the gRPC dispatcher and defaults to `NoopGrpcDispatch`.
+`HttpServer[G]` (`src/komira_http_server/server.mojo`) owns one listener, one `Reactor[NoopSink]` (epoll on Linux, kqueue on macOS), a `Slab[ConnEntry]` of connections and a 4,096-byte read buffer (`REQ_BUF_BYTES`). `HttpServerConfig` sets the port (0 asks the kernel for one), the backlog (4,096), the parser limits and `Expect: 100-continue` handling, and binds to 127.0.0.1 unless built with `with_port_bind_any`. `G` is the gRPC dispatcher and defaults to `NoopGrpcDispatch`.
 
 A caller drives the loop one poll at a time. Each of the five `serve_one_iteration*` methods runs `poll_completions` once, accepts on the listener's event, and runs a serve round for each ready connection:
 
@@ -51,39 +51,39 @@ The four dispatch methods close any connection that is TLS or HTTP/2. Only `serv
 
 The dispatcher is passed to each call, not stored. `RequestDispatcher.dispatch[RT](mut reactor, var req) raises -> HttpResponse` owns routing and error mapping; a raise becomes a 500. `serve_one_iteration_dispatch` requires `RT.Sink == NoopSink` with a `comptime assert`, so the reactor it lends is the one it polls.
 
-`GcpServerlessEntry` (`src/komira_http/serving/serverless_entry.mojo`) is the ready-made loop for a platform that routes requests to a listener. It holds one listen port, which defaults to 8080 and which a binary parses from its own flag with `parse_serve_port`: the library reads no environment. `serve` calls `tls_init()`, binds 0.0.0.0, and calls `serve_one_iteration_over` with a 50 ms poll timeout forever; `serve_chained` does the same through the chained round. Its runtime type is `GcpCloudRunRuntime[NoopSink]`, imported from `komira_async` (`komira_async.runtime.gcp_cloud_run_runtime`), which `komira_http` does not define; it is used only as `RT`.
+`GcpServerlessEntry` (`src/komira_http_server/serving/serverless_entry.mojo`) is the ready-made loop for a platform that routes requests to a listener. It holds one listen port, which defaults to 8080 and which a binary parses from its own flag with `parse_serve_port`: the library reads no environment. `serve` calls `tls_init()`, binds 0.0.0.0, and calls `serve_one_iteration_over` with a 50 ms poll timeout forever; `serve_chained` does the same through the chained round. Its runtime type is `GcpCloudRunRuntime[NoopSink]`, imported from `komira_async` (`komira_async.runtime.gcp_cloud_run_runtime`), which `komira_http` does not define; it is used only as `RT`.
 
 ### How is an HTTP/1.1 request parsed and a response framed?
 
-`parse_request_head` (`src/komira_http/codec/h1/parser.mojo`) validates one request head in the read buffer and returns a `HeadersParseOutcome`. Header names are lowercased, and repeated headers are joined with `, `. It refuses request smuggling shapes: two `Content-Length` headers, even equal ones; `Content-Length` together with chunked; and a `Transfer-Encoding` without the `chunked` token.
+`parse_request_head` (`src/komira_http_core/codec/h1/parser.mojo`) validates one request head in the read buffer and returns a `HeadersParseOutcome`. Header names are lowercased, and repeated headers are joined with `, `. It refuses request smuggling shapes: two `Content-Length` headers, even equal ones; `Content-Length` together with chunked; and a `Transfer-Encoding` without the `chunked` token.
 
-`ParseLimits` defaults (`src/komira_http/codec/h1/limits.mojo`) are 100 headers, 8,192 bytes per header line and per request line, 65,536 bytes of headers, and a 10 MiB body. `_kind_to_status` maps each refusal to a status: 414 for a long request line, 431 for header overflow (and for an oversized chunked trailer), 413 for a large body, 417 for an unsupported expectation, 505 for an unsupported version, and 400 for the rest. The round writes that error response.
+`ParseLimits` defaults (`src/komira_http_core/codec/h1/limits.mojo`) are 100 headers, 8,192 bytes per header line and per request line, 65,536 bytes of headers, and a 10 MiB body. `_kind_to_status` maps each refusal to a status: 414 for a long request line, 431 for header overflow (and for an oversized chunked trailer), 413 for a large body, 417 for an unsupported expectation, 505 for an unsupported version, and 400 for the rest. The round writes that error response.
 
-After the head, the round drains a `Content-Length` body with `accumulate_body_remainder`, or a chunked body with `accumulate_chunked_body` (`src/komira_http/transport/dispatch.mojo`), both into `req.body`. The plain round then parses the next pipelined request in the buffer.
+After the head, the round drains a `Content-Length` body with `accumulate_body_remainder`, or a chunked body with `accumulate_chunked_body` (`src/komira_http_server/dispatch.mojo`), both into `req.body`. The plain round then parses the next pipelined request in the buffer.
 
-Response framing is decided by the transport. A handler calls `HttpResponse.mark_chunked()` to ask for chunked transfer encoding. `response_may_be_chunked(status, http_version_minor, is_head_request)` (`src/komira_http/codec/response_framing.mojo`) refuses it for an HTTP/1.0 client, a HEAD request, a 1xx, 204 or 304. `serialize_response_framed` then writes either 64 KiB chunks (`append_chunked_body`) or a `Content-Length` body.
+Response framing is decided by the transport. A handler calls `HttpResponse.mark_chunked()` to ask for chunked transfer encoding. `response_may_be_chunked(status, http_version_minor, is_head_request)` (`src/komira_http_core/codec/response_framing.mojo`) refuses it for an HTTP/1.0 client, a HEAD request, a 1xx, 204 or 304. `serialize_response_framed` then writes either 64 KiB chunks (`append_chunked_body`) or a `Content-Length` body.
 
 A write that would block keeps the rest in the connection's entry, and the next writable event sends it (`resume_pending_write`).
 
 ### How are HTTP/2 and gRPC served?
 
-HTTP/2 is served only after TLS negotiates `h2` by ALPN, inside `serve_one_iteration`. The connection gets an `H2ConnectionState`, and `serve_read_round_h2` (`src/komira_http/transport/serve_h2.mojo`) checks the 24-byte client preface, sends its SETTINGS (at most 50 concurrent streams), decodes frames and validates request headers. There is no cleartext HTTP/2 (h2c) server.
+HTTP/2 is served only after TLS negotiates `h2` by ALPN, inside `serve_one_iteration`. The connection gets an `H2ConnectionState`, and `serve_read_round_h2` (`src/komira_http_server/serve_h2.mojo`) checks the 24-byte client preface, sends its SETTINGS (at most 50 concurrent streams), decodes frames and validates request headers. There is no cleartext HTTP/2 (h2c) server.
 
-A request whose content type `is_grpc_content_type` accepts goes to the server's `G`. `GrpcDispatch.dispatch_grpc(path, content_type, request_body) -> GrpcResponse` handles unary calls, and `GrpcStreamDispatch.dispatch_grpc_stream` handles streaming ones, whose `GrpcStreamResponse.messages` is a complete `List[List[UInt8]]`. `emit_grpc_response` and `emit_grpc_stream_response` (`src/komira_http/transport/grpc_emit.mojo`) write the result.
+A request whose content type `is_grpc_content_type` accepts goes to the server's `G`. `GrpcDispatch.dispatch_grpc(path, content_type, request_body) -> GrpcResponse` handles unary calls, and `GrpcStreamDispatch.dispatch_grpc_stream` handles streaming ones, whose `GrpcStreamResponse.messages` is a complete `List[List[UInt8]]`. `emit_grpc_response` and `emit_grpc_stream_response` (`src/komira_http_core/transport/grpc_emit.mojo`) write the result.
 
 Any other HTTP/2 request is matched against the server's `Router`: a match answers `200 Hello from HTTP/2!` and a miss answers 404.
 
 ### How do middleware and routing work?
 
-`MiddlewareChain` (`src/komira_http/middleware/chain.mojo`) holds four optional built-ins, `ErrorMappingMiddleware`, `CorsMiddleware`, `TracingMiddleware` and `LoggingMiddleware`, and runs one user middleware that the caller passes in. `run_before_legs` calls `before` on CORS, tracing, logging, then the user middleware; a `before` that returns a response skips the rest and the handler. `run_after_legs` calls `after` in reverse order on whatever response resulted, and skips the user middleware's `after` when its `before` did not run. A raise is turned into a response by `map_chain_error`. `MetricsMiddleware` and `PairMiddleware` (`middleware/metrics.mojo`) are user-slot middleware: the first reports one `RequestMetric` per request to a `MetricsSink`, and the second runs two middleware in one slot.
+`MiddlewareChain` (`src/komira_http_server/middleware/chain.mojo`) holds four optional built-ins, `ErrorMappingMiddleware`, `CorsMiddleware`, `TracingMiddleware` and `LoggingMiddleware`, and runs one user middleware that the caller passes in. `run_before_legs` calls `before` on CORS, tracing, logging, then the user middleware; a `before` that returns a response skips the rest and the handler. `run_after_legs` calls `after` in reverse order on whatever response resulted, and skips the user middleware's `after` when its `before` did not run. A raise is turned into a response by `map_chain_error`. `MetricsMiddleware` and `PairMiddleware` (`middleware/metrics.mojo`) are user-slot middleware: the first reports one `RequestMetric` per request to a `MetricsSink`, and the second runs two middleware in one slot.
 
 In `serve_one_iteration_dispatch_chained`, the dispatcher is a `CtxRequestDispatcher`: `dispatch_with_ctx` also receives the `RequestContext` the chain filled in, for example the `AuthedUser` an authentication middleware resolved.
 
-Two routers exist. `Router` (`src/komira_http/routing/router.mojo`) maps a method and path to an integer handler id; patterns hold static segments, `:name` parameters and a `*` that matches the rest of the path and must be the last segment. `AppRouter[*Routes]` (`src/komira_http/routing/route.mojo`) is a `RequestDispatcher` over a compile-time pack of `Route` types, each with a `METHOD`, a `PATTERN` and a `handle[RT]` method. It matches through a `Router`, fills `req.path_params`, and answers 405 for a known path with the wrong method and 404 for an unknown path.
+Two routers exist. `Router` (`src/komira_http_server/routing/router.mojo`) maps a method and path to an integer handler id; patterns hold static segments, `:name` parameters and a `*` that matches the rest of the path and must be the last segment. `AppRouter[*Routes]` (`src/komira_http_server/routing/route.mojo`) is a `RequestDispatcher` over a compile-time pack of `Route` types, each with a `METHOD`, a `PATTERN` and a `handle[RT]` method. It matches through a `Router`, fills `req.path_params`, and answers 405 for a known path with the wrong method and 404 for an unknown path.
 
 ### How does the HTTP client send a request?
 
-`HttpClient[C: Connector]` (`src/komira_http/client/client.mojo`) is generic over its connector. `KernelTcpConnector` (`src/komira_http/transport/kernel_tcp.mojo`) dials TCP and returns a `TcpIoStream`. `TlsConnector[U]` (`src/komira_http/client/tls_connector.mojo`) wraps another connector, runs the s2n client handshake with SNI and ALPN, and returns a `TlsClientStream[U.Stream]`.
+`HttpClient[C: Connector]` (`src/komira_http_client/client.mojo`) is generic over its connector. `KernelTcpConnector` (`src/komira_http_core/transport/kernel_tcp.mojo`) dials TCP and returns a `TcpIoStream`. `TlsConnector[U]` (`src/komira_http_client/tls_connector.mojo`) wraps another connector, runs the s2n client handshake with SNI and ALPN, and returns a `TlsClientStream[U.Stream]`.
 
 Each send method is generic over a `Runtime` and takes the caller's reactor. The buffered paths (`send_buffered`, `call` and `call_pooled`) read the stream's `negotiated_protocol()`: `NEGOTIATED_HTTP_2` sends through the HTTP/2 driver, and anything else through the HTTP/1.1 `OutboundDriver`.
 
@@ -94,9 +94,9 @@ The main calls:
 - `get_range` sends a `Range` GET and raises `HTTP_ERROR_RANGE_NOT_HONORED` if the server answers 200 instead of 206.
 - `send_buffered_batch` sends K requests to one origin as K streams on one HTTP/2 connection.
 - `send_grpc_pooled` multiplexes HTTPS gRPC calls on a pooled HTTP/2 connection, and `send_grpc_pooled_h2c` does the same over cleartext HTTP/2 with prior knowledge.
-- `call`, from the `HttpService` trait (`src/komira_http/client/service.mojo`), is the buffered surface that `HttpLayer` wrappers such as `RetryLayer`, `TimeoutLayer` and `RedirectLayer` wrap.
+- `call`, from the `HttpService` trait (`src/komira_http_client/service.mojo`), is the buffered surface that `HttpLayer` wrappers such as `RetryLayer`, `TimeoutLayer` and `RedirectLayer` wrap.
 
-Errors raise `HttpError` (`src/komira_http/client/error.mojo`) with a kind such as `HTTP_ERROR_CONNECT_FAILED`, `HTTP_ERROR_TLS_VERIFY_FAILED`, `HTTP_ERROR_RETRYABLE_TRANSPORT`, `HTTP_ERROR_EOF_MID_RESPONSE`, `HTTP_ERROR_BODY_TOO_LARGE` or `HTTP_ERROR_TIMEOUT`. `HttpTransport` (`src/komira_http/client/http_transport.mojo`) is a smaller seam: one request with a single auth header and a string body. Its production conformer is `TlsHttpTransport`, and `ScriptedTransport` records calls for tests.
+Errors raise `HttpError` (`src/komira_http_client/error.mojo`) with a kind such as `HTTP_ERROR_CONNECT_FAILED`, `HTTP_ERROR_TLS_VERIFY_FAILED`, `HTTP_ERROR_RETRYABLE_TRANSPORT`, `HTTP_ERROR_EOF_MID_RESPONSE`, `HTTP_ERROR_BODY_TOO_LARGE` or `HTTP_ERROR_TIMEOUT`. `HttpTransport` (`src/komira_http_client/http_transport.mojo`) is a smaller seam: one request with a single auth header and a string body. Its production conformer is `TlsHttpTransport`, and `ScriptedTransport` records calls for tests.
 
 ### How are client connections pooled and reused?
 
@@ -116,13 +116,13 @@ A `408 Request Timeout` read off a reused connection is discarded, and the reque
 
 A request budget is the time one outbound call may take. `HttpClientConfig.defaults()` is for a process with no containing request deadline, a job, a pod or a command-line tool, and gives 600 s. A process that serves requests under a platform deadline builds its client with `HttpClientConfig.for_serving_ceiling(ceiling_us)` instead, and `HttpClient.with_defaults` is only for the first kind.
 
-`outbound_budget_us(requested_us, ceiling_us)` (`src/komira_http/client/outbound_budget.mojo`) is the rule. A request inside the ceiling keeps its budget; one over it is clamped to the ceiling minus a 5 s reserve; a request of zero gets that largest permissible budget. `serving_request_ceiling_us` computes the ceiling from the platform's identity values, which the caller passes in as strings because the library reads no environment. A Cloud Run job marker (`CLOUD_RUN_JOB`, `CLOUD_RUN_EXECUTION`) means no ceiling and is checked first. Otherwise `K_SERVICE`, `K_REVISION` or `K_CONFIGURATION` mean a Cloud Run service, whose request ceiling is 300 s, so the budget is 295 s. The AWS Lambda runtime API and every other process answer no ceiling.
+`outbound_budget_us(requested_us, ceiling_us)` (`src/komira_http_client/outbound_budget.mojo`) is the rule. A request inside the ceiling keeps its budget; one over it is clamped to the ceiling minus a 5 s reserve; a request of zero gets that largest permissible budget. `serving_request_ceiling_us` computes the ceiling from the platform's identity values, which the caller passes in as strings because the library reads no environment. A Cloud Run job marker (`CLOUD_RUN_JOB`, `CLOUD_RUN_EXECUTION`) means no ceiling and is checked first. Otherwise `K_SERVICE`, `K_REVISION` or `K_CONFIGURATION` mean a Cloud Run service, whose request ceiling is 300 s, so the budget is 295 s. The AWS Lambda runtime API and every other process answer no ceiling.
 
 The HTTP/2 driver has its own bounds. One park waits at most 250 ms (`_H2_PARK_DEADLINE_US`), and one `drive_h2_streams_to_completion` call defaults to a 120 s wall (`_H2_DRIVE_DEFAULT_WALL_US`). After 15 s with no bytes read while a stream awaits its response, the driver sends a PING, and a PING unanswered for 15 s ends the call with a timeout.
 
 ### How does TLS work?
 
-The TLS layer is [s2n-tls](https://github.com/aws/s2n-tls), built by `third_party/s2n-tls` against `third_party/aws-lc` and called through FFI. In `src/komira_http/tls/`, `ffi.mojo` declares the C functions and `s2n_shim.mojo` wraps them. `_S2nConfigHandle` and `_S2nConnectionHandle` own the raw pointers and free them on destruction. `TlsConfig` holds its handle in an `ArcPointer`, so `.copy()` shares one `s2n_config_t`.
+The TLS layer is [s2n-tls](https://github.com/aws/s2n-tls), built by `third_party/s2n-tls` against `third_party/aws-lc` and called through FFI. In `src/komira_http_core/tls/`, `ffi.mojo` declares the C functions and `s2n_shim.mojo` wraps them. `_S2nConfigHandle` and `_S2nConnectionHandle` own the raw pointers and free them on destruction. `TlsConfig` holds its handle in an `ArcPointer`, so `.copy()` shares one `s2n_config_t`.
 
 `TlsConfig` loads a certificate, sets ALPN protocols and cipher preferences, adds or wipes trusted PEM roots, turns verification on or off, and enables session tickets. `TlsConnection` binds an existing socket with `bind_fd`, which calls `s2n_connection_set_fd`, and exposes `handshake`, `send`, `recv`, `shutdown` and the negotiated protocol. `handshake` and `shutdown` return an outcome, and `send` and `recv` return an outcome and a byte count. The outcome is `TLS_OUTCOME_DONE`, `TLS_OUTCOME_BLOCKED_ON_READ`, `TLS_OUTCOME_BLOCKED_ON_WRITE` or `TLS_OUTCOME_ERROR`, which `outcome_to_interest` (`tls/handshake_state.mojo`) turns into reactor interest.
 
@@ -238,42 +238,42 @@ The TLS layer is [s2n-tls](https://github.com/aws/s2n-tls), built by `third_part
 
 | File | Holds | Key types and functions |
 |---|---|---|
-| `src/komira_http/server.mojo` | The server and its serve loops | `HttpServer`, `HttpServerConfig`, `serve_one_iteration_dispatch` |
-| `src/komira_http/transport/dispatch.mojo` | Dispatch rounds, body accumulation | `RequestDispatcher`, `CtxRequestDispatcher`, `SuspendableDispatcher`, `serve_read_round_dispatch` |
-| `src/komira_http/transport/accept_loop.mojo` | Accept, TLS handshake and canned rounds | `accept_one_and_register`, `drive_tls_handshake`, `resume_pending_write` |
-| `src/komira_http/transport/serve_h2.mojo` | HTTP/2 serve round | `serve_read_round_h2`, `build_initial_server_settings` |
-| `src/komira_http/transport/grpc_emit.mojo` | gRPC seam and emitters | `GrpcDispatch`, `GrpcStreamDispatch`, `NoopGrpcDispatch`, `emit_grpc_response` |
-| `src/komira_http/transport/io_stream.mojo`, `kernel_tcp.mojo`, `scripted.mojo` | Stream and connector traits and conformers | `IoStream`, `Connector`, `KernelTcpConnector`, `ScriptedConnector` |
-| `src/komira_http/transport/stream_park.mojo` | The one park primitive for stream drivers | `park_on_pending` |
-| `src/komira_http/codec/h1/` | HTTP/1.1 parser, limits, chunked codec | `parse_request_head`, `ParseLimits`, `ChunkedDecoder`, `append_chunked_body` |
-| `src/komira_http/codec/h2/` | HTTP/2 frames, HPACK, flow control, streams | `H2ConnectionState`, `decode_frame` |
-| `src/komira_http/codec/types.mojo`, `response_framing.mojo` | Request, response, framing decision | `HttpRequest`, `HttpResponse`, `response_may_be_chunked` |
-| `src/komira_http/middleware/` | Chain and built-in middleware | `MiddlewareChain`, `Middleware`, `RequestContext`, `CorsMiddleware` |
-| `src/komira_http/routing/` | Routers | `Router`, `AppRouter`, `Route` |
-| `src/komira_http/serving/serverless_entry.mojo` | Listener-platform serving loop | `ServerlessEntry`, `GcpServerlessEntry`, `parse_serve_port` |
-| `src/komira_http/client/client.mojo` | The client | `HttpClient`, `HttpClientConfig` |
-| `src/komira_http/client/state_machine.mojo`, `h2_client.mojo` | HTTP/1.1 and HTTP/2 drivers | `OutboundDriver`, `drive_h2_streams_to_completion` |
-| `src/komira_http/client/pool.mojo`, `h2_pool.mojo`, `session_cache.mojo` | Pools and TLS session cache | `PerCorePool`, `PoolKey`, `H2ClientPool`, `SessionCache` |
-| `src/komira_http/client/outbound_budget.mojo` | Budget rule | `outbound_budget_us`, `serving_request_ceiling_us` |
-| `src/komira_http/client/retry.mojo`, `timeout.mojo`, `redirect.mojo`, `redirect_policy.mojo` | Layers and redirect rules | `RetryLayer`, `TimeoutLayer`, `RedirectLayer`, `resolve_redirect_location` |
-| `src/komira_http/client/tls_connector.mojo` | TLS client connector | `TlsConnector`, `TlsClientStream` |
-| `src/komira_http/client/header_simd.mojo` | SIMD byte helpers for headers | `case_fold_copy_span`, `ci_eq_span` |
-| `src/komira_http/tls/` | s2n FFI and safe wrappers | `TlsConfig`, `TlsConnection`, `TlsStream`, `tls_init` |
+| `src/komira_http_server/server.mojo` | The server and its serve loops | `HttpServer`, `HttpServerConfig`, `serve_one_iteration_dispatch` |
+| `src/komira_http_server/dispatch.mojo` | Dispatch rounds, body accumulation | `RequestDispatcher`, `CtxRequestDispatcher`, `SuspendableDispatcher`, `serve_read_round_dispatch` |
+| `src/komira_http_server/accept_loop.mojo` | Accept, TLS handshake and canned rounds | `accept_one_and_register`, `drive_tls_handshake`, `resume_pending_write` |
+| `src/komira_http_server/serve_h2.mojo` | HTTP/2 serve round | `serve_read_round_h2`, `build_initial_server_settings` |
+| `src/komira_http_core/transport/grpc_emit.mojo` | gRPC seam and emitters | `GrpcDispatch`, `GrpcStreamDispatch`, `NoopGrpcDispatch`, `emit_grpc_response` |
+| `src/komira_http_core/transport/io_stream.mojo`, `kernel_tcp.mojo`, `scripted.mojo` | Stream and connector traits and conformers | `IoStream`, `Connector`, `KernelTcpConnector`, `ScriptedConnector` |
+| `src/komira_http_core/transport/stream_park.mojo` | The one park primitive for stream drivers | `park_on_pending` |
+| `src/komira_http_core/codec/h1/` | HTTP/1.1 parser, limits, chunked codec | `parse_request_head`, `ParseLimits`, `ChunkedDecoder`, `append_chunked_body` |
+| `src/komira_http_core/codec/h2/` | HTTP/2 frames, HPACK, flow control, streams | `H2ConnectionState`, `decode_frame` |
+| `src/komira_http_core/codec/types.mojo`, `response_framing.mojo` | Request, response, framing decision | `HttpRequest`, `HttpResponse`, `response_may_be_chunked` |
+| `src/komira_http_server/middleware/` | Chain and built-in middleware | `MiddlewareChain`, `Middleware`, `RequestContext`, `CorsMiddleware` |
+| `src/komira_http_server/routing/` | Routers | `Router`, `AppRouter`, `Route` |
+| `src/komira_http_server/serving/serverless_entry.mojo` | Listener-platform serving loop | `ServerlessEntry`, `GcpServerlessEntry`, `parse_serve_port` |
+| `src/komira_http_client/client.mojo` | The client | `HttpClient`, `HttpClientConfig` |
+| `src/komira_http_client/state_machine.mojo`, `h2_client.mojo` | HTTP/1.1 and HTTP/2 drivers | `OutboundDriver`, `drive_h2_streams_to_completion` |
+| `src/komira_http_client/pool.mojo`, `h2_pool.mojo`, `session_cache.mojo` | Pools and TLS session cache | `PerCorePool`, `PoolKey`, `H2ClientPool`, `SessionCache` |
+| `src/komira_http_client/outbound_budget.mojo` | Budget rule | `outbound_budget_us`, `serving_request_ceiling_us` |
+| `src/komira_http_client/retry.mojo`, `timeout.mojo`, `redirect.mojo`, `redirect_policy.mojo` | Layers and redirect rules | `RetryLayer`, `TimeoutLayer`, `RedirectLayer`, `resolve_redirect_location` |
+| `src/komira_http_client/tls_connector.mojo` | TLS client connector | `TlsConnector`, `TlsClientStream` |
+| `src/komira_http_client/header_simd.mojo` | SIMD byte helpers for headers | `case_fold_copy_span`, `ci_eq_span` |
+| `src/komira_http_core/tls/` | s2n FFI and safe wrappers | `TlsConfig`, `TlsConnection`, `TlsStream`, `tls_init` |
 
 Entry points:
 
 - **Serve HTTP:** build an `HttpServer`, then call `serve_one_iteration_dispatch[D, RT]` in a loop with a `RequestDispatcher`, or call `GcpServerlessEntry(port).serve(dispatcher)`.
 - **Serve gRPC:** conform to `GrpcDispatch` and `GrpcStreamDispatch`, build `HttpServer[G]` with a `TlsConfig`, and call `serve_one_iteration`.
 - **Call HTTP:** `HttpClient[TlsConnector[KernelTcpConnector]].with_defaults(connector)`, then `send_buffered`.
-- **Execution starts at:** `HttpServer.serve_one_iteration_dispatch` in `src/komira_http/server.mojo`, and `HttpClient.send_buffered` in `src/komira_http/client/client.mojo`.
+- **Execution starts at:** `HttpServer.serve_one_iteration_dispatch` in `src/komira_http_server/server.mojo`, and `HttpClient.send_buffered` in `src/komira_http_client/client.mojo`.
 
 ## How is it tested?
 
-The `komira_http` target in `src/komira_http/BUCK` lists all 164 files of `src/komira_http/tests/` in its `test_srcs`. Each runs as a build action, so the library cannot build while one fails. Run: `./buck2 build //src/komira_http:komira_http`.
+The `komira_http` target in `src/komira_http_server/BUCK` lists all 164 files of `src/komira_http_client/tests/` in its `test_srcs`. Each runs as a build action, so the library cannot build while one fails. Run: `./buck2 build //src/komira_http:komira_http`.
 
-- TLS tests link the vendored s2n-tls and AWS-LC archives and read the certificates in `src/komira_http/tests/fixtures/`.
+- TLS tests link the vendored s2n-tls and AWS-LC archives and read the certificates in `src/komira_http_core/tests/fixtures/`.
 - `ScriptedStream` and `ScriptedConnector` feed byte scripts to the client, and `ScriptedTransport` records calls through the `HttpTransport` seam, so most client tests open no socket.
-- The HTTP/2 client tests replay the frames in `src/komira_http/tests/fuzz_corpus/h2_client/`.
+- The HTTP/2 client tests replay the frames in `src/komira_http_client/tests/fuzz_corpus/h2_client/`.
 
 Not tested:
 
