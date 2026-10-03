@@ -32,12 +32,12 @@
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 
-from komira_http.client.body import EmptyBody
-from komira_http.client.client import HttpClient, build_request_with_body
-from komira_http.client.header_map import HeaderMap
-from komira_http.client.url import Url
-from komira_http.codec.types import HTTP_METHOD_GET, HttpMethod
-from komira_http.transport.io_stream import Connector
+from komira_http_client.body import EmptyBody
+from komira_http_client.client import HttpClient, build_request_with_body
+from komira_http_client.header_map import HeaderMap
+from komira_http_client.url import Url
+from komira_http_core.codec.types import HTTP_METHOD_GET, HttpMethod
+from komira_http_core.transport.io_stream import Connector
 
 
 # =============================================================================
