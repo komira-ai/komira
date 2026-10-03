@@ -74,7 +74,7 @@ A library `kci` owns is named `kci_<x>`.
 
 | module | what it is |
 |---|---|
-| [`kci_artifact_declaration`](../src/kci_artifact_declaration/) | the artifact declarations: the one reviewed list of what kci builds and publishes. kci names no build tool: a file declares build systems (a program and the args it always gets) and artifacts (a name, the build system, the args appended for it). The contract: for each artifact kci creates an EMPTY directory, runs `<executable> <build system args> <artifact args>` with every `{out_dir}` replaced by its absolute path, and ships exactly what the ONE kci artifact manifest it left at the top, `manifest.json`, describes: one artifact per declaration (the layout of a `conda_package`'s `[release]`: the `.conda`, `manifest.json`, `metadata.json`). Refused: a non-zero exit, no `manifest.json` at the top (or a listing naming it twice), and a manifest whose `name` is not the declaration's, compared exactly. Which remote-execution farm a build uses is machine configuration, never a declaration's args: buck2 reads `[buck2_re_client]` only from config files at daemon start (`/etc/buckconfig.d/`, `~/.buckconfig.d/`), so `--config-file` and `-c` cannot supply it, and a buck2 build system's args are just `["build"]`. Reads and validates a declarations file (names, executables, args, the one placeholder `{out_dir}` present for every artifact) and renders one artifact's argv (pure; `kci build` runs it). Type, platform, file, sha256 and metadata come from the built manifest, and the set-level checks (every artifact built, lockstep versions, metapackage last, requirement closure) are kci publish's, over those manifests. |
+| [`kci_artifact_declaration`](../src/kci_artifact_declaration/) | the artifact declarations: the one reviewed list of what kci builds and publishes. kci names no build tool: a file declares build systems (a program and the args it always gets) and artifacts (a name, the build system, the args appended for it). The contract: for each artifact kci creates an EMPTY directory, runs `<executable> <build system args> <artifact args>` with every `{out_dir}` replaced by its absolute path, and ships exactly what the ONE kci artifact manifest it left at the top, `manifest.json`, describes: one artifact per declaration (the layout of a `conda_package`'s `[release]`: the `.conda`, `manifest.json`, `metadata.json`). Refused: a non-zero exit, no `manifest.json` at the top (or a listing naming it twice), and a manifest whose `name` is not the declaration's, compared exactly. Reads and validates a declarations file (names, executables, args, the one placeholder `{out_dir}` present for every artifact) and renders one artifact's argv (pure; `kci build` runs it). Type, platform, file, sha256 and metadata come from the built manifest, and the set-level checks (every artifact built, lockstep versions, metapackage last, requirement closure) are kci publish's, over those manifests. |
 | [`kci_artifact_declaration_proto`](../src/kci_artifact_declaration_proto/) | the declarations schema (`kci.release.v1`): `ArtifactDeclarations` holds `BuildSystem`s (name, executable, args) and `ArtifactDeclaration`s (name, build system, args). No enum and no kind of artifact; the build contract (one artifact per declaration: exactly one `manifest.json` at the top of `{out_dir}`, its `name` the declaration's) is stated in the `.proto`. |
 | [`kci_logs`](../src/kci_logs/) | reads the logs behind a failed step: a pipeline run's stage logs, and a terminated cloud unit's container output. |
 | [`kci_params`](../src/kci_params/) | the generic managed-app parameter mechanism: one declaration that the deploy renderer turns into argv, the app parses at startup, and the control plane stores opaquely. |
@@ -83,20 +83,6 @@ A library `kci` owns is named `kci_<x>`.
 | [`kci_release_channel`](../src/kci_release_channel/) | release-channel declarations: a publish destination (a name, a visibility and one repository per artifact type), its lookups and validation, and the channels-file parser. |
 | [`kci_secret_writer`](../src/kci_secret_writer/) | the write-only secret seam: the verb a deployer uses to write an app secret it is the source of, a capability distinct from `SecretStore` so the runtime resolve path cannot write. |
 | [`komira_validation_run`](../src/komira_validation_run/) | the validation-run correlator: the tag key under which a validation run stamps its identity on every billable cloud resource it creates, so cleanup acts only on what it can prove that run made. |
-
-### Test infrastructure
-
-Libraries a test uses to run against real infrastructure and prove it
-cleaned up. Each is configured by the test's own flags, and with no flags a
-test that needs one SKIPS with a reason (exit 77) instead of passing. The
-dependency order is the order of the rows.
-
-| module | what it is |
-|---|---|
-| [`komira_test_verdict`](../src/komira_test_verdict/) | the exit-code vocabulary of a test that can do more than pass or fail: `Verdict` (CLEAN 0, CANNOT_TELL 3, LEAK 6; the worst wins and every reason is kept) and SKIP (77) / CANNOT_TELL (3) with a reason, which end the process and are never exit 0. Standard library only. |
-| [`komira_test_run_id`](../src/komira_test_run_id/) | a per-run id minted inside the test process from the wall clock and 64 random bits, never derived from inputs, so a retry and its twin get disjoint resources; with the clock and random-source seams and their fakes. |
-| [`komira_test_minio`](../src/komira_test_minio/) | an embedded MinIO the test starts itself: pinned by sha256, a private temporary directory, a random root credential in 0600 files, random loopback-only ports, dies with the test. It hands back the endpoint, region and credentials-file path, and `stop()` returns a verdict. |
-| [`komira_test_bucket`](../src/komira_test_bucket/) | a run-scoped prefix in any S3-compatible store: the lease is written first, `close()` deletes everything and re-lists to prove it, and a leak check asks the same from outside the run. It reads the test's `--test-s3-*` / `--test-minio-binary` flags, and on an embedded MinIO it creates the bucket and owns and stops the server. |
 
 ### Third-party code
 
@@ -163,7 +149,7 @@ with its libraries ([docs/index.md](index.md#design-docs)).
 
 | layer | coming with |
 |---|---|
-| HTTP, databases, object stores, file-system discovery, gRPC | komira_http_core, komira_http_client, komira_http_server, komira_db, komira_objectstore, komira_grpc |
+| HTTP, databases, object stores, file-system discovery, gRPC | komira_http, komira_db, komira_objectstore, komira_grpc |
 | storage formats: Parquet, text and row formats, Iceberg and CDC, serverless Postgres | komira_parquet, komira_csv, komira_iceberg, komira_pgstore |
 | execution and operators: pipelines and morsel dispatch, aggregation, joins, sort, top-N, window | the engine libraries |
 | plan and optimizer: logical and physical planning, the plan wire format, the query optimizer | komira_compiler, komira_optimizer |

@@ -15,36 +15,19 @@ clients.
   `CredentialTransport` trait (`credential_transport.mojo`); this package
   opens no socket.
 - `aws_request.mojo`: `AwsRequest` (unsigned, what a generated
-  `build_<op>_request` returns), `AwsResponse` (what a generated
-  `parse_<op>_response` reads) and `HttpResult` (what a transport returns).
-  Every body is bytes.
-- `aws_error.mojo`: `AwsErrorInfo` (status, code, message, request id of a
-  failed response) and `aws_json_error_info`.
+  `build_<op>_request` returns) and `HttpResult`.
 - `aws_codec.mojo`: the awsJson scalar encoding (`AwsJsonToken`, the
   `aws_token_*` encoders and decoders, the AWS_TS_* timestamp formats) and
   the error shape (`aws_error_code*`, `aws_error_message_from_body`).
 - `aws_json.mojo`: the `JsonValue`-typed `aws_json_*` / `aws_*_from_json` /
   `aws_ts_to_json` names a generated module calls, over komira_json.
-- `aws_text.mojo`: the text form of a scalar bound to a URI label, a query
-  value or a header (`aws_text_*` writers, strict `aws_*_from_text`
-  readers), and the three Smithy timestamp formats as text, http-date
-  (IMF-fixdate) included.
-- `aws_rest.mojo`: the HTTP binding runtime of a restJson1 / restXml
-  client: `AwsRestUri` (labels, greedy labels, query), host-prefix labels,
-  list and prefix headers, the response code, and `aws_rest_json_error`.
-- `aws_xml.mojo`: the restXml body codec over komira_xml (`aws_xml_write_*`
-  and `aws_xml_get_*` scalars, wrapped and flattened lists and maps,
-  xmlAttribute, xmlNamespace), `aws_rest_xml_error` /
-  `aws_xml_error_info` (<ErrorResponse><Error>, a bare <Error>, the status
-  as the code of an empty or non-XML body), and `aws_xml_body_is_error`,
-  S3's 200-with-<Error> check.
 - `endpoint.mojo`: `AwsEndpoint`, the partitions, `aws_service_endpoint`,
   `resolve_endpoint`, and `aws_endpoint_config` (AWS_ENDPOINT_URL[_<SVC>],
   FIPS and dual-stack, from the standard settings only).
 - `creds_source.mojo`: the `AwsCredsSource` trait a generated client signs
   through, a static source and the cached default chain.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
-  of a send, and `AwsPayloadSigning` (hashed, unsigned or precomputed).
+  of a send.
 - `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
   library; `partitions.mojo`: `AwsPartitionSet`, the partitions.json table
@@ -92,94 +75,7 @@ from .aws_json import (
     aws_ts_from_json,
     aws_ts_to_json,
 )
-from .aws_error import (
-    AWS_REQUEST_ID_MAX_BYTES,
-    AwsErrorInfo,
-    aws_json_error_info,
-    aws_request_id,
-)
-from .aws_request import AwsRequest, AwsResponse, HttpResult
-from .aws_rest import (
-    AwsRestUri,
-    aws_header_field,
-    aws_header_http_date_list,
-    aws_header_http_date_list_from,
-    aws_header_list,
-    aws_header_list_from,
-    aws_host_label,
-    aws_host_prefix,
-    aws_prefix_headers,
-    aws_response_code,
-    aws_rest_json_error,
-    aws_set_prefix_headers,
-)
-from .aws_text import (
-    aws_blob_from_base64,
-    aws_bool_from_text,
-    aws_f64_from_text,
-    aws_http_date_from_text,
-    aws_i32_from_text,
-    aws_i64_from_text,
-    aws_int_from_text,
-    aws_media_from_text,
-    aws_text_blob,
-    aws_text_bool,
-    aws_text_f32,
-    aws_text_f64,
-    aws_text_int,
-    aws_text_media,
-    aws_text_ts,
-    aws_ts_from_text,
-)
-from .aws_xml import (
-    aws_rest_xml_error,
-    aws_xml_attr,
-    aws_xml_blob_of,
-    aws_xml_body_is_error,
-    aws_xml_bool_of,
-    aws_xml_child,
-    aws_xml_end,
-    aws_xml_entry_key,
-    aws_xml_entry_value,
-    aws_xml_error_info,
-    aws_xml_f32_of,
-    aws_xml_f64_of,
-    aws_xml_get_attr,
-    aws_xml_get_blob,
-    aws_xml_get_bool,
-    aws_xml_get_f32,
-    aws_xml_get_f64,
-    aws_xml_get_int,
-    aws_xml_get_string,
-    aws_xml_get_string_list,
-    aws_xml_get_string_map,
-    aws_xml_get_struct,
-    aws_xml_get_ts,
-    aws_xml_int_of,
-    aws_xml_list_end,
-    aws_xml_list_items,
-    aws_xml_list_start,
-    aws_xml_map_end,
-    aws_xml_map_entries,
-    aws_xml_map_entry_start,
-    aws_xml_map_start,
-    aws_xml_namespace,
-    aws_xml_parse,
-    aws_xml_set_body,
-    aws_xml_start,
-    aws_xml_string_of,
-    aws_xml_ts_of,
-    aws_xml_write_blob,
-    aws_xml_write_bool,
-    aws_xml_write_f32,
-    aws_xml_write_f64,
-    aws_xml_write_int,
-    aws_xml_write_string,
-    aws_xml_write_string_list,
-    aws_xml_write_string_map,
-    aws_xml_write_text,
-    aws_xml_write_ts,
-)
+from .aws_request import AwsRequest, HttpResult
 from .credential import AwsCredential
 from .creds_source import (
     AWS_CREDENTIAL_ADVISORY_REFRESH_SECONDS,
@@ -248,7 +144,7 @@ from .shared_config import (
     select_profile,
     shared_file_paths,
 )
-from .signed_request import AwsPayloadSigning, build_sigv4_signed_request
+from .signed_request import build_sigv4_signed_request
 from .sigv4 import (
     EMPTY_PAYLOAD_SHA256,
     MAX_PRESIGN_EXPIRES_SECONDS,

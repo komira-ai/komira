@@ -23,7 +23,7 @@ from komira_uuid.uuid import (
     Uuidv7Generator,
     from_hyphenated,
 )
-from komira_clock import now_unix_ms
+from komira_uuid.clock import now_unix_ms
 from komira_uuid.entropy import system_entropy
 
 

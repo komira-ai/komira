@@ -38,7 +38,7 @@ from komira_connect.status import (
 )
 from komira_connect.codec_grpc import grpc_percent_decode_message
 from komira_connect.codec_connect_json import ConnectErrorEnvelope
-from komira_http_client.header_map import HeaderMap
+from komira_http.client.header_map import HeaderMap
 
 
 # =============================================================================

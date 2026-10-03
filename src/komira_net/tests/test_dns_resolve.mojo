@@ -113,4 +113,4 @@ def main() raises:
     test_getaddrinfo_collect_localhost_success()
     test_resolve_nxdomain_raises()
     test_ffi_lifetime_stress_no_leak()
-    print("PASS komira_net.dns resolve_host")
+    print("PASS komira_async.net.dns resolve_host")

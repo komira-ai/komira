@@ -29,5 +29,3 @@
 
 json input 76 64 7 refused[document=1,host-prefix=4]
 json output 92 78 12 refused[aws-query-compatible=1,document=1]
-rest-json input 113 93 12 refused[document=6,host-prefix=2]
-rest-json output 91 74 9 refused[document=8]

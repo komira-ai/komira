@@ -17,15 +17,15 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_http_core.codec.h2.connection_state import H2ConnectionState
-from komira_http_core.codec.h2.frame import (
+from komira_http.codec.h2.connection_state import H2ConnectionState
+from komira_http.codec.h2.frame import (
     FLAG_END_STREAM,
     FRAME_DATA,
     FRAME_HEADERS,
     decode_frame,
 )
-from komira_http_core.codec.h2.hpack import HpackDecoder, HpackHeader
-from komira_http_core.transport.grpc_emit import (
+from komira_http.codec.h2.hpack import HpackDecoder, HpackHeader
+from komira_http.transport.grpc_emit import (
     GrpcResponse,
     emit_grpc_response,
     is_grpc_content_type,

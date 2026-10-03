@@ -20,7 +20,7 @@
 from komira_connect.deadline import (
     encode_grpc_timeout_us,
 )
-from komira_http_client.header_map import HeaderMap
+from komira_http.client.header_map import HeaderMap
 
 from komira_grpc.protocol import Protocol
 from komira_grpc.call_options import CallOptions, CALL_DEADLINE_UNSET

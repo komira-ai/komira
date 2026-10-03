@@ -1,10 +1,9 @@
 # The JsonValue-typed awsJson names (aws_json.mojo), as a generated
 # komira_aws_<svc> module calls them. The import block below is the emitter's
-# `Always` import rows that apply to the `json` protocol
-# (tools/build/proto-codegen/src/emit_aws/mod.rs, AWS_IMPORTS): every name an
-# awsJson pure-mode module imports from komira_aws_core, plus JsonValue /
-# parse_json_value from komira_json, so a name the emitter writes and the core
-# does not export fails this test's compile.
+# `Always` import contract (tools/build/proto-codegen/src/emit_aws.rs,
+# AWS_IMPORTS): every name a pure-mode module imports from komira_aws_core,
+# plus JsonValue / parse_json_value from komira_json, so a name the emitter
+# writes and the core does not export fails this test's compile.
 #
 # Each encoder is checked by the exact JSON text it serializes to, and that
 # text is put back through komira_json's strict RFC 8259 parser, so a

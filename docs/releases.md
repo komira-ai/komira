@@ -28,22 +28,20 @@ packages are published is the release tool's reviewed list of artifact
 declarations, not a file in the build, and a name and version in a registry are
 permanent in practice, so the first upload is gated. A library that cannot be
 packaged still has a target that builds, holding the reason. The layout, the
-versioning (the package version is the Mojo compiler version, the release
-iteration is the conda build number) and the metapackage are in
+version scheme (`<prefix>.<N>`) and the metapackage are in
 [packaging/conda](../packaging/conda/README.md).
 
 An uploader reads only a package target's `[release]` sub-target, which exists
 only for a stamped build that carries its source commit; the unstamped
-build-number-0 files the other sub-targets produce are for development and
-claim a permanent name if uploaded. Before uploading, the publish job
-re-derives the version, build number, build string and commit with
-`release_version.sh` at a clean full-history checkout and compares them with
-the manifest and metadata; that
+`<prefix>.0` files the other sub-targets produce are for development and
+claim a permanent version if uploaded. Before uploading, the publish job
+re-derives the version and commit with `release_version.sh` at a clean
+full-history checkout and compares them with the manifest and metadata; that
 and the rest of the publish step are in the README.
 
 A project that uses a package lists the komira channel and Modular's `max`
 channel (or already depends on `mojo`, which pulls the same pinned compiler,
-`mojo-compiler ==<the package's version>`); the snippet is in the README.
+`mojo-compiler ==1.0.0`); the snippet is in the README.
 
 ## Pinning komira from another repository
 

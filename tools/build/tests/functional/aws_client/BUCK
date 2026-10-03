@@ -16,19 +16,20 @@ load("//functional/gcp_client:defs.bzl", "gen_check", "tests_check")
 # GetLogEvents' error shapes are memberless in the pinned model, so the
 # caller's test checks only that the generated one is (it decodes nothing);
 # reading an error's code and message is komira_aws_core's, stubbed here and
-# tested in komira//src/komira_aws_core.
+# tested against the real core once it carries that surface.
 #
-# The runtime is STUBS, kept by hand: a library of this cell cannot depend
-# on a mojo_library of the komira cell (each cell's MojoPkgTSet is a
-# different type), so the real komira_aws_core and komira_json cannot be
-# deps here. stub/komira_aws_core declares every name the generated module
-# imports, with the real core's signatures (bodies as bytes, AwsResponse);
+# The runtime is STUBS: komira_aws_core on main holds SigV4 and the
+# credential value but not yet the request and codec surface pure-mode code
+# imports (AwsRequest, the aws_json_* encoders, the aws_error_* readers).
+# stub/komira_aws_core declares every name the generated module imports;
 # stub/komira_json is a minimal JSON value and parser with komira_json's
-# layout and the part of its API that code calls. Generated code is built
-# against the real core and komira_json in the komira cell, by the AWS
-# conformance driver (komira//tools/build/proto-codegen) and by the pure-mode
-# restJson1 client in komira//tools/build/proto-codegen/aws_rest_json; this
-# package tests the rule.
+# layout and the part of its API that code calls. They are stubs and not
+# komira//src labels because a library of this cell cannot depend on a
+# mojo_library of the komira cell (each cell's MojoPkgTSet is a different
+# type). Nothing in this cell builds a generated client against the real
+# komira_json; that check belongs with the real komira_aws_logs below.
+# The real komira_aws_logs is built in the komira cell, on the real
+# komira_aws_core, once that carries the surface; this package tests the rule.
 
 _LOGS = botocore_model("logs")
 

@@ -10,10 +10,10 @@
 #   api version  : 2014-03-28
 #   protocol     : json 1.1 (targetPrefix `Logs_20140328`)
 #   model key    : logs/2014-03-28
-#   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
+#   model sha256 : 24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 4
+#   generator    : aws-client-gen version 2
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -56,7 +56,6 @@ from komira_aws_core import (
     AWS_TS_RFC822,
     AWS_TS_UNIX,
     AwsRequest,
-    AwsResponse,
     aws_blob_from_json,
     aws_error_code,
     aws_error_code_from_body,
@@ -82,10 +81,9 @@ from komira_aws_core import (
 )
 from komira_json import (
     JsonValue,
-    parse_json_bytes,
     parse_json_value,
 )
-from komira_http_core.transport.io_stream import Connector
+from komira_http.transport.io_stream import Connector
 
 
 # ---------------------------------------------------------------------------
@@ -694,16 +692,16 @@ def build_get_log_events_request(input: CloudWatchLogsGetLogEventsRequest) raise
     var req = AwsRequest(String("POST"), String("/"))
     req.set_header(String("X-Amz-Target"), String("Logs_20140328.GetLogEvents"))
     req.set_header(String("Content-Type"), String(CLOUDWATCHLOGS_CONTENT_TYPE))
-    req.set_body_text(input.to_aws_json().serialize())
+    req.body = input.to_aws_json().serialize()
     return req^
 
-def parse_get_log_events_response(resp: AwsResponse) raises -> CloudWatchLogsGetLogEventsResponse:
+def parse_get_log_events_response(body: String) raises -> CloudWatchLogsGetLogEventsResponse:
     """`GetLogEvents` — the awsJson response. An EMPTY body is `{}`: awsJson
         operations with no output still answer 200 with no bytes, and
         `parses_operations_with_empty_json_bodies` states it."""
-    if len(resp.body) == 0:
+    if body.byte_length() == 0:
         return CloudWatchLogsGetLogEventsResponse.from_aws_json(parse_json_value(String("{}")))
-    return CloudWatchLogsGetLogEventsResponse.from_aws_json(parse_json_bytes(resp.body))
+    return CloudWatchLogsGetLogEventsResponse.from_aws_json(parse_json_value(body))
 
 
 # ===========================================================================
@@ -764,9 +762,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         ))
         for _i in range(len(req.header_names)):
             var n = req.header_names[_i].copy()
-            if n.lower() == String("content-type"):
-                # Header names are case-insensitive, and the substrate refuses an
-                # `extra` Content-Type in any case.
+            if n == String("Content-Type"):
                 # The substrate takes the content type as its own argument and
                 # puts it in BOTH the signed set and the wire headers. Passing it
                 # again here would emit it twice and break the signature.
@@ -791,7 +787,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         var req = build_get_log_events_request(input)
         var res = self.send(req^)
         if not aws_is_error_status(res.status):
-            return parse_get_log_events_response(res^.into_response())
+            return parse_get_log_events_response(res.body)
         raise _komira_aws_logs_error(String("GetLogEvents"), res)
 
 

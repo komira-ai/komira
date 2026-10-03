@@ -11,44 +11,13 @@
 #
 # ATTRIBUTES ARE FIRST-CLASS HERE and that is deliberate: they are the one
 # thing the JSON codec has no analogue for, and rest-xml uses them
-# (`xmlAttribute`, `xmlNamespace` -> `xmlns`).
-#
-# `text` and `attr` refuse a VALUE holding a character outside XML 1.0 [2]
-# Char that a `String` can carry: a C0 control other than TAB, LF and CR, or
-# U+FFFE / U+FFFF. XML has no way to write one, not even as a reference, so a
-# document carrying one could not be read back. Element and attribute NAMES
-# are written as given and are not checked; the caller owns them.
+# (`xmlAttribute`, `xmlNamespace` -> `xmlns`). See `komira_restxml` for what
+# that costs the shared `WireEncoder` trait surface.
 #
 # Encapsulation: no `UnsafePointer` in any signature.
 # =============================================================================
 
 from .xml_escape import append_escaped_attr, append_escaped_text
-
-
-def _refuse_non_xml_chars(s: StringSlice, what: StringSlice) raises:
-    """Raise if `s` holds a character outside [2] Char. A valid UTF-8 string
-    cannot hold a surrogate, so the cases are a byte below 0x20 other than
-    TAB, LF or CR (always a whole character), and U+FFFE / U+FFFF
-    (EF BF BE / EF BF BF)."""
-    var b = s.as_bytes()
-    var n = len(b)
-    for i in range(n):
-        var c = b[i]
-        var cp = -1
-        if c < 0x20 and c != 0x09 and c != 0x0A and c != 0x0D:
-            cp = Int(c)
-        elif (
-            c == 0xEF
-            and i + 2 < n
-            and b[i + 1] == 0xBF
-            and (b[i + 2] == 0xBE or b[i + 2] == 0xBF)
-        ):
-            cp = 0xFFFE if b[i + 2] == 0xBE else 0xFFFF
-        if cp >= 0:
-            raise Error(
-                "xml writer: " + String(what) + " holds character (code point "
-                + String(cp) + "), which XML cannot represent"
-            )
 
 
 struct XmlWriter(Movable):
@@ -87,7 +56,6 @@ struct XmlWriter(Movable):
         """Write ` name="value"` on the currently-open start tag."""
         if not self._open:
             raise Error("xml writer: attribute after the start tag was closed")
-        _refuse_non_xml_chars(value, "an attribute value")
         self.buf.append(0x20)  # ' '
         self._raw(name)
         self.buf.append(0x3D)  # '='
@@ -95,9 +63,8 @@ struct XmlWriter(Movable):
         append_escaped_attr(self.buf, value)
         self.buf.append(0x22)
 
-    def text(mut self, s: StringSlice) raises:
+    def text(mut self, s: StringSlice):
         """Write escaped element text content."""
-        _refuse_non_xml_chars(s, "element text")
         self._close_open_tag()
         append_escaped_text(self.buf, s)
 

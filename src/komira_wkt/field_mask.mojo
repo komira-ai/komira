@@ -17,17 +17,11 @@
 # that has no underscore is unchanged by either direction.
 # =============================================================================
 
-from komira_proto_codec import (
-    Serializable,
-    Proto3JsonWkt,
-    WireEncoder,
-    WireDecoder,
-)
-from komira_json import JsonValue, JSON_STRING, write_json_string
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 
 
 @fieldwise_init
-struct FieldMask(Proto3JsonWkt, Copyable, Movable):
+struct FieldMask(Serializable, Copyable, Movable):
     """`google.protobuf.FieldMask` — a set of field-path selectors."""
 
     var paths: List[String]
@@ -60,33 +54,19 @@ struct FieldMask(Proto3JsonWkt, Copyable, Movable):
 
     # -- the canonical-JSON surface ---------------------------------------
 
-    def to_proto3_json(self) raises -> String:
-        """The comma-joined lowerCamelCase path string (raw, unquoted).
-
-        REFUSES a path whose camelCase form would not convert back to the
-        same path (an uppercase letter, `__`, or `_` before a non-letter):
-        the JSON form would silently name a DIFFERENT field."""
+    def to_proto3_json(self) -> String:
+        """The comma-joined lowerCamelCase path string (raw, unquoted)."""
         var out = String("")
         for i in range(len(self.paths)):
             if i > 0:
                 out += ","
-            var camel = _snake_to_camel(self.paths[i])
-            if _camel_to_snake_bytes(_bytes_of(camel)) != self.paths[i]:
-                raise Error(
-                    "WktError: FieldMask path does not round-trip through"
-                    + " lowerCamelCase: " + self.paths[i]
-                )
-            out += camel
+            out += _snake_to_camel(self.paths[i])
         return out
 
     @staticmethod
-    def from_proto3_json(text: String) raises -> Self:
+    def from_proto3_json(text: String) -> Self:
         """Parse a comma-joined lowerCamelCase path string back to the wire
-        `paths` (each segment converted to snake_case).
-
-        REFUSES an underscore in the input: the JSON form is camelCase, and
-        `log_name` would otherwise become a different path than the sender
-        meant (the spec rejects it for that reason)."""
+        `paths` (each segment converted to snake_case)."""
         var paths = List[String]()
         if text.byte_length() == 0:
             return Self(paths^)
@@ -94,10 +74,6 @@ struct FieldMask(Proto3JsonWkt, Copyable, Movable):
         var bytes = text.as_bytes()
         for i in range(len(bytes)):
             var b = bytes[i]
-            if b == 0x5F:  # '_'
-                raise Error(
-                    "WktError: FieldMask JSON path contains '_': " + text
-                )
             if b == 0x2C:  # ','
                 paths.append(_camel_to_snake_bytes(cur))
                 cur = List[UInt8]()
@@ -105,17 +81,6 @@ struct FieldMask(Proto3JsonWkt, Copyable, Movable):
                 cur.append(b)
         paths.append(_camel_to_snake_bytes(cur))
         return Self(paths^)
-
-    # -- `Proto3JsonWkt`: the codec arms call these ----------------------
-
-    def write_proto3_json(self, mut buf: List[UInt8]) raises:
-        write_json_string(buf, self.to_proto3_json())
-
-    @staticmethod
-    def read_proto3_json(v: JsonValue) raises -> Self:
-        if v.kind != JSON_STRING:
-            raise Error("WktError: FieldMask JSON must be a string")
-        return Self.from_proto3_json(v.text)
 
 
 # =============================================================================
@@ -158,12 +123,3 @@ def _camel_to_snake_bytes(bytes: List[UInt8]) -> String:
         else:
             out.append(b)
     return String(unsafe_from_utf8=Span(out))
-
-
-def _bytes_of(s: String) -> List[UInt8]:
-    """A `String`'s UTF-8 bytes as an owned `List[UInt8]`."""
-    var out = List[UInt8]()
-    var src = s.as_bytes()
-    for i in range(len(src)):
-        out.append(src[i])
-    return out^

@@ -139,9 +139,8 @@ def append_unescaped(mut out: List[UInt8], b: Span[UInt8, _], lo: Int, hi: Int):
     """Append `b[lo:hi]` with XML entity references decoded.
 
     An `&` that does not begin a recognised reference is passed through
-    verbatim. `XmlReader` refuses such a document before it decodes
-    anything, so this leniency only reaches direct callers of
-    `xml_unescape`.
+    verbatim — XML forbids it, but a decoder that raises on real-world AWS
+    payloads is worse than one that is lenient on input and strict on output.
     """
     var i = lo
     while i < hi:

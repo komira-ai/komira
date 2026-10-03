@@ -76,9 +76,9 @@ struct Scripted(CredentialTransport, Movable):
     ) raises -> CredentialHttpResponse:
         self.sent.append(req.copy())
         if req.host.startswith("sts."):
-            if req.body_text().find("Action=AssumeRoleWithWebIdentity&") >= 0:
+            if req.body.find("Action=AssumeRoleWithWebIdentity&") >= 0:
                 return CredentialHttpResponse(200, self.sts_web)
-            if req.body_text().find("Action=AssumeRole&") >= 0:
+            if req.body.find("Action=AssumeRole&") >= 0:
                 return CredentialHttpResponse(200, self.sts_role)
         if req.host == "169.254.170.2" or req.host == "169.254.170.23":
             return CredentialHttpResponse(200, self.container)
@@ -309,8 +309,8 @@ def test_web_identity_region_and_default_session() raises:
     assert_equal(t.sent[0].host, "sts.eu-central-1.amazonaws.com")
     # No AWS_ROLE_SESSION_NAME: the default carries the clock's time.
     assert_true(
-        t.sent[0].body_text().find("RoleSessionName=komira-aws-1789473600&") >= 0,
-        t.sent[0].body_text(),
+        t.sent[0].body.find("RoleSessionName=komira-aws-1789473600&") >= 0,
+        t.sent[0].body,
     )
 
 
@@ -411,8 +411,8 @@ def test_profiles() raises:
     assert_equal(t.sent[0].header("X-Amz-Date"), "20260915T120000Z")
     # A static source carries no session token.
     assert_equal(t.sent[0].header("X-Amz-Security-Token"), "")
-    assert_true(t.sent[0].body_text().find("ExternalId=example-external-id") >= 0)
-    assert_true(t.sent[0].body_text().find("DurationSeconds=1800") >= 0)
+    assert_true(t.sent[0].body.find("ExternalId=example-external-id") >= 0)
+    assert_true(t.sent[0].body.find("DurationSeconds=1800") >= 0)
     # The explicit profile parameter wins over AWS_PROFILE; AWS_REGION reaches STS.
     var p2 = AwsCredentialParams()
     p2.profile = String("dev")
@@ -427,7 +427,7 @@ def test_profiles() raises:
     var t3 = Scripted(False)
     r = _run(params, e3, files, t3)
     assert_equal(r.credential.access_key_id, "ASIAWEBIDENTITYEXAMPL")
-    assert_true(t3.sent[0].body_text().find("Action=AssumeRoleWithWebIdentity&") >= 0)
+    assert_true(t3.sent[0].body.find("Action=AssumeRoleWithWebIdentity&") >= 0)
 
     # A profile that is its own source uses its own static keys.
     var e4 = _profile_env(String("self"))
@@ -518,8 +518,8 @@ def _assume_role_signed_by(
     with `key_id`, carrying `session_token` ("" = none) as
     X-Amz-Security-Token."""
     assert_equal(req.host, "sts.amazonaws.com")
-    assert_true(req.body_text().find("Action=AssumeRole&") >= 0, req.body_text())
-    assert_true(req.body_text().find("RoleArn=" + role + "&") >= 0, req.body_text())
+    assert_true(req.body.find("Action=AssumeRole&") >= 0, req.body)
+    assert_true(req.body.find("RoleArn=" + role + "&") >= 0, req.body)
     assert_equal(req.header("X-Amz-Date"), "20260915T120000Z")
     assert_true(
         req.header("Authorization").find(

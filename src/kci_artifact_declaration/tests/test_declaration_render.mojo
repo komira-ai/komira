@@ -62,6 +62,8 @@ def test_example_file_renders_the_buck2_build() raises:
         _argv(
             "buck2",
             "build",
+            "--config-file",
+            "/etc/kci/remote.buckconfig",
             "//src/komira_encoding:komira_encoding_conda[release]",
             "--out",
             "/work/out/komira_encoding",

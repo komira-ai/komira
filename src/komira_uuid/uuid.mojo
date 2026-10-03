@@ -35,11 +35,12 @@
 # arithmetic in this file at all — all byte access goes through `SIMD` /
 # `Array` indexing, so there is no `# SAFETY:` site to annotate.
 #
-# Time source:   komira_clock.now_unix_ms() — wall-clock ms since
-#                Unix epoch (CLOCK_REALTIME, through komira_clock's one clock
-#                binding). A caller that needs a deterministic timestamp passes
-#                `now_ms` to `generate_uuidv7` / `Uuidv7Generator.generate`
-#                instead; the clock itself has no override.
+# Time source:   komira_uuid.clock.now_unix_ms() — wall-clock ms since
+#                Unix epoch (CLOCK_REALTIME, vDSO-accelerated). A caller that
+#                needs a deterministic timestamp passes `now_ms` to
+#                `generate_uuidv7` / `Uuidv7Generator.generate` instead; the
+#                clock itself has no override. See clock.mojo's header for why
+#                this package owns its clock.
 # Randomness:    komira_uuid.entropy.system_entropy() — AWS-LC RAND_bytes
 #                CSPRNG (the same AWS-LC entrypoint `komira_crypto` uses).
 #                This package declares that C symbol itself, to stay a leaf;
@@ -50,7 +51,7 @@
 
 from komira_atomic_alias import AtomicU64
 
-from komira_clock import now_unix_ms
+from komira_uuid.clock import now_unix_ms
 from komira_uuid.entropy import system_entropy
 
 

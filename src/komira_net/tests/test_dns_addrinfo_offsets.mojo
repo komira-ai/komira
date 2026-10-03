@@ -3,7 +3,7 @@
 # =============================================================================
 # HERMETIC unit test for the platform-branched `struct
 # addrinfo` field-offset parser (`_collect_a_records_from_addrinfo_list` in
-# komira_net.dns).
+# komira_async.net.dns).
 #
 # The motivation: BSD/Darwin's `struct addrinfo` SWAPS `ai_addr` and
 # `ai_canonname` relative to glibc — ai_addr lives at +32 on macOS but +24 on
@@ -201,4 +201,4 @@ def main() raises:
     test_canonname_offset_not_mistaken_for_addr()
     test_skips_non_inet_and_walks_next()
     test_empty_list_null_head()
-    print("PASS komira_net.dns addrinfo field-offset parser")
+    print("PASS komira_async.net.dns addrinfo field-offset parser")

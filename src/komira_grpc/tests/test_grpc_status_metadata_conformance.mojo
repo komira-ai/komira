@@ -45,7 +45,7 @@ from komira_grpc import (
     GRPC_STATUS_UNIMPLEMENTED,
     GRPC_STATUS_UNKNOWN,
 )
-from komira_http_client.header_map import HeaderMap
+from komira_http.client.header_map import HeaderMap
 
 
 # =============================================================================

@@ -27,7 +27,7 @@
 # Encapsulation: NO UnsafePointer in any public sig.
 # =============================================================================
 
-from komira_http_core.transport.grpc_emit import (
+from komira_http.transport.grpc_emit import (
     GRPC_KIND_CLIENT_STREAM,
     GRPC_KIND_SERVER_STREAM,
     GRPC_KIND_UNARY,

@@ -115,4 +115,4 @@ def main() raises:
     test_dotted_quad_byte_order()
     test_non_literal_returns_none()
     test_malformed_literal_raises()
-    print("PASS komira_net.dns parse_ip_literal")
+    print("PASS komira_async.net.dns parse_ip_literal")

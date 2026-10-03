@@ -33,7 +33,7 @@ def _items(field: String, xs: String) -> String:
 def _bs(
     name: String = String("buck2"),
     exe: String = String("buck2"),
-    args: String = String("build|--keep-going"),
+    args: String = String("build|--config-file|/etc/kci/remote.buckconfig"),
 ) -> String:
     var out = String("build_systems {\n")
     if name.byte_length() > 0:

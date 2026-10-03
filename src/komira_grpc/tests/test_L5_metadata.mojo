@@ -27,7 +27,7 @@ from komira_grpc import (
     base64_encode_standard,
     base64_decode_standard,
 )
-from komira_http_client.header_map import HeaderMap
+from komira_http.client.header_map import HeaderMap
 
 
 def test_t1_metadata_set_drain_text() raises:

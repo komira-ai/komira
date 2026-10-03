@@ -58,7 +58,7 @@ from komira_connect.envelope import (
 from komira_connect.codec_connect_json import (
     build_connect_end_stream_json,
 )
-from komira_http_client.header_map import HeaderMap
+from komira_http.client.header_map import HeaderMap
 
 
 # =============================================================================

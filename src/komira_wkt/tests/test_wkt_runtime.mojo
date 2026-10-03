@@ -14,7 +14,7 @@
 #      `from_proto3_json()` round-tripped back.
 # =============================================================================
 
-from std.testing import assert_equal, assert_true, assert_false, assert_raises
+from std.testing import assert_equal, assert_true, assert_false
 
 from komira_proto_codec import encode_proto, decode_proto
 
@@ -226,38 +226,6 @@ def test_float_double_values() raises:
     assert_false(DoubleValue.is_json_string())
 
 
-def test_wrapper_string_helpers_follow_the_codec() raises:
-    """The string helpers write and read what the codec arms do: a
-    shortest-form double, the spec's non-finite strings, and the 64- and
-    32-bit bounds refused rather than wrapped."""
-    assert_equal(DoubleValue(Float64(0.5)).to_proto3_json(), String("0.5"))
-    var inf = Float64(1.0e308) * Float64(10.0)
-    assert_equal(DoubleValue(inf - inf).to_proto3_json(), String('"NaN"'))
-    assert_equal(DoubleValue(-inf).to_proto3_json(), String('"-Infinity"'))
-    assert_equal(FloatValue(Float32(1.5)).to_proto3_json(), String("1.5"))
-    assert_equal(DoubleValue.from_proto3_json(String("0.5")).value, 0.5)
-    var nan = DoubleValue.from_proto3_json(String('"NaN"')).value
-    assert_true(nan != nan)
-    assert_equal(
-        Int64Value.from_proto3_json(String("-9223372036854775808")).value,
-        Int64(-9223372036854775807) - 1,
-    )
-    with assert_raises():
-        _ = Int64Value.from_proto3_json(String("9223372036854775808"))
-    assert_equal(
-        UInt64Value.from_proto3_json(String("18446744073709551615")).value,
-        UInt64(18446744073709551615),
-    )
-    with assert_raises():
-        _ = UInt64Value.from_proto3_json(String("18446744073709551616"))
-    with assert_raises(contains="out of range"):
-        _ = Int32Value.from_proto3_json(String("2147483648"))
-    with assert_raises(contains="out of range"):
-        _ = UInt32Value.from_proto3_json(String("4294967296"))
-    with assert_raises():
-        _ = Int64Value.from_proto3_json(String("1.5"))
-
-
 def test_bool_value() raises:
     var t = BoolValue(True)
     var tb = encode_proto[BoolValue](t)
@@ -385,7 +353,7 @@ def test_struct_roundtrip() raises:
     # The literal-JSON form (insertion order preserved).
     assert_equal(
         s.to_proto3_json(),
-        String('{"name":"example","active":true,"meta":{"count":3}}'),
+        String('{"name":"example","active":true,"meta":{"count":3.0}}'),
     )
 
 
@@ -402,13 +370,13 @@ def test_list_value_roundtrip() raises:
     assert_equal(back.values[0].kind, VALUE_KIND_NUMBER)
     assert_equal(back.values[1].string_value, String("two"))
 
-    assert_equal(lv.to_proto3_json(), String('[1,"two",false]'))
+    assert_equal(lv.to_proto3_json(), String('[1.0,"two",false]'))
 
 
 def test_value_recursive_json() raises:
     """A deeply recursive Value (object -> array -> object) round-trips
     through the canonical JSON form."""
-    var doc = String('{"items":[{"id":1},{"id":2.5}],"ok":true}')
+    var doc = String('{"items":[{"id":1.0},{"id":2.0}],"ok":true}')
     var v = Value.from_proto3_json(doc)
     assert_equal(v.kind, VALUE_KIND_STRUCT)
     # to_proto3_json reproduces the document byte-for-byte (key order kept).
@@ -418,25 +386,6 @@ def test_value_recursive_json() raises:
     var b = encode_proto[Value](v)
     var back = decode_proto[Value](b^)
     assert_equal(back.to_proto3_json(), doc)
-
-
-def test_struct_binary_repeated_key_last_write_wins() raises:
-    """A key repeated on the wire is one map entry holding the last value,
-    as `put` and the JSON reader give."""
-    var keys = List[String]()
-    keys.append(String("a"))
-    keys.append(String("b"))
-    keys.append(String("a"))
-    var values = List[Value]()
-    values.append(Value.number(Float64(1.0)))
-    values.append(Value.number(Float64(2.0)))
-    values.append(Value.number(Float64(3.0)))
-    var wire = encode_proto[Struct](Struct(keys^, values^))
-    var back = decode_proto[Struct](wire^)
-    assert_equal(len(back.keys), 2)
-    assert_equal(back.keys[0], String("a"))
-    assert_equal(back.values[0].number_value, Float64(3.0))
-    assert_equal(back.keys[1], String("b"))
 
 
 def main() raises:
@@ -452,8 +401,6 @@ def main() raises:
     test_int64_value()
     test_uint_values()
     test_float_double_values()
-    test_wrapper_string_helpers_follow_the_codec()
-    test_struct_binary_repeated_key_last_write_wins()
     test_bool_value()
     test_string_value()
     test_bytes_value()

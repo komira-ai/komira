@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_net.dns — host resolution above the socket layer
+# komira_async.net.dns — host resolution above the socket layer
 # =============================================================================
 # The DNS resolver: API surface, FFI/SAFETY plan, IP-literal fast path,
 # error model. IPv4 (AF_INET) only. HTTP-site wiring, caching, IPv6 and

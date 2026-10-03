@@ -65,7 +65,7 @@ conda_closure(
         "lib/libgcc_s.so.1": ":libgcc_15.3.0_linux-64.conda",
         "lib/libstdc++.so.6": ":libstdcxx_15.3.0_linux-64.conda",
     },
-    package = ":" + pinned_kwargs("linux-x86_64", "mojo_compiler")["name"],
+    package = ":mojo_compiler_1.0.0_linux-64.conda",
     unpacker = ":conda_unpack",
     visibility = ["PUBLIC"],
 )

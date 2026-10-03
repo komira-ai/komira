@@ -563,6 +563,7 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
 // is in packaging/conda/README.md.
 
 const conda_subdir = "linux-64";
+const conda_build = "0";
 const conda_metadata = "{\"conda_pkg_format_version\":2}";
 const mojo_conda_name = "mojo-compiler";
 const payload_dir = "lib/mojo/";
@@ -803,25 +804,6 @@ fn decimal(s: []const u8) bool {
     return true;
 }
 
-/// The version of every package: the Mojo compiler version they are built
-/// with, pinned by the platform table, so a conda version: it starts with a digit and holds
-/// letters, digits, `.`, `_` and `+` only (a `-` would make the file name
-/// ambiguous).
-fn compilerVersion(v: []const u8) []const u8 {
-    if (v.len == 0 or !std.ascii.isDigit(v[0])) fail("compiler version `{s}` does not start with a digit", .{v});
-    for (v) |c| if (!(std.ascii.isAlphanumeric(c) or c == '.' or c == '_' or c == '+')) fail("compiler version `{s}` holds `{c}`", .{ v, c });
-    return v;
-}
-
-/// The build string of a release: `h<first 8 hex of the source commit>_<N>`,
-/// N the build number. An unstamped build (N is 0, no commit) is
-/// `h00000000_0`. Two builds of one name and version differ in N, and in the
-/// commit they came from, so the string names both.
-fn buildString(alloc: Alloc, commit: []const u8, number: i64) ![]const u8 {
-    const head: []const u8 = if (commit.len >= 8) commit[0..8] else "00000000";
-    return std.fmt.allocPrint(alloc, "h{s}_{d}", .{ head, number });
-}
-
 fn guardFor(subdir: []const u8) []const u8 {
     if (std.mem.eql(u8, subdir, conda_subdir)) return "__linux";
     fail("subdir `{s}`: this tool writes {s} only (an arm64 or macOS package needs its own payload and guard)", .{ subdir, conda_subdir });
@@ -829,27 +811,25 @@ fn guardFor(subdir: []const u8) []const u8 {
 
 /// The run requirements of a library, in the order they are written and
 /// checked: the platform guard, the exact Mojo pin, then each direct
-/// dependency at this version AND this build string (`name ==V BUILD`), sorted.
-/// Every package of a release is lockstep, so a dependency's build string is
-/// this package's. Direct dependencies only: the solver's closure is the
-/// build's.
-fn runRequirements(alloc: Alloc, subdir: []const u8, pin: []const u8, version: []const u8, build: []const u8, deps: []const []const u8) ![][]const u8 {
+/// dependency at this version, sorted. Direct dependencies only: every
+/// package is lockstep, so the solver's closure is the build's.
+fn runRequirements(alloc: Alloc, subdir: []const u8, pin: []const u8, version: []const u8, deps: []const []const u8) ![][]const u8 {
     var list = std.ArrayList([]const u8).init(alloc);
     try list.append(guardFor(subdir));
     try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ mojo_conda_name, pin }));
     const sorted = try alloc.dupe([]const u8, deps);
     std.mem.sort([]const u8, sorted, {}, lessStr);
-    for (sorted) |d| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ d, version, build }));
+    for (sorted) |d| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ d, version }));
     return list.toOwnedSlice();
 }
 
 /// The run requirements of the metapackage: the platform guard, then every
-/// member at exactly its version and build string, sorted by name. No compiler
-/// pin: the members carry it.
+/// member at exactly its version, sorted by name. No compiler pin: the members
+/// carry it.
 fn metaRequirements(alloc: Alloc, subdir: []const u8, members: []const Member) ![][]const u8 {
     var list = std.ArrayList([]const u8).init(alloc);
     try list.append(guardFor(subdir));
-    for (members) |m| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s} {s}", .{ m.name, m.version, m.build }));
+    for (members) |m| try list.append(try std.fmt.allocPrint(alloc, "{s} =={s}", .{ m.name, m.version }));
     return list.toOwnedSlice();
 }
 
@@ -887,6 +867,19 @@ fn dlopenReason(alloc: Alloc, dir_path: []const u8) !?[]const u8 {
     }
     if (files == 0) fail("sources {s} hold no .mojo file", .{dir_path});
     return null;
+}
+
+/// `<prefix>.<stamp>` from --version-prefix (the one line, MAJOR.MINOR) and
+/// --stamp (a decimal; 0 is an unstamped build).
+fn versionOf(alloc: Alloc, a: Args) ![]const u8 {
+    const prefix_text = std.mem.trim(u8, readAll(alloc, need(one(a, "--version-prefix"), "--version-prefix")), " \t\r\n");
+    var parts = std.mem.splitScalar(u8, prefix_text, '.');
+    const major = parts.next() orelse "";
+    const minor = parts.next() orelse "";
+    if (!decimal(major) or !decimal(minor) or parts.next() != null) fail("version prefix `{s}` is not MAJOR.MINOR", .{prefix_text});
+    const stamp = need(one(a, "--stamp"), "--stamp");
+    if (!decimal(stamp)) fail("--stamp `{s}` is not a decimal number without leading zeros", .{stamp});
+    return std.fmt.allocPrint(alloc, "{s}.{s}.{s}", .{ major, minor, stamp });
 }
 
 /// The source commit of a stamp (--commit): empty only for an unstamped build.
@@ -935,9 +928,7 @@ fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_entr
 //
 // Every package is written as one DIRECTORY (--out-dir):
 //
-//   <name>-<version>-<build>.conda   the package; this is the name the channel
-//                              carries. <version> is the Mojo compiler version,
-//                              <build> is `h<8 hex of the source commit>_<N>`
+//   <name>-<version>-0.conda   the package; this is the name the channel carries
 //   manifest.json              the artifact manifest, exactly the contract of
 //                              kci's `kci_artifact_manifest`: seven string keys,
 //                              compact, in this order, one trailing newline:
@@ -995,11 +986,11 @@ fn contractManifest(alloc: Alloc, name: []const u8, version: []const u8, subdir:
     return out.toOwnedSlice();
 }
 
-fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, name: []const u8, version: []const u8, build: []const u8, number: i64, subdir: []const u8, metadata: *json.Value) !void {
+fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, name: []const u8, version: []const u8, subdir: []const u8, metadata: *json.Value) !void {
     const conda_sha = sha256Hex(conda);
     const file = try std.fmt.allocPrint(alloc, "{s}.conda", .{stem});
-    try metadata.object.put("build", str(build));
-    try metadata.object.put("build_number", .{ .integer = number });
+    try metadata.object.put("build", str(conda_build));
+    try metadata.object.put("build_number", .{ .integer = 0 });
     try metadata.object.put("file_name", str(file));
     try metadata.object.put("name", str(name));
     try metadata.object.put("schema", .{ .integer = 1 });
@@ -1013,22 +1004,20 @@ fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, name:
     try writeFile(d, conda_manifest_metadata, try jsonLine(alloc, metadata.*));
 }
 
-/// komira_pack conda --name N --import-name I --stamp N
+/// komira_pack conda --name N --import-name I --version-prefix FILE --stamp N
 ///     --timestamp-ms T [--commit SHA] --subdir linux-64 --mojo-pin V
 ///     --license SPDX --summary S --home URL --payload F.mojoc [--dep NAME]...
 ///     --sources DIR --extra-file info/licenses/LICENSE=FILE --label L
 ///     --out-dir D
 /// komira_pack conda --name N --refuse REASON --out-dir D
 ///
-/// The version is --mojo-pin V, the Mojo compiler version the library was built
-/// with, and the run requirement `mojo-compiler ==V` pins the same value. The
-/// release iteration is the build number --stamp N (0 is an unstamped build),
-/// and the build string is `h<8 hex of --commit>_<N>`. N (the option) is the
+/// The version is `<prefix>.<stamp>` (the prefix is the one line of
+/// --version-prefix, MAJOR.MINOR; stamp 0 is an unstamped build). N is the
 /// CONDA name, I the import name (the `.mojoc`'s name); each --dep is the
 /// conda name of a direct dependency. With --refuse, the package is not made
 /// and D holds REFUSED instead.
 fn cmdConda(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--label", "--commit", "--refuse", "--out-dir" });
+    allow(a, &.{ "--version-prefix", "--stamp", "--timestamp-ms", "--subdir", "--mojo-pin", "--license", "--summary", "--home", "--payload", "--dep", "--sources", "--import-name", "--extra-file", "--label", "--commit", "--refuse", "--out-dir" });
     const name = need(a.name, "--name");
     if (one(a, "--refuse")) |why| {
         try writeRefusal(alloc, a, why);
@@ -1048,10 +1037,8 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     const pin = plain(need(one(a, "--mojo-pin"), "--mojo-pin"), "mojo pin", "");
     if (!decimal(std.mem.sliceTo(pin, '.'))) fail("mojo pin `{s}` is not an exact version", .{pin});
 
-    const version = compilerVersion(pin);
+    const version = try versionOf(alloc, a);
     const stamp = need(one(a, "--stamp"), "--stamp");
-    if (!decimal(stamp)) fail("--stamp `{s}` is not a decimal number without leading zeros", .{stamp});
-    const number = std.fmt.parseInt(i64, stamp, 10) catch unreachable;
     const ts_text = need(one(a, "--timestamp-ms"), "--timestamp-ms");
     const timestamp = std.fmt.parseInt(i64, ts_text, 10) catch fail("--timestamp-ms `{s}` is not an integer", .{ts_text});
 
@@ -1059,7 +1046,6 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     // stamped package must carry it, so a stamp is tied to git and not just to
     // a number someone typed; an unstamped one carries it only if given.
     const commit = commitOf(a, stamp);
-    const build = try buildString(alloc, commit, number);
 
     if (try dlopenReason(alloc, need(one(a, "--sources"), "--sources"))) |why| {
         try writeRefusal(alloc, a, why);
@@ -1072,11 +1058,11 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     const payload_sha = sha256Hex(payload);
 
     // info/
-    const depends = try runRequirements(alloc, subdir, pin, version, build, deps);
+    const depends = try runRequirements(alloc, subdir, pin, version, deps);
     var index = newObject(alloc);
     try index.object.put("arch", str("x86_64"));
-    try index.object.put("build", str(build));
-    try index.object.put("build_number", .{ .integer = number });
+    try index.object.put("build", str(conda_build));
+    try index.object.put("build_number", .{ .integer = 0 });
     try index.object.put("depends", try strArray(alloc, depends));
     try index.object.put("license", str(need(one(a, "--license"), "--license")));
     try index.object.put("name", str(name));
@@ -1101,7 +1087,7 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
     try aboutAndLicense(alloc, a, &info_entries);
 
-    const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, build });
+    const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, conda_build });
     var pkg_entries = [_]Entry{.{ .path = payload_path, .mode = 0o644, .data = payload }};
     const conda = try assembleConda(alloc, stem, &pkg_entries, info_entries.items);
 
@@ -1116,7 +1102,7 @@ fn cmdConda(alloc: Alloc, a: Args) !void {
     try m.object.put("source_commit", str(commit));
     try m.object.put("stamped", .{ .bool = !std.mem.eql(u8, stamp, "0") });
     try m.object.put("timestamp_ms", .{ .integer = timestamp });
-    try emitPackage(alloc, a, stem, conda, name, version, build, number, subdir, &m);
+    try emitPackage(alloc, a, stem, conda, name, version, subdir, &m);
 }
 
 // ---- the metapackage -----------------------------------------------------
@@ -1132,8 +1118,6 @@ const Member = struct {
     version: []const u8,
     subdir: []const u8,
     sha256: []const u8,
-    build: []const u8,
-    build_number: i64,
     commit: []const u8,
     timestamp: i64,
     stamped: bool,
@@ -1194,8 +1178,6 @@ fn readMember(alloc: Alloc, path: []const u8) !Member {
         .version = memberStr(doc, "version", path),
         .subdir = memberStr(doc, "subdir", path),
         .sha256 = memberStr(doc, "sha256", path),
-        .build = memberStr(meta, "build", meta_path),
-        .build_number = memberInt(meta, "build_number", meta_path),
         .commit = memberStr(meta, "source_commit", meta_path),
         .timestamp = memberInt(meta, "timestamp_ms", meta_path),
         .stamped = memberBool(meta, "stamped", meta_path),
@@ -1222,7 +1204,6 @@ fn readMembers(alloc: Alloc, a: Args) ![]Member {
         if (!std.mem.eql(u8, m.version, f.version)) fail("members are not one release: {s} is at {s}, {s} at {s}", .{ f.name, f.version, m.name, m.version });
         if (!std.mem.eql(u8, m.subdir, f.subdir)) fail("members are not one subdir: {s} is {s}, {s} is {s}", .{ f.name, f.subdir, m.name, m.subdir });
         if (!std.mem.eql(u8, m.commit, f.commit)) fail("members are not one source commit: {s} and {s} differ", .{ f.name, m.name });
-        if (!std.mem.eql(u8, m.build, f.build) or m.build_number != f.build_number) fail("members are not one release: {s} is build {s}, {s} is build {s}", .{ f.name, f.build, m.name, m.build });
         if (m.timestamp != f.timestamp or m.stamped != f.stamped) fail("members are not one release: {s} and {s} differ in commit time or stamp", .{ f.name, m.name });
     }
     return members;
@@ -1233,29 +1214,25 @@ fn readMembers(alloc: Alloc, a: Args) ![]Member {
 ///     --label L --out-dir D
 ///
 /// The metapackage: no file, run requirements that are exactly the platform
-/// guard and every member at its own version and build string. Its version,
-/// build, subdir, source commit and commit time are the members' (which must
-/// agree); --mojo-pin V, if given, must be that version. Installing it
+/// guard and every member at its own version. Its version, subdir, source
+/// commit and commit time are the members' (which must agree). Installing it
 /// installs the whole set, and a registry that receives it LAST makes it the
 /// switch for users.
 fn cmdCondaMeta(alloc: Alloc, a: Args) !void {
-    allow(a, &.{ "--member-manifest", "--mojo-pin", "--license", "--summary", "--home", "--extra-file", "--label", "--out-dir" });
+    allow(a, &.{ "--member-manifest", "--license", "--summary", "--home", "--extra-file", "--label", "--out-dir" });
     const name = need(a.name, "--name");
     if (!validName(name)) fail("metapackage name `{s}` is not lowercase letters, digits and _, starting with a letter", .{name});
     const members = try readMembers(alloc, a);
     for (members) |m| if (std.mem.eql(u8, m.name, name)) fail("metapackage name `{s}` is also a member", .{name});
     const version = members[0].version;
-    if (one(a, "--mojo-pin")) |pin| expectEq("the members' version (it must be the compiler version)", version, pin);
-    const build = members[0].build;
-    const number = members[0].build_number;
     const subdir = members[0].subdir;
     const timestamp = members[0].timestamp;
 
     const depends = try metaRequirements(alloc, subdir, members);
     var index = newObject(alloc);
     try index.object.put("arch", str("x86_64"));
-    try index.object.put("build", str(build));
-    try index.object.put("build_number", .{ .integer = number });
+    try index.object.put("build", str(conda_build));
+    try index.object.put("build_number", .{ .integer = 0 });
     try index.object.put("depends", try strArray(alloc, depends));
     try index.object.put("license", str(need(one(a, "--license"), "--license")));
     try index.object.put("name", str(name));
@@ -1271,14 +1248,13 @@ fn cmdCondaMeta(alloc: Alloc, a: Args) !void {
     try info_entries.append(.{ .path = "info/index.json", .mode = 0o644, .data = try jsonLine(alloc, index) });
     try info_entries.append(.{ .path = "info/paths.json", .mode = 0o644, .data = try jsonLine(alloc, paths) });
     try aboutAndLicense(alloc, a, &info_entries);
-    const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, build });
+    const stem = try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, conda_build });
     var no_files = [_]Entry{};
     const conda = try assembleConda(alloc, stem, &no_files, info_entries.items);
 
     var rows = newArray(alloc);
     for (members) |m| {
         var row = newObject(alloc);
-        try row.object.put("build", str(m.build));
         try row.object.put("name", str(m.name));
         try row.object.put("sha256", str(m.sha256));
         try row.object.put("version", str(m.version));
@@ -1292,7 +1268,7 @@ fn cmdCondaMeta(alloc: Alloc, a: Args) !void {
     try md.object.put("source_commit", str(members[0].commit));
     try md.object.put("stamped", .{ .bool = members[0].stamped });
     try md.object.put("timestamp_ms", .{ .integer = timestamp });
-    try emitPackage(alloc, a, stem, conda, name, version, build, number, subdir, &md);
+    try emitPackage(alloc, a, stem, conda, name, version, subdir, &md);
 }
 
 // ---- reading a package back ----------------------------------------------
@@ -1331,10 +1307,7 @@ fn sortedNames(alloc: Alloc, dir_path: []const u8) ![][]const u8 {
 /// komira_pack conda-check --dir D --kind library|metapackage --name N
 ///     --expect-subdir S [--require-stamped true] --out MARKER
 ///   library:     --import-name I --mojo-pin V --payload F.mojoc [--dep NAME]...
-///   metapackage: --member-manifest M.json... [--mojo-pin V]
-///
-/// V is the Mojo compiler version: the package's version must BE it (a package
-/// whose version is not the pinned compiler's is refused).
+///   metapackage: --member-manifest M.json...
 ///
 /// Reads the package directory back, not through the code that wrote it: the
 /// manifest (it must be the artifact-manifest contract exactly), the metadata,
@@ -1385,7 +1358,8 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     const info = parts.info;
     const pkg = parts.pkg;
     if (!validName(name)) fail("name `{s}` is not a conda name", .{name});
-    if (one(a, "--mojo-pin")) |pin| expectEq("version (it must be the Mojo compiler version)", version, compilerVersion(pin));
+    expectEq("file name", file_name, try std.fmt.allocPrint(alloc, "{s}-{s}-{s}.conda", .{ name, version, conda_build }));
+    expectEq("member stem", parts.stem, try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, conda_build }));
 
     // info/: exactly the files a consumer reads, plus licences.
     var saw_license = false;
@@ -1412,16 +1386,17 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     expectEq("index subdir", memberStr(index, "subdir", "index"), subdir);
     expectEq("index platform", memberStr(index, "platform", "index"), "linux");
     expectEq("index arch", memberStr(index, "arch", "index"), "x86_64");
-    _ = compilerVersion(version);
-    const build = memberStr(index, "build", "index");
-    const number = memberInt(index, "build_number", "index");
-    if (number < 0) fail("index build_number {d} is negative", .{number});
-    expectEq("file name", file_name, try std.fmt.allocPrint(alloc, "{s}-{s}-{s}.conda", .{ name, version, build }));
-    expectEq("member stem", parts.stem, try std.fmt.allocPrint(alloc, "{s}-{s}-{s}", .{ name, version, build }));
-    const stamped = number != 0;
+    expectEq("index build", memberStr(index, "build", "index"), conda_build);
+    if (memberInt(index, "build_number", "index") != 0) fail("index build_number is not 0", .{});
+    var vparts = std.mem.splitScalar(u8, version, '.');
+    const v_major = vparts.next() orelse "";
+    const v_minor = vparts.next() orelse "";
+    const v_stamp = vparts.next() orelse "";
+    if (!decimal(v_major) or !decimal(v_minor) or !decimal(v_stamp) or vparts.next() != null) fail("version `{s}` is not MAJOR.MINOR.N", .{version});
+    const stamped = !std.mem.eql(u8, v_stamp, "0");
     const timestamp = memberInt(index, "timestamp", "index");
     if (require_stamped) {
-        if (!stamped) fail("version {s} was never stamped (the build number is 0): a release has a real build number", .{version});
+        if (!stamped) fail("version {s} was never stamped (N is 0): a release has a real N", .{version});
         // A release is tied to git: a positive commit time, and the commit the stamp came from.
         if (timestamp <= 0) fail("version {s} is stamped but its index timestamp is not positive: a release carries its commit's time", .{version});
     }
@@ -1433,15 +1408,13 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         for (members) |m| {
             if (std.mem.eql(u8, m.name, name)) fail("the metapackage `{s}` is also a member", .{name});
             expectEq("member version", m.version, version);
-            expectEq("member build", m.build, build);
-            if (m.build_number != number) fail("member {s} has build number {d}, the metapackage {d}", .{ m.name, m.build_number, number });
             expectEq("member subdir", m.subdir, subdir);
         }
     }
     const want = if (is_meta)
         try metaRequirements(alloc, subdir, members)
     else
-        try runRequirements(alloc, subdir, need(one(a, "--mojo-pin"), "--mojo-pin"), version, build, try all(alloc, a, "--dep"));
+        try runRequirements(alloc, subdir, need(one(a, "--mojo-pin"), "--mojo-pin"), version, try all(alloc, a, "--dep"));
     const depends = member(index, "depends", "index");
     if (depends != .array or depends.array.items.len != want.len) fail("index depends has {d} entries, must be {d} (the platform guard{s} and each requirement at its version)", .{ if (depends == .array) depends.array.items.len else 0, want.len, @as([]const u8, if (is_meta) "" else ", the exact compiler pin") });
     for (depends.array.items, want) |got, w| {
@@ -1485,8 +1458,8 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     expectEq("metadata name", memberStr(md, "name", "metadata"), name);
     expectEq("metadata version", memberStr(md, "version", "metadata"), version);
     expectEq("metadata subdir", memberStr(md, "subdir", "metadata"), subdir);
-    expectEq("metadata build", memberStr(md, "build", "metadata"), build);
-    if (memberInt(md, "build_number", "metadata") != number) fail("metadata build_number differs from the index", .{});
+    expectEq("metadata build", memberStr(md, "build", "metadata"), conda_build);
+    if (memberInt(md, "build_number", "metadata") != 0) fail("metadata build_number is not 0", .{});
     expectEq("metadata file_name", memberStr(md, "file_name", "metadata"), file_name);
     if (memberInt(md, "size", "metadata") != @as(i64, @intCast(bytes.len))) fail("metadata size differs from the file", .{});
     if (memberInt(md, "timestamp_ms", "metadata") != timestamp) fail("metadata timestamp_ms differs from the index", .{});
@@ -1494,8 +1467,6 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     const commit = memberStr(md, "source_commit", "metadata");
     if (commit.len != 0 and !fullCommit(commit)) fail("metadata source_commit `{s}` is not a full lowercase 40-digit hex commit id", .{commit});
     if (stamped and commit.len == 0) fail("metadata source_commit is empty on a stamped package", .{});
-    // The build string names the commit and the number: h<8 hex of source_commit>_<N>.
-    expectEq("index build (h<first 8 hex of the source commit>_<build number>)", build, try buildString(alloc, commit, number));
     if (require_stamped and !fullCommit(commit)) fail("a release must carry the source commit of its stamp in the metadata", .{});
     const mdeps = member(md, "depends", "metadata");
     if (mdeps != .array or mdeps.array.items.len != want.len) fail("metadata depends differ from info/index.json", .{});
@@ -1510,7 +1481,6 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         for (members, rows_md.array.items) |m, r| {
             expectEq("metadata member name", memberStr(r, "name", "member row"), m.name);
             expectEq("metadata member version", memberStr(r, "version", "member row"), m.version);
-            expectEq("metadata member build", memberStr(r, "build", "member row"), m.build);
             expectEq("metadata member sha256", memberStr(r, "sha256", "member row"), m.sha256);
         }
     } else {

@@ -40,9 +40,6 @@
 # =============================================================================
 
 
-from komira_json import JsonValue
-
-
 # =============================================================================
 # ProtoEnum — the format-neutral enum mapping a generated enum conforms to.
 #
@@ -686,44 +683,4 @@ trait Serializable(Copyable, Movable):
 
     @staticmethod
     def decode[D: WireDecoder](mut dec: D) raises -> Self:
-        ...
-
-
-# =============================================================================
-# Proto3JsonWkt — a well-known type with its own proto3-JSON form.
-#
-# The protobuf JSON mapping gives each `google.protobuf.*` well-known type a
-# SPECIAL JSON form instead of the `{field: value}` object every other
-# message gets. `Serializable.encode/decode` cannot say that — one body
-# serves both backends — so a WKT ALSO conforms to this trait, and the
-# proto3-JSON backend's ordinary message arms (`write_message_field` /
-# `write_message_element`, `read_message` / `read_into_repeated_message` /
-# `read_into_string_message_map`) and the top-level `encode_json` /
-# `decode_json*` dispatch on it at comptime
-# (`comptime if conforms_to(T, Proto3JsonWkt)`). There is deliberately no
-# WKT-specific arm: a parallel arm whose wrong twin still compiles is how a
-# WKT ends up in its binary-shaped JSON. On that backend:
-#
-#   - `write_proto3_json` appends ONE COMPLETE JSON value to `buf`: quoted
-#     where the canonical form is a string (`"1.5s"`), bare where it is a
-#     number / bool / object / array. A caller never adds quotes.
-#   - `read_proto3_json` reads from the field's ALREADY-PARSED `JsonValue`
-#     (never re-parses text) and refuses anything the spec does not accept.
-#
-# The protobuf-binary backend never calls either: a WKT is an ordinary
-# message on that wire, so its `Serializable` body is what runs there.
-# =============================================================================
-
-
-trait Proto3JsonWkt(Serializable):
-    """A `Serializable` message whose proto3-JSON form is special-cased by
-    the protobuf JSON mapping (the `google.protobuf.*` well-known types)."""
-
-    def write_proto3_json(self, mut buf: List[UInt8]) raises:
-        """Append the complete canonical JSON value for `self` to `buf`."""
-        ...
-
-    @staticmethod
-    def read_proto3_json(v: JsonValue) raises -> Self:
-        """Read a `Self` from its canonical JSON value."""
         ...

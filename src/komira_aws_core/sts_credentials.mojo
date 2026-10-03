@@ -38,8 +38,7 @@ from .credential_transport import (
     host_header,
 )
 from .sigv4 import Header, SigV4SigningContext, sigv4_sign, uri_encode
-from ._text import bytes_of, has_control
-from .aws_xml import aws_xml_error_info
+from ._text import has_control
 
 
 comptime STS_API_VERSION: StaticString = "2011-06-15"
@@ -214,7 +213,7 @@ def _sts_request(
     req.headers.append(
         Header(String("Content-Type"), String(_FORM_CONTENT_TYPE))
     )
-    req.set_body_text(body)
+    req.body = body^
     return req^
 
 
@@ -237,7 +236,7 @@ def build_assume_role_with_web_identity(
     _form(body, "WebIdentityToken", web_identity_token)
     var req = _sts_request(region, body^)
     req.headers.append(
-        Header(String("Content-Length"), String(len(req.body)))
+        Header(String("Content-Length"), String(req.body.byte_length()))
     )
     return req^
 
@@ -275,10 +274,10 @@ def build_assume_role(
         source, sts_signing_region(region), String("sts"), amz_date
     )
     var signed = sigv4_sign(
-        req.method, req.target, req.headers, Span(req.body), ctx
+        req.method, req.target, req.headers, req.body.as_bytes(), ctx
     )
     req.headers.append(
-        Header(String("Content-Length"), String(len(req.body)))
+        Header(String("Content-Length"), String(req.body.byte_length()))
     )
     for i in range(len(signed.headers_to_add)):
         req.headers.append(signed.headers_to_add[i])
@@ -309,16 +308,17 @@ def parse_sts_credentials(
     status, is refused naming the STS error code and message."""
     var root = _parse_body(action, resp)
     if root.local == "ErrorResponse" or resp.status != 200:
-        # The body is parsed again inside aws_xml_error_info; this is the
-        # error path only. A CredentialHttpResponse carries no headers, so
-        # no x-amzn-RequestId is passed: the request id, unused in the
-        # message, comes from the body or is "".
-        var err = aws_xml_error_info(
-            resp.status, bytes_of(resp.body), String("")
-        )
+        var code = String("")
+        var message = String("")
+        if root.has_child("Error"):
+            var err = root.first_child("Error")
+            if err.has_child("Code"):
+                code = err.first_child("Code").text
+            if err.has_child("Message"):
+                message = err.first_child("Message").text
         raise Error(
             "STS " + action + " refused (HTTP " + String(resp.status) + "): "
-            + err.code + ": " + err.message
+            + code + ": " + message
         )
     if root.local != action + "Response":
         raise Error("STS " + action + " answered with a " + root.local)

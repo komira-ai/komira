@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # UUIDv7 (RFC 9562): the `Uuid` value type, a stateless generator and a
-# monotonic one, with its CSPRNG declaration; the wall clock is komira_clock's.
+# monotonic one, with the package's own wall clock and CSPRNG declaration.
 # `entropy.mojo` declares AWS-LC's `RAND_bytes` itself (so the package does not
 # depend on `komira_crypto`), which is why aws-lc's libcrypto is a dep.
 mojo_library(
@@ -9,7 +9,6 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
-        "//src/komira_clock:komira_clock",
         "//third_party/aws-lc:crypto",
     ],
     test_srcs = ["tests/test_uuid_v7.mojo"],
