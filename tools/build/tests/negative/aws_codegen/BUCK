@@ -1,11 +1,14 @@
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
 load("//functional/aws_codegen:defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 
 # Planted defects for tests//functional/aws_codegen; each must fail its build
 # (run_tests.sh, test 34).
 
+_LOGS_MODEL = botocore_model("logs")
+
 _LOGS = [
     "--model-sha256",
-    "24a6c5868f1dc6ce9661113f79bc6c51580363957b9b59dad3d530a350183fa2",
+    _LOGS_MODEL.sha256,
     "--service",
     "logs",
     "--operations",
@@ -17,7 +20,7 @@ aws_codegen_golden(
     name = "golden_differs",
     gen_args = _LOGS + ["--pure-only"],
     golden = "//functional/aws_codegen:logs_client_golden",
-    model = "//functional/aws_codegen:logs_model",
+    model = _LOGS_MODEL.model,
     module = "komira_aws_logs",
 )
 
@@ -26,5 +29,5 @@ aws_codegen_refusal(
     name = "accepted",
     expect = "anything",
     gen_args = _LOGS,
-    model = "//functional/aws_codegen:logs_model",
+    model = _LOGS_MODEL.model,
 )
