@@ -15,6 +15,13 @@
 # two documents that differ only in prefix spelling canonicalise identically,
 # and two that differ in the URI a name resolves to do not.
 #
+# A document that is not namespace-well-formed (Namespaces in XML 1.0) is
+# refused: a name with more than one colon or an empty part, a prefix that is
+# not declared in scope, `xmlns:p=""`, a misuse of the reserved `xml` and
+# `xmlns` prefixes or their namespace names, and two attributes with the same
+# expanded name. The `xml` prefix is bound to its namespace without a
+# declaration.
+#
 # `canonical()` is the ORACLE the rest-xml conformance harness compares with.
 # It mirrors botocore's own comparison, which is
 # `xml.etree.ElementTree.canonicalize(body, strip_text=True)` — see
@@ -29,6 +36,7 @@ from .xml_escape import xml_escape_attr, xml_escape_text
 from .xml_reader import (
     XML_END,
     XML_EOF,
+    XML_MAX_DEPTH,
     XML_START,
     XML_TEXT,
     XmlEvent,
@@ -76,9 +84,45 @@ struct XmlNode(Copyable, Movable):
                 return True
         return False
 
+    def child_index(self, local: StringSlice) -> Int:
+        """The position in `children` of the first direct child with this
+        local name, or -1. `node.children[node.child_index("Key")]` borrows
+        that child where `first_child` copies it. (A method returning the
+        reference itself cannot be written over a `List` field: the element
+        origin it would need has no syntax.)"""
+        for i in range(len(self.children)):
+            if self.children[i].local == local:
+                return i
+        return -1
+
+    def children_named(self, local: StringSlice) -> List[Int]:
+        """The positions in `children` of every direct child with this local
+        name, in document order. Empty when there is none."""
+        var at = List[Int]()
+        for i in range(len(self.children)):
+            if self.children[i].local == local:
+                at.append(i)
+        return at^
+
+    def child_text(self, local: StringSlice) raises -> String:
+        """The direct text of the first child with this local name, as
+        written; only that string is copied. Raises if there is no such
+        child, naming it."""
+        var i = self.child_index(local)
+        if i < 0:
+            raise Error("xml: no child <" + String(local) + ">")
+        return self.children[i].text.copy()
+
+    def trimmed_text(self) -> String:
+        """`text` without leading and trailing XML whitespace (SP, TAB, CR,
+        LF). `text` itself is every direct text run, as written, so an
+        element with indented children carries the indentation."""
+        return _strip(self.text)
+
     def first_child(self, local: StringSlice) raises -> XmlNode:
-        """The first direct child with this local name. Raises if absent —
-        callers guard with `has_child`."""
+        """A COPY of the first direct child with this local name, subtree
+        included. Raises if absent. `child_index` gives a position to borrow
+        through instead."""
         for i in range(len(self.children)):
             if self.children[i].local == local:
                 return self.children[i].copy()
@@ -121,26 +165,10 @@ def _strip(s: StringSlice) -> String:
     return String(unsafe_from_utf8=b[lo:hi])
 
 
-def _local_of(qname: StringSlice) -> String:
-    var b = qname.as_bytes()
-    var lo = 0
-    for i in range(len(b)):
-        if b[i] == 0x3A:
-            lo = i + 1
-    return String(unsafe_from_utf8=b[lo:])
-
-
-def _prefix_of(qname: StringSlice) -> String:
-    var b = qname.as_bytes()
-    for i in range(len(b)):
-        if b[i] == 0x3A:
-            return String(unsafe_from_utf8=b[0:i])
-    return String("")
-
-
 def parse_xml(doc: StringSlice) raises -> XmlNode:
-    """Parse `doc` into a namespace-resolved tree. Raises on malformed input
-    or on a document with no root element."""
+    """Parse `doc` into a namespace-resolved tree. Raises on any input that
+    is not a well-formed (XML 1.0) and namespace-well-formed document, and on
+    any DTD; see `xml_reader.mojo` for the list."""
     var rd = XmlReader.from_string(doc)
     # An explicit stack of (node, ns-scope-marker). Mojo has no recursion-free
     # tree builder in stdlib, so we keep partially-built nodes in a stack and
@@ -170,29 +198,48 @@ def parse_xml(doc: StringSlice) raises -> XmlNode:
             for i in range(ev.attr_count):
                 var an = rd.attr_name(i)
                 if an == "xmlns":
+                    var du = rd.attr_value(i)
+                    if du == _XML_NS or du == _XMLNS_NS:
+                        raise Error(
+                            "xml: the default namespace cannot be the xml or "
+                            + "xmlns namespace name"
+                        )
                     ns_prefix.append(String(""))
-                    ns_uri.append(rd.attr_value(i))
+                    ns_uri.append(du^)
                 elif an.startswith("xmlns:"):
-                    ns_prefix.append(
-                        String(unsafe_from_utf8=an.as_bytes()[6:])
-                    )
-                    ns_uri.append(rd.attr_value(i))
+                    var p = _split_qname(an)[1]
+                    var u = rd.attr_value(i)
+                    _check_binding(p, u)
+                    ns_prefix.append(p^)
+                    ns_uri.append(u^)
             # Pass 2: the ordinary attributes.
             for i in range(ev.attr_count):
                 var an2 = rd.attr_name(i)
                 if an2 == "xmlns" or an2.startswith("xmlns:"):
                     continue
-                var pfx = _prefix_of(an2)
-                node.attr_local.append(_local_of(an2))
+                var parts = _split_qname(an2)
                 # An UNPREFIXED attribute is in NO namespace — the default
                 # xmlns does not apply to attributes (Namespaces in XML §6.2).
-                node.attr_ns.append(
-                    _lookup_ns(ns_prefix, ns_uri, pfx) if pfx != "" else String("")
-                )
+                var ans = String("")
+                if parts[0] != "":
+                    ans = _resolve(ns_prefix, ns_uri, parts[0])
+                # §6.3: no two attributes with the same expanded name.
+                for k in range(len(node.attr_local)):
+                    if node.attr_local[k] == parts[1] and node.attr_ns[k] == ans:
+                        raise Error(
+                            "xml: duplicate attribute "
+                            + _qualified(ans, parts[1]) + " after namespace "
+                            + "resolution"
+                        )
+                node.attr_local.append(parts[1])
+                node.attr_ns.append(ans^)
                 node.attr_value.append(rd.attr_value(i))
             var qn = rd.name_of(ev)
-            node.local = _local_of(qn)
-            node.ns = _lookup_ns(ns_prefix, ns_uri, _prefix_of(qn))
+            var eparts = _split_qname(qn)
+            if eparts[0] == "xmlns":
+                raise Error("xml: element <" + qn + "> uses the reserved xmlns prefix")
+            node.local = eparts[1]
+            node.ns = _resolve(ns_prefix, ns_uri, eparts[0])
             stack.append(node^)
             continue
         # XML_END
@@ -218,15 +265,64 @@ def parse_xml(doc: StringSlice) raises -> XmlNode:
     return root^
 
 
-def _lookup_ns(
+comptime _XML_NS = "http://www.w3.org/XML/1998/namespace"
+comptime _XMLNS_NS = "http://www.w3.org/2000/xmlns/"
+
+
+def _split_qname(qname: StringSlice) raises -> Tuple[String, String]:
+    """(prefix, local) of a Namespaces in XML [7] QName: at most one colon,
+    and never an empty part."""
+    var b = qname.as_bytes()
+    var colon = -1
+    for i in range(len(b)):
+        if b[i] == 0x3A:
+            if colon >= 0:
+                raise Error("xml: name '" + String(qname) + "' has more than one colon")
+            colon = i
+    if colon < 0:
+        return (String(""), String(qname))
+    if colon == 0 or colon == len(b) - 1:
+        raise Error("xml: name '" + String(qname) + "' has an empty prefix or local part")
+    return (
+        String(unsafe_from_utf8=b[0:colon]),
+        String(unsafe_from_utf8=b[colon + 1 :]),
+    )
+
+
+def _check_binding(prefix: StringSlice, uri: StringSlice) raises:
+    """Namespaces in XML 1.0 §3 and [NSC: No Prefix Undeclaring]."""
+    if prefix == "xmlns":
+        raise Error("xml: the xmlns prefix cannot be declared")
+    if prefix == "xml":
+        if String(uri) != _XML_NS:
+            raise Error("xml: the xml prefix can only be bound to " + _XML_NS)
+        return
+    if String(uri) == _XML_NS:
+        raise Error("xml: only the xml prefix can be bound to " + _XML_NS)
+    if String(uri) == _XMLNS_NS:
+        raise Error("xml: no prefix can be bound to the xmlns namespace name")
+    if uri.byte_length() == 0:
+        raise Error(
+            "xml: xmlns:" + String(prefix) + " has an empty value; Namespaces "
+            + "in XML 1.0 cannot undeclare a prefix"
+        )
+
+
+def _resolve(
     prefixes: List[String], uris: List[String], pfx: StringSlice
-) -> String:
+) raises -> String:
+    """The namespace name `pfx` is bound to in scope. The empty prefix is the
+    default namespace, or none; any other prefix must be declared."""
     var i = len(prefixes) - 1
     while i >= 0:
         if prefixes[i] == pfx:
             return uris[i]
         i -= 1
-    return String("")
+    if pfx.byte_length() == 0:
+        return String("")
+    if pfx == "xml":
+        return String(_XML_NS)
+    raise Error("xml: undeclared namespace prefix '" + String(pfx) + "'")
 
 
 def _qualified(ns: StringSlice, local: StringSlice) -> String:
@@ -240,8 +336,8 @@ def _canon_into(node: XmlNode, mut out: String, depth: Int) raises:
     # happily build a 100k-deep tree from 100k bytes of `<a>`; a
     # recursive walk over it would exhaust the stack. Refusing is the
     # only safe answer for a codec fed untrusted network bodies.
-    if depth > 512:
-        raise Error("xml: element nesting deeper than 512")
+    if depth > XML_MAX_DEPTH:
+        raise Error("xml: element nesting deeper than " + String(XML_MAX_DEPTH))
     out += "<"
     out += _qualified(node.ns, node.local)
     # Attributes in a stable order: sorted by (namespace, local name).
