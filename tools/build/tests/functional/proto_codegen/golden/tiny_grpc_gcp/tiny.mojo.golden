@@ -204,14 +204,14 @@ def _gcp_grpc_error(rpc: String, text: String) -> Error:
 
         komira_grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also
         inside its retry-exhaustion error. Such a status becomes
-        `komira_gcp_core.gcp_grpc_status_error`, which keeps `N` and the length of
-        `text`, never `text`: the message is the server's. An error without a
-        status (a transport fault before any status arrived, or a response
-        that did not decode) is returned unchanged."""
+        `komira_gcp_core.gcp_grpc_status_error`, which keeps a `[grpc:<code>]` anchor,
+        the attempt count and the length of the status text, never the text:
+        the message is the server's. An error without a status (a transport
+        fault before any status arrived) is returned unchanged."""
     var status = parse_grpc_status_code(text)
     if status < 0:
         return Error(text)
-    return gcp_grpc_status_error(rpc, status, text.byte_length())
+    return gcp_grpc_status_error(rpc, status, text)
 
 
 # gRPC client for `example.tiny.v1.TinyService`, authorized by a komira_gcp_core token source.
@@ -224,7 +224,9 @@ struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         `komira_gcp_core.GcpTokenSource`) returns for that call, set on the call's
         `CallOptions.raw_metadata`: the client reads no environment and holds
         no credential of its own. A call that ends in a gRPC status raises
-        `komira_gcp_core.gcp_grpc_status_error`.
+        `komira_gcp_core.gcp_grpc_status_error`, whose text starts with a
+        `[grpc:<google.rpc.Code>]` anchor that komira_grpc's
+        `parse_grpc_status_code` reads.
 
         The full path for each method is `/example.tiny.v1.TinyService/<MethodName>`."""
 
@@ -242,8 +244,8 @@ struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._token_source = token_source^
 
     def token_source(mut self) -> ref [self._token_source] Self.T:
-        """The token source, for example to drop a cached token after
-            UNAUTHENTICATED."""
+        """The token source, for example to drop a cached token after a call
+            raised UNAUTHENTICATED (`parse_grpc_status_code(String(e)) == 16`)."""
         return self._token_source
 
     def _authorize(mut self, mut opts: CallOptions) raises:

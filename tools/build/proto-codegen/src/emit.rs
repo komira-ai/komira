@@ -95,9 +95,11 @@ fn mojo_str_lit(s: &str) -> String {
 
 /// The error mapper of `komira_gcp_core` ([`crate::emit_rest::GCP_CORE`]) a
 /// generated Google Cloud gRPC client raises through. Its contract:
-/// `def gcp_grpc_status_error(rpc: String, grpc_status: Int, message_bytes: Int) -> Error`
-/// maps the gRPC status to its `google.rpc.Code` and returns an `Error` naming
-/// the RPC, the code and the byte length of the error text, never the text.
+/// `def gcp_grpc_status_error(rpc: String, grpc_status: Int, text: String) -> Error`
+/// maps the gRPC status to its `google.rpc.Code` and returns an `Error` that
+/// starts with a `[grpc:<code>]` anchor and names the RPC, the code, the
+/// attempt count of a call whose retries ran out, and the byte length of the
+/// status text; it reads `text` and keeps none of it.
 pub const GCP_GRPC_STATUS_ERROR: &str = "gcp_grpc_status_error";
 
 /// The programmatic Mojo emitter — one per generated `.mojo` file.
@@ -1424,7 +1426,7 @@ impl<'a> Emitter<'a> {
 
     /// The module-level mapper every method of a Google Cloud gRPC client
     /// raises through: komira_grpc raises a status as `[grpc:N] <text>`, and
-    /// the client hands `N` and the text's length to [`GCP_GRPC_STATUS_ERROR`].
+    /// the client hands `N` and that error to [`GCP_GRPC_STATUS_ERROR`].
     fn emit_gcp_grpc_error_helper(&mut self) {
         self.blank();
         self.blank();
@@ -1435,19 +1437,19 @@ impl<'a> Emitter<'a> {
         self.line("    komira_grpc raises every gRPC status as `[grpc:N] <grpc-message>`, also");
         self.line("    inside its retry-exhaustion error. Such a status becomes");
         self.line(&format!(
-            "    `{}.{GCP_GRPC_STATUS_ERROR}`, which keeps `N` and the length of",
+            "    `{}.{GCP_GRPC_STATUS_ERROR}`, which keeps a `[grpc:<code>]` anchor,",
             crate::emit_rest::GCP_CORE
         ));
-        self.line("    `text`, never `text`: the message is the server's. An error without a");
-        self.line("    status (a transport fault before any status arrived, or a response");
-        self.line("    that did not decode) is returned unchanged.\"\"\"");
+        self.line("    the attempt count and the length of the status text, never the text:");
+        self.line("    the message is the server's. An error without a status (a transport");
+        self.line("    fault before any status arrived) is returned unchanged.\"\"\"");
         self.line("var status = parse_grpc_status_code(text)");
         self.line("if status < 0:");
         self.push_indent();
         self.line("return Error(text)");
         self.pop_indent();
         self.line(&format!(
-            "return {GCP_GRPC_STATUS_ERROR}(rpc, status, text.byte_length())"
+            "return {GCP_GRPC_STATUS_ERROR}(rpc, status, text)"
         ));
         self.pop_indent();
         self.blank();
@@ -1481,7 +1483,9 @@ impl<'a> Emitter<'a> {
         ));
         self.line("    `CallOptions.raw_metadata`: the client reads no environment and holds");
         self.line("    no credential of its own. A call that ends in a gRPC status raises");
-        self.line(&format!("    `{core}.{GCP_GRPC_STATUS_ERROR}`."));
+        self.line(&format!("    `{core}.{GCP_GRPC_STATUS_ERROR}`, whose text starts with a"));
+        self.line("    `[grpc:<google.rpc.Code>]` anchor that komira_grpc's");
+        self.line("    `parse_grpc_status_code` reads.");
         self.blank();
         self.line(&format!(
             "    The full path for each method is `/{}.{}/<MethodName>`.\"\"\"",
@@ -1507,8 +1511,8 @@ impl<'a> Emitter<'a> {
         self.blank();
         self.line("def token_source(mut self) -> ref [self._token_source] Self.T:");
         self.push_indent();
-        self.line("\"\"\"The token source, for example to drop a cached token after");
-        self.line("    UNAUTHENTICATED.\"\"\"");
+        self.line("\"\"\"The token source, for example to drop a cached token after a call");
+        self.line("    raised UNAUTHENTICATED (`parse_grpc_status_code(String(e)) == 16`).\"\"\"");
         self.line("return self._token_source");
         self.pop_indent();
         self.blank();
@@ -2346,7 +2350,7 @@ mod gcp_grpc_client_tests {
             );
         }
         assert!(
-            out.contains("    return gcp_grpc_status_error(rpc, status, text.byte_length())\n"),
+            out.contains("    return gcp_grpc_status_error(rpc, status, text)\n"),
             "got:\n{out}"
         );
         // The decode is outside the `try`: a malformed message is not a status.

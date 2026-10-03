@@ -349,11 +349,26 @@ def gcp_status_error(
 #
 # A Google API called over gRPC states its failure as a gRPC status: the
 # `grpc-status` trailer (or a trailers-only response), with a free-text
-# `grpc-message` beside it. The generated gRPC clients (proto-codegen
-# `emit.rs`, `GCP_GRPC_STATUS_ERROR`) hand the status number and the length of
-# the error text here, and raise what comes back. As with the REST envelope,
-# the text is counted and never kept: a `grpc-message` carries what an
-# `error.message` carries.
+# `grpc-message` beside it. komira_grpc raises such a status as
+# `[grpc:N] <grpc-message>`, and a call whose retries ran out as
+# `[grpc-retry:EXHAUSTED] gave up replaying <rpc> after <A> attempt(s) ...
+# Last: [grpc:N] <grpc-message>`. The generated gRPC clients (proto-codegen
+# `emit.rs`, `GCP_GRPC_STATUS_ERROR`) read `N` and hand it here with that
+# text, and raise what comes back. As with the REST envelope, the text is
+# counted and never kept: a `grpc-message` carries what an `error.message`
+# carries.
+#
+# The raised text keeps ONE machine-readable part, a `[grpc:C]` anchor in
+# front, where `C` is the google.rpc.Code. It is the anchor komira_grpc's
+# `parse_grpc_status_code` and `is_retryable_grpc_error` read, so a caller
+# classifies a mapped error the way it classifies komira_grpc's own (for
+# example, `parse_grpc_status_code(String(e)) == CODE_UNAUTHENTICATED` to drop
+# a cached token). The anchor is a number this package wrote; no server byte
+# is in it.
+
+comptime _GRPC_ANCHOR = "[grpc:"
+comptime _GRPC_RETRY_EXHAUSTED = "[grpc-retry:EXHAUSTED]"
+comptime _GRPC_RETRY_ATTEMPTS = " after "
 
 
 def code_from_grpc_status(grpc_status: Int) -> Int:
@@ -368,6 +383,63 @@ def code_from_grpc_status(grpc_status: Int) -> Int:
     return grpc_status
 
 
+def _find_bytes(hay: String, needle: String, start: Int) -> Int:
+    """The byte offset of the first `needle` in `hay` at or after `start`, or
+    -1."""
+    var h = hay.as_bytes()
+    var n = needle.as_bytes()
+    var i = start
+    while i + len(n) <= len(h):
+        var j = 0
+        while j < len(n) and h[i + j] == n[j]:
+            j += 1
+        if j == len(n):
+            return i
+        i += 1
+    return -1
+
+
+def _status_text_bytes(text: String) -> Int:
+    """The byte length of what follows the first `[grpc:N]` anchor of `text`
+    (and the one space after it): the `grpc-message`, or komira_grpc's own
+    text for a status it derived. All of `text` when it has no anchor."""
+    var b = text.as_bytes()
+    var at = _find_bytes(text, _GRPC_ANCHOR, 0)
+    if at < 0:
+        return len(b)
+    var i = at + _GRPC_ANCHOR.byte_length()
+    while i < len(b) and b[i] != UInt8(ord("]")):
+        i += 1
+    if i >= len(b):
+        return 0
+    i += 1
+    if i < len(b) and b[i] == UInt8(ord(" ")):
+        i += 1
+    return len(b) - i
+
+
+def _retry_attempts(text: String) -> Int:
+    """The attempt count of komira_grpc's retry-exhaustion error, or 1 when
+    `text` is not one (a call that failed on its only attempt)."""
+    if not text.startswith(_GRPC_RETRY_EXHAUSTED):
+        return 1
+    var at = _find_bytes(text, _GRPC_RETRY_ATTEMPTS, 0)
+    if at < 0:
+        return 1
+    var b = text.as_bytes()
+    var i = at + _GRPC_RETRY_ATTEMPTS.byte_length()
+    var n = 0
+    var digits = 0
+    while i < len(b) and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
+        if digits < 6:
+            n = n * 10 + Int(b[i] - UInt8(ord("0")))
+        digits += 1
+        i += 1
+    if n < 1 or digits > 6:
+        return 1
+    return n
+
+
 @fieldwise_init
 struct GcpGrpcStatusError(Copyable, Movable, Deinitable):
     """A failed Google API call over gRPC, as much as can be said without the
@@ -375,22 +447,40 @@ struct GcpGrpcStatusError(Copyable, Movable, Deinitable):
 
     `grpc_status` is the number the server sent (or the runtime derived, for
     a deadline or a cancellation); `code()` is its `google.rpc.Code`.
-    `message_bytes` is the byte length of the error text the transport
-    raised, which holds the `grpc-message`; the text itself is not kept."""
+    `message_bytes` is the byte length of the status text, what followed
+    `[grpc:N]` in the transport's error: the `grpc-message`, or komira_grpc's
+    own text for a status it derived. The text itself is not kept.
+    `attempts` is how many times the call was sent: 1, or the count
+    komira_grpc's retry-exhaustion error states."""
 
     var rpc: String
     var grpc_status: Int
     var message_bytes: Int
+    var attempts: Int
+
+    @staticmethod
+    def from_transport_text(
+        rpc: String, grpc_status: Int, text: String
+    ) -> Self:
+        """Classify the error text komira_grpc raised for a call to `rpc`,
+        whose status anchor reads `grpc_status`. Keeps no byte of `text`."""
+        return Self(
+            rpc.copy(), grpc_status, _status_text_bytes(text), _retry_attempts(text)
+        )
 
     def code(self) -> Int:
         """The canonical `google.rpc.Code` (`code_from_grpc_status`)."""
         return code_from_grpc_status(self.grpc_status)
 
     def message(self) -> String:
-        """The error text: the RPC, the code and its name, and byte counts
-        only. A status outside google.rpc.Code is named as received."""
+        """The error text: a `[grpc:C]` anchor with the google.rpc.Code, the
+        RPC, the code and its name, the attempt count of a call whose retries
+        ran out, and a byte count. A status outside google.rpc.Code is named
+        as received."""
         var out = (
-            String("gRPC ")
+            String(_GRPC_ANCHOR)
+            + String(self.code())
+            + "] gRPC "
             + self.rpc
             + ": "
             + code_name(self.code())
@@ -400,6 +490,8 @@ struct GcpGrpcStatusError(Copyable, Movable, Deinitable):
         )
         if self.code() != self.grpc_status:
             out += ", grpc-status " + String(self.grpc_status)
+        if self.attempts > 1:
+            out += ", retries exhausted after " + String(self.attempts) + " attempts"
         out += ", error text " + String(self.message_bytes) + " bytes"
         return out^
 
@@ -407,9 +499,9 @@ struct GcpGrpcStatusError(Copyable, Movable, Deinitable):
         return Error(self.message())
 
 
-def gcp_grpc_status_error(
-    rpc: String, grpc_status: Int, message_bytes: Int
-) -> Error:
+def gcp_grpc_status_error(rpc: String, grpc_status: Int, text: String) -> Error:
     """The `Error` a generated gRPC client raises for a call that ended in a
-    non-OK gRPC status. `rpc` is the method's path (`/pkg.Service/Method`)."""
-    return GcpGrpcStatusError(rpc.copy(), grpc_status, message_bytes).to_error()
+    non-OK gRPC status. `rpc` is the method's path (`/pkg.Service/Method`),
+    `grpc_status` the number of the status anchor in `text`, and `text` the
+    error komira_grpc raised, which is read and not kept."""
+    return GcpGrpcStatusError.from_transport_text(rpc, grpc_status, text).to_error()

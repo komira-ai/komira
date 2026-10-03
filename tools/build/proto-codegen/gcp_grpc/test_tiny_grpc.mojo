@@ -12,11 +12,20 @@
 #     GcpTokenSource for that call; a caller's own `authorization` entry is
 #     replaced, not sent beside it; an empty token is refused before anything
 #     is sent;
-#   * the status mapping: a gRPC status, on a unary or a streaming call, is
-#     raised as komira_gcp_core's error, with its google.rpc.Code, and without
-#     the server's `grpc-message`;
+#   * the status mapping: a gRPC status, on a call of each streaming shape, is
+#     raised as komira_gcp_core's error, with its google.rpc.Code (also as the
+#     `[grpc:C]` anchor komira_grpc's `parse_grpc_status_code` reads), and
+#     without the server's `grpc-message`; a response that is not gRPC at
+#     all raises without its bytes either;
 #   * the messages: requests are protobuf-encoded on the RPC's path, responses
 #     decode into the generated types.
+#
+# The rig is HTTP/1.1, so a status arrives in the response headers (the
+# trailers-only shape). A status in real HTTP/2 trailers after DATA frames
+# reaches the client as the same `[grpc:N]` error; komira_grpc's
+# test_grpc_client_trailers_only_and_streams pins that for `unary_call` and
+# `server_stream`, and the mapping here does not depend on where the anchor
+# came from.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -48,6 +57,7 @@ from komira_grpc import (
     STREAM_OUTCOME_MESSAGE,
     encode_stream_message,
     encode_unary_request,
+    parse_grpc_status_code,
 )
 from komira_proto_codec.proto_binary import PbDecoder, PbEncoder
 
@@ -155,8 +165,23 @@ def _http_200(body: List[UInt8], status_headers: String = "") -> List[UInt8]:
     """A canned HTTP/1.1 200 gRPC response: `status_headers` (CRLF-terminated
     lines) after the content type, then `body`. `Connection: close`, so each
     call dials its own scripted stream."""
+    return _http_response("200 OK", "application/grpc", body, status_headers)
+
+
+def _http_response(
+    status_line: String,
+    content_type: String,
+    body: List[UInt8],
+    status_headers: String = "",
+) -> List[UInt8]:
+    """A canned HTTP/1.1 response: the status line, the content type,
+    `status_headers`, then `body`, with `Connection: close`."""
     var out = _b(
-        String("HTTP/1.1 200 OK\r\nContent-Type: application/grpc\r\n")
+        String("HTTP/1.1 ")
+        + status_line
+        + "\r\nContent-Type: "
+        + content_type
+        + "\r\n"
         + status_headers
         + "Content-Length: "
         + String(len(body))
@@ -398,7 +423,9 @@ def _unary_failure(grpc_status: Int) raises -> String:
 
 def _expected(rpc: String, code: Int) -> String:
     return (
-        String("gRPC ")
+        String("[grpc:")
+        + String(code)
+        + "] gRPC "
         + rpc
         + ": "
         + code_name(code)
@@ -416,8 +443,14 @@ def test_a_grpc_status_is_raised_with_its_google_rpc_code() raises:
         var want = _expected(_GET, codes[k])
         assert_true(text.startswith(want + ", error text "), text)
         assert_false(text.find("grpc-status") >= 0, text)
-        assert_true(text.endswith(" bytes"), text)
-        for leak in ["acme-secret-bucket", "leaked@example.com", "busy", "[grpc:"]:
+        # The count is of the grpc-message, not of komira_grpc's wrapper.
+        assert_true(
+            text.endswith(String(", error text ") + String(_SERVER_TEXT.byte_length()) + " bytes"),
+            text,
+        )
+        # The code reads back the way komira_grpc's own errors do.
+        assert_equal(parse_grpc_status_code(text), codes[k], text)
+        for leak in ["acme-secret-bucket", "leaked@example.com", "busy"]:
             assert_false(text.find(leak) >= 0, String("echoed: ") + leak + " in " + text)
 
 
@@ -427,6 +460,7 @@ def test_a_status_grpc_does_not_define_is_unknown() raises:
         text.startswith(_expected(_GET, CODE_UNKNOWN) + ", grpc-status 42, error text "),
         text,
     )
+    assert_equal(parse_grpc_status_code(text), CODE_UNKNOWN, text)
 
 
 def test_a_streaming_call_maps_its_status_too() raises:
@@ -447,6 +481,126 @@ def test_a_streaming_call_maps_its_status_too() raises:
     assert_false(text.find("acme-secret-bucket") >= 0, text)
 
 
+def _upload_failure(var script: List[UInt8]) raises -> String:
+    """The error text of an UploadThings answered with `script`."""
+    var capture = _new_capture()
+    var scripts = List[List[UInt8]]()
+    scripts.append(script^)
+    var client = _client(scripts^, capture, CountingTokenSource())
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var encoder = ClientStreamEncoder[ProtocolGrpcProto].new()
+    encoder.encode_message(Span(_thing("u1", 5)))
+    encoder.mark_close()
+    try:
+        _ = client.upload_things[RT](encoder^, CallOptions(), 0, reactor, token)
+    except e:
+        return String(e)
+    raise Error("UploadThings succeeded over a failing response")
+
+
+def _sync_failure(var script: List[UInt8]) raises -> String:
+    """The error text of a SyncThings answered with `script`."""
+    var capture = _new_capture()
+    var scripts = List[List[UInt8]]()
+    scripts.append(script^)
+    var client = _client(scripts^, capture, CountingTokenSource())
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var codec = BidiStreamCodec[ProtocolGrpcProto].new()
+    codec.encoder.encode_message(Span(_thing("q1", 8)))
+    codec.encoder.mark_close()
+    try:
+        _ = client.sync_things[RT](codec^, CallOptions(), 0, reactor, token)
+    except e:
+        return String(e)
+    raise Error("SyncThings succeeded over a failing response")
+
+
+def test_client_streaming_and_bidi_calls_map_their_status() raises:
+    var up = _upload_failure(_status_only(14))
+    assert_true(up.startswith(_expected(_UPLOAD, CODE_UNAVAILABLE) + ", error text "), up)
+    assert_false(up.find("acme-secret-bucket") >= 0, up)
+    var sync = _sync_failure(_status_only(14))
+    assert_true(sync.startswith(_expected(_SYNC, CODE_UNAVAILABLE) + ", error text "), sync)
+    assert_false(sync.find("acme-secret-bucket") >= 0, sync)
+
+
+def test_a_client_stream_with_no_response_message_is_unknown() raises:
+    # An OK status and no message: komira_grpc raises its own `[grpc:2]`
+    # error, which is mapped like a server's, not passed through.
+    var text = _upload_failure(_http_200(List[UInt8](), "grpc-status: 0\r\n"))
+    assert_true(text.startswith(_expected(_UPLOAD, CODE_UNKNOWN) + ", error text "), text)
+    assert_false(text.find("client-stream") >= 0, text)
+
+
+comptime _PAGE = "<html><body>502 for acme-secret-bucket of leaked@example.com</body></html>"
+"""A proxy's error page, holding what such a page can hold: names."""
+
+
+def _assert_no_response_bytes(text: String, rpc: String) raises:
+    assert_true(text.byte_length() > 0, rpc)
+    for leak in ["acme-secret-bucket", "leaked@example.com", "<html", "502 for"]:
+        assert_false(text.find(leak) >= 0, String("echoed: ") + leak + " in " + text)
+    # komira_grpc raised it with a status, so it is mapped, not passed through.
+    assert_true(text.startswith("[grpc:"), text)
+    assert_true(text.find(String("] gRPC ") + rpc + ": ") >= 0, text)
+
+
+def test_a_response_that_is_not_grpc_raises_without_its_bytes() raises:
+    # A proxy's HTML page instead of a gRPC response, on a unary and on a
+    # server-streaming call.
+    var capture = _new_capture()
+    var scripts = List[List[UInt8]]()
+    scripts.append(_http_response("502 Bad Gateway", "text/html", _b(_PAGE)))
+    scripts.append(_http_response("200 OK", "text/html", _b(_PAGE)))
+    var client = _client(scripts^, capture, CountingTokenSource())
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var unary = String()
+    try:
+        _ = client.get_thing[RT](
+            GetThingRequest(name=String("things/a")), CallOptions(), 0, reactor, token
+        )
+    except e:
+        unary = String(e)
+    _assert_no_response_bytes(unary, _GET)
+    var stream = String()
+    try:
+        _ = client.watch_things[RT](
+            WatchThingsRequest(prefix=String("things/")), CallOptions(), 0, reactor, token
+        )
+    except e:
+        stream = String(e)
+    _assert_no_response_bytes(stream, _WATCH)
+
+
+def test_a_malformed_grpc_body_raises_without_its_bytes() raises:
+    # A gRPC envelope that declares more bytes than follow it.
+    var body: List[UInt8] = [0, 0, 0, 0, 200]
+    for b in _b(_PAGE):
+        body.append(b)
+    var text = _unary_failure_over(_http_200(body^))
+    _assert_no_response_bytes(text, _GET)
+
+
+def _unary_failure_over(var script: List[UInt8]) raises -> String:
+    """The error text of a GetThing answered with `script`."""
+    var capture = _new_capture()
+    var scripts = List[List[UInt8]]()
+    scripts.append(script^)
+    var client = _client(scripts^, capture, CountingTokenSource())
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    try:
+        _ = client.get_thing[RT](
+            GetThingRequest(name=String("things/a")), CallOptions(), 0, reactor, token
+        )
+    except e:
+        return String(e)
+    raise Error("GetThing succeeded over a failing response")
+
+
 def main() raises:
     test_each_unary_call_carries_its_own_bearer_token()
     test_a_callers_authorization_entry_is_replaced()
@@ -455,4 +609,8 @@ def main() raises:
     test_a_grpc_status_is_raised_with_its_google_rpc_code()
     test_a_status_grpc_does_not_define_is_unknown()
     test_a_streaming_call_maps_its_status_too()
+    test_client_streaming_and_bidi_calls_map_their_status()
+    test_a_client_stream_with_no_response_message_is_unknown()
+    test_a_response_that_is_not_grpc_raises_without_its_bytes()
+    test_a_malformed_grpc_body_raises_without_its_bytes()
     print("all tiny gRPC client tests passed")
