@@ -586,9 +586,17 @@ impl AwsEmitter<'_> {
                 msg.name, facts.name
             ));
         }
+        // Whether the caller can carry another algorithm's value: an input
+        // member bound to an `x-amz-checksum-*` header (PutObject's
+        // ChecksumSHA256 and the like; DeleteObjects has none).
+        let value_members = members.iter().any(|m| {
+            m.location == AwsLocation::Header
+                && m.wire.to_ascii_lowercase().starts_with("x-amz-checksum-")
+        });
         self.line(&format!(
-            "s3_apply_request_checksum(req, String(\"{}\"))",
-            escape(&b.wire)
+            "s3_apply_request_checksum(req, String(\"{}\"), value_members={})",
+            escape(&b.wire),
+            if value_members { "True" } else { "False" }
         ));
         Ok(())
     }

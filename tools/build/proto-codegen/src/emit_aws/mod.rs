@@ -65,7 +65,8 @@ pub struct AwsEmitOptions {
 ///   checksum is optional (PutObject, UploadPart) and those where it is
 ///   required (`requestChecksumRequired`: DeleteObjects, PutBucket* and the
 ///   like), which are refused without the customization
-///   ([`check_request_checksums`]).
+///   (`check_request_checksums`, applied by
+///   [`emit_aws_module_with_endpoints`]).
 /// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
 ///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
 ///   puts the bucket in the URL it chooses (`rest_request_uri` in
@@ -526,8 +527,14 @@ pub fn emit_aws_module_with_endpoints(
 /// names a `requestAlgorithmMember` (`emit_s3_request_checksum` in
 /// `rest.rs`): botocore sends CRC32 there whether the checksum is required
 /// or only supported (`resolve_request_checksum_algorithm`), and so does the
-/// generated builder. Anywhere else the client would send none, and the
-/// service would reject every request.
+/// generated builder. Anywhere else the generated client sends none, and
+/// the service would reject every request.
+///
+/// That refusal is this generator's choice, not botocore's behaviour:
+/// botocore also sends `x-amz-checksum-crc32` (with no algorithm header)
+/// for `httpChecksumRequired` with no algorithm member, and for any
+/// service. No S3 operation in the pinned model is in that case: each one
+/// requiring a checksum names a `requestAlgorithmMember`.
 fn check_request_checksums(facts: &AwsFacts, options: AwsEmitOptions) -> Result<(), String> {
     for (name, op) in facts.operations() {
         if !op.request_checksum_required() {
@@ -2290,5 +2297,100 @@ mod tests {
             assert!(aws_import_section(*p, false).contains("Connector"), "{p:?}");
             assert!(aws_import_section(*p, true).contains("    AwsRequest,"), "{p:?}");
         }
+    }
+
+    /// A one-operation model whose operation carries `checksum` (its
+    /// httpChecksum traits), emitted with or without the `s3`
+    /// customization. `protocol` is `rest-xml` (serviceId S3, so the
+    /// customization applies) or `json`.
+    fn emit_checksum_op(protocol: &str, checksum: &str, s3: bool) -> Result<String, String> {
+        let (service_id, extra_meta, method) = match protocol {
+            "json" => ("Tiny", r#", "jsonVersion": "1.0", "targetPrefix": "Tiny""#, "POST"),
+            _ => ("S3", "", "PUT"),
+        };
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
+                    "protocol": "{protocol}", "serviceFullName": "Tiny",
+                    "serviceId": "{service_id}", "signatureVersion": "v4",
+                    "uid": "tiny-2026-10-02"{extra_meta}}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "{method}", "requestUri": "/op"}},
+                    "input": {{"shape": "In"}}{checksum}}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{
+                    "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                        "locationName": "x-amz-sdk-checksum-algorithm"}},
+                    "A": {{"shape": "Str"}}}}}},
+                    "Str": {{"type": "string"}}}}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "s3",
+            &["Op".to_string()],
+            "s3.json",
+            "aws.s3",
+        )?;
+        let options = AwsEmitOptions {
+            pure_only: true,
+            omit_preamble: true,
+            s3,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_client(&lowering, &AwsOverrides::empty(), "s3", options).map(|(_, s)| s)
+    }
+
+    #[test]
+    fn a_required_checksum_is_refused_where_the_client_sends_none() {
+        let refusal = |protocol: &str, checksum: &str, s3: bool| {
+            let e = emit_checksum_op(protocol, checksum, s3).unwrap_err();
+            crate::aws_conformance::refusal_name(&e)
+        };
+        let required = r#", "httpChecksumRequired": true"#;
+        let with_member = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm",
+            "requestChecksumRequired": true}"#;
+        let no_member = r#", "httpChecksum": {"requestChecksumRequired": true}"#;
+        // Without the customization nothing computes one, in any protocol.
+        for (protocol, checksum) in [
+            ("rest-xml", with_member),
+            ("rest-xml", required),
+            ("json", with_member),
+            ("json", required),
+        ] {
+            assert_eq!(
+                refusal(protocol, checksum, false).as_deref(),
+                Some("checksum-required"),
+                "{protocol} {checksum}"
+            );
+        }
+        // With it, only where the model names the algorithm member: the
+        // older trait names none.
+        for checksum in [required, no_member] {
+            assert_eq!(
+                refusal("rest-xml", checksum, true).as_deref(),
+                Some("checksum-required"),
+                "{checksum}"
+            );
+        }
+        let src = emit_checksum_op("rest-xml", with_member, true).unwrap();
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
+        // An optional checksum is never refused. Without the customization
+        // none is sent; with it, only where the model names the algorithm
+        // member.
+        let optional = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm"}"#;
+        for checksum in [r#", "httpChecksumRequired": false"#, optional] {
+            let src = emit_checksum_op("rest-xml", checksum, false).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{src}");
+        }
+        for checksum in [
+            "",
+            r#", "httpChecksumRequired": false"#,
+            r#", "httpChecksum": {"requestChecksumRequired": false}"#,
+        ] {
+            let src = emit_checksum_op("rest-xml", checksum, true).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{checksum}: {src}");
+        }
+        let src = emit_checksum_op("rest-xml", optional, true).unwrap();
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
     }
 }

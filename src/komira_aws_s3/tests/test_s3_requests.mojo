@@ -35,9 +35,9 @@ from komira_aws_s3.komira_aws_s3 import (
     S3DeleteObjectRequest,
     S3DeleteObjectsRequest,
     S3GetObjectRequest,
-    S3ObjectIdentifier,
     S3HeadObjectRequest,
     S3ListObjectsV2Request,
+    S3ObjectIdentifier,
     S3PutObjectRequest,
     S3UploadPartRequest,
     build_abort_multipart_upload_request,
@@ -209,7 +209,13 @@ def test_put_object_other_algorithm_refused() raises:
     var input = S3PutObjectRequest(String("lake"), String("k"))
     input.set_body(_bytes(String("x")))
     input.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_SHA256))
-    with assert_raises(contains="'SHA256' is not computed by this client"):
+    # PutObject has the member for that value, which the caller sets.
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA256' is not computed by this"
+            + " client (only CRC32 is); set its x-amz-checksum-sha256 member too"
+        )
+    ):
         _ = build_put_object_request(input)
 
 
@@ -411,6 +417,8 @@ def test_abort_multipart_upload() raises:
 
 
 comptime _DELETE_NS = '<Delete xmlns="http://s3.amazonaws.com/doc/2006-03-01/">'
+# Thu, 01 Oct 2026 12:00:00 GMT
+comptime _T = Float64(1790856000.0)
 
 
 def _delete_of(key: String) -> S3Delete:
@@ -457,8 +465,7 @@ def test_delete_objects_every_member() raises:
     # request's headers are its members.
     var o = S3ObjectIdentifier(String('a&b<c>"d".txt'))
     o.set_e_tag(String('"9b2cf535f27731c974343645a3985328"'))
-    # Thu, 01 Oct 2026 12:00:00 GMT
-    o.set_last_modified_time(Float64(1790856000.0))
+    o.set_last_modified_time(_T)
     o.set_size(Int64(5368709120))
     var objects = List[S3ObjectIdentifier]()
     objects.append(o^)
@@ -482,6 +489,21 @@ def test_delete_objects_every_member() raises:
     assert_equal(req.header(String("x-amz-expected-bucket-owner")), "123456789012")
     _crc32_checksum(req, String("Fa9U/A=="))
     assert_equal(_header_count(req), 6)
+
+
+def test_delete_objects_key_line_breaks() raises:
+    # A key holding a carriage return and a line feed (the API reference's
+    # ObjectIdentifier.Key warns of XML line-end handling): the CR is sent
+    # as the reference &#xD;, as a raw CR would be read back as nothing and
+    # name another key; the LF survives an XML parser and is sent as is.
+    var req = build_delete_objects_request(
+        S3DeleteObjectsRequest(String("lake"), _delete_of(String("logs/a\r\nb.txt")))
+    )
+    assert_equal(
+        req.body_text(),
+        _DELETE_NS + "<Object><Key>logs/a&#xD;\nb.txt</Key></Object></Delete>",
+    )
+    _crc32_checksum(req, String("RJ1tew=="))
 
 
 def test_delete_objects_checksum_algorithm() raises:
@@ -510,7 +532,13 @@ def test_delete_objects_checksum_algorithm() raises:
         String("lake"), _delete_of(String("k"))
     )
     other.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_SHA256))
-    with assert_raises(contains="'SHA256' is not computed by this client"):
+    with assert_raises(
+        contains=(
+            "S3 request checksum algorithm 'SHA256' is not computed by this"
+            + " client (only CRC32 is); this operation has no member to carry"
+            + " another algorithm's checksum, so only CRC32 can be sent"
+        )
+    ):
         _ = build_delete_objects_request(other)
 
 
@@ -545,6 +573,7 @@ def main() raises:
     test_abort_multipart_upload()
     test_delete_objects()
     test_delete_objects_every_member()
+    test_delete_objects_key_line_breaks()
     test_delete_objects_checksum_algorithm()
     test_delete_objects_refuses_an_empty_key()
     print("OK")

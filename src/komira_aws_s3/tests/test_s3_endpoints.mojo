@@ -12,10 +12,10 @@
 #
 # The other signed rows (path style, PutObject as the client sends it,
 # HEAD, DELETE, POST ?uploads and DeleteObjects' POST ?delete) have no
-# published example. Their
-# signatures were computed with an independent SigV4 implementation that
-# reproduces all four published examples, at the examples' time and with
-# their credentials; each row states the canonical request it signs.
+# published example. Their signatures were computed with an independent
+# SigV4 implementation that reproduces all four published examples, at the
+# examples' time and with their credentials; each row states the canonical
+# request it signs.
 from komira_aws_s3.komira_aws_s3 import (
     S3_STORAGE_CLASS_REDUCED_REDUNDANCY,
     S3CreateMultipartUploadRequest,
