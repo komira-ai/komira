@@ -201,4 +201,5 @@ mojo_deps(
     name = "deps_lint",
     buck = "BUCK",
     srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
 )
