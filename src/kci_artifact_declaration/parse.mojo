@@ -3,8 +3,10 @@
 # =============================================================================
 #
 # A declarations file is textproto for `kci.release.v1.ArtifactDeclarations`
-# (//src/kci_artifact_declaration_proto):
+# (//src/kci_artifact_declaration_proto), under its format's major
+# (kci_contract's format table, `kci.artifact_declarations`):
 #
+#   schema_version: 1
 #   build_systems {
 #     name: "buck2"
 #     executable: "buck2"
@@ -25,13 +27,18 @@
 # `~/.buckconfig.d/`); `--config-file` and `-c` in these args never reach
 # `[buck2_re_client]` (see example.textproto).
 #
-# Every value is a quoted string (the schema has no enum and no number). A
-# `:` before a `{` is optional, as in textproto; `#` starts a comment.
+# Every value but `schema_version` is a quoted string. A `:` before a `{` is
+# optional, as in textproto; `#` starts a comment.
+#
+# `schema_version` is read FIRST, before any other field (kci_contract's
+# `authored_schema_version`): missing, set twice, not an integer, or a major
+# this kci does not read is refused, so a file written for a newer kci says
+# "needs a newer kci" rather than naming a field the newer major added.
 #
 # Refused here, each starting `<source>: line N:` (lexer refusals included):
 # an unknown field at any level, a non-repeated field set twice, an unquoted
-# value, a block never closed, any top-level field but `build_systems` and
-# `artifacts`. Everything else is `validate_artifact_declarations`, run on the
+# value, a block never closed, any top-level field but `schema_version`,
+# `build_systems` and `artifacts`. Everything else is `validate_artifact_declarations`, run on the
 # parsed value before it is returned, so a parsed value is always a valid one.
 #
 # Owned values only; no pointer.
@@ -49,6 +56,8 @@ from komira_textproto import (
     TokenCursor,
     lex,
 )
+
+from kci_contract import FORMAT_ARTIFACT_DECLARATIONS, authored_schema_version, skip_schema_version
 
 from kci_artifact_declaration_proto.artifact_declaration import (
     ArtifactDeclaration,
@@ -194,12 +203,16 @@ def parse_artifact_declarations(
 ) raises -> ArtifactDeclarations:
     """Parse and validate a declarations file. `source` (its path) starts
     every refusal. Raises on the first refusal."""
-    var x = _Ctx(TokenCursor(lex(text, source), source.copy()), source.copy())
+    var tokens = lex(text, source)
+    var major = authored_schema_version(tokens, String(FORMAT_ARTIFACT_DECLARATIONS), source)
+    var x = _Ctx(TokenCursor(tokens^, source.copy()), source.copy())
     var systems = List[BuildSystem]()
     var artifacts = List[ArtifactDeclaration]()
     while not x.c.at_end():
         var t = x.c.expect(TOKEN_WORD)
-        if t.text == "build_systems":
+        if t.text == "schema_version":
+            skip_schema_version(x.c)
+        elif t.text == "build_systems":
             var line = _open_block(x)
             systems.append(_parse_build_system(x, len(systems) + 1, line))
         elif t.text == "artifacts":
@@ -210,9 +223,9 @@ def parse_artifact_declarations(
                 x.at(t.line)
                 + String("unknown top-level field '")
                 + t.text
-                + String("' (expected build_systems, artifacts)")
+                + String("' (expected schema_version, build_systems, artifacts)")
             )
-    var decls = ArtifactDeclarations(systems^, artifacts^)
+    var decls = ArtifactDeclarations(systems^, artifacts^, Int32(major))
     validate_artifact_declarations(decls, source)
     return decls^
 

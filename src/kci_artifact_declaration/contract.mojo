@@ -21,14 +21,18 @@
 # for byte; no case folding, no trimming, no `-`/`_` equivalence).
 #
 # A placeholder is `{<identifier>}`, the identifier `[A-Za-z_][A-Za-z0-9_]*`.
-# The six, every one a value kci knows before the build starts:
+# The seven, every one a value kci knows before the build starts:
 #
 #   {out_dir}        this artifact's output directory, `{release_dir}/<name>`
 #                    (absolute, EMPTY when the build starts)
-#   {release_dir}    the release directory (absolute): it holds the output
-#                    directory of every artifact declared ABOVE this one,
-#                    each named by its declaration name and already
-#                    verified, and nothing else that a declaration names
+#   {release_dir}    this platform's release directory (absolute),
+#                    `<--release-dir>/<platform>` (kci_contract's layout): it
+#                    holds the output directory of every artifact declared
+#                    ABOVE this one, each named by its declaration name and
+#                    already verified, and nothing else that a declaration
+#                    names. The same declaration text serves every platform
+#   {platform}       the platform the release is built for, a name from
+#                    kci_contract's platform table (`linux-x86_64`)
 #   {revision_id}    the release commit (`kci build --revision-id`): the full
 #                    40-hex id of the commit checked out in the work dir
 #   {source_commit}  the stamp's commit: the newest first-parent commit at
@@ -66,11 +70,17 @@
 # Pure functions over owned values; no pointer, no process.
 # =============================================================================
 
+from kci_contract import ARTIFACT_MANIFEST_NAME, require_full_commit_id
+
 comptime OUT_DIR_PLACEHOLDER: String = "{out_dir}"
 """This artifact's output directory, `{release_dir}/<name>`."""
 
 comptime RELEASE_DIR_PLACEHOLDER: String = "{release_dir}"
-"""The release directory: every artifact declared above, already built."""
+"""This platform's release directory, `<--release-dir>/<platform>`: every
+artifact declared above, already built."""
+
+comptime PLATFORM_PLACEHOLDER: String = "{platform}"
+"""The release's platform (kci_contract's platform table)."""
 
 comptime REVISION_ID_PLACEHOLDER: String = "{revision_id}"
 """The release commit, full 40 hex (`kci build --revision-id`)."""
@@ -84,8 +94,9 @@ comptime BUILD_NUMBER_PLACEHOLDER: String = "{build_number}"
 comptime TIMESTAMP_MS_PLACEHOLDER: String = "{timestamp_ms}"
 """The stamp's commit time in milliseconds."""
 
-comptime KCI_MANIFEST_NAME: String = "manifest.json"
-"""The one kci artifact manifest a build leaves at the top of `{out_dir}`."""
+comptime KCI_MANIFEST_NAME: String = ARTIFACT_MANIFEST_NAME
+"""The one kci artifact manifest a build leaves at the top of `{out_dir}`
+(kci_contract's `ARTIFACT_MANIFEST_NAME`; this name stays for callers)."""
 
 
 def _ident_start(c: Int) -> Bool:
@@ -113,10 +124,11 @@ def placeholders_in(arg: String) -> List[String]:
 
 
 def known_placeholders() -> List[String]:
-    """The six placeholders, in the order of this file's header."""
+    """The seven placeholders, in the order of this file's header."""
     var out = List[String]()
     out.append(String(OUT_DIR_PLACEHOLDER))
     out.append(String(RELEASE_DIR_PLACEHOLDER))
+    out.append(String(PLATFORM_PLACEHOLDER))
     out.append(String(REVISION_ID_PLACEHOLDER))
     out.append(String(SOURCE_COMMIT_PLACEHOLDER))
     out.append(String(BUILD_NUMBER_PLACEHOLDER))
@@ -130,29 +142,6 @@ def is_known_placeholder(p: String) -> Bool:
         if known[i] == p:
             return True
     return False
-
-
-def _is_lower_hex(s: String) -> Bool:
-    var b = s.as_bytes()
-    for i in range(len(b)):
-        var c = Int(b[i])
-        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
-            return False
-    return True
-
-
-def require_full_commit_id(what: String, id: String) raises:
-    """Refuse unless `id` is a full commit id: exactly 40 lowercase hex
-    digits. An abbreviated id names a commit only as long as no other commit
-    shares its prefix, so a stamp never carries one."""
-    if id.byte_length() != 40 or not _is_lower_hex(id):
-        raise Error(
-            what
-            + String(" '")
-            + id
-            + String("' is not a full commit id (exactly 40 lowercase hex digits; an")
-            + String(" abbreviated id is refused)")
-        )
 
 
 struct ReleaseStamp(Copyable, Movable):
@@ -192,26 +181,33 @@ struct ReleaseStamp(Copyable, Movable):
 
 struct BuildValues(Copyable, Movable):
     """What the placeholders of ONE artifact's argv stand for. `out_dir` is
-    always `release_dir + "/" + artifact` (render_build_argv derives it).
+    always `release_dir + "/" + artifact` (render_build_argv derives it);
+    `release_dir` is already the platform's release directory.
 
     Layout: owned values only. No pointer field."""
 
     var out_dir: String
     var release_dir: String
+    var platform: String
     var stamp: ReleaseStamp
 
-    def __init__(out self, var out_dir: String, var release_dir: String, var stamp: ReleaseStamp):
+    def __init__(
+        out self, var out_dir: String, var release_dir: String, var platform: String, var stamp: ReleaseStamp
+    ):
         self.out_dir = out_dir^
         self.release_dir = release_dir^
+        self.platform = platform^
         self.stamp = stamp^
 
     def value_of(self, placeholder: String) raises -> String:
         """The value `placeholder` (braces included) stands for; raises on
-        one that is not among the six."""
+        one that is not among the seven."""
         if placeholder == OUT_DIR_PLACEHOLDER:
             return self.out_dir.copy()
         if placeholder == RELEASE_DIR_PLACEHOLDER:
             return self.release_dir.copy()
+        if placeholder == PLATFORM_PLACEHOLDER:
+            return self.platform.copy()
         if placeholder == REVISION_ID_PLACEHOLDER:
             return self.stamp.revision_id.copy()
         if placeholder == SOURCE_COMMIT_PLACEHOLDER:
