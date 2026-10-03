@@ -7,12 +7,16 @@ These libraries give a Mojo process one way to write diagnostics. A call site wr
 | Library | Role |
 |---|---|
 | `komira_log` (`src/komira_log`) | The facade, the typed `Logger` and `Tracer`, `SharedEngine`, its rings, drains and output sinks |
-| `komira_obs` (`src/komira_obs`) | Clocks, `MetricsSet` and EXPLAIN ANALYZE rendering, the metric series table and sweep, histograms, the span tracer, the JSON severity and layout selection, the `write(2)` loop |
+| `komira_metrics` (`src/komira_metrics`) | `MetricsSet` and EXPLAIN ANALYZE rendering, the metric series table and sweep, histograms, attribute-set interning |
+| `komira_trace` (`src/komira_trace`) | The span tracer, its per-worker span rings and the JSONL span exporter |
+| `komira_clock` (`src/komira_clock`) | The clock reads: `now_ns`, `now_unix_ms`, `now_unix_us`, `thread_cpu_ns` |
+| `komira_name_registry` (`src/komira_name_registry`) | `NameRegistry` and `name_id`, the compile-time name to 32-bit id mapping the metric and span libraries share |
+| `komira_spsc_ring` (`src/komira_spsc_ring`) | The generic single-producer single-consumer ring `SpscRing[T]` under both the log record ring and the span rings |
 | `komira_log_query` (`src/komira_log_query`) | The `ServiceLogSearch` trait, its erased facade, and the `GET /internal/logs` route |
 
 Out of scope:
 
-- Where a drained record goes next, and what answers a read query. These three libraries stop at the drain and at the read seam: the `ServiceLogSearch` trait takes any conformer, and no conformer ships here.
+- Where a drained record goes next, and what answers a read query. These libraries stop at the drain and at the read seam: the `ServiceLogSearch` trait takes any conformer, and no conformer ships here.
 - Threshold detection over metric series and the readers of a cloud's own container logs and metrics.
 - Worker threads and their idle hooks: the async runtime lives in `komira_async`.
 - Export over OTLP: not built; see the limits.
@@ -47,11 +51,11 @@ Levels are `LEVEL_TRACE` (0) to `LEVEL_ERROR` (4), with `LEVEL_OFF` (5), in `lev
 
 Configuration arrives as arguments, not from the environment. A binary parses its own `--log-level` and `--log-format` flags and calls `init_logging_from_spec(spec, source, log_format, on_deployed_platform)`; `LOG_SPEC_SOURCE_FLAG` is `"--log-level"`, the `source` to pass for the flag. `init_logging()` and the lazy `_ensure_config()` install the built-in default (global level INFO, no rules), and `LOG_SPEC_SOURCE_DEFAULT` names it as "built-in default (no --log-level given)". Each of the three prints `log_config_banner_lines`, which name the level and where it came from. `init_logging_with(filter)` installs an explicit `EnvFilter` and prints nothing. No code in these libraries reads an environment variable.
 
-`render_line` in `pattern_layout.mojo` writes `{ts} {LEVEL} [{module}] {message} {k=v ...}`, or a JSON line when the selected layout is JSON. `select_log_layout` stores the choice in a C cell, and `init_logging_from_spec` calls it on every call. `log_format_is_json` in `komira_obs/structured_log.mojo` decides: `json` or `text` (any case) wins; any other value, empty or malformed, falls back to the `on_deployed_platform` argument.
+`render_line` in `pattern_layout.mojo` writes `{ts} {LEVEL} [{module}] {message} {k=v ...}`, or a JSON line when the selected layout is JSON. `select_log_layout` stores the choice in a C cell, and `init_logging_from_spec` calls it on every call. `log_format_is_json` in `komira_log/structured_log.mojo` decides: `json` or `text` (any case) wins; any other value, empty or malformed, falls back to the `on_deployed_platform` argument.
 
 ### What does the engine hold?
 
-`SharedEngine(num_workers, filter)` allocates `num_workers + 1` rings of `DEFAULT_RING_CAPACITY` (4,096, defined in `komira_obs/ring_buffer.mojo`) records. Worker rings use `OVERFLOW_DROP`; the last ring, the fallback slot, uses `OVERFLOW_BLOCK`. It also holds the `SiteDictionary` (`site_id` to format, `module_id` to module), a `CalibrationAnchor` that converts ticks to wall time at drain time (`refresh_anchor`), the global level and the `EnvFilter`, one `LogSink`, and a pthread TLS key for the worker id (`worker_id_tls.mojo`). Logs, span opens, span closes and metric points share one ring; `LogEventRecord.kind` is `REC_LOG`, `REC_SPAN_OPEN`, `REC_SPAN_CLOSE` or `REC_METRIC`.
+`SharedEngine(num_workers, filter)` allocates `num_workers + 1` rings of `DEFAULT_RING_CAPACITY` (4,096, defined in `komira_spsc_ring/spsc_ring.mojo`) records. Worker rings use `OVERFLOW_DROP`; the last ring, the fallback slot, uses `OVERFLOW_BLOCK`. It also holds the `SiteDictionary` (`site_id` to format, `module_id` to module), a `CalibrationAnchor` that converts ticks to wall time at drain time (`refresh_anchor`), the global level and the `EnvFilter`, one `LogSink`, and a pthread TLS key for the worker id (`worker_id_tls.mojo`). Logs, span opens, span closes and metric points share one ring; `LogEventRecord.kind` is `REC_LOG`, `REC_SPAN_OPEN`, `REC_SPAN_CLOSE` or `REC_METRIC`.
 
 `LogManager.install(engine)` moves an engine to the heap, leaks it, and parks its address in a C static (`engine/_log_holder_shim.c`). The first install wins and later ones are no-ops.
 
@@ -61,21 +65,21 @@ A drain pops records and decodes them against the site dictionary (`engine/drain
 
 Span records are paired by span id in `engine/span_drain.mojo` into one OTLP-shaped JSON object. With `set_capture_spans(True)` they are kept per worker for `take_span_lines` or `drain_captured_spans`. Metric records decode to `MetricPoint`s and, with `set_capture_metrics(True)`, are kept for `take_metric_points`. Each retained buffer is capped at four ring capacities (`_SPAN_BUF_MAX`, `_METRIC_BUF_MAX`); overflow is counted by `spans_dropped_count` and `metrics_dropped_count`.
 
-`LogSink` (`engine/output_sink.mojo`) has three modes: `SINK_STDERR`, `SINK_FILE` and `SINK_PER_CORE_SEGMENTS`, with one segment per core plus a fallback segment. The engine starts on stderr; `set_sink_stderr`, `set_sink_single_file` and `set_sink_per_core_segments` switch it. A segment rotates under its own `RotationPolicy` (none, size, time or both, with a retained-archive count, `RETAIN_ALL` keeping every archive). Output goes through `write_log_line` in `komira_obs/log_write.mojo`, which retries transient errors, and a line the sink could not write is counted rather than silently dropped.
+`LogSink` (`engine/output_sink.mojo`) has three modes: `SINK_STDERR`, `SINK_FILE` and `SINK_PER_CORE_SEGMENTS`, with one segment per core plus a fallback segment. The engine starts on stderr; `set_sink_stderr`, `set_sink_single_file` and `set_sink_per_core_segments` switch it. A segment rotates under its own `RotationPolicy` (none, size, time or both, with a retained-archive count, `RETAIN_ALL` keeping every archive). Output goes through `write_log_line` in `komira_log/log_write.mojo`, which retries transient errors, and a line the sink could not write is counted rather than silently dropped.
 
 ### How are metrics recorded?
 
-There are two instruments. `MetricsSet` (`komira_obs/metrics_set.mojo`) is a per-operator registry of at most 8 counters, 4 times and 4 gauges, with one slot per worker for up to 64 workers. `inc_in_pipeline(n, worker_id)` writes only that worker's slot, and `reduce()` sums the slots. A lookup of an unregistered name lands in a quarantine slot that no read path reports. `format_execution_report` in `explain_analyze.mojo` renders the per-operator blocks for EXPLAIN ANALYZE, and `explain_analyze_collect.mojo` is the collector, armed only for the scope of one explicit EXPLAIN ANALYZE call.
+There are two instruments. `MetricsSet` (`komira_metrics/metrics_set.mojo`) is a per-operator registry of at most 8 counters, 4 times and 4 gauges, with one slot per worker for up to 64 workers. `inc_in_pipeline(n, worker_id)` writes only that worker's slot, and `reduce()` sums the slots. A lookup of an unregistered name lands in a quarantine slot that no read path reports. `format_execution_report` in `explain_analyze.mojo` renders the per-operator blocks for EXPLAIN ANALYZE, and `explain_analyze_collect.mojo` is the collector, armed only for the scope of one explicit EXPLAIN ANALYZE call.
 
 The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_table.mojo`) is one table that maps a series key, built from `(name_id, attrset_id)`, to a value; `SeriesTables` in the same file holds the per-worker tables. Attribute sets are interned by `attr_set.mojo`. `MetricSweep` (`metric_sweep.mojo`) reduces those tables and hands one `MetricPoint` per series per interval to a `MetricPointSink`. `RingMetricSink` (`komira_log/engine/metric_sink.mojo`) is one such sink: it encodes each point as a `REC_METRIC` record with `build_metric_record` and pushes it onto the engine's ring. Histograms live in `histogram.mojo` as their own tables.
 
 ### How are spans recorded?
 
-`komira_obs` has its own span path: a `Tracer` with per-worker context slots and `start_span[name](worker_id, parent_id)` / `end_span(span_id, worker_id)`, a `SpanRecord`, an SPSC ring per worker, and two exporters in `exporter.mojo` (`JsonlFileExporter`, `CapturingExporter`). A `TRACES_ENABLED` comptime flag removes every method body when it is false. The engine's span path in `komira_log` is the second one: it carries the same start and end calls as records on the log ring, so logs and spans share one drain.
+`komira_trace` has its own span path: a `Tracer` with per-worker context slots and `start_span[name](worker_id, parent_id)` / `end_span(span_id, worker_id)`, a `SpanRecord`, one `SpscRing[SpanPacket]` per worker (`SpanPacketRing` in `span_ring.mojo`), and two exporters in `exporter.mojo` (`JsonlFileExporter`, `CapturingExporter`). A `TRACES_ENABLED` comptime flag removes every method body when it is false. The engine's span path in `komira_log` is the second one: it carries the same start and end calls as records on the log ring, so logs and spans share one drain.
 
 ### How does a service read its own log?
 
-`ServiceLogSearch` (`komira_log_query/search_seam.mojo`) is the read trait, with one method, `scan(q: ServiceLogQuery) raises -> ServiceLogPage`. A `ServiceLogQuery` carries a nanosecond window, a term and a limit; a `ServiceLogPage` carries `ServiceLogHit`s. `ErasedServiceLogSearch` holds one conformer behind function pointers so a dispatcher holds a single non-generic field and the conformer's storage type instantiates only at `erase[S]`. The package depends on `komira_http` and nothing else. No conformer ships in this tree.
+`ServiceLogSearch` (`komira_log_query/search_seam.mojo`) is the read trait, with one method, `scan(q: ServiceLogQuery) raises -> ServiceLogPage`. A `ServiceLogQuery` carries a nanosecond window, a term and a limit; a `ServiceLogPage` carries `ServiceLogHit`s. `ErasedServiceLogSearch` holds one conformer behind function pointers so a dispatcher holds a single non-generic field and the conformer's storage type instantiates only at `erase[S]`. The package depends on `komira_http_core` and nothing else. No conformer ships in this tree.
 
 `service_log_response(search, req, expected_token, now_ns)` in `route.mojo` serves `GET /internal/logs`; `is_service_log_request` matches the exact path and method. It checks the `x-komira-log-read-token` header first, then reads `q`, `since_ms`, `until_ms` and `limit`. The window ends at `now_ns` by default and starts 2,592,000,000 ms (30 days) before its end. `since_ms` after `until_ms` is a 400. The limit defaults to 50, is raised to 1 if lower, and is capped at 500. The function never raises. When `scan` raises, a query with no term (`q` empty) becomes a 400 that carries the conformer's own message, because the conformer could not answer a time-range query by itself; a query with a term becomes a 500, `log index read failed`, that names the fault.
 
@@ -171,10 +175,11 @@ An authorized caller can still see a 400: an inverted window (`since_ms` after `
 | `src/komira_log/engine/drain.mojo`, `span_drain.mojo` | Decode and span pairing | `render_record_view`, `drain_unified` |
 | `src/komira_log/engine/output_sink.mojo`, `rotation.mojo` | Output modes and rotation | `LogSink`, `SegmentFile`, `RotationPolicy` |
 | `src/komira_log/engine/metric_emit.mojo`, `metric_sink.mojo` | Metric records on the ring | `build_metric_record`, `RingMetricSink` |
-| `src/komira_obs/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
-| `src/komira_obs/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
-| `src/komira_obs/tracer.mojo`, `exporter.mojo` | Spans | `Tracer`, `JsonlFileExporter` |
-| `src/komira_obs/log_write.mojo`, `structured_log.mojo`, `clock.mojo` | Writes, JSON selection, clocks | `write_log_line`, `log_format_is_json`, `now_ns` |
+| `src/komira_metrics/metrics_set.mojo`, `explain_analyze.mojo` | Per-operator metrics | `MetricsSet`, `format_execution_report` |
+| `src/komira_metrics/series_table.mojo`, `metric_sweep.mojo`, `histogram.mojo` | Series metrics | `SeriesTable`, `MetricSweep`, `HistogramTable` |
+| `src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
+| `src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
+| `src/komira_clock/clock.mojo`, `src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
 | `src/komira_log_query/route.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, trait and values | `service_log_response`, `ServiceLogSearch`, `ServiceLogQuery` |
 
 Entry points:
@@ -188,10 +193,14 @@ Each library below welds its tests with `test_srcs`, so building it runs them. `
 
 | Library | Welded tests | Covers |
 |---|---|---|
-| `komira_log` | 29, all of `src/komira_log/tests/` | levels and filters, facade, engine, drains, spans, metrics on the ring, sinks and rotation, escalation, JSON layout, TLS key reuse |
-| `komira_obs` | 19, all of `src/komira_obs/tests/` | `MetricsSet`, EXPLAIN ANALYZE, histograms, series table, sweep, tracer, JSONL exporter, write retry and loss accounting |
+| `komira_log` | 30, all of `src/komira_log/tests/` | levels and filters, facade, engine, drains, spans, metrics on the ring, sinks and rotation, escalation, JSON layout, write retry and loss accounting, TLS key reuse |
+| `komira_metrics` | 9, all of `src/komira_metrics/tests/` | `MetricsSet`, EXPLAIN ANALYZE, histograms, series table, sweep, attribute sets |
+| `komira_trace` | 7, all of `src/komira_trace/tests/` | tracer, JSONL exporter, span records, drain throughput |
+| `komira_spsc_ring` | 2, `test_spsc_ring` and `test_ring_variants` | the generic ring: order, wrap, block and drop policies |
+| `komira_clock` | 1, `test_clock` | clock reads |
+| `komira_name_registry` | 1, `test_name_registry` | name registry |
 
-Run: `./buck2 build //src/komira_log:komira_log` and `./buck2 build //src/komira_obs:komira_obs`.
+Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry`.
 
 `test_log_p2c_aot_perf` compares the typed and ambient reaches and only reports. Not tested: `emit_erased` has tests and no caller in these libraries.
 
@@ -202,6 +211,6 @@ Run: `./buck2 build //src/komira_log:komira_log` and `./buck2 build //src/komira
 - **Limit:** nothing in these libraries drains a worker ring. Records wait until the embedder calls a drain, and a full worker ring drops TRACE, DEBUG and INFO records.
 - **Limit:** the `SiteDictionary` is not synchronised; two bound workers registering the same new site at once can race.
 - **Limit:** `MetricPoint` has one value field and cannot carry histogram buckets.
-- **Limit:** no code in these three libraries calls `MetricSweep` or constructs a `RingMetricSink`; they are the pieces a metrics publisher is built from.
+- **Limit:** no code in these libraries calls `MetricSweep` or constructs a `RingMetricSink`; they are the pieces a metrics publisher is built from.
 - **Open question:** whether the typed `Logger` is faster than the ambient path. `test_log_p2c_aot_perf`'s header records both arms measured at about the same cost. A repeatable A/B on the build farm would decide it.
 - **Open question:** telemetry export over OTLP. The span and metric shapes follow OpenTelemetry, but nothing exports; a destination and a transport would have to be chosen.
