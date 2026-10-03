@@ -1,7 +1,8 @@
 """`komira_db` — backend-generic, schema-driven database abstraction.
 
-The runtime types and traits that generated DbStorable code compiles against,
-plus the sqlite and Postgres drivers.
+The runtime types and traits that generated DbStorable code compiles against.
+The sqlite and Postgres drivers live in `komira_db_sqlite` and
+`komira_db_postgres`.
 
 Public surface (what a generated `*_db.mojo` imports):
   DbStorable           — the generated row-type contract
@@ -17,9 +18,8 @@ Public surface (what a generated `*_db.mojo` imports):
   LOGICAL_*            — the backend-neutral logical-type tags
   to_proto_json / from_proto_json — the nested-field native-JSON serde
 
-It depends on komira_uuid (Uuid), komira_json (JSON scanner), komira_pg (the
-Postgres wire client) and komira_async (the reactor seam), and modifies no
-other package.
+It depends on komira_uuid (Uuid), komira_json (JSON scanner) and komira_async
+(the reactor seam), and modifies no other package.
 
 Encapsulation: no UnsafePointer crosses any public boundary; no wildcard
 origins; no unsafe_from_address. The value carriers each hold a single heap
@@ -103,10 +103,7 @@ from komira_db.sql_neutral_ops import (
     render_where,
     render_order,
 )
-from komira_db.sqlite_driver import SqliteDatabase
-from komira_db.pg_driver import PgDatabase, pg_rows_to_db_rows, to_pg_params
 from komira_db.pool import Pool, PooledResource
-from komira_db.pg_pool import PgPool
 from komira_db.db_storable import (
     DbStorable,
     Store,

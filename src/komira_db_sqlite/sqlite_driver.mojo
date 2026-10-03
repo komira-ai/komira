@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_db/sqlite_driver.mojo — the SqliteDatabase Database conformer.
+# komira_db_sqlite/sqlite_driver.mojo — the SqliteDatabase Database conformer.
 # =============================================================================
 #
 # The in-process sqlite backend: a `Database`-trait conformer
@@ -83,7 +83,7 @@ from komira_db.db_value import (
 )
 from komira_db.db_row import DbRow, DbRows
 
-from komira_db.sqlite.ffi import (
+from komira_db_sqlite.ffi import (
     SqliteHandle,
     sqlite_null_handle,
     _ffi_null_byte,

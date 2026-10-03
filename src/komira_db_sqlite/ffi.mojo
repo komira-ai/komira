@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_db/sqlite/ffi.mojo — thin external_call wrappers over libsqlite3.
+# komira_db_sqlite/ffi.mojo — thin external_call wrappers over libsqlite3.
 # =============================================================================
 #
 # The FFI BOUNDARY for the sqlite backend.
@@ -19,13 +19,13 @@
 # ENCAPSULATION DISCIPLINE:
 # This module IS the FFI boundary. UnsafePointer / `_FFI_ORIGIN` types in
 # signatures here are PERMITTED because:
-#   - This module is inside `src/komira_db/sqlite/`, the canonical FFI
+#   - This module is inside `src/komira_db_sqlite/`, the canonical FFI
 #     carve-out for the sqlite backend.
 #   - Every `external_call` site carries a `# SAFETY:` comment.
 #   - The safe `SqliteDatabase` driver (sqlite_driver.mojo) is the
 #     public-facing surface; it hides these declarations behind safe APIs
 #     (execute / query / claim_pending returning DbRows). No UnsafePointer
-#     and no opaque handle crosses the komira_db module boundary.
+#     and no opaque handle crosses the komira_db_sqlite module boundary.
 #
 # This module MUST NOT be imported by anything other than `sqlite_driver.mojo`.
 #

@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_db/pg_driver.mojo — the PgDatabase Database conformer.
+# komira_db_postgres/pg_driver.mojo — the PgDatabase Database conformer.
 # =============================================================================
 #
 # The Postgres backend: a `Database`-trait conformer over
@@ -148,7 +148,7 @@ struct PgDatabase(SqlDatabase, PooledResource):
 
     # ---- PooledResource conformance ----
     # `PgDatabase` is the canonical `PooledResource` conformer: `Pool[PgDatabase]`
-    # is `PgPool` (pg_pool.mojo). The `Config` associated type is `PgConfig`, and
+    # is `PgPool` (komira_db_postgres/pg_pool.mojo). The `Config` associated type is `PgConfig`, and
     # the pool factory `pooled_connect` delegates to the existing
     # `connect_blocking` (the synchronous-pool establishment path). `close` (above
     # / below) is the teardown. This makes `PgDatabase` a drop-in `Pool[T]`

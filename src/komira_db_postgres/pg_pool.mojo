@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_db/pg_pool.mojo — PgPool: the Postgres specialization of Pool[T].
+# komira_db_postgres/pg_pool.mojo — PgPool: the Postgres specialization of Pool[T].
 # =============================================================================
 #
 # `PgPool` is a THIN
@@ -57,13 +57,8 @@
 #      Int-lease surface.
 # =============================================================================
 
-from komira_db.pg_driver import PgDatabase
+from komira_db_postgres.pg_driver import PgDatabase
 from komira_db.pool import Pool
-
-# Re-export `_FreeList` from pool.mojo (the resource-agnostic module) so
-# `from komira_db.pg_pool import _FreeList` resolves. The free-list is the
-# connection-independent checkout/return bookkeeping.
-from komira_db.pool import _FreeList
 
 from komira_pg.connection import PgConfig
 

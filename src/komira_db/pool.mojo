@@ -78,7 +78,7 @@
 # struct entering a slab requires. `_in_use` / `_live: List[Bool]` are
 # Copyable-element lists (POD), relocation-clean.
 #
-# ── FOLLOW-ONS (not built here; identical to pg_pool's) ──────────────
+# ── FOLLOW-ONS (not built here; identical to komira_db_postgres/pg_pool.mojo's) ──────────────
 #  (1) MULTI-PTHREAD LOCKING. `_FreeList.checkout/return_lease` are correct for a
 #      single-threaded control loop. For N threads sharing ONE pool, checkout/
 #      return must run under a mutex and block-on-condvar when full. The
@@ -238,7 +238,7 @@ struct Pool[T: PooledResource](Movable):
     hands out opaque Int leases; no UnsafePointer / wildcard origin crosses the
     boundary.
 
-    `PgPool` (pg_pool.mojo) is the thin `Pool[PgDatabase]` specialization. The
+    `PgPool` (komira_db_postgres/pg_pool.mojo) is the thin `Pool[PgDatabase]` specialization. The
     same `Pool[T]` drives a Redis/HTTP/gRPC pool by swapping `T` — the
     cheap-vacate machinery is identical. See the module banner for the SCOPE note
     (the SIMPLE synchronous pool; async/pipelined upgrade DEFERRED) and the

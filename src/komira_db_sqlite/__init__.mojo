@@ -1,13 +1,13 @@
-# =============================================================================
-# komira_db/sqlite/__init__.mojo — the sqlite FFI carve-out subpackage.
-# =============================================================================
-#
-# This subpackage holds the FFI BOUNDARY for the sqlite
-# backend: `ffi.mojo` (thin external_call wrappers over libsqlite3). It is an
-# INTERNAL subpackage — the FFI declarations are NOT re-exported here. The
-# safe `SqliteDatabase` driver (komira_db/sqlite_driver.mojo) imports from
-# `komira_db.sqlite.ffi` directly and is the only legitimate consumer; it
-# hides every UnsafePointer / opaque handle behind the `Database` trait
-# surface (the encapsulation rule — no UnsafePointer crosses the
-# komira_db module boundary).
-# =============================================================================
+"""`komira_db_sqlite` — the SQLite driver for `komira_db`.
+
+`SqliteDatabase` conforms to the backend-generic `SqlDatabase` trait over the
+in-process libsqlite3 library. The FFI declarations live in `ffi.mojo`, which
+is internal: it is not re-exported here, and only `sqlite_driver.mojo` imports
+it. The driver hides every UnsafePointer and opaque handle behind the
+`Database` trait surface, so none crosses the package boundary.
+
+Public surface:
+  SqliteDatabase — the SQLite `SqlDatabase` conformer
+"""
+
+from komira_db_sqlite.sqlite_driver import SqliteDatabase
