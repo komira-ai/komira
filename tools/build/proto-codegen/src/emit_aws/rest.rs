@@ -170,6 +170,8 @@ impl Binding for AwsRestXml {
 /// needs about it.
 struct Bound {
     field: IrField,
+    /// The member's name in the model.
+    member: String,
     wire: String,
     location: AwsLocation,
     required: bool,
@@ -208,6 +210,7 @@ impl AwsEmitter<'_> {
                 .unwrap_or(false);
             out.push(Bound {
                 field: f.clone(),
+                member: mf.member_name.clone(),
                 wire: mf.wire_name.clone(),
                 location: mf.location,
                 required: mf.required,
@@ -538,9 +541,52 @@ impl AwsEmitter<'_> {
             self.line("req.set_body_text(_body.serialize())");
             self.set_content_type_default(&format!("String({p}_CONTENT_TYPE)"));
         }
+        self.emit_s3_request_checksum(facts, &msg, &members)?;
         self.line("return req^");
         self.pop();
         self.blank();
+        Ok(())
+    }
+
+    /// `s3`: an operation whose `httpChecksum` names a
+    /// `requestAlgorithmMember` sends the request checksum current AWS SDKs
+    /// send by default (`when_supported`): `s3_apply_request_checksum`, over
+    /// the built body, with the header that member is bound to. Nothing
+    /// without the customization, or for an operation with no such member.
+    fn emit_s3_request_checksum(
+        &mut self,
+        facts: &AwsOperationFacts,
+        msg: &IrMessage,
+        members: &[Bound],
+    ) -> Result<(), String> {
+        if !self.options.s3 {
+            return Ok(());
+        }
+        let Some(member) = facts
+            .http_checksum
+            .as_ref()
+            .and_then(|c| c.request_algorithm_member.as_ref())
+        else {
+            return Ok(());
+        };
+        let b = members.iter().find(|b| &b.member == member).ok_or_else(|| {
+            format!(
+                "emit_aws: `{}` names `{member}` as its httpChecksum \
+                 requestAlgorithmMember, and its input shape `{}` has no such member",
+                facts.name, msg.name
+            )
+        })?;
+        if b.location != AwsLocation::Header {
+            return Err(format!(
+                "emit_aws: `{}`.{member} is `{}`'s httpChecksum requestAlgorithmMember \
+                 and is not bound to a header; the checksum algorithm travels as one",
+                msg.name, facts.name
+            ));
+        }
+        self.line(&format!(
+            "s3_apply_request_checksum(req, String(\"{}\"))",
+            escape(&b.wire)
+        ));
         Ok(())
     }
 

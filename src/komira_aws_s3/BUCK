@@ -9,9 +9,11 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 # a built request with komira_aws_core's build_sigv4_signed_request.
 #
 # The `s3` customization applies what botocore does to S3 beyond the model:
-# a 200 whose body is an <Error> is raised as an HTTP 500 is, an `Expires`
-# header that is not a date is left unset, and the bucket is left to the
-# endpoint ruleset, which puts it in the host or in the endpoint's path.
+# a 200 whose body is an <Error> is raised as an HTTP 500, an `Expires`
+# header that is not a date is left unset, PutObject and UploadPart send
+# the CRC32 request checksum current AWS SDKs send by default, and the
+# bucket is left to the endpoint ruleset, which puts it in the host or in
+# the endpoint's path.
 # Addressing follows the ruleset: virtual host unless the bucket cannot be a
 # host name or `S3EndpointConfig.force_path_style` is set, which a caller
 # of a custom endpoint (LocalStack, MinIO) sets.
@@ -19,8 +21,7 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 # `operations` is every S3 operation the generator emits. The others are
 # refused by the generator, by name, and are not listed: the operations
 # that require a request checksum (`checksum-required`: DeleteObjects,
-# PutBucket*, PutObjectAcl, PutObjectTagging and the like; the client sends
-# no checksum), those reading `Grantee`'s XML attribute (`xml-attribute`:
+# PutBucket*, PutObjectAcl, PutObjectTagging and the like), those reading `Grantee`'s XML attribute (`xml-attribute`:
 # GetBucketAcl, GetBucketLogging, GetObjectAcl, RestoreObject),
 # SelectObjectContent (`eventstream`) and WriteGetObjectResponse
 # (`host-prefix`).

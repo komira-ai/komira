@@ -56,6 +56,12 @@ pub struct AwsEmitOptions {
 ///   <message>`).
 /// - `handle_expires_header`: an `Expires` header that is not a valid date
 ///   leaves the member unset, and the rest of the response still parses.
+/// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
+///   (botocore/httpchecksum.py, under the default `when_supported`): an
+///   operation whose `httpChecksum` names a `requestAlgorithmMember`
+///   (PutObject, UploadPart) sends `x-amz-checksum-crc32` and the algorithm
+///   header, `CRC32` when the caller chose none, unless the caller set an
+///   `x-amz-checksum-*` header (`s3_apply_request_checksum`).
 /// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
 ///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
 ///   puts the bucket in the URL it chooses (`rest_request_uri` in
@@ -265,7 +271,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     },
     AwsImport {
         module: AWS_CORE,
-        names: &["aws_xml_body_is_error"],
+        names: &["aws_xml_body_is_error", "s3_apply_request_checksum"],
         mode: AwsImportMode::S3,
         protocols: XML_BODY_PROTOCOLS,
     },

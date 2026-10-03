@@ -7,10 +7,18 @@
 # host) or in the endpoint's path (path style), so the request target
 # starts at the key. test_s3_endpoints joins the two.
 #
-# Checksums: the client sends none. Current AWS SDKs send a CRC32 on
-# PutObject and UploadPart by default; the rows below that assert no
-# checksum header state that gap, and change when checksums are emitted.
+# Checksums: PutObject and UploadPart carry the CRC32 request checksum
+# current AWS SDKs send by default: `x-amz-sdk-checksum-algorithm: CRC32`
+# and `x-amz-checksum-crc32`, the base64 of the body's CRC-32, big-endian
+# (the PutObject and UploadPart API references). Each expected value was
+# computed with zlib's crc32, an independent implementation.
+#
+# Content-Type: a blob payload with no ContentType member set is sent as
+# `application/octet-stream`. That is the generator's choice, and differs
+# from botocore, which sends no Content-Type then; S3 accepts either and
+# stores the type it is given.
 from komira_aws_s3.komira_aws_s3 import (
+    S3_CHECKSUM_ALGORITHM_SHA256,
     S3_ENCODING_TYPE_URL,
     S3_METADATA_DIRECTIVE_REPLACE,
     S3AbortMultipartUploadRequest,
@@ -46,15 +54,18 @@ def _bytes(s: String) -> List[UInt8]:
     return out^
 
 
-def _no_checksum(req: AwsRequest) raises:
-    var names: List[String] = [
-        "x-amz-sdk-checksum-algorithm",
-        "x-amz-checksum-crc32",
+def _crc32_checksum(req: AwsRequest, expected: String) raises:
+    assert_equal(req.header(String("x-amz-sdk-checksum-algorithm")), "CRC32")
+    assert_equal(req.header(String("x-amz-checksum-crc32")), expected)
+    var others: List[String] = [
         "x-amz-checksum-crc32c",
+        "x-amz-checksum-crc64nvme",
+        "x-amz-checksum-sha1",
+        "x-amz-checksum-sha256",
         "Content-MD5",
     ]
-    for i in range(len(names)):
-        assert_false(req.has_header(names[i]), names[i])
+    for i in range(len(others)):
+        assert_false(req.has_header(others[i]), others[i])
 
 
 def _header_count(req: AwsRequest) -> Int:
@@ -126,12 +137,13 @@ def test_put_object_if_none_match_star() raises:
     assert_equal(req.uri, "/manifest.json")
     assert_equal(req.header(String("If-None-Match")), "*")
     assert_equal(req.body_text(), '{"v":1}')
-    # A blob payload with no Content-Type member set goes as octet-stream.
+    # A blob payload with no Content-Type member set goes as octet-stream
+    # (botocore sends none; see the file header).
     assert_equal(
         req.header(String("Content-Type")), "application/octet-stream"
     )
-    _no_checksum(req)
-    assert_equal(_header_count(req), 2)
+    _crc32_checksum(req, String("hNvnPQ=="))
+    assert_equal(_header_count(req), 4)
 
 
 def test_put_object_if_match_and_metadata() raises:
@@ -150,7 +162,7 @@ def test_put_object_if_match_and_metadata() raises:
     assert_equal(req.header(String("Content-Type")), "application/json")
     # A user-defined metadata entry is one x-amz-meta-<name> header.
     assert_equal(req.header(String("x-amz-meta-writer")), "engine-7")
-    _no_checksum(req)
+    _crc32_checksum(req, String("jNwWgw=="))
 
 
 def test_put_object_with_no_body() raises:
@@ -161,6 +173,36 @@ def test_put_object_with_no_body() raises:
     assert_equal(req.uri, "/dir/")
     assert_equal(len(req.body), 0)
     assert_false(req.has_header(String("Content-Type")))
+    # The checksum of the empty body.
+    _crc32_checksum(req, String("AAAAAA=="))
+    assert_equal(_header_count(req), 2)
+
+
+def test_put_object_checksum_supplied() raises:
+    # A checksum the caller computed (the SHA-256 of "x") is sent as given,
+    # and no CRC32 is added: the client computes one only when none is set.
+    var input = S3PutObjectRequest(String("lake"), String("k"))
+    input.set_body(_bytes(String("x")))
+    input.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_SHA256))
+    input.set_checksum_sha256(
+        String("LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIE=")
+    )
+    var req = build_put_object_request(input)
+    assert_equal(req.header(String("x-amz-sdk-checksum-algorithm")), "SHA256")
+    assert_equal(
+        req.header(String("x-amz-checksum-sha256")),
+        "LXEWQrcmsEQBYnyp+6wy9chTD7GQPMTbAiWHF5IaSIE=",
+    )
+    assert_false(req.has_header(String("x-amz-checksum-crc32")))
+
+
+def test_put_object_other_algorithm_refused() raises:
+    # An algorithm this client does not compute, with no checksum given.
+    var input = S3PutObjectRequest(String("lake"), String("k"))
+    input.set_body(_bytes(String("x")))
+    input.set_checksum_algorithm(String(S3_CHECKSUM_ALGORITHM_SHA256))
+    with assert_raises(contains="'SHA256' is not computed by this client"):
+        _ = build_put_object_request(input)
 
 
 def test_put_object_refuses_an_empty_key() raises:
@@ -310,7 +352,8 @@ def test_upload_part() raises:
         + "&uploadId=VXBsb2FkIElEIGZvciA2aWWpbmcncyBteS1tb3ZpZS5tMnRzIHVwbG9hZA",
     )
     assert_equal(req.body_text(), "part three")
-    _no_checksum(req)
+    _crc32_checksum(req, String("L8IwAg=="))
+    assert_equal(_header_count(req), 3)
 
 
 def test_complete_multipart_upload() raises:
@@ -364,6 +407,8 @@ def main() raises:
     test_put_object_if_none_match_star()
     test_put_object_if_match_and_metadata()
     test_put_object_with_no_body()
+    test_put_object_checksum_supplied()
+    test_put_object_other_algorithm_refused()
     test_put_object_refuses_an_empty_key()
     test_key_escaping_and_dot_segments()
     test_list_objects_v2_first_page()
