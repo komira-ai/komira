@@ -85,7 +85,7 @@
 # operator, so the fault text is information rather than a leak).
 # =============================================================================
 
-from komira_http.codec.types import HttpMethod, HttpRequest, HttpResponse
+from komira_http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
 
 from komira_log_query.hit import (
     ServiceLogHit,

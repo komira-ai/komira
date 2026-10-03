@@ -11,7 +11,7 @@ mojo_library(
     name = "komira_log_query",
     srcs = glob(["**/*.mojo"]),
     deps = [
-        "//src/komira_http:komira_http",
+        "//src/komira_http_core:komira_http_core",
     ],
     visibility = ["PUBLIC"],
 )
