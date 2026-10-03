@@ -58,10 +58,12 @@ clients.
   through a `Connector`, and retried; `send_sigv4_signed_request_with`
   over injected seams (`AwsHttpTransport`, the clocks, the retry loop and
   budget), and `AwsConnectorTransport`.
-- `aws_retry.mojo`: `AwsRetryClassifier`, the AWS SDKs' standard retry
+- `aws_retry.mojo`: `AwsRetryClassifier`, botocore's standard retry
   conditions for komira_retry over an `AwsAttempt`, with
-  `aws_standard_retry_policy`; a request that is not retry-safe is resent
-  only when the service cannot have acted on it.
+  `aws_standard_retry_policy` and `AwsRetryQuota`, the retry quota a
+  client keeps; every operation is retried alike, whatever its method,
+  but a conditional write the service may have acted on
+  (`aws_request_is_conditional`), which is not resent.
 - `echo_connector.mojo`: `AwsEchoConnector`, a test double whose stream
   answers each request with an error naming the request head as it reached
   the wire, so a test of a generated client asserts each verb's request.
@@ -150,16 +152,23 @@ from .aws_text import (
     aws_ts_from_text,
 )
 from .aws_retry import (
+    AWS_DYNAMODB_CRC32_HEADER,
+    AWS_IDP_COMMUNICATION_ERROR,
+    AWS_NO_RETRY_INCREMENT,
     AWS_RETRY_COST,
+    AWS_RETRY_QUOTA_CAPACITY,
     AWS_STANDARD_MAX_ATTEMPTS,
     AWS_TIMEOUT_RETRY_COST,
     AwsAttempt,
     AwsRetryClassifier,
+    AwsRetryQuota,
+    aws_dynamodb_crc32_mismatch,
     aws_is_throttling_code,
     aws_is_transient_code,
     aws_is_transient_status,
-    aws_method_is_idempotent,
+    aws_request_is_conditional,
     aws_standard_retry_policy,
+    aws_transport_error_is_timeout,
     aws_transport_error_kind,
     aws_transport_error_unsent,
 )

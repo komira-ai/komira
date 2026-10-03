@@ -51,7 +51,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # komira_aws_core's AwsEchoConnector), and test_s3_retry drives the same
 # send with a recording sleeper and a stepping clock (a 503 retried and
 # signed again at a later date, the attempt limit, a 200-with-<Error>
-# retried, and the POSTs not resent).
+# retried, and the POSTs resent as botocore resends them).
 
 _S3 = botocore_model("s3")
 
