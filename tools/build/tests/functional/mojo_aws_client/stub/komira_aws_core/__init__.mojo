@@ -21,16 +21,18 @@ as in the real core; `body_text` here refuses any non-ASCII byte rather
 than validating UTF-8.
 
 The client half (the end of this file): `AwsCredential`, `AwsCredsSource`,
-`AwsEndpoint`, `Header`, `HttpResult`, `AwsErrorInfo`, `aws_json_error_info`,
-`resolve_endpoint`, `send_sigv4_signed_request`, `AwsClock`,
-`AwsHttpTransport`, `CredentialHttpRequest`, `aws_request_is_conditional`
-and `send_sigv4_signed_request_with` have the real core's types and
-signatures (bar the last's defaulted payload-signing argument, which no
-generated code passes, and `CredentialHttpRequest`'s methods, of which only
-`header` and `body_text` are here), and behave as the real ones do for what
-a generated client calls; `AwsEndpoint.https` checks nothing of the host.
-The seam types `send_sigv4_signed_request_with` takes from komira_retry
-come from the stub komira_retry beside this one. The real
+`AwsEndpoint`, `AwsRetryQuota`, `Header`, `HttpResult`, `AwsErrorInfo`,
+`aws_json_error_info`, `resolve_endpoint`, `send_sigv4_signed_request`,
+`AwsClock`, `AwsHttpTransport`, `CredentialHttpRequest`,
+`aws_request_is_conditional` and `send_sigv4_signed_request_with` have the
+real core's types and signatures (bar the last's defaulted payload-signing
+argument, which no generated code passes, and `CredentialHttpRequest`'s
+methods, of which only `header` and `body_text` are here), and behave as
+the real ones do for what a generated client calls (`AwsRetryQuota` here is
+not a komira_retry budget: it starts at the real one's 500 and spends);
+`AwsEndpoint.https` checks nothing of the host. The seam types
+`send_sigv4_signed_request_with` takes from komira_retry come from the stub
+komira_retry beside this one. The real
 `send_sigv4_signed_request` is komira//src/komira_aws_core/aws_send.mojo
 (a connector factory, standard-mode retries, the signed request of
 signed_request.mojo); signed_request.mojo's header states the signature,
@@ -40,10 +42,12 @@ and this one keeps it, or both change together.
 what the real request builder refuses of its arguments (an `extra` header
 named Host, Content-Type or Content-Length, in any case; CR or LF in a
 header, the path or the content type), calls the client's connector
-factory once, signs nothing, sends nothing and never retries. It answers
-with one `x-stub-*` header per argument it was given (of the credential,
-the access key id and whether a session token is set, never a secret;
-`retry_safe` and `s3_200_error` as "true" or "false"), the request body as
+factory once, signs nothing, sends nothing and never retries, so it
+spends nothing from the retry quota. It answers with one `x-stub-*` header
+per argument it was given (of the HTTP config, its `context_ceiling_us` and
+`request_timeout_us`; of the credential, the access key id and whether a
+session token is set, never a secret; of the retry quota, what it holds;
+`s3_200_error` as "true" or "false"), the request body as
 `x-stub-body` (ASCII only), then the `extra` headers as given, so that a
 caller's test can read what the generated `send` hands the transport. The
 status and body come from the endpoint host: `status-<NNN>.invalid`
@@ -71,6 +75,7 @@ not length-capped or checked for control bytes.
 """
 
 from komira_json import JsonValue, parse_json_value
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
 
@@ -456,10 +461,31 @@ def aws_json_error_info(resp: AwsResponse) -> AwsErrorInfo:
     )
 
 
+struct AwsRetryQuota(Movable, Deinitable):
+    """The retry quota a generated client keeps and hands its sends: 500 at
+    the start, as the real one (komira_aws_core's aws_retry.mojo)."""
+
+    var _available: Int
+
+    def __init__(out self):
+        self._available = 500
+
+    def available(self) -> Int:
+        return self._available
+
+    def try_spend(mut self, cost: Int) -> Bool:
+        if cost < 0 or cost > self._available:
+            return False
+        self._available -= cost
+        return True
+
+
 def send_sigv4_signed_request[
     C: Connector
 ](
     mk_connector: def () raises thin -> C,
+    http_config: HttpClientConfig,
+    mut retry_quota: AwsRetryQuota,
     method: String,
     cred: AwsCredential,
     region: String,
@@ -469,7 +495,6 @@ def send_sigv4_signed_request[
     content_type: String,
     body: List[UInt8],
     extra: List[Header],
-    retry_safe: Bool = False,
     s3_200_error: Bool = False,
 ) raises -> HttpResult:
     """The test double described in the module docstring."""
@@ -511,6 +536,12 @@ def send_sigv4_signed_request[
             String("ResourceNotFoundException:http://internal.amazon.com/"),
         )
         res.add_header(String("x-amzn-RequestId"), String("req-0001"))
+    res.add_header(
+        String("x-stub-context-ceiling-us"), String(http_config.context_ceiling_us)
+    )
+    res.add_header(
+        String("x-stub-request-timeout-us"), String(http_config.request_timeout_us)
+    )
     res.add_header(String("x-stub-method"), method)
     res.add_header(String("x-stub-access-key-id"), cred.access_key_id)
     res.add_header(
@@ -530,10 +561,7 @@ def send_sigv4_signed_request[
     res.add_header(String("x-stub-uri"), uri)
     res.add_header(String("x-stub-content-type"), content_type)
     res.add_header(String("x-stub-body"), _ascii_text(body))
-    res.add_header(
-        String("x-stub-retry-safe"),
-        String("true") if retry_safe else String("false"),
-    )
+    res.add_header(String("x-stub-retry-quota"), String(retry_quota.available()))
     res.add_header(
         String("x-stub-s3-200-error"),
         String("true") if s3_200_error else String("false"),
@@ -644,7 +672,6 @@ def send_sigv4_signed_request_with[
     content_type: String,
     body: List[UInt8],
     extra: List[Header],
-    retry_safe: Bool = False,
     s3_200_error: Bool = False,
 ) raises -> HttpResult:
     """A test double of the real send over seams (the real one also takes
@@ -658,8 +685,8 @@ def send_sigv4_signed_request_with[
     `after_success` with `budget` and answers the transport's response
     with these headers added: `x-stub-region`, `x-stub-service`,
     `x-stub-access-key-id`, `x-stub-clock` (the clock's reading),
-    `x-stub-attempts` (the loop's count), `x-stub-retry-safe` and
-    `x-stub-s3-200-error` as given, and `x-stub-conditional`
+    `x-stub-attempts` (the loop's count), `x-stub-s3-200-error` as
+    given, and `x-stub-conditional`
     (`aws_request_is_conditional` of `method` and `extra`), each "true" or
     "false"."""
     if _has_crlf(uri) or _has_crlf(content_type):
@@ -692,10 +719,6 @@ def send_sigv4_signed_request_with[
     res.add_header(String("x-stub-access-key-id"), cred.access_key_id)
     res.add_header(String("x-stub-clock"), String(now))
     res.add_header(String("x-stub-attempts"), String(retry.attempts()))
-    res.add_header(
-        String("x-stub-retry-safe"),
-        String("true") if retry_safe else String("false"),
-    )
     res.add_header(
         String("x-stub-s3-200-error"),
         String("true") if s3_200_error else String("false"),

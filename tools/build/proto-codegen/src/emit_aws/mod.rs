@@ -84,7 +84,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "8";
+pub const AWS_GENERATOR_VERSION: &str = "10";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -242,6 +242,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "AwsCredsSource",
             "AwsEndpoint",
             "AwsHttpTransport",
+            "AwsRetryQuota",
             "Header",
             "HttpResult",
             "resolve_endpoint",
@@ -344,6 +345,12 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         names: &["XmlNode", "XmlWriter"],
         mode: AwsImportMode::Always,
         protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: "komira_http_client.client",
+        names: &["HttpClientConfig"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: ALL_PROTOCOLS,
     },
     AwsImport {
         module: "komira_http_core.transport.io_stream",
@@ -538,6 +545,7 @@ pub fn emit_aws_module_with_endpoints(
         ));
     }
     check_request_checksums(&lowering.facts, options)?;
+    check_modeled_retryable_errors(&lowering.facts, options)?;
     if selected.protocol == AwsProtocol::RestXml {
         xml_codec::check_rest_xml_features(&lowering.facts)?;
     }
@@ -587,6 +595,35 @@ fn check_request_checksums(facts: &AwsFacts, options: AwsEmitOptions) -> Result<
                  `{S3_CUSTOMIZATION}` customization, for an operation whose httpChecksum \
                  names a requestAlgorithmMember"
             ));
+        }
+    }
+    Ok(())
+}
+
+/// REFUSED, by name (`modeled-retryable`), in client mode: an operation that
+/// can return an error shape the model marks `retryable`. botocore's
+/// standard mode retries such an error (`ModeledRetryableChecker`), and the
+/// generated send (`send_sigv4_signed_request`) retries by status, error
+/// code and transport failure only, so the client would give up where
+/// botocore retries. A pure-mode module has no send and is not refused.
+fn check_modeled_retryable_errors(
+    facts: &AwsFacts,
+    options: AwsEmitOptions,
+) -> Result<(), String> {
+    if options.pure_only {
+        return Ok(());
+    }
+    for (name, op) in facts.operations() {
+        for fq in &op.errors {
+            let shape = fq.rsplit('#').next().unwrap_or(fq);
+            if facts.shape(shape)?.retryable {
+                return Err(format!(
+                    "emit_aws: REFUSED modeled-retryable: operation `{name}` can return \
+                     `{shape}`, which the model marks retryable; botocore's standard mode \
+                     retries it (ModeledRetryableChecker), and the generated send retries \
+                     by status, error code and transport failure only"
+                ));
+            }
         }
     }
     Ok(())
@@ -1854,14 +1891,27 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
         self.line("    The connector factory is a `def () raises thin -> C` function");
         self.line("    pointer (a code pointer, no heap); the credential source is moved");
-        self.line("    in. No field is an `UnsafePointer`.\"\"\"");
+        self.line("    in. No field is an `UnsafePointer`.");
+        self.blank();
+        self.line("    `http_config` is the caller's and has no default: the HTTP client is");
+        self.line("    built inside `send_sigv4_signed_request`, so this argument is the only");
+        self.line("    way to bound it. A process serving requests under a platform deadline");
+        self.line("    passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling");
+        self.line("    in microseconds; a process with no containing deadline (a job, a CLI,");
+        self.line("    a test) passes `HttpClientConfig.defaults()`.\"\"\"");
         self.blank();
         let ruleset = self.endpoint_rules.is_some();
         let cfg = format!("{}EndpointConfig", self.prefix);
         let mn = self.module_name.clone();
         self.line("var _mk_connector: def () raises thin -> Self.C");
+        self.line("# Handed to `send_sigv4_signed_request` on every send, unchanged.");
+        self.line("var _http_config: HttpClientConfig");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
+        self.line("# The retry quota this client's calls share (botocore's standard mode");
+        self.line("# keeps one per client): every retry spends from it, and a call that");
+        self.line("# succeeds refills it.");
+        self.line("var _retry_quota: AwsRetryQuota");
         if ruleset {
             self.line("# WHERE this client sends: the service's endpoint ruleset, resolved per");
             self.line("# call over this configuration (`endpoint` for a local emulator,");
@@ -1884,6 +1934,7 @@ impl<'a> AwsEmitter<'a> {
         self.push();
         self.line("out self,");
         self.line("mk_connector: def () raises thin -> Self.C,");
+        self.line("http_config: HttpClientConfig,");
         self.line("var creds_source: Self.T,");
         self.line("region: String,");
         if ruleset {
@@ -1900,8 +1951,10 @@ impl<'a> AwsEmitter<'a> {
             self.push();
         }
         self.line("self._mk_connector = mk_connector");
+        self.line("self._http_config = http_config.copy()");
         self.line("self._creds_source = creds_source^");
         self.line("self._region = region");
+        self.line("self._retry_quota = AwsRetryQuota()");
         if ruleset {
             self.line("if not endpoint_config.region and region.byte_length() > 0:");
             self.push();
@@ -1978,6 +2031,8 @@ impl<'a> AwsEmitter<'a> {
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
+        self.line("self._http_config.copy(),");
+        self.line("self._retry_quota,");
         self.emit_send_args(ruleset, &p);
         if self.options.s3 {
             self.line("s3_200_error=s3_200_error,");
@@ -2002,6 +2057,13 @@ impl<'a> AwsEmitter<'a> {
         ));
         self.line("    connector from this client's factory, the wall clock and the");
         self.line("    standard retry loop. It returns the response, successful or not.");
+        self.blank();
+        self.line("    The transport carries the HTTP config: `AwsConnectorTransport(");
+        self.line("    http_config, connector)` is built from the caller's");
+        self.line("    `HttpClientConfig`, as `send` builds its own from this client's. The");
+        self.line("    budget is the retry quota: an `AwsRetryQuota` the caller keeps, one");
+        self.line("    for all the calls it makes over this client, as botocore keeps one");
+        self.line("    per client. `send` spends this client's own quota instead.");
         self.blank();
         self.line("    A request carrying `If-Match` or `If-None-Match` is resent only");
         self.line("    when the service cannot have acted on it (`aws_request_is_conditional`).\"\"\"");
@@ -2578,6 +2640,86 @@ mod tests {
             ..AwsEmitOptions::default()
         };
         emit_aws_client(&lowering, &AwsOverrides::empty(), "s3", options).map(|(_, s)| s)
+    }
+
+    #[test]
+    fn a_client_keeps_one_retry_quota_and_spends_it_on_every_send() {
+        // botocore's standard mode keeps one retry quota per client; the
+        // generated client holds it and hands it to every send.
+        let src = json_module_with_a_list_of_timestamps();
+        assert!(src.contains("    var _retry_quota: AwsRetryQuota\n"), "{src}");
+        assert!(src.contains("        self._retry_quota = AwsRetryQuota()\n"), "{src}");
+        assert!(
+            src.contains(
+                "        return send_sigv4_signed_request[Self.C](\n            \
+                 self._mk_connector,\n            self._http_config.copy(),\n            \
+                 self._retry_quota,\n"
+            ),
+            "{src}"
+        );
+        assert_eq!(src.matches("self._retry_quota").count(), 2, "{src}");
+        for p in ALL_PROTOCOLS {
+            assert!(aws_import_section(*p, false).contains("    AwsRetryQuota,\n"), "{p:?}");
+            assert!(!aws_import_section(*p, true).contains("AwsRetryQuota"), "{p:?}");
+        }
+    }
+
+    /// The module of a one-operation awsJson model whose operation can
+    /// return `Busy`, an error shape with the given `retryable` trait (or
+    /// none, for "").
+    fn emit_with_error(retryable: &str, pure_only: bool) -> Result<String, String> {
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}, "output": {{"shape": "Out"}},
+                    "errors": [{{"shape": "Busy"}}]}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{}}}},
+                           "Out": {{"type": "structure", "members": {{}}}},
+                           "Busy": {{"type": "structure", "members": {{}},
+                                    "exception": true{retryable}}}}}}}"#
+        ))
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let options = AwsEmitOptions {
+            omit_preamble: true,
+            pure_only,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, None).map(|e| e.source)
+    }
+
+    #[test]
+    fn a_modeled_retryable_error_is_refused_in_client_mode() {
+        // botocore retries an error the model marks retryable, and the
+        // generated send does not read the model: a client of such an
+        // operation would give up where botocore retries.
+        for retryable in [
+            r#", "retryable": {"throttling": false}"#,
+            r#", "retryable": {"throttling": true}"#,
+        ] {
+            let e = emit_with_error(retryable, false).unwrap_err();
+            assert_eq!(
+                crate::aws_conformance::refusal_name(&e).as_deref(),
+                Some("modeled-retryable"),
+                "{e}"
+            );
+            assert!(e.contains("operation `Op` can return `Busy`"), "{e}");
+            // A pure-mode module has no send.
+            emit_with_error(retryable, true).unwrap();
+        }
+        emit_with_error("", false).unwrap();
     }
 
     #[test]

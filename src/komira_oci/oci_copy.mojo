@@ -121,6 +121,7 @@ from .oci_ref import (
     media_type_is_index,
     parse_oci_ref,
 )
+from .oci_location import append_query, resolve_upload_location
 from .oci_transport import OciRequest, OciResponse, OciTransport
 
 
@@ -377,7 +378,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
         ORIGINAL request's host. Comparing against the original rather than the
         previous hop is what keeps an `A -> B -> B` chain from walking the
         token onto B."""
-        var resp = self._transport.send(request)
+        var resp = self._transport.send(request.copy())
         var host = request.registry.copy()
         var hops = 0
         while is_redirect_status(resp.status):
@@ -421,7 +422,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
             if carries_credential(request.registry, target.host):
                 next_req.with_bearer(bearer)
             host = target.host.copy()
-            resp = self._transport.send(next_req)
+            resp = self._transport.send(next_req^)
         return resp^
 
     # -------------------------------------------------------------------------
@@ -432,7 +433,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
     ) raises:
         """Ensure the destination holds the config blob and every layer blob this
         image manifest references."""
-        var digests = _image_blob_digests(manifest_raw)
+        var digests = image_blob_digests(manifest_raw)
         for i in range(len(digests)):
             self._ensure_blob(src, dst, String(digests[i]))
 
@@ -448,7 +449,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
             String("/v2/") + dst.repository + String("/blobs/") + digest,
         )
         head.with_bearer(self._dst_token)
-        var head_resp = self._transport.send(head)
+        var head_resp = self._transport.send(head^)
         if head_resp.status == 200:
             return
 
@@ -466,7 +467,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
                 + src.repository,
             )
             mount.with_bearer(self._dst_token)
-            var mount_resp = self._transport.send(mount)
+            var mount_resp = self._transport.send(mount^)
             if mount_resp.status == 201:
                 # Mounted — zero bytes transferred. The common path for a
                 # cross-PROJECT, same-HOST promote.
@@ -495,7 +496,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
                 String("/v2/") + dst.repository + String("/blobs/uploads/"),
             )
             start.with_bearer(self._dst_token)
-            var start_resp = self._transport.send(start)
+            var start_resp = self._transport.send(start^)
             if start_resp.status != 202:
                 raise Error(
                     String("oci: opening a blob upload session in ")
@@ -506,15 +507,12 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
                     + String(_body_hint(start_resp))
                 )
             upload_location = start_resp.header(String("location"))
-        if upload_location.byte_length() == 0:
-            raise Error(
-                String("oci: the registry accepted a blob upload session for ")
-                + digest
-                + String(
-                    " but returned no Location header — there is no URL to PUT"
-                    " the blob to"
-                )
-            )
+        # ⚠ The session URL is resolved, never used raw as a path: it may be an
+        # absolute URL, and one naming another host is REFUSED (the credential
+        # must not leave the host it was issued for). See oci_location.mojo.
+        var upload_target = resolve_upload_location(
+            dst.registry, upload_location
+        )
 
         # (d) Fetch the blob from the SOURCE and verify its content-address
         # before it is written anywhere. A layer that does not hash to its
@@ -545,15 +543,15 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
         # is what tells the registry to finalize + verify.
         var put = OciRequest(
             HTTP_METHOD_PUT,
-            dst.registry.copy(),
-            _append_query(upload_location, String("digest=") + digest),
+            upload_target.host.copy(),
+            append_query(upload_target.path, String("digest=") + digest),
         )
         put.with_bearer(self._dst_token)
         put.with_header(
             String("content-type"), String("application/octet-stream")
         )
-        put.with_body(blob.body.copy())
-        var put_resp = self._transport.send(put)
+        put.with_body(blob.take_body())
+        var put_resp = self._transport.send(put^)
         if put_resp.status != 201:
             raise Error(
                 String("oci: PUT blob ")
@@ -587,7 +585,7 @@ struct OciCopier[T: OciTransport](Movable, Deinitable):
         req.with_bearer(self._dst_token)
         # VERBATIM — see (1) at the top of the file.
         req.with_body(m.raw.copy())
-        var resp = self._transport.send(req)
+        var resp = self._transport.send(req^)
         if resp.status != 201 and resp.status != 200:
             raise Error(
                 String("oci: PUT manifest ")
@@ -640,7 +638,7 @@ def _index_child_digests(raw: List[UInt8]) raises -> List[String]:
     return out^
 
 
-def _image_blob_digests(raw: List[UInt8]) raises -> List[String]:
+def image_blob_digests(raw: List[UInt8]) raises -> List[String]:
     """The config digest + every layer digest of an image manifest.
 
     The config is listed FIRST purely so a failure reads in the order a human
@@ -735,19 +733,6 @@ def _resolve_redirect_or_raise(
             " REFUSING to guess what it is relative to."
         )
     )
-
-
-def _append_query(location: String, param: String) -> String:
-    """Append `param` to an upload-session URL, choosing `?` or `&` correctly.
-
-    The session URL is SERVER-CHOSEN and opaque: some registries return a bare
-    path, others one that already carries state in a query string. Guessing the
-    separator wrong turns the finalizing `digest=` into part of a previous
-    parameter's value, and the registry rejects the upload with a message that
-    does not mention the real cause."""
-    if location.find(String("?")) >= 0:
-        return location + String("&") + param
-    return location + String("?") + param
 
 
 def _body_hint(resp: OciResponse) -> String:

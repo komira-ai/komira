@@ -4,8 +4,8 @@
 # awsQueryCompatible, so it names the error's legacy query code in an
 # `x-amzn-query-error` header beside the shape name in `__type`; the
 # client raises the query code, AWS.SimpleQueueService.NonExistentQueue, as
-# botocore and the Go v2 SDK report it. Both answers are a POST's, and the
-# error is a 400, so nothing is retried.
+# botocore and the Go v2 SDK report it. The error is a 400 naming no code
+# botocore retries, so nothing is retried.
 #
 # Then the GetQueueUrl request as it reached the wire: the client is given
 # komira_aws_core's AwsEchoConnector, whose answer is an awsJson error
@@ -23,6 +23,7 @@ from komira_aws_core import (
     AwsEchoConnector,
     StaticCredsSource,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from std.testing import assert_equal, assert_raises, assert_true
@@ -82,6 +83,7 @@ def _client[C: Connector](
     config.endpoint = Optional[String](String("http://127.0.0.1:9324"))
     return SQSSQSClient[C, StaticCredsSource](
         mk,
+        HttpClientConfig.defaults(),
         StaticCredsSource(
             AwsCredential(
                 String("AKIDEXAMPLE"),

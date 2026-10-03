@@ -203,10 +203,15 @@
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen). The tiny models' pure-mode
-#      clients (komira//tools/build/proto-codegen/aws_rest_json and
-#      aws_rest_xml) generated exactly their packages' files, and their
-#      welded tests ran: see test 36.
+#      go red (tests//negative/aws_codegen). Each client module (logs and
+#      the tiny restJson1 model) must also contain, as whole lines, the
+#      strings its must_contain names (the caller's HttpClientConfig
+#      reaching the send); a must_contain whose lines the module holds only
+#      non-adjacently, or only as the tail of a longer line, goes red, and
+#      for no other reason. The tiny models' pure-mode clients
+#      (komira//tools/build/proto-codegen/aws_rest_json and aws_rest_xml)
+#      generated exactly their packages' files, and their welded tests ran:
+#      see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]
@@ -242,10 +247,12 @@
 #      hand_srcs module and the overrides manifest naming it: the module is
 #      copied into the package, the header names its owner, and a caller test
 #      imports it. A client-mode client (tests//functional/aws_client_mode)
-#      carries the signed-send surface, the komira_http_core import and the
-#      error builder, and builds against the same stubs with their client
+#      carries the signed-send surface, the komira_http_core and
+#      komira_http_client imports, the constructor's HttpClientConfig and
+#      the error builder, and builds against the same stubs with their client
 #      half, once its layout probe and a caller test of what its send hands
-#      the transport and of its error builder pass. Refused at
+#      the transport (the caller's HttpClientConfig included) and of its
+#      error builder pass. Refused at
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
@@ -921,6 +928,14 @@ fi
 expect_green aws_codegen tests//functional/aws_codegen:
 expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
 expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
+expect_red aws_codegen_missing_contains "does not contain" tests//negative/aws_codegen:missing_contains
+expect_red aws_codegen_prefixed_contains "does not contain" tests//negative/aws_codegen:prefixed_contains
+# Their modules equal the goldens, so the must_contain check is their only red.
+for n in missing_contains prefixed_contains; do
+    if grep -qF -- "differs from the golden" "$LOG/aws_codegen_$n.log"; then
+        fail "aws_codegen_$n: also red for a golden difference (see $LOG/aws_codegen_$n.log)"
+    fi
+done
 
 # 35
 RT=tests//negative/rust_test

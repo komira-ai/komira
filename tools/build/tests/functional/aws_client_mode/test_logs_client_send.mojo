@@ -16,13 +16,17 @@
 # `get_log_events` goes through `send`, parses a 200, and turns a non-2xx
 # into an error naming the operation, the status and the code and message
 # komira_aws_core's aws_json_error_info reads (an X-Amzn-Errortype code
-# included), never the raw body. It sends neither `retry_safe` nor
-# `s3_200_error` (the transport's defaults, False). And that the send over
-# injected seams (`send_with`, through `get_log_events_with`) hands the
-# same arguments to the stub `send_sigv4_signed_request_with`, which sends
-# one unsigned request through the caller's transport, reads the caller's
-# clock and drives the caller's retry loop and budget. Signing, retries and
-# the conditional-write rule are tested in komira//src/komira_aws_core.
+# included), never the raw body; that `send` hands the transport the
+# client's own retry quota, the one its calls share (500 at the start); and
+# that it does not send `s3_200_error` (the transport's default, False). It
+# hands on the HttpClientConfig the caller built it with, unchanged, on
+# every send: the serving-ceiling clamp is the caller's, in that config.
+# And that the send over injected seams (`send_with`, through
+# `get_log_events_with`) hands the same arguments to the stub
+# `send_sigv4_signed_request_with`, which sends one unsigned request through
+# the caller's transport, reads the caller's clock and drives the caller's
+# retry loop and budget. Signing, retries and the conditional-write rule
+# are tested in komira//src/komira_aws_core.
 from komira_aws_logs_client.komira_aws_logs_client import (
     CloudWatchLogsCloudWatchLogsClient,
     CloudWatchLogsGetLogEventsRequest,
@@ -38,6 +42,7 @@ from komira_aws_core import (
     CredentialHttpRequest,
     HttpResult,
 )
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
@@ -82,9 +87,14 @@ def _creds(session_token: String = String("")) -> _FixedCreds:
 comptime _Client = CloudWatchLogsCloudWatchLogsClient[_NoConnector, _FixedCreds]
 
 
+def _defaults() -> HttpClientConfig:
+    return HttpClientConfig.defaults()
+
+
 def _client_at(host: String) -> _Client:
     return _Client(
         _mk_connector,
+        _defaults(),
         _creds(),
         String("us-west-2"),
         Optional[AwsEndpoint](AwsEndpoint(String("https"), host, 443, String(""), True)),
@@ -98,7 +108,7 @@ def _request() raises -> CloudWatchLogsGetLogEventsRequest:
 
 
 def test_send_hands_the_transport() raises:
-    var client = _Client(_mk_connector, _creds(), String("us-west-2"))
+    var client = _Client(_mk_connector, _defaults(), _creds(), String("us-west-2"))
     var built = build_get_log_events_request(_request())
     var want_body = built.body_text()
     var res = client.send(built^)
@@ -126,14 +136,48 @@ def test_send_hands_the_transport() raises:
     # transport's own argument and is not repeated there.
     assert_equal(res.header(String("x-stub-extra-count")), "1")
     assert_equal(res.header(String("X-Amz-Target")), "Logs_20140328.GetLogEvents")
-    # GetLogEvents is not marked retry-safe and Logs is not S3.
-    assert_equal(res.header(String("x-stub-retry-safe")), "false")
+    # The client's retry quota, and Logs is not S3.
+    assert_equal(res.header(String("x-stub-retry-quota")), "500")
     assert_equal(res.header(String("x-stub-s3-200-error")), "false")
+    # The caller's HTTP config, here the defaults: no containing deadline.
+    assert_equal(res.header(String("x-stub-context-ceiling-us")), "0")
+    assert_equal(res.header(String("x-stub-request-timeout-us")), "0")
+
+
+def test_send_hands_on_the_callers_http_config() raises:
+    # The config the caller built the client with reaches the transport
+    # unchanged on every send: the client keeps no config of its own. Both
+    # fields are set, to different values, so neither can stand in for the
+    # other.
+    var client = _Client(
+        _mk_connector,
+        HttpClientConfig(request_timeout_us=1_234_567, context_ceiling_us=4_500_000),
+        _creds(),
+        String("us-west-2"),
+    )
+    for _ in range(2):
+        var res = client.send(build_get_log_events_request(_request()))
+        assert_equal(res.header(String("x-stub-context-ceiling-us")), "4500000")
+        assert_equal(res.header(String("x-stub-request-timeout-us")), "1234567")
+
+
+def test_send_hands_over_the_clients_retry_quota() raises:
+    # One quota per client, kept across its calls: what was spent from it
+    # before a call is what the transport is handed, not a fresh quota.
+    var client = _Client(_mk_connector, _defaults(), _creds(), String("us-west-2"))
+    assert_true(client._retry_quota.try_spend(5))
+    var res = client.send(build_get_log_events_request(_request()))
+    assert_equal(res.header(String("x-stub-retry-quota")), "495")
+    var again = client.send(build_get_log_events_request(_request()))
+    assert_equal(again.header(String("x-stub-retry-quota")), "495")
 
 
 def test_send_keeps_the_session_token() raises:
     var client = _Client(
-        _mk_connector, _creds(String("example-session-token")), String("us-west-2")
+        _mk_connector,
+        _defaults(),
+        _creds(String("example-session-token")),
+        String("us-west-2"),
     )
     var res = client.send(build_get_log_events_request(_request()))
     assert_equal(res.header(String("x-stub-has-session-token")), "true")
@@ -142,6 +186,7 @@ def test_send_keeps_the_session_token() raises:
 def test_send_to_the_endpoint_override() raises:
     var client = _Client(
         _mk_connector,
+        _defaults(),
         _creds(),
         String("us-east-1"),
         Optional[AwsEndpoint](
@@ -160,7 +205,7 @@ def test_send_to_the_endpoint_override() raises:
 
 
 def test_send_takes_content_type_in_any_case() raises:
-    var client = _Client(_mk_connector, _creds(), String("us-west-2"))
+    var client = _Client(_mk_connector, _defaults(), _creds(), String("us-west-2"))
     var req = AwsRequest(String("POST"), String("/"))
     req.set_header(String("content-TYPE"), String("application/x-amz-json-1.0"))
     req.set_header(String("X-Amz-Target"), String("Logs_20140328.GetLogEvents"))
@@ -174,7 +219,7 @@ def test_send_takes_content_type_in_any_case() raises:
 def test_send_does_not_launder_a_reserved_header() raises:
     # A Host or Content-Length on the request reaches the transport as an
     # extra header, which the request builder refuses.
-    var client = _Client(_mk_connector, _creds(), String("us-west-2"))
+    var client = _Client(_mk_connector, _defaults(), _creds(), String("us-west-2"))
     var req = AwsRequest(String("POST"), String("/"))
     req.set_header(String("Content-Length"), String("2"))
     with assert_raises(contains="is set by the request builder"):
@@ -182,19 +227,23 @@ def test_send_does_not_launder_a_reserved_header() raises:
 
 
 def test_send_calls_the_connector_factory() raises:
-    var client = _Client(_mk_connector_refused, _creds(), String("us-west-2"))
+    var client = _Client(
+        _mk_connector_refused, _defaults(), _creds(), String("us-west-2")
+    )
     with assert_raises(contains="connector factory refused"):
         _ = client.send(build_get_log_events_request(_request()))
 
 
 def test_get_log_events_goes_through_send() raises:
-    var client = _Client(_mk_connector_refused, _creds(), String("us-west-2"))
+    var client = _Client(
+        _mk_connector_refused, _defaults(), _creds(), String("us-west-2")
+    )
     with assert_raises(contains="connector factory refused"):
         _ = client.get_log_events(_request())
 
 
 def test_get_log_events_parses_a_200() raises:
-    var client = _Client(_mk_connector, _creds(), String("us-west-2"))
+    var client = _Client(_mk_connector, _defaults(), _creds(), String("us-west-2"))
     var resp = client.get_log_events(_request())
     assert_equal(resp.next_forward_token.value(), "f/1")
     assert_equal(len(resp.events.value()), 0)
@@ -265,7 +314,7 @@ def test_get_log_events_error_never_echoes_the_body() raises:
 
 
 def test_creds_source_threads_through() raises:
-    var client = _Client(_mk_connector, _creds(), String("eu-west-1"))
+    var client = _Client(_mk_connector, _defaults(), _creds(), String("eu-west-1"))
     assert_equal(client.region(), "eu-west-1")
     var source = client^.into_creds_source()
     assert_equal(source.credentials().access_key_id, "AKIDEXAMPLE")
@@ -338,7 +387,9 @@ struct _Budget(RetryBudget):
 
 
 def test_get_log_events_with_goes_over_the_given_seams() raises:
-    var client = _Client(_mk_connector_refused, _creds(), String("us-west-2"))
+    var client = _Client(
+        _mk_connector_refused, _defaults(), _creds(), String("us-west-2")
+    )
     var transport = _RecordingTransport()
     var clock = _Clock()
     var loop = RetryLoop[_Mono, _NoSleep, _Rng](_Mono(), _NoSleep(), _Rng())
@@ -355,7 +406,6 @@ def test_get_log_events_with_goes_over_the_given_seams() raises:
     assert_equal(res.header(String("x-stub-service")), "logs")
     assert_equal(res.header(String("x-stub-access-key-id")), "AKIDEXAMPLE")
     assert_equal(res.header(String("x-stub-clock")), "1700000000")
-    assert_equal(res.header(String("x-stub-retry-safe")), "false")
     assert_equal(res.header(String("x-stub-s3-200-error")), "false")
     assert_equal(res.header(String("x-stub-conditional")), "false")
     var sent = transport.last.value().copy()
@@ -374,7 +424,9 @@ def test_get_log_events_with_goes_over_the_given_seams() raises:
 def test_send_with_reports_a_conditional_write() raises:
     # An If-Match header on a POST is a conditional write; the generated
     # send hands it on as an extra header, where the core's rule reads it.
-    var client = _Client(_mk_connector_refused, _creds(), String("us-west-2"))
+    var client = _Client(
+        _mk_connector_refused, _defaults(), _creds(), String("us-west-2")
+    )
     var transport = _RecordingTransport()
     var clock = _Clock()
     var loop = RetryLoop[_Mono, _NoSleep, _Rng](_Mono(), _NoSleep(), _Rng())
@@ -388,6 +440,8 @@ def test_send_with_reports_a_conditional_write() raises:
 
 def main() raises:
     test_send_hands_the_transport()
+    test_send_hands_on_the_callers_http_config()
+    test_send_hands_over_the_clients_retry_quota()
     test_send_keeps_the_session_token()
     test_send_to_the_endpoint_override()
     test_send_takes_content_type_in_any_case()

@@ -16,7 +16,8 @@
 #
 # 2. The proto3 JSON form round-trips a whole list, under the camelCase names
 #    an author's tooling sees (`healthPath`, `schedule`, `timezone`,
-#    `secretEnv`, `platform`), and re-encodes to the same binary bytes.
+#    `secretEnv`, `platform`, `store`, `version`), and re-encodes to the same
+#    binary bytes.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -60,17 +61,14 @@ def _long(tag: String, i: Int) -> String:
     return s^
 
 
-def _platform() -> List[UInt8]:
-    """linux x86_64, written out (os 1 = LINUX, cpu 1 = X86_64)."""
-    var b = List[UInt8]()
-    _uint(b, 1, 1)
-    _uint(b, 2, 1)
-    return b^
-
-
-def _secret_entry(key: String, name: String) -> List[UInt8]:
+def _secret_entry(
+    key: String, name: String, pinned: Bool = False
+) -> List[UInt8]:
     var secret = List[UInt8]()
     _str(secret, 1, name)
+    if pinned:
+        _str(secret, 2, String("default"))
+        _str(secret, 3, String("12"))
     var entry = List[UInt8]()
     _str(entry, 1, key)
     _msg(entry, 2, secret)
@@ -81,7 +79,7 @@ def _service_resource(i: Int) -> List[UInt8]:
     """A `service` whose every string is heap-owned."""
     var image = List[UInt8]()
     _str(image, 2, _long("sha256-api", i))
-    _msg(image, 3, _platform())
+    _str(image, 3, String("linux/amd64"))
     var target = List[UInt8]()
     _str(target, 1, _long("target", i))
     var uses = List[UInt8]()
@@ -113,7 +111,7 @@ def _job_resource(i: Int) -> List[UInt8]:
     _str(sched, 2, _long("tz", i))
     var digest = List[UInt8]()
     _str(digest, 2, _long("sha256", i))
-    _msg(digest, 3, _platform())
+    _str(digest, 3, String("linux/amd64"))
     var literal = List[UInt8]()
     _str(literal, 1, _long("jobvalue", i))
     var env = List[UInt8]()
@@ -123,7 +121,11 @@ def _job_resource(i: Int) -> List[UInt8]:
     _msg(job, 1, digest)
     _str(job, 2, _long("report", i))
     _msg(job, 6, env)
-    _msg(job, 7, _secret_entry(_long("JOBSECRET", i), _long("job_secret", i)))
+    _msg(
+        job,
+        7,
+        _secret_entry(_long("JOBSECRET", i), _long("job_secret", i), pinned=True),
+    )
     _msg(job, 11, sched)
     var r = List[UInt8]()
     _str(r, 1, _long("job", i))
@@ -166,7 +168,7 @@ def _check_originals(lst: List[Resource], what: String) raises:
             what + ": service image",
         )
         assert_equal(
-            svc.image.value().platform.value().cpu.value, 1, what + ": platform"
+            svc.image.value().platform, "linux/amd64", what + ": platform"
         )
         assert_equal(
             svc.secret_env[_long("SECRET", i)].name,
@@ -191,7 +193,14 @@ def _check_originals(lst: List[Resource], what: String) raises:
             what + ": job secret_env",
         )
         assert_equal(
-            job.image.value().platform.value().os.value, 1, what + ": job platform"
+            job.image.value().platform, "linux/amd64", what + ": job platform"
+        )
+        ref js = job.secret_env[_long("JOBSECRET", i)]
+        assert_equal(js.store.value(), "default", what + ": secret store")
+        assert_equal(js.version.value(), "12", what + ": secret version")
+        assert_true(
+            not Bool(svc.secret_env[_long("SECRET", i)].version),
+            what + ": an unpinned secret has no version",
         )
         assert_equal(job.schedule.value().cron, _long("cron", i), what + ": cron")
         assert_equal(
@@ -234,9 +243,9 @@ def test_json_round_trip_of_a_list() raises:
         '"timezone"',
         '"uses"',
         '"secretEnv"',
-        '"platform"',
-        '"os":"LINUX"',
-        '"cpu":"X86_64"',
+        '"platform":"linux/amd64"',
+        '"store":"default"',
+        '"version":"12"',
     ]:
         assert_true(
             String(key) in text,

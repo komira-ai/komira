@@ -16,9 +16,13 @@
 # X-Amz-Date for the same path-style target; a GetObject that keeps getting
 # 503 SlowDown gives up after the standard mode's three sends and returns
 # the last answer, which raises as SlowDown; a CopyObject 200-with-<Error>
-# is retried; a CompleteMultipartUpload (a POST) that gets a
-# 200-with-<Error> InternalError is not resent, and its parser raises it as
-# a 500; a 500 on CreateMultipartUpload (a POST) is not resent either.
+# is retried; a CompleteMultipartUpload (a POST, not idempotent) is resent,
+# as botocore's standard mode resends every operation: after a
+# 200-with-<Error> InternalError, and after a 500 and a 503, each resend
+# signed again, until the third send, whose answer its parser raises; a 500
+# on CreateMultipartUpload (a POST) is resent too. A PutObject with
+# If-None-Match: * (a conditional write) is sent once after a 500, the 500
+# returned, and resent after a throttle.
 from komira_aws_s3.komira_aws_s3 import (
     S3CompleteMultipartUploadRequest,
     S3CopyObjectRequest,
@@ -271,33 +275,76 @@ def test_copy_200_with_error_is_retried() raises:
     assert_equal(out.copy_object_result.value().e_tag.value(), '"9b2c"')
 
 
-def test_complete_200_with_error_is_not_resent() raises:
-    var input = S3CompleteMultipartUploadRequest(
-        String("lake"), String("big.bin"), String("u1")
-    )
-    var target = aws_signing_target(
+def _complete_target(input: S3CompleteMultipartUploadRequest) raises -> AwsSigningTarget:
+    return aws_signing_target(
         resolve_complete_multipart_upload_endpoint(
             komira_aws_s3_endpoint_rules(), _config(), input
         ),
         String("us-east-1"),
         String("s3"),
     )
+
+
+def test_complete_200_with_error_is_resent() raises:
+    var input = S3CompleteMultipartUploadRequest(
+        String("lake"), String("big.bin"), String("u1")
+    )
+    var target = _complete_target(input)
     var c = ScriptedConnector.with_stream(_internal_200())
+    c.arm_next(
+        _answer(
+            200,
+            "OK",
+            "<CompleteMultipartUploadResult><ETag>&quot;e-2&quot;</ETag>"
+            "</CompleteMultipartUploadResult>",
+        )
+    )
+    var w = Wire(c^)
+    var res = w.send(
+        build_complete_multipart_upload_request(input), target, s3_200_error=True
+    )
+    # A POST, resent as the 500 botocore makes of the answer.
+    assert_equal(len(w.t.sent), 2)
+    assert_equal(w.slept(), 1)
+    for i in range(2):
+        assert_equal(w.t.sent[i].method, "POST")
+        assert_equal(w.t.sent[i].target, "/lake/big.bin?uploadId=u1")
+    assert_equal(_header(w.t.sent[0], "X-Amz-Date"), "20260921T141320Z")
+    assert_equal(_header(w.t.sent[1], "X-Amz-Date"), "20260921T141325Z")
+    var out = parse_complete_multipart_upload_response(res^.into_response())
+    assert_equal(out.e_tag.value(), '"e-2"')
+
+
+def test_complete_is_resent_until_the_third_send() raises:
+    var input = S3CompleteMultipartUploadRequest(
+        String("lake"), String("big.bin"), String("u1")
+    )
+    var target = _complete_target(input)
+    var c = ScriptedConnector.with_stream(
+        _answer(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
+    )
+    c.arm_next(
+        _answer(503, "Service Unavailable", "<Error><Code>ServiceUnavailable</Code></Error>")
+    )
+    c.arm_next(_internal_200())
     c.arm_next(_answer(200, "OK", "<CompleteMultipartUploadResult/>"))
     var w = Wire(c^)
     var res = w.send(
         build_complete_multipart_upload_request(input), target, s3_200_error=True
     )
-    # A POST: S3 may have completed the upload, so it is not resent; the
-    # parser raises the answer as the 500 it is.
-    assert_equal(len(w.t.sent), 1)
-    assert_equal(w.slept(), 0)
-    assert_equal(w.t.sent[0].target, "/lake/big.bin?uploadId=u1")
+    assert_equal(len(w.t.sent), 3)
+    assert_equal(w.slept(), 2)
+    assert_equal(_header(w.t.sent[0], "X-Amz-Date"), "20260921T141320Z")
+    assert_equal(_header(w.t.sent[1], "X-Amz-Date"), "20260921T141325Z")
+    assert_equal(_header(w.t.sent[2], "X-Amz-Date"), "20260921T141330Z")
+    assert_true(
+        _header(w.t.sent[1], "Authorization") != _header(w.t.sent[2], "Authorization")
+    )
     with assert_raises(contains="CompleteMultipartUpload failed: HTTP 500 InternalError"):
         _ = parse_complete_multipart_upload_response(res^.into_response())
 
 
-def test_a_500_on_a_post_is_not_resent() raises:
+def test_a_500_on_a_post_is_resent() raises:
     var input = S3CreateMultipartUploadRequest(String("lake"), String("big.bin"))
     var target = aws_signing_target(
         resolve_create_multipart_upload_endpoint(
@@ -312,15 +359,64 @@ def test_a_500_on_a_post_is_not_resent() raises:
     c.arm_next(_answer(200, "OK", ""))
     var w = Wire(c^)
     var res = w.send(build_create_multipart_upload_request(input), target)
+    assert_equal(res.status, 200)
+    assert_equal(len(w.t.sent), 2)
+    assert_equal(w.t.sent[1].target, "/lake/big.bin?uploads")
+
+
+def _put_if_none_match() raises -> S3PutObjectRequest:
+    var input = S3PutObjectRequest(String("lake"), String("manifest.json"))
+    input.set_body(_bytes(String("{}")))
+    input.set_if_none_match(String("*"))
+    return input^
+
+
+def _put_target(input: S3PutObjectRequest) raises -> AwsSigningTarget:
+    return aws_signing_target(
+        resolve_put_object_endpoint(komira_aws_s3_endpoint_rules(), _config(), input),
+        String("us-east-1"),
+        String("s3"),
+    )
+
+
+def test_a_conditional_put_is_not_resent_after_a_500() raises:
+    # A create-if-absent PutObject the service may have applied: a resend
+    # would be answered 412, read as another writer's object. One send, and
+    # the 500 is returned.
+    var input = _put_if_none_match()
+    var c = ScriptedConnector.with_stream(
+        _answer(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
+    )
+    c.arm_next(
+        _answer(412, "Precondition Failed", "<Error><Code>PreconditionFailed</Code></Error>")
+    )
+    var w = Wire(c^)
+    var res = w.send(build_put_object_request(input), _put_target(input))
     assert_equal(res.status, 500)
     assert_equal(len(w.t.sent), 1)
-    assert_equal(w.t.sent[0].target, "/lake/big.bin?uploads")
+    assert_equal(w.slept(), 0)
+    assert_equal(_header(w.t.sent[0], "If-None-Match"), "*")
+
+
+def test_a_conditional_put_is_resent_after_a_throttle() raises:
+    var input = _put_if_none_match()
+    var c = ScriptedConnector.with_stream(_slow_down())
+    c.arm_next(_answer(200, "OK", ""))
+    var w = Wire(c^)
+    var res = w.send(build_put_object_request(input), _put_target(input))
+    assert_equal(res.status, 200)
+    assert_equal(len(w.t.sent), 2)
+    assert_equal(_header(w.t.sent[1], "If-None-Match"), "*")
+    assert_equal(_header(w.t.sent[1], "X-Amz-Date"), "20260921T141325Z")
 
 
 def main() raises:
     test_a_retry_is_signed_again()
     test_gives_up_after_three_sends()
     test_copy_200_with_error_is_retried()
-    test_complete_200_with_error_is_not_resent()
-    test_a_500_on_a_post_is_not_resent()
+    test_complete_200_with_error_is_resent()
+    test_complete_is_resent_until_the_third_send()
+    test_a_500_on_a_post_is_resent()
+    test_a_conditional_put_is_not_resent_after_a_500()
+    test_a_conditional_put_is_resent_after_a_throttle()
     print("OK")

@@ -21,6 +21,7 @@
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_objectstore.types import WritePrecondition
 from komira_objectstore_s3 import (
@@ -91,6 +92,7 @@ def _store(
     return _Store(
         config^,
         mk,
+        HttpClientConfig.defaults(),
         StaticCredsSource(
             AwsCredential(
                 String("AKIDEXAMPLE"),

@@ -12,7 +12,9 @@ komira_objectstore store, built on the generated `komira_aws_s3` client.
   HTTP's closed Range, and the checks a 206's Content-Range must pass.
 - `store.mojo`: `S3Store[C, T, K]`, the object verbs (HEAD, GET, ranged and
   suffix GET, ListObjectsV2, DELETE, conditional PUT, multipart, coalesced
-  range fetch) over the generated client's `<op>_with` sends.
+  range fetch) over the generated client's `<op>_with` sends, through an
+  HTTP client built from the caller's `HttpClientConfig` and paying for
+  retries from the store's own `AwsRetryQuota`.
 - `conditional_store.mojo`: `S3ConditionalStore[C, T, K]`, one bucket as a
   `CloneableConditionalWriteStore` and `RangeFetchStore`.
 - `presign.mojo`: `S3PresignSigner[T, K]`, presigned GET and PUT URLs as an
