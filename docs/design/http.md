@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-`komira_http` (`src/komira_http`) is an HTTP/1.1 and HTTP/2 server and client, the codecs both share, and a TLS layer. Neither the server nor the client starts a thread: each is driven by a `Reactor` from `komira_async` on the calling thread. A **reactor** waits on many sockets at once and reports each ready one as a completion.
+The HTTP layer is four packages. `komira_http_core` (`src/komira_http_core`) holds the codecs, the TLS layer and the stream seam that the server and the client share. `komira_http_client` and `komira_http_server` are the HTTP/1.1 and HTTP/2 client and server; each depends on the core and neither on the other. `komira_http_status_hook` is the one piece that needs both. Neither the server nor the client starts a thread: each is driven by a `Reactor` from `komira_async` on the calling thread. A **reactor** waits on many sockets at once and reports each ready one as a completion.
 
 The design idea is **one event loop per server, and I/O as explicit state**. A handler receives the server's own reactor, so its I/O runs on the loop that serves HTTP. Only the suspendable and erased serve methods let a handler that waits on a database or an outbound call park while the loop serves other connections. In the plain and chained methods, the dispatcher returns its response synchronously.
 
@@ -213,11 +213,11 @@ The TLS layer is [s2n-tls](https://github.com/aws/s2n-tls), built by `third_part
 
 **Decision.** `GrpcDispatch` takes a path, a content type and a byte body, and returns a `GrpcResponse`.
 
-**Because.** A gRPC service library depends on `komira_http`, so `komira_http` cannot import that library's types without a cycle. A trait over strings and bytes lets the serve loop call any gRPC service.
+**Because.** A gRPC service library depends on `komira_http_server`, so `komira_http_server` cannot import that library's types without a cycle. A trait over strings and bytes lets the serve loop call any gRPC service.
 
 **Alternatives weighed.**
 
-- Put the gRPC service types in `komira_http`: the HTTP library would own protobuf-level code.
+- Put the gRPC service types in `komira_http_server`: the HTTP library would own protobuf-level code.
 
 **Revisit if.** Streaming responses need incremental delivery, which a returned list cannot express.
 
@@ -269,7 +269,7 @@ Entry points:
 
 ## How is it tested?
 
-The `komira_http` target in `src/komira_http_server/BUCK` lists all 164 files of `src/komira_http_client/tests/` in its `test_srcs`. Each runs as a build action, so the library cannot build while one fails. Run: `./buck2 build //src/komira_http:komira_http`.
+Each package welds its own tests: `komira_http_core` 36, `komira_http_client` 105, `komira_http_server` 24 and `komira_http_status_hook` 1, 166 in all. Each runs as a build action, so a library cannot build while one of its tests fails. Run: `./buck2 build //src/komira_http_core:komira_http_core //src/komira_http_client:komira_http_client //src/komira_http_server:komira_http_server //src/komira_http_status_hook:komira_http_status_hook`.
 
 - TLS tests link the vendored s2n-tls and AWS-LC archives and read the certificates in `src/komira_http_core/tests/fixtures/`.
 - `ScriptedStream` and `ScriptedConnector` feed byte scripts to the client, and `ScriptedTransport` records calls through the `HttpTransport` seam, so most client tests open no socket.
@@ -290,6 +290,6 @@ Not tested:
 - **Limit: IPv4 only, with blocking DNS.** Dials take a `UInt32` address; `resolve_host_be` in `komira_async` calls `getaddrinfo`, which has no timeout.
 - **Limit: routes match in registration order.** A `/users/:id` added before `/users/me` captures `/users/me`, and lookup scans the routes one by one.
 - **Limit: AWS Lambda reports no ceiling.** `serving_request_ceiling_us` returns no ceiling for the Lambda runtime API value, so a client there keeps the 600 s default (`test_lambda_reports_no_ceiling_and_that_is_a_known_gap`).
-- **Limit: no WebSocket framing.** Outside its tests, `komira_http` mentions WebSocket only in one comment.
+- **Limit: no WebSocket framing.** Outside its tests, the HTTP layer mentions WebSocket only in one comment.
 - **Raw pointer across a module:** `TlsConnection._raw_conn_ptr_for_test()` in `tls/s2n_shim.mojo` returns the raw s2n pointer. Five test files in `tests/` reach it: three call it directly, and two through `TlsClientStream._conn_quic_enabled_for_test` in `client/tls_connector.mojo`. See the encapsulation rule in [Mojo safety and idioms](mojo_safety_and_idioms.md).
 - **Open question:** should the dispatch rounds serve TLS and HTTP/2? The pieces exist in `serve_one_iteration`; what is missing is a handler path for plain requests there, and a decision on whether TLS ends in the process or in front of it.
