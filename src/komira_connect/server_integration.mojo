@@ -33,8 +33,8 @@
 
 from std.collections.dict import Dict
 
-from komira_http.codec import HttpMethod
-from komira_http.routing import Router
+from komira_http_core.codec import HttpMethod
+from komira_http_server.routing import Router
 
 from .dispatch import DispatchResult, codec_id_for_content_type
 from .service import ConnectService, _make_not_found_result

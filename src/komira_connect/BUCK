@@ -10,7 +10,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 mojo_library(
     name = "komira_connect",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
-    deps = ["//src/komira_http:komira_http"],
+    deps = ["<<UNHANDLED>>"],
     test_srcs = [
         "tests/test_L5_codec_connect_json.mojo",
         "tests/test_L5_codec_grpc.mojo",

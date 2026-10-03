@@ -20,7 +20,7 @@
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_http.routing import Router
+from komira_http_server.routing import Router
 
 from komira_connect import (
     GRPC_STATUS_OK,
