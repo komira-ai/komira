@@ -191,14 +191,17 @@
 #      stops after that test; run with a `uname` reporting macOS arm64 it must
 #      refuse, and with this machine's, pass.
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
-#      GetLogEvents module, pure and client, and the layout probe of each,
-#      equal their text goldens byte for byte; the generator refuses an empty
-#      or missing operation list, an operation the model lacks, a protocol it
-#      does not implement, a missing, malformed (not 64 lowercase hex digits)
-#      or wrong --model-sha256, a zero-byte model, and --probe-import without
+#      GetLogEvents module, pure and client, a restJson1 client of a tiny
+#      model, and the layout probe of each, equal their text goldens byte for
+#      byte; the generator refuses an empty or missing operation list, an
+#      operation the model lacks, a protocol it does not implement, a
+#      missing, malformed (not 64 lowercase hex digits) or wrong
+#      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen).
+#      go red (tests//negative/aws_codegen). The tiny model's pure-mode
+#      client (komira//tools/build/proto-codegen/aws_rest_json) generated
+#      exactly its package's files, and its welded tests ran: see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]
@@ -219,14 +222,20 @@
 #      response. GetLogEvents' error shapes have no members in that model, so
 #      the error-shape check pins only that the generated shape is memberless
 #      (it decodes nothing); an error's code and message are read by
-#      komira_aws_core, stubbed here, and are tested on the real core in P06.
+#      komira_aws_core, stubbed here, and are tested in
+#      komira//src/komira_aws_core. Generated code compiled against the
+#      real komira_aws_core and komira_json: the AWS conformance driver, and
+#      a pure-mode restJson1 client of a tiny model
+#      (komira//tools/build/proto-codegen/aws_rest_json), which builds only
+#      once its layout probe and a caller test of the requests it builds and
+#      the responses it reads pass.
 #      Exactly the package's files are generated, nothing of an operation not
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
 #      copied into the package, the header names its owner, and a caller test
 #      imports it. A client-mode client is checked at generation only
 #      (tests//functional/aws_client_mode): it carries the signed-send
-#      surface, the komira_http import and the error builder. Refused at
+#      surface, the komira_http_core import and the error builder. Refused at
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
@@ -941,6 +950,7 @@ fi
 
 # 36
 expect_green aws_client tests//functional/aws_client:
+expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
 expect_red aws_client_no_operations '`operations` is empty' tests//negative/aws_client:no_operations
 expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/aws_client:joined_operations
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/aws_client:no_runtime

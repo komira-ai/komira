@@ -138,7 +138,10 @@ aws_conformance_driver_src(
     name = "aws_conformance_driver_src",
     corpus = _PROTOCOL_TESTS,
     ignore_list = _IGNORE_LIST,
-    protocols = ["json"],
+    protocols = [
+        "json",
+        "rest-json",
+    ],
 )
 
 # A test program, built once and run once, so at the test optimization level.
