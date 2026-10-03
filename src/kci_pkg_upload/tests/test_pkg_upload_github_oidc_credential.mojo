@@ -40,7 +40,7 @@ from std.os import setenv
 from std.testing import assert_equal, assert_raises, assert_true
 
 from komira_encoding import base64_url_encode_nopad
-from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
+from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 from komira_secret_store import SecretValue
 
 from kci_pkg_upload.approved_names import ApprovedNames

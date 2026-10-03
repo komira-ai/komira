@@ -50,7 +50,7 @@ from std.ffi import external_call
 from std.memory import ArcPointer
 
 from komira_atomic_alias import AtomicI64, AtomicU8
-from komira_http.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
+from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
 
 from kci_pkg_upload import PkgRequest, PkgResponse, PkgTransport, content_identity_of
 

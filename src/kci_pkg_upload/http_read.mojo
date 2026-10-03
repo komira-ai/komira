@@ -1,12 +1,12 @@
 # =============================================================================
 # src/kci_pkg_upload/http_read.mojo — the one GET loop the registry
-#   reads share: follow a redirect under `komira_http`'s redirect POLICY, and
+#   reads share: follow a redirect under `komira_http_client`'s redirect POLICY, and
 #   never let a transport fault or an unfollowable redirect escape as a raise.
 # =============================================================================
 #
 # THE LOOP IS HERE; THE POLICY IS NOT. Which statuses redirect, how a Location
 # resolves, the hop budget, and which host may receive the credential are
-# `komira_http/client/redirect_policy.mojo`'s decisions, shared with the OCI
+# `komira_http_client/redirect_policy.mojo`'s decisions, shared with the OCI
 # copier. The loop stays in this package, above `PkgTransport`, because a
 # redirect must stay SCRIPTABLE: the falsifier is "queue a 302, queue the
 # answer, assert over the recorded conversation".
@@ -23,7 +23,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from komira_http.client.redirect_policy import (
+from komira_http_client.redirect_policy import (
     MAX_REDIRECT_HOPS,
     REDIRECT_REFUSED_EMPTY_HOST,
     REDIRECT_REFUSED_NO_LOCATION,
@@ -35,7 +35,7 @@ from komira_http.client.redirect_policy import (
     is_redirect_status,
     resolve_redirect_location,
 )
-from komira_http.codec.types import HTTP_METHOD_GET
+from komira_http_core.codec.types import HTTP_METHOD_GET
 
 from .outcome import withhold_if_echoes
 from .transport import PkgRequest, PkgResponse, PkgTransport, try_exchange

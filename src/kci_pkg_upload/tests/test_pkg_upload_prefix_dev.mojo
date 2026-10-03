@@ -29,7 +29,7 @@
 
 from std.testing import assert_equal, assert_raises, assert_true
 
-from komira_http.codec.types import HTTP_METHOD_POST
+from komira_http_core.codec.types import HTTP_METHOD_POST
 
 from kci_pkg_upload.approved_names import ApprovedNames
 from kci_pkg_upload.coordinate import (

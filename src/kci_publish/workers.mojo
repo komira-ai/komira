@@ -26,7 +26,7 @@
 # field (a code pointer, no heap). No raw pointer, no wildcard origin.
 # =============================================================================
 
-from komira_http.transport.io_stream import Connector
+from komira_http_core.transport.io_stream import Connector
 from komira_retry import Sleeper
 
 from kci_pkg_upload import HttpPkgTransport, PkgRequest, PkgResponse, PkgTransport
