@@ -32,6 +32,7 @@
 # The trait's `fault_domain` default. Importing ONE constant from a leaf module
 # that imports nothing keeps this file's dependency surface at zero cycles.
 from kci_iac.fault_domain import FAULT_UNSET
+from kci_iac.outputs import InputRef, Outputs, ResolvedInputs
 
 
 # =============================================================================
@@ -270,8 +271,14 @@ engine RAISES on this at apply time (the typed hole)."""
 comptime VERB_DELETE: Int = 4
 """The planned action: delete the resource (destroy / rollback)."""
 
+comptime VERB_KNOWN_AFTER_APPLY: Int = 5
+"""A DRY-RUN-ONLY verb: the node consumes a value a producer will only have
+after the producer is created or changed, so its desired state cannot be known
+yet. `plan_graph` reports it as "may change", never as a no-op, and does not
+read the node (its desired digest would be over an unresolved reference).
+`apply_graph` never returns it: at apply time the producer runs first."""
 
-@fieldwise_init
+
 struct ChangeAction(Copyable, Movable, Deinitable):
     """One planned change for a resource (the PURE diff `plan` returns):
       * `logical_id` — the graph-stable key of the resource this action targets.
@@ -281,12 +288,38 @@ struct ChangeAction(Copyable, Movable, Deinitable):
                        "digest sha256:.. -> sha256:.. drifted -> update").
       * `retention`  — the resource's RETAIN_* policy (so a plan reader can see
                        which nodes a destroy would skip).
+      * `owner`      — the id of the authored resource this node was lowered
+                       from (`Resource.owner`), so a plan can be grouped under
+                       what the author wrote. Empty for a node with no owner.
+                       `plan_graph` stamps it; a conformer's `plan` need not.
     Flat-String value POD."""
 
     var logical_id: String
     var verb: Int
     var reason: String
     var retention: Int
+    var owner: String
+
+    def __init__(
+        out self,
+        logical_id: String,
+        verb: Int,
+        reason: String,
+        retention: Int,
+        owner: String = String(""),
+    ):
+        self.logical_id = logical_id
+        self.verb = verb
+        self.reason = reason
+        self.retention = retention
+        self.owner = owner
+
+    def __init__(out self, *, copy: Self):
+        self.logical_id = copy.logical_id.copy()
+        self.verb = copy.verb
+        self.reason = copy.reason.copy()
+        self.retention = copy.retention
+        self.owner = copy.owner.copy()
 
     def is_noop(self) -> Bool:
         return self.verb == VERB_NOOP
@@ -303,6 +336,9 @@ struct ChangeAction(Copyable, Movable, Deinitable):
     def is_delete(self) -> Bool:
         return self.verb == VERB_DELETE
 
+    def is_known_after_apply(self) -> Bool:
+        return self.verb == VERB_KNOWN_AFTER_APPLY
+
     def verb_name(self) -> StaticString:
         if self.verb == VERB_CREATE:
             return "create"
@@ -312,6 +348,8 @@ struct ChangeAction(Copyable, Movable, Deinitable):
             return "replace"
         if self.verb == VERB_DELETE:
             return "delete"
+        if self.verb == VERB_KNOWN_AFTER_APPLY:
+            return "known after apply"
         return "noop"
 
 
@@ -540,3 +578,51 @@ trait Resource(Movable, Deinitable):
 
         `mut self` (the erasure-shape rationale — see `logical_id`)."""
         return FAULT_UNSET
+
+    # ---- apply-time value flow (kci_iac/outputs.mojo) ----------------------
+    #
+    # ⚠ EVERY ONE OF THESE HAS A DEFAULT, AND EVERY ONE IS FORWARDED BY
+    # `ErasedResource`. A defaulted verb that the erased facade does not forward
+    # is silently answered by THIS default for every node of a real graph (the
+    # graph only holds erased nodes), so a new verb here is a new vtable entry
+    # there, pinned by `test_resource_outputs`'s probe.
+
+    def input_refs(mut self) -> List[InputRef]:
+        """The values this node CONSUMES from other nodes. Each is a graph edge
+        (the producer is ordered first; a producer not in the graph is refused)
+        in addition to `depends_on`, so an author never has to keep a
+        dependency list and a reference list in step.
+
+        DEFAULT = NONE. `mut self` (the erasure-shape rationale — see
+        `logical_id`)."""
+        return List[InputRef]()
+
+    def bind_inputs(mut self, resolved: ResolvedInputs) raises:
+        """Receive the values of `input_refs`, one per ref, in declared order.
+        The engine calls this AFTER every producer has been applied (or, in a
+        dry run, read as unchanged) and BEFORE this node's `read_status`, so
+        the desired state the node is read and planned against holds real
+        values, never a placeholder.
+
+        DEFAULT = NO-OP, correct for a node with no `input_refs`."""
+        pass
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        """The named values this node PRODUCES, for the resource `physical_id`,
+        reading AS `creds` if it must read (a node created in this run has not
+        been read since it was created). Called after every apply of the node,
+        whatever the verb, so an adopted node's values are re-derived from its
+        latest live read rather than trusted from state (a value that drifted
+        in the cloud is seen).
+
+        DEFAULT = NONE."""
+        return Outputs()
+
+    def owner(mut self) -> String:
+        """The id of the authored resource this node was lowered from (one
+        authored resource lowers to several engine nodes). Stamped on every
+        `ChangeAction` by `plan_graph`, so a plan groups under what the author
+        wrote.
+
+        DEFAULT = EMPTY."""
+        return String("")

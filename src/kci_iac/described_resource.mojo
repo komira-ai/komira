@@ -117,6 +117,7 @@ from kci_iac.resource import (
 )
 from kci_iac.fault_domain import FAULT_UNSET
 from kci_iac.erased_resource import ErasedResource
+from kci_iac.outputs import InputRef, Outputs, ResolvedInputs
 
 
 # =============================================================================
@@ -273,6 +274,30 @@ trait ResourceDescriptor(Movable, Deinitable):
         node."""
         return String("")
 
+    # ---- apply-time value flow (kci_iac/outputs.mojo) ----------------------
+
+    def input_refs(self, spec: Self.Spec) -> List[InputRef]:
+        """DEFAULT: none — the values this spec reads from other nodes."""
+        return List[InputRef]()
+
+    def bind_inputs(
+        self, mut spec: Self.Spec, resolved: ResolvedInputs
+    ) raises:
+        """Write the resolved values into `spec`. DEFAULT: no-op.
+
+        ⛔ THE SPEC IS MUTABLE HERE AND NOWHERE ELSE. The driver calls this
+        before `read`, so `desired_digest` and `live_digest` are always taken
+        over a BOUND spec. A descriptor whose spec can hold a reference must
+        make `desired_digest` raise `unbound_error` while one is still
+        unresolved, never hash a placeholder (a placeholder digest can never
+        equal a live one, so every plan would read as drift)."""
+        pass
+
+    def outputs(self, spec: Self.Spec, view: Self.View) -> Outputs:
+        """DEFAULT: none — the named values this resource produces, from its
+        latest live view."""
+        return Outputs()
+
 
 # =============================================================================
 # §2 — DescribedResource[D] — the generic driver. The half that is identical
@@ -301,6 +326,10 @@ struct DescribedResource[D: ResourceDescriptor](
     var _spec: Self.D.Spec
     var _logical_id: String
     var _deps: List[String]
+    # The authored resource this node was lowered from (`Resource.owner`).
+    var _owner: String
+    # The latest live view `read_status` took, for `outputs`. None until read.
+    var _last_view: Optional[Self.D.View]
 
     def __init__(
         out self,
@@ -308,11 +337,14 @@ struct DescribedResource[D: ResourceDescriptor](
         var spec: Self.D.Spec,
         logical_id: String,
         var deps: List[String],
+        owner: String = String(""),
     ):
         self._d = descriptor^
         self._spec = spec^
         self._logical_id = logical_id
         self._deps = deps^
+        self._owner = owner
+        self._last_view = None
 
     # ---- the two verbs with ONE distinct body across conformers ----------------
     def logical_id(mut self) -> String:
@@ -347,7 +379,9 @@ struct DescribedResource[D: ResourceDescriptor](
                 return ResourceStatus.absent()
             raise e^
         if not self._d.exists(live):
+            self._last_view = None
             return ResourceStatus.absent()
+        self._last_view = live.copy()
         var digest = self._d.live_digest(self._spec, live)
         var pid = self._d.physical_id(live)
         var ep = self._d.endpoint(live)
@@ -406,6 +440,40 @@ struct DescribedResource[D: ResourceDescriptor](
         documents, one layer down, and the reason both forwards exist."""
         return self._d.fault_domain(self._spec, verb)
 
+    # ---- apply-time value flow: FORWARDED to the descriptor ----------------
+    # Same shadowing hazard as `fault_domain`: without these the trait
+    # defaults answer at this wrapper and the descriptor's overrides never run.
+
+    def input_refs(mut self) -> List[InputRef]:
+        return self._d.input_refs(self._spec)
+
+    def bind_inputs(mut self, resolved: ResolvedInputs) raises:
+        """Bind into the driver's OWN spec, which `read_status` then digests:
+        the bind always precedes the digest (the engine binds before it
+        reads)."""
+        self._d.bind_inputs(self._spec, resolved)
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        """From the latest live view. A node created in this run has no view
+        yet (its pre-create read was absent), so it is read once more here:
+        the values a consumer needs are the created resource's, and they are
+        never invented."""
+        if not self._last_view:
+            var live: Self.D.View
+            try:
+                live = self._d.read(self._spec, creds.token.copy())
+            except e:
+                if self._d.is_not_found(String(e)):
+                    return Outputs()
+                raise e^
+            if not self._d.exists(live):
+                return Outputs()
+            self._last_view = live^
+        return self._d.outputs(self._spec, self._last_view.value())
+
+    def owner(mut self) -> String:
+        return self._owner.copy()
+
 
 # =============================================================================
 # §3 — the erase wrapper. Every hand-written conformer carried its own copy;
@@ -416,9 +484,10 @@ def make_described_node[D: ResourceDescriptor](
     var spec: D.Spec,
     logical_id: String,
     var deps: List[String],
+    owner: String = String(""),
 ) raises -> ErasedResource:
     """Erase a `DescribedResource[D]` into the graph's node type. A conformer
     built on a descriptor needs NO `make_*_node` of its own — it calls this."""
     return ErasedResource.erase(
-        DescribedResource[D](descriptor^, spec^, logical_id, deps^)
+        DescribedResource[D](descriptor^, spec^, logical_id, deps^, owner)
     )

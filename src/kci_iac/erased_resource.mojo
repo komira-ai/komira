@@ -48,6 +48,7 @@
 
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
+from kci_iac.outputs import InputRef, Outputs, ResolvedInputs
 from kci_iac.resource import (
     Resource,
     ResourceStatus,
@@ -130,6 +131,28 @@ comptime _FaultDomainFn = def (
     String,  # the Resource verb that raised
 ) raises thin -> Int
 
+# The apply-time value-flow verbs (kci_iac/outputs.mojo). Each has a trait
+# default, which is exactly why each needs its entry: without one the facade
+# answers with the DEFAULT for every node of a real graph.
+comptime _InputRefsFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+) raises thin -> List[InputRef]
+
+comptime _BindInputsFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    ResolvedInputs,
+) raises thin -> None
+
+comptime _OutputsFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    String,  # the physical id
+    Creds,
+) raises thin -> Outputs
+
+comptime _OwnerFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+) raises thin -> String
+
 comptime _DropFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],  # the erased R home (consumed)
 ) thin -> None
@@ -168,6 +191,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
     var _delete_fn: _DeleteFn
     var _prune_fn: _PruneFn
     var _fault_domain_fn: _FaultDomainFn
+    var _input_refs_fn: _InputRefsFn
+    var _bind_inputs_fn: _BindInputsFn
+    var _outputs_fn: _OutputsFn
+    var _owner_fn: _OwnerFn
     var _drop_fn: _DropFn
 
     def __init__(
@@ -185,6 +212,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
         delete_fn: _DeleteFn,
         prune_fn: _PruneFn,
         fault_domain_fn: _FaultDomainFn,
+        input_refs_fn: _InputRefsFn,
+        bind_inputs_fn: _BindInputsFn,
+        outputs_fn: _OutputsFn,
+        owner_fn: _OwnerFn,
         drop_fn: _DropFn,
     ):
         self._home = home^
@@ -200,6 +231,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
         self._delete_fn = delete_fn
         self._prune_fn = prune_fn
         self._fault_domain_fn = fault_domain_fn
+        self._input_refs_fn = input_refs_fn
+        self._bind_inputs_fn = bind_inputs_fn
+        self._outputs_fn = outputs_fn
+        self._owner_fn = owner_fn
         self._drop_fn = drop_fn
 
     # =========================================================================
@@ -240,6 +275,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
         var delete_t: _DeleteFn = _erased_delete_for[R]
         var prune_t: _PruneFn = _erased_prune_for[R]
         var fault_domain_t: _FaultDomainFn = _erased_fault_domain_for[R]
+        var input_refs_t: _InputRefsFn = _erased_input_refs_for[R]
+        var bind_inputs_t: _BindInputsFn = _erased_bind_inputs_for[R]
+        var outputs_t: _OutputsFn = _erased_outputs_for[R]
+        var owner_t: _OwnerFn = _erased_owner_for[R]
         var drop_t: _DropFn = _erased_drop_for[R]
         return ErasedResource(
             home^,
@@ -255,6 +294,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
             delete_t,
             prune_t,
             fault_domain_t,
+            input_refs_t,
+            bind_inputs_t,
+            outputs_t,
+            owner_t,
             drop_t,
         )
 
@@ -392,6 +435,46 @@ struct ErasedResource(Resource, Movable, Deinitable):
         in-place; the wildcard is confined to this cast-site body)."""
         var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
         return self._fault_domain_fn(p, verb)
+
+    # ---- apply-time value flow: FORWARDED, never the trait default --------
+    # Same reason as `prune` and `fault_domain`: the graph only holds erased
+    # nodes, so a verb this facade does not forward is answered by the trait
+    # default for every node. `test_resource_outputs` pins all four through an
+    # erased probe. SAFETY: see `read_status` (R driven in-place; the wildcard
+    # is confined to each cast-site body).
+
+    def input_refs(mut self) -> List[InputRef]:
+        """FORWARDED to the concrete R. `Resource.input_refs` does not raise;
+        a (contract-forbidden) raise from the trampoline surfaces as NO refs,
+        exactly as `depends_on` surfaces one."""
+        try:
+            var p = (
+                self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+            )
+            return self._input_refs_fn(p)
+        except e:
+            return List[InputRef]()
+
+    def bind_inputs(mut self, resolved: ResolvedInputs) raises:
+        """FORWARDED to the concrete R."""
+        var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+        self._bind_inputs_fn(p, resolved)
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        """FORWARDED to the concrete R."""
+        var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+        return self._outputs_fn(p, physical_id, creds)
+
+    def owner(mut self) -> String:
+        """FORWARDED to the concrete R; a (contract-forbidden) raise surfaces
+        as no owner."""
+        try:
+            var p = (
+                self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+            )
+            return self._owner_fn(p)
+        except e:
+            return String("")
 
     def __deinit__(deinit self):
         """Destroy the erased R AND free its home in ONE shot via `_drop_fn`. We
@@ -550,6 +633,49 @@ def _erased_fault_domain_for[
     unconsidered R resolves the trait default `FAULT_UNSET`, which reads as OURS."""
     var rp = home.bitcast[R]()
     return rp[].fault_domain(verb)
+
+
+def _erased_input_refs_for[
+    R: Resource
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> List[InputRef]:
+    """`input_refs` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R read in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].input_refs()
+
+
+def _erased_bind_inputs_for[
+    R: Resource
+](
+    home: UnsafePointer[UInt8, MutUntrackedOrigin],
+    resolved: ResolvedInputs,
+) raises:
+    """`bind_inputs` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R mutated in-place, not moved or freed)."""
+    var rp = home.bitcast[R]()
+    rp[].bind_inputs(resolved)
+
+
+def _erased_outputs_for[
+    R: Resource
+](
+    home: UnsafePointer[UInt8, MutUntrackedOrigin],
+    physical_id: String,
+    creds: Creds,
+) raises -> Outputs:
+    """`outputs` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R read in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].outputs(physical_id, creds)
+
+
+def _erased_owner_for[
+    R: Resource
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> String:
+    """`owner` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R read in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].owner()
 
 
 def _erased_drop_for[

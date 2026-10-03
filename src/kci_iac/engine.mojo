@@ -91,6 +91,13 @@ from kci_iac.resource import (
     VERB_UPDATE,
     VERB_REPLACE,
     VERB_DELETE,
+    VERB_KNOWN_AFTER_APPLY,
+)
+from kci_iac.outputs import (
+    InputRef,
+    Outputs,
+    ResolvedInputs,
+    unbound_error,
 )
 from kci_iac.fault_domain import (
     FAULT_UNSET,
@@ -229,17 +236,122 @@ def undeletable_report_lines(
 # =============================================================================
 # §2 — plan_graph — the READ-ONLY dry run. Topo order; per node, plan(read_status).
 # =============================================================================
+struct _RunOutputs(Movable):
+    """The outputs each node produced in THIS walk (apply or dry run), by
+    logical id, and, in a dry run, the producers whose values are not known
+    until apply."""
+
+    var _ids: List[String]
+    var _outs: List[Outputs]
+    var _pending_ids: List[String]
+    var _pending_verbs: List[String]
+
+    def __init__(out self):
+        self._ids = List[String]()
+        self._outs = List[Outputs]()
+        self._pending_ids = List[String]()
+        self._pending_verbs = List[String]()
+
+    def put(mut self, logical_id: String, var outs: Outputs):
+        self._ids.append(logical_id)
+        self._outs.append(outs^)
+
+    def mark_pending(mut self, logical_id: String, verb: String):
+        self._pending_ids.append(logical_id)
+        self._pending_verbs.append(verb)
+
+    def pending_verb(self, logical_id: String) -> Optional[String]:
+        for i in range(len(self._pending_ids)):
+            if self._pending_ids[i] == logical_id:
+                return self._pending_verbs[i]
+        return None
+
+    def value(self, logical_id: String, output: String) -> Optional[String]:
+        for i in range(len(self._ids)):
+            if self._ids[i] == logical_id:
+                return self._outs[i].get(output)
+        return None
+
+
+def _resolve_inputs(
+    lid: String, refs: List[InputRef], run: _RunOutputs
+) raises -> ResolvedInputs:
+    """One resolved value per ref, or the UNBOUND refusal naming the consumer,
+    the field, the producer and the output. Every producer has already been
+    walked (topo order), so a missing value means the producer did not report
+    it: a refusal, never an empty string."""
+    var resolved = ResolvedInputs()
+    for r in range(len(refs)):
+        var v = run.value(refs[r].producer, refs[r].output)
+        if not v:
+            raise unbound_error(lid, refs[r])
+        resolved.add(refs[r], v.value())
+    return resolved^
+
+
 def plan_graph(mut graph: ResourceGraph, creds: Creds) raises -> List[ChangeAction]:
     """Return the ChangeAction for every node, in topo order, WITHOUT mutating
     anything. Per node: `read_status(creds)` (the live read) then `plan(live)` (the
     pure diff). NO create/update/delete is issued — this is a dry run. RAISES on a
-    dangling dependency / cycle (via topo_sort) or a genuine backend read fault."""
+    dangling dependency or reference, a cycle (via topo_sort), an unresolved
+    reference, or a genuine backend read fault.
+
+    ── VALUES THAT ONLY EXIST AFTER APPLY ──────────────────────────────────────
+    A node with `input_refs` is bound to its producers' values BEFORE it is
+    read, so it is planned against real values. A dry run cannot create or
+    change a producer, so when any producer of a node plans anything but a
+    no-op (or is itself waiting on one), the node is reported as
+    VERB_KNOWN_AFTER_APPLY ("may change") and is NOT read: its desired digest
+    would be over an unresolved reference. It is never reported as a no-op. A
+    node whose producers all plan no-ops is bound to their live outputs and
+    planned like any other.
+
+    Every action carries the node's `owner()`."""
     var order = topo_sort(graph)
     var actions = List[ChangeAction]()
+    var run = _RunOutputs()
     for oi in range(len(order)):
         var idx = order[oi]
+        var lid = graph.node(idx).logical_id()
+        var owner = graph.node(idx).owner()
+        var refs = graph.node(idx).input_refs()
+        var waiting_on = String("")
+        for r in range(len(refs)):
+            var pv = run.pending_verb(refs[r].producer)
+            if pv:
+                if waiting_on.byte_length() > 0:
+                    waiting_on += String(", ")
+                waiting_on += (
+                    refs[r].field
+                    + String(" <- ")
+                    + refs[r].producer
+                    + String(".")
+                    + refs[r].output
+                    + String(" (")
+                    + pv.value()
+                    + String(")")
+                )
+        if waiting_on.byte_length() > 0:
+            run.mark_pending(lid, String("known after apply"))
+            actions.append(
+                ChangeAction(
+                    lid,
+                    VERB_KNOWN_AFTER_APPLY,
+                    String("(known after apply): ") + waiting_on,
+                    graph.node(idx).retention(),
+                    owner,
+                )
+            )
+            continue
+        if len(refs) > 0:
+            graph.node(idx).bind_inputs(_resolve_inputs(lid, refs, run))
         var live = graph.node(idx).read_status(creds)
         var action = graph.node(idx).plan(live)
+        action.owner = owner
+        if action.verb == VERB_NOOP:
+            run.put(lid, graph.node(idx).outputs(live.physical_id, creds))
+        else:
+            run.mark_pending(lid, String(action.verb_name()))
         actions.append(action^)
     return actions^
 
@@ -444,10 +556,20 @@ def apply_graph_tracked[
     pending.clear()
     for oi in range(len(order)):
         pending.append(graph.node(order[oi]).logical_id())
+    var run = _RunOutputs()
     for oi in range(len(order)):
         var idx = order[oi]
         var lid = graph.node(idx).logical_id()
         var retention = graph.node(idx).retention()
+
+        # ---- 0: BIND BEFORE READ ----
+        # Every producer of this node has been applied (topo order) and has
+        # reported its outputs, so the node's desired state holds real values
+        # before it is read and planned. An unresolved value raises here,
+        # before any intent is written for the node.
+        var refs = graph.node(idx).input_refs()
+        if len(refs) > 0:
+            graph.node(idx).bind_inputs(_resolve_inputs(lid, refs, run))
 
         # ---- 1: write-ahead intent (record or adopt) BEFORE the mutation ----
         var ticket = store.record_or_adopt_intent(lid)
@@ -587,6 +709,14 @@ def apply_graph_tracked[
         if physical_id.byte_length() == 0 and ticket.already_confirmed:
             physical_id = store.physical_id_for(lid)
         store.confirm(ticket, physical_id)
+
+        # ---- 4b: what the node produced ----
+        # Re-derived on EVERY apply, whatever the verb: an adopted node's values
+        # come from its live read, not from state. Persisted beside the physical
+        # id as a fallback for readers that cannot read live.
+        var outs = graph.node(idx).outputs(physical_id, creds)
+        store.record_outputs(lid, outs)
+        run.put(lid, outs^)
 
         # ---- 5: record what we did (for rollback) ----
         var record = AppliedNode(

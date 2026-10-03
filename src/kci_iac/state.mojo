@@ -49,6 +49,7 @@
 # =============================================================================
 
 from std.memory import OwnedPointer
+from kci_iac.outputs import Outputs
 
 
 # =============================================================================
@@ -123,6 +124,23 @@ trait StateStore(Movable, Deinitable):
     def physical_id_for(mut self, logical_id: String) raises -> String:
         ...
 
+    def record_outputs(mut self, logical_id: String, outputs: Outputs) raises:
+        """Persist the values node `logical_id` produced on its latest apply,
+        beside its physical id. The copy kept here is a FALLBACK for a reader
+        that cannot read live (an offline dry run); the engine itself
+        re-derives outputs from a live read on every apply.
+
+        DEFAULT = NOT PERSISTED. A store that does not override this keeps no
+        outputs, and `outputs_for` then answers empty, which a caller must read
+        as "unknown", never as "the node produces nothing"."""
+        pass
+
+    def outputs_for(mut self, logical_id: String) raises -> Outputs:
+        """The outputs last recorded for `logical_id`; empty if none were.
+
+        DEFAULT = EMPTY (see `record_outputs`)."""
+        return Outputs()
+
 
 # =============================================================================
 # §3 — _InMemoryState — the in-memory store's interior (parallel arrays keyed by
@@ -143,6 +161,9 @@ struct _InMemoryState(Movable, Deinitable):
     var statuses: List[Int]
     var physical_ids: List[String]
     var next_id: Int
+    # The last outputs recorded per logical id (record_outputs).
+    var output_ids: List[String]
+    var outputs: List[Outputs]
 
     def __init__(out self):
         self.logical_ids = List[String]()
@@ -150,6 +171,8 @@ struct _InMemoryState(Movable, Deinitable):
         self.statuses = List[Int]()
         self.physical_ids = List[String]()
         self.next_id = 1
+        self.output_ids = List[String]()
+        self.outputs = List[Outputs]()
 
 
 # =============================================================================
@@ -237,6 +260,22 @@ struct InMemoryStateStore(StateStore, Movable, Deinitable):
             ):
                 return self._p[].physical_ids[i]
         return String("")
+
+    def record_outputs(mut self, logical_id: String, outputs: Outputs) raises:
+        """Replace the outputs recorded for `logical_id`."""
+        for i in range(len(self._p[].output_ids)):
+            if self._p[].output_ids[i] == logical_id:
+                self._p[].outputs[i] = outputs.copy()
+                return
+        self._p[].output_ids.append(logical_id)
+        self._p[].outputs.append(outputs.copy())
+
+    def outputs_for(mut self, logical_id: String) raises -> Outputs:
+        """The outputs last recorded for `logical_id`; empty if none were."""
+        for i in range(len(self._p[].output_ids)):
+            if self._p[].output_ids[i] == logical_id:
+                return self._p[].outputs[i].copy()
+        return Outputs()
 
     # =========================================================================
     # inspection (test assertions — NOT part of the StateStore trait).
