@@ -3459,6 +3459,15 @@ def _is_precondition(msg: String) -> Bool:
 
 
 @always_inline
+def is_precondition(msg: String) -> Bool:
+    """True iff `msg` is a lost conditional write (HTTP 412 / precondition
+    failed). The public spelling of `_is_precondition` for packages built on
+    this one (`komira_shuffle`'s partition claim): same substring convention,
+    one definition."""
+    return _is_precondition(msg)
+
+
+@always_inline
 def is_retryable_contention(msg: String) -> Bool:
     """True iff `msg` is the `CasManifestStore.append` retry-budget-exhausted
     Error (raised at `_append_inner` after `max_retries` 412s under genuine
