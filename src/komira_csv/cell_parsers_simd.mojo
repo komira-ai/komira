@@ -51,7 +51,7 @@
 # SIMD fast paths (Lemire 8-digit / fast_parse_int64_simple /
 # fast_parse_float64_simple + their helpers) were promoted to
 # `komira_core.parsers.byte_span_numeric` so substrate-layer consumers
-# (row-format decoders in komira_eval) can reuse them without a `komira_eval -> komira_csv` layering
+# (row-format decoders in komira_row_format) can reuse them without a `komira_row_format -> komira_csv` layering
 # inversion.
 #
 # This module RE-EXPORTS the public entries so the
