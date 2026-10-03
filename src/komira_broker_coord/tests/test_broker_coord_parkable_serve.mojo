@@ -47,7 +47,7 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
     SharedInMemorySlowCasStore,
 )
 
-from komira_http import HttpMethod, HttpRequest
+from komira_http_core.codec import HttpMethod, HttpRequest
 
 from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,

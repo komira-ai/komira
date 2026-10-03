@@ -73,8 +73,8 @@ from komira_objectstore.store import (
     CloneableConditionalWriteStore,
 )
 
-from komira_http import HttpMethod, HttpRequest, HttpResponse
-from komira_http.transport.dispatch import SuspendableDispatcher
+from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from komira_http_server.dispatch import SuspendableDispatcher
 
 from komira_supervisor_proto.supervisor import (
     SupervisorHeartbeat as PbSupervisorHeartbeat,

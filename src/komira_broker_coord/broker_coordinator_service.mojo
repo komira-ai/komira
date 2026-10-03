@@ -31,16 +31,11 @@ from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
 from komira_async.runtime.suspendable_handler import SuspendableHandlerDriver
 
-from komira_http import (
-    HttpMethod,
-    HttpRequest,
-    HttpResponse,
-    HttpServer,
-    HttpServerConfig,
-    NoopGrpcDispatch,
-    RequestDispatcher,
-    Router,
-)
+from komira_http_core.codec import HttpMethod, HttpRequest, HttpResponse
+from komira_http_server.server import HttpServer, HttpServerConfig
+from komira_http_core.transport.grpc_emit import NoopGrpcDispatch
+from komira_http_server.dispatch import RequestDispatcher
+from komira_http_server.routing import Router
 
 from komira_clock import now_unix_ms
 
