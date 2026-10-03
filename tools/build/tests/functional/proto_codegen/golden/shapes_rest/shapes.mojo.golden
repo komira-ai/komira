@@ -3,12 +3,12 @@
 # proto package: komira.test.shapes.v1
 # Mojo package:  komira_test_shapes
 #
-# Generated message structs conform to the komira_serde
+# Generated message structs conform to the komira_proto_codec
 # `Serializable` trait: encode[E: WireEncoder] / decode[D: WireDecoder].
 
-from komira_serde import Serializable, WireEncoder, WireDecoder
+from komira_proto_codec import Serializable, WireEncoder, WireDecoder
 from komira_gcp_core import GcpTokenSource, gcp_status_error
-from komira_serde.proto3_json import JsonEncoder, JsonDecoder
+from komira_proto_codec.codec import encode_json, decode_json_lenient
 from komira_http.client.client import (
     HttpClient,
     build_get_request,
@@ -446,8 +446,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var resp_text = String(unsafe_from_utf8=Span(resp_bytes))
         if resp_text.byte_length() == 0:
             resp_text = String("{}")
-        var dec = JsonDecoder.from_text_lenient(resp_text)
-        return Thing.decode(dec)
+        return decode_json_lenient[Thing](resp_text)
 
     def cancel_operation[RT: Runtime](mut self, req: CancelOperationRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """POST `/v1/{name=operations/**}:cancel` — REST/JSON."""
@@ -461,10 +460,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._rest_apply_default_headers(headers)
         headers.append(String("Authorization"), String("Bearer ") + self._token_source.access_token())
         headers.append(String("Content-Type"), String("application/json"))
-        var benc = JsonEncoder()
-        req.encode(benc)
-        benc.finish()
-        var body_text = benc^.into_string()
+        var body_text = encode_json(req)
         var body = BytesBody.from_str(body_text)
         var req_http = build_request_with_body[BytesBody](
             HttpMethod.post(), url^, headers^, body^,
@@ -477,8 +473,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var resp_text = String(unsafe_from_utf8=Span(resp_bytes))
         if resp_text.byte_length() == 0:
             resp_text = String("{}")
-        var dec = JsonDecoder.from_text_lenient(resp_text)
-        return Thing.decode(dec)
+        return decode_json_lenient[Thing](resp_text)
 
     def list_things[RT: Runtime](mut self, req: ListThingsRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/v1/{name=*}/things` — REST/JSON."""
@@ -518,8 +513,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var resp_text = String(unsafe_from_utf8=Span(resp_bytes))
         if resp_text.byte_length() == 0:
             resp_text = String("{}")
-        var dec = JsonDecoder.from_text_lenient(resp_text)
-        return Thing.decode(dec)
+        return decode_json_lenient[Thing](resp_text)
 
     def get_root[RT: Runtime](mut self, req: Thing, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/` — REST/JSON."""
@@ -544,6 +538,5 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         var resp_text = String(unsafe_from_utf8=Span(resp_bytes))
         if resp_text.byte_length() == 0:
             resp_text = String("{}")
-        var dec = JsonDecoder.from_text_lenient(resp_text)
-        return Thing.decode(dec)
+        return decode_json_lenient[Thing](resp_text)
 

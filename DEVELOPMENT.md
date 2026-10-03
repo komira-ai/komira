@@ -1,29 +1,29 @@
 # Developing komira
 
-The build uses [Buck2](https://buck2.build). By default every action runs
-on your machine, with the [pinned toolchain](tools/build/toolchains/README.md)
-buck2 downloads and verifies. So far only the toolchain, zig and C actions
-have been measured running locally; Mojo compiles and tests have run only on
-a remote-execution service
-([what a local build guarantees](#what-a-local-build-guarantees)). If you have
-a remote-execution service that speaks the Bazel Remote Execution API (for
-example Buildbarn), you can build there instead (step 3). Remote execution is
-opt-in: it is configured only by a `.buckconfig.local` you write.
+The build uses [Buck2](https://buck2.build). **Supported today: Linux x86_64**,
+where by default every action runs on your machine, with the
+[pinned toolchain](tools/build/toolchains/README.md) buck2 downloads and
+verifies. So far only the toolchain, zig and C actions have been measured
+running locally; Mojo compiles and tests have so far run on a remote-execution
+service ([what a local build guarantees](#what-a-local-build-guarantees)).
+Native builds on macOS (Apple silicon) and Linux arm64 are being added; until
+then, on a Mac you can install and run `./buck2` and read the code. If you
+already run a remote-execution service, see
+[Advanced: remote execution](#advanced-remote-execution); it is optional and
+configured only by a `.buckconfig.local` you write.
 
 ## Repository layout
 
 | directory | holds |
 |---|---|
 | `src/<module>/` | one Mojo library per directory, directly under `src/`. The directory name is the import name (`from komira_crypto import ...`) and the name of its `mojo_library`; there are no nested Mojo namespaces, because a nested one has to re-export every child. A module's tests are in its own `tests/`, and a binary is declared in its module's own package. |
-| `src/proto/` | `.proto` sources |
-| `src/mojo_sdk/`, `src/python_sdk/`, `src/typescript_sdk/` | the user-facing SDKs |
 | `tools/` | the build rules, toolchains and platforms, the lints, and the end-to-end tests cell (`tools/build/tests`) |
 | `docs/` | the repository's documentation |
 | `third_party/` | C and C++ libraries built from pinned source archives |
 
 A new module is `src/<module>/BUCK` with a `mojo_library(name = "<module>")`;
-the Markdown link check reads its files with nothing more ([step 2](#2-build-locally-by-default)).
-A library kci (komira_ci) owns is named `kci_<x>`.
+the Markdown link check reads its files with nothing more ([step 2](#2-build-linux-x86_64)).
+A library kci owns is named `kci_<x>`.
 
 ## 1. Get buck2
 
@@ -45,25 +45,26 @@ where dotslash is installed. The prelude is the one bundled with that binary
 (`[external_cells] prelude = bundled` in [`.buckconfig`](.buckconfig)), so the
 pin fixes the prelude too.
 
-`tools/buck2` has entries for Linux x86_64 and macOS aarch64. Local builds
-need a Linux x86_64 machine: every toolchain action is a Linux x86_64 binary.
-On macOS buck2 works as a client of a remote-execution service (step 3); a
-local build there refuses, naming `.buckconfig.local`; remotely,
-`./buck2 build //...` and `./buck2 test //...` work as on Linux. Two things
-need a Linux x86_64 client either way, because they run Linux binaries on
-your machine: `./buck2 run`, and `tools/build/tests/run_tests.sh` (section
-4), which refuses any other client.
+`tools/buck2` has entries for Linux x86_64 and macOS aarch64, so buck2
+itself runs on a Mac. A build is a separate matter: the toolchain is unpacked
+by Linux x86_64 programs (a static busybox, zig) that macOS cannot run, so
+today a purely local build works on Linux x86_64 and refuses on a Mac, naming
+`.buckconfig.local`. A native macOS build is being added; it is a gap in this
+repository, not a limit of Mojo. Two things need a Linux x86_64 client:
+`./buck2 run`, and `tools/build/tests/run_tests.sh` (section 3), which
+refuses any other client.
 
 Commands below use `./buck2`; a `buck2` on your `PATH` at the same version
 works the same.
 
-## 2. Build (locally, by default)
+## 2. Build (Linux x86_64)
 
-With no `.buckconfig.local`, every action runs on this machine. A local
-Mojo compile has not yet been measured
+With no `.buckconfig.local`, every action runs on this machine. Measured on
+one Linux x86_64 workstation: `hello` took 23 seconds cold, `//src/...` about
+10 minutes
 ([what a local build guarantees](#what-a-local-build-guarantees)); the same
-commands build on a remote-execution service once `.buckconfig.local` names
-one (step 3):
+commands build on a remote-execution service if you run one
+([Advanced: remote execution](#advanced-remote-execution)):
 
 ```sh
 ./buck2 build //tools/build/examples:hello                         # one binary
@@ -102,10 +103,7 @@ BUCK file naming its own `doc_tree`.
 
 Mojo compiles take a lot of memory. Buck2 runs as many local actions at once
 as the machine has cores; on a machine with less than a few GB of memory per
-core, pass `-j <n>` to run fewer. A `mojo_multi_numa_test` does not configure
-locally (nothing knows how many NUMA nodes this machine has); it needs a
-remote service with multi-NUMA workers
-([tools/build/platforms/README.md](tools/build/platforms/README.md#multi-numa-runs)).
+core, pass `-j <n>` to run fewer.
 
 `./buck2 audit execution-platform-resolution <target>` shows where a target
 builds; `./buck2 log what-ran` shows `local` for each action that ran here.
@@ -128,10 +126,12 @@ What that gives you, and what it does not:
   programs, assembling the Mojo runtime, and one C compile and archive run
   locally and succeed; [test 25](tools/build/tests/README.md) repeats the
   zig unpack and two concurrent zig builds on every run. **A local
-  Mojo compile has not yet been measured**: `mojo_build`, `mojo_precompile`,
-  gated tests, run checks and bundles have so far run only on a
-  remote-execution service. Until they have, do not assume a local build of
-  a Mojo target succeeds with an empty host `PATH`, or at all.
+  Mojo compile has been measured once**, on one Linux x86_64 workstation
+  (61 GB of memory) from a clean checkout with nothing cached: `hello` built
+  and ran in 23 seconds (9 local actions, a 119 MiB toolchain download), one
+  library with its welded tests built in 5 seconds, and `//src/...` built in
+  588 seconds (962 local actions, none cached). That is one machine; do not
+  assume another host, or an empty host `PATH`, behaves the same.
 - **Guaranteed: the host floor, as remotely.** An action still takes the
   kernel, the CPU and glibc from the machine it runs on (see
   [Host floor](#host-floor)).
@@ -154,59 +154,7 @@ a remote-execution service, or at least from a shell with a minimal
 environment (`env -i HOME="$HOME" PATH=/usr/bin:/bin buck2 ...` after
 `./buck2 kill`, so the daemon restarts with it).
 
-## 3. Optional: build on a remote-execution service
-
-Committed configuration names no service, worker pool or property set, so a
-fresh clone builds locally. To build remotely instead, put your service in
-`.buckconfig.local`, which is gitignored:
-
-```sh
-cp .buckconfig.local.example .buckconfig.local
-./buck2 kill                                      # the daemon reads remote settings when it starts
-```
-
-Fill in:
-
-- **`[buck2_re_client]`**: the addresses of your remote-execution service
-  (engine, action cache, CAS), its instance name, TLS, and
-  `execution_concurrency_limit`.
-- **`[komira_re]`**: the exact platform property set of each kind of Linux
-  x86_64 worker, as comma-separated `key=value` pairs:
-  `light_properties` and `mojo_compile_properties` (for example `pool=light`
-  and `pool=mojo`; both may name the same set if you have one kind of
-  worker), and optionally `mojo_compile_multi_numa_properties` for workers
-  spanning more than one NUMA node. What each class runs, and what a
-  multi-NUMA worker must provide, is in
-  [tools/build/platforms/README.md](tools/build/platforms/README.md).
-
-Workers match a property set exactly: a key your workers do not advertise
-leaves actions queued until the scheduler gives up. The property sets are
-part of every action digest, so checkouts share cache entries only when they
-send the same sets.
-
-Once `light_properties` and `mojo_compile_properties` are set, every action
-runs remotely: the platforms then have local execution disabled, so nothing
-falls back to your machine. `-c komira.execution=local` builds one command
-locally anyway, and `[komira] execution = local` in `.buckconfig.local` keeps
-the service settings but builds locally. The commands in step 2 are the same
-either way.
-
-A `.buckconfig.local` that names a service in `[buck2_re_client]` but has no
-`[komira_re]` section (missing, or misspelled) refuses to build rather than
-building on your machine; so does a `[komira_re]` with only some of the
-required property sets. On a machine that must never build locally, put
-`[komira] execution = remote` in your user buckconfig (`~/.buckconfig.local`):
-a checkout there with no `.buckconfig.local` then refuses too.
-
-[`.buckconfig`](.buckconfig) caps each batched CAS request at 1 MiB
-(`[buck2_re_client] max_total_batch_size`); larger blobs use ByteStream.
-Without it buck2 packs up to 4000000 bytes into one BatchReadBlobs request
-when the server does not advertise a lower limit, which a server with a
-2 MiB gRPC message limit rejects ("Attempted to read a total of at least N
-bytes, while a maximum of 2097152 bytes is permitted"). The setting changes no
-action digest.
-
-## 4. Run the tests
+## 3. Run the tests
 
 ```sh
 tools/build/tests/run_tests.sh                 # everything
@@ -220,7 +168,7 @@ which: `MODE  remote` with a `.buckconfig.local` (or, as on the CI runner, a
 machine-wide buckconfig) naming a service, when every
 test runs; `MODE  local` without one, when every action runs on this machine
 and the tests that need a remote service (the umbrella cache, `buck2 run`'s
-download budget, the multi-NUMA and per-action property-set tests, macOS)
+download budget, the per-action property-set test, macOS)
 each print a `SKIP` line saying so. Test 3 (a missing `deps` edge fails to
 compile) is also skipped locally: it relies on the remote executor staging
 only declared inputs, and a local action, which is not sandboxed, may find
@@ -242,6 +190,98 @@ script, after `./buck2 build //...` and `./buck2 test //...`; see
 [docs/ci.md](docs/ci.md). It needs a Linux x86_64 client (it runs Linux
 binaries the farm built, and `readelf`/`objdump`, on your machine) and
 refuses any other with exit 2.
+
+## Advanced: remote execution
+
+Everything above runs on your machine. This section is for people who
+already operate a remote-execution service (a server that speaks the Bazel
+Remote Execution API, for example Buildbarn) and want komira's actions to run
+there. It is optional: nothing in [getting started](docs/getting-started.md)
+needs it.
+
+
+Committed configuration names no service, worker pool or property set, so a
+fresh clone builds locally. To build remotely instead, put your service in
+`.buckconfig.local`, which is gitignored:
+
+```sh
+cp .buckconfig.local.example .buckconfig.local
+./buck2 kill                                      # the daemon reads remote settings when it starts
+```
+
+Fill in:
+
+- **`[buck2_re_client]`**: the addresses of your remote-execution service
+  (engine, action cache, CAS), its instance name, TLS, and
+  `execution_concurrency_limit`.
+- **`[komira_re]`**: one key per platform, each the exact property set every
+  action of that platform carries, as comma-separated `key=value` pairs:
+  `linux_x86_64_properties` (for example `pool=mojo-sized`) and
+  `darwin_arm64_properties` (for example `pool=darwin-sized`). Your service
+  picks the worker for each action; the build says nothing about worker
+  classes. A Mac needs `darwin_macos_hosts` too (see
+  [tools/build/toolchains/README.md](tools/build/toolchains/README.md#macos)).
+  How target platforms, execution platforms and toolchains fit together is
+  in [tools/build/platforms/README.md](tools/build/platforms/README.md).
+
+Workers match a property set exactly: a key your workers do not advertise
+leaves actions queued until the scheduler gives up. The property set is part
+of every action digest, so checkouts share cache entries only when they send
+the same set.
+
+**Where actions run follows your own platform.** Builds default to the
+platform of the machine you run them on. Once the key of *that* platform is
+set (`linux_x86_64_properties` on Linux x86_64, `darwin_arm64_properties` on
+a Mac), every action runs remotely: the platforms then have local execution
+disabled, so nothing falls back to your machine. If `.buckconfig.local` sets
+only another platform's key, builds for your own platform run on your machine
+and nothing fails; that key is used when you name the platform with
+`--target-platforms`. Names no key at all: everything is local.
+`-c komira.execution=local` builds one command
+locally anyway, and `[komira] execution = local` in `.buckconfig.local` keeps
+the service settings but builds locally. The commands in step 2 are the same
+either way.
+
+A `.buckconfig.local` that names a service in `[buck2_re_client]` but has no
+`[komira_re]` section (missing, or misspelled) refuses to build rather than
+building on your machine; so does a `[komira_re]` still naming a key of the
+earlier layouts (`linux_properties` and `darwin_properties`, the per-class
+`light_properties` and `mojo_compile_properties`, ...), which names the key to
+rename it to. On a machine that must never build locally, put
+`[komira] execution = remote` in your user buckconfig (`~/.buckconfig.local`):
+a checkout there with no `.buckconfig.local` then refuses too.
+
+[`.buckconfig`](.buckconfig) caps each batched CAS request at 1 MiB
+(`[buck2_re_client] max_total_batch_size`); larger blobs use ByteStream.
+Without it buck2 packs up to 4000000 bytes into one BatchReadBlobs request
+when the server does not advertise a lower limit, which a server with a
+2 MiB gRPC message limit rejects ("Attempted to read a total of at least N
+bytes, while a maximum of 2097152 bytes is permitted"). The setting changes no
+action digest.
+
+### macOS workers
+
+This applies only if your service has macOS (Apple silicon) workers. It is
+separate from the native macOS build that is being added, which needs no
+service.
+
+- The plain `./buck2 build` targets `linux-x86_64`, because `.buckconfig` maps
+  every target there. For a macOS result pass
+  `--target-platforms komira//tools/build/platforms:darwin-arm64` and set
+  `darwin_properties` (the property set of your macOS workers) and
+  `darwin_macos_hosts` in `.buckconfig.local`. A host identity is one line per
+  macOS worker OS and hardware, from `sh tools/build/mojo/darwin/host_identity.sh`
+  run on that worker; identities are pinned, and a worker whose identity does
+  not match refuses the action. The compile runs on the macOS workers and the
+  toolchain unpack runs on Linux x86_64 workers of the same service. Checks:
+  [check.sh](tools/build/tests/functional/darwin/check.sh).
+- Known gap, not fixed on main yet and being fixed: the macOS test gate loses
+  the runtime library path (macOS strips `DYLD_*` variables passed through
+  `/usr/bin/env`), so a welded test of a `darwin-arm64` library fails because a
+  runtime library is not found. A target with no gated test,
+  `//tools/build/examples:hello`, is reported to build there; section 7 of
+  [check.sh](tools/build/tests/functional/darwin/check.sh) is the check, and it
+  needs macOS workers.
 
 ## Host floor
 
@@ -284,9 +324,16 @@ not share a remote cache.
 
 ## Troubleshooting
 
-- **`komira_local_execution_platforms: local execution runs the pinned linux
-  x86_64 toolchain on this machine, which is not Linux x86_64`.** Local builds
-  need Linux x86_64; configure a remote service (step 3).
+- **`komira_local_execution_platforms: no platform row matches this host`** (or
+  `this host is linux-arm64, which komira reserves a row for but does not
+  build for yet`). Local builds run this machine's own platform, one row of
+  [the platform table](tools/build/platforms/table.bzl); a machine no
+  registered row matches builds through a remote service ([advanced](#advanced-remote-execution)), naming
+  the platform with `--target-platforms`.
+- **On a Mac, a local build stops at the first toolchain action.** The
+  default platform is `darwin-arm64`, but unpacking the toolchain still runs
+  Linux x86_64 binaries, so a darwin target needs a remote service until the
+  unpack tier has a darwin row of its own.
 - **A local build is slow or runs out of memory.** Pass `-j <n>` to run
   fewer actions at once (step 2).
 - **You want to know whether a build was local or remote.** `buck2 log
@@ -302,24 +349,20 @@ not share a remote cache.
 - **``[buck2_re_client] <key>` names a remote-execution service, but
   `[komira_re]` names no worker property set``.** Your `.buckconfig.local`
   has the service addresses but no (or a misspelled) `[komira_re]`; fill it
-  in (step 3), or pass `-c komira.execution=local` to build here.
+  in ([advanced](#advanced-remote-execution)), or pass `-c komira.execution=local` to build here.
 - **``[komira_re] <key>` is not set``.** You asked for remote execution
-  (`.buckconfig.local` names one of the property sets, or `komira.execution =
-  remote`) but not all of them; see step 3.
+  (`komira.execution = remote`, or a `[komira_re]` key on a machine no platform
+  row matches) but not the key of your own platform; see [Advanced: remote execution](#advanced-remote-execution).
 - **Actions sit queued and never start.** The property set names a key or
   value no worker advertises.
 - **`.buckconfig.local` seems ignored in a non-root cell.** It configures the
   root cell (`komira`, which holds the rules and toolchains) only; the
   standalone-only `toolchains` and `tests` cells do not read it. Pass a cell-scoped override instead, e.g.
-  `-c tests//komira_re.light_properties=...`.
-- **`Can't find toolchain_dep execution platform`** for a
-  `mojo_multi_numa_test`. No multi-NUMA workers are configured; that is the
-  intended refusal
-  ([tools/build/platforms/README.md](tools/build/platforms/README.md#multi-numa-runs)).
-- **Which worker class did a target get?**
+  `-c tests//komira_re.linux_x86_64_properties=...`.
+- **Which execution platform did a target get?**
   `./buck2 audit execution-platform-resolution <target>` shows the platform and
   why the others were skipped.
 - **Errors from inside the Mojo rules**: `GATED TEST FAILED`, `REFUSING:
   toolchain member ...` (exit 2), an output containing the action's working
-  directory (exit 4), `numa_guard: REFUSING to run` (exit 3) -- see
+  directory (exit 4) -- see
   [tools/build/mojo/README.md](tools/build/mojo/README.md#errors).

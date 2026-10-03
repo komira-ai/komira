@@ -1,99 +1,57 @@
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs", "row", "zig_strip_prefix")
 load("@komira//tools/build/package:defs.bzl", "oci_base")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load("@komira//tools/build/mojo:toolchain.bzl", "conda_closure", "mojo_runtime", "zig_dist", "zig_exe")
 
 # ---- Pinned inputs (linux x86_64 execution platform) -----------------------
+# Each is a row pin of the platform table (tools/build/platforms/table.bzl):
+# the URL and sha256 are stated there, once, with every other platform's.
 
 # Static busybox: `sh` and the file utilities every action uses.
-pinned_file(
-    name = "busybox",
-    url = "https://busybox.net/downloads/binaries/1.35.0-x86_64-linux-musl/busybox",
-    sha256 = "6e123e7f3202a8c1e9b1f94d8941580a25135382b99e8d3e34fb858bba311348",
-    executable = True,
-    visibility = ["PUBLIC"],
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "busybox", visibility = ["PUBLIC"]))
 
 # zig: the C link driver for `mojo build`, and the compiler for conda_unpack.
-pinned_file(
-    name = "zig_linux_x86_64.tar.xz",
-    url = "https://ziglang.org/download/0.12.0/zig-linux-x86_64-0.12.0.tar.xz",
-    sha256 = "c7ae866b8a76a568e2d5cfd31fe89cdb629bdd161fdd5018b29a4a0a17045cad",
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "zig"))
 
 # The Mojo compiler package.
-pinned_file(
-    name = "mojo_compiler_1.0.0_linux-64.conda",
-    url = "https://conda.modular.com/max-nightly/linux-64/mojo-compiler-1.0.0-release.conda",
-    sha256 = "4394c6146d47ec7794a9a3ed5775ae158f59f83f8e1aed59408b17c4909821b3",
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "mojo_compiler"))
 
 # The C++ runtime the compiler links against (NEEDED libstdc++.so.6 and
 # libgcc_s.so.1; newest symbol versions GLIBCXX_3.4.30, CXXABI_1.3.13,
 # GCC_3.3, i.e. GCC 12 or newer). conda-forge, one matched pair: this
 # libstdcxx build depends on exactly this libgcc build.
-pinned_file(
-    name = "libstdcxx_15.3.0_linux-64.conda",
-    url = "https://conda.anaconda.org/conda-forge/linux-64/libstdcxx-15.3.0-h934c35e_7.conda",
-    sha256 = "0c3dc08bf43357a77297b4449abd0ce1d40a140989f004071e69c04ed13e36bb",
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "libstdcxx"))
 
-pinned_file(
-    name = "libgcc_15.3.0_linux-64.conda",
-    url = "https://conda.anaconda.org/conda-forge/linux-64/libgcc-15.3.0-h3363355_7.conda",
-    sha256 = "0bb57ee8557aad33317eeb881e3957b6fab776dd75473311c25789fa3a29f792",
-    visibility = ["PUBLIC"],
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "libgcc", visibility = ["PUBLIC"]))
 
-# The base of oci_image: distroless base-debian12 (glibc, CA certificates,
-# tzdata, a nonroot user, no shell), tag `nonroot`, its linux/amd64 image
-# manifest. The manifest is checked in (a registry serves one only to a
-# client sending an Accept header); every blob is one pinned download. The
-# digests are the pin.
+# The base of oci_image: distroless base-debian12 for linux/amd64, its
+# digests in the linux-x86_64 row of the platform table (table.bzl).
 oci_base(
     name = "distroless_base",
-    registry = "gcr.io",
-    repository = "distroless/base-debian12",
-    manifest_file = "distroless_base_debian12.manifest.json",
-    manifest = "sha256:5883c320d81f76c764e114c9ab14054f037bb040907816fc9028d80d9602a7c3",
-    config = "sha256:c31423653c22931f970322b39ef0b1a9395efefa45e4e8d16fc409c286443c0b",
-    layers = [
-        "sha256:a5789fc40e828c4e7467626e3f69ec5dea8e5da22fe660db8ae6d16f777b0bbf",
-        "sha256:990a9c434e5e0f11549a8d4a41a1991e621b04e30cd63269adbc97b1dc38fd7e",
-        "sha256:39dc083afc39bd8dc43d456fe7ff7d39292e593bb2769972c11bb2e5f9119386",
-        "sha256:bf7a4185f01524837d19abde915ffde84e64368b250f5b5e9f6f75aea62a11d4",
-        "sha256:2780920e5dbfbe103d03a583ed75345306e572ec5a48cb10361f046767d9f29a",
-        "sha256:7c12895b777bcaa8ccae0605b4de635b68fc32d60fa08f421dc3818bf55ee212",
-        "sha256:3214acf345c0cc6bbdb56b698a41ccdefc624a09d6beb0d38b5de0b2303ecaf4",
-        "sha256:52630fc75a18675c530ed9eba5f55eca09b03e91bd5bc15307918bbc1a7e7296",
-        "sha256:dd64bf2dd177757451a98fcdc999a339c35dee5d9872d8f4dc69c8f3c4dd0112",
-        "sha256:b839dfae01f66e15c6a8b63520557ed315bdfe036342fa7a0c537259f10d7a9a",
-        "sha256:dcaa5a89b0ccda4b283e16d0b4d0891cd93d5fe05c6798f7806781a6a2d84354",
-        "sha256:96ed2737ae312e0bc637b40783f7c2f23416cb72ca957aa01855f1614278e64b",
-        "sha256:235c3625d753c5b8a741210c2e7fb26b47a0d02cf49acc631a38dcf847eedf89",
-        "sha256:dc0fb75e565a59a5824baedc9645656d17bc91c4b31332ee179580fa9f60eacd",
-    ],
     visibility = ["PUBLIC"],
+    **row("linux-x86_64")["oci_base"]
 )
 
 # ---- Unpacked by remote actions ---------------------------------------------
 
-# Unpacking and copying run on `light` workers. The Mojo toolchains below
-# state `mojo_compile` + a NUMA constraint; a toolchain's
-# `exec_compatible_with` binds every target that uses it, so each Mojo target
-# builds on an execution platform providing both.
+# Unpacking and copying run linux x86_64 binaries, so they state the linux
+# execution platform's constraints. A toolchain's `exec_compatible_with`
+# binds every target that uses it, so each Mojo target builds on the
+# execution platform of the OS its toolchain states.
 
 zig_dist(
     name = "zig",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":zig_linux_x86_64.tar.xz",
     busybox = ":busybox",
-    strip_prefix = "zig-linux-x86_64-0.12.0",
+    strip_prefix = zig_strip_prefix("linux-x86_64"),
     visibility = ["PUBLIC"],
 )
 
 zig_exe(
     name = "conda_unpack",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:conda_unpack.zig",
     busybox = ":busybox",
     zig = ":zig",
@@ -102,12 +60,12 @@ zig_exe(
 
 conda_closure(
     name = "mojo_compiler",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     libs = {
         "lib/libgcc_s.so.1": ":libgcc_15.3.0_linux-64.conda",
         "lib/libstdc++.so.6": ":libstdcxx_15.3.0_linux-64.conda",
     },
-    package = ":mojo_compiler_1.0.0_linux-64.conda",
+    package = ":" + pinned_kwargs("linux-x86_64", "mojo_compiler")["name"],
     unpacker = ":conda_unpack",
     visibility = ["PUBLIC"],
 )
@@ -117,7 +75,7 @@ conda_closure(
 # tools/build/tests/run_tests.sh fails if this list and that record disagree.
 mojo_runtime(
     name = "mojo_runtime",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     busybox = ":busybox",
     compiler = ":mojo_compiler",
     libs = [
@@ -130,8 +88,7 @@ mojo_runtime(
     visibility = ["PUBLIC"],
 )
 
-# The Mojo toolchains built from these (`toolchains//:mojo` and
-# `toolchains//:mojo_multi_numa`) are declared by `komira_mojo_toolchains` in
+# The Mojo toolchain built from these (`toolchains//:mojo`) is declared by `komira_mojo_toolchains` in
 # defs.bzl, which komira_toolchains calls from the `toolchains` cell of the
 # repository at the project root: tools/build/cells/toolchains/BUCK in a standalone checkout.
 
@@ -139,10 +96,10 @@ mojo_runtime(
 
 # The compiler driver of the C/C++ toolchain (komira_cxx_toolchains in
 # defs.bzl): runs zig's clang, flattening nested response files, which zig
-# refuses. Built on `light` workers.
+# refuses.
 zig_exe(
     name = "zig_cc_launcher",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     src = "komira//tools/build/mojo:zig_cc_launcher.zig",
     busybox = ":busybox",
     zig = ":zig",

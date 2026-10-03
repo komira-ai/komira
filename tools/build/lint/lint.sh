@@ -46,7 +46,14 @@ set -eu
 BB=$1 RESULT=$2 KIND=$3 STAGE=$4 PREFIX=$5
 shift 5
 case "$BB" in /*) ;; *) BB="$PWD/$BB" ;; esac
-T="$PWD/.komira_action"
+# Actions that run on this machine share the checkout root as their working
+# directory, so scratch is per action: the directory buck2 names in
+# BUCK_SCRATCH_PATH (unset on a remote worker, whose root is the action's own).
+case "${BUCK_SCRATCH_PATH:-}" in
+    "") T="$PWD/.komira_action" ;;
+    /*) T="$BUCK_SCRATCH_PATH/komira" ;;
+    *) T="$PWD/$BUCK_SCRATCH_PATH/komira" ;;
+esac
 "$BB" mkdir -p "$T/bin"
 "$BB" --install -s "$T/bin"
 PATH="$T/bin"

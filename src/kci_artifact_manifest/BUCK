@@ -1,0 +1,22 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The artifact manifest: one JSON object per package file, saying what the
+# file is (artifact type, name, version, platform subdir) and its sha256.
+# The build that makes a package writes it; `kci build` checks it and copies
+# it next to the package; `kci publish` reads it to decide what to upload.
+# One format, parsed and written here, so the two verbs cannot drift apart.
+#
+# The welded test parses and renders synthetic manifests in memory and
+# asserts each refusal by its message: no file system, no network.
+mojo_library(
+    name = "kci_artifact_manifest",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/komira_json:komira_json",
+    ],
+    test_srcs = [
+        "tests/test_artifact_manifest.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
