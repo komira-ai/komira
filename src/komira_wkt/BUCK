@@ -18,6 +18,7 @@ mojo_library(
         "tests/test_wkt_json_codec_path.mojo",
         "tests/test_wkt_plain_arms.mojo",
         "tests/test_wkt_runtime.mojo",
+        "tests/test_wkt_timestamp_text.mojo",
     ],
     visibility = ["PUBLIC"],
 )
