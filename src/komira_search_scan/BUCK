@@ -11,7 +11,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the kind through core's `resolve_for_execution`, its split plan and readers,
 # and `drain_scan`.
 mojo_library(
-    name = "komira_search_runtime",
+    name = "komira_search_scan",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_core:komira_core",

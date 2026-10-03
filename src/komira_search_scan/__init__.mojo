@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_search_runtime — the `komira.search.index` scan kind.
+# komira_search_scan — the `komira.search.index` scan kind.
 # =============================================================================
 #
 # A search index read as a relation: a scan of kind `komira.search.index`
@@ -28,9 +28,9 @@
 # SearchCore for ergonomics.
 #
 # Build DAG (cycle-free, no engine):
-#   komira_search_runtime -> komira_search         (SearchCore / QueryIR / hit_schema)
-#   komira_search_runtime -> komira_scan_resolver  (ScanSourceResolver / ScanRequest)
-#   komira_search_runtime -> komira_core           (ScanBinding / RecordBatch / Expr)
+#   komira_search_scan -> komira_search         (SearchCore / QueryIR / hit_schema)
+#   komira_search_scan -> komira_scan_resolver  (ScanSourceResolver / ScanRequest)
+#   komira_search_scan -> komira_core           (ScanBinding / RecordBatch / Expr)
 # =============================================================================
 
 from .search_source import (

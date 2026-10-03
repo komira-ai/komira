@@ -77,13 +77,13 @@ from komira_search.analyzer import AnalyzerConfig
 from komira_search.sink import SearchSink
 from komira_search.source import QueryIR, SearchCore
 
-from komira_search_runtime.search_source import analyzer_config_fingerprint
-from komira_search_runtime.search_split_reader import (
+from komira_search_scan.search_source import analyzer_config_fingerprint
+from komira_search_scan.search_split_reader import (
     SEARCH_SPLIT_POSITION_INVALID,
     SEARCH_SPLIT_POSITION_VERSION,
     search_split_position,
 )
-from komira_search_runtime.search_scan_kind import (
+from komira_search_scan.search_scan_kind import (
     InMemorySearchIndexCatalog,
     SEARCH_ANALYZER_MISMATCH,
     SEARCH_FIELD_AMBIGUOUS,

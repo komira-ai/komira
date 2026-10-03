@@ -5,10 +5,10 @@
 # =============================================================================
 #
 # Upstream contract: komira_search/{split,term_dict,analyzer,score,inverted}.mojo.
-# The Searcher SourceLike spec + the SearchMorselSource MorselSourceImpl reader
-# live in the HIGHER `komira_search_runtime` package (keep komira_search on the
-# light komira_core edge — the morsel source machinery is NOT on
-# that edge).
+# The `komira.search.index` scan kind (its binding, split plan and split
+# reader, implementing the komira_scan_resolver contract) lives in the HIGHER
+# `komira_search_scan` package, which keeps komira_search on the light
+# komira_core edge.
 #
 # -----------------------------------------------------------------------------
 # WHAT THIS MODULE OWNS (PURE, S3-FREE, unit-testable on the core edge)
@@ -47,8 +47,8 @@
 #   * _decode_posting_list + _read_docstore_blob stay INTRA-package (komira_search)
 #     — no UnsafePointer crosses a module boundary.
 #
-# NOTE: the SourceLike / MorselSourceImpl conformer methods live on the
-# HIGHER-package Searcher / SearchMorselSource (komira_search_runtime), NOT here.
+# NOTE: the scan-resolver conformance (`SearchScanRuntime`, `SearchSplitReader`)
+# lives in the HIGHER package komira_search_scan, NOT here.
 # =============================================================================
 
 from komira_core.arrow.arrow_types import ArrowType

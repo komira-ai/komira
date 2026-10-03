@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_search_runtime/search_split_reader.mojo -- reading ONE split of a
+# komira_search_scan/search_split_reader.mojo -- reading ONE split of a
 # `komira.search.index` scan.
 # =============================================================================
 #

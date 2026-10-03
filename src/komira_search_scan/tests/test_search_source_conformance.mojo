@@ -50,12 +50,12 @@ from komira_search.split import serialize_split, DocStoreBuilder
 
 from komira_core.plan.expr import Expr, BIN_EQ
 from komira_core.plan.scalar_value import ScalarValue
-from komira_search_runtime.search_source import (
+from komira_search_scan.search_source import (
     FastFieldPushdownGate,
     analyzer_config_fingerprint,
     search_split_hits,
 )
-from komira_search_runtime.search_scan_kind import search_scan_binding
+from komira_search_scan.search_scan_kind import search_scan_binding
 from komira_search.source import QueryIR, SearchCore
 
 

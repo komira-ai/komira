@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_search_runtime/search_scan_kind.mojo -- the `komira.search.index`
+# komira_search_scan/search_scan_kind.mojo -- the `komira.search.index`
 # scan kind.
 # =============================================================================
 #

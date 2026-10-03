@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_search_runtime/search_source.mojo
+# komira_search_scan/search_source.mojo
 #   The split-reading half of the `komira.search.index` scan kind: the
 #   fast-field pushdown classifier, the analyzer fingerprint, and the one call
 #   that turns (SearchCore, QueryIR) into a hit batch.
