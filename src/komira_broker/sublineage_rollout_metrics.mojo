@@ -5,7 +5,7 @@
 # =============================================================================
 #
 # The LIVE, CHEAP rollout-watch signals for the disjoint-keyspace per-generation
-# `<part>/_lineage/<shard>` model. Emitted into the existing `komira_obs`
+# `<part>/_lineage/<shard>` model. Emitted into the existing `komira_metrics`
 # `MetricsSet` so a live canary is observable on the broker's metrics surface.
 # The signal definitions here are the same ones an offline go/no-go evaluation
 # over a sampled snapshot should use, so the live L/F values an operator
@@ -67,10 +67,10 @@
 #          long-lived holder behind an OwnedPointer, and its sole field is
 #          itself an OwnedPointer (no Movable-struct-in-byte-slab-with-heap-field
 #          shape). The metric primitives' own slab safety (InlineArray per-worker
-#          slabs + Atomic) is established in `komira_obs`.
+#          slabs + Atomic) is established in `komira_metrics`.
 # =============================================================================
 
-from komira_obs.metrics_set import MetricsSet, MetricsSnapshot, new_owned_metrics_set
+from komira_metrics.metrics_set import MetricsSet, MetricsSnapshot, new_owned_metrics_set
 from std.memory import OwnedPointer
 
 

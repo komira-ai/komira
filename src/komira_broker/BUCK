@@ -15,8 +15,8 @@ mojo_library(
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_core:komira_core",
+        "//src/komira_metrics:komira_metrics",
         "//src/komira_objectstore:komira_objectstore",
-        "//src/komira_obs:komira_obs",
         "//src/komira_scan_resolver:komira_scan_resolver",
     ],
     test_srcs = [

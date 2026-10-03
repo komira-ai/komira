@@ -11,7 +11,7 @@ Output layout of a library `L` with import name `I`:
                            takes every test's PASS marker as an input
     L/src/I/...            the staged package sources
     L[gen]                 with `gen`: that target's DefaultInfo, re-exported
-                           whole, sub-targets included (for gcp_client: the
+                           whole, sub-targets included (for mojo_gcp_client: the
                            generated directory, `[gen][<file>]`, and the
                            staged `.proto` inputs `[gen][proto]`)
     L/tests/<t>/...        per test: its binary, its staged tree `root/`
@@ -24,6 +24,7 @@ staged source directory can never shadow a package.
 load("@prelude//linking:link_info.bzl", "LinkStrategy", "MergedLinkInfo", "create_merged_link_info_for_propagation")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoProgramInfo", "MojoRunnableInfo", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
+load("@komira//tools/build/package:conda.bzl", "conda_package")
 
 def _toolchain(ctx):
     return ctx.attrs.toolchain[MojoToolchainInfo]
@@ -156,17 +157,26 @@ _OPT_LEVELS = ["0", "1", "2", "3"]
 TEST_OPT_LEVEL = "1"
 SHIPPED_OPT_LEVEL = "3"
 
-def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False):
+def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, category, identifier, c_link, shared = False, abi_lib = False, link_extra = None):
     """`mojo build` of `main` (one of `srcs`) against the packages in closure_tsets, linking c_link.
 
     With `shared`, emits a shared library instead: DT_SONAME is the output's
     file name and its one run path is `$ORIGIN/../..`, the bundle's lib/
     seen from lib/glibc-hwcaps/<level>/.
+
+    With `abi_lib`, emits a shared library straight from `main`, a file of
+    `@export` C-ABI functions: no generated entry and no `komira_main`.
+    DT_SONAME is the output's file name (the caller names it, with no `lib`
+    prefix forced) and the run path is the default `$ORIGIN/lib`.
+    `link_extra` is appended to the link tail after the C libraries (the
+    force-loaded archives of mojo_shared_lib).
     """
     if opt_level not in _OPT_LEVELS:
         fail("{}: optimization level `{}` is not one of {}".format(ctx.label, opt_level, ", ".join(_OPT_LEVELS)))
     mapping = {s.short_path: s for s in srcs}
     entry = main.short_path
+    if shared and abi_lib:
+        fail("{}: shared and abi_lib are exclusive".format(ctx.label))
     if shared:
         # `mojo build --emit shared-lib` refuses a file defining `main`, so the
         # library is built from a generated entry file next to it, which
@@ -195,6 +205,22 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             exe.basename,
             cmd_args(staged.project(entry_dir) if entry_dir else staged, format = "-I{}"),
         ]
+    if abi_lib:
+        # The library's name for the loader: ELF DT_SONAME, Mach-O install
+        # name. On macOS an unnamed dylib records the -o path as given, which
+        # is a build directory; `@rpath/<file>` is the same
+        # no-directory name the soname is.
+        emit = [
+            "--emit",
+            "shared-lib",
+            "-Xlinker",
+            "-install_name" if tc.os == "darwin" else "-soname",
+            "-Xlinker",
+            ("@rpath/" + exe.basename) if tc.os == "darwin" else exe.basename,
+        ]
+    tail = _link_tail(c_link)
+    if link_extra:
+        tail = cmd_args(tail, link_extra) if tail else cmd_args(link_extra)
     ctx.actions.run(
         _mojo_cmd(tc, [
             "build",
@@ -207,7 +233,7 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
             staged.project(entry),
             "-o",
             exe.as_output(),
-        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = _link_tail(c_link)),
+        ], runpath = "$ORIGIN/../.." if shared else None, source_root = staged, link_tail = tail),
         category = category,
         identifier = identifier,
     )
@@ -215,62 +241,13 @@ def _build_executable(ctx, tc, out_path, srcs, main, closure_tsets, opt_level, c
 
 # ---- mojo_library ----------------------------------------------------------
 
-# `tests_known_failing` -- a hold on a red test, which INVERTS rather than
-# mutes. A held test still builds and runs as an action of the library's gate;
-# its marker is produced only if it FAILS. So:
-#   an unheld test that fails   -> the gate is red (GATED TEST FAILED)
-#   a held test that fails      -> satisfied (marker `HELD <label>`)
-#   a held test that passes     -> red (LEDGER STALE), naming its row: delete it
-#   a held test SIGKILLed (137) -> red (NO VERDICT): a memory limit's kill is
-#                                  not the test's failure (gate_runner.sh)
-# A hold therefore silences nothing: the red is asserted on every build, and
-# the fix is reported as a build failure until the row goes.
-#
-# A row is `{"issue": ..., "reason": ...}`. `issue` is the GitHub issue that
-# will remove the hold (`123`, `#123` or its https://github.com/<o>/<r>/issues/
-# URL); `reason` says why THIS test fails. Refused at analysis, before any
-# action: a key that is not a `test_srcs` entry, another field, a missing or
-# malformed issue, an empty reason, two rows with byte-identical reasons (one
-# investigation pasted over a second test), and holding every test (a gate
-# that asserts nothing passes).
-_KNOWN_FAILING_FIELDS = ["issue", "reason"]
-_ISSUE_REF = "^(#?[1-9][0-9]*|https://github[.]com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/issues/[1-9][0-9]*)$"
-
 def _test_key(ctx, t):
-    """The package-relative path of test source `t`: its tests_known_failing key."""
+    """The package-relative path of test source `t`: its test_data key."""
     p = t.short_path
     pkg = ctx.label.package
     if pkg and p.startswith(pkg + "/"):
         p = p[len(pkg) + 1:]
     return p
-
-def _admit_known_failing(ctx):
-    held = ctx.attrs.tests_known_failing
-    if not held:
-        return {}
-    keys = [_test_key(ctx, t) for t in ctx.attrs.test_srcs]
-    where = "{}: tests_known_failing".format(ctx.label.raw_target())
-    seen = {}
-    for entry, row in held.items():
-        if entry not in keys:
-            fail("{}[{}]: not a test_srcs entry (entries: {}). A hold that matches no test reads as applied and is not; fix the path, or delete the row if the test is gone.".format(where, repr(entry), ", ".join(keys)))
-        for field in row:
-            if field not in _KNOWN_FAILING_FIELDS:
-                fail("{}[{}]: unknown field `{}`; a row has exactly `issue` and `reason`.".format(where, repr(entry), field))
-        issue = row.get("issue", "")
-        reason = row.get("reason", "")
-        if not issue:
-            fail("{}[{}]: no `issue`. A hold is debt; name the GitHub issue that will remove it (`123`, `#123` or its URL).".format(where, repr(entry)))
-        if not regex_match(_ISSUE_REF, issue):
-            fail("{}[{}]: issue {} is not a GitHub issue number (`123`, `#123`) or https://github.com/<owner>/<repo>/issues/<n> URL.".format(where, repr(entry), repr(issue)))
-        if not reason.strip():
-            fail("{}[{}]: empty `reason`. Say what this test shows is broken; a reader deciding whether the hold is still honest has nothing else to go on.".format(where, repr(entry)))
-        if reason in seen:
-            fail("{}[{}] and [{}] carry byte-identical reasons. If they share a cause, say what each test shows; otherwise the second test was never examined.".format(where, repr(seen[reason]), repr(entry)))
-        seen[reason] = entry
-    if len(held) >= len(keys):
-        fail("{}: holds all {} tests. That gate asserts nothing passes; a library whose whole suite is red has a defect, not a debt.".format(where, len(keys)))
-    return held
 
 # ---- the test runtime contract ------------------------------------------
 #
@@ -353,6 +330,33 @@ def _check_import_name(ctx, name):
     if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", name):
         fail("{}: import name `{}` is not a Mojo identifier; set `import_name`".format(ctx.label, name))
 
+def _conda_facts(ctx, import_name, c_link, has_tests):
+    """(conda name, refusal) of this library's conda package.
+
+    The name is None when the library opted out. The refusal is None when the
+    package can be built, else the reason it cannot: a reason known without
+    reading a source (native code, no tests, a dependency with no package, a name
+    that is not a conda name). The package target still builds, as a directory
+    holding the reason (tools/build/package/conda.bzl).
+    """
+    if not ctx.attrs.conda:
+        return None, None
+    name = ctx.attrs.conda_name or import_name
+    if not regex_match("^[a-z][a-z0-9_]*$", name):
+        return name, "`{}` is not a conda name (a lowercase letter, then lowercase letters, digits and _); set `conda_name`".format(name)
+    if c_link != None:
+        return name, "{} links native code. A `.mojoc` holds none, so a consumer would fail at its own link; no conda package for it until native code is supported".format(ctx.label.raw_target())
+    if not has_tests:
+        return name, "{} has no tests, so its package would not be gated by any; declare test_srcs on the library".format(ctx.label.raw_target())
+    for d in ctx.attrs.deps:
+        if MojoInfo in d:
+            di = d[MojoInfo]
+            if di.conda_name == None:
+                return name, "it depends on {}, which has no conda package (`conda = False`, or it is not a mojo_library)".format(d.label.raw_target())
+            if di.conda_refusal != None:
+                return name, "it depends on {}, which has no conda package: {}".format(d.label.raw_target(), di.conda_refusal)
+    return name, None
+
 def _library_impl(ctx):
     tc = _toolchain(ctx)
     import_name = ctx.attrs.import_name or ctx.label.name
@@ -380,7 +384,6 @@ def _library_impl(ctx):
     )
     ungated_tset = ctx.actions.tset(MojoPkgTSet, value = ungated, children = deps)
 
-    held = _admit_known_failing(ctx)
     test_data = _admit_test_data(ctx)
     env_args = _env_args("{}: test_env".format(ctx.label.raw_target()), ctx.attrs.test_env)
 
@@ -406,7 +409,6 @@ def _library_impl(ctx):
         marker = ctx.actions.declare_output("tests/{}.passed".format(stem))
         key = _test_key(ctx, t)
         root, staged = _test_root(ctx, "tests/{}/root".format(stem), exe, test_data.get(key, {}))
-        hold = ["--hold", key, held[key]["issue"], held[key]["reason"]] if key in held else []
         ctx.actions.run(
             cmd_args(
                 tc.busybox,
@@ -418,7 +420,6 @@ def _library_impl(ctx):
                 staged,
                 marker.as_output(),
                 env_args,
-                hold,
                 hidden = root,
             ),
             category = "mojo_gated_test",
@@ -442,6 +443,7 @@ def _library_impl(ctx):
     else:
         public = ungated
 
+    conda_name, conda_refusal = _conda_facts(ctx, import_name, c_link, len(markers) > 0)
     return [
         DefaultInfo(
             default_output = public,
@@ -457,6 +459,14 @@ def _library_impl(ctx):
         ),
         MojoInfo(
             c_link = c_link,
+            conda_name = conda_name,
+            conda_refusal = conda_refusal,
+            direct = sorted([d[MojoInfo].import_name for d in ctx.attrs.deps if MojoInfo in d]),
+            direct_conda = {
+                d[MojoInfo].import_name: struct(name = d[MojoInfo].conda_name, refusal = d[MojoInfo].conda_refusal)
+                for d in ctx.attrs.deps
+                if MojoInfo in d
+            },
             import_name = import_name,
             pkgs = ctx.actions.tset(MojoPkgTSet, value = public, children = deps),
         ),
@@ -469,9 +479,15 @@ _TOOLCHAIN_ATTR = {
 mojo_library_rule = rule(
     impl = _library_impl,
     attrs = {
+        # The library's conda package (tools/build/package/conda.bzl): the macro
+        # declares `<name>_conda` unless `conda = False`; `conda_name` is the
+        # published name when it is not the import name. Both are read here so
+        # that a dependent's package can name this one by its published name.
+        "conda": attrs.bool(default = True),
+        "conda_name": attrs.option(attrs.string(), default = None),
         # Mojo packages and C/C++ libraries; see _check_deps.
         "deps": attrs.list(attrs.dep(), default = []),
-        # Optional: the target that generated `srcs` (gcp_client, for example).
+        # Optional: the target that generated `srcs` (mojo_gcp_client, for example).
         # Its DefaultInfo is re-exported whole as the `[gen]` sub-target, so a
         # reader or an IDE finds the generated code (and what it was generated
         # from); nothing else reads it. Unchecked: nothing verifies that `srcs`
@@ -485,8 +501,6 @@ mojo_library_rule = rule(
         "test_data": attrs.dict(attrs.string(), attrs.one_of(attrs.list(attrs.source()), attrs.dict(attrs.string(), attrs.source())), default = {}),
         # Environment for every gated test of this library.
         "test_env": attrs.dict(attrs.string(), attrs.string(), default = {}),
-        # {test_srcs path: {"issue": ..., "reason": ...}}; see _admit_known_failing.
-        "tests_known_failing": attrs.dict(attrs.string(), attrs.dict(attrs.string(), attrs.string()), default = {}),
     } | _TOOLCHAIN_ATTR,
 )
 
@@ -626,8 +640,207 @@ mojo_test_rule = rule(
     },
 )
 
+# ---- mojo_shared_lib --------------------------------------------------------
+#
+# A C-ABI shared library: `mojo build --emit shared-lib` of one file of
+# `@export` functions, over the closure of `deps`. Linux (`.so`) and macOS
+# arm64 (`.dylib`); mojo_binary's `[shared]` and the bundles are Linux only,
+# and the darwin wrapper still refuses `--emit shared-lib` for them.
+#
+#   out_name       the file is `<out_name>.so` (Linux) or `<out_name>.dylib`
+#                  (macOS), its DT_SONAME / install name `@rpath/<file>`: no
+#                  `lib` prefix is forced (mojo_binary's `[shared]` forces
+#                  one). Drivers open `./<out_name>.so` or `./<out_name>.dylib`
+#                  by `CompilationTarget.is_macos()`.
+#   exports        the symbols the library must export. The gate dlopens the
+#                  library (RTLD_NOW, so an unresolved symbol fails there) and
+#                  fails unless every one resolves.
+#   exports_exact  default False. True links with a version script that makes
+#                  `exports` the whole dynamic symbol table: nothing else is
+#                  visible, so a symbol of a static C dependency does not
+#                  leak into the ABI. The gate then also sees an @export the
+#                  list omits as MISSING for any driver that calls it.
+#   gate_srcs      linked-run drivers: Mojo mains that dlopen `./<out_name>.so`
+#                  (the gate stages it as their one data file) and call it.
+#   force_load     C/C++ libraries linked whole (--whole-archive): every object
+#                  of their archives is in the library, referenced or not.
+#
+# The published file is `<name>/<out_name>.so`: a copy of `ungated/<out_name>.so`
+# that takes the PASS marker of every gate run as an input, so it cannot exist
+# unless the exports check and every driver passed. The same pattern as
+# mojo_library's tests.
+
+_EXPORTS_DRIVER = """from std.ffi import OwnedDLHandle
+
+
+def main() raises:
+    # RTLD_NOW (the default flags): an unresolved symbol fails here, not at
+    # the first call.
+    var lib = OwnedDLHandle("./{so}")
+    var missing = 0
+{checks}
+    if missing != 0:
+        raise Error("{so}: " + String(missing) + " expected export(s) missing")
+"""
+
+_EXPORT_CHECK = """    if not lib.check_symbol("{sym}"):
+        print("MISSING EXPORT: {sym}")
+        missing += 1
+"""
+
+def _shared_lib_impl(ctx):
+    tc = _toolchain(ctx)
+    out_name = ctx.attrs.out_name or ctx.label.name
+    if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", out_name):
+        fail("{}: out_name `{}` is not [A-Za-z_][A-Za-z0-9_]*".format(ctx.label, out_name))
+    if not ctx.attrs.exports:
+        fail("{}: `exports` is empty: a gate that expects no symbol checks nothing".format(ctx.label))
+    for sym in ctx.attrs.exports:
+        if not regex_match("^[A-Za-z_][A-Za-z0-9_]*$", sym):
+            fail("{}: export `{}` is not a C symbol name".format(ctx.label, sym))
+    main = _main_src(ctx)
+    srcs = ctx.attrs.srcs if main in ctx.attrs.srcs else ctx.attrs.srcs + [main]
+    _check_deps(ctx)
+    for d in ctx.attrs.force_load:
+        if MergedLinkInfo not in d:
+            fail("{}: force_load {} provides no MergedLinkInfo (a C/C++ library)".format(ctx.label, d.label))
+    force = None
+    if ctx.attrs.force_load:
+        force = _link_tail(create_merged_link_info_for_propagation(ctx, [d[MergedLinkInfo] for d in ctx.attrs.force_load]))
+    darwin = tc.os == "darwin"
+    link_extra = None
+    if force != None:
+        if darwin:
+            # ld has no bracketed whole-archive: -force_load names one
+            # archive, so each argument of the C libraries' link line is one.
+            link_extra = cmd_args(force, format = "-Wl,-force_load,{}")
+        else:
+            link_extra = cmd_args("-Wl,--whole-archive", force, "-Wl,--no-whole-archive")
+    if ctx.attrs.exports_exact:
+        # The dynamic symbol table is `exports` and nothing else, so a symbol
+        # of a static C dependency, or an @export the list does not name, is
+        # local to the library. ELF: a version script. Mach-O: an exported
+        # symbols list, whose names carry the C underscore.
+        if darwin:
+            script = ctx.actions.write(
+                "exports.list",
+                "".join(["_" + sym + "\n" for sym in ctx.attrs.exports]),
+            )
+            limit = cmd_args(script, format = "-Wl,-exported_symbols_list,{}")
+        else:
+            script = ctx.actions.write(
+                "exports.map",
+                "{ global: " + " ".join([sym + ";" for sym in ctx.attrs.exports]) + " local: *; };\n",
+            )
+            limit = cmd_args(script, format = "-Wl,--version-script={}")
+        link_extra = cmd_args(link_extra, limit) if link_extra else cmd_args(limit)
+
+    so_file = out_name + (".dylib" if darwin else ".so")
+    ungated = _build_executable(
+        ctx,
+        tc,
+        "ungated/" + so_file,
+        srcs,
+        main,
+        _dep_closure(ctx),
+        ctx.attrs.optimization_level,
+        "mojo_build_shared_lib",
+        None,
+        _c_link(ctx),
+        abi_lib = True,
+        link_extra = link_extra,
+    )
+
+    # The gate: each driver is a Mojo program with no dependencies that
+    # dlopens "./<out_name>.so", staged as its only data file.
+    drivers = {}
+    checks = "".join([_EXPORT_CHECK.format(sym = sym) for sym in ctx.attrs.exports])
+    drivers["exports"] = ctx.actions.write(
+        "gate/exports.mojo",
+        _EXPORTS_DRIVER.format(so = so_file, checks = checks),
+    )
+    for g in ctx.attrs.gate_srcs:
+        stem = _stem(g)
+        if stem == "exports" or stem in drivers:
+            fail("{}: gate_srcs has two drivers named `{}`".format(ctx.label, stem))
+        drivers[stem] = g
+    markers = []
+    gate_subtargets = {}
+    for stem in sorted(drivers.keys()):
+        src = drivers[stem]
+        exe = _build_executable(ctx, tc, "gate/{}/{}".format(stem, stem), [src], src, [], ctx.attrs.driver_optimization_level, "mojo_build_gate_driver", stem, None)
+        root, staged = _test_root(ctx, "gate/{}/root".format(stem), exe, {so_file: ungated})
+        marker = ctx.actions.declare_output("gate/{}.passed".format(stem))
+        ctx.actions.run(
+            cmd_args(
+                tc.busybox,
+                "sh",
+                tc.gate_runner,
+                tc.busybox,
+                tc.compiler,
+                "{}:{}".format(ctx.label.raw_target(), stem),
+                staged,
+                marker.as_output(),
+                hidden = root,
+            ),
+            category = "mojo_shared_lib_gate",
+            identifier = stem,
+        )
+        gate_subtargets[stem] = [DefaultInfo(default_output = marker, other_outputs = [root])]
+        markers.append(marker)
+
+    public = ctx.actions.declare_output("pub/" + so_file)
+    ctx.actions.run(
+        cmd_args(tc.busybox, "cp", ungated, public.as_output(), hidden = markers),
+        category = "mojo_shared_lib_join",
+    )
+    return [DefaultInfo(
+        default_output = public,
+        sub_targets = {
+            "gate": [DefaultInfo(default_outputs = markers, sub_targets = gate_subtargets)],
+            # Files only: the library before its gate ran.
+            "ungated": [DefaultInfo(default_output = ungated)],
+        },
+    )]
+
+mojo_shared_lib_rule = rule(
+    impl = _shared_lib_impl,
+    attrs = {
+        "deps": attrs.list(attrs.dep(), default = []),
+        "driver_optimization_level": attrs.string(default = TEST_OPT_LEVEL),
+        "exports": attrs.list(attrs.string()),
+        "exports_exact": attrs.bool(default = False),
+        "force_load": attrs.list(attrs.dep(), default = []),
+        "gate_srcs": attrs.list(attrs.source(), default = []),
+        "main": attrs.option(attrs.source(), default = None),
+        "optimization_level": attrs.string(default = SHIPPED_OPT_LEVEL),
+        "out_name": attrs.option(attrs.string(), default = None),
+        "srcs": attrs.list(attrs.source()),
+    } | _TOOLCHAIN_ATTR,
+)
+
+def _mojo_library(**kwargs):
+    # Refused by name, so a stale BUCK file says why rather than buck2's
+    # generic "unexpected parameter".
+    if "tests_known_failing" in kwargs:
+        fail("{}: tests_known_failing was removed: every welded test must pass".format(kwargs.get("name", "mojo_library")))
+    # Every library has a conda package target, `<name>_conda`, unless it opts
+    # out with `conda = False`. Nothing is published by that: the release tool's
+    # artifact declarations say which packages are (tools/build/package/conda.bzl).
+    summary = kwargs.pop("conda_summary", None)
+    mojo_library_rule(**kwargs)
+    if kwargs.get("conda", True):
+        name = kwargs["name"]
+        conda_package(
+            name = name + "_conda",
+            lib = ":" + name,
+            summary = summary or "The `{}` Mojo library of komira, as a conda package.".format(kwargs.get("import_name") or name),
+            visibility = ["PUBLIC"],
+        )
+
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_binary = declares_docs(mojo_binary_rule)
-mojo_library = declares_docs(mojo_library_rule)
+mojo_library = declares_docs(_mojo_library)
+mojo_shared_lib = declares_docs(mojo_shared_lib_rule)
 mojo_test = declares_docs(mojo_test_rule)

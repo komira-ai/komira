@@ -11,8 +11,8 @@ Everything the build needs besides the project configuration
 | [`toolchains/`](toolchains/) | package `komira//tools/build/toolchains` | the sha256-pinned downloads and the hermetic Mojo toolchain built from them. [Reference](toolchains/README.md). |
 | [`platforms/`](platforms/) | package `komira//tools/build/platforms` | the target platform, the execution constraints and configurations, and `komira_execution_platforms`; [`platforms/default/`](platforms/default/) registers a standalone checkout's execution platforms: local, or remote when `.buckconfig.local` names a service. [Reference](platforms/README.md). |
 | [`rust/`](rust/) | package `komira//tools/build/rust` | the Rust rules (`rust_library`, `rust_binary`, `crates_io_library`) and the rustc toolchain rule. [Reference](rust/README.md). |
-| [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo` and `protoc-gen-mojo-db`, the protoc plugins of `mojo_proto_library` and `mojo_db_proto_library`, and `:db_options`, the `(komira.db.*)` options (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)). |
-| [`lint/`](lint/) | package `komira//tools/build/lint` | lints that are part of the build: `shell_lint`, `workflow_lint`, `action_pins` and `no_endpoint` return their verdict as a Buck2 validation, and the pinned shellcheck and actionlint. The Mojo and Rust toolchains depend on the lint of the scripts their rules run; the root [`BUCK`](../../BUCK) lints the top-level scripts and the workflows. |
+| [`proto-codegen/`](proto-codegen/) | package `komira//tools/build/proto-codegen` | the `komira_proto_codegen` crate: `protoc-gen-mojo` and `protoc-gen-mojo-db`, the protoc plugins of `mojo_proto_library` and `mojo_db_proto_library`, and `:db_options`, the `(komira.db.*)` options (see [Protobuf](mojo/README.md#protobuf-mojo_proto_library)); `aws-client-gen`, the AWS client generator, published behind `:aws_conformance_test`, which runs botocore's protocol conformance corpus against the generated Mojo and checks the result against `aws_conformance_ledger.txt`. |
+| [`lint/`](lint/) | package `komira//tools/build/lint` | lints that are part of the build: `shell_lint`, `workflow_lint`, `action_pins`, `no_endpoint` and `mojo_deps` (the `deps` of a Mojo package name every module its files import) return their verdict as a Buck2 validation, and the pinned shellcheck and actionlint. The Mojo and Rust toolchains depend on the lint of the scripts their rules run; the root [`BUCK`](../../BUCK) lints the top-level scripts and the workflows. |
 | [`inspect/`](inspect/) | package `komira//tools/build/inspect` | `buildtools`, a Mojo package of readers the tools share (SHA-256, JSON, tar members, Mach-O load commands, Markdown links; its unit tests are welded), and `inspect`, the Mojo tool the [checks](tests/README.md) run for every structured read ([`inspect.mojo`](inspect/inspect.mojo)). |
 | [`third_party_srcs/`](third_party_srcs/) | package `komira//tools/build/third_party_srcs` | `gen`, which reads a vendored C library's source lists out of its pinned release archive, and `third_party_srcs`, which declares the generated file and the drift test holding the committed copy to it ([`defs.bzl`](third_party_srcs/defs.bzl)); tested on two made-up archives. |
 | [`package/`](package/) | package `komira//tools/build/package` | `mojo_bundle`, `bundle_tarball` and `oci_image`. [Reference](package/README.md). |
@@ -31,8 +31,9 @@ from, and `tests`, kept apart so that `//...` holds no target that fails by
 design. The Mojo toolchain is declared in the `toolchains` cell rather than
 in `komira//tools/build/toolchains` so that the repository at the project
 root, which owns that cell, can override it. `.buckconfig` maps each cell to the target platform
-`komira//tools/build/platforms:linux-x86_64`
-(`[parser] target_platform_detector_spec`) and registers
+`komira//tools/build/platforms:host`, the client's own platform
+(`[parser] target_platform_detector_spec`; a Linux x86_64 client's is
+`linux-x86_64`) and registers
 `komira//tools/build/platforms/default:default` as the execution platforms.
 
 Rules are loaded from one cell: a `.bzl` file's providers are distinct per
@@ -109,9 +110,11 @@ of a standalone checkout.
 **Your own targets need a target platform too.**
 `target_platform_detector_spec` is a single key; `consumer.buckconfig` maps
 the root cell (`app`), `komira` and `toolchains` to
-`komira//tools/build/platforms:linux-x86_64`. Keep komira's entry unchanged
+`komira//tools/build/platforms:host`. Keep komira's entry unchanged
 when you add your own cells to it: a different target platform for komira's
-targets is a different configuration, and so different digests. Keep
+targets is a different configuration, and so different digests (`host` is
+an alias of the client's own row, so on a Linux x86_64 client it is
+`linux-x86_64` itself). Keep
 `[buck2_re_client] max_total_batch_size = 1048576` too, and do not raise it:
 a server whose message limit is below buck2's default batch size fails
 `BatchReadBlobs`.
@@ -130,8 +133,9 @@ What keeps the digests equal:
   toolchain's output paths. An execution platform declared some other way must
   do the same.
 - **Target platform.** The `komira` cell maps to
-  `komira//tools/build/platforms:linux-x86_64` in `[parser]`.
-  `komira//tools/build/platforms` holds only the two platforms; the
+  `komira//tools/build/platforms:host` in `[parser]`, an alias of the row of
+  the platform table that matches the client (`linux-x86_64` on Linux x86_64).
+  `komira//tools/build/platforms` holds only the platforms; the
   standalone checkout's execution platforms live in its `default`
   subpackage, which the consuming repository never loads (it copies the file
   instead).

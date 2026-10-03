@@ -126,9 +126,9 @@ from komira_async.reactor.reactor import Reactor
 # The counter is incremented at the `force_auth`
 # trigger branch in `_append_inner`'s retry loop. NO wildcard-origin field
 # the field is `Optional[OwnedPointer[MetricsSet]]`, a POD handle
-# behind the canonical OwnedPointer indirection. Cycle-free: komira_obs deps
-# {komira_core} only — never reaches back into komira_objectstore.
-from komira_obs.metrics_set import MetricsSet, new_owned_metrics_set
+# behind the canonical OwnedPointer indirection. Cycle-free: komira_metrics deps
+# {komira_core and the small leaf packages} only — never reaches back into komira_objectstore.
+from komira_metrics.metrics_set import MetricsSet, new_owned_metrics_set
 
 from komira_objectstore.path import Path
 
@@ -3456,6 +3456,15 @@ def _is_precondition(msg: String) -> Bool:
         or msg.find("412") >= 0
         or msg.find("PreconditionFailed") >= 0
     )
+
+
+@always_inline
+def is_precondition(msg: String) -> Bool:
+    """True iff `msg` is a lost conditional write (HTTP 412 / precondition
+    failed). The public spelling of `_is_precondition` for packages built on
+    this one (`komira_shuffle`'s partition claim): same substring convention,
+    one definition."""
+    return _is_precondition(msg)
 
 
 @always_inline

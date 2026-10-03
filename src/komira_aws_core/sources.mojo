@@ -13,8 +13,8 @@
 #                  and the token files they and the environment name.
 #                  `ProcessFiles` reads the filesystem; `MapFiles` is a map.
 #   AwsClock    -- the wall clock, for SigV4 signing time and the default role
-#                  session name. `FixedClock` is a fixed instant. The
-#                  production clock arrives with the transport.
+#                  session name. `SystemAwsClock` reads the process's wall
+#                  clock (komira_clock); `FixedClock` is a fixed instant.
 #
 # ⛔ This file is the ONLY file of komira_aws_core that may read the process
 # environment. A welded test (tests/test_env_source_only.mojo) scans every
@@ -32,6 +32,7 @@
 from std.collections import Dict
 from std.os.path import exists, isfile
 
+from komira_clock import now_unix_ms
 from komira_core_ffi.posix import _read_env
 
 
@@ -46,7 +47,7 @@ trait EnvSource:
         ...
 
 
-struct ProcessEnv(EnvSource, Movable):
+struct ProcessEnv(EnvSource, Movable, Deinitable):
     """The process environment, through komira_core_ffi's one getenv."""
 
     def __init__(out self):
@@ -56,7 +57,7 @@ struct ProcessEnv(EnvSource, Movable):
         return _read_env(name)
 
 
-struct MapEnv(EnvSource, Movable):
+struct MapEnv(EnvSource, Movable, Deinitable):
     """A fixed environment held in memory. Records every name read, in order,
     so a test can assert exactly what the chain looked at."""
 
@@ -97,7 +98,7 @@ trait FileSource:
         ...
 
 
-struct ProcessFiles(FileSource, Movable):
+struct ProcessFiles(FileSource, Movable, Deinitable):
     """The local filesystem."""
 
     def __init__(out self):
@@ -114,7 +115,7 @@ struct ProcessFiles(FileSource, Movable):
             raise Error("cannot read the file " + path)
 
 
-struct MapFiles(FileSource, Movable):
+struct MapFiles(FileSource, Movable, Deinitable):
     """Files held in memory. Records every path read."""
 
     var files: Dict[String, String]
@@ -145,8 +146,19 @@ trait AwsClock:
         ...
 
 
+struct SystemAwsClock(AwsClock, Copyable, Movable, Deinitable):
+    """The process's wall clock (`CLOCK_REALTIME`, komira_clock), read
+    each time it is asked."""
+
+    def __init__(out self):
+        pass
+
+    def now_unix_seconds(mut self) -> Int:
+        return Int(now_unix_ms() // 1000)
+
+
 @fieldwise_init
-struct FixedClock(AwsClock, Copyable, Movable):
+struct FixedClock(AwsClock, Copyable, Movable, Deinitable):
     """A clock stopped at one instant."""
 
     var unix_seconds: Int

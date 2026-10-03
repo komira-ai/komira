@@ -1,0 +1,82 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The fixture libraries of tools/build/tests/functional/conda.sh. NONE is declared in a
+# list or has a packaging target written by hand: each gets `<name>_conda` from
+# the mojo_library macro, and the script builds what it must and checks what it
+# must refuse.
+
+mojo_library(
+    name = "fx_plain",
+    srcs = ["fx_plain/__init__.mojo"],
+    test_srcs = ["fx_plain/tests/test_fx_plain.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_user",
+    srcs = ["fx_user/__init__.mojo"],
+    test_srcs = ["fx_user/tests/test_fx_user.mojo"],
+    deps = [":fx_plain"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_renamed",
+    srcs = ["fx_renamed/__init__.mojo"],
+    test_srcs = ["fx_renamed/tests/test_fx_renamed.mojo"],
+    conda_name = "fx_published",
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_renamed_user",
+    srcs = ["fx_renamed_user/__init__.mojo"],
+    test_srcs = ["fx_renamed_user/tests/test_fx_renamed_user.mojo"],
+    deps = [":fx_renamed"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_optout",
+    srcs = ["fx_optout/__init__.mojo"],
+    test_srcs = ["fx_optout/tests/test_fx_optout.mojo"],
+    conda = False,
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_optout_user",
+    srcs = ["fx_optout_user/__init__.mojo"],
+    test_srcs = ["fx_optout_user/tests/test_fx_optout_user.mojo"],
+    deps = [":fx_optout"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_notests",
+    srcs = ["fx_notests/__init__.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_notests_user",
+    srcs = ["fx_notests_user/__init__.mojo"],
+    test_srcs = ["fx_notests_user/tests/test_fx_notests_user.mojo"],
+    deps = [":fx_notests"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_dlopen",
+    srcs = ["fx_dlopen/__init__.mojo"],
+    test_srcs = ["fx_dlopen/tests/test_fx_dlopen.mojo"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "fx_badname",
+    srcs = ["fx_badname/__init__.mojo"],
+    test_srcs = ["fx_badname/tests/test_fx_badname.mojo"],
+    conda_name = "Bad-Name",
+    visibility = ["PUBLIC"],
+)
