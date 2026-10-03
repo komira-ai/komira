@@ -65,7 +65,7 @@ metadata.json              everything else the build knows
 ```
 
 `manifest.json` is **exactly** the artifact manifest that kci's
-`kci_artifact_manifest` parses (`kci build` writes it and `kci publish` reads
+`kci_artifact_manifest` parses (the BUILD step writes it and the PUBLISH step reads
 it): ten keys, in this order, compact, one trailing newline.
 
 ```json

@@ -153,7 +153,7 @@ def test_refusals_name_the_manifest_and_the_key() raises:
         _refusal(_conda().replace(String('"CONDA"'), String('"OCI"'))),
         String(
             "artifact manifest 'out/m.json': artifact_type 'OCI' is not"
-            " published by kci publish (CONDA or PYTHON)"
+            " published by the PUBLISH step (CONDA or PYTHON)"
         ),
     )
     assert_equal(
