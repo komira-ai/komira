@@ -1,0 +1,395 @@
+// The kci resource catalog (`kci.resource.v1`): what an author writes in a
+// deploy action. Ten typed resources, each a common, cloud-agnostic shape; a
+// platform adapter set linked into kci turns each one into engine nodes.
+//
+// WHAT THIS FILE PROMISES
+//   * Every field is a BEHAVIOUR (a port, a scale, a public URL, an expiry),
+//     never a part of somebody's product. No vendor word appears in a
+//     message, field or enum value name.
+//   * The resource types are a CLOSED oneof. There is no kind string, no
+//     `google.protobuf.Any` and no provider enum: which platform a graph runs
+//     on is chosen by the invocation (`--platform=<id>`), never by this file.
+//   * Every field that names another resource is a `Ref`. The only
+//     id-bearing string is `Resource.id`. So one walk over `Ref` fields finds
+//     every edge of the graph.
+//
+// WHAT IS NOT HERE, ON PURPOSE
+//   * Identity, permissions, networks, gateways, load balancers and DNS
+//     records. The platform creates them while it builds a `service` or a
+//     `domain`; "this may read that" is one `Uses` line on the consumer.
+//   * Stage names. A stage's list of resources lives in the release machine
+//     file; no resource carries the name of a stage.
+//   * The `raw` escape hatch. Field 90 of `Resource.body` is left free for
+//     it; it is specified separately and not built yet.
+//
+// Field numbers are what is stored. They are pinned as literal wire bytes by
+// the welded tests in tests/; renumbering a field is protoc-legal and decodes
+// stored data as the wrong field, so the tests are the guard.
+syntax = "proto3";
+
+package kci.resource.v1;
+
+import "google/protobuf/descriptor.proto";
+import "google/protobuf/duration.proto";
+
+// ---- the catalog's one declared bit ------------------------------------------
+
+// Whether every complete platform must host a type. PORTABLE: a complete
+// platform implements it or carries a ledgered gap. PLATFORM_BOUND: partial
+// coverage is legitimate, and applying it where no adapter exists is refused
+// before anything is created. UNSET is never a legal marking.
+enum Portability {
+  PORTABILITY_UNSET = 0;
+  PORTABLE = 1;
+  PLATFORM_BOUND = 2;
+}
+
+extend google.protobuf.MessageOptions {
+  // Marks each of the ten type messages below.
+  Portability portability = 50001;
+  // The outputs a type exposes to a `Ref`. A `Ref` asking a type for an
+  // output it does not expose is refused when the graph is loaded.
+  repeated Output exposes = 50002;
+}
+
+// ---- references ----------------------------------------------------------------
+
+// What a produced value IS, never whose attribute it is.
+enum Output {
+  OUTPUT_UNSET = 0;
+  URL = 1;
+  HOST = 2;
+  ADDRESS = 3;
+  NAME = 4;
+}
+
+// A reference to another resource of the same list. With neither arm of
+// `output` set it names the resource itself (as in `Uses.target`,
+// `Domain.serves`); with `standard` set it names one value the resource
+// produces at apply time. `named` is reserved for the escape hatch's own
+// outputs and is refused for every other producer.
+message Ref {
+  string resource = 1;
+  oneof output {
+    Output standard = 2;
+    string named = 3;
+  }
+}
+
+// What a consumer may do to a resource. Each type accepts its own subset.
+enum Access {
+  ACCESS_UNSET = 0;
+  CALL = 1;
+  READ = 2;
+  WRITE = 3;
+  READ_WRITE = 4;
+  SEND = 5;
+  RECEIVE = 6;
+}
+
+// "This resource may do `access` to `target`." The platform turns it into
+// whatever its own permission system needs. `target.output` must be unset:
+// access is granted to a resource, not to one of its values.
+message Uses {
+  Ref target = 1;
+  Access access = 2;
+}
+
+// A configuration value: a literal, a release machine parameter, a value
+// another resource produces, or a reference to a `secret` resource (whose
+// value never appears in this file).
+message Value {
+  oneof v {
+    string literal = 1;
+    string param = 2;
+    Ref ref = 3;
+    Ref secret = 4;
+  }
+}
+
+// An output of an earlier BUILD action of the release machine. A different
+// namespace from `Ref`: resolved before the deploy graph exists, and never a
+// graph edge.
+message ActionOutput {
+  string action = 1;
+  string name = 2;
+}
+
+// What to run: a build action's output, or a literal content digest. Never a
+// mutable tag.
+message Image {
+  oneof source {
+    ActionOutput output = 1;
+    string digest = 2;
+  }
+}
+
+// What a `site` serves: a build action's output, or a literal content digest.
+message Content {
+  oneof source {
+    ActionOutput output = 1;
+    string digest = 2;
+  }
+}
+
+// What happens to a resource that holds data when the graph is destroyed.
+// UNSET is refused where a default would be dangerous (`table`, `bucket`,
+// `mail_relay`), so the author always says it.
+enum Retain {
+  RETAIN_UNSET = 0;
+  KEEP = 1;
+  DELETE = 2;
+}
+
+// ---- one entry of a deploy action's list --------------------------------------
+
+message Resource {
+  // Author-chosen and stable: the identity key for state.
+  string id = 1;
+  repeated Uses uses = 2;
+  Retain retain = 3;
+  // Was a per-resource stage filter in an earlier draft. Stage differences
+  // live in the release machine file.
+  reserved 4;
+  reserved "only_in";
+
+  // Typed and closed. 90 is left free for the escape hatch (not built yet).
+  oneof body {
+    Service service = 10;
+    Job job = 11;
+    Worker worker = 12;
+    Table table = 13;
+    Bucket bucket = 14;
+    Queue queue = 15;
+    Secret secret = 16;
+    Site site = 17;
+    Domain domain = 18;
+    MailRelay mail_relay = 19;
+  }
+}
+
+// The resources of one deploy action, in no particular order: ordering is
+// derived from the `Ref`s between them.
+message ResourceList {
+  repeated Resource resource = 1;
+}
+
+// ---- shared shapes -------------------------------------------------------------
+
+// Neutral sizes.
+message Size {
+  uint32 cpu_millis = 1;
+  uint32 memory_mb = 2;
+}
+
+// Instance bounds. `min = 0` allows scaling to zero.
+message Scale {
+  uint32 min = 1;
+  uint32 max = 2;
+}
+
+// ---- the ten types ---------------------------------------------------------------
+
+// A container that answers requests, scales (to zero if allowed) and may have
+// a public URL.
+message Service {
+  option (portability) = PORTABLE;
+  option (exposes) = URL;
+  option (exposes) = HOST;
+
+  Image image = 1;
+  uint32 port = 2;
+  repeated string args = 3;
+  map<string, Value> env = 4;
+  Size size = 5;
+  Scale scale = 6;
+  string health_path = 7;
+  // Behaviours, not products: an adapter reports a finding when the
+  // platform's ceiling is lower.
+  google.protobuf.Duration request_timeout = 8;
+  uint32 max_concurrency = 9;
+
+  // "A public URL" is an arm, not a gateway resource.
+  oneof exposure {
+    Public public = 10;
+    Internal internal = 11;
+  }
+
+  // Reachable from outside the graph at a URL.
+  message Public {}
+  // No public URL; callable by other resources of this graph. Not a
+  // statement about networks.
+  message Internal {}
+}
+
+// A container that runs to completion, on demand or on a schedule.
+message Job {
+  option (portability) = PORTABLE;
+
+  Image image = 1;
+  repeated string args = 2;
+  Size size = 3;
+  uint32 max_retries = 4;
+  google.protobuf.Duration timeout = 5;
+
+  oneof trigger {
+    OnDemand on_demand = 10;
+    Schedule schedule = 11;
+  }
+
+  message OnDemand {}
+  // Part of the job, not a second resource.
+  message Schedule {
+    string cron = 1;
+    string timezone = 2;
+  }
+}
+
+// A container that runs all the time or reacts to a queue; no public URL.
+message Worker {
+  option (portability) = PORTABLE;
+
+  Image image = 1;
+  Size size = 2;
+  Scale scale = 3;
+  repeated string args = 4;
+
+  oneof source {
+    AlwaysOn always_on = 10;
+    FromQueue queue = 11;
+  }
+
+  message AlwaysOn {}
+  message FromQueue {
+    // A `Ref` to a `queue` resource.
+    Ref queue = 1;
+    uint32 batch = 2;
+    uint32 concurrency = 3;
+  }
+}
+
+// Durable keyed data (a document or key-value store) with declared indexes.
+// Not a relational database.
+message Table {
+  option (portability) = PORTABLE;
+  option (exposes) = ADDRESS;
+
+  repeated Index indexes = 1;
+  // The key field's name (a field of the stored records, not a resource).
+  string key = 2;
+  google.protobuf.Duration ttl = 3;
+
+  message Index {
+    string field = 1;
+  }
+}
+
+// A place for files, with an expiry and a public-read yes/no.
+message Bucket {
+  option (portability) = PORTABLE;
+  option (exposes) = NAME;
+
+  uint32 expiry_days = 1;
+  bool public_read = 2;
+}
+
+// A message queue with an optional dead-letter queue.
+message Queue {
+  option (portability) = PORTABLE;
+  option (exposes) = ADDRESS;
+
+  google.protobuf.Duration visibility_timeout = 1;
+  // A `Ref` to another `queue` resource.
+  Ref dead_letter = 2;
+}
+
+// A named secret whose value never appears in this file; the arm says who
+// supplies it.
+message Secret {
+  option (portability) = PORTABLE;
+
+  oneof custody {
+    Customer customer = 10;
+    Operator operator = 11;
+    Generated generated = 12;
+  }
+
+  // The customer supplies the value.
+  message Customer {}
+  // The operator of the deployment supplies the value.
+  message Operator {}
+  // kci generates the value at first apply.
+  message Generated {}
+}
+
+// Static files served from a URL, with a single-page-app fallback and
+// optional routes to a service.
+message Site {
+  option (portability) = PORTABLE;
+  option (exposes) = URL;
+
+  Content content = 1;
+  string spa_fallback = 2;
+  repeated Route routes = 3;
+
+  message Route {
+    // A path prefix of the site.
+    string path = 1;
+    // A `Ref` to the `service` that answers it.
+    Ref to_service = 2;
+  }
+}
+
+// A custom name with TLS, pointing at a service or a site.
+message Domain {
+  option (portability) = PORTABLE;
+
+  string name = 1;
+  // A `Ref` to the `service` or `site` it serves.
+  Ref serves = 2;
+
+  oneof tls {
+    Managed managed = 10;
+    Provided provided = 11;
+  }
+  oneof dns {
+    PlatformZone zone = 20;
+    Manual manual = 21;
+  }
+
+  // The platform obtains and renews the certificate.
+  message Managed {}
+  // The author supplies the certificate, as a `Ref` to a `secret`.
+  message Provided {
+    Ref certificate = 1;
+  }
+  // The platform writes the records into a zone it manages.
+  message PlatformZone {}
+  // kci prints the records as outputs; the author writes them.
+  message Manual {}
+}
+
+// Send and receive mail for a domain. Platform-bound: only platforms that
+// have a managed mail service can host it, and applying it elsewhere is
+// refused before anything is created.
+message MailRelay {
+  option (portability) = PLATFORM_BOUND;
+  option (exposes) = NAME;
+
+  string domain = 1;
+
+  oneof inbound {
+    ToService to_service = 10;
+    ToQueue to_queue = 11;
+  }
+
+  // Inbound mail is posted to a path of a `service`.
+  message ToService {
+    Ref service = 1;
+    string path = 2;
+  }
+  // Inbound mail is sent to a `queue`.
+  message ToQueue {
+    Ref queue = 1;
+  }
+}
