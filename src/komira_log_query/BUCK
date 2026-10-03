@@ -3,10 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The read side of a service's own operational log: format-neutral hit and
 # page values, the `ServiceLogSearch` trait with a type-erased facade a
 # dispatcher holds as one field, and the operator-only `GET /internal/logs`
-# route. A leaf on `komira_http` alone; conformers that know a storage format
-# live in the packages that depend on this one (`komira_log_index`,
-# `komira_telemetry_read`). It has no welded tests of its own: the route and
-# the seam are exercised by those conformer packages' tests.
+# route. A leaf on `komira_http` alone. It has no welded tests of its own.
 mojo_library(
     name = "komira_log_query",
     srcs = glob(["**/*.mojo"]),
