@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Join result assembly: gather-index planning, chunked parallel gather, join-key common-subexpression.
+mojo_library(
+    name = "komira_join_assembly",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_buffer:komira_buffer",
+        "//src/komira_column_kernels:komira_column_kernels",
+        "//src/komira_concurrency:komira_concurrency",
+        "//src/komira_counters:komira_counters",
+        "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_plan_ir:komira_plan_ir",
+    ],
+    test_srcs = [
+        "tests/test_assemble_join_gather_parallel_param.mojo",
+        "tests/test_compiler_join_assembly_string_gather_simd_parity.mojo",
+        "tests/test_expr_walk_unification.mojo",
+        "tests/test_g4_bool_carried_join_gather.mojo",
+        "tests/test_gather_narrow_widths_core.mojo",
+        "tests/test_join_chunk_plan_byte_budget.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
