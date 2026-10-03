@@ -61,12 +61,11 @@ struct ResolveResult(Copyable, Movable, Deinitable):
     """Whether a binding exists at `key`."""
 
     var value: String
-    """The bound value — a URL for a discovery lookup, a service NAME for an
-    enrollment lookup. Empty when `found` is False."""
+    """The bound value — the URL for a discovery lookup. Empty when `found`
+    is False."""
 
     var key: String
-    """The object key that was consulted, e.g. `service/orders-api` or
-    `identity/gcp.jm_40proj.iam.gserviceaccount.com`."""
+    """The object key that was consulted, e.g. `service/orders-api`."""
 
     var age_ms: Int64
     """Milliseconds since the value was read from the store. 0 for a store

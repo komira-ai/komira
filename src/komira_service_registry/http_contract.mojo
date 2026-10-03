@@ -78,8 +78,7 @@ accept either; one that checks the VALUE would not, and `found` is the single
 field every caller branches on."""
 
 comptime WIRE_FIELD_VALUE: String = "value"
-"""The bound value: a URL for a discovery lookup, a service NAME for an
-enrollment lookup. Emitted as `""` when `found` is false — never omitted, so an
+"""The bound value: the URL for a discovery lookup. Emitted as `""` when `found` is false — never omitted, so an
 absent binding has the SAME BODY SHAPE as a hit and a client's parse has one
 path."""
 
@@ -114,19 +113,10 @@ a PATTERN and a PREFIX without either side hardcoding the other's spelling."""
 comptime RESOLVE_SERVICE_PATH_PREFIX: StaticString = "/v1/services/"
 """DISCOVERY. The client appends the service NAME verbatim."""
 
-comptime RESOLVE_IDENTITY_PATH_PREFIX: StaticString = "/v1/identities/"
-"""ENROLLMENT. The client appends the identity FINGERPRINT verbatim (which is
-safe without percent-encoding: `escape_principal` emits only `[A-Za-z0-9.-]`
-plus `_XX`, every byte of which is unreserved in RFC 3986)."""
-
 comptime PARAM_NAME: String = "name"
-comptime PARAM_FINGERPRINT: String = "fingerprint"
 
 comptime ROUTE_RESOLVE_SERVICE: StaticString = "/v1/services/:name"
 """The DISCOVERY route pattern the server registers."""
-
-comptime ROUTE_RESOLVE_IDENTITY: StaticString = "/v1/identities/:fingerprint"
-"""The ENROLLMENT route pattern the server registers."""
 
 
 def resolve_service_path(name: String) -> String:
@@ -139,9 +129,3 @@ def resolve_service_path(name: String) -> String:
     name that is not safe in one path segment — a check that belongs in the
     client, because it is the caller who can name the offending byte."""
     return String(RESOLVE_SERVICE_PATH_PREFIX) + name
-
-
-def resolve_identity_path(fingerprint: String) -> String:
-    """`/v1/identities/<fingerprint>` — the concrete request path for an
-    ENROLLMENT lookup. Same non-encoding rule as `resolve_service_path`."""
-    return String(RESOLVE_IDENTITY_PATH_PREFIX) + fingerprint
