@@ -21,7 +21,12 @@ ruleset, `endpoint-rule-set-1.json` beside the model, is
 """
 
 BOTOCORE_MODELS = {
-    # Amazon CloudWatch Logs.
+    # Amazon DynamoDB (//src/komira_aws_dynamodb).
+    "dynamodb": struct(
+        api_version = "2012-08-10",
+        sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
+    ),
+    # Amazon CloudWatch Logs (//src/komira_aws_logs).
     "logs": struct(
         api_version = "2014-03-28",
         sha256 = "b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30",
@@ -32,6 +37,11 @@ BOTOCORE_MODELS = {
     "s3": struct(
         api_version = "2006-03-01",
         sha256 = "429763d64912af5edae4c7a0f20a8ac3e6fecf734cde5fc465016bc8badcdef9",
+    ),
+    # Amazon SQS (//src/komira_aws_sqs).
+    "sqs": struct(
+        api_version = "2012-11-05",
+        sha256 = "282d08c85a2003ab91ed400a81339fe81952e446ae40a599877705903e870c0f",
     ),
 }
 

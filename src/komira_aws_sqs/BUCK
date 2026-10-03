@@ -1,0 +1,83 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+)
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# Amazon SQS: an awsJson 1.0 client generated at build time from botocore's
+# sqs model (//third_party/botocore, pinned by sha256; nothing of it is
+# copied here), in pure mode: each operation's request builder and response
+# parser, and its endpoint resolved through the service's published
+# endpoint ruleset and partition table, embedded in the module. No
+# transport; a caller signs a built request with komira_aws_core's
+# build_sigv4_signed_request (signing name `sqs`).
+#
+# Pure, not client, mode: client-mode code sends through komira_aws_core's
+# `send_sigv4_signed_request`, which komira_aws_core does not have yet (it
+# lands with the core's HTTP send surface), so a client-mode library would
+# not compile.
+#
+# SQS's model is awsQueryCompatible: every request carries
+# `x-amzn-query-mode: true`, and an error names its legacy query code in
+# an `x-amzn-query-error` header beside the shape name in `__type`. The
+# generator refuses an operation one of whose errors has a custom query
+# code, since its error path reads the body only; none of the operations
+# below has one in the pinned model, so none is refused.
+#
+# `operations` is a work queue's lifecycle: a queue created, looked up,
+# its attributes read and set, and deleted; messages received and deleted.
+# An operation joins the list with its own rows in the tests below.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Amazon SQS API reference (no upstream test body is copied):
+# test_sqs_requests (the request each operation builds, exactly),
+# test_sqs_responses (each result decoded, and the error forms read through
+# komira_aws_core), test_sqs_endpoints (botocore's endpoint cases for sqs
+# through every operation's resolver, the regional, FIPS, dual-stack and
+# LocalStack endpoints, and two requests signed end to end against
+# independently computed signatures) and test_no_env_reads (the generated
+# module reads no environment).
+
+_SQS = botocore_model("sqs")
+
+_ENDPOINT_TESTS = botocore_endpoint_tests_path("sqs")
+
+mojo_aws_client(
+    name = "komira_aws_sqs",
+    endpoint_rules = _SQS.endpoint_rules,
+    mode = "pure",
+    model = _SQS.model,
+    model_sha256 = _SQS.sha256,
+    operations = [
+        "CreateQueue",
+        "DeleteMessage",
+        "DeleteQueue",
+        "GetQueueAttributes",
+        "GetQueueUrl",
+        "ReceiveMessage",
+        "SetQueueAttributes",
+    ],
+    partitions = _SQS.partitions,
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "gen/" + f: ":komira_aws_sqs_gen[{}]".format(f)
+            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_sqs.mojo"]
+        },
+        "tests/test_sqs_endpoints.mojo": {
+            _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_sqs_endpoints.mojo",
+        "tests/test_sqs_requests.mojo",
+        "tests/test_sqs_responses.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_json:komira_json",
+    ],
+)
