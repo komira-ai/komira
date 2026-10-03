@@ -244,7 +244,7 @@ impl<'a> Emitter<'a> {
                     "from komira_proto_codec.proto_binary import PbEncoder, PbDecoder",
                 );
                 self.line(
-                    "from komira_http.transport.io_stream import Connector",
+                    "from komira_http_core.transport.io_stream import Connector",
                 );
                 self.line("from komira_async.reactor.reactor import Reactor");
                 self.line(
