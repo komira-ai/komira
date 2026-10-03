@@ -77,9 +77,9 @@ from komira_core.runtime_traits.worker_pool_traits import KeepAlive, Segment
 # Writes go through LocalFs[NoopSink].write_at (64 MiB chunking
 # inside the trait body).
 from komira_core.source.sink import Sink
-from komira_eval.row_format.row_sink import RowSink
-from komira_eval.row_format.row_output import RowOutput
-from komira_eval.row_format.row_block import (
+from komira_row_format.row_sink import RowSink
+from komira_row_format.row_output import RowOutput
+from komira_row_format.row_block import (
     DT_I64,
     DT_F64,
     DT_I32,

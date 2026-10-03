@@ -15,6 +15,7 @@
 # and for the byte-exact tests. Never log it.
 # =============================================================================
 
+from ._text import bytes_of, utf8_text
 from .sigv4 import Header
 
 
@@ -23,7 +24,8 @@ struct CredentialHttpRequest(Copyable, Movable):
 
     `scheme` is "http" or "https"; `host` is the host name or IP literal (an
     IPv6 literal in brackets); `port` is the TCP port; `target` is the path
-    and query. `headers` are in send order and include Host.
+    and query. `headers` are in send order and include Host. `body` is
+    bytes; `set_body_text` and `body_text` write and read it as UTF-8.
     """
 
     var method: String
@@ -32,7 +34,7 @@ struct CredentialHttpRequest(Copyable, Movable):
     var port: Int
     var target: String
     var headers: List[Header]
-    var body: String
+    var body: List[UInt8]
 
     def __init__(
         out self,
@@ -48,7 +50,7 @@ struct CredentialHttpRequest(Copyable, Movable):
         self.port = port
         self.target = target
         self.headers = List[Header]()
-        self.body = String("")
+        self.body = List[UInt8]()
 
     def header(self, name: String) -> String:
         """The first header named `name` (exact case), "" when absent."""
@@ -57,23 +59,45 @@ struct CredentialHttpRequest(Copyable, Movable):
                 return self.headers[i].value
         return String("")
 
-    def to_wire(self) -> String:
+    def set_body_text(mut self, text: String):
+        """Sets the body to the UTF-8 bytes of `text`."""
+        self.body = bytes_of(text)
+
+    def body_text(self) raises -> String:
+        """The body as text. Refuses a body that is not well-formed UTF-8."""
+        return utf8_text(Span(self.body), "the request body")
+
+    def to_wire(self) -> List[UInt8]:
         """The HTTP/1.1 request bytes: request line, headers, blank line,
         body. Holds secrets; for the transport and tests only."""
-        var out = self.method + " " + self.target + " HTTP/1.1\r\n"
+        var head = self.method + " " + self.target + " HTTP/1.1\r\n"
         for i in range(len(self.headers)):
-            out += self.headers[i].name + ": " + self.headers[i].value + "\r\n"
-        out += "\r\n"
-        out += self.body
-        return out
+            head += self.headers[i].name + ": " + self.headers[i].value + "\r\n"
+        head += "\r\n"
+        var out = bytes_of(head)
+        out.extend(Span(self.body))
+        return out^
 
 
 @fieldwise_init
 struct CredentialHttpResponse(Copyable, Movable):
-    """The status code and body of a response. Bodies hold secrets."""
+    """The status code and body of a response. Bodies hold secrets.
+
+    Every credential response is text (XML from STS, JSON from the
+    container endpoint, plain text from instance metadata), so the body is
+    a `String`. A transport holding the received bytes builds one with
+    `of_bytes`, which refuses bytes that are not well-formed UTF-8; that
+    refusal is the transport's, and the providers never see such a body.
+    """
 
     var status: Int
     var body: String
+
+    @staticmethod
+    def of_bytes(status: Int, body: Span[UInt8, _]) raises -> Self:
+        """A response whose body is `body` read as UTF-8. Refuses bytes that
+        are not well-formed UTF-8, quoting none of them."""
+        return Self(status, utf8_text(body, "a credential response body"))
 
 
 trait CredentialTransport:
