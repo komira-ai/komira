@@ -1,6 +1,7 @@
 """`komira_oci` — a native OCI distribution client for image copies.
 
-It performs a registry-to-registry, DIGEST-PRESERVING image copy over HTTPS.
+It performs a registry-to-registry, DIGEST-PRESERVING image copy over HTTPS,
+and the upload of a LOCAL OCI image layout into a registry.
 
 WHY THIS EXISTS. A release `stage` promotes a built image from the build
 project's registry into each target environment's registry. That promote is a
@@ -36,6 +37,13 @@ WHAT IS IN HERE:
     LOCAL OCI layout's `index.json` rather than asking a registry. Borrowed from
     `rules_oci`'s pusher and strictly better provenance than `crane digest`,
     which reports whatever a registry is currently serving for a name.
+  * `OciLayoutPusher[T]` (oci_push.mojo) — the other direction: upload a LOCAL
+    OCI layout (the `oci_image` rule's output) into a registry over the same
+    transport seam and bearer auth. Every file is checked against its name
+    before the first registry call; blobs, then manifests, then the tag, so a
+    manifest never names a missing blob. Reads through `OciLayoutSource`
+    (oci_layout_source.mojo): `DirOciLayout` for a directory, `MemOciLayout`
+    for a layout in memory.
 
 OUT OF SCOPE (deliberately, and not accidentally omitted):
   * The `WWW-Authenticate` token-exchange dance. Artifact Registry accepts a
@@ -45,7 +53,8 @@ OUT OF SCOPE (deliberately, and not accidentally omitted):
     completeness.
   * Chunked/resumable blob upload. A monolithic PUT closes the session; layers
     that need chunking are a possible follow-on, not a silent gap.
-  * Tag pushes, deletes, and garbage collection. `stage` copies by digest.
+  * Deletes and garbage collection. `stage` copies by digest; only a layout
+    push writes a tag, and only after the content it names is complete.
 
 A self-contained, flat package (import name `komira_oci`). Depends on
 komira_http (the transport, and the shared redirect policy), komira_crypto
@@ -86,3 +95,12 @@ from .oci_transport import (
 from .oci_copy import OciCopier
 
 from .oci_layout import layout_image_digest
+
+from .oci_layout_source import (
+    OCI_IMAGE_LAYOUT_VERSION,
+    DirOciLayout,
+    MemOciLayout,
+    OciLayoutSource,
+)
+
+from .oci_push import OciLayoutPusher
