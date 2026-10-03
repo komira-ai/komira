@@ -71,7 +71,7 @@
 from komira_core.collections.slab import Slab
 from komira_core.collections.string_column_view import StringColumnView
 
-from komira_core.eval.fnv1a_64 import fnv1a_64_over_bytes
+from komira_hash import fnv1a_64
 
 from .analyzer import (
     AnalyzedField,
@@ -711,7 +711,7 @@ struct InvertedIndexBuilder(Movable, Deinitable):
         var touched_start = len(self._doc_touched)
         for ti in range(n):
             ref tok = af.tokens[ti]
-            var h = fnv1a_64_over_bytes(tok.term.as_bytes())
+            var h = fnv1a_64(tok.term.as_bytes())
             var term_id = self._find_or_insert(h, tok.term.as_bytes())
             # Grow the dense accumulator to cover a freshly-inserted term_id
             # (find_or_insert assigns dense ids in [0, _n_terms); a new id == the
