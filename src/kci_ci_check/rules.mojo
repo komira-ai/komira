@@ -27,8 +27,11 @@
 #
 # How `kci run` is found (R5): each `run:` block is split into shell words
 # (a line ending in `\` continues; quotes around a word are dropped); an
-# invocation is a word whose last `/`-separated part is `kci` followed by
-# the word `run`. Its `--stage` is the next word, or `--stage=<v>`.
+# invocation is a word in COMMAND position (the first word of a line, or
+# right after `;` `&&` `||` `|` `then` `do` `else` `exec` `!`, or after a
+# word ending in `;`) whose last `/`-separated part is `kci`, followed by
+# the word `run`. So `echo "... kci run ..."` is not one. Its `--stage` is
+# the next word, or `--stage=<v>`.
 #
 # A workflow the restricted reader cannot read raises (`cannot tell:`,
 # workflow_reader.mojo): the caller reports INDETERMINATE, never a pass.
@@ -158,6 +161,18 @@ struct KciRunCall(Copyable, Movable):
         self.stage = stage^
 
 
+def _command_position(w: List[String], j: Int) -> Bool:
+    if j == 0:
+        return True
+    var p = w[j - 1]
+    if p.endswith(String(";")):
+        return True
+    for sep in [";", "&&", "||", "|", "then", "do", "else", "exec", "!"]:
+        if p == String(sep):
+            return True
+    return False
+
+
 def kci_run_calls(script: String) -> List[KciRunCall]:
     """Every `kci run` invocation in a `run:` script (file header, R5)."""
     var out = List[KciRunCall]()
@@ -166,6 +181,8 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
         ref w = lines[i]
         for j in range(len(w)):
             if not _is_kci(w[j]) or j + 1 >= len(w) or w[j + 1] != String("run"):
+                continue
+            if not _command_position(w, j):
                 continue
             var stage = String("")
             var k = j + 2
@@ -177,6 +194,9 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                     stage = String(w[k][byte = 8:])
                     break
                 k += 1
+            while stage.endswith(String(";")):
+                var trimmed = String(stage[byte = 0 : stage.byte_length() - 1])
+                stage = trimmed^
             out.append(KciRunCall(stage^))
     return out^
 
