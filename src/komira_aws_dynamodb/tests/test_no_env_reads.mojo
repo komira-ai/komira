@@ -1,8 +1,8 @@
-# The generated client reads no environment: every input is a parameter,
-# the endpoint ones included (DynamoDBEndpointConfig). The three generated files are staged
-# as this test's data, at gen/<file>; the test reads each one and fails if
-# any names a way to read the environment, reaches the FFI a read would go
-# through, or takes the core's ruleset-free endpoint path.
+# The generated client reads no environment: every input is a parameter, the
+# endpoint ones included (DynamoDBEndpointConfig). The three generated files
+# are staged as this test's data, at gen/<file>; the test reads each one and
+# fails if any names a way to read the environment, reaches the FFI a read
+# would go through, or takes the core's ruleset-free endpoint path.
 # komira_aws_core's test_env_source_only holds the same line for the core,
 # where the one read site is its EnvSource.
 from std.testing import assert_equal, assert_true

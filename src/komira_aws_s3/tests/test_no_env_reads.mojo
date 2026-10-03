@@ -32,6 +32,7 @@ def test_no_environment_read() raises:
         "std.os",
         "EnvSource",
         "ProcessEnv",
+        "aws_endpoint_config",
         "komira_core_ffi",
         "external_call",
         # Not a read: komira_aws_core's endpoint path for a client with no

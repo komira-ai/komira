@@ -232,10 +232,15 @@ def test_continuous_backups() raises:
 def test_refusals() raises:
     with assert_raises():
         _ = parse_get_item_response(_ok(String('{"Item":{"pk":{"S":"r"}')))
-    # A required member of a nested shape that is not the type the model
-    # states.
+    # A member whose JSON type is not the model's.
     with assert_raises():
         _ = parse_query_response(_ok(String('{"Count":"two"}')))
+    # A required member of a nested shape (KeySchemaElement's
+    # AttributeName) whose JSON type is not the model's.
+    with assert_raises():
+        _ = parse_describe_table_response(
+            _ok(String('{"Table":{"KeySchema":[{"AttributeName":1,"KeyType":"HASH"}]}}'))
+        )
 
 
 # ---- errors ------------------------------------------------------------------
