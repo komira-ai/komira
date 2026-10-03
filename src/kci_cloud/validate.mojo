@@ -14,14 +14,18 @@
 #      output or a release parameter must have been substituted by the deploy
 #      facade before a cloud ever sees the resource) in `env` of a service
 #      AND of a job, a variable set by `env` or by `secret_env` but not both,
-#      a secret reference with a name, and an image platform (OS + CPU) this
-#      kci deploys: v1 deploys `linux/amd64` only (empty means that).
+#      a secret reference with a name, and an image platform written as
+#      `<os>/<cpu>` (empty means `linux/amd64`).
 #   2. COVERAGE findings: the chosen cloud has no adapter for a type. The
 #      text carries the cloud's typed absence and the built-in clouds
 #      that do host the type.
 #   3. LIMIT findings: the cloud hosts the type but refuses a value or a
 #      shape (`CloudAdapter.check`), for example a public URL on a cloud
-#      with no public ingress.
+#      with no public ingress; the image's platform is not the one the cloud
+#      needs for the type (`CloudAdapter.required_artifact`); or a `public {}`
+#      service in a cell whose settings choose no public mechanism
+#      (`CloudAdapter.public_mechanism`). The mechanism is chosen HERE, from
+#      the cell's settings, and never fallen back on at apply time.
 #
 # ⛔ A FINDING IS A REFUSAL OF THE WHOLE GRAPH. There is no "skip what the
 # cloud cannot do": that turns "cannot do it yet" into a silently thinner
@@ -32,6 +36,7 @@ from kci_resource_proto.resource import Resource, Ref, Value
 
 from kci_cloud.adapter import (
     CloudAdapter,
+    ArtifactNeed,
     Finding,
     FINDING_GRAPH,
     FINDING_COVERAGE,
@@ -160,8 +165,7 @@ comptime ID_MAX_BYTES = 24
 """The longest resource id. Narrowing later breaks authors; widening is free."""
 
 comptime V1_IMAGE_PLATFORM = "linux/amd64"
-"""The one image platform (OS + CPU) v1 deploys. An empty `Image.platform`
-means this value."""
+"""What an empty `Image.platform` means (OS + CPU)."""
 
 
 def id_problem(id: String) -> String:
@@ -196,9 +200,29 @@ def id_problem(id: String) -> String:
     return String("")
 
 
+def image_platform(r: Resource) -> String:
+    """The image platform of a service or a job, with the empty default
+    filled in; empty when the resource has no image."""
+    var p = String("")
+    var has = False
+    if r._oneof0_case == 1 and Bool(r.service.value().image):
+        has = True
+        p = r.service.value().image.value().platform.copy()
+    elif r._oneof0_case == 2 and Bool(r.job.value().image):
+        has = True
+        p = r.job.value().image.value().platform.copy()
+    if not has:
+        return String("")
+    if p.byte_length() == 0:
+        return String(V1_IMAGE_PLATFORM)
+    return p^
+
+
 def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding]):
     """Shared by the two v1 types: an image must be a content digest by now,
-    of the one platform v1 deploys."""
+    and its platform written `<os>/<cpu>`. Whether a cloud runs that
+    platform is the cloud's question (`required_artifact`, in
+    `validate_for`)."""
     var has = False
     var arm = 0
     var platform = String("")
@@ -210,21 +234,25 @@ def _check_image(owner: String, path: String, r: Resource, mut out: List[Finding
         has = True
         arm = r.job.value().image.value()._oneof0_case
         platform = r.job.value().image.value().platform.copy()
-    if has and platform.byte_length() > 0 and platform != V1_IMAGE_PLATFORM:
-        out.append(
-            Finding(
-                FINDING_GRAPH,
-                owner,
-                path + String(".platform"),
-                String("platform \"")
-                + platform
-                + String("\" is not deployable: v1 deploys ")
-                + String(V1_IMAGE_PLATFORM)
-                + String(" only (an empty platform means ")
-                + String(V1_IMAGE_PLATFORM)
-                + String(")"),
+    if has and platform.byte_length() > 0:
+        var parts = platform.split("/")
+        if (
+            len(parts) != 2
+            or parts[0].byte_length() == 0
+            or parts[1].byte_length() == 0
+        ):
+            out.append(
+                Finding(
+                    FINDING_GRAPH,
+                    owner,
+                    path + String(".platform"),
+                    String("platform \"")
+                    + platform
+                    + String("\" is not <os>/<cpu> (for example ")
+                    + String(V1_IMAGE_PLATFORM)
+                    + String(")"),
+                )
             )
-        )
     if not has or arm == 0:
         out.append(Finding(FINDING_GRAPH, owner, path, String("no image")))
     elif arm == 1:
@@ -395,6 +423,36 @@ def graph_findings(catalog: Catalog, resources: List[Resource]) -> List[Finding]
     return out^
 
 
+def _check_platform[
+    S: CloudAdapter
+](cloud: S, r: Resource, mut out: List[Finding]):
+    """The image's platform against the one the cloud needs for `r`."""
+    var have = image_platform(r)
+    if have.byte_length() == 0:
+        return
+    var need = cloud.required_artifact(r)
+    if need.platform != have:
+        var kind = String("service") if r._oneof0_case == 1 else String("job")
+        out.append(
+            Finding(
+                FINDING_LIMIT,
+                r.id,
+                kind + String(".image.platform"),
+                String("platform \"")
+                + have
+                + String("\" is not deployable on cloud \"")
+                + cloud.cloud_id().text()
+                + String("\": it runs ")
+                + need.kind
+                + String(" for ")
+                + need.platform
+                + String(" (an empty platform means ")
+                + String(V1_IMAGE_PLATFORM)
+                + String(")"),
+            )
+        )
+
+
 def validate_for[
     S: CloudAdapter
 ](clouds: Clouds, cloud: S, resources: List[Resource]) raises -> List[Finding]:
@@ -421,8 +479,29 @@ def validate_for[
             continue
         if entry.implements(field):
             var limits = cloud.check(r)
+            var public_refused = False
             for k in range(len(limits)):
+                if limits[k].field_path == "service.public":
+                    public_refused = True
                 out.append(limits[k].copy())
+            _check_platform(cloud, r, out)
+            if (
+                not public_refused
+                and r._oneof0_case == 1
+                and r.service.value()._oneof0_case == 1
+                and cloud.public_mechanism().byte_length() == 0
+            ):
+                out.append(
+                    Finding(
+                        FINDING_LIMIT,
+                        r.id,
+                        String("service.public"),
+                        String("this cell's settings choose no public mechanism")
+                        + String(" on cloud \"")
+                        + pid.text()
+                        + String("\"; kci never picks one at apply time"),
+                    )
+                )
             continue
         ref ct = clouds.catalog.types[t]
         var why = String("no adapter")

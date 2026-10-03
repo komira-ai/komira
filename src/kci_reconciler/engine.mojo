@@ -62,6 +62,25 @@
 # does NOT `mark_reaped` them — the resource is still live, and retiring the
 # record would orphan it.
 #
+# ★ THE CELL SCOPE (kci_reconciler/ownership.mojo). Every verb has an OWNED form
+# (`plan_graph_owned`, `apply_graph_owned`, `destroy_graph_owned`) that runs in a
+# `CellScope (machine, cell, provenance, adopt)`; the older forms run in the
+# UNOWNED scope and behave exactly as before. In an owned scope:
+#   * the store is keyed `(machine, cell, logical id)`;
+#   * before ANY change, every node must stamp ownership and every present object
+#     must be this node's (stamped with its identity, or explicitly adopted):
+#     a FOREIGN or CONFLICT object refuses the whole run (`kci: REFUSED`), and
+#     destroy never deletes one;
+#   * the write-ahead intent carries the identity, and a create is
+#     `create_owned(stamp)`: the object is born stamped, in the same call;
+#   * `--adopt <id>` (`CellScope.adopt`) stamps an unstamped object of a wanted
+#     name and records it, instead of refusing it.
+# In either scope, a node the file no longer wants (`Resource.wanted` False, the
+# closed world) is deleted when the store recorded it (and, owned,
+# it carries the stamp), and otherwise left and planned as leftover; a difference
+# on a field kci does not model (`ResourceStatus.unmanaged`) is planned beside the
+# verb and never converged.
+#
 # WHAT v1 DOES NOT DO (the typed holes). No REPLACE (a DRIFTED node whose
 # converge_mode is not IN_PLACE makes apply RAISE "CONVERGE_REPLACE unsupported in
 # v1" — fail-loud, not a surprise teardown). No rollback_update (the digest-revert
@@ -109,8 +128,15 @@ from kci_reconciler.fault_domain import (
     fault_domain_of_error,
     fault_message_of_error,
 )
-from kci_reconciler.state import StateStore, IntentTicket
+from kci_reconciler.state import StateStore, IntentTicket, InMemoryStateStore
 from kci_reconciler.graph import ResourceGraph, topo_sort, reverse_order
+from kci_reconciler.ownership import CellScope, ResourceKey, ownership_problem
+from kci_reconciler.cell_walk import (
+    bind_from_recorded_outputs,
+    delete_confirmed,
+    refuse_unless_owned,
+    removal_is_ours,
+)
 
 # The ambient (process-global) structured-log facade — the no-`ctx`/no-threaded-
 # handle reach the best-effort prune swallow uses to emit a breadcrumb WITHOUT
@@ -154,6 +180,10 @@ struct AppliedNode(Copyable, Movable, Deinitable):
                               poll fills that case). This is the DEPLOY->VALIDATE
                               handoff source: the served URL surfaced by the apply
                               itself so a no-op re-apply still records it.
+      * `key`               — the store key `(machine, cell, logical id)` the
+                              node was recorded under (rollback reaps by it).
+    A node the file no longer wants appears with VERB_DELETE when its object
+    was removed, else VERB_NOOP.
     Flat value POD."""
 
     var logical_id: String
@@ -162,6 +192,7 @@ struct AppliedNode(Copyable, Movable, Deinitable):
     var already_confirmed: Bool
     var verb: Int
     var served_endpoint: String
+    var key: ResourceKey
 
 
 # =============================================================================
@@ -295,10 +326,10 @@ def _resolve_inputs(
 
 def plan_graph(mut graph: ResourceGraph, creds: Creds) raises -> List[ChangeAction]:
     """Return the ChangeAction for every node, in topo order, WITHOUT mutating
-    anything. Per node: `read_status(creds)` (the live read) then `plan(live)` (the
-    pure diff). NO create/update/delete is issued — this is a dry run. RAISES on a
-    dangling dependency or reference, a cycle (via topo_sort), an unresolved
-    reference, or a genuine backend read fault.
+    anything, in the UNOWNED scope. Per node: `read_status(creds)` (the live
+    read) then `plan(live)` (the pure diff). NO create/update/delete is issued
+    — this is a dry run. RAISES on a dangling dependency or reference, a cycle
+    (via topo_sort), an unresolved reference, or a genuine backend read fault.
 
     ── VALUES THAT ONLY EXIST AFTER APPLY ──────────────────────────────────────
     A node with `input_refs` is bound to its producers' values BEFORE it is
@@ -310,14 +341,73 @@ def plan_graph(mut graph: ResourceGraph, creds: Creds) raises -> List[ChangeActi
     node whose producers all plan no-ops is bound to their live outputs and
     planned like any other.
 
-    Every action carries the node's `owner()`."""
+    Every action carries the node's `owner()` and the live read's
+    `unmanaged` differences.
+
+    ⚠ THIS FORM HAS NO STORE, so a node the file no longer wants is planned as
+    leftover even when a store recorded it. `plan_graph_owned` reads the
+    store."""
+    var store = InMemoryStateStore()
+    return _plan_impl(graph, creds, CellScope.unowned(), store)
+
+
+def plan_graph_owned[
+    S: StateStore
+](
+    mut graph: ResourceGraph, creds: Creds, cell: CellScope, mut store: S
+) raises -> List[ChangeAction]:
+    """`plan_graph` in `cell`: the same dry run, after the owned pre-flight
+    (`kci: REFUSED plan ...` when a node cannot stamp or a present object is
+    not this node's, exactly what apply would refuse), with the store read for
+    the closed-world rule. Reads only; writes nothing to the store."""
+    if not cell.owned():
+        raise Error(
+            String("plan_graph_owned: the scope names no machine and cell;")
+            + String(" use plan_graph for the unowned scope")
+        )
+    return _plan_impl(graph, creds, cell, store)
+
+
+def _plan_impl[
+    S: StateStore
+](
+    mut graph: ResourceGraph, creds: Creds, cell: CellScope, mut store: S
+) raises -> List[ChangeAction]:
     var order = topo_sort(graph)
+    refuse_unless_owned(
+        graph, order, creds, cell, store, String("plan"), True
+    )
     var actions = List[ChangeAction]()
     var run = _RunOutputs()
     for oi in range(len(order)):
         var idx = order[oi]
         var lid = graph.node(idx).logical_id()
         var owner = graph.node(idx).owner()
+        if not graph.node(idx).wanted():
+            # THE CLOSED WORLD: a role the file turned off. Deleted when both
+            # sources say it is ours, else left and planned as leftover. It
+            # produces nothing, so a consumer of it is refused as unbound.
+            var retention = graph.node(idx).retention()
+            var live = graph.node(idx).read_presence(creds)
+            var identity = cell.stamp(owner, lid).identity()
+            var recorded = store.physical_id_for(cell.key(lid))
+            var verb = VERB_NOOP
+            var why = String("not wanted by the file, and absent")
+            if live.is_present():
+                if removal_is_ours(cell, identity, retention, live, recorded):
+                    verb = VERB_DELETE
+                    why = String("not wanted by the file (a role turned off) -> delete")
+                else:
+                    why = String(
+                        "leftover: present and not wanted by the file, but not"
+                        " proven kci's by both the store and the stamp (or"
+                        " kept by retention); left alone"
+                    )
+            run.put(lid, Outputs())
+            actions.append(
+                ChangeAction(lid, verb, why, retention, owner, live.unmanaged)
+            )
+            continue
         var refs = graph.node(idx).input_refs()
         var waiting_on = String("")
         for r in range(len(refs)):
@@ -352,6 +442,7 @@ def plan_graph(mut graph: ResourceGraph, creds: Creds) raises -> List[ChangeActi
         var live = graph.node(idx).read_status(creds)
         var action = graph.node(idx).plan(live)
         action.owner = owner
+        action.unmanaged = live.unmanaged.copy()
         if action.verb == VERB_NOOP:
             run.put(lid, graph.node(idx).outputs(live.physical_id, creds))
         else:
@@ -551,6 +642,44 @@ def apply_graph_tracked[
     them in reverse). RAISES on the typed hole, a non-steady live phase, or a
     genuine backend fault — a raise leaves the surviving PROVISIONING intents for
     a re-apply to adopt (the recovery property)."""
+    return _apply_impl(graph, creds, CellScope.unowned(), store, landed, pending)
+
+
+def apply_graph_owned[
+    S: StateStore
+](
+    mut graph: ResourceGraph,
+    creds: Creds,
+    cell: CellScope,
+    mut store: S,
+    mut landed: List[AppliedNode],
+    mut pending: List[String],
+) raises -> List[AppliedNode]:
+    """`apply_graph_tracked` in `cell` (the owned scope; the file header's ★
+    section): the store keyed by the cell, the owned pre-flight before any
+    change (`kci: REFUSED apply ...`), the identity written with the
+    write-ahead intent, every create a `create_owned(stamp)`, and an adopted
+    unstamped object stamped by `adopt_owned`. The progress channels behave as
+    in `apply_graph_tracked`; a pre-flight refusal raises with `landed` empty
+    and `pending` the whole graph (nothing changed)."""
+    if not cell.owned():
+        raise Error(
+            String("apply_graph_owned: the scope names no machine and cell;")
+            + String(" use apply_graph_tracked for the unowned scope")
+        )
+    return _apply_impl(graph, creds, cell, store, landed, pending)
+
+
+def _apply_impl[
+    S: StateStore
+](
+    mut graph: ResourceGraph,
+    creds: Creds,
+    cell: CellScope,
+    mut store: S,
+    mut landed: List[AppliedNode],
+    mut pending: List[String],
+) raises -> List[AppliedNode]:
     var order = topo_sort(graph)
     var applied = List[AppliedNode]()
     # ---- 0: seed the progress channels BEFORE the first mutation ----
@@ -564,11 +693,58 @@ def apply_graph_tracked[
     pending.clear()
     for oi in range(len(order)):
         pending.append(graph.node(order[oi]).logical_id())
+    # ---- 0a: the owned pre-flight, BEFORE ANY CHANGE ----
+    # Every node must stamp ownership and every present object must be this
+    # node's (or adopted by name). A refusal raises here with nothing changed.
+    refuse_unless_owned(
+        graph, order, creds, cell, store, String("apply"), True
+    )
     var run = _RunOutputs()
     for oi in range(len(order)):
         var idx = order[oi]
         var lid = graph.node(idx).logical_id()
         var retention = graph.node(idx).retention()
+        var key = cell.key(lid)
+        var stamp = cell.stamp(graph.node(idx).owner(), lid)
+        var identity = stamp.identity() if cell.owned() else String("")
+
+        # ---- 0b: THE CLOSED WORLD — a node the file no longer wants ----
+        # Deleted when the store recorded it with the same physical id and
+        # (owned) it carries this node's stamp; otherwise left (leftover).
+        # It produces nothing.
+        if not graph.node(idx).wanted():
+            var gone_verb = VERB_NOOP
+            var gone_pid = String("")
+            var plive = graph.node(idx).read_presence(creds)
+            var recorded = store.physical_id_for(key)
+            if removal_is_ours(cell, identity, retention, plive, recorded):
+                gone_pid = recorded.copy()
+                try:
+                    delete_confirmed(
+                        graph, idx, lid, key, gone_pid, creds, store
+                    )
+                except de:
+                    raise _node_verb_error(
+                        lid,
+                        String("delete"),
+                        String(de),
+                        _node_fault_domain(
+                            graph, idx, String("delete"), String(de)
+                        ),
+                    )
+                gone_verb = VERB_DELETE
+            elif not plive.is_present():
+                # Absent: retire any record left by an earlier run.
+                store.mark_reaped(key)
+            var gone = AppliedNode(
+                lid, gone_pid^, retention, False, gone_verb, String(""), key^
+            )
+            applied.append(gone.copy())
+            landed.append(gone^)
+            if len(pending) > 0:
+                _ = pending.pop(0)
+            run.put(lid, Outputs())
+            continue
 
         # ---- 0: BIND BEFORE READ ----
         # Every producer of this node has been applied (topo order) and has
@@ -580,7 +756,10 @@ def apply_graph_tracked[
             graph.node(idx).bind_inputs(_resolve_inputs(lid, refs, run))
 
         # ---- 1: write-ahead intent (record or adopt) BEFORE the mutation ----
-        var ticket = store.record_or_adopt_intent(lid)
+        # THE WRITE-AHEAD HOOK: the intent names the key AND the identity the
+        # create will stamp, so a crash after the create leaves a record of
+        # what the orphan object carries.
+        var ticket = store.record_or_adopt_intent(key, identity)
 
         # ---- 2: the LIVE read (the sole actual-state source) ----
         var live: ResourceStatus
@@ -596,6 +775,46 @@ def apply_graph_tracked[
                 ),
             )
 
+        # ---- 2b: OWNERSHIP, again at the point of change ----
+        # The pre-flight read every node; this re-check catches an object that
+        # appeared or changed hands since (another writer in the same cell).
+        # An unstamped object this run was told to ADOPT is stamped here, and
+        # the node is then converged like any other present object.
+        var adopted = False
+        if cell.owned() and live.is_present():
+            var recorded = store.physical_id_for(key)
+            var why = ownership_problem(
+                lid,
+                identity,
+                True,
+                live.physical_id,
+                live.stamp,
+                recorded,
+                cell.adopts(lid),
+            )
+            if why.byte_length() > 0:
+                raise Error(
+                    String("apply node '")
+                    + lid
+                    + String("': ownership changed during the run: ")
+                    + why
+                )
+            if live.stamp != identity:
+                try:
+                    graph.node(idx).adopt_owned(
+                        stamp, live.physical_id, creds
+                    )
+                except ae:
+                    raise _node_verb_error(
+                        lid,
+                        String("adopt"),
+                        String(ae),
+                        _node_fault_domain(
+                            graph, idx, String("adopt"), String(ae)
+                        ),
+                    )
+                adopted = True
+
         # ---- 3: dispatch on the live phase ----
         var physical_id: String
         var verb: Int
@@ -608,7 +827,9 @@ def apply_graph_tracked[
         if live.phase == RES_PRESENT_MATCHED:
             # ADOPT: the live resource already matches — no mutation.
             physical_id = live.physical_id
-            verb = VERB_NOOP
+            # An adopted object was stamped (a mutation): UPDATE, so a
+            # rollback can never delete it (it predates this run).
+            verb = VERB_UPDATE if adopted else VERB_NOOP
             # The no-op re-apply STILL surfaces the served URL — off the live read
             # we already did (no extra RPC). So a no-op
             # customer-env re-apply records `served_endpoint` without a post-apply
@@ -619,7 +840,11 @@ def apply_graph_tracked[
             # logical_id + verb (DIAGNOSABILITY) so the surfaced
             # `String(e)` pinpoints WHICH node/verb failed.
             try:
-                physical_id = graph.node(idx).create(creds)
+                if cell.owned():
+                    # Born stamped: the identity rides the create call itself.
+                    physical_id = graph.node(idx).create_owned(stamp, creds)
+                else:
+                    physical_id = graph.node(idx).create(creds)
             except ce:
                 raise _node_verb_error(
                     lid,
@@ -718,7 +943,7 @@ def apply_graph_tracked[
         # from the live read; fall back to the store's confirmed id so confirm is a
         # faithful no-op-shaped re-confirm.
         if physical_id.byte_length() == 0 and ticket.already_confirmed:
-            physical_id = store.physical_id_for(lid)
+            physical_id = store.physical_id_for(key)
         store.confirm(ticket, physical_id)
 
         # ---- 5: record what we did (for rollback) ----
@@ -729,6 +954,7 @@ def apply_graph_tracked[
             ticket.already_confirmed,
             verb,
             served_endpoint^,
+            key.copy(),
         )
         applied.append(record.copy())
         # ---- 5b: advance the progress channels ----
@@ -764,7 +990,7 @@ def apply_graph_tracked[
                 String(oe),
                 _node_fault_domain(graph, idx, String("outputs"), String(oe)),
             )
-        store.record_outputs(lid, outs)
+        store.record_outputs(key, outs)
         run.put(lid, outs^)
 
     return applied^
@@ -869,33 +1095,13 @@ def rollback_create[
         if idx >= 0:
             # delete is idempotent (a 404 is a no-op); a real fault raises + stops.
             graph.node(idx).delete(node.physical_id, creds)
-        store.mark_reaped(node.logical_id)
+        store.mark_reaped(node.key)
         i -= 1
 
 
 # =============================================================================
 # §5 — destroy_graph — tear the whole graph down, in REVERSE topo order.
 # =============================================================================
-def _bind_from_recorded_outputs[
-    S: StateStore
-](mut graph: ResourceGraph, idx: Int, lid: String, mut store: S) raises:
-    """Best-effort bind for TEARDOWN: bind node `idx`'s `input_refs` from the
-    outputs `store` recorded for its producers, iff every one is recorded.
-    A missing value binds nothing and refuses nothing (teardown reads with
-    `read_presence`, which needs no bound value); it is never an empty
-    string."""
-    var refs = graph.node(idx).input_refs()
-    if len(refs) == 0:
-        return
-    var resolved = ResolvedInputs()
-    for r in range(len(refs)):
-        var v = store.outputs_for(refs[r].producer).get(refs[r].output)
-        if not v:
-            return
-        resolved.add(refs[r], v.value())
-    graph.node(idx).bind_inputs(resolved)
-
-
 def destroy_graph[
     S: StateStore
 ](
@@ -905,7 +1111,7 @@ def destroy_graph[
     force_delete_data: Bool = False,
     scope: Optional[List[String]] = None,
 ) raises -> List[UndeletableSkip]:
-    """Tear down every node of the graph, in REVERSE topo order (a dependent is
+    """Tear down every node of the graph in the UNOWNED scope, in REVERSE topo order (a dependent is
     deleted BEFORE the node it depends on). RETURNS the nodes it could not delete
     (see the ⛔ RETAIN_UNDELETABLE block below); an empty list means every node was
     either reaped or kept by policy. Per node:
@@ -1014,8 +1220,72 @@ def destroy_graph[
 
     A delete failure RAISES and STOPS (fail-loud). Reverse topo order guarantees a
     node is never deleted while a live dependent still references it."""
+    return _destroy_impl(
+        graph, creds, CellScope.unowned(), store, force_delete_data, scope
+    )
+
+
+def destroy_graph_owned[
+    S: StateStore
+](
+    mut graph: ResourceGraph,
+    creds: Creds,
+    cell: CellScope,
+    mut store: S,
+    force_delete_data: Bool = False,
+    scope: Optional[List[String]] = None,
+) raises -> List[UndeletableSkip]:
+    """`destroy_graph` in `cell` (the owned scope). Before ANY delete, every
+    node must stamp ownership and every present object must carry this node's
+    identity: a FOREIGN or CONFLICT object refuses the whole teardown
+    (`kci: REFUSED destroy ...`). An adoption is never a reason to delete, so
+    `cell.adopt` is ignored here. The rest is `destroy_graph`."""
+    if not cell.owned():
+        raise Error(
+            String("destroy_graph_owned: the scope names no machine and cell;")
+            + String(" use destroy_graph for the unowned scope")
+        )
+    return _destroy_impl(graph, creds, cell, store, force_delete_data, scope)
+
+
+def _destroy_impl[
+    S: StateStore
+](
+    mut graph: ResourceGraph,
+    creds: Creds,
+    cell: CellScope,
+    mut store: S,
+    force_delete_data: Bool,
+    scope: Optional[List[String]],
+) raises -> List[UndeletableSkip]:
     var order = topo_sort(graph)
     var rorder = reverse_order(order)
+    # The owned pre-flight, BEFORE ANY DELETE: nothing foreign is ever deleted,
+    # and an adoption is never a reason to delete. It reads only the nodes
+    # this walk would delete (in scope, not UNDELETABLE, not KEEP unless
+    # forced), so a skipped node still costs no call.
+    if cell.owned():
+        var targets = List[Int]()
+        for ti in range(len(rorder)):
+            var tidx = rorder[ti]
+            if scope:
+                var tid = graph.node(tidx).logical_id()
+                var inside = False
+                for si in range(len(scope.value())):
+                    if scope.value()[si] == tid:
+                        inside = True
+                        break
+                if not inside:
+                    continue
+            var tret = graph.node(tidx).retention()
+            if tret == RETAIN_UNDELETABLE:
+                continue
+            if tret == RETAIN_KEEP and not force_delete_data:
+                continue
+            targets.append(tidx)
+        refuse_unless_owned(
+            graph, targets, creds, cell, store, String("destroy"), False
+        )
     var undeletable = List[UndeletableSkip]()
     for oi in range(len(rorder)):
         var idx = rorder[oi]
@@ -1067,7 +1337,8 @@ def destroy_graph[
         # store has every one of them, for a node that does not override
         # `read_presence`; when it has not, nothing is bound and nothing is
         # refused.
-        _bind_from_recorded_outputs(graph, idx, lid, store)
+        var key = cell.key(lid)
+        bind_from_recorded_outputs(graph, idx, cell, store)
         var live = graph.node(idx).read_presence(creds)
         if not live.is_present():
             # ABSENT — the resource is PROVABLY already gone. `read_presence` returns
@@ -1075,7 +1346,7 @@ def destroy_graph[
             # / 5xx / DEADLINE / network) RAISES out of this loop rather than reading
             # as absent. So an absent read is a confirmed-gone outcome — retire the
             # intent (idempotent — a never-recorded node no-ops), no delete to issue.
-            store.mark_reaped(lid)
+            store.mark_reaped(key)
             continue
 
         # PRESENT — issue the (idempotent) delete; a real fault raises + stops.
@@ -1083,31 +1354,23 @@ def destroy_graph[
         if pid.byte_length() == 0:
             # the live read did not surface a physical id — fall back to the store's
             # confirmed id (the id the create confirmed).
-            pid = store.physical_id_for(lid)
-        graph.node(idx).delete(pid, creds)
-
-        # ⛔ CONFIRM-GONE before retiring the record (the money-leak gate). Re-read
-        # the LIVE state: `mark_reaped` fires ONLY when the delete provably removed
-        # the resource (the re-read is ABSENT). A re-read that is still PRESENT means
-        # the delete did not take — LEAVE the record intact + RAISE so the level-
-        # triggered reconcile re-drives (never retire a record over a live resource).
-        # A transient re-read RAISES here too (surfaced by read_presence, not absent) —
-        # the same fail-loud, no silent retire.
-        var after = graph.node(idx).read_presence(creds)
-        if after.is_present():
-            raise Error(
-                String("destroy_graph: node '")
-                + lid
-                + String("' is STILL PRESENT after its delete was issued — the")
-                + String(" reap did NOT converge (an eventually-consistent backend,")
-                + String(" a partial delete, or a swallowed-but-transient delete")
-                + String(" outcome). The intent is LEFT INTACT (NOT reaped) so the")
-                + String(" level-triggered reconcile re-drives on the next tick —")
-                + String(" a record is never retired over a live (billable)")
-                + String(" resource. ")
-                + after.message
-            )
-        # CONFIRMED GONE — retire the intent (idempotent — a never-recorded node
-        # no-ops).
-        store.mark_reaped(lid)
+            pid = store.physical_id_for(key)
+        if cell.owned():
+            # The pre-flight saw this object as ours; a stamp that changed
+            # since (another writer) stops the teardown before the delete.
+            var identity = cell.stamp(graph.node(idx).owner(), lid).identity()
+            if live.stamp != identity:
+                raise Error(
+                    String("destroy_graph: node '")
+                    + lid
+                    + String("': ownership changed during the run; the live")
+                    + String(" object no longer carries this node's stamp, so")
+                    + String(" it is not deleted")
+                )
+        # ⛔ CONFIRM-GONE before retiring the record (the money-leak gate):
+        # `delete_confirmed` re-reads, and retires the record ONLY when the
+        # re-read is ABSENT; still PRESENT leaves the record intact and RAISES
+        # so the level-triggered reconcile re-drives (never retire a record
+        # over a live resource). A transient re-read RAISES too.
+        delete_confirmed(graph, idx, lid, key, pid, creds, store)
     return undeletable^

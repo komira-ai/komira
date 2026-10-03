@@ -28,9 +28,22 @@ WHAT LIVES HERE (the four concerns):
   * fault_domain.mojo    — WHOSE FAULT a failure is (FAULT_* + the raise-site
                            token + `FaultAttribution`), with the unclassified
                            case reading as OURS.
+  * ownership.mojo       — the cell scope: `ResourceKey (machine, cell,
+                           resource)` (the store key), `OwnerStamp` (the
+                           identity an object carries, born with it),
+                           `Provenance` (annotations, never compared),
+                           `CellScope`, and the ownership rule (foreign and
+                           conflict refuse before any change).
+  * cell_walk.mojo       — the owned pre-flight, the closed-world removal
+                           rule and the confirmed-gone delete, shared by the
+                           verbs.
+  * digest.mojo          — `ModelledDigest`: every modelled field, never
+                           provenance.
   * engine.mojo          — the verbs (`plan_graph` / `apply_graph` /
                            `apply_graph_tracked` / `rollback_create` /
-                           `destroy_graph`) + `AppliedNode`.
+                           `destroy_graph`, and the owned forms
+                           `plan_graph_owned` / `apply_graph_owned` /
+                           `destroy_graph_owned`) + `AppliedNode`.
 
 A per-provider conformer (a GCP CloudRunService, an AWS Lambda, an on-prem unit)
 is a SEPARATE package that imports `kci_reconciler` and implements `Resource`; the
@@ -97,13 +110,40 @@ from kci_reconciler.state import (
     INTENT_CONFIRMED,
     INTENT_REAPED,
 )
+from kci_reconciler.ownership import (
+    Label,
+    ResourceKey,
+    Provenance,
+    OwnerStamp,
+    CellScope,
+    KCI_SCHEME,
+    LABEL_MANAGED_BY,
+    LABEL_MACHINE,
+    LABEL_CELL,
+    LABEL_RESOURCE,
+    LABEL_ROLE,
+    LABEL_SCHEME,
+    MANAGED_BY_KCI,
+    REFUSED_TOKEN,
+    ownership_problem,
+)
+from kci_reconciler.digest import (
+    ModelledDigest,
+    is_provenance,
+    PROVENANCE_PREFIX,
+    PROVENANCE_RUN_ID,
+    PROVENANCE_REVISION,
+)
 from kci_reconciler.engine import (
     AppliedNode,
     UndeletableSkip,
     undeletable_report_lines,
     plan_graph,
+    plan_graph_owned,
     apply_graph,
     apply_graph_tracked,
+    apply_graph_owned,
     rollback_create,
     destroy_graph,
+    destroy_graph_owned,
 )

@@ -49,6 +49,7 @@
 from std.memory import OwnedPointer, UnsafePointer, alloc
 
 from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.ownership import OwnerStamp
 from kci_reconciler.resource import (
     Resource,
     ResourceStatus,
@@ -160,6 +161,27 @@ comptime _ReadPresenceFn = def (
     Creds,
 ) raises thin -> ResourceStatus
 
+# The ownership verbs (`Resource.stamps_ownership` / `create_owned` /
+# `adopt_owned`) and the closed-world verb (`Resource.wanted`). Each has a
+# trait default, so each needs its entry for the same reason as the value-flow
+# verbs.
+comptime _StampsOwnershipFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+) raises thin -> Bool
+comptime _CreateOwnedFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    OwnerStamp,
+    Creds,
+) raises thin -> String
+comptime _AdoptOwnedFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    OwnerStamp,
+    String,  # the physical id of the existing object
+    Creds,
+) raises thin -> None
+comptime _WantedFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+) raises thin -> Bool
 comptime _DropFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],  # the erased R home (consumed)
 ) thin -> None
@@ -203,6 +225,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
     var _outputs_fn: _OutputsFn
     var _owner_fn: _OwnerFn
     var _read_presence_fn: _ReadPresenceFn
+    var _stamps_ownership_fn: _StampsOwnershipFn
+    var _create_owned_fn: _CreateOwnedFn
+    var _adopt_owned_fn: _AdoptOwnedFn
+    var _wanted_fn: _WantedFn
     var _drop_fn: _DropFn
 
     def __init__(
@@ -225,6 +251,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
         outputs_fn: _OutputsFn,
         owner_fn: _OwnerFn,
         read_presence_fn: _ReadPresenceFn,
+        stamps_ownership_fn: _StampsOwnershipFn,
+        create_owned_fn: _CreateOwnedFn,
+        adopt_owned_fn: _AdoptOwnedFn,
+        wanted_fn: _WantedFn,
         drop_fn: _DropFn,
     ):
         self._home = home^
@@ -245,6 +275,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
         self._outputs_fn = outputs_fn
         self._owner_fn = owner_fn
         self._read_presence_fn = read_presence_fn
+        self._stamps_ownership_fn = stamps_ownership_fn
+        self._create_owned_fn = create_owned_fn
+        self._adopt_owned_fn = adopt_owned_fn
+        self._wanted_fn = wanted_fn
         self._drop_fn = drop_fn
 
     # =========================================================================
@@ -290,6 +324,12 @@ struct ErasedResource(Resource, Movable, Deinitable):
         var outputs_t: _OutputsFn = _erased_outputs_for[R]
         var owner_t: _OwnerFn = _erased_owner_for[R]
         var read_presence_t: _ReadPresenceFn = _erased_read_presence_for[R]
+        var stamps_ownership_t: _StampsOwnershipFn = (
+            _erased_stamps_ownership_for[R]
+        )
+        var create_owned_t: _CreateOwnedFn = _erased_create_owned_for[R]
+        var adopt_owned_t: _AdoptOwnedFn = _erased_adopt_owned_for[R]
+        var wanted_t: _WantedFn = _erased_wanted_for[R]
         var drop_t: _DropFn = _erased_drop_for[R]
         return ErasedResource(
             home^,
@@ -310,6 +350,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
             outputs_t,
             owner_t,
             read_presence_t,
+            stamps_ownership_t,
+            create_owned_t,
+            adopt_owned_t,
+            wanted_t,
             drop_t,
         )
 
@@ -495,6 +539,47 @@ struct ErasedResource(Resource, Movable, Deinitable):
         `UNBOUND` out of `destroy_graph`. SAFETY: see `read_status`."""
         var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
         return self._read_presence_fn(p, creds)
+
+    def stamps_ownership(mut self) -> Bool:
+        """FORWARDED to the concrete R. Without the forward every node would
+        answer the trait default (False) and an owned apply would refuse every
+        graph. Non-raising like `logical_id`: a contract-forbidden raise reads
+        as False, which refuses (the safe direction). SAFETY: see
+        `read_status`."""
+        try:
+            var p = (
+                self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+            )
+            return self._stamps_ownership_fn(p)
+        except e:
+            return False
+
+    def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
+        """FORWARDED to the concrete R (the create that carries the stamp).
+        SAFETY: see `read_status`."""
+        var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+        return self._create_owned_fn(p, stamp, creds)
+
+    def adopt_owned(
+        mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
+    ) raises:
+        """FORWARDED to the concrete R (the explicit `--adopt` takeover).
+        SAFETY: see `read_status`."""
+        var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+        self._adopt_owned_fn(p, stamp, physical_id, creds)
+
+    def wanted(mut self) -> Bool:
+        """FORWARDED to the concrete R. Without the forward every role the
+        file turned off would read as wanted and never be removed.
+        Non-raising: a contract-forbidden raise reads as True (wanted), so a
+        broken conformer never causes a delete. SAFETY: see `read_status`."""
+        try:
+            var p = (
+                self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+            )
+            return self._wanted_fn(p)
+        except e:
+            return True
 
     def __deinit__(deinit self):
         """Destroy the erased R AND free its home in ONE shot via `_drop_fn`. We
@@ -708,6 +793,51 @@ def _erased_read_presence_for[
     `_erased_read_status_for` (R driven in-place)."""
     var rp = home.bitcast[R]()
     return rp[].read_presence(creds)
+
+
+def _erased_stamps_ownership_for[
+    R: Resource
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> Bool:
+    """`stamps_ownership` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R read in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].stamps_ownership()
+
+
+def _erased_create_owned_for[
+    R: Resource
+](
+    home: UnsafePointer[UInt8, MutUntrackedOrigin],
+    stamp: OwnerStamp,
+    creds: Creds,
+) raises -> String:
+    """`create_owned` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R driven in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].create_owned(stamp, creds)
+
+
+def _erased_adopt_owned_for[
+    R: Resource
+](
+    home: UnsafePointer[UInt8, MutUntrackedOrigin],
+    stamp: OwnerStamp,
+    physical_id: String,
+    creds: Creds,
+) raises:
+    """`adopt_owned` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R driven in-place)."""
+    var rp = home.bitcast[R]()
+    rp[].adopt_owned(stamp, physical_id, creds)
+
+
+def _erased_wanted_for[
+    R: Resource
+](home: UnsafePointer[UInt8, MutUntrackedOrigin]) raises -> Bool:
+    """`wanted` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R read in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].wanted()
 
 
 def _erased_drop_for[
