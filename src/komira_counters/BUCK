@@ -1,0 +1,11 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Process-global census and falsifier counters plus the build-gated runtime introspection probe.
+mojo_library(
+    name = "komira_counters",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+    ],
+    visibility = ["PUBLIC"],
+)
