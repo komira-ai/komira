@@ -2,7 +2,8 @@
 # caller's GcpTokenSource and the endpoint from the caller's GrpcClient. The
 # generated files are staged as this test's data, at gen/<file>; the test
 # reads each one and fails if any names a way to read the environment or
-# reaches the FFI a read would go through.
+# reaches the FFI a read would go through, or imports komira_serde (generated
+# code encodes with komira_proto_codec) or komira_obs.
 from std.testing import assert_equal, assert_true
 
 
@@ -33,6 +34,9 @@ def test_no_environment_read() raises:
         "GOOGLE_",
         "komira_core_ffi",
         "external_call",
+        # Generated code encodes with komira_proto_codec and logs nothing.
+        "komira_serde",
+        "komira_obs",
     ]
     var files: List[String] = [
         "__init__.mojo",

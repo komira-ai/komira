@@ -12,15 +12,22 @@
 #     `authorization: Bearer <token>` from the client's token source;
 #   * the request message: the protobuf bytes, in one gRPC frame. For
 #     GetObject they are compared with bytes written by hand, field by field,
-#     with an encoder independent of komira_proto_codec; for the other
-#     methods with the generated message's own encoding;
+#     with an encoder independent of komira_proto_codec. For the other
+#     methods the frame is the generated encoding, and for ListObjects,
+#     ReadObject and CreateBucket that encoding is then read back with a
+#     field walker independent of komira_proto_codec, so a wrong field
+#     number is caught;
 #   * routing: the `x-goog-request-params` value each method's
 #     `(google.api.routing)` annotation gives, percent-encoded, or no header
 #     where the method has none (WriteObject);
 #   * the response: protobuf bytes written by hand decode into the generated
 #     types, an unknown field skipped;
-#   * one error shape: a gRPC status is raised as komira_gcp_core's error,
-#     with its google.rpc.Code and without the server's `grpc-message`.
+#   * the error shape, for each call shape (unary, server streaming, client
+#     streaming): a gRPC status is raised as komira_gcp_core's error, with
+#     its google.rpc.Code and without the server's `grpc-message`.
+#
+# Every success response carries `grpc-status: 0`, as a conforming server
+# sends it.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -33,6 +40,14 @@ from komira_async.reactor.reactor import BACKEND_EPOLL, BACKEND_KQUEUE, Reactor
 from komira_async.runtime.runtime import PerCoreAsyncRuntime
 from komira_http_client.client import HttpClient
 from komira_http_client.url import Url
+from komira_http_core.codec.h2.frame import (
+    SettingsEntry,
+    encode_data_frame,
+    encode_headers_frame,
+    encode_settings_frame,
+)
+from komira_http_core.codec.h2.hpack import HpackEncoder, HpackHeader
+from komira_http_core.transport.io_stream import NEGOTIATED_HTTP_2
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 from komira_gcp_core import GcpTokenSource
 from komira_grpc import (
@@ -40,6 +55,7 @@ from komira_grpc import (
     ClientStreamEncoder,
     GrpcClient,
     ProtocolGrpcProto,
+    STREAM_OUTCOME_END_ERROR,
     STREAM_OUTCOME_MESSAGE,
     ServerStreamDecoder,
 )
@@ -147,6 +163,92 @@ def _fixed32(mut out: List[UInt8], field: Int, v: UInt32):
         out.append(UInt8((v >> UInt32(8 * k)) & 0xFF))
 
 
+@fieldwise_init
+struct _Field(Copyable, Movable):
+    """One field as read off the wire: its number, wire type, the varint
+    value (wire type 0) and the payload (wire type 2)."""
+
+    var number: Int
+    var wire_type: Int
+    var value: UInt64
+    var payload: List[UInt8]
+
+
+def _read_varint(b: List[UInt8], mut at: Int) raises -> UInt64:
+    var v = UInt64(0)
+    var shift = UInt64(0)
+    while True:
+        if at >= len(b):
+            raise Error("truncated varint")
+        var c = b[at]
+        at += 1
+        v |= UInt64(c & 0x7F) << shift
+        if c < 0x80:
+            return v
+        shift += 7
+
+
+def _fields(b: List[UInt8]) raises -> List[_Field]:
+    """Every top-level field of the protobuf message `b`, in wire order. A
+    reader independent of komira_proto_codec, for wire types 0, 2 and 5."""
+    var out = List[_Field]()
+    var at = 0
+    while at < len(b):
+        var key = _read_varint(b, at)
+        var number = Int(key >> 3)
+        var wt = Int(key & 7)
+        if wt == 0:
+            out.append(_Field(number, wt, _read_varint(b, at), List[UInt8]()))
+        elif wt == 2:
+            var n = Int(_read_varint(b, at))
+            var payload = List[UInt8]()
+            for i in range(at, at + n):
+                payload.append(b[i])
+            at += n
+            out.append(_Field(number, wt, UInt64(0), payload^))
+        elif wt == 5:
+            at += 4
+            out.append(_Field(number, wt, UInt64(0), List[UInt8]()))
+        else:
+            raise Error(String("unexpected wire type ") + String(wt))
+    return out^
+
+
+def _string_field(b: List[UInt8], number: Int) raises -> String:
+    """The last string field `number` of `b` ("" when absent)."""
+    var out = String()
+    var fields = _fields(b)
+    for i in range(len(fields)):
+        if fields[i].number == number:
+            assert_equal(fields[i].wire_type, 2, String("field ") + String(number))
+            out = String()
+            for c in fields[i].payload:
+                out += chr(Int(c))
+    return out^
+
+
+def _message_field(b: List[UInt8], number: Int) raises -> List[UInt8]:
+    """The payload of the last length-delimited field `number` of `b`."""
+    var out = List[UInt8]()
+    var fields = _fields(b)
+    for i in range(len(fields)):
+        if fields[i].number == number:
+            assert_equal(fields[i].wire_type, 2, String("field ") + String(number))
+            out = fields[i].payload.copy()
+    return out^
+
+
+def _varint_field(b: List[UInt8], number: Int) raises -> Int:
+    """The last varint field `number` of `b` (0 when absent)."""
+    var out = 0
+    var fields = _fields(b)
+    for i in range(len(fields)):
+        if fields[i].number == number:
+            assert_equal(fields[i].wire_type, 0, String("field ") + String(number))
+            out = Int(fields[i].value)
+    return out
+
+
 def _frame(message: List[UInt8]) -> List[UInt8]:
     """One gRPC length-prefixed message: flag 0, the length big-endian, the
     bytes."""
@@ -203,9 +305,11 @@ def _make_reactor() raises -> Reactor[NoopSink]:
     return Reactor[NoopSink](NoopSink(_placeholder=UInt8(0)), BACKEND_KQUEUE)
 
 
-def _http_200(body: List[UInt8], status_headers: String = "") -> List[UInt8]:
+def _http_200(
+    body: List[UInt8], status_headers: String = "grpc-status: 0\r\n"
+) -> List[UInt8]:
     """A canned HTTP/1.1 200 gRPC response: `status_headers` (CRLF-terminated
-    lines) after the content type, then `body`."""
+    lines; an OK status by default) after the content type, then `body`."""
     var out = _b(
         String("HTTP/1.1 200 OK\r\nContent-Type: application/grpc\r\n")
         + status_headers
@@ -238,6 +342,59 @@ def _client(var script: List[UInt8], capture: ArcPointer[List[UInt8]]) raises ->
     var http = HttpClient[ScriptedConnector].with_defaults(connector^)
     var base = Url.parse(String("http://127.0.0.1:8080/"))
     return Client(GrpcClient[ScriptedConnector](http^, base^), CountingTokenSource())
+
+
+def _h2_client(var script: List[UInt8]) raises -> Client:
+    """A client over one scripted HTTP/2 connection, which (unlike the
+    HTTP/1.1 rig) carries real trailers. ALPN h2 is reported, or the client
+    falls back to HTTP/1.1; the script is served one byte per read, or a
+    greedy read takes frames for a stream not yet opened."""
+    var s = ScriptedStream.from_read_script(script^)
+    s.set_negotiated_protocol(NEGOTIATED_HTTP_2)
+    s.set_max_read_per_call(1)
+    var connector = ScriptedConnector.with_stream_tls(s^)
+    var http = HttpClient[ScriptedConnector].with_defaults(connector^)
+    var base = Url.parse(String("https://storage.googleapis.com:443/"))
+    return Client(GrpcClient[ScriptedConnector](http^, base^), CountingTokenSource())
+
+
+def _h2_data_then_trailers(var body: List[UInt8], grpc_status: Int) raises -> List[UInt8]:
+    """A stream that fails part way: HEADERS, a DATA frame of messages, then a
+    real TRAILERS block with `grpc-status` and the server's text."""
+    var out = List[UInt8]()
+    encode_settings_frame(List[SettingsEntry](), out)
+    var hpack = HpackEncoder(max_table_size=4096)
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(String(":status"), String("200")))
+    hdrs.append(HpackHeader(String("content-type"), String("application/grpc")))
+    encode_headers_frame(
+        UInt32(1), hpack.encode_block(hdrs^), end_stream=False, end_headers=True, out=out
+    )
+    encode_data_frame(UInt32(1), body^, end_stream=False, out=out)
+    var trailers = List[HpackHeader]()
+    trailers.append(HpackHeader(String("grpc-status"), String(grpc_status)))
+    trailers.append(HpackHeader(String("grpc-message"), String(_SERVER_TEXT)))
+    encode_headers_frame(
+        UInt32(1), hpack.encode_block(trailers^), end_stream=True, end_headers=True, out=out
+    )
+    return out^
+
+
+def _assert_gcp_error(text: String, method: String, name: String, code: Int) raises:
+    """`text` is komira_gcp_core's error for `method`: its own `[grpc:C]`
+    anchor, the RPC and the code, a byte count, and no byte of the server's
+    text (nor komira_grpc's `[grpc:N] <grpc-message>` passed through)."""
+    assert_true(
+        text.startswith(
+            String("[grpc:") + String(code) + "] gRPC " + _SVC + method + ": "
+            + name + " (code " + String(code) + "), error text "
+        ),
+        text,
+    )
+    assert_true(text.endswith(" bytes"), text)
+    assert_equal(_count(text, "[grpc:"), 1, text)
+    for leak in ["logs/a.parquet", "acme", "leaked@example.com", "no such object"]:
+        assert_false(text.find(leak) >= 0, String("echoed: ") + leak + " in " + text)
 
 
 def _new_capture() -> ArcPointer[List[UInt8]]:
@@ -324,6 +481,8 @@ def _drain(var decoder: ServerStreamDecoder[ProtocolGrpcProto]) raises -> List[R
     var got = List[ReadObjectResponse]()
     for _ in range(100):
         var o = decoder.try_next_message()
+        if o.kind == STREAM_OUTCOME_END_ERROR:
+            raise Error("the stream ended in an error")
         if o.kind != STREAM_OUTCOME_MESSAGE:
             break
         var dec = PbDecoder(o.message_bytes.copy())
@@ -367,7 +526,13 @@ def test_get_object_golden() raises:
     _str(want, 2, "logs/a.parquet")
     _int(want, 3, 7)  # generation
     _int(want, 4, 7)  # if_generation_match, set: present on the wire
-    _str(want, 12, "")  # restore_token
+    # restore_token, an implicit-presence string at its default. The
+    # generated encoder writes implicit-presence fields even at their
+    # default: valid proto3 (a reader takes it as the default) but not the
+    # canonical encoding, which leaves them off. These bytes pin that choice
+    # of proto-codegen's; were it to stop, this field drops out and nothing
+    # else changes.
+    _str(want, 12, "")
     assert_true(_contains(capture[], _frame(want)), _text(capture[], False))
     _check_call(capture[], "GetObject", _BUCKET_PARAM)
     assert_equal(client.token_source().fetches(), 1)
@@ -392,13 +557,7 @@ def test_get_object_not_found_is_the_gcp_error_shape() raises:
         _ = client.get_object[RT](_get_object_request(), CallOptions(), 0, reactor, token)
     except e:
         text = String(e)
-    assert_true(
-        text.startswith("gRPC /google.storage.v2.Storage/GetObject: NOT_FOUND (code 5), error text "),
-        text,
-    )
-    assert_true(text.endswith(" bytes"), text)
-    for leak in ["logs/a.parquet", "acme", "leaked@example.com", "no such object", "[grpc:"]:
-        assert_false(text.find(leak) >= 0, String("echoed: ") + leak + " in " + text)
+    _assert_gcp_error(text, "GetObject", "NOT_FOUND", 5)
 
 
 def test_list_objects() raises:
@@ -430,7 +589,12 @@ def test_list_objects() raises:
     )
     var got = client.list_objects[RT](req, CallOptions(), 0, reactor, token)
 
-    assert_true(_contains(capture[], _frame(_encoded(req))))
+    var sent = _encoded(req)
+    assert_true(_contains(capture[], _frame(sent)))
+    assert_equal(_string_field(sent, 1), _BUCKET)  # parent
+    assert_equal(_varint_field(sent, 2), 2)  # page_size
+    assert_equal(_string_field(sent, 4), "/")  # delimiter
+    assert_equal(_string_field(sent, 6), "logs/")  # prefix
     _check_call(capture[], "ListObjects", _BUCKET_PARAM)
     assert_equal(len(got.objects), 2)
     assert_equal(got.objects[0].name, "logs/a.parquet")
@@ -500,7 +664,13 @@ def test_read_object_streams_the_range() raises:
     )
     var got = _drain(client.read_object[RT](req, CallOptions(), 0, reactor, token))
 
-    assert_true(_contains(capture[], _frame(_encoded(req))))
+    var sent = _encoded(req)
+    assert_true(_contains(capture[], _frame(sent)))
+    assert_equal(_string_field(sent, 1), _BUCKET)
+    assert_equal(_string_field(sent, 2), "logs/a.parquet")
+    assert_equal(_varint_field(sent, 3), 7)  # generation
+    assert_equal(_varint_field(sent, 4), 100)  # read_offset
+    assert_equal(_varint_field(sent, 5), 11)  # read_limit
     _check_call(capture[], "ReadObject", _BUCKET_PARAM)
     assert_equal(len(got), 2)
     var text = String()
@@ -514,6 +684,60 @@ def test_read_object_streams_the_range() raises:
     assert_equal(got[0].content_range.value().end, Int64(111))
     assert_equal(got[0].content_range.value().complete_length, Int64(4096))
     assert_false(got[1].content_range.__bool__())
+
+
+def _read_request() -> ReadObjectRequest:
+    return ReadObjectRequest(
+        bucket=String(_BUCKET),
+        object=String("logs/a.parquet"),
+        generation=Int64(0),
+        read_offset=Int64(0),
+        read_limit=Int64(0),
+        if_generation_match=None,
+        if_generation_not_match=None,
+        if_metageneration_match=None,
+        if_metageneration_not_match=None,
+        common_object_request_params=None,
+        read_mask=None,
+    )
+
+
+def test_read_object_not_found_is_the_gcp_error_shape() raises:
+    """A ReadObject of a missing object: a trailers-only NOT_FOUND on a
+    server-streaming call raises the same shape as a unary one."""
+    var capture = _new_capture()
+    var client = _client(_status_only(5), capture)
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var text = String()
+    var n = -1
+    try:
+        n = len(_drain(client.read_object[RT](_read_request(), CallOptions(), 0, reactor, token)))
+    except e:
+        text = String(e)
+    assert_equal(n, -1, "returned " + String(n) + " message(s) for a NOT_FOUND")
+    _assert_gcp_error(text, "ReadObject", "NOT_FOUND", 5)
+
+
+def test_read_object_failing_mid_stream_raises() raises:
+    """A read that fails part way: a data message arrives, then trailers
+    say DATA_LOSS. The call raises; it does not return the message it has,
+    which a caller would take for the whole object."""
+    var data = List[UInt8]()
+    _bytes(data, 1, _b("hello "))
+    var first = List[UInt8]()
+    _bytes(first, 1, data)
+    var client = _h2_client(_h2_data_then_trailers(_frame(first), 15))
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var text = String()
+    var n = -1
+    try:
+        n = len(_drain(client.read_object[RT](_read_request(), CallOptions(), 0, reactor, token)))
+    except e:
+        text = String(e)
+    assert_equal(n, -1, "returned " + String(n) + " message(s) for a stream that failed")
+    _assert_gcp_error(text, "ReadObject", "DATA_LOSS", 15)
 
 
 def _write_request(first: Bool, data: String, finish: Bool, offset: Int) raises -> WriteObjectRequest:
@@ -608,13 +832,7 @@ def test_write_object_failed_precondition() raises:
         _ = client.write_object[RT](encoder^, CallOptions(), 0, reactor, token)
     except e:
         text = String(e)
-    assert_true(
-        text.startswith(
-            "gRPC /google.storage.v2.Storage/WriteObject: FAILED_PRECONDITION (code 9), error text "
-        ),
-        text,
-    )
-    assert_false(text.find("leaked@example.com") >= 0, text)
+    _assert_gcp_error(text, "WriteObject", "FAILED_PRECONDITION", 9)
 
 
 def _start_request(with_resource: Bool) raises -> StartResumableWriteRequest:
@@ -680,7 +898,7 @@ def test_start_resumable_write_without_a_resource_sends_no_routing() raises:
 def _bucket_bytes() -> List[UInt8]:
     var out = List[UInt8]()
     _str(out, 1, _BUCKET)
-    _str(out, 3, "projects/123456")
+    _str(out, 3, "projects/example-project")
     _int(out, 4, 3)  # metageneration
     _str(out, 5, "US-CENTRAL1")
     _int(out, 999, 1)
@@ -702,7 +920,7 @@ def test_get_bucket() raises:
     assert_true(_contains(capture[], _frame(_encoded(req))))
     _check_call(capture[], "GetBucket", _BUCKET_PARAM)
     assert_equal(got.name, _BUCKET)
-    assert_equal(got.project, "projects/123456")
+    assert_equal(got.project, "projects/example-project")
     assert_equal(got.metageneration, Int64(3))
     assert_equal(got.location, "US-CENTRAL1")
 
@@ -722,15 +940,20 @@ def test_delete_bucket() raises:
     _check_call(capture[], "DeleteBucket", _BUCKET_PARAM)
 
 
-def _create_request(bucket_project: String) raises -> CreateBucketRequest:
+def _create_request(with_bucket: Bool, bucket_project: String) raises -> CreateBucketRequest:
+    """A CreateBucket whose `parent` is `projects/_`, the one non-empty value
+    storage.proto allows (the project goes in `bucket.project`). With a
+    bucket, it carries `bucket_project` (unset when "") and a location."""
     var bucket = Optional[Bucket]()
-    if bucket_project.byte_length() > 0:
+    if with_bucket:
         var raw = List[UInt8]()
-        _str(raw, 3, bucket_project)
+        if bucket_project.byte_length() > 0:
+            _str(raw, 3, bucket_project)
+        _str(raw, 5, "US-CENTRAL1")
         var dec = PbDecoder(raw^)
         bucket = Bucket.decode(dec)
     return CreateBucketRequest(
-        parent=String("projects/p1"),
+        parent=String("projects/_"),
         bucket=bucket^,
         bucket_id=String("acme"),
         predefined_acl=String(""),
@@ -741,22 +964,46 @@ def _create_request(bucket_project: String) raises -> CreateBucketRequest:
 
 def test_create_bucket_routes_on_the_project() raises:
     """CreateBucket names two routing parameters with the same key,
-    `project`: `parent` and `bucket.project`. The last one that matches is
-    sent, once; without a bucket, `parent`."""
+    `project`: `parent` and `bucket.project`. The last one with a non-empty
+    match is sent, once: `bucket.project` when set; otherwise `parent`,
+    whether there is no bucket or a bucket whose project is unset (`**`
+    matches the empty string, and an empty match is not sent)."""
     var capture = _new_capture()
     var client = _client(_http_200(_frame(_bucket_bytes())), capture)
     var reactor = _make_reactor()
     var token = CancellationToken.never()
-    var req = _create_request("projects/p2")
+    var req = _create_request(True, "projects/example-project")
     var got = client.create_bucket[RT](req, CallOptions(), 0, reactor, token)
-    assert_true(_contains(capture[], _frame(_encoded(req))))
-    _check_call(capture[], "CreateBucket", "project=projects%2Fp2")
+    var sent = _encoded(req)
+    assert_true(_contains(capture[], _frame(sent)))
+    assert_equal(_string_field(sent, 1), "projects/_")  # parent
+    assert_equal(_string_field(_message_field(sent, 2), 3), "projects/example-project")
+    assert_equal(_string_field(sent, 3), "acme")  # bucket_id
+    _check_call(capture[], "CreateBucket", "project=projects%2Fexample-project")
     assert_equal(got.name, _BUCKET)
 
     var capture2 = _new_capture()
     var client2 = _client(_http_200(_frame(_bucket_bytes())), capture2)
-    _ = client2.create_bucket[RT](_create_request(""), CallOptions(), 0, reactor, token)
-    _check_call(capture2[], "CreateBucket", "project=projects%2Fp1")
+    _ = client2.create_bucket[RT](_create_request(False, ""), CallOptions(), 0, reactor, token)
+    _check_call(capture2[], "CreateBucket", "project=projects%2F_")
+
+    var capture3 = _new_capture()
+    var client3 = _client(_http_200(_frame(_bucket_bytes())), capture3)
+    _ = client3.create_bucket[RT](_create_request(True, ""), CallOptions(), 0, reactor, token)
+    _check_call(capture3[], "CreateBucket", "project=projects%2F_")
+
+
+def test_an_empty_routed_value_sends_no_header() raises:
+    """`bucket = ""` matches `{bucket=**}` with an empty capture, which is
+    not sent: no `bucket=` header."""
+    var capture = _new_capture()
+    var client = _client(_http_200(_frame(_object_bytes("k", 1, 1))), capture)
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var req = _get_object_request()
+    req.bucket = String("")
+    _ = client.get_object[RT](req, CallOptions(), 0, reactor, token)
+    _check_call(capture[], "GetObject", "")
 
 
 def _policy_bytes() -> List[UInt8]:
@@ -793,6 +1040,9 @@ def test_get_iam_policy_routes_on_the_bucket() raises:
 
 
 def test_set_iam_policy() raises:
+    """SetIamPolicy on a managed folder routes on its bucket, as GetIamPolicy
+    does: the second template, `{bucket=projects/*/buckets/*}/**`, is the
+    last match."""
     var capture = _new_capture()
     var client = _client(_http_200(_frame(_policy_bytes())), capture)
     var reactor = _make_reactor()
@@ -804,7 +1054,7 @@ def test_set_iam_policy() raises:
         Binding(role=String("roles/storage.objectViewer"), members=members^, condition=None)
     )
     var req = SetIamPolicyRequest(
-        resource=String(_BUCKET),
+        resource=String(_BUCKET) + "/managedFolders/logs",
         policy=Optional[Policy](
             Policy(version=Int32(3), bindings=bindings^, audit_configs=List[AuditConfig](), etag=_b("etag-1"))
         ),
@@ -814,6 +1064,18 @@ def test_set_iam_policy() raises:
     assert_true(_contains(capture[], _frame(_encoded(req))))
     _check_call(capture[], "SetIamPolicy", _BUCKET_PARAM)
     assert_equal(got.bindings[0].members[0], "serviceAccount:reader@example.iam.gserviceaccount.com")
+
+
+def test_iam_policy_on_a_bare_name_routes_on_the_first_template() raises:
+    """A resource the second template does not match is routed by the first,
+    `{bucket=**}`, whole."""
+    var capture = _new_capture()
+    var client = _client(_http_200(_frame(_policy_bytes())), capture)
+    var reactor = _make_reactor()
+    var token = CancellationToken.never()
+    var req = GetIamPolicyRequest(resource=String("acme"), options=None)
+    _ = client.get_iam_policy[RT](req, CallOptions(), 0, reactor, token)
+    _check_call(capture[], "GetIamPolicy", "bucket=acme")
 
 
 # =============================================================================
@@ -847,6 +1109,8 @@ def main() raises:
     test_list_objects()
     test_delete_object()
     test_read_object_streams_the_range()
+    test_read_object_not_found_is_the_gcp_error_shape()
+    test_read_object_failing_mid_stream_raises()
     test_write_object_streams_each_message()
     test_write_object_without_routing_sends_none()
     test_write_object_failed_precondition()
@@ -855,7 +1119,9 @@ def main() raises:
     test_get_bucket()
     test_delete_bucket()
     test_create_bucket_routes_on_the_project()
+    test_an_empty_routed_value_sends_no_header()
     test_get_iam_policy_routes_on_the_bucket()
     test_set_iam_policy()
+    test_iam_policy_on_a_bare_name_routes_on_the_first_template()
     test_routing_and_bearer_replace_a_callers_entries()
     print("all Cloud Storage gRPC client tests passed")

@@ -101,7 +101,16 @@ def test_create_if_absent_write_bytes() raises:
     """The encoding of the create-if-absent first message, field by field:
     write_offset (3) 0, finish_write (7) true, write_object_spec (2) holding
     predefined_acl (7) "" and if_generation_match (3) 0, then
-    checksummed_data (4) holding content (1) 01 02 03."""
+    checksummed_data (4) holding content (1) 01 02 03.
+
+    write_offset and predefined_acl are implicit-presence fields at their
+    default. The generated encoder writes such fields anyway: valid proto3
+    (a reader takes them as the default) but not the canonical encoding,
+    which leaves them off. Those four bytes (`18 00`, `3A 00`) pin that
+    choice of proto-codegen's, not anything Cloud Storage requires; were it
+    to stop writing defaults, they drop out and nothing else here changes.
+    if_generation_match is different: it has explicit presence, so its 0 is
+    on the wire in any encoding."""
     var want: List[UInt8] = [
         0x18, 0x00,
         0x38, 0x01,
@@ -114,12 +123,78 @@ def test_create_if_absent_write_bytes() raises:
         assert_equal(got[i], want[i], String("byte ") + String(i))
 
 
+def _read_varint(b: List[UInt8], mut at: Int) raises -> Int:
+    var v = 0
+    var shift = 0
+    while True:
+        if at >= len(b):
+            raise Error("truncated varint")
+        var c = Int(b[at])
+        at += 1
+        v |= (c & 0x7F) << shift
+        if c < 0x80:
+            return v
+        shift += 7
+
+
+def _field_numbers(b: List[UInt8]) raises -> List[Int]:
+    """The top-level field numbers of message `b`, in wire order (wire types
+    0, 2 and 5); read without komira_proto_codec."""
+    var out = List[Int]()
+    var at = 0
+    while at < len(b):
+        var key = _read_varint(b, at)
+        var wt = key & 7
+        if wt == 0:
+            _ = _read_varint(b, at)
+        elif wt == 2:
+            at += _read_varint(b, at)
+        elif wt == 5:
+            at += 4
+        else:
+            raise Error(String("unexpected wire type ") + String(wt))
+        out.append(key >> 3)
+    return out^
+
+
+def _payload_of(b: List[UInt8], number: Int) raises -> List[UInt8]:
+    """The payload of the first length-delimited field `number` of `b`."""
+    var at = 0
+    while at < len(b):
+        var key = _read_varint(b, at)
+        var wt = key & 7
+        if wt == 0:
+            _ = _read_varint(b, at)
+        elif wt == 2:
+            var n = _read_varint(b, at)
+            if key >> 3 == number:
+                var out = List[UInt8]()
+                for i in range(at, at + n):
+                    out.append(b[i])
+                return out^
+            at += n
+        elif wt == 5:
+            at += 4
+        else:
+            raise Error(String("unexpected wire type ") + String(wt))
+    raise Error(String("no field ") + String(number))
+
+
 def test_an_unset_generation_match_is_not_on_the_wire() raises:
-    """No precondition: the spec holds only predefined_acl, and the field
-    decodes as unset, not as 0."""
+    """No precondition: the spec carries no if_generation_match (3) at all,
+    and the field decodes as unset, not as 0."""
     var got = _bytes(_first_write(None, _payload(), None))
-    assert_equal(got[4], UInt8(0x12))
-    assert_equal(got[5], UInt8(0x02), "the spec is predefined_acl alone")
+    var spec = _payload_of(got, 2)
+    var numbers = _field_numbers(spec)
+    for i in range(len(numbers)):
+        assert_true(numbers[i] != 3, "if_generation_match is on the wire")
+    var with_match = _field_numbers(
+        _payload_of(_bytes(_first_write(Optional[Int64](Int64(0)), _payload(), None)), 2)
+    )
+    var seen = False
+    for i in range(len(with_match)):
+        seen = seen or with_match[i] == 3
+    assert_true(seen, "a set if_generation_match of 0 is on the wire")
     var rt = _roundtrip(_first_write(None, _payload(), None))
     assert_false(rt.write_object_spec.value().if_generation_match.__bool__())
 
