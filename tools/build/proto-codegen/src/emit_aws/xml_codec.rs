@@ -925,6 +925,10 @@ mod tests {
     /// A two-operation restXml model with serviceId `service_id`, emitted
     /// with the `s3` customization.
     fn emit_s3(service_id: &str) -> Result<String, String> {
+        emit_s3_in(service_id, true)
+    }
+
+    fn emit_s3_in(service_id: &str, pure_only: bool) -> Result<String, String> {
         let model = parse(&format!(
             r#"{{"version": "2.0",
                 "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
@@ -990,7 +994,7 @@ mod tests {
             "aws.s3",
         )?;
         let options = AwsEmitOptions {
-            pure_only: true,
+            pure_only,
             omit_preamble: true,
             s3: true,
             ..AwsEmitOptions::default()
@@ -1032,6 +1036,37 @@ mod tests {
         // Nor for an operation with no output shape (`Drop`).
         assert!(!parser(&src, "s3_parse_drop_response").contains("aws_xml_body_is_error"), "{src}");
         assert_eq!(src.matches("if aws_xml_body_is_error(resp):").count(), 1, "{src}");
+    }
+
+    #[test]
+    fn an_s3_client_tells_the_send_which_operations_answer_a_200_error() {
+        let src = emit_s3_in("S3", false).unwrap();
+        // The send takes the flag and hands it to komira_aws_core.
+        assert!(
+            src.contains(
+                "    def send(mut self, var req: AwsRequest, s3_200_error: Bool = False) raises -> HttpResult:\n"
+            ),
+            "{src}"
+        );
+        assert!(src.contains("            s3_200_error=s3_200_error,\n"), "{src}");
+        // Each verb, up to the next method of the client.
+        let verb = |name: &str| -> &str {
+            let at = src.find(&format!("    def {name}(mut self")).expect(name);
+            let rest = &src[at..];
+            let end = rest[1..].find("\n    def ").map_or(rest.len(), |e| e + 1);
+            &rest[..end]
+        };
+        // botocore's `_should_handle_200_error`: an output shape whose
+        // payload is not a blob or a string (`Head`) ...
+        assert!(verb("head").contains("var res = self.send(req^, s3_200_error=True)\n"), "{src}");
+        // ... and not a payload that is a blob, streaming or not, or a
+        // string, nor an operation with no output shape.
+        for name in ["get", "get_bytes", "get_text", "drop", "put", "purge"] {
+            assert!(verb(name).contains("var res = self.send(req^)\n"), "{name}: {src}");
+        }
+        assert_eq!(src.matches("s3_200_error=True").count(), 1, "{src}");
+        // A pure module has no send.
+        assert!(!emit_s3("S3").unwrap().contains("s3_200_error"));
     }
 
     /// The text of the request builder `name` in `src`.

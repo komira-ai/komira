@@ -6,9 +6,9 @@
 # hand -- method, credential, region, service, endpoint, path and query,
 # content type, body bytes and the operation's extra headers -- into the
 # exact SigV4-signed request, at the time the clock says. It opens no
-# socket. The transport half, `send_sigv4_signed_request`, takes the same
-# arguments plus the HTTP client and its configuration, calls this, and
-# hands the bytes to the HTTP client; it lands with the HTTP library.
+# socket. The transport half, `send_sigv4_signed_request` (aws_send.mojo),
+# takes the same arguments plus the connector factory, calls this once per
+# attempt, and hands the request to komira_http_client.
 #
 # Every operation header in `extra` is SIGNED. awsJson services include
 # X-Amz-Target in the canonical request, so an unsigned one is answered

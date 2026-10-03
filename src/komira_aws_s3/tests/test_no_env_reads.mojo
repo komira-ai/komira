@@ -65,7 +65,17 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(_count(text, "\ndef build_get_object_request("), 1)
     assert_equal(_count(text, "\nstruct S3EndpointConfig("), 1)
     assert_equal(_count(text, "#   customize    : s3"), 1)
-    assert_equal(_count(text, "#   mode         : pure (no transport)"), 1)
+    assert_equal(_count(text, "#   mode         : client"), 1)
+    # The client sends where the ruleset resolves each call, over the
+    # configuration it was given.
+    assert_equal(_count(text, "\nstruct S3S3Client["), 1)
+    assert_equal(
+        _count(
+            text,
+            "resolve_get_object_endpoint(self._rules, self._endpoint_config, input)",
+        ),
+        1,
+    )
 
 
 def main() raises:

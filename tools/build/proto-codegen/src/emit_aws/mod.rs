@@ -53,7 +53,9 @@ pub struct AwsEmitOptions {
 ///   has an output shape whose payload is not a blob or a string
 ///   (`_should_handle_200_error`). `parse_<op>_response` raises it in the
 ///   client's text for an HTTP 500 (`<Service>.<Op> failed: HTTP 500 <code>
-///   <message>`).
+///   <message>`). In client mode each such operation's verb also passes
+///   `s3_200_error=True` to `send_sigv4_signed_request`, which then retries
+///   the answer as the 500 botocore's `_update_status_code` makes it.
 /// - `handle_expires_header`: an `Expires` header that is not a valid date
 ///   leaves the member unset, and the rest of the response still parses.
 /// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
@@ -82,7 +84,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "6";
+pub const AWS_GENERATOR_VERSION: &str = "7";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -96,6 +98,9 @@ pub enum AwsImportMode {
     Always,
     /// Client mode only: anything that touches the transport.
     ClientOnly,
+    /// Pure mode only: what a caller with its own transport reads a response
+    /// with, which a client's own error builder does not call.
+    PureOnly,
     /// A module generated with an endpoint ruleset, in either mode: the
     /// ruleset interpreter (see [`endpoint`]).
     EndpointRules,
@@ -110,6 +115,9 @@ pub enum AwsImportMode {
     /// the error reader, which the client's error builder and the `s3`
     /// 200-with-`<Error>` check both call.
     ClientOrS3,
+    /// Client mode of a module generated with an endpoint ruleset: what
+    /// turns the endpoint the ruleset chose into the signer's target.
+    ClientEndpointRules,
 }
 
 /// One `from <module> import <names>` group of [`AWS_IMPORTS`].
@@ -164,8 +172,14 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     AwsImport {
         module: AWS_CORE,
         names: &["aws_error_code_from_body", "aws_error_message_from_body"],
-        mode: AwsImportMode::Always,
+        mode: AwsImportMode::PureOnly,
         protocols: JSON_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_json_error_info"],
+        mode: AwsImportMode::ClientOnly,
+        protocols: &[AwsProtocol::Json],
     },
     AwsImport {
         module: AWS_CORE,
@@ -305,6 +319,12 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         protocols: ALL_PROTOCOLS,
     },
     AwsImport {
+        module: AWS_CORE,
+        names: &["AwsSigningTarget", "aws_signing_target"],
+        mode: AwsImportMode::ClientEndpointRules,
+        protocols: ALL_PROTOCOLS,
+    },
+    AwsImport {
         module: "komira_json",
         names: &["JsonValue", "parse_json_bytes", "parse_json_value"],
         mode: AwsImportMode::Always,
@@ -365,7 +385,13 @@ pub fn aws_import_section_with(
         if pure_only && row.mode == AwsImportMode::ClientOnly {
             continue;
         }
+        if !pure_only && row.mode == AwsImportMode::PureOnly {
+            continue;
+        }
         if !endpoint_rules && row.mode == AwsImportMode::EndpointRules {
+            continue;
+        }
+        if (pure_only || !endpoint_rules) && row.mode == AwsImportMode::ClientEndpointRules {
             continue;
         }
         if !model_json && row.mode == AwsImportMode::ModelJson {
@@ -1741,17 +1767,29 @@ impl<'a> AwsEmitter<'a> {
         self.line("    pointer (a code pointer, no heap); the credential source is moved");
         self.line("    in. No field is an `UnsafePointer`.\"\"\"");
         self.blank();
+        let ruleset = self.endpoint_rules.is_some();
+        let cfg = format!("{}EndpointConfig", self.prefix);
+        let mn = self.module_name.clone();
         self.line("var _mk_connector: def () raises thin -> Self.C");
         self.line("var _creds_source: Self.T");
         self.line("var _region: String");
-        self.line("# WHERE this client sends. `None` = real AWS (the host derived from");
-        self.line("# the region). A VALUE, never an ambient env var — see");
-        self.line(&format!(
-            "# `{}.AwsEndpoint`. This is what makes every verb this",
-            AWS_CORE
-        ));
-        self.line("# generator emits exercisable against a local emulator.");
-        self.line("var _endpoint_override: Optional[AwsEndpoint]");
+        if ruleset {
+            self.line("# WHERE this client sends: the service's endpoint ruleset, resolved per");
+            self.line("# call over this configuration (`endpoint` for a local emulator,");
+            self.line("# `force_path_style`, FIPS, dual-stack). A VALUE, never an ambient env");
+            self.line("# var. The ruleset is loaded once, here.");
+            self.line(&format!("var _endpoint_config: {cfg}"));
+            self.line("var _rules: EndpointRuleSet");
+        } else {
+            self.line("# WHERE this client sends. `None` = real AWS (the host derived from");
+            self.line("# the region). A VALUE, never an ambient env var — see");
+            self.line(&format!(
+                "# `{}.AwsEndpoint`. This is what makes every verb this",
+                AWS_CORE
+            ));
+            self.line("# generator emits exercisable against a local emulator.");
+            self.line("var _endpoint_override: Optional[AwsEndpoint]");
+        }
         self.blank();
         self.line("def __init__(");
         self.push();
@@ -1759,14 +1797,32 @@ impl<'a> AwsEmitter<'a> {
         self.line("mk_connector: def () raises thin -> Self.C,");
         self.line("var creds_source: Self.T,");
         self.line("region: String,");
-        self.line("endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),");
-        self.pop();
-        self.line("):");
-        self.push();
+        if ruleset {
+            self.line(&format!("var endpoint_config: {cfg} = {cfg}(),"));
+            self.pop();
+            self.line(") raises:");
+            self.push();
+            self.line("\"\"\"`endpoint_config`'s region, when unset, is `region`.\"\"\"");
+            self.line(&format!("var rules = {mn}_endpoint_rules()"));
+        } else {
+            self.line("endpoint_override: Optional[AwsEndpoint] = Optional[AwsEndpoint](),");
+            self.pop();
+            self.line("):");
+            self.push();
+        }
         self.line("self._mk_connector = mk_connector");
         self.line("self._creds_source = creds_source^");
         self.line("self._region = region");
-        self.line("self._endpoint_override = endpoint_override.copy()");
+        if ruleset {
+            self.line("if not endpoint_config.region and region.byte_length() > 0:");
+            self.push();
+            self.line("endpoint_config.region = Optional[String](region)");
+            self.pop();
+            self.line("self._endpoint_config = endpoint_config^");
+            self.line("self._rules = rules^");
+        } else {
+            self.line("self._endpoint_override = endpoint_override.copy()");
+        }
         self.pop();
         self.blank();
         self.line("def into_creds_source(deinit self) -> Self.T:");
@@ -1784,7 +1840,20 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
 
         // -- the send primitive ------------------------------------------
-        self.line("def send(mut self, var req: AwsRequest) raises -> HttpResult:");
+        let s3_flag = if self.options.s3 {
+            ", s3_200_error: Bool = False"
+        } else {
+            ""
+        };
+        if ruleset {
+            self.line(&format!(
+                "def send(mut self, var req: AwsRequest, target: AwsSigningTarget{s3_flag}) raises -> HttpResult:"
+            ));
+        } else {
+            self.line(&format!(
+                "def send(mut self, var req: AwsRequest{s3_flag}) raises -> HttpResult:"
+            ));
+        }
         self.push();
         let mut doc: Vec<String> = vec![
             "\"\"\"Sign and send `req`. THE SIGNER IS NOT GENERATED — this is a call".to_string(),
@@ -1799,6 +1868,17 @@ impl<'a> AwsEmitter<'a> {
             doc.push(String::new());
             doc.extend(notes.iter().map(|l| l.to_string()));
         }
+        if ruleset {
+            doc.push(String::new());
+            doc.push("    `target` is where the endpoint ruleset sent this call and how it".to_string());
+            doc.push("    is signed (`aws_signing_target`): its endpoint, signing name and".to_string());
+            doc.push("    region, and the headers the endpoint adds.".to_string());
+        }
+        if self.options.s3 {
+            doc.push(String::new());
+            doc.push("    `s3_200_error`: S3 can answer this operation with a 200 whose".to_string());
+            doc.push("    body is an `<Error>`, which the send then retries as a 500.".to_string());
+        }
         if let Some(last) = doc.last_mut() {
             last.push_str("\"\"\"");
         }
@@ -1807,6 +1887,12 @@ impl<'a> AwsEmitter<'a> {
         }
         self.line("var cred = self._creds_source.credentials()");
         self.line("var extra = List[Header]()");
+        if ruleset {
+            self.line("for _i in range(len(target.header_names)):");
+            self.push();
+            self.line("extra.append(Header(target.header_names[_i].copy(), target.header_values[_i].copy()))");
+            self.pop();
+        }
         self.line("var content_type = String(String(" );
         self.push();
         let default_content_type = self.binding.default_content_type(self);
@@ -1835,16 +1921,25 @@ impl<'a> AwsEmitter<'a> {
         self.line("self._mk_connector,");
         self.line("req.method.copy(),");
         self.line("cred,");
-        self.line("self._region.copy(),");
-        self.line(&format!("String({p}_SERVICE),"));
-        self.line(&format!(
-            "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
-            self.module_name
-        ));
+        if ruleset {
+            self.line("target.signing_region.copy(),");
+            self.line("target.signing_name.copy(),");
+            self.line("target.endpoint.copy(),");
+        } else {
+            self.line("self._region.copy(),");
+            self.line(&format!("String({p}_SERVICE),"));
+            self.line(&format!(
+                "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
+                self.module_name
+            ));
+        }
         self.line("req.uri.copy(),");
         self.line("content_type^,");
         self.line("req.body.copy(),");
         self.line("extra^,");
+        if self.options.s3 {
+            self.line("s3_200_error=s3_200_error,");
+        }
         self.pop();
         self.line(")");
         self.pop();
@@ -1896,8 +1991,27 @@ impl<'a> AwsEmitter<'a> {
                 ));
             }
             let fp = self.fn_prefix();
+            let s3_200 = if self.s3_send_reads_200_error(m, &facts)? {
+                ", s3_200_error=True"
+            } else {
+                ""
+            };
             self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
-            self.line("var res = self.send(req^)");
+            if ruleset {
+                self.line("var target = aws_signing_target(");
+                self.push();
+                self.line(&format!(
+                    "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, input),",
+                    m.name
+                ));
+                self.line("self._region.copy(),");
+                self.line(&format!("String({p}_SERVICE),"));
+                self.pop();
+                self.line(")");
+                self.line(&format!("var res = self.send(req^, target{s3_200})"));
+            } else {
+                self.line(&format!("var res = self.send(req^{s3_200})"));
+            }
             self.line("if not aws_is_error_status(res.status):");
             self.push();
             self.line(&format!("return {fp}parse_{}_response(res^.into_response())", m.name));
@@ -2288,6 +2402,43 @@ mod tests {
         let src = json_module_with_a_list_of_timestamps();
         assert!(src.contains("if n.lower() == String(\"content-type\"):"), "{src}");
         assert!(!src.contains("if n == String(\"Content-Type\"):"), "{src}");
+    }
+
+    #[test]
+    fn an_aws_json_client_reads_its_error_code_through_the_error_info() {
+        // The client's error builder takes the code aws_json_error_info
+        // reads: an awsQueryCompatible service's x-amzn-query-error code
+        // first, so an SQS QueueDoesNotExist is raised under its query code.
+        let src = json_module_with_a_list_of_timestamps();
+        let builder = &src[src.find("def _tiny_error(").unwrap()..];
+        for want in [
+            "    var info = aws_json_error_info(res.to_response())\n",
+            "    var code = info.code.copy()\n",
+            "    var msg = info.message.copy()\n",
+        ] {
+            assert!(builder.contains(want), "`{want}` missing");
+        }
+        assert!(!builder.contains("aws_error_code_from_body(res.body)"));
+        let imports = aws_import_section(AwsProtocol::Json, false);
+        assert!(imports.contains("    aws_json_error_info,\n"), "{imports}");
+        assert!(!aws_import_section(AwsProtocol::Json, true).contains("aws_json_error_info"));
+        assert!(!aws_import_section(AwsProtocol::RestJson, false).contains("aws_json_error_info"));
+        // Grouped with the other error readers, ahead of the transport's
+        // types.
+        assert!(
+            imports.find("aws_json_error_info").unwrap() < imports.find("AwsCredential").unwrap(),
+            "{imports}"
+        );
+        // A client's error builder reads through its protocol's error info,
+        // so a client module does not import the body readers; a pure
+        // module keeps them for a caller with its own transport.
+        for p in JSON_BODY_PROTOCOLS {
+            assert!(!aws_import_section(*p, false).contains("aws_error_code_from_body"), "{p:?}");
+            assert!(aws_import_section(*p, true).contains("aws_error_code_from_body"), "{p:?}");
+        }
+        // The builder's doc line stays inside the block's wrap.
+        let doc = builder.lines().find(|l| l.contains("ride out")).unwrap();
+        assert!(doc.len() <= 80, "{doc}");
     }
 
     #[test]

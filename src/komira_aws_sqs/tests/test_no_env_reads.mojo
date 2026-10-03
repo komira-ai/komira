@@ -65,7 +65,15 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(_count(text, "\ndef build_receive_message_request("), 1)
     assert_equal(_count(text, "\nstruct SQSEndpointConfig("), 1)
     assert_equal(_count(text, '"AmazonSQS.ReceiveMessage"'), 1)
-    assert_equal(_count(text, "#   mode         : pure (no transport)"), 1)
+    assert_equal(_count(text, "#   mode         : client"), 1)
+    # The client sends where the ruleset resolves each call.
+    assert_equal(
+        _count(
+            text,
+            "resolve_get_queue_url_endpoint(self._rules, self._endpoint_config, input)",
+        ),
+        1,
+    )
 
 
 def main() raises:
