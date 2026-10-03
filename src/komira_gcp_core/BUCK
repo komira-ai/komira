@@ -11,8 +11,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # and the Cloud Storage V4 signing primitives:
 #   v4_sign    - GOOG4-RSA-SHA256 canonicalization, string to sign, RSA
 #                signature and signed URL; the signing time is a parameter.
-# Generic pieces come from dependencies: server bodies (and their UTF-8
-# validation) from komira_json; retry policy, backoff, loop and the clock
+# Generic pieces come from dependencies: the UTC calendar and the
+# YYYYMMDDTHHMMSSZ / YYYYMMDD stamps from komira_datetime; server bodies
+# (and their UTF-8 validation) from komira_json; retry policy, backoff, loop and the clock
 # seam from komira_retry; SHA-256, RSA and the PEM-to-PKCS#8 step for a key
 # file's `private_key` from komira_crypto (AWS-LC; the PEM armor under it is
 # komira_encoding's). It never imports a generated module, reads no
@@ -40,6 +41,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_crypto:komira_crypto",
+        "//src/komira_datetime:komira_datetime",
         "//src/komira_json:komira_json",
         "//src/komira_retry:komira_retry",
     ],

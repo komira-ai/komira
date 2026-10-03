@@ -398,6 +398,10 @@ struct StringValue(Proto3JsonWkt, Copyable, Movable):
 
     var value: String
 
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (see `structpb.mojo`)."""
+        self.value = copy.value.copy()
+
     def encode[E: WireEncoder](self, mut enc: E) raises:
         enc.write_string_field(1, "value", self.value)
 
@@ -447,6 +451,10 @@ struct BytesValue(Proto3JsonWkt, Copyable, Movable):
     """`google.protobuf.BytesValue` — a boxed `bytes`."""
 
     var value: List[UInt8]
+
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (see `structpb.mojo`)."""
+        self.value = copy.value.copy()
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         enc.write_bytes_field(1, "value", self.value)

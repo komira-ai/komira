@@ -1,0 +1,36 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The Connect-RPC server runtime: the 5-byte envelope framing, the gRPC
+# canonical status codes and their HTTP / Connect-name mappings, the
+# grpc+proto, grpc-web+proto and connect+json codecs, grpc-timeout and
+# Connect-Timeout-Ms deadline parsing, the method-dispatch table behind
+# `ConnectService`, and the bridge that mounts a ConnectService on a
+# komira_http Router and its h2 serve loop. The gRPC client (komira_grpc)
+# imports its codec primitives from here.
+mojo_library(
+    name = "komira_connect",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+    ],
+    test_srcs = [
+        "tests/test_L5_codec_connect_json.mojo",
+        "tests/test_L5_codec_grpc.mojo",
+        "tests/test_L5_codec_grpc_web.mojo",
+        "tests/test_L5_conformance_code_mapping.mojo",
+        "tests/test_L5_deadline.mojo",
+        "tests/test_L5_dispatch.mojo",
+        "tests/test_L5_envelope.mojo",
+        "tests/test_L5_grpc_stream_emit.mojo",
+        "tests/test_L5_grpc_trailer_emit.mojo",
+        "tests/test_L5_status.mojo",
+        "tests/test_e2e_bidi.mojo",
+        "tests/test_e2e_client_streaming.mojo",
+        "tests/test_e2e_server_streaming.mojo",
+        "tests/test_e2e_unary.mojo",
+        "tests/test_grpc_timeout_conformance.mojo",
+        "tests/test_server_integration.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

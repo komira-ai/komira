@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Aligned, shared and memory-mapped byte buffers and the region trait that columns sit on.
+mojo_library(
+    name = "komira_buffer",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_host:komira_host",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_simd:komira_simd",
+    ],
+    test_srcs = [
+        "tests/test_byte_view.mojo",
+        "tests/test_copyable_sab_mmap_keepalive_copy.mojo",
+        "tests/test_fast_copy_call_sites_enabled.mojo",
+        "tests/test_heap_region.mojo",
+        "tests/test_hugepage_hint.mojo",
+        "tests/test_mmap_region_open_readonly.mojo",
+        "tests/test_mmap_region_willneed.mojo",
+        "tests/test_owned_aligned_buffer_reserve_regrow.mojo",
+        "tests/test_sab_borrowed_view_mmap_keepalive.mojo",
+        "tests/test_sab_share_range_window.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
