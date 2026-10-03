@@ -235,7 +235,7 @@
 #      copied into the package, the header names its owner, and a caller test
 #      imports it. A client-mode client is checked at generation only
 #      (tests//functional/aws_client_mode): it carries the signed-send
-#      surface, the komira_http import and the error builder. Refused at
+#      surface, the komira_http_core import and the error builder. Refused at
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
