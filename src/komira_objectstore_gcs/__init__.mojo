@@ -26,10 +26,13 @@ traits.
     `komira_gcp_core.GcpTokenSource` `T` and a komira_retry
     `MonotonicClock` `K`. `gcs_error_kind_from_code` /
     `gcs_store_error_from_code` map a gRPC status onto the `GCS_ERR_*` kinds.
+  * `crc32c` / `crc32c_extend` (crc32c.mojo) — CRC-32C (Castagnoli), the
+    checksum the gRPC backend states for each write and checks on each read.
 """
 
 from .backend import GcsStorageBackend, ListPageRaw, ObjectMetaRaw
 from .conditional_store import GcsConditionalStore
+from .crc32c import crc32c, crc32c_extend
 from .errors import (
     GCS_ERR_MALFORMED,
     GCS_ERR_NONE,
@@ -46,7 +49,6 @@ from .grpc_backend import (
     GCS_DEFAULT_CALL_DEADLINE_MS,
     GCS_GRPC_HOST,
     GCS_GRPC_PORT,
-    GCS_READ_MAX_MESSAGES,
     WRITE_OBJECT_CHUNK_BYTES,
     GcsTlsConnector,
     StorageGrpcBackend,

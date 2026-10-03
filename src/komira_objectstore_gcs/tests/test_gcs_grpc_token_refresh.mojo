@@ -121,9 +121,9 @@ def test_endpoint_token_already_stale_is_refused() raises:
 
 
 def test_static_source_never_changes() raises:
-    var src = StaticTokenSource(String("emulator-token"))
-    assert_equal(src.access_token(), "emulator-token")
-    assert_equal(src.access_token(), "emulator-token")
+    var src = StaticTokenSource(String("fixed-token"))
+    assert_equal(src.access_token(), "fixed-token")
+    assert_equal(src.access_token(), "fixed-token")
 
 
 def test_static_source_refuses_an_empty_token() raises:
@@ -290,7 +290,7 @@ def test_backend_with_a_static_source_sends_the_same_token() raises:
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var backend = StorageGrpcBackend[ScriptedConnector, StaticTokenSource, ManualClock](
         _connector(_two_calls(0), capture),
-        StaticTokenSource(String("emulator-token")),
+        StaticTokenSource(String("fixed-token")),
         ManualClock(0),
         HttpClientConfig.defaults(),
     )
@@ -298,8 +298,8 @@ def test_backend_with_a_static_source_sends_the_same_token() raises:
     _ = backend.get_object("acme", "k")
     var bearers = _bearers(capture)
     assert_equal(len(bearers), 2)
-    assert_equal(bearers[0], "Bearer emulator-token")
-    assert_equal(bearers[1], "Bearer emulator-token")
+    assert_equal(bearers[0], "Bearer fixed-token")
+    assert_equal(bearers[1], "Bearer fixed-token")
 
 
 def main() raises:

@@ -23,6 +23,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error
 from komira_gcp_storage.storage import (
+    WriteObjectResponse,
     DeleteObjectRequest,
     GetObjectRequest,
     ListObjectsRequest,
@@ -53,6 +54,8 @@ from komira_proto_codec.proto_binary import PbDecoder
 from komira_retry import ManualClock
 
 from komira_objectstore_gcs import (
+    crc32c,
+    crc32c_extend,
     GCS_ERR_MALFORMED,
     GCS_ERR_NONE,
     GCS_ERR_NOT_FOUND,
@@ -182,12 +185,54 @@ def _write_response(generation: Int, size: Int) -> List[UInt8]:
     return out^
 
 
+def _fixed32(mut out: List[UInt8], field: Int, v: UInt32):
+    _varint(out, UInt64(field * 8 + 5))
+    out.append(UInt8(v & 0xFF))
+    out.append(UInt8((v >> 8) & 0xFF))
+    out.append(UInt8((v >> 16) & 0xFF))
+    out.append(UInt8((v >> 24) & 0xFF))
+
+
 def _read_response(data: String) -> List[UInt8]:
     """ReadObjectResponse carrying `data` (checksummed_data.content)."""
     var cd = List[UInt8]()
     _msg(cd, 1, _b(data))
     var out = List[UInt8]()
     _msg(out, 1, cd)
+    return out^
+
+
+def _read_response_crc(data: String, crc: UInt32) -> List[UInt8]:
+    """ReadObjectResponse carrying `data` and the chunk CRC-32C `crc`."""
+    var cd = List[UInt8]()
+    _msg(cd, 1, _b(data))
+    _fixed32(cd, 2, crc)
+    var out = List[UInt8]()
+    _msg(out, 1, cd)
+    return out^
+
+
+def _read_first(data: String, start: Int, end: Int) -> List[UInt8]:
+    """The first ReadObjectResponse of a ranged read: `data` and the
+    `content_range` [start, end) (field 3)."""
+    var out = _read_response(data)
+    var r = List[UInt8]()
+    _int(r, 1, start)
+    _int(r, 2, end)
+    _int(r, 3, 1_000_000)
+    _msg(out, 3, r)
+    return out^
+
+
+def _read_first_whole(data: String, size: Int, object_crc: UInt32) -> List[UInt8]:
+    """The first ReadObjectResponse of a whole-object read: `data`, the
+    object's `object_checksums.crc32c` (field 2) and its `metadata` (field 4)
+    with `size`."""
+    var out = _read_response(data)
+    var sums = List[UInt8]()
+    _fixed32(sums, 1, object_crc)
+    _msg(out, 2, sums)
+    _msg(out, 4, _object("logs/a.parquet", 7, size, "CAc="))
     return out^
 
 
@@ -252,6 +297,57 @@ def _reply_status(sid: Int, status: Int, mut hpack: HpackEncoder, mut out: List[
     hdrs.append(HpackHeader(String("grpc-status"), String(status)))
     hdrs.append(HpackHeader(String("grpc-message"), String(_SERVER_TEXT)))
     encode_headers_frame(UInt32(sid), hpack.encode_block(hdrs^), end_stream=True, end_headers=True, out=out)
+
+
+def _reply_body(
+    sid: Int, var body: List[UInt8], trailers: Bool, mut hpack: HpackEncoder, mut out: List[UInt8]
+) raises:
+    """HEADERS, `body` (raw gRPC bytes) in one DATA frame, then trailers with
+    `grpc-status: 0` when `trailers`, else END_STREAM on the DATA frame and no
+    status at all."""
+    var hdrs = List[HpackHeader]()
+    hdrs.append(HpackHeader(String(":status"), String("200")))
+    hdrs.append(HpackHeader(String("content-type"), String("application/grpc")))
+    encode_headers_frame(UInt32(sid), hpack.encode_block(hdrs^), end_stream=False, end_headers=True, out=out)
+    encode_data_frame(UInt32(sid), body^, end_stream=not trailers, out=out)
+    if trailers:
+        var t = List[HpackHeader]()
+        t.append(HpackHeader(String("grpc-status"), String("0")))
+        encode_headers_frame(UInt32(sid), hpack.encode_block(t^), end_stream=True, end_headers=True, out=out)
+
+
+def _body_script(var body: List[UInt8], trailers: Bool = True) raises -> List[UInt8]:
+    var out = _prologue()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _reply_body(1, body^, trailers, hpack, out)
+    return out^
+
+
+def _messages_script(messages: List[List[UInt8]]) raises -> List[UInt8]:
+    var out = _prologue()
+    var hpack = HpackEncoder(max_table_size=4096)
+    _reply_ok(1, messages, 0, hpack, out)
+    return out^
+
+
+def _read_fails(var script: List[UInt8], offset: Int, limit: Int) raises -> String:
+    """The error a `read_range(offset, limit)` over `script` raises."""
+    var capture = _new_capture()
+    var backend = _backend(script^, capture)
+    var msg = String()
+    var returned = -1
+    try:
+        returned = len(backend.read_range(_BUCKET, "logs/a.parquet", Int64(offset), Int64(limit)))
+    except e:
+        msg = String(e)
+    if returned >= 0:
+        raise Error(String("the read returned ") + String(returned) + " bytes instead of failing")
+    return msg^
+
+
+def _crc(s: String) -> UInt32:
+    var b = _b(s)
+    return crc32c(Span(b))
 
 
 def _ok_script(var message: List[UInt8]) raises -> List[UInt8]:
@@ -396,9 +492,13 @@ def _sent(capture: ArcPointer[List[UInt8]]) raises -> Sent:
     return out^
 
 
-def _check_call(sent: Sent, method: String, token: String, routing: String) raises:
+def _check_call(
+    sent: Sent, method: String, token: String, routing: String, timeout: String = "1M"
+) raises:
     """One call of `method` with one bearer token `token`, the routing header
-    `routing`, a deadline, and no `grpc-metadata-` (Connect) prefix."""
+    `routing`, the deadline `timeout` (`1M`: the default 60 s, as komira_grpc
+    renders 60 000 000 us; the ManualClock does not move during a call), and
+    no `grpc-metadata-` (Connect) prefix."""
     var paths = sent.values(":path")
     assert_equal(len(paths), 1, method)
     assert_equal(paths[0], String(_SVC) + method)
@@ -408,7 +508,9 @@ def _check_call(sent: Sent, method: String, token: String, routing: String) rais
     var params = sent.values("x-goog-request-params")
     assert_equal(len(params), 1, method + ": one routing header")
     assert_equal(params[0], routing)
-    assert_equal(len(sent.values("grpc-timeout")), 1, method + ": the call states its deadline")
+    var timeouts = sent.values("grpc-timeout")
+    assert_equal(len(timeouts), 1, method + ": the call states its deadline")
+    assert_equal(timeouts[0], timeout, method + ": grpc-timeout")
     assert_equal(sent.names_starting("grpc-metadata-"), 0)
 
 
@@ -453,6 +555,9 @@ def test_conditional_create_on_the_wire() raises:
     assert_equal(req._oneof1_case, 1)
     assert_equal(len(req.checksummed_data.value().content), 3)
     assert_equal(req.checksummed_data.value().content[2], UInt8(3))
+    # The chunk's CRC-32C and, on the last (only) message, the object's.
+    assert_equal(req.checksummed_data.value().crc32c.value(), crc32c(Span(data)))
+    assert_equal(req.object_checksums.value().crc32c.value(), crc32c(Span(data)))
 
 
 def test_compare_and_swap_writes_a_large_object_in_chunks() raises:
@@ -489,6 +594,11 @@ def test_compare_and_swap_writes_a_large_object_in_chunks() raises:
             assert_false(req.write_object_spec.__bool__())
         ref content = req.checksummed_data.value().content
         assert_equal(len(content), WRITE_OBJECT_CHUNK_BYTES if m < 2 else 1000)
+        assert_equal(req.checksummed_data.value().crc32c.value(), crc32c(Span(content)))
+        if m < 2:
+            assert_false(req.object_checksums.__bool__())
+        else:
+            assert_equal(req.object_checksums.value().crc32c.value(), crc32c(Span(data)))
         for k in range(len(content)):
             if content[k] != data[at]:
                 raise Error(String("payload byte ") + String(at) + " differs")
@@ -497,9 +607,9 @@ def test_compare_and_swap_writes_a_large_object_in_chunks() raises:
 
 
 def test_write_preconditions_are_412() raises:
-    """FAILED_PRECONDITION, ALREADY_EXISTS and ABORTED on WriteObject are the
-    seam's PRECONDITION / 412, with no server text."""
-    for code in [9, 6, 10]:
+    """FAILED_PRECONDITION and ALREADY_EXISTS on WriteObject are the seam's
+    PRECONDITION / 412, with no server text."""
+    for code in [9, 6]:
         var capture = _new_capture()
         var backend = _backend(_status_script(code), capture)
         var msg = String()
@@ -513,6 +623,23 @@ def test_write_preconditions_are_412() raises:
         )
         assert_equal(gcs_store_error_kind_from_message(msg), GCS_ERR_PRECONDITION)
         _assert_no_server_text(msg)
+
+
+def test_aborted_write_is_retryable_not_412() raises:
+    """ABORTED is a concurrency conflict (AIP-194: retry at a higher level),
+    so a create-if-absent that gets it must not read as "the key exists"."""
+    var capture = _new_capture()
+    var backend = _backend(_status_script(10), capture)
+    var msg = String()
+    try:
+        _ = backend.conditional_create(_BUCKET, "logs/new.parquet", List[UInt8]())
+    except e:
+        msg = String(e)
+    assert_true(
+        msg.startswith("StoreError[THROTTLED] WriteObject gs://acme/logs/new.parquet status=429 grpc_code=10 (ABORTED)"),
+        msg,
+    )
+    _assert_no_server_text(msg)
 
 
 def test_refusals_send_nothing() raises:
@@ -544,7 +671,7 @@ def test_refusals_send_nothing() raises:
 
 def test_empty_token_is_refused_before_sending() raises:
     """The generated client refuses an empty token; the backend reports it as
-    a TRANSPORT error carrying that reason, and nothing is written."""
+    a TRANSPORT error, and nothing is written."""
     var capture = _new_capture()
     var backend = StorageGrpcBackend[ScriptedConnector, EmptyTokenSource, ManualClock](
         _connector(_ok_script(List[UInt8]()), capture),
@@ -557,8 +684,12 @@ def test_empty_token_is_refused_before_sending() raises:
         _ = backend.get_object(_BUCKET, "k")
     except e:
         msg = String(e)
-    assert_equal(gcs_store_error_kind_from_message(msg), GCS_ERR_TRANSPORT, msg)
-    assert_true(msg.find("empty access token") >= 0, msg)
+    # The generated client's own sentence has no class before a `:`, so only
+    # its length is kept.
+    assert_equal(
+        msg,
+        "StoreError[TRANSPORT] GetObject gs://acme/k status=500 detail=error text 47 bytes",
+    )
     assert_equal(len(capture[]), 0)
 
 
@@ -573,8 +704,8 @@ def test_read_range_on_the_wire() raises:
     var out = _prologue()
     var hpack = HpackEncoder(max_table_size=4096)
     var messages = List[List[UInt8]]()
-    messages.append(_read_response("hello "))
-    messages.append(_read_response("world"))
+    messages.append(_read_first("hello ", 100, 111))
+    messages.append(_read_response_crc("world", _crc("world")))
     _reply_ok(1, messages, 0, hpack, out)
     var capture = _new_capture()
     var backend = _backend(out^, capture)
@@ -607,7 +738,9 @@ def test_read_of_an_absent_object_is_404() raises:
 
 def test_read_status_after_data_is_raised() raises:
     """A status that arrives in the trailers, after data, still fails the
-    read (DATA_LOSS: TRANSPORT), rather than returning the partial bytes."""
+    read (DATA_LOSS: TRANSPORT), rather than returning the partial bytes.
+    komira_grpc's `server_stream` raises it before it returns the decoder, so
+    it reaches the backend as the generated client's mapped error."""
     var out = _prologue()
     var hpack = HpackEncoder(max_table_size=4096)
     var messages = List[List[UInt8]]()
@@ -623,6 +756,86 @@ def test_read_status_after_data_is_raised() raises:
     assert_equal(gcs_store_error_kind_from_message(msg), GCS_ERR_TRANSPORT, msg)
     assert_true(msg.find("grpc_code=15") >= 0, msg)
     _assert_no_server_text(msg)
+
+
+def test_read_whole_object_checks_length_and_crc() raises:
+    """A whole-object read takes its length from the first response's
+    `metadata.size` and its CRC-32C from `object_checksums`: both matching,
+    the bytes come back; a wrong object CRC-32C fails the read."""
+    var data = String("hello world")
+    var good = _crc(data)
+    var messages = List[List[UInt8]]()
+    messages.append(_read_first_whole("hello ", 11, good))
+    messages.append(_read_response("world"))
+    var capture = _new_capture()
+    var backend = _backend(_messages_script(messages), capture)
+    assert_equal(_text(backend.read_range(_BUCKET, "logs/a.parquet", Int64(0), Int64(0))), data)
+
+    var bad = List[List[UInt8]]()
+    bad.append(_read_first_whole("hello ", 11, good ^ UInt32(1)))
+    bad.append(_read_response("world"))
+    var msg = _read_fails(_messages_script(bad), 0, 0)
+    assert_true(
+        msg.startswith("StoreError[TRANSPORT] ReadObject gs://acme/logs/a.parquet status=500 detail=the object does not match its CRC-32C"),
+        msg,
+    )
+
+
+def test_read_chunk_crc_mismatch_fails() raises:
+    var messages = List[List[UInt8]]()
+    messages.append(_read_first("hello ", 0, 11))
+    messages.append(_read_response_crc("world", _crc("worle")))
+    var msg = _read_fails(_messages_script(messages), 0, 11)
+    assert_equal(gcs_store_error_kind_from_message(msg), GCS_ERR_TRANSPORT, msg)
+    assert_true(msg.find("response 2 does not match its CRC-32C") >= 0, msg)
+
+
+def test_read_cut_off_message_with_ok_status_fails() raises:
+    """A DATA frame that ends inside a message, then `grpc-status: 0`: the
+    decoder keeps the partial bytes, so the read is short of the range the
+    first response states and fails instead of returning 6 of 11 bytes."""
+    var body = _frame(_read_first("hello ", 0, 11))
+    var second = _frame(_read_response("world"))
+    for i in range(7):
+        body.append(second[i])
+    var msg = _read_fails(_body_script(body^), 0, 11)
+    assert_true(
+        msg.startswith("StoreError[TRANSPORT] ReadObject gs://acme/logs/a.parquet status=500 detail=short read: 6 of 11 stated bytes"),
+        msg,
+    )
+
+
+def test_read_without_a_status_fails_when_short() raises:
+    """A stream with no `grpc-status` at all (komira_grpc reads that as OK)
+    that delivered less than it stated fails the read."""
+    var body = _frame(_read_first_whole("hello ", 11, UInt32(0)))
+    var msg = _read_fails(_body_script(body^, trailers=False), 0, 0)
+    assert_true(msg.find("short read: 6 of 11 stated bytes") >= 0, msg)
+
+
+def test_read_that_states_no_length_fails() raises:
+    """A first response with neither `content_range` nor `metadata` cannot be
+    checked for truncation; so can a stream with no response at all."""
+    var messages = List[List[UInt8]]()
+    messages.append(_read_response("hello"))
+    var msg = _read_fails(_messages_script(messages), 0, 0)
+    assert_true(msg.find("states neither the range nor the object") >= 0, msg)
+    msg = _read_fails(_body_script(List[UInt8]()), 0, 0)
+    assert_true(msg.find("the stream ended without a response") >= 0, msg)
+    # A range that does not start at the offset asked for.
+    var shifted = List[List[UInt8]]()
+    shifted.append(_read_first("hello", 5, 10))
+    msg = _read_fails(_messages_script(shifted), 0, 5)
+    assert_true(msg.find("states the range [5, 10) for offset 0") >= 0, msg)
+
+
+def test_read_envelope_the_decoder_refuses_fails() raises:
+    """An envelope with the compressed flag set (no decompressor here): the
+    decoder ends the stream with UNKNOWN, which is TRANSPORT."""
+    var body = _frame(_read_first("hello", 0, 5))
+    body[0] = UInt8(1)
+    var msg = _read_fails(_body_script(body^), 0, 5)
+    assert_true(msg.startswith("StoreError[TRANSPORT] ReadObject gs://acme/logs/a.parquet status=500 grpc_code=2 (UNKNOWN)"), msg)
 
 
 def test_get_object_maps_the_metadata() raises:
@@ -731,7 +944,7 @@ def test_every_status_maps_to_its_kind() raises:
         GCS_ERR_PERMISSION_DENIED,  # 7 PERMISSION_DENIED
         GCS_ERR_THROTTLED,  # 8 RESOURCE_EXHAUSTED
         GCS_ERR_PRECONDITION,  # 9 FAILED_PRECONDITION
-        GCS_ERR_PRECONDITION,  # 10 ABORTED
+        GCS_ERR_THROTTLED,  # 10 ABORTED
         GCS_ERR_MALFORMED,  # 11 OUT_OF_RANGE
         GCS_ERR_MALFORMED,  # 12 UNIMPLEMENTED
         GCS_ERR_TRANSPORT,  # 13 INTERNAL
@@ -739,14 +952,19 @@ def test_every_status_maps_to_its_kind() raises:
         GCS_ERR_TRANSPORT,  # 15 DATA_LOSS
         GCS_ERR_PERMISSION_DENIED,  # 16 UNAUTHENTICATED
     ]
-    var http: List[Int] = [400, 500, 500, 400, 500, 404, 412, 403, 429, 412, 412, 400, 400, 500, 429, 500, 403]
+    var http: List[Int] = [400, 500, 500, 400, 500, 404, 412, 403, 429, 412, 429, 400, 400, 500, 429, 500, 403]
     for code in range(17):
         assert_equal(gcs_error_kind_from_code(code), want[code], String("code ") + String(code))
         var msg = String(gcs_store_error_from_code("GetObject", "b", "k", code))
         assert_equal(gcs_store_error_kind_from_message(msg), want[code], msg)
         assert_true(msg.find(String(" status=") + String(http[code]) + " ") >= 0, msg)
         # The same, from the error the generated client raises.
-        var raised = String(gcp_grpc_status_error(String(_SVC) + "GetObject", code, 40))
+        var raised = String(
+            gcp_grpc_status_error(
+                String(_SVC) + "GetObject", code, String("[grpc:") + String(code) + "] " + _SERVER_TEXT
+            )
+        )
+        _assert_no_server_text(raised)
         assert_equal(String(gcs_store_error_from_raised("GetObject", "b", "k", raised)), msg)
 
 
@@ -756,8 +974,28 @@ def test_errors_without_a_status_are_transport() raises:
     var msg = String(
         gcs_store_error_from_raised("GetObject", "b", "k", "HttpError[EOF_MID_RESPONSE]: peer closed")
     )
-    assert_equal(msg, "StoreError[TRANSPORT] GetObject gs://b/k status=500 detail=HttpError[EOF_MID_RESPONSE]: peer closed")
-    var other = String(gcp_grpc_status_error(String(_SVC) + "ReadObject", 5, 1))
+    assert_equal(
+        msg,
+        "StoreError[TRANSPORT] GetObject gs://b/k status=500 detail=HttpError[EOF_MID_RESPONSE], error text 40 bytes",
+    )
+    # A token fetcher's error may carry its endpoint's answer: only the class
+    # before the first `:` is kept, and nothing of a text with no class.
+    var fetcher = String(
+        gcs_store_error_from_raised(
+            "GetObject", "b", "k", "TokenFetcher: invalid_grant for leaked@example.com"
+        )
+    )
+    assert_equal(
+        fetcher,
+        "StoreError[TRANSPORT] GetObject gs://b/k status=500 detail=TokenFetcher, error text 50 bytes",
+    )
+    var prose = String(
+        gcs_store_error_from_raised("GetObject", "b", "k", "token endpoint said leaked@example.com: no")
+    )
+    assert_equal(prose, "StoreError[TRANSPORT] GetObject gs://b/k status=500 detail=error text 42 bytes")
+    var other = String(
+        gcp_grpc_status_error(String(_SVC) + "ReadObject", 5, "[grpc:5] " + _SERVER_TEXT)
+    )
     assert_equal(
         gcs_store_error_kind_from_message(String(gcs_store_error_from_raised("GetObject", "b", "k", other))),
         GCS_ERR_TRANSPORT,
@@ -779,6 +1017,20 @@ def test_cancel_fails_later_calls() raises:
     assert_equal(gcs_store_error_kind_from_message(msg), GCS_ERR_TRANSPORT, msg)
 
 
+def test_call_deadline_reaches_the_wire() raises:
+    """`call_deadline_ms = 1500` is stated as `grpc-timeout: 1500m`."""
+    var capture = _new_capture()
+    var backend = Backend(
+        _connector(_ok_script(_object("logs/a.parquet", 7, 1, "e")), capture),
+        CountingTokenSource(),
+        ManualClock(5_000_000),
+        HttpClientConfig.defaults(),
+        call_deadline_ms=1500,
+    )
+    _ = backend.get_object(_BUCKET, "logs/a.parquet")
+    _check_call(_sent(capture), "GetObject", "tok-1", _ROUTING, "1500m")
+
+
 def test_call_deadline_must_be_positive() raises:
     var capture = _new_capture()
     var raised = False
@@ -796,14 +1048,46 @@ def test_call_deadline_must_be_positive() raises:
     assert_true(raised)
 
 
+def test_oneof_cases_match_the_codec() raises:
+    """The oneof case numbers the backend sets and reads, checked against
+    bytes written by hand (field numbers from storage.proto) rather than
+    against themselves: WriteObjectRequest's `first_message` is case 2 for
+    `write_object_spec` (field 2), 1 for `upload_id` (field 1); its `data` is
+    case 1 for `checksummed_data` (field 4); WriteObjectResponse's
+    `write_status` is case 2 for `resource` (field 2)."""
+    var spec = List[UInt8]()
+    _int(spec, 3, 0)
+    var w = List[UInt8]()
+    _msg(w, 2, spec)
+    var cd = List[UInt8]()
+    _msg(cd, 1, _b("x"))
+    _msg(w, 4, cd)
+    var dec = PbDecoder(w^)
+    var req = WriteObjectRequest.decode(dec)
+    assert_equal(req._oneof0_case, 2)
+    assert_true(req.write_object_spec.__bool__())
+    assert_equal(req._oneof1_case, 1)
+    assert_true(req.checksummed_data.__bool__())
+    var u = List[UInt8]()
+    _str(u, 1, "upload-1")
+    var dec_u = PbDecoder(u^)
+    assert_equal(WriteObjectRequest.decode(dec_u)._oneof0_case, 1)
+    var dec_r = PbDecoder(_write_response(42, 3))
+    var resp = WriteObjectResponse.decode(dec_r)
+    assert_equal(resp._oneof0_case, 2)
+    assert_equal(resp.resource.value().generation, Int64(42))
+
+
 def test_helpers_and_constants() raises:
     assert_equal(gcs_bucket_resource_name("my-bucket"), "projects/_/buckets/my-bucket")
     assert_equal(gcs_routing_param("my-bucket"), "bucket=projects%2F_%2Fbuckets%2Fmy-bucket")
-    # Every chunk but the last must be 256 KiB-aligned, and a chunk plus the
-    # first message's spec must stay well under the 4 MiB message limit.
-    assert_equal(WRITE_OBJECT_CHUNK_BYTES % (256 * 1024), 0)
-    assert_true(WRITE_OBJECT_CHUNK_BYTES > 0)
-    assert_true(WRITE_OBJECT_CHUNK_BYTES <= 3 * 1024 * 1024)
+    # storage.proto's ServiceConstants.MAX_WRITE_CHUNK_BYTES.
+    assert_equal(WRITE_OBJECT_CHUNK_BYTES, 2097152)
+    # CRC-32C's check value (RFC 3720 B.4), and summing in pieces.
+    assert_equal(_crc("123456789"), UInt32(0xE3069283))
+    assert_equal(crc32c(Span(List[UInt8]())), UInt32(0))
+    var tail = _b("56789")
+    assert_equal(crc32c_extend(_crc("1234"), Span(tail)), UInt32(0xE3069283))
     # The production connector is TLS (it dials nothing until a call).
     assert_true(build_gcs_tls_connector().is_tls())
 
@@ -812,11 +1096,18 @@ def main() raises:
     test_conditional_create_on_the_wire()
     test_compare_and_swap_writes_a_large_object_in_chunks()
     test_write_preconditions_are_412()
+    test_aborted_write_is_retryable_not_412()
     test_refusals_send_nothing()
     test_empty_token_is_refused_before_sending()
     test_read_range_on_the_wire()
     test_read_of_an_absent_object_is_404()
     test_read_status_after_data_is_raised()
+    test_read_whole_object_checks_length_and_crc()
+    test_read_chunk_crc_mismatch_fails()
+    test_read_cut_off_message_with_ok_status_fails()
+    test_read_without_a_status_fails_when_short()
+    test_read_that_states_no_length_fails()
+    test_read_envelope_the_decoder_refuses_fails()
     test_get_object_maps_the_metadata()
     test_delete_object_on_the_wire()
     test_list_objects_maps_the_page()
@@ -824,6 +1115,8 @@ def main() raises:
     test_every_status_maps_to_its_kind()
     test_errors_without_a_status_are_transport()
     test_cancel_fails_later_calls()
+    test_call_deadline_reaches_the_wire()
     test_call_deadline_must_be_positive()
+    test_oneof_cases_match_the_codec()
     test_helpers_and_constants()
     print("all StorageGrpcBackend tests passed")

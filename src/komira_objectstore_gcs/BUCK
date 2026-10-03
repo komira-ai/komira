@@ -16,8 +16,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_gcs_grpc_backend drives StorageGrpcBackend over a scripted HTTP/2
 # connector (no socket, no credential, no service): each verb's request
 # messages, routing header and bearer token on the wire, the chunked
-# WriteObject, the range read, the response mapping, and every gRPC status
-# onto its StoreError kind. test_gcs_grpc_token_refresh checks that each call
+# WriteObject with its CRC-32Cs, the range read and its length and CRC-32C
+# checks (a cut-off message, a stream with no status), the response mapping,
+# and every gRPC status onto its StoreError kind. test_gcs_grpc_token_refresh checks that each call
 # takes its token from the source (a CachingTokenSource on a ManualClock
 # refetches a token near expiry, and again after `invalidate`).
 # test_gcs_grpc_unit_budget checks that the transport's request_timeout_us
