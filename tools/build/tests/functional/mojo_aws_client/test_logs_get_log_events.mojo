@@ -22,7 +22,7 @@ from komira_aws_logs.komira_aws_logs import (
     parse_get_log_events_response,
 )
 from komira_aws_core import AwsResponse
-from komira_json import parse_json_value
+from komira_json import JsonValue, parse_json_value
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 
@@ -128,6 +128,12 @@ def test_error_shape() raises:
 
 
 def main() raises:
+    # The stub's copy constructor must stay non-trivial, as komira_json's:
+    # a trivial one lets List.copy() memcpy elements and share their heap
+    # buffers.
+    comptime assert not JsonValue.__copy_ctor_is_trivial, (
+        "stub JsonValue must have a non-trivial copy constructor"
+    )
     test_request()
     test_request_is_validated()
     test_response()
