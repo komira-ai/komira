@@ -5,11 +5,13 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `ListValue`, an opaque `Any`) as `Proto3JsonWkt` Mojo structs, each with
 # its proto3 canonical-JSON special form, which the codec's message arms and
 # top-level entry points use. Generated clients import these; the first-party
-# dependencies are `komira_proto_codec`, `komira_json` and `komira_encoding`.
+# dependencies are `komira_proto_codec`, `komira_json`, `komira_encoding` and
+# `komira_datetime`.
 mojo_library(
     name = "komira_wkt",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_datetime:komira_datetime",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_json:komira_json",
         "//src/komira_encoding:komira_encoding",
