@@ -241,6 +241,17 @@ def test_parse_fractions() raises:
         _ = parse_rfc3339("2026-09-15T12:00:00.Z")
 
 
+def test_fraction_survives_every_offset_sign() raises:
+    var east = parse_rfc3339("2026-09-15T14:00:00.25+02:00")
+    assert_equal(east.seconds, 1789473600)
+    assert_equal(east.nanos, 250_000_000)
+    var west = parse_rfc3339("2026-09-15T07:00:00.25-05:00")
+    assert_equal(west.seconds, 1789473600)
+    assert_equal(west.nanos, 250_000_000)
+    var zulu = parse_rfc3339("2026-09-15T12:00:00.25-00:00")
+    assert_equal(zulu.nanos, 250_000_000)
+
+
 # DISAGREEMENT: the AWS reader took any number of fraction digits (through a
 # Float64); the protobuf reader refused more than nine. Refused by default;
 # `truncate_fraction` keeps the first nine (never rounds up).
@@ -455,6 +466,7 @@ def main() raises:
     test_format_refuses_bad_arguments()
     test_parse_basic_and_offsets()
     test_parse_fractions()
+    test_fraction_survives_every_offset_sign()
     test_parse_long_fractions()
     test_parse_leap_second()
     test_parse_offset_is_bounded()

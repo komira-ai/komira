@@ -57,6 +57,7 @@ def days_in_month(year: Int, month: Int) -> Int:
     return 0
 
 
+@always_inline
 def days_from_civil(year: Int, month: Int, day: Int) -> Int:
     """Days since 1970-01-01 of the date (year, month, day).
 
