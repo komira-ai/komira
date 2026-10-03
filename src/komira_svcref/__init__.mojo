@@ -9,6 +9,10 @@
 # (`ServiceResolver`, TTL-cached). One object per service on the CAS object
 # store, keyed by name, so registrations of different services never contend.
 #
+# DISCOVERY ONLY: this package maps a name to where it can be reached. It does
+# not bind platform identities to service names (enrollment) -- that is
+# authentication-adjacent and is not provided here.
+#
 # Depends ONLY on `komira_objectstore` (the `ConditionalWriteStore` seam +
 # Path / WritePrecondition types): no DB, no HTTP, no proto. Encapsulation:
 # the surface is `String` / `Optional[String]` / `List[String]` in and out;
