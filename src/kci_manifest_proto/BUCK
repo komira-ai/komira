@@ -1,0 +1,39 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The deployment resource graph (`kci.manifest.v1`): the FullManifest a
+# composition synthesizes and a deployer applies, generated to Mojo structs
+# with proto3-JSON and binary serde. Standalone by design: the deployer's only
+# desired-state input needs no intent schema, so the proto imports nothing.
+#
+# Reach the surface via
+#   from kci_manifest_proto.full_manifest import FullManifest, ResourceNode, ResourceKind, ...
+#
+# The `.proto` is staged at its import path `kci/manifest/v1/full_manifest.proto`,
+# which is also its descriptor name.
+mojo_proto_library(
+    name = "kci_manifest_proto",
+    srcs = ["full_manifest.proto"],
+    import_prefix = "kci/manifest/v1",
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    visibility = ["PUBLIC"],
+)
+
+# The ResourceKind ordinal census. A generated package has no `test_srcs` of
+# its own, so its test is a `mojo_test` beside it.
+mojo_test(
+    name = "test_resource_kind_ordinals",
+    srcs = ["tests/test_resource_kind_ordinals.mojo"],
+    deps = [":kci_manifest_proto"],
+)
+
+# `WebFrontendSpec.content_store` (field 12): the literal wire bytes, and the
+# binary and proto3-JSON round trips.
+mojo_test(
+    name = "test_web_frontend_content_store",
+    srcs = ["tests/test_web_frontend_content_store.mojo"],
+    deps = [
+        ":kci_manifest_proto",
+        "//src/komira_proto_codec:komira_proto_codec",
+    ],
+)
