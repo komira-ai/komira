@@ -166,11 +166,14 @@ pub struct AwsMemberFacts {
     /// `hostLabel: true` — the member is substituted into the endpoint's
     /// `hostPrefix`.
     pub host_label: bool,
+    /// `jsonvalue: true` — a string holding a JSON document; bound to a
+    /// header it travels base64-encoded.
+    pub json_value: bool,
     pub boxed: bool,
     pub deprecated: bool,
     pub deprecated_message: Option<String>,
     /// `contextParam.name` — an endpoint-ruleset input. Recorded rather
-    /// than dropped even though no ruleset is vendored.
+    /// than dropped even though the generator reads no ruleset.
     pub context_param: Option<String>,
     /// True when this member is the shape's designated `payload`.
     pub is_payload: bool,
@@ -183,7 +186,9 @@ pub struct AwsMemberFacts {
     /// its member/key/value `locationName`s, which are the XML element
     /// names — is otherwise unreachable from the IR. This is the link.
     pub container_shape: Option<String>,
-    /// The resolved timestamp format, for a `timestamp`-shaped member.
+    /// The resolved timestamp format, for a `timestamp`-shaped member and
+    /// for a list or map whose elements (at any depth) are timestamps: a
+    /// container has one scalar leaf, so the format belongs to it.
     pub timestamp_format: Option<AwsTimestampFormat>,
 }
 
@@ -492,6 +497,16 @@ pub fn lower_aws_service(
             return Err(format!(
                 "aws front-end: REFUSED document: shape `{name}` is a document type \
                  (untyped JSON), which the IR has no type for"
+            ));
+        }
+        // REFUSED, by name: an event stream is a framed sequence of events
+        // inside one HTTP body, and the generated code reads and writes a
+        // body as one document, so a client of it would send or read the
+        // frames as if they were that document.
+        if flag(shape, "eventstream") {
+            return Err(format!(
+                "aws front-end: REFUSED eventstream: shape `{name}` is an event \
+                 stream, and the generated code has no event-stream framing"
             ));
         }
         match ty {
@@ -1083,10 +1098,11 @@ impl<'a> AwsLowerer<'a> {
         };
         let location_name = str_of(mo, "locationName");
         let shape_name = member_shape_name(m, owner)?;
-        let shape = self.shape(&shape_name)?;
-        let timestamp_format = if shape_type(shape, &shape_name)? == "timestamp" {
+        let leaf_name = self.container_leaf(&shape_name)?;
+        let leaf = self.shape(&leaf_name)?;
+        let timestamp_format = if shape_type(leaf, &leaf_name)? == "timestamp" {
             Some(resolve_timestamp_format(
-                str_of(shape, "timestampFormat").as_deref(),
+                str_of(leaf, "timestampFormat").as_deref(),
                 &self.meta.protocol,
                 location,
             )?)
@@ -1107,6 +1123,7 @@ impl<'a> AwsLowerer<'a> {
             streaming: flag(mo, "streaming"),
             event_payload: flag(mo, "eventpayload"),
             host_label: flag(mo, "hostLabel"),
+            json_value: flag(mo, "jsonvalue"),
             boxed: flag(mo, "box"),
             deprecated: flag(mo, "deprecated"),
             deprecated_message: str_of(mo, "deprecatedMessage"),
@@ -1120,6 +1137,34 @@ impl<'a> AwsLowerer<'a> {
             container_shape: container,
             timestamp_format,
         })
+    }
+
+    /// The shape a list's elements or a map's values end in, through any
+    /// depth of containers: `shape_name` itself when it is not a list or a
+    /// map. A container chain that re-enters itself is refused (see
+    /// [`Self::lower_nested_type_on`]).
+    fn container_leaf(&self, shape_name: &str) -> Result<String, String> {
+        let mut name = shape_name.to_string();
+        let mut seen: Vec<String> = Vec::new();
+        loop {
+            let s = self.shape(&name)?;
+            let next = match shape_type(s, &name)? {
+                "list" => s.get("member"),
+                "map" => s.get("value"),
+                _ => return Ok(name),
+            };
+            if seen.contains(&name) {
+                return Err(format!(
+                    "aws front-end: container shape `{name}` contains itself through \
+                     containers only"
+                ));
+            }
+            seen.push(name.clone());
+            let next = next.ok_or_else(|| {
+                format!("aws front-end: container shape `{name}` has no element shape")
+            })?;
+            name = member_shape_name(next, &name)?;
+        }
     }
 
     // --- operations ------------------------------------------------------
@@ -1209,6 +1254,26 @@ impl<'a> AwsLowerer<'a> {
             ));
         }
 
+        // REFUSED, by name: an operation whose request must carry a checksum
+        // (`httpChecksumRequired`, or `httpChecksum.requestChecksumRequired`).
+        // The generated client sends none, so the service would reject every
+        // request.
+        let checksum_required = op
+            .get("httpChecksumRequired")
+            .and_then(Json::as_bool)
+            .unwrap_or(false)
+            || op
+                .get("httpChecksum")
+                .and_then(|c| c.get("requestChecksumRequired"))
+                .and_then(Json::as_bool)
+                .unwrap_or(false);
+        if checksum_required {
+            return Err(format!(
+                "aws front-end: REFUSED checksum-required: operation `{op_name}` \
+                 requires a request checksum, and the generated client sends none"
+            ));
+        }
+
         let facts = AwsOperationFacts {
             name: op_name.to_string(),
             ir_method_name: ir_method_name.clone(),
@@ -1283,7 +1348,7 @@ impl<'a> AwsLowerer<'a> {
         };
         // DROPPED, deliberately and named: `staticContextParams` (78
         // operations) and `operationContextParams` (5). They bind values
-        // into an ENDPOINT RULESET, and `PIN.json` vendors no rulesets —
+        // into an ENDPOINT RULESET, and the generator reads no ruleset —
         // there is nothing for them to parameterise, and inventing a
         // representation for an absent consumer is how a wrong default gets
         // established. `contextParam` (the per-MEMBER half, 179 members) IS
@@ -1291,8 +1356,8 @@ impl<'a> AwsLowerer<'a> {
         if op.get("staticContextParams").is_some() || op.get("operationContextParams").is_some() {
             self.note(format!(
                 "operation `{op_name}`: staticContextParams / operationContextParams \
-                 DROPPED — they are endpoint-ruleset inputs and no ruleset is vendored \
-                 (see tools/vendor/aws_models/PIN.json)"
+                 DROPPED — they are endpoint-ruleset inputs and the generator reads no \
+                 ruleset (see third_party/botocore/models.bzl)"
             ));
         }
 
@@ -1619,6 +1684,11 @@ mod tests {
                                    "members": {{"M": {{"shape": "{member_shape}"}}}}}},
                            "Str": {{"type": "string"}},
                            "Doc": {{"type": "structure", "members": {{}}, "document": true}},
+                           "Events": {{"type": "structure", "members": {{}}, "eventstream": true}},
+                           "Stamps": {{"type": "list", "member": {{"shape": "StampMap"}}}},
+                           "StampMap": {{"type": "map", "key": {{"shape": "Str"}},
+                                        "value": {{"shape": "Stamp"}}}},
+                           "Stamp": {{"type": "timestamp", "timestampFormat": "rfc822"}},
                            "Plain": {{"type": "structure", "members": {{}}, "exception": true}},
                            "Coded": {{"type": "structure", "members": {{}}, "exception": true,
                                      "error": {{"code": "Customized", "httpStatusCode": 402}}}},
@@ -1653,6 +1723,50 @@ mod tests {
     fn a_host_prefix_is_a_named_refusal() {
         let op = r#", "endpoint": {"hostPrefix": "data-"}"#;
         assert_eq!(refusal_of(&tiny_model("", op, "Str")).as_deref(), Some("host-prefix"));
+    }
+
+    #[test]
+    fn a_required_checksum_is_a_named_refusal() {
+        for op in [
+            r#", "httpChecksumRequired": true"#,
+            r#", "httpChecksum": {"requestChecksumRequired": true}"#,
+        ] {
+            assert_eq!(
+                refusal_of(&tiny_model("", op, "Str")).as_deref(),
+                Some("checksum-required"),
+                "{op}"
+            );
+        }
+        // An optional checksum (the client may send none) lowers.
+        for op in [
+            r#", "httpChecksumRequired": false"#,
+            r#", "httpChecksum": {"requestChecksumRequired": false, "requestAlgorithmMember": "M"}"#,
+        ] {
+            lower_tiny(&tiny_model("", op, "Str")).unwrap();
+        }
+    }
+
+    #[test]
+    fn an_event_stream_is_a_named_refusal() {
+        assert_eq!(refusal_of(&tiny_model("", "", "Events")).as_deref(), Some("eventstream"));
+    }
+
+    /// The timestamp format recorded for the tiny model's member `M`.
+    fn member_m_format(member_shape: &str) -> Option<AwsTimestampFormat> {
+        let l = lower_tiny(&tiny_model("", "", member_shape)).unwrap();
+        let (_, m) = l
+            .facts
+            .members()
+            .find(|(_, m)| m.member_name == "M")
+            .expect("member M");
+        m.timestamp_format
+    }
+
+    #[test]
+    fn a_container_of_timestamps_carries_its_leaf_format() {
+        // A list of maps of rfc822 timestamps: the leaf's format.
+        assert_eq!(member_m_format("Stamps"), Some(AwsTimestampFormat::Rfc822));
+        assert_eq!(member_m_format("Str"), None);
     }
 
     #[test]

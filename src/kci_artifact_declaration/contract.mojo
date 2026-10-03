@@ -1,15 +1,15 @@
 # =============================================================================
 # kci_artifact_declaration/contract.mojo -- the words of the build contract
-#   kci holds every build system to, and the one substitution it performs.
+#   kci holds every build system to: the placeholders, the stamp, the order,
+#   and the one substitution it performs.
 # =============================================================================
 #
 # For each artifact kci creates an EMPTY output directory and runs
 #
 #   <executable> <build_system.args...> <artifact.args...>
 #
-# with every `{out_dir}` in any arg replaced by that directory's absolute
-# path. ONE ARTIFACT PER DECLARATION: the build leaves, at the top of that
-# directory, EXACTLY ONE kci artifact manifest (//src/kci_artifact_manifest's
+# with every placeholder in any arg replaced by its value (below). ONE
+# ARTIFACT PER DECLARATION: the build leaves, at the top of that directory, EXACTLY ONE kci artifact manifest (//src/kci_artifact_manifest's
 # format) named `KCI_MANIFEST_NAME` (`manifest.json`), plus the files it
 # names. That is the layout of a `conda_package`'s `[release]` directory
 # (`<name>-<version>-0.conda`, `manifest.json`, `metadata.json`). kci ships
@@ -21,15 +21,68 @@
 # for byte; no case folding, no trimming, no `-`/`_` equivalence).
 #
 # A placeholder is `{<identifier>}`, the identifier `[A-Za-z_][A-Za-z0-9_]*`.
-# `{out_dir}` is the only one; a brace that does not enclose an identifier
-# (`{}`, `{"k": 1}`) is literal text and passed through unchanged. There is
-# no escape: an arg cannot carry a literal `{out_dir}`.
+# The six, every one a value kci knows before the build starts:
+#
+#   {out_dir}        this artifact's output directory, `{release_dir}/<name>`
+#                    (absolute, EMPTY when the build starts)
+#   {release_dir}    the release directory (absolute): it holds the output
+#                    directory of every artifact declared ABOVE this one,
+#                    each named by its declaration name and already
+#                    verified, and nothing else that a declaration names
+#   {revision_id}    the release commit (`kci build --revision-id`): the full
+#                    40-hex id of the commit checked out in the work dir
+#   {source_commit}  the stamp's commit: the newest first-parent commit at
+#                    or below the release commit that touches anything but
+#                    documentation (`tools/build/package/release_version.sh`'s
+#                    `commit=`; equal to {revision_id} unless the newest
+#                    commits only change documentation)
+#   {build_number}   the release iteration: the first-parent commit count of
+#                    {source_commit}, a positive decimal
+#   {timestamp_ms}   {source_commit}'s commit time in milliseconds, a
+#                    positive decimal
+#
+# The last four are the STAMP: git-derived by kci, never typed and never
+# read from the environment, so a declaration passes them to the build as
+# plain args (buck2: `-c komira.package_stamp={build_number}`). Any other
+# `{<identifier>}` is refused by the validator; a brace that does not
+# enclose an identifier (`{}`, `{"k": 1}`) is literal text and passed
+# through unchanged. Substitution is ONE pass over the arg as written, so a
+# value that itself holds `{...}` (a directory named `{out_dir}`) is never
+# substituted again. There is no escape: an arg cannot carry a literal
+# placeholder.
+#
+# ORDER. kci builds the artifacts one at a time in declarations-file order,
+# each only after the one above it built and was verified. That is what makes
+# `{release_dir}` useful: a later declaration (a metapackage) reads the
+# manifests of the earlier ones, e.g. `{release_dir}/komira_encoding/
+# manifest.json`.
+#
+# ONE METAPACKAGE (a recommendation; the CEO has not answered it): a set holds
+# exactly one metapackage per subdir, declared LAST, whose members are every
+# library of the set. kci build places it last by file order; kci publish
+# refuses a set with zero or two metapackages, or one whose members are not
+# every library.
 #
 # Pure functions over owned values; no pointer, no process.
 # =============================================================================
 
 comptime OUT_DIR_PLACEHOLDER: String = "{out_dir}"
-"""The one placeholder: replaced by the output directory's absolute path."""
+"""This artifact's output directory, `{release_dir}/<name>`."""
+
+comptime RELEASE_DIR_PLACEHOLDER: String = "{release_dir}"
+"""The release directory: every artifact declared above, already built."""
+
+comptime REVISION_ID_PLACEHOLDER: String = "{revision_id}"
+"""The release commit, full 40 hex (`kci build --revision-id`)."""
+
+comptime SOURCE_COMMIT_PLACEHOLDER: String = "{source_commit}"
+"""The stamp's commit, full 40 hex (the newest non-documentation commit)."""
+
+comptime BUILD_NUMBER_PLACEHOLDER: String = "{build_number}"
+"""The release iteration: the first-parent commit count of the stamp's commit."""
+
+comptime TIMESTAMP_MS_PLACEHOLDER: String = "{timestamp_ms}"
+"""The stamp's commit time in milliseconds."""
 
 comptime KCI_MANIFEST_NAME: String = "manifest.json"
 """The one kci artifact manifest a build leaves at the top of `{out_dir}`."""
@@ -50,21 +103,160 @@ def placeholders_in(arg: String) -> List[String]:
     var n = len(b)
     var i = 0
     while i < n:
-        if Int(b[i]) == 123 and i + 1 < n and _ident_start(Int(b[i + 1])):
-            var j = i + 2
-            while j < n and _ident(Int(b[j])):
-                j += 1
-            if j < n and Int(b[j]) == 125:
-                out.append(String(arg[byte = i : j + 1]))
-                i = j + 1
-                continue
-        i += 1
+        var end = _placeholder_end(arg, i)
+        if end < 0:
+            i += 1
+            continue
+        out.append(String(arg[byte = i:end]))
+        i = end
     return out^
 
 
-def substitute_out_dir(arg: String, out_dir: String) -> String:
-    """`arg` with every `{out_dir}` replaced by `out_dir`."""
-    return arg.replace(String(OUT_DIR_PLACEHOLDER), out_dir)
+def known_placeholders() -> List[String]:
+    """The six placeholders, in the order of this file's header."""
+    var out = List[String]()
+    out.append(String(OUT_DIR_PLACEHOLDER))
+    out.append(String(RELEASE_DIR_PLACEHOLDER))
+    out.append(String(REVISION_ID_PLACEHOLDER))
+    out.append(String(SOURCE_COMMIT_PLACEHOLDER))
+    out.append(String(BUILD_NUMBER_PLACEHOLDER))
+    out.append(String(TIMESTAMP_MS_PLACEHOLDER))
+    return out^
+
+
+def is_known_placeholder(p: String) -> Bool:
+    var known = known_placeholders()
+    for i in range(len(known)):
+        if known[i] == p:
+            return True
+    return False
+
+
+def _is_lower_hex(s: String) -> Bool:
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+            return False
+    return True
+
+
+def require_full_commit_id(what: String, id: String) raises:
+    """Refuse unless `id` is a full commit id: exactly 40 lowercase hex
+    digits. An abbreviated id names a commit only as long as no other commit
+    shares its prefix, so a stamp never carries one."""
+    if id.byte_length() != 40 or not _is_lower_hex(id):
+        raise Error(
+            what
+            + String(" '")
+            + id
+            + String("' is not a full commit id (exactly 40 lowercase hex digits; an")
+            + String(" abbreviated id is refused)")
+        )
+
+
+struct ReleaseStamp(Copyable, Movable):
+    """The git-derived values of the four stamp placeholders. Built only
+    through the checking constructor, so a value of this type is a valid
+    stamp: both ids full 40-hex, both numbers positive.
+
+    Layout: owned values only. No pointer field."""
+
+    var revision_id: String
+    var source_commit: String
+    var build_number: Int
+    var timestamp_ms: Int
+
+    def __init__(
+        out self,
+        var revision_id: String,
+        var source_commit: String,
+        build_number: Int,
+        timestamp_ms: Int,
+    ) raises:
+        require_full_commit_id(String("revision_id"), revision_id)
+        require_full_commit_id(String("source_commit"), source_commit)
+        if build_number <= 0:
+            raise Error(
+                String("build_number ") + String(build_number) + String(" is not positive")
+            )
+        if timestamp_ms <= 0:
+            raise Error(
+                String("timestamp_ms ") + String(timestamp_ms) + String(" is not positive")
+            )
+        self.revision_id = revision_id^
+        self.source_commit = source_commit^
+        self.build_number = build_number
+        self.timestamp_ms = timestamp_ms
+
+
+struct BuildValues(Copyable, Movable):
+    """What the placeholders of ONE artifact's argv stand for. `out_dir` is
+    always `release_dir + "/" + artifact` (render_build_argv derives it).
+
+    Layout: owned values only. No pointer field."""
+
+    var out_dir: String
+    var release_dir: String
+    var stamp: ReleaseStamp
+
+    def __init__(out self, var out_dir: String, var release_dir: String, var stamp: ReleaseStamp):
+        self.out_dir = out_dir^
+        self.release_dir = release_dir^
+        self.stamp = stamp^
+
+    def value_of(self, placeholder: String) raises -> String:
+        """The value `placeholder` (braces included) stands for; raises on
+        one that is not among the six."""
+        if placeholder == OUT_DIR_PLACEHOLDER:
+            return self.out_dir.copy()
+        if placeholder == RELEASE_DIR_PLACEHOLDER:
+            return self.release_dir.copy()
+        if placeholder == REVISION_ID_PLACEHOLDER:
+            return self.stamp.revision_id.copy()
+        if placeholder == SOURCE_COMMIT_PLACEHOLDER:
+            return self.stamp.source_commit.copy()
+        if placeholder == BUILD_NUMBER_PLACEHOLDER:
+            return String(self.stamp.build_number)
+        if placeholder == TIMESTAMP_MS_PLACEHOLDER:
+            return String(self.stamp.timestamp_ms)
+        raise Error(String("unknown placeholder '") + placeholder + String("'"))
+
+
+def _placeholder_end(arg: String, i: Int) -> Int:
+    """If a placeholder starts at byte `i`, the index just past its `}`;
+    else -1. The one lexer `placeholders_in` and the substitution share."""
+    var b = arg.as_bytes()
+    var n = len(b)
+    if Int(b[i]) == 123 and i + 1 < n and _ident_start(Int(b[i + 1])):
+        var j = i + 2
+        while j < n and _ident(Int(b[j])):
+            j += 1
+        if j < n and Int(b[j]) == 125:
+            return j + 1
+    return -1
+
+
+def substitute_placeholders(arg: String, values: BuildValues) raises -> String:
+    """`arg` with every placeholder replaced by its value, in ONE pass over
+    `arg` as written (a value is never substituted again). Raises on an
+    unknown placeholder (a validated declaration holds none)."""
+    var b = arg.as_bytes()
+    var n = len(b)
+    var out = String("")
+    var lit = 0
+    var i = 0
+    while i < n:
+        var end = _placeholder_end(arg, i)
+        if end < 0:
+            i += 1
+            continue
+        out += String(arg[byte = lit:i])
+        out += values.value_of(String(arg[byte = i:end]))
+        i = end
+        lit = end
+    out += String(arg[byte = lit:n])
+    return out^
 
 
 def require_one_manifest(declaration: String, top_level: List[String]) raises:

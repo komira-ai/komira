@@ -12,14 +12,17 @@
 #
 #   parse.mojo     the textproto reader (validates before it returns)
 #   validate.mojo  the rules and the lookups
-#   contract.mojo  `{out_dir}`, `manifest.json`, the substitution, and the
-#                  two refusals over what a build left (exactly one
-#                  manifest; its `name` is the declaration's, exactly)
+#   contract.mojo  the six placeholders (`{out_dir}`, `{release_dir}` and
+#                  the git-derived stamp: `{revision_id}`, `{source_commit}`,
+#                  `{build_number}`, `{timestamp_ms}`), `ReleaseStamp`,
+#                  `BuildValues`, the one-pass substitution, file order,
+#                  `manifest.json`, and the two refusals over what a build
+#                  left (exactly one manifest; its `name` the declaration's)
 #   render.mojo    `render_build_argv`: the argv for one artifact (pure)
 #
 # The contract, in full in contract.mojo and the .proto: kci creates an EMPTY
-# directory per artifact, runs the rendered argv, and ships exactly what the
-# ONE kci artifact manifest, `manifest.json`, left at its top describes (one
+# directory per artifact, in declarations-file order, runs the rendered
+# argv, and ships exactly what the ONE kci artifact manifest, `manifest.json`, left at its top describes (one
 # artifact per declaration; its `name` must be the declaration's). Running
 # the build is `kci build`'s; the set-level checks over the built manifests
 # (every artifact built, lockstep versions, metapackage last, requirement
@@ -27,12 +30,22 @@
 # =============================================================================
 
 from kci_artifact_declaration.contract import (
+    BUILD_NUMBER_PLACEHOLDER,
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
+    RELEASE_DIR_PLACEHOLDER,
+    REVISION_ID_PLACEHOLDER,
+    SOURCE_COMMIT_PLACEHOLDER,
+    TIMESTAMP_MS_PLACEHOLDER,
+    BuildValues,
+    ReleaseStamp,
+    is_known_placeholder,
+    known_placeholders,
     placeholders_in,
+    require_full_commit_id,
     require_manifest_name,
     require_one_manifest,
-    substitute_out_dir,
+    substitute_placeholders,
 )
 from kci_artifact_declaration.parse import (
     parse_artifact_declarations,
