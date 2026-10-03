@@ -6,8 +6,9 @@
 #   every refusal (shallow clone, HEAD not the revision, modified tracked
 #   files, no non-documentation commit, git exiting non-zero, output not of
 #   the expected shape) with the commands after it not run; git that cannot
-#   start or times out is CANNOT_TELL; and through `build_release`, a refused
-#   stamp runs no build and creates no out dir.
+#   start or times out is INDETERMINATE; and through `run_build`, a refused
+#   stamp (after the RUNNING record) runs no build and creates no platform
+#   release directory.
 # =============================================================================
 #
 # git is a ScriptedRunner: its argv must match each step exactly, so the
@@ -20,18 +21,27 @@ from std.os.path import exists, realpath
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
+from kci_contract import (
+    ERROR_CANNOT_TELL,
+    ERROR_REVISION,
+    OUTCOME_INDETERMINATE,
+    OUTCOME_REFUSED,
+    OUTCOME_SUCCEEDED,
+    STATUS_RUNNING,
+    MemoryRecorder,
+    RunIdentity,
+    exit_code_of,
+)
+from kci_contract import RunResult as KciRunResult
 from kci_build import (
-    EXIT_CANNOT_TELL,
-    EXIT_OK,
-    EXIT_REFUSED,
     BuildRequest,
     ProcessRunner,
     RunResult,
     RunSpec,
     ScriptedRunner,
     ScriptedStep,
-    build_release,
     derive_release_stamp,
+    run_build,
     write_text_file,
 )
 
@@ -52,13 +62,14 @@ def _fresh(tag: String) raises -> String:
     return realpath(d)
 
 
-def _request(root: String) -> BuildRequest:
-    var r = BuildRequest()
+def _request(root: String) raises -> BuildRequest:
+    var r = BuildRequest(RunIdentity(String("gh-1"), 1))
     r.declarations_file = root + String("/decls.textproto")
     r.work_dir = root + String("/repo")
-    r.out_dir = root + String("/out")
+    r.release_dir = root + String("/release")
     r.log_dir = root + String("/logs")
     r.revision_id = String(_REV)
+    r.platform = String("linux-x86_64")
     return r^
 
 
@@ -121,7 +132,8 @@ def _git(
 def _refused(mut g: ScriptedRunner, ran: Int, why: String) raises:
     var root = _fresh(String("ref"))
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_REFUSED, r.message)
+    assert_equal(r.outcome, String(OUTCOME_REFUSED), r.message)
+    assert_equal(r.error_id, String(ERROR_REVISION))
     assert_equal(r.message, String(_PREFIX) + why)
     assert_false(Bool(r.stamp))
     # the commands after the refusal did not run
@@ -136,7 +148,7 @@ def test_clean_full_history_checkout_gives_the_stamp() raises:
     var req = _request(root)
     var g = _git()
     var r = derive_release_stamp(req, g)
-    assert_equal(r.exit_code, EXIT_OK, r.message)
+    assert_equal(r.outcome, String(OUTCOME_SUCCEEDED), r.message)
     assert_equal(g.remaining(), 0)
     var s = r.stamp.value().copy()
     assert_equal(s.revision_id, String(_REV))
@@ -162,7 +174,7 @@ def test_the_stamp_commit_may_be_the_revision() raises:
     g.expect(_ok(_a("rev-list", "--count", "--first-parent", _REV), String("1\n")))
     g.expect(_ok(_a("log", "-1", "--format=%ct", _REV), String("1\n")))
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_OK, r.message)
+    assert_equal(r.outcome, String(OUTCOME_SUCCEEDED), r.message)
     assert_equal(r.stamp.value().source_commit, String(_REV))
     assert_equal(r.stamp.value().build_number, 1)
     assert_equal(r.stamp.value().timestamp_ms, 1000)
@@ -175,7 +187,7 @@ def test_a_shallow_clone_is_refused() raises:
     var root = _fresh(String("shallow"))
     var g = _git(shallow = String("true\n"))
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_REFUSED)
+    assert_equal(r.outcome, String(OUTCOME_REFUSED))
     assert_equal(
         r.message,
         String(_PREFIX) + String("--work-dir '") + root
@@ -199,7 +211,7 @@ def test_head_not_the_revision_is_refused() raises:
     var root = _fresh(String("head"))
     var g = _git(head = String(_SRC) + String("\n"))
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_REFUSED)
+    assert_equal(r.outcome, String(OUTCOME_REFUSED))
     assert_equal(
         r.message,
         String(_PREFIX) + String("'") + String(_REV)
@@ -214,7 +226,7 @@ def test_modified_tracked_files_are_refused() raises:
     var root = _fresh(String("dirty"))
     var g = _git(status = String(" M src/komira_encoding/BUCK\n"))
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_REFUSED)
+    assert_equal(r.outcome, String(OUTCOME_REFUSED))
     assert_equal(
         r.message,
         String(_PREFIX) + String("--work-dir '") + root
@@ -296,7 +308,8 @@ def test_git_that_cannot_start_is_cannot_tell() raises:
     var root = _fresh(String("nogit"))
     var g = _Unstartable()
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_CANNOT_TELL)
+    assert_equal(r.outcome, String(OUTCOME_INDETERMINATE))
+    assert_equal(r.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(
         r.message,
         String(_PREFIX)
@@ -311,30 +324,40 @@ def test_git_that_times_out_is_cannot_tell() raises:
     g.expect(_ok(_shallow(), String("false\n")))
     g.expect(ScriptedStep(_head(), timed_out=True))
     var r = derive_release_stamp(_request(root), g)
-    assert_equal(r.exit_code, EXIT_CANNOT_TELL)
+    assert_equal(r.outcome, String(OUTCOME_INDETERMINATE))
+    assert_equal(r.error_id, String(ERROR_CANNOT_TELL))
     assert_equal(r.message, String(_PREFIX) + String("`git rev-parse --verify HEAD` timed out"))
 
 
-# ---- through build_release ---------------------------------------------------
+# ---- through run_build ---------------------------------------------------
 
 
-def test_a_refused_stamp_runs_no_build_and_creates_no_out_dir() raises:
+def test_a_refused_stamp_runs_no_build_and_creates_no_release_dir() raises:
     var root = _fresh(String("flow"))
     var req = _request(root)
     write_text_file(
         req.declarations_file,
         String(
+            'schema_version: 1\n'
             'build_systems { name: "b" executable: "b" }\n'
             'artifacts { name: "a" build_system: "b" args: "--out={out_dir}" }\n'
         ),
     )
     var builds = ScriptedRunner()
     var g = _git(shallow = String("true\n"))
-    var outcome = build_release(req, builds, g)
-    assert_equal(outcome.exit_code, EXIT_REFUSED)
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = MemoryRecorder()
+    var outcome = run_build(req, result, rec, builds, g)
+    assert_equal(outcome.outcome, String(OUTCOME_REFUSED))
+    assert_equal(outcome.error_id, String(ERROR_REVISION))
+    assert_equal(outcome.exit_code(), exit_code_of(String(OUTCOME_REFUSED)))
     assert_true(outcome.message.startswith(String(_PREFIX) + String("--work-dir '")))
     assert_equal(len(builds.calls), 0)
-    assert_false(exists(req.out_dir))
+    assert_false(exists(req.platform_dir()))
+    # the RUNNING record came first: git reading the checkout is the first effect
+    assert_equal(len(rec.statuses), 1)
+    assert_equal(rec.statuses[0], String(STATUS_RUNNING))
+    assert_equal(result.error.id, String(ERROR_REVISION))
 
 
 def main() raises:

@@ -8,24 +8,29 @@
 #   (1) classification by download: our bytes = present-same, other bytes =
 #       present-different, no file = absent -- and a repodata entry naming a
 #       file that is not there is ABSENT, not present;
-#   (2) one file present with other bytes: exit 7 with ZERO write requests,
+#   (2) one file present with other bytes: STOP_DIFFERENT_BYTES, REFUSED
+#       (exit 3: nothing of this run landed) with ZERO write requests,
 #       naming the file, and the credential never asked;
-#   (3) a set name the channel has never held: unclaimed = exit 8, zero
-#       writes; claimed, the run proceeds; a claim for a name the channel
-#       holds = 8; a claim for a name not in the set = 8;
-#   (4) every file present and identical: exit 6 ("already published"),
-#       zero writes;
-#   (5) a name listing that cannot be read (noarch answers 503): exit 5,
-#       never "new" (no claim demanded); a file read that cannot be answered:
-#       exit 5;
+#   (3) a set name the channel has never held: unclaimed = STOP_NEW_NAME,
+#       REFUSED (exit 3), zero writes; claimed, the run proceeds; a claim for
+#       a name the channel holds = STOP_NEW_NAME; a claim for a name not in
+#       the set = STOP_NEW_NAME;
+#   (4) every file present and identical: ALREADY_PUBLISHED, NOOP, EXIT 0
+#       (the end state holds: not a red job), zero writes;
+#   (5) a name listing that cannot be read (noarch answers 503):
+#       INDETERMINATE (exit 5), never "new" (no claim demanded); a file read
+#       that cannot be answered: exit 5;
 #   (6) a set file the DOWNLOAD finds but no listing names yet (the index
 #       lags) makes its name HELD: no claim is needed for it, and when every
-#       file is so, the run is 6, not 8. A claim for such a name is
+#       file is so, the run is ALREADY_PUBLISHED, not STOP_NEW_NAME. A claim
+#       for such a name is
 #       SATISFIED, not refused: the channel holds only this release's own
 #       bytes under it (see (7) for why it must be); a claim for a name that
-#       ANOTHER file holds is still 8, also while our own file is unlisted;
-#   (7) the SAME COMMAND, claims and all, run again: after exit 0 it is 6,
-#       and after a partial publish (exit 9) it resumes and ends 0 without
+#       ANOTHER file holds is still STOP_NEW_NAME, also while our own file is
+#       unlisted;
+#   (7) the SAME COMMAND, claims and all, run again: after a publish it is
+#       ALREADY_PUBLISHED (exit 0 both times), and after a partial publish
+#       (exit 6) it resumes and ends 0 without
 #       re-uploading what landed -- with the index caught up AND while it
 #       still lags, so the verdict does not depend on index timing.
 #
@@ -38,15 +43,16 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_false, assert_true
 
+from kci_contract import EXIT_CANNOT_TELL, EXIT_OK, EXIT_PARTIAL, EXIT_REFUSED
 from kci_pkg_upload import SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
 from kci_publish import (
-    EXIT_PARTIAL,
     NoWaitSleeper,
-    EXIT_ALREADY_PUBLISHED,
-    EXIT_CANNOT_TELL,
-    EXIT_PUBLISHED,
-    EXIT_STOP_DIFFERENT_BYTES,
-    EXIT_STOP_NEW_NAME,
+    REASON_ALREADY_PUBLISHED,
+    REASON_CANNOT_TELL,
+    REASON_PARTIAL,
+    REASON_PUBLISHED,
+    REASON_STOP_DIFFERENT_BYTES,
+    REASON_STOP_NEW_NAME,
     STATE_ABSENT,
     STATE_DIFFERENT,
     STATE_SAME,
@@ -60,6 +66,13 @@ from kci_publish import (
 )
 from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_targets
 from kci_publish.scripted_channel import UPLOAD_LOSE_NOT_STORED
+
+def _ends(rep: PublishReport, reason: String, exit_code: Int, msg: String = String("")) raises:
+    """`rep` stopped for `reason`, and its exit number (kci_contract's) is
+    `exit_code`."""
+    assert_equal(rep.reason, reason, msg)
+    assert_equal(rep.exit_code(), exit_code, msg)
+
 
 
 def _root(tag: String) raises -> String:
@@ -149,7 +162,7 @@ def test_one_different_file_stops_with_zero_writes() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, _none(), reg, src)
-    assert_equal(rep.exit_code, EXIT_STOP_DIFFERENT_BYTES)
+    _ends(rep, String(REASON_STOP_DIFFERENT_BYTES), EXIT_REFUSED)
     assert_true(rep.has_line_containing(String("STOP different bytes: linux-64/") + t[2].coordinate.file_name))
     assert_equal(reg.transport().write_count(), 0)
     assert_equal(src.asked_count(), 0)
@@ -162,17 +175,17 @@ def test_new_names_must_be_claimed() raises:
     var reg = _registry(_channel())
     var src = _src()
     var rep = _run(t, _none(), reg, src)
-    assert_equal(rep.exit_code, EXIT_STOP_NEW_NAME)
+    _ends(rep, String(REASON_STOP_NEW_NAME), EXIT_REFUSED)
     assert_true(rep.has_line_containing(String("STOP new name: 'komira_alpha'")))
     assert_true(rep.has_line_containing(String("STOP new name: 'komira'")))
     assert_equal(reg.transport().write_count(), 0)
-    # two of three claimed: still 8, naming the third
+    # two of three claimed: still STOP_NEW_NAME, naming the third
     var some = List[String]()
     some.append(String("komira_alpha"))
     some.append(String("komira_beta"))
     var reg2 = _registry(_channel())
     var rep2 = _run(t, some, reg2, src)
-    assert_equal(rep2.exit_code, EXIT_STOP_NEW_NAME)
+    _ends(rep2, String(REASON_STOP_NEW_NAME), EXIT_REFUSED)
     assert_true(rep2.has_line_containing(String("STOP new name: 'komira'")))
     assert_false(rep2.has_line_containing(String("STOP new name: 'komira_alpha'")))
     assert_equal(reg2.transport().write_count(), 0)
@@ -181,13 +194,13 @@ def test_new_names_must_be_claimed() raises:
     all.append(String("komira"))
     var reg3 = _registry(_channel())
     var rep3 = _run(t, all, reg3, src)
-    assert_equal(rep3.exit_code, EXIT_PUBLISHED, String("\n").join(rep3.lines))
+    _ends(rep3, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep3.lines))
     # a claim for a name the channel holds
     var ch4 = _channel()
     _seed_names(ch4)
     var reg4 = _registry(ch4^)
     var rep4 = _run(t, some, reg4, src)
-    assert_equal(rep4.exit_code, EXIT_STOP_NEW_NAME)
+    _ends(rep4, String(REASON_STOP_NEW_NAME), EXIT_REFUSED)
     assert_true(rep4.has_line_containing(String("--claim-new-name 'komira_alpha' is already in the channel")))
     assert_equal(reg4.transport().write_count(), 0)
     # a claim for a name not in the set
@@ -197,7 +210,7 @@ def test_new_names_must_be_claimed() raises:
     var stray = List[String]()
     stray.append(String("komira_extra"))
     var rep5 = _run(t, stray, reg5, src)
-    assert_equal(rep5.exit_code, EXIT_STOP_NEW_NAME)
+    _ends(rep5, String(REASON_STOP_NEW_NAME), EXIT_REFUSED)
     assert_true(rep5.has_line_containing(String("'komira_extra' is not a package of this release set")))
     assert_equal(reg5.transport().write_count(), 0)
     print("  test_new_names_must_be_claimed: PASS")
@@ -212,7 +225,10 @@ def test_all_identical_is_already_published() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, _none(), reg, src)
-    assert_equal(rep.exit_code, EXIT_ALREADY_PUBLISHED)
+    # NOOP, exit 0: the end state holds; there is no second "green" number
+    _ends(rep, String(REASON_ALREADY_PUBLISHED), EXIT_OK)
+    assert_equal(rep.outcome(), String("NOOP"))
+    assert_true(rep.ok())
     assert_true(rep.has_line_containing(String("already published")))
     assert_equal(reg.transport().write_count(), 0)
     assert_equal(src.asked_count(), 0)
@@ -226,7 +242,7 @@ def test_an_unread_listing_is_cannot_tell_never_new() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, _none(), reg, src)
-    assert_equal(rep.exit_code, EXIT_CANNOT_TELL)
+    _ends(rep, String(REASON_CANNOT_TELL), EXIT_CANNOT_TELL)
     assert_true(rep.has_line_containing(String("CANNOT TELL which names the channel holds: noarch")))
     assert_false(rep.has_line_containing(String("STOP new name")))
     assert_equal(reg.transport().write_count(), 0)
@@ -236,7 +252,7 @@ def test_an_unread_listing_is_cannot_tell_never_new() raises:
     ch2.fail_fetch_once(String("linux-64"), t[1].coordinate.file_name)
     var reg2 = _registry(ch2^)
     var rep2 = _run(t, _none(), reg2, src)
-    assert_equal(rep2.exit_code, EXIT_CANNOT_TELL)
+    _ends(rep2, String(REASON_CANNOT_TELL), EXIT_CANNOT_TELL)
     assert_true(rep2.has_line_containing(String("CANNOT TELL linux-64/") + t[1].coordinate.file_name))
     assert_equal(reg2.transport().write_count(), 0)
     print("  test_an_unread_listing_is_cannot_tell_never_new: PASS")
@@ -260,7 +276,7 @@ def test_a_file_found_by_download_but_not_listed_holds_its_name() raises:
     ch.put_unlisted(String("linux-64"), t[2].coordinate.file_name, _bytes(String("meta conda bytes")))
     var reg = _registry(ch^)
     var rep = _run(t, _none(), reg, src)
-    assert_equal(rep.exit_code, EXIT_ALREADY_PUBLISHED, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_ALREADY_PUBLISHED), EXIT_OK, String("\n").join(rep.lines))
     assert_false(rep.has_line_containing(String("STOP new name")))
     assert_equal(reg.transport().write_count(), 0)
     # alpha ours by download only, beta and komira held by older listed files:
@@ -270,7 +286,7 @@ def test_a_file_found_by_download_but_not_listed_holds_its_name() raises:
     ch2.put_unlisted(String("linux-64"), t[0].coordinate.file_name, _bytes(String("alpha conda bytes")))
     var reg2 = _registry(ch2^)
     var rep2 = _run(t, _none(), reg2, src)
-    assert_equal(rep2.exit_code, EXIT_PUBLISHED, String("\n").join(rep2.lines))
+    _ends(rep2, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep2.lines))
     assert_false(rep2.has_line_containing(String("STOP new name: 'komira_alpha'")))
     assert_equal(reg2.transport().upload_count(t[0].coordinate.file_name), 0)
     # the same channel state with a claim for alpha: satisfied, not refused
@@ -282,7 +298,7 @@ def test_a_file_found_by_download_but_not_listed_holds_its_name() raises:
     var alpha = List[String]()
     alpha.append(String("komira_alpha"))
     var rep3 = _run(t, alpha, reg3, src)
-    assert_equal(rep3.exit_code, EXIT_PUBLISHED, String("\n").join(rep3.lines))
+    _ends(rep3, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep3.lines))
     assert_true(rep3.has_line_containing(String("CLAIM --claim-new-name 'komira_alpha' is satisfied")))
     # but a claim for a name an OLDER file holds is refused, even though our
     # own file of it is present (and unlisted)
@@ -291,7 +307,7 @@ def test_a_file_found_by_download_but_not_listed_holds_its_name() raises:
     ch4.put_unlisted(String("linux-64"), t[0].coordinate.file_name, _bytes(String("alpha conda bytes")))
     var reg4 = _registry(ch4^)
     var rep4 = _run(t, alpha, reg4, src)
-    assert_equal(rep4.exit_code, EXIT_STOP_NEW_NAME, String("\n").join(rep4.lines))
+    _ends(rep4, String(REASON_STOP_NEW_NAME), EXIT_REFUSED, String("\n").join(rep4.lines))
     assert_true(rep4.has_line_containing(String("--claim-new-name 'komira_alpha' is already in the channel")))
     assert_equal(reg4.transport().write_count(), 0)
     print("  test_a_file_found_by_download_but_not_listed_holds_its_name: PASS")
@@ -308,17 +324,17 @@ def test_the_same_command_again_is_stable() raises:
             ch.lag_index()
         var reg = _registry(ch^)
         var rep = _run(t, _all_claims(), reg, src)
-        assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines) + tag)
+        _ends(rep, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep.lines) + tag)
         var writes = reg.transport().write_count()
         var again = _run(t, _all_claims(), reg, src)
-        assert_equal(again.exit_code, EXIT_ALREADY_PUBLISHED, String("\n").join(again.lines) + tag)
+        _ends(again, String(REASON_ALREADY_PUBLISHED), EXIT_OK, String("\n").join(again.lines) + tag)
         assert_equal(reg.transport().write_count(), writes, String("the re-run wrote") + tag)
         var unclaimed = _run(t, _none(), reg, src)
-        assert_equal(unclaimed.exit_code, EXIT_ALREADY_PUBLISHED, String("\n").join(unclaimed.lines) + tag)
+        _ends(unclaimed, String(REASON_ALREADY_PUBLISHED), EXIT_OK, String("\n").join(unclaimed.lines) + tag)
         if lag == 1:
             reg.transport().catch_up_index()
             var caught_up = _run(t, _all_claims(), reg, src)
-            assert_equal(caught_up.exit_code, EXIT_ALREADY_PUBLISHED, String("\n").join(caught_up.lines) + tag)
+            _ends(caught_up, String(REASON_ALREADY_PUBLISHED), EXIT_OK, String("\n").join(caught_up.lines) + tag)
         # after 9: the identical command resumes and ends 0
         var chp = _channel()
         if lag == 1:
@@ -327,10 +343,10 @@ def test_the_same_command_again_is_stable() raises:
             chp.plan_upload(t[1].coordinate.file_name, UPLOAD_LOSE_NOT_STORED)
         var regp = _registry(chp^)
         var first = _run(t, _all_claims(), regp, src)
-        assert_equal(first.exit_code, EXIT_PARTIAL, String("\n").join(first.lines) + tag)
+        _ends(first, String(REASON_PARTIAL), EXIT_PARTIAL, String("\n").join(first.lines) + tag)
         assert_true(regp.transport().holds(String("linux-64"), t[0].coordinate.file_name))
         var resumed = _run(t, _all_claims(), regp, src)
-        assert_equal(resumed.exit_code, EXIT_PUBLISHED, String("\n").join(resumed.lines) + tag)
+        _ends(resumed, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(resumed.lines) + tag)
         assert_equal(regp.transport().upload_count(t[0].coordinate.file_name), 1, String("alpha re-uploaded") + tag)
         assert_true(regp.transport().holds(String("linux-64"), t[2].coordinate.file_name))
     print("  test_the_same_command_again_is_stable: PASS")

@@ -25,8 +25,16 @@
 # It also renders the matching declarations file and `--release-version`
 # text, and names a set hash a test can pass as `--expect-set-hash`.
 #
+# The release identity is `revision` (a full commit id) and `platform`
+# (`linux-x86_64`); `release.json` (major 2) records them and who produced
+# it (`gh-1`, attempt 1). `write(dir)` writes into `dir` itself, which is a
+# platform's release directory (`<release-dir>/<platform>`);
+# `write_example_inputs` lays out a whole `--release-dir` and the files beside
+# it, and returns the PUBLISH request that publishes it.
+#
 # `EXAMPLE_CHANNELS` declares four channels on `.invalid` hosts (PUBLIC and
-# PRIVATE, API token and OIDC); `example_targets`
+# PRIVATE, API token and OIDC; each OIDC push identity names the environment
+# `EXAMPLE_STAGE`); `example_targets`
 # loads a written directory and resolves it against one of them.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
@@ -38,14 +46,17 @@ from std.os.path import isdir
 from komira_json import JsonValue, parse_json_value
 
 from kci_artifact_declaration import parse_artifact_declarations
+from kci_contract import RunIdentity, release_platform_dir
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
 from kci_pkg_upload import content_identity_of
 from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
 from kci_release_set.member import ReleaseMember, verify_member
 from .inputs import LoadedRelease, load_release
 from .plan import PublishTarget, resolve_targets
+from .request import PublishRequest
 from kci_release_set.release_manifest import (
     RELEASE_MANIFEST_NAME,
+    ReleaseIdentity,
     release_manifest_of,
     render_release_manifest,
 )
@@ -78,6 +89,8 @@ struct ExampleRelease(Copyable, Movable):
     var version: String
     var build_number: Int
     var commit: String
+    var revision: String
+    var platform: String
     var subdir: String
     var timestamp_ms: Int
     var members: List[FixtureMember]
@@ -90,6 +103,8 @@ struct ExampleRelease(Copyable, Movable):
         self.version = String("1.0.0")
         self.build_number = 3
         self.commit = String("0123456789abcdef0123456789abcdef01234567")
+        self.revision = String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678")
+        self.platform = String("linux-x86_64")
         self.subdir = String("linux-64")
         self.timestamp_ms = 1790000000000
         self.members = List[FixtureMember]()
@@ -165,7 +180,8 @@ struct ExampleRelease(Copyable, Movable):
         if m.kind != String("metapackage"):
             doc.set_member(String("payload_path"), JsonValue.from_string(String("lib/mojo/") + m.name + String(".mojoc")))
             doc.set_member(String("payload_sha256"), JsonValue.from_string(content_identity_of(m.name.as_bytes()).sha256_hex))
-        doc.set_member(String("schema"), JsonValue.from_i64(1))
+        doc.set_member(String("format"), JsonValue.from_string(String("kci.conda_metadata")))
+        doc.set_member(String("schema_version"), JsonValue.from_i64(1))
         doc.set_member(String("size"), JsonValue.from_i64(Int64(m.content.byte_length())))
         doc.set_member(String("source_commit"), JsonValue.from_string(self.commit.copy()))
         doc.set_member(String("stamped"), JsonValue.from_bool(True))
@@ -186,10 +202,12 @@ struct ExampleRelease(Copyable, Movable):
 
     def manifest_json(self, m: FixtureMember) -> String:
         return (
-            String('{"artifact_type":"CONDA","name":"')
+            String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"')
             + m.name
             + String('","version":"')
             + self.version
+            + String('","platform":"')
+            + self.platform
             + String('","subdir":"')
             + self.subdir
             + String('","file":"')
@@ -217,7 +235,11 @@ struct ExampleRelease(Copyable, Movable):
             members.append(verify_member(self.members[i].name, dir + String("/") + self.members[i].name))
         write_text_file(
             dir + String("/") + String(RELEASE_MANIFEST_NAME),
-            render_release_manifest(release_manifest_of(members)),
+            render_release_manifest(
+                release_manifest_of(
+                    members, ReleaseIdentity(self.revision.copy(), self.platform.copy(), String("gh-1"), 1)
+                )
+            ),
         )
 
     def set_hash(self, dir: String) raises -> String:
@@ -227,7 +249,7 @@ struct ExampleRelease(Copyable, Movable):
 
     def declarations_text(self) -> String:
         var t = String(
-            'build_systems {\n  name: "buck2"\n  executable: "buck2"\n  args: "build"\n}\n'
+            'schema_version: 1\nbuild_systems {\n  name: "buck2"\n  executable: "buck2"\n  args: "build"\n}\n'
         )
         for i in range(len(self.members)):
             t += (
@@ -258,7 +280,10 @@ struct ExampleRelease(Copyable, Movable):
 comptime EXAMPLE_HOST: String = "conda.example.invalid"
 comptime EXAMPLE_TOKEN_SECRET: String = "EXAMPLE_CONDA_TOKEN"
 
-comptime EXAMPLE_CHANNELS: String = """channel {
+comptime EXAMPLE_STAGE: String = "prod"
+"""The stage (and GitHub environment) the example OIDC channels publish from."""
+
+comptime EXAMPLE_CHANNELS: String = """schema_version: 1 channel {
   name: "example-stable"
   visibility: PUBLIC
   repository {
@@ -284,7 +309,7 @@ channel {
   repository {
     artifact_type: CONDA
     location: "https://conda.example.invalid/example-oidc"
-    push_identity: "publisher@example.invalid"
+    push_identity: "repo:example/release:environment:prod"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }
@@ -294,7 +319,7 @@ channel {
   repository {
     artifact_type: CONDA
     location: "https://conda.example.invalid/example-oidc-private"
-    push_identity: "publisher@example.invalid"
+    push_identity: "repo:example/release:environment:prod"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
 }
@@ -318,3 +343,30 @@ def example_targets(
 ) raises -> List[PublishTarget]:
     var loaded = example_loaded(r, dir)
     return resolve_targets(example_channel(channel), loaded.members)
+
+
+def write_example_inputs(
+    r: ExampleRelease, root: String, channel: String, dry_run: Bool = False
+) raises -> PublishRequest:
+    """Write `r` under `<root>/release/<platform>/`, and beside it the
+    declarations, `EXAMPLE_CHANNELS` and the `--release-version` file; return
+    the PUBLISH request for `channel` in stage `EXAMPLE_STAGE`, approving the
+    set hash `release.json` records."""
+    makedirs(root, exist_ok=True)
+    var dir = release_platform_dir(root + String("/release"), r.platform)
+    r.write(dir)
+    write_text_file(root + String("/decls.textproto"), r.declarations_text())
+    write_text_file(root + String("/channels.textproto"), String(EXAMPLE_CHANNELS))
+    write_text_file(root + String("/rv.txt"), r.release_version_text())
+    var req = PublishRequest(RunIdentity(String("gh-2"), 1))
+    req.declarations_file = root + String("/decls.textproto")
+    req.release_dir = root + String("/release")
+    req.platform = r.platform.copy()
+    req.revision_id = r.revision.copy()
+    req.stage = String(EXAMPLE_STAGE)
+    req.channels_file = root + String("/channels.textproto")
+    req.channel = channel.copy()
+    req.release_version_file = root + String("/rv.txt")
+    req.expect_set_hash = r.set_hash(dir)
+    req.dry_run = dry_run
+    return req^

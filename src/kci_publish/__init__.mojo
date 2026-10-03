@@ -1,5 +1,6 @@
-"""`kci_publish` -- the `kci publish` verb: publish the release set `kci build`
-left in a release directory to a conda channel, or refuse it whole.
+"""`kci_publish` -- one PUBLISH action of a stage (`kci run --stage S`, or its
+alias `kci publish --stage S`): publish the release set `kci build` left in
+`<release-dir>/<platform>/` to a conda channel, or refuse it whole.
 
 THE CONTRACT, IN ORDER. Step 0 checks the set before any request: every
 declared artifact is in the release directory and nothing else is, each member
@@ -10,9 +11,17 @@ the channel by DOWNLOAD (other bytes under one of our file names stops the run;
 a name the channel has never held must be claimed). Steps 2 to 4 upload the
 members still missing, read every member back, and only then publish the
 metapackage; the missing members upload on up to `--concurrency` worker
-threads. Step 6 writes one JSON report; the exit code says which verdict.
+threads. Step 6 is the action's part of the run's result document
+(kci_contract's `kci.result`): an outcome word, an error id, one artifact
+row per file. The exit number is kci_contract's: a release whose every file
+is already in the channel with the same bytes is NOOP, exit 0.
 
-  * flags.mojo            `parse_publish_flags` -> `PublishFlags`
+The release is the one `--revision-id` names, built for the action's
+platform: `release.json` must say both. For a channel that publishes with
+OIDC trusted publishing the stage must be the environment its push identity
+names.
+
+  * request.mojo          `PublishRequest` (the kci binary's one parser fills it)
   * release_version.mojo  the `--release-version` file
   * inputs.mojo           `load_release`: steps 0.1 and 0.2
   * verify.mojo           lockstep, closure, set hash (0.3 to 0.5)
@@ -21,9 +30,9 @@ threads. Step 6 writes one JSON report; the exit code says which verdict.
   * upload.mojo           the channel credential, steps 2 to 4, the workers
   * workers.mojo          what one more worker needs: transport, sleeper
   * index.mojo            step 5, report-only
-  * report.mojo           the report and the exit codes
+  * report.mojo           the reasons, their outcomes, the result rows
   * run.mojo              `run_publish`: steps 1 to 6
-  * cli.mojo              `publish_main` and `publish_flow`
+  * flow.mojo             `publish_flow`, `publish_release_with_store`
   * scripted_channel.mojo `ScriptedChannel`, an in-memory channel (tests)
   * pause.mojo            `UsleepSleeper`, `NoWaitSleeper` (tests)
 
@@ -34,7 +43,7 @@ Encapsulation: owned values and generic seams. No UnsafePointer crosses a
 module boundary; no wildcard origin; no unsafe_from_address.
 """
 
-from .flags import PUBLISH_USAGE, PublishFlags, parse_publish_flags
+from .request import PublishRequest
 from .release_version import ReleaseVersion, parse_release_version, read_release_version
 from .inputs import LoadedRelease, load_release
 from .verify import (
@@ -69,20 +78,21 @@ from .workers import (
     WorkerSleeper,
 )
 from .report import (
-    EXIT_ALREADY_PUBLISHED,
-    EXIT_CANNOT_TELL,
-    EXIT_FAILED,
-    EXIT_PARTIAL,
-    EXIT_PUBLISHED,
-    EXIT_READ_BACK_MISMATCH,
-    EXIT_REFUSED,
-    EXIT_STOP_DIFFERENT_BYTES,
-    EXIT_STOP_NEW_NAME,
-    EXIT_USAGE,
+    REASON_ALREADY_PUBLISHED,
+    REASON_CANNOT_TELL,
+    REASON_FAILED,
+    REASON_PARTIAL,
+    REASON_PUBLISHED,
+    REASON_READ_BACK_MISMATCH,
+    REASON_REFUSED,
+    REASON_STOP_DIFFERENT_BYTES,
+    REASON_STOP_NEW_NAME,
+    FileRow,
     PublishReport,
-    render_report,
+    artifact_action_of,
+    record_publish_result,
 )
 from .run import run_publish
 from .scripted_channel import ScriptedChannel
 from .pause import NoWaitSleeper, UsleepSleeper
-from .cli import NoSecretStore, publish_flow, publish_main, publish_main_with_store
+from .flow import NoSecretStore, PreparedRelease, publish_flow, publish_release_with_store

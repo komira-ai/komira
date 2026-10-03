@@ -1,20 +1,26 @@
 # =============================================================================
 # src/kci_build/tests/test_build_flow.mojo
-#   The whole `kci build` verb over ScriptedRunner: one build per declared
-#   artifact, in file order, each into its own empty directory; every stop
-#   (exit, signal, timeout, not startable, every verify_member refusal, a
-#   symlinked entry) with later artifacts not run and no release.json; a
-#   --log-dir that is --out-dir or under it refused with zero runs; a stray
-#   sibling in the out dir and a later build rewriting an earlier member
-#   refused before release.json; release.json last on success, with the set
-#   hash printed.
+#   One BUILD action over ScriptedRunner and MemoryRecorder: one build per
+#   declared artifact, in file order, each into its own empty directory under
+#   <--release-dir>/<platform>; every stop (exit, signal, timeout, not
+#   startable, every verify_member refusal, a symlinked entry) with its
+#   outcome word and error id, later artifacts not run and no release.json;
+#   a --log-dir that is --release-dir or under it, a platform kci does not
+#   release, an abbreviated --revision-id and a recorder that cannot record
+#   each refused with zero runs; a stray sibling in the release directory and
+#   a later build rewriting an earlier member refused before release.json;
+#   release.json (major 2: revision, platform, produced_by) last on success,
+#   with the set hash printed; the RUNNING record before the first effect,
+#   and the action's row, artifacts and error in the result document.
 # =============================================================================
 #
 # Every file a build would have left (package, manifest.json, metadata.json)
 # is written by the scripted step under TEST_TMPDIR. The two golden set
-# hashes were computed outside Mojo (python3 hashlib over the sorted lines
-# `<name>\t1.0.0\th01234567_7\t<sha256 of "conda bytes of <name>">\n`), so
-# the printed SET_HASH is checked against an independent computation.
+# hashes were computed outside Mojo (python3 hashlib over the header line
+# `release_set\t2\t<_REV>\tlinux-x86_64\n` and then the sorted lines
+# `<name>\tlinux-x86_64\t1.0.0\th01234567_7\tlinux-64\tCONDA\t<sha256 of
+# "conda bytes of <name>">\n`), so the printed SET_HASH is checked against an
+# independent computation.
 # =============================================================================
 
 from std.ffi import external_call
@@ -27,36 +33,57 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_crypto import hex_lower_array_32, sha256_string
 
 from kci_artifact_declaration import ReleaseStamp, read_artifact_declarations, render_build_argv
-from kci_build import (
+from kci_contract import (
+    ACTION_BUILD,
+    ARTIFACT_BUILT,
+    ERROR_BUILD_FAILED,
+    ERROR_CANNOT_TELL,
+    ERROR_DECLARATION,
+    ERROR_MEMBER,
+    ERROR_PLATFORM,
+    ERROR_RESULT_FILE,
+    ERROR_REVISION,
+    ERROR_USAGE,
     EXIT_CANNOT_TELL,
     EXIT_FAILED,
     EXIT_OK,
     EXIT_REFUSED,
     EXIT_USAGE,
+    OUTCOME_FAILED,
+    OUTCOME_SUCCEEDED,
+    RETRY_SAFE,
+    STATUS_RUNNING,
+    MemoryRecorder,
+    RunIdentity,
+    RunRecorder,
+)
+from kci_contract import RunResult as KciRunResult
+from kci_build import (
+    BuildOutcome,
     BuildRequest,
     ProcessRunner,
     RunResult,
     RunSpec,
     ScriptedRunner,
     ScriptedStep,
-    build_main_with,
-    build_release,
+    run_build,
     write_text_file,
 )
 from kci_release_set import read_release_manifest
 
 comptime _EXAMPLE = "src/kci_artifact_declaration/example.textproto"
-comptime _SET_THREE = "b315a610a30db7464869bebf2c622dc99e377d12ed248389f62d855283e1b9c0"
-comptime _SET_EXAMPLE = "988a850fd15a324976688400ea9996f6c27b369466aea33e1c28ea0eb002fab6"
+comptime _SET_THREE = "ea878fe9fdaf3371bc17a6315984290078e3f59f3a1e199b0b594957ebeb3e9e"
+comptime _SET_EXAMPLE = "325dc7021b024291f5838382d72106390c37b2e3bd63eafa42f5643fea187f50"
 comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
 comptime _BUILD = "h01234567_7"
 comptime _HEX = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 comptime _PACK = "/opt/pack/komira_pack"
+comptime _PLATFORM = "linux-x86_64"
 
 # Two build systems, three artifacts: two libraries built by buck2 and the
 # metapackage by the packer, in that order.
-comptime _THREE = """
+comptime _THREE = """schema_version: 1
 build_systems {
   name: "buck2"
   executable: "buck2"
@@ -111,15 +138,24 @@ def _fresh(tag: String) raises -> String:
 
 
 def _request(root: String, decls_text: String = String(_THREE)) raises -> BuildRequest:
-    var r = BuildRequest()
+    var run = RunIdentity(String("gh-7"), 2)
+    var r = BuildRequest(run^)
     r.declarations_file = root + String("/decls.textproto")
     write_text_file(r.declarations_file, decls_text)
     r.work_dir = root + String("/repo")
-    r.out_dir = root + String("/out")
+    r.release_dir = root + String("/release")
     r.log_dir = root + String("/logs")
     r.revision_id = String(_REV)
+    r.platform = String(_PLATFORM)
     r.build_timeout_s = 99
     return r^
+
+
+def _run[R: ProcessRunner, G: ProcessRunner](req: BuildRequest, mut runner: R, mut git: G) -> BuildOutcome:
+    """`run_build` with a fresh result document and a MemoryRecorder."""
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = MemoryRecorder()
+    return run_build(req, result, rec, runner, git)
 
 
 def _stamp() raises -> ReleaseStamp:
@@ -169,8 +205,8 @@ def _file(name: String) -> String:
 
 def _manifest(name: String, file: String, sha: String) -> String:
     return (
-        String('{"artifact_type":"CONDA","name":"') + name
-        + String('","version":"1.0.0","subdir":"linux-64","file":"') + file
+        String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"')
+        + name + String('","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"') + file
         + String('","sha256":"') + sha + String('","metadata":"metadata.json"}\n')
     )
 
@@ -197,8 +233,8 @@ def _metadata(
         )
     return (
         String('{"build":"') + String(_BUILD) + String('","build_number":7,"depends":["__linux"],')
-        + String('"file_name":"') + file + String('","kind":"') + kind
-        + String('","label":"test","name":"') + name + String('","schema":1,"size":')
+        + String('"file_name":"') + file + String('","format":"kci.conda_metadata","kind":"') + kind
+        + String('","label":"test","name":"') + name + String('","schema_version":1,"size":')
         + String(size) + String(',"source_commit":"0123456789abcdef0123456789abcdef01234567",')
         + String('"stamped":') + stamped + String(',"subdir":"linux-64","timestamp_ms":86400000,')
         + String('"version":"') + version + String('"') + own + String("}")
@@ -208,7 +244,7 @@ def _metadata(
 def _expected_argv(req: BuildRequest, name: String) raises -> List[String]:
     """argv[1:] of `render_build_argv` for `name` into `<out>/<name>`."""
     var decls = read_artifact_declarations(req.declarations_file)
-    var argv = render_build_argv(decls, name, req.out_dir, _stamp())
+    var argv = render_build_argv(decls, name, req.platform_dir(), req.platform, _stamp())
     var rest = List[String]()
     for i in range(1, len(argv)):
         rest.append(argv[i].copy())
@@ -217,7 +253,7 @@ def _expected_argv(req: BuildRequest, name: String) raises -> List[String]:
 
 def _good_step(req: BuildRequest, name: String) raises -> ScriptedStep:
     """A step whose build leaves a good member directory for `name`."""
-    var d = req.out_dir + String("/") + name + String("/")
+    var d = req.platform_dir() + String("/") + name + String("/")
     var step = ScriptedStep(_expected_argv(req, name))
     var content = _content(name)
     step.writes(d + _file(name), content.copy())
@@ -276,8 +312,8 @@ struct _Unstartable(ProcessRunner):
         raise Error(String("cannot start '") + spec.path + String("': errno 2"))
 
 
-def _release_json(req: BuildRequest) -> String:
-    return req.out_dir + String("/release.json")
+def _release_json(req: BuildRequest) raises -> String:
+    return req.platform_dir() + String("/release.json")
 
 
 # ---- success -----------------------------------------------------------------
@@ -290,8 +326,8 @@ def test_example_file_builds_the_stamped_library_then_the_metapackage() raises:
     runner.expect(_good_step(req, String("komira_encoding")))
     runner.expect(_good_step(req, String("komira_all")))
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_OK, outcome.message)
     assert_equal(git.remaining(), 0)
     assert_equal(len(runner.calls), 2)
     ref spec = runner.calls[0]
@@ -304,7 +340,7 @@ def test_example_file_builds_the_stamped_library_then_the_metapackage() raises:
         "//src/komira_encoding:komira_encoding_conda[release]", "--out",
     ]:
         want.append(String(a))
-    want.append(req.out_dir + String("/komira_encoding"))
+    want.append(req.platform_dir() + String("/komira_encoding"))
     assert_equal(len(spec.argv), len(want))
     for i in range(len(want)):
         assert_equal(spec.argv[i], want[i])
@@ -318,8 +354,8 @@ def test_example_file_builds_the_stamped_library_then_the_metapackage() raises:
     assert_equal(meta.argv[0], String("run"))
     assert_equal(meta.argv[1], String("//tools/build/package:komira_pack"))
     assert_equal(meta.argv[3], String("conda-meta"))
-    assert_equal(meta.argv[7], req.out_dir + String("/komira_encoding/manifest.json"))
-    assert_equal(meta.argv[len(meta.argv) - 1], req.out_dir + String("/komira_all"))
+    assert_equal(meta.argv[7], req.platform_dir() + String("/komira_encoding/manifest.json"))
+    assert_equal(meta.argv[len(meta.argv) - 1], req.platform_dir() + String("/komira_all"))
     # the git commands ran in the work dir, logged where no artifact can be
     assert_equal(git.calls[0].cwd, req.work_dir)
     assert_equal(git.calls[0].stdout_path, req.log_dir + String("/_git_1.stdout"))
@@ -341,11 +377,11 @@ def test_three_artifacts_two_build_systems_in_file_order() raises:
     for i in range(len(names)):
         var step = _good_step(req, names[i])
         inner.expect(step^)
-        dirs.append(req.out_dir + String("/") + names[i])
+        dirs.append(req.platform_dir() + String("/") + names[i])
     var runner = _Observed(inner^, dirs^)
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_OK, outcome.message)
     assert_equal(runner.inner.remaining(), 0)
     assert_equal(len(runner.inner.calls), 3)
     # declaration-file order, each with its own build system's program
@@ -361,15 +397,15 @@ def test_three_artifacts_two_build_systems_in_file_order() raises:
         assert_true(runner.empty_at_start[i], String("out dir not empty at start: ") + names[i])
     assert_equal(runner.inner.calls[2].argv[2], String("komira"))
     assert_equal(
-        runner.inner.calls[2].argv[3], String("--out-dir=") + req.out_dir + String("/komira")
+        runner.inner.calls[2].argv[3], String("--out-dir=") + req.platform_dir() + String("/komira")
     )
     # the metapackage, last, names its members under {release_dir} (the out
     # dir), and both manifests were there when it started; the stamp reached it
     assert_equal(
-        runner.inner.calls[2].argv[5], req.out_dir + String("/komira_hash/manifest.json")
+        runner.inner.calls[2].argv[5], req.platform_dir() + String("/komira_hash/manifest.json")
     )
     assert_equal(
-        runner.inner.calls[2].argv[7], req.out_dir + String("/komira_name_registry/manifest.json")
+        runner.inner.calls[2].argv[7], req.platform_dir() + String("/komira_name_registry/manifest.json")
     )
     assert_equal(
         runner.inner.calls[2].argv[8],
@@ -386,65 +422,55 @@ def test_three_artifacts_two_build_systems_in_file_order() raises:
     assert_equal(r.entries[1].name, String("komira_hash"))
     assert_equal(r.entries[2].dir, String("komira_name_registry"))
     # the release directory is exactly the member dirs and release.json
-    assert_equal(len(listdir(req.out_dir)), 4)
+    assert_equal(len(listdir(req.platform_dir())), 4)
 
 
-def test_build_main_with_prints_and_returns_ok() raises:
-    var root = _fresh(String("main"))
+# ---- stops before anything runs ---------------------------------------------
+
+
+def test_non_empty_platform_dir_is_refused_with_zero_runs() raises:
+    var root = _fresh(String("nonempty"))
     var req = _request(root)
+    makedirs(req.platform_dir(), exist_ok=True)
+    write_text_file(req.platform_dir() + String("/stale.conda"), String("x"))
+    var runner = ScriptedRunner()
+    var git = _git_ok()
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_USAGE)
+    assert_equal(outcome.error_id, String(ERROR_USAGE))
+    assert_true(outcome.message.find(String("is not empty")) >= 0, outcome.message)
+    assert_equal(len(runner.calls), 0)
+    assert_equal(len(git.calls), 0)
+
+
+def test_another_platforms_directory_beside_it_is_left_alone() raises:
+    # --release-dir may already hold another platform's release: only
+    # <release-dir>/<platform> must be absent or empty
+    var root = _fresh(String("otherplat"))
+    var req = _request(root)
+    write_text_file(req.release_dir + String("/darwin-arm64/release.json"), String("{}"))
     var runner = ScriptedRunner()
     var names = _names()
     for i in range(len(names)):
-        var step = _good_step(req, names[i])
-        runner.expect(step^)
-    var args = List[String]()
-    args.append(String("--declarations=") + req.declarations_file)
-    args.append(String("--work-dir=") + req.work_dir)
-    args.append(String("--out-dir=") + req.out_dir)
-    args.append(String("--log-dir=") + req.log_dir)
-    args.append(String("--revision-id=") + String(_REV))
+        runner.expect(_good_step(req, names[i]))
     var git = _git_ok()
-    assert_equal(build_main_with(args, runner, git), EXIT_OK)
-    assert_equal(git.remaining(), 0)
-    assert_equal(runner.calls[0].timeout_s, 3600)
-    assert_true(exists(_release_json(req)))
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_OK, outcome.message)
+    assert_true(exists(req.release_dir + String("/darwin-arm64/release.json")))
 
 
-# ---- stops before anything runs -----------------------------------------------
-
-
-def test_usage_errors_run_nothing() raises:
-    var runner = ScriptedRunner()
-    var args = List[String]()
-    args.append(String("--buck2=/usr/bin/buck2"))
-    var git = _git_ok()
-    assert_equal(build_main_with(args, runner, git), EXIT_USAGE)
-    assert_equal(len(runner.calls), 0)
-
-
-def test_non_empty_out_dir_is_refused_with_zero_runs() raises:
-    var root = _fresh(String("nonempty"))
-    var req = _request(root)
-    makedirs(req.out_dir, exist_ok=True)
-    write_text_file(req.out_dir + String("/stale.conda"), String("x"))
-    var runner = ScriptedRunner()
-    var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED)
-    assert_true(outcome.message.find(String("is not empty")) >= 0, outcome.message)
-    assert_equal(len(runner.calls), 0)
-
-
-def test_out_dir_that_is_a_file_is_refused_with_zero_runs() raises:
+def test_platform_dir_that_is_a_file_is_refused_with_zero_runs() raises:
     var root = _fresh(String("outfile"))
     var req = _request(root)
-    write_text_file(req.out_dir, String("x"))
+    write_text_file(req.platform_dir(), String("x"))
     var runner = ScriptedRunner()
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_USAGE)
     assert_equal(
-        outcome.message, String("kci build: --out-dir '") + req.out_dir + String("' is not a directory")
+        outcome.message,
+        String("kci build: --release-dir '") + req.release_dir + String("': '") + req.platform_dir()
+        + String("' is not a directory"),
     )
     assert_equal(len(runner.calls), 0)
 
@@ -455,25 +481,104 @@ def test_missing_work_dir_is_refused_with_zero_runs() raises:
     req.work_dir = root + String("/absent")
     var runner = ScriptedRunner()
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_USAGE)
     assert_equal(
         outcome.message,
         String("kci build: --work-dir '") + req.work_dir + String("' is not a directory"),
     )
+    assert_equal(outcome.error_id, String(ERROR_USAGE))
     assert_equal(len(runner.calls), 0)
+
+
+def test_relative_work_dir_is_refused_with_zero_runs() raises:
+    var root = _fresh(String("relwork"))
+    var req = _request(root)
+    req.work_dir = String("repo")
+    var runner = ScriptedRunner()
+    var git = _git_ok()
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.error_id, String(ERROR_USAGE))
+    assert_equal(
+        outcome.message,
+        String("kci build: --work-dir 'repo' is not an absolute path: it is the cwd every build")
+        + String(" resolves against"),
+    )
+    assert_equal(len(git.calls), 0)
+
+
+def _refused_before_running(tag: String, var req: BuildRequest, error_id: String, starts: String) raises:
+    """`req` is refused with `error_id`, its message starting `starts`, before
+    the RUNNING record: no git command, no build, no log dir."""
+    var runner = ScriptedRunner()
+    var git = _git_ok()
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = MemoryRecorder()
+    var outcome = run_build(req, result, rec, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_REFUSED, outcome.message)
+    assert_equal(outcome.error_id, error_id)
+    assert_true(outcome.message.startswith(starts), outcome.message)
+    assert_equal(len(rec.records), 0)
+    assert_equal(len(git.calls), 0)
+    assert_equal(len(runner.calls), 0)
+    assert_false(exists(req.log_dir))
+    assert_equal(result.error.id, error_id)
+    assert_equal(len(result.actions), 1)
+    assert_equal(result.actions[0].kind, String(ACTION_BUILD))
+    assert_equal(len(result.artifacts), 0)
+
+
+def test_a_platform_kci_does_not_release_is_refused_before_anything() raises:
+    var root = _fresh(String("plat"))
+    var req = _request(root)
+    req.platform = String("darwin-arm64")
+    _refused_before_running(
+        String("plat"), req^, String(ERROR_PLATFORM), String("kci build: platform 'darwin-arm64' is not released")
+    )
+    var req2 = _request(_fresh(String("plat_noarch")))
+    req2.platform = String("noarch")
+    _refused_before_running(
+        String("plat_noarch"), req2^, String(ERROR_PLATFORM), String("kci build: platform 'noarch' is a member's platform")
+    )
+
+
+def test_an_abbreviated_revision_id_is_refused_before_anything() raises:
+    var req = _request(_fresh(String("abbrev")))
+    req.revision_id = String("a1b2c3d")
+    _refused_before_running(
+        String("abbrev"), req^, String(ERROR_REVISION), String("kci build: --revision-id 'a1b2c3d' is not a full commit id")
+    )
+
+
+def test_a_recorder_that_cannot_record_stops_before_the_first_effect() raises:
+    var root = _fresh(String("norec"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    var git = _git_ok()
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = MemoryRecorder()
+    rec.fail_begin = True
+    var outcome = run_build(req, result, rec, runner, git)
+    assert_equal(outcome.outcome, String(OUTCOME_FAILED))
+    assert_equal(outcome.error_id, String(ERROR_RESULT_FILE))
+    assert_equal(outcome.exit_code(), EXIT_FAILED)
+    assert_equal(len(git.calls), 0)
+    assert_equal(len(runner.calls), 0)
+    assert_false(exists(req.log_dir))
+    assert_false(exists(req.platform_dir()))
 
 
 def test_invalid_declarations_are_refused_with_zero_runs() raises:
     var root = _fresh(String("baddecl"))
-    var req = _request(root, String('build_systems { name: "buck2" executable: "buck2" }\n'))
+    var req = _request(root, String('schema_version: 1 build_systems { name: "buck2" executable: "buck2" }\n'))
     var runner = ScriptedRunner()
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_REFUSED)
+    assert_equal(outcome.error_id, String(ERROR_DECLARATION))
     assert_true(outcome.message.startswith(String("kci build: ")), outcome.message)
     assert_equal(len(runner.calls), 0)
-    assert_false(exists(req.out_dir))
+    assert_false(exists(req.platform_dir()))
 
 
 # ---- a build that fails: FAILED, later artifacts not run, no release.json ---------
@@ -484,13 +589,15 @@ struct _Run(Movable):
 
     var req: BuildRequest
     var code: Int
+    var error_id: String
     var message: String
     var remaining: Int
 
-    def __init__(out self, var req: BuildRequest, code: Int, var message: String, remaining: Int):
+    def __init__(out self, var req: BuildRequest, o: BuildOutcome, remaining: Int) raises:
         self.req = req^
-        self.code = code
-        self.message = message^
+        self.code = o.exit_code()
+        self.error_id = o.error_id.copy()
+        self.message = o.message.copy()
         self.remaining = remaining
 
 
@@ -504,8 +611,8 @@ def _second_fails(tag: String, var bad: ScriptedStep) raises -> _Run:
     var third = _good_step(req, String("komira"))
     runner.expect(third^)
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
+    var outcome = _run(req, runner, git)
+    return _Run(req^, outcome, runner.remaining())
 
 
 def _bad_second(req_root_tag: String) raises -> List[String]:
@@ -520,13 +627,14 @@ def test_non_zero_exit_is_failed_naming_the_artifact() raises:
     var r = _second_fails(String("exit"), step^)
     ref req = r.req
     assert_equal(r.code, EXIT_FAILED)
+    assert_equal(r.error_id, String(ERROR_BUILD_FAILED))
     var msg = r.message.copy()
     assert_true(msg.startswith(String("kci build: artifact 'komira_name_registry': `buck2 build ")), msg)
     assert_true(msg.find(String("` exit 2 (stderr: ") + req.log_dir + String("/komira_name_registry.stderr)")) >= 0, msg)
     assert_true(msg.endswith(String("\nError: action failed")), msg)
     assert_equal(r.remaining, 1)
     assert_false(exists(_release_json(req)))
-    assert_true(isdir(req.out_dir + String("/komira_hash")))
+    assert_true(isdir(req.platform_dir() + String("/komira_hash")))
 
 
 def test_signal_is_failed() raises:
@@ -553,8 +661,8 @@ def test_a_build_that_cannot_start_is_cannot_tell() raises:
     var req = _request(root)
     var runner = _Unstartable()
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_CANNOT_TELL)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_CANNOT_TELL)
     assert_equal(
         outcome.message,
         String("kci build: artifact 'komira_hash': the build could not be started:")
@@ -573,7 +681,7 @@ def _first_refused(tag: String, which: Int) raises -> _Run:
     var root = _fresh(tag)
     var req = _request(root)
     var name = String("komira_hash")
-    var d = req.out_dir + String("/") + name + String("/")
+    var d = req.platform_dir() + String("/") + name + String("/")
     var content = _content(name)
     var file = _file(name)
     var step = ScriptedStep(_expected_argv(req, name))
@@ -606,13 +714,14 @@ def _first_refused(tag: String, which: Int) raises -> _Run:
     var third = _good_step(req, String("komira"))
     runner.expect(third^)
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
+    var outcome = _run(req, runner, git)
+    return _Run(req^, outcome, runner.remaining())
 
 
 def _expect_refused(tag: String, which: Int, why: String) raises:
     var r = _first_refused(tag, which)
     assert_equal(r.code, EXIT_REFUSED, r.message)
+    assert_equal(r.error_id, String(ERROR_MEMBER))
     assert_equal(r.message, String("kci build: artifact 'komira_hash': ") + why)
     assert_equal(r.remaining, 2)
     assert_false(exists(_release_json(r.req)))
@@ -683,71 +792,75 @@ def test_unstamped_is_refused() raises:
     )
 
 
-# ---- --log-dir is --out-dir or under it: REFUSED, nothing runs, nothing made -----
+# ---- --log-dir is --release-dir or under it: REFUSED, nothing runs, nothing made -
 
 
 def _log_dir_refused(tag: String, log_dir: String, shown: String) raises:
     """`log_dir` (relative to the fresh root) resolves to `shown` (relative
-    to the root), which is the out dir or under it."""
+    to the root), which is the release dir or under it."""
     var root = _fresh(tag)
     var req = _request(root)
     req.log_dir = root + String("/") + log_dir
     var runner = ScriptedRunner()
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_USAGE, outcome.message)
+    assert_equal(outcome.error_id, String(ERROR_USAGE))
     assert_equal(
         outcome.message,
-        String("kci build: --log-dir '") + req.log_dir + String("' is --out-dir '") + req.out_dir
+        String("kci build: --log-dir '") + req.log_dir + String("' is --release-dir '") + req.release_dir
         + String("' or lies under it ('") + root + String("/") + shown + String("' in '")
-        + req.out_dir
-        + String("'): the out dir becomes the release directory, which holds only the")
-        + String(" member directories and release.json"),
+        + req.release_dir
+        + String("'): the release directory holds only the member directories and")
+        + String(" release.json"),
     )
     assert_equal(len(runner.calls), 0)
-    assert_false(exists(req.out_dir))
+    assert_false(exists(req.platform_dir()))
     assert_false(exists(req.log_dir))
 
 
-def test_log_dir_that_is_the_out_dir_is_refused_with_zero_runs() raises:
-    _log_dir_refused(String("log_eq"), String("out"), String("out"))
-    _log_dir_refused(String("log_eq2"), String("repo/../out/."), String("out"))
+def test_log_dir_that_is_the_release_dir_is_refused_with_zero_runs() raises:
+    _log_dir_refused(String("log_eq"), String("release"), String("release"))
+    _log_dir_refused(String("log_eq2"), String("repo/../release/."), String("release"))
 
 
-def test_log_dir_under_the_out_dir_is_refused_with_zero_runs() raises:
-    _log_dir_refused(String("log_under"), String("out/logs"), String("out/logs"))
-    # named like an artifact: it would have collided with that member's dir
-    _log_dir_refused(String("log_member"), String("out/komira"), String("out/komira"))
+def test_log_dir_under_the_release_dir_is_refused_with_zero_runs() raises:
+    _log_dir_refused(String("log_under"), String("release/logs"), String("release/logs"))
+    # inside the platform's directory, named like an artifact: it would have
+    # collided with that member's dir
+    _log_dir_refused(
+        String("log_member"), String("release/linux-x86_64/komira"), String("release/linux-x86_64/komira")
+    )
 
 
-def test_log_dir_under_the_out_dir_through_a_symlink_is_refused() raises:
+def test_log_dir_under_the_release_dir_through_a_symlink_is_refused() raises:
     var root = _fresh(String("log_link"))
     var req = _request(root)
-    makedirs(req.out_dir, exist_ok=True)
-    _symlink(req.out_dir, root + String("/alias"))
+    makedirs(req.release_dir, exist_ok=True)
+    _symlink(req.release_dir, root + String("/alias"))
     req.log_dir = root + String("/alias/logs")
     var runner = ScriptedRunner()
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
-    assert_true(outcome.message.find(String("' or lies under it ('") + req.out_dir + String("/logs' in '")) >= 0, outcome.message)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_USAGE, outcome.message)
+    assert_true(outcome.message.find(String("' or lies under it ('") + req.release_dir + String("/logs' in '")) >= 0, outcome.message)
     assert_equal(len(runner.calls), 0)
 
 
-def test_log_dir_beside_the_out_dir_is_accepted() raises:
+def test_log_dir_beside_the_release_dir_is_accepted() raises:
     var root = _fresh(String("log_beside"))
     var req = _request(root)
-    req.log_dir = root + String("/out-logs")  # shares a prefix, not a directory
+    req.log_dir = root + String("/release-logs")  # shares a prefix, not a directory
     var runner = ScriptedRunner()
     var names = _names()
     for i in range(len(names)):
         runner.expect(_good_step(req, names[i]))
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_OK, outcome.message)
 
 
-# ---- after every build: the out dir must hold exactly the final members ------------
+# ---- after every build: the release dir must hold exactly the final members ------------
 
 
 def _symlink(target: String, link: String) raises:
@@ -772,9 +885,9 @@ def _three_with(tag: String, which: Int) raises -> _Run:
     runner.expect(_good_step(req, String("komira_hash")))
     runner.expect(_good_step(req, String("komira_name_registry")))
     var last = _good_step(req, String("komira"))
-    var first = req.out_dir + String("/komira_hash/")
+    var first = req.platform_dir() + String("/komira_hash/")
     if which == 1:
-        last.writes(req.out_dir + String("/BUILD_SUMMARY.txt"), String("x"))
+        last.writes(req.platform_dir() + String("/BUILD_SUMMARY.txt"), String("x"))
     if which == 2:
         var other = _content(String("komira_hash")) + String(" v2")
         var file = _file(String("komira_hash"))
@@ -788,19 +901,18 @@ def _three_with(tag: String, which: Int) raises -> _Run:
         last.writes(first + String("stray.txt"), String("x"))
     runner.expect(last^)
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
+    var outcome = _run(req, runner, git)
+    return _Run(req^, outcome, runner.remaining())
 
 
-def test_a_stray_sibling_in_the_out_dir_is_refused() raises:
+def test_a_stray_sibling_in_the_release_dir_is_refused() raises:
     var r = _three_with(String("sibling"), 1)
     assert_equal(r.code, EXIT_REFUSED, r.message)
     assert_equal(
         r.message,
-        String("kci build: --out-dir '") + r.req.out_dir
-        + String("' holds 'BUILD_SUMMARY.txt', which no declaration names: the release")
-        + String(" directory holds only the member directories and release.json (a build wrote")
-        + String(" outside its own directory)"),
+        String("kci build: the release directory '") + r.req.platform_dir()
+        + String("' holds 'BUILD_SUMMARY.txt', which no declaration names: it holds only the")
+        + String(" member directories and release.json (a build wrote outside its own directory)"),
     )
     assert_equal(r.remaining, 0)
     assert_false(exists(_release_json(r.req)))
@@ -883,11 +995,11 @@ def _linked_first(tag: String, entry: String, why: String = String("")) raises:
     for i in range(len(names)):
         inner.expect(_good_step(req, names[i]))
     var runner = _LinksFirstFile(
-        inner^, req.out_dir + String("/komira_hash"), entry.copy(), root + String("/elsewhere/") + entry
+        inner^, req.platform_dir() + String("/komira_hash"), entry.copy(), root + String("/elsewhere/") + entry
     )
     var git = _git_ok()
-    var outcome = build_release(req, runner, git)
-    assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_REFUSED, outcome.message)
     var expected = why.copy()
     if expected.byte_length() == 0:
         expected = (
@@ -917,9 +1029,143 @@ def test_a_symlinked_member_dir_is_refused() raises:
     _linked_first(
         String("lndir"),
         String(""),
-        String("'") + root + String("/out/komira_hash' is a symlink, not a directory: a link can")
+        String("'") + root + String("/release/linux-x86_64/komira_hash' is a symlink, not a directory: a link can")
         + String(" name bytes outside the release directory"),
     )
+
+
+# ---- the release identity and the result document --------------------------
+
+
+def test_release_json_is_major_2_and_the_result_records_the_action() raises:
+    var root = _fresh(String("identity"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    var names = _names()
+    for i in range(len(names)):
+        runner.expect(_good_step(req, names[i]))
+    var git = _git_ok()
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = MemoryRecorder()
+    var outcome = run_build(req, result, rec, runner, git)
+    assert_equal(outcome.outcome, String(OUTCOME_SUCCEEDED), outcome.message)
+    # release.json: the identity (revision, platform) and who produced it
+    var text = Path(_release_json(req)).read_text()
+    assert_true(text.startswith(String('{"format":"kci.release_set","members":[')), text)
+    var r = read_release_manifest(_release_json(req))
+    assert_equal(r.revision, String(_REV))
+    assert_equal(r.platform, String(_PLATFORM))
+    assert_equal(r.produced_by_run_id, String("gh-7"))
+    assert_equal(r.produced_by_attempt, 2)
+    for i in range(len(r.entries)):
+        assert_equal(r.entries[i].platform, String(_PLATFORM))
+    # the result: one RUNNING record so far (FINISHED is the caller's), the
+    # action's row, one BUILT row per member naming the revision, the set hash
+    assert_equal(len(rec.statuses), 1)
+    assert_equal(rec.statuses[0], String(STATUS_RUNNING))
+    assert_true(rec.records[0].find(String('"revision":"') + String(_REV) + String('"')) >= 0, rec.records[0])
+    assert_true(rec.records[0].find(String('"run_id":"gh-7"')) >= 0, rec.records[0])
+    assert_equal(len(result.actions), 1)
+    assert_equal(result.actions[0].kind, String(ACTION_BUILD))
+    assert_equal(result.actions[0].platform, String(_PLATFORM))
+    assert_equal(result.actions[0].outcome, String(OUTCOME_SUCCEEDED))
+    assert_false(result.has_error)
+    assert_equal(result.set_hash, String(_SET_THREE))
+    assert_equal(len(result.artifacts), 3)
+    for i in range(len(result.artifacts)):
+        ref a = result.artifacts[i]
+        assert_equal(a.action, String(ARTIFACT_BUILT))
+        assert_equal(a.revision, String(_REV))
+        assert_equal(a.platform, String(_PLATFORM))
+        assert_equal(a.subdir, String("linux-64"))
+        assert_equal(a.file, _file(a.name))
+        assert_equal(a.sha256, _hash(_content(a.name)))
+    var done = result.finish_record(outcome.outcome.copy(), 1)
+    assert_equal(done.exit_code, EXIT_OK)
+    assert_equal(done.retry, String(RETRY_SAFE))
+
+
+struct _MarkRecorder(RunRecorder):
+    """Writes `path` when the RUNNING record arrives, so a runner can tell
+    whether it came first."""
+
+    var path: String
+
+    def __init__(out self, var path: String):
+        self.path = path^
+
+    def begin(mut self, r: KciRunResult) raises:
+        write_text_file(self.path, r.status)
+
+    def finish(mut self, r: KciRunResult) raises:
+        pass
+
+
+struct _SeesMark(ProcessRunner):
+    """ScriptedRunner, plus: for each run, whether `marker` existed."""
+
+    var inner: ScriptedRunner
+    var marker: String
+    var seen: List[Bool]
+
+    def __init__(out self, var inner: ScriptedRunner, var marker: String):
+        self.inner = inner^
+        self.marker = marker^
+        self.seen = List[Bool]()
+
+    def run(mut self, spec: RunSpec) raises -> RunResult:
+        self.seen.append(exists(self.marker))
+        return self.inner.run(spec)
+
+
+def test_running_is_recorded_before_the_first_git_command() raises:
+    var root = _fresh(String("running"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    var names = _names()
+    for i in range(len(names)):
+        runner.expect(_good_step(req, names[i]))
+    var marker = root + String("/running.mark")
+    var git = _SeesMark(_git_ok(), marker.copy())
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = _MarkRecorder(marker.copy())
+    var outcome = run_build(req, result, rec, runner, git)
+    assert_equal(outcome.outcome, String(OUTCOME_SUCCEEDED), outcome.message)
+    assert_equal(len(git.seen), 6)
+    assert_true(git.seen[0], String("the first git command ran before the RUNNING record"))
+
+
+def test_a_failed_build_is_exit_4_safe_to_retry_and_recorded() raises:
+    var root = _fresh(String("failed4"))
+    var req = _request(root)
+    var runner = ScriptedRunner()
+    runner.expect(
+        ScriptedStep(_expected_argv(req, String("komira_hash")), exit_code=Int32(1), stderr_text=String("boom"))
+    )
+    var git = _git_ok()
+    var result = KciRunResult(String("run"), String("build"))
+    var rec = MemoryRecorder()
+    var outcome = run_build(req, result, rec, runner, git)
+    assert_equal(outcome.outcome, String(OUTCOME_FAILED))
+    assert_equal(outcome.error_id, String(ERROR_BUILD_FAILED))
+    assert_equal(outcome.exit_code(), EXIT_FAILED)
+    assert_equal(result.error.id, String(ERROR_BUILD_FAILED))
+    assert_equal(result.error.message, outcome.message)
+    assert_equal(result.actions[0].outcome, String(OUTCOME_FAILED))
+    assert_equal(len(result.artifacts), 0)
+    assert_equal(result.set_hash, String(""))
+    var done = result.finish_record(outcome.outcome.copy(), 1)
+    assert_equal(done.exit_code, EXIT_FAILED)
+    assert_equal(done.retry, String(RETRY_SAFE))
+
+
+def test_a_build_that_cannot_start_is_indeterminate_with_its_error_id() raises:
+    var req = _request(_fresh(String("nostart_id")))
+    var runner = _Unstartable()
+    var git = _git_ok()
+    var outcome = _run(req, runner, git)
+    assert_equal(outcome.error_id, String(ERROR_CANNOT_TELL))
+    assert_equal(outcome.exit_code(), EXIT_CANNOT_TELL)
 
 
 def main() raises:

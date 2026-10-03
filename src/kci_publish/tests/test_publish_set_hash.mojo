@@ -5,15 +5,18 @@
 #
 # ROWS
 #   (1) GOLDEN: the example release's set hash is a fixed value, computed
-#       outside Mojo from the rule (sha256 of the bytewise-sorted lines
-#       `<name>\t<version>\t<build>\t<sha256>\n`, the metapackage included);
+#       outside Mojo from the rule (python3 hashlib: sha256 of the header
+#       line `release_set\t2\t<revision>\tlinux-x86_64\n` and then the
+#       bytewise-sorted lines `<name>\tlinux-x86_64\t<version>\t<build>\t
+#       linux-64\tCONDA\t<sha256>\n`, the metapackage included);
 #       `load_release` recomputes it and release.json records it;
 #   (2) one member's bytes changed (and its manifest and metadata with it,
 #       so the member verifies): the recomputed hash is another, and the
 #       approved one is refused;
-#   (3) the whole verb with a wrong `--expect-set-hash`: exit 3, the line
-#       names both hashes, and the channel saw ZERO requests (no read, no
-#       write) and the credential was never asked.
+#   (3) the whole action with a wrong `--expect-set-hash`: REFUSED (exit 3,
+#       KCI-E-SET-HASH), the line names both hashes, nothing was recorded as
+#       RUNNING, and the channel saw ZERO requests (no read, no write) and
+#       the credential was never asked.
 #
 # Hermetic: TEST_TMPDIR and ScriptedChannel; no network.
 # =============================================================================
@@ -24,30 +27,29 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_true
 
+from kci_contract import ERROR_SET_HASH, EXIT_REFUSED, MemoryRecorder
+from kci_contract import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet
 from kci_publish import (
     NoWaitSleeper,
-    EXIT_REFUSED,
     NoSecretStore,
     PublishCredential,
-    PublishFlags,
     RunOptions,
     ScriptedChannel,
     publish_flow,
 )
 from kci_publish.release_fixture import (
-    EXAMPLE_CHANNELS,
     EXAMPLE_HOST,
     ExampleRelease,
     example_loaded,
-    write_text_file,
+    write_example_inputs,
 )
 from kci_publish.verify import require_set_hash
 from kci_pkg_upload import ScriptedPkgTransport
 
 
 comptime _WRONG: String = "abababababababababababababababababababababababababababababababab"
-comptime _GOLDEN: String = "99973435ee59ab963403d51d045fdd3b57dada20f3c47ca1077030e0c98029b6"
+comptime _GOLDEN: String = "551855805f860054f4024e7ad1c219c54f0c30da078ff0ea273f9d19806292ef"
 
 
 def _root(tag: String) raises -> String:
@@ -93,26 +95,21 @@ def test_other_bytes_other_hash() raises:
 def test_a_wrong_expectation_sends_nothing() raises:
     var r = ExampleRelease()
     var d = _root(String("flow"))
-    r.write(d + String("/release"))
-    write_text_file(d + String("/decls.textproto"), r.declarations_text())
-    write_text_file(d + String("/channels.textproto"), String(EXAMPLE_CHANNELS))
-    write_text_file(d + String("/rv.txt"), r.release_version_text())
-    var f = PublishFlags()
-    f.declarations_file = d + String("/decls.textproto")
-    f.artifacts_dir = d + String("/release")
-    f.channels_file = d + String("/channels.textproto")
-    f.channel = String("example-stable")
-    f.release_version_file = d + String("/rv.txt")
-    f.expect_set_hash = String(_WRONG)
-    f.report_file = d + String("/report.json")
+    var req = write_example_inputs(r, d, String("example-stable"))
+    req.expect_set_hash = String(_WRONG)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](
         ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64")),
         PublishCredential(),
     )
     var store = NoSecretStore()
     var sleeper = NoWaitSleeper()
-    var rep = publish_flow(f, reg, ScriptedPkgTransport(), store, RunOptions(), sleeper)
-    assert_equal(rep.exit_code, EXIT_REFUSED)
+    var result = KciRunResult(String("run"), String("publish"))
+    var rec = MemoryRecorder()
+    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), store, RunOptions(), sleeper)
+    assert_equal(rep.exit_code(), EXIT_REFUSED)
+    assert_equal(rep.error_id, String(ERROR_SET_HASH))
+    assert_equal(result.error.id, String(ERROR_SET_HASH))
+    assert_equal(len(rec.records), 0)
     assert_true(rep.has_line_containing(String("--expect-set-hash is ") + String(_WRONG)))
     assert_true(rep.has_line_containing(String(_GOLDEN)))
     assert_equal(reg.transport().call_count(), 0)

@@ -7,23 +7,25 @@
 # ROWS
 #   (1) a clean publish: each file uploaded EXACTLY once; the metapackage's
 #       upload comes after the last member read-back in the recorded order;
-#       the write credential asked ONCE; exit 0;
+#       the write credential asked ONCE; SUCCEEDED, exit 0;
 #   (2) a member already present-same is not uploaded but IS read back;
 #   (3) the upload's answer lost after the bytes landed: re-read
 #       present-same = done, one upload;
 #   (4) the answer lost and nothing stored, every attempt: bounded retry
-#       (upload_attempts uploads, never more), then PARTIAL (9);
+#       (upload_attempts uploads, never more), then PARTIAL (exit 6);
 #   (5) a 409 where the channel holds OUR bytes = success; a 409 where it
-#       holds OTHER bytes = STOP (7);
-#   (6) a definitive rejection (400) = FAILED (4); every other member is
-#       still attempted (the step-3 barrier waits for every member's upload),
-#       the metapackage is not;
-#   (7) a member that reads back with other bytes at step 3 = 10;
-#   (8) in 4, 7, 9 and 10 the recorded requests hold NO metapackage upload;
+#       holds OTHER bytes = STOP_DIFFERENT_BYTES, and since the other
+#       member's upload landed in this run, PARTIAL (exit 6), not REFUSED;
+#   (6) a definitive rejection (400) = FAILED; every other member is still
+#       attempted (the step-3 barrier waits for every member's upload), the
+#       metapackage is not; another member landed, so PARTIAL (exit 6);
+#   (7) a member that reads back with other bytes at step 3 =
+#       READ_BACK_MISMATCH: PARTIAL (exit 6), retry NEEDS_HUMAN;
+#   (8) in 4 to 7 the recorded requests hold NO metapackage upload;
 #   (9) `ApprovedNames` built from the listing plus claims refuses a name in
 #       neither with ZERO requests;
 #  (10) --concurrency 1, 2 and 4 give the same final state over every
-#       scenario above: exit code, every report row and line, the channel's
+#       scenario above: the reason, every report row and line, the channel's
 #       stored files, the uploads per file;
 #  (11) the workers really run in parallel: with --concurrency 2 the two
 #       member uploads are in flight AT ONCE (each waits at a rendezvous
@@ -40,14 +42,15 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_false, assert_true
 
+from kci_contract import EXIT_OK, EXIT_PARTIAL, RETRY_NEEDS_HUMAN
 from kci_pkg_upload import SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
 from kci_publish import (
     NoWaitSleeper,
-    EXIT_FAILED,
-    EXIT_PARTIAL,
-    EXIT_PUBLISHED,
-    EXIT_READ_BACK_MISMATCH,
-    EXIT_STOP_DIFFERENT_BYTES,
+    REASON_FAILED,
+    REASON_PARTIAL,
+    REASON_PUBLISHED,
+    REASON_READ_BACK_MISMATCH,
+    REASON_STOP_DIFFERENT_BYTES,
     PublishCredential,
     PublishReport,
     PublishTarget,
@@ -66,6 +69,13 @@ from kci_publish.scripted_channel import (
     UPLOAD_STORE_OTHER_BYTES,
 )
 from kci_publish.upload import package_file_of
+
+def _ends(rep: PublishReport, reason: String, exit_code: Int, msg: String = String("")) raises:
+    """`rep` stopped for `reason`, and its exit number (kci_contract's) is
+    `exit_code`."""
+    assert_equal(rep.reason, reason, msg)
+    assert_equal(rep.exit_code(), exit_code, msg)
+
 
 
 def _root(tag: String) raises -> String:
@@ -137,7 +147,7 @@ def test_a_clean_publish() raises:
     var reg = _registry(_channel())
     var src = _src()
     var rep = _run(t, reg, src)
-    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep.lines))
     ref ch = reg.transport()
     for i in range(len(t)):
         assert_equal(ch.upload_count(t[i].coordinate.file_name), 1, t[i].coordinate.file_name)
@@ -163,7 +173,7 @@ def test_a_present_member_is_read_back_not_uploaded() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src)
-    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep.lines))
     assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 0)
     var meta_at = reg.transport().first_upload_call(t[2].coordinate.file_name)
     var alpha_reads = 0
@@ -181,7 +191,7 @@ def test_a_lost_answer_settles_by_download() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src)
-    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep.lines))
     assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 1)
     print("  test_a_lost_answer_settles_by_download: PASS")
 
@@ -194,7 +204,7 @@ def test_absent_after_bounded_retries_is_partial() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src, 3)
-    assert_equal(rep.exit_code, EXIT_PARTIAL, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_PARTIAL), EXIT_PARTIAL, String("\n").join(rep.lines))
     assert_equal(reg.transport().upload_count(t[1].coordinate.file_name), 3)
     assert_true(rep.has_line_containing(String("MISSING linux-64/") + t[1].coordinate.file_name))
     _no_meta_upload(reg, t[2].coordinate.file_name)
@@ -208,14 +218,17 @@ def test_a_409_is_settled_by_what_the_channel_holds() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src)
-    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep.lines))
     assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 1)
 
     var ch2 = _channel()
     ch2.plan_upload(t[0].coordinate.file_name, UPLOAD_STORE_OTHER_BYTES)
     var reg2 = _registry(ch2^)
     var rep2 = _run(t, reg2, src)
-    assert_equal(rep2.exit_code, EXIT_STOP_DIFFERENT_BYTES, String("\n").join(rep2.lines))
+    # other bytes AFTER an upload of this run landed (beta's): PARTIAL, not REFUSED
+    _ends(rep2, String(REASON_STOP_DIFFERENT_BYTES), EXIT_PARTIAL, String("\n").join(rep2.lines))
+    assert_true(rep2.landed())
+    assert_equal(rep2.error_id, String("KCI-E-PUBLISH-DIFFERENT-BYTES"))
     assert_equal(reg2.transport().upload_count(t[0].coordinate.file_name), 1)
     _no_meta_upload(reg2, t[2].coordinate.file_name)
     assert_equal(reg2.transport().upload_count(t[1].coordinate.file_name), 1, String("every member is attempted"))
@@ -229,7 +242,9 @@ def test_a_rejection_fails_and_withholds_the_metapackage() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src)
-    assert_equal(rep.exit_code, EXIT_FAILED, String("\n").join(rep.lines))
+    # a rejection after another member's upload landed: PARTIAL (6), not FAILED (4)
+    _ends(rep, String(REASON_FAILED), EXIT_PARTIAL, String("\n").join(rep.lines))
+    assert_true(rep.landed())
     assert_equal(reg.transport().upload_count(t[0].coordinate.file_name), 1)
     assert_equal(reg.transport().upload_count(t[1].coordinate.file_name), 1, String("every member is attempted"))
     assert_true(reg.transport().holds(String("linux-64"), t[1].coordinate.file_name))
@@ -247,7 +262,10 @@ def test_a_read_back_mismatch_withholds_the_metapackage() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src)
-    assert_equal(rep.exit_code, EXIT_READ_BACK_MISMATCH, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_READ_BACK_MISMATCH), EXIT_PARTIAL, String("\n").join(rep.lines))
+    # bytes read back are not the bytes sent: look before re-running
+    assert_equal(rep.retry(), String(RETRY_NEEDS_HUMAN))
+    assert_equal(rep.error_id, String("KCI-E-PUBLISH-READ-BACK"))
     assert_true(rep.has_line_containing(String("READ-BACK linux-64/") + t[0].coordinate.file_name))
     _no_meta_upload(reg, t[2].coordinate.file_name)
     print("  test_a_read_back_mismatch_withholds_the_metapackage: PASS")
@@ -305,7 +323,7 @@ def _final_state(t: List[PublishTarget], scenario: Int, concurrency: Int) raises
     var src = _src()
     var rep = _run(t, reg, src, 3, concurrency)
     ref ch = reg.transport()
-    var out = String("exit=") + String(rep.exit_code) + String("\n")
+    var out = String("reason=") + rep.reason + String("\n")
     for i in range(len(rep.files)):
         out += (
             rep.files[i].file
@@ -336,8 +354,8 @@ def test_concurrency_1_and_4_end_in_the_same_state() raises:
         var four = _final_state(t, scenario, 4)
         assert_equal(one, four, String("scenario ") + String(scenario) + String(": --concurrency 1 vs 4"))
         assert_equal(one, two, String("scenario ") + String(scenario) + String(": --concurrency 1 vs 2"))
-    # scenario 8: other bytes (7) outranks a rejection (4), at any concurrency
-    assert_true(_final_state(t, 8, 4).startswith(String("exit=") + String(EXIT_STOP_DIFFERENT_BYTES)))
+    # scenario 8: other bytes outranks a rejection, at any concurrency
+    assert_true(_final_state(t, 8, 4).startswith(String("reason=") + String(REASON_STOP_DIFFERENT_BYTES)))
     print("  test_concurrency_1_and_4_end_in_the_same_state: PASS")
 
 
@@ -355,7 +373,7 @@ def test_the_workers_really_run_in_parallel() raises:
     var reg = _registry(ch^)
     var src = _src()
     var rep = _run(t, reg, src, 2, 2)
-    assert_equal(rep.exit_code, EXIT_PUBLISHED, String("\n").join(rep.lines))
+    _ends(rep, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep.lines))
     ref c2 = reg.transport()
     assert_equal(c2.missed_rendezvous(), 0, String("the two member uploads were never in flight at once"))
     var ta = c2.call_thread(c2.first_upload_call(alpha))
@@ -367,7 +385,7 @@ def test_the_workers_really_run_in_parallel() raises:
     ch1.rendezvous_uploads(2)
     var reg1 = _registry(ch1^)
     var rep1 = _run(t, reg1, src, 2, 1)
-    assert_equal(rep1.exit_code, EXIT_PUBLISHED, String("\n").join(rep1.lines))
+    _ends(rep1, String(REASON_PUBLISHED), EXIT_OK, String("\n").join(rep1.lines))
     ref c1 = reg1.transport()
     assert_equal(c1.missed_rendezvous(), 1, String("--concurrency 1 had two uploads in flight"))
     var ua = c1.call_thread(c1.first_upload_call(alpha))

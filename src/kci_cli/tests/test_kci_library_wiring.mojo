@@ -1,44 +1,31 @@
 # =============================================================================
 # src/kci_cli/tests/test_kci_library_wiring.mojo
-#   The REAL verbs (`LibraryVerbs`, as bin/kci runs them) reach their
-#   libraries: each verb's --help and usage refusal, and the secret store
-#   --secret-store composes is the one that resolves the channel's secret
-#   NAME. No socket: every publish run here stops before step 1.
+#   The REAL steps (`LibrarySteps`, as bin/kci runs them) reached through a
+#   machine file: a BUILD step reaches kci_build, a PUBLISH step reaches
+#   kci_publish with the secret store --secret-store composes. No socket and
+#   no build: every run here stops before its first request or program.
 #
 #   The store proof, in two halves:
-#   * `ComposedSecretStore` (the one store `publish` is handed) resolves a
-#     secret by NAME from the environment for `env` (KCI_CLI_TEST_SECRET is
+#   * `ComposedSecretStore` (the one store a PUBLISH step is handed) resolves
+#     a secret by NAME from the environment for `env` (KCI_CLI_TEST_SECRET is
 #     set by `test_env`), refuses an unset name naming the variable, and for
-#     `none` refuses naming the option;
-#   * end to end through `kci_main_with` and the real verbs: a dry run of a
-#     PRIVATE channel whose credential is an API token resolves the token
-#     BEFORE any read; EXAMPLE_CONDA_TOKEN is unset, so it exits 4 with no
-#     file in the report (the refusal is printed; the report carries no
-#     reason text by design).
+#     `none` refuses naming the flag;
+#   * end to end through `kci_main_with`: `kci run --plan` of a stage whose
+#     PUBLISH step targets a PRIVATE channel with an API token resolves the
+#     token BEFORE any read; EXAMPLE_CONDA_TOKEN is unset, so the run ends
+#     FAILED (KCI-E-CREDENTIAL, exit 4) with no artifact row, whichever store.
 # =============================================================================
 
 from std.ffi import external_call
 from std.os import makedirs
-
-from komira_libc.posix import _read_env
 from std.pathlib import Path
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_cli import ComposedSecretStore, LibraryVerbs, SecretStoreChoice, kci_main_with
-from kci_publish import EXIT_FAILED
-from kci_publish.release_fixture import (
-    EXAMPLE_CHANNELS,
-    EXAMPLE_TOKEN_SECRET,
-    ExampleRelease,
-    write_text_file,
-)
+from komira_libc.posix import _read_env
 
-
-def _args(*items: String) -> List[String]:
-    var l = List[String]()
-    for s in items:
-        l.append(String(s))
-    return l^
+from kci_cli import ComposedSecretStore, LibrarySteps, SecretStoreChoice, kci_main_with, recorder_for, write_whole_file
+from kci_contract import parse_result
+from kci_publish.release_fixture import EXAMPLE_STAGE, EXAMPLE_TOKEN_SECRET, ExampleRelease, write_example_inputs
 
 
 def _root(tag: String) raises -> String:
@@ -52,50 +39,9 @@ def _root(tag: String) raises -> String:
     return d^
 
 
-def _private_dry_run(tag: String, store: String) raises -> Tuple[Int, String]:
-    """Runs `kci --secret-store=<store> publish --dry-run` on the fixture's
-    PRIVATE API-token channel; returns the exit code and the report text."""
-    var r = ExampleRelease()
-    var d = _root(tag)
-    r.write(d + String("/release"))
-    write_text_file(d + String("/decls.textproto"), r.declarations_text())
-    write_text_file(d + String("/channels.textproto"), String(EXAMPLE_CHANNELS))
-    write_text_file(d + String("/rv.txt"), r.release_version_text())
-    var verbs = LibraryVerbs()
-    var rc = kci_main_with(
-        _args(
-            String("--secret-store=") + store,
-            "publish",
-            "--declarations", d + String("/decls.textproto"),
-            "--artifacts", d + String("/release"),
-            "--channels", d + String("/channels.textproto"),
-            "--channel", "example-private",
-            "--release-version", d + String("/rv.txt"),
-            "--expect-set-hash", r.set_hash(d + String("/release")),
-            "--report", d + String("/report.json"),
-            "--dry-run",
-        ),
-        verbs,
-    )
-    return (rc, Path(d + String("/report.json")).read_text())
-
-
-def test_each_verbs_help_is_its_librarys() raises:
-    var v = LibraryVerbs()
-    assert_equal(kci_main_with(_args("build", "--help"), v), 0)
-    assert_equal(kci_main_with(_args("publish", "--help"), v), 0)
-    assert_equal(kci_main_with(_args("--secret-store=env", "publish", "--help"), v), 0)
-
-
-def test_each_verbs_usage_refusal_is_its_librarys() raises:
-    var v = LibraryVerbs()
-    # No flags: each library refuses its first missing flag, exit 2.
-    assert_equal(kci_main_with(_args("build"), v), 2)
-    assert_equal(kci_main_with(_args("publish"), v), 2)
-    # A flag of the other verb is unknown to this one.
-    assert_equal(kci_main_with(_args("build", "--dry-run"), v), 2)
-    assert_equal(kci_main_with(_args("publish", "--revision-id", "x"), v), 2)
-    assert_equal(v.publish(_args("--bogus"), SecretStoreChoice.ENV), 2)
+def _flag(mut a: List[String], flag: String, value: String):
+    a.append(flag.copy())
+    a.append(value.copy())
 
 
 def _refusal(mut store: ComposedSecretStore, name: String) -> String:
@@ -121,21 +67,79 @@ def test_env_store_resolves_a_secret_by_name() raises:
     )
 
 
-def test_none_store_refuses_naming_the_option() raises:
+def test_none_store_refuses_naming_the_flag() raises:
     var store = ComposedSecretStore(SecretStoreChoice.NONE)
     var why = _refusal(store, String("KCI_CLI_TEST_SECRET"))
     assert_true(why.find(String("kci was run with --secret-store=none, so the secret 'KCI_CLI_TEST_SECRET'")) >= 0, why)
     assert_true(why.find(String("pass --secret-store=env")) >= 0, why)
 
 
+def _plan_private(tag: String, store: String) raises -> Tuple[Int, String]:
+    """`kci run --plan` of a PUBLISH stage on the fixture's PRIVATE API-token
+    channel; returns the exit number and the result file."""
+    var d = _root(tag)
+    var r = ExampleRelease()
+    var req = write_example_inputs(r, d, String("example-private"), True)
+    var m = d + String("/machine.textproto")
+    write_whole_file(
+        m,
+        String("schema_version: 1\nstage { name: \"") + String(EXAMPLE_STAGE)
+        + String("\" step { name: \"publish\" kind: PUBLISH platform: \"") + req.platform
+        + String("\" declarations: \"") + req.declarations_file + String("\" channels: \"") + req.channels_file
+        + String("\" channel: \"example-private\" } }\n"),
+    )
+    var a = List[String]()
+    for s in ["run", "--stage", "prod", "--run-id", "gh-2", "--attempt", "1", "--plan"]:
+        a.append(String(s))
+    _flag(a, String("--machine"), m)
+    _flag(a, String("--revision-id"), req.revision_id)
+    _flag(a, String("--release-dir"), req.release_dir)
+    _flag(a, String("--release-version"), req.release_version_file)
+    _flag(a, String("--expect-set-hash"), req.expect_set_hash)
+    _flag(a, String("--secret-store"), store)
+    _flag(a, String("--result-file"), d + String("/result.json"))
+    var steps = LibrarySteps()
+    var rec = recorder_for(a)
+    var rc = kci_main_with(a, steps, rec)
+    return (rc, Path(d + String("/result.json")).read_text())
+
+
 def test_publish_resolves_the_channel_secret_before_any_read() raises:
     assert_equal(_read_env("EXAMPLE_CONDA_TOKEN"), String(""))
     for store in [String("env"), String("none")]:
-        var out = _private_dry_run(String("e2e_") + store, store)
-        assert_equal(out[0], EXIT_FAILED, out[1])
-        assert_true(out[1].find(String('"dry_run":true')) >= 0, out[1])
-        assert_true(out[1].find(String('"files":[]')) >= 0, out[1])
-        assert_true(out[1].find(String('"verdict":"FAILED"')) >= 0, out[1])
+        var out = _plan_private(String("e2e_") + store, store)
+        assert_equal(out[0], 4, out[1])
+        var res = parse_result(out[1], String("result"))
+        assert_equal(res.outcome, String("FAILED"))
+        assert_equal(res.error.id, String("KCI-E-CREDENTIAL"))
+        assert_true(res.dry_run)
+        assert_equal(len(res.artifacts), 0)
+        assert_equal(res.actions[0].kind, String("PUBLISH"))
+
+
+def test_a_build_step_reaches_kci_build() raises:
+    var d = _root(String("build"))
+    var m = d + String("/machine.textproto")
+    write_whole_file(
+        m,
+        String("schema_version: 1\nstage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\"")
+        + String(" declarations: \"") + d + String("/absent.textproto\" } }\n"),
+    )
+    makedirs(d + String("/work"), exist_ok=True)
+    var a = List[String]()
+    for s in ["run", "--stage", "build", "--run-id", "gh-4", "--attempt", "1", "--revision-id", "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"]:
+        a.append(String(s))
+    _flag(a, String("--machine"), m)
+    _flag(a, String("--release-dir"), d + String("/release"))
+    _flag(a, String("--work-dir"), d + String("/work"))
+    _flag(a, String("--log-dir"), d + String("/logs"))
+    _flag(a, String("--result-file"), d + String("/result.json"))
+    var steps = LibrarySteps()
+    var rec = recorder_for(a)
+    assert_equal(kci_main_with(a, steps, rec), 3)
+    var res = parse_result(Path(d + String("/result.json")).read_text(), String("result"))
+    assert_equal(res.error.id, String("KCI-E-DECLARATION"))
+    assert_equal(res.actions[0].kind, String("BUILD"))
 
 
 def main() raises:
