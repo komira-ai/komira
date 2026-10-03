@@ -30,11 +30,14 @@
 // exits non-zero is refused.
 //
 // Buck2 needs no special code: a build system `buck2` with args
-// `["build", "--config-file", "/etc/kci/remote.buckconfig"]` and artifact
-// args `["//src/komira_encoding:komira_encoding_conda[release]", "--out",
+// `["build"]` and artifact args
+// `["//src/komira_encoding:komira_encoding_conda[release]", "--out",
 // "{out_dir}"]`. The subcommand belongs in the build system's args because
-// those come first and buck2 accepts `--config-file` only after the
-// subcommand. What `buck2 build --out <existing dir>` copies is the ONE
+// those come first. The farm is machine configuration, not a declaration:
+// a buckconfig buck2 reads when its daemon starts (`/etc/buckconfig.d/` or
+// `~/.buckconfig.d/`). `--config-file` and `-c` in args cannot name it:
+// the daemon reads `[buck2_re_client]` from config files only, at startup,
+// so a build given them fails with "No engine address". What `buck2 build --out <existing dir>` copies is the ONE
 // default output of the ONE target named: a single file lands in the
 // directory under its own name, the CONTENTS of a directory output land
 // directly in it (files already there are kept, which is why kci starts
@@ -76,8 +79,7 @@ message BuildSystem {
   string executable = 2;
 
   // Args passed on every invocation, before the artifact's own, e.g.
-  // `["build", "--config-file", "/etc/kci/remote.buckconfig"]`. May be empty; no
-  // entry may be. `{out_dir}` is substituted here too.
+  // `["build"]`. May be empty; no entry may be. `{out_dir}` is substituted here too.
   repeated string args = 3;
 }
 

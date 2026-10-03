@@ -1,0 +1,19 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# What a library user writes against: schema descriptors, the aggregate-function
+# trait, and the map, filter, window and row UDF traits, with the purity,
+# predicate, row-transform and column-resolver leaves they share.
+mojo_library(
+    name = "komira_udf",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+    ],
+    test_srcs = [
+        "tests/test_column_resolver.mojo",
+        "tests/test_map_fn_rt.mojo",
+        "tests/test_schema_auto.mojo",
+        "tests/test_typed_udf_raises_variance.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
