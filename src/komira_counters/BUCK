@@ -7,5 +7,8 @@ mojo_library(
     deps = [
         "//src/komira_atomic_alias:komira_atomic_alias",
     ],
+    test_srcs = [
+        "tests/test_global_counter.mojo",
+    ],
     visibility = ["PUBLIC"],
 )
