@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/resource.mojo — the provider-neutral RESOURCE abstraction of the
+# kci_reconciler/resource.mojo — the provider-neutral RESOURCE abstraction of the
 #   resource-graph deploy engine (open-core; no cloud, provider or deployment
 #   coupling).
 # =============================================================================
@@ -31,7 +31,8 @@
 
 # The trait's `fault_domain` default. Importing ONE constant from a leaf module
 # that imports nothing keeps this file's dependency surface at zero cycles.
-from kci_iac.fault_domain import FAULT_UNSET
+from kci_reconciler.fault_domain import FAULT_UNSET
+from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
 
 
 # =============================================================================
@@ -49,7 +50,9 @@ replace, a v1-unsupported REPLACE — see CONVERGE_REPLACE)."""
 comptime RES_CONVERGING: Int = 3
 """The live resource is reconciling toward the desired spec (not yet settled)."""
 comptime RES_FAILED: Int = 4
-"""The live resource is in a failed terminal state."""
+"""The live resource is in a failed terminal state. It exists and does not run
+what the file asks, so apply treats it like a drift: an in-place update (a
+fixed image after a bad one) is how it recovers."""
 
 
 # =============================================================================
@@ -83,7 +86,7 @@ comptime RETAIN_DELETE: Int = 0
 app-owned resource — its lifecycle is the deploy's)."""
 comptime RETAIN_KEEP: Int = 1
 """KEPT BY POLICY, AND OVERRIDABLE. The engine does not delete this resource in
-the ordinary course (a standing / shared resource — the environment-shared
+the ordinary course (a standing / shared resource — the cell-shared
 bootstrap bucket, the WIF pool, the VPC — provisioned once and only ever READ by a
 deploy), so rollback_create + destroy_graph SKIP it. An operator who has
 explicitly opted into destroying data-bearing / shared scope
@@ -270,8 +273,14 @@ engine RAISES on this at apply time (the typed hole)."""
 comptime VERB_DELETE: Int = 4
 """The planned action: delete the resource (destroy / rollback)."""
 
+comptime VERB_KNOWN_AFTER_APPLY: Int = 5
+"""A DRY-RUN-ONLY verb: the node consumes a value a producer will only have
+after the producer is created or changed, so its desired state cannot be known
+yet. `plan_graph` reports it as "may change", never as a no-op, and does not
+read the node (its desired digest would be over an unresolved reference).
+`apply_graph` never returns it: at apply time the producer runs first."""
 
-@fieldwise_init
+
 struct ChangeAction(Copyable, Movable, Deinitable):
     """One planned change for a resource (the PURE diff `plan` returns):
       * `logical_id` — the graph-stable key of the resource this action targets.
@@ -281,12 +290,38 @@ struct ChangeAction(Copyable, Movable, Deinitable):
                        "digest sha256:.. -> sha256:.. drifted -> update").
       * `retention`  — the resource's RETAIN_* policy (so a plan reader can see
                        which nodes a destroy would skip).
+      * `owner`      — the id of the authored resource this node was lowered
+                       from (`Resource.owner`), so a plan can be grouped under
+                       what the author wrote. Empty for a node with no owner.
+                       `plan_graph` stamps it; a conformer's `plan` need not.
     Flat-String value POD."""
 
     var logical_id: String
     var verb: Int
     var reason: String
     var retention: Int
+    var owner: String
+
+    def __init__(
+        out self,
+        logical_id: String,
+        verb: Int,
+        reason: String,
+        retention: Int,
+        owner: String = String(""),
+    ):
+        self.logical_id = logical_id
+        self.verb = verb
+        self.reason = reason
+        self.retention = retention
+        self.owner = owner
+
+    def __init__(out self, *, copy: Self):
+        self.logical_id = copy.logical_id.copy()
+        self.verb = copy.verb
+        self.reason = copy.reason.copy()
+        self.retention = copy.retention
+        self.owner = copy.owner.copy()
 
     def is_noop(self) -> Bool:
         return self.verb == VERB_NOOP
@@ -303,6 +338,9 @@ struct ChangeAction(Copyable, Movable, Deinitable):
     def is_delete(self) -> Bool:
         return self.verb == VERB_DELETE
 
+    def is_known_after_apply(self) -> Bool:
+        return self.verb == VERB_KNOWN_AFTER_APPLY
+
     def verb_name(self) -> StaticString:
         if self.verb == VERB_CREATE:
             return "create"
@@ -312,6 +350,8 @@ struct ChangeAction(Copyable, Movable, Deinitable):
             return "replace"
         if self.verb == VERB_DELETE:
             return "delete"
+        if self.verb == VERB_KNOWN_AFTER_APPLY:
+            return "known after apply"
         return "noop"
 
 
@@ -450,7 +490,7 @@ trait Resource(Movable, Deinitable):
         """A PURE diff: given the live status (from `read_status`), return the
         ChangeAction that would converge this resource — WITHOUT mutating anything
         (no I/O, no side effect). RES_ABSENT -> VERB_CREATE; RES_PRESENT_MATCHED ->
-        VERB_NOOP; RES_PRESENT_DRIFTED -> VERB_UPDATE (IN_PLACE) or VERB_REPLACE
+        VERB_NOOP; RES_PRESENT_DRIFTED or RES_FAILED -> VERB_UPDATE (IN_PLACE) or VERB_REPLACE
         (needs replace). The engine's `plan_graph` collects these for a dry-run;
         `apply_graph` re-reads live and acts, it does not replay this."""
         ...
@@ -474,7 +514,7 @@ trait Resource(Movable, Deinitable):
         ...
 
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
-        """HOW a drift (RES_PRESENT_DRIFTED) is converged: CONVERGE_IN_PLACE (the
+        """HOW a drift (RES_PRESENT_DRIFTED, or RES_FAILED) is converged: CONVERGE_IN_PLACE (the
         v1-supported update) or a RAISE for a drift that genuinely needs a REPLACE
         (delete-then-create). v1 has NO replace path — a conformer that returns
         CONVERGE_REPLACE, or raises here, makes the engine surface a clear
@@ -503,7 +543,7 @@ trait Resource(Movable, Deinitable):
 
     def fault_domain(mut self, verb: String) raises -> Int:
         """WHOSE FAULT is a failure of `verb` ON THIS NODE — a FAULT_* code
-        (`kci_iac.fault_domain`). `verb` is the `Resource` verb that raised:
+        (`kci_reconciler.fault_domain`). `verb` is the `Resource` verb that raised:
         `read_status` / `create` / `update` / `delete`.
 
         DEFAULT = `FAULT_UNSET`, WHICH READS AS **OURS**. A conformer that has
@@ -540,3 +580,71 @@ trait Resource(Movable, Deinitable):
 
         `mut self` (the erasure-shape rationale — see `logical_id`)."""
         return FAULT_UNSET
+
+    # ---- apply-time value flow (kci_reconciler/outputs.mojo) ----------------
+    #
+    # ⚠ EVERY ONE OF THESE HAS A DEFAULT, AND EVERY ONE IS FORWARDED BY
+    # `ErasedResource`. A defaulted verb that the erased facade does not forward
+    # is silently answered by THIS default for every node of a real graph (the
+    # graph only holds erased nodes), so a new verb here is a new vtable entry
+    # there, pinned by `test_resource_outputs`'s probe.
+
+    def input_refs(mut self) -> List[InputRef]:
+        """The values this node CONSUMES from other nodes. Each is a graph edge
+        (the producer is ordered first; a producer not in the graph is refused)
+        in addition to `depends_on`, so an author never has to keep a
+        dependency list and a reference list in step.
+
+        DEFAULT = NONE. `mut self` (the erasure-shape rationale — see
+        `logical_id`)."""
+        return List[InputRef]()
+
+    def bind_inputs(mut self, resolved: ResolvedInputs) raises:
+        """Receive the values of `input_refs`, one per ref, in declared order.
+        The engine calls this AFTER every producer has been applied (or, in a
+        dry run, read as unchanged) and BEFORE this node's `read_status`, so
+        the desired state the node is read and planned against holds real
+        values, never a placeholder.
+
+        DEFAULT = NO-OP, correct for a node with no `input_refs`."""
+        pass
+
+    def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
+        """The named values this node PRODUCES, for the resource `physical_id`,
+        reading AS `creds` if it must read (a node created in this run has not
+        been read since it was created). Called after every apply of the node,
+        whatever the verb, so an adopted node's values are re-derived from its
+        latest live read rather than trusted from state (a value that drifted
+        in the cloud is seen).
+
+        DEFAULT = NONE."""
+        return Outputs()
+
+    def owner(mut self) -> String:
+        """The id of the authored resource this node was lowered from (one
+        authored resource lowers to several engine nodes). Stamped on every
+        `ChangeAction` by `plan_graph`, so a plan groups under what the author
+        wrote.
+
+        DEFAULT = EMPTY."""
+        return String("")
+
+    def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        """The live read TEARDOWN uses: is the resource there, and what is its
+        physical id. `destroy_graph` calls this, never `read_status`, because
+        teardown compares nothing against a desired state, and a consumer's
+        desired state may not be computable then: `destroy_graph` binds a
+        node's `input_refs` only from the outputs the store persisted, and a
+        store that persists none leaves the node unbound, where the digest
+        rule makes `desired_digest` raise `UNBOUND`.
+
+        ⛔ THE PHASE IS PRESENT-OR-ABSENT ONLY. An override answers ABSENT
+        exactly where `read_status` would (a real not-found, never a transient
+        or an AccessDenied) and otherwise a PRESENT phase carrying the physical
+        id; the matched/drifted distinction is not computed and must not be
+        planned on.
+
+        DEFAULT = `read_status(creds)`, correct for a node with no
+        `input_refs`. A node with references overrides it (the descriptor
+        driver does)."""
+        return self.read_status(creds)

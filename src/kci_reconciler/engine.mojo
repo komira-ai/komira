@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_iac/engine.mojo — the reconcile VERBS of the resource-graph deploy
+# kci_reconciler/engine.mojo — the reconcile VERBS of the resource-graph deploy
 #   engine, driving a ResourceGraph over a StateStore + Creds (provider-neutral).
 # =============================================================================
 #
@@ -8,18 +8,22 @@
 #     `plan(read_status())` — READ-ONLY (no mutation). The dry-run.
 #   * apply_graph(graph, creds, store) -> List[AppliedNode]. Topo order; per node:
 #     record_or_adopt_intent -> read_status -> (MATCHED: adopt / ABSENT: create /
-#     DRIFTED: converge_mode IN_PLACE -> update, else RAISE "REPLACE unsupported")
-#     -> confirm -> append AppliedNode. The forward apply, with write-ahead
-#     recovery (a crashed apply is re-driven by adopting the surviving intents).
+#     DRIFTED or FAILED: converge_mode IN_PLACE -> update, else RAISE "REPLACE
+#     unsupported") -> confirm -> append AppliedNode -> outputs. The forward
+#     apply, with write-ahead recovery (a crashed apply is re-driven by adopting
+#     the surviving intents). A FAILED live resource is updatable: the fix for a
+#     bad image is the next apply with a good one.
 #   * rollback_create(graph, applied, creds, store). REVERSE order over `applied`;
 #     SKIP RETAIN_KEEP (never delete a kept resource) and SKIP RETAIN_UNDELETABLE
-#     (no delete capability exists); SKIP VERB_NOOP (we ADOPTED
-#     it — live already matched and we mutated nothing, so it is not ours to
-#     unwind); SKIP already_confirmed (the node predated us — we did not create it,
-#     so we must not delete it); else delete + mark_reaped. A delete failure
-#     raises-and-stops (fail-loud). ⚠ The VERB_NOOP skip is NOT redundant with
+#     (no delete capability exists); SKIP every node this apply did not CREATE
+#     (VERB_NOOP: we adopted it; VERB_UPDATE: it existed before this apply and we
+#     only changed it, so deleting it would destroy a pre-existing resource);
+#     SKIP already_confirmed (the node predated us — we did not create it, so we
+#     must not delete it); else delete + mark_reaped. A delete failure
+#     raises-and-stops (fail-loud). ⚠ The verb skip is NOT redundant with
 #     already_confirmed: on a FIRST apply against a pre-existing resource there is
-#     no prior intent, so already_confirmed is False while the verb is NOOP.
+#     no prior intent, so already_confirmed is False while the verb is NOOP or
+#     UPDATE.
 #   * destroy_graph(graph, creds, store, force_delete_data=False)
 #       -> List[UndeletableSkip]. REVERSE topo
 #     order; SKIP RETAIN_KEEP (unless force_delete_data — the `--delete-data`
@@ -42,7 +46,7 @@
 # THE RETAIN_KEEP INVARIANT (shared-resource retention).
 # rollback_create + destroy_graph SKIP any node whose `retention()` is
 # RETAIN_KEEP — the engine NEVER deletes a standing / shared resource (the
-# environment-shared bucket, the WIF pool, the VPC). That is the whole reason
+# cell-shared bucket, the WIF pool, the VPC). That is the whole reason
 # retention is a first-class node property.
 #
 # ★ AND THE RETAIN_UNDELETABLE INVARIANT, WHICH IS A DIFFERENT ONE.
@@ -71,7 +75,7 @@
 # across destroy and recreate. Mojo 1.0.0b2.
 # =============================================================================
 
-from kci_iac.resource import (
+from kci_reconciler.resource import (
     ResourceStatus,
     ChangeAction,
     Creds,
@@ -91,15 +95,22 @@ from kci_iac.resource import (
     VERB_UPDATE,
     VERB_REPLACE,
     VERB_DELETE,
+    VERB_KNOWN_AFTER_APPLY,
 )
-from kci_iac.fault_domain import (
+from kci_reconciler.outputs import (
+    InputRef,
+    Outputs,
+    ResolvedInputs,
+    unbound_error,
+)
+from kci_reconciler.fault_domain import (
     FAULT_UNSET,
     fault_error,
     fault_domain_of_error,
     fault_message_of_error,
 )
-from kci_iac.state import StateStore, IntentTicket
-from kci_iac.graph import ResourceGraph, topo_sort, reverse_order
+from kci_reconciler.state import StateStore, IntentTicket
+from kci_reconciler.graph import ResourceGraph, topo_sort, reverse_order
 
 # The ambient (process-global) structured-log facade — the no-`ctx`/no-threaded-
 # handle reach the best-effort prune swallow uses to emit a breadcrumb WITHOUT
@@ -166,7 +177,7 @@ struct UndeletableSkip(Copyable, Movable, Deinitable):
     not; that is strictly worse than the raise this replaces, because a raise at
     least stopped. So `destroy_graph` hands every skip back — `logical_id` names
     the node, `reason` carries the CONFORMER's own words — and the caller renders
-    them. The engine cannot print: `kci_iac` is provider- AND IO-neutral by
+    them. The engine cannot print: `kci_reconciler` is provider- AND IO-neutral by
     construction (no reporter, no logger on the verb surface), so the record is
     the only honest carrier.
 
@@ -186,7 +197,7 @@ def undeletable_report_lines(
     """The teardown's UNDELETABLE report, as LINES — one shared rendering for
     every caller of `destroy_graph`, and EMPTY when nothing was skipped.
 
-    ⛔ A PURE FUNCTION RETURNING STRINGS, BECAUSE `kci_iac` DOES NO IO. The
+    ⛔ A PURE FUNCTION RETURNING STRINGS, BECAUSE `kci_reconciler` DOES NO IO. The
     engine layer has no reporter, no logger on its verb surface and no cloud; a
     renderer that printed would put an output policy in the neutral layer. It
     lives here anyway rather than in each caller because the sentence an operator
@@ -216,7 +227,7 @@ def undeletable_report_lines(
     lines.append(
         String(
             "  ⚠ THE TEARDOWN COMPLETED — every other node was reaped or kept by"
-            " policy — but the environment is NOT empty. Each resource above was"
+            " policy — but the cell is NOT empty. Each resource above was"
             " SKIPPED WITHOUT BEING READ, so this is a statement about what was"
             " attempted, not about what still exists. Their intent records are"
             " deliberately LEFT INTACT (never marked reaped) so nothing is"
@@ -229,17 +240,122 @@ def undeletable_report_lines(
 # =============================================================================
 # §2 — plan_graph — the READ-ONLY dry run. Topo order; per node, plan(read_status).
 # =============================================================================
+struct _RunOutputs(Movable):
+    """The outputs each node produced in THIS walk (apply or dry run), by
+    logical id, and, in a dry run, the producers whose values are not known
+    until apply."""
+
+    var _ids: List[String]
+    var _outs: List[Outputs]
+    var _pending_ids: List[String]
+    var _pending_verbs: List[String]
+
+    def __init__(out self):
+        self._ids = List[String]()
+        self._outs = List[Outputs]()
+        self._pending_ids = List[String]()
+        self._pending_verbs = List[String]()
+
+    def put(mut self, logical_id: String, var outs: Outputs):
+        self._ids.append(logical_id)
+        self._outs.append(outs^)
+
+    def mark_pending(mut self, logical_id: String, verb: String):
+        self._pending_ids.append(logical_id)
+        self._pending_verbs.append(verb)
+
+    def pending_verb(self, logical_id: String) -> Optional[String]:
+        for i in range(len(self._pending_ids)):
+            if self._pending_ids[i] == logical_id:
+                return self._pending_verbs[i]
+        return None
+
+    def value(self, logical_id: String, output: String) -> Optional[String]:
+        for i in range(len(self._ids)):
+            if self._ids[i] == logical_id:
+                return self._outs[i].get(output)
+        return None
+
+
+def _resolve_inputs(
+    lid: String, refs: List[InputRef], run: _RunOutputs
+) raises -> ResolvedInputs:
+    """One resolved value per ref, or the UNBOUND refusal naming the consumer,
+    the field, the producer and the output. Every producer has already been
+    walked (topo order), so a missing value means the producer did not report
+    it: a refusal, never an empty string."""
+    var resolved = ResolvedInputs()
+    for r in range(len(refs)):
+        var v = run.value(refs[r].producer, refs[r].output)
+        if not v:
+            raise unbound_error(lid, refs[r])
+        resolved.add(refs[r], v.value())
+    return resolved^
+
+
 def plan_graph(mut graph: ResourceGraph, creds: Creds) raises -> List[ChangeAction]:
     """Return the ChangeAction for every node, in topo order, WITHOUT mutating
     anything. Per node: `read_status(creds)` (the live read) then `plan(live)` (the
     pure diff). NO create/update/delete is issued — this is a dry run. RAISES on a
-    dangling dependency / cycle (via topo_sort) or a genuine backend read fault."""
+    dangling dependency or reference, a cycle (via topo_sort), an unresolved
+    reference, or a genuine backend read fault.
+
+    ── VALUES THAT ONLY EXIST AFTER APPLY ──────────────────────────────────────
+    A node with `input_refs` is bound to its producers' values BEFORE it is
+    read, so it is planned against real values. A dry run cannot create or
+    change a producer, so when any producer of a node plans anything but a
+    no-op (or is itself waiting on one), the node is reported as
+    VERB_KNOWN_AFTER_APPLY ("may change") and is NOT read: its desired digest
+    would be over an unresolved reference. It is never reported as a no-op. A
+    node whose producers all plan no-ops is bound to their live outputs and
+    planned like any other.
+
+    Every action carries the node's `owner()`."""
     var order = topo_sort(graph)
     var actions = List[ChangeAction]()
+    var run = _RunOutputs()
     for oi in range(len(order)):
         var idx = order[oi]
+        var lid = graph.node(idx).logical_id()
+        var owner = graph.node(idx).owner()
+        var refs = graph.node(idx).input_refs()
+        var waiting_on = String("")
+        for r in range(len(refs)):
+            var pv = run.pending_verb(refs[r].producer)
+            if pv:
+                if waiting_on.byte_length() > 0:
+                    waiting_on += String(", ")
+                waiting_on += (
+                    refs[r].field
+                    + String(" <- ")
+                    + refs[r].producer
+                    + String(".")
+                    + refs[r].output
+                    + String(" (")
+                    + pv.value()
+                    + String(")")
+                )
+        if waiting_on.byte_length() > 0:
+            run.mark_pending(lid, String("known after apply"))
+            actions.append(
+                ChangeAction(
+                    lid,
+                    VERB_KNOWN_AFTER_APPLY,
+                    String("(known after apply): ") + waiting_on,
+                    graph.node(idx).retention(),
+                    owner,
+                )
+            )
+            continue
+        if len(refs) > 0:
+            graph.node(idx).bind_inputs(_resolve_inputs(lid, refs, run))
         var live = graph.node(idx).read_status(creds)
         var action = graph.node(idx).plan(live)
+        action.owner = owner
+        if action.verb == VERB_NOOP:
+            run.put(lid, graph.node(idx).outputs(live.physical_id, creds))
+        else:
+            run.mark_pending(lid, String(action.verb_name()))
         actions.append(action^)
     return actions^
 
@@ -251,7 +367,7 @@ def _node_fault_domain(
     mut graph: ResourceGraph, idx: Int, verb: String, inner: String
 ) -> Int:
     """WHOSE FAULT this node's `verb` failure is — the engine's resolution of the
-    two carriers, in precedence order (`kci_iac.fault_domain`).
+    two carriers, in precedence order (`kci_reconciler.fault_domain`).
 
       1. THE RAISE SITE, if it stated one (`fault_error(FAULT_CUSTOMER, ...)`
          leaves our canonical token on the front of `inner`). A site that knew
@@ -380,7 +496,7 @@ def apply_graph_tracked[
     On a raise:
       * `landed`  — every node this apply already acted on, in APPLY ORDER, with
                     the verb it issued. These are the mutations that are LIVE in
-                    the environment right now.
+                    the cell right now.
       * `pending` — the logical ids the topo order had NOT reached, in the order
                     they would have run. These did NOT land. The failing node is
                     the FIRST entry (it was reached and did not complete).
@@ -388,7 +504,7 @@ def apply_graph_tracked[
     ⛔ THERE IS NO ROLLBACK ON THIS PATH, AND THAT IS A STATEMENT ABOUT THE
     ENGINE, NOT AN OMISSION HERE. `rollback_create` exists in this file, but no
     deploy verb calls it to unwind a partial apply. A failed apply therefore
-    leaves the environment HALF-CONFIGURED — for example, a service converges
+    leaves the cell HALF-CONFIGURED — for example, a service converges
     while the secret-access grants ordered after the failing node never land, so
     the service comes up and is refused on both of its secret reads.
 
@@ -414,13 +530,17 @@ def apply_graph_tracked[
              physical_id (or the store's confirmed id if the live read did not
              surface one).
            * RES_ABSENT           -> CREATE: `create(creds)` -> the physical id.
-           * RES_PRESENT_DRIFTED  -> converge_mode(live):
+           * RES_PRESENT_DRIFTED / RES_FAILED -> converge_mode(live):
                - CONVERGE_IN_PLACE -> `update(creds)`. The physical id is the live
                  physical_id.
                - else (CONVERGE_REPLACE / a raise) -> RAISE "CONVERGE_REPLACE
                  unsupported in v1" (the typed hole — no surprise teardown).
-           * RES_CONVERGING / RES_FAILED -> RAISE (the live resource is not in a
-             reconcilable steady state for a v1 apply — fail-loud).
+             A FAILED resource is treated as drifted: it exists, it does not
+             run what the file asks, and an update is the way out (a fixed
+             image after a bad one). Refusing it would leave a console edit as
+             the only recovery.
+           * RES_CONVERGING -> RAISE (the live resource is still reconciling
+             toward some state; a v1 apply does not wait for it — fail-loud).
       4. confirm(ticket, physical_id) — heal the intent to CONFIRMED.
       5. append AppliedNode(logical_id, physical_id, retention, already_confirmed,
          verb, served_endpoint) — `served_endpoint` is the served node's live
@@ -444,10 +564,20 @@ def apply_graph_tracked[
     pending.clear()
     for oi in range(len(order)):
         pending.append(graph.node(order[oi]).logical_id())
+    var run = _RunOutputs()
     for oi in range(len(order)):
         var idx = order[oi]
         var lid = graph.node(idx).logical_id()
         var retention = graph.node(idx).retention()
+
+        # ---- 0: BIND BEFORE READ ----
+        # Every producer of this node has been applied (topo order) and has
+        # reported its outputs, so the node's desired state holds real values
+        # before it is read and planned. An unresolved value raises here,
+        # before any intent is written for the node.
+        var refs = graph.node(idx).input_refs()
+        if len(refs) > 0:
+            graph.node(idx).bind_inputs(_resolve_inputs(lid, refs, run))
 
         # ---- 1: write-ahead intent (record or adopt) BEFORE the mutation ----
         var ticket = store.record_or_adopt_intent(lid)
@@ -500,8 +630,10 @@ def apply_graph_tracked[
                     ),
                 )
             verb = VERB_CREATE
-        elif live.phase == RES_PRESENT_DRIFTED:
-            # DRIFTED: converge in place, or fail-loud on a replace-needing drift.
+        elif live.phase == RES_PRESENT_DRIFTED or live.phase == RES_FAILED:
+            # DRIFTED, or FAILED (a failed resource is updatable: the next
+            # apply with a fixed spec is how it recovers): converge in place,
+            # or fail-loud on a replace-needing drift.
             var mode = graph.node(idx).converge_mode(live)
             if mode == CONVERGE_IN_PLACE:
                 try:
@@ -525,22 +657,23 @@ def apply_graph_tracked[
                 raise Error(
                     String("apply_graph: node '")
                     + lid
-                    + String("' drifted and its converge_mode is CONVERGE_REPLACE")
+                    + String("' drifted (or failed) and its converge_mode is")
+                    + String(" CONVERGE_REPLACE")
                     + String(" — REPLACE (delete-then-create) is UNSUPPORTED in v1")
                     + String(" (the typed hole; the engine refuses to guess a")
                     + String(" destructive teardown). Resolve the drift out of")
                     + String(" band or extend the engine with a replace path.")
                 )
         else:
-            # CONVERGING / FAILED: not a reconcilable steady state for a v1 apply.
+            # CONVERGING (or an unknown phase): not a state a v1 apply acts on.
             raise Error(
                 String("apply_graph: node '")
                 + lid
                 + String("' read a non-steady live phase (")
                 + String(live.phase)
-                + String(") — the engine reconciles absent/matched/drifted; a")
-                + String(" converging/failed resource must settle (or be")
-                + String(" resolved) before apply. ")
+                + String(") — the engine reconciles absent/matched/drifted/")
+                + String("failed; a converging resource must settle before")
+                + String(" apply. ")
                 + live.message
             )
 
@@ -573,7 +706,7 @@ def apply_graph_tracked[
                 log.warn[
                     "retention prune failed (best-effort; deploy continues):"
                     " node={} verb={} err={}",
-                    "kci_iac",
+                    "kci_reconciler",
                 ](
                     ArgStr(lid.copy()),
                     ArgI64(Int64(verb)),
@@ -599,13 +732,40 @@ def apply_graph_tracked[
         )
         applied.append(record.copy())
         # ---- 5b: advance the progress channels ----
-        # This node is DONE, so it moves from `pending` to `landed`. It happens
-        # AFTER `store.confirm` and after every raise site above, so a node in
-        # `landed` is one whose mutation completed AND whose intent healed —
-        # exactly the claim the failure report makes about it.
+        # The node's mutation completed and its intent healed, so it moves from
+        # `pending` to `landed` NOW, before its outputs are read. It happens
+        # AFTER `store.confirm` and after every raise site of the mutation, so
+        # a node in `landed` is one whose mutation completed AND whose intent
+        # healed, exactly the claim the failure report makes about it.
+        #
+        # ⛔ NOT AFTER THE OUTPUTS READ. `outputs` may read live (a created
+        # node has never been read since its create), and that read can fail.
+        # Had the node moved to `landed` only after it, a failing read would
+        # leave a LIVE, CONFIRMED resource out of `landed`: the failure report
+        # would say nothing was created, and a teardown of what this apply
+        # created would not find it.
         landed.append(record^)
         if len(pending) > 0:
             _ = pending.pop(0)
+
+        # ---- 6: what the node produced ----
+        # Re-derived on EVERY apply, whatever the verb: an adopted node's values
+        # come from its live read, not from state. Persisted beside the physical
+        # id as a fallback for readers that cannot read live. A raise is
+        # enriched like the mutation verbs' (node + verb + fault domain); the
+        # node is already in `landed` (above).
+        var outs: Outputs
+        try:
+            outs = graph.node(idx).outputs(physical_id, creds)
+        except oe:
+            raise _node_verb_error(
+                lid,
+                String("outputs"),
+                String(oe),
+                _node_fault_domain(graph, idx, String("outputs"), String(oe)),
+            )
+        store.record_outputs(lid, outs)
+        run.put(lid, outs^)
 
     return applied^
 
@@ -627,8 +787,11 @@ def rollback_create[
 
       * SKIP RETAIN_KEEP — the engine NEVER deletes a kept / shared resource (the
         shared-bucket-retention invariant).
-      * SKIP VERB_NOOP — this apply ADOPTED the resource (the live read reported
-        RES_PRESENT_MATCHED and we mutated NOTHING), so it is not ours to unwind.
+      * SKIP every verb but VERB_CREATE — VERB_NOOP: this apply ADOPTED the
+        resource (the live read reported RES_PRESENT_MATCHED and we mutated
+        NOTHING); VERB_UPDATE: the resource EXISTED before this apply (the live
+        read reported it drifted or failed) and we only changed it. Neither is
+        a create of ours, so neither is ours to unwind.
       * SKIP already_confirmed — the intent PREDATED this apply (we did NOT create
         the resource, so we must not delete it; unwinding OUR apply must not reap a
         resource a prior apply owns).
@@ -652,12 +815,19 @@ def rollback_create[
     Falsified by `tests/test_resource_graph_engine.mojo`'s
     `test_rollback_never_deletes_an_adopted_node_on_first_apply`.
 
-    ⚠ THE SKIP IS NARROW BY DESIGN: only VERB_NOOP. A node this apply genuinely
+    ⛔ AND THE SAME HOLDS FOR VERB_UPDATE. On a first apply against a
+    pre-existing resource that DRIFTED, the ticket again reports
+    already_confirmed=False and §3 issues `update`; in a run whose state store
+    is new (a scratch cell, a lost store) that is every resource the apply
+    touched. Deleting it would turn "a later node failed" into "the service
+    that was running before this deploy is gone". An updated node's prior
+    state is a `rollback_update` concern (a wrapper's), never a delete.
+    Falsified by `test_rollback_never_deletes_an_updated_node`.
+
+    ⚠ ONLY A CREATE IS UNWOUND, AND IT STILL IS. A node this apply genuinely
     CREATED (VERB_CREATE) is still deleted — a fix that stopped all rollback
     deletion would replace a data-loss bug with an orphan-resource bug, and that
-    node's arm is asserted by the same falsifier. VERB_UPDATE is likewise NOT
-    skipped: this function is rollback of CREATES, and an updated node's prior
-    state is a `rollback_update` concern (below), not a reason to leave it.
+    node's arm is asserted by both falsifiers.
 
     A delete failure RAISES and STOPS (fail-loud — a half-rolled-back state is
     surfaced, not silently continued; the surviving reaped/un-reaped intents let a
@@ -682,11 +852,12 @@ def rollback_create[
             # which is the verb an operator invokes deliberately.
             i -= 1
             continue
-        if node.verb == VERB_NOOP:
-            # ADOPTED: the live read matched and this apply mutated nothing, so the
-            # resource is not ours to unwind. This arm covers the FIRST apply, where
-            # `already_confirmed` is False because no prior intent exists — see the
-            # docstring. Deleting here destroys a pre-existing customer resource.
+        if node.verb != VERB_CREATE:
+            # NOT A CREATE OF OURS. VERB_NOOP: adopted, nothing mutated.
+            # VERB_UPDATE: the resource existed before this apply; we changed
+            # it, we did not make it. This arm covers the FIRST apply, where
+            # `already_confirmed` is False because no prior intent exists — see
+            # the docstring. Deleting here destroys a pre-existing resource.
             i -= 1
             continue
         if node.already_confirmed:
@@ -705,6 +876,26 @@ def rollback_create[
 # =============================================================================
 # §5 — destroy_graph — tear the whole graph down, in REVERSE topo order.
 # =============================================================================
+def _bind_from_recorded_outputs[
+    S: StateStore
+](mut graph: ResourceGraph, idx: Int, lid: String, mut store: S) raises:
+    """Best-effort bind for TEARDOWN: bind node `idx`'s `input_refs` from the
+    outputs `store` recorded for its producers, iff every one is recorded.
+    A missing value binds nothing and refuses nothing (teardown reads with
+    `read_presence`, which needs no bound value); it is never an empty
+    string."""
+    var refs = graph.node(idx).input_refs()
+    if len(refs) == 0:
+        return
+    var resolved = ResolvedInputs()
+    for r in range(len(refs)):
+        var v = store.outputs_for(refs[r].producer).get(refs[r].output)
+        if not v:
+            return
+        resolved.add(refs[r], v.value())
+    graph.node(idx).bind_inputs(resolved)
+
+
 def destroy_graph[
     S: StateStore
 ](
@@ -725,8 +916,9 @@ def destroy_graph[
         shared-bucket-retention invariant: destroy retains the standing scope) —
         UNLESS `force_delete_data` is set (the `--delete-data` whole-project override,
         below).
-      * else — `read_status(creds)` (the live read); then:
-          - ABSENT — the resource is provably already gone (`read_status` returns
+      * else — `read_presence(creds)` (the live read, no digest: teardown
+        needs no bound inputs); then:
+          - ABSENT — the resource is provably already gone (`read_presence` returns
             ABSENT ONLY on a real 404 / NOT_FOUND; a transient / GOAWAY / 5xx RAISES
             out of this loop, it does NOT read as absent). `mark_reaped` retires the
             intent (idempotent already-gone) — NO delete to issue.
@@ -744,7 +936,7 @@ def destroy_graph[
     a billable resource forever (no level-triggered re-drive can recover it — the
     record is gone). So the retire is gated on a CONFIRMED-GONE outcome: a provable-
     404 absent read, OR a delete-then-reread that comes back ABSENT. A transient /
-    ambiguous read (which `read_status` surfaces as a RAISE, never as ABSENT) and a
+    ambiguous read (which `read_presence` surfaces as a RAISE, never as ABSENT) and a
     resource that SURVIVES its delete both LEAVE the record for the re-drive. This is
     the "fail-loud, no partial-reap swallowed" contract. An unconditional
     `mark_reaped` (retire regardless) would violate it: a read that reported
@@ -868,9 +1060,17 @@ def destroy_graph[
             # `--delete-data` (force_delete_data), the explicit whole-project override.
             continue
         var lid = graph.node(idx).logical_id()
-        var live = graph.node(idx).read_status(creds)
+        # ⛔ TEARDOWN NEEDS NO BOUND INPUTS. It reads with `read_presence`
+        # (present or absent + physical id, no digest), so a consumer whose
+        # references cannot be bound now is still found and deleted. The
+        # references are bound from the producers' PERSISTED outputs when the
+        # store has every one of them, for a node that does not override
+        # `read_presence`; when it has not, nothing is bound and nothing is
+        # refused.
+        _bind_from_recorded_outputs(graph, idx, lid, store)
+        var live = graph.node(idx).read_presence(creds)
         if not live.is_present():
-            # ABSENT — the resource is PROVABLY already gone. `read_status` returns
+            # ABSENT — the resource is PROVABLY already gone. `read_presence` returns
             # ABSENT ONLY on a real 404 / NOT_FOUND; a transient (GOAWAY / H2_PROTOCOL
             # / 5xx / DEADLINE / network) RAISES out of this loop rather than reading
             # as absent. So an absent read is a confirmed-gone outcome — retire the
@@ -891,9 +1091,9 @@ def destroy_graph[
         # the resource (the re-read is ABSENT). A re-read that is still PRESENT means
         # the delete did not take — LEAVE the record intact + RAISE so the level-
         # triggered reconcile re-drives (never retire a record over a live resource).
-        # A transient re-read RAISES here too (surfaced by read_status, not absent) —
+        # A transient re-read RAISES here too (surfaced by read_presence, not absent) —
         # the same fail-loud, no silent retire.
-        var after = graph.node(idx).read_status(creds)
+        var after = graph.node(idx).read_presence(creds)
         if after.is_present():
             raise Error(
                 String("destroy_graph: node '")

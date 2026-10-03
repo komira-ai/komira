@@ -14,7 +14,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # code, the confirmed-gone reap gate, the destroy scope, crash-then-adopt
 # recovery, the best-effort prune, and fault attribution defaulting to ours.
 mojo_library(
-    name = "kci_iac",
+    name = "kci_reconciler",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_core:komira_core",
@@ -23,6 +23,8 @@ mojo_library(
     test_srcs = [
         "tests/test_fault_domain_defaults_to_ours.mojo",
         "tests/test_resource_graph_engine.mojo",
+        "tests/test_resource_outputs.mojo",
+        "tests/test_resource_outputs_after_mutation.mojo",
     ],
     visibility = ["PUBLIC"],
 )

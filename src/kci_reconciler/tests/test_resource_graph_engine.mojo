@@ -1,6 +1,6 @@
 # =============================================================================
 # test_resource_graph_engine.mojo — the unit gate for the provider-neutral
-#   resource-graph deploy engine core (kci_iac).
+#   resource-graph deploy engine core (kci_reconciler).
 # =============================================================================
 #
 # Drives the engine (plan / apply / rollback / destroy) over a pure in-memory
@@ -29,7 +29,7 @@
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true, assert_false, assert_raises
 
-from kci_iac import (
+from kci_reconciler import (
     Resource,
     ResourceStatus,
     ChangeAction,
@@ -52,6 +52,7 @@ from kci_iac import (
     RES_ABSENT,
     RES_PRESENT_MATCHED,
     RES_PRESENT_DRIFTED,
+    RES_FAILED,
     RETAIN_DELETE,
     RETAIN_KEEP,
     RETAIN_UNDELETABLE,
@@ -303,6 +304,15 @@ struct FakeResource(Resource, Movable, Deinitable):
         if ph == RES_PRESENT_MATCHED:
             return ResourceStatus.matched(
                 self._p[].physical_id, String("digest-live")
+            )
+        if ph == RES_FAILED:
+            # A live resource in a failed terminal state (a revision that never
+            # became ready): present, and not running what the file asks.
+            return ResourceStatus(
+                RES_FAILED,
+                self._p[].physical_id,
+                String("digest-bad"),
+                String("terminal condition: revision failed to become ready"),
             )
         # DRIFTED
         return ResourceStatus.drifted(
@@ -711,6 +721,65 @@ def test_rollback_reverse_order() raises:
     _ = a^
     _ = b^
     _ = c^
+
+
+# =============================================================================
+# (3c) ⛔ rollback MUST NOT delete a resource this apply merely UPDATED.
+#
+# The same gap as (3a), one verb over. On a first apply against a pre-existing
+# resource that DRIFTED, there is no prior intent (already_confirmed=False) and
+# the engine issues `update` (verb=VERB_UPDATE). In a run whose state store is
+# new, that is EVERY resource the apply touched. A rollback that deleted it
+# would turn "a later node failed" into "the service that was running before
+# this deploy is gone". Only a CREATE of this apply is unwound; that arm is
+# asserted here too.
+# =============================================================================
+def test_rollback_never_deletes_an_updated_node() raises:
+    var g = ResourceGraph()
+    # Pre-existing and drifted, RETAIN_DELETE (so RETAIN_KEEP is not what saves
+    # it), no prior intent (so already_confirmed is not what saves it).
+    var running = FakeResource(
+        String("running"), List[String](), RETAIN_DELETE, RES_PRESENT_DRIFTED
+    )
+    g.add(ErasedResource.erase(running.share()))
+    var deps_app = List[String]()
+    deps_app.append(String("running"))
+    var app = FakeResource(String("app"), deps_app^, RETAIN_DELETE, RES_ABSENT)
+    g.add(ErasedResource.erase(app.share()))
+
+    var creds = Creds.none()
+    var store = InMemoryStateStore()
+    var applied = apply_graph(g, creds, store)
+    assert_equal(len(applied), 2, "both nodes applied")
+    assert_equal(applied[0].logical_id, String("running"))
+    assert_equal(
+        applied[0].verb, VERB_UPDATE, "the pre-existing node was UPDATED, not created"
+    )
+    assert_false(
+        applied[0].already_confirmed,
+        "first apply: no prior intent, so already_confirmed does not save it",
+    )
+    assert_true(running.updated() and not running.created())
+    assert_true(app.created())
+
+    rollback_create(g, applied, creds, store)
+
+    assert_false(
+        running.deleted(),
+        (
+            "rollback DELETED a resource this deploy only UPDATED (verb=UPDATE) —"
+            " the service that ran before this deploy is gone"
+        ),
+    )
+    assert_equal(
+        store.count_reaped(String("running")),
+        0,
+        "the updated node's intent was NOT reaped (the resource still exists)",
+    )
+    assert_true(app.deleted(), "rollback still deletes the node this apply created")
+    assert_equal(store.count_reaped(String("app")), 1)
+    _ = running^
+    _ = app^
 
 
 # =============================================================================
@@ -1259,7 +1328,7 @@ def test_rollback_create_skips_an_undeletable_node() raises:
     var applied = apply_graph(g, creds, store)
 
     # ⛔ THE PRECONDITION IS ASSERTED, NOT ASSUMED. If this node is ever adopted
-    # again (VERB_NOOP), the later VERB_NOOP skip fires first and the rest of this
+    # again (VERB_NOOP), the later not-a-create skip fires first and the rest of this
     # case stops measuring the guard it names — silently, and while still passing.
     var repo_verb = -1
     var repo_confirmed = True
@@ -1611,6 +1680,55 @@ def test_destroy_transient_read_raises_and_does_not_reap() raises:
 
 
 # =============================================================================
+# (8a) A FAILED live resource is UPDATED, not refused.
+#
+# The author ships a bad image; the new revision never becomes ready and the
+# cloud reports the resource FAILED while it stays present. The author pushes
+# a fixed image. The apply must update the failed resource (the way out); a
+# refusal would leave a console edit as the only recovery, every apply after
+# the first bad one raising at that node forever.
+# =============================================================================
+def test_apply_updates_a_failed_node() raises:
+    var g = ResourceGraph()
+    var svc = FakeResource(
+        String("svc"), List[String](), RETAIN_DELETE, RES_FAILED
+    )
+    g.add(ErasedResource.erase(svc.share()))
+    var creds = Creds.none()
+    var store = InMemoryStateStore()
+    var applied = apply_graph(g, creds, store)
+    assert_equal(len(applied), 1)
+    assert_equal(applied[0].verb, VERB_UPDATE, "a FAILED node is updated")
+    assert_equal(applied[0].physical_id, String("phys-svc"), "the live id is kept")
+    assert_true(svc.updated(), "update was issued on the failed resource")
+    assert_false(svc.created(), "a failed resource is not re-created")
+    # The fixed spec converged: a re-apply is a no-op.
+    var again = apply_graph(g, creds, store)
+    assert_equal(again[0].verb, VERB_NOOP, "after the fix the node settles")
+
+    # A failed node whose drift needs a REPLACE still refuses (the typed hole
+    # is the same whatever made the resource differ).
+    var g2 = ResourceGraph()
+    var bad = FakeResource(
+        String("bad"), List[String](), RETAIN_DELETE, RES_FAILED, CONVERGE_REPLACE
+    )
+    g2.add(ErasedResource.erase(bad.share()))
+    var store2 = InMemoryStateStore()
+    var raised = False
+    try:
+        _ = apply_graph(g2, creds, store2)
+    except e:
+        raised = True
+        assert_true(
+            _contains_sub(String(e), "CONVERGE_REPLACE"), String(e)
+        )
+    assert_true(raised, "a failed node that needs a REPLACE is refused")
+    assert_false(bad.updated() or bad.created() or bad.deleted())
+    _ = svc^
+    _ = bad^
+
+
+# =============================================================================
 # (8) apply_graph ADOPTS a matched node (no create) and UPDATES a drifted node.
 # =============================================================================
 def test_apply_adopts_matched_and_updates_drifted() raises:
@@ -1827,6 +1945,7 @@ def main() raises:
     test_rollback_reverse_skips_keep_and_confirmed()
     test_rollback_never_deletes_an_adopted_node_on_first_apply()
     test_rollback_reverse_order()
+    test_rollback_never_deletes_an_updated_node()
     test_cycle_raises()
     test_dangling_dependency_raises()
     test_plan_mutates_nothing()
@@ -1847,12 +1966,13 @@ def main() raises:
     test_a_scoped_destroy_still_confirms_gone()
     test_destroy_scope_does_not_lift_retain_keep()
     test_apply_adopts_matched_and_updates_drifted()
+    test_apply_updates_a_failed_node()
     test_reapply_adopts_intent_no_double_create()
     test_apply_invokes_prune_after_create()
     test_apply_swallows_prune_raise_deploy_succeeds()
     verifier_adopted_node_survives_a_real_downstream_failure()
     verifier_created_node_is_still_reaped_on_the_failing_path()
-    print("test_resource_graph_engine: all kci_iac engine cases PASSED")
+    print("test_resource_graph_engine: all kci_reconciler engine cases PASSED")
 
 
 # =============================================================================
