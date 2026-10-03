@@ -1,6 +1,7 @@
 # The responses komira_aws_s3 reads for the operations an object store
 # needs, written as the Amazon S3 API Reference shows them, each field
-# compared exactly; S3's 200-with-<Error> (raised as an HTTP 500 is, which
+# compared exactly (DeleteObjects' per-key <Error> results among them);
+# S3's 200-with-<Error> (raised as an HTTP 500 is, which
 # a caller retries); and the error forms a caller classifies by
 # komira_aws_core.aws_rest_xml_error: a code in the body, a bare <Error>,
 # and a HEAD error, which has no body and so is named by its status.
@@ -10,6 +11,7 @@ from komira_aws_s3.komira_aws_s3 import (
     parse_copy_object_response,
     parse_create_multipart_upload_response,
     parse_delete_object_response,
+    parse_delete_objects_response,
     parse_get_object_head,
     parse_get_object_response,
     parse_head_object_response,
@@ -435,6 +437,93 @@ def test_redirect_names_its_code() raises:
     assert_equal(resp.header(String("x-amz-bucket-region")), "eu-west-1")
 
 
+# ---- DeleteObjects -----------------------------------------------------------------
+
+
+def test_delete_objects_result() raises:
+    # A 200 <DeleteResult>: what was deleted and, per key, what was not.
+    # An <Error> child is a key's failure, not the request's: only an
+    # <Error> ROOT is an error document.
+    var body = String(
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        + "<DeleteResult "
+        + _NS
+        + ">"
+        + "<Deleted><Key>data/part-0.parquet</Key></Deleted>"
+        + "<Deleted><Key>data/part-1.parquet</Key>"
+        + "<DeleteMarker>true</DeleteMarker>"
+        + "<DeleteMarkerVersionId>A._w1z6EFiCF5uhtQMDal9JDkID9tQ7F</DeleteMarkerVersionId>"
+        + "</Deleted>"
+        + "<Error><Key>locked/a.parquet</Key>"
+        + "<VersionId>3/L4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY</VersionId>"
+        + "<Code>AccessDenied</Code><Message>Access Denied</Message></Error>"
+        + "<Error><Key>a&amp;b.txt</Key><Code>InternalError</Code>"
+        + "<Message>We encountered an internal error. Please try again.</Message>"
+        + "</Error>"
+        + "</DeleteResult>"
+    )
+    var resp = AwsResponse.of_text(200, body)
+    resp.add_header(String("x-amz-request-charged"), String("requester"))
+    var out = parse_delete_objects_response(resp)
+    # Read in place. A List.copy() of these lists has corrupted the heap of
+    # this test binary under the pinned Mojo compiler (List[T] where T has
+    # the generated explicit __deinit__), so the rows here do not copy.
+    ref deleted = out.deleted.value()
+    assert_equal(len(deleted), 2)
+    assert_equal(deleted[0].key.value(), "data/part-0.parquet")
+    assert_false(Bool(deleted[0].delete_marker))
+    assert_false(Bool(deleted[0].version_id))
+    assert_equal(deleted[1].key.value(), "data/part-1.parquet")
+    assert_true(deleted[1].delete_marker.value())
+    assert_equal(
+        deleted[1].delete_marker_version_id.value(),
+        "A._w1z6EFiCF5uhtQMDal9JDkID9tQ7F",
+    )
+    ref errors = out.errors.value()
+    assert_equal(len(errors), 2)
+    assert_equal(errors[0].key.value(), "locked/a.parquet")
+    assert_equal(errors[0].version_id.value(), "3/L4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY")
+    assert_equal(errors[0].code.value(), "AccessDenied")
+    assert_equal(errors[0].message.value(), "Access Denied")
+    assert_equal(errors[1].key.value(), "a&b.txt")
+    assert_equal(errors[1].code.value(), "InternalError")
+    assert_false(Bool(errors[1].version_id))
+    assert_equal(out.request_charged.value(), "requester")
+
+
+def test_delete_objects_quiet_result() raises:
+    # Quiet mode: only failures are listed, and with none the result is
+    # empty. Neither list is set, rather than set empty.
+    var out = parse_delete_objects_response(
+        AwsResponse.of_text(200, String("<DeleteResult " + _NS + "/>"))
+    )
+    assert_false(Bool(out.deleted))
+    assert_false(Bool(out.errors))
+    assert_false(Bool(out.request_charged))
+    # Failures only.
+    var some = parse_delete_objects_response(
+        AwsResponse.of_text(
+            200,
+            String(
+                "<DeleteResult "
+                + _NS
+                + "><Error><Key>k</Key><Code>AccessDenied</Code>"
+                + "<Message>Access Denied</Message></Error></DeleteResult>"
+            ),
+        )
+    )
+    assert_false(Bool(some.deleted))
+    assert_equal(len(some.errors.value()), 1)
+    assert_equal(some.errors.value()[0].key.value(), "k")
+
+
+def test_delete_objects_200_error_is_raised() raises:
+    # The whole request failing after a 200: an <Error> root, raised as an
+    # HTTP 500 is.
+    with assert_raises(contains="DeleteObjects failed: HTTP 500 InternalError"):
+        _ = parse_delete_objects_response(AwsResponse.of_text(200, String(_INTERNAL)))
+
+
 def main() raises:
     test_get_object_206()
     test_get_object_body_is_never_an_error_body()
@@ -457,4 +546,7 @@ def main() raises:
     test_request_id_header_wins()
     test_head_error_has_no_body()
     test_redirect_names_its_code()
+    test_delete_objects_result()
+    test_delete_objects_quiet_result()
+    test_delete_objects_200_error_is_raised()
     print("OK")

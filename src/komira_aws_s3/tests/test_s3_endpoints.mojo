@@ -11,23 +11,28 @@
 # and GET Bucket (List Objects)).
 #
 # The other signed rows (path style, PutObject as the client sends it,
-# HEAD, DELETE and POST ?uploads) have no published example. Their
+# HEAD, DELETE, POST ?uploads and DeleteObjects' POST ?delete) have no
+# published example. Their
 # signatures were computed with an independent SigV4 implementation that
 # reproduces all four published examples, at the examples' time and with
 # their credentials; each row states the canonical request it signs.
 from komira_aws_s3.komira_aws_s3 import (
     S3_STORAGE_CLASS_REDUCED_REDUNDANCY,
     S3CreateMultipartUploadRequest,
+    S3Delete,
     S3DeleteObjectRequest,
+    S3DeleteObjectsRequest,
     S3EndpointConfig,
     S3GetObjectRequest,
     S3HeadObjectRequest,
     S3ListBucketsRequest,
     S3ListObjectsRequest,
     S3ListObjectsV2Request,
+    S3ObjectIdentifier,
     S3PutObjectRequest,
     build_create_multipart_upload_request,
     build_delete_object_request,
+    build_delete_objects_request,
     build_get_object_request,
     build_head_object_request,
     build_list_buckets_request,
@@ -37,6 +42,7 @@ from komira_aws_s3.komira_aws_s3 import (
     komira_aws_s3_endpoint_rules,
     resolve_create_multipart_upload_endpoint,
     resolve_delete_object_endpoint,
+    resolve_delete_objects_endpoint,
     resolve_get_object_endpoint,
     resolve_head_object_endpoint,
     resolve_list_buckets_endpoint,
@@ -539,6 +545,51 @@ def test_signed_create_multipart_upload() raises:
     )
 
 
+def test_signed_delete_objects() raises:
+    # POST /?delete with its <Delete> document and the required checksum,
+    # all signed. Canonical request:
+    #   POST
+    #   /
+    #   delete=
+    #   content-type:application/xml
+    #   host:examplebucket.s3.amazonaws.com
+    #   x-amz-checksum-crc32:rdR1yA==
+    #   x-amz-content-sha256:f804874c0f2a7b5f75baf7a57f460e9c9f6b35f051142ddc5caa4d5c1b2c629c
+    #   x-amz-date:20130524T000000Z
+    #   x-amz-sdk-checksum-algorithm:CRC32
+    #
+    #   <signed headers>
+    #   f804874c0f2a7b5f75baf7a57f460e9c9f6b35f051142ddc5caa4d5c1b2c629c
+    var objects = List[S3ObjectIdentifier]()
+    objects.append(S3ObjectIdentifier(String("sample1.txt")))
+    objects.append(S3ObjectIdentifier(String("sample2.txt")))
+    var delete = S3Delete(objects^)
+    delete.set_quiet(True)
+    var input = S3DeleteObjectsRequest(String("examplebucket"), delete^)
+    var resolved = resolve_delete_objects_endpoint(
+        komira_aws_s3_endpoint_rules(), _example_config(), input
+    )
+    assert_equal(resolved.url, "https://examplebucket.s3.amazonaws.com")
+    var req = _signed(build_delete_objects_request(input), resolved)
+    assert_equal(req.method, "POST")
+    assert_equal(req.host, "examplebucket.s3.amazonaws.com")
+    assert_equal(req.target, "/?delete")
+    assert_equal(req.header("Content-Length"), "162")
+    assert_equal(req.header("x-amz-checksum-crc32"), "rdR1yA==")
+    assert_equal(
+        req.header("x-amz-content-sha256"),
+        "f804874c0f2a7b5f75baf7a57f460e9c9f6b35f051142ddc5caa4d5c1b2c629c",
+    )
+    _expect(
+        req,
+        String(
+            "content-type;host;x-amz-checksum-crc32;x-amz-content-sha256;"
+            + "x-amz-date;x-amz-sdk-checksum-algorithm"
+        ),
+        String("787daa3db4b8e911f8388a8384f47b22ccd18ca92892cdd542b9e72590f1c76d"),
+    )
+
+
 def main() raises:
     test_virtual_host_by_default()
     test_force_path_style()
@@ -559,4 +610,5 @@ def main() raises:
     test_signed_head_object()
     test_signed_delete_object()
     test_signed_create_multipart_upload()
+    test_signed_delete_objects()
     print("OK")
