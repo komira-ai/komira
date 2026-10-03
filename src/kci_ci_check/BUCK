@@ -27,6 +27,17 @@ mojo_library(
         "tests/test_workflow_reader.mojo",
         # a fixture that agrees, one mutation per rule R1-R8, the id-token stages
         "tests/test_ci_rules.mojo",
+        # the repository's own kci.yml held to its own release/machine.textproto
+        "tests/test_repo_kci_yml.mojo",
     ],
+    # The repository's own release workflow, machine file and channels file
+    # (the root BUCK and release/BUCK).
+    test_data = {
+        "tests/test_repo_kci_yml.mojo": {
+            "channels.textproto": "//release:channels.textproto",
+            "kci.yml": "//:kci.yml",
+            "machine.textproto": "//release:machine.textproto",
+        },
+    },
     visibility = ["PUBLIC"],
 )

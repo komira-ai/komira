@@ -1,31 +1,49 @@
 # The release of komira's conda packages through kci (docs/ci.md, "kci.yml").
-# One job per stage, each one kci invocation:
 #
-#   build  on the farm runner (the same runner as ci.yml): builds bin/kci and
-#          runs `kci build` over release/artifacts.textproto at this commit.
-#          The release directory and the kci binary travel to `prod` as one
-#          workflow artifact, so `prod` publishes the bytes `build` verified
-#          and never builds anything.
+# HAND-WRITTEN. The machine file (release/machine.textproto, KCI_MACHINE below)
+# owns the stage graph; this file runs it, one job per stage, and `kci ci check`
+# holds it to the machine file: a step of the build job, and the welded test
+# src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift fails
+# `./buck2 build //...` on every pull request. Edit both together. The rules:
+# each job's id and GitHub environment are its stage's name; its `needs` is the
+# stage's `after`; `id-token: write` only on the job whose stage publishes by
+# trusted publishing; each job runs exactly one `kci run --stage <its id>`;
+# no pull_request trigger; a `revision` input; every action pinned.
+#
+#   build  on the farm runner (the same runner as ci.yml), in the environment
+#          `build`: builds bin/kci, checks this file against the machine file,
+#          and runs `kci run --stage build` at the release revision. The
+#          release directory, the kci binary and the build's result file travel
+#          to `prod` as one workflow artifact named for the revision, so `prod`
+#          publishes the bytes `build` verified and never builds anything.
 #   prod   on a GitHub-hosted runner, in the GitHub environment `prod`, with
-#          `id-token: write`: runs `kci publish` to the channel declared in
-#          release/channels.textproto. The channel trusts this repository,
-#          this file (kci.yml) and the environment `prod` (trusted
-#          publishing): no secret is stored anywhere. The job stays a
-#          top-level job of this file; a reusable-workflow call would change
-#          the token's workflow claim.
+#          `id-token: write`: `kci run --stage prod` publishes to the channel
+#          the machine file names. The channel trusts this repository, this file
+#          (kci.yml) and the environment `prod` (trusted publishing): no secret
+#          is stored anywhere. The job stays a top-level job of this file; a
+#          reusable-workflow call would change the token's workflow claim.
+#          Deploying, when there is one, is a stage and an environment of its
+#          own, never this one.
 #
-# Triggers: a push to main and a manual run. NEVER pull_request: `build` runs
-# on a self-hosted runner of a public repository, and a pull request's code
-# must not reach a job of a release workflow.
+# Triggers: a push to main and a manual run. NEVER pull_request: `build` runs on
+# a self-hosted runner of a public repository, and a pull request's code must
+# not reach a job of a release workflow.
 #
-# ⛔ DRY RUN. Every run is `kci publish --dry-run` (every check, and reads of
-# the channel; no write, no token exchange) unless it is a MANUAL run with
+# THE REVISION. Everything a run builds and publishes is the commit REVISION:
+# the pushed commit, or a manual run's input `revision` (a full commit id; empty
+# means the commit the run was started on). Both jobs check it out, kci refuses
+# a checkout whose HEAD is not it, and every artifact and result is named for
+# it. A run that publishes requires REVISION to be on main's history, so a
+# manual run cannot publish an unmerged commit.
+#
+# ⛔ DRY RUN. Every run is `kci run --stage prod --plan` (every check, and reads
+# of the channel; no write, no token exchange) unless it is a MANUAL run with
 # the input dry_run set to false. A push to main is always a dry run: the
 # DRY_RUN line of the prod job pins it. Making a push publish is a reviewed
-# change of that one line, nothing else. A run that would publish is
-# refused unless it is on main and carries the set hash the approver read
-# (input expect_set_hash) and names any first-time package names
-# (input claim_new_names); see the step "what this run may do".
+# change of that one line, nothing else. A run that would publish is refused
+# unless it is on main and carries the set hash the approver read (input
+# expect_set_hash) and names any first-time package names (input
+# claim_new_names); see the step "what this run may do".
 name: kci
 
 on:
@@ -33,6 +51,10 @@ on:
     branches: [main]
   workflow_dispatch:
     inputs:
+      revision:
+        description: "the commit to release (a full 40-hex commit id); empty for the commit this run starts on"
+        type: string
+        default: ""
       dry_run:
         description: "dry run: check and read the channel, publish nothing"
         type: boolean
@@ -49,32 +71,35 @@ on:
 permissions: {}
 
 concurrency:
-  # A group of its own per commit, so no run is cancelled or dropped for a
-  # newer one (the reason is in ci.yml). Two runs of one commit queue.
-  group: kci-${{ github.sha }}
+  # A group of its own per revision, so no run is cancelled or dropped for a
+  # newer one (the reason is in ci.yml). Two runs of one revision queue.
+  group: kci-${{ inputs.revision || github.sha }}
   cancel-in-progress: false
 
 env:
-  # The release declarations: what is built, how, and in which order.
-  KCI_DECLARATIONS: release/artifacts.textproto
-  # The channels file and the channel this workflow publishes to.
-  KCI_CHANNELS: release/channels.textproto
-  KCI_CHANNEL: komira
+  # The release machine: its stages, and through them the declarations, the
+  # channels file and the channel. The one place this workflow names a path kci
+  # reads.
+  KCI_MACHINE: release/machine.textproto
+  # The commit this run releases (THE REVISION, above).
+  REVISION: ${{ inputs.revision || github.sha }}
 
 jobs:
   build:
     runs-on: [self-hosted, komira-farm]
+    environment: build
     timeout-minutes: 120
     permissions:
       contents: read
     outputs:
-      # "true" when this commit declares a release; `prod` runs only then.
-      release: ${{ steps.declarations.outputs.release }}
+      # "true" when this revision has a release machine; `prod` runs only then.
+      release: ${{ steps.machine.outputs.release }}
     steps:
-      # Full history: kci build and release_version.sh derive the stamp from
-      # git, and both refuse a shallow clone.
+      # Full history: kci and release_version.sh derive the stamp from git, and
+      # both refuse a shallow clone.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.REVISION }}
           fetch-depth: 0
           persist-credentials: false
       # The farm connection is the runner's machine configuration (docs/ci.md),
@@ -85,22 +110,18 @@ jobs:
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
               { echo "the runner's buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
-      # A commit that declares no release is not a failure of a push to
+      # A revision without a release machine is not a failure of a push to
       # main: the job says so (a warning and a summary line) and every later
-      # step, and the prod job, is skipped. A MANUAL run asked for a release,
-      # so there a missing declaration is a refusal.
-      - name: the release declarations exist
-        id: declarations
+      # step, and the prod job, is skipped. A MANUAL run asked for a release, so
+      # there a missing machine file is a refusal.
+      - name: the release machine exists
+        id: machine
         run: |
-          missing=""
-          for f in "$KCI_DECLARATIONS" "$KCI_CHANNELS"; do
-            [ -f "$f" ] || missing="$missing $f"
-          done
-          if [ -z "$missing" ]; then
+          if [ -f "$KCI_MACHINE" ]; then
             echo "release=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          msg="nothing to release: this commit has no$missing"
+          msg="nothing to release: $REVISION has no $KCI_MACHINE"
           if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
             echo "refused: $msg"
             exit 1
@@ -111,38 +132,60 @@ jobs:
       # The runnable directory: the binary and the runtime libraries it loads,
       # so it starts on the hosted runner with no environment.
       - name: build kci
-        if: steps.declarations.outputs.release == 'true'
+        if: steps.machine.outputs.release == 'true'
         run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
+      # This file against the machine file: a drift stops the run here, before
+      # anything is built.
+      - name: kci ci check
+        if: steps.machine.outputs.release == 'true'
+        run: |
+          "$RUNNER_TEMP/kci/kci" ci check --machine "$KCI_MACHINE" \
+            --workflow .github/workflows/kci.yml \
+            --result-file "$RUNNER_TEMP/kci-result-ci-check.json"
       # The declarations name the program `buck2`; the repository's is the
       # ./buck2 wrapper of this checkout.
       - name: buck2 on PATH
-        if: steps.declarations.outputs.release == 'true'
+        if: steps.machine.outputs.release == 'true'
         run: |
           mkdir -p "$RUNNER_TEMP/bin"
           printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
           chmod +x "$RUNNER_TEMP/bin/buck2"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
-      - name: kci build
-        if: steps.declarations.outputs.release == 'true'
+      - name: kci run --stage build
+        if: steps.machine.outputs.release == 'true'
         run: |
-          "$RUNNER_TEMP/kci/kci" build --declarations "$KCI_DECLARATIONS" \
-            --work-dir "$GITHUB_WORKSPACE" --out-dir "$RUNNER_TEMP/release" \
-            --log-dir "$RUNNER_TEMP/kci-logs" --revision-id "$GITHUB_SHA"
+          "$RUNNER_TEMP/kci/kci" run --stage build --machine "$KCI_MACHINE" \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --work-dir "$GITHUB_WORKSPACE" --release-dir "$RUNNER_TEMP/release" \
+            --log-dir "$RUNNER_TEMP/kci-logs" --result-file "$RUNNER_TEMP/kci-result-build.json"
       - name: the build logs
-        if: failure() && steps.declarations.outputs.release == 'true'
+        if: failure() && steps.machine.outputs.release == 'true'
         run: |
           for f in "$RUNNER_TEMP"/kci-logs/*; do
             [ -f "$f" ] && { echo "== $f"; cat "$f"; }
           done
           true
-      # One tar, so the binary keeps its mode across the artifact store.
-      - name: pack the release
-        if: steps.declarations.outputs.release == 'true'
-        run: tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/kci-release.tar" kci release
+      # The result files of this job, whatever the outcome: the driver's record
+      # of what kci did (kci_contract's kci.result).
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        if: steps.declarations.outputs.release == 'true'
+        if: always() && steps.machine.outputs.release == 'true'
         with:
-          name: kci-release
+          name: kci-result-build-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-*.json
+          if-no-files-found: warn
+          retention-days: 90
+      # One tar, so the binary keeps its mode across the artifact store. The
+      # build's result file travels with it: prod reads the set hash from it.
+      - name: pack the release
+        if: steps.machine.outputs.release == 'true'
+        run: tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/kci-release.tar" kci release kci-result-build.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.machine.outputs.release == 'true'
+        with:
+          name: kci-release-${{ env.REVISION }}
           path: ${{ runner.temp }}/kci-release.tar
           if-no-files-found: error
           retention-days: 14
@@ -165,58 +208,65 @@ jobs:
       EXPECT_SET_HASH: ${{ inputs.expect_set_hash }}
       CLAIM_NEW_NAMES: ${{ inputs.claim_new_names }}
     steps:
-      # The declarations, the channels file and release_version.sh, at the
-      # release commit, with the full history the version needs.
+      # The machine file, the declarations, the channels file and
+      # release_version.sh at the release revision, with the full history the
+      # version (and the "on main" check) needs.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ env.REVISION }}
           fetch-depth: 0
           persist-credentials: false
       - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: kci-release
+          name: kci-release-${{ env.REVISION }}
           path: ${{ runner.temp }}/in
       - name: unpack the release
         run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
-      # kci publish compares this with every package before any request.
+      # kci compares this with every package before any request.
       - name: release_version.sh
-        run: tools/build/package/release_version.sh "$GITHUB_SHA" | tee "$RUNNER_TEMP/release_version.txt"
+        run: tools/build/package/release_version.sh "$REVISION" | tee "$RUNNER_TEMP/release_version.txt"
       - name: what this run may do
         run: |
-          built=$(sed -n 's/.*"set_hash":"\([0-9a-f]\{64\}\)".*/\1/p' "$RUNNER_TEMP/release/release.json")
-          [ -n "$built" ] || { echo "release.json carries no set hash"; exit 1; }
+          built=$(sed -n 's/.*"set_hash":"\([0-9a-f]\{64\}\)".*/\1/p' "$RUNNER_TEMP/kci-result-build.json")
+          [ -n "$built" ] || { echo "the build's result file carries no set hash"; exit 1; }
           echo "the build's set hash: $built"
           if [ "$DRY_RUN" = true ]; then
             hash=${EXPECT_SET_HASH:-$built}
-            echo "DRY RUN: kci publish --dry-run, nothing is written to the channel"
+            echo "DRY RUN: kci run --stage prod --plan, nothing is written to the channel"
           else
             [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] ||
               { echo "refused: only a manual run publishes"; exit 1; }
             [ "$GITHUB_REF" = refs/heads/main ] ||
               { echo "refused: $GITHUB_REF is not main; only main publishes"; exit 1; }
+            git merge-base --is-ancestor "$REVISION" origin/main ||
+              { echo "refused: $REVISION is not on main's history; only a merged commit is published"; exit 1; }
             [ -n "$EXPECT_SET_HASH" ] ||
               { echo "refused: publishing needs the approved set hash (input expect_set_hash)"; exit 1; }
             hash=$EXPECT_SET_HASH
-            echo "PUBLISH: kci publish writes to channel $KCI_CHANNEL"
+            echo "PUBLISH: kci run --stage prod writes to the channel the machine file names"
           fi
           echo "KCI_SET_HASH=$hash" >> "$GITHUB_ENV"
       # The channel's credential is trusted publishing (OIDC): kci reads the
-      # job's ID token itself and resolves no secret, so the store is none.
-      - name: kci publish
+      # job's ID token itself and resolves no secret, so the store is none. kci
+      # refuses the token unless its environment is this stage, prod.
+      - name: kci run --stage prod
         run: |
-          set -- --declarations "$KCI_DECLARATIONS" --artifacts "$RUNNER_TEMP/release" \
-            --channels "$KCI_CHANNELS" --channel "$KCI_CHANNEL" \
-            --release-version "$RUNNER_TEMP/release_version.txt" \
-            --expect-set-hash "$KCI_SET_HASH" --report "$RUNNER_TEMP/publish_report.json" \
-            --require-environment prod
+          set -- --expect-set-hash "$KCI_SET_HASH" --release-version "$RUNNER_TEMP/release_version.txt"
           for name in $CLAIM_NEW_NAMES; do
             set -- "$@" --claim-new-name "$name"
           done
-          if [ "$DRY_RUN" = true ]; then set -- "$@" --dry-run; fi
-          "$RUNNER_TEMP/kci/kci" --secret-store none publish "$@"
+          if [ "$DRY_RUN" = true ]; then set -- "$@" --plan; fi
+          "$RUNNER_TEMP/kci/kci" run --stage prod --machine "$KCI_MACHINE" \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --release-dir "$RUNNER_TEMP/release" --secret-store none \
+            --result-file "$RUNNER_TEMP/kci-result-prod.json" "$@"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always()
         with:
-          name: kci-publish-report
-          path: ${{ runner.temp }}/publish_report.json
+          name: kci-result-prod-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-prod.json
           if-no-files-found: warn
           retention-days: 90

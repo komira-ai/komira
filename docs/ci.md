@@ -130,37 +130,67 @@ approved run as able to affect every build that uses the same service.
 
 [`.github/workflows/kci.yml`](../.github/workflows/kci.yml) releases the conda
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
-One job per stage, each one kci invocation:
+It is written by hand. The stages are owned by the release machine,
+[`release/machine.textproto`](../release/machine.textproto). The workflow runs
+one job per stage; each job is named for its stage, runs in the GitHub
+environment of the same name, and runs exactly one `kci run --stage <its name>`.
+`kci ci check` holds the workflow to the machine file. It runs as a step of the
+`build` job and as the welded test
+`src/kci_ci_check/tests/test_repo_kci_yml.mojo`, so a drift between the two
+files fails `./buck2 build //...`. Edit both together.
 
-| job | runner | what it does |
+| job (stage) | runner | what it does |
 |---|---|---|
-| `build` | the farm runner (`self-hosted`, `komira-farm`), `contents: read` | builds `//bin/kci:kci[runnable]`, then `kci build --revision-id <the commit>`: every declared artifact, stamped from git, verified, and `release.json` with the set hash. The release directory and the kci binary leave the job as one workflow artifact. |
-| `prod` | GitHub-hosted (`ubuntu-24.04`), GitHub environment `prod`, `id-token: write` | runs `release_version.sh` at the same commit, then `kci publish` of the release directory `build` made, to the channel `release/channels.textproto` declares. Nothing is built here. |
+| `build` | the farm runner (`self-hosted`, `komira-farm`), environment `build`, `contents: read` | builds `//bin/kci:kci[runnable]`, runs `kci ci check`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
+| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage prod`: the release directory `build` made, published to the channel the machine file names. Nothing is built here. |
 
 - **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
   Never `pull_request`: the build job runs on the farm runner, and a pull
   request's code must not reach a release workflow.
-- **No declarations, no release.** While `release/artifacts.textproto` or
-  `release/channels.textproto` is absent, a push to `main` is a reported
-  skip (a `kci skipped` warning and a summary line; every later step and the
-  `prod` job are skipped), so main does not go red before the declarations
-  land. A manual run with either file absent is refused (exit 1).
-- **Dry run by default.** Every run is `kci publish --dry-run` (every check,
-  and anonymous reads of the channel; no write and no token exchange) except a
-  manual run with the input `dry_run` set to false. A push to `main` is always
-  a dry run: the `DRY_RUN` line of the `prod` job pins it, and making pushes
-  publish is a reviewed change of that line.
-- **A publishing run** is refused unless it runs on `main` and carries the set
-  hash the approver read (input `expect_set_hash`, compared by `kci publish`
-  with the release's own). Package names published for the first time are
-  named in the input `claim_new_names`; any other new name is refused.
+- **The revision.** A run releases the commit `REVISION`. For a push that is
+  the pushed commit. For a manual run it is the input `revision` (a full
+  commit id), or the commit the run started on when the input is empty. Both
+  jobs check it out, kci refuses a checkout whose HEAD is not that commit,
+  and the artifact and result names carry it. A publishing run also requires
+  `REVISION` to be on `main`'s history, so a manual run cannot publish an
+  unmerged commit.
+- **One verb, one record.** Every kci invocation writes kci's result document
+  (`--result-file`, format `kci.result`): RUNNING before the first effect and
+  FINISHED on every exit. Each job uploads it whatever the outcome, as
+  `kci-result-<job>-<REVISION>`. The run is identified by
+  `--run-id gh-<run id>`, `--attempt <run attempt>` and `--context` lines
+  (event, ref, actor id, run URL). kci reads no CI variable itself. The exit
+  numbers are kci's one table: publishing a set the channel already holds,
+  byte for byte, is exit 0.
+- **No release machine, no release.** While `release/machine.textproto` is
+  absent, a push to `main` is a reported skip (a `kci skipped` warning and a
+  summary line; every later step and the `prod` job are skipped), so main
+  does not go red before the release files land. A manual run without it is
+  refused (exit 1).
+- **Dry run by default.** Every run is `kci run --stage prod --plan` (every
+  check, and anonymous reads of the channel; no write and no token exchange)
+  except a manual run with the input `dry_run` set to false. A push to `main`
+  is always a dry run: the `DRY_RUN` line of the `prod` job pins it, and making
+  pushes publish is a reviewed change of that line. A dry run checks against
+  the build's own set hash, read from the build's result file.
+- **A publishing run** is refused unless it runs on `main`, `REVISION` is on
+  `main`'s history, and it carries the set hash the approver read (input
+  `expect_set_hash`, compared by kci with the release's own). Package names
+  published for the first time are named in the input `claim_new_names`; any
+  other new name is refused.
 - **No secret.** The channel's credential is trusted publishing: the registry
   trusts this repository, the workflow file `kci.yml` and the environment
-  `prod`, and kci exchanges the job's ID token itself (`--require-environment
-  prod` refuses a token from any other environment). The `prod` job is a
-  top-level job of `kci.yml` on purpose: a reusable-workflow call changes the
-  token's workflow claim. Required reviewers and the deployment branch rule
-  (`main`) on the environment `prod` are GitHub settings, outside this file.
+  `prod`, and kci exchanges the job's ID token itself. The stage that
+  publishes must be the environment the channel's push identity names (kci
+  refuses a token from any other). The `prod` job is a top-level job of
+  `kci.yml` on purpose: a reusable-workflow call changes the token's workflow
+  claim. Required reviewers and the deployment branch rule (`main`) on the
+  environment `prod` are GitHub settings, outside this file. The environment
+  `build` is created by GitHub on the first run and needs no setting.
+  Publishing and deploying are separate stages in separate environments.
+- **Known residual:** the `prod` job runs the kci binary the `build` job made
+  (it travels in the workflow artifact). How kci itself reaches the runner is
+  an open design question.
 - The build job's farm connection is the runner's, as for `ci.yml`. The
   declarations name the program `buck2`; the job puts a `buck2` that runs this
   checkout's `./buck2` on `PATH`.
