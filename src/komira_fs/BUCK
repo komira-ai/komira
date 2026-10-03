@@ -1,0 +1,47 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The storage substrate for sources and sinks: the `FileSystem` and
+# `FileFormat` traits, the local-disk implementation, glob and partition
+# (hive) discovery, file-format capabilities, footer hints and the metadata
+# cache.
+#
+# It depends on komira_async for `ops.waker_sink` (the completion-sink trait
+# the traits are parameterised over); `test_local_fs_write_at` also drives the
+# executor. It takes its buffer, Arrow, collections and POSIX-wrapper types
+# from komira_core. komira_runtime_paths is declared because several tests take
+# their scratch directory from `test_tmpdir()`.
+
+# The directory-walk C shim: platform-fragile `dirent` / `stat` layouts kept
+# in C. Each of its symbols (`komira_walk_dir_recursive`,
+# `komira_list_dir_shallow`, `komira_free`) is defined here and nowhere else.
+cxx_library(
+    name = "komira_fs_posix",
+    srcs = ["_fs_shim.c"],
+    compiler_flags = ["-O2", "-Wall", "-Werror"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "komira_fs",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        ":komira_fs_posix",
+        "//src/komira_async:komira_async",
+        "//src/komira_core:komira_core",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_cloud_lazy_hive_prune.mojo",
+        "tests/test_file_discovery.mojo",
+        "tests/test_fs_path_bytes_non_ascii.mojo",
+        "tests/test_glob_engine.mojo",
+        "tests/test_local_fs_list_dir_shallow.mojo",
+        "tests/test_local_fs_list_recursive.mojo",
+        "tests/test_local_fs_read_at_mmap.mojo",
+        "tests/test_local_fs_trait_elaboration.mojo",
+        "tests/test_local_fs_write_at.mojo",
+        "tests/test_path_discovery.mojo",
+        "tests/test_pruned_hive_discovery.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
