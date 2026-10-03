@@ -16,7 +16,7 @@
 # exactly).
 #
 # THE STAMP. `{build_number}`, `{source_commit}` and `{timestamp_ms}` are
-# derived by kci from git at `kci build --revision-id` (the same rule as
+# derived by kci from git at `kci run --revision-id` (the same rule as
 # tools/build/package/release_version.sh), never typed and never read from
 # the environment. The three `-c komira.package_*` keys are `[komira]` keys,
 # read at ANALYSIS by conda_package (tools/build/package/conda.bzl), so a `-c`
@@ -35,7 +35,7 @@
 # needs no absolute path), whose cwd is kci's `--work-dir`: the LICENSE below
 # is the repository's. Its members must be every library of this file (one
 # metapackage per subdir, all libraries in it: a recommendation the CEO has
-# not answered; kci publish enforces it).
+# not answered; the PUBLISH step enforces it).
 #
 # `build` / `run` are in the build systems' args, not the artifacts': the
 # build system's args come first.
@@ -105,7 +105,7 @@ artifacts {
   args: "--extra-file"
   args: "info/licenses/LICENSE=LICENSE"
   args: "--label"
-  args: "kci build {revision_id}"
+  args: "kci run {revision_id}"
   args: "--out-dir"
   args: "{out_dir}"
 }

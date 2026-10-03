@@ -25,9 +25,9 @@
 # directory per artifact, in declarations-file order, runs the rendered
 # argv, and ships exactly what the ONE kci artifact manifest, `manifest.json`, left at its top describes (one
 # artifact per declaration; its `name` must be the declaration's). Running
-# the build is `kci build`'s; the set-level checks over the built manifests
+# the build is the BUILD step's; the set-level checks over the built manifests
 # (every artifact built, lockstep versions, metapackage last, requirement
-# closure) are `kci publish`'s.
+# closure) are the PUBLISH step's.
 # =============================================================================
 
 from kci_artifact_declaration.contract import (
