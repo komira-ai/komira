@@ -27,6 +27,10 @@
 #      that loses its slot to the seal mid-reap) raises `[SHARD_RETIRED]`
 #      instead of landing past the seal, nothing it wrote is visible, and the
 #      caller's re-publish into a fresh shard is the only copy.
+#      test_a_sweep_never_deletes_an_earlier_seal: a seal left by a reaper
+#      that crashed before recording the shard, or written by a concurrent
+#      reaper, survives the next sweep, so the writer's warm publish is
+#      refused instead of succeeding below the log start of a retired shard.
 #   7. test_reaping_a_chunk_below_the_top_keeps_cold_reads_whole and
 #      test_cold_read_racing_a_prefix_reap_is_not_torn: reaping chunks in any
 #      order, and a cold read racing the reap of a prefix, never make a cold
@@ -645,6 +649,59 @@ def test_publish_that_loses_its_slot_to_a_seal_is_refused() raises:
     var fresh = _shard_meta(store, make_shard_id(String("node"), 7))
     _ = fresh.publish(_summary(3, Int64(2)))
     var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 1, "exactly one copy of the re-published split")
+    assert_true(_has_uuid(live, _uuid(3)), "the re-publish is visible")
+
+    _ = store^
+
+
+def test_a_sweep_never_deletes_an_earlier_seal() raises:
+    # The shard already has a seal at slot 2 that no `_RETIRED_SHARDS` record
+    # covers: an earlier reaper wrote it and crashed before recording the
+    # shard, or a concurrent reaper wrote it after this sweep read the record.
+    # This sweep then sees generation 3 and seals slot 3. Deleting the seal at
+    # slot 2 would free the slot the writer's warm handle (last chunk 1)
+    # publishes into next, and that publish would report success for a split
+    # below the log start of a shard readers skip.
+    var store = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 10)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+    var w = _shard_meta(store, shard_id)
+    _ = w.publish(_summary(1, Int64(2)))
+    _ = w.publish(_summary(2, Int64(2)))
+    _drain(w, 2)
+    _ = store.conditional_put(
+        chunk_key(lineage, Int64(2)),
+        encode_chunk(List[UInt8](), Int64(0)),
+        WritePrecondition.if_none_match_star(),
+    )
+    var r = reap_drained_shards(store, _META, String("logs"))
+    assert_equal(r.shards_reaped, 1, "the sweep retires the shard")
+
+    # The warm writer's publish is either refused or visible; never lost.
+    var refused = False
+    try:
+        _ = w.publish(_summary(3, Int64(2)))
+    except e:
+        assert_true(
+            is_shard_retired(String(e)),
+            "the publish failed for a reason other than retirement: "
+            + String(e),
+        )
+        refused = True
+    var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_true(refused, "the publish into the retired shard was not refused")
+    assert_equal(len(live), 0, "the refused publish is not visible")
+
+    # A cold handle on the same shard is refused too.
+    var cold = _shard_meta(store, shard_id)
+    with assert_raises(contains="[SHARD_RETIRED]"):
+        _ = cold.publish(_summary(3, Int64(2)))
+
+    # The caller's re-publish into a fresh shard is the only copy.
+    var fresh = _shard_meta(store, make_shard_id(String("node"), 11))
+    _ = fresh.publish(_summary(3, Int64(2)))
+    live = list_live_splits_across_shards(store, _META, String("logs"))
     assert_equal(len(live), 1, "exactly one copy of the re-published split")
     assert_true(_has_uuid(live, _uuid(3)), "the re-publish is visible")
 

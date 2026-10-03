@@ -11,10 +11,11 @@ from komira_objectstore import (
     RetryPolicy,
     WritePrecondition,
     chunk_key,
+    decode_chunk_body,
     encode_chunk,
     log_start_key,
 )
-from komira_objectstore.cas_manifest import is_precondition
+from komira_objectstore.cas_manifest import is_not_found, is_precondition
 from komira_objectstore.path import Path
 from komira_objectstore.store import (
     CloneableConditionalWriteStore,
@@ -76,23 +77,40 @@ from komira_search_catalog.metastore import SearchMetastore
 #   6. Record the shard's final generation, `g + 1` (the seal is a chunk),
 #      in the index's `_RETIRED_SHARDS` record. The index generation does not
 #      drop, and readers skip the shard from now on.
-#   7. Delete the snapshot's keys except the log start. A publish creates a
-#      key that did not exist, so it is never in the snapshot.
+#   7. Delete the snapshot's keys except the log start, every seal, and
+#      every chunk above the earliest seal. A publish creates a key that did
+#      not exist, so it is never in the snapshot.
 #
-# The seal is terminal and is never deleted. Deleting it would free slot `g`
-# again, and the writer's warm handle would publish there successfully into
-# a shard readers no longer replay. With the seal in place every later
-# publish into the shard finds it, below the slot it won or as the slot it
-# lost, rewrites its own chunk into a seal and raises `[SHARD_RETIRED]`
-# (`SearchMetastore.publish`); the caller publishes into a fresh shard id.
-# What remains of a retired shard is the seal (plus a seal per refused
-# publish) and the log start pointing at it: two objects in the common case.
+# The seal is terminal and is never deleted, nor is any chunk above it.
+# Deleting one would free a slot at or above the writer's next slot, and the
+# writer's warm handle publishes there without a check (its steady state:
+# the slot after its own last chunk) and would succeed into a shard readers
+# no longer replay. With every seal in place, a later publish into the shard
+# finds one, below the slot it won or as the slot it lost, rewrites its own
+# chunk into a seal and raises `[SHARD_RETIRED]` (`SearchMetastore.publish`);
+# the caller publishes into a fresh shard id. What remains of a retired shard
+# is its seals and the log start: two objects in the common case.
 #
-# A reaper that crashes after step 4 leaves a seal that replay skips; the
-# next sweep finds the shard drained again (the seal is not a split), seals
-# the next slot and finishes. Deletes are idempotent, since deleting an
-# absent key succeeds. A shard already in the `_RETIRED_SHARDS` record is
-# not examined again.
+# A sweep can find a seal no `_RETIRED_SHARDS` record covers yet, and must
+# keep it:
+#   * a reaper crashed after step 4 (before step 6). Replay skips its seal,
+#     so the next sweep finds the shard drained again, reads generation
+#     `g + 1` and seals that slot. The old seal at `g` is the writer's next
+#     slot, so it stays.
+#   * two reapers ran concurrently and both read `_RETIRED_SHARDS` before
+#     either recorded the shard. The second one's snapshot can hold the
+#     first one's seal; it seals the slot above and keeps both.
+# The deletes are bounded by the earliest seal in the snapshot, not by `g`,
+# because `g` is past every seal the snapshot holds. They are idempotent, as
+# deleting an absent key succeeds. A shard already in the `_RETIRED_SHARDS`
+# record is not examined again.
+#
+# Every chunk below the earliest seal is a reaped stub (the shard was
+# drained), and every chunk the shard's writer won is below the earliest
+# seal, because that seal took the writer's next slot. Deleting those stubs
+# frees only slots at or below the writer's last chunk, which its next publish
+# never targets. That holds for one publishing handle per writer shard, which
+# is how shard ids are issued (`make_shard_id`).
 
 
 @fieldwise_init
@@ -107,7 +125,7 @@ struct DrainedShardReapResult(
       shards_reaped:   drained shards deleted.
       shards_fenced:   drained shards left alone because a publish took the
                        fenced slot after the drained check.
-      objects_deleted: objects deleted across the reaped shards. The seal
+      objects_deleted: objects deleted across the reaped shards. The seals
                        and the log start of a retired shard stay.
     """
 
@@ -158,6 +176,59 @@ def _keys_under_prefix[
             for q in range(len(sub2_listed.objects)):
                 keys.append(sub2_listed.objects[q].location)
     return keys^
+
+
+comptime _NOT_A_CHUNK = Int64(-1)
+comptime _NO_SEAL = Int64(0x7FFFFFFFFFFFFFFF)
+
+
+def _chunk_seq_of(lineage_prefix: String, key: String) -> Int64:
+    """The chunk sequence number of `key` if it is one of the lineage's
+    manifest chunks (`<lineage>/manifest/<20 digits>.chunk`), else
+    `_NOT_A_CHUNK`."""
+    var head = lineage_prefix + "/manifest/"
+    var tail = String(".chunk")
+    if not key.startswith(head) or not key.endswith(tail):
+        return _NOT_A_CHUNK
+    var bytes = key.as_bytes()
+    var lo = head.byte_length()
+    var hi = key.byte_length() - tail.byte_length()
+    if hi <= lo:
+        return _NOT_A_CHUNK
+    var seq = Int64(0)
+    for i in range(lo, hi):
+        var c = bytes[i]
+        if c < UInt8(ord("0")) or c > UInt8(ord("9")):
+            return _NOT_A_CHUNK
+        seq = seq * Int64(10) + Int64(c - UInt8(ord("0")))
+    return seq
+
+
+def _earliest_seal[
+    Storage: CloneableConditionalWriteStore
+](
+    storage: Storage, lineage_prefix: String, snapshot: List[String]
+) raises -> Int64:
+    """The lowest chunk sequence number in `snapshot` whose body is a seal,
+    or `_NO_SEAL`. A chunk the store proves absent is skipped. A chunk read
+    here as a split or a reaped stub never becomes the earliest seal later:
+    the only chunk rewritten into a seal is a refused publish, and that one
+    sits above a seal that already existed."""
+    var earliest = _NO_SEAL
+    for k in range(len(snapshot)):
+        var seq = _chunk_seq_of(lineage_prefix, snapshot[k])
+        if seq == _NOT_A_CHUNK or seq >= earliest:
+            continue
+        var raw: List[UInt8]
+        try:
+            raw = storage.get(Path.parse(snapshot[k]))
+        except e:
+            if is_not_found(String(e)):
+                continue
+            raise e^
+        if len(decode_chunk_body(raw)) == 0:
+            earliest = seq
+    return earliest
 
 
 def reap_drained_shards[
@@ -227,8 +298,12 @@ def reap_drained_shards[
             storage, index_meta_prefix, shard_ids[i], g + Int64(1)
         )
         var keep = log_start_key(lineage_prefix).raw()
+        var first_kept = _earliest_seal(storage, lineage_prefix, snapshot)
         for k in range(len(snapshot)):
             if snapshot[k] == keep:
+                continue
+            var seq = _chunk_seq_of(lineage_prefix, snapshot[k])
+            if seq >= first_kept:
                 continue
             storage.delete(Path.parse(snapshot[k]))
             objects_deleted += 1
