@@ -36,7 +36,7 @@ mojo_library(
   identifier. Consumers `import` that name.
 - **`gen`** (optional) names the target that generated `srcs`; its
   DefaultInfo, sub-targets included, is re-exported as the `[gen]`
-  sub-target, so a reader or an IDE finds the generated code (see [gcp_client](#generated-google-cloud-clients-gcp_client)).
+  sub-target, so a reader or an IDE finds the generated code (see [mojo_gcp_client](#generated-google-cloud-clients-mojo_gcp_client)).
 - **`deps`** carries the full transitive closure of packages to the compiler,
   one `-I` directory per package, each holding exactly one `.mojoc`, so a
   staged source directory can never shadow a package. A package reaches the
@@ -297,13 +297,13 @@ crates in `third_party/rust`. The plugin crate, `komira_proto_codegen`, is
 in [`../proto-codegen/`](../proto-codegen/);
 [`tests//functional/proto`](../tests/functional/proto/BUCK) holds the example protos and tests.
 
-### Generated Google Cloud clients: gcp_client
+### Generated Google Cloud clients: mojo_gcp_client
 
 ```python
-load("@komira//tools/build/cloud:gcp.bzl", "gcp_client")
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 ```
 
-`gcp_client(name, protos, deps, bundle_proto_deps, bundle_only, roots,
+`mojo_gcp_client(name, protos, deps, bundle_proto_deps, bundle_only, roots,
 methods, messages_only, proto_deps, import_prefix, protocol, test_srcs,
 **kwargs)`
 (`kwargs`: `test_data`, `test_env`, passed to the
@@ -317,7 +317,7 @@ files, so the client is welded like any library: the generated
 closure of `roots` (messages) and `methods` (`Service.Method`), at least one
 of them required; `messages_only` emits no service. `protocol` is "rest"
 (the default) or "grpc"; a target that emits a service is refused under
-"grpc" until gcp_client wires the gRPC transport runtime and its
+"grpc" until mojo_gcp_client wires the gRPC transport runtime and its
 token-metadata hook, and `messages_only` output is the same under both.
 `protos` takes source paths of `.proto` files only, never a label. The
 referenced googleapis files (monitored_resource, logging/type, rpc/status,
@@ -331,24 +331,24 @@ attribute re-exports a generating target whole, sub-targets included, as
 that sub-target; nothing checks that `srcs` come from it). The module
 docstring of
 [`../cloud/gcp.bzl`](../cloud/gcp.bzl) has the details;
-[`tests//functional/gcp_client`](../tests/functional/gcp_client/BUCK) and
-[`tests//negative/gcp_client`](../tests/negative/gcp_client/BUCK) exercise it.
+[`tests//functional/mojo_gcp_client`](../tests/functional/mojo_gcp_client/BUCK) and
+[`tests//negative/mojo_gcp_client`](../tests/negative/mojo_gcp_client/BUCK) exercise it.
 
-### Generated AWS clients: aws_client
+### Generated AWS clients: mojo_aws_client
 
 ```python
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 ```
 
-`aws_client(name, model, model_sha256, operations, deps, mode, service,
-overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
+`mojo_aws_client(name, model, model_sha256, operations, deps, mode, service,
+endpoint_rules, partitions, overrides, hand_srcs, test_srcs, **kwargs)` (`kwargs`: `test_data`,
 `test_env`, passed to the `mojo_library`) generates an AWS client from one
 botocore service model at build time; no generated code is checked in.
 `<name>_gen` runs `komira//tools/build/proto-codegen:aws-client-gen`, which
 writes the package `<name>`: `__init__.mojo`, the module `<name>.mojo`
 (imported as `<name>.<name>`) and `_layout_probe.mojo`; `<name>` is an
-ordinary `mojo_library` over them, welded like gcp_client's: the probe is
+ordinary `mojo_library` over them, welded like mojo_gcp_client's: the probe is
 its first `test_srcs` entry, followed by the caller's. `model` and
 `model_sha256` are normally `botocore_model("<service>").model` and
 `.sha256` from [`third_party/botocore`](../../../third_party/botocore/BUCK);
@@ -357,16 +357,27 @@ names it. `operations` is required and non-empty: only the closure of the
 operations named is emitted, and one the model lacks is refused by the
 generator. `mode = "pure"` (the default) emits shapes and
 `build_<op>_request` / `parse_<op>_response` with no transport; `"client"`
-adds the signed-send surface. `overrides` (the generator's hand-override
-manifest) and `hand_srcs` (the hand-written modules owning the operations
-it names, copied into the package) each require the other. `deps` is
-required and non-empty, and nothing is added to it. Every refusal of the
-rule is at analysis. The module docstring of
+adds the signed-send surface. `endpoint_rules` and `partitions` (the
+service's botocore endpoint ruleset and the partition table,
+`botocore_model("<service>").endpoint_rules` and `.partitions`) are set
+together or not at all; with them the module embeds both and resolves each
+operation's endpoint through `komira_aws_core.EndpointRuleSet`
+(`<Prefix>EndpointConfig` and `resolve_<op>_endpoint`), and in client mode
+each verb sends to the endpoint it resolves; without them the
+module's header lists the endpoint bindings of the model it does not apply.
+`overrides` (the
+generator's hand-override manifest) and `hand_srcs` (the hand-written
+modules owning the operations it names, copied into the package) each
+require the other. `deps` is required and non-empty, and nothing is added
+to it. Every refusal of the rule is at analysis. The module docstring of
 [`../cloud/aws.bzl`](../cloud/aws.bzl) has the details;
-[`tests//functional/aws_client`](../tests/functional/aws_client/BUCK),
+[`tests//functional/mojo_aws_client`](../tests/functional/mojo_aws_client/BUCK),
 [`tests//functional/aws_client_mode`](../tests/functional/aws_client_mode/BUCK)
-(client mode, at generation only) and
-[`tests//negative/aws_client`](../tests/negative/aws_client/BUCK) exercise it.
+(client mode, at generation only),
+[`tests//negative/mojo_aws_client`](../tests/negative/mojo_aws_client/BUCK) and, for
+endpoint rulesets,
+[`../proto-codegen/aws_endpoint_rules`](../proto-codegen/aws_endpoint_rules/BUCK)
+exercise it.
 
 ## C-ABI shared libraries
 

@@ -1,0 +1,153 @@
+load("@komira//third_party/botocore:models.bzl", "botocore_model")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
+
+# mojo_aws_client (tools/build/cloud/aws.bzl) over the pinned botocore CloudWatch
+# Logs model, in pure mode, with stub runtime deps. `buck2 build
+# tests//functional/mojo_aws_client:` builds two clients, each of which runs its
+# welded tests (the generated layout probe, then the caller's), and their
+# gen_checks and tests_checks: komira_aws_logs, and komira_aws_logs_hand,
+# which adds a hand_srcs module and the overrides manifest naming it.
+# run_tests.sh (test 35) builds this package, the generation of a client-mode
+# client in ../aws_client_mode, and runs each target of
+# ../../negative/mojo_aws_client as an expect_red.
+#
+# GetLogEvents' error shapes are memberless in the pinned model, so the
+# caller's test checks only that the generated one is (it decodes nothing);
+# reading an error's code and message is komira_aws_core's, stubbed here and
+# tested in komira//src/komira_aws_core.
+#
+# The runtime is STUBS, kept by hand: a library of this cell cannot depend
+# on a mojo_library of the komira cell (each cell's MojoPkgTSet is a
+# different type), so the real komira_aws_core and komira_json cannot be
+# deps here. stub/komira_aws_core declares every name the generated module
+# imports, with the real core's signatures (bodies as bytes, AwsResponse);
+# stub/komira_json is a minimal JSON value and parser with komira_json's
+# layout and the part of its API that code calls. Generated code is built
+# against the real core and komira_json in the komira cell, by the AWS
+# conformance driver (komira//tools/build/proto-codegen) and by the pure-mode
+# restJson1 client in komira//tools/build/proto-codegen/aws_rest_json; this
+# package tests the rule.
+
+_LOGS = botocore_model("logs")
+
+mojo_library(
+    name = "komira_json",
+    srcs = [
+        "stub/komira_json/__init__.mojo",
+        "stub/komira_json/parse.mojo",
+        "stub/komira_json/value.mojo",
+    ],
+    visibility = [
+        "//functional/aws_client_mode:",
+        "//negative/mojo_aws_client:",
+    ],
+)
+
+mojo_library(
+    name = "komira_aws_core",
+    srcs = ["stub/komira_aws_core/__init__.mojo"],
+    visibility = [
+        "//functional/aws_client_mode:",
+        "//negative/mojo_aws_client:",
+    ],
+    deps = [":komira_json"],
+)
+
+# GetLogEvents only, pure: the module kci_logs needs first.
+mojo_aws_client(
+    name = "komira_aws_logs",
+    mode = "pure",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    test_srcs = ["test_logs_get_log_events.mojo"],
+    deps = [
+        ":komira_aws_core",
+        ":komira_json",
+    ],
+)
+
+# What was generated: exactly the package's three files, GetLogEvents and
+# its closure present, and nothing of the operations not named.
+gen_check(
+    name = "komira_aws_logs_scoped",
+    absent = [
+        "FilterLogEvents",
+        "PutLogEvents",
+        "DescribeLogGroups",
+        "komira_http",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_logs.mojo",
+    ],
+    gen = ":komira_aws_logs[gen]",
+    present = [
+        "mode         : pure (no transport)",
+        "operations   : GetLogEvents",
+        "model sha256 : " + _LOGS.sha256,
+        "def build_get_log_events_request(",
+        "struct CloudWatchLogsGetLogEventsRequest(",
+        "from komira_aws_logs.komira_aws_logs import (",
+    ],
+)
+
+# The layout probe is welded into the client, not only generated, and the
+# caller's test ran after it: the library ran exactly these, and each passed.
+tests_check(
+    name = "komira_aws_logs_tests",
+    expect = [
+        "_layout_probe",
+        "test_logs_get_log_events",
+    ],
+    markers = ":komira_aws_logs[tests]",
+)
+
+# hand_srcs + overrides: the manifest names logs_overrides.get_log_events as
+# the owner of GetLogEvents, the generator checks that it is defined there,
+# and the module is copied into the package next to the generated one.
+mojo_aws_client(
+    name = "komira_aws_logs_hand",
+    hand_srcs = ["hand/logs_overrides.mojo"],
+    mode = "pure",
+    model = _LOGS.model,
+    model_sha256 = _LOGS.sha256,
+    operations = ["GetLogEvents"],
+    overrides = "hand/logs_overrides.json",
+    test_srcs = ["test_logs_hand_override.mojo"],
+    deps = [
+        ":komira_aws_core",
+        ":komira_json",
+    ],
+)
+
+# The copied hand module is in the package (a fourth file, which the
+# generation action's file count admits), and the generated header names
+# its owner, which only an `--overrides` the generator read can put there.
+gen_check(
+    name = "komira_aws_logs_hand_scoped",
+    absent = ["HAND-OVERRIDE SEAM: no overrides are declared"],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_logs_hand.mojo",
+        "logs_overrides.mojo",
+    ],
+    gen = ":komira_aws_logs_hand[gen]",
+    present = [
+        "owner  : komira_aws_logs_hand.logs_overrides.get_log_events",
+        "def get_log_events(input: CloudWatchLogsGetLogEventsRequest)",
+    ],
+)
+
+tests_check(
+    name = "komira_aws_logs_hand_tests",
+    expect = [
+        "_layout_probe",
+        "test_logs_hand_override",
+    ],
+    markers = ":komira_aws_logs_hand[tests]",
+)

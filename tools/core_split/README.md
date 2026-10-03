@@ -13,8 +13,10 @@ them.
 | `core.sha256`, `libc.sha256` | the recorded digest of each frozen package (`defs.bzl` says how it is computed) |
 | `owners.tsv` | which branch may rewrite the importers of which package |
 | `split.py` | derives the modules and tests of the new packages from the map, rewriting imports |
+| `split_selftest.py` | seeded import statements and the line `split.py` must write for each, including `from .. arrow.x` (blanks after the dots, which Mojo accepts) |
 | `gen_build.py`, `deps.py` | write each package's `BUCK`, `__init__.mojo` and `README.md`; the deps come from the generated files' imports and `external_call` strings, never from `:komira_core` |
 | `packages.tsv`, `c_symbols.tsv` | the one sentence of each package; which package owns each C symbol of the shim |
+| `deps_selftest.py` | seeded packages with and without a local C library: what `check.py deps` must accept and must still reject |
 | `check.py` | `digest`, `map`, `copy`, `copy_range`, `deps` and `importers` checks, each exiting 1 when red |
 | `defs.bzl`, `BUCK` | the test targets `core_frozen`, `libc_frozen`, `map_total`, `libc_map_total` |
 | `no_mixed_closure.sh` | no target may depend on a package and on its replacement; `--selftest` proves it can fail |
@@ -28,8 +30,17 @@ history or the whole tree and run in `.github/workflows/core_split.yml`.
 
 - **`deps_derived`** (`check.py deps`): each package's `BUCK` deps equal the deps derived from its own files, and every
   `komira_` symbol of the C shim has an owner in `c_symbols.tsv`. It reports NOT CHECKED, not GREEN, while no derived
-  package exists. Not generated: the `cxx_library` of the three symbol owners and the two `komira_arrow_ipc` extras
-  (`large_writes_check`, the `arrow_types.mojo` data of the census test); the commits that make those packages add them.
+  package exists. **Package-local C libraries:** a package that owns C symbols carries a hand-added `cxx_library` in its
+  own `BUCK` (`komira_libc`, `komira_concurrency`, `komira_scan_source`) and its `mojo_library` depends on it as
+  `":name"`. That edge cannot be derived from files, so the check accepts exactly a `":name"` dep that is a `cxx_library`
+  of the same `BUCK`, whose every src is a C file under `native/` (given directly or as `:<staged_files>[native/x.c]` of
+  that `BUCK`, which must name the file), and every `komira_` symbol of which `c_symbols.tsv` gives to this package. It
+  also requires that library: if the package's files call a symbol the package owns, some accepted local library must
+  define it. Everything else stays an extra dep and is RED (an `//src/...` dep that is not derived, a `":name"` that is
+  not such a `cxx_library`, a library with a source outside `native/`, a library defining a symbol of another package or
+  of no row). `deps_selftest.py` seeds each of these cases and fails if one gets the wrong verdict. Not generated: the
+  `cxx_library` of the three symbol owners and the two `komira_arrow_ipc` extras (`large_writes_check`, the
+  `arrow_types.mojo` data of the census test); the commits that make those packages add them.
 - **`copy_exact`** (`check.py copy_range`): a commit with a `Core-Split-Copy: <package>` trailer must equal what
   `split.py` generates from the `src/komira_core` of the same commit. A range with no trailered commit is reported
   NOT CHECKED, never GREEN; on events other than a pull request the range is the whole history.
