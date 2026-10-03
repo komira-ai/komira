@@ -10,7 +10,7 @@
 #     -> komira_core.eval.string_comparison  `eval_string_eq`
 #     -> komira_core.eval.string_comparison  `_string_eq_kernel`
 #
-# `komira_kernels.kleene` and `komira_core.eval.comparison` are the
+# `komira_eval.kleene` and `komira_core.eval.comparison` are the
 # other two implementations and NEITHER is reached by a string comparison.
 #
 # THE DEFECT IS IN THE SIGNATURE, NOT IN THE LOOP. `_string_eq_kernel` takes

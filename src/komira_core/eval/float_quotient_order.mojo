@@ -48,9 +48,9 @@
 # SCOPE — WHAT USES THIS TODAY
 # ============================
 #
-#   * `komira_kernels.builtin_hash_fns`      HashF32 / HashF64
-#   * `komira_agg.builtin_agg_fns_minmax`    MinF32/MinF64/MaxF32/MaxF64
-#   * `komira_agg.hash_agg_op_dt`            MinOp/MaxOp's float family
+#   * `komira_eval.builtin_hash_fns`        HashF32 / HashF64
+#   * `komira_eval.builtin_agg_fns_minmax`  MinF32/MinF64/MaxF32/MaxF64
+#   * `komira_eval.hash_agg_op_dt`          MinOp/MaxOp's float family
 #         (the typed door's MIN/MAX) -- identities + fold steps
 #   * `komira_engine_operators.hash_agg_untyped`
 #         the F32/F64 arms of `_hash_single_col` / `_hash_storage_single_col`
@@ -78,7 +78,7 @@
 # ⚠ Also still IEEE, and reachable from NO door (no production caller): the
 # typed-stage `SortKeyColumn_Typed.compare_at`
 # (`stage_primitives.sort_buffer`), `partition_topn_hash_state._order_heap_key`
-# and `komira_expr.expr_sortable_key._cmp_float64`.
+# and `komira_eval.expr_sortable_key._cmp_float64`.
 #
 # Mojo discipline: no UnsafePointer in any signature, no wildcard origins,
 # file < 1000 LOC.

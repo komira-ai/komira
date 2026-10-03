@@ -8,9 +8,8 @@ from komira_core.arrow import StringArray, LargeStringArray, BooleanArray
 from komira_core.eval import eval_string_eq, eval_string_ne, eval_string_gt, eval_string_lt, eval_string_ge, eval_string_le
 
 # ★ THE EIGHT PATTERN ENTRY POINTS. Imported from
-# `komira_core.eval.string_comparison` rather than through the root facade
-# `komira_eval` used to have (now deleted), which re-exported the four Int32
-# spellings only, and the
+# `komira_core.eval.string_comparison` rather than from the `komira_eval`
+# facade because the facade re-exports the four Int32 spellings only, and the
 # four Int64 (LARGE_STRING) siblings are HALF of what this file now gates.
 #
 # ⛔⛔ A CORRECTION: this note used to say the Int64 siblings "have
