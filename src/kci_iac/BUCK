@@ -24,6 +24,7 @@ mojo_library(
         "tests/test_fault_domain_defaults_to_ours.mojo",
         "tests/test_resource_graph_engine.mojo",
         "tests/test_resource_outputs.mojo",
+        "tests/test_resource_outputs_after_mutation.mojo",
     ],
     visibility = ["PUBLIC"],
 )

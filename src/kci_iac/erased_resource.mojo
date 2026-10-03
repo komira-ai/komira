@@ -153,6 +153,13 @@ comptime _OwnerFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],
 ) raises thin -> String
 
+# The teardown read (`Resource.read_presence`). Defaulted to `read_status`, so
+# a facade that did not forward it would read every node through the digest.
+comptime _ReadPresenceFn = def (
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    Creds,
+) raises thin -> ResourceStatus
+
 comptime _DropFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin],  # the erased R home (consumed)
 ) thin -> None
@@ -195,6 +202,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
     var _bind_inputs_fn: _BindInputsFn
     var _outputs_fn: _OutputsFn
     var _owner_fn: _OwnerFn
+    var _read_presence_fn: _ReadPresenceFn
     var _drop_fn: _DropFn
 
     def __init__(
@@ -216,6 +224,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         bind_inputs_fn: _BindInputsFn,
         outputs_fn: _OutputsFn,
         owner_fn: _OwnerFn,
+        read_presence_fn: _ReadPresenceFn,
         drop_fn: _DropFn,
     ):
         self._home = home^
@@ -235,6 +244,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         self._bind_inputs_fn = bind_inputs_fn
         self._outputs_fn = outputs_fn
         self._owner_fn = owner_fn
+        self._read_presence_fn = read_presence_fn
         self._drop_fn = drop_fn
 
     # =========================================================================
@@ -279,6 +289,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         var bind_inputs_t: _BindInputsFn = _erased_bind_inputs_for[R]
         var outputs_t: _OutputsFn = _erased_outputs_for[R]
         var owner_t: _OwnerFn = _erased_owner_for[R]
+        var read_presence_t: _ReadPresenceFn = _erased_read_presence_for[R]
         var drop_t: _DropFn = _erased_drop_for[R]
         return ErasedResource(
             home^,
@@ -298,6 +309,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
             bind_inputs_t,
             outputs_t,
             owner_t,
+            read_presence_t,
             drop_t,
         )
 
@@ -475,6 +487,14 @@ struct ErasedResource(Resource, Movable, Deinitable):
             return self._owner_fn(p)
         except e:
             return String("")
+
+    def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        """FORWARDED to the concrete R (the teardown read). Without the
+        forward, the trait default would answer through `read_status` for
+        every node, and a consumer left unbound at teardown would raise
+        `UNBOUND` out of `destroy_graph`. SAFETY: see `read_status`."""
+        var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
+        return self._read_presence_fn(p, creds)
 
     def __deinit__(deinit self):
         """Destroy the erased R AND free its home in ONE shot via `_drop_fn`. We
@@ -676,6 +696,18 @@ def _erased_owner_for[
     `_erased_read_status_for` (R read in-place)."""
     var rp = home.bitcast[R]()
     return rp[].owner()
+
+
+def _erased_read_presence_for[
+    R: Resource
+](
+    home: UnsafePointer[UInt8, MutUntrackedOrigin],
+    creds: Creds,
+) raises -> ResourceStatus:
+    """`read_presence` trampoline for concrete `R`. SAFETY: see
+    `_erased_read_status_for` (R driven in-place)."""
+    var rp = home.bitcast[R]()
+    return rp[].read_presence(creds)
 
 
 def _erased_drop_for[

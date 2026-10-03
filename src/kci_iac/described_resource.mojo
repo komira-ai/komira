@@ -376,6 +376,7 @@ struct DescribedResource[D: ResourceDescriptor](
             live = self._d.read(self._spec, creds.token.copy())
         except e:
             if self._d.is_not_found(String(e)):
+                self._last_view = None
                 return ResourceStatus.absent()
             raise e^
         if not self._d.exists(live):
@@ -407,9 +408,19 @@ struct DescribedResource[D: ResourceDescriptor](
         )
 
     def create(mut self, creds: Creds) raises -> String:
+        # A mutation makes any view taken before it stale: drop it BEFORE the
+        # verb runs, so `outputs` re-reads the resource as it is now, whether
+        # the verb succeeds or raises half-way.
+        self._last_view = None
         return self._d.create(self._spec, creds.token.copy())
 
     def update(mut self, creds: Creds) raises:
+        # ⛔ THE PRE-UPDATE VIEW IS THE OLD RESOURCE. `read_status` cached it
+        # when it found the drift; an `outputs` answered from it would record
+        # the OLD value and bind it into every consumer, which would then
+        # converge only on the NEXT apply. Dropping it makes `outputs` read the
+        # updated resource.
+        self._last_view = None
         self._d.update(self._spec, creds.token.copy())
 
     def delete(mut self, physical_id: String, creds: Creds) raises:
@@ -454,10 +465,11 @@ struct DescribedResource[D: ResourceDescriptor](
         self._d.bind_inputs(self._spec, resolved)
 
     def outputs(mut self, physical_id: String, creds: Creds) raises -> Outputs:
-        """From the latest live view. A node created in this run has no view
-        yet (its pre-create read was absent), so it is read once more here:
-        the values a consumer needs are the created resource's, and they are
-        never invented."""
+        """From the latest live view. A node created or updated in this run has
+        no view (`create` / `update` drop the one taken before them), so it is
+        read once more here: the values a consumer needs are the resource's as
+        it is AFTER the mutation, and they are never invented or carried over
+        from the pre-mutation read."""
         if not self._last_view:
             var live: Self.D.View
             try:
@@ -473,6 +485,31 @@ struct DescribedResource[D: ResourceDescriptor](
 
     def owner(mut self) -> String:
         return self._owner.copy()
+
+    def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        """The teardown read: the SAME read envelope as `read_status` (a
+        not-found is ABSENT, anything else propagates) WITHOUT the digest
+        comparison. `desired_digest` is never called, so a consumer whose
+        references were never bound (teardown binds only from persisted
+        outputs) is still found and deleted. `live_digest` is not called
+        either (it takes the spec, so it may need the same bound values): the
+        present phase is reported as drifted with an EMPTY digest, and
+        teardown reads only presence and the physical id."""
+        var live: Self.D.View
+        try:
+            live = self._d.read(self._spec, creds.token.copy())
+        except e:
+            if self._d.is_not_found(String(e)):
+                return ResourceStatus.absent()
+            raise e^
+        if not self._d.exists(live):
+            return ResourceStatus.absent()
+        return ResourceStatus.drifted(
+            self._d.physical_id(live),
+            String(""),
+            self._d.endpoint(live),
+            self._d.live_image(live),
+        )
 
 
 # =============================================================================

@@ -9,7 +9,7 @@
 #   * apply_graph(graph, creds, store) -> List[AppliedNode]. Topo order; per node:
 #     record_or_adopt_intent -> read_status -> (MATCHED: adopt / ABSENT: create /
 #     DRIFTED: converge_mode IN_PLACE -> update, else RAISE "REPLACE unsupported")
-#     -> confirm -> append AppliedNode. The forward apply, with write-ahead
+#     -> confirm -> append AppliedNode -> outputs. The forward apply, with write-ahead
 #     recovery (a crashed apply is re-driven by adopting the surviving intents).
 #   * rollback_create(graph, applied, creds, store). REVERSE order over `applied`;
 #     SKIP RETAIN_KEEP (never delete a kept resource) and SKIP RETAIN_UNDELETABLE
@@ -710,14 +710,6 @@ def apply_graph_tracked[
             physical_id = store.physical_id_for(lid)
         store.confirm(ticket, physical_id)
 
-        # ---- 4b: what the node produced ----
-        # Re-derived on EVERY apply, whatever the verb: an adopted node's values
-        # come from its live read, not from state. Persisted beside the physical
-        # id as a fallback for readers that cannot read live.
-        var outs = graph.node(idx).outputs(physical_id, creds)
-        store.record_outputs(lid, outs)
-        run.put(lid, outs^)
-
         # ---- 5: record what we did (for rollback) ----
         var record = AppliedNode(
             lid,
@@ -729,13 +721,40 @@ def apply_graph_tracked[
         )
         applied.append(record.copy())
         # ---- 5b: advance the progress channels ----
-        # This node is DONE, so it moves from `pending` to `landed`. It happens
-        # AFTER `store.confirm` and after every raise site above, so a node in
-        # `landed` is one whose mutation completed AND whose intent healed —
-        # exactly the claim the failure report makes about it.
+        # The node's mutation completed and its intent healed, so it moves from
+        # `pending` to `landed` NOW, before its outputs are read. It happens
+        # AFTER `store.confirm` and after every raise site of the mutation, so
+        # a node in `landed` is one whose mutation completed AND whose intent
+        # healed, exactly the claim the failure report makes about it.
+        #
+        # ⛔ NOT AFTER THE OUTPUTS READ. `outputs` may read live (a created
+        # node has never been read since its create), and that read can fail.
+        # Had the node moved to `landed` only after it, a failing read would
+        # leave a LIVE, CONFIRMED resource out of `landed`: the failure report
+        # would say nothing was created, and a teardown of what this apply
+        # created would not find it.
         landed.append(record^)
         if len(pending) > 0:
             _ = pending.pop(0)
+
+        # ---- 6: what the node produced ----
+        # Re-derived on EVERY apply, whatever the verb: an adopted node's values
+        # come from its live read, not from state. Persisted beside the physical
+        # id as a fallback for readers that cannot read live. A raise is
+        # enriched like the mutation verbs' (node + verb + fault domain); the
+        # node is already in `landed` (above).
+        var outs: Outputs
+        try:
+            outs = graph.node(idx).outputs(physical_id, creds)
+        except oe:
+            raise _node_verb_error(
+                lid,
+                String("outputs"),
+                String(oe),
+                _node_fault_domain(graph, idx, String("outputs"), String(oe)),
+            )
+        store.record_outputs(lid, outs)
+        run.put(lid, outs^)
 
     return applied^
 
@@ -835,6 +854,26 @@ def rollback_create[
 # =============================================================================
 # §5 — destroy_graph — tear the whole graph down, in REVERSE topo order.
 # =============================================================================
+def _bind_from_recorded_outputs[
+    S: StateStore
+](mut graph: ResourceGraph, idx: Int, lid: String, mut store: S) raises:
+    """Best-effort bind for TEARDOWN: bind node `idx`'s `input_refs` from the
+    outputs `store` recorded for its producers, iff every one is recorded.
+    A missing value binds nothing and refuses nothing (teardown reads with
+    `read_presence`, which needs no bound value); it is never an empty
+    string."""
+    var refs = graph.node(idx).input_refs()
+    if len(refs) == 0:
+        return
+    var resolved = ResolvedInputs()
+    for r in range(len(refs)):
+        var v = store.outputs_for(refs[r].producer).get(refs[r].output)
+        if not v:
+            return
+        resolved.add(refs[r], v.value())
+    graph.node(idx).bind_inputs(resolved)
+
+
 def destroy_graph[
     S: StateStore
 ](
@@ -855,8 +894,9 @@ def destroy_graph[
         shared-bucket-retention invariant: destroy retains the standing scope) —
         UNLESS `force_delete_data` is set (the `--delete-data` whole-project override,
         below).
-      * else — `read_status(creds)` (the live read); then:
-          - ABSENT — the resource is provably already gone (`read_status` returns
+      * else — `read_presence(creds)` (the live read, no digest: teardown
+        needs no bound inputs); then:
+          - ABSENT — the resource is provably already gone (`read_presence` returns
             ABSENT ONLY on a real 404 / NOT_FOUND; a transient / GOAWAY / 5xx RAISES
             out of this loop, it does NOT read as absent). `mark_reaped` retires the
             intent (idempotent already-gone) — NO delete to issue.
@@ -874,7 +914,7 @@ def destroy_graph[
     a billable resource forever (no level-triggered re-drive can recover it — the
     record is gone). So the retire is gated on a CONFIRMED-GONE outcome: a provable-
     404 absent read, OR a delete-then-reread that comes back ABSENT. A transient /
-    ambiguous read (which `read_status` surfaces as a RAISE, never as ABSENT) and a
+    ambiguous read (which `read_presence` surfaces as a RAISE, never as ABSENT) and a
     resource that SURVIVES its delete both LEAVE the record for the re-drive. This is
     the "fail-loud, no partial-reap swallowed" contract. An unconditional
     `mark_reaped` (retire regardless) would violate it: a read that reported
@@ -998,9 +1038,17 @@ def destroy_graph[
             # `--delete-data` (force_delete_data), the explicit whole-project override.
             continue
         var lid = graph.node(idx).logical_id()
-        var live = graph.node(idx).read_status(creds)
+        # ⛔ TEARDOWN NEEDS NO BOUND INPUTS. It reads with `read_presence`
+        # (present or absent + physical id, no digest), so a consumer whose
+        # references cannot be bound now is still found and deleted. The
+        # references are bound from the producers' PERSISTED outputs when the
+        # store has every one of them, for a node that does not override
+        # `read_presence`; when it has not, nothing is bound and nothing is
+        # refused.
+        _bind_from_recorded_outputs(graph, idx, lid, store)
+        var live = graph.node(idx).read_presence(creds)
         if not live.is_present():
-            # ABSENT — the resource is PROVABLY already gone. `read_status` returns
+            # ABSENT — the resource is PROVABLY already gone. `read_presence` returns
             # ABSENT ONLY on a real 404 / NOT_FOUND; a transient (GOAWAY / H2_PROTOCOL
             # / 5xx / DEADLINE / network) RAISES out of this loop rather than reading
             # as absent. So an absent read is a confirmed-gone outcome — retire the
@@ -1021,9 +1069,9 @@ def destroy_graph[
         # the resource (the re-read is ABSENT). A re-read that is still PRESENT means
         # the delete did not take — LEAVE the record intact + RAISE so the level-
         # triggered reconcile re-drives (never retire a record over a live resource).
-        # A transient re-read RAISES here too (surfaced by read_status, not absent) —
+        # A transient re-read RAISES here too (surfaced by read_presence, not absent) —
         # the same fail-loud, no silent retire.
-        var after = graph.node(idx).read_status(creds)
+        var after = graph.node(idx).read_presence(creds)
         if after.is_present():
             raise Error(
                 String("destroy_graph: node '")

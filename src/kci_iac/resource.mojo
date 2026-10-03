@@ -626,3 +626,23 @@ trait Resource(Movable, Deinitable):
 
         DEFAULT = EMPTY."""
         return String("")
+
+    def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
+        """The live read TEARDOWN uses: is the resource there, and what is its
+        physical id. `destroy_graph` calls this, never `read_status`, because
+        teardown compares nothing against a desired state, and a consumer's
+        desired state may not be computable then: `destroy_graph` binds a
+        node's `input_refs` only from the outputs the store persisted, and a
+        store that persists none leaves the node unbound, where the digest
+        rule makes `desired_digest` raise `UNBOUND`.
+
+        ⛔ THE PHASE IS PRESENT-OR-ABSENT ONLY. An override answers ABSENT
+        exactly where `read_status` would (a real not-found, never a transient
+        or an AccessDenied) and otherwise a PRESENT phase carrying the physical
+        id; the matched/drifted distinction is not computed and must not be
+        planned on.
+
+        DEFAULT = `read_status(creds)`, correct for a node with no
+        `input_refs`. A node with references overrides it (the descriptor
+        driver does)."""
+        return self.read_status(creds)
