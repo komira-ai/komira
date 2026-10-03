@@ -31,21 +31,18 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # nested types decoded, unknown keys and names skipped, an empty page),
 # test_logging_token_hook (one token asked of the source per request, sent
 # as one `Bearer`; no token, no dial), test_logging_errors (the
-# google.rpc.Status envelope and bare HTTP statuses mapped to a code, the
-# body never quoted) and test_no_env_reads (the generated modules read no
-# environment and hold no method but ListLogEntries).
+# google.rpc.Status envelope and bare HTTP statuses mapped to a code, a
+# 3xx included and never followed, the body never quoted) and
+# test_no_env_reads (every generated module reads no environment and holds
+# no method but ListLogEntries).
 #
 # No test here talks to the service.
-
-_GEN_FILES = [
-    "__init__.mojo",
-    "_layout_probe.mojo",
-    "http_request.mojo",
-    "log_entry.mojo",
-    "log_severity.mojo",
-    "logging.mojo",
-    "monitored_resource.mojo",
-]
+#
+# A live caller MUST call `set_rest_host("logging.googleapis.com")` on the
+# client. The generated client starts at the offline `localhost` placeholder
+# (the emitter does not read the service's `google.api.default_host` yet),
+# and without that call the bearer token goes to whatever answers on
+# https://localhost.
 
 mojo_gcp_client(
     name = "komira_gcp_logging",
@@ -62,10 +59,9 @@ mojo_gcp_client(
     protocol = "rest",
     protos = [],
     test_data = {
-        "tests/test_no_env_reads.mojo": {
-            "gen/" + f: ":komira_gcp_logging_gen[{}]".format(f)
-            for f in _GEN_FILES
-        },
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_logging_gen"},
     },
     test_srcs = [
         "tests/test_logging_errors.mojo",

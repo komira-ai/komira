@@ -1,6 +1,7 @@
 # The generated modules read no environment, and hold only what a log
-# reader calls. Every generated file is staged as this test's data, at
-# gen/<file>; the test reads each one.
+# reader calls. The generated package is staged whole as this test's data,
+# at gen/, and the test reads every file it finds there: no list of the
+# generated files is kept here to fall behind what the generator writes.
 #
 # No environment: no file names a way to read it or the FFI a read would
 # go through. Configuration is a parameter (the HTTP client, the token
@@ -11,22 +12,27 @@
 # only. The service's other methods, every write among them, are not in
 # the generated code, so a caller of this package cannot write, delete or
 # tail a log through it.
+from std.os import listdir
 from std.testing import assert_equal, assert_true
 
 
 comptime _DIR = "gen/"
 
 
-def _files() -> List[String]:
-    return [
-        "__init__.mojo",
-        "_layout_probe.mojo",
-        "http_request.mojo",
-        "log_entry.mojo",
-        "log_severity.mojo",
-        "logging.mojo",
-        "monitored_resource.mojo",
-    ]
+def _files() raises -> List[String]:
+    """Every file staged under gen/. Refuses an empty staging, which would
+    make each scan below pass over nothing."""
+    var names = listdir(String(_DIR))
+    var has_client = False
+    var has_entry = False
+    for i in range(len(names)):
+        if names[i] == "logging.mojo":
+            has_client = True
+        if names[i] == "log_entry.mojo":
+            has_entry = True
+    assert_true(len(names) > 0, "nothing is staged under gen/")
+    assert_true(has_client and has_entry, "gen/ is not the generated package")
+    return names^
 
 
 def _count(hay: String, needle: String) -> Int:

@@ -113,6 +113,11 @@ def test_each_request_asks_the_source() raises:
     assert_equal(a1[0], "authorization: Bearer token-1")
     assert_equal(len(a2), 1)
     assert_equal(a2[0], "authorization: Bearer token-2")
+    # Two requests, two dials, each for the host that was set: the count
+    # the no-token case below expects to stay at 0.
+    assert_equal(c._client._connector.connect_call_count(), 2)
+    assert_equal(c._client._connector.dial_hosts_len(), 2)
+    assert_equal(c._client._connector.dial_host_at(0), "logging.googleapis.com")
 
 
 def test_no_token_no_request() raises:
@@ -134,6 +139,10 @@ def test_no_token_no_request() raises:
     except e:
         raised = String(e)
     assert_equal(raised, "no credential available")
+    # Nothing dialled, not only nothing written: a client that connected and
+    # failed before its first write would leave the capture empty too.
+    assert_equal(c._client._connector.connect_call_count(), 0)
+    assert_equal(c._client._connector.dial_hosts_len(), 0)
     assert_equal(len(capture[]), 0)
 
 

@@ -145,6 +145,31 @@ def test_empty_error_body() raises:
     )
 
 
+def test_a_redirect_is_not_a_page() raises:
+    # The 2xx boundary from above: a 3xx is not success, and no redirect is
+    # followed (the client has no redirect layer). 300 is the first status
+    # past 2xx; 307 is a front end moving the call, its Location not quoted.
+    var got300 = _raised(_answer("300 Multiple Choices", "application/json", ""))
+    assert_equal(
+        got300,
+        "POST ListLogEntries: HTTP 300, UNKNOWN (code 2), no google.rpc.Status"
+        " envelope, body 0 bytes",
+    )
+    var got307 = _raised(
+        _bytes(
+            String("HTTP/1.1 307 Temporary Redirect\r\n")
+            + "Location: https://elsewhere.example/v2/entries:list\r\n"
+            + "Content-Length: 0\r\nConnection: close\r\n\r\n"
+        )
+    )
+    assert_equal(
+        got307,
+        "POST ListLogEntries: HTTP 307, UNKNOWN (code 2), no google.rpc.Status"
+        " envelope, body 0 bytes",
+    )
+    assert_false("elsewhere" in got307)
+
+
 def test_unauthenticated() raises:
     var body = String(
         '{"error":{"code":401,"message":"Request had invalid authentication'
@@ -164,4 +189,5 @@ def main() raises:
     test_status_from_http_when_there_is_no_envelope()
     test_empty_error_body()
     test_unauthenticated()
+    test_a_redirect_is_not_a_page()
     print("OK")

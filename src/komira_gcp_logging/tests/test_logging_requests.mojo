@@ -10,10 +10,17 @@
 # fields' JSON names): `resourceNames` is an array even for one project,
 # `pageToken` is the previous page's `nextPageToken` sent back verbatim.
 #
-# The body carries every field, `"pageToken":""` included on a first page:
-# komira_proto_codec's JsonEncoder writes default values, and the API reads
-# an empty `pageToken` as no token (proto3: the empty string is the unset
-# value), so a first page is a first page either way.
+# One part of each body is NOT from the reference: the default-valued keys
+# (`"pageToken":""` on a first page, `"filter":""`, `"pageSize":0`). The
+# proto3 JSON mapping omits a default-valued field, and the reference
+# examples do; they are here because komira_proto_codec's JsonEncoder writes
+# defaults today. Those keys pin codec behaviour, not the API: when the
+# encoder omits defaults they are deleted from these bodies, and a first
+# page then carries no `pageToken` key. On the wire either form is the same
+# request: the API reads an empty `pageToken` as no token, a non-positive
+# `pageSize` as its default and an empty `filter` as no filter. Key order
+# follows the message's declaration order (`resourceNames` first) and means
+# nothing to the server.
 from std.memory import ArcPointer
 from std.testing import assert_equal
 
