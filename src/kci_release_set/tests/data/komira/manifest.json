@@ -1,1 +1,1 @@
-{"artifact_type":"CONDA","name":"komira","version":"0.1.7","subdir":"linux-64","file":"komira-0.1.7-0.conda","sha256":"2419f1b69621c0c607c4df2d6d0591e80e58d166841de2f32609868c2969c24f","metadata":"metadata.json"}
+{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira","version":"0.1.7","platform":"linux-x86_64","subdir":"linux-64","file":"komira-0.1.7-0.conda","sha256":"2419f1b69621c0c607c4df2d6d0591e80e58d166841de2f32609868c2969c24f","metadata":"metadata.json"}

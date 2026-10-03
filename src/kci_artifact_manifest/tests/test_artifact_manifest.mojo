@@ -24,7 +24,9 @@ def _conda(extra: String = String("")) -> String:
     # `metadata` is required on a CONDA manifest, so the fixture carries it,
     # last, where the renderer writes it; `extra` goes in before it.
     return (
-        String('{"artifact_type":"CONDA","name":"example-pkg","version":"1.2.3",')
+        String('{"format":"kci.artifact_manifest","schema_version":1,')
+        + String('"artifact_type":"CONDA","name":"example-pkg","version":"1.2.3",')
+        + String('"platform":"linux-x86_64",')
         + String('"subdir":"linux-64","file":"linux-64/example-pkg-1.2.3-h0_0.conda",')
         + String('"sha256":"')
         + String(_HASH)
@@ -36,7 +38,8 @@ def _conda(extra: String = String("")) -> String:
 
 def _python() -> String:
     return (
-        String('{"artifact_type":"PYTHON","name":"example_pkg","version":"1.2.3",')
+        String('{"format":"kci.artifact_manifest","schema_version":1,')
+        + String('"artifact_type":"PYTHON","name":"example_pkg","version":"1.2.3","platform":"noarch",')
         + String('"file":"example_pkg-1.2.3-py3-none-any.whl","sha256":"')
         + String(_HASH)
         + String('","metadata":"METADATA"}')
@@ -80,10 +83,6 @@ def test_an_absolute_file_is_not_re_rooted() raises:
 
 
 def test_refusals_name_the_manifest_and_the_key() raises:
-    assert_equal(
-        _refusal(_conda(String(',"extra":"x"'))),
-        String("artifact manifest 'out/m.json': unknown key 'extra'"),
-    )
     assert_equal(
         _refusal(_conda(String(',"name":"again"'))),
         String("artifact manifest 'out/m.json': 'name' is given twice"),
@@ -164,6 +163,76 @@ def test_refusals_name_the_manifest_and_the_key() raises:
     assert_true(_refusal(String("{")).startswith(String("artifact manifest 'out/m.json': not JSON: ")))
 
 
+def test_format_and_major_are_read_first() raises:
+    assert_equal(
+        _refusal(_conda().replace(String('"schema_version":1'), String('"schema_version":2'))),
+        String(
+            "artifact manifest 'out/m.json': schema_version 2 needs a newer kci"
+            " (this kci reads kci.artifact_manifest up to major 1)"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"format":"kci.artifact_manifest",'), String(""))),
+        String(
+            "artifact manifest 'out/m.json': no 'format' (a kci.artifact_manifest document"
+            " names its format)"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"schema_version":1,'), String(""))),
+        String("artifact manifest 'out/m.json': no 'schema_version'"),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"kci.artifact_manifest"'), String('"kci.result"'))),
+        String("artifact manifest 'out/m.json': format 'kci.result' is not 'kci.artifact_manifest'"),
+    )
+    # A major-2 manifest is refused as such even when it carries a key this
+    # kci does not know.
+    assert_true(
+        _refusal(
+            _conda(String(',"provenance":"x"')).replace(String('"schema_version":1'), String('"schema_version":2'))
+        ).find(String("needs a newer kci")) >= 0
+    )
+
+
+def test_an_unknown_key_of_a_known_major_is_ignored_and_listed() raises:
+    var m = parse_artifact_manifest(_conda(String(',"provenance":"x","later":1')), String("out/m.json"))
+    assert_equal(len(m.ignored_keys), 2)
+    assert_equal(m.ignored_keys[0], String("provenance"))
+    assert_equal(m.ignored_keys[1], String("later"))
+    # the renderer writes only what it knows
+    assert_equal(render_artifact_manifest(m), _conda() + String("\n"))
+
+
+def test_platform() raises:
+    var m = parse_artifact_manifest(_conda(), String("out/m.json"))
+    assert_equal(m.platform, String("linux-x86_64"))
+    assert_equal(parse_artifact_manifest(_python(), String("out/m.json")).platform, String("noarch"))
+    assert_equal(
+        _refusal(_conda().replace(String('"platform":"linux-x86_64",'), String(""))),
+        String("artifact manifest 'out/m.json': missing 'platform'"),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"linux-x86_64"'), String('"linux-64"'))),
+        String(
+            "artifact manifest 'out/m.json': platform 'linux-64' is not one of:"
+            " linux-x86_64 darwin-arm64 linux-arm64 noarch"
+        ),
+    )
+    assert_equal(
+        _refusal(_conda().replace(String('"linux-x86_64"'), String('"darwin-arm64"'))),
+        String(
+            "artifact manifest 'out/m.json': platform 'darwin-arm64' is not released:"
+            " kci releases linux-x86_64 only for now; darwin-arm64 is reserved"
+        ),
+    )
+    # a CONDA subdir is its platform's conda subdir
+    assert_equal(
+        _refusal(_conda().replace(String('"linux-x86_64"'), String('"noarch"'))),
+        String("artifact manifest 'out/m.json': subdir 'linux-64' is not platform noarch's conda subdir 'noarch'"),
+    )
+
+
 def test_render_round_trips_conda() raises:
     var m = parse_artifact_manifest(_conda(), String("out/m.json"))
     var text = render_artifact_manifest(m)
@@ -206,6 +275,7 @@ def test_render_refuses_what_the_parser_would() raises:
     m.artifact_type = String("CONDA")
     m.name = String("example-pkg")
     m.version = String("1.2.3")
+    m.platform = String("linux-x86_64")
     m.subdir = String("linux-64")
     m.file = String("linux-64/example-pkg-1.2.3-h0_0.conda")
     m.sha256_hex = String("not-a-hash")
