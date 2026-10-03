@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 6
+#   generator    : aws-client-gen version 7
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -79,6 +79,7 @@ from komira_aws_core import (
     HttpResult,
     resolve_endpoint,
     send_sigv4_signed_request,
+    aws_json_error_info,
 )
 from komira_json import (
     JsonValue,
@@ -823,12 +824,13 @@ def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
     """A non-2xx as an `Error`.
 
         ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the
-        parsed short `__type` token and message ride out. A generated client
+        awsJson error code (`aws_json_error_info`) and message ride out. A generated client
         cannot know which of its shapes carry a secret, so the discipline is
         unconditional — the `secrets_manager_client._sm_error` rule, applied
         everywhere because the generator has no way to make the exception."""
-    var code = aws_error_code_from_body(res.body)
-    var msg = aws_error_message_from_body(res.body)
+    var info = aws_json_error_info(res.to_response())
+    var code = info.code.copy()
+    var msg = info.message.copy()
     return Error(
         String("CloudWatchLogsCloudWatchLogs.")
         + op

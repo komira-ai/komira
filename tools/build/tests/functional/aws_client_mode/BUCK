@@ -10,8 +10,15 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check")
 # is that `mode = "client"` reaches the generator without `--pure-only`: the
 # generated module carries the signed-send surface, its komira_http_core import
 # and the error builder that reads an error's code and message through
-# komira_aws_core. (Pure mode leaving all of that out is the `absent` of
-# ../mojo_aws_client's gen_check.)
+# komira_aws_core's aws_json_error_info. (Pure mode leaving all of that out
+# is the `absent` of ../mojo_aws_client's gen_check.)
+#
+# Client-mode code is compiled against the REAL komira_aws_core, the HTTP
+# client and its welded tests in the komira cell: komira//src/komira_aws_s3
+# (restXml) and komira//src/komira_aws_sqs (awsJson) are client mode. This
+# cell cannot depend on those libraries (each cell's MojoPkgTSet is a
+# different type), and a stub of the transport here would be a second
+# copy of the send signature to keep in step.
 
 _LOGS = botocore_model("logs")
 
@@ -41,7 +48,8 @@ gen_check(
         "from komira_http_core.transport.io_stream import Connector",
         "send_sigv4_signed_request,",
         "[C: Connector, T: AwsCredsSource](Movable, Deinitable):",
-        "var code = aws_error_code_from_body(res.body)",
-        "var msg = aws_error_message_from_body(res.body)",
+        "var info = aws_json_error_info(res.to_response())",
+        "var code = info.code.copy()",
+        "var msg = info.message.copy()",
     ],
 )

@@ -1091,6 +1091,40 @@ mod tests {
     }
 
     #[test]
+    fn a_ruleset_client_sends_where_the_ruleset_resolves_each_call() {
+        let src = emit_rest_json(Some(&rules(S3_LIKE)));
+        // The client holds the ruleset and its configuration, not a static
+        // host, and imports what turns a resolved endpoint into a target.
+        for want in [
+            "    AwsSigningTarget,\n    aws_signing_target,\n",
+            "    var _endpoint_config: TinyEndpointConfig\n",
+            "    var _rules: EndpointRuleSet\n",
+            "        var endpoint_config: TinyEndpointConfig = TinyEndpointConfig(),\n    ) raises:\n",
+            "        var rules = tiny_endpoint_rules()\n",
+            "    def send(mut self, var req: AwsRequest, target: AwsSigningTarget) raises -> HttpResult:\n",
+            "            target.signing_region.copy(),\n            target.signing_name.copy(),\n            target.endpoint.copy(),\n",
+        ] {
+            assert!(src.contains(want), "`{want}` missing");
+        }
+        assert!(!src.contains("_endpoint_override"));
+        assert!(!src.contains("resolve_endpoint(self._endpoint_override"));
+        // Each verb resolves its own endpoint, from its own input.
+        let verb = &src[src.find("    def op(mut self").unwrap()..];
+        let mut at = 0;
+        for want in [
+            "var req = build_op_request(input)",
+            "var target = aws_signing_target(",
+            "resolve_op_endpoint(self._rules, self._endpoint_config, input),",
+            "self._region.copy(),",
+            "String(TINY_SERVICE),",
+            "var res = self.send(req^, target)",
+        ] {
+            let i = verb[at..].find(want).unwrap_or_else(|| panic!("`{want}` missing or out of order"));
+            at += i + want.len();
+        }
+    }
+
+    #[test]
     fn a_rest_json_client_without_a_ruleset_keeps_the_static_host() {
         let src = emit_rest_json(None);
         for absent in ["EndpointRuleSet", "EndpointConfig", "§E", "resolve_op_endpoint"] {
