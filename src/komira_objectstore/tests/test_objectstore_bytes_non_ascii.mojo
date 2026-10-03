@@ -10,7 +10,7 @@
 # ASCII is the corruption's FIXED POINT, which is exactly why an all-ASCII
 # corpus never sees it.
 #
-# ⚠ THIS PACKAGE DOCUMENTS THE CLASS IN SEVERAL PLACES (`shuffle_codec.mojo`,
+# ⚠ THIS PACKAGE DOCUMENTS THE CLASS IN SEVERAL PLACES (`komira_shuffle`'s `codec.mojo`,
 # `delimiter_faithful_conditional_store.mojo`, and the whole of
 # `tests/test_delimiter_listing_byte_faithful.mojo`), and a comment does not
 # stop a copy. ⇒ A COMMENT IS NOT A GUARD. This file is the guard.

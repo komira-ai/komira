@@ -13,7 +13,7 @@
 #
 # corrupts every non-ASCII name. The function mirrors komira_async's
 # `_local_fs_list_dir_shallow`, so a defect in one is likely in the other.
-# Other files here describe the same class (`shuffle_codec.mojo`,
+# Other files here describe the same class (`komira_shuffle`'s `codec.mojo`,
 # `delimiter_faithful_conditional_store.mojo`,
 # `tests/test_delimiter_listing_byte_faithful.mojo`); a comment does not stop
 # one call site being missed, which is the argument for a falsifier.
