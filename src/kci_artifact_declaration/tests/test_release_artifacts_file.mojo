@@ -46,6 +46,7 @@ def _flag_values(argv: List[String], flag: String) -> List[String]:
 
 
 def test_the_first_release_is_komira_encoding_then_komira_all() raises:
+    assert_equal(read_artifact_declarations(String(_FILE)).schema_version, Int32(1))
     var d = read_artifact_declarations(String(_FILE))
     assert_equal(len(d.artifacts), 2)
     assert_equal(d.artifacts[0].name, String("komira_encoding"))
@@ -56,7 +57,7 @@ def test_every_library_builds_stamped_into_its_own_directory() raises:
     var d = read_artifact_declarations(String(_FILE))
     for i in range(len(d.artifacts) - 1):
         var name = d.artifacts[i].name.copy()
-        var argv = render_build_argv(d, name, String(_REL), _stamp())
+        var argv = render_build_argv(d, name, String(_REL), String("linux-x86_64"), _stamp())
         assert_equal(argv[0], String("buck2"))
         assert_equal(argv[1], String("build"))
         assert_equal(_count(argv, String("komira.package_stamp=154")), 1)
@@ -75,7 +76,7 @@ def test_the_metapackage_is_last_and_holds_every_library() raises:
     var d = read_artifact_declarations(String(_FILE))
     var last = len(d.artifacts) - 1
     var meta = d.artifacts[last].name.copy()
-    var argv = render_build_argv(d, meta, String(_REL), _stamp())
+    var argv = render_build_argv(d, meta, String(_REL), String("linux-x86_64"), _stamp())
     assert_equal(_count(argv, String("conda-meta")), 1)
     var names = _flag_values(argv, String("--name"))
     assert_equal(len(names), 1)

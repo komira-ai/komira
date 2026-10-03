@@ -21,6 +21,10 @@
 # test src/kci_release_channel/tests/test_release_channels_file.mojo reads
 # this file through the real parser.
 
+# The file format's major (kci_contract's format table): kci refuses a file
+# without it, and one written for a newer kci.
+schema_version: 1
+
 channel {
   name: "komira"
   visibility: PUBLIC

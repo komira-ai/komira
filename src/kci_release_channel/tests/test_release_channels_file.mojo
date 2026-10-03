@@ -19,6 +19,7 @@ from kci_release_channel import (
     CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING,
     find_channel,
     parse_channels_file,
+    push_identity_environment,
 )
 
 
@@ -43,6 +44,9 @@ def test_komira_is_the_prefix_dev_conda_channel_by_trusted_publishing() raises:
     var cred = repo.declared_credential()
     assert_equal(cred.kind, String(CREDENTIAL_KIND_OIDC_TRUSTED_PUBLISHING))
     assert_equal(cred.secret_name, String(""))
+    # The Trusted Publisher names the GitHub environment `prod`: only the
+    # kci.yml job in that environment (the publish stage) can push here.
+    assert_equal(push_identity_environment(repo), String("prod"))
 
 
 def main() raises:
