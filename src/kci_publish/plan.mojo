@@ -232,7 +232,7 @@ def resolve_targets(
             libs.insert(at, t^)
     if len(refusals) > 0:
         raise Error(
-            String("kci publish: refused before any read:\n  ") + String("\n  ").join(refusals)
+            String("PUBLISH step: refused before any read:\n  ") + String("\n  ").join(refusals)
         )
     for i in range(len(metas)):
         libs.append(metas[i].copy())
@@ -338,7 +338,7 @@ def plan_from_state(
     and the targets differ in number."""
     if len(channel_read.states) != len(targets):
         raise Error(
-            String("kci publish: ")
+            String("PUBLISH step: ")
             + String(len(targets))
             + String(" targets but ")
             + String(len(channel_read.states))

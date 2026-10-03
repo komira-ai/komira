@@ -161,8 +161,8 @@ struct _Step0(Movable):
     def __init__(out self, var error_id: String, message: String):
         self.prepared = None
         var text = message.copy()
-        if not text.startswith(String("kci publish: ")):
-            text = String("kci publish: ") + text
+        if not text.startswith(String("PUBLISH step: ")):
+            text = String("PUBLISH step: ") + text
         self.refusal = PublishReport.refused(error_id^, text^)
 
 
@@ -335,7 +335,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
         base.stop(
             String(REASON_FAILED),
             String(ERROR_RESULT_FILE),
-            String("kci publish: the run's RUNNING record could not be written; nothing was sent: ")
+            String("PUBLISH step: the run's RUNNING record could not be written; nothing was sent: ")
             + String(e),
         )
         return base^
@@ -343,7 +343,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     try:
         host = repo_host(p.targets[0].coordinate.repo)
     except e:
-        base.stop(String(REASON_FAILED), String(ERROR_CHANNEL), String("kci publish: ") + String(e))
+        base.stop(String(REASON_FAILED), String(ERROR_CHANNEL), String("PUBLISH step: ") + String(e))
         return base^
     var public = p.channel.is_public()
     var is_oidc = Bool(p.credential) and p.credential.value().is_oidc_trusted_publishing()
@@ -383,7 +383,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
         base.stop(
             String(REASON_FAILED),
             String(ERROR_CREDENTIAL),
-            String("kci publish: the channel's credential: ") + String(e),
+            String("PUBLISH step: the channel's credential: ") + String(e),
         )
         return base^
 
@@ -419,7 +419,7 @@ def _mk_connector(host: String) -> _Conn:
     try:
         return build_public_ca_tls_connector(host)
     except e:
-        abort(String("kci publish: TLS connector for ") + host + String(": ") + String(e))
+        abort(String("PUBLISH step: TLS connector for ") + host + String(": ") + String(e))
 
 
 def _http() -> _Http:
