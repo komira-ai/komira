@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/tests/test_broker_coord_serve_stays_responsive.mojo
+# komira_broker_coordinator/tests/test_broker_coordinator_serve_stays_responsive.mojo
 #   BROKER COORDINATOR serve responsiveness: the coordinator's parkable
 #   suspendable serve loop stays responsive to a FRESH connect under SUSTAINED
 #   heartbeat load; it does NOT wedge.
@@ -34,8 +34,8 @@ from std.sys.info import CompilationTarget
 from std.testing import assert_true
 
 from komira_broker import ClusterAssignmentStore
-from komira_broker_coord import BrokerHeartbeatCoordinator
-from komira_broker_coord import BrokerCoordinatorService
+from komira_broker_coordinator import BrokerHeartbeatCoordinator
+from komira_broker_coordinator import BrokerCoordinatorService
 from komira_objectstore.shared_in_memory_slow_cas_store import (
     SharedInMemorySlowCasStore,
 )
@@ -57,7 +57,7 @@ comptime _Store = SharedInMemorySlowCasStore
 
 # =============================================================================
 # §1 — raw-socket libc client (the same-process harness shape, shared with
-# test_broker_coord_store_raise_survives.mojo).
+# test_broker_coordinator_store_raise_survives.mojo).
 # =============================================================================
 comptime _AF_INET: Int32 = 2
 comptime _SOCK_STREAM: Int32 = 1
@@ -311,9 +311,10 @@ def test_serve_stays_responsive_under_sustained_heartbeats() raises:
 
 def main() raises:
     print(
-        "test_broker_coord_serve_stays_responsive — the coordinator serve loop"
+        "test_broker_coordinator_serve_stays_responsive — the coordinator"
+        " serve loop"
         " stays responsive to a fresh connect under sustained heartbeat load"
         " (no serve-loop stall)"
     )
     test_serve_stays_responsive_under_sustained_heartbeats()
-    print("ALL test_broker_coord_serve_stays_responsive tests PASS")
+    print("ALL test_broker_coordinator_serve_stays_responsive tests PASS")

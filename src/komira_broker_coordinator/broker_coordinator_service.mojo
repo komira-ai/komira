@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/broker_coordinator_service.mojo
+# komira_broker_coordinator/broker_coordinator_service.mojo
 #   BROKER COORDINATOR: the runnable broker-node coordinator service (no DB).
 # =============================================================================
 #

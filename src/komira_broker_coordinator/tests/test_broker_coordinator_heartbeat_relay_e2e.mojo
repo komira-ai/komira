@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/tests/test_broker_coord_heartbeat_relay_e2e.mojo
+# komira_broker_coordinator/tests/test_broker_coordinator_heartbeat_relay_e2e.mojo
 #   BROKER heartbeat-relay end-to-end, over the object-store CAS coordinator.
 # =============================================================================
 #
@@ -18,7 +18,7 @@
 from std.testing import assert_equal, assert_true, assert_false
 
 from komira_broker import ClusterAssignmentStore, BrokerNodeState
-from komira_broker_coord import BrokerHeartbeatCoordinator
+from komira_broker_coordinator import BrokerHeartbeatCoordinator
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
@@ -291,7 +291,7 @@ def test_coordinator_restart_recovers() raises:
 
 def main() raises:
     print(
-        "test_broker_coord_heartbeat_relay_e2e — heartbeat relay"
+        "test_broker_coordinator_heartbeat_relay_e2e — heartbeat relay"
         " (DB-free object-store CAS coordinator)"
     )
     test_even_assign_and_inprocess_apply()

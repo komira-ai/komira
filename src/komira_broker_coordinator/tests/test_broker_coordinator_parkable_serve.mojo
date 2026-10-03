@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/tests/test_broker_coord_parkable_serve.mojo
+# komira_broker_coordinator/tests/test_broker_coordinator_parkable_serve.mojo
 #   BROKER COORDINATOR PARKABLE CAS SERVE: the acceptance test.
 # =============================================================================
 #
@@ -40,9 +40,9 @@ from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.suspendable_handler import SuspendableHandlerDriver
 
 from komira_broker import ClusterAssignmentStore
-from komira_broker_coord import BrokerCoordSuspendableDispatcher
-from komira_broker_coord import BrokerHeartbeatCoordinator
-from komira_broker_coord import BrokerHeartbeatSM
+from komira_broker_coordinator import BrokerCoordSuspendableDispatcher
+from komira_broker_coordinator import BrokerHeartbeatCoordinator
+from komira_broker_coordinator import BrokerHeartbeatSM
 from komira_objectstore.shared_in_memory_slow_cas_store import (
     SharedInMemorySlowCasStore,
 )
@@ -230,9 +230,9 @@ def test_zero_slow_ticks_completes_in_one_step() raises:
 
 def main() raises:
     print(
-        "test_broker_coord_parkable_serve — the parkable CAS serve gate"
+        "test_broker_coordinator_parkable_serve — the parkable CAS serve gate"
     )
     test_reassign_parks_and_second_request_admitted()
     test_steady_state_heartbeat_one_step_no_park()
     test_zero_slow_ticks_completes_in_one_step()
-    print("ALL test_broker_coord_parkable_serve tests PASS")
+    print("ALL test_broker_coordinator_parkable_serve tests PASS")

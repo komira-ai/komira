@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/broker_heartbeat_handler.mojo
+# komira_broker_coordinator/broker_heartbeat_handler.mojo
 #   BROKER COORDINATOR: the broker-node heartbeat handler (no DB, object-store
 #   CAS persistence).
 # =============================================================================

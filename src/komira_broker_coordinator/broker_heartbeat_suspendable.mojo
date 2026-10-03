@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/broker_heartbeat_suspendable.mojo
+# komira_broker_coordinator/broker_heartbeat_suspendable.mojo
 #   BROKER COORDINATOR PARKABLE CAS SERVE: the heartbeat handler as a
 #   SuspendableHandler whose reassign parks on the SERVE reactor.
 # =============================================================================
