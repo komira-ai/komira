@@ -141,6 +141,7 @@ aws_conformance_driver_src(
     protocols = [
         "json",
         "rest-json",
+        "rest-xml",
     ],
 )
 
@@ -151,6 +152,7 @@ mojo_binary(
     deps = [
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_json:komira_json",
+        "//src/komira_xml:komira_xml",
     ],
     optimization_level = "1",
 )

@@ -192,16 +192,21 @@
 #      refuse, and with this machine's, pass.
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
 #      GetLogEvents module, pure and client, a restJson1 client of a tiny
-#      model, and the layout probe of each, equal their text goldens byte for
-#      byte; the generator refuses an empty or missing operation list, an
-#      operation the model lacks, a protocol it does not implement, a
+#      model, a restXml module of a tiny S3-shaped model (pure, with the `s3`
+#      customization), and the layout probe of each, equal their text goldens
+#      byte for byte; the generator refuses an empty or missing operation
+#      list, an operation the model lacks, a protocol it does not implement, a
+#      restXml model reaching a union, an XML attribute or a body map, the
+#      `s3` customization unless the model's serviceId is `S3` and its
+#      protocol restXml, or an unknown customization, a
 #      missing, malformed (not 64 lowercase hex digits) or wrong
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen). The tiny model's pure-mode
-#      client (komira//tools/build/proto-codegen/aws_rest_json) generated
-#      exactly its package's files, and its welded tests ran: see test 36.
+#      go red (tests//negative/aws_codegen). The tiny models' pure-mode
+#      clients (komira//tools/build/proto-codegen/aws_rest_json and
+#      aws_rest_xml) generated exactly their packages' files, and their
+#      welded tests ran: see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]
@@ -214,7 +219,7 @@
 #      at its timeout. There are no holds: every welded test must pass.
 #      `buck2 test` of a welded library runs its rust_test (Pass, with the
 #      harness's count), and of a binary welded to a red test fails.
-#  36. aws_client (tools/build/cloud/aws.bzl; tests//functional/aws_client): a
+#  36. mojo_aws_client (tools/build/cloud/aws.bzl; tests//functional/mojo_aws_client): a
 #      pure-mode CloudWatch Logs client generated from the pinned botocore
 #      model with operations = [GetLogEvents], over stub runtime deps, builds
 #      only once its welded tests pass: the generated layout probe, then a
@@ -228,20 +233,25 @@
 #      a pure-mode restJson1 client of a tiny model
 #      (komira//tools/build/proto-codegen/aws_rest_json), which builds only
 #      once its layout probe and a caller test of the requests it builds and
-#      the responses it reads pass.
+#      the responses it reads pass; and a pure-mode restXml client of a tiny
+#      S3-shaped model with the `s3` customization
+#      (komira//tools/build/proto-codegen/aws_rest_xml), likewise, against
+#      komira_aws_core and komira_xml.
 #      Exactly the package's files are generated, nothing of an operation not
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
 #      copied into the package, the header names its owner, and a caller test
-#      imports it. A client-mode client is checked at generation only
-#      (tests//functional/aws_client_mode): it carries the signed-send
-#      surface, the komira_http_core import and the error builder. Refused at
+#      imports it. A client-mode client (tests//functional/aws_client_mode)
+#      carries the signed-send surface, the komira_http_core import and the
+#      error builder, and builds against the same stubs with their client
+#      half, once its layout probe and a caller test of what its send hands
+#      the transport and of its error builder pass. Refused at
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
-#      (tests//negative/aws_client).
+#      (tests//negative/mojo_aws_client).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
 #      (os, cpu)) is complete and the default target platform is the client's
 #      own: loading tests//functional/platform_table: runs the load-time
@@ -949,21 +959,22 @@ else
 fi
 
 # 36
-expect_green aws_client tests//functional/aws_client:
+expect_green mojo_aws_client tests//functional/mojo_aws_client:
 expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
-expect_red aws_client_no_operations '`operations` is empty' tests//negative/aws_client:no_operations
-expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/aws_client:joined_operations
-expect_red aws_client_no_runtime '`deps` is empty' tests//negative/aws_client:no_runtime
-expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/aws_client:unknown_operation
-expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/aws_client:caller_test_red
-expect_green aws_client_mode tests//functional/aws_client_mode:komira_aws_logs_client_send_surface
-expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/aws_client:duplicate_operation
-expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/aws_client:overrides_without_hand_srcs
-expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/aws_client:hand_srcs_without_overrides
-expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` is not a source path of a `.mojo` file' tests//negative/aws_client:hand_src_is_label
-expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/aws_client:hand_src_not_mojo
-expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/aws_client:hand_src_clashes
-expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/aws_client:service_unreadable
+expect_green aws_rest_xml //tools/build/proto-codegen/aws_rest_xml:
+expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
+expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
+expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
+expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/mojo_aws_client:unknown_operation
+expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/mojo_aws_client:caller_test_red
+expect_green aws_client_mode tests//functional/aws_client_mode:
+expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/mojo_aws_client:duplicate_operation
+expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/mojo_aws_client:overrides_without_hand_srcs
+expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/mojo_aws_client:hand_srcs_without_overrides
+expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_is_label
+expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_not_mojo
+expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/mojo_aws_client:hand_src_clashes
+expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/mojo_aws_client:service_unreadable
 
 # 9
 if [ "$MODE" = local ]; then

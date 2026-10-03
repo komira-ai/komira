@@ -217,13 +217,19 @@ struct AwsEndpoint(Copyable, Movable):
     def target_for(self, uri: String) -> String:
         """The request target for `uri` ("/" or "/path?query"), joined as
         botocore's `_urljoin` joins them: the root keeps the endpoint
-        path exactly ("/proxy" stays "/proxy", "/proxy/" stays "/proxy/")."""
+        path exactly ("/proxy" stays "/proxy", "/proxy/" stays "/proxy/").
+        The path is joined before the query is appended, as botocore's
+        `prepare_request_dict` does, so a root with a query keeps it too
+        ("/?a" on "/proxy" is "/proxy?a")."""
         if self.base_path.byte_length() == 0:
             return uri
-        if uri == "/":
+        var q = uri.find("?")
+        var path = uri if q < 0 else sub(uri, 0, q)
+        var query = String("") if q < 0 else sub(uri, q, uri.byte_length())
+        if path == "/":
             if self.root_slash:
-                return self.base_path + "/"
-            return self.base_path
+                return self.base_path + "/" + query
+            return self.base_path + query
         return self.base_path + uri
 
     def url_for(self, uri: String) -> String:

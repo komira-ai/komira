@@ -1,0 +1,32 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The broker-node coordinator: serves the broker-heartbeat endpoint, folds
+# each node's heartbeat into a live-membership registry, and persists the
+# partition assignment through komira_broker's ClusterAssignmentStore over a
+# conditional-write object store. The store is a trait parameter, so the
+# concrete conformer (in-memory for tests, S3 in production) is chosen by the
+# program that instantiates the coordinator. It depends on no database.
+
+mojo_library(
+    name = "komira_broker_coord",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_broker_proto:komira_broker_proto",
+        "//src/komira_async:komira_async",
+        "//src/komira_broker:komira_broker",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_supervisor_proto:komira_supervisor_proto",
+    ],
+    test_srcs = [
+        "tests/test_broker_coord_heartbeat_relay_e2e.mojo",
+        "tests/test_broker_coord_parkable_serve.mojo",
+        "tests/test_broker_coord_serve_coalesce.mojo",
+        "tests/test_broker_coord_serve_stays_responsive.mojo",
+        "tests/test_broker_coord_store_raise_survives.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
