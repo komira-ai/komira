@@ -23,10 +23,11 @@
 # The bytes are a LITERAL restatement of the proto, deliberately: deriving
 # them from the generated code would agree with it by construction.
 #
-# ALSO PINNED: the ten `Resource.body` arms (10 to 19) by number AND by which
-# field each number fills; field 90 left FREE for the escape hatch (decoded as
-# unknown today); the retired field 4 ignored; and every enum's ordinals in
-# both directions.
+# ALSO PINNED: the two v1 `Resource.body` arms (10 service, 11 job) by number
+# AND by which field each fills; the HELD numbers (body 12 to 19 for the later
+# types, 90 for the escape hatch, `Resource` 3, `Value` 4) decode as unknown
+# today, so nothing else has taken them; the retired field 4 is ignored; and
+# every enum's ordinals in both directions, held values undeclared.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -34,25 +35,16 @@ from std.testing import assert_equal, assert_true
 from komira_proto_codec import decode_proto, encode_proto
 from kci_resource_proto.resource import (
     Access,
-    Bucket,
-    Content,
-    Domain,
+    Image,
     Job,
-    MailRelay,
     Output,
     Portability,
-    Queue,
     Ref,
     Resource,
     ResourceList,
-    Retain,
-    Secret,
     Service,
-    Site,
-    Table,
     Uses,
     Value,
-    Worker,
 )
 
 
@@ -262,11 +254,11 @@ def _image_digest(digest: String) -> List[UInt8]:
 
 def test_ref() raises:
     """Ref: 1 resource; oneof output { 2 standard, 3 named }."""
-    var b = _ref_out("jobs", Output.ADDRESS)
+    var b = _ref_out("jobs", Output.HOST)
     var r = decode_proto[Ref](b.copy())
     assert_equal(r.resource, "jobs")
     assert_equal(r._oneof0_case, 1, "field 2 is the `standard` arm")
-    assert_equal(r.standard.value().value, Output.ADDRESS)
+    assert_equal(r.standard.value().value, Output.HOST)
     _same(encode_proto(r), b, "Ref.standard")
 
     var n = List[UInt8]()
@@ -288,17 +280,17 @@ def test_ref() raises:
 def test_uses() raises:
     """Uses: 1 target, 2 access."""
     var b = List[UInt8]()
-    _msg(b, 1, _ref("orders"))
-    _uint(b, 2, UInt64(Access.READ_WRITE))
+    _msg(b, 1, _ref("billing"))
+    _uint(b, 2, UInt64(Access.CALL))
     var u = decode_proto[Uses](b.copy())
-    assert_equal(u.target.value().resource, "orders")
-    assert_equal(u.access.value, Access.READ_WRITE)
+    assert_equal(u.target.value().resource, "billing")
+    assert_equal(u.access.value, Access.CALL)
     _same(encode_proto(u), b, "Uses")
     print("  test_uses: PASS")
 
 
 def test_value_arms() raises:
-    """Value: oneof v { 1 literal, 2 param, 3 ref, 4 secret }."""
+    """Value: oneof v { 1 literal, 2 param, 3 ref }; 4 held."""
     var lit = List[UInt8]()
     _str(lit, 1, "plain")
     var v1 = decode_proto[Value](lit.copy())
@@ -314,38 +306,37 @@ def test_value_arms() raises:
     _same(encode_proto(v2), par, "Value.param")
 
     var rf = List[UInt8]()
-    _msg(rf, 3, _ref_out("jobs", Output.ADDRESS))
+    _msg(rf, 3, _ref_out("jobs", Output.HOST))
     var v3 = decode_proto[Value](rf.copy())
     assert_equal(v3._oneof0_case, 3)
     assert_equal(v3.ref_.value().resource, "jobs")
     _same(encode_proto(v3), rf, "Value.ref")
 
+    # 4 is held for a secret reference: undeclared today, so unknown.
     var sec = List[UInt8]()
     _msg(sec, 4, _ref("stripe_key"))
     var v4 = decode_proto[Value](sec.copy())
-    assert_equal(v4._oneof0_case, 4, "field 4 is `secret`, not `ref`")
-    assert_equal(v4.secret.value().resource, "stripe_key")
-    _same(encode_proto(v4), sec, "Value.secret")
+    assert_equal(v4._oneof0_case, 0, "Value field 4 is held, not declared")
     print("  test_value_arms: PASS")
 
 
-def test_content_arms() raises:
-    """Content: oneof source { 1 output, 2 digest } (Image is pinned below)."""
+def test_image_arms() raises:
+    """Image: oneof source { 1 output, 2 digest }."""
     var o = List[UInt8]()
     _msg(o, 1, _action_output("build", "docs_bundle"))
-    var c = decode_proto[Content](o.copy())
+    var c = decode_proto[Image](o.copy())
     assert_equal(c._oneof0_case, 1)
     assert_equal(c.output.value().action, "build")
     assert_equal(c.output.value().name, "docs_bundle")
-    _same(encode_proto(c), o, "Content.output")
+    _same(encode_proto(c), o, "Image.output")
 
     var d = List[UInt8]()
     _str(d, 2, "sha256:cd")
-    var cd = decode_proto[Content](d.copy())
+    var cd = decode_proto[Image](d.copy())
     assert_equal(cd._oneof0_case, 2)
     assert_equal(cd.digest.value(), "sha256:cd")
-    _same(encode_proto(cd), d, "Content.digest")
-    print("  test_content_arms: PASS")
+    _same(encode_proto(cd), d, "Image.digest")
+    print("  test_image_arms: PASS")
 
 
 # ---- Resource and its body arms --------------------------------------------------
@@ -357,27 +348,11 @@ def _arm_of(r: Resource) -> String:
         return "service"
     if r.job:
         return "job"
-    if r.worker:
-        return "worker"
-    if r.table:
-        return "table"
-    if r.bucket:
-        return "bucket"
-    if r.queue:
-        return "queue"
-    if r.secret:
-        return "secret"
-    if r.site:
-        return "site"
-    if r.domain:
-        return "domain"
-    if r.mail_relay:
-        return "mail_relay"
     return ""
 
 
-def test_resource_body_arms_are_10_to_19() raises:
-    """Each body arm, by number AND by the field it fills.
+def test_resource_body_arms_are_10_and_11() raises:
+    """Each v1 body arm, by number AND by the field it fills.
 
     The arm numbers are the adapter registry's key (one adapter per arm), so a
     renumber would hand a resource to another type's adapter.
@@ -385,14 +360,6 @@ def test_resource_body_arms_are_10_to_19() raises:
     var names = List[String]()
     names.append("service")
     names.append("job")
-    names.append("worker")
-    names.append("table")
-    names.append("bucket")
-    names.append("queue")
-    names.append("secret")
-    names.append("site")
-    names.append("domain")
-    names.append("mail_relay")
     for i in range(len(names)):
         var field = 10 + i
         var b = List[UInt8]()
@@ -410,45 +377,68 @@ def test_resource_body_arms_are_10_to_19() raises:
             b,
             String("Resource.body field ") + String(field),
         )
-    print("  test_resource_body_arms_are_10_to_19: PASS")
+    print("  test_resource_body_arms_are_10_and_11: PASS")
 
 
-def test_field_90_is_free_and_field_4_is_retired() raises:
-    """90 is left for the escape hatch; 4 (a retired stage filter) is ignored.
+def test_held_body_numbers_are_undeclared() raises:
+    """12 to 19 are held for the later types (worker, table, bucket, queue,
+    secret, site, domain, mail_relay) and 90 for the escape hatch. Today each
+    decodes as an unknown field: no arm set, dropped on re-encode. When a type
+    lands at its held number this test changes with it; anything else taking
+    one of these numbers is a mistake."""
+    var held = List[Int]()
+    for n in range(12, 20):
+        held.append(n)
+    held.append(90)
+    var head = List[UInt8]()
+    _str(head, 1, "r")
+    for k in range(len(held)):
+        var b = head.copy()
+        _empty(b, held[k])
+        var r = decode_proto[Resource](b.copy())
+        assert_equal(
+            r._oneof0_case,
+            0,
+            String("Resource.body field ") + String(held[k]) + " is held",
+        )
+        _same(
+            encode_proto(r),
+            head,
+            String("held field ") + String(held[k]) + " is unknown",
+        )
+    print("  test_held_body_numbers_are_undeclared: PASS")
 
-    Today both decode as unknown fields: skipped, nothing set, and dropped on
-    re-encode. When the escape hatch lands at 90 this test changes with it;
-    anything else at 90 is a mistake.
-    """
+
+def test_fields_3_and_4_are_not_declared() raises:
+    """3 is held for retention (data-bearing types only); 4 (a retired stage
+    filter) is reserved. Both decode as unknown: skipped, dropped on
+    re-encode."""
     var head = List[UInt8]()
     _str(head, 1, "r")
     var b = head.copy()
-    _empty(b, 90)
+    _uint(b, 3, 1)
     _uint(b, 4, 1)
     var r = decode_proto[Resource](b.copy())
-    assert_equal(r._oneof0_case, 0, "field 90 fills no body arm")
-    assert_equal(_arm_of(r), "", "field 90 fills no body arm")
-    _same(encode_proto(r), head, "fields 90 and 4 are unknown")
-    print("  test_field_90_is_free_and_field_4_is_retired: PASS")
+    assert_equal(_arm_of(r), "")
+    _same(encode_proto(r), head, "fields 3 and 4 are unknown")
+    print("  test_fields_3_and_4_are_not_declared: PASS")
 
 
 def test_resource_header_fields() raises:
-    """Resource: 1 id, 2 uses, 3 retain; then the body."""
+    """Resource: 1 id, 2 uses; then the body."""
     var u = List[UInt8]()
-    _msg(u, 1, _ref("orders"))
-    _uint(u, 2, UInt64(Access.READ))
+    _msg(u, 1, _ref("nightly"))
+    _uint(u, 2, UInt64(Access.CALL))
     var b = List[UInt8]()
     _str(b, 1, "api")
     _msg(b, 2, u)
-    _uint(b, 3, UInt64(Retain.KEEP))
-    _empty(b, 14)
+    _empty(b, 10)
     var r = decode_proto[Resource](b.copy())
     assert_equal(r.id, "api")
     assert_equal(len(r.uses), 1)
-    assert_equal(r.uses[0].target.value().resource, "orders")
-    assert_equal(r.uses[0].access.value, Access.READ)
-    assert_equal(r.retain.value, Retain.KEEP)
-    assert_equal(_arm_of(r), "bucket")
+    assert_equal(r.uses[0].target.value().resource, "nightly")
+    assert_equal(r.uses[0].access.value, Access.CALL)
+    assert_equal(_arm_of(r), "service")
     _same(encode_proto(r), b, "Resource header")
 
     var lst = List[UInt8]()
@@ -466,7 +456,7 @@ def test_resource_header_fields() raises:
 def test_service() raises:
     """Service: 1 image .. 9 max_concurrency; oneof { 10 public, 11 internal }."""
     var env_value = List[UInt8]()
-    _msg(env_value, 3, _ref_out("jobs", Output.ADDRESS))
+    _msg(env_value, 3, _ref_out("jobs", Output.HOST))
     var env_entry = List[UInt8]()
     _str(env_entry, 1, "JOBS_ADDR")
     _msg(env_entry, 2, env_value)
@@ -492,7 +482,7 @@ def test_service() raises:
     assert_equal(s.args[1], "--fast")
     assert_equal(s.env["JOBS_ADDR"].ref_.value().resource, "jobs")
     assert_equal(
-        s.env["JOBS_ADDR"].ref_.value().standard.value().value, Output.ADDRESS
+        s.env["JOBS_ADDR"].ref_.value().standard.value().value, Output.HOST
     )
     assert_equal(Int(s.size.value().cpu_millis), 1000)
     assert_equal(Int(s.size.value().memory_mb), 512)
@@ -549,168 +539,6 @@ def test_job() raises:
     print("  test_job: PASS")
 
 
-def test_worker() raises:
-    """Worker: 1 image, 2 size, 3 scale, 4 args; oneof { 10 always_on, 11 queue }.
-    """
-    var fq = List[UInt8]()
-    _msg(fq, 1, _ref("jobs"))
-    _uint(fq, 2, 10)
-    _uint(fq, 3, 3)
-    var b = List[UInt8]()
-    _msg(b, 1, _image_from_action("build", "api_image"))
-    _msg(b, 2, _size(500, 256))
-    _msg(b, 3, _scale(1, 4))
-    _str(b, 4, "fulfil")
-    _msg(b, 11, fq)
-    var w = decode_proto[Worker](b.copy())
-    assert_equal(Int(w.size.value().memory_mb), 256)
-    assert_equal(Int(w.scale.value().max), 4)
-    assert_equal(w.args[0], "fulfil")
-    assert_equal(w._oneof0_case, 2, "field 11 is `queue`")
-    assert_equal(w.queue.value().queue.value().resource, "jobs")
-    assert_equal(Int(w.queue.value().batch), 10)
-    assert_equal(Int(w.queue.value().concurrency), 3)
-    _same(encode_proto(w), b, "Worker (queue)")
-
-    var a = List[UInt8]()
-    _str(a, 4, "loop")
-    _empty(a, 10)
-    var wa = decode_proto[Worker](a.copy())
-    assert_equal(wa._oneof0_case, 1, "field 10 is `always_on`")
-    _same(encode_proto(wa), a, "Worker (always_on)")
-    print("  test_worker: PASS")
-
-
-def test_table_bucket_queue() raises:
-    """Table: 1 indexes, 2 key, 3 ttl. Bucket: 1 expiry_days, 2 public_read.
-    Queue: 1 visibility_timeout, 2 dead_letter."""
-    var idx = List[UInt8]()
-    _str(idx, 1, "customer_id")
-    var t = List[UInt8]()
-    _msg(t, 1, idx)
-    _str(t, 2, "order_id")
-    _msg(t, 3, _duration(86400))
-    var tb = decode_proto[Table](t.copy())
-    assert_equal(tb.indexes[0].field, "customer_id")
-    assert_equal(tb.key, "order_id")
-    assert_equal(Int(tb.ttl.value().seconds), 86400)
-    _same(encode_proto(tb), t, "Table")
-
-    var k = List[UInt8]()
-    _uint(k, 1, 90)
-    _uint(k, 2, 1)
-    var bk = decode_proto[Bucket](k.copy())
-    assert_equal(Int(bk.expiry_days), 90)
-    assert_true(bk.public_read)
-    _same(encode_proto(bk), k, "Bucket")
-
-    var q = List[UInt8]()
-    _msg(q, 1, _duration(60))
-    _msg(q, 2, _ref("jobs_dlq"))
-    var qu = decode_proto[Queue](q.copy())
-    assert_equal(Int(qu.visibility_timeout.value().seconds), 60)
-    assert_equal(qu.dead_letter.value().resource, "jobs_dlq")
-    _same(encode_proto(qu), q, "Queue")
-    print("  test_table_bucket_queue: PASS")
-
-
-def test_secret_custody_arms() raises:
-    """Secret: oneof custody { 10 customer, 11 operator, 12 generated }."""
-    for arm in range(3):
-        var b = List[UInt8]()
-        _empty(b, 10 + arm)
-        var s = decode_proto[Secret](b.copy())
-        assert_equal(s._oneof0_case, arm + 1)
-        if arm == 0:
-            assert_true(Bool(s.customer), "field 10 is `customer`")
-        elif arm == 1:
-            assert_true(Bool(s.operator), "field 11 is `operator`")
-        else:
-            assert_true(Bool(s.generated), "field 12 is `generated`")
-        _same(encode_proto(s), b, String("Secret arm ") + String(10 + arm))
-    print("  test_secret_custody_arms: PASS")
-
-
-def test_site() raises:
-    """Site: 1 content, 2 spa_fallback, 3 routes { 1 path, 2 to_service }."""
-    var route = List[UInt8]()
-    _str(route, 1, "/api")
-    _msg(route, 2, _ref("api"))
-    var content = List[UInt8]()
-    _str(content, 2, "sha256:cd")
-    var b = List[UInt8]()
-    _msg(b, 1, content)
-    _str(b, 2, "index.html")
-    _msg(b, 3, route)
-    var s = decode_proto[Site](b.copy())
-    assert_equal(s.content.value().digest.value(), "sha256:cd")
-    assert_equal(s.spa_fallback, "index.html")
-    assert_equal(s.routes[0].path, "/api")
-    assert_equal(s.routes[0].to_service.value().resource, "api")
-    _same(encode_proto(s), b, "Site")
-    print("  test_site: PASS")
-
-
-def test_domain() raises:
-    """Domain: 1 name, 2 serves; tls { 10 managed, 11 provided { 1 certificate } };
-    dns { 20 zone, 21 manual }."""
-    var prov = List[UInt8]()
-    _msg(prov, 1, _ref("tls_cert"))
-    var b = List[UInt8]()
-    _str(b, 1, "api.example.com")
-    _msg(b, 2, _ref("api"))
-    _msg(b, 11, prov)
-    _empty(b, 21)
-    var d = decode_proto[Domain](b.copy())
-    assert_equal(d.name, "api.example.com")
-    assert_equal(d.serves.value().resource, "api")
-    assert_equal(d._oneof0_case, 2, "field 11 is `provided`")
-    assert_equal(d.provided.value().certificate.value().resource, "tls_cert")
-    assert_equal(d._oneof1_case, 2, "field 21 is `manual`")
-    assert_true(Bool(d.manual))
-    _same(encode_proto(d), b, "Domain (provided, manual)")
-
-    var m = List[UInt8]()
-    _str(m, 1, "www.example.com")
-    _empty(m, 10)
-    _empty(m, 20)
-    var dm = decode_proto[Domain](m.copy())
-    assert_equal(dm._oneof0_case, 1, "field 10 is `managed`")
-    assert_equal(dm._oneof1_case, 1, "field 20 is `zone`")
-    assert_true(Bool(dm.managed))
-    assert_true(Bool(dm.zone))
-    _same(encode_proto(dm), m, "Domain (managed, zone)")
-    print("  test_domain: PASS")
-
-
-def test_mail_relay() raises:
-    """MailRelay: 1 domain; inbound { 10 to_service { 1 service, 2 path },
-    11 to_queue { 1 queue } }."""
-    var ts = List[UInt8]()
-    _msg(ts, 1, _ref("api"))
-    _str(ts, 2, "/inbound")
-    var b = List[UInt8]()
-    _str(b, 1, "example.com")
-    _msg(b, 10, ts)
-    var r = decode_proto[MailRelay](b.copy())
-    assert_equal(r.domain, "example.com")
-    assert_equal(r._oneof0_case, 1, "field 10 is `to_service`")
-    assert_equal(r.to_service.value().service.value().resource, "api")
-    assert_equal(r.to_service.value().path, "/inbound")
-    _same(encode_proto(r), b, "MailRelay (to_service)")
-
-    var tq = List[UInt8]()
-    _msg(tq, 1, _ref("mailq"))
-    var q = List[UInt8]()
-    _str(q, 1, "example.org")
-    _msg(q, 11, tq)
-    var rq = decode_proto[MailRelay](q.copy())
-    assert_equal(rq._oneof0_case, 2, "field 11 is `to_queue`")
-    assert_equal(rq.to_queue.value().queue.value().resource, "mailq")
-    _same(encode_proto(rq), q, "MailRelay (to_queue)")
-    print("  test_mail_relay: PASS")
-
-
 # ---- enums ---------------------------------------------------------------------
 
 
@@ -723,39 +551,27 @@ def _enum_row(got_name: String, want_name: String, n: Int, what: String) raises:
 
 
 def test_enum_ordinals() raises:
-    """Every enum value by number AND by name: the number is what is stored."""
+    """Every enum value by number AND by name: the number is what is stored.
+    The held values (Output 3, 4; Access 2 to 6) render as bare numbers, i.e.
+    nothing has taken them."""
     var outputs = List[String]()
     outputs.append("OUTPUT_UNSET")
     outputs.append("URL")
     outputs.append("HOST")
-    outputs.append("ADDRESS")
-    outputs.append("NAME")
     for n in range(len(outputs)):
         _enum_row(Output(n).json_name(), outputs[n], n, "Output")
         assert_equal(Output.from_json_name(outputs[n]).value, n)
-    assert_equal(Output(5).json_name(), "5", "Output has five values")
+    for n in range(3, 5):
+        assert_equal(Output(n).json_name(), String(n), "Output value held")
 
     var access = List[String]()
     access.append("ACCESS_UNSET")
     access.append("CALL")
-    access.append("READ")
-    access.append("WRITE")
-    access.append("READ_WRITE")
-    access.append("SEND")
-    access.append("RECEIVE")
     for n in range(len(access)):
         _enum_row(Access(n).json_name(), access[n], n, "Access")
         assert_equal(Access.from_json_name(access[n]).value, n)
-    assert_equal(Access(7).json_name(), "7", "Access has seven values")
-
-    var retain = List[String]()
-    retain.append("RETAIN_UNSET")
-    retain.append("KEEP")
-    retain.append("DELETE")
-    for n in range(len(retain)):
-        _enum_row(Retain(n).json_name(), retain[n], n, "Retain")
-        assert_equal(Retain.from_json_name(retain[n]).value, n)
-    assert_equal(Retain(3).json_name(), "3", "Retain has three values")
+    for n in range(2, 7):
+        assert_equal(Access(n).json_name(), String(n), "Access value held")
 
     var port = List[String]()
     port.append("PORTABILITY_UNSET")
@@ -773,17 +589,12 @@ def main() raises:
     test_ref()
     test_uses()
     test_value_arms()
-    test_content_arms()
-    test_resource_body_arms_are_10_to_19()
-    test_field_90_is_free_and_field_4_is_retired()
+    test_image_arms()
+    test_resource_body_arms_are_10_and_11()
+    test_held_body_numbers_are_undeclared()
+    test_fields_3_and_4_are_not_declared()
     test_resource_header_fields()
     test_service()
     test_job()
-    test_worker()
-    test_table_bucket_queue()
-    test_secret_custody_arms()
-    test_site()
-    test_domain()
-    test_mail_relay()
     test_enum_ordinals()
     print("ALL kci.resource.v1 FIELD-NUMBER TESTS PASSED")

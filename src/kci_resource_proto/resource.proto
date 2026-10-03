@@ -1,6 +1,11 @@
 // The kci resource catalog (`kci.resource.v1`): what an author writes in a
-// deploy action. Ten typed resources, each a common, cloud-agnostic shape; a
+// deploy action. Typed resources, each a common, cloud-agnostic shape; a
 // platform adapter set linked into kci turns each one into engine nodes.
+//
+// V1 IS TWO TYPES: `service` and `job`. The other planned types (worker,
+// table, bucket, queue, secret, site, domain, mail_relay) are not declared
+// yet; their `Resource.body` numbers are held (see `Resource`), so adding one
+// later is an addition, never a renumber.
 //
 // WHAT THIS FILE PROMISES
 //   * Every field is a BEHAVIOUR (a port, a scale, a public URL, an expiry),
@@ -21,6 +26,9 @@
 //     file; no resource carries the name of a stage.
 //   * The `raw` escape hatch. Field 90 of `Resource.body` is left free for
 //     it; it is specified separately and not built yet.
+//   * Secrets and retention. Both serve types v1 does not have (a secret
+//     resource; data-bearing resources). `Value` field 4 and `Resource` field
+//     3 are held for them.
 //
 // Field numbers are what is stored. They are pinned as literal wire bytes by
 // the welded tests in tests/; renumbering a field is protoc-legal and decodes
@@ -54,13 +62,12 @@ extend google.protobuf.MessageOptions {
 
 // ---- references ----------------------------------------------------------------
 
-// What a produced value IS, never whose attribute it is.
+// What a produced value IS, never whose attribute it is. 3 and 4 are held
+// for ADDRESS and NAME, which only the later data types expose.
 enum Output {
   OUTPUT_UNSET = 0;
   URL = 1;
   HOST = 2;
-  ADDRESS = 3;
-  NAME = 4;
 }
 
 // A reference to another resource of the same list. With neither arm of
@@ -77,14 +84,11 @@ message Ref {
 }
 
 // What a consumer may do to a resource. Each type accepts its own subset.
+// 2 to 6 are held for READ, WRITE, READ_WRITE, SEND and RECEIVE, which only
+// the later data types accept.
 enum Access {
   ACCESS_UNSET = 0;
   CALL = 1;
-  READ = 2;
-  WRITE = 3;
-  READ_WRITE = 4;
-  SEND = 5;
-  RECEIVE = 6;
 }
 
 // "This resource may do `access` to `target`." The platform turns it into
@@ -95,15 +99,14 @@ message Uses {
   Access access = 2;
 }
 
-// A configuration value: a literal, a release machine parameter, a value
-// another resource produces, or a reference to a `secret` resource (whose
-// value never appears in this file).
+// A configuration value: a literal, a release machine parameter, or a value
+// another resource produces. 4 is held for a reference to a `secret`
+// resource.
 message Value {
   oneof v {
     string literal = 1;
     string param = 2;
     Ref ref = 3;
-    Ref secret = 4;
   }
 }
 
@@ -124,47 +127,24 @@ message Image {
   }
 }
 
-// What a `site` serves: a build action's output, or a literal content digest.
-message Content {
-  oneof source {
-    ActionOutput output = 1;
-    string digest = 2;
-  }
-}
-
-// What happens to a resource that holds data when the graph is destroyed.
-// UNSET is refused where a default would be dangerous (`table`, `bucket`,
-// `mail_relay`), so the author always says it.
-enum Retain {
-  RETAIN_UNSET = 0;
-  KEEP = 1;
-  DELETE = 2;
-}
-
 // ---- one entry of a deploy action's list --------------------------------------
 
 message Resource {
   // Author-chosen and stable: the identity key for state.
   string id = 1;
   repeated Uses uses = 2;
-  Retain retain = 3;
+  // 3 is held for the retention policy of data-bearing types.
   // Was a per-resource stage filter in an earlier draft. Stage differences
   // live in the release machine file.
   reserved 4;
   reserved "only_in";
 
-  // Typed and closed. 90 is left free for the escape hatch (not built yet).
+  // Typed and closed. Held, not declared: 12 worker, 13 table, 14 bucket,
+  // 15 queue, 16 secret, 17 site, 18 domain, 19 mail_relay; 90 the escape
+  // hatch.
   oneof body {
     Service service = 10;
     Job job = 11;
-    Worker worker = 12;
-    Table table = 13;
-    Bucket bucket = 14;
-    Queue queue = 15;
-    Secret secret = 16;
-    Site site = 17;
-    Domain domain = 18;
-    MailRelay mail_relay = 19;
   }
 }
 
@@ -242,154 +222,5 @@ message Job {
   message Schedule {
     string cron = 1;
     string timezone = 2;
-  }
-}
-
-// A container that runs all the time or reacts to a queue; no public URL.
-message Worker {
-  option (portability) = PORTABLE;
-
-  Image image = 1;
-  Size size = 2;
-  Scale scale = 3;
-  repeated string args = 4;
-
-  oneof source {
-    AlwaysOn always_on = 10;
-    FromQueue queue = 11;
-  }
-
-  message AlwaysOn {}
-  message FromQueue {
-    // A `Ref` to a `queue` resource.
-    Ref queue = 1;
-    uint32 batch = 2;
-    uint32 concurrency = 3;
-  }
-}
-
-// Durable keyed data (a document or key-value store) with declared indexes.
-// Not a relational database.
-message Table {
-  option (portability) = PORTABLE;
-  option (exposes) = ADDRESS;
-
-  repeated Index indexes = 1;
-  // The key field's name (a field of the stored records, not a resource).
-  string key = 2;
-  google.protobuf.Duration ttl = 3;
-
-  message Index {
-    string field = 1;
-  }
-}
-
-// A place for files, with an expiry and a public-read yes/no.
-message Bucket {
-  option (portability) = PORTABLE;
-  option (exposes) = NAME;
-
-  uint32 expiry_days = 1;
-  bool public_read = 2;
-}
-
-// A message queue with an optional dead-letter queue.
-message Queue {
-  option (portability) = PORTABLE;
-  option (exposes) = ADDRESS;
-
-  google.protobuf.Duration visibility_timeout = 1;
-  // A `Ref` to another `queue` resource.
-  Ref dead_letter = 2;
-}
-
-// A named secret whose value never appears in this file; the arm says who
-// supplies it.
-message Secret {
-  option (portability) = PORTABLE;
-
-  oneof custody {
-    Customer customer = 10;
-    Operator operator = 11;
-    Generated generated = 12;
-  }
-
-  // The customer supplies the value.
-  message Customer {}
-  // The operator of the deployment supplies the value.
-  message Operator {}
-  // kci generates the value at first apply.
-  message Generated {}
-}
-
-// Static files served from a URL, with a single-page-app fallback and
-// optional routes to a service.
-message Site {
-  option (portability) = PORTABLE;
-  option (exposes) = URL;
-
-  Content content = 1;
-  string spa_fallback = 2;
-  repeated Route routes = 3;
-
-  message Route {
-    // A path prefix of the site.
-    string path = 1;
-    // A `Ref` to the `service` that answers it.
-    Ref to_service = 2;
-  }
-}
-
-// A custom name with TLS, pointing at a service or a site.
-message Domain {
-  option (portability) = PORTABLE;
-
-  string name = 1;
-  // A `Ref` to the `service` or `site` it serves.
-  Ref serves = 2;
-
-  oneof tls {
-    Managed managed = 10;
-    Provided provided = 11;
-  }
-  oneof dns {
-    PlatformZone zone = 20;
-    Manual manual = 21;
-  }
-
-  // The platform obtains and renews the certificate.
-  message Managed {}
-  // The author supplies the certificate, as a `Ref` to a `secret`.
-  message Provided {
-    Ref certificate = 1;
-  }
-  // The platform writes the records into a zone it manages.
-  message PlatformZone {}
-  // kci prints the records as outputs; the author writes them.
-  message Manual {}
-}
-
-// Send and receive mail for a domain. Platform-bound: only platforms that
-// have a managed mail service can host it, and applying it elsewhere is
-// refused before anything is created.
-message MailRelay {
-  option (portability) = PLATFORM_BOUND;
-  option (exposes) = NAME;
-
-  string domain = 1;
-
-  oneof inbound {
-    ToService to_service = 10;
-    ToQueue to_queue = 11;
-  }
-
-  // Inbound mail is posted to a path of a `service`.
-  message ToService {
-    Ref service = 1;
-    string path = 2;
-  }
-  // Inbound mail is sent to a `queue`.
-  message ToQueue {
-    Ref queue = 1;
   }
 }

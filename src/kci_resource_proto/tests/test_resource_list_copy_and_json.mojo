@@ -15,7 +15,7 @@
 #    catalog types with strings longer than the inline capacity.
 #
 # 2. The proto3 JSON form round-trips a whole list, under the camelCase names
-#    an author's tooling sees (`mailRelay`, `deadLetter`, `healthPath`), and
+#    an author's tooling sees (`healthPath`, `schedule`, `timezone`), and
 #    re-encodes to the same binary bytes.
 # =============================================================================
 
@@ -60,48 +60,44 @@ def _long(tag: String, i: Int) -> String:
     return s^
 
 
-def _mail_resource(i: Int) -> List[UInt8]:
-    """A `mail_relay` resource whose every string is heap-owned."""
+def _service_resource(i: Int) -> List[UInt8]:
+    """A `service` whose every string is heap-owned."""
     var target = List[UInt8]()
     _str(target, 1, _long("target", i))
     var uses = List[UInt8]()
     _msg(uses, 1, target)
-    _uint(uses, 2, 5)  # SEND
-    var svc = List[UInt8]()
-    _str(svc, 1, _long("service", i))
-    var to_service = List[UInt8]()
-    _msg(to_service, 1, svc)
-    _str(to_service, 2, _long("/path", i))
-    var relay = List[UInt8]()
-    _str(relay, 1, _long("domain", i))
-    _msg(relay, 10, to_service)
-    var r = List[UInt8]()
-    _str(r, 1, _long("id", i))
-    _msg(r, 2, uses)
-    _uint(r, 3, 1)  # KEEP
-    _msg(r, 19, relay)
-    return r^
-
-
-def _queue_resource(i: Int) -> List[UInt8]:
-    var dlq = List[UInt8]()
-    _str(dlq, 1, _long("dlq", i))
-    var q = List[UInt8]()
-    _msg(q, 2, dlq)
-    var r = List[UInt8]()
-    _str(r, 1, _long("queue", i))
-    _msg(r, 15, q)
-    return r^
-
-
-def _service_resource(i: Int) -> List[UInt8]:
+    _uint(uses, 2, 1)  # CALL
+    var literal = List[UInt8]()
+    _str(literal, 1, _long("value", i))
+    var entry = List[UInt8]()
+    _str(entry, 1, _long("KEY", i))
+    _msg(entry, 2, literal)
     var svc = List[UInt8]()
     _uint(svc, 2, 8080)
+    _str(svc, 3, _long("arg", i))
+    _msg(svc, 4, entry)
     _str(svc, 7, _long("/healthz", i))
     _msg(svc, 10, List[UInt8]())
     var r = List[UInt8]()
     _str(r, 1, _long("api", i))
+    _msg(r, 2, uses)
     _msg(r, 10, svc)
+    return r^
+
+
+def _job_resource(i: Int) -> List[UInt8]:
+    var sched = List[UInt8]()
+    _str(sched, 1, _long("cron", i))
+    _str(sched, 2, _long("tz", i))
+    var digest = List[UInt8]()
+    _str(digest, 2, _long("sha256", i))
+    var job = List[UInt8]()
+    _msg(job, 1, digest)
+    _str(job, 2, _long("report", i))
+    _msg(job, 11, sched)
+    var r = List[UInt8]()
+    _str(r, 1, _long("job", i))
+    _msg(r, 11, job)
     return r^
 
 
@@ -111,45 +107,39 @@ comptime _N = 8
 def _list_bytes() -> List[UInt8]:
     var b = List[UInt8]()
     for i in range(_N):
-        _msg(b, 1, _mail_resource(i))
-        _msg(b, 1, _queue_resource(i))
         _msg(b, 1, _service_resource(i))
+        _msg(b, 1, _job_resource(i))
     return b^
 
 
 def _check_originals(lst: List[Resource], what: String) raises:
-    assert_equal(len(lst), 3 * _N, what + ": length")
+    assert_equal(len(lst), 2 * _N, what + ": length")
     for i in range(_N):
-        ref m = lst[3 * i]
-        assert_equal(m.id, _long("id", i), what + ": mail id")
+        ref a = lst[2 * i]
+        assert_equal(a.id, _long("api", i), what + ": service id")
         assert_equal(
-            m.uses[0].target.value().resource,
+            a.uses[0].target.value().resource,
             _long("target", i),
             what + ": uses target",
         )
-        ref relay = m.mail_relay.value()
-        assert_equal(relay.domain, _long("domain", i), what + ": domain")
+        ref svc = a.service.value()
+        assert_equal(svc.args[0], _long("arg", i), what + ": args")
         assert_equal(
-            relay.to_service.value().service.value().resource,
-            _long("service", i),
-            what + ": inbound service",
+            svc.env[_long("KEY", i)].literal.value(),
+            _long("value", i),
+            what + ": env",
         )
+        assert_equal(svc.health_path, _long("/healthz", i), what + ": health")
+        ref j = lst[2 * i + 1]
+        assert_equal(j.id, _long("job", i), what + ": job id")
+        ref job = j.job.value()
         assert_equal(
-            relay.to_service.value().path, _long("/path", i), what + ": path"
+            job.image.value().digest.value(), _long("sha256", i), what + ": image"
         )
-        ref q = lst[3 * i + 1]
-        assert_equal(q.id, _long("queue", i), what + ": queue id")
+        assert_equal(job.args[0], _long("report", i), what + ": job args")
+        assert_equal(job.schedule.value().cron, _long("cron", i), what + ": cron")
         assert_equal(
-            q.queue.value().dead_letter.value().resource,
-            _long("dlq", i),
-            what + ": dead letter",
-        )
-        ref s = lst[3 * i + 2]
-        assert_equal(s.id, _long("api", i), what + ": service id")
-        assert_equal(
-            s.service.value().health_path,
-            _long("/healthz", i),
-            what + ": health path",
+            job.schedule.value().timezone, _long("tz", i), what + ": timezone"
         )
 
 
@@ -182,13 +172,12 @@ def test_json_round_trip_of_a_list() raises:
     var bytes = _list_bytes()
     var lst = decode_proto[ResourceList](bytes.copy())
     var text = encode_json(lst)
-    for key in ['"mailRelay"', '"deadLetter"', '"healthPath"', '"toService"']:
+    for key in ['"healthPath"', '"schedule"', '"timezone"', '"uses"']:
         assert_true(
             String(key) in text,
             String("proto3 JSON carries ") + String(key) + ": " + text,
         )
-    assert_true('"retain":"KEEP"' in text, "an enum renders by name: " + text)
-    assert_true('"access":"SEND"' in text, "an enum renders by name: " + text)
+    assert_true('"access":"CALL"' in text, "an enum renders by name: " + text)
     var back = decode_json[ResourceList](text)
     _check_originals(back.resource, "after JSON")
     # Compared against the encoding of the list as first decoded, not the
