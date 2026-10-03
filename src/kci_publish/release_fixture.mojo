@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_publish/release_fixture.mojo -- `ExampleRelease`: writes a coherent
-#   release directory, the way `kci build` leaves one. A TEST AID.
+#   release directory, the way a BUILD step leaves one. A TEST AID.
 # =============================================================================
 #
 # The welded tests need many release directories that differ from a good one
@@ -17,7 +17,7 @@
 # `manifest.json`, `metadata.json` and the `.conda` file (whose bytes are a
 # short text: nothing here opens the archive). `write` computes every sha256
 # and size, then writes `release.json` from what `kci_release_set` recomputes
-# over the written members, so it is exactly what `kci build` would write.
+# over the written members, so it is exactly what a BUILD step would write.
 #
 # `set_meta(member, key, raw_json)` replaces one `metadata.json` key AFTER
 # the derived values are filled in, so a test can make any one key wrong.
@@ -346,7 +346,7 @@ def example_targets(
 
 
 def write_example_inputs(
-    r: ExampleRelease, root: String, channel: String, dry_run: Bool = False
+    r: ExampleRelease, root: String, channel: String, plan: Bool = False
 ) raises -> PublishRequest:
     """Write `r` under `<root>/release/<platform>/`, and beside it the
     declarations, `EXAMPLE_CHANNELS` and the `--release-version` file; return
@@ -368,5 +368,6 @@ def write_example_inputs(
     req.channel = channel.copy()
     req.release_version_file = root + String("/rv.txt")
     req.expect_set_hash = r.set_hash(dir)
-    req.dry_run = dry_run
+    req.plan = plan
+    req.step_name = String("publish")
     return req^

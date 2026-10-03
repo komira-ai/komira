@@ -2,7 +2,8 @@
 # src/kci_cli/tests/test_kci_dispatch.mojo -- `kci run --stage S` over a
 #   recording fake of the steps, and `kci ci check`, through `kci_main_with`:
 #   which steps run, in which order, with which request; where the run stops;
-#   the run's outcome and exit number; and the records the recorder got.
+#   the run's outcome and exit number; the records the recorder got; and
+#   `--only` (a SELECTIVE run, never reported as FULL) and `--plan`.
 # =============================================================================
 
 from std.ffi import external_call
@@ -20,7 +21,7 @@ from kci_contract import (
     OUTCOME_NOOP,
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
-    ResultAction,
+    ResultStep,
     parse_result,
 )
 from kci_contract import RunResult as KciRunResult
@@ -40,11 +41,11 @@ struct FakeSteps(StageSteps, Movable):
         self.calls = List[String]()
         self.ends = List[StepEnd]()
 
-    def _next(mut self, kind: String, platform: String, mut result: KciRunResult) -> StepEnd:
+    def _next(mut self, name: String, kind: String, platform: String, mut result: KciRunResult) -> StepEnd:
         var end = StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
         if len(self.calls) <= len(self.ends):
             end = self.ends[len(self.calls) - 1].copy()
-        result.actions.append(ResultAction(kind.copy(), platform.copy(), end.outcome.copy()))
+        result.steps.append(ResultStep(name.copy(), kind.copy(), platform.copy(), end.outcome.copy()))
         if end.error_id.byte_length() > 0:
             try:
                 result.set_error(end.error_id.copy(), end.message.copy())
@@ -55,18 +56,19 @@ struct FakeSteps(StageSteps, Movable):
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.calls.append(
             String("build ") + req.platform + String(" ") + req.declarations_file + String(" ") + req.revision_id
-            + String(" ") + req.work_dir + String(" ") + req.run.run_id
+            + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
+            + String(" plan=") + String(req.plan)
         )
-        return self._next(String("BUILD"), req.platform, result)
+        return self._next(req.step_name, String("BUILD"), req.platform, result)
 
     def publish(
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
         self.calls.append(
             String("publish ") + req.stage + String(" ") + req.channel + String(" ") + req.channels_file
-            + String(" plan=") + String(req.dry_run) + String(" store=") + store.name()
+            + String(" plan=") + String(req.plan) + String(" store=") + store.name()
         )
-        return self._next(String("PUBLISH"), req.platform, result)
+        return self._next(req.step_name, String("PUBLISH"), req.platform, result)
 
 
 def _root(tag: String) raises -> String:
@@ -138,7 +140,9 @@ def test_a_build_stage_runs_its_build_step() raises:
     a.extend(_build_flags())
     assert_equal(kci_main_with(a, steps, rec), 0)
     assert_equal(len(steps.calls), 1)
-    assert_equal(steps.calls[0], String("build linux-x86_64 d.textproto ") + String(_REV) + String(" /w gh-7"))
+    assert_equal(
+        steps.calls[0], String("build linux-x86_64 d.textproto ") + String(_REV) + String(" /w gh-7 step=b plan=False")
+    )
     assert_equal(len(rec.statuses), 2)
     assert_equal(rec.statuses[0], String("RUNNING"))
     assert_equal(rec.statuses[1], String("FINISHED"))
@@ -150,7 +154,11 @@ def test_a_build_stage_runs_its_build_step() raises:
     assert_equal(r.attempt, 2)
     assert_equal(r.platform, String("linux-x86_64"))
     assert_equal(r.machine_sha256.byte_length(), 64)
-    assert_equal(len(r.stage_action_kinds), 1)
+    assert_equal(len(r.stage_step_kinds), 1)
+    assert_equal(r.scope, String("FULL"))
+    assert_equal(len(r.only), 0)
+    assert_equal(r.steps[0].name, String("b"))
+    assert_true(r.steps[0].selected)
 
 
 def test_a_mixed_stage_runs_every_step_in_order() raises:
@@ -165,11 +173,12 @@ def test_a_mixed_stage_runs_every_step_in_order() raises:
     assert_true(steps.calls[0].startswith(String("build ")))
     assert_equal(steps.calls[1], String("publish all komira c.textproto plan=True store=none"))
     var r = _last(rec)
-    assert_equal(len(r.actions), 2)
-    assert_equal(r.actions[0].kind, String("BUILD"))
-    assert_equal(r.actions[1].kind, String("PUBLISH"))
-    assert_true(r.dry_run)
+    assert_equal(len(r.steps), 2)
+    assert_equal(r.steps[0].kind, String("BUILD"))
+    assert_equal(r.steps[1].kind, String("PUBLISH"))
+    assert_true(r.plan)
     assert_equal(r.channel, String("komira"))
+    assert_equal(r.scope, String("FULL"))
 
 
 def test_the_run_stops_at_the_first_failure() raises:
@@ -309,7 +318,8 @@ def _ci(dir: String, workflow_text: String) raises -> Int:
         + String(" declarations: \"d\" channels: \"") + dir + String("/c.textproto\" channel: \"komira\" } }\n"),
     )
     write_whole_file(dir + String("/c.textproto"), String(_CHANNELS))
-    write_whole_file(dir + String("/kci.yml"), workflow_text)
+    # every `kci run` in the fixture reads the machine file being checked (R10)
+    write_whole_file(dir + String("/kci.yml"), workflow_text.replace(String("kci run "), String("kci run --machine ") + m + String(" ")))
     var a = List[String]()
     for s in ["ci", "check", "--machine"]:
         a.append(String(s))
@@ -324,11 +334,99 @@ def _ci(dir: String, workflow_text: String) raises -> Int:
     return rc
 
 
+def test_only_one_step_is_selective() raises:
+    var m = _machine(_root(String("only")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _run(m, String("all"), "--only", "step:p")
+    a.extend(_publish_flags())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    # only the PUBLISH step ran
+    assert_equal(len(steps.calls), 1)
+    assert_true(steps.calls[0].startswith(String("publish all komira")))
+    var r = _last(rec)
+    assert_equal(r.outcome, String("SUCCEEDED"))
+    assert_equal(r.scope, String("SELECTIVE"))
+    assert_equal(len(r.only), 1)
+    assert_equal(r.only[0], String("step:p"))
+    # every step has a row, in file order; the unselected one has no outcome
+    assert_equal(len(r.steps), 2)
+    assert_equal(r.steps[0].name, String("b"))
+    assert_false(r.steps[0].selected)
+    assert_equal(r.steps[0].outcome, String(""))
+    assert_equal(r.steps[1].name, String("p"))
+    assert_true(r.steps[1].selected)
+    # the RUNNING record already says SELECTIVE
+    assert_true(rec.records[0].find(String('"scope":"SELECTIVE"')) >= 0, rec.records[0])
+
+
+def test_every_step_selected_is_still_selective() raises:
+    var m = _machine(_root(String("every")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _run(m, String("all"), "--only", "step:p", "--only", "step:b")
+    a.extend(_build_flags())
+    a.extend(_publish_flags())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    # file order, whatever the order on the command line
+    assert_equal(len(steps.calls), 2)
+    assert_true(steps.calls[0].startswith(String("build ")))
+    var r = _last(rec)
+    assert_equal(r.scope, String("SELECTIVE"))
+    assert_equal(r.only[0], String("step:p"))
+    assert_equal(r.only[1], String("step:b"))
+
+
+def test_a_selector_that_matches_nothing_is_refused() raises:
+    var m = _machine(_root(String("nomatch")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(m, String("build"), "--only", "step:p", "--work-dir", "/w", "--log-dir", "/l"), steps, rec), 3)
+    assert_equal(len(steps.calls), 0)
+    var r = _last(rec)
+    assert_equal(r.error.id, String("KCI-E-SELECTOR-NO-MATCH"))
+    assert_true(r.error.message.find(String("its steps: b;")) >= 0, r.error.message)
+    assert_equal(r.scope, String("SELECTIVE"))
+    var v = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_run(m, String("build"), "--only", "validation:smoke"), steps, v), 3)
+    assert_true(_last(v).error.message.find(String("declares no validations")) >= 0, _last(v).error.message)
+    assert_equal(len(steps.calls), 0)
+
+
+def test_a_malformed_selector_is_exit_2_before_anything_is_read() raises:
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    # the machine file does not exist: the selector is refused first
+    assert_equal(kci_main_with(_run(String("/nonexistent/m.textproto"), String("build"), "--only", "build"), steps, rec), 2)
+    var r = _last(rec)
+    assert_equal(r.error.id, String("KCI-E-SELECTOR"))
+    assert_equal(r.machine_path, String(""))
+    var dup = CliRecorder.memory(String(""))
+    assert_equal(
+        kci_main_with(_run(String("/nonexistent/m.textproto"), String("build"), "--only", "step:b", "--only", "step:b"), steps, dup), 2
+    )
+    assert_equal(_last(dup).error.id, String("KCI-E-SELECTOR"))
+    assert_equal(len(steps.calls), 0)
+
+
+def test_plan_reaches_a_build_step() raises:
+    var m = _machine(_root(String("plan")))
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var a = _run(m, String("build"), "--plan")
+    a.extend(_build_flags())
+    assert_equal(kci_main_with(a, steps, rec), 0)
+    assert_true(steps.calls[0].endswith(String("step=b plan=True")), steps.calls[0])
+    assert_true(_last(rec).plan)
+
+
 def test_ci_check() raises:
     var d = _root(String("ci"))
     assert_equal(_ci(d, String(_WF)), 0)
     assert_equal(_ci(d, String(_WF).replace(String("environment: prod"), String("environment: production"))), 3)
     assert_equal(_ci(d, String(_WF).replace(String("environment: prod"), String("environment: &p prod"))), 5)
+    # R9: a release job never runs selectively
+    assert_equal(_ci(d, String(_WF).replace(String("--stage prod"), String("--stage prod --only step:p"))), 3)
 
 
 def main() raises:

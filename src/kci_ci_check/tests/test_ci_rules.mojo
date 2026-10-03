@@ -1,10 +1,10 @@
 # =============================================================================
 # src/kci_ci_check/tests/test_ci_rules.mojo -- a workflow held to a machine
-#   file: a fixture that agrees, then one mutation per rule (R1 to R8), each
+#   file: a fixture that agrees, then one mutation per rule (R1 to R10), each
 #   of which must be reported; and the stages that need an identity token.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal, assert_true
+from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_ci_check import ChannelsFile, channels_paths, check_workflow, id_token_stages, kci_run_calls
 from kci_stage_graph import parse_machine_file
@@ -60,11 +60,15 @@ comptime _WF: String = (
 )
 
 
-def _findings(wf: String) raises -> List[String]:
+def _findings_for(wf: String, machine_path: String) raises -> List[String]:
     var g = parse_machine_file(String(_MACHINE), String("machine file"))
     var tokens = List[String]()
     tokens.append(String("prod"))
-    return check_workflow(wf, g, tokens)
+    return check_workflow(wf, g, tokens, machine_path)
+
+
+def _findings(wf: String) raises -> List[String]:
+    return _findings_for(wf, String("release/machine.textproto"))
 
 
 def _mutated(old: String, new: String) raises -> String:
@@ -141,6 +145,57 @@ def test_r8_uses_pinned() raises:
     )
 
 
+def test_r9_never_selective() raises:
+    _reports(
+        _mutated(String("run --stage build \\\n"), String("run --stage build --only step:build \\\n")),
+        String("job 'build': R9: `kci run` carries --only"),
+    )
+    _reports(
+        _mutated(String("run --stage prod --plan"), String("run --stage prod --plan --only=step:publish")),
+        String("job 'prod': R9: `kci run` carries --only"),
+    )
+
+
+def _none_with(wf: String, machine_path: String, needle: String) raises:
+    var f = _findings_for(wf, machine_path)
+    for i in range(len(f)):
+        if f[i].find(needle) >= 0:
+            raise Error(String("unexpected finding: ") + f[i])
+
+
+def test_r10_reads_the_machine_file_checked() raises:
+    # another file named in the job
+    _reports(
+        _mutated(String("run --stage prod --plan"), String("run --stage prod --plan --machine other.textproto")),
+        String("job 'prod': R10: `kci run --machine other.textproto` reads another machine file than the one checked (release/machine.textproto)"),
+    )
+    # a variable is not the file checked either
+    _reports(
+        _mutated(String("run --stage prod --plan"), String("run --stage prod --plan --machine=$KCI_MACHINE")),
+        String("R10: `kci run --machine $KCI_MACHINE`"),
+    )
+    # the checked file named explicitly, with or without ./, agrees
+    _none_with(
+        _mutated(String("run --stage prod --plan"), String("run --stage prod --plan --machine release/machine.textproto")),
+        String("release/machine.textproto"),
+        String("R10"),
+    )
+    _none_with(
+        _mutated(String("run --stage prod --plan"), String("run --stage prod --plan --machine=./release/machine.textproto")),
+        String("release/machine.textproto"),
+        String("R10"),
+    )
+    # no --machine reads the default: fine when the default is the file
+    # checked, a disagreement when another file is checked
+    _none_with(String(_WF), String("./release/machine.textproto"), String("R10"))
+    var f = _findings_for(String(_WF), String("ops/machine.textproto"))
+    var hits = 0
+    for i in range(len(f)):
+        if f[i].find(String("R10: `kci run` gives no --machine, so it reads the default release/machine.textproto, not the machine file checked (ops/machine.textproto)")) >= 0:
+            hits += 1
+    assert_equal(hits, 2)
+
+
 def test_unreadable_is_cannot_tell() raises:
     try:
         _ = _findings(_mutated(String("    environment: prod\n"), String("    environment: &e prod\n")))
@@ -164,6 +219,19 @@ def test_kci_run_calls() raises:
     assert_equal(chained[0].stage, String("a"))
     assert_equal(chained[1].stage, String("b"))
     assert_equal(chained[2].stage, String("c"))
+    # --machine and --only are read up to the end of the invocation only
+    var m = kci_run_calls(
+        String("kci run --stage a --machine m.textproto --only step:x; kci run --stage b\nkci run --stage=c --machine=n\n")
+    )
+    assert_equal(len(m), 3)
+    assert_true(m[0].has_machine)
+    assert_equal(m[0].machine, String("m.textproto"))
+    assert_true(m[0].has_only)
+    assert_false(m[1].has_machine)
+    assert_false(m[1].has_only)
+    assert_equal(m[1].stage, String("b"))
+    assert_equal(m[2].stage, String("c"))
+    assert_equal(m[2].machine, String("n"))
 
 
 comptime _OIDC: String = (

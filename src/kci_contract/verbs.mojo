@@ -1,48 +1,45 @@
 # =============================================================================
 # src/kci_contract/verbs.mojo -- the verbs a result document names, and the
-#   kinds of action a stage holds.
+#   kinds of step a stage holds.
 # =============================================================================
 #
-#   run        THE driver verb: `kci run --stage S` runs every action of S
-#   build      an alias of `run` for a stage whose every action is a BUILD
-#   publish    an alias of `run` for a stage whose every action is a PUBLISH
-#   stages     prints the machine file's stages (changes nothing)
+#   run        THE one verb that runs a stage: `kci run --stage S` runs every
+#              step of S, or the steps `--only` selects (selection.mojo)
 #   ci-check   checks a CI workflow against the machine file (changes nothing)
 #
-# An action of a stage is a BUILD, a PUBLISH or a DEPLOY. DEPLOY is reserved:
-# the word exists so adding its body later is additive; nothing runs one yet.
+# There is no other verb and no alias: `kci build`, `kci publish` and the
+# like are not verbs, so a typed `build` is a usage error. A utility that is
+# not a stage (the deploy side's trust, leaks and cells commands) joins this
+# table in the change that builds it.
 #
-# The spellings are v1 placeholders a design revision may rename; they are
-# spelled here only.
+# A step of a stage is a BUILD, a PUBLISH or a DEPLOY. DEPLOY is reserved:
+# the word exists so adding its body later is additive; nothing runs one yet.
+# "Step" is kci's unit of a stage; a Buck2 build action is something else.
+#
+# The spellings are spelled here only.
 # Pure functions over owned values; no pointer.
 # =============================================================================
 
 comptime VERB_RUN: String = "run"
-comptime VERB_BUILD: String = "build"
-comptime VERB_PUBLISH: String = "publish"
-comptime VERB_STAGES: String = "stages"
 comptime VERB_CI_CHECK: String = "ci-check"
 
-comptime ACTION_BUILD: String = "BUILD"
-comptime ACTION_PUBLISH: String = "PUBLISH"
-comptime ACTION_DEPLOY: String = "DEPLOY"
+comptime STEP_KIND_BUILD: String = "BUILD"
+comptime STEP_KIND_PUBLISH: String = "PUBLISH"
+comptime STEP_KIND_DEPLOY: String = "DEPLOY"
 
 
 def all_verbs() -> List[String]:
     var out = List[String]()
     out.append(String(VERB_RUN))
-    out.append(String(VERB_BUILD))
-    out.append(String(VERB_PUBLISH))
-    out.append(String(VERB_STAGES))
     out.append(String(VERB_CI_CHECK))
     return out^
 
 
-def all_action_kinds() -> List[String]:
+def all_step_kinds() -> List[String]:
     var out = List[String]()
-    out.append(String(ACTION_BUILD))
-    out.append(String(ACTION_PUBLISH))
-    out.append(String(ACTION_DEPLOY))
+    out.append(String(STEP_KIND_BUILD))
+    out.append(String(STEP_KIND_PUBLISH))
+    out.append(String(STEP_KIND_DEPLOY))
     return out^
 
 
@@ -54,19 +51,9 @@ def require_verb(word: String) raises:
     raise Error(String("verb '") + word + String("' is not a kci verb"))
 
 
-def require_action_kind(word: String) raises:
-    var v = all_action_kinds()
+def require_step_kind(word: String) raises:
+    var v = all_step_kinds()
     for i in range(len(v)):
         if v[i] == word:
             return
-    raise Error(String("action kind '") + word + String("' is not BUILD, PUBLISH or DEPLOY"))
-
-
-def alias_action_kind(verb: String) raises -> String:
-    """The one action kind an alias runs (`build` -> BUILD, `publish` ->
-    PUBLISH); refuses a verb that is not an alias."""
-    if verb == VERB_BUILD:
-        return String(ACTION_BUILD)
-    if verb == VERB_PUBLISH:
-        return String(ACTION_PUBLISH)
-    raise Error(String("verb '") + verb + String("' is not an alias of run"))
+    raise Error(String("step kind '") + word + String("' is not BUILD, PUBLISH or DEPLOY"))

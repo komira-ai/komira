@@ -6,26 +6,40 @@
 #
 # `kci run --stage S`:
 #
+#   0. every `--only` parsed (args.mojo `selectors_of`): a malformed or
+#      repeated selector is KCI-E-SELECTOR, exit 2, before anything is read;
 #   1. read the machine file (`--machine`, or args.mojo's default): a path
 #      that names no file is a usage error (KCI-E-USAGE, exit 2); a file
 #      whose schema_version this kci does not read is REFUSED
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
 #      (KCI-E-FORMAT);
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
-#      message lists the stages); then the flags S's step kinds take
+#      message lists the stages); then the selection (kci_stage_graph
+#      `resolve_selection`): a selector that matches nothing in S is
+#      REFUSED (KCI-E-SELECTOR-NO-MATCH, exit 3, naming S's steps and
+#      validations); then the flags the SELECTED steps' kinds take
 #      (args.mojo `require_stage_flags`, exit 2);
 #   3. the RUNNING record (`recorder.begin`) BEFORE the first effect. A
 #      record that cannot be written stops the run FAILED
 #      (KCI-E-RESULT-FILE), nothing done;
-#   4. every step of S, in file order: a BUILD step through `steps.build`, a
-#      PUBLISH step through `steps.publish`, each given the stage, the
-#      revision, the platform, the run identity and its own inputs. Each
-#      step adds its row, artifacts and first error to the result. The run
-#      stops at the first step that does not end SUCCEEDED or NOOP;
+#   4. every SELECTED step of S, in file order: a BUILD step through
+#      `steps.build`, a PUBLISH step through `steps.publish`, each given its
+#      name, the stage, the revision, the platform, the run identity, `--plan`
+#      and its own inputs. Each step adds its row, artifacts and first error
+#      to the result; a step `--only` did not select gets a row with
+#      `selected: false` and no outcome. The run stops at the first step
+#      that does not end SUCCEEDED or NOOP;
 #   5. the run's outcome is its worst step's (kci_contract's `worst_outcome`),
 #      and PARTIAL when a step fails after an earlier PUBLISH step changed
 #      the channel; the FINISHED record, then the exit number
 #      (kci_contract's exit table), which is the return value.
+#   6. the LAST stderr line is the run's evidence (kci_contract
+#      `run_evidence_line`): `kci: FULL run of stage S: <OUTCOME>`, or
+#      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`.
+#      The result document says the same in `scope` and `only`. A selective
+#      success exits 0 like a full one, so the scope, never the number, is
+#      what tells them apart. A run refused before its selectors parse (a
+#      usage error) prints no evidence line: nothing was selected.
 #
 # `kci ci check`: the machine file as in 1; the workflow (`--workflow`; a
 # path that names no file is a usage error); every channels file a PUBLISH
@@ -59,6 +73,8 @@ from kci_contract import (
     ERROR_FORMAT_VERSION,
     ERROR_INTERNAL,
     ERROR_RESULT_FILE,
+    ERROR_SELECTOR,
+    ERROR_SELECTOR_NO_MATCH,
     ERROR_STAGE_UNKNOWN,
     ERROR_USAGE,
     EXIT_INTERNAL,
@@ -71,12 +87,24 @@ from kci_contract import (
     OUTCOME_SUCCEEDED,
     VERB_CI_CHECK,
     VERB_RUN,
+    SCOPE_SELECTIVE,
+    ResultStep,
+    Selector,
+    run_evidence_line,
     worst_outcome,
 )
 from kci_contract import RunResult as KciRunResult
 from kci_publish import PublishRequest
 from kci_release_set.member import file_sha256_hex
-from kci_stage_graph import Stage, StageGraph, StageStep, machine_schema_version, parse_machine_file
+from kci_stage_graph import (
+    Selection,
+    Stage,
+    StageGraph,
+    StageStep,
+    machine_schema_version,
+    parse_machine_file,
+    resolve_selection,
+)
 
 from .args import (
     CLI_VERB_CI_CHECK,
@@ -87,6 +115,7 @@ from .args import (
     find_result_file,
     parse_kci_args,
     require_stage_flags,
+    selectors_of,
 )
 from .recorder import CliRecorder
 
@@ -208,8 +237,31 @@ def _split(e: Error) -> Tuple[String, String]:
     return (String(s[byte = 0:nl]), String(s[byte = nl + 1 :]))
 
 
+def _evidence(result: KciRunResult, outcome: String, rc: Int) -> Int:
+    """Say the run's last line (file header, 6); return `rc`."""
+    try:
+        _say(run_evidence_line(result.scope, result.stage, result.only, outcome))
+    except e:
+        _say(String("kci: ") + String(e))
+    return rc
+
+
+def _end_run(mut result: KciRunResult, mut recorder: CliRecorder, outcome: String, retry: String = String("")) -> Int:
+    var rc = _finish(result, recorder, outcome, retry)
+    return _evidence(result, outcome, rc)
+
+
+def _stop_run(
+    mut result: KciRunResult, mut recorder: CliRecorder, outcome: String, error_id: String, message: String
+) -> Int:
+    var rc = _stop(result, recorder, outcome, error_id, message)
+    return _evidence(result, outcome, rc)
+
+
 def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     var req = BuildRequest(cmd.run_identity())
+    req.step_name = step.name.copy()
+    req.plan = cmd.plan
     req.declarations_file = step.declarations.copy()
     req.work_dir = cmd.work_dir.copy()
     req.release_dir = cmd.release_dir.copy()
@@ -223,6 +275,7 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
 
 def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> PublishRequest:
     var req = PublishRequest(cmd.run_identity())
+    req.step_name = step.name.copy()
     req.declarations_file = step.declarations.copy()
     req.release_dir = cmd.release_dir.copy()
     req.platform = step.platform.copy()
@@ -235,7 +288,7 @@ def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> P
     req.claims = cmd.claims.copy()
     if cmd.concurrency > 0:
         req.concurrency = cmd.concurrency
-    req.dry_run = cmd.plan
+    req.plan = cmd.plan
     return req^
 
 
@@ -245,38 +298,53 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     result.started_at_ms = _now()
     result.stage = cmd.stage.copy()
     result.revision = cmd.revision_id.copy()
+    result.plan = cmd.plan
     try:
         result.set_run(cmd.run_identity())
     except e:
         return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
+    # 0. the selectors, before anything is read
+    var selectors: List[Selector]
+    try:
+        selectors = selectors_of(cmd)
+    except e:
+        return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_SELECTOR), String(e))
+    for i in range(len(selectors)):
+        result.only.append(selectors[i].canonical())
+    if len(selectors) > 0:
+        result.scope = String(SCOPE_SELECTIVE)
     var g: StageGraph
     try:
         g = _load_graph(cmd, result)
     except e:
         var p = _split(e)
-        return _stop(result, recorder, String(OUTCOME_REFUSED), p[0], p[1])
+        return _stop_run(result, recorder, String(OUTCOME_REFUSED), p[0], p[1])
     var stage: Stage
     try:
         stage = g.stage(cmd.stage)
     except e:
-        return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_STAGE_UNKNOWN), String(e))
-    result.stage_action_kinds = stage.step_kinds()
+        return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_STAGE_UNKNOWN), String(e))
+    result.stage_step_kinds = stage.step_kinds()
     result.platform = stage.steps[0].platform.copy()
+    var sel: Selection
     try:
-        require_stage_flags(cmd, stage)
+        sel = resolve_selection(stage, selectors)
     except e:
-        return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
-    if stage.has_kind(String("PUBLISH")):
-        result.dry_run = cmd.plan
-        result.expect_set_hash = cmd.expect_set_hash.copy()
-        for i in range(len(stage.steps)):
-            if stage.steps[i].is_publish():
-                result.channel = stage.steps[i].channel.copy()
-                break
+        return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_SELECTOR_NO_MATCH), String(e))
+    result.scope = sel.scope.copy()
+    try:
+        require_stage_flags(cmd, stage, sel)
+    except e:
+        return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
+    for i in range(len(stage.steps)):
+        if sel.steps[i] and stage.steps[i].is_publish():
+            result.expect_set_hash = cmd.expect_set_hash.copy()
+            result.channel = stage.steps[i].channel.copy()
+            break
     try:
         recorder.begin(result.begin_record())
     except e:
-        return _stop(
+        return _stop_run(
             result, recorder, String(OUTCOME_FAILED), String(ERROR_RESULT_FILE),
             String("the RUNNING record could not be written, so nothing was run: ") + String(e),
         )
@@ -285,6 +353,10 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
     var changed_outside = False
     for i in range(len(stage.steps)):
         ref step = stage.steps[i]
+        if not sel.steps[i]:
+            _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(": not selected (--only)"))
+            result.steps.append(ResultStep.unselected(step.name.copy(), step.kind.copy(), step.platform.copy()))
+            continue
         _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
         var end: StepEnd
         try:
@@ -311,7 +383,7 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
             break
         if end.changed_outside:
             changed_outside = True
-    return _finish(result, recorder, outcome, retry)
+    return _end_run(result, recorder, outcome, retry)
 
 
 def ci_check_with(cmd: KciCommand, mut recorder: CliRecorder) -> Int:
@@ -347,7 +419,7 @@ def ci_check_with(cmd: KciCommand, mut recorder: CliRecorder) -> Int:
         return _stop(result, recorder, String(OUTCOME_REFUSED), String(ERROR_CHANNEL), String(e))
     var findings: List[String]
     try:
-        findings = check_workflow(_read(cmd.workflow), g, tokens)
+        findings = check_workflow(_read(cmd.workflow), g, tokens, cmd.machine)
     except e:
         var m = String(e)
         if m.startswith(String(CANNOT_TELL)):

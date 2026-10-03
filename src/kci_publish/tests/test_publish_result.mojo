@@ -1,17 +1,17 @@
 # =============================================================================
 # src/kci_publish/tests/test_publish_result.mojo -- contract step 6: the
-#   PUBLISH action's part of the run's one result document (kci_contract's
+#   PUBLISH step's part of the run's one result document (kci_contract's
 #   `kci.result`), no secret in it, and one outcome per reason.
 # =============================================================================
 #
 # ROWS
-#   (1) the whole action over a channel holding older releases of every
+#   (1) the whole step over a channel holding older releases of every
 #       name: SUCCEEDED, exit 0; the RUNNING record was written once, before
 #       the first request, naming the revision and the run; the result holds
-#       one PUBLISH action row, the channel, the recomputed set hash, who
+#       one PUBLISH step row, the channel, the recomputed set hash, who
 #       produced the release (release.json's `produced_by`), and one
 #       artifact row per file in upload order (alpha, beta, the metapackage
-#       last) with action UPLOADED, the revision, the platform, the subdir,
+#       last) with effect UPLOADED, the revision, the platform, the subdir,
 #       state_before absent, state_after present-same, indexed true; the API
 #       token resolved by secret NAME from the store; the rendered document
 #       parses back to the same value;
@@ -21,7 +21,7 @@
 #       REFUSED, exit 3, error KCI-E-PUBLISH-DIFFERENT-BYTES whose message
 #       names the file; the metapackage row NOT_REACHED and
 #       present-different, the members NOT_REACHED and absent;
-#   (4) the whole action run AGAIN over the channel the first run filled:
+#   (4) the whole step run AGAIN over the channel the first run filled:
 #       NOOP, exit 0 (not a separate "already published" number), every row
 #       ALREADY_PRESENT, no upload;
 #   (5) every reason has one outcome, by the table in report.mojo, with and
@@ -39,7 +39,7 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_secret_store import StaticSecretStore
 
 from kci_contract import (
-    ACTION_PUBLISH,
+    STEP_KIND_PUBLISH,
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
     ARTIFACT_UPLOADED,
@@ -167,14 +167,16 @@ def test_the_result_of_a_publish() raises:
     assert_true(ran.rec.records[0].find(String('"revision":"') + r.revision + String('"')) >= 0)
     assert_true(ran.rec.records[0].find(String('"run_id":"gh-2"')) >= 0)
     ref res = ran.result
-    assert_equal(len(res.actions), 1)
-    assert_equal(res.actions[0].kind, String(ACTION_PUBLISH))
-    assert_equal(res.actions[0].platform, String("linux-x86_64"))
-    assert_equal(res.actions[0].outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(len(res.steps), 1)
+    assert_equal(res.steps[0].kind, String(STEP_KIND_PUBLISH))
+    assert_equal(res.steps[0].name, String("publish"))
+    assert_true(res.steps[0].selected)
+    assert_equal(res.steps[0].platform, String("linux-x86_64"))
+    assert_equal(res.steps[0].outcome, String(OUTCOME_SUCCEEDED))
     assert_equal(res.channel, String("example-stable"))
     assert_equal(res.set_hash, req.expect_set_hash)
     assert_equal(res.expect_set_hash, req.expect_set_hash)
-    assert_false(res.dry_run)
+    assert_false(res.plan)
     assert_false(res.has_error)
     assert_true(res.has_release_produced_by)
     assert_equal(res.release_produced_by_run_id, String("gh-1"))
@@ -187,7 +189,7 @@ def test_the_result_of_a_publish() raises:
     for i in range(3):
         ref a = res.artifacts[i]
         assert_equal(a.name, order[i])
-        assert_equal(a.action, String(ARTIFACT_UPLOADED))
+        assert_equal(a.effect, String(ARTIFACT_UPLOADED))
         assert_equal(a.file, r.file_name(order[i]))
         assert_equal(a.subdir, String("linux-64"))
         assert_equal(a.platform, String("linux-x86_64"))
@@ -202,14 +204,14 @@ def test_the_result_of_a_publish() raises:
     assert_equal(render_result(back), text)
     assert_equal(back.exit_code, EXIT_OK)
     _no_token(ran.rep, text)
-    # (4) the same action again over the channel it filled: NOOP, exit 0
+    # (4) the same step again over the channel it filled: NOOP, exit 0
     var writes = reg.transport().write_count()
     var again = _flow(req, reg)
     assert_equal(again.rep.outcome(), String(OUTCOME_NOOP), String("\n").join(again.rep.lines))
     assert_equal(again.rep.exit_code(), EXIT_OK)
     assert_equal(reg.transport().write_count(), writes)
     for i in range(len(again.result.artifacts)):
-        assert_equal(again.result.artifacts[i].action, String(ARTIFACT_ALREADY_PRESENT))
+        assert_equal(again.result.artifacts[i].effect, String(ARTIFACT_ALREADY_PRESENT))
     var again_text = _finished(again.result, again.rep)
     assert_true(again_text.find(String('"exit_code":0,')) >= 0, again_text)
     assert_true(again_text.find(String('"outcome":"NOOP"')) >= 0, again_text)
@@ -231,8 +233,8 @@ def test_a_stop_records_its_error() raises:
     ref meta = res.artifacts[2]
     assert_equal(meta.name, String("komira"))
     assert_equal(meta.state_before, String("present-different"))
-    assert_equal(meta.action, String(ARTIFACT_NOT_REACHED))
-    assert_equal(res.artifacts[0].action, String(ARTIFACT_NOT_REACHED))
+    assert_equal(meta.effect, String(ARTIFACT_NOT_REACHED))
+    assert_equal(res.artifacts[0].effect, String(ARTIFACT_NOT_REACHED))
     assert_equal(res.artifacts[0].state_before, String("absent"))
     var text = _finished(res, ran.rep)
     assert_true(text.find(String('"exit_code":3,')) >= 0, text)
@@ -248,7 +250,7 @@ def _report(reason: String, landed: Bool) raises -> PublishReport:
     var rep = PublishReport()
     rep.files.append(FileRow(t[0]))
     if landed:
-        rep.files[0].action = String("uploaded")
+        rep.files[0].effect = String("uploaded")
     if reason == REASON_REFUSED:
         rep.stop(reason.copy(), String("KCI-E-MEMBER"), String("refused"))
     else:

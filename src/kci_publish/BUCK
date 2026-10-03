@@ -1,11 +1,11 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# One PUBLISH action of a stage (`kci run --stage S`, or its alias `kci publish
-# --stage S`; the kci binary's one parser fills the request): publish the
-# release set `kci build` left in <--release-dir>/<platform>/ to a conda
+# One PUBLISH step of a stage (`kci run --stage S`; the kci binary's one
+# parser fills the request): publish the
+# release set a BUILD step left in <--release-dir>/<platform>/ to a conda
 # channel, or refuse it whole. The release must be the one --revision-id names,
-# for the action's platform; an OIDC channel's push identity must name the
-# stage as its environment. Step 0 re-verifies every
+# for the step's platform; an OIDC channel's push identity must name the
+# stage as its GitHub environment. Step 0 re-verifies every
 # member over its bytes with the same `kci_release_set.verify_member` the build
 # ran, then lockstep, the requirement closure and the set hash, before any
 # request. The channel is read by download; a file present with other bytes, an
@@ -13,7 +13,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # nothing written. Then the missing members are uploaded by up to
 # `--concurrency` worker threads (komira_fork_join; never with `force`), every
 # member is read back, and the metapackage goes last. The credential is
-# the channel's own (kci_release_channel), resolved once. The action ends in a
+# the channel's own (kci_release_channel), resolved once. The step ends in a
 # kci_contract outcome word and error id, and puts its rows into the run's one
 # result document; no exit number is spelled here, and a release already in
 # the channel byte for byte is NOOP, exit 0. Nothing here names a channel, an

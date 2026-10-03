@@ -8,10 +8,13 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from kci_contract import (
     ARTIFACT_MANIFEST_NAME,
+    DEFAULT_MACHINE_FILE,
     RELEASE_MANIFEST_NAME,
     conda_subdir_of,
     member_dir,
+    oci_platform_of,
     platform_of_conda_subdir,
+    platform_of_oci,
     platform_table,
     release_manifest_path,
     release_platform_dir,
@@ -103,6 +106,52 @@ def test_layout() raises:
     except e:
         refused += 1
     assert_equal(refused, 3)
+
+
+def _oci(p: String) -> String:
+    try:
+        return oci_platform_of(p)
+    except e:
+        return String(e)
+
+
+def _from_oci(p: String) -> String:
+    try:
+        return platform_of_oci(p)
+    except e:
+        return String(e)
+
+
+def test_oci_platform_spelling() raises:
+    # a platform is OS + CPU; OCI spells the same pair os/arch (v1.3 A3)
+    assert_equal(_oci(String("linux-x86_64")), String("linux/amd64"))
+    assert_equal(_oci(String("darwin-arm64")), String("darwin/arm64"))
+    assert_equal(_oci(String("linux-arm64")), String("linux/arm64"))
+    assert_equal(_from_oci(String("linux/amd64")), String("linux-x86_64"))
+    assert_equal(_from_oci(String("darwin/arm64")), String("darwin-arm64"))
+    assert_equal(_from_oci(String("linux/arm64")), String("linux-arm64"))
+    # every row round-trips
+    var t = platform_table()
+    for i in range(len(t)):
+        if t[i].name == "noarch":
+            continue
+        assert_equal(_from_oci(_oci(t[i].name)), t[i].name)
+    # unknown on each side is refused; noarch has no OCI spelling
+    assert_equal(
+        _oci(String("noarch")),
+        String("platform 'noarch' has no OCI os/arch (one of: linux-x86_64 darwin-arm64 linux-arm64)"),
+    )
+    assert_true(_oci(String("linux/amd64")).find(String("has no OCI os/arch")) >= 0)
+    assert_equal(
+        _from_oci(String("linux/x86_64")),
+        String("OCI platform 'linux/x86_64' is not a kci platform (one of: linux/amd64 darwin/arm64 linux/arm64)"),
+    )
+    assert_true(_from_oci(String("linux-x86_64")).find(String("is not a kci platform")) >= 0)
+
+
+def test_default_machine_file() raises:
+    # the ONE default path kci has; --machine overrides it
+    assert_equal(String(DEFAULT_MACHINE_FILE), String("release/machine.textproto"))
 
 
 def main() raises:

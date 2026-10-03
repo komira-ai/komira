@@ -1,13 +1,13 @@
 # =============================================================================
-# src/kci_publish/report.mojo -- how a PUBLISH action ended, and its part of
+# src/kci_publish/report.mojo -- how a PUBLISH step ended, and its part of
 #   the run's result document (kci_contract's `kci.result`).
 # =============================================================================
 #
-# `PublishReport` is the action's working record: the REASON it stopped (a
+# `PublishReport` is the step's working record: the REASON it stopped (a
 # word of this file, kept for people and for the result's error id), whether
 # any upload LANDED in this run, one row per file, and the lines printed
 # beside it. It is not a document: the one document is the result file, and
-# `record_publish_result` puts this action's part into it.
+# `record_publish_result` puts this step's part into it.
 #
 # THE OUTCOME follows from the reason and from whether an upload landed
 # (kci_contract's outcome words; the exit number is the contract's, so this
@@ -40,7 +40,7 @@
 # =============================================================================
 
 from kci_contract import (
-    ACTION_PUBLISH,
+    STEP_KIND_PUBLISH,
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
     ARTIFACT_UPLOADED,
@@ -57,7 +57,7 @@ from kci_contract import (
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
     RETRY_NEEDS_HUMAN,
-    ResultAction,
+    ResultStep,
     ResultArtifact,
     exit_code_of,
     platform_of_conda_subdir,
@@ -78,8 +78,8 @@ comptime REASON_STOP_NEW_NAME: String = "STOP_NEW_NAME"
 comptime REASON_PARTIAL: String = "PARTIAL"
 comptime REASON_READ_BACK_MISMATCH: String = "READ_BACK_MISMATCH"
 
-comptime ACTION_WORD_UPLOADED: String = "uploaded"
-"""A file row's `action` when this run's upload of it landed."""
+comptime EFFECT_WORD_UPLOADED: String = "uploaded"
+"""A file row's `effect` when this run's upload of it landed."""
 
 
 struct FileRow(Copyable, Movable):
@@ -92,7 +92,7 @@ struct FileRow(Copyable, Movable):
     var version: String
     var sha256_hex: String
     var state_before: Int
-    var action: String
+    var effect: String
     var state_after: Int
     var indexed: Bool
 
@@ -104,19 +104,19 @@ struct FileRow(Copyable, Movable):
         self.version = t.coordinate.version.copy()
         self.sha256_hex = t.sha256_hex.copy()
         self.state_before = STATE_NOT_READ
-        self.action = String("none")
+        self.effect = String("none")
         self.state_after = STATE_NOT_READ
         self.indexed = False
 
 
 struct PublishReport(Copyable, Movable):
-    """How the action ended (file header). Layout: owned values only. No
+    """How the step ended (file header). Layout: owned values only. No
     pointer field."""
 
     var reason: String
     var error_id: String
     var channel: String
-    var dry_run: Bool
+    var plan: Bool
     var set_hash: String
     var release_commit: String
     var has_produced_by: Bool
@@ -129,7 +129,7 @@ struct PublishReport(Copyable, Movable):
         self.reason = String(REASON_PUBLISHED)
         self.error_id = String("")
         self.channel = String("")
-        self.dry_run = False
+        self.plan = False
         self.set_hash = String("")
         self.release_commit = String("")
         self.has_produced_by = False
@@ -178,7 +178,7 @@ struct PublishReport(Copyable, Movable):
     def landed(self) -> Bool:
         """Whether any upload of this run landed."""
         for i in range(len(self.files)):
-            if self.files[i].action == ACTION_WORD_UPLOADED:
+            if self.files[i].effect == EFFECT_WORD_UPLOADED:
                 return True
         return False
 
@@ -232,28 +232,28 @@ struct PublishReport(Copyable, Movable):
         )
 
 
-def artifact_action_of(row: FileRow, dry_run: Bool) -> String:
-    """A file row's `artifacts[].action` in the result document."""
-    if row.action == ACTION_WORD_UPLOADED:
+def artifact_effect_of(row: FileRow, plan: Bool) -> String:
+    """A file row's `artifacts[].effect` in the result document."""
+    if row.effect == EFFECT_WORD_UPLOADED:
         return String(ARTIFACT_UPLOADED)
-    if row.action == "skipped" or (row.action == "none" and row.state_before == STATE_SAME):
+    if row.effect == "skipped" or (row.effect == "none" and row.state_before == STATE_SAME):
         return String(ARTIFACT_ALREADY_PRESENT)
-    if dry_run and row.action == "none" and row.state_before == STATE_ABSENT:
+    if plan and row.effect == "none" and row.state_before == STATE_ABSENT:
         return String(ARTIFACT_WOULD_UPLOAD)
     return String(ARTIFACT_NOT_REACHED)
 
 
 def record_publish_result(
-    r: PublishReport, revision: String, platform: String, mut result: KciRunResult
+    r: PublishReport, step_name: String, revision: String, platform: String, mut result: KciRunResult
 ) raises:
-    """Put this action's part into the run's result document: its row (kind
-    PUBLISH), the channel, the dry-run flag, the recomputed set hash, who
+    """Put this step's part into the run's result document: its row (its
+    name, kind PUBLISH), the channel, the plan flag, the recomputed set hash, who
     produced the release, one artifact row per file, and the first error
     (its message is the report's lines, which hold no secret)."""
     var outcome = r.outcome()
-    result.actions.append(ResultAction(String(ACTION_PUBLISH), platform.copy(), outcome.copy()))
+    result.steps.append(ResultStep(step_name.copy(), String(STEP_KIND_PUBLISH), platform.copy(), outcome.copy()))
     result.channel = r.channel.copy()
-    result.dry_run = r.dry_run
+    result.plan = r.plan
     if r.set_hash.byte_length() > 0:
         result.set_hash = r.set_hash.copy()
     if r.has_produced_by:
@@ -263,7 +263,7 @@ def record_publish_result(
     for i in range(len(r.files)):
         ref f = r.files[i]
         var row = ResultArtifact()
-        row.action = artifact_action_of(f, r.dry_run)
+        row.effect = artifact_effect_of(f, r.plan)
         row.artifact_type = String("CONDA")
         row.file = f.file_name.copy()
         row.indexed = f.indexed

@@ -112,9 +112,10 @@ def test_publish_resolves_the_channel_secret_before_any_read() raises:
         var res = parse_result(out[1], String("result"))
         assert_equal(res.outcome, String("FAILED"))
         assert_equal(res.error.id, String("KCI-E-CREDENTIAL"))
-        assert_true(res.dry_run)
+        assert_true(res.plan)
         assert_equal(len(res.artifacts), 0)
-        assert_equal(res.actions[0].kind, String("PUBLISH"))
+        assert_equal(res.steps[0].kind, String("PUBLISH"))
+        assert_equal(res.steps[0].name, String("publish"))
 
 
 def test_a_build_step_reaches_kci_build() raises:
@@ -139,7 +140,8 @@ def test_a_build_step_reaches_kci_build() raises:
     assert_equal(kci_main_with(a, steps, rec), 3)
     var res = parse_result(Path(d + String("/result.json")).read_text(), String("result"))
     assert_equal(res.error.id, String("KCI-E-DECLARATION"))
-    assert_equal(res.actions[0].kind, String("BUILD"))
+    assert_equal(res.steps[0].kind, String("BUILD"))
+    assert_equal(res.steps[0].name, String("b"))
 
 
 def main() raises:

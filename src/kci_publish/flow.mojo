@@ -1,11 +1,11 @@
 # =============================================================================
-# src/kci_publish/flow.mojo -- `publish_flow`: one PUBLISH action of a stage,
+# src/kci_publish/flow.mojo -- `publish_flow`: one PUBLISH step of a stage,
 #   from its request to its report and its part of the run's result.
 # =============================================================================
 #
 # `publish_flow` is generic over the channel transport, the OIDC transport,
 # the secret store, the sleeper and the result recorder, so the welded tests
-# drive the whole action over an in-memory channel. The order:
+# drive the whole step over an in-memory channel. The order:
 #
 #   1. the request's own values (REFUSED, nothing read): the platform is one
 #      kci releases (KCI-E-PLATFORM), --revision-id is a full commit id
@@ -27,7 +27,7 @@
 #      dry-run (KCI-E-CREDENTIAL);
 #   3. `recorder.begin` gets the RUNNING record BEFORE the first effect (the
 #      first secret, token or channel request). A recorder that cannot
-#      record stops the action FAILED with nothing sent;
+#      record stops the step FAILED with nothing sent;
 #   4. THE CREDENTIAL comes from the channel's CONDA repository, never from a
 #      flag: an API_TOKEN by secret name (resolved through the `SecretStore`)
 #      or OIDC trusted publishing, whose token's `environment` claim must be
@@ -36,12 +36,12 @@
 #      exchange included: that is the one value the run uses). On a PUBLIC
 #      channel the write value is resolved at step 2, once. A credential
 #      that cannot be had is FAILED (KCI-E-CREDENTIAL), nothing sent;
-#   5. --dry-run: steps 0 and 1 only. No write request and no OIDC exchange.
+#   5. --plan: steps 0 and 1 only. No write request and no OIDC exchange.
 #      A PUBLIC channel resolves nothing; a PRIVATE channel with an API_TOKEN
 #      resolves it for the reads;
-#   6. `run_publish` (`run.mojo`), then this action's part of the result
+#   6. `run_publish` (`run.mojo`), then this step's part of the result
 #      document (`report.mojo`, `record_publish_result`). Writing the
-#      FINISHED record is the caller's: a stage may hold more actions.
+#      FINISHED record is the caller's: a stage may hold more steps.
 #
 # THE ONE ENVIRONMENT READ is the GitHub Actions OIDC handshake, inside
 # `GithubOidcCredential.from_actions_env`, and only for an OIDC channel
@@ -169,7 +169,7 @@ struct _Step0(Movable):
 def _usage(req: PublishRequest) -> String:
     """Why the request's own values are refused, or "" (file header, 1)."""
     if req.stage.byte_length() == 0:
-        return String("the stage is EMPTY: a PUBLISH action runs in a named stage")
+        return String("the stage is EMPTY: a PUBLISH step runs in a named stage")
     if not is_lower_hex_64(req.expect_set_hash):
         return String("--expect-set-hash '") + req.expect_set_hash + String("' is not 64 lowercase hex characters")
     if req.concurrency < MIN_CONCURRENCY or req.concurrency > MAX_CONCURRENCY:
@@ -225,7 +225,7 @@ def _step0(req: PublishRequest) -> _Step0:
             return _Step0(
                 String(ERROR_PLATFORM_MISMATCH),
                 String("the release in '") + dir + String("' is for platform ") + recorded.platform
-                + String(", not this action's ") + req.platform,
+                + String(", not this step's ") + req.platform,
             )
     var loaded: LoadedRelease
     try:
@@ -275,17 +275,17 @@ def _step0(req: PublishRequest) -> _Step0:
         return _Step0(
             String(ERROR_STAGE_ENVIRONMENT),
             String("channel '") + channel.name + String("' publishes with OIDC trusted publishing, and its")
-            + String(" push identity ") + named + String("; this PUBLISH action runs in stage '")
+            + String(" push identity ") + named + String("; this PUBLISH step runs in stage '")
             + req.stage + String("'. The trusted publisher accepts one environment, so the stage")
             + String(" that publishes is named exactly that environment"),
         )
-    if not credential and not (req.dry_run and channel.is_public()):
+    if not credential and not (req.plan and channel.is_public()):
         return _Step0(
             String(ERROR_CREDENTIAL),
             String("channel '") + channel.name
             + String("' declares no credential for its CONDA repository, so it cannot be published to"),
         )
-    if req.dry_run and is_oidc and not channel.is_public():
+    if req.plan and is_oidc and not channel.is_public():
         return _Step0(
             String(ERROR_CREDENTIAL),
             String("channel '") + channel.name
@@ -300,7 +300,7 @@ def _base_report(p: PreparedRelease, req: PublishRequest) -> PublishReport:
     r.channel = p.channel.name.copy()
     r.set_hash = p.loaded.set_hash()
     r.release_commit = p.release_version.commit.copy()
-    r.dry_run = req.dry_run
+    r.plan = req.plan
     r.has_produced_by = True
     r.produced_by_run_id = p.loaded.recomputed.produced_by_run_id.copy()
     r.produced_by_attempt = p.loaded.recomputed.produced_by_attempt
@@ -348,7 +348,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     var public = p.channel.is_public()
     var is_oidc = Bool(p.credential) and p.credential.value().is_oidc_trusted_publishing()
     try:
-        if req.dry_run:
+        if req.plan:
             if public:
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
             else:
@@ -398,14 +398,14 @@ def publish_flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: Worker
     opts: RunOptions,
     mut sleeper: W,
 ) -> PublishReport:
-    """One PUBLISH action over the given seams (file header): `registry`
+    """One PUBLISH step over the given seams (file header): `registry`
     talks to the channel (its credential unconfigured; the flow configures
     it), `oidc_t` carries the OIDC exchange. `recorder.begin` is called at
-    most once, before the first effect; this action's row, artifacts, set
+    most once, before the first effect; this step's row, artifacts, set
     hash and first error go into `result`. Never raises."""
     var r = _flow(req, result, recorder, registry, oidc_t^, store, opts, sleeper)
     try:
-        record_publish_result(r, req.revision_id, req.platform, result)
+        record_publish_result(r, req.step_name, req.revision_id, req.platform, result)
     except e:
         r.lines.append(String("RESULT not recorded in the result document: ") + String(e))
     return r^
