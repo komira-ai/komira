@@ -8,6 +8,7 @@
 //! the client and its send.
 
 use super::json_codec::AwsJsonCodec;
+use super::rest::AwsRestJson;
 use super::rpc::AwsJsonRpc;
 use super::{AwsEmitter, SUPPORTED_JSON_VERSIONS, SUPPORTED_PROTOCOLS};
 use crate::aws_in::{AwsOperationFacts, AwsServiceMeta};
@@ -45,6 +46,11 @@ pub const ALL_PROTOCOLS: &[AwsProtocol] = &[
 /// The protocols whose request and response bodies are JSON documents, and
 /// so whose generated code imports the `komira_json` runtime.
 pub const JSON_BODY_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::Json, AwsProtocol::RestJson];
+
+/// The protocols that bind members to the HTTP message (URI labels and
+/// query, headers, payload, status), and so whose generated code imports the
+/// REST binding runtime.
+pub const REST_PROTOCOLS: &[AwsProtocol] = &[AwsProtocol::RestJson, AwsProtocol::RestXml];
 
 impl AwsProtocol {
     /// The `metadata.protocol` spelling.
@@ -109,8 +115,14 @@ pub(super) trait Binding: Sync {
     fn default_content_type(&self, em: &AwsEmitter) -> String;
     /// Docstring lines the client's `send` adds after the generic ones.
     fn send_notes(&self) -> &'static [&'static str];
-    /// The Mojo expressions, over `res: HttpResult`, for a failed call's
-    /// error code and message.
+    /// A statement the error builder runs before reading the code and the
+    /// message, binding what both read so the response is parsed once.
+    fn error_info_binding(&self) -> Option<&'static str> {
+        None
+    }
+    /// The Mojo expressions, over `res: HttpResult` (and what
+    /// `error_info_binding` binds), for a failed call's error code and
+    /// message.
     fn error_code_and_message(&self) -> (&'static str, &'static str);
     /// What the error builder's docstring calls the code it extracts, as the
     /// phrase before "and message ride out".
@@ -119,6 +131,7 @@ pub(super) trait Binding: Sync {
 
 static AWS_JSON_CODEC: AwsJsonCodec = AwsJsonCodec;
 static AWS_JSON_RPC: AwsJsonRpc = AwsJsonRpc;
+static AWS_REST_JSON: AwsRestJson = AwsRestJson;
 
 /// The protocol a service is emitted with: its codec and binding, and the
 /// `jsonVersion` an awsJson service dispatches on (empty otherwise).
@@ -139,7 +152,7 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
         _ => {
             return Err(format!(
                 "emit_aws: service `{}` declares protocol `{}`, and this emitter \
-                 implements only {:?} (awsJson1_0 / awsJson1_1). It is REFUSED by name \
+                 implements only {:?} (awsJson1_0 / awsJson1_1, restJson1). It is REFUSED by name \
                  rather than emitted half-right: a `{}` client emitted by a `json` \
                  serializer produces requests that are syntactically valid and \
                  semantically wrong, which is the failure mode a conformance corpus \
@@ -167,6 +180,12 @@ pub(super) fn select_protocol(meta: &AwsServiceMeta) -> Result<SelectedProtocol,
                 json_version,
             }
         }
+        AwsProtocol::RestJson => SelectedProtocol {
+            protocol,
+            codec: &AWS_JSON_CODEC,
+            binding: &AWS_REST_JSON,
+            json_version: String::new(),
+        },
         other => {
             return Err(format!(
                 "emit_aws: protocol `{}` is listed as supported and has no codec and \
@@ -261,10 +280,21 @@ mod tests {
 
     #[test]
     fn an_unsupported_protocol_is_refused_by_name() {
-        for name in ["rest-xml", "rest-json", "query", "ec2", "smithy-rpc-v2-cbor", "nope"] {
+        for name in ["rest-xml", "query", "ec2", "smithy-rpc-v2-cbor", "nope"] {
             let e = select_protocol(&meta(name, None, "v4", &[])).err().expect("refused");
             assert!(e.contains(&format!("declares protocol `{name}`")), "{e}");
         }
+    }
+
+    #[test]
+    fn rest_json_is_the_json_codec_behind_the_rest_binding() {
+        let s = select_protocol(&meta("rest-json", None, "v4", &[])).expect("selected");
+        assert_eq!(s.protocol, AwsProtocol::RestJson);
+        assert!(s.json_version.is_empty());
+        for p in REST_PROTOCOLS {
+            assert!(ALL_PROTOCOLS.contains(p));
+        }
+        assert!(JSON_BODY_PROTOCOLS.contains(&AwsProtocol::RestJson));
     }
 
     #[test]

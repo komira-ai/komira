@@ -48,7 +48,7 @@
 
 from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.string_array import StringArray
-from komira_core.eval.fnv1a_64 import FNV1A_OFFSET_64, FNV1A_PRIME_64
+from komira_hash import FNV1A_64_OFFSET_BASIS, FNV1A_64_PRIME
 
 from .hash_fn import NULL_HASH, StringHashFn
 
@@ -57,9 +57,9 @@ from .hash_fn import NULL_HASH, StringHashFn
 # FNV-1a 64-bit
 # =============================================================================
 #
-# The offset basis, the prime and the byte-span form (`fnv1a_64_over_bytes`)
-# live in `komira_core.eval.fnv1a_64`, so every FNV-1a-64 fold shares one
-# definition. `_fnv1a_64_hash_range` below is the StringArray-range form of the
+# The offset basis and the prime live in `komira_hash`, so every FNV-1a-64 fold
+# shares one definition (`komira_hash.fnv1a_64` is the byte-span form).
+# `_fnv1a_64_hash_range` below is the StringArray-range form of the
 # same fold (xor, then multiply, byte by byte).
 # =============================================================================
 
@@ -76,12 +76,12 @@ def _fnv1a_64_hash_range(
     bounds-checks `read_u8_at`. The caller wraps it in a chunk-level
     try/except per the non-raising contract.
     """
-    var h = FNV1A_OFFSET_64
+    var h = FNV1A_64_OFFSET_BASIS
     var view = input.data.view_ro()
     for off in range(length):
         var b = view.read_u8_at(start + off)
         h = h ^ UInt64(b)
-        h = h * FNV1A_PRIME_64
+        h = h * FNV1A_64_PRIME
     return h
 
 
