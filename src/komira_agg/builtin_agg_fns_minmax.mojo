@@ -19,7 +19,7 @@
 # ⛔ THE FLOAT CELLS DO NOT FOLD ON BARE `<` / `>` (fixed)
 # --------------------------------------------------------------------
 # `MinF32`/`MinF64`/`MaxF32`/`MaxF64` compare through
-# `komira_core.eval.float_quotient_order`, NOT through `<` / `>`. Every IEEE
+# `komira_udf.float_quotient_order`, NOT through `<` / `>`. Every IEEE
 # comparison against a NaN is FALSE, so `if not s.seen or v < s.value` can
 # never displace a NaN that has reached `s.value`: a NaN in the FIRST row of a
 # partition stuck forever, while the same NaN arriving LATER was silently
@@ -53,7 +53,7 @@ from komira_udf.schema_descriptor import (
     schema_of, DT_I8, DT_I16, DT_I32, DT_I64,
     DT_U8, DT_U16, DT_U32, DT_U64, DT_F32, DT_F64,
 )
-from komira_core.eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     float_quotient_gt_f32,
     float_quotient_gt_f64,
     float_quotient_lt_f32,
