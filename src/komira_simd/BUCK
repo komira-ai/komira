@@ -1,0 +1,27 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# SIMD byte-class, mask, copy, gather and bit-unpack primitives.
+mojo_library(
+    name = "komira_simd",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = [
+        "tests/test_byte_class_compare_reduce.mojo",
+        "tests/test_byte_class_movemask.mojo",
+        "tests/test_byte_class_shuffle_compress.mojo",
+        "tests/test_byte_equal_simd.mojo",
+        "tests/test_byte_memmem.mojo",
+        "tests/test_fast_copy_byte_oracle.mojo",
+        "tests/test_fast_copy_erms_band.mojo",
+        "tests/test_fast_copy_size_ladder.mojo",
+        "tests/test_simd_bit_unpack.mojo",
+        "tests/test_simd_blend.mojo",
+        "tests/test_simd_compress.mojo",
+        "tests/test_simd_gather.mojo",
+        "tests/test_simd_helpers.mojo",
+        "tests/test_simd_horizontal_add.mojo",
+        "tests/test_simd_pattern_copy_extend.mojo",
+        "tests/test_simd_popcount.mojo",
+        "tests/test_simd_validity_pack.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
