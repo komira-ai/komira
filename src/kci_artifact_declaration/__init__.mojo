@@ -12,7 +12,8 @@
 #
 #   parse.mojo     the textproto reader (validates before it returns)
 #   validate.mojo  the rules and the lookups
-#   contract.mojo  the six placeholders (`{out_dir}`, `{release_dir}` and
+#   contract.mojo  the seven placeholders (`{out_dir}`, `{release_dir}`,
+#                  `{platform}` and
 #                  the git-derived stamp: `{revision_id}`, `{source_commit}`,
 #                  `{build_number}`, `{timestamp_ms}`), `ReleaseStamp`,
 #                  `BuildValues`, the one-pass substitution, file order,
@@ -33,6 +34,7 @@ from kci_artifact_declaration.contract import (
     BUILD_NUMBER_PLACEHOLDER,
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
+    PLATFORM_PLACEHOLDER,
     RELEASE_DIR_PLACEHOLDER,
     REVISION_ID_PLACEHOLDER,
     SOURCE_COMMIT_PLACEHOLDER,
@@ -42,11 +44,13 @@ from kci_artifact_declaration.contract import (
     is_known_placeholder,
     known_placeholders,
     placeholders_in,
-    require_full_commit_id,
     require_manifest_name,
     require_one_manifest,
     substitute_placeholders,
 )
+# The full-commit-id check moved to kci_contract; it stays importable from
+# here so callers keep one import.
+from kci_contract import require_full_commit_id
 from kci_artifact_declaration.parse import (
     parse_artifact_declarations,
     read_artifact_declarations,

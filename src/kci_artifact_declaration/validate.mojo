@@ -12,9 +12,9 @@
 #     or a relative path for one (`./buck2`, `bin/buck2`: the file does not
 #     state the directory it would resolve against);
 #   * an empty entry in any args list;
-#   * a placeholder that is not one of contract.mojo's six (`{out_dir}`,
-#     `{release_dir}`, `{revision_id}`, `{source_commit}`, `{build_number}`,
-#     `{timestamp_ms}`) in any arg: `{<identifier>}`, the identifier
+#   * a placeholder that is not one of contract.mojo's seven (`{out_dir}`,
+#     `{release_dir}`, `{platform}`, `{revision_id}`, `{source_commit}`,
+#     `{build_number}`, `{timestamp_ms}`) in any arg: `{<identifier>}`, the identifier
 #     `[A-Za-z_][A-Za-z0-9_]*`; any other brace is literal;
 #   * an artifact whose `build_system` is empty or names no declared one;
 #   * an artifact with no args;

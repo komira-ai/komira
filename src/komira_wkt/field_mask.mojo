@@ -32,6 +32,10 @@ struct FieldMask(Proto3JsonWkt, Copyable, Movable):
 
     var paths: List[String]
 
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (see `structpb.mojo`)."""
+        self.paths = copy.paths.copy()
+
     @staticmethod
     def new() -> Self:
         """An empty mask."""

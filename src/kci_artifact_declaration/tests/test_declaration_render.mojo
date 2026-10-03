@@ -12,7 +12,7 @@
 # cell root) is read and rendered too, so it cannot drift from the code.
 # =============================================================================
 
-from std.testing import TestSuite, assert_equal
+from std.testing import TestSuite, assert_equal, assert_true
 
 from kci_artifact_declaration_proto.artifact_declaration import (
     ArtifactDeclaration,
@@ -23,6 +23,7 @@ from kci_artifact_declaration import (
     BUILD_NUMBER_PLACEHOLDER,
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
+    PLATFORM_PLACEHOLDER,
     RELEASE_DIR_PLACEHOLDER,
     REVISION_ID_PLACEHOLDER,
     SOURCE_COMMIT_PLACEHOLDER,
@@ -40,6 +41,12 @@ from kci_artifact_declaration import (
 
 comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
+
+
+def _parse(text: String) raises -> ArtifactDeclarations:
+    """`parse_artifact_declarations` over `text` with `schema_version: 1`
+    prepended on its FIRST line, so no line number a refusal names moves."""
+    return parse_artifact_declarations(String("schema_version: 1 ") + text, String("decl.textproto"))
 
 
 def _stamp() raises -> ReleaseStamp:
@@ -61,7 +68,7 @@ def _expect_argv(got: List[String], want: List[String]) raises:
 
 def _refusal(decls: ArtifactDeclarations, artifact: String, release_dir: String) raises -> String:
     try:
-        _ = render_build_argv(decls, artifact, release_dir, _stamp())
+        _ = render_build_argv(decls, artifact, release_dir, String("linux-x86_64"), _stamp())
     except e:
         return String(e)
     return String("<rendered>")
@@ -70,6 +77,7 @@ def _refusal(decls: ArtifactDeclarations, artifact: String, release_dir: String)
 def test_contract_words() raises:
     assert_equal(String(OUT_DIR_PLACEHOLDER), String("{out_dir}"))
     assert_equal(String(RELEASE_DIR_PLACEHOLDER), String("{release_dir}"))
+    assert_equal(String(PLATFORM_PLACEHOLDER), String("{platform}"))
     assert_equal(String(REVISION_ID_PLACEHOLDER), String("{revision_id}"))
     assert_equal(String(SOURCE_COMMIT_PLACEHOLDER), String("{source_commit}"))
     assert_equal(String(BUILD_NUMBER_PLACEHOLDER), String("{build_number}"))
@@ -77,7 +85,7 @@ def test_contract_words() raises:
     _expect_argv(
         known_placeholders(),
         _argv(
-            "{out_dir}", "{release_dir}", "{revision_id}", "{source_commit}",
+            "{out_dir}", "{release_dir}", "{platform}", "{revision_id}", "{source_commit}",
             "{build_number}", "{timestamp_ms}",
         ),
     )
@@ -91,7 +99,7 @@ def test_example_file_renders_the_stamped_library_then_the_metapackage() raises:
     assert_equal(d.artifacts[0].name, String("komira_encoding"))
     assert_equal(d.artifacts[1].name, String("komira_all"))
     _expect_argv(
-        render_build_argv(d, String("komira_encoding"), String("/work/rel"), _stamp()),
+        render_build_argv(d, String("komira_encoding"), String("/work/rel"), String("linux-x86_64"), _stamp()),
         _argv(
             "buck2",
             "build",
@@ -107,7 +115,7 @@ def test_example_file_renders_the_stamped_library_then_the_metapackage() raises:
         ),
     )
     _expect_argv(
-        render_build_argv(d, String("komira_all"), String("/work/rel"), _stamp()),
+        render_build_argv(d, String("komira_all"), String("/work/rel"), String("linux-x86_64"), _stamp()),
         _argv(
             "buck2",
             "run",
@@ -142,28 +150,28 @@ def _file() -> String:
         + String("  args: \"x{out_dir}y{out_dir}z\"\n  args: \"{}\"\n  args: \"{k: 1}\"\n")
         + String("  args: \"{out_dir\"\n}\n")
         + String("artifacts {\n  name: \"b\"\n  build_system: \"tool\"\n  args: \"plain\"\n")
-        + String("  args: \"{release_dir}|{revision_id}|{source_commit}|{build_number}|{timestamp_ms}\"\n")
+        + String("  args: \"{release_dir}|{platform}|{revision_id}|{source_commit}|{build_number}|{timestamp_ms}\"\n")
         + String("  args: \"{{build_number}}\"\n}\n")
     )
 
 
 def test_substitution_in_build_system_and_artifact_args() raises:
-    var d = parse_artifact_declarations(_file(), String("decl.textproto"))
+    var d = _parse(_file())
     _expect_argv(
-        render_build_argv(d, String("a"), String("/r"), _stamp()),
+        render_build_argv(d, String("a"), String("/r"), String("linux-x86_64"), _stamp()),
         _argv("/opt/tool/bin/tool", "--root=/r/a/root", "run", "x/r/ay/r/az", "{}", "{k: 1}", "{out_dir"),
     )
     # The executable and the order are the build system's; only the
     # artifact's own args differ between artifacts. Every stamp value lands
     # as written; a doubled brace keeps its outer braces.
     _expect_argv(
-        render_build_argv(d, String("b"), String("/p q"), _stamp()),
+        render_build_argv(d, String("b"), String("/p q"), String("linux-x86_64"), _stamp()),
         _argv(
             "/opt/tool/bin/tool",
             "--root=/p q/b/root",
             "run",
             "plain",
-            "/p q|a1b2c3d4e5f60718293a4b5c6d7e8f9012345678|f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
+            "/p q|linux-x86_64|a1b2c3d4e5f60718293a4b5c6d7e8f9012345678|f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
             "|154|1790994309000",
             "{154}",
         ),
@@ -173,15 +181,15 @@ def test_substitution_in_build_system_and_artifact_args() raises:
 def test_substitution_is_one_pass() raises:
     # A release directory whose own name holds placeholders: substituted
     # once, never again.
-    var d = parse_artifact_declarations(_file(), String("decl.textproto"))
+    var d = _parse(_file())
     _expect_argv(
-        render_build_argv(d, String("b"), String("/x{out_dir}{build_number}"), _stamp()),
+        render_build_argv(d, String("b"), String("/x{out_dir}{build_number}"), String("linux-x86_64"), _stamp()),
         _argv(
             "/opt/tool/bin/tool",
             "--root=/x{out_dir}{build_number}/b/root",
             "run",
             "plain",
-            "/x{out_dir}{build_number}|a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+            "/x{out_dir}{build_number}|linux-x86_64|a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
             "|f0e1d2c3b4a5968778695a4b3c2d1e0f12345678|154|1790994309000",
             "{154}",
         ),
@@ -189,18 +197,34 @@ def test_substitution_is_one_pass() raises:
 
 
 def test_render_refusals() raises:
-    var d = parse_artifact_declarations(_file(), String("decl.textproto"))
+    var d = _parse(_file())
     var tail = String("' is not an absolute path (other than '/', with no trailing '/')")
     assert_equal(_refusal(d, String("a"), String("out")), String("release_dir 'out") + tail)
     assert_equal(_refusal(d, String("a"), String("")), String("release_dir '") + tail)
     assert_equal(_refusal(d, String("a"), String("/")), String("release_dir '/") + tail)
     assert_equal(_refusal(d, String("a"), String("/r/")), String("release_dir '/r/") + tail)
     assert_equal(_refusal(d, String("nope"), String("/o")), String("no artifact 'nope' is declared"))
+    # A platform kci does not release is refused before anything is rendered.
+    var refused = String("<rendered>")
+    try:
+        _ = render_build_argv(d, String("a"), String("/o"), String("darwin-arm64"), _stamp())
+    except e:
+        refused = String(e)
+    assert_equal(
+        refused,
+        String("platform 'darwin-arm64' is not released: kci releases linux-x86_64 only for now; darwin-arm64 is reserved"),
+    )
+    refused = String("<rendered>")
+    try:
+        _ = render_build_argv(d, String("a"), String("/o"), String("noarch"), _stamp())
+    except e:
+        refused = String(e)
+    assert_true(refused.find(String("never a release's")) >= 0, refused)
     # A value that never went through the validator.
     var systems = List[BuildSystem]()
     var artifacts = List[ArtifactDeclaration]()
     artifacts.append(ArtifactDeclaration(String("a"), String("zz"), _argv("{out_dir}")))
-    var raw = ArtifactDeclarations(systems^, artifacts^)
+    var raw = ArtifactDeclarations(systems^, artifacts^, Int32(1))
     assert_equal(
         _refusal(raw, String("a"), String("/o")),
         String("artifact 'a': build_system 'zz' is not declared"),
@@ -211,7 +235,7 @@ def test_render_refusals() raises:
     systems2.append(BuildSystem(String("t"), String("t"), List[String]()))
     var artifacts2 = List[ArtifactDeclaration]()
     artifacts2.append(ArtifactDeclaration(String("a"), String("t"), _argv("{out_dir}", "{nope}")))
-    var raw2 = ArtifactDeclarations(systems2^, artifacts2^)
+    var raw2 = ArtifactDeclarations(systems2^, artifacts2^, Int32(1))
     assert_equal(_refusal(raw2, String("a"), String("/o")), String("unknown placeholder '{nope}'"))
 
 
