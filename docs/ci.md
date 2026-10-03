@@ -140,6 +140,11 @@ One job per stage, each one kci invocation:
 - **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
   Never `pull_request`: the build job runs on the farm runner, and a pull
   request's code must not reach a release workflow.
+- **No declarations, no release.** While `release/artifacts.textproto` or
+  `release/channels.textproto` is absent, a push to `main` is a reported
+  skip (a `kci skipped` warning and a summary line; every later step and the
+  `prod` job are skipped), so main does not go red before the declarations
+  land. A manual run with either file absent is refused (exit 1).
 - **Dry run by default.** Every run is `kci publish --dry-run` (every check,
   and anonymous reads of the channel; no write and no token exchange) except a
   manual run with the input `dry_run` set to false. A push to `main` is always
