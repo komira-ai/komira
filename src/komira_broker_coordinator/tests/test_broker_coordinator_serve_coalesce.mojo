@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/tests/test_broker_coord_serve_coalesce.mojo
+# komira_broker_coordinator/tests/test_broker_coordinator_serve_coalesce.mojo
 #   BROKER COORDINATOR serve-loop coalesce: the unit test.
 # =============================================================================
 #
@@ -22,7 +22,7 @@
 from std.testing import assert_equal, assert_true
 
 from komira_broker import ClusterAssignmentStore
-from komira_broker_coord import BrokerHeartbeatCoordinator
+from komira_broker_coordinator import BrokerHeartbeatCoordinator
 from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
@@ -270,4 +270,4 @@ def main() raises:
     test_steady_state_heartbeat_zero_store()
     test_membership_change_recomputes()
     test_restart_recovers_from_store()
-    print("ALL test_broker_coord_serve_coalesce tests PASS")
+    print("ALL test_broker_coordinator_serve_coalesce tests PASS")

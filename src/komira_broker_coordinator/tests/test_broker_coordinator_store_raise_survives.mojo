@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_broker_coord/tests/test_broker_coord_store_raise_survives.mojo
+# komira_broker_coordinator/tests/test_broker_coordinator_store_raise_survives.mojo
 #   BROKER COORDINATOR process survival: a store verb that RAISES during a
 #   parkable reassign must NOT crash the coordinator process.
 # =============================================================================
@@ -38,8 +38,8 @@ from std.testing import assert_true, assert_false
 from komira_async.ops.waker_sink import NoopSink
 
 from komira_broker import ClusterAssignmentStore
-from komira_broker_coord import BrokerHeartbeatCoordinator
-from komira_broker_coord import BrokerCoordinatorService
+from komira_broker_coordinator import BrokerHeartbeatCoordinator
+from komira_broker_coordinator import BrokerCoordinatorService
 from komira_objectstore.shared_in_memory_slow_cas_store import (
     SharedInMemorySlowCasStore,
 )
@@ -272,8 +272,9 @@ def test_store_raise_does_not_crash_serve() raises:
 
 def main() raises:
     print(
-        "test_broker_coord_store_raise_survives — a parkable store-verb raise"
+        "test_broker_coordinator_store_raise_survives — a parkable"
+        " store-verb raise"
         " must NOT crash the coordinator"
     )
     test_store_raise_does_not_crash_serve()
-    print("ALL test_broker_coord_store_raise_survives tests PASS")
+    print("ALL test_broker_coordinator_store_raise_survives tests PASS")
