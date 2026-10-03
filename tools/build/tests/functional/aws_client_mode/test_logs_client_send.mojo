@@ -17,15 +17,29 @@
 # into an error naming the operation, the status and the code and message
 # komira_aws_core's aws_json_error_info reads (an X-Amzn-Errortype code
 # included), never the raw body. It sends neither `retry_safe` nor
-# `s3_200_error` (the transport's defaults, False). Signing is tested in
-# komira//src/komira_aws_core.
+# `s3_200_error` (the transport's defaults, False). And that the send over
+# injected seams (`send_with`, through `get_log_events_with`) hands the
+# same arguments to the stub `send_sigv4_signed_request_with`, which sends
+# one unsigned request through the caller's transport, reads the caller's
+# clock and drives the caller's retry loop and budget. Signing, retries and
+# the conditional-write rule are tested in komira//src/komira_aws_core.
 from komira_aws_logs_client.komira_aws_logs_client import (
     CloudWatchLogsCloudWatchLogsClient,
     CloudWatchLogsGetLogEventsRequest,
     build_get_log_events_request,
 )
-from komira_aws_core import AwsCredential, AwsCredsSource, AwsEndpoint, AwsRequest
+from komira_aws_core import (
+    AwsClock,
+    AwsCredential,
+    AwsCredsSource,
+    AwsEndpoint,
+    AwsHttpTransport,
+    AwsRequest,
+    CredentialHttpRequest,
+    HttpResult,
+)
 from komira_http_core.transport.io_stream import Connector
+from komira_retry import MonotonicClock, RetryBudget, RetryLoop, RetryRng, Sleeper
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 
@@ -257,6 +271,121 @@ def test_creds_source_threads_through() raises:
     assert_equal(source.credentials().access_key_id, "AKIDEXAMPLE")
 
 
+struct _RecordingTransport(AwsHttpTransport):
+    """Answers 200 with the GetLogEvents body and keeps what it was sent."""
+
+    var sends: Int
+    var last: Optional[CredentialHttpRequest]
+
+    def __init__(out self):
+        self.sends = 0
+        self.last = Optional[CredentialHttpRequest]()
+
+    def send(mut self, req: CredentialHttpRequest) raises -> HttpResult:
+        self.sends += 1
+        self.last = Optional[CredentialHttpRequest](req.copy())
+        var body = List[UInt8]()
+        body.extend(Span(String('{"nextForwardToken":"f/1","events":[]}').as_bytes()))
+        return HttpResult(200, body^)
+
+
+struct _Clock(AwsClock, Movable):
+    var reads: Int
+
+    def __init__(out self):
+        self.reads = 0
+
+    def now_unix_seconds(mut self) -> Int:
+        self.reads += 1
+        return 1700000000
+
+
+struct _Mono(MonotonicClock):
+    def __init__(out self):
+        pass
+
+    def now_ms(mut self) -> Int64:
+        return 0
+
+
+struct _NoSleep(Sleeper):
+    def __init__(out self):
+        pass
+
+    def sleep_ms(mut self, ms: Int64) raises:
+        raise Error("the stub loop never sleeps")
+
+
+struct _Rng(RetryRng):
+    def __init__(out self):
+        pass
+
+    def next_u64(mut self) -> UInt64:
+        return 0
+
+
+struct _Budget(RetryBudget):
+    var successes: Int
+
+    def __init__(out self):
+        self.successes = 0
+
+    def try_spend(mut self, cost: Int) -> Bool:
+        return False
+
+    def on_success(mut self, last_retry_cost: Int):
+        self.successes += 1
+
+
+def test_get_log_events_with_goes_over_the_given_seams() raises:
+    var client = _Client(_mk_connector_refused, _creds(), String("us-west-2"))
+    var transport = _RecordingTransport()
+    var clock = _Clock()
+    var loop = RetryLoop[_Mono, _NoSleep, _Rng](_Mono(), _NoSleep(), _Rng())
+    var budget = _Budget()
+    # The connector factory refuses, so a send that reached for it, rather
+    # than the transport given, would raise.
+    var res = client.get_log_events_with(_request(), transport, clock, loop, budget)
+    assert_equal(res.status, 200)
+    assert_equal(transport.sends, 1)
+    assert_equal(clock.reads, 1)
+    assert_equal(loop.attempts(), 1)
+    assert_equal(budget.successes, 1)
+    assert_equal(res.header(String("x-stub-region")), "us-west-2")
+    assert_equal(res.header(String("x-stub-service")), "logs")
+    assert_equal(res.header(String("x-stub-access-key-id")), "AKIDEXAMPLE")
+    assert_equal(res.header(String("x-stub-clock")), "1700000000")
+    assert_equal(res.header(String("x-stub-retry-safe")), "false")
+    assert_equal(res.header(String("x-stub-s3-200-error")), "false")
+    assert_equal(res.header(String("x-stub-conditional")), "false")
+    var sent = transport.last.value().copy()
+    assert_equal(sent.method, "POST")
+    assert_equal(sent.scheme, "https")
+    assert_equal(sent.host, "logs.us-west-2.amazonaws.com")
+    assert_equal(sent.port, 443)
+    assert_equal(sent.target, "/")
+    assert_equal(sent.header(String("Content-Type")), "application/x-amz-json-1.1")
+    assert_equal(sent.header(String("X-Amz-Target")), "Logs_20140328.GetLogEvents")
+    assert_equal(len(sent.headers), 3)
+    var body = sent.body_text()
+    assert_true(body.find('"logStreamName":"web-1"') >= 0)
+
+
+def test_send_with_reports_a_conditional_write() raises:
+    # An If-Match header on a POST is a conditional write; the generated
+    # send hands it on as an extra header, where the core's rule reads it.
+    var client = _Client(_mk_connector_refused, _creds(), String("us-west-2"))
+    var transport = _RecordingTransport()
+    var clock = _Clock()
+    var loop = RetryLoop[_Mono, _NoSleep, _Rng](_Mono(), _NoSleep(), _Rng())
+    var budget = _Budget()
+    var req = build_get_log_events_request(_request())
+    req.set_header(String("If-Match"), String("\"etag-1\""))
+    var res = client.send_with(req^, transport, clock, loop, budget)
+    assert_equal(res.header(String("x-stub-conditional")), "true")
+    assert_equal(transport.last.value().header(String("If-Match")), "\"etag-1\"")
+
+
 def main() raises:
     test_send_hands_the_transport()
     test_send_keeps_the_session_token()
@@ -270,3 +399,5 @@ def main() raises:
     test_get_log_events_error_takes_the_errortype_header()
     test_get_log_events_error_never_echoes_the_body()
     test_creds_source_threads_through()
+    test_get_log_events_with_goes_over_the_given_seams()
+    test_send_with_reports_a_conditional_write()
