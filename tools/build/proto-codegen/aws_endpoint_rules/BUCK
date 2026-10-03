@@ -1,0 +1,71 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+    "botocore_model_path",
+)
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# A generated client resolving its endpoints through an endpoint ruleset
+# (mojo_aws_client's `endpoint_rules`), compiled against the real komira_aws_core,
+# with botocore's endpoint test cases run through the GENERATED code: the
+# config, the context-parameter bindings and `resolve_<op>_endpoint`. The
+# ruleset interpreter itself is komira_aws_core's subject (its
+# test_s3_endpoint_rules); this package tests what the generator binds.
+# A service client generated with its ruleset runs that service's cases
+# through every one of its operations in its own tests
+# (//src/komira_aws_logs, //src/komira_aws_sqs, //src/komira_aws_dynamodb);
+# this package keeps what no service client covers.
+#
+# Every upstream file is read from the botocore archive
+# //third_party/botocore pins by sha256; none is copied here.
+
+_RUNTIME = [
+    "//src/komira_aws_core:komira_aws_core",
+    "//src/komira_json:komira_json",
+]
+
+# botocore's S3 endpoint test cases, staged at their archive path.
+_S3_ENDPOINT_TESTS = {
+    botocore_endpoint_tests_path("s3"): botocore_endpoint_file(botocore_endpoint_tests_path("s3")),
+}
+
+# A model of this package's own (model/endpoint_bindings.json, awsJson, so
+# that it generates before the S3 protocol does) whose operations bind S3's
+# ruleset parameters as the S3 model's operations of the same names do:
+# `contextParam` members, `staticContextParams` (CopyObject, CreateBucket,
+# ListDirectoryBuckets, WriteGetObjectResponse) and the five
+# `clientContextParams`. The test checks each of those against the pinned
+# S3 model (staged beside it), so a binding typed here that S3 does not make
+# fails it. PutTarget's `operationContextParams` member path is this model's
+# alone: S3 has none at the pinned release. Every `operationInputs` entry of
+# botocore's S3 endpoint cases is resolved through it.
+_S3_MODEL = botocore_model_path("s3")
+
+_S3 = botocore_model("s3")
+
+mojo_aws_client(
+    name = "endpoint_bindings",
+    model = "model/endpoint_bindings.json",
+    model_sha256 = "c0ed1b711cd3530a143ddcde49578cf717b8dfca46d00e153e1956f4456b5773",
+    service = "endpoint-bindings",
+    operations = [
+        "CopyObject",
+        "CreateBucket",
+        "GetObject",
+        "ListBuckets",
+        "ListDirectoryBuckets",
+        "ListObjects",
+        "PutTarget",
+        "WriteGetObjectResponse",
+    ],
+    endpoint_rules = _S3.endpoint_rules,
+    partitions = _S3.partitions,
+    deps = _RUNTIME,
+    test_srcs = ["test_endpoint_bindings.mojo"],
+    test_data = {"test_endpoint_bindings.mojo": _S3_ENDPOINT_TESTS | {
+        _S3_MODEL: _S3.model,
+        "model/endpoint_bindings.json": "model/endpoint_bindings.json",
+    }},
+)

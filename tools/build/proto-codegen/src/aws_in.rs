@@ -53,12 +53,40 @@ pub struct AwsServiceMeta {
     pub service_full_name: String,
     pub service_abbreviation: Option<String>,
     pub global_endpoint: Option<String>,
-    /// `metadata.xmlNamespace` — the default XML namespace URI for
-    /// `rest-xml` request documents.
-    pub xml_namespace: Option<String>,
+    /// `metadata.xmlNamespace` — the default XML namespace for `rest-xml`
+    /// request documents.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     pub aws_query_compatible: bool,
     pub checksum_format: Option<String>,
     pub uid: String,
+    /// The model's `clientContextParams`: endpoint-ruleset parameters a
+    /// client is configured with, in declared order.
+    pub client_context_params: Vec<AwsClientContextParam>,
+}
+
+/// An `xmlNamespace` trait: the namespace URI, and the prefix it is bound
+/// to (empty for the default namespace). botocore models spell it as an
+/// object (`{"uri": ..., "prefix": ...}`) or as the bare URI string.
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AwsXmlNamespace {
+    pub prefix: String,
+    pub uri: String,
+}
+
+/// One `clientContextParams` entry: a ruleset parameter a client is
+/// configured with, and its model type (`boolean` or `string`).
+#[derive(Clone, Debug, PartialEq, Eq, Default)]
+pub struct AwsClientContextParam {
+    pub name: String,
+    pub ty: String,
+}
+
+/// The value of one `staticContextParams` entry: the ruleset parameter an
+/// operation always resolves its endpoint with.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum AwsStaticValue {
+    Bool(bool),
+    Str(String),
 }
 
 // ===========================================================================
@@ -155,8 +183,8 @@ pub struct AwsMemberFacts {
     pub idempotency_token: bool,
     /// Member-level `flattened` (XML: no wrapper element around a list).
     pub flattened: bool,
-    /// Member-level `xmlNamespace.uri`.
-    pub xml_namespace: Option<String>,
+    /// Member-level `xmlNamespace`.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     /// `xmlAttribute: true` — serialise as an attribute, not an element.
     pub xml_attribute: bool,
     /// `streaming: true` on the member.
@@ -166,11 +194,14 @@ pub struct AwsMemberFacts {
     /// `hostLabel: true` — the member is substituted into the endpoint's
     /// `hostPrefix`.
     pub host_label: bool,
+    /// `jsonvalue: true` — a string holding a JSON document; bound to a
+    /// header it travels base64-encoded.
+    pub json_value: bool,
     pub boxed: bool,
     pub deprecated: bool,
     pub deprecated_message: Option<String>,
-    /// `contextParam.name` — an endpoint-ruleset input. Recorded rather
-    /// than dropped even though no ruleset is vendored.
+    /// `contextParam.name` — the endpoint-ruleset parameter this input
+    /// member binds.
     pub context_param: Option<String>,
     /// True when this member is the shape's designated `payload`.
     pub is_payload: bool,
@@ -183,7 +214,9 @@ pub struct AwsMemberFacts {
     /// its member/key/value `locationName`s, which are the XML element
     /// names — is otherwise unreachable from the IR. This is the link.
     pub container_shape: Option<String>,
-    /// The resolved timestamp format, for a `timestamp`-shaped member.
+    /// The resolved timestamp format, for a `timestamp`-shaped member and
+    /// for a list or map whose elements (at any depth) are timestamps: a
+    /// container has one scalar leaf, so the format belongs to it.
     pub timestamp_format: Option<AwsTimestampFormat>,
 }
 
@@ -208,8 +241,8 @@ pub struct AwsShapeFacts {
     pub retryable: bool,
     /// Shape-level `locationName`.
     pub location_name: Option<String>,
-    /// Shape-level `xmlNamespace.uri`.
-    pub xml_namespace: Option<String>,
+    /// Shape-level `xmlNamespace`.
+    pub xml_namespace: Option<AwsXmlNamespace>,
     /// The `payload` member name, for a structure that designates one.
     pub payload: Option<String>,
     /// The `required` list, verbatim (member names, not IR field names).
@@ -218,6 +251,8 @@ pub struct AwsShapeFacts {
     /// container element is elided in XML.
     pub flattened: bool,
     pub list_member_location_name: Option<String>,
+    /// For a `list`: the `xmlNamespace` on its `member` reference.
+    pub list_member_xml_namespace: Option<AwsXmlNamespace>,
     /// For a `map`: the key / value `locationName`s.
     pub map_key_location_name: Option<String>,
     pub map_value_location_name: Option<String>,
@@ -281,8 +316,8 @@ pub struct AwsOperationFacts {
     pub input_shape: Option<String>,
     /// `input.locationName` — the XML root element name for `rest-xml`.
     pub input_location_name: Option<String>,
-    /// `input.xmlNamespace.uri`.
-    pub input_xml_namespace: Option<String>,
+    /// `input.xmlNamespace`.
+    pub input_xml_namespace: Option<AwsXmlNamespace>,
     /// The AWS output shape name, or `None` (165 of 850 declare none).
     pub output_shape: Option<String>,
     pub result_wrapper: Option<String>,
@@ -308,6 +343,30 @@ pub struct AwsOperationFacts {
     /// `endpoint.hostPrefix` — a per-operation host prefix.
     pub host_prefix: Option<String>,
     pub http_checksum: Option<AwsHttpChecksum>,
+    /// `httpChecksumRequired`: the trait that predates `httpChecksum`, which
+    /// requires a request checksum and names no algorithm member.
+    pub http_checksum_required: bool,
+    /// `staticContextParams`: ruleset parameters this operation always
+    /// resolves its endpoint with, in declared order.
+    pub static_context_params: Vec<(String, AwsStaticValue)>,
+    /// `operationContextParams`: ruleset parameters taken from the input by
+    /// a path (`{"path": "A.B"}`), as (parameter, path), in declared order.
+    pub operation_context_params: Vec<(String, String)>,
+}
+
+impl AwsOperationFacts {
+    /// Whether every request of this operation must carry a checksum:
+    /// `httpChecksumRequired`, or `httpChecksum.requestChecksumRequired`
+    /// (botocore's `request_checksum_required`). The emitter refuses such an
+    /// operation where the generated client would send none
+    /// (`checksum-required`).
+    pub fn request_checksum_required(&self) -> bool {
+        self.http_checksum_required
+            || self
+                .http_checksum
+                .as_ref()
+                .is_some_and(|c| c.request_checksum_required)
+    }
 }
 
 /// The `httpChecksum` trait, flattened.
@@ -485,6 +544,25 @@ pub fn lower_aws_service(
     for name in &reached {
         let shape = lowerer.shape(name)?;
         let ty = shape_type(shape, name)?;
+        // REFUSED, by name (aws_conformance::REFUSAL_MARKER): a document is
+        // untyped JSON, and lowering it as the empty structure it is spelled
+        // as would drop its contents on both the request and the response.
+        if flag(shape, "document") {
+            return Err(format!(
+                "aws front-end: REFUSED document: shape `{name}` is a document type \
+                 (untyped JSON), which the IR has no type for"
+            ));
+        }
+        // REFUSED, by name: an event stream is a framed sequence of events
+        // inside one HTTP body, and the generated code reads and writes a
+        // body as one document, so a client of it would send or read the
+        // frames as if they were that document.
+        if flag(shape, "eventstream") {
+            return Err(format!(
+                "aws front-end: REFUSED eventstream: shape `{name}` is an event \
+                 stream, and the generated code has no event-stream framing"
+            ));
+        }
         match ty {
             "structure" => {
                 lowerer.message_shapes.insert(name.clone());
@@ -703,7 +781,7 @@ impl<'a> AwsLowerer<'a> {
             fault: flag(s, "fault"),
             retryable: s.get("retryable").is_some(),
             location_name: str_of(s, "locationName"),
-            xml_namespace: xml_ns(s.get("xmlNamespace")),
+            xml_namespace: xml_ns(s.get("xmlNamespace"), &format!("shape `{name}`"))?,
             payload: str_of(s, "payload"),
             required: s
                 .get("required")
@@ -750,6 +828,8 @@ impl<'a> AwsLowerer<'a> {
             f.element_shape = Some(member_shape_name(m, name)?);
             f.list_member_location_name =
                 m.get("locationName").and_then(Json::as_str).map(String::from);
+            f.list_member_xml_namespace =
+                xml_ns(m.get("xmlNamespace"), &format!("the member of list `{name}`"))?;
             // A member-level `flattened` on the list's own `member` node.
             if m.get("flattened").and_then(Json::as_bool) == Some(true) {
                 f.flattened = true;
@@ -1074,10 +1154,11 @@ impl<'a> AwsLowerer<'a> {
         };
         let location_name = str_of(mo, "locationName");
         let shape_name = member_shape_name(m, owner)?;
-        let shape = self.shape(&shape_name)?;
-        let timestamp_format = if shape_type(shape, &shape_name)? == "timestamp" {
+        let leaf_name = self.container_leaf(&shape_name)?;
+        let leaf = self.shape(&leaf_name)?;
+        let timestamp_format = if shape_type(leaf, &leaf_name)? == "timestamp" {
             Some(resolve_timestamp_format(
-                str_of(shape, "timestampFormat").as_deref(),
+                str_of(leaf, "timestampFormat").as_deref(),
                 &self.meta.protocol,
                 location,
             )?)
@@ -1093,11 +1174,15 @@ impl<'a> AwsLowerer<'a> {
             declared_index: idx,
             idempotency_token: flag(mo, "idempotencyToken"),
             flattened: flag(mo, "flattened"),
-            xml_namespace: xml_ns(mo.get("xmlNamespace")),
+            xml_namespace: xml_ns(
+                mo.get("xmlNamespace"),
+                &format!("member `{owner}.{mname}`"),
+            )?,
             xml_attribute: flag(mo, "xmlAttribute"),
             streaming: flag(mo, "streaming"),
             event_payload: flag(mo, "eventpayload"),
             host_label: flag(mo, "hostLabel"),
+            json_value: flag(mo, "jsonvalue"),
             boxed: flag(mo, "box"),
             deprecated: flag(mo, "deprecated"),
             deprecated_message: str_of(mo, "deprecatedMessage"),
@@ -1111,6 +1196,34 @@ impl<'a> AwsLowerer<'a> {
             container_shape: container,
             timestamp_format,
         })
+    }
+
+    /// The shape a list's elements or a map's values end in, through any
+    /// depth of containers: `shape_name` itself when it is not a list or a
+    /// map. A container chain that re-enters itself is refused (see
+    /// [`Self::lower_nested_type_on`]).
+    fn container_leaf(&self, shape_name: &str) -> Result<String, String> {
+        let mut name = shape_name.to_string();
+        let mut seen: Vec<String> = Vec::new();
+        loop {
+            let s = self.shape(&name)?;
+            let next = match shape_type(s, &name)? {
+                "list" => s.get("member"),
+                "map" => s.get("value"),
+                _ => return Ok(name),
+            };
+            if seen.contains(&name) {
+                return Err(format!(
+                    "aws front-end: container shape `{name}` contains itself through \
+                     containers only"
+                ));
+            }
+            seen.push(name.clone());
+            let next = next.ok_or_else(|| {
+                format!("aws front-end: container shape `{name}` has no element shape")
+            })?;
+            name = member_shape_name(next, &name)?;
+        }
     }
 
     // --- operations ------------------------------------------------------
@@ -1159,7 +1272,45 @@ impl<'a> AwsLowerer<'a> {
                 .get("shape")
                 .and_then(Json::as_str)
                 .ok_or_else(|| format!("aws front-end: `{op_name}` error has no `shape`"))?;
+            // REFUSED, by name (aws_conformance::REFUSAL_MARKER): an error
+            // of an awsQueryCompatible service whose `error.code` is not its
+            // shape name. The service answers that error with the code in
+            // the x-amzn-query-error header and the shape name in the body's
+            // `__type`, and the generated error path reads the body only, so
+            // the client would report the wrong code. An error without a
+            // custom code carries the same code in both places, so the
+            // operation is only refused when one of its errors has one.
+            if self.meta.aws_query_compatible {
+                let shape = self.shape(s)?;
+                if let Some(code) = shape
+                    .get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(Json::as_str)
+                    .filter(|c| *c != s)
+                {
+                    return Err(format!(
+                        "aws front-end: REFUSED aws-query-compatible: operation \
+                         `{op_name}` can return `{s}`, whose awsQueryCompatible code \
+                         `{code}` arrives in the x-amzn-query-error header, which the \
+                         generated error path does not read"
+                    ));
+                }
+            }
             errors.push(aws_fq(&self.meta.service, s));
+        }
+        // REFUSED, by name: an operation with an `endpoint.hostPrefix`. The
+        // request builder fills `AwsRequest.host_prefix`, but the generated
+        // `send` resolves the endpoint without it, so the client would send
+        // the request to the unprefixed host.
+        if let Some(hp) = op
+            .get("endpoint")
+            .and_then(|e| e.get("hostPrefix"))
+            .and_then(Json::as_str)
+        {
+            return Err(format!(
+                "aws front-end: REFUSED host-prefix: operation `{op_name}` has the \
+                 host prefix `{hp}`, and the generated send does not apply a host prefix"
+            ));
         }
 
         let facts = AwsOperationFacts {
@@ -1177,7 +1328,10 @@ impl<'a> AwsLowerer<'a> {
                 .and_then(|i| i.get("locationName"))
                 .and_then(Json::as_str)
                 .map(String::from),
-            input_xml_namespace: op.get("input").and_then(|i| xml_ns(i.get("xmlNamespace"))),
+            input_xml_namespace: xml_ns(
+                op.get("input").and_then(|i| i.get("xmlNamespace")),
+                &format!("the input of operation `{op_name}`"),
+            )?,
             output_shape: output_shape.map(String::from),
             result_wrapper: op
                 .get("output")
@@ -1233,22 +1387,13 @@ impl<'a> AwsLowerer<'a> {
                     .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
                     .unwrap_or_default(),
             }),
+            http_checksum_required: op
+                .get("httpChecksumRequired")
+                .and_then(Json::as_bool)
+                .unwrap_or(false),
+            static_context_params: static_context_params(op, op_name)?,
+            operation_context_params: operation_context_params(op, op_name)?,
         };
-        // DROPPED, deliberately and named: `staticContextParams` (78
-        // operations) and `operationContextParams` (5). They bind values
-        // into an ENDPOINT RULESET, and `PIN.json` vendors no rulesets —
-        // there is nothing for them to parameterise, and inventing a
-        // representation for an absent consumer is how a wrong default gets
-        // established. `contextParam` (the per-MEMBER half, 179 members) IS
-        // recorded, because it costs one string.
-        if op.get("staticContextParams").is_some() || op.get("operationContextParams").is_some() {
-            self.note(format!(
-                "operation `{op_name}`: staticContextParams / operationContextParams \
-                 DROPPED — they are endpoint-ruleset inputs and no ruleset is vendored \
-                 (see tools/vendor/aws_models/PIN.json)"
-            ));
-        }
-
         let body = self.body_designator(op_name, input_shape, &path_params)?;
         self.facts.operations.insert(op_name.to_string(), facts);
 
@@ -1362,11 +1507,86 @@ fn lower_metadata(root: &JsonObject, service: &str) -> Result<AwsServiceMeta, St
         service_full_name: need("serviceFullName")?,
         service_abbreviation: str_of(m, "serviceAbbreviation"),
         global_endpoint: str_of(m, "globalEndpoint"),
-        xml_namespace: xml_ns(m.get("xmlNamespace")),
+        xml_namespace: xml_ns(m.get("xmlNamespace"), "the service metadata")?,
         aws_query_compatible: m.get("awsQueryCompatible").is_some(),
         checksum_format: str_of(m, "checksumFormat"),
         uid: need("uid")?,
+        client_context_params: client_context_params(root)?,
     })
+}
+
+/// The model's `clientContextParams` (a top-level object of the model, not
+/// of `metadata`), in declared order.
+fn client_context_params(root: &JsonObject) -> Result<Vec<AwsClientContextParam>, String> {
+    let Some(v) = root.get("clientContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v
+        .as_object()
+        .ok_or("AWS service model `clientContextParams` is not an object")?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let ty = spec
+            .get("type")
+            .and_then(Json::as_str)
+            .ok_or_else(|| format!("clientContextParams `{name}` has no `type`"))?;
+        out.push(AwsClientContextParam {
+            name: name.clone(),
+            ty: ty.to_ascii_lowercase(),
+        });
+    }
+    Ok(out)
+}
+
+/// An operation's `staticContextParams`, in declared order. A value that is
+/// neither a boolean nor a string is refused: no other kind occurs in the
+/// pinned models, and the emitter binds only these two.
+fn static_context_params(
+    op: &Json,
+    op_name: &str,
+) -> Result<Vec<(String, AwsStaticValue)>, String> {
+    let Some(v) = op.get("staticContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v.as_object().ok_or_else(|| {
+        format!("operation `{op_name}`: `staticContextParams` is not an object")
+    })?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let value = match spec.get("value") {
+            Some(Json::Bool(b)) => AwsStaticValue::Bool(*b),
+            Some(Json::Str(s)) => AwsStaticValue::Str(s.clone()),
+            _ => {
+                return Err(format!(
+                    "aws front-end: REFUSED static-context-param: operation `{op_name}` \
+                     binds the endpoint parameter `{name}` to a value that is neither a \
+                     boolean nor a string"
+                ))
+            }
+        };
+        out.push((name.clone(), value));
+    }
+    Ok(out)
+}
+
+/// An operation's `operationContextParams`, as (parameter, path), in
+/// declared order. The path is kept as written; the emitter decides which
+/// paths it can bind.
+fn operation_context_params(op: &Json, op_name: &str) -> Result<Vec<(String, String)>, String> {
+    let Some(v) = op.get("operationContextParams") else {
+        return Ok(Vec::new());
+    };
+    let obj = v.as_object().ok_or_else(|| {
+        format!("operation `{op_name}`: `operationContextParams` is not an object")
+    })?;
+    let mut out = Vec::new();
+    for (name, spec) in obj.iter_declared() {
+        let path = spec.get("path").and_then(Json::as_str).ok_or_else(|| {
+            format!("operation `{op_name}`: operationContextParams `{name}` has no `path`")
+        })?;
+        out.push((name.clone(), path.to_string()));
+    }
+    Ok(out)
 }
 
 /// The generated client struct's name — `serviceId` with non-alphanumerics
@@ -1421,10 +1641,36 @@ fn as_i64(v: &Json) -> Option<i64> {
     }
 }
 
-fn xml_ns(v: Option<&Json>) -> Option<String> {
-    v.and_then(|x| x.get("uri"))
-        .and_then(Json::as_str)
-        .map(String::from)
+/// The `xmlNamespace` trait `v` of `what` (`None` when absent): the bare
+/// URI string, or an object with a string `uri` and an optional string
+/// `prefix`. Any other spelling is an error naming `what`, so a namespace
+/// is never dropped from a document without notice.
+fn xml_ns(v: Option<&Json>, what: &str) -> Result<Option<AwsXmlNamespace>, String> {
+    let malformed = || {
+        format!(
+            "aws front-end: the `xmlNamespace` of {what} is neither a URI string nor an \
+             object with a string `uri` and an optional string `prefix`"
+        )
+    };
+    match v {
+        None => Ok(None),
+        Some(Json::Str(uri)) => Ok(Some(AwsXmlNamespace {
+            prefix: String::new(),
+            uri: uri.clone(),
+        })),
+        Some(o @ Json::Object(_)) => {
+            let uri = o.get("uri").and_then(Json::as_str).ok_or_else(malformed)?;
+            let prefix = match o.get("prefix") {
+                None => "",
+                Some(p) => p.as_str().ok_or_else(malformed)?,
+            };
+            Ok(Some(AwsXmlNamespace {
+                prefix: prefix.to_string(),
+                uri: uri.to_string(),
+            }))
+        }
+        Some(_) => Err(malformed()),
+    }
 }
 
 pub fn resolve_timestamp_format(
@@ -1554,6 +1800,197 @@ fn enum_ident(wire: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A one-operation awsJson model: `extra_meta` is merged into its
+    /// metadata, `extra_op` into its one operation, and `member_shape` is the
+    /// type of the input's one member.
+    fn tiny_model(extra_meta: &str, extra_op: &str, member_shape: &str) -> Json {
+        crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-01", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.0", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-01"{extra_meta}}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}{extra_op}}}}},
+                "shapes": {{"In": {{"type": "structure",
+                                   "members": {{"M": {{"shape": "{member_shape}"}}}}}},
+                           "Str": {{"type": "string"}},
+                           "Doc": {{"type": "structure", "members": {{}}, "document": true}},
+                           "Events": {{"type": "structure", "members": {{}}, "eventstream": true}},
+                           "Stamps": {{"type": "list", "member": {{"shape": "StampMap"}}}},
+                           "StampMap": {{"type": "map", "key": {{"shape": "Str"}},
+                                        "value": {{"shape": "Stamp"}}}},
+                           "Stamp": {{"type": "timestamp", "timestampFormat": "rfc822"}},
+                           "Plain": {{"type": "structure", "members": {{}}, "exception": true}},
+                           "Coded": {{"type": "structure", "members": {{}}, "exception": true,
+                                     "error": {{"code": "Customized", "httpStatusCode": 402}}}},
+                           "SameCode": {{"type": "structure", "members": {{}}, "exception": true,
+                                       "error": {{"code": "SameCode", "httpStatusCode": 400}}}}}}}}"#
+        ))
+        .unwrap()
+    }
+
+    fn lower_tiny(model: &Json) -> Result<AwsLowering, String> {
+        lower_aws_service(model, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny")
+    }
+
+    fn refusal_of(model: &Json) -> Option<String> {
+        let e = lower_tiny(model).err().expect("the model lowered");
+        crate::aws_conformance::refusal_name(&e)
+    }
+
+    const QUERY_COMPATIBLE: &str = r#", "awsQueryCompatible": {}"#;
+
+    #[test]
+    fn the_tiny_model_lowers() {
+        lower_tiny(&tiny_model("", "", "Str")).unwrap();
+    }
+
+    #[test]
+    fn xml_namespace_is_a_string_or_a_uri_object_with_an_optional_prefix() {
+        let ns = |src: &str| xml_ns(Some(&crate::json::parse(src).unwrap()), "x");
+        let want = |prefix: &str, uri: &str| {
+            Some(AwsXmlNamespace {
+                prefix: prefix.to_string(),
+                uri: uri.to_string(),
+            })
+        };
+        assert_eq!(xml_ns(None, "x").unwrap(), None);
+        assert_eq!(ns(r#""urn:a""#).unwrap(), want("", "urn:a"));
+        assert_eq!(ns(r#"{"uri": "urn:a"}"#).unwrap(), want("", "urn:a"));
+        assert_eq!(ns(r#"{"prefix": "p", "uri": "urn:a"}"#).unwrap(), want("p", "urn:a"));
+        for bad in [r#"{"prefix": "p"}"#, r#"{"uri": 5}"#, r#"{"uri": "u", "prefix": 1}"#, "7"] {
+            let e = ns(bad).unwrap_err();
+            assert!(e.contains("the `xmlNamespace` of x is neither"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_xml_namespace_is_refused_naming_where_it_is() {
+        let e = lower_tiny(&tiny_model(r#", "xmlNamespace": {"prefix": "p"}"#, "", "Str"))
+            .unwrap_err();
+        assert!(e.contains("the `xmlNamespace` of the service metadata"), "{e}");
+    }
+
+    #[test]
+    fn a_document_shape_is_a_named_refusal() {
+        assert_eq!(refusal_of(&tiny_model("", "", "Doc")).as_deref(), Some("document"));
+    }
+
+    #[test]
+    fn a_host_prefix_is_a_named_refusal() {
+        let op = r#", "endpoint": {"hostPrefix": "data-"}"#;
+        assert_eq!(refusal_of(&tiny_model("", op, "Str")).as_deref(), Some("host-prefix"));
+    }
+
+    #[test]
+    fn a_required_checksum_lowers_and_is_recorded() {
+        // The front-end lowers it; whether the client can send the checksum
+        // is the emitter's question (emit_aws `checksum-required`).
+        for (op, required) in [
+            (r#", "httpChecksumRequired": true"#, true),
+            (r#", "httpChecksum": {"requestChecksumRequired": true}"#, true),
+            (r#", "httpChecksumRequired": false"#, false),
+            (
+                r#", "httpChecksum": {"requestChecksumRequired": false, "requestAlgorithmMember": "M"}"#,
+                false,
+            ),
+            ("", false),
+        ] {
+            let l = lower_tiny(&tiny_model("", op, "Str")).unwrap();
+            let facts = l.facts.operation("Op").unwrap();
+            assert_eq!(facts.request_checksum_required(), required, "{op}");
+        }
+    }
+
+    #[test]
+    fn an_event_stream_is_a_named_refusal() {
+        assert_eq!(refusal_of(&tiny_model("", "", "Events")).as_deref(), Some("eventstream"));
+    }
+
+    /// The timestamp format recorded for the tiny model's member `M`.
+    fn member_m_format(member_shape: &str) -> Option<AwsTimestampFormat> {
+        let l = lower_tiny(&tiny_model("", "", member_shape)).unwrap();
+        let (_, m) = l
+            .facts
+            .members()
+            .find(|(_, m)| m.member_name == "M")
+            .expect("member M");
+        m.timestamp_format
+    }
+
+    #[test]
+    fn a_container_of_timestamps_carries_its_leaf_format() {
+        // A list of maps of rfc822 timestamps: the leaf's format.
+        assert_eq!(member_m_format("Stamps"), Some(AwsTimestampFormat::Rfc822));
+        assert_eq!(member_m_format("Str"), None);
+    }
+
+    #[test]
+    fn a_query_compatible_custom_error_code_is_a_named_refusal() {
+        let op = r#", "errors": [{"shape": "Plain"}, {"shape": "Coded"}]"#;
+        assert_eq!(
+            refusal_of(&tiny_model(QUERY_COMPATIBLE, op, "Str")).as_deref(),
+            Some("aws-query-compatible")
+        );
+    }
+
+    #[test]
+    fn a_query_compatible_service_without_custom_codes_lowers() {
+        // No errors, a plain one, and one whose code is its shape name: the
+        // header and the body name the same code, so nothing is refused, and
+        // the service is still marked query-compatible for the request side.
+        for op in [
+            "",
+            r#", "errors": [{"shape": "Plain"}]"#,
+            r#", "errors": [{"shape": "SameCode"}]"#,
+        ] {
+            let l = lower_tiny(&tiny_model(QUERY_COMPATIBLE, op, "Str")).unwrap();
+            assert!(l.service.aws_query_compatible, "{op}");
+        }
+    }
+
+    #[test]
+    fn a_custom_error_code_outside_query_compatible_lowers() {
+        let op = r#", "errors": [{"shape": "Coded"}]"#;
+        lower_tiny(&tiny_model("", op, "Str")).unwrap();
+    }
+
+    #[test]
+    fn endpoint_context_params_are_carried() {
+        let op = r#", "staticContextParams": {"A": {"value": true}, "B": {"value": "x"}},
+                     "operationContextParams": {"C": {"path": "M"}}"#;
+        let mut m = tiny_model("", op, "Str");
+        if let Json::Object(root) = &mut m {
+            let ccp = crate::json::parse(r#"{"D": {"type": "Boolean"}}"#).unwrap();
+            root.insert("clientContextParams".to_string(), ccp);
+        }
+        let l = lower_tiny(&m).unwrap();
+        let f = l.facts.operation("Op").unwrap();
+        assert_eq!(
+            f.static_context_params,
+            vec![
+                ("A".to_string(), AwsStaticValue::Bool(true)),
+                ("B".to_string(), AwsStaticValue::Str("x".to_string())),
+            ]
+        );
+        assert_eq!(f.operation_context_params, vec![("C".to_string(), "M".to_string())]);
+        assert_eq!(
+            l.service.client_context_params,
+            vec![AwsClientContextParam { name: "D".into(), ty: "boolean".into() }]
+        );
+    }
+
+    #[test]
+    fn a_static_context_param_of_another_kind_is_a_named_refusal() {
+        let op = r#", "staticContextParams": {"A": {"value": ["x"]}}"#;
+        assert_eq!(
+            refusal_of(&tiny_model("", op, "Str")).as_deref(),
+            Some("static-context-param")
+        );
+    }
 
     #[test]
     fn snake_case_breaks_on_acronym_boundaries() {

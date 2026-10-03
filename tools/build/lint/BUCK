@@ -1,15 +1,12 @@
 # The linters run by the lint rules (defs.bzl), as pinned downloads, and the
-# lint action script. linux x86_64 static binaries, run on the light workers.
+# lint action script. linux x86_64 static binaries.
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+load("@komira//tools/build/platforms:table.bzl", "pinned_kwargs")
 load(":defs.bzl", "shell_lint", "tar_member")
 
 export_file(name = "lint.sh", visibility = ["PUBLIC"])
 
-pinned_file(
-    name = "shellcheck-v0.11.0.linux.x86_64.tar.xz",
-    url = "https://github.com/koalaman/shellcheck/releases/download/v0.11.0/shellcheck-v0.11.0.linux.x86_64.tar.xz",
-    sha256 = "8c3be12b05d5c177a04c29e3c78ce89ac86f1595681cab149b65b97c4e227198",
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "shellcheck"))
 
 tar_member(
     name = "shellcheck",
@@ -18,11 +15,7 @@ tar_member(
     visibility = ["PUBLIC"],
 )
 
-pinned_file(
-    name = "actionlint_1.7.12_linux_amd64.tar.gz",
-    url = "https://github.com/rhysd/actionlint/releases/download/v1.7.12/actionlint_1.7.12_linux_amd64.tar.gz",
-    sha256 = "8aca8db96f1b94770f1b0d72b6dddcb1ebb8123cb3712530b08cc387b349a3d8",
-)
+pinned_file(**pinned_kwargs("linux-x86_64", "actionlint"))
 
 tar_member(
     name = "actionlint",

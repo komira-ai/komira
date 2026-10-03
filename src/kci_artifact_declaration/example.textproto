@@ -1,0 +1,41 @@
+# An example artifact declarations file (kci.release.v1.ArtifactDeclarations).
+# The welded test tests/test_declaration_render.mojo reads this file (staged
+# as its test data), so it always parses, validates and renders.
+#
+# kci runs, per artifact, with D a fresh EMPTY directory:
+#   buck2 build <target> --out D
+# and ships what the ONE `manifest.json` left at the top of D describes (its
+# `name` must equal the artifact's `name` below, exactly).
+#
+# `build` is in the build system's args, not the artifacts': the build
+# system's args come first.
+#
+# Which farm buck2 builds on is the MACHINE's configuration, not this file's:
+# a buckconfig buck2 reads when its daemon starts, `/etc/buckconfig.d/<file>`
+# or the job user's `~/.buckconfig.d/<file>`, holding `[buck2_re_client]` and
+# `[komira_re]` (docs/ci.md). Neither `--config-file P` nor `-c k=v` in these
+# args can do it: the daemon reads `[buck2_re_client]` once, at startup, from
+# config files only, while `[komira_re]` is read at analysis and DOES take
+# them, so the build switches to the farm platforms and then fails with "No
+# engine address" (remote_upload_error).
+#
+# `buck2 build --out D` copies the ONE default output of the ONE target
+# named: a directory output's contents land directly in D. A conda_package's
+# `[release]` (tools/build/package/conda.bzl) is that directory:
+# `komira_encoding-<version>-0.conda`, `manifest.json` (kci artifact-manifest
+# format, `name` "komira_encoding") and `metadata.json`. It exists only for a
+# stamped build, so an unstamped one fails here rather than shipping.
+
+build_systems {
+  name: "buck2"
+  executable: "buck2"
+  args: "build"
+}
+
+artifacts {
+  name: "komira_encoding"
+  build_system: "buck2"
+  args: "//src/komira_encoding:komira_encoding_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+}

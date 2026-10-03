@@ -15,11 +15,87 @@
    "http": {"method": "GET", "requestUri": "/ping"},
    "input": {"shape": "PingRequest"},
    "output": {"shape": "PingResponse"}
+  },
+  "PutThing": {
+   "name": "PutThing",
+   "http": {"method": "PUT", "requestUri": "/things/{Name}?thing"},
+   "input": {
+    "shape": "PutThingRequest",
+    "locationName": "PutThingRequest",
+    "xmlNamespace": {"uri": "https://tiny.example.com/doc/2026-09-30/"}
+   },
+   "output": {"shape": "PutThingResponse"}
+  },
+  "SetConfig": {
+   "name": "SetConfig",
+   "http": {"method": "PUT", "requestUri": "/config"},
+   "input": {"shape": "SetConfigRequest"},
+   "output": {"shape": "SetConfigResponse"}
   }
  },
  "shapes": {
   "PingRequest": {"type": "structure", "members": {}},
   "PingResponse": {"type": "structure", "members": {"Message": {"shape": "String"}}},
-  "String": {"type": "string"}
+  "PutThingRequest": {
+   "type": "structure",
+   "required": ["Name"],
+   "members": {
+    "Name": {"shape": "String", "location": "uri", "locationName": "Name"},
+    "Token": {"shape": "String", "location": "header", "locationName": "x-tiny-token"},
+    "Size": {"shape": "Long"},
+    "Created": {"shape": "Timestamp"},
+    "Tags": {"shape": "TagList"},
+    "Parts": {"shape": "PartList", "flattened": true, "locationName": "Part"}
+   }
+  },
+  "PutThingResponse": {
+   "type": "structure",
+   "members": {
+    "ETag": {"shape": "String", "location": "header", "locationName": "ETag"},
+    "Size": {"shape": "Long"},
+    "Tags": {"shape": "TagList"},
+    "Parts": {"shape": "PartList", "flattened": true, "locationName": "Part"}
+   }
+  },
+  "SetConfigRequest": {
+   "type": "structure",
+   "required": ["Config"],
+   "members": {
+    "Config": {
+     "shape": "Config",
+     "locationName": "Config",
+     "xmlNamespace": {"uri": "https://tiny.example.com/doc/2026-09-30/"}
+    }
+   },
+   "payload": "Config"
+  },
+  "SetConfigResponse": {
+   "type": "structure",
+   "members": {"Config": {"shape": "Config"}},
+   "payload": "Config"
+  },
+  "Config": {
+   "type": "structure",
+   "members": {
+    "Enabled": {"shape": "Boolean"},
+    "Ratio": {"shape": "Double"}
+   }
+  },
+  "Part": {
+   "type": "structure",
+   "members": {
+    "Number": {"shape": "Integer"},
+    "Digest": {"shape": "Blob"}
+   }
+  },
+  "PartList": {"type": "list", "member": {"shape": "Part"}},
+  "TagList": {"type": "list", "member": {"shape": "String", "locationName": "Tag"}},
+  "String": {"type": "string"},
+  "Long": {"type": "long"},
+  "Integer": {"type": "integer"},
+  "Boolean": {"type": "boolean"},
+  "Double": {"type": "double"},
+  "Blob": {"type": "blob"},
+  "Timestamp": {"type": "timestamp"}
  }
 }

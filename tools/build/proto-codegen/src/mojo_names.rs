@@ -25,7 +25,7 @@ const RESERVED: &[&str] = &[
     // breaking the client. Escaping it to `Error_` keeps the builtin free.
     "Error",
     "range", "len", "chr", "swap", "print", "abort",
-    // The `komira_serde` runtime surface the generated code imports.
+    // The `komira_proto_codec` runtime surface the generated code imports.
     "Serializable", "WireEncoder", "WireDecoder", "FieldKey",
     "PbEncoder", "PbDecoder", "JsonEncoder", "JsonDecoder",
 ];

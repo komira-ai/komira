@@ -17,9 +17,8 @@ downloads (tools/build/lint/BUCK). Each rule's default output is the validation
 result, a JSON file whose message holds the findings.
 """
 
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load(":doc_tree.bzl", "DocTreeInfo", "collect_docs", "declares_docs")
-
-_LIGHT = ["komira//tools/build/platforms:light"]
 
 _COMMON = {
     "_busybox": attrs.exec_dep(default = "komira//tools/build/toolchains:busybox"),
@@ -136,6 +135,21 @@ push_verdicts_rule = rule(
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 
+def _mojo_deps_impl(ctx):
+    if not ctx.attrs.srcs:
+        fail("mojo_deps {}: srcs is empty, so it would check nothing".format(ctx.label))
+    staged, copy = _stage(ctx, [ctx.attrs.buck] + ctx.attrs.srcs)
+    return _lint(ctx, "mojo_deps", [], [copy[ctx.attrs.buck.short_path]] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+
+mojo_deps_rule = rule(
+    impl = _mojo_deps_impl,
+    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed.",
+    attrs = _COMMON | {
+        "buck": attrs.source(),
+        "srcs": attrs.list(attrs.source()),
+    },
+)
+
 def _lint_suite_impl(ctx):
     if not ctx.attrs.lints:
         fail("lint_suite {}: lints is empty".format(ctx.label))
@@ -201,39 +215,43 @@ tar_member_rule = rule(
     },
 )
 
-def _light(kwargs):
-    kwargs.setdefault("exec_compatible_with", _LIGHT)
+def _linux(kwargs):
+    kwargs.setdefault("exec_compatible_with", LINUX_X86_64)
     return kwargs
 
-# Every lint runs on the light worker class: it reads a few files.
+# Every lint runs linux x86_64 tools (busybox, shellcheck): it reads a few files.
 def shell_lint(**kwargs):
-    shell_lint_rule(**_light(kwargs))
+    shell_lint_rule(**_linux(kwargs))
 
 def workflow_lint(**kwargs):
-    workflow_lint_rule(**_light(kwargs))
+    workflow_lint_rule(**_linux(kwargs))
 
 def action_pins(**kwargs):
-    action_pins_rule(**_light(kwargs))
+    action_pins_rule(**_linux(kwargs))
 
 def no_endpoint(**kwargs):
-    no_endpoint_rule(**_light(kwargs))
+    no_endpoint_rule(**_linux(kwargs))
 
 def push_verdicts(**kwargs):
-    push_verdicts_rule(**_light(kwargs))
+    push_verdicts_rule(**_linux(kwargs))
+
+def mojo_deps(**kwargs):
+    mojo_deps_rule(**_linux(kwargs))
 
 def tar_member(**kwargs):
-    tar_member_rule(**_light(kwargs))
+    tar_member_rule(**_linux(kwargs))
 
 # Markdown: see markdown_docs_rule. The root BUCK applies it to the
 # repository's documentation (//:docs).
 def markdown_docs(**kwargs):
-    markdown_docs_rule(**_light(kwargs))
+    markdown_docs_rule(**_linux(kwargs))
 
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (doc_tree.bzl), so no BUCK file names one.
 action_pins = declares_docs(action_pins)
 lint_suite = declares_docs(lint_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
+mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
 push_verdicts = declares_docs(push_verdicts)
 shell_lint = declares_docs(shell_lint)

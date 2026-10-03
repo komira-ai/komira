@@ -1,0 +1,128 @@
+syntax = "proto3";
+package komira.supervisor.v1;
+
+import "komira/broker/v1/broker.proto";
+
+// The wire contract between a job supervisor (or a co-located broker node)
+// and the job manager / broker coordinator: the job phase vocabulary, the
+// supervisor heartbeat and its response, and the failure report. The
+// multi-node routing types the heartbeat and its response carry (NodeLoad,
+// ClusterConfig, BrokerClusterMap) are declared in `komira.broker.v1`,
+// which this file imports. Generated into the Mojo package
+// `komira_supervisor_proto` as `komira_supervisor_proto.supervisor`.
+
+// ─── Job Phase (State Machine) ───────────────────────────────────────────
+
+// WARNING: this vocabulary is declared twice. `komira_job_store` keeps a
+// job's phase as a tag set and as text; this enum is the wire side. A phase
+// stored there but missing here is invisible on the wire: an agent cannot
+// report it, and it decodes to JOB_PHASE_UNSPECIFIED at every proto boundary.
+// Add a phase in both places, in one change.
+//
+// The numbers here and the store's tag ordinals are NOT a shared ordinal: the
+// store orders its tags differently (RECONCILING, for one, is 3 there and 6
+// here), and proto3 reserves 0 for UNSPECIFIED. The correspondence is by
+// name: store "X" <-> wire "JOB_PHASE_X". Never renumber an existing value;
+// append.
+enum JobPhase {
+  JOB_PHASE_UNSPECIFIED = 0;
+  JOB_PHASE_PENDING = 1;
+  JOB_PHASE_ASSIGNED = 2;
+  JOB_PHASE_RUNNING = 3;
+  JOB_PHASE_COMPLETED = 4;
+  JOB_PHASE_FAILED = 5;
+  JOB_PHASE_RECONCILING = 6;
+  JOB_PHASE_CANCELLED = 7;
+
+  // The graceful-stop intermediate phase of an infinite job.
+  JOB_PHASE_DRAINING = 8;
+
+  // CREATING collapses PENDING + ASSIGNED into one phase: the job manager
+  // writes CREATING, then creates and runs the job. The queue-claim protocol
+  // that PENDING -> ASSIGNED implemented does not apply when the pipeline
+  // manager calls the job manager directly.
+  JOB_PHASE_CREATING = 9;
+
+  // SUPERVISOR_ABSENT: the job started and never sent a heartbeat, meaning
+  // the image does not run the supervisor. A terminal phase distinct from
+  // FAILED and never restarted: a job that never sent a heartbeat (bad image)
+  // and one that sent heartbeats then stopped (crashed) are handled
+  // differently, because retrying cannot fix the first.
+  JOB_PHASE_SUPERVISOR_ABSENT = 10;
+}
+
+// ─── Internal Heartbeat ──────────────────────────────────────────────────
+
+message SupervisorHeartbeat {
+  string job_id = 1;
+  JobPhase phase = 2;
+  string pod_name = 3;
+  optional uint32 progress = 4;
+  optional string message = 5;
+  optional FailureReport failure = 6;
+
+  // ── Multi-node control plane (additive, wire-safe proto3) ──
+  // A co-located supervisor+broker node reports its identity + load + the
+  // partitions it currently OWNS (is serving) on every heartbeat. The job
+  // manager folds these into its node registry, runs the assignment pass,
+  // and replies (HeartbeatResponse) with the partitions this node SHOULD be
+  // serving; the agent reconciles the diff in-process.
+  // These fields are all empty/absent for a plain job supervisor that owns
+  // no broker partitions, so the existing job-only heartbeat is unchanged.
+  optional string node_id = 7;          // stable cluster node identity
+  optional komira.broker.v1.NodeLoad load = 8;           // soft-advisory load signal
+  repeated uint32 owned_partitions = 9; // partitions this node is serving NOW
+
+  // ── Broker peer routing (additive, wire-safe proto3) ──
+  // The broker reports its own REACHABLE Kafka endpoint so the coordinator can
+  // assemble the cluster-wide NodeEndpoint list it hands back to every node (the
+  // coordinator cannot otherwise know how a node is reachable — bind IP / port
+  // are container/host-local). A plain job supervisor omits both (additive).
+  optional string advertised_host = 10; // this broker's reachable Kafka host
+  optional uint32 advertised_port = 11; // this broker's reachable Kafka port
+}
+
+message HeartbeatResponse {
+  bool cancel = 1;
+
+  // ── Multi-node control plane (additive, wire-safe proto3) ──
+  // The desired assignment the job manager pushes back to the node: the partitions
+  // this node SHOULD be serving after the assignment pass, plus the current
+  // cluster config (total partition count) so the node can size its routing
+  // view. Empty for a plain job supervisor (no partitions assigned).
+  repeated uint32 assigned_partitions = 2; // partitions this node SHOULD serve
+  optional komira.broker.v1.ClusterConfig cluster = 3;      // current cluster shape
+
+  // ── Broker peer routing (additive, wire-safe proto3) ──
+  // The cluster-wide routing map the coordinator pushes to every node so a
+  // single broker can serve a COMPLETE Kafka Metadata response (full broker
+  // list + the TRUE per-partition leader) — letting a VANILLA single-bootstrap
+  // Kafka client route correctly across the whole cluster without the client
+  // having to merge Metadata across all brokers. Built AFTER the prune+reassign
+  // pass so dead nodes never appear; absent on a plain job-leg heartbeat.
+  optional komira.broker.v1.BrokerClusterMap broker_cluster = 4;
+
+  // ── Writer lease epoch fence (additive, wire-safe proto3) ──
+  // The MONOTONE lease generation for each assigned partition, POSITIONALLY
+  // PARALLEL to assigned_partitions (assigned_generations[i] is the lease
+  // generation for assigned_partitions[i]). The owner stamps this generation as
+  // its `writer_lease_epoch` on every manifest append; the append fence rejects a
+  // displaced owner whose generation is below the live one (a torn-offset guard).
+  // Declared LAST (source order) so the generated constructor keeps the existing
+  // positional shape with assigned_generations as the trailing arg. Empty on a
+  // plain job supervisor and on an older coordinator that did not compute
+  // generations (the owner then defaults its writer_lease_epoch to 0 -> the fence
+  // is a no-op, preserving back-compat).
+  repeated int64 assigned_generations = 5;
+}
+
+// ─── Shared Types ────────────────────────────────────────────────────────
+
+message FailureReport {
+  optional int32 exit_code = 1;
+  optional int32 signal = 2;
+  repeated string stderr_tail = 3;
+  optional string panic_message = 4;
+  optional string reason = 5;
+  optional uint64 last_record_offset = 6;
+}

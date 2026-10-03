@@ -27,7 +27,7 @@ from std.io import FileHandle
 
 from std.testing import assert_equal, assert_true, assert_false
 
-from komira_obs.ring_buffer import OVERFLOW_BLOCK, OVERFLOW_DROP
+from komira_spsc_ring.spsc_ring import OVERFLOW_BLOCK, OVERFLOW_DROP
 
 from komira_log.engine.record_ring import LogRecordRing
 from komira_log.engine.rotation import (

@@ -1,13 +1,23 @@
 load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
 load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load(":defs.bzl", "botocore_model")
-load(":models.bzl", "BOTOCORE_MODELS", "botocore_model_path")
+load(
+    ":models.bzl",
+    "BOTOCORE_MODELS",
+    "BOTOCORE_PARTITIONS_PATH",
+    "botocore_endpoint_rules_path",
+    "botocore_endpoint_tests_path",
+    "botocore_model_path",
+)
 
 # boto/botocore 1.43.70, Apache-2.0 (LICENSE.txt and NOTICE in the archive).
 #
 # The AWS service models the Mojo AWS clients are generated from
-# (komira//tools/build/proto-codegen:aws-client-gen), read from botocore's
-# release archive at build time: no model is committed to this repository.
+# (komira//tools/build/proto-codegen:aws-client-gen), and (`:endpoint_rules`)
+# the endpoint rulesets and partition table the generated clients embed,
+# read from botocore's release archive at build time: no model is committed
+# to this repository.
 # The services are models.bzl's; a newer botocore is this url and sha256 plus
 # that file's entries. tools/build/third_party_srcs/upstream_versions.sh
 # reports whether a newer release exists; it gates nothing.
@@ -19,7 +29,7 @@ pinned_file(
 
 archive_files(
     name = "files",
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     archive = ":botocore-1.43.70.tar.gz",
     files = ["LICENSE.txt", "NOTICE"] + [botocore_model_path(s) for s in sorted(BOTOCORE_MODELS)],
     strip_prefix = "botocore-1.43.70",
@@ -30,9 +40,79 @@ archive_files(
 # sha256.
 [botocore_model(
     name = service,
-    exec_compatible_with = ["komira//tools/build/platforms:light"],
+    exec_compatible_with = LINUX_X86_64,
     path = "{}/{}/service-2.json".format(service, BOTOCORE_MODELS[service].api_version),
     sha256 = BOTOCORE_MODELS[service].sha256,
     src = ":files[{}]".format(botocore_model_path(service)),
     visibility = ["PUBLIC"],
 ) for service in sorted(BOTOCORE_MODELS)]
+
+# botocore's protocol conformance corpus, `tests/unit/protocols`: the case
+# files of the protocols the AWS generator serves or is to serve, and the
+# ignore list botocore applies to them (matched by file basename, as
+# botocore's tests/unit/test_protocols.py does). One directory, the
+# `[tests/unit/protocols]` sub-target, read by
+# komira//tools/build/proto-codegen (the conformance driver, its test, and
+# xml-equiv-verdicts), and the rest-xml case files by komira_aws_core's
+# test_xml_canonical_differential.
+_PROTOCOL_TESTS = "tests/unit/protocols"
+
+_PROTOCOL_TEST_STEMS = [
+    "json",
+    "json_1_0",
+    "json_1_0-query-compatible",
+    "rest-json",
+    "rest-xml",
+]
+
+archive_files(
+    name = "protocol_tests",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":botocore-1.43.70.tar.gz",
+    one_tree = True,
+    files = ["LICENSE.txt", "NOTICE", _PROTOCOL_TESTS + "/protocol-tests-ignore-list.json"] + [
+        "{}/{}/{}.json".format(_PROTOCOL_TESTS, direction, stem)
+        for direction in ["input", "output"]
+        for stem in _PROTOCOL_TEST_STEMS
+    ],
+    strip_prefix = "botocore-1.43.70",
+    tree_dirs = [_PROTOCOL_TESTS],
+    visibility = ["PUBLIC"],
+)
+
+# The endpoint data, every file of it read here and nowhere else: the
+# endpoint ruleset of each service of models.bzl (BOTOCORE_MODELS), the
+# partition table their `aws.partition` reads, and botocore's endpoint test
+# cases for each. Each file is a sub-target named by its path
+# (`botocore_endpoint_file`), read by the generated clients
+# (`botocore_model(...).endpoint_rules` / `.partitions`), komira_aws_core's
+# endpoint ruleset tests (test_s3_endpoint_rules, test_endpoint_rules_library)
+# and the generated clients' endpoint tests
+# (komira//tools/build/proto-codegen/aws_endpoint_rules).
+_ENDPOINT_SERVICES = sorted(BOTOCORE_MODELS.keys())
+
+archive_files(
+    name = "endpoint_rules",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":botocore-1.43.70.tar.gz",
+    files = ["LICENSE.txt", "NOTICE", BOTOCORE_PARTITIONS_PATH] + [
+        p
+        for s in _ENDPOINT_SERVICES
+        for p in [botocore_endpoint_rules_path(s), botocore_endpoint_tests_path(s)]
+    ],
+    strip_prefix = "botocore-1.43.70",
+    visibility = ["PUBLIC"],
+)
+
+# botocore's standard retry mode, `botocore/retries/standard.py`: its retry
+# conditions, backoff and quota costs, read by komira_aws_core's
+# test_aws_retry, which checks its classifier and policy against every list
+# and constant of the file (no Python is run; the file is read as text).
+archive_files(
+    name = "retries",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":botocore-1.43.70.tar.gz",
+    files = ["LICENSE.txt", "NOTICE", "botocore/retries/standard.py"],
+    strip_prefix = "botocore-1.43.70",
+    visibility = ["PUBLIC"],
+)

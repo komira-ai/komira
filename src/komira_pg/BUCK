@@ -1,0 +1,31 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Native Postgres pgwire-v3 client: SCRAM-SHA-256 authentication over TLS 1.3
+# (s2n, through komira_http's TLS layer), the simple and extended query
+# protocols with binary-format codecs for a closed OID set, and poll-shaped
+# query and transaction operations driven by a komira_async reactor.
+#
+# The tests need no database server: SCRAM and codec vectors, hand-built rows,
+# host resolution through /etc/hosts, and the poll-shaped read frame driven
+# over a local socketpair.
+
+mojo_library(
+    name = "komira_pg",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_crypto:komira_crypto",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_net:komira_net",
+    ],
+    test_srcs = [
+        "tests/test_binary_codec.mojo",
+        "tests/test_dns_resolve_pg_host.mojo",
+        "tests/test_pg_query_op_poll.mojo",
+        "tests/test_pg_tx_op_sequence.mojo",
+        "tests/test_pgrow_accumulation.mojo",
+        "tests/test_scram_and_pgwire.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
