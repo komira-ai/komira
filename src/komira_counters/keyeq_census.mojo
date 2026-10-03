@@ -45,14 +45,12 @@
 #   3. flip it back to False
 # The `KEYEQ` lines `keyeq_dump` emits are the artifact.
 #
-# Storage mechanism: the `_Global` + `Atomic` process-lifetime counter idiom
-# (the same one `rxcensus` uses) — no `unsafe_from_address`, no
-# wildcard-origin field.
+# Storage mechanism: `GlobalCounterTable` (`global_counter.mojo`), the shared
+# process-lifetime counter primitive (the same one `rxcensus` uses) — no
+# `unsafe_from_address`, no wildcard-origin field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounterTable
 
 
 # -----------------------------------------------------------------------------
@@ -108,25 +106,12 @@ comptime KEYEQ_SLAB_STRIDE8: Int = 22          # CTL  slab_storage stride==8 Int
 comptime KEYEQ_SLAB_STRIDE16: Int = 23         # CTL  slab_storage stride==16 2xInt64 arm
 
 
-def _init_keyeq_counters() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the whole counter table once per process
-    (all slots zeroed)."""
-    var n = KEYEQ_N_SITES * KEYEQ_SLOT_STRIDE
-    var raw = alloc[AtomicI64](n)
-    for i in range(n):
-        (raw + i).unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(
-            Scalar[DType.int64](0)
-        )
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _KEYEQ_COUNTERS = _Global[
+comptime _KEYEQ_COUNTERS = GlobalCounterTable[
     "komira_core_instr_keyeq_census_counters",
-    _init_keyeq_counters,
+    KEYEQ_N_SITES * KEYEQ_SLOT_STRIDE,
 ]
 
 
-@always_inline
 def _keyeq_bucket(width: Int) -> Int:
     """Width -> histogram bucket (0 / 1-3 / 4-7 / 8-15 / 16-31 / 32-63 /
     64-255 / 256+). The edges are fixed so dumps from different runs stay
@@ -153,20 +138,16 @@ def _keyeq_bucket(width: Int) -> Int:
 def _keyeq_record_impl(
     site: Int, width: Int, bytes_touched: Int, matched: Bool
 ) raises:
-    """The raising body of `keyeq_record`. Split out because `_Global`'s
-    `get_or_create_ptr` is `raises` while most of the instrumented kernels
+    """The raising body of `keyeq_record`. Split out because the table's
+    `add` is `raises` while most of the instrumented kernels
     sit in non-raising contexts."""
-    # SAFETY: FFI boundary — `get_or_create_ptr` targets KGEN-runtime
-    # static storage (process-lifetime); the wildcard origin is the stdlib
-    # `_Global` API's own return type and is confined to this helper.
-    var gp = _KEYEQ_COUNTERS.get_or_create_ptr()
-    var base = UnsafePointer(to=gp[][]) + site * KEYEQ_SLOT_STRIDE
-    _ = base[].fetch_add(Int64(1))
-    _ = (base + 1)[].fetch_add(Int64(bytes_touched))
+    var base = site * KEYEQ_SLOT_STRIDE
+    _KEYEQ_COUNTERS.incr(base)
+    _KEYEQ_COUNTERS.add(base + 1, bytes_touched)
     if matched:
-        _ = (base + 2)[].fetch_add(Int64(1))
-    _ = (base + 3)[].fetch_add(Int64(width))
-    _ = (base + 4 + _keyeq_bucket(width))[].fetch_add(Int64(1))
+        _KEYEQ_COUNTERS.incr(base + 2)
+    _KEYEQ_COUNTERS.add(base + 3, width)
+    _KEYEQ_COUNTERS.incr(base + 4 + _keyeq_bucket(width))
 
 
 @always_inline
@@ -197,18 +178,13 @@ def keyeq_record(site: Int, width: Int, bytes_touched: Int, matched: Bool):
 
 def keyeq_read(site: Int, field: Int) raises -> Int:
     """Read one counter. `field`: 0=calls 1=bytes 2=hits 3=wsum 4+b=hist[b]."""
-    var gp = _KEYEQ_COUNTERS.get_or_create_ptr()
-    var base = UnsafePointer(to=gp[][]) + site * KEYEQ_SLOT_STRIDE
-    return Int((base + field)[].load())
+    return _KEYEQ_COUNTERS.read(site * KEYEQ_SLOT_STRIDE + field)
 
 
 def keyeq_reset() raises:
     """Zero every counter (called by the harness between cells/reps)."""
     comptime if KEYEQ_CENSUS_ENABLED:
-        var gp = _KEYEQ_COUNTERS.get_or_create_ptr()
-        var base = UnsafePointer(to=gp[][])
-        for i in range(KEYEQ_N_SITES * KEYEQ_SLOT_STRIDE):
-            (base + i)[].store(Scalar[DType.int64](0))
+        _KEYEQ_COUNTERS.reset()
 
 
 def _write_keyeq_site_name[W: Writer](mut writer: W, site: Int):

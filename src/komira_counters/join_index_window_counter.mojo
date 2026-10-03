@@ -48,55 +48,20 @@
 # COST. At most three relaxed `fetch_add`s -- exactly ONE on the default,
 # non-windowed path -- per ASSEMBLE call. Not per column, not per row.
 #
-# `_Global` + `Atomic` idiom -- no environment read, no `unsafe_from_address`
-# laundering, no wildcard-origin field.
+# `GlobalCounter` primitive (`global_counter.mojo`) -- no environment read, no
+# `unsafe_from_address` laundering, no wildcard-origin field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounter
 
 
-def _init_jiw_calls() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the CALLS counter once per process (init 0).
-    """
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-def _init_jiw_windowed() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the WINDOWED counter once per process."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-def _init_jiw_aliased() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the ALIASED-ROWS counter once per process."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-def _init_jiw_copy_bytes() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the COPY-BYTES counter once per process."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _JIW_CALLS = _Global[
-    "komira_core_join_index_window_calls", _init_jiw_calls
+comptime _JIW_CALLS = GlobalCounter["komira_core_join_index_window_calls"]
+comptime _JIW_WINDOWED = GlobalCounter["komira_core_join_index_window_windowed"]
+comptime _JIW_ALIASED = GlobalCounter[
+    "komira_core_join_index_window_aliased_rows"
 ]
-comptime _JIW_WINDOWED = _Global[
-    "komira_core_join_index_window_windowed", _init_jiw_windowed
-]
-comptime _JIW_ALIASED = _Global[
-    "komira_core_join_index_window_aliased_rows", _init_jiw_aliased
-]
-comptime _JIW_COPY_BYTES = _Global[
-    "komira_core_join_index_window_copy_bytes", _init_jiw_copy_bytes
+comptime _JIW_COPY_BYTES = GlobalCounter[
+    "komira_core_join_index_window_copy_bytes"
 ]
 
 
@@ -116,20 +81,12 @@ def join_index_window_note_gather(
     `index_span - count` is the aliasing observation: it is 0 for a
     per-chunk COPY (a copied list is sized exactly `count`) and positive when
     the callee is reading a window of the caller's whole list."""
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
-    var gc = _JIW_CALLS.get_or_create_ptr()
-    _ = gc[][].fetch_add(Int64(1))
+    _JIW_CALLS.incr()
     if index_base != 0:
-        # SAFETY: FFI carve-out (see above).
-        var gw = _JIW_WINDOWED.get_or_create_ptr()
-        _ = gw[][].fetch_add(Int64(1))
+        _JIW_WINDOWED.incr()
     var extra = index_span - count
     if extra > 0:
-        # SAFETY: FFI carve-out (see above).
-        var ga = _JIW_ALIASED.get_or_create_ptr()
-        _ = ga[][].fetch_add(Int64(extra))
+        _JIW_ALIASED.add(extra)
 
 
 @always_inline
@@ -140,49 +97,34 @@ def join_index_window_note_copy(byte_count: Int) raises:
     re-introduced per-chunk copy is required to declare itself in, so
     `join_index_window_copy_bytes() == 0` stays a meaningful assertion rather
     than a tautology about code that no longer exists."""
-    # SAFETY: FFI carve-out (see `join_index_window_note_gather`).
-    var gb = _JIW_COPY_BYTES.get_or_create_ptr()
-    _ = gb[][].fetch_add(Int64(byte_count))
+    _JIW_COPY_BYTES.add(byte_count)
 
 
 def join_index_window_calls() raises -> Int:
     """Total per-column gathers noted since the last reset."""
-    # SAFETY: FFI carve-out (see `join_index_window_note_gather`).
-    var gc = _JIW_CALLS.get_or_create_ptr()
-    return Int(gc[][].load())
+    return _JIW_CALLS.read()
 
 
 def join_index_window_windowed_calls() raises -> Int:
     """Gathers that arrived with a NON-ZERO `index_base`. Zero for a copying
     driver, whatever its chunk count."""
-    # SAFETY: FFI carve-out (see `join_index_window_note_gather`).
-    var gw = _JIW_WINDOWED.get_or_create_ptr()
-    return Int(gw[][].load())
+    return _JIW_WINDOWED.read()
 
 
 def join_index_window_aliased_rows() raises -> Int:
     """Index elements visible to the callee BEYOND its own output window,
     summed. Zero for a copying driver by construction."""
-    # SAFETY: FFI carve-out (see `join_index_window_note_gather`).
-    var ga = _JIW_ALIASED.get_or_create_ptr()
-    return Int(ga[][].load())
+    return _JIW_ALIASED.read()
 
 
 def join_index_window_copy_bytes() raises -> Int:
     """Index bytes copied into fresh per-chunk lists. MUST read 0."""
-    # SAFETY: FFI carve-out (see `join_index_window_note_gather`).
-    var gb = _JIW_COPY_BYTES.get_or_create_ptr()
-    return Int(gb[][].load())
+    return _JIW_COPY_BYTES.read()
 
 
 def reset_join_index_window_counters() raises:
     """Reset all four process-wide counters to 0 (test setup)."""
-    # SAFETY: FFI carve-out (see `join_index_window_note_gather`).
-    var gc = _JIW_CALLS.get_or_create_ptr()
-    gc[][].store(Scalar[DType.int64](0))
-    var gw = _JIW_WINDOWED.get_or_create_ptr()
-    gw[][].store(Scalar[DType.int64](0))
-    var ga = _JIW_ALIASED.get_or_create_ptr()
-    ga[][].store(Scalar[DType.int64](0))
-    var gb = _JIW_COPY_BYTES.get_or_create_ptr()
-    gb[][].store(Scalar[DType.int64](0))
+    _JIW_CALLS.reset()
+    _JIW_WINDOWED.reset()
+    _JIW_ALIASED.reset()
+    _JIW_COPY_BYTES.reset()

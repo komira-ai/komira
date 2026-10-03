@@ -56,26 +56,16 @@
 #
 # COST. One relaxed `fetch_add` in front of a parquet decode. Not measurable.
 #
-# Same `_Global` + `Atomic` idiom as `planner_scale_counter.mojo` and
-# `join_index_window_counter.mojo` -- no environment read, no
-# `unsafe_from_address` laundering, no wildcard-origin field.
+# Same `GlobalCounter` primitive (`global_counter.mojo`) as
+# `planner_scale_counter.mojo` and `join_index_window_counter.mojo` -- no
+# environment read, no `unsafe_from_address` laundering, no wildcard-origin
+# field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounter
 
 
-def _init_pq_read_counter() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate one counter cell per process (init 0)."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _PQ_SOURCE_READS = _Global[
-    "komira_core_parquet_source_reads", _init_pq_read_counter
-]
+comptime _PQ_SOURCE_READS = GlobalCounter["komira_core_parquet_source_reads"]
 
 
 @always_inline
@@ -85,11 +75,7 @@ def parquet_note_source_read() raises:
     Called at the TOP of each parquet source-materialize entry point, before
     any early return, so a read that produces zero rows still counts as a
     read — the cost this measures is the read, not its result."""
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
-    var g = _PQ_SOURCE_READS.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(1))
+    _PQ_SOURCE_READS.incr()
 
 
 def parquet_source_reads() raises -> Int:
@@ -98,9 +84,7 @@ def parquet_source_reads() raises -> Int:
     ⚠ PROCESS-GLOBAL AND MONOTONE. A test must take a DELTA across the
     operation it is measuring, never read an absolute — a gated test shares its
     process with whatever ran before it."""
-    # SAFETY: FFI carve-out (see `parquet_note_source_read`).
-    var g = _PQ_SOURCE_READS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PQ_SOURCE_READS.read()
 
 
 # =============================================================================
@@ -135,15 +119,8 @@ def parquet_source_reads() raises -> Int:
 # =============================================================================
 
 
-def _init_pq_cols_counter() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate one counter cell per process (init 0)."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _PQ_COLUMNS_DECODED = _Global[
-    "komira_core_parquet_columns_decoded", _init_pq_cols_counter
+comptime _PQ_COLUMNS_DECODED = GlobalCounter[
+    "komira_core_parquet_columns_decoded"
 ]
 
 
@@ -151,11 +128,7 @@ comptime _PQ_COLUMNS_DECODED = _Global[
 def parquet_note_columns_decoded(n: Int) raises:
     """Record that a resident parquet collect was configured to decode `n`
     leaf columns."""
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
-    var g = _PQ_COLUMNS_DECODED.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(n))
+    _PQ_COLUMNS_DECODED.add(n)
 
 
 def parquet_columns_decoded() raises -> Int:
@@ -164,9 +137,7 @@ def parquet_columns_decoded() raises -> Int:
     ⚠ PROCESS-GLOBAL, MONOTONE AND A SUM. A test must take a DELTA across the
     operation it is measuring, and must also delta `parquet_source_reads()` so
     the number can be divided by the calls it came from."""
-    # SAFETY: FFI carve-out (see `parquet_note_columns_decoded`).
-    var g = _PQ_COLUMNS_DECODED.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PQ_COLUMNS_DECODED.read()
 
 
 # =============================================================================
@@ -248,41 +219,19 @@ def parquet_columns_decoded() raises -> Int:
 # =============================================================================
 
 
-def _init_pq_chunk_counter() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate one counter cell per process (init 0)."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-def _init_pq_chunk_bytes() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate one counter cell per process (init 0)."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _PQ_CHUNKS_DECODED = _Global[
-    "komira_core_parquet_chunks_decoded", _init_pq_chunk_counter
+comptime _PQ_CHUNKS_DECODED = GlobalCounter[
+    "komira_core_parquet_chunks_decoded"
 ]
 
-comptime _PQ_CHUNK_BYTES = _Global[
-    "komira_core_parquet_chunk_bytes", _init_pq_chunk_bytes
-]
+comptime _PQ_CHUNK_BYTES = GlobalCounter["komira_core_parquet_chunk_bytes"]
 
 
 @always_inline
 def parquet_note_column_chunk_decoded(compressed_bytes: Int) raises:
     """Record ONE (row group, leaf column) chunk decode of
     `compressed_bytes` compressed bytes."""
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
-    var g = _PQ_CHUNKS_DECODED.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(1))
-    # SAFETY: FFI carve-out (see above).
-    var b = _PQ_CHUNK_BYTES.get_or_create_ptr()
-    _ = b[][].fetch_add(Int64(compressed_bytes))
+    _PQ_CHUNKS_DECODED.incr()
+    _PQ_CHUNK_BYTES.add(compressed_bytes)
 
 
 def parquet_column_chunks_decoded() raises -> Int:
@@ -290,9 +239,7 @@ def parquet_column_chunks_decoded() raises -> Int:
 
     ⚠ PROCESS-GLOBAL AND MONOTONE — delta across the operation, never read an
     absolute."""
-    # SAFETY: FFI carve-out (see `parquet_note_column_chunk_decoded`).
-    var g = _PQ_CHUNKS_DECODED.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PQ_CHUNKS_DECODED.read()
 
 
 def parquet_column_chunk_bytes() raises -> Int:
@@ -300,6 +247,4 @@ def parquet_column_chunk_bytes() raises -> Int:
 
     ⚠ PROCESS-GLOBAL AND MONOTONE — delta across the operation, never read an
     absolute."""
-    # SAFETY: FFI carve-out (see `parquet_note_column_chunk_decoded`).
-    var b = _PQ_CHUNK_BYTES.get_or_create_ptr()
-    return Int(b[][].load())
+    return _PQ_CHUNK_BYTES.read()

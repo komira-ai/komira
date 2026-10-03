@@ -32,30 +32,16 @@
 #   needle wider than `_EQ_HOIST_MAX_NEEDLE` bytes; a test asserting `> 0`
 #   for those is as load-bearing as one asserting `== 0` for a short needle.
 #
-# Mechanism: the same name-keyed, init-once, cross-compile-unit process-global
-# `Atomic[int64]` via the stdlib `_Global` runtime slot that
-# `komira_arrow/dict_interner.mojo` and `komira_parquet/dict_mat_counter.
-# mojo` use — no env var, no `unsafe_from_address` laundering.
+# Mechanism: `GlobalCounter` (`global_counter.mojo`), the name-keyed, init-once,
+# cross-compile-unit process-global atomic counter that every counter in this
+# package shares — no env var, no `unsafe_from_address` laundering.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounter
 
 
-def _init_string_eq_ladder_counter() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn (non-raising): allocate the counter Atomic once per
-    process, initialised to 0. Mirrors `dict_interner._init_dict_merge_probe_
-    counter` (`alloc` + `init_pointee_move` + `OwnedPointer(unsafe_from_raw_
-    pointer=)`) since `Atomic` is not movable-by-value."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _STRING_EQ_LADDER_COUNTER = _Global[
-    "komira_core_string_eq_runtime_ladder_calls",
-    _init_string_eq_ladder_counter,
+comptime _STRING_EQ_LADDER_COUNTER = GlobalCounter[
+    "komira_core_string_eq_runtime_ladder_calls"
 ]
 
 
@@ -64,40 +50,27 @@ def string_eq_ladder_counter_incr() -> None:
     """Record one string ==/!= kernel call that took the RUNTIME-WIDTH ladder
     arm. One relaxed atomic add per kernel call, never per row.
 
-    ⚠ NON-RAISING ON PURPOSE, AND THE `except` IS NOT A SWALLOWED ERROR.
-    `eval_string_eq` and the kernels below it are non-raising `def`s and their
-    whole call chain (`compiler_eval_predicate`, the row walkers) depends on
-    that; a `raises` here would ripple through every one of them for an
-    instrument. `_Global.get_or_create_ptr` is declared `raises` only to
-    allocate its process-lifetime slot and never raises at runtime — the same
-    statement `komira_parquet/dict_mat_counter.mojo` and
-    `komira_arrow/dict_interner.mojo` make about the identical call.
+    ⚠ NON-RAISING ON PURPOSE, AND THE SWALLOWED ERROR IS NOT A LOST COUNT IN
+    PRACTICE. `eval_string_eq` and the kernels below it are non-raising `def`s
+    and their whole call chain (`compiler_eval_predicate`, the row walkers)
+    depends on that; a `raises` here would ripple through every one of them for
+    an instrument. The stdlib `_Global` slot under `GlobalCounter` is declared
+    `raises` only to allocate its process-lifetime cell and never raises at
+    runtime.
 
     ⭐ AND A LOST INCREMENT CANNOT PRODUCE A VACUOUS PASS. The test asserts
     the counter in BOTH directions — 0 for a needle the hoist covers, 1 for a
     needle it does not — so an increment that never happened reds the second
     leg rather than silently satisfying the first.
     """
-    # SAFETY: FFI boundary. `get_or_create_ptr` targets KGEN-runtime-managed
-    # static storage (process-lifetime); `MutUntrackedOrigin` is the stdlib
-    # `_Global` API's own return type, confined to this helper. The outer deref
-    # yields the process-global `OwnedPointer`; the inner deref the `Atomic`.
-    try:
-        var gp = _STRING_EQ_LADDER_COUNTER.get_or_create_ptr()
-        _ = gp[][].fetch_add(Int64(1))
-    except:
-        pass
+    _STRING_EQ_LADDER_COUNTER.try_incr()
 
 
 def string_eq_ladder_call_count() raises -> Int:
     """Read the process-wide runtime-ladder-arm call count."""
-    # SAFETY: FFI boundary (see `string_eq_ladder_counter_incr`).
-    var gp = _STRING_EQ_LADDER_COUNTER.get_or_create_ptr()
-    return Int(gp[][].load())
+    return _STRING_EQ_LADDER_COUNTER.read()
 
 
 def reset_string_eq_ladder_call_count() raises:
     """Reset the process-wide count to 0 (test setup)."""
-    # SAFETY: FFI boundary (see `string_eq_ladder_counter_incr`).
-    var gp = _STRING_EQ_LADDER_COUNTER.get_or_create_ptr()
-    gp[][].store(Scalar[DType.int64](0))
+    _STRING_EQ_LADDER_COUNTER.reset()
