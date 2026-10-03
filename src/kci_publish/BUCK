@@ -1,7 +1,11 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The `kci publish` verb: publish the release set `kci build` left in a release
-# directory to a conda channel, or refuse it whole. Step 0 re-verifies every
+# One PUBLISH action of a stage (`kci run --stage S`, or its alias `kci publish
+# --stage S`; the kci binary's one parser fills the request): publish the
+# release set `kci build` left in <--release-dir>/<platform>/ to a conda
+# channel, or refuse it whole. The release must be the one --revision-id names,
+# for the action's platform; an OIDC channel's push identity must name the
+# stage as its environment. Step 0 re-verifies every
 # member over its bytes with the same `kci_release_set.verify_member` the build
 # ran, then lockstep, the requirement closure and the set hash, before any
 # request. The channel is read by download; a file present with other bytes, an
@@ -9,8 +13,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 # nothing written. Then the missing members are uploaded by up to
 # `--concurrency` worker threads (komira_fork_join; never with `force`), every
 # member is read back, and the metapackage goes last. The credential is
-# the channel's own (kci_release_channel), resolved once. One JSON report.
-# Nothing here names a channel, an account or an organisation.
+# the channel's own (kci_release_channel), resolved once. The action ends in a
+# kci_contract outcome word and error id, and puts its rows into the run's one
+# result document; no exit number is spelled here, and a release already in
+# the channel byte for byte is NOOP, exit 0. Nothing here names a channel, an
+# account or an organisation.
 #
 # Every welded test drives `ScriptedChannel`, an in-memory channel, over
 # release directories `ExampleRelease` writes under TEST_TMPDIR: no socket, no
@@ -18,10 +25,11 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 mojo_library(
     name = "kci_publish_lib",
     import_name = "kci_publish",
-    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo", "main/**/*.mojo"]),
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
+        "//src/kci_contract:kci_contract",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_release_channel:kci_release_channel",
         "//src/kci_release_set:kci_release_set",
@@ -34,8 +42,6 @@ mojo_library(
         "//src/komira_secret_store:komira_secret_store",
     ],
     test_srcs = [
-        # 2.1: every flag, both spellings; --credential/--approved-names unknown
-        "tests/test_publish_flags.mojo",
         # 0.1/0.2/0.6: every declared member and nothing else, verified over its bytes
         "tests/test_publish_inputs.mojo",
         # 0.3: one version/build/build_number/commit/timestamp/subdir; --release-version
@@ -44,26 +50,21 @@ mojo_library(
         "tests/test_publish_closure.mojo",
         # 0.5: golden set hash; a wrong --expect-set-hash sends nothing
         "tests/test_publish_set_hash.mojo",
-        # 1: by download; other bytes = 7, unclaimed new name = 8, all same = 6, unread = 5
+        # 1: by download; other bytes and an unclaimed new name REFUSED (3), all same NOOP (0),
+        # unread INDETERMINATE (5)
         "tests/test_publish_channel_state.mojo",
         # 2-4: once per attempt, settle, bounded retry, read-back barrier, metapackage last;
         # --concurrency 1 and 4 end in the same state; workers really run in parallel
         "tests/test_publish_run.mojo",
         # 2: no request of any scenario says force
         "tests/test_publish_never_force.mojo",
-        # 6: report keys and states, no secret, one verdict per exit code
-        "tests/test_publish_report.mojo",
-        # dry run reads only, mints nothing; the credential is the channel's
+        # 6: the result document's rows and error, no secret, one outcome per reason
+        "tests/test_publish_result.mojo",
+        # dry run reads only, mints nothing; the credential is the channel's; RUNNING first
         "tests/test_publish_flow.mojo",
+        # the release identity: --revision-id and the platform must be release.json's;
+        # the subdir is the platform's; an OIDC channel publishes only from its stage
+        "tests/test_publish_platform.mojo",
     ],
-    visibility = ["PUBLIC"],
-)
-
-# `kci publish` as a standalone binary, until the kci binary dispatches its
-# `publish` verb to the same `publish_main`.
-mojo_binary(
-    name = "kci_publish",
-    srcs = ["main/kci_publish_main.mojo"],
-    deps = [":kci_publish_lib"],
     visibility = ["PUBLIC"],
 )

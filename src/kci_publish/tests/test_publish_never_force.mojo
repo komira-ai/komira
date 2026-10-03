@@ -104,7 +104,7 @@ def _scenario(t: List[PublishTarget], kind: Int, name: String) raises -> Int:
         _assert_no_force(req, name)
         if req.method == HTTP_METHOD_POST:
             posts += 1
-    assert_true(posts > 0, name + String(": the scenario made no upload, so it checks nothing (exit ") + String(rep.exit_code) + String(")"))
+    assert_true(posts > 0, name + String(": the scenario made no upload, so it checks nothing (reason ") + rep.reason + String(")"))
     return got.call_count()
 
 

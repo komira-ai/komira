@@ -1,11 +1,13 @@
 # =============================================================================
 # src/kci_publish/run.mojo -- `run_publish`: contract steps 1 to 6 over a set
-#   that step 0 already verified, and the exit code (`report.mojo`'s table).
+#   that step 0 already verified, and the reason it stopped (`report.mojo`
+#   maps a reason to an outcome).
 # =============================================================================
 #
 #   1. read the channel (`channel_state.mojo`): every file by download, every
-#      listed subdir's names; `plan_from_state` decides: 7, 5, 8 or 6 stop
-#      here with NO write request;
+#      listed subdir's names; `plan_from_state` decides: STOP_DIFFERENT_BYTES,
+#      CANNOT_TELL, STOP_NEW_NAME or ALREADY_PUBLISHED stop here with NO write
+#      request;
 #   --dry-run stops here too, printing what steps 2 to 4 would do: no write
 #      request, and the channel's credential is never asked for a write
 #      value (no OIDC exchange);
@@ -13,14 +15,14 @@
 #      every member still absent is uploaded by up to `--concurrency` workers
 #      (`upload.mojo`, `upload_members`). EVERY such member is attempted; when
 #      any of them does not end present-same the run stops after all of them
-#      returned, with the worst outcome's exit code (7 over 4 over 9 over 5),
-#      and the metapackage is not attempted;
+#      returned, with the worst reason (STOP_DIFFERENT_BYTES over FAILED over
+#      PARTIAL over CANNOT_TELL), and the metapackage is not attempted;
 #   3. the barrier: when every worker has returned, EVERY member is
 #      downloaded back and compared;
 #   4. only then the metapackage, uploaded (or found present-same) and read
 #      back;
 #   5. report-only: is each file in its subdir's repodata yet (`index.mojo`);
-#   6. the report (`report.mojo`).
+#   6. the report (`report.mojo`): the reason, and every file's row.
 #
 # `--concurrency 1` and `--concurrency 4` end in the same channel state and
 # the same report: which thread uploads a member never changes what happens
@@ -54,15 +56,17 @@ from .plan import (
     plan_from_state,
     state_name,
 )
+from kci_contract import ERROR_CREDENTIAL
+
 from .report import (
-    EXIT_ALREADY_PUBLISHED,
-    EXIT_CANNOT_TELL,
-    EXIT_FAILED,
-    EXIT_PARTIAL,
-    EXIT_PUBLISHED,
-    EXIT_READ_BACK_MISMATCH,
-    EXIT_STOP_DIFFERENT_BYTES,
-    EXIT_STOP_NEW_NAME,
+    REASON_ALREADY_PUBLISHED,
+    REASON_CANNOT_TELL,
+    REASON_FAILED,
+    REASON_PARTIAL,
+    REASON_PUBLISHED,
+    REASON_READ_BACK_MISMATCH,
+    REASON_STOP_DIFFERENT_BYTES,
+    REASON_STOP_NEW_NAME,
     FileRow,
     PublishReport,
 )
@@ -82,53 +86,53 @@ from .upload import (
 from .workers import ChannelTransport, WorkerSleeper
 
 
-def _exit_of_verdict(verdict: Int) -> Int:
+def _reason_of_verdict(verdict: Int) -> String:
     if verdict == VERDICT_STOP_DIFFERENT:
-        return EXIT_STOP_DIFFERENT_BYTES
+        return String(REASON_STOP_DIFFERENT_BYTES)
     if verdict == VERDICT_CANNOT_TELL:
-        return EXIT_CANNOT_TELL
+        return String(REASON_CANNOT_TELL)
     if verdict == VERDICT_STOP_NEW_NAME:
-        return EXIT_STOP_NEW_NAME
+        return String(REASON_STOP_NEW_NAME)
     if verdict == VERDICT_ALREADY_PUBLISHED:
-        return EXIT_ALREADY_PUBLISHED
-    return EXIT_PUBLISHED
+        return String(REASON_ALREADY_PUBLISHED)
+    return String(REASON_PUBLISHED)
 
 
-def _exit_of_file(result: Int) -> Int:
+def _reason_of_file(result: Int) -> String:
     if result == FILE_STOP_DIFFERENT:
-        return EXIT_STOP_DIFFERENT_BYTES
+        return String(REASON_STOP_DIFFERENT_BYTES)
     if result == FILE_FAILED:
-        return EXIT_FAILED
+        return String(REASON_FAILED)
     if result == FILE_STILL_ABSENT:
-        return EXIT_PARTIAL
+        return String(REASON_PARTIAL)
     if result == FILE_CANNOT_TELL:
-        return EXIT_CANNOT_TELL
-    return EXIT_PUBLISHED
+        return String(REASON_CANNOT_TELL)
+    return String(REASON_PUBLISHED)
 
 
-def _step_two_rank(code: Int) -> Int:
+def _step_two_rank(code: String) -> Int:
     """Step 2's precedence when several members did not end present-same:
     other bytes (a person's decision) over a definitive refusal over a
     member still missing over one that could not be read."""
-    if code == EXIT_STOP_DIFFERENT_BYTES:
+    if code == REASON_STOP_DIFFERENT_BYTES:
         return 4
-    if code == EXIT_FAILED:
+    if code == REASON_FAILED:
         return 3
-    if code == EXIT_PARTIAL:
+    if code == REASON_PARTIAL:
         return 2
-    if code == EXIT_CANNOT_TELL:
+    if code == REASON_CANNOT_TELL:
         return 1
     return 0
 
 
-def _read_back_rank(code: Int) -> Int:
+def _read_back_rank(code: String) -> Int:
     """Step 3's precedence: a mismatch over a missing member over an
     unreadable one."""
-    if code == EXIT_READ_BACK_MISMATCH:
+    if code == REASON_READ_BACK_MISMATCH:
         return 3
-    if code == EXIT_PARTIAL:
+    if code == REASON_PARTIAL:
         return 2
-    if code == EXIT_CANNOT_TELL:
+    if code == REASON_CANNOT_TELL:
         return 1
     return 0
 
@@ -168,13 +172,11 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         for k in range(len(v.lines)):
             r.lines.append(v.lines[k].copy())
     except e:
-        r.exit_code = EXIT_CANNOT_TELL
         r.lines.append(String(e))
-        r.finish_line()
+        r.end(String(REASON_CANNOT_TELL))
         return r^
     if verdict != VERDICT_PROCEED:
-        r.exit_code = _exit_of_verdict(verdict)
-        r.finish_line()
+        r.end(_reason_of_verdict(verdict))
         return r^
     var to_upload = 0
     for i in range(len(targets)):
@@ -188,16 +190,24 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
             + String(to_upload)
             + String(" file(s) would be, the metapackage last")
         )
-        r.exit_code = EXIT_PUBLISHED
-        r.finish_line()
+        r.end(String(REASON_PUBLISHED))
         return r^
     # ── step 2 ───────────────────────────────────────────────────────────────
     try:
         var names = approved_names_for(targets, channel_read, claims)
         if not registry.credential().is_armed():
-            var host = repo_host(targets[0].coordinate.repo)
-            var auth = source.authorization(SURFACE_PREFIX_DEV, host)
-            registry.credential().arm(auth^)
+            try:
+                var host = repo_host(targets[0].coordinate.repo)
+                var auth = source.authorization(SURFACE_PREFIX_DEV, host)
+                registry.credential().arm(auth^)
+            except e:
+                # nothing was sent: the write value is asked for before the first upload
+                r.stop(
+                    String(REASON_FAILED),
+                    String(ERROR_CREDENTIAL),
+                    String("FAILED -- the channel's credential: ") + String(e),
+                )
+                return r^
         var jobs = List[Int]()
         for i in range(len(targets)):
             if targets[i].is_metapackage:
@@ -208,36 +218,35 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
                 continue
             jobs.append(i)
         var outcomes = upload_members(registry, targets, jobs, names, opts, sleeper)
-        var step_two = EXIT_PUBLISHED
+        var step_two = String(REASON_PUBLISHED)
         for k in range(len(jobs)):
             _record(r, jobs[k], outcomes[k])
             if outcomes[k].result != FILE_DONE:
-                var code = _exit_of_file(outcomes[k].result)
+                var code = _reason_of_file(outcomes[k].result)
                 if _step_two_rank(code) > _step_two_rank(step_two):
                     step_two = code
-        if step_two != EXIT_PUBLISHED:
+        if step_two != REASON_PUBLISHED:
             for i in range(len(targets)):
                 if targets[i].is_metapackage:
                     r.files[i].action = String("not-attempted")
                     r.lines.append(String("NOT-ATTEMPTED ") + targets[i].where() + String(" -- the metapackage is published only after every member reads back"))
-            r.exit_code = step_two
-            r.finish_line()
+            r.end(step_two.copy())
             return r^
         # ── step 3 ───────────────────────────────────────────────────────────
         var back = read_back_all(registry, targets)
-        var worst = EXIT_PUBLISHED
+        var worst = String(REASON_PUBLISHED)
         for i in range(len(targets)):
             if targets[i].is_metapackage:
                 continue
             r.files[i].state_after = back[i].kind
-            var code = EXIT_PUBLISHED
+            var code = String(REASON_PUBLISHED)
             if back[i].kind == STATE_DIFFERENT:
-                code = EXIT_READ_BACK_MISMATCH
+                code = String(REASON_READ_BACK_MISMATCH)
             elif back[i].kind == STATE_ABSENT:
-                code = EXIT_PARTIAL
+                code = String(REASON_PARTIAL)
             elif back[i].kind != STATE_SAME:
-                code = EXIT_CANNOT_TELL
-            if code != EXIT_PUBLISHED:
+                code = String(REASON_CANNOT_TELL)
+            if code != REASON_PUBLISHED:
                 r.lines.append(
                     String("READ-BACK ")
                     + targets[i].where()
@@ -248,13 +257,12 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
                 )
                 if _read_back_rank(code) > _read_back_rank(worst):
                     worst = code
-        if worst != EXIT_PUBLISHED:
+        if worst != REASON_PUBLISHED:
             for i in range(len(targets)):
                 if targets[i].is_metapackage:
                     r.files[i].action = String("not-attempted")
                     r.lines.append(String("NOT-ATTEMPTED ") + targets[i].where() + String(" -- the metapackage is published only after every member reads back"))
-            r.exit_code = worst
-            r.finish_line()
+            r.end(worst.copy())
             return r^
         # ── step 4 ───────────────────────────────────────────────────────────
         for i in range(len(targets)):
@@ -265,26 +273,22 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
                 r.files[i].action = String("skipped")
                 r.files[i].state_after = s.kind
                 if s.kind != STATE_SAME:
-                    r.exit_code = EXIT_READ_BACK_MISMATCH if s.kind == STATE_DIFFERENT else EXIT_CANNOT_TELL
                     r.lines.append(String("READ-BACK ") + targets[i].where() + String(": ") + state_name(s.kind))
-                    r.finish_line()
+                    r.end(String(REASON_READ_BACK_MISMATCH) if s.kind == STATE_DIFFERENT else String(REASON_CANNOT_TELL))
                     return r^
                 r.lines.append(String("SKIPPED ") + targets[i].where() + String(" -- already present, identical"))
                 continue
             var o = upload_file(registry, targets[i], names, opts, sleeper)
             _record(r, i, o)
             if o.result != FILE_DONE:
-                r.exit_code = _exit_of_file(o.result)
-                r.finish_line()
+                r.end(_reason_of_file(o.result))
                 return r^
     except e:
-        r.exit_code = EXIT_FAILED
         r.lines.append(String("FAILED -- ") + String(e))
-        r.finish_line()
+        r.end(String(REASON_FAILED))
         return r^
     # ── step 5 (report-only) ─────────────────────────────────────────────────
     for i in range(len(targets)):
         r.files[i].indexed = is_indexed(registry, targets[i], opts, sleeper)
-    r.exit_code = EXIT_PUBLISHED
-    r.finish_line()
+    r.end(String(REASON_PUBLISHED))
     return r^

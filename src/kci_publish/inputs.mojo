@@ -15,9 +15,11 @@
 #     the declaration's, bare `file`/`metadata`, nothing else at the top, the
 #     file's sha256 and size, the conda metadata agreeing with the manifest);
 #   - `release.json` missing, unparsable, or not exactly what the members
-#     recompute to. It is a commit marker and a convenience, never an
-#     authority: everything publish uses is recomputed from the member
-#     directories.
+#     recompute to under the identity it records (revision, platform; the
+#     set hash holds both). It is a commit marker and a convenience, never
+#     an authority: everything publish uses is recomputed from the member
+#     directories. Whether that identity is the one this run publishes
+#     (--revision-id, the action's platform) is the flow's check.
 #
 # Contract 0.6 holds structurally: `verify_member` reads only inside the
 # member's own directory (bare names), and this file reads nothing else but
@@ -33,6 +35,7 @@ from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarat
 from kci_release_set.member import ReleaseMember, verify_member
 from kci_release_set.release_manifest import (
     RELEASE_MANIFEST_NAME,
+    ReleaseIdentity,
     ReleaseManifest,
     read_release_manifest,
     release_manifest_of,
@@ -41,7 +44,9 @@ from kci_release_set.release_manifest import (
 
 struct LoadedRelease(Copyable, Movable):
     """Every member, verified, in declaration-file order, and the release
-    manifest they recompute to (its `set_hash` is the recomputed one).
+    manifest they recompute to under the recorded identity (its `set_hash`
+    is the recomputed one; `revision`, `platform` and `produced_by` are
+    `release.json`'s).
 
     Layout: owned values only. No pointer field."""
 
@@ -80,7 +85,7 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
     """Contract steps 0.1 and 0.2 (see the file header)."""
     if not isdir(dir):
         raise Error(
-            String("kci publish: --artifacts '") + dir + String("' is not a directory")
+            String("kci publish: the release directory '") + dir + String("' is not a directory")
         )
     var base = _slash(dir)
     var refusals = List[String]()
@@ -126,8 +131,14 @@ def load_release(decls: ArtifactDeclarations, dir: String) raises -> LoadedRelea
         )
     if len(refusals) > 0:
         _refuse_all(refusals)
-    var recomputed = release_manifest_of(members)
     var recorded = read_release_manifest(base + String(RELEASE_MANIFEST_NAME))
+    var identity = ReleaseIdentity(
+        recorded.revision.copy(),
+        recorded.platform.copy(),
+        recorded.produced_by_run_id.copy(),
+        recorded.produced_by_attempt,
+    )
+    var recomputed = release_manifest_of(members, identity)
     if recorded.set_hash != recomputed.set_hash or not recorded.same_as(recomputed):
         refusals.append(
             String(RELEASE_MANIFEST_NAME)
