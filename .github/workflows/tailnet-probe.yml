@@ -34,16 +34,17 @@ jobs:
           audience: ${{ vars.TS_AUDIENCE }}
           tags: tag:ci
           log-mode: quiet
-      - name: path and reachability (no addresses, names or accounts are printed: this log is public)
+      - name: "path and reachability (nothing identifying is printed, this log is public)"
         env:
           FARM_ADDRESS: ${{ vars.FARM_ADDRESS }}
         run: |
           set -u
           hp="${FARM_ADDRESS#*//}"; host="${hp%:*}"; port="${hp##*:}"
+          echo "::add-mask::${host}"
           if tailscale ping -c 5 "${host}" 2>&1 | grep -q ' via DERP'; then relay=relayed; else relay=direct; fi
           ms="$(tailscale ping -c 5 "${host}" 2>&1 | sed -n 's/.* in \([0-9]*\)ms.*/\1/p' | tail -1)"
           echo "path to the farm: last ping ${ms:-unknown} ms; first-hop kind seen: ${relay}"
-          if timeout 10 bash -c "</dev/tcp/${host}/${port}"; then echo "reachable ${port}"; else echo "NOT reachable ${port}"; exit 1; fi
+          if timeout 10 bash -c "</dev/tcp/${host}/${port}" 2>/dev/null; then echo "reachable ${port}"; else echo "NOT reachable ${port}"; exit 1; fi
           for p in 30983 22 6443; do
             if timeout 5 bash -c "</dev/tcp/${host}/${p}" 2>/dev/null; then echo "UNEXPECTEDLY reachable ${p}"; exit 1; else echo "blocked ${p} (expected)"; fi
           done
