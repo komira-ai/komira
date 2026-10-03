@@ -33,6 +33,7 @@
 # that imports nothing keeps this file's dependency surface at zero cycles.
 from kci_reconciler.fault_domain import FAULT_UNSET
 from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.ownership import OwnerStamp
 
 
 # =============================================================================
@@ -166,7 +167,17 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
                         (a served node's live_digest IS its live image, but
                         the two are kept separate so a non-image node can still
                         carry a digest without implying a served image).
-    Flat-String value POD (all six fields are single-level owned Int/String —
+      * `stamp`       — the ownership IDENTITY the live object carries
+                        (`OwnerStamp.identity()`, decoded by the conformer from
+                        the object's labels), or empty when it carries none.
+                        Read only in an OWNED scope (engine.mojo); never part
+                        of `live_digest`.
+      * `unmanaged`   — a description of differences on fields kci does NOT
+                        model (a console-added label, a field the catalog has
+                        no word for). Reported by `plan` beside the verb and
+                        NEVER converged: kci owns every field it models and
+                        touches no other. Empty when there are none.
+    Flat-String value POD (all eight fields are single-level owned Int/String —
     no pointer field; never in a byte-slab)."""
 
     var phase: Int
@@ -178,6 +189,10 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
     # below) needs neither; a served node populates them in `read_status`.
     var endpoint: String
     var live_image: String
+    # The ownership and the unmodelled-difference fields, defaulted EMPTY for
+    # the same reason (a conformer that does not stamp never sets them).
+    var stamp: String
+    var unmanaged: String
 
     def __init__(
         out self,
@@ -187,17 +202,21 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
         message: String,
         endpoint: String = String(""),
         live_image: String = String(""),
+        stamp: String = String(""),
+        unmanaged: String = String(""),
     ):
-        """The flat POD ctor. `endpoint` + `live_image` default EMPTY so a
-        4-arg call (raw `ResourceStatus(phase, pid, digest, msg)` + the
-        factories) needs neither — a served node passes the two extra fields
-        explicitly."""
+        """The flat POD ctor. `endpoint` + `live_image` + `stamp` +
+        `unmanaged` default EMPTY so a 4-arg call (raw
+        `ResourceStatus(phase, pid, digest, msg)` + the factories) needs none
+        of them."""
         self.phase = phase
         self.physical_id = physical_id.copy()
         self.live_digest = live_digest.copy()
         self.message = message.copy()
         self.endpoint = endpoint.copy()
         self.live_image = live_image.copy()
+        self.stamp = stamp.copy()
+        self.unmanaged = unmanaged.copy()
 
     def is_absent(self) -> Bool:
         return self.phase == RES_ABSENT
@@ -224,10 +243,13 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
         live_digest: String,
         endpoint: String = String(""),
         live_image: String = String(""),
+        stamp: String = String(""),
+        unmanaged: String = String(""),
     ) -> ResourceStatus:
         """A present-matched status. `endpoint` + `live_image` default EMPTY
         for a non-served node; a served node passes its live served URL + image so
-        the STATUS subsystem can surface them."""
+        the STATUS subsystem can surface them. A stamping conformer passes the
+        live `stamp`; any conformer passes `unmanaged` differences."""
         return ResourceStatus(
             RES_PRESENT_MATCHED,
             physical_id,
@@ -235,6 +257,8 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
             String(""),
             endpoint,
             live_image,
+            stamp,
+            unmanaged,
         )
 
     @staticmethod
@@ -243,9 +267,12 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
         live_digest: String,
         endpoint: String = String(""),
         live_image: String = String(""),
+        stamp: String = String(""),
+        unmanaged: String = String(""),
     ) -> ResourceStatus:
         """A present-drifted status. `endpoint` + `live_image` default EMPTY
-        for a non-served node; a served node passes its live served URL + image."""
+        for a non-served node; a served node passes its live served URL + image.
+        `stamp` and `unmanaged` as for `matched`."""
         return ResourceStatus(
             RES_PRESENT_DRIFTED,
             physical_id,
@@ -253,6 +280,8 @@ struct ResourceStatus(Copyable, Movable, Deinitable):
             String(""),
             endpoint,
             live_image,
+            stamp,
+            unmanaged,
         )
 
 
@@ -294,6 +323,9 @@ struct ChangeAction(Copyable, Movable, Deinitable):
                        from (`Resource.owner`), so a plan can be grouped under
                        what the author wrote. Empty for a node with no owner.
                        `plan_graph` stamps it; a conformer's `plan` need not.
+      * `unmanaged`  — differences on fields kci does not model
+                       (`ResourceStatus.unmanaged`), printed beside the verb
+                       and never acted on. `plan_graph` copies it.
     Flat-String value POD."""
 
     var logical_id: String
@@ -301,6 +333,7 @@ struct ChangeAction(Copyable, Movable, Deinitable):
     var reason: String
     var retention: Int
     var owner: String
+    var unmanaged: String
 
     def __init__(
         out self,
@@ -309,12 +342,14 @@ struct ChangeAction(Copyable, Movable, Deinitable):
         reason: String,
         retention: Int,
         owner: String = String(""),
+        unmanaged: String = String(""),
     ):
         self.logical_id = logical_id
         self.verb = verb
         self.reason = reason
         self.retention = retention
         self.owner = owner
+        self.unmanaged = unmanaged
 
     def __init__(out self, *, copy: Self):
         self.logical_id = copy.logical_id.copy()
@@ -322,6 +357,7 @@ struct ChangeAction(Copyable, Movable, Deinitable):
         self.reason = copy.reason.copy()
         self.retention = copy.retention
         self.owner = copy.owner.copy()
+        self.unmanaged = copy.unmanaged.copy()
 
     def is_noop(self) -> Bool:
         return self.verb == VERB_NOOP
@@ -648,3 +684,59 @@ trait Resource(Movable, Deinitable):
         `input_refs`. A node with references overrides it (the descriptor
         driver does)."""
         return self.read_status(creds)
+
+    # ---- ownership and the closed world (kci_reconciler/ownership.mojo) -----
+    #
+    # ⚠ Same rule as the value-flow verbs: every one has a default and every
+    # one is forwarded by `ErasedResource`, pinned by
+    # `test_ownership_and_cell_keys`'s probe.
+
+    def stamps_ownership(mut self) -> Bool:
+        """True iff this node implements `create_owned` (and `adopt_owned`)
+        and reports the live object's identity in `ResourceStatus.stamp`. An
+        OWNED apply refuses a graph holding a node that answers False, before
+        any change: a node that cannot stamp would create objects nobody can
+        later prove are kci's.
+
+        DEFAULT = FALSE."""
+        return False
+
+    def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
+        """Create the resource AS `creds` CARRYING `stamp` in the same call
+        (the identity as labels, or as the description's first line on an
+        object that cannot carry labels; the provenance as annotations), and
+        return its physical id. The owned scope's create: there is never a
+        moment when an object kci made exists without its stamp.
+
+        DEFAULT = REFUSE (the engine checks `stamps_ownership` first, so this
+        is reached only by a conformer that answers True and forgot it)."""
+        raise Error(
+            String("create_owned: node '")
+            + self.logical_id()
+            + String("' does not stamp ownership")
+        )
+
+    def adopt_owned(
+        mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
+    ) raises:
+        """Stamp the EXISTING unstamped object `physical_id` with `stamp`: the
+        explicit `--adopt <id>` takeover, and nothing else calls it.
+
+        DEFAULT = REFUSE."""
+        raise Error(
+            String("adopt_owned: node '")
+            + self.logical_id()
+            + String("' cannot adopt an existing object")
+        )
+
+    def wanted(mut self) -> Bool:
+        """False for a node the file no longer asks for: a role of an authored
+        resource that is now off (`public {}` turned `internal {}`, a removed
+        schedule or `uses` line). Lowering emits it anyway, so the closed set
+        of roles is converged: apply deletes the object if it is present AND
+        the store recorded it (and, in an owned scope, it carries this node's
+        stamp); a present object the store never recorded is left and
+        reported as leftover.
+
+        DEFAULT = TRUE."""
+        return True
