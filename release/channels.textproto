@@ -1,5 +1,5 @@
-# The release channels (src/kci_release_channel): where `kci publish` may
-# push, and how. .github/workflows/kci.yml reads this file (KCI_CHANNELS) and
+# The release channels (src/kci_release_channel): where a PUBLISH step
+# (`kci run --stage <S>`) may push, and how. .github/workflows/kci.yml reads this file (KCI_CHANNELS) and
 # publishes to the channel named `komira` (KCI_CHANNEL). CODEOWNERS requires
 # the release approver's review for everything under release/.
 #
