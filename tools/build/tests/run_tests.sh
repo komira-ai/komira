@@ -219,7 +219,7 @@
 #      at its timeout. There are no holds: every welded test must pass.
 #      `buck2 test` of a welded library runs its rust_test (Pass, with the
 #      harness's count), and of a binary welded to a red test fails.
-#  36. aws_client (tools/build/cloud/aws.bzl; tests//functional/aws_client): a
+#  36. mojo_aws_client (tools/build/cloud/aws.bzl; tests//functional/mojo_aws_client): a
 #      pure-mode CloudWatch Logs client generated from the pinned botocore
 #      model with operations = [GetLogEvents], over stub runtime deps, builds
 #      only once its welded tests pass: the generated layout probe, then a
@@ -249,7 +249,7 @@
 #      that is a label, not `.mojo`, or named like a generated file, and a
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
-#      (tests//negative/aws_client).
+#      (tests//negative/mojo_aws_client).
 #  37. The platform table (tools/build/platforms/table.bzl, one row per
 #      (os, cpu)) is complete and the default target platform is the client's
 #      own: loading tests//functional/platform_table: runs the load-time
@@ -957,22 +957,22 @@ else
 fi
 
 # 36
-expect_green aws_client tests//functional/aws_client:
+expect_green mojo_aws_client tests//functional/mojo_aws_client:
 expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
 expect_green aws_rest_xml //tools/build/proto-codegen/aws_rest_xml:
-expect_red aws_client_no_operations '`operations` is empty' tests//negative/aws_client:no_operations
-expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/aws_client:joined_operations
-expect_red aws_client_no_runtime '`deps` is empty' tests//negative/aws_client:no_runtime
-expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/aws_client:unknown_operation
-expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/aws_client:caller_test_red
+expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
+expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
+expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
+expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/mojo_aws_client:unknown_operation
+expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/mojo_aws_client:caller_test_red
 expect_green aws_client_mode tests//functional/aws_client_mode:komira_aws_logs_client_send_surface
-expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/aws_client:duplicate_operation
-expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/aws_client:overrides_without_hand_srcs
-expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/aws_client:hand_srcs_without_overrides
-expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` is not a source path of a `.mojo` file' tests//negative/aws_client:hand_src_is_label
-expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/aws_client:hand_src_not_mojo
-expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/aws_client:hand_src_clashes
-expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/aws_client:service_unreadable
+expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/mojo_aws_client:duplicate_operation
+expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/mojo_aws_client:overrides_without_hand_srcs
+expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/mojo_aws_client:hand_srcs_without_overrides
+expect_red aws_client_hand_src_is_label '`hand_srcs` entry `:hand_owner_label` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_is_label
+expect_red aws_client_hand_src_not_mojo '`hand_srcs` entry `hand/notes.txt` is not a source path of a `.mojo` file' tests//negative/mojo_aws_client:hand_src_not_mojo
+expect_red aws_client_hand_src_clashes 'has the name of a generated or another hand-written file, `_layout_probe.mojo`' tests//negative/mojo_aws_client:hand_src_clashes
+expect_red aws_client_service_unreadable 'the botocore service id cannot be read from the model path' tests//negative/mojo_aws_client:service_unreadable
 
 # 9
 if [ "$MODE" = local ]; then

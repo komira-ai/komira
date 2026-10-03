@@ -1,8 +1,8 @@
-"""The hand-written owner of GetLogEvents in the aws_client hand_srcs fixture.
+"""The hand-written owner of GetLogEvents in the mojo_aws_client hand_srcs fixture.
 
 `logs_overrides.json` names `get_log_events` here as the owner of the
 operation's plain verb; aws-client-gen refuses the manifest unless this file
-defines it, and aws_client copies this file into the generated package next
+defines it, and mojo_aws_client copies this file into the generated package next
 to the generated module.
 """
 

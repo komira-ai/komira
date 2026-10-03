@@ -1,4 +1,4 @@
-"""`gen_check` and `tests_check`: what a gcp_client generated and ran, checked as build actions.
+"""`gen_check` and `tests_check`: what a mojo_gcp_client generated and ran, checked as build actions.
 
 `gen` is a generated directory, here a library's `[gen]` sub-target, so the
 check also proves mojo_library's `gen` attribute re-exports it. The action

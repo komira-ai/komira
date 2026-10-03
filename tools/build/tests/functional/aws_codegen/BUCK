@@ -2,7 +2,7 @@ load("@komira//third_party/botocore:models.bzl", "botocore_model")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/proto-codegen/aws_rest_json:model.bzl", "TINY_REST_JSON")
 load("@komira//tools/build/proto-codegen/aws_rest_xml:model.bzl", "TINY_REST_XML")
-load("//functional/gcp_client:defs.bzl", "gen_check", "tests_check")
+load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 
 # Text goldens and refusals of komira//tools/build/proto-codegen:aws-client-gen,

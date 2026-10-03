@@ -1,4 +1,4 @@
-"""A stub `komira_json` for the aws_client fixture.
+"""A stub `komira_json` for the mojo_aws_client fixture.
 
 The generated AWS code imports `JsonValue`, `parse_json_bytes` and
 `parse_json_value` from `komira_json`, the package komira//src/komira_json.
