@@ -138,7 +138,11 @@ aws_conformance_driver_src(
     name = "aws_conformance_driver_src",
     corpus = _PROTOCOL_TESTS,
     ignore_list = _IGNORE_LIST,
-    protocols = ["json"],
+    protocols = [
+        "json",
+        "rest-json",
+        "rest-xml",
+    ],
 )
 
 # A test program, built once and run once, so at the test optimization level.
@@ -148,6 +152,7 @@ mojo_binary(
     deps = [
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_json:komira_json",
+        "//src/komira_xml:komira_xml",
     ],
     optimization_level = "1",
 )
