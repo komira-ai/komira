@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Cancellation token, detached-drop spawn, the dispatcher / worker-pool / fork-join / scale-signal trait contracts, and the pool-depth counter.
+mojo_library(
+    name = "komira_concurrency",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_atomic_alias:komira_atomic_alias",
+    ],
+    test_srcs = [
+        "tests/test_spawn_drop.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
