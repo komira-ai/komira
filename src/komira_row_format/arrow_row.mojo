@@ -72,7 +72,7 @@
 from std.bit import byte_swap
 from std.memory import bitcast
 
-from komira_core.eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     float_quotient_order_bits_f32,
     float_quotient_order_bits_f64,
 )
@@ -239,7 +239,7 @@ def encode_u64_to_bytes(v: UInt64, asc: Bool) -> Array[UInt8, 8]:
 def encode_f64_to_bytes(v: Float64, asc: Bool) -> Array[UInt8, 8]:
     """Encode a 64-bit float so byte-lex order is the engine's FLOAT ORDER.
 
-    That order is the DuckDB quotient order (`komira_core.eval.float_quotient_order`):
+    That order is the DuckDB quotient order (`komira_udf.float_quotient_order`):
     every NaN is ONE value above `+inf`, and `-0.0`
     ties `+0.0`. The image is `float_quotient_order_bits_f64` -- the sign-flip
     of the CANONICAL value -- so `-0.0` encodes to `+0.0`'s bytes and every NaN
