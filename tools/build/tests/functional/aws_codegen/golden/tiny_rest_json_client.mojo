@@ -13,7 +13,7 @@
 #   model sha256 : 75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee
 #   operations   : GetThing, PutThing, SetConfig
 #   shapes       : 8 messages, 0 enums
-#   generator    : aws-client-gen version 4
+#   generator    : aws-client-gen version 5
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
