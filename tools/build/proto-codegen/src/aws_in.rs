@@ -170,7 +170,7 @@ pub struct AwsMemberFacts {
     pub deprecated: bool,
     pub deprecated_message: Option<String>,
     /// `contextParam.name` — an endpoint-ruleset input. Recorded rather
-    /// than dropped even though no ruleset is vendored.
+    /// than dropped even though the generator reads no ruleset.
     pub context_param: Option<String>,
     /// True when this member is the shape's designated `payload`.
     pub is_payload: bool,
@@ -485,6 +485,15 @@ pub fn lower_aws_service(
     for name in &reached {
         let shape = lowerer.shape(name)?;
         let ty = shape_type(shape, name)?;
+        // REFUSED, by name (aws_conformance::REFUSAL_MARKER): a document is
+        // untyped JSON, and lowering it as the empty structure it is spelled
+        // as would drop its contents on both the request and the response.
+        if flag(shape, "document") {
+            return Err(format!(
+                "aws front-end: REFUSED document: shape `{name}` is a document type \
+                 (untyped JSON), which the IR has no type for"
+            ));
+        }
         match ty {
             "structure" => {
                 lowerer.message_shapes.insert(name.clone());
@@ -1159,7 +1168,45 @@ impl<'a> AwsLowerer<'a> {
                 .get("shape")
                 .and_then(Json::as_str)
                 .ok_or_else(|| format!("aws front-end: `{op_name}` error has no `shape`"))?;
+            // REFUSED, by name (aws_conformance::REFUSAL_MARKER): an error
+            // of an awsQueryCompatible service whose `error.code` is not its
+            // shape name. The service answers that error with the code in
+            // the x-amzn-query-error header and the shape name in the body's
+            // `__type`, and the generated error path reads the body only, so
+            // the client would report the wrong code. An error without a
+            // custom code carries the same code in both places, so the
+            // operation is only refused when one of its errors has one.
+            if self.meta.aws_query_compatible {
+                let shape = self.shape(s)?;
+                if let Some(code) = shape
+                    .get("error")
+                    .and_then(|e| e.get("code"))
+                    .and_then(Json::as_str)
+                    .filter(|c| *c != s)
+                {
+                    return Err(format!(
+                        "aws front-end: REFUSED aws-query-compatible: operation \
+                         `{op_name}` can return `{s}`, whose awsQueryCompatible code \
+                         `{code}` arrives in the x-amzn-query-error header, which the \
+                         generated error path does not read"
+                    ));
+                }
+            }
             errors.push(aws_fq(&self.meta.service, s));
+        }
+        // REFUSED, by name: an operation with an `endpoint.hostPrefix`. The
+        // request builder fills `AwsRequest.host_prefix`, but the generated
+        // `send` resolves the endpoint without it, so the client would send
+        // the request to the unprefixed host.
+        if let Some(hp) = op
+            .get("endpoint")
+            .and_then(|e| e.get("hostPrefix"))
+            .and_then(Json::as_str)
+        {
+            return Err(format!(
+                "aws front-end: REFUSED host-prefix: operation `{op_name}` has the \
+                 host prefix `{hp}`, and the generated send does not apply a host prefix"
+            ));
         }
 
         let facts = AwsOperationFacts {
@@ -1236,7 +1283,7 @@ impl<'a> AwsLowerer<'a> {
         };
         // DROPPED, deliberately and named: `staticContextParams` (78
         // operations) and `operationContextParams` (5). They bind values
-        // into an ENDPOINT RULESET, and `PIN.json` vendors no rulesets —
+        // into an ENDPOINT RULESET, and the generator reads no ruleset —
         // there is nothing for them to parameterise, and inventing a
         // representation for an absent consumer is how a wrong default gets
         // established. `contextParam` (the per-MEMBER half, 179 members) IS
@@ -1244,8 +1291,8 @@ impl<'a> AwsLowerer<'a> {
         if op.get("staticContextParams").is_some() || op.get("operationContextParams").is_some() {
             self.note(format!(
                 "operation `{op_name}`: staticContextParams / operationContextParams \
-                 DROPPED — they are endpoint-ruleset inputs and no ruleset is vendored \
-                 (see tools/vendor/aws_models/PIN.json)"
+                 DROPPED — they are endpoint-ruleset inputs and the generator reads no \
+                 ruleset (see third_party/botocore/models.bzl)"
             ));
         }
 
@@ -1554,6 +1601,89 @@ fn enum_ident(wire: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A one-operation awsJson model: `extra_meta` is merged into its
+    /// metadata, `extra_op` into its one operation, and `member_shape` is the
+    /// type of the input's one member.
+    fn tiny_model(extra_meta: &str, extra_op: &str, member_shape: &str) -> Json {
+        crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-01", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.0", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-01"{extra_meta}}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}{extra_op}}}}},
+                "shapes": {{"In": {{"type": "structure",
+                                   "members": {{"M": {{"shape": "{member_shape}"}}}}}},
+                           "Str": {{"type": "string"}},
+                           "Doc": {{"type": "structure", "members": {{}}, "document": true}},
+                           "Plain": {{"type": "structure", "members": {{}}, "exception": true}},
+                           "Coded": {{"type": "structure", "members": {{}}, "exception": true,
+                                     "error": {{"code": "Customized", "httpStatusCode": 402}}}},
+                           "SameCode": {{"type": "structure", "members": {{}}, "exception": true,
+                                       "error": {{"code": "SameCode", "httpStatusCode": 400}}}}}}}}"#
+        ))
+        .unwrap()
+    }
+
+    fn lower_tiny(model: &Json) -> Result<AwsLowering, String> {
+        lower_aws_service(model, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny")
+    }
+
+    fn refusal_of(model: &Json) -> Option<String> {
+        let e = lower_tiny(model).err().expect("the model lowered");
+        crate::aws_conformance::refusal_name(&e)
+    }
+
+    const QUERY_COMPATIBLE: &str = r#", "awsQueryCompatible": {}"#;
+
+    #[test]
+    fn the_tiny_model_lowers() {
+        lower_tiny(&tiny_model("", "", "Str")).unwrap();
+    }
+
+    #[test]
+    fn a_document_shape_is_a_named_refusal() {
+        assert_eq!(refusal_of(&tiny_model("", "", "Doc")).as_deref(), Some("document"));
+    }
+
+    #[test]
+    fn a_host_prefix_is_a_named_refusal() {
+        let op = r#", "endpoint": {"hostPrefix": "data-"}"#;
+        assert_eq!(refusal_of(&tiny_model("", op, "Str")).as_deref(), Some("host-prefix"));
+    }
+
+    #[test]
+    fn a_query_compatible_custom_error_code_is_a_named_refusal() {
+        let op = r#", "errors": [{"shape": "Plain"}, {"shape": "Coded"}]"#;
+        assert_eq!(
+            refusal_of(&tiny_model(QUERY_COMPATIBLE, op, "Str")).as_deref(),
+            Some("aws-query-compatible")
+        );
+    }
+
+    #[test]
+    fn a_query_compatible_service_without_custom_codes_lowers() {
+        // No errors, a plain one, and one whose code is its shape name: the
+        // header and the body name the same code, so nothing is refused, and
+        // the service is still marked query-compatible for the request side.
+        for op in [
+            "",
+            r#", "errors": [{"shape": "Plain"}]"#,
+            r#", "errors": [{"shape": "SameCode"}]"#,
+        ] {
+            let l = lower_tiny(&tiny_model(QUERY_COMPATIBLE, op, "Str")).unwrap();
+            assert!(l.service.aws_query_compatible, "{op}");
+        }
+    }
+
+    #[test]
+    fn a_custom_error_code_outside_query_compatible_lowers() {
+        let op = r#", "errors": [{"shape": "Coded"}]"#;
+        lower_tiny(&tiny_model("", op, "Str")).unwrap();
+    }
 
     #[test]
     fn snake_case_breaks_on_acronym_boundaries() {

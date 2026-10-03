@@ -308,7 +308,7 @@ def test_the_records_branch_reports_the_same_extent_as_the_empty_one() raises:
 #
 # ── THE SHAPE IT PREVENTS ────────────────────────────────────────────────────
 #     validator output: READ BY THIS TOOL — the rows below were fetched from
-#     this step's own stream by komira_ci; no raw cloud command is needed. ...
+#     this step's own stream by kci; no raw cloud command is needed. ...
 #     validate-dag: 0/1 step(s) passed (1 failed, 0 skipped) — FAIL
 #
 # The sentence "the rows below were fetched" with NO ROWS BELOW IT violates
@@ -420,7 +420,7 @@ def test_an_empty_container_read_names_what_to_do_next() raises:
     """★★ AN ABSENCE WITH NO NEXT ACTION IS A DEAD END.
 
     ⛔ AND THE NEXT ACTION MAY NOT BE A RAW CLOUD COMMAND. The remedy is a
-    `komira_ci` command: this read is the tool that replaces a raw `gcloud` or
+    `kci` command: this read is the tool that replaces a raw `gcloud` or
     `aws` log query, so printing one here would send the reader back to the
     thing it replaces."""
     var out = render_run_log_tail(_settled(1, True, 0))
@@ -431,7 +431,7 @@ def test_an_empty_container_read_names_what_to_do_next() raises:
     assert_true(
         _contains(out, String("--only-validate=step:")),
         String(
-            "and it is an EXISTING komira_ci spelling — re-run THIS gate alone"
+            "and it is an EXISTING kci spelling — re-run THIS gate alone"
             " once ingestion has caught up, not a new verb. Got: "
         )
         + out,

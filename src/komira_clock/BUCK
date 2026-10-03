@@ -1,0 +1,12 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The process clocks: monotonic nanoseconds, wall-clock milliseconds and
+# microseconds, and the calling thread's CPU nanoseconds. Each is a direct
+# `clock_gettime` call; the package has no C shim and no dependencies beyond
+# the standard library, so it is a leaf any package can import.
+mojo_library(
+    name = "komira_clock",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    test_srcs = ["tests/test_clock.mojo"],
+    visibility = ["PUBLIC"],
+)

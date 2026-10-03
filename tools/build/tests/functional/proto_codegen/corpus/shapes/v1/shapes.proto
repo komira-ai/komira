@@ -1,0 +1,58 @@
+// Path and query shapes the Logging subset does not reach: `**`, a verb
+// after a capture, `{x=*}`, the root path `/`, and repeated, optional and bool query fields.
+syntax = "proto3";
+
+package komira.test.shapes.v1;
+
+import "google/api/annotations.proto";
+
+service Shapes {
+  // `**` takes the rest of the path, zero or more segments.
+  rpc GetObject(GetObjectRequest) returns (Thing) {
+    option (google.api.http) = {
+      get: "/v1/{name=buckets/*/objects/**}"
+    };
+  }
+
+  // A custom verb after a `**` capture, as google.longrunning's cancel.
+  rpc CancelOperation(CancelOperationRequest) returns (Thing) {
+    option (google.api.http) = {
+      post: "/v1/{name=operations/**}:cancel"
+      body: "*"
+    };
+  }
+
+  // `{name=*}` is one segment, the same as `{name}`.
+  rpc ListThings(ListThingsRequest) returns (Thing) {
+    option (google.api.http) = {
+      get: "/v1/{name=*}/things"
+    };
+  }
+
+  // The root path: no segment at all, so the client sends `/`.
+  rpc GetRoot(Thing) returns (Thing) {
+    option (google.api.http) = {
+      get: "/"
+    };
+  }
+}
+
+message GetObjectRequest {
+  string name = 1;
+}
+
+message CancelOperationRequest {
+  string name = 1;
+}
+
+message ListThingsRequest {
+  string name = 1;
+  repeated int64 ids = 2;
+  repeated bool flags = 3;
+  optional string view = 4;
+  bool show_deleted = 5;
+}
+
+message Thing {
+  string name = 1;
+}

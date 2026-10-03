@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # One mechanism, THREE consumers that must not depend on each other:
-#   * the DEPLOY renderer (komira_ci / the pipeline's deploy renderer) turns a
+#   * the DEPLOY renderer (kci / the pipeline's deploy renderer) turns a
 #     declaration + supplied values into the argv a revision runs with,
 #   * the APP parses that argv at ONE site at startup, against the SAME
 #     declaration,

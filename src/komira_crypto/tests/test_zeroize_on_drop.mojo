@@ -6,6 +6,7 @@
 #
 #   * zeroize_inline_array[N]     — for InlineArray[UInt8, N]
 #   * zeroize_inline_array_u32[N] — for InlineArray[UInt32, N]
+#   * zeroize_list                — for List[UInt8]
 #
 # The canonical secure-zero is `external_call["memset_s"]` on macOS /
 # `["explicit_bzero"]` on Linux. The
@@ -25,6 +26,7 @@ from komira_crypto import (
     Sha256,
     zeroize_inline_array,
     zeroize_inline_array_u32,
+    zeroize_list,
 )
 
 
@@ -122,6 +124,19 @@ def test_sha256_destructor_invocable() raises:
     assert_true(True)
 
 
+def test_zeroize_list() raises:
+    """zeroize_list zeroes every element of a List[UInt8] and keeps its
+    length; an empty list is a no-op."""
+    var key = List[UInt8](length=300, fill=UInt8(0x5A))
+    zeroize_list(key)
+    assert_equal(len(key), 300)
+    for i in range(300):
+        assert_equal(Int(key[i]), 0)
+    var empty = List[UInt8]()
+    zeroize_list(empty)
+    assert_equal(len(empty), 0)
+
+
 # -----------------------------------------------------------------------------
 # main — invoke every test
 # -----------------------------------------------------------------------------
@@ -133,4 +148,5 @@ def main() raises:
     test_zeroize_uint32_basic()
     test_zeroize_uint32_sha256_state_shape()
     test_sha256_destructor_invocable()
+    test_zeroize_list()
     print("OK")
