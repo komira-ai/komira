@@ -15,7 +15,7 @@
 #   5.  sorted drain (ordinal == lexicographic, NOT insertion order)
 #   6.  empty field / finalize-then-add raises / zero-doc clean finalize
 #   7.  128-doc block boundary (in-memory shape that feeds the split writer transform)
-#   8.  FNV cross-check (the fnv1a_64_over_bytes export) — known answers
+#   8.  FNV cross-check (the fnv1a_64 export) — known answers
 #   9.  hash-collision tiebreak (distinct terms stay distinct under probing)
 #   10. add_text_column driver (the Arrow seam)
 #   A1. salt-sentinel regression (top-16-bits-zero hash as term_id 0)
@@ -36,7 +36,7 @@ from komira_core.arrow.schema import Field, Schema, SchemaBuilder
 from komira_core.arrow.string_array import StringArray
 from komira_core.collections.batch_view import batch_view_over
 
-from komira_core.eval.fnv1a_64 import fnv1a_64_over_bytes
+from komira_hash import fnv1a_64
 
 from komira_search.analyzer import (
     AnalyzedField,
@@ -291,22 +291,22 @@ def test_08_fnv_known_answers() raises:
     # Empty span -> FNV-1a-64 offset basis.
     var empty = List[UInt8]()
     assert_equal(
-        fnv1a_64_over_bytes(Span(empty)),
+        fnv1a_64(Span(empty)),
         UInt64(0xCBF29CE484222325),
         "8: empty -> offset basis",
     )
     # "a" -> 0xaf63dc4c8601ec8c (canonical FNV-1a-64 vector).
     var a = String("a")
     assert_equal(
-        fnv1a_64_over_bytes(a.as_bytes()),
+        fnv1a_64(a.as_bytes()),
         UInt64(0xAF63DC4C8601EC8C),
         "8: 'a' -> known answer",
     )
     # Determinism: same input -> same hash.
     var s = String("hello world")
     assert_equal(
-        fnv1a_64_over_bytes(s.as_bytes()),
-        fnv1a_64_over_bytes(s.as_bytes()),
+        fnv1a_64(s.as_bytes()),
+        fnv1a_64(s.as_bytes()),
         "8: deterministic",
     )
 
@@ -349,7 +349,7 @@ def test_A1_salt_sentinel_zero_top16() raises:
     # for term_id 0 would be (0 << 48) | 0 == 0 == EMPTY sentinel — the term
     # would alias EMPTY and be lost/duplicated. With the force, salt == 0x8000
     # (nonzero), so the term is FOUND. This is the load-bearing A1 invariant.
-    var h = fnv1a_64_over_bytes(String("oqda").as_bytes())
+    var h = fnv1a_64(String("oqda").as_bytes())
     assert_equal(h >> 48, UInt64(0), "A1: precondition top-16 bits zero")
 
     var b = InvertedIndexBuilder.create("body")

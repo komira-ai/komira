@@ -10,6 +10,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_core:komira_core",
+        "//src/komira_hash:komira_hash",
         "//src/komira_lz4:komira_lz4",
     ],
     test_srcs = [
