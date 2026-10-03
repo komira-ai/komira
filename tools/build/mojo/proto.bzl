@@ -20,6 +20,9 @@ same MojoInfo.
     closure into this package too. Without it, `proto_deps` only let protoc
     resolve the imports (options, for example).
 
+  * `test_srcs` welds the package to its tests, as on a `mojo_library`:
+    see "mojo_proto_library with test_srcs" below.
+
 Output layout of a target `L` with import name `I`:
 
     L/proto/...            the staged `.proto` files (sub-target `[proto]`)
@@ -35,6 +38,7 @@ the plugin as `--mojo_opt` arguments, never from a file, so they are part of
 the action key.
 """
 
+load(":defs.bzl", "mojo_library")
 load(":providers.bzl", "MojoInfo", "MojoPkgTSet", "MojoToolchainInfo")
 load("@komira//tools/build/lint:doc_tree.bzl", "declares_docs")
 
@@ -395,6 +399,130 @@ mojo_proto_library_rule = rule(
     },
 )
 
+# ---- mojo_proto_library with test_srcs: the welded form ------------------------
+#
+# `mojo_proto_library(name, ..., test_srcs = [...])` is two targets, the shape
+# gcp_client (tools/build/cloud/gcp.bzl) already uses:
+#
+#   * `<name>_gen`: the generation half only (protoc + protoc-gen-mojo writing
+#     `gen/<import name>/`), nothing compiled. It carries the ProtoSrcsInfo, so
+#     another proto library that imports these `.proto` files names
+#     `:<name>_gen` in its `proto_deps`.
+#   * `<name>`: an ordinary `mojo_library` over those files, so its
+#     `test_srcs` gate its `.mojoc` exactly as a hand-written library's do: the
+#     package cannot be built unless every test passes.
+#
+# Without `test_srcs` nothing changes: the call is the single
+# mojo_proto_library rule above. Bundling (`bundle_proto_deps`, `bundle_only`)
+# is not supported in the welded form yet and is refused at load time, naming
+# the gap, rather than silently generating a different file set.
+
+def _mojo_proto_gen_impl(ctx):
+    ptc = ctx.attrs.proto_toolchain[MojoProtoToolchainInfo]
+    import_name = ctx.attrs.import_name
+    check_proto_import_name(ctx, import_name)
+    tree, own_paths = stage_proto_srcs(ctx)
+    trees, dep_paths = proto_closure(ctx, tree, own_paths)
+    generate, names = select_generated(ctx, own_paths, dep_paths)
+
+    # The macro named the library's sources before analysis, from the same
+    # paths; hold it to what is generated so the two can never disagree.
+    if sorted(names) != sorted(ctx.attrs.expected):
+        fail("{}: the welded library names {} but the generation writes {}".format(
+            ctx.label,
+            ", ".join(sorted(ctx.attrs.expected)),
+            ", ".join(sorted(names)),
+        ))
+    opt = ",".join([
+        "default_wire=" + ctx.attrs.default_wire,
+        "default_protocol=" + ctx.attrs.default_protocol,
+        "package_prefix=" + (ctx.attrs.package_name or import_name),
+    ])
+    gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", opt, trees, generate, names, import_name)
+    files = ["__init__.mojo"] + names
+    return [
+        DefaultInfo(
+            default_output = gen_dir,
+            sub_targets = {"proto": [DefaultInfo(default_output = tree)]} |
+                          {f: [DefaultInfo(default_output = gen_dir.project(f))] for f in files},
+        ),
+        ProtoSrcsInfo(trees = trees, import_paths = own_paths + dep_paths),
+    ]
+
+_mojo_proto_gen = rule(
+    impl = _mojo_proto_gen_impl,
+    attrs = {
+        # Always empty here (the macro refuses bundling); select_generated reads them.
+        "bundle_only": attrs.list(attrs.string(), default = []),
+        "bundle_proto_deps": attrs.bool(default = False),
+        "default_protocol": attrs.string(default = "connect"),
+        "default_wire": attrs.string(default = "proto"),
+        # The `<stem>.mojo` names the macro gave the library.
+        "expected": attrs.list(attrs.string()),
+        "import_name": attrs.string(),
+        "import_prefix": attrs.string(default = ""),
+        "package_name": attrs.option(attrs.string(), default = None),
+        "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
+        "proto_toolchain": attrs.toolchain_dep(default = "toolchains//:mojo_proto", providers = [MojoProtoToolchainInfo]),
+        "srcs": attrs.list(attrs.source()),
+    },
+)
+
+# Every other keyword is refused in the welded form rather than dropped.
+_WELDED_KWARGS = ["default_protocol", "default_wire", "deps", "import_name", "import_prefix", "package_name", "proto_deps", "visibility"]
+
+def _mojo_proto_library(
+        name,
+        srcs,
+        test_srcs = [],
+        test_data = None,
+        test_env = None,
+        **kwargs):
+    if not test_srcs:
+        if test_data or test_env:
+            fail("//{}:{}: `test_data` / `test_env` without `test_srcs`".format(native.package_name(), name))
+        mojo_proto_library_rule(name = name, srcs = srcs, **kwargs)
+        return
+    if kwargs.get("bundle_proto_deps") or kwargs.get("bundle_only"):
+        fail("//{}:{}: `test_srcs` with `bundle_proto_deps` / `bundle_only` is not supported yet; the welded form generates only this target's own `srcs`".format(native.package_name(), name))
+    for k in kwargs:
+        if k not in _WELDED_KWARGS:
+            fail("//{}:{}: `{}` is not taken by the welded form (`test_srcs` set); it takes {}".format(native.package_name(), name, k, ", ".join(_WELDED_KWARGS)))
+    import_name = kwargs.get("import_name") or name
+    stems = []
+    for s in srcs:
+        if ":" in s or not s.endswith(".proto"):
+            fail("//{}:{}: with `test_srcs`, `srcs` takes source paths of `.proto` files only (the library's `<stem>.mojo` names are derived from them), not `{}`".format(native.package_name(), name, s))
+        stems.append(s.rsplit("/", 1)[-1][:-len(".proto")])
+    gen = name + "_gen"
+    vis = {"visibility": kwargs["visibility"]} if kwargs.get("visibility") != None else {}
+    _mojo_proto_gen(
+        name = gen,
+        srcs = srcs,
+        expected = [s + ".mojo" for s in stems],
+        import_name = import_name,
+        import_prefix = kwargs.get("import_prefix", ""),
+        package_name = kwargs.get("package_name"),
+        proto_deps = kwargs.get("proto_deps", []),
+        default_protocol = kwargs.get("default_protocol", "connect"),
+        default_wire = kwargs.get("default_wire", "proto"),
+        **vis
+    )
+    lib = {}
+    if test_data != None:
+        lib["test_data"] = test_data
+    if test_env != None:
+        lib["test_env"] = test_env
+    mojo_library(
+        name = name,
+        srcs = [":{}[__init__.mojo]".format(gen)] + [":{}[{}.mojo]".format(gen, s) for s in stems],
+        deps = kwargs.get("deps", []),
+        gen = ":" + gen,
+        import_name = kwargs.get("import_name"),
+        test_srcs = test_srcs,
+        **(vis | lib)
+    )
+
 # ---- mojo_db_proto_library -----------------------------------------------------
 
 def _mojo_db_proto_library_impl(ctx):
@@ -435,6 +563,6 @@ mojo_db_proto_library_rule = rule(
 # Each rule and macro a BUCK file calls declares its package's doc_tree
 # (tools/build/lint/doc_tree.bzl), so no BUCK file names one.
 mojo_db_proto_library = declares_docs(mojo_db_proto_library_rule)
-mojo_proto_library = declares_docs(mojo_proto_library_rule)
+mojo_proto_library = declares_docs(_mojo_proto_library)
 proto_srcs = declares_docs(proto_srcs_rule)
 protoc_dist = declares_docs(protoc_dist_rule)

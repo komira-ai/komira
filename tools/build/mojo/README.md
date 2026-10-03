@@ -248,7 +248,7 @@ mojo_test(
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 ```
 
-`mojo_proto_library(name, srcs, deps, proto_deps, import_prefix, bundle_proto_deps)`
+`mojo_proto_library(name, srcs, deps, proto_deps, import_prefix, bundle_proto_deps, test_srcs)`
 runs protoc with the `protoc-gen-mojo` plugin over `srcs` (`.proto` files)
 and precompiles the generated directory, one `<stem>.mojo` per `.proto` plus
 an `__init__.mojo`, into `<name>.mojoc`. Other Mojo targets name it in `deps`
@@ -262,9 +262,15 @@ module of the same package: with `bundle_proto_deps = True` the whole
 `bundle_only = [<import path>, ...]`, only those files of it (a closure often
 holds files that only declare options, which need no Mojo). Sub-targets:
 `[gen]` (the generated directory), `[<stem>.mojo]`, `[proto]` (the staged
-`.proto` files). A generated package has no tests of its own (no
-`test_srcs`): it is gated only through the tests of the libraries and
-binaries that depend on it. Generation is deterministic, checked by
+`.proto` files). With `test_srcs` (and optionally `test_data`, `test_env`),
+the package is welded to its tests exactly like a `mojo_library`: the call
+becomes `<name>_gen` (generation only; it carries the `.proto` files, so
+another proto library that imports them names `:<name>_gen` in `proto_deps`)
+and `<name>`, a `mojo_library` over the generated files whose `.mojoc` is not
+produced until every test passes. The welded form generates only the target's
+own `srcs` (`bundle_proto_deps` and `bundle_only` are refused with it). Without
+`test_srcs` a generated package is gated only through the tests of the
+libraries and binaries that depend on it. Generation is deterministic, checked by
 comparing two uncached builds
 ([test 23](../tests/README.md#23-protobuf)).
 
