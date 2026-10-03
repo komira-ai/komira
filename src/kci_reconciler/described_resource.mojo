@@ -118,6 +118,7 @@ from kci_reconciler.resource import (
 from kci_reconciler.fault_domain import FAULT_UNSET
 from kci_reconciler.erased_resource import ErasedResource
 from kci_reconciler.outputs import InputRef, Outputs, ResolvedInputs
+from kci_reconciler.ownership import OwnerStamp
 
 
 # =============================================================================
@@ -173,7 +174,15 @@ trait ResourceDescriptor(Movable, Deinitable):
         ...
 
     def desired_digest(self, spec: Self.Spec) raises -> String:
-        """The desired state of the AUTHORED axes, in a fixed order."""
+        """The desired state of the AUTHORED axes, in a fixed order.
+
+        ⚠ UNDER KCI'S CATALOG, "AUTHORED" MEANS EVERY MODELLED FIELD: kci
+        owns every field the catalog models, its default included, so a
+        descriptor for a catalog type fills defaults into the
+        spec before it is digested, and a console edit of a modelled field is
+        drift. A field the catalog does not model is never in the digest (it
+        is reported through `unmanaged`). PROVENANCE (run id, revision) is
+        never in it: `ModelledDigest` (digest.mojo) refuses those names."""
         ...
 
     def live_digest(self, spec: Self.Spec, view: Self.View) raises -> String:
@@ -298,6 +307,46 @@ trait ResourceDescriptor(Movable, Deinitable):
         latest live view."""
         return Outputs()
 
+    # ---- ownership and the closed world (kci_reconciler/ownership.mojo) -----
+
+    def stamps_ownership(self) -> Bool:
+        """DEFAULT: False. A descriptor that overrides `create_owned`,
+        `adopt_owned` and `stamp_of` answers True."""
+        return False
+
+    def create_owned(
+        mut self, spec: Self.Spec, stamp: OwnerStamp, token: String
+    ) raises -> String:
+        """Create AS `token` CARRYING `stamp` in the same call; return the
+        physical id. DEFAULT: refuse."""
+        raise Error(String("this descriptor does not stamp ownership"))
+
+    def adopt_owned(
+        mut self,
+        spec: Self.Spec,
+        stamp: OwnerStamp,
+        physical_id: String,
+        token: String,
+    ) raises:
+        """Stamp the existing object `physical_id` (the explicit `--adopt`).
+        DEFAULT: refuse."""
+        raise Error(String("this descriptor cannot adopt an existing object"))
+
+    def stamp_of(self, view: Self.View) -> String:
+        """The identity (`OwnerStamp.identity()`) the live object carries,
+        decoded from its labels; empty when none. DEFAULT: empty."""
+        return String("")
+
+    def unmanaged(self, spec: Self.Spec, view: Self.View) -> String:
+        """Differences on fields the catalog does not model, for `plan` to
+        print; never converged. DEFAULT: none."""
+        return String("")
+
+    def wanted(self, spec: Self.Spec) -> Bool:
+        """False for a role the spec turned off (the closed world).
+        DEFAULT: True."""
+        return True
+
 
 # =============================================================================
 # §2 — DescribedResource[D] — the generic driver. The half that is identical
@@ -387,9 +436,11 @@ struct DescribedResource[D: ResourceDescriptor](
         var pid = self._d.physical_id(live)
         var ep = self._d.endpoint(live)
         var img = self._d.live_image(live)
+        var stamp = self._d.stamp_of(live)
+        var extra = self._d.unmanaged(self._spec, live)
         if digest == self._d.desired_digest(self._spec):
-            return ResourceStatus.matched(pid, digest, ep, img)
-        return ResourceStatus.drifted(pid, digest, ep, img)
+            return ResourceStatus.matched(pid, digest, ep, img, stamp, extra)
+        return ResourceStatus.drifted(pid, digest, ep, img, stamp, extra)
 
     def plan(mut self, live: ResourceStatus) raises -> ChangeAction:
         """The plan scaffolding that about half of every hand-written `plan`
@@ -486,6 +537,25 @@ struct DescribedResource[D: ResourceDescriptor](
     def owner(mut self) -> String:
         return self._owner.copy()
 
+    # ---- ownership and the closed world: FORWARDED to the descriptor -------
+
+    def stamps_ownership(mut self) -> Bool:
+        return self._d.stamps_ownership()
+
+    def create_owned(mut self, stamp: OwnerStamp, creds: Creds) raises -> String:
+        # The same stale-view rule as `create`.
+        self._last_view = None
+        return self._d.create_owned(self._spec, stamp, creds.token.copy())
+
+    def adopt_owned(
+        mut self, stamp: OwnerStamp, physical_id: String, creds: Creds
+    ) raises:
+        self._last_view = None
+        self._d.adopt_owned(self._spec, stamp, physical_id, creds.token.copy())
+
+    def wanted(mut self) -> Bool:
+        return self._d.wanted(self._spec)
+
     def read_presence(mut self, creds: Creds) raises -> ResourceStatus:
         """The teardown read: the SAME read envelope as `read_status` (a
         not-found is ABSENT, anything else propagates) WITHOUT the digest
@@ -509,6 +579,7 @@ struct DescribedResource[D: ResourceDescriptor](
             String(""),
             self._d.endpoint(live),
             self._d.live_image(live),
+            self._d.stamp_of(live),
         )
 
 

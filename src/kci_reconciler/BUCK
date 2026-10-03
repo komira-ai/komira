@@ -12,7 +12,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests drive the real engine over in-memory conformers: topo
 # order, create / adopt / update, rollback and destroy with every retention
 # code, the confirmed-gone reap gate, the destroy scope, crash-then-adopt
-# recovery, the best-effort prune, and fault attribution defaulting to ours.
+# recovery, the best-effort prune, fault attribution defaulting to ours, and
+# the owned scope: the store keyed (machine, cell, resource), the stamp born
+# with the object, foreign and conflict refused before any change, the closed
+# world of turned-off roles, and unmanaged differences planned, never touched.
 mojo_library(
     name = "kci_reconciler",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -22,6 +25,7 @@ mojo_library(
     ],
     test_srcs = [
         "tests/test_fault_domain_defaults_to_ours.mojo",
+        "tests/test_ownership_and_cell_keys.mojo",
         "tests/test_resource_graph_engine.mojo",
         "tests/test_resource_outputs.mojo",
         "tests/test_resource_outputs_after_mutation.mojo",
