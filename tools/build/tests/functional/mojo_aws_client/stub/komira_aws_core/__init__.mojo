@@ -20,20 +20,39 @@ depend on one would fail rather than pass on a stand-in. Bodies are bytes,
 as in the real core; `body_text` here refuses any non-ASCII byte rather
 than validating UTF-8.
 
-The client half (the end of this file) has the real core's types and
-signatures. `AwsCredential`, `Header`, `AwsCredsSource`, `HttpResult` and
-`resolve_endpoint` behave as the real ones do for what a generated client
-calls; `AwsEndpoint.https` checks nothing of the host.
-`send_sigv4_signed_request` is a test double, not a transport: it calls the
-client's connector factory, signs nothing and sends nothing, and answers
-200 with the body `{}` and one `x-stub-*` header per argument it was given
-(of the credential, the access key id only), followed by the `extra`
-headers as given, so that a caller's test can read what the generated
-`send` hands the transport. The real transport half is not in
-komira//src/komira_aws_core yet; it lands with the HTTP client.
+The client half (the end of this file): `AwsCredential`, `AwsCredsSource`,
+`AwsEndpoint`, `Header`, `HttpResult` and `resolve_endpoint` have the real
+core's types and signatures, and behave as the real ones do for what a
+generated client calls; `AwsEndpoint.https` checks nothing of the host.
+`send_sigv4_signed_request` is not in komira//src/komira_aws_core yet (its
+signed_request.mojo builds the signed request; the transport half lands
+with the HTTP library). Its signature here is the call the generator emits
+(emit_aws/mod.rs, the client's `send`): the contract the real transport
+has to meet, and the line to re-check this stub against when it lands.
+
+`send_sigv4_signed_request` is a test double, not a transport. It refuses
+what the real request builder refuses of its arguments (an `extra` header
+named Host, Content-Type or Content-Length, in any case; CR or LF in a
+header, the path or the content type), calls the client's connector
+factory, signs nothing and sends nothing. It answers with one `x-stub-*`
+header per argument it was given (of the credential, the access key id and
+whether a session token is set, never a secret), the request body as
+`x-stub-body` (ASCII only), then the `extra` headers as given, so that a
+caller's test can read what the generated `send` hands the transport. The
+status and body come from the endpoint host: `status-<NNN>.invalid`
+answers NNN with an awsJson error body (`__type`, `message` and a detail
+member no error should echo), `status-<NNN>-html.invalid` answers NNN with
+a non-JSON body, and any other host answers 200 with
+`{"nextForwardToken":"f/1","events":[]}`.
+
+The error readers read `__type` (then `code`) and `message` (then
+`Message`, `errorMessage`) of a JSON object body, as the real ones do, and
+answer "" for any other body; the bytes overloads answer "" for a non-ASCII
+body where the real ones validate UTF-8. `aws_error_code` keeps what the
+real one keeps of a `__type` value, without its length cap.
 """
 
-from komira_json import JsonValue
+from komira_json import JsonValue, parse_json_value
 from komira_http_core.transport.io_stream import Connector
 
 comptime AWS_TS_UNIX: Int = 0
@@ -163,28 +182,72 @@ def aws_is_error_status(status: Int) -> Bool:
     return status < 200 or status >= 300
 
 
-def aws_error_code(
-    error_type_header: String, body: String, query_error_header: String = String("")
-) raises -> String:
-    raise Error("stub komira_aws_core: aws_error_code is not implemented")
+def aws_error_code(raw: String) -> String:
+    """The short error code of a `__type` value: cut at the first ':', then
+    after the last '#'; only [A-Za-z0-9_.-] kept."""
+    var s = raw
+    var colon = s.find(":")
+    if colon >= 0:
+        s = _sub(s, 0, colon)
+    var hash = s.rfind("#")
+    if hash >= 0:
+        s = _sub(s, hash + 1, s.byte_length())
+    var out = String("")
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = b[i]
+        if (
+            (c >= UInt8(0x41) and c <= UInt8(0x5A))
+            or (c >= UInt8(0x61) and c <= UInt8(0x7A))
+            or (c >= UInt8(0x30) and c <= UInt8(0x39))
+            or c == UInt8(0x5F)
+            or c == UInt8(0x2E)
+            or c == UInt8(0x2D)
+        ):
+            out += chr(Int(c))
+    return out^
 
 
-# The error readers answer empty: the real ones read `__type`/`code` and
-# `message` and never raise, each over a body held as text or as bytes.
-def aws_error_code_from_body(body: String) -> String:
+def _error_member(body: String, keys: List[String]) -> String:
+    """The first of `keys` a JSON object `body` holds as a string, "" when
+    none or when the body is not a JSON object."""
+    try:
+        var j = parse_json_value(body)
+        for k in range(len(keys)):
+            if j.has(keys[k]):
+                return j.get(keys[k]).as_string()
+    except:
+        pass
     return String("")
+
+
+def _is_ascii(body: List[UInt8]) -> Bool:
+    for i in range(len(body)):
+        if body[i] > UInt8(0x7F):
+            return False
+    return True
+
+
+def aws_error_code_from_body(body: String) -> String:
+    var keys: List[String] = ["__type", "code"]
+    return aws_error_code(_error_member(body, keys))
 
 
 def aws_error_code_from_body(body: List[UInt8]) -> String:
-    return String("")
+    if not _is_ascii(body):
+        return String("")
+    return aws_error_code_from_body(String(unsafe_from_utf8=Span(body)))
 
 
 def aws_error_message_from_body(body: String) -> String:
-    return String("")
+    var keys: List[String] = ["message", "Message", "errorMessage"]
+    return _error_member(body, keys)
 
 
 def aws_error_message_from_body(body: List[UInt8]) -> String:
-    return String("")
+    if not _is_ascii(body):
+        return String("")
+    return aws_error_message_from_body(String(unsafe_from_utf8=Span(body)))
 
 
 # -----------------------------------------------------------------------------
@@ -306,22 +369,69 @@ def send_sigv4_signed_request[
     var extra: List[Header],
 ) raises -> HttpResult:
     """The test double described in the module docstring."""
+    if _has_crlf(uri) or _has_crlf(content_type):
+        raise Error("an AWS request path or content type holds CR or LF")
+    for i in range(len(extra)):
+        var n = extra[i].name.lower()
+        if n == "host" or n == "content-type" or n == "content-length":
+            raise Error(
+                "the extra header "
+                + extra[i].name
+                + " is set by the request builder; pass it as its argument"
+            )
+        if _has_crlf(extra[i].name) or _has_crlf(extra[i].value):
+            raise Error("the AWS request header " + extra[i].name + " holds CR or LF")
     _ = mk_connector()
-    var body_ = List[UInt8]()
-    body_.append(UInt8(ord("{")))
-    body_.append(UInt8(ord("}")))
-    var res = HttpResult(200, body_^)
+    var status = 200
+    var reply = String('{"nextForwardToken":"f/1","events":[]}')
+    if endpoint.host.startswith("status-") and endpoint.host.endswith(".invalid"):
+        var label = _sub(endpoint.host, 7, endpoint.host.byte_length() - 8)
+        if label.endswith("-html"):
+            status = Int(_sub(label, 0, label.byte_length() - 5))
+            reply = String("<html>upstream detail /private/x</html>")
+        else:
+            status = Int(label)
+            reply = String(
+                '{"__type":"com.amazonaws.logs#ResourceNotFoundException",'
+                + '"message":"no such group","detail":"/private/x"}'
+            )
+    var res = HttpResult(status, _bytes(reply))
     res.add_header(String("x-stub-method"), method)
     res.add_header(String("x-stub-access-key-id"), cred.access_key_id)
+    res.add_header(
+        String("x-stub-has-session-token"),
+        String("true") if cred.has_session_token() else String("false"),
+    )
     res.add_header(String("x-stub-region"), region)
     res.add_header(String("x-stub-service"), service)
     res.add_header(String("x-stub-scheme"), endpoint.scheme)
     res.add_header(String("x-stub-host"), endpoint.host)
     res.add_header(String("x-stub-port"), String(endpoint.port))
+    res.add_header(String("x-stub-base-path"), endpoint.base_path)
+    res.add_header(
+        String("x-stub-root-slash"),
+        String("true") if endpoint.root_slash else String("false"),
+    )
     res.add_header(String("x-stub-uri"), uri)
     res.add_header(String("x-stub-content-type"), content_type)
-    res.add_header(String("x-stub-body-bytes"), String(len(body)))
+    res.add_header(String("x-stub-body"), _ascii_text(body))
     res.add_header(String("x-stub-extra-count"), String(len(extra)))
     for i in range(len(extra)):
         res.add_header(extra[i].name, extra[i].value)
     return res^
+
+
+def _has_crlf(s: String) -> Bool:
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        if b[i] == UInt8(0x0D) or b[i] == UInt8(0x0A):
+            return True
+    return False
+
+
+def _sub(s: String, i: Int, j: Int) -> String:
+    """Bytes [i, j) of `s`, clamped."""
+    var b = s.as_bytes()
+    var lo = max(0, min(i, len(b)))
+    var hi = max(lo, min(j, len(b)))
+    return String(StringSlice(unsafe_from_utf8=b[lo:hi]))
