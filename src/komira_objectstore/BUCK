@@ -4,8 +4,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # ObjectStore trait family (metadata, conditional writes, ranged and parkable
 # CAS verbs), the CAS-manifest substrate shared by the broker and the search
 # engine, the in-memory / local-filesystem conformers, the coalescing and
-# compaction windows, the sub-lineage shard kernel, presigned-URL signing seam,
-# and the distributed-shuffle seal. It depends on komira_core, komira_async
+# compaction windows, the sub-lineage shard kernel and the presigned-URL
+# signing seam. (The distributed shuffle lives in `komira_shuffle`, which depends
+# on this package.) It depends on komira_core, komira_async
 # (the reactor and its C shim, which also carries the CAS-manifest gate lock),
 # komira_atomic_alias and komira_metrics (the escalation metrics sink).
 # komira_runtime_paths is declared because several tests take their scratch
@@ -37,11 +38,6 @@ mojo_library(
         "tests/test_objectstore_bytes_non_ascii.mojo",
         "tests/test_path_uri.mojo",
         "tests/test_sharded_lineage_kernel.mojo",
-        "tests/test_shuffle_claim_fail_closed.mojo",
-        "tests/test_shuffle_continuous_epoch_seal.mojo",
-        "tests/test_shuffle_retention_reaper.mojo",
-        "tests/test_shuffle_seal_codec_driver.mojo",
-        "tests/test_shuffle_seal_phase_a.mojo",
         "tests/test_slow_cas_store_start_412_abi.mojo",
         "tests/test_sublineage_base_fold.mojo",
     ],
