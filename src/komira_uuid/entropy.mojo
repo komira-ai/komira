@@ -13,7 +13,8 @@
 # importing `komira_crypto` here would put the whole crypto library upstream
 # of every package that mints an ID: an edit to any crypto source would
 # invalidate all of them. Declaring the one C symbol locally keeps this package
-# a small leaf. `clock.mojo` makes the same choice for `clock_gettime`.
+# a small leaf. (The clock is different: `komira_clock` is a dependency-free
+# leaf of its own, so the wall clock comes from there.)
 #
 # # What is and is NOT duplicated
 #
