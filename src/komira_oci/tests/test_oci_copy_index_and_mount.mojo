@@ -32,7 +32,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_http.codec.types import (
+from komira_http_core.codec.types import (
     HTTP_METHOD_GET,
     HTTP_METHOD_HEAD,
     HTTP_METHOD_POST,

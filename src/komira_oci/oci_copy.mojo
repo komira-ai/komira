@@ -89,7 +89,7 @@
 # =============================================================================
 
 from komira_json import parse_json_value, JsonValue
-from komira_http.codec.types import (
+from komira_http_core.codec.types import (
     HTTP_METHOD_GET,
     HTTP_METHOD_HEAD,
     HTTP_METHOD_POST,
@@ -100,7 +100,7 @@ from komira_http.codec.types import (
 # bearer may reach are shared with every other scriptable client
 # (`redirect_policy.mojo`); `_follow_redirects` below stays here, above our own
 # transport seam, for the reason its comment gives.
-from komira_http.client.redirect_policy import (
+from komira_http_client.redirect_policy import (
     MAX_REDIRECT_HOPS,
     REDIRECT_REFUSED_EMPTY_HOST,
     REDIRECT_REFUSED_NO_LOCATION,
