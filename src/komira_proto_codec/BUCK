@@ -1,4 +1,5 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library", "mojo_test")
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 
 # The `Serializable` / `WireFormat` codec runtime every generated protobuf
 # message conforms to: one message description, serialized as protobuf-binary
@@ -20,4 +21,28 @@ mojo_library(
         "tests/test_proto_codec_roundtrip.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# A generated message must survive being copied as a list element. Mojo 1.0.0
+# treats a struct's synthesized copy constructor as trivial for some layouts
+# (three Optional[String] plus an Optional[Bool] or Optional[Int64], in a
+# struct with an explicit `__deinit__`), after which `List.copy()` and
+# `List.extend` copy the elements with a memcpy and the copy shares its String
+# buffers with the original. The messages in `tests/copy_hazard.proto` cover
+# those layouts, plain fields, and every other storage shape the generator
+# emits (repeated, map, nested message, enum, bytes, oneof arms).
+mojo_proto_library(
+    name = "copy_hazard_proto",
+    srcs = ["tests/copy_hazard.proto"],
+    import_prefix = "example",
+    deps = [":komira_proto_codec"],
+)
+
+mojo_test(
+    name = "test_copy_hazard",
+    srcs = ["tests/test_copy_hazard.mojo"],
+    deps = [
+        ":komira_proto_codec",
+        ":copy_hazard_proto",
+    ],
 )

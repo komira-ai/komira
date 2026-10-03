@@ -1,6 +1,0 @@
-# The one line every package's version starts with (MAJOR.MINOR); tools/build/package/conda.bzl
-# reads it. Nothing else is stated here: every mojo_library declares its own
-# conda package (`<name>_conda`), and which packages are PUBLISHED is the release
-# tool's list of artifact declarations, not a file of this repository's build.
-# See README.md.
-export_file(name = "VERSION_PREFIX", visibility = ["PUBLIC"])

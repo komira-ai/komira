@@ -10,8 +10,8 @@
 //! emitted by the real emitter; the driver's `main` prints one actuals
 //! record per case (the format `aws_conformance::ActualsFile::parse`
 //! reads). A case botocore's ignore list skips is not driven. A case the
-//! generator cannot build (its suite does not lower, or the driver cannot
-//! construct its input) becomes a `refused` record carrying the error text,
+//! generator cannot build (its suite does not lower or emit, or the driver
+//! cannot construct its input) becomes a `refused` record carrying the error text,
 //! so the harness can tell a named refusal from a defect.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -19,7 +19,7 @@ use std::path::{Path, PathBuf};
 
 use komira_proto_codegen::aws_conformance::{Direction as CorpusDirection, IgnoreList};
 use komira_proto_codegen::aws_in::{lower_aws_service, AwsLowering};
-use komira_proto_codegen::emit_aws::{emit_aws_client, pure_preamble, AwsEmitOptions};
+use komira_proto_codegen::emit_aws::{emit_aws_client, pure_preamble, AwsEmitOptions, AwsProtocol};
 use komira_proto_codegen::ir::{IrField, IrMessage, IrType, Label, ScalarKind};
 use komira_proto_codegen::json::{parse, Json, JsonObject};
 use komira_proto_codegen::overrides::AwsOverrides;
@@ -68,12 +68,38 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
     if protocols.is_empty() {
         return Err("at least one --protocol is required".into());
     }
+    for p in &protocols {
+        driver_protocol(p)?;
+    }
     Ok(Args {
         corpus: corpus.ok_or("--corpus is required")?,
         protocols,
         ignore_list: ignore_list.ok_or("--ignore-list is required")?,
         out: out.ok_or("--out is required")?,
     })
+}
+
+/// The protocol `--protocol <p>` drives, refused unless the driver can run it.
+///
+/// ⚠ THE DRIVER RECORDS EVERY ACTUAL AS A `JsonValue` (komira_json), whatever
+/// the suites are, so it needs the JSON runtime in its preamble: the JSON-body
+/// protocols import it, and the MODEL-convention rows import it for restXml.
+/// An error case reads the code and message as its protocol's client does:
+/// awsJson from the body (`aws_error_code_from_body` /
+/// `aws_error_message_from_body`), restJson1 with `aws_rest_json_error`,
+/// restXml with `aws_rest_xml_error`.
+fn driver_protocol(p: &str) -> Result<AwsProtocol, String> {
+    match AwsProtocol::from_botocore(p) {
+        Some(proto @ (AwsProtocol::Json | AwsProtocol::RestJson | AwsProtocol::RestXml)) => {
+            Ok(proto)
+        }
+        Some(_) => Err(format!(
+            "--protocol `{p}`: the conformance driver reads errors as awsJson, \
+             restJson1 and restXml clients do, so it drives `json`, `rest-json` \
+             and `rest-xml` only"
+        )),
+        None => Err(format!("--protocol `{p}` is not a botocore protocol name")),
+    }
 }
 
 fn main() {
@@ -225,9 +251,12 @@ fn run(args: &Args) -> Result<(), String> {
         return Err(format!("the corpus holds no suite for --protocol {missing:?}"));
     }
 
+    // A suite the emitter refuses is refused case by case, as one the
+    // front-end refuses is.
     let mut bodies = String::new();
-    for s in &suites {
-        let (_, src) = emit_aws_client(
+    let mut emitted: Vec<Suite> = Vec::new();
+    for s in suites {
+        let r = emit_aws_client(
             &s.lowering,
             &AwsOverrides::empty(),
             &s.module,
@@ -235,15 +264,34 @@ fn run(args: &Args) -> Result<(), String> {
                 emit_model_json: true,
                 pure_only: true,
                 omit_preamble: true,
+                s3: false,
             },
-        )?;
-        bodies.push_str(&src);
+        );
+        match r {
+            Ok((_, src)) => {
+                bodies.push_str(&src);
+                emitted.push(s);
+            }
+            Err(e) => {
+                for (key, _) in &s.cases {
+                    refused.push((key.clone(), e.clone()));
+                }
+            }
+        }
     }
+    let suites = emitted;
     let (driver_main, undriveable) = emit_driver(&suites, &refused, &args.protocols)?;
     let mut all_refused = refused.clone();
     all_refused.extend(undriveable.iter().cloned());
     let mut whole = driver_header(&suites, &all_refused, n_cases, n_skipped, &args.protocols);
-    whole.push_str(&pure_preamble(true));
+    // One preamble for every driven protocol: each import row that applies
+    // to any of them, once.
+    let protocols: Vec<AwsProtocol> = args
+        .protocols
+        .iter()
+        .map(|p| driver_protocol(p))
+        .collect::<Result<_, _>>()?;
+    whole.push_str(&pure_preamble(&protocols, true));
     whole.push_str(&bodies);
     whole.push_str(&driver_main);
     std::fs::write(&args.out, &whole)
@@ -397,7 +445,9 @@ fn driver_header(
     o.line("#");
     o.line("# A case the generated code raises on has a `raised` record holding the");
     o.line("# error, which the harness scores red. A case the generator could not");
-    o.line("# build has a `refused` record holding the error.");
+    o.line("# build has a `refused` record holding the error. The first output");
+    o.line("# case's parser is also handed a body that is not well-formed UTF-8,");
+    o.line("# and the driver stops when it does not refuse it.");
     o.line("#");
     let p: Vec<&str> = protocols.iter().map(String::as_str).collect();
     o.line(&format!("#   protocols       : {}", p.join(", ")));
@@ -413,10 +463,16 @@ fn driver_header(
     o.line("from komira_aws_core import (");
     o.line("    AwsCredential,");
     o.line("    AwsEndpoint,");
+    o.line("    AwsResponse,");
     o.line("    FixedClock,");
     o.line("    Header,");
-    o.line("    HttpResult,");
     o.line("    build_sigv4_signed_request,");
+    if protocols.contains("rest-json") {
+        o.line("    aws_rest_json_error,");
+    }
+    if protocols.contains("rest-xml") {
+        o.line("    aws_rest_xml_error,");
+    }
     o.line(")");
     o.line("");
     o.buf
@@ -447,6 +503,9 @@ fn emit_driver(
 
     let mut undriveable: Vec<(String, String)> = Vec::new();
     let mut ctr = 0usize;
+    // The parser of the first output case driven: the ill-formed UTF-8
+    // probe below runs it.
+    let mut probe: Option<String> = None;
     for s in suites {
         for (key, case) in &s.cases {
             let co = case.as_object().unwrap();
@@ -462,10 +521,17 @@ fn emit_driver(
                     o.line("");
                     o.line(&format!("# --- {key} ---"));
                     o.buf.push_str(&sub.buf);
+                    if probe.is_none() && s.direction == Direction::Output {
+                        probe = Some(output_parser(s, co)?);
+                    }
                 }
                 Err(e) => undriveable.push((key.clone(), e)),
             }
         }
+    }
+
+    if let Some(parser) = probe {
+        emit_utf8_probe(&mut o, &parser);
     }
 
     o.line("");
@@ -489,6 +555,52 @@ fn emit_driver(
     o.line("print(actuals.serialize())");
     o.indent -= 1;
     Ok((o.buf, undriveable))
+}
+
+/// The generated parser an output case calls.
+fn output_parser(s: &Suite, case: &JsonObject) -> Result<String, String> {
+    let op_name = case
+        .get("given")
+        .and_then(Json::as_object)
+        .and_then(|g| g.get("name"))
+        .and_then(Json::as_str)
+        .ok_or("no given.name")?;
+    let facts = s.lowering.facts.operation(op_name)?;
+    Ok(format!(
+        "{}_parse_{}_response",
+        s.prefix.to_lowercase(),
+        facts.ir_method_name
+    ))
+}
+
+/// A generated parser handed a 200 response whose body is JSON holding a
+/// string that is not well-formed UTF-8 (`{"a":"\xFF"}`) must refuse it.
+/// The corpus holds only text bodies, so no case asks this; a parser that
+/// accepts the bytes stops the driver, and with it the conformance test.
+fn emit_utf8_probe(o: &mut Out, parser: &str) {
+    o.line("");
+    o.line("# --- probe: a body that is not well-formed UTF-8 is refused ---");
+    o.line("var _utf8_refused = False");
+    o.line("try:");
+    o.indent += 1;
+    o.line("var _bad: List[UInt8] = [");
+    o.indent += 1;
+    o.line("UInt8(0x7B), UInt8(0x22), UInt8(0x61), UInt8(0x22), UInt8(0x3A),");
+    o.line("UInt8(0x22), UInt8(0xFF), UInt8(0x22), UInt8(0x7D),");
+    o.indent -= 1;
+    o.line("]");
+    o.line(&format!("_ = {parser}(AwsResponse(200, _bad^))"));
+    o.indent -= 1;
+    o.line("except e:");
+    o.indent += 1;
+    o.line("_utf8_refused = String(e).find(\"UTF-8\") >= 0");
+    o.indent -= 1;
+    o.line("if not _utf8_refused:");
+    o.indent += 1;
+    o.line(&format!(
+        "raise Error(\"{parser} did not refuse a body that is not well-formed UTF-8\")"
+    ));
+    o.indent -= 1;
 }
 
 fn emit_input_case(
@@ -531,17 +643,18 @@ fn emit_input_case(
     o.line(&format!("var {var} = {expr}"));
     let fp = s.prefix.to_lowercase();
     o.line(&format!("var _req = {fp}_build_{method}_request({var})"));
-    // MIRRORS the generated `send` (emit_aws.rs), which this driver cannot
+    // MIRRORS the generated `send` (emit_aws/mod.rs), which this driver cannot
     // call without a connector: the unsigned request's headers go to the
-    // signer as `extra`, except a header named exactly `Content-Type`, which
-    // is its own argument, and the endpoint is resolved WITHOUT
-    // `_req.host_prefix`, because `send` does not apply it (the front-end
-    // refuses an operation with a host prefix, by name, until it does).
+    // signer as `extra`, except a header named Content-Type in any case
+    // (header names are case-insensitive), which is its own argument, and
+    // the endpoint is resolved WITHOUT `_req.host_prefix`, because `send`
+    // does not apply it (the front-end refuses an operation with a host
+    // prefix, by name, until it does).
     o.line("var _ct = String(\"\")");
     o.line("var _extra = List[Header]()");
     o.line("for _i in range(len(_req.header_names)):");
     o.indent += 1;
-    o.line("if _req.header_names[_i] == String(\"Content-Type\"):");
+    o.line("if _req.header_names[_i].lower() == String(\"content-type\"):");
     o.line("    _ct = _req.header_values[_i].copy()");
     o.line("else:");
     o.line("    _extra.append(Header(_req.header_names[_i].copy(), _req.header_values[_i].copy()))");
@@ -559,7 +672,7 @@ fn emit_input_case(
     o.line("_ep,");
     o.line("_req.uri,");
     o.line("_ct,");
-    o.line("_req.body,");
+    o.line("Span(_req.body),");
     o.line("_extra,");
     o.line("_clock,");
     o.indent -= 1;
@@ -568,7 +681,7 @@ fn emit_input_case(
     o.line("_rec.set_member(String(\"host\"), JsonValue.from_string(_sr.header(String(\"Host\"))))");
     o.line("_rec.set_member(String(\"method\"), JsonValue.from_string(_sr.method.copy()))");
     o.line("_rec.set_member(String(\"uri\"), JsonValue.from_string(_sr.target.copy()))");
-    o.line("_rec.set_member(String(\"body\"), JsonValue.from_string(_sr.body.copy()))");
+    o.line("_rec.set_member(String(\"body\"), JsonValue.from_string(_sr.body_text()))");
     o.line("var _hdr = JsonValue.empty_object()");
     o.line("for _i in range(len(_sr.headers)):");
     o.indent += 1;
@@ -634,24 +747,36 @@ fn emit_output_case(
     o.line("try:");
     o.indent += 1;
     let fp = s.prefix.to_lowercase();
-    // The whole response is bound, status and headers included, as a
-    // client's send receives it.
-    o.line(&format!("var _resp = HttpResult({status}, String(\"{}\"))", esc(&body)));
+    // The whole response is bound, status and headers included: the
+    // AwsResponse a generated parser reads.
+    o.line(&format!("var _resp = AwsResponse.of_text({status}, String(\"{}\"))", esc(&body)));
     for (k, v) in &headers {
         o.line(&format!("_resp.add_header(String(\"{}\"), String(\"{}\"))", esc(k), esc(v)));
     }
     o.line("var _rec = JsonValue.empty_object()");
     // MIRRORS the generated client's error builder (`_<module>_error` in
-    // emit_aws.rs), which reads the code and message from the body only. The
-    // builder is not called, so a defect in it would not show here.
+    // emit_aws/mod.rs, the code and message expressions of the protocol's
+    // binding): awsJson reads the body only, restJson1 the X-Amzn-Errortype
+    // header and then the body, restXml the <Error> element. The builder is
+    // not called, so a defect in it would not show here.
     o.line("if aws_is_error_status(_resp.status):");
     o.indent += 1;
-    o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(aws_error_code_from_body(_resp.body)))");
-    o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(aws_error_message_from_body(_resp.body)))");
+    if s.lowering.service.protocol == "rest-xml" {
+        o.line("var _ei = aws_rest_xml_error(_resp)");
+        o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(_ei.code))");
+        o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(_ei.message))");
+    } else if s.lowering.service.protocol == "rest-json" {
+        o.line("var _ei = aws_rest_json_error(_resp)");
+        o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(_ei.code))");
+        o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(_ei.message))");
+    } else {
+        o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(aws_error_code_from_body(_resp.body)))");
+        o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(aws_error_message_from_body(_resp.body)))");
+    }
     o.indent -= 1;
     o.line("else:");
     o.indent += 1;
-    o.line(&format!("var _out = {fp}_parse_{method}_response(_resp.body)"));
+    o.line(&format!("var _out = {fp}_parse_{method}_response(_resp)"));
     o.line("_rec.set_member(String(\"result\"), _out.to_model_json())");
     o.indent -= 1;
     o.line(&format!("outp.set_member(String(\"{}\"), _rec^)", esc(key)));
@@ -684,16 +809,17 @@ fn emit_construct(
     let ty = format!("{}{}", s.prefix, msg.mojo_name);
     let obj = params.as_object().cloned().unwrap_or_else(JsonObject::new);
 
-    // wire name -> field
-    let mut by_wire: BTreeMap<String, IrField> = BTreeMap::new();
+    // A case's `params` name members by their MEMBER name, not their wire
+    // name (`locationName`): member name -> field.
+    let mut by_name: BTreeMap<String, IrField> = BTreeMap::new();
     for f in &msg.fields {
-        let w = s
+        let n = s
             .lowering
             .facts
             .member(&msg.fq_name, &f.name)
-            .map(|m| m.wire_name.clone())
+            .map(|m| m.member_name.clone())
             .unwrap_or_else(|_| f.json_name.clone());
-        by_wire.insert(w, f.clone());
+        by_name.insert(n, f.clone());
     }
 
     // Required members are constructor arguments.
@@ -703,7 +829,7 @@ fn emit_construct(
         if !mf.required {
             continue;
         }
-        let v = obj.get(&mf.wire_name);
+        let v = obj.get(&mf.member_name);
         args.push(match v {
             Some(j) => emit_value(o, s, &msg, f, j, ctr)?,
             None => default_expr(s, &msg, f)?,
@@ -713,12 +839,15 @@ fn emit_construct(
     let name = format!("_t{}", *ctr);
     o.line(&format!("var {name} = {ty}({})", args.join(", ")));
 
-    for (wire, f) in &by_wire {
+    for (member, f) in &by_name {
         let mf = s.lowering.facts.member(&msg.fq_name, &f.name)?;
         if mf.required {
             continue;
         }
-        let Some(j) = obj.get(wire) else { continue };
+        // An explicit `null` is an unset member, as botocore serializes it.
+        let Some(j) = obj.get(member).filter(|j| !matches!(j, Json::Null)) else {
+            continue;
+        };
         let v = emit_value(o, s, &msg, f, j, ctr)?;
         o.line(&format!("{name}.set_{}({v})", f.name));
     }

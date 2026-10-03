@@ -244,7 +244,7 @@ impl<'a> Emitter<'a> {
                     "from komira_proto_codec.proto_binary import PbEncoder, PbDecoder",
                 );
                 self.line(
-                    "from komira_http.transport.io_stream import Connector",
+                    "from komira_http_core.transport.io_stream import Connector",
                 );
                 self.line("from komira_async.reactor.reactor import Reactor");
                 self.line(
@@ -460,6 +460,8 @@ impl<'a> Emitter<'a> {
         self.blank();
         self.emit_explicit_deinit();
         self.blank();
+        self.emit_explicit_copy_ctor(msg);
+        self.blank();
         self.emit_encode(msg);
         self.blank();
         self.emit_decode(msg);
@@ -476,6 +478,47 @@ impl<'a> Emitter<'a> {
         self.line("def __deinit__(deinit self):");
         self.push_indent();
         self.line("pass");
+        self.pop_indent();
+    }
+
+    /// An explicit copy constructor, so the struct is never trivially
+    /// copyable.
+    ///
+    /// On Mojo 1.0.0 the synthesized copy constructor of a struct with an
+    /// explicit `__deinit__` can be treated as trivial for some layouts (three
+    /// `Optional[String]` plus an `Optional[Bool]` or `Optional[Int64]` was
+    /// measured), and then `List.copy()` and `List.extend` copy the elements
+    /// with a memcpy: the copy and the original share their String buffers, and
+    /// dropping the copy frees them under the original. An explicit
+    /// constructor is never trivial. Every field is copied by its own
+    /// `.copy()`, so a nested message, a repeated field, a map, an `Optional`
+    /// and a oneof arm each go through that type's real copy.
+    fn emit_explicit_copy_ctor(&mut self, msg: &IrMessage) {
+        self.line("# Explicit so the struct is never trivially copyable: Mojo 1.0.0 can");
+        self.line("# synthesize a trivial copy for some layouts, and `List.copy()` would");
+        self.line("# then share String buffers between the copy and the original.");
+        self.line("def __init__(out self, *, copy: Self):");
+        self.push_indent();
+        let mut names: Vec<String> = Vec::new();
+        for field in &msg.fields {
+            if field.oneof_index.is_none() {
+                names.push(field.name.clone());
+            }
+        }
+        for (oi, oneof) in msg.oneofs.iter().enumerate() {
+            names.push(format!("_oneof{oi}_case"));
+            for arm_name in &oneof.arms {
+                if msg.fields.iter().any(|f| &f.name == arm_name) {
+                    names.push(arm_name.clone());
+                }
+            }
+        }
+        if names.is_empty() {
+            self.line("pass");
+        }
+        for n in &names {
+            self.line(&format!("self.{n} = copy.{n}.copy()"));
+        }
         self.pop_indent();
     }
 
@@ -1712,6 +1755,51 @@ mod oneof_recursion_box_tests {
     }
 
     #[test]
+    fn copy_constructor_copies_every_field_oneof_arms_and_discriminant() {
+        let f = file(vec![
+            message("Inner", vec![msg_field("o", "Outer", 1, None)], vec![]),
+            message(
+                "Outer",
+                vec![
+                    msg_field("plain", "Inner", 1, None),
+                    msg_field("i", "Inner", 2, Some(0)),
+                    msg_field("j", "Leaf", 3, Some(0)),
+                ],
+                vec![IrOneof {
+                    name: "n".to_string(),
+                    arms: vec!["i".to_string(), "j".to_string()],
+                }],
+            ),
+            message("Leaf", vec![], vec![]),
+        ]);
+        let out = Emitter::new(&f).emit();
+        let at = out
+            .find("struct Outer(")
+            .unwrap_or_else(|| panic!("Outer missing; got:\n{out}"));
+        let body = &out[at..];
+        let end = body[1..].find("\nstruct ").map(|i| i + 1).unwrap_or(body.len());
+        let body = &body[..end];
+        for want in [
+            "def __init__(out self, *, copy: Self):",
+            "self.plain = copy.plain.copy()",
+            "self._oneof0_case = copy._oneof0_case.copy()",
+            "self.i = copy.i.copy()",
+            "self.j = copy.j.copy()",
+        ] {
+            assert!(
+                body.contains(want),
+                "the copy constructor must contain `{want}`; got:\n{body}"
+            );
+        }
+        // An empty message still carries one, with a body that is valid.
+        let leaf = &out[out.find("struct Leaf(").unwrap()..];
+        assert!(
+            leaf.contains("def __init__(out self, *, copy: Self):\n        pass"),
+            "an empty message's copy constructor is `pass`; got:\n{leaf}"
+        );
+    }
+
+    #[test]
     fn non_recursive_oneof_arm_stays_optional() {
         let f = file(vec![
             message("Leaf", vec![], vec![]),
@@ -1866,6 +1954,19 @@ mod mojo_100_service_client_tests {
             !out.contains("ImplicitlyDestructible"),
             "`ImplicitlyDestructible` is the Mojo b2 spelling — 1.0.0 renamed it \
              `Deinitable`; got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn every_message_struct_carries_an_explicit_copy_constructor() {
+        let out = Emitter::new(&file_with_service()).emit();
+        let ctors = out.matches("def __init__(out self, *, copy: Self):").count();
+        assert_eq!(
+            ctors, 2,
+            "one copy constructor per MESSAGE struct (2 messages, none on the \
+             client): Mojo 1.0.0 can synthesize a TRIVIAL copy for a struct with \
+             an explicit __deinit__, and List.copy() then shares String buffers; \
+             got:\n{out}"
         );
     }
 
