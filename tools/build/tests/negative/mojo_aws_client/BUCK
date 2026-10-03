@@ -1,8 +1,8 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 
-# aws_client targets that must fail, over the pinned botocore CloudWatch Logs
-# model and the stub runtime of ../../functional/aws_client. Each refusal is
+# mojo_aws_client targets that must fail, over the pinned botocore CloudWatch Logs
+# model and the stub runtime of ../../functional/mojo_aws_client. Each refusal is
 # in its own target, so this package loads and every target fails on its
 # own. run_tests.sh (test 35) builds each as an expect_red, requiring the
 # text quoted above the target.
@@ -10,12 +10,12 @@ load("@komira//tools/build/cloud:aws.bzl", "aws_client")
 _LOGS = botocore_model("logs")
 
 _RUNTIME = [
-    "//functional/aws_client:komira_aws_core",
-    "//functional/aws_client:komira_json",
+    "//functional/mojo_aws_client:komira_aws_core",
+    "//functional/mojo_aws_client:komira_json",
 ]
 
 # "`operations` is empty", at analysis: the client is operation-scoped.
-aws_client(
+mojo_aws_client(
     name = "no_operations",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -26,7 +26,7 @@ aws_client(
 # "is not a botocore operation name", at analysis: two operations joined into
 # one entry would be split by the generator into a scope the BUCK file does
 # not show.
-aws_client(
+mojo_aws_client(
     name = "joined_operations",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -35,7 +35,7 @@ aws_client(
 )
 
 # "`deps` is empty", at analysis: no runtime is added by default.
-aws_client(
+mojo_aws_client(
     name = "no_runtime",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -45,7 +45,7 @@ aws_client(
 
 # "GetLogEvent", in the build: an operation the model does not declare is
 # refused by the generator (the analysis check only reads the name's shape).
-aws_client(
+mojo_aws_client(
     name = "unknown_operation",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -53,11 +53,11 @@ aws_client(
     deps = _RUNTIME,
 )
 
-# "GATED TEST FAILED: tests//negative/aws_client:caller_test_red:
+# "GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:
 # test_logs_deliberate_failure.mojo": a failing caller `test_srcs` entry
 # blocks the client like any library's test, next to the generated layout
 # probe (which passes, so the red is the caller's test and no other).
-aws_client(
+mojo_aws_client(
     name = "caller_test_red",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -67,7 +67,7 @@ aws_client(
 )
 
 # "`operations` names `GetLogEvents` twice", at analysis.
-aws_client(
+mojo_aws_client(
     name = "duplicate_operation",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -79,7 +79,7 @@ aws_client(
 )
 
 # "`overrides` is set and `hand_srcs` is empty", at analysis.
-aws_client(
+mojo_aws_client(
     name = "overrides_without_hand_srcs",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -92,8 +92,8 @@ aws_client(
 # ruleset's aws.partition reads the partition table. Its run_tests.sh row is
 # to be added with the next edit of that file: expect_red
 # aws_client_endpoint_rules_without_partitions 'are set together'
-# tests//negative/aws_client:endpoint_rules_without_partitions
-aws_client(
+# tests//negative/mojo_aws_client:endpoint_rules_without_partitions
+mojo_aws_client(
     name = "endpoint_rules_without_partitions",
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
@@ -103,7 +103,7 @@ aws_client(
 )
 
 # "`hand_srcs` is set and `overrides` is not", at analysis.
-aws_client(
+mojo_aws_client(
     name = "hand_srcs_without_overrides",
     hand_srcs = ["hand/hand_owner.mojo"],
     model = _LOGS.model,
@@ -119,7 +119,7 @@ export_file(
 
 # "is not a source path of a `.mojo` file", at analysis: a label, whose
 # output's name the package would take without the BUCK file showing it.
-aws_client(
+mojo_aws_client(
     name = "hand_src_is_label",
     hand_srcs = [":hand_owner_label"],
     model = _LOGS.model,
@@ -131,7 +131,7 @@ aws_client(
 
 # "is not a source path of a `.mojo` file", at analysis: a file the library
 # would not compile.
-aws_client(
+mojo_aws_client(
     name = "hand_src_not_mojo",
     hand_srcs = ["hand/notes.txt"],
     model = _LOGS.model,
@@ -143,7 +143,7 @@ aws_client(
 
 # "has the name of a generated or another hand-written file", at analysis:
 # copied into the package, it would overwrite the generated layout probe.
-aws_client(
+mojo_aws_client(
     name = "hand_src_clashes",
     hand_srcs = ["hand/_layout_probe.mojo"],
     model = _LOGS.model,
@@ -156,7 +156,7 @@ aws_client(
 # "the botocore service id cannot be read from the model path", at analysis:
 # a model outside botocore's `<service>/<api version>/service-2.json` layout
 # with no `service` naming it.
-aws_client(
+mojo_aws_client(
     name = "service_unreadable",
     model = "not_botocore_layout.json",
     model_sha256 = _LOGS.sha256,

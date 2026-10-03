@@ -1,4 +1,4 @@
-"""A stub `komira_aws_core` for the aws_client fixture.
+"""A stub `komira_aws_core` for the mojo_aws_client fixture.
 
 The real core is komira//src/komira_aws_core, and generated code is built
 against it in the komira cell (the AWS conformance driver,

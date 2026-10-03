@@ -1,4 +1,4 @@
-load("@komira//tools/build/cloud:aws.bzl", "aws_client")
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 load(":model.bzl", "TINY_REST_XML")
 
 # A restXml client of a tiny S3-shaped model (serviceId S3, signature
@@ -24,7 +24,7 @@ export_file(
     visibility = ["PUBLIC"],
 )
 
-aws_client(
+mojo_aws_client(
     name = "komira_aws_tiny_xml",
     customizations = ["s3"],
     mode = "pure",

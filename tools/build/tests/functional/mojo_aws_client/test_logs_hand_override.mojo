@@ -1,4 +1,4 @@
-# The caller's test of the aws_client hand_srcs fixture: the hand-written
+# The caller's test of the mojo_aws_client hand_srcs fixture: the hand-written
 # module was copied into the generated package, is importable from it, and
 # builds the request through the generated encoder.
 from komira_aws_logs_hand.komira_aws_logs_hand import CloudWatchLogsGetLogEventsRequest
