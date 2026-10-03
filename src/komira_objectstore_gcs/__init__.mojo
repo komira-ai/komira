@@ -19,8 +19,13 @@ traits.
     one a deployed signer uses; `FixedSigningClock` is a clock stopped at one
     instant, for tests.
 
-A production backend (google.storage.v2 over gRPC) is another conformer of
-`GcsStorageBackend`; it does not live in this package.
+  * `StorageGrpcBackend[C, T, K]` (grpc_backend.mojo) — the production
+    conformer of `GcsStorageBackend`: google.storage.v2 over gRPC through the
+    generated `komira_gcp_storage` client, on connector `C`
+    (`GcsTlsConnector`, built by `build_gcs_tls_connector`), a
+    `komira_gcp_core.GcpTokenSource` `T` and a komira_retry
+    `MonotonicClock` `K`. `gcs_error_kind_from_code` /
+    `gcs_store_error_from_code` map a gRPC status onto the `GCS_ERR_*` kinds.
 """
 
 from .backend import GcsStorageBackend, ListPageRaw, ObjectMetaRaw
@@ -37,6 +42,21 @@ from .errors import (
 )
 from .fake_backend import FakeGcsStorageBackend
 from .gcs_fs import GcsFileHandle, GcsFs, GcsWriteFile
+from .grpc_backend import (
+    GCS_DEFAULT_CALL_DEADLINE_MS,
+    GCS_GRPC_HOST,
+    GCS_GRPC_PORT,
+    GCS_READ_MAX_MESSAGES,
+    WRITE_OBJECT_CHUNK_BYTES,
+    GcsTlsConnector,
+    StorageGrpcBackend,
+    build_gcs_tls_connector,
+    gcs_bucket_resource_name,
+    gcs_error_kind_from_code,
+    gcs_routing_param,
+    gcs_store_error_from_code,
+    gcs_store_error_from_raised,
+)
 from .signer import (
     GCS_SIGNER_CLOUD,
     GCS_V4_DEFAULT_LOCATION,

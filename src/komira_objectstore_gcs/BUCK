@@ -1,15 +1,27 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# Google Cloud Storage over the komira_objectstore traits, without a wire
-# client: the narrow object-verb seam (`GcsStorageBackend`), an in-memory
-# conformer of it for hermetic tests (`FakeGcsStorageBackend`), the
-# `ConditionalWriteStore` conformer over the seam (`GcsConditionalStore`), the
-# `FileSystem` read conformer over the seam (`GcsFs`), and the StoreError kind
-# reader; and the `ObjectUrlSigner` conformer (`GcsV4Signer`) over
-# komira_gcp_core's V4 signing, on a caller-supplied clock (the production
-# one, `SystemSigningClock`, is komira_clock's wall clock). The
-# google.storage.v2 gRPC backend is a separate conformer of the object-verb
-# seam and lands with the gRPC client.
+# Google Cloud Storage over the komira_objectstore traits: the narrow
+# object-verb seam (`GcsStorageBackend`), an in-memory conformer of it for
+# hermetic tests (`FakeGcsStorageBackend`), the `ConditionalWriteStore`
+# conformer over the seam (`GcsConditionalStore`), the `FileSystem` read
+# conformer over the seam (`GcsFs`), and the StoreError kind reader; the
+# production conformer of the seam (`StorageGrpcBackend`), google.storage.v2
+# over gRPC through the generated komira_gcp_storage client, with the bearer
+# token from a komira_gcp_core `GcpTokenSource` and its deadlines on a
+# komira_retry `MonotonicClock`; and the `ObjectUrlSigner` conformer
+# (`GcsV4Signer`) over komira_gcp_core's V4 signing, on a caller-supplied
+# clock (the production one, `SystemSigningClock`, is komira_clock's wall
+# clock).
+#
+# test_gcs_grpc_backend drives StorageGrpcBackend over a scripted HTTP/2
+# connector (no socket, no credential, no service): each verb's request
+# messages, routing header and bearer token on the wire, the chunked
+# WriteObject, the range read, the response mapping, and every gRPC status
+# onto its StoreError kind. test_gcs_grpc_token_refresh checks that each call
+# takes its token from the source (a CachingTokenSource on a ManualClock
+# refetches a token near expiry, and again after `invalidate`).
+# test_gcs_grpc_unit_budget checks that the transport's request_timeout_us
+# reaches the HttpClient inside the generated client.
 #
 # test_gcs_presign_portability signs with Google's published inactive dummy
 # service account and checks the signer against Google's published V4 URLs,
@@ -33,9 +45,15 @@ mojo_library(
         "//src/komira_crypto:komira_crypto",
         "//src/komira_fs:komira_fs",
         "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_gcp_storage:komira_gcp_storage",
+        "//src/komira_grpc:komira_grpc",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
         # For the tests only: they parse the conformance JSON with it.
         "//src/komira_json:komira_json",
         "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_retry:komira_retry",
     ],
     test_srcs = [
         "tests/test_gcs_conditional_store.mojo",
@@ -43,6 +61,9 @@ mojo_library(
         "tests/test_gcs_presign_portability.mojo",
         "tests/test_system_signing_clock.mojo",
         "tests/test_env_source_only.mojo",
+        "tests/test_gcs_grpc_backend.mojo",
+        "tests/test_gcs_grpc_token_refresh.mojo",
+        "tests/test_gcs_grpc_unit_budget.mojo",
     ],
     test_data = {
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),
