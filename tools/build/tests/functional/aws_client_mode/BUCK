@@ -9,9 +9,10 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 #
 # The runtime is ../mojo_aws_client's stubs (a library of this cell cannot
 # depend on a mojo_library of the komira cell; see that BUCK):
-# komira_aws_core with its client half, whose `send_sigv4_signed_request` is
-# a test double that answers with the arguments it was given, and
-# komira_http_core's Connector trait. Compiling the generated module against
+# komira_aws_core with its client half, whose `send_sigv4_signed_request`
+# and `send_sigv4_signed_request_with` are test doubles that answer with the
+# arguments they were given, komira_http_core's Connector trait, and
+# komira_retry's seams and loop. Compiling the generated module against
 # them is what keeps the stubs in step with the import block the generator
 # writes from emit_aws/mod.rs AWS_IMPORTS, for the rows that apply to an
 # awsJson module: a client-mode row for every protocol or for awsJson that
@@ -39,6 +40,7 @@ mojo_aws_client(
         "//functional/mojo_aws_client:komira_aws_core",
         "//functional/mojo_aws_client:komira_http_core",
         "//functional/mojo_aws_client:komira_json",
+        "//functional/mojo_aws_client:komira_retry",
     ],
 )
 
