@@ -7,7 +7,7 @@
 # Upstream contract: komira_search/{split,term_dict,analyzer,score,inverted}.mojo.
 # The Searcher SourceLike spec + the SearchMorselSource MorselSourceImpl reader
 # live in the HIGHER `komira_search_runtime` package (keep komira_search on the
-# light komira_core + komira_eval edge — the morsel source machinery is NOT on
+# light komira_core edge — the morsel source machinery is NOT on
 # that edge).
 #
 # -----------------------------------------------------------------------------

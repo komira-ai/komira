@@ -455,6 +455,31 @@ proto_codegen_golden(
     options = "default_protocol=rest,package_prefix=komira_test_shapes",
 )
 
+# Well-known types as a GET response (Struct), a PUT response (Timestamp) and
+# a `body:` field (Struct): the client reads and writes them through
+# komira_proto_codec's codec, whose comptime branch gives a WKT its canonical
+# JSON form. A direct `T.decode(JsonDecoder)` / `.encode(JsonEncoder)` would
+# read and write the binary-shaped message instead.
+proto_codegen_golden(
+    name = "wkt_rest",
+    srcs = [
+        _ANNOTATIONS,
+        "corpus/rest/v1/wkt_rest.proto",
+    ],
+    generate = ["rest/v1/wkt_rest.proto"],
+    golden = ["golden/wkt_rest/wkt_rest.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_wkt_rest",
+    absent = [
+        "JsonDecoder",
+        "JsonEncoder",
+    ],
+    present = [
+        "decode_json_lenient[Struct](resp_text)",
+        "decode_json_lenient[Timestamp](resp_text)",
+        "encode_json(req.doc.value())",
+    ],
+)
+
 # Templates a client cannot fill are refused, each naming the reason.
 _REST_REFUSALS = [
     ("bare_wildcard", "a bare `*` segment has no request field to fill it"),
@@ -555,5 +580,6 @@ proto_codegen_goldens(
         ":refuse_db_layout_probe",
         ":logging_rest",
         ":shapes_rest",
+        ":wkt_rest",
     ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS],
 )

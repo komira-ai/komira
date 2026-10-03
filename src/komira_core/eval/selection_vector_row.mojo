@@ -7,10 +7,11 @@
 # `komira_core.arrow.primitive_array.PrimitiveArray` (strictly DOWN into
 # core), so they live in this leaf layer. Consumers inside `komira_core`
 # (`collections/chunk_typed.mojo`, `arrow/gather_recordbatch.mojo`) import
-# them from here; `komira_eval` re-exports them (the SAME struct, so type
-# identity and codegen are preserved), so no `komira_core -> komira_eval`
-# up-edge exists. A hermetic build that stages only declared inputs would
-# reject such an edge even where a local sibling-source search accepts it.
+# them from here, and so do the packages above core (`komira_kernels`,
+# `komira_eval`); nothing re-exports them, so each name has exactly one home
+# and no `komira_core -> komira_eval` up-edge exists. A hermetic build that
+# stages only declared inputs would reject such an edge even where a local
+# sibling-source search accepts it.
 #
 # The columnar `SelectionVector` lives in
 # `komira_core/eval/selection_vector.mojo`.
@@ -269,7 +270,7 @@ struct RowSelectionVector(Movable):
 
         PERF-CRITICAL: this is the dual-compact bulk-sink primitive for
         the sel-pair compare-and-emit kernels (`_emit_lane_writes` in
-        `komira_eval/sel_kernels.mojo`). Callers compute
+        `komira_kernels/sel_kernels.mojo`). Callers compute
         `vec = compress_u32xW(mask, lanes).compacted` and
         `k = popcount_mask(mask)` (or equivalently `Int(result.count)`),
         then funnel the dense W-lane result through this method instead of

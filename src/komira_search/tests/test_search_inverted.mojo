@@ -36,7 +36,7 @@ from komira_core.arrow.schema import Field, Schema, SchemaBuilder
 from komira_core.arrow.string_array import StringArray
 from komira_core.collections.batch_view import batch_view_over
 
-from komira_eval import fnv1a_64_over_bytes
+from komira_core.eval.fnv1a_64 import fnv1a_64_over_bytes
 
 from komira_search.analyzer import (
     AnalyzedField,

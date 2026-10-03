@@ -67,9 +67,9 @@ trait Sink(Movable, Deinitable):
 
     # NOTE: the row-native write hook `accept_row_blocks(var ro: RowOutput)`
     # is NOT on the core `Sink` trait — it would force `komira_core` to
-    # import `RowOutput` from `komira_eval` (a higher layer), creating a
+    # import `RowOutput` from `komira_row_format` (a higher layer), creating a
     # `core -> eval` import cycle. Instead the hook lives on the
-    # `RowSink(Sink)` refinement in `komira_eval.row_format.row_sink`.
+    # `RowSink(Sink)` refinement in `komira_row_format.row_sink`.
     # Core's `Sink` never CALLS the hook (only the SDK's
     # `WriteSpec.feed_sinks_with_row_output` does, and it binds the sole text
     # sink to the concrete `LocalFormatSink[F]` / `CsvSink` type — both `RowSink`

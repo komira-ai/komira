@@ -13,15 +13,16 @@
 # memberless (it re-encodes as `{}` after decoding a body that carries a
 # message). Reading the error code and message (`__type`, `message`) is
 # komira_aws_core's (aws_error_code_from_body, aws_error_message_from_body),
-# which pure-mode code imports and never calls; it is stubbed here and is
-# tested on the real core in P06.
+# which pure-mode code imports and never calls; it is stubbed here and
+# tested in komira//src/komira_aws_core.
 from komira_aws_logs.komira_aws_logs import (
     CloudWatchLogsGetLogEventsRequest,
     CloudWatchLogsResourceNotFoundException,
     build_get_log_events_request,
     parse_get_log_events_response,
 )
-from komira_serde.json_value import parse_json_value
+from komira_aws_core import AwsResponse
+from komira_json import parse_json_value
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 
@@ -38,7 +39,7 @@ def test_request() raises:
     assert_equal(req.header(String("Content-Type")), "application/x-amz-json-1.1")
     # Members in model order, an unset member absent rather than null.
     assert_equal(
-        req.body,
+        req.body_text(),
         '{"logGroupName":"/example/app","logStreamName":"web-1",'
         + '"startTime":1790812800000,"limit":10,"startFromHead":true}',
     )
@@ -64,7 +65,9 @@ comptime _RESPONSE = (
 
 
 def test_response() raises:
-    var resp = parse_get_log_events_response(String(_RESPONSE))
+    var resp = parse_get_log_events_response(
+        AwsResponse.of_text(200, String(_RESPONSE))
+    )
     assert_true(Bool(resp.events))
     var events = resp.events.value().copy()
     assert_equal(len(events), 2)
@@ -86,7 +89,9 @@ def test_response() raises:
 
 def test_empty_response_body() raises:
     # awsJson answers an empty body for an empty result: it decodes as `{}`.
-    var resp = parse_get_log_events_response(String(""))
+    var resp = parse_get_log_events_response(
+        AwsResponse.of_text(200, String(""))
+    )
     assert_false(Bool(resp.events))
     assert_false(Bool(resp.next_forward_token))
 
@@ -106,15 +111,20 @@ def test_error_shape() raises:
         parse_json_value(String(_ERROR))
     )
     assert_equal(e.to_aws_json().serialize(), "{}")
-    # The result decoder is not an error decoder: the error body has no
-    # result member, so it decodes as an empty result rather than raising,
-    # which is why a caller must classify the status before decoding.
-    var resp = parse_get_log_events_response(String(_ERROR))
+    # The result decoder is not an error decoder: it does not read the
+    # status, and the error body has no result member, so it decodes as an
+    # empty result rather than raising, which is why a caller must classify
+    # the status before decoding.
+    var resp = parse_get_log_events_response(
+        AwsResponse.of_text(400, String(_ERROR))
+    )
     assert_false(Bool(resp.events))
     # A body that is not JSON is refused, not decoded as empty. (The refusal
     # is the JSON parser's; the generated decoder only passes it on.)
     with assert_raises():
-        _ = parse_get_log_events_response(String("<html>503</html>"))
+        _ = parse_get_log_events_response(
+            AwsResponse.of_text(503, String("<html>503</html>"))
+        )
 
 
 def main() raises:

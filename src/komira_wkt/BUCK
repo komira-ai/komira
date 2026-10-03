@@ -1,0 +1,23 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The protobuf well-known types (`google.protobuf.Timestamp`, `Duration`,
+# `Empty`, the scalar wrappers, `FieldMask`, `Struct` / `Value` /
+# `ListValue`, an opaque `Any`) as `Proto3JsonWkt` Mojo structs, each with
+# its proto3 canonical-JSON special form, which the codec's message arms and
+# top-level entry points use. Generated clients import these; the first-party
+# dependencies are `komira_proto_codec`, `komira_json` and `komira_encoding`.
+mojo_library(
+    name = "komira_wkt",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_json:komira_json",
+        "//src/komira_encoding:komira_encoding",
+    ],
+    test_srcs = [
+        "tests/test_wkt_json_codec_path.mojo",
+        "tests/test_wkt_plain_arms.mojo",
+        "tests/test_wkt_runtime.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

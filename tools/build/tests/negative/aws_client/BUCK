@@ -11,7 +11,7 @@ _LOGS = botocore_model("logs")
 
 _RUNTIME = [
     "//functional/aws_client:komira_aws_core",
-    "//functional/aws_client:komira_serde",
+    "//functional/aws_client:komira_json",
 ]
 
 # "`operations` is empty", at analysis: the client is operation-scoped.

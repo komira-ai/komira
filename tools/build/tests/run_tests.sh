@@ -65,7 +65,7 @@
 #      //tools/build/third_party_srcs:aws_lc_mini_gen (its own daemon under a
 #      fixed --isolation-dir, --no-remote-cache, so every action really
 #      executes) must record a remote execution carrying `[komira_re]
-#      linux_properties` for every action it ran, and must have run
+#      linux_x86_64_properties` for every action it ran, and must have run
 #      zig_unpack, zig_build_exe, conda_unpack, mojo_runtime, fixture_archive,
 #      third_party_srcs and mojo_build (`buck2 log what-ran`; a cache hit
 #      records no properties, so a warm build cannot answer this). Costs about 3 minutes of remote execution; the isolated
@@ -140,13 +140,6 @@
 #  26. The vendored aws-lc and s2n-tls: source lists against their archives,
 #      known-answer tests, a TLS handshake, the s2n-tls feature probes: see
 #      tools/build/tests/c_libs_tests.sh.
-#  27. mojo_library's tests_known_failing inverts rather than mutes
-#      (tests//functional/known_failing): a held test that fails is satisfied (marker
-#      `HELD`), a held test that passes is red (LEDGER STALE, naming its row),
-#      an unheld red beside a hold is still red, and every inadmissible row
-#      (no issue, an issue that is not a GitHub issue reference, an empty
-#      reason, an entry that is not a test, an unknown field, byte-identical
-#      reasons, every test held) is refused at analysis.
 #  28. The compile watchdog of mojo_wrapper.sh on stand-in compilers
 #      (tests//functional/watchdog:cases, a remote action): a process tree using no CPU
 #      is killed with exit 124 and the message, its children and an orphaned
@@ -163,13 +156,13 @@
 #      fixture it did not declare is absent (the gate goes red); TEST_TMPDIR
 #      is private, empty and not /tmp in each of two actions; test_env and a
 #      mojo_test's data and env arrive under `buck2 test`; a red test stays
-#      red with test_env {HELD: 1} (library) and env {BIN: true} (mojo_test);
+#      red with test_env {BIN: true} (library) and env {BIN: true} (mojo_test);
 #      the runner itself, run twice in ONE action directory
 #      (tests//functional/test_data:runner_cases), gives each run its own empty
 #      TEST_TMPDIR under that directory and removes it, no --env reaches
-#      the verdict, and a held test killed by SIGKILL fails (137, NO VERDICT)
-#      with no marker while other signal deaths stay HELD; five inadmissible
-#      data/env declarations are refused at analysis.
+#      the verdict, and a test killed by SIGKILL or SIGABRT fails with its
+#      own status (137, 134) and no marker; five inadmissible data/env
+#      declarations are refused at analysis.
 #  30. Optimization levels, read from each compile command (buck2 aquery,
 #      analysis only): mojo_test and a mojo_library's gated tests at -O1,
 #      mojo_binary and the shared libraries of a bundle at -O3, a per-target
@@ -180,6 +173,18 @@
 #      (tools/build/tests/negative/lint_weld.sh).
 #  32. The ./buck2 bootstrap installs only what tools/buck2 pins
 #      (tools/build/tests/functional/bootstrap.sh; a made-up release, no network).
+#  33a. Conda packages: see tools/build/tests/functional/conda.sh (a package is a
+#       directory read back with unzip, zstd, tar and jq; kci's manifest contract;
+#       a new library gets its package from the macro with no declaration; the
+#       refusals, as targets that build and releases that do not; the stamp; two
+#       uncached builds, skipped with --no-uncached; a pixi install from a
+#       file:// channel and a Mojo program importing the library, skipped with
+#       --no-install).
+#  33b. The conda package set and metapackage: see tools/build/tests/functional/conda_set.sh
+#       (every library's package target builds; the stamped releases; the metapackage
+#       from the members' manifests; kci's own parser over the emitted manifests; the
+#       refusals; two uncached builds, skipped with --no-uncached; a pixi install of
+#       the metapackage alone, skipped with --no-install).
 #  33. The client is Linux x86_64: several tests run binaries built for the
 #      farm, and ELF tools, on this machine, so on any other client this
 #      script stops before it builds anything (exit 2). `--host-check-only`
@@ -214,7 +219,8 @@
 #      response. GetLogEvents' error shapes have no members in that model, so
 #      the error-shape check pins only that the generated shape is memberless
 #      (it decodes nothing); an error's code and message are read by
-#      komira_aws_core, stubbed here, and are tested on the real core in P06.
+#      komira_aws_core, stubbed here, and are tested in
+#      komira//src/komira_aws_core.
 #      Exactly the package's files are generated, nothing of an operation not
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
@@ -228,6 +234,16 @@
 #      model path the service id cannot be read from; an operation the model
 #      lacks by the generator; and a failing caller test reds the client
 #      (tests//negative/aws_client).
+#  37. The platform table (tools/build/platforms/table.bzl, one row per
+#      (os, cpu)) is complete and the default target platform is the client's
+#      own: loading tests//functional/platform_table: runs the load-time
+#      cases (a table missing a pin or a field, with a pending pin in a
+#      registered row, a malformed sha256 or a duplicate key or host is
+#      refused naming the row and the pin; each host_info() selects its row);
+#      `platforms:host` is linux-x86_64 on this client and a target stating no
+#      --target-platforms is configured for it; the reserved linux-arm64 row
+#      has no platform and its `[komira_re]` key is refused
+#      (tools/build/tests/functional/platform_table/check.sh).
 set -uo pipefail
 
 umbrella=1
@@ -249,6 +265,7 @@ done
 # another client they would fail one by one, looking like defects; stop here
 # instead. `./buck2 build //...` and `./buck2 test //...` work from any client.
 client=$(uname -s) arch=$(uname -m)
+# komira-limit:run-tests-linux-x86-64-client
 if [ "$client $arch" != "Linux x86_64" ]; then
     echo "run_tests.sh: needs a Linux x86_64 client, this is $client $arch: the tests run Linux x86_64 binaries and ELF tools here. ./buck2 build //... and ./buck2 test //... run from any client." >&2
     exit 2
@@ -325,6 +342,7 @@ EXAMPLES=(
     //tools/build/examples/cshim:add //tools/build/examples/cshim:cadd
     //tools/build/examples/cshim:cadd_user //tools/build/examples/cshim:test_add_direct
     //third_party/snappy:snappy //tools/build/examples/snappy:test_snappy
+    //tools/build/examples/shared_lib:spike //tools/build/examples/shared_lib:spike_exact //tools/build/examples/shared_lib:plain //tools/build/examples/shared_lib:plain_exact //tools/build/examples/shared_lib_mid:mid
 )
 # Sub-targets are built in their own invocation. (`buck2 build //... 'T[sub]'`
 # was observed to skip the sub-target, so never rely on combining them with a
@@ -365,6 +383,18 @@ expect_red gate_red "GATED TEST FAILED" tests//negative/libgate_bad:libgate_bad
 expect_green gate_ungated_green "tests//negative/libgate_bad:libgate_bad[ungated]"
 expect_red gate_consumer_red "GATED TEST FAILED" tests//negative/libgate_bad:gated_consumer
 expect_red gate_bypass_refused "MojoInfo" tests//negative/libgate_bad:bypass_consumer
+
+# 2 (mojo_shared_lib): the gate refuses to publish a library whose compile is green
+for t in missing_export unresolved_symbol failing_driver forced_not_loaded leaks_by_default plain_leaks; do
+    expect_green "sharedlib_${t}_ungated" "tests//negative/shared_lib:${t}[ungated]"
+done
+expect_red sharedlib_missing_export_red "MISSING EXPORT: neg_missing" tests//negative/shared_lib:missing_export
+expect_red sharedlib_unresolved_red "undefined symbol: komira_neg_undefined_symbol" tests//negative/shared_lib:unresolved_symbol
+expect_red sharedlib_driver_red "GATED TEST FAILED" tests//negative/shared_lib:failing_driver
+expect_red sharedlib_force_load_red "MISSING EXPORT: komira_spike_forced" tests//negative/shared_lib:forced_not_loaded
+expect_red sharedlib_leaks_by_default_red "komira_example_add leaked into the dynamic symbol table" tests//negative/shared_lib:leaks_by_default
+expect_red sharedlib_plain_leaks_red "plain_hidden leaked into the dynamic symbol table" tests//negative/shared_lib:plain_leaks
+expect_red sharedlib_empty_exports_refused "exports\` is empty" tests//negative/shared_lib:empty_exports
 
 # 3
 # Its red depends on the executor staging only declared inputs. A local action
@@ -539,12 +569,12 @@ action_platforms() { # what-ran json: every action ran remotely, with the linux 
             printf "%d actions, every one a remote execution with [%s]\n", total, P
         }'
 }
-LINUX_PROPS=$(re_value linux_properties)
+LINUX_PROPS=$(re_value linux_x86_64_properties)
 ISO=komira_tests_uncached
 if [ "$MODE" = local ]; then
     needs_remote "action platforms (per-action worker property sets)"
 elif [ -z "$LINUX_PROPS" ]; then
-    fail "action platforms: cannot read [komira_re] linux_properties"
+    fail "action platforms: cannot read [komira_re] linux_x86_64_properties"
 # The isolated daemon keeps its outputs between runs, and --no-remote-cache
 # does not rerun an action whose output is already on disk: clean first, or
 # a second run of these tests in the same checkout executes nothing.
@@ -758,29 +788,6 @@ else
     fail "local default: $(grep -o 'FAIL  local default: .*' "$LOG/local_default.log" | cut -c 22-) (see $LOG/local_default.log)"
 fi
 
-# 27
-if "$BUCK2" build tests//functional/known_failing:held_ok --show-full-simple-output > "$LOG/kf_held_ok.log" 2>&1; then
-    "$BUCK2" build 'tests//functional/known_failing:held_ok[tests][test_fails]' --show-full-simple-output > "$LOG/kf_marker.log" 2>&1
-    kf_marker=$(tail -n 1 "$LOG/kf_marker.log")
-    if [ "$(cat "$kf_marker" 2> /dev/null)" = "HELD tests//functional/known_failing:held_ok:tests/test_fails.mojo" ]; then
-        pass "known_failing: a held test that fails satisfies the gate (HELD marker)"
-    else
-        fail "known_failing: held_ok built, but its held marker is '$(cat "$kf_marker" 2> /dev/null)' (see $LOG/kf_marker.log)"
-    fi
-else
-    fail "known_failing: held_ok must build (see $LOG/kf_held_ok.log)"
-fi
-expect_red kf_held_passing 'tests_known_failing["tests/test_passes_too.mojo"]' tests//negative/known_failing:held_passing
-expect_red kf_held_passing_stale "LEDGER STALE" tests//negative/known_failing:held_passing
-expect_red kf_unheld_red "GATED TEST FAILED: tests//negative/known_failing:unheld_red:tests/test_fails_too.mojo" tests//negative/known_failing:unheld_red
-expect_red kf_no_issue "no \`issue\`" tests//negative/known_failing:bad_no_issue
-expect_red kf_issue_ref "is not a GitHub issue number" tests//negative/known_failing:bad_issue_ref
-expect_red kf_empty_reason "empty \`reason\`" tests//negative/known_failing:bad_empty_reason
-expect_red kf_entry "not a test_srcs entry" tests//negative/known_failing:bad_entry
-expect_red kf_field "unknown field \`card\`" tests//negative/known_failing:bad_field
-expect_red kf_same_reason "byte-identical reasons" tests//negative/known_failing:bad_same_reason
-expect_red kf_all_held "holds all 2 tests" tests//negative/known_failing:bad_all_held
-
 # 28
 if ! "$BUCK2" build tests//functional/watchdog:cases --show-full-simple-output > "$LOG/watchdog_cases.txt" 2> "$LOG/watchdog_cases.log"; then
     fail "compile watchdog cases: $(grep '^BAD ' "$LOG/watchdog_cases.log" | sort -u | tr '\n' ' ')(see $LOG/watchdog_cases.log)"
@@ -803,7 +810,7 @@ if timeout 900 "$BUCK2" test tests//functional/test_data:mojo_test_data > "$LOG/
 else
     fail "td_mojo_test: buck2 test tests//functional/test_data:mojo_test_data failed (see $LOG/td_mojo_test.log)"
 fi
-expect_red td_env_held "GATED TEST FAILED: tests//negative/test_data:env_held:tests/test_red.mojo" tests//negative/test_data:env_held
+expect_red td_env_bin_lib "GATED TEST FAILED: tests//negative/test_data:env_bin_lib:tests/test_red.mojo" tests//negative/test_data:env_bin_lib
 if timeout 900 "$BUCK2" test tests//negative/test_data:env_bin > "$LOG/td_env_bin.log" 2>&1; then
     fail "td_env_bin: buck2 test tests//negative/test_data:env_bin passed, but its test is red (env BIN reached the runner; see $LOG/td_env_bin.log)"
 elif grep -qF "test_red: DELIBERATE FAILURE" "$LOG/td_env_bin.log"; then
@@ -849,6 +856,30 @@ if "$ROOT/tools/build/tests/functional/bootstrap.sh" "$LOG/bootstrap" > "$LOG/bo
 else
     fail "./buck2 bootstrap: $(grep '^FAIL' "$LOG/bootstrap.log" | cut -c 18- | tr '\n' ' ')(see $LOG/bootstrap.log)"
 fi
+
+# 33a
+conda_args=()
+[ "$uncached" = 1 ] || conda_args+=(--no-uncached)
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda "*) pass "${line#PASS  }" ;;
+        "FAIL  conda "*) fail "${line#FAIL  } (see $LOG/conda.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda.log"
+grep -qE '^(PASS|FAIL)  conda ' "$LOG/conda.log" || fail "conda: tools/build/tests/functional/conda.sh reported nothing (see $LOG/conda.log)"
+
+# 33b
+BUCK2="$BUCK2" "$ROOT/tools/build/tests/functional/conda_set.sh" ${conda_args[@]+"${conda_args[@]}"} > "$LOG/conda_set.log" 2>&1
+while IFS= read -r line; do
+    case "$line" in
+        "PASS  conda_set "*) pass "${line#PASS  }" ;;
+        "FAIL  conda_set "*) fail "${line#FAIL  } (see $LOG/conda_set.log)" ;;
+        "SKIP  "*) echo "$line" ;;
+    esac
+done < "$LOG/conda_set.log"
+grep -qE '^(PASS|FAIL)  conda_set ' "$LOG/conda_set.log" || fail "conda_set: tools/build/tests/functional/conda_set.sh reported nothing (see $LOG/conda_set.log)"
 
 # 33
 S="$LOG/uname_shim"
@@ -950,6 +981,17 @@ elif [ "$umbrella" = 1 ]; then
 else
     echo "SKIP  umbrella cache (--no-umbrella)"
 fi
+
+# 37
+pt_rc=0
+pt_out=$(cd "$ROOT" && BUCK2="$BUCK2" bash tools/build/tests/functional/platform_table/check.sh "$LOG" 2>&1) || pt_rc=$?
+printf '%s\n' "$pt_out" > "$LOG/platform_table.log"
+grep -E '^(PASS|FAIL)  ' "$LOG/platform_table.log"
+pt_fails=$(grep -c '^FAIL  ' "$LOG/platform_table.log" || true)
+if [ "$pt_rc" != 0 ] && [ "$pt_fails" = 0 ]; then
+    fail "platform table: check.sh exited $pt_rc without a FAIL line (see $LOG/platform_table.log)"
+fi
+fails=$((fails + pt_fails))
 
 echo "logs: $LOG"
 [ "$fails" = 0 ] || { echo "$fails test(s) failed"; exit 1; }

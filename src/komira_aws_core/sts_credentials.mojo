@@ -213,7 +213,7 @@ def _sts_request(
     req.headers.append(
         Header(String("Content-Type"), String(_FORM_CONTENT_TYPE))
     )
-    req.body = body^
+    req.set_body_text(body)
     return req^
 
 
@@ -236,7 +236,7 @@ def build_assume_role_with_web_identity(
     _form(body, "WebIdentityToken", web_identity_token)
     var req = _sts_request(region, body^)
     req.headers.append(
-        Header(String("Content-Length"), String(req.body.byte_length()))
+        Header(String("Content-Length"), String(len(req.body)))
     )
     return req^
 
@@ -274,10 +274,10 @@ def build_assume_role(
         source, sts_signing_region(region), String("sts"), amz_date
     )
     var signed = sigv4_sign(
-        req.method, req.target, req.headers, req.body.as_bytes(), ctx
+        req.method, req.target, req.headers, Span(req.body), ctx
     )
     req.headers.append(
-        Header(String("Content-Length"), String(req.body.byte_length()))
+        Header(String("Content-Length"), String(len(req.body)))
     )
     for i in range(len(signed.headers_to_add)):
         req.headers.append(signed.headers_to_add[i])

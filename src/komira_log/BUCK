@@ -1,0 +1,77 @@
+load("@komira//tools/build/mojo:cxx.bzl", "staged_files")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Structured logging: the five-level facade (`log.info[fmt, module](*args)`),
+# the typed argument model, the per-module level filter, the synchronous P1
+# stderr path, and the P2 engine behind the same call sites (per-core binary
+# record rings, decode-at-flush drain, file/stderr/metric sinks, spans). It
+# depends on komira_core (`Slab[T]`, raw fd writes), komira_spsc_ring (`SpscRing[T]`),
+# komira_clock, komira_hash (the FNV-1a constants),
+# komira_atomic_alias (the atomic level gate), komira_trace (the span-line
+# formatter the drain renders with) and komira_metrics (the metric point types
+# the engine feeds). It also owns the one-line JSON structured logger and the
+# bounded write(2) loop every rendered line goes through (`structured_log`,
+# `log_write`). komira_runtime_paths is declared
+# because several tests take their scratch directory from `test_tmpdir()`.
+
+# The process-global holders: the immortal engine's address, the P1 config's
+# address, and the selected line layout. Three one-word C cells, no logic.
+staged_files(
+    name = "log_holder_files",
+    srcs = ["engine/_log_holder_shim.c"],
+)
+
+cxx_library(
+    name = "komira_log_holder",
+    srcs = [":log_holder_files[engine/_log_holder_shim.c]"],
+    visibility = ["PUBLIC"],
+)
+
+mojo_library(
+    name = "komira_log",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        ":komira_log_holder",
+        "//src/komira_atomic_alias:komira_atomic_alias",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_core:komira_core",
+        "//src/komira_hash:komira_hash",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_spsc_ring:komira_spsc_ring",
+        "//src/komira_trace:komira_trace",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_env_filter_bytes_non_ascii.mojo",
+        "tests/test_log_bytes_non_ascii.mojo",
+        "tests/test_log_drain_corrupt_header_guard.mojo",
+        "tests/test_log_drain_metric_point_all_drains.mojo",
+        "tests/test_log_drain_span_retained_all_drains.mojo",
+        "tests/test_log_drain_unknown_kind_closed_default.mojo",
+        "tests/test_log_effective_level_resolution.mojo",
+        "tests/test_log_engine.mojo",
+        "tests/test_log_erased_emit.mojo",
+        "tests/test_log_erased_emit_perf.mojo",
+        "tests/test_log_facade_error_escalation.mojo",
+        "tests/test_log_facade_smoke.mojo",
+        "tests/test_log_json_severity.mojo",
+        "tests/test_log_level_config.mojo",
+        "tests/test_log_manager_global.mojo",
+        "tests/test_log_p1.mojo",
+        "tests/test_log_p2b_aot_perf.mojo",
+        "tests/test_log_p2b_integration.mojo",
+        "tests/test_log_p2c_aot_perf.mojo",
+        "tests/test_log_p3_output.mojo",
+        "tests/test_log_p4a_span.mojo",
+        "tests/test_log_p4b_ambient_span.mojo",
+        "tests/test_log_ring_bounded_drain_arena.mojo",
+        "tests/test_log_sink_error_evidence.mojo",
+        "tests/test_log_sink_write_loss_is_counted_and_announced.mojo",
+        "tests/test_log_text_emit.mojo",
+        "tests/test_log_typed_never_drop_contract.mojo",
+        "tests/test_log_write_retry_and_loss_accounting.mojo",
+        "tests/test_ring_lazy_slots.mojo",
+        "tests/test_shared_engine_tls_key_reclaimed.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

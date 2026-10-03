@@ -71,7 +71,7 @@
 from komira_core.collections.slab import Slab
 from komira_core.collections.string_column_view import StringColumnView
 
-from komira_eval import fnv1a_64_over_bytes
+from komira_core.eval.fnv1a_64 import fnv1a_64_over_bytes
 
 from .analyzer import (
     AnalyzedField,

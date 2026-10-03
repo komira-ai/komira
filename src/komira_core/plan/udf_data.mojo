@@ -16,7 +16,7 @@
 #   - the output column(s) (name + dtype tag),
 #   - the null-handling / volatility / parallelism TAGS (the strongly-typed
 #     `NullHandling` / `FunctionStability` / `StatefulContract` types live on
-#     `F` in `komira_eval`; the IR only needs the `UInt8` tag for optimizer
+#     `F` in `komira_udf`; the IR only needs the `UInt8` tag for optimizer
 #     reasoning — a `comptime KeyList` cannot live on a runtime field, so
 #     the IR carries a RUNTIME `partition_keys` / `order_keys` snapshot the
 #     plan compiler emits at SDK-call-site time, NOT the comptime view),
@@ -42,8 +42,8 @@
 #
 # This struct lives in `komira_core/plan/` (the leaf pkg) and stores only
 # `String` / `List` / `UInt8` / `UInt32` / `Bool` — no dependency on
-# `komira_eval`'s typed `NullHandling` / `StatefulContract` (which would be
-# a layering inversion: `komira_eval -> komira_core`, not the reverse). The
+# `komira_udf`'s typed `NullHandling` / `StatefulContract` (which would be
+# a layering inversion: `komira_udf -> komira_core`, not the reverse). The
 # `.tag` snapshot is the only thing the IR needs.
 #
 # Mojo discipline: zero `UnsafePointer` anywhere (the struct is plain
@@ -59,17 +59,17 @@ from ..arrow.arrow_types import ArrowType
 
 
 # =============================================================================
-# Dtype tags — mirror of `komira_eval/schema_descriptor.mojo:DT_*`
+# Dtype tags — mirror of `komira_udf/schema_descriptor.mojo:DT_*`
 # =============================================================================
 #
 # `UdfData.input_columns` / `.output_columns` store these as the column dtype
 # (snapshotted from `F.InputSchema` / `F.OutputSchema`'s `ColDescriptor.dtype`,
-# which is itself one of `komira_eval`'s `DT_*` Int constants). They live here
-# AS WELL (not just in `komira_eval`) because `komira_core` is the leaf pkg
-# and cannot import `komira_eval` (`komira_eval -> komira_core`, not the
+# which is itself one of `komira_udf`'s `DT_*` Int constants). They live here
+# AS WELL (not just in `komira_udf`) because `komira_core` is the leaf pkg
+# and cannot import `komira_udf` (`komira_udf -> komira_core`, not the
 # reverse) — same documented-sync-mirror discipline as `UDF_NULL_*` above /
 # below. Numeric values are kept in lockstep with
-# `komira_eval/schema_descriptor.mojo`.
+# `komira_udf/schema_descriptor.mojo`.
 
 comptime DTAG_UNKNOWN: UInt8 = 255  # = DT_UNKNOWN (-1 there; 255 here since we store UInt8)
 comptime DTAG_I8: UInt8 = 0
@@ -92,7 +92,7 @@ comptime DTAG_TIMESTAMP: UInt8 = 14
 def arrow_type_of_dtag(t: UInt8) -> ArrowType:
     """Map a `DTAG_*` dtype tag to the corresponding `ArrowType`.
 
-    Mirrors `komira_eval/schema_descriptor.mojo:dtag_to_arrow_type_id` (that
+    Mirrors `komira_udf/schema_descriptor.mojo:dtag_to_arrow_type_id` (that
     one returns the bare `type_id`; this one returns the `ArrowType` value
     directly — what `LogicalPlan.aggregate`'s schema builder needs). DATE32 /
     DATE64 / TIMESTAMP are physical-typed as INT32 / INT64 / INT64 (matches
@@ -146,10 +146,10 @@ comptime UDF_KIND_AGG: UInt8 = 2       # AggFn — N input cols -> 1 aggregated 
 
 
 # =============================================================================
-# Null-handling tags — snapshot of `komira_eval.NullHandling._tag`
+# Null-handling tags — snapshot of `komira_udf.udf_descriptor.NullHandling._tag`
 # =============================================================================
 #
-# Kept in numeric sync with `komira_eval/udf_descriptor.mojo:NullHandling`.
+# Kept in numeric sync with `komira_udf/udf_descriptor.mojo:NullHandling`.
 
 comptime UDF_NULL_MANUAL: UInt8 = 0
 comptime UDF_NULL_PROPAGATE: UInt8 = 1
@@ -157,10 +157,10 @@ comptime UDF_NULL_SKIP_NULL_FAST_PATH: UInt8 = 2
 
 
 # =============================================================================
-# Volatility tags — snapshot of `komira_eval.FunctionStability._tag`
+# Volatility tags — snapshot of `komira_udf.udf_descriptor.FunctionStability._tag`
 # =============================================================================
 #
-# Kept in numeric sync with `komira_eval/udf_descriptor.mojo:FunctionStability`.
+# Kept in numeric sync with `komira_udf/udf_descriptor.mojo:FunctionStability`.
 
 comptime UDF_STABILITY_IMMUTABLE: UInt8 = 0
 comptime UDF_STABILITY_STABLE: UInt8 = 1
@@ -169,10 +169,10 @@ comptime UDF_STABILITY_VOLATILE: UInt8 = 2
 
 # =============================================================================
 # Parallelism (stateful-contract) tags — snapshot of
-# `komira_eval.StatefulContract.tag`
+# `komira_udf.stateful_contract.StatefulContract.tag`
 # =============================================================================
 #
-# Kept in numeric sync with `komira_eval/stateful_contract.mojo:StatefulContract`.
+# Kept in numeric sync with `komira_udf/stateful_contract.mojo:StatefulContract`.
 #   stateless      = the common case (default): freely parallel, freely
 #                    retryable/spillable (`is_restartable = True`).
 #   serial_ordered = the stateful-with-row-order case: the operator must
@@ -231,7 +231,7 @@ struct UdfData(Movable, Copyable, Deinitable, Writable):
             in `F.InputSchema` order. Materialize-time resolves these against
             the child node's output schema (name lookup + dtype check) and
             errors early on a mismatch. The `dtype_tag` is the `DT_*` tag from
-            `komira_eval/schema_descriptor.mojo` (snapshotted as a `UInt8`).
+            `komira_udf/schema_descriptor.mojo` (snapshotted as a `UInt8`).
         output_columns: `(column_name, dtype_tag)` for the output column(s).
             A single output for MAP / AGG; FILTER is always Bool so its
             `output_columns` is `[("<name>_pred", DT_BOOL)]` (the engine

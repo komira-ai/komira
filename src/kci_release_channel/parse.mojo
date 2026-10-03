@@ -11,18 +11,25 @@
 #       artifact_type: OCI
 #       location: "registry.example.invalid/beta"
 #       push_identity: "publisher@example.invalid"
+#       credential { kind: API_TOKEN  secret_name: "BETA_REGISTRY_TOKEN" }
 #     }
 #   }
 #
 # `channel` is the only top-level field; `name`, `visibility` and `repository`
-# (repeated) the only channel fields; `artifact_type`, `location` and
-# `push_identity` the only repository fields. A `:` before a `{` is optional,
+# (repeated) the only channel fields; `artifact_type`, `location`,
+# `push_identity` and `credential` (at most once) the only repository fields;
+# `kind` and `secret_name` the only credential fields. A `:` before a `{` is optional,
 # as in textproto. A scalar may be quoted or bare.
 #
 # Every refusal from this file starts `channels file: line N:` (lexer and
 # token-cursor refusals included). The parser refuses: an unknown field at
-# any level, a scalar field set twice, a `channel` or `repository` block that
-# is never closed, and a file declaring no channel.
+# any level, a scalar field set twice, a `credential` block set twice, a
+# `channel`, `repository` or `credential` block that is never closed, and a
+# file declaring no channel.
+# Inside a `credential` block no refusal quotes a token: a secret pasted where
+# a field name, a colon or a value was expected would otherwise be echoed by
+# the token cursor into the error text and from there into a CI log. Those
+# refusals name the field and the line and say the value is not quoted.
 # Everything else (names, visibility, artifact types, empty values, sharing)
 # is `validate_channel_declarations`, which runs on the parsed list before it
 # is returned, so a parsed list is always a valid one.
@@ -39,6 +46,7 @@ from komira_textproto import (
     lex,
 )
 
+from .channel_credential import ChannelCredential
 from .channel_declaration import (
     ChannelDeclaration,
     ChannelRepository,
@@ -98,6 +106,75 @@ def _channel_label(name: String, ordinal: Int) -> String:
     return String("channel #") + String(ordinal)
 
 
+def _credential_scalar(
+    mut c: TokenCursor, field: String, line: Int, label: String
+) raises -> String:
+    """`_scalar` for a credential field, with its refusal reworded so it never
+    quotes the token it got: the cursor's own refusal echoes that token, and
+    in a credential block that token may be a pasted secret."""
+    var value = String("")
+    var failed = False
+    try:
+        value = _scalar(c, field)
+    except:
+        failed = True
+    if failed:
+        raise Error(
+            _at(line)
+            + String("malformed ")
+            + field
+            + String(" in ")
+            + label
+            + String(" (expected `")
+            + field
+            + String(": <value>`; value not quoted)")
+        )
+    return value^
+
+
+def _parse_credential(
+    mut c: TokenCursor, where: String, open_line: Int
+) raises -> ChannelCredential:
+    var kind = String("")
+    var secret_name = String("")
+    var seen_kind = False
+    var seen_secret = False
+    var label = String("the credential of ") + where
+    while True:
+        if c.at_end():
+            _refuse_unclosed(open_line, label)
+        if c.is_kind(TOKEN_RBRACE):
+            _ = c.expect(TOKEN_RBRACE)
+            break
+        if not c.is_kind(TOKEN_WORD):
+            var bad_line = c.next(String("a field name")).line
+            raise Error(
+                _at(bad_line)
+                + String("expected a field name in ")
+                + label
+                + String(" (expected kind, secret_name; token not quoted)")
+            )
+        var f = c.expect(TOKEN_WORD)
+        if f.text == "kind":
+            if seen_kind:
+                _refuse_twice(f.line, f.text, label)
+            kind = _credential_scalar(c, f.text, f.line, label)
+            seen_kind = True
+        elif f.text == "secret_name":
+            if seen_secret:
+                _refuse_twice(f.line, f.text, label)
+            secret_name = _credential_scalar(c, f.text, f.line, label)
+            seen_secret = True
+        else:
+            raise Error(
+                _at(f.line)
+                + String("unknown field in ")
+                + label
+                + String(" (expected kind, secret_name; field not quoted)")
+            )
+    return ChannelCredential(kind^, secret_name^)
+
+
 def _parse_repository(
     mut c: TokenCursor, where: String, open_line: Int
 ) raises -> ChannelRepository:
@@ -107,6 +184,7 @@ def _parse_repository(
     var seen_type = False
     var seen_location = False
     var seen_identity = False
+    var credential = Optional[ChannelCredential](None)
     var label = String("a repository of ") + where
     while True:
         if c.at_end():
@@ -130,6 +208,11 @@ def _parse_repository(
                 _refuse_twice(f.line, f.text, label)
             push_identity = _scalar(c, f.text)
             seen_identity = True
+        elif f.text == "credential":
+            if credential:
+                _refuse_twice(f.line, f.text, label)
+            var cred_line = _open_block(c)
+            credential = Optional(_parse_credential(c, label, cred_line))
         else:
             raise Error(
                 _at(f.line)
@@ -137,9 +220,12 @@ def _parse_repository(
                 + f.text
                 + String("' in ")
                 + label
-                + String(" (expected artifact_type, location, push_identity)")
+                + String(" (expected artifact_type, location, push_identity,")
+                + String(" credential)")
             )
-    return ChannelRepository(artifact_type^, location^, push_identity^)
+    return ChannelRepository(
+        artifact_type^, location^, push_identity^, credential^
+    )
 
 
 def _parse_channel(

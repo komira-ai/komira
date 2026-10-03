@@ -76,7 +76,7 @@ step after these, on pushes to `main` only, of artifacts the same job built.
 - The farm connection is **machine configuration**, not repository
   configuration: the runner image carries a machine-wide buckconfig (buck2
   reads `/etc/buckconfig.d/` and `~/.buckconfig.d/`) with the
-  `[buck2_re_client]` endpoints and the `[komira_re]` worker property set (`linux_properties`).
+  `[buck2_re_client]` endpoints and the `[komira_re]` worker property set (`linux_x86_64_properties`).
   The job reads no secret, writes no `.buckconfig.local` and names no GitHub
   Environment. Its logs are not redacted and are public, so the endpoints in
   that configuration must be addresses reachable only from inside the farm.
