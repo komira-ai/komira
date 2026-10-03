@@ -13,7 +13,7 @@
 #   model sha256 : 7f960b9d0f5a4c8b06d4f3338c525c68bef960651af9318bae43810df3675a49
 #   operations   : GetBlob, GetBytes, GetPolicy, PutThing, SetConfig
 #   shapes       : 10 messages, 0 enums
-#   generator    : aws-client-gen version 6
+#   generator    : aws-client-gen version 7
 #   mode         : pure (no transport)
 #   customize    : s3 (botocore handlers.py: 200-with-<Error> as an
 #                  error, an invalid Expires header left unset)

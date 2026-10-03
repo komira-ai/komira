@@ -103,3 +103,16 @@ archive_files(
     strip_prefix = "botocore-1.43.70",
     visibility = ["PUBLIC"],
 )
+
+# botocore's standard retry mode, `botocore/retries/standard.py`: its retry
+# conditions, backoff and quota costs, read by komira_aws_core's
+# test_aws_retry, which checks its classifier and policy against every list
+# and constant of the file (no Python is run; the file is read as text).
+archive_files(
+    name = "retries",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":botocore-1.43.70.tar.gz",
+    files = ["LICENSE.txt", "NOTICE", "botocore/retries/standard.py"],
+    strip_prefix = "botocore-1.43.70",
+    visibility = ["PUBLIC"],
+)

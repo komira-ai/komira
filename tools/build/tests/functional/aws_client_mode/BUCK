@@ -55,8 +55,9 @@ gen_check(
         "from komira_http_core.transport.io_stream import Connector",
         "send_sigv4_signed_request,",
         "[C: Connector, T: AwsCredsSource](Movable, Deinitable):",
-        "var code = aws_error_code_from_body(res.body)",
-        "var msg = aws_error_message_from_body(res.body)",
+        "var info = aws_json_error_info(res.to_response())",
+        "var code = info.code.copy()",
+        "var msg = info.message.copy()",
     ],
 )
 

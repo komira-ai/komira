@@ -933,17 +933,7 @@ impl AwsEmitter<'_> {
     /// A streaming payload is read by `parse_<op>_head`, which never checks.
     /// Nothing without the customization.
     fn emit_s3_200_error_check(&mut self, facts: &AwsOperationFacts, members: &[Bound]) {
-        if !self.options.s3 || facts.output_shape.is_none() {
-            return;
-        }
-        let raw_payload = members.iter().any(|b| {
-            b.is_payload
-                && matches!(
-                    b.field.ty,
-                    IrType::Scalar(ScalarKind::Bytes | ScalarKind::String) | IrType::Enum(_)
-                )
-        });
-        if raw_payload {
+        if !self.s3_answers_200_error(facts, members) {
             return;
         }
         let svc = self.ty_name(&self.lowering.model.files[0].services[0].name);
@@ -963,6 +953,39 @@ impl AwsEmitter<'_> {
         self.pop();
         self.line(")");
         self.pop();
+    }
+
+    /// `s3`: whether S3 can answer the operation `facts` names, whose
+    /// output members are `members`, with a 200 whose body is an `<Error>`
+    /// (botocore `_should_handle_200_error`): it has an output shape, and
+    /// that shape's payload, if it has one, is not a blob or a string.
+    fn s3_answers_200_error(&self, facts: &AwsOperationFacts, members: &[Bound]) -> bool {
+        if !self.options.s3 || facts.output_shape.is_none() {
+            return false;
+        }
+        !members.iter().any(|b| {
+            b.is_payload
+                && matches!(
+                    b.field.ty,
+                    IrType::Scalar(ScalarKind::Bytes | ScalarKind::String) | IrType::Enum(_)
+                )
+        })
+    }
+
+    /// `s3`: whether the client must tell the send that S3 can answer the
+    /// operation of `m` with a 200 whose body is an `<Error>`
+    /// (`s3_answers_200_error`), so the send retries one as the 500 it is.
+    pub(super) fn s3_send_reads_200_error(
+        &self,
+        m: &IrMethod,
+        facts: &AwsOperationFacts,
+    ) -> Result<bool, String> {
+        if !self.options.s3 {
+            return Ok(false);
+        }
+        let msg = self.message_by_fq(&m.output.fq_name)?.clone();
+        let members = self.bound_members(&msg)?;
+        Ok(self.s3_answers_200_error(facts, &members))
     }
 
     /// `s3`: whether the header member `b` is S3's optional `Expires`

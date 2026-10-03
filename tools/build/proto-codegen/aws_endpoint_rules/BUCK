@@ -7,12 +7,16 @@ load(
 )
 load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 
-# Generated clients resolving their endpoints through an endpoint ruleset
+# A generated client resolving its endpoints through an endpoint ruleset
 # (mojo_aws_client's `endpoint_rules`), compiled against the real komira_aws_core,
 # with botocore's endpoint test cases run through the GENERATED code: the
 # config, the context-parameter bindings and `resolve_<op>_endpoint`. The
 # ruleset interpreter itself is komira_aws_core's subject (its
 # test_s3_endpoint_rules); this package tests what the generator binds.
+# A service client generated with its ruleset runs that service's cases
+# through every one of its operations in its own tests
+# (//src/komira_aws_logs, //src/komira_aws_sqs, //src/komira_aws_dynamodb);
+# this package keeps what no service client covers.
 #
 # Every upstream file is read from the botocore archive
 # //third_party/botocore pins by sha256; none is copied here.
@@ -22,29 +26,10 @@ _RUNTIME = [
     "//src/komira_json:komira_json",
 ]
 
-# botocore's endpoint test cases of a service, staged at their archive path.
-_ENDPOINT_TESTS = {
-    service: {
-        botocore_endpoint_tests_path(service): botocore_endpoint_file(botocore_endpoint_tests_path(service)),
-    }
-    for service in ["logs", "s3"]
+# botocore's S3 endpoint test cases, staged at their archive path.
+_S3_ENDPOINT_TESTS = {
+    botocore_endpoint_tests_path("s3"): botocore_endpoint_file(botocore_endpoint_tests_path("s3")),
 }
-
-_LOGS = botocore_model("logs")
-
-# CloudWatch Logs, whose ruleset reads built-ins only: every one of
-# botocore's logs endpoint cases is resolved through the generated config.
-mojo_aws_client(
-    name = "logs_endpoints",
-    model = _LOGS.model,
-    model_sha256 = _LOGS.sha256,
-    operations = ["GetLogEvents"],
-    endpoint_rules = _LOGS.endpoint_rules,
-    partitions = _LOGS.partitions,
-    deps = _RUNTIME,
-    test_srcs = ["test_logs_endpoints.mojo"],
-    test_data = {"test_logs_endpoints.mojo": _ENDPOINT_TESTS["logs"]},
-)
 
 # A model of this package's own (model/endpoint_bindings.json, awsJson, so
 # that it generates before the S3 protocol does) whose operations bind S3's
@@ -79,7 +64,7 @@ mojo_aws_client(
     partitions = _S3.partitions,
     deps = _RUNTIME,
     test_srcs = ["test_endpoint_bindings.mojo"],
-    test_data = {"test_endpoint_bindings.mojo": _ENDPOINT_TESTS["s3"] | {
+    test_data = {"test_endpoint_bindings.mojo": _S3_ENDPOINT_TESTS | {
         _S3_MODEL: _S3.model,
         "model/endpoint_bindings.json": "model/endpoint_bindings.json",
     }},

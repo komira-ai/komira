@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 6
+#   generator    : aws-client-gen version 7
 #   mode         : pure (no transport)
 #
 # ── §CONSTRAINTS — the model's `min` / `max`, checked ─────────────

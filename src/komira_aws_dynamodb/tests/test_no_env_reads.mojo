@@ -1,5 +1,5 @@
-# The generated client reads no environment: every input is a parameter,
-# the endpoint ones included (S3EndpointConfig). The three generated files
+# The generated client reads no environment: every input is a parameter, the
+# endpoint ones included (DynamoDBEndpointConfig). The three generated files
 # are staged as this test's data, at gen/<file>; the test reads each one and
 # fails if any names a way to read the environment, reaches the FFI a read
 # would go through, or takes the core's ruleset-free endpoint path.
@@ -38,14 +38,14 @@ def test_no_environment_read() raises:
         # Not a read: komira_aws_core's endpoint path for a client with no
         # ruleset (an override, else https://<host>), whose override a
         # caller takes from the environment through aws_endpoint_config.
-        # This module resolves every endpoint through S3's ruleset over
-        # S3EndpointConfig, and must not take that path around it.
+        # This module resolves every endpoint through the service's ruleset
+        # over DynamoDBEndpointConfig, and must not take that path around it.
         "resolve_endpoint(",
     ]
     var files: List[String] = [
         "__init__.mojo",
         "_layout_probe.mojo",
-        "komira_aws_s3.mojo",
+        "komira_aws_dynamodb.mojo",
     ]
     for i in range(len(files)):
         var text = _read(files[i])
@@ -60,22 +60,12 @@ def test_no_environment_read() raises:
 
 def test_the_scan_saw_the_client() raises:
     # Not vacuous: the module staged is the generated client, whole.
-    var text = _read("komira_aws_s3.mojo")
-    assert_true(text.byte_length() > 100000, "the staged module is too small")
-    assert_equal(_count(text, "\ndef build_get_object_request("), 1)
-    assert_equal(_count(text, "\nstruct S3EndpointConfig("), 1)
-    assert_equal(_count(text, "#   customize    : s3"), 1)
-    assert_equal(_count(text, "#   mode         : client"), 1)
-    # The client sends where the ruleset resolves each call, over the
-    # configuration it was given.
-    assert_equal(_count(text, "\nstruct S3S3Client["), 1)
-    assert_equal(
-        _count(
-            text,
-            "resolve_get_object_endpoint(self._rules, self._endpoint_config, input)",
-        ),
-        1,
-    )
+    var text = _read("komira_aws_dynamodb.mojo")
+    assert_true(text.byte_length() > 20000, "the staged module is too small")
+    assert_equal(_count(text, "\ndef build_get_item_request("), 1)
+    assert_equal(_count(text, "\nstruct DynamoDBEndpointConfig("), 1)
+    assert_equal(_count(text, '"DynamoDB_20120810.GetItem"'), 1)
+    assert_equal(_count(text, "#   mode         : pure (no transport)"), 1)
 
 
 def main() raises:

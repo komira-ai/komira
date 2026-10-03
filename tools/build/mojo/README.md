@@ -368,7 +368,8 @@ service's botocore endpoint ruleset and the partition table,
 `botocore_model("<service>").endpoint_rules` and `.partitions`) are set
 together or not at all; with them the module embeds both and resolves each
 operation's endpoint through `komira_aws_core.EndpointRuleSet`
-(`<Prefix>EndpointConfig` and `resolve_<op>_endpoint`); without them the
+(`<Prefix>EndpointConfig` and `resolve_<op>_endpoint`), and in client mode
+each verb sends to the endpoint it resolves; without them the
 module's header lists the endpoint bindings of the model it does not apply.
 `overrides` (the
 generator's hand-override manifest) and `hand_srcs` (the hand-written

@@ -516,12 +516,30 @@ impl<'a> AwsEmitter<'a> {
             .iter()
             .find(|(rp, _)| rp.built_in.as_deref() == Some("AWS::Region"))
             .map(|(_, f)| f.clone());
+        let sdk_defaults: Vec<(&RulesetParam, &String, &'static str)> = fields
+            .iter()
+            .filter_map(|(rp, f)| sdk_built_in_default(rp).map(|d| (rp, f, d)))
+            .collect();
         self.line(&format!("struct {cfg}(Copyable, Movable):"));
         self.push();
         self.line("\"\"\"The endpoint ruleset's client-level parameters: its built-ins and the");
-        self.line("    model's clientContextParams. Every field is unset until a caller sets it,");
-        self.line("    and an unset one takes the ruleset's default. Nothing here reads the");
-        self.line("    environment.");
+        if sdk_defaults.is_empty() {
+            self.line("    model's clientContextParams. Every field is unset until a caller sets it,");
+            self.line("    and an unset one takes the ruleset's default. Nothing here reads the");
+            self.line("    environment.");
+        } else {
+            self.line("    model's clientContextParams. Every field is unset until a caller sets it,");
+            self.line("    but for a built-in the AWS SDKs give a value the ruleset does not:");
+            for (rp, f, d) in &sdk_defaults {
+                self.line(&format!(
+                    "    `{f}` starts as `{d}` ({});",
+                    rp.built_in.as_deref().unwrap_or_default()
+                ));
+                self.line("    a caller that wants it unset assigns it an empty Optional.");
+            }
+            self.line("    An unset field takes the ruleset's default. Nothing here reads the");
+            self.line("    environment.");
+        }
         if let Some((_, f)) = fields.iter().find(|(rp, _)| rp.name == "ForcePathStyle") {
             self.blank();
             self.line(&format!(
@@ -549,9 +567,20 @@ impl<'a> AwsEmitter<'a> {
         }
         self.line("def __init__(out self):");
         self.push();
-        self.line("\"\"\"Every parameter unset.\"\"\"");
+        if sdk_defaults.is_empty() {
+            self.line("\"\"\"Every parameter unset.\"\"\"");
+        } else {
+            self.line("\"\"\"Every parameter unset but those the AWS SDKs default.\"\"\"");
+        }
         for (rp, f) in &fields {
-            self.line(&format!("self.{f} = Optional[{}]()", rp.ty.mojo()));
+            match sdk_built_in_default(rp) {
+                Some(d) => self.line(&format!(
+                    "self.{f} = Optional[{}](String(\"{}\"))",
+                    rp.ty.mojo(),
+                    escape(d)
+                )),
+                None => self.line(&format!("self.{f} = Optional[{}]()", rp.ty.mojo())),
+            }
         }
         self.pop();
         self.blank();
@@ -705,6 +734,22 @@ fn same_type(p: &RulesetParam, ty: RulesetParamType, what: &str) -> Result<(), S
         ));
     }
     Ok(())
+}
+
+/// The value the AWS SDKs give built-in `rp` when their caller sets none,
+/// for a built-in whose ruleset parameter declares no default. One today:
+/// `AWS::Auth::AccountIdEndpointMode`, whose SDK setting
+/// (`account_id_endpoint_mode`) defaults to `preferred`, so an account id
+/// the caller supplies picks the account-based endpoint where the ruleset
+/// has one.
+fn sdk_built_in_default(rp: &RulesetParam) -> Option<&'static str> {
+    if rp.has_default || rp.ty != RulesetParamType::Str {
+        return None;
+    }
+    match rp.built_in.as_deref() {
+        Some("AWS::Auth::AccountIdEndpointMode") => Some("preferred"),
+        _ => None,
+    }
 }
 
 #[cfg(test)]
@@ -876,6 +921,36 @@ mod tests {
         }
     }
 
+    #[test]
+    fn the_account_id_endpoint_mode_built_in_starts_as_the_sdk_default() {
+        let params = r#""Region": {"builtIn": "AWS::Region", "type": "String"},
+            "AccountId": {"builtIn": "AWS::Auth::AccountId", "type": "String"},
+            "AccountIdEndpointMode": {"builtIn": "AWS::Auth::AccountIdEndpointMode",
+                                      "type": "String"}"#;
+        let plain = r#""Bucket": {"shape": "Str"}"#;
+        let src = emit(&model("", plain, ""), &rules(params)).unwrap();
+        let cfg = &src[src.find("struct TinyEndpointConfig").unwrap()..];
+        assert!(cfg.contains("Every parameter unset but those the AWS SDKs default."));
+        assert!(cfg.contains(
+            "self.account_id_endpoint_mode = Optional[String](String(\"preferred\"))"
+        ));
+        assert!(cfg.contains("self.account_id = Optional[String]()"));
+        assert!(cfg.contains(
+            "`account_id_endpoint_mode` starts as `preferred` (AWS::Auth::AccountIdEndpointMode);"
+        ));
+        // A ruleset default of its own wins: the field stays unset.
+        let declared = params.replace(
+            r#""AWS::Auth::AccountIdEndpointMode","#,
+            r#""AWS::Auth::AccountIdEndpointMode", "default": "disabled","#,
+        );
+        let src = emit(&model("", plain, ""), &rules(&declared)).unwrap();
+        assert!(src.contains("self.account_id_endpoint_mode = Optional[String]()"));
+        assert!(!src.contains("preferred"));
+        // Without the built-in nothing changes.
+        let s3_like = emit(&model("", MEMBERS, ""), &rules(S3_LIKE)).unwrap();
+        assert!(s3_like.contains("\"\"\"Every parameter unset.\"\"\""));
+    }
+
     fn emit_without_ruleset(m: &Json) -> String {
         let lowering = lower_aws_service(m, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny").unwrap();
         let options = AwsEmitOptions { pure_only: true, ..Default::default() };
@@ -1011,6 +1086,40 @@ mod tests {
             "var outcome = rules.resolve(params)",
         ] {
             let i = body[at..].find(want).unwrap_or_else(|| panic!("`{want}` missing or out of order"));
+            at += i + want.len();
+        }
+    }
+
+    #[test]
+    fn a_ruleset_client_sends_where_the_ruleset_resolves_each_call() {
+        let src = emit_rest_json(Some(&rules(S3_LIKE)));
+        // The client holds the ruleset and its configuration, not a static
+        // host, and imports what turns a resolved endpoint into a target.
+        for want in [
+            "    AwsSigningTarget,\n    aws_signing_target,\n",
+            "    var _endpoint_config: TinyEndpointConfig\n",
+            "    var _rules: EndpointRuleSet\n",
+            "        var endpoint_config: TinyEndpointConfig = TinyEndpointConfig(),\n    ) raises:\n",
+            "        var rules = tiny_endpoint_rules()\n",
+            "    def send(mut self, var req: AwsRequest, target: AwsSigningTarget) raises -> HttpResult:\n",
+            "            target.signing_region.copy(),\n            target.signing_name.copy(),\n            target.endpoint.copy(),\n",
+        ] {
+            assert!(src.contains(want), "`{want}` missing");
+        }
+        assert!(!src.contains("_endpoint_override"));
+        assert!(!src.contains("resolve_endpoint(self._endpoint_override"));
+        // Each verb resolves its own endpoint, from its own input.
+        let verb = &src[src.find("    def op(mut self").unwrap()..];
+        let mut at = 0;
+        for want in [
+            "var req = build_op_request(input)",
+            "var target = aws_signing_target(",
+            "resolve_op_endpoint(self._rules, self._endpoint_config, input),",
+            "self._region.copy(),",
+            "String(TINY_SERVICE),",
+            "var res = self.send(req^, target)",
+        ] {
+            let i = verb[at..].find(want).unwrap_or_else(|| panic!("`{want}` missing or out of order"));
             at += i + want.len();
         }
     }

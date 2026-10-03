@@ -23,9 +23,9 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 # different type), so the real komira_aws_core and komira_json cannot be
 # deps here. stub/komira_aws_core declares every name a generated awsJson
 # module imports in either mode, with the real core's signatures (bodies as
-# bytes, AwsResponse, HttpResult; its docstring says which are implemented),
-# except `send_sigv4_signed_request`, which the real core does not define
-# yet: its signature is the call the generator emits;
+# bytes, AwsResponse, HttpResult, AwsErrorInfo, and the
+# `send_sigv4_signed_request` of komira//src/komira_aws_core/aws_send.mojo;
+# its docstring says which are implemented);
 # stub/komira_http_core is the Connector trait client-mode code names;
 # stub/komira_json is a minimal JSON value and parser with komira_json's
 # layout and the part of its API that code calls. Generated code is built
