@@ -9,10 +9,18 @@
 #    it (both compared absolute, `.`/`..` folded and every existing prefix
 #    resolved through its symlinks), before anything runs: the out dir becomes
 #    the release directory, and a log there is an entry no declaration names.
-# 2. For each artifact, in declarations-file order, one at a time:
+# 2. Derive the release stamp from git at `--revision-id`
+#    (revision.mojo, through the `git` runner): refused for a shallow
+#    clone, a HEAD that is not the revision, or modified tracked files,
+#    before any build runs.
+# 3. For each artifact, in declarations-file order, one at a time (the order
+#    is the contract's: a metapackage declared last reads, under
+#    `{release_dir}`, the manifests of every artifact above it, each already
+#    built and verified):
 #      a. create `<out>/<name>/` (empty by construction: `<out>` was empty
 #         and declaration names are unique);
-#      b. run `render_build_argv(decls, name, <out>/<name>)` through the
+#      b. run `render_build_argv(decls, name, <out>, stamp)` (`{out_dir}` is
+#         `<out>/<name>`, `{release_dir}` is `<out>`) through the
 #         `ProcessRunner`, cwd `--work-dir`, stdout and stderr to
 #         `<log>/<name>.stdout|.stderr`, timeout `--build-timeout-s`;
 #      c. a non-zero exit, a signal or a timeout is FAILED, naming the
@@ -20,7 +28,7 @@
 #         cannot be started is CANNOT_TELL; either way, stop;
 #      d. `kci_release_set.verify_member(name, <out>/<name>)`: REFUSED on
 #         any refusal; stop.
-# 3. Only when every artifact passed, and before `release.json`:
+# 4. Only when every artifact passed, and before `release.json`:
 #      a. `<out>` must hold exactly the declared member directories: a build
 #         that wrote a sibling of its own out dir (it is handed an absolute
 #         path) is REFUSED, naming the entry;
@@ -39,8 +47,10 @@
 # cheap (the cache) and the empty-out-dir rule makes it safe.
 #
 # kci knows no build tool. "Never build locally" is the declarations' to
-# say (buck2's `-c komira.execution=remote` and the farm `--config-file` are
-# build-system args there), never a kci flag.
+# say (buck2's `-c komira.execution=remote` is a build-system arg there) and
+# the machine's (the farm is a buckconfig buck2 reads at daemon start; see
+# kci_artifact_declaration's example), never a kci flag. The stamp reaches
+# the build only as the declarations' placeholders.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -65,6 +75,7 @@ from kci_build.request import (
     BuildOutcome,
     BuildRequest,
 )
+from kci_build.revision import derive_release_stamp
 from kci_build.runner import ProcessRunner, RunResult, RunSpec
 
 
@@ -205,8 +216,12 @@ def _check_release_top(release_dir: String, names: List[String]) raises -> Build
     return BuildOutcome(EXIT_OK, String(""))
 
 
-def build_release[R: ProcessRunner](req: BuildRequest, mut runner: R) -> BuildOutcome:
-    """Build every declared artifact (file header)."""
+def build_release[R: ProcessRunner, G: ProcessRunner](
+    req: BuildRequest, mut runner: R, mut git: G
+) -> BuildOutcome:
+    """Build every declared artifact (file header). `git` runs the git
+    commands of revision.mojo, `runner` the builds: two seams, so a test
+    scripts each on its own."""
     try:
         var decls = read_artifact_declarations(req.declarations_file)
         if not isdir(req.work_dir):
@@ -217,15 +232,24 @@ def build_release[R: ProcessRunner](req: BuildRequest, mut runner: R) -> BuildOu
         var logs = check_log_dir(req.out_dir, req.log_dir)
         if not logs.ok():
             return logs^
-        makedirs(req.out_dir, exist_ok=True)
         makedirs(req.log_dir, exist_ok=True)
+        var derived = derive_release_stamp(req, git)
+        if not derived.ok():
+            return BuildOutcome(derived.exit_code, derived.message.copy())
+        var stamp = derived.stamp.value().copy()
+        print(
+            String("kci build: revision ") + stamp.revision_id + String(", stamp commit ")
+            + stamp.source_commit + String(", build number ") + String(stamp.build_number)
+            + String(", commit time ") + String(stamp.timestamp_ms) + String(" ms")
+        )
+        makedirs(req.out_dir, exist_ok=True)
         var out = realpath(req.out_dir)
         var members = List[ReleaseMember]()
         for i in range(len(decls.artifacts)):
             var name = decls.artifacts[i].name.copy()
             var dir = out + String("/") + name
             makedirs(dir, exist_ok=False)
-            var argv = render_build_argv(decls, name, dir)
+            var argv = render_build_argv(decls, name, out, stamp)
             var rest = List[String]()
             for k in range(1, len(argv)):
                 rest.append(argv[k].copy())

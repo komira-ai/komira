@@ -1,7 +1,11 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
-# The `kci build` verb: for each artifact of the declarations file
-# (kci_artifact_declaration), in file order and one at a time, create an
+# The `kci build` verb: derive the release stamp from git at --revision-id
+# (a full commit id that must be the checkout's HEAD, in a full-history
+# clone; refused otherwise, before any build), then for each artifact of the
+# declarations file (kci_artifact_declaration), in file order and one at a
+# time (a metapackage declared last reads its members under {release_dir}),
+# create an
 # EMPTY directory under --out-dir, run the declared build system's rendered
 # argv into it, and check what it left with kci_release_set.verify_member
 # (the same checks `kci publish` re-runs); when every artifact passed, write
@@ -52,6 +56,8 @@ mojo_library(
         "tests/test_build_flags.mojo",
         # the whole verb over ScriptedRunner: argv, order, empty dirs, every stop, release.json last
         "tests/test_build_flow.mojo",
+        # --revision-id against the checkout, the stamp from git, every refusal
+        "tests/test_revision.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout
         "tests/test_supervisor_runner.mojo",
     ],

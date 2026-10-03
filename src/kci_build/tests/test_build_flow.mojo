@@ -26,7 +26,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_crypto import hex_lower_array_32, sha256_string
 
-from kci_artifact_declaration import read_artifact_declarations, render_build_argv
+from kci_artifact_declaration import ReleaseStamp, read_artifact_declarations, render_build_argv
 from kci_build import (
     EXIT_CANNOT_TELL,
     EXIT_FAILED,
@@ -47,7 +47,9 @@ from kci_release_set import read_release_manifest
 
 comptime _EXAMPLE = "src/kci_artifact_declaration/example.textproto"
 comptime _SET_THREE = "b315a610a30db7464869bebf2c622dc99e377d12ed248389f62d855283e1b9c0"
-comptime _SET_EXAMPLE = "d2ee84f534bbede2d5de6ae4a70aa0f04a8b0ea27c750a99996a5a992bd37f42"
+comptime _SET_EXAMPLE = "988a850fd15a324976688400ea9996f6c27b369466aea33e1c28ea0eb002fab6"
+comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
+comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
 comptime _BUILD = "h01234567_7"
 comptime _HEX = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
 comptime _PACK = "/opt/pack/komira_pack"
@@ -87,6 +89,11 @@ artifacts {
   args: "--name"
   args: "komira"
   args: "--out-dir={out_dir}"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_hash/manifest.json"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_name_registry/manifest.json"
+  args: "--label=kci {revision_id} {source_commit} {build_number} {timestamp_ms}"
 }
 """
 
@@ -110,8 +117,42 @@ def _request(root: String, decls_text: String = String(_THREE)) raises -> BuildR
     r.work_dir = root + String("/repo")
     r.out_dir = root + String("/out")
     r.log_dir = root + String("/logs")
+    r.revision_id = String(_REV)
     r.build_timeout_s = 99
     return r^
+
+
+def _stamp() raises -> ReleaseStamp:
+    return ReleaseStamp(String(_REV), String(_SRC), 154, 1790994309000)
+
+
+def _git_argv(*xs: String) -> List[String]:
+    var out = List[String]()
+    for x in xs:
+        out.append(String(x))
+    return out^
+
+
+def _git_ok() -> ScriptedRunner:
+    """The six git commands of revision.mojo answering a clean, full-history
+    checkout of _REV whose stamp commit is _SRC (an older commit: the newest
+    ones changed only documentation)."""
+    var g = ScriptedRunner()
+    g.expect(ScriptedStep(_git_argv("rev-parse", "--is-shallow-repository"), stdout_text=String("false\n")))
+    g.expect(ScriptedStep(_git_argv("rev-parse", "--verify", "HEAD"), stdout_text=String(_REV) + String("\n")))
+    g.expect(ScriptedStep(_git_argv("status", "--porcelain", "--untracked-files=no")))
+    g.expect(
+        ScriptedStep(
+            _git_argv(
+                "log", "-1", "--first-parent", "--format=%H", _REV, "--", ".",
+                ":(exclude)docs", ":(exclude)*.md", ":(exclude).github",
+            ),
+            stdout_text=String(_SRC) + String("\n"),
+        )
+    )
+    g.expect(ScriptedStep(_git_argv("rev-list", "--count", "--first-parent", _SRC), stdout_text=String("154\n")))
+    g.expect(ScriptedStep(_git_argv("log", "-1", "--format=%ct", _SRC), stdout_text=String("1790994309\n")))
+    return g^
 
 
 def _hash(text: String) -> String:
@@ -141,7 +182,7 @@ def _metadata(
     version: String = String("1.0.0"),
     stamped: String = String("true"),
 ) -> String:
-    var kind = String("metapackage") if name == "komira" else String("library")
+    var kind = String("metapackage") if (name == "komira" or name == "komira_all") else String("library")
     var own: String
     if kind == "library":
         own = (
@@ -167,7 +208,7 @@ def _metadata(
 def _expected_argv(req: BuildRequest, name: String) raises -> List[String]:
     """argv[1:] of `render_build_argv` for `name` into `<out>/<name>`."""
     var decls = read_artifact_declarations(req.declarations_file)
-    var argv = render_build_argv(decls, name, req.out_dir + String("/") + name)
+    var argv = render_build_argv(decls, name, req.out_dir, _stamp())
     var rest = List[String]()
     for i in range(1, len(argv)):
         rest.append(argv[i].copy())
@@ -195,21 +236,30 @@ def _names() -> List[String]:
 
 struct _Observed(ProcessRunner):
     """ScriptedRunner, plus: for each run, whether the artifact's out dir
-    existed and was empty when the run started."""
+    existed and was empty when the run started, and whether every
+    `.../manifest.json` its argv names existed then (a metapackage reads its
+    members' manifests under `{release_dir}`)."""
 
     var inner: ScriptedRunner
     var dirs: List[String]
     var empty_at_start: List[Bool]
+    var manifests_at_start: List[Bool]
 
     def __init__(out self, var inner: ScriptedRunner, var dirs: List[String]):
         self.inner = inner^
         self.dirs = dirs^
         self.empty_at_start = List[Bool]()
+        self.manifests_at_start = List[Bool]()
 
     def run(mut self, spec: RunSpec) raises -> RunResult:
         var i = len(self.empty_at_start)
         var d = self.dirs[i].copy()
         self.empty_at_start.append(isdir(d) and len(listdir(d)) == 0)
+        var present = True
+        for k in range(len(spec.argv)):
+            if spec.argv[k].endswith(String("/manifest.json")) and not exists(spec.argv[k]):
+                present = False
+        self.manifests_at_start.append(present)
         return self.inner.run(spec)
 
 
@@ -233,20 +283,24 @@ def _release_json(req: BuildRequest) -> String:
 # ---- success -----------------------------------------------------------------
 
 
-def test_example_file_builds_its_one_artifact() raises:
+def test_example_file_builds_the_stamped_library_then_the_metapackage() raises:
     var root = _fresh(String("example"))
     var req = _request(root, Path(String(_EXAMPLE)).read_text())
     var runner = ScriptedRunner()
-    var step = _good_step(req, String("komira_encoding"))
-    runner.expect(step^)
-    var outcome = build_release(req, runner)
+    runner.expect(_good_step(req, String("komira_encoding")))
+    runner.expect(_good_step(req, String("komira_all")))
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
-    assert_equal(len(runner.calls), 1)
+    assert_equal(git.remaining(), 0)
+    assert_equal(len(runner.calls), 2)
     ref spec = runner.calls[0]
     assert_equal(spec.path, String("buck2"))
     var want = List[String]()
     for a in [
-        "build", "--config-file", "/etc/kci/remote.buckconfig",
+        "build", "-c", "komira.package_stamp=154",
+        "-c", "komira.package_commit=f0e1d2c3b4a5968778695a4b3c2d1e0f12345678",
+        "-c", "komira.package_timestamp_ms=1790994309000",
         "//src/komira_encoding:komira_encoding_conda[release]", "--out",
     ]:
         want.append(String(a))
@@ -258,6 +312,17 @@ def test_example_file_builds_its_one_artifact() raises:
     assert_equal(spec.timeout_s, 99)
     assert_equal(spec.stdout_path, req.log_dir + String("/komira_encoding.stdout"))
     assert_equal(spec.stderr_path, req.log_dir + String("/komira_encoding.stderr"))
+    # the metapackage, last, through `buck2 run`, reading the library's manifest
+    ref meta = runner.calls[1]
+    assert_equal(meta.path, String("buck2"))
+    assert_equal(meta.argv[0], String("run"))
+    assert_equal(meta.argv[1], String("//tools/build/package:komira_pack"))
+    assert_equal(meta.argv[3], String("conda-meta"))
+    assert_equal(meta.argv[7], req.out_dir + String("/komira_encoding/manifest.json"))
+    assert_equal(meta.argv[len(meta.argv) - 1], req.out_dir + String("/komira_all"))
+    # the git commands ran in the work dir, logged where no artifact can be
+    assert_equal(git.calls[0].cwd, req.work_dir)
+    assert_equal(git.calls[0].stdout_path, req.log_dir + String("/_git_1.stdout"))
     assert_equal(outcome.set_hash, String(_SET_EXAMPLE))
     assert_equal(outcome.lines[len(outcome.lines) - 1], String("SET_HASH ") + String(_SET_EXAMPLE))
     assert_equal(
@@ -278,7 +343,8 @@ def test_three_artifacts_two_build_systems_in_file_order() raises:
         inner.expect(step^)
         dirs.append(req.out_dir + String("/") + names[i])
     var runner = _Observed(inner^, dirs^)
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
     assert_equal(runner.inner.remaining(), 0)
     assert_equal(len(runner.inner.calls), 3)
@@ -297,6 +363,19 @@ def test_three_artifacts_two_build_systems_in_file_order() raises:
     assert_equal(
         runner.inner.calls[2].argv[3], String("--out-dir=") + req.out_dir + String("/komira")
     )
+    # the metapackage, last, names its members under {release_dir} (the out
+    # dir), and both manifests were there when it started; the stamp reached it
+    assert_equal(
+        runner.inner.calls[2].argv[5], req.out_dir + String("/komira_hash/manifest.json")
+    )
+    assert_equal(
+        runner.inner.calls[2].argv[7], req.out_dir + String("/komira_name_registry/manifest.json")
+    )
+    assert_equal(
+        runner.inner.calls[2].argv[8],
+        String("--label=kci ") + String(_REV) + String(" ") + String(_SRC) + String(" 154 1790994309000"),
+    )
+    assert_true(runner.manifests_at_start[2], String("member manifests missing when the metapackage ran"))
     # the printed set hash is the independently computed one, and release.json carries it
     assert_equal(outcome.lines[3], String("SET_HASH ") + String(_SET_THREE))
     var r = read_release_manifest(_release_json(req))
@@ -323,7 +402,10 @@ def test_build_main_with_prints_and_returns_ok() raises:
     args.append(String("--work-dir=") + req.work_dir)
     args.append(String("--out-dir=") + req.out_dir)
     args.append(String("--log-dir=") + req.log_dir)
-    assert_equal(build_main_with(args, runner), EXIT_OK)
+    args.append(String("--revision-id=") + String(_REV))
+    var git = _git_ok()
+    assert_equal(build_main_with(args, runner, git), EXIT_OK)
+    assert_equal(git.remaining(), 0)
     assert_equal(runner.calls[0].timeout_s, 3600)
     assert_true(exists(_release_json(req)))
 
@@ -335,7 +417,8 @@ def test_usage_errors_run_nothing() raises:
     var runner = ScriptedRunner()
     var args = List[String]()
     args.append(String("--buck2=/usr/bin/buck2"))
-    assert_equal(build_main_with(args, runner), EXIT_USAGE)
+    var git = _git_ok()
+    assert_equal(build_main_with(args, runner, git), EXIT_USAGE)
     assert_equal(len(runner.calls), 0)
 
 
@@ -345,7 +428,8 @@ def test_non_empty_out_dir_is_refused_with_zero_runs() raises:
     makedirs(req.out_dir, exist_ok=True)
     write_text_file(req.out_dir + String("/stale.conda"), String("x"))
     var runner = ScriptedRunner()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED)
     assert_true(outcome.message.find(String("is not empty")) >= 0, outcome.message)
     assert_equal(len(runner.calls), 0)
@@ -356,7 +440,8 @@ def test_out_dir_that_is_a_file_is_refused_with_zero_runs() raises:
     var req = _request(root)
     write_text_file(req.out_dir, String("x"))
     var runner = ScriptedRunner()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED)
     assert_equal(
         outcome.message, String("kci build: --out-dir '") + req.out_dir + String("' is not a directory")
@@ -369,7 +454,8 @@ def test_missing_work_dir_is_refused_with_zero_runs() raises:
     var req = _request(root)
     req.work_dir = root + String("/absent")
     var runner = ScriptedRunner()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED)
     assert_equal(
         outcome.message,
@@ -382,7 +468,8 @@ def test_invalid_declarations_are_refused_with_zero_runs() raises:
     var root = _fresh(String("baddecl"))
     var req = _request(root, String('build_systems { name: "buck2" executable: "buck2" }\n'))
     var runner = ScriptedRunner()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED)
     assert_true(outcome.message.startswith(String("kci build: ")), outcome.message)
     assert_equal(len(runner.calls), 0)
@@ -416,7 +503,8 @@ def _second_fails(tag: String, var bad: ScriptedStep) raises -> _Run:
     runner.expect(bad^)
     var third = _good_step(req, String("komira"))
     runner.expect(third^)
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
 
 
@@ -464,7 +552,8 @@ def test_a_build_that_cannot_start_is_cannot_tell() raises:
     var root = _fresh(String("nostart"))
     var req = _request(root)
     var runner = _Unstartable()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_CANNOT_TELL)
     assert_equal(
         outcome.message,
@@ -516,7 +605,8 @@ def _first_refused(tag: String, which: Int) raises -> _Run:
     runner.expect(second^)
     var third = _good_step(req, String("komira"))
     runner.expect(third^)
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
 
 
@@ -603,7 +693,8 @@ def _log_dir_refused(tag: String, log_dir: String, shown: String) raises:
     var req = _request(root)
     req.log_dir = root + String("/") + log_dir
     var runner = ScriptedRunner()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
     assert_equal(
         outcome.message,
@@ -636,7 +727,8 @@ def test_log_dir_under_the_out_dir_through_a_symlink_is_refused() raises:
     _symlink(req.out_dir, root + String("/alias"))
     req.log_dir = root + String("/alias/logs")
     var runner = ScriptedRunner()
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
     assert_true(outcome.message.find(String("' or lies under it ('") + req.out_dir + String("/logs' in '")) >= 0, outcome.message)
     assert_equal(len(runner.calls), 0)
@@ -650,7 +742,8 @@ def test_log_dir_beside_the_out_dir_is_accepted() raises:
     var names = _names()
     for i in range(len(names)):
         runner.expect(_good_step(req, names[i]))
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_OK, outcome.message)
 
 
@@ -694,7 +787,8 @@ def _three_with(tag: String, which: Int) raises -> _Run:
     if which == 3:
         last.writes(first + String("stray.txt"), String("x"))
     runner.expect(last^)
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     return _Run(req^, outcome.exit_code, outcome.message.copy(), runner.remaining())
 
 
@@ -791,7 +885,8 @@ def _linked_first(tag: String, entry: String, why: String = String("")) raises:
     var runner = _LinksFirstFile(
         inner^, req.out_dir + String("/komira_hash"), entry.copy(), root + String("/elsewhere/") + entry
     )
-    var outcome = build_release(req, runner)
+    var git = _git_ok()
+    var outcome = build_release(req, runner, git)
     assert_equal(outcome.exit_code, EXIT_REFUSED, outcome.message)
     var expected = why.copy()
     if expected.byte_length() == 0:

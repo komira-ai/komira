@@ -5,6 +5,8 @@
 #
 #   request.mojo            BuildRequest, BuildOutcome, the exit codes
 #   runner.mojo             the ProcessRunner seam: RunSpec, RunResult
+#   revision.mojo           derive_release_stamp: --revision-id checked
+#                           against the checkout, the stamp derived from git
 #   supervisor_runner.mojo  SupervisorRunner: real processes (komira_supervisor)
 #   scripted_runner.mojo    ScriptedRunner: the test double
 #   build.mojo              build_release: the flow
@@ -28,6 +30,7 @@ from kci_build.request import (
     BuildOutcome,
     BuildRequest,
 )
+from kci_build.revision import GIT_PROGRAM, GIT_TIMEOUT_S, StampResult, derive_release_stamp
 from kci_build.runner import STDERR_TAIL_BYTES, ProcessRunner, RunResult, RunSpec, tail_text
 from kci_build.scripted_runner import ANY_ARG, ScriptedRunner, ScriptedStep, write_text_file
 from kci_build.supervisor_runner import SupervisorRunner

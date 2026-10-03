@@ -38,6 +38,7 @@ struct BuildRequest(Copyable, Movable):
     var work_dir: String
     var out_dir: String
     var log_dir: String
+    var revision_id: String
     var build_timeout_s: Int
 
     def __init__(out self):
@@ -45,6 +46,7 @@ struct BuildRequest(Copyable, Movable):
         self.work_dir = String("")
         self.out_dir = String("")
         self.log_dir = String("")
+        self.revision_id = String("")
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
 
 

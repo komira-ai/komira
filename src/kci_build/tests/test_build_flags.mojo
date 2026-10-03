@@ -22,6 +22,7 @@ def _full() -> List[String]:
         "--work-dir", "/work/repo",
         "--out-dir", "out",
         "--log-dir", "logs",
+        "--revision-id", "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678",
     )
 
 
@@ -47,6 +48,7 @@ def test_every_flag_space_spelling() raises:
     assert_equal(f.request.work_dir, String("/work/repo"))
     assert_equal(f.request.out_dir, String("out"))
     assert_equal(f.request.log_dir, String("logs"))
+    assert_equal(f.request.revision_id, String("f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"))
     assert_equal(f.request.build_timeout_s, 120)
 
 
@@ -57,6 +59,7 @@ def test_every_flag_equals_spelling() raises:
             "--work-dir=/w",
             "--out-dir=/o",
             "--log-dir=/l",
+            "--revision-id=a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
             "--build-timeout-s=7",
         )
     )
@@ -64,6 +67,7 @@ def test_every_flag_equals_spelling() raises:
     assert_equal(f.request.work_dir, String("/w"))
     assert_equal(f.request.out_dir, String("/o"))
     assert_equal(f.request.log_dir, String("/l"))
+    assert_equal(f.request.revision_id, String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"))
     assert_equal(f.request.build_timeout_s, 7)
 
 
@@ -90,12 +94,12 @@ def _without(flag: String) -> List[String]:
 
 
 def test_each_required_flag() raises:
-    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir"]:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--revision-id"]:
         _expect(_without(String(f)), String(f) + String(" is required"))
 
 
 def test_each_flag_given_twice() raises:
-    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--build-timeout-s"]:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--revision-id", "--build-timeout-s"]:
         var a = _full()
         a.append(String(f) + String("=/x1"))
         a.append(String(f) + String("=/x2"))
@@ -107,13 +111,13 @@ def test_each_flag_given_twice() raises:
 
 
 def test_each_flag_with_an_empty_value() raises:
-    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--build-timeout-s"]:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--revision-id", "--build-timeout-s"]:
         _expect(_args(String(f) + String("=")), String(f) + String(" has an EMPTY value"))
         _expect(_args(String(f), String("  ")), String(f) + String(" has an EMPTY value"))
 
 
 def test_each_flag_with_no_value() raises:
-    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--build-timeout-s"]:
+    for f in ["--declarations", "--work-dir", "--out-dir", "--log-dir", "--revision-id", "--build-timeout-s"]:
         _expect(_args(String(f)), String(f) + String(" needs a value"))
 
 
@@ -129,6 +133,25 @@ def test_work_dir_must_be_absolute() raises:
         a,
         String("--work-dir 'repo' is not an absolute path: it is the cwd every build resolves against"),
     )
+
+
+def test_revision_id_must_be_a_full_commit_id() raises:
+    # Abbreviated (git's default 7 and 12), one short, one long, upper case,
+    # not hex, and a ref name: each refused before anything is read or run.
+    for v in [
+        "f0e1d2c", "f0e1d2c3b4a5", "f0e1d2c3b4a5968778695a4b3c2d1e0f1234567",
+        "f0e1d2c3b4a5968778695a4b3c2d1e0f123456780",
+        "F0E1D2C3B4A5968778695A4B3C2D1E0F12345678",
+        "f0e1d2c3b4a5968778695a4b3c2d1e0f1234567z", "HEAD", "main",
+    ]:
+        var a = _without(String("--revision-id"))
+        a.append(String("--revision-id=") + String(v))
+        _expect(
+            a,
+            String("--revision-id '") + String(v)
+            + String("' is not a full commit id (exactly 40 lowercase hex digits; an")
+            + String(" abbreviated id is refused)"),
+        )
 
 
 def test_timeout_must_be_a_positive_integer() raises:

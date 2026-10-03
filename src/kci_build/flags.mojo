@@ -13,6 +13,12 @@
 #                              build refuses that before anything runs, after
 #                              resolving both paths: build.mojo
 #                              `check_log_dir`)
+#   --revision-id <commit>     the release commit: a FULL commit id, exactly
+#                              40 lowercase hex digits (an abbreviated id is
+#                              refused here); it must be the commit checked
+#                              out in --work-dir, in a clone with full
+#                              history (revision.mojo), and the stamp is
+#                              derived from it
 #   [--build-timeout-s <n>]    per artifact; default 3600
 #   [--help]
 #
@@ -22,17 +28,20 @@
 #
 # A value may follow its flag as the next argument or after `=`. A missing
 # required flag, a flag given twice, an unknown flag, an empty value, a
-# positional argument, a `--work-dir` that is not an absolute path and a
-# timeout that is not a positive integer are each refused, naming the flag.
+# positional argument, a `--work-dir` that is not an absolute path, a
+# `--revision-id` that is not a full 40-hex commit id and a timeout that is
+# not a positive integer are each refused, naming the flag.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
+
+from kci_artifact_declaration import require_full_commit_id
 
 from kci_build.request import BuildRequest
 
 comptime BUILD_USAGE: String = (
     "usage: kci build --declarations <file> --work-dir <abs dir> --out-dir <dir>"
-    " --log-dir <dir> [--build-timeout-s <n>]"
+    " --log-dir <dir> --revision-id <40-hex commit> [--build-timeout-s <n>]"
 )
 
 
@@ -59,6 +68,7 @@ def _is_value_flag(name: String) -> Bool:
         or name == "--work-dir"
         or name == "--out-dir"
         or name == "--log-dir"
+        or name == "--revision-id"
         or name == "--build-timeout-s"
     )
 
@@ -122,6 +132,8 @@ def parse_build_flags(args: List[String]) raises -> BuildFlags:
             _set_once(r.out_dir, name, value^)
         elif name == "--log-dir":
             _set_once(r.log_dir, name, value^)
+        elif name == "--revision-id":
+            _set_once(r.revision_id, name, value^)
         else:
             _set_once(build_timeout, name, value^)
     ref r = flags.request
@@ -138,6 +150,12 @@ def parse_build_flags(args: List[String]) raises -> BuildFlags:
         _refuse(String("--out-dir is required"))
     if r.log_dir.byte_length() == 0:
         _refuse(String("--log-dir is required"))
+    if r.revision_id.byte_length() == 0:
+        _refuse(String("--revision-id is required"))
+    try:
+        require_full_commit_id(String("--revision-id"), r.revision_id)
+    except e:
+        _refuse(String(e))
     if build_timeout.byte_length() > 0:
         r.build_timeout_s = _positive_int(String("--build-timeout-s"), build_timeout)
     return flags^
