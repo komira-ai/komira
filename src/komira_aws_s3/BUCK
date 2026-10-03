@@ -3,10 +3,14 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 
 # Amazon S3: a restXml client generated at build time from botocore's S3
 # model (//third_party/botocore, pinned by sha256; nothing of it is copied
-# here), in pure mode: each operation's request builder and response
-# parser, and its endpoint resolved through S3's published endpoint ruleset
-# and partition table, embedded in the module. No transport; a caller signs
-# a built request with komira_aws_core's build_sigv4_signed_request.
+# here), in client mode: each operation's request builder and response
+# parser, its endpoint resolved through S3's published endpoint ruleset
+# and partition table, embedded in the module, and `S3S3Client`, whose
+# verbs resolve that endpoint per call and send through komira_aws_core's
+# send_sigv4_signed_request (signed per attempt, retried as the AWS SDKs'
+# standard mode does) over the komira_http_core Connector it is given. The
+# builders, parsers and resolvers stay exported for a caller with its own
+# transport.
 #
 # The `s3` customization applies what botocore does to S3 beyond the model:
 # a 200 whose body is an <Error> is raised as an HTTP 500, an `Expires`
@@ -39,7 +43,13 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # error forms), test_s3_endpoints (virtual-host and path-style addressing,
 # a custom endpoint, and the signed request of each HTTP method, against the
 # signatures AWS publishes for its SigV4 examples where one exists) and
-# test_no_env_reads (the generated module reads no environment).
+# test_no_env_reads (the generated module reads no environment). Two more
+# send through komira_http_client over a scripted connector (no socket):
+# test_s3_client drives the generated client verb by verb (a 412 race, a
+# 206 range read, two list pages, a multipart upload, an abort 404, a HEAD
+# 404, a 503 and a 200-with-<Error> retried), and test_s3_retry drives the
+# same send with a recording sleeper and a stepping clock (a retry signed
+# again at a later date, the attempt limit, and the POSTs not resent).
 
 _S3 = botocore_model("s3")
 
@@ -47,7 +57,7 @@ mojo_aws_client(
     name = "komira_aws_s3",
     customizations = ["s3"],
     endpoint_rules = _S3.endpoint_rules,
-    mode = "pure",
+    mode = "client",
     model = _S3.model,
     model_sha256 = _S3.sha256,
     operations = [
@@ -74,13 +84,17 @@ mojo_aws_client(
     },
     test_srcs = [
         "tests/test_no_env_reads.mojo",
+        "tests/test_s3_client.mojo",
         "tests/test_s3_endpoints.mojo",
         "tests/test_s3_requests.mojo",
         "tests/test_s3_responses.mojo",
+        "tests/test_s3_retry.mojo",
     ],
     visibility = ["PUBLIC"],
     deps = [
         "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_retry:komira_retry",
         "//src/komira_xml:komira_xml",
     ],
 )

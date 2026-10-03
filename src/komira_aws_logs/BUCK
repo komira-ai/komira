@@ -14,10 +14,10 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # No transport; a caller signs a built request with komira_aws_core's
 # build_sigv4_signed_request (signing name `logs`).
 #
-# Pure, not client, mode: client-mode code sends through komira_aws_core's
-# `send_sigv4_signed_request`, which komira_aws_core does not have yet (it
-# lands with the core's HTTP send surface), so a client-mode library would
-# not compile.
+# Pure, not client, mode: komira_aws_core's `send_sigv4_signed_request` and
+# the client-mode emitter are in place (komira_aws_s3 and komira_aws_sqs
+# are client mode), and this library moves to client mode with client
+# tests of its own over a scripted connector, as theirs have.
 #
 # `operations` is what a log reader calls: GetLogEvents, a stream read page
 # by page. An operation joins the list with its own rows in the tests below.
@@ -33,8 +33,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # generated module reads no environment).
 #
 # No test here talks to the service. Integration tests against LocalStack
-# join once komira_aws_core has its HTTP send surface and credential
-# providers, when this library also moves to client mode.
+# join with the test-services area that runs it on the farm.
 
 _LOGS = botocore_model("logs")
 
