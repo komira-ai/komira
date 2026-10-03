@@ -27,20 +27,22 @@ jobs:
           echo "::add-mask::${tok}"
           payload="$(printf '%s' "${tok}" | cut -d. -f2 | tr '_-' '/+')"
           pad=$(( (4 - ${#payload} % 4) % 4 )); payload="${payload}$(printf '=%.0s' $(seq 1 ${pad}) 2>/dev/null || true)"
-          printf '%s' "${payload}" | base64 -d 2>/dev/null | sed -n 's/.*"\(sub\)":"\([^"]*\)".*/\1 = \2/p; s/.*"\(event_name\)":"\([^"]*\)".*/\1 = \2/p; s/.*"\(ref\)":"\([^"]*\)".*/\1 = \2/p'
+          printf '%s' "${payload}" | base64 -d 2>/dev/null | grep -o '"\(sub\|ref\|event_name\)":"[^"]*"' | sed 's/":"/ = /; s/"//g'; echo
       - uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
         with:
           oauth-client-id: ${{ vars.TS_CLIENT_ID }}
           audience: ${{ vars.TS_AUDIENCE }}
           tags: tag:ci
-      - name: path and reachability
+          log-mode: quiet
+      - name: path and reachability (no addresses, names or accounts are printed: this log is public)
         env:
           FARM_ADDRESS: ${{ vars.FARM_ADDRESS }}
         run: |
           set -u
           hp="${FARM_ADDRESS#*//}"; host="${hp%:*}"; port="${hp##*:}"
-          tailscale status | head -20
-          tailscale ping -c 5 "${host}" || true
+          if tailscale ping -c 5 "${host}" 2>&1 | grep -q ' via DERP'; then relay=relayed; else relay=direct; fi
+          ms="$(tailscale ping -c 5 "${host}" 2>&1 | sed -n 's/.* in \([0-9]*\)ms.*/\1/p' | tail -1)"
+          echo "path to the farm: last ping ${ms:-unknown} ms; first-hop kind seen: ${relay}"
           if timeout 10 bash -c "</dev/tcp/${host}/${port}"; then echo "reachable ${port}"; else echo "NOT reachable ${port}"; exit 1; fi
           for p in 30983 22 6443; do
             if timeout 5 bash -c "</dev/tcp/${host}/${p}" 2>/dev/null; then echo "UNEXPECTEDLY reachable ${p}"; exit 1; else echo "blocked ${p} (expected)"; fi
