@@ -9,6 +9,12 @@
 # socket. The transport half, `send_sigv4_signed_request`, takes the same
 # arguments plus the HTTP client and its configuration, calls this, and
 # hands the bytes to the HTTP client; it lands with the HTTP library.
+# Generated clients already call it (emit_aws/mod.rs, a client's `send`):
+# `send_sigv4_signed_request[C: Connector](mk_connector, method, cred,
+# region, service, endpoint, uri, content_type, var body: List[UInt8],
+# var extra: List[Header]) raises -> HttpResult`. The tests cell's stand-in
+# (tools/build/tests/functional/mojo_aws_client/stub/komira_aws_core) has
+# that signature; the real one keeps it, or both change together.
 #
 # Every operation header in `extra` is SIGNED. awsJson services include
 # X-Amz-Target in the canonical request, so an unsigned one is answered
