@@ -86,7 +86,7 @@ comptime RETAIN_DELETE: Int = 0
 app-owned resource — its lifecycle is the deploy's)."""
 comptime RETAIN_KEEP: Int = 1
 """KEPT BY POLICY, AND OVERRIDABLE. The engine does not delete this resource in
-the ordinary course (a standing / shared resource — the environment-shared
+the ordinary course (a standing / shared resource — the cell-shared
 bootstrap bucket, the WIF pool, the VPC — provisioned once and only ever READ by a
 deploy), so rollback_create + destroy_graph SKIP it. An operator who has
 explicitly opted into destroying data-bearing / shared scope
