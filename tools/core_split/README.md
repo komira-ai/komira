@@ -13,6 +13,7 @@ them.
 | `core.sha256`, `libc.sha256` | the recorded digest of each frozen package (`defs.bzl` says how it is computed) |
 | `owners.tsv` | which branch may rewrite the importers of which package |
 | `split.py` | derives the modules and tests of the new packages from the map, rewriting imports |
+| `split_selftest.py` | seeded import statements and the line `split.py` must write for each, including `from .. arrow.x` (blanks after the dots, which Mojo accepts) |
 | `gen_build.py`, `deps.py` | write each package's `BUCK`, `__init__.mojo` and `README.md`; the deps come from the generated files' imports and `external_call` strings, never from `:komira_core` |
 | `packages.tsv`, `c_symbols.tsv` | the one sentence of each package; which package owns each C symbol of the shim |
 | `deps_selftest.py` | seeded packages with and without a local C library: what `check.py deps` must accept and must still reject |
