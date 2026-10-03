@@ -13,7 +13,8 @@
 # DeleteObject (204, an absent key, a missing bucket, a refusal); a
 # multipart upload (create, a part, complete; an abort of an upload that is
 # gone and of one in a missing bucket; part number and part order refused;
-# a CompleteMultipartUpload answered 200 with an <Error>, not resent); a
+# a CompleteMultipartUpload answered 200 with an <Error>, resent, and
+# raised once every send is answered so); a
 # conditional PutObject (412, 409 race, an answer without an ETag, a 500 not
 # resent while an unconditional one is, If-None-Match with an ETag refused);
 # and a 503 SlowDown retried. Retries wait 1 ms (the config's
@@ -394,8 +395,9 @@ def _mk_abort_gone() raises -> ScriptedConnector:
 
 def _mk_complete_200_error() raises -> ScriptedConnector:
     # S3 can fail the assembly after its 200: the body is an <Error>. The
-    # send reads it as a 500. CompleteMultipartUpload is a POST, so it is not
-    # sent again: the second answer, a success, is never read.
+    # send reads it as a 500 and, as botocore's standard mode does for every
+    # operation, a POST included, sends it again: the second answer, a
+    # success, is the result.
     var body = String("<Error><Code>InternalError</Code><Message>We encountered an internal error.</Message></Error>")
     var c = _one(_answer(200, "OK", body))
     c.arm_next(
@@ -408,6 +410,15 @@ def _mk_complete_200_error() raises -> ScriptedConnector:
             + "<ETag>&quot;whole-2&quot;</ETag></CompleteMultipartUploadResult>",
         )
     )
+    return c^
+
+
+def _mk_complete_200_error_every_time() raises -> ScriptedConnector:
+    # The same failure on all three sends: the last is the answer.
+    var body = String("<Error><Code>InternalError</Code><Message>We encountered an internal error.</Message></Error>")
+    var c = _one(_answer(200, "OK", body))
+    c.arm_next(_answer(200, "OK", body))
+    c.arm_next(_answer(200, "OK", body))
     return c^
 
 
@@ -441,7 +452,10 @@ def test_multipart() raises:
         _ = a.complete_multipart_upload("lake", "big.bin", "u-1", backwards)
     with assert_raises(contains="no parts"):
         _ = a.complete_multipart_upload("lake", "big.bin", "u-1", List[S3UploadedPart]())
-    var e = _store(_mk_complete_200_error)
+    var r = _store(_mk_complete_200_error)
+    var again = r.complete_multipart_upload("lake", "big.bin", "u-1", parts)
+    assert_equal(again.etag, '"whole-2"')
+    var e = _store(_mk_complete_200_error_every_time)
     with assert_raises(contains="StoreError[TRANSPORT] CompleteMultipartUpload s3://lake/big.bin status=500 s3_code=InternalError"):
         _ = e.complete_multipart_upload("lake", "big.bin", "u-1", parts)
 
