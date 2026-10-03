@@ -6,18 +6,19 @@
 # hand -- method, credential, region, service, endpoint, path and query,
 # content type, body bytes and the operation's extra headers -- into the
 # exact SigV4-signed request, at the time the clock says. It opens no
-# socket. The transport half, `send_sigv4_signed_request`, takes the same
-# arguments plus the HTTP client and its configuration, calls this, and
-# hands the bytes to the HTTP client; it lands with the HTTP library. The
-# generated clients already call it, in this argument order:
-#
-#   send_sigv4_signed_request[C](mk_connector, http_config, method, cred,
-#       region, service, endpoint, path, content_type, body, extra)
-#
-# where `mk_connector` is the client's `def () raises thin -> C` factory and
-# `http_config` the caller's `HttpClientConfig`, which has no default. The
-# generator's golden tests pin that order
-# (tools/build/tests/functional/aws_codegen); change both together.
+# socket. The transport half, `send_sigv4_signed_request` (aws_send.mojo),
+# takes the same arguments plus the connector factory and the caller's
+# `HttpClientConfig`, calls this once per attempt, and hands the request to
+# a komira_http_client built from that config. Generated clients call it
+# (emit_aws/mod.rs, a client's `send`):
+# `send_sigv4_signed_request[C: Connector](mk_connector, http_config:
+# HttpClientConfig, method, cred, region, service, endpoint, uri,
+# content_type, body: List[UInt8], extra: List[Header], retry_safe: Bool =
+# False, s3_200_error: Bool = False) raises -> HttpResult`. The tests cell's
+# stand-in (tools/build/tests/functional/mojo_aws_client/stub/komira_aws_core)
+# has that signature, and the generator's goldens pin the call's first two
+# arguments (tools/build/tests/functional/aws_codegen, `must_contain`); the
+# real one keeps it, or all three change together.
 #
 # Every operation header in `extra` is SIGNED. awsJson services include
 # X-Amz-Target in the canonical request, so an unsigned one is answered
@@ -29,10 +30,17 @@
 #   .hashed()          the SHA-256 of the body, computed here (the default);
 #   .unsigned()        UNSIGNED-PAYLOAD: the body is not covered;
 #   .precomputed(hex)  a SHA-256 the caller already has, 64 lowercase hex.
-# The hash is sent and signed as x-amz-content-sha256 for service "s3", and
-# for any service whenever it is not `.hashed()`: a service can check an
-# unsigned or precomputed hash only from that header. For "s3" the S3 SigV4
-# rules apply too: the path is neither normalized nor encoded twice.
+# The hash is sent and signed as x-amz-content-sha256 for an S3 signing
+# name, and for any service whenever it is not `.hashed()`: a service can
+# check an unsigned or precomputed hash only from that header. For an S3
+# signing name the S3 SigV4 rules apply too: the path is neither normalized
+# nor encoded twice.
+#
+# The S3 signing names are botocore's `S3_SIGNING_NAMES`
+# (botocore/handlers.py): s3, s3-outposts, s3-object-lambda and s3express.
+# botocore signs a sigv4 request under any of them with `S3SigV4Auth`
+# (`set_operation_specific_signer`), and so does this builder
+# (`is_s3_signing_name`).
 #
 # Outside S3 this follows botocore: its base `SigV4Auth` sends
 # `X-Amz-Content-SHA256: UNSIGNED-PAYLOAD` for any service whose payload
@@ -59,6 +67,19 @@ from .sigv4 import (
     sigv4_sign_payload_hash,
 )
 from .sources import AwsClock, amz_date_from_unix
+
+
+def is_s3_signing_name(name: String) -> Bool:
+    """Whether `name` is signed by S3's SigV4 rules: botocore's
+    `S3_SIGNING_NAMES` (botocore/handlers.py), the names it signs with
+    `S3SigV4Auth` (path neither normalized nor encoded twice, payload hash
+    sent as x-amz-content-sha256)."""
+    return (
+        name == "s3"
+        or name == "s3-outposts"
+        or name == "s3-object-lambda"
+        or name == "s3express"
+    )
 
 
 comptime _HASHED = 0
@@ -193,8 +214,8 @@ def build_sigv4_signed_request[
     `extra`, Content-Length (when the request carries a body, and "0" on a
     body-less POST, PUT or PATCH; never signed, as botocore adds it in
     `prepare()` after signing), then the signer's X-Amz-Date,
-    x-amz-content-sha256 (service "s3", or a `payload` other than
-    `.hashed()`), X-Amz-Security-Token (temporary credentials) and
+    x-amz-content-sha256 (a `service` that `is_s3_signing_name`, or a
+    `payload` other than `.hashed()`), X-Amz-Security-Token (temporary credentials) and
     Authorization.
 
     Refuses a malformed method, a `uri` not starting with '/', CR/LF
@@ -221,7 +242,7 @@ def build_sigv4_signed_request[
                 + " is set by the request builder; pass it as its argument"
             )
         headers.append(extra[i])
-    var is_s3 = service == "s3"
+    var is_s3 = is_s3_signing_name(service)
     var ctx = SigV4SigningContext(
         cred,
         region,

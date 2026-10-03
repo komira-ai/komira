@@ -20,15 +20,25 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   - endpoint and partition resolution (AWS_ENDPOINT_URL[_<SERVICE>], FIPS,
 #     dual-stack), the AwsCredsSource trait, and the SigV4-signed request
 #     builder, the socket-free half of a generated client's send
+#   - aws_send.mojo, the transport half: send_sigv4_signed_request signs
+#     each attempt at the wall clock's time, sends it over
+#     komira_http_client through the client's Connector, and retries with
+#     komira_retry under aws_retry.mojo's classifier (the AWS SDKs'
+#     standard mode; a request that is not retry-safe is resent only when
+#     the service cannot have acted on it)
 #   - the interpreter of the endpoint rulesets AWS publishes as data
 #     (endpoint_rules.mojo, over partitions.json), which reads no
 #     environment: every input is a parameter
-#   - s3_wire.mojo: the two S3 header values no model states
+#   - endpoint_signing.mojo, which turns an endpoint the ruleset chose into
+#     what the signer takes, refusing an auth scheme it cannot sign
+#   - s3_wire.mojo: the S3 header values no model states, and the CRC32
+#     request checksum
 #
 # The chain reads only the STANDARD AWS SDK environment variables and shared
 # files, through the EnvSource / FileSource / AwsClock seams of sources.mojo,
 # and reaches STS, the container endpoint and instance metadata only through
-# the CredentialTransport trait: this package opens no socket.
+# the CredentialTransport trait. The only connections it opens are a
+# generated client's sends, through the Connector that client is given.
 #
 # test_sigv4_test_suite runs every case of the official AWS SigV4 signing test
 # suite byte for byte. The suite is not copied here: it is read from the
@@ -52,6 +62,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # //tools/build/proto-codegen:rest_xml_verdicts, and the corpus they were
 # written from. Welding it makes this library's build depend on that Rust
 # tool and its run over the corpus, as well as on the corpus itself.
+# test_aws_retry checks the retry classifier and policy against botocore's
+# standard retry mode, reading botocore/retries/standard.py from the botocore
+# archive //third_party/botocore pins (`:retries`) and checking each of its
+# lists and constants, and the retry-safety rule over the transport errors
+# komira_http_client, its kernel and TLS dials and name resolution raise.
+# test_aws_send sends over komira_http_client and a scripted connector (no
+# socket): retries, re-signing at a later date, the attempt limit and its
+# backoff, the budget, S3's 200-with-<Error>, the request on the wire
+# (AwsEchoConnector), and the connector-factory entry point; and one dial
+# to a closed loopback port through the kernel connector, so the classifier
+# reads the text the production dial raises.
 # test_s3_endpoint_rules runs every case of botocore's S3 endpoint tests
 # through the ruleset interpreter (endpoint_rules.mojo) over S3's published
 # ruleset, and requires each to pass. test_env_source_only scans the
@@ -85,10 +106,15 @@ mojo_library(
     name = "komira_aws_core",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_clock:komira_clock",
         "//src/komira_core_ffi:komira_core_ffi",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
         "//src/komira_json:komira_json",
+        "//src/komira_retry:komira_retry",
         "//src/komira_xml:komira_xml",
     ],
     test_srcs = [
@@ -98,6 +124,8 @@ mojo_library(
         "tests/test_aws_rest_headers.mojo",
         "tests/test_aws_rest_uri.mojo",
         "tests/test_aws_rest_xml_errors.mojo",
+        "tests/test_aws_retry.mojo",
+        "tests/test_aws_send.mojo",
         "tests/test_aws_text.mojo",
         "tests/test_aws_xml_codec.mojo",
         "tests/test_credential_chain.mojo",
@@ -105,6 +133,7 @@ mojo_library(
         "tests/test_creds_source.mojo",
         "tests/test_endpoint_resolution.mojo",
         "tests/test_endpoint_rules_library.mojo",
+        "tests/test_endpoint_signing.mojo",
         "tests/test_env_source_only.mojo",
         "tests/test_s3_endpoint_rules.mojo",
         "tests/test_s3_wire.mojo",
@@ -128,6 +157,9 @@ mojo_library(
             "aws_c_auth": "//third_party/aws_c_auth:files",
         },
         "tests/test_s3_endpoint_rules.mojo": _ENDPOINT_RULES,
+        "tests/test_aws_retry.mojo": {
+            "botocore/retries/standard.py": "//third_party/botocore:retries[botocore/retries/standard.py]",
+        },
         "tests/test_xml_canonical_differential.mojo": {
             "rest_xml_verdicts.tsv": "//tools/build/proto-codegen:rest_xml_verdicts",
         } | _REST_XML_CORPUS,

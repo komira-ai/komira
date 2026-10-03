@@ -1,0 +1,10 @@
+{
+  "player": "Rowan",
+  "hands": [
+    ["full house", "8♣"]
+  ]
+}
+null
+{"player": "Imogen", "hands": [["flush", "Q♦"], ["high card", "A♠"]]}
+{"player": "Tobias", "hands": [["two pair", "3♥"], ["straight", "J♣"]]}
+{"player": "Wren", "hands": []}

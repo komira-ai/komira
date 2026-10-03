@@ -1366,9 +1366,25 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
         try writeFile(std.fs.cwd(), need(a.out, "--out"), "refused\n");
         return;
     }
-    if (listing.len != 3 or !std.mem.eql(u8, listing[1], "manifest.json") or !std.mem.eql(u8, listing[2], "metadata.json") or !std.mem.endsWith(u8, listing[0], ".conda"))
+    // The listing is sorted, so where the package falls depends on its name
+    // (`komira_*` sorts before `manifest.json`, `rest_url-*` after
+    // `metadata.json`): find it among the three, never by position.
+    var file_name: []const u8 = "";
+    var n_conda: usize = 0;
+    var has_manifest = false;
+    var has_metadata = false;
+    for (listing) |entry| {
+        if (std.mem.eql(u8, entry, "manifest.json")) {
+            has_manifest = true;
+        } else if (std.mem.eql(u8, entry, "metadata.json")) {
+            has_metadata = true;
+        } else if (std.mem.endsWith(u8, entry, ".conda")) {
+            file_name = entry;
+            n_conda += 1;
+        }
+    }
+    if (listing.len != 3 or n_conda != 1 or !has_manifest or !has_metadata)
         fail("{s} must hold exactly one .conda, manifest.json and metadata.json (or only REFUSED)", .{dir});
-    const file_name = listing[0];
     const bytes = readAll(alloc, try std.fmt.allocPrint(alloc, "{s}/{s}", .{ dir, file_name }));
 
     // The manifest: the contract, and the file it describes.

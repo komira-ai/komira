@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 5
+#   generator    : aws-client-gen version 8
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -59,8 +59,7 @@ from komira_aws_core import (
     AwsResponse,
     aws_blob_from_json,
     aws_error_code,
-    aws_error_code_from_body,
-    aws_error_message_from_body,
+    aws_json_error_info,
     aws_is_error_status,
     aws_f64_from_json,
     aws_json_blob,
@@ -160,6 +159,10 @@ struct CloudWatchLogsGetLogEventsRequest(Copyable, Movable, Deinitable):
         self.limit = Optional[Int32]()
         self.start_from_head = Optional[Bool]()
         self.unmask = Optional[Bool]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -350,6 +353,10 @@ struct CloudWatchLogsGetLogEventsResponse(Copyable, Movable, Deinitable):
         self.next_forward_token = Optional[String]()
         self.next_backward_token = Optional[String]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -451,6 +458,10 @@ struct CloudWatchLogsInvalidParameterException(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -506,6 +517,10 @@ struct CloudWatchLogsOutputLogEvent(Copyable, Movable, Deinitable):
         self.timestamp = Optional[Int64]()
         self.message = Optional[String]()
         self.ingestion_time = Optional[Int64]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -606,6 +621,10 @@ struct CloudWatchLogsResourceNotFoundException(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -653,6 +672,10 @@ struct CloudWatchLogsServiceUnavailableException(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -718,15 +741,12 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         pointer (a code pointer, no heap); the credential source is moved
         in. No field is an `UnsafePointer`.
 
-        ⛔ `http_config` IS THE CALLER'S OBLIGATION, AND IT HAS NO DEFAULT.
-        This client builds its `HttpClient` inside the core, so the config
-        is the only way a caller can bound it. A process serving requests
-        under a platform deadline (Cloud Run, Lambda) MUST pass
-        `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling in
-        microseconds; only a process with no containing deadline (a job, a
-        CLI, a test) passes `HttpClientConfig.defaults()`, whose budget is
-        600s. A default here would silently exceed the serving ceiling, so
-        there is none."""
+        `http_config` is the caller's and has no default: the HTTP client is
+        built inside `send_sigv4_signed_request`, so this argument is the only
+        way to bound it. A process serving requests under a platform deadline
+        passes `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling
+        in microseconds; a process with no containing deadline (a job, a CLI,
+        a test) passes `HttpClientConfig.defaults()`, whose budget is 600 s."""
 
     var _mk_connector: def () raises thin -> Self.C
     # Handed to `send_sigv4_signed_request` on every send, unchanged.
@@ -815,12 +835,13 @@ def _komira_aws_logs_error(op: String, res: HttpResult) -> Error:
     """A non-2xx as an `Error`.
 
         ⛔ IT NEVER ECHOES THE RESPONSE BODY. Only the HTTP status plus the
-        parsed short `__type` token and message ride out. A generated client
+        awsJson error code and message ride out. A generated client
         cannot know which of its shapes carry a secret, so the discipline is
         unconditional — the `secrets_manager_client._sm_error` rule, applied
         everywhere because the generator has no way to make the exception."""
-    var code = aws_error_code_from_body(res.body)
-    var msg = aws_error_message_from_body(res.body)
+    var info = aws_json_error_info(res.to_response())
+    var code = info.code.copy()
+    var msg = info.message.copy()
     return Error(
         String("CloudWatchLogsCloudWatchLogs.")
         + op

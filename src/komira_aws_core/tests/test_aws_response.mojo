@@ -17,6 +17,7 @@ from komira_aws_core import (
     aws_error_code_from_body,
     aws_error_message_from_body,
     aws_json_error_info,
+    aws_query_error_code,
 )
 
 
@@ -196,6 +197,34 @@ def test_json_error_info() raises:
     var nameless = aws_json_error_info(AwsResponse.of_text(500, String("{}")))
     assert_equal(nameless.code, "")
     assert_equal(nameless.status, 500)
+    # An awsQueryCompatible error's `x-amzn-query-error` code, the text
+    # before its one `;`, wins over X-Amzn-Errortype and the body; a header
+    # of another form is not read.
+    var qc = AwsResponse.of_text(
+        400, String('{"__type":"com.amazonaws.sqs#QueueDoesNotExist"}')
+    )
+    qc.add_header(String("X-Amzn-Errortype"), String("QueueDoesNotExist"))
+    qc.add_header(
+        String("x-amzn-query-error"),
+        String("AWS.SimpleQueueService.NonExistentQueue;Sender"),
+    )
+    assert_equal(
+        aws_json_error_info(qc).code, "AWS.SimpleQueueService.NonExistentQueue"
+    )
+    assert_equal(aws_query_error_code(qc), "AWS.SimpleQueueService.NonExistentQueue")
+    var malformed: List[String] = [
+        String("NoType"),
+        String(";Sender"),
+        String("A;B;C"),
+        String("!!;Sender"),
+    ]
+    for i in range(len(malformed)):
+        var m = AwsResponse.of_text(
+            400, String('{"__type":"com.amazonaws.sqs#QueueDoesNotExist"}')
+        )
+        m.add_header(String("x-amzn-query-error"), malformed[i])
+        assert_equal(aws_query_error_code(m), "")
+        assert_equal(aws_json_error_info(m).code, "QueueDoesNotExist")
     var direct = AwsErrorInfo(409, String("Conflict"), String(""), String(""))
     assert_equal(String(direct.to_error(String("Op"))), "Op failed: HTTP 409 Conflict")
 
