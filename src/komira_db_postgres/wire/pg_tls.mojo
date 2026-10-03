@@ -64,7 +64,7 @@ from komira_http_core.tls.s2n_shim import (
     s2n_strerror_message,
 )
 
-from komira_pg.pgwire import encode_ssl_request
+from komira_db_postgres.wire.pgwire import encode_ssl_request
 
 
 # -----------------------------------------------------------------------------

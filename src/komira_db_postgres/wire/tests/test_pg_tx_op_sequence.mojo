@@ -30,7 +30,7 @@
 
 from std.testing import assert_equal, assert_true
 
-from komira_pg import (
+from komira_db_postgres.wire import (
     PgTxAsyncOp,
     TxStep,
     PreparedStatement,

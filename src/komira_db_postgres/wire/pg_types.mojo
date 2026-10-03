@@ -26,14 +26,14 @@
 # doubly-nested container never exists on the row path. See the PgRow banner.
 # =============================================================================
 
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pgwire import (
     ColumnDesc,
     BackendMessage,
     read_i16_be,
     read_i32_be,
     owned_utf8_string,
 )
-from komira_pg.pg_binary import (
+from komira_db_postgres.wire.pg_binary import (
     encode_int4_binary,
     encode_int8_binary,
     encode_text_binary,

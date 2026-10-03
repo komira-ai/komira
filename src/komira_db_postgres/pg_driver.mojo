@@ -78,8 +78,8 @@ from komira_db.db_value import (
 )
 from komira_db.db_row import DbRow, DbRows
 
-from komira_pg.connection import PgConnection, PgConfig, PreparedStatement
-from komira_pg.pg_types import (
+from komira_db_postgres.wire.connection import PgConnection, PgConfig, PreparedStatement
+from komira_db_postgres.wire.pg_types import (
     PgValue,
     PgRow,
     PgRows,

@@ -38,14 +38,14 @@ from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import BACKEND_EPOLL, Reactor
 from komira_async.runtime.parked_morsel_slab import ParkedMorselSlab
 
-from komira_pg.pg_query_op import (
+from komira_db_postgres.wire.pg_query_op import (
     PgReadFrame,
     PG_OP_PENDING,
     PG_OP_READY,
     PG_OP_ERR,
 )
-from komira_pg.pg_types import OID_TEXT
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pg_types import OID_TEXT
+from komira_db_postgres.wire.pgwire import (
     put_i16_be,
     put_i32_be,
     MSG_DATA_ROW,

@@ -68,16 +68,16 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_pg.connection import PgConnection, PreparedStatement
-from komira_pg.pg_tls import PG_RECV_DONE, PG_RECV_PENDING, PG_RECV_EOF
-from komira_pg.pg_types import (
+from komira_db_postgres.wire.connection import PgConnection, PreparedStatement
+from komira_db_postgres.wire.pg_tls import PG_RECV_DONE, PG_RECV_PENDING, PG_RECV_EOF
+from komira_db_postgres.wire.pg_types import (
     PgValue,
     PgRow,
     PgRows,
     PgError,
     binary_row_from_data_message,
 )
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pgwire import (
     ErrorFields,
     BackendMessage,
     first_message_byte_len,

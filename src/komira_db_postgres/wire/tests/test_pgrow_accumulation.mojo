@@ -26,7 +26,7 @@ This test builds the rows by hand (no live Postgres), exercising:
   * repeated build+teardown (50 trials) to surface any double-free / leak.
 """
 
-from komira_pg.pg_types import PgRow, PgRows
+from komira_db_postgres.wire.pg_types import PgRow, PgRows
 
 
 def _make_row(row_idx: Int, ncols: Int) -> PgRow:

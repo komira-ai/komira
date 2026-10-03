@@ -60,7 +60,7 @@
 from komira_db_postgres.pg_driver import PgDatabase
 from komira_db.pool import Pool
 
-from komira_pg.connection import PgConfig
+from komira_db_postgres.wire.connection import PgConfig
 
 
 # =============================================================================

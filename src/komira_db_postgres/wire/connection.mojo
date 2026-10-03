@@ -42,8 +42,8 @@
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_pg.pg_tls import PgReactorStream, pg_reactor_connect
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pg_tls import PgReactorStream, pg_reactor_connect
+from komira_db_postgres.wire.pgwire import (
     BackendMessage,
     ColumnDesc,
     parse_one_message,
@@ -86,7 +86,7 @@ from komira_pg.pgwire import (
     MSG_PARAM_DESC,
     MSG_NO_DATA,
 )
-from komira_pg.pg_types import (
+from komira_db_postgres.wire.pg_types import (
     PgError,
     PgValue,
     PgRow,
@@ -95,8 +95,8 @@ from komira_pg.pg_types import (
     binary_row_from_data_message,
     pg_param_binary,
 )
-from komira_pg.pgwire import ErrorFields
-from komira_pg.scram import (
+from komira_db_postgres.wire.pgwire import ErrorFields
+from komira_db_postgres.wire.scram import (
     make_client_nonce,
     compute_scram_client,
     verify_server_signature,

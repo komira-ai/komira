@@ -9,13 +9,13 @@ KAT.
 No network, no database server — pure value + crypto. Always runs.
 """
 
-from komira_pg.scram import (
+from komira_db_postgres.wire.scram import (
     compute_scram_client,
     verify_server_signature,
     scram_field,
     make_client_nonce,
 )
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pgwire import (
     encode_ssl_request,
     encode_startup,
     encode_sasl_initial,
@@ -33,7 +33,7 @@ from komira_pg.pgwire import (
     auth_subcode,
     AUTH_SASL,
 )
-from komira_pg.pg_types import row_from_data_message
+from komira_db_postgres.wire.pg_types import row_from_data_message
 from komira_encoding import base64_encode, base64_decode
 from komira_crypto.pbkdf2 import pbkdf2_hmac_sha256_32, pbkdf2_hmac_sha256
 

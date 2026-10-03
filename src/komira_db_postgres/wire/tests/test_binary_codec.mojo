@@ -17,7 +17,7 @@ the binary-aware PgRow getters + the extended-protocol message encoders
 No database server, no TLS.
 """
 
-from komira_pg.pg_types import (
+from komira_db_postgres.wire.pg_types import (
     PgRow,
     PgRows,
     PgValue,
@@ -32,7 +32,7 @@ from komira_pg.pg_types import (
     OID_TIMESTAMPTZ,
     OID_TEXT_ARRAY,
 )
-from komira_pg.pg_binary import (
+from komira_db_postgres.wire.pg_binary import (
     encode_int4_binary,
     encode_int8_binary,
     encode_text_binary,
@@ -51,7 +51,7 @@ from komira_pg.pg_binary import (
     uuid_bytes_to_hex,
     PG_EPOCH_OFFSET_MICROS,
 )
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pgwire import (
     BackendMessage,
     put_i16_be,
     put_i32_be,

@@ -59,10 +59,10 @@ from std.utils import Variant
 from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_pg.connection import PgConnection, PreparedStatement
-from komira_pg.pg_tls import PG_RECV_DONE, PG_RECV_PENDING, PG_RECV_EOF
-from komira_pg.pg_types import PgValue, PgRows, PgRow
-from komira_pg.pg_query_op import (
+from komira_db_postgres.wire.connection import PgConnection, PreparedStatement
+from komira_db_postgres.wire.pg_tls import PG_RECV_DONE, PG_RECV_PENDING, PG_RECV_EOF
+from komira_db_postgres.wire.pg_types import PgValue, PgRows, PgRow
+from komira_db_postgres.wire.pg_query_op import (
     PgReadFrame,
     PG_OP_PENDING,
     PG_OP_READY,

@@ -32,7 +32,7 @@
 # a byte-backed slab, so there is no stale-pointer hazard on reuse.
 # =============================================================================
 
-from komira_pg.pgwire import (
+from komira_db_postgres.wire.pgwire import (
     put_i32_be,
     put_i16_be,
     read_i16_be,

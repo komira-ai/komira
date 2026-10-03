@@ -14,7 +14,7 @@
 from std.testing import assert_equal, assert_true
 from std.sys.info import CompilationTarget
 
-from komira_pg.pg_tls import _resolve_host_be
+from komira_db_postgres.wire.pg_tls import _resolve_host_be
 from komira_async.reactor.socket_setup import inet_loopback_be
 from komira_net.dns import _getaddrinfo_collect
 
