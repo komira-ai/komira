@@ -62,7 +62,7 @@ from komira_core.collections.band_view import BandView
 from komira_core.collections.morsel_view import MorselView
 
 from komira_agg.aggregator import Aggregator
-from komira_core.eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     float_max_fold_f64,
     float_max_identity_f64,
     float_min_fold_f64,

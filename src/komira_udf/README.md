@@ -10,5 +10,7 @@ on `komira_core` alone.
   `frame_view`, `partition_row_view` and `partition_local_map_fn`.
 - Shared leaves: `purity`, `predicate`, `row_transform`, `column_resolver`,
   `row_builder`, `stateful_contract`.
+- `float_quotient_order`: the float equality and ordering model; it moves to
+  `komira_column_kernels` with the `komira_core` split.
 
 There are no root re-exports; import each name from its module.

@@ -64,7 +64,7 @@ from std.memory import bitcast
 from std.sys import simd_width_of
 
 from komira_core.arrow.primitive_array import PrimitiveArray
-from komira_core.eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     canonicalize_f32,
     canonicalize_f64,
 )
@@ -110,7 +110,7 @@ comptime _SPLITMIX64_S3: UInt64 = UInt64(31)
 
 
 # ⭐ THE CANONICAL-NaN CONSTANTS AND THE TWO CANONICALIZERS NOW LIVE IN
-# `komira_core.eval.float_quotient_order` AND ARE IMPORTED ABOVE. They used to
+# `komira_udf.float_quotient_order` AND ARE IMPORTED ABOVE. They used to
 # be private to this file, which is how `GROUP BY <float>` came to hash raw
 # bits while comparing with IEEE `==`: the model was written here and nowhere
 # else, so the two sites that needed it wrote their own halves. Do not re-add a

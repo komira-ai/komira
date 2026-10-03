@@ -2867,7 +2867,7 @@ def date_to_days(year: Int, month: Int, day: Int) -> Int:
     # duckdb v1.5.3 `-0044-01-01` is day -735599; the idiom answers -735600.
     #
     # ⚠ AD IS UNAFFECTED: for y >= 0 both spellings evaluate `y // 400`. The
-    # sibling `komira_kernels/temporal_extract._days_from_civil` uses the same
+    # sibling `komira_eval/temporal_extract._days_from_civil` uses the same
     # plain flooring divide.
     var era = y // 400
     # yoe = year-of-era, in [0, 399].
