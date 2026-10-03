@@ -77,18 +77,26 @@ struct JsonValue(Copyable, Movable):
         self.src_line = 0
         self.key_line = 0
 
+    def __init__(out self, *, copy: Self):
+        """Deep copy, field by field, recursing through `children`.
+
+        Explicit so the type never has a trivial copy constructor: Mojo
+        1.0.0 can treat a synthesized one as trivial for some layouts of a
+        struct with an explicit `__deinit__`, and `List.copy()` then
+        memcpys the elements, sharing their heap buffers with the
+        originals (tests/test_json_list_copy.mojo)."""
+        self.kind = copy.kind
+        self.bool_val = copy.bool_val
+        self.text = copy.text.copy()
+        self.children = copy.children.copy()
+        self.obj_keys = copy.obj_keys.copy()
+        self.src_line = copy.src_line
+        self.key_line = copy.key_line
+
     def copy(self) -> Self:
         """Deep clone (the `Copyable` conformance over the recursive
         children)."""
-        var out = JsonValue()
-        out.kind = self.kind
-        out.bool_val = self.bool_val
-        out.text = self.text
-        out.children = self.children.copy()
-        out.obj_keys = self.obj_keys.copy()
-        out.src_line = self.src_line
-        out.key_line = self.key_line
-        return out^
+        return Self(copy=self)
 
     # =========================================================================
     # Scalar constructors.

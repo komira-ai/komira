@@ -33,14 +33,19 @@ struct JsonValue(Copyable, Movable):
     def __deinit__(deinit self):
         pass
 
+    # An explicit deep copy constructor, as komira_json's: a synthesised one
+    # can be treated as trivial by Mojo 1.0.0 for some layouts of a struct
+    # with an explicit `__deinit__`, and `List.copy()` would then share the
+    # elements' heap buffers with the originals.
+    def __init__(out self, *, copy: Self):
+        self.kind = copy.kind
+        self.bool_val = copy.bool_val
+        self.text = copy.text.copy()
+        self.children = copy.children.copy()
+        self.keys = copy.keys.copy()
+
     def copy(self) -> Self:
-        var out = JsonValue()
-        out.kind = self.kind
-        out.bool_val = self.bool_val
-        out.text = self.text
-        out.children = self.children.copy()
-        out.keys = self.keys.copy()
-        return out^
+        return Self(copy=self)
 
     @staticmethod
     def empty_object() -> JsonValue:
