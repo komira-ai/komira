@@ -21,9 +21,13 @@ from komira_gcp_core import (
     ENVELOPE_PRESENT,
     ENVELOPE_ABSENT,
     ENVELOPE_MALFORMED,
+    CODE_DATA_LOSS,
+    GcpGrpcStatusError,
+    code_from_grpc_status,
     code_from_http_status,
     code_from_name,
     code_name,
+    gcp_grpc_status_error,
     gcp_status_error,
     parse_gcp_status,
 )
@@ -316,6 +320,52 @@ def test_http_status_mapping() raises:
     assert_equal(code_from_http_status(505), CODE_UNKNOWN)
 
 
+def test_grpc_status_mapping() raises:
+    # gRPC's codes are google.rpc.Code's, number for number.
+    for c in range(17):
+        assert_equal(code_from_grpc_status(c), c)
+    assert_equal(code_from_grpc_status(14), CODE_UNAVAILABLE)
+    assert_equal(code_from_grpc_status(16), CODE_UNAUTHENTICATED)
+    assert_equal(code_from_grpc_status(15), CODE_DATA_LOSS)
+    # A status gRPC does not define is UNKNOWN.
+    assert_equal(code_from_grpc_status(17), CODE_UNKNOWN)
+    assert_equal(code_from_grpc_status(99), CODE_UNKNOWN)
+    assert_equal(code_from_grpc_status(-1), CODE_UNKNOWN)
+
+
+def test_grpc_status_error_names_the_code_not_the_text() raises:
+    var server_text = String(
+        "[grpc:7] Permission denied on projects/acme-secret-project for"
+        " leaked@example.com"
+    )
+    var e = GcpGrpcStatusError(
+        String("/google.storage.v2.Storage/ReadObject"), 7, server_text.byte_length()
+    )
+    assert_equal(e.code(), CODE_PERMISSION_DENIED)
+    var text = String(
+        gcp_grpc_status_error(
+            "/google.storage.v2.Storage/ReadObject", 7, server_text.byte_length()
+        )
+    )
+    assert_equal(text, e.message())
+    assert_equal(
+        text,
+        String("gRPC /google.storage.v2.Storage/ReadObject: PERMISSION_DENIED")
+        + " (code 7), error text "
+        + String(server_text.byte_length())
+        + " bytes",
+    )
+    for leak in ["acme-secret-project", "leaked@example.com", "Permission denied"]:
+        assert_false(_has(text, leak), String("echoed: ") + leak)
+
+
+def test_unknown_grpc_status_is_named_as_received() raises:
+    var text = String(gcp_grpc_status_error("/a.B/C", 42, 0))
+    assert_equal(
+        text, "gRPC /a.B/C: UNKNOWN (code 2), grpc-status 42, error text 0 bytes"
+    )
+
+
 def main() raises:
     test_full_envelope_is_classified()
     test_the_body_is_never_echoed()
@@ -332,4 +382,7 @@ def main() raises:
     test_non_utf8_message_is_counted_not_decoded()
     test_code_tables()
     test_http_status_mapping()
+    test_grpc_status_mapping()
+    test_grpc_status_error_names_the_code_not_the_text()
+    test_unknown_grpc_status_is_named_as_received()
     print("all gcp status tests passed")

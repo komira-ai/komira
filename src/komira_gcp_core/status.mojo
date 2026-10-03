@@ -24,6 +24,11 @@
 # for, as a number of milliseconds (`retry_delay_ms`; the retry classifier's
 # server delay). `gcp_status_error` is the contract the generated
 # REST clients call (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
+#
+# The same API called over gRPC answers with a gRPC status instead;
+# `gcp_grpc_status_error` (at the end of this file) is the generated gRPC
+# clients' contract, under the same rule: the server's text is counted, never
+# kept.
 # =============================================================================
 
 from komira_json import JsonValue, JSON_STRING, parse_json_bytes
@@ -336,3 +341,75 @@ def gcp_status_error(
 ) -> Error:
     """The `Error` a generated REST client raises for a non-2xx response."""
     return parse_gcp_status(verb, rpc, http_status, body).to_error()
+
+
+# =============================================================================
+# gRPC statuses.
+# =============================================================================
+#
+# A Google API called over gRPC states its failure as a gRPC status: the
+# `grpc-status` trailer (or a trailers-only response), with a free-text
+# `grpc-message` beside it. The generated gRPC clients (proto-codegen
+# `emit.rs`, `GCP_GRPC_STATUS_ERROR`) hand the status number and the length of
+# the error text here, and raise what comes back. As with the REST envelope,
+# the text is counted and never kept: a `grpc-message` carries what an
+# `error.message` carries.
+
+
+def code_from_grpc_status(grpc_status: Int) -> Int:
+    """The `google.rpc.Code` of a gRPC status.
+
+    gRPC's status codes are google.rpc.Code's, number for number (gRPC
+    doc/statuscodes.md; google/rpc/code.proto), so a code in 0..16 maps to
+    itself. Any other value is UNKNOWN: a client receiving a status it does
+    not know treats it as UNKNOWN (the same document)."""
+    if grpc_status < CODE_OK or grpc_status > CODE_UNAUTHENTICATED:
+        return CODE_UNKNOWN
+    return grpc_status
+
+
+@fieldwise_init
+struct GcpGrpcStatusError(Copyable, Movable, Deinitable):
+    """A failed Google API call over gRPC, as much as can be said without the
+    server's text.
+
+    `grpc_status` is the number the server sent (or the runtime derived, for
+    a deadline or a cancellation); `code()` is its `google.rpc.Code`.
+    `message_bytes` is the byte length of the error text the transport
+    raised, which holds the `grpc-message`; the text itself is not kept."""
+
+    var rpc: String
+    var grpc_status: Int
+    var message_bytes: Int
+
+    def code(self) -> Int:
+        """The canonical `google.rpc.Code` (`code_from_grpc_status`)."""
+        return code_from_grpc_status(self.grpc_status)
+
+    def message(self) -> String:
+        """The error text: the RPC, the code and its name, and byte counts
+        only. A status outside google.rpc.Code is named as received."""
+        var out = (
+            String("gRPC ")
+            + self.rpc
+            + ": "
+            + code_name(self.code())
+            + " (code "
+            + String(self.code())
+            + ")"
+        )
+        if self.code() != self.grpc_status:
+            out += ", grpc-status " + String(self.grpc_status)
+        out += ", error text " + String(self.message_bytes) + " bytes"
+        return out^
+
+    def to_error(self) -> Error:
+        return Error(self.message())
+
+
+def gcp_grpc_status_error(
+    rpc: String, grpc_status: Int, message_bytes: Int
+) -> Error:
+    """The `Error` a generated gRPC client raises for a call that ended in a
+    non-OK gRPC status. `rpc` is the method's path (`/pkg.Service/Method`)."""
+    return GcpGrpcStatusError(rpc.copy(), grpc_status, message_bytes).to_error()
