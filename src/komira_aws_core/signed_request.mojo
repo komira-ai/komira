@@ -7,13 +7,14 @@
 # content type, body bytes and the operation's extra headers -- into the
 # exact SigV4-signed request, at the time the clock says. It opens no
 # socket. The transport half, `send_sigv4_signed_request` (aws_send.mojo),
-# takes the same arguments plus the connector factory, calls this once per
-# attempt, and hands the request to komira_http_client. Generated clients
-# call it (emit_aws/mod.rs, a client's `send`):
-# `send_sigv4_signed_request[C: Connector](mk_connector, method, cred,
-# region, service, endpoint, uri, content_type, body: List[UInt8],
-# extra: List[Header], retry_safe: Bool = False, s3_200_error: Bool = False)
-# raises -> HttpResult`. The tests cell's stand-in
+# takes the same arguments plus the connector factory and the client's retry
+# quota, calls this once per attempt, and hands the request to
+# komira_http_client. Generated clients call it (emit_aws/mod.rs, a
+# client's `send`):
+# `send_sigv4_signed_request[C: Connector](mk_connector, mut retry_quota:
+# AwsRetryQuota, method, cred, region, service, endpoint, uri,
+# content_type, body: List[UInt8], extra: List[Header], s3_200_error: Bool
+# = False) raises -> HttpResult`. The tests cell's stand-in
 # (tools/build/tests/functional/mojo_aws_client/stub/komira_aws_core) has
 # that signature; the real one keeps it, or both change together.
 #

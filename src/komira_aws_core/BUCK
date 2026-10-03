@@ -23,9 +23,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #   - aws_send.mojo, the transport half: send_sigv4_signed_request signs
 #     each attempt at the wall clock's time, sends it over
 #     komira_http_client through the client's Connector, and retries with
-#     komira_retry under aws_retry.mojo's classifier (the AWS SDKs'
-#     standard mode; a request that is not retry-safe is resent only when
-#     the service cannot have acted on it)
+#     komira_retry under aws_retry.mojo's classifier and the client's retry
+#     quota (botocore's standard mode: every operation retried alike,
+#     whatever its method, but a conditional write the service may have
+#     acted on, which is not resent)
 #   - the interpreter of the endpoint rulesets AWS publishes as data
 #     (endpoint_rules.mojo, over partitions.json), which reads no
 #     environment: every input is a parameter
@@ -62,17 +63,23 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # //tools/build/proto-codegen:rest_xml_verdicts, and the corpus they were
 # written from. Welding it makes this library's build depend on that Rust
 # tool and its run over the corpus, as well as on the corpus itself.
-# test_aws_retry checks the retry classifier and policy against botocore's
-# standard retry mode, reading botocore/retries/standard.py from the botocore
-# archive //third_party/botocore pins (`:retries`) and checking each of its
-# lists and constants, and the retry-safety rule over the transport errors
-# komira_http_client, its kernel and TLS dials and name resolution raise.
+# test_aws_retry checks the retry classifier, policy, attempt limits and
+# quota against botocore's standard retry mode, reading
+# botocore/retries/standard.py, quota.py and special.py from the botocore
+# archive //third_party/botocore pins (`:retries`) and checking each of
+# their lists and constants, and the transport errors komira_http_client,
+# its kernel and TLS dials and name resolution raise (all retried, the
+# timeouts at their own cost; for a conditional write only those raised
+# before the request was sent).
 # test_aws_send sends over komira_http_client and a scripted connector (no
-# socket): retries, re-signing at a later date, the attempt limit and its
-# backoff, the budget, S3's 200-with-<Error>, the request on the wire
-# (AwsEchoConnector), and the connector-factory entry point; and one dial
-# to a closed loopback port through the kernel connector, so the classifier
-# reads the text the production dial raises.
+# socket): retries, a POST resent after a 5xx and a dropped response, a
+# conditional write not resent after a 5xx or a dropped response but
+# resent after a throttle or a failed dial, re-signing at a later date,
+# the attempt limit and its backoff (four sends to DynamoDB), the quota,
+# S3's 200-with-<Error>, the request on the wire (AwsEchoConnector), and
+# the connector-factory entry point; and one dial to a closed loopback
+# port through the kernel connector, so the classifier reads the text the
+# production dial raises.
 # test_s3_endpoint_rules runs every case of botocore's S3 endpoint tests
 # through the ruleset interpreter (endpoint_rules.mojo) over S3's published
 # ruleset, and requires each to pass. test_env_source_only scans the
@@ -158,7 +165,12 @@ mojo_library(
         },
         "tests/test_s3_endpoint_rules.mojo": _ENDPOINT_RULES,
         "tests/test_aws_retry.mojo": {
-            "botocore/retries/standard.py": "//third_party/botocore:retries[botocore/retries/standard.py]",
+            f: "//third_party/botocore:retries[{}]".format(f)
+            for f in [
+                "botocore/retries/quota.py",
+                "botocore/retries/special.py",
+                "botocore/retries/standard.py",
+            ]
         },
         "tests/test_xml_canonical_differential.mojo": {
             "rest_xml_verdicts.tsv": "//tools/build/proto-codegen:rest_xml_verdicts",

@@ -16,9 +16,10 @@
 # `get_log_events` goes through `send`, parses a 200, and turns a non-2xx
 # into an error naming the operation, the status and the code and message
 # komira_aws_core's aws_json_error_info reads (an X-Amzn-Errortype code
-# included), never the raw body. It sends neither `retry_safe` nor
-# `s3_200_error` (the transport's defaults, False). Signing is tested in
-# komira//src/komira_aws_core.
+# included), never the raw body; that `send` hands the transport the
+# client's own retry quota, the one its calls share (500 at the start); and
+# that it does not send `s3_200_error` (the transport's default, False).
+# Signing and retries are tested in komira//src/komira_aws_core.
 from komira_aws_logs_client.komira_aws_logs_client import (
     CloudWatchLogsCloudWatchLogsClient,
     CloudWatchLogsGetLogEventsRequest,
@@ -112,9 +113,20 @@ def test_send_hands_the_transport() raises:
     # transport's own argument and is not repeated there.
     assert_equal(res.header(String("x-stub-extra-count")), "1")
     assert_equal(res.header(String("X-Amz-Target")), "Logs_20140328.GetLogEvents")
-    # GetLogEvents is not marked retry-safe and Logs is not S3.
-    assert_equal(res.header(String("x-stub-retry-safe")), "false")
+    # The client's retry quota, and Logs is not S3.
+    assert_equal(res.header(String("x-stub-retry-quota")), "500")
     assert_equal(res.header(String("x-stub-s3-200-error")), "false")
+
+
+def test_send_hands_over_the_clients_retry_quota() raises:
+    # One quota per client, kept across its calls: what was spent from it
+    # before a call is what the transport is handed, not a fresh quota.
+    var client = _Client(_mk_connector, _creds(), String("us-west-2"))
+    assert_true(client._retry_quota.try_spend(5))
+    var res = client.send(build_get_log_events_request(_request()))
+    assert_equal(res.header(String("x-stub-retry-quota")), "495")
+    var again = client.send(build_get_log_events_request(_request()))
+    assert_equal(again.header(String("x-stub-retry-quota")), "495")
 
 
 def test_send_keeps_the_session_token() raises:
@@ -259,6 +271,7 @@ def test_creds_source_threads_through() raises:
 
 def main() raises:
     test_send_hands_the_transport()
+    test_send_hands_over_the_clients_retry_quota()
     test_send_keeps_the_session_token()
     test_send_to_the_endpoint_override()
     test_send_takes_content_type_in_any_case()
