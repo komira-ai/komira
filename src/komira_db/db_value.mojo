@@ -12,7 +12,7 @@
 # RELOCATION DISCIPLINE (the keystone constraint): a `DbValue` accumulates into a
 # growing `List[DbValue]` in `to_row()`, so its element layout must be
 # relocation-safe under the synthesized move/copy that `List` relocation triggers.
-# Like `komira_pg.PgValue`, `DbValue` holds
+# Like `komira_db_postgres.wire.PgValue`, `DbValue` holds
 # EXACTLY ONE heap field — `_text: String` — the canonical carrier value, and
 # DERIVES every other rendering on demand. No second heap container, no nested
 # heap container, no UnsafePointer. The TEXT[] elements are carried inside the

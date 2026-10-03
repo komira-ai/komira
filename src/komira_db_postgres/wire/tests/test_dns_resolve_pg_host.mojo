@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/tests/test_dns_resolve_pg_host.mojo
+# komira_db_postgres/wire/tests/test_dns_resolve_pg_host.mojo
 # =============================================================================
 # Host resolution on the pg connect path: pg_tls._resolve_host_be takes the
 # IP-literal fast path for "localhost" / "" / dotted quads and falls through
@@ -76,4 +76,4 @@ def main() raises:
     test_pg_literal_fast_path_parity()
     test_pg_dns_name_resolves_not_raises()
     test_pg_nxdomain_still_raises()
-    print("PASS komira_pg DNS host resolution")
+    print("PASS komira_db_postgres.wire DNS host resolution")

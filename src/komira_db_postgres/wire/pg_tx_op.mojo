@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pg_tx_op.mojo — PgTxAsyncOp: a poll-shaped MULTI-STATEMENT
+# komira_db_postgres/wire/pg_tx_op.mojo — PgTxAsyncOp: a poll-shaped MULTI-STATEMENT
 # transaction over a single HELD connection.
 # =============================================================================
 # The single-EXECUTE `PgQueryOp` poll-shapes ONE round-trip. An application

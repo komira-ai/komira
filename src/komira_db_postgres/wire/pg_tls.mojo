@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pg_tls.mojo — Postgres SSLRequest preamble + TLS over the reactor
+# komira_db_postgres/wire/pg_tls.mojo — Postgres SSLRequest preamble + TLS over the reactor
 # =============================================================================
 #
 # The pg wire transport rides the shared `komira_async` reactor primitives: a

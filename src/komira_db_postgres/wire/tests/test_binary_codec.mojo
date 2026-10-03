@@ -1,4 +1,4 @@
-"""komira_pg BINARY-format codec round-trip guard.
+"""komira_db_postgres.wire BINARY-format codec round-trip guard.
 
 NO NETWORK. Exercises the extended-protocol BINARY codecs (pg_binary.mojo) +
 the binary-aware PgRow getters + the extended-protocol message encoders
@@ -537,6 +537,6 @@ def test_binary_codec() raises:
 
 
 def main() raises:
-    print("== komira_pg BINARY codec round-trip guard ==")
+    print("== komira_db_postgres.wire BINARY codec round-trip guard ==")
     test_binary_codec()
     print("== PASSED ==")

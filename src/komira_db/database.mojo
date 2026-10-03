@@ -4,7 +4,7 @@
 #
 # The backend-generic execution surface. `Database` is the
 # common seam across the concrete backends (pg = wire-to-server over
-# komira_pg; sqlite = FFI to embedded libsqlite3; pgstore = serverless-pg over
+# komira_db_postgres.wire; sqlite = FFI to embedded libsqlite3; pgstore = serverless-pg over
 # object-store) — designed against all so the trait bakes in NO backend's
 # assumptions.
 #

@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/tests/test_pg_query_op_poll.mojo — the poll-shaped pgwire READ
+# komira_db_postgres/wire/tests/test_pg_query_op_poll.mojo — the poll-shaped pgwire READ
 # =============================================================================
 # The concurrency + framing-cursor evidence for the poll-shaped pgwire READ.
 # Proves the foundation for suspendable handlers: ONE worker holds >1 PG query
@@ -560,4 +560,4 @@ def main() raises:
     test_frame_two_rows_split_between_messages()
     test_multiplex_two_queries_one_worker()
     test_repark_across_two_recvs_real_fd()
-    print("PASS komira_pg.pg_query_op_poll")
+    print("PASS komira_db_postgres.wire.pg_query_op_poll")

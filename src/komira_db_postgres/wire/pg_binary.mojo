@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pg_binary.mojo — binary-format codecs for the closed 7-OID set
+# komira_db_postgres/wire/pg_binary.mojo — binary-format codecs for the closed 7-OID set
 # =============================================================================
 #
 # The Postgres BINARY wire format

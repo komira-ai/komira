@@ -3,14 +3,14 @@
 # =============================================================================
 #
 # The Postgres backend: a `Database`-trait conformer over
-# `komira_pg`'s `PgConnection`. It completes the dual backend — the same
+# `komira_db_postgres.wire`'s `PgConnection`. It completes the dual backend — the same
 # generated `DbStorable` row type runs on BOTH sqlite (in-process FFI)
 # AND pg (wire-to-server over SCRAM-over-TLS).
 #
 # ENCAPSULATION — the STRONGEST possible: this driver contains ZERO
 # UnsafePointer, ZERO wildcard origin, ZERO unsafe_from_address. Every pointer /
-# raw-byte / FFI concern is already encapsulated INSIDE `komira_pg` (the s2n
-# TLS shim + the pgwire framing); the pg driver speaks only `komira_pg`'s safe
+# raw-byte / FFI concern is already encapsulated INSIDE `komira_db_postgres.wire` (the s2n
+# TLS shim + the pgwire framing); the pg driver speaks only `komira_db_postgres.wire`'s safe
 # surface: `PgValue` in, `PgRow` / `PgRows` / `UInt64` out. The komira_db public
 # surface is exactly `Database`: String / List[DbValue] in, DbRows / DbRow /
 # UInt64 out. Nothing unsafe crosses any boundary here. (Contrast the sqlite
@@ -18,7 +18,7 @@
 # driver needs neither — it is a pure safe-type adapter.)
 #
 # THE TYPED BINARY PATH (the point of this driver): execute / query route through
-# `komira_pg`'s PREPARED-STATEMENT BINARY path (`prepare` + `query_prepared` /
+# `komira_db_postgres.wire`'s PREPARED-STATEMENT BINARY path (`prepare` + `query_prepared` /
 # `execute_prepared`), so params bind in BINARY format and results decode from
 # BINARY format — exact types, no text-parse ambiguity. The `$N` placeholders the
 # generated INSERT renders (via `placeholder(i)`) are the pg extended-protocol
@@ -106,10 +106,10 @@ struct PgDatabase(SqlDatabase, PooledResource):
     control-plane access; a single connection is correct + sufficient for the
     sequential CRUD + claim workload.
 
-    All execution routes through the komira_pg PREPARED-STATEMENT BINARY path,
+    All execution routes through the komira_db_postgres.wire PREPARED-STATEMENT BINARY path,
     so the typed surface gets exact-typed values with no text-parse ambiguity.
     The public surface is exactly `Database` (String / List[DbValue] in, DbRows
-    out); ZERO UnsafePointer crosses this boundary (komira_pg already owns every
+    out); ZERO UnsafePointer crosses this boundary (komira_db_postgres.wire already owns every
     unsafe concern)."""
 
     var _conn: PgConnection

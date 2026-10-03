@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/connection.mojo — PgConfig + PgConnection state machine
+# komira_db_postgres/wire/connection.mojo — PgConfig + PgConnection state machine
 # =============================================================================
 #
 # `PgConnection`'s wire I/O rides the shared `komira_async` reactor

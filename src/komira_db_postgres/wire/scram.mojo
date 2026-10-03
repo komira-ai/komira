@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/scram.mojo — SCRAM-SHA-256 client driver
+# komira_db_postgres/wire/scram.mojo — SCRAM-SHA-256 client driver
 # =============================================================================
 #
 # Implements the RFC 5802 / RFC 7677 SCRAM-SHA-256 client computation on top

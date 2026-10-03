@@ -1,7 +1,7 @@
 """`komira_db_postgres` — the Postgres driver for `komira_db`.
 
 `PgDatabase` conforms to the backend-generic `SqlDatabase` trait over the
-`komira_pg` wire client; `PgPool` is the `Pool[PgDatabase]` specialization.
+`komira_db_postgres.wire` client; `PgPool` is the `Pool[PgDatabase]` specialization.
 
 Public surface:
   PgDatabase         — the Postgres `SqlDatabase` conformer

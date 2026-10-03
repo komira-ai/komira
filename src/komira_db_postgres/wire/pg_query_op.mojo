@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pg_query_op.mojo — frame-resumable poll-shaped PG EXECUTE round-trip
+# komira_db_postgres/wire/pg_query_op.mojo — frame-resumable poll-shaped PG EXECUTE round-trip
 # (start / poll / take_result).
 # =============================================================================
 # The pgwire READ as a frame-resumable state machine, so a worker can hold >1

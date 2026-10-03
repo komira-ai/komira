@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pg/pg_types.mojo — PgValue / PgRow / PgRows / PgError
+# komira_db_postgres/wire/pg_types.mojo — PgValue / PgRow / PgRows / PgError
 # =============================================================================
 #
 # The safe value / row / error types of the client. The SIMPLE-QUERY
