@@ -25,7 +25,7 @@
 # not a full commit id and a platform kci does not release. An empty set is
 # refused: there is nothing to approve.
 #
-# `kci build` prints it, `release.json` carries it, and `kci publish`
+# The BUILD step prints it, `release.json` carries it, and the PUBLISH step
 # recomputes it from the bytes on disk and compares it with the hash the
 # release was approved under.
 #

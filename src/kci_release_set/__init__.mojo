@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_release_set -- what `kci build` and `kci publish` both know about a
+# kci_release_set -- what the BUILD step and the PUBLISH step both know about a
 #   release set: one artifact directory checked, the conda metadata read,
 #   `release.json`, and the set hash.
 # =============================================================================

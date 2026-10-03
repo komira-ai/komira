@@ -20,7 +20,7 @@
 # {name, sha256, version} and the compiler-version change of the packer adds
 # `build`; the reader accepts both and records whether it was there
 # (`MetaMember.has_build`). Whether a release may ship a row without it is
-# `kci publish`'s rule, not the reader's.
+# the PUBLISH step's rule, not the reader's.
 #
 # Refused, naming the file and the key: not JSON, not an object, a key given
 # twice, an unknown key, a key of the other kind, a missing key, a value of
