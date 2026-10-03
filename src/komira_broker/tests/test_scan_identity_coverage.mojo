@@ -434,7 +434,7 @@ codec=zstd, estimated_rows=-1, empty schema), from the independent reference.
 It includes the snapshot token, which is what makes a rewritten file a
 different scan."""
 
-comptime BROKER_BID_ORDERS_P3_OFF1000: UInt64 = 5576424882752574727
+comptime BROKER_BID_ORDERS_P3_OFF1000: UInt64 = 10487422566028931375
 """`identity_hash()` of `broker_scan_binding("orders", 3, 1000, Schema())`.
 `SNAPSHOT_LIVE`, so the token is NOT folded — that exclusion is the
 identity/freshness split, and this literal is what pins it."""
@@ -508,7 +508,7 @@ def test_golden_rendered_plan_text_broker() raises:
     what make EXPLAIN readable for it."""
     var expected = String('Scan(path="orders", type=BINDING')
     expected += String(", binding=komira.broker.topic(orders")
-    expected += String(", partition=3, start_offset=1000, topic=orders)")
+    expected += String(", partitions=3, start_offset=1000, topic=orders)")
     expected += String(", bsid=17762514713362705584")
     expected += String(", bid=") + String(BROKER_BID_ORDERS_P3_OFF1000)
     expected += String(", source_kind=COLUMNAR)")
