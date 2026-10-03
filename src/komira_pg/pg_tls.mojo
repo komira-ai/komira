@@ -53,7 +53,7 @@ from komira_net.dns import resolve_host_be
 from komira_async.runtime.runtime_trait import Runtime
 from komira_async.runtime.tcp_stream import TcpStream
 
-from komira_http.tls.s2n_shim import (
+from komira_http_core.tls.s2n_shim import (
     TlsConfig,
     TlsConnection,
     TLS_OUTCOME_DONE,
