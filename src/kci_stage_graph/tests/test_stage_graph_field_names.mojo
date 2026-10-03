@@ -23,6 +23,8 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("step.declarations"))
     want.append(String("step.channels"))
     want.append(String("step.channel"))
+    # reserved: refused as "needs a newer kci" until validations land
+    want.append(String("step.validation"))
     assert_equal(len(got), len(want))
     for i in range(len(want)):
         assert_equal(got[i], want[i])

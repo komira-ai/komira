@@ -3,7 +3,8 @@
 #   steps of each (format `kci.machine`).
 # =============================================================================
 #
-#   graph.mojo  StageGraph, Stage, StageStep and `validate_stage_graph`
+#   graph.mojo  StageGraph, Stage, StageStep, `validate_stage_graph`, and
+#               `resolve_selection` (`kci run --only` against one stage)
 #   parse.mojo  `parse_machine_file`, `machine_schema_version`,
 #               `machine_field_names`
 #
@@ -19,8 +20,10 @@ from kci_stage_graph.graph import (
     Stage,
     StageGraph,
     StageStep,
+    Selection,
     is_stage_or_step_name,
     joined_names,
+    resolve_selection,
     validate_stage_graph,
 )
 from kci_stage_graph.parse import machine_field_names, machine_schema_version, parse_machine_file

@@ -4,8 +4,8 @@
 # =============================================================================
 #
 # A STAGE is a named list of STEPS that one `kci run --stage <name>` runs, in
-# order. Its name is also the CI job that runs it and the CI environment that
-# job runs in (kci_ci_check holds a workflow to that). `after` names the one
+# order. Its name is also the CI job that runs it and the GitHub environment
+# that job runs in (kci_ci_check holds a workflow to that). `after` names the one
 # stage that must have finished first; it names an EARLIER stage, so the
 # graph has no cycle by construction.
 #
@@ -21,7 +21,25 @@
 #                                                       "needs a newer kci"
 #
 # A stage may hold steps of different kinds. The kind words are
-# kci_contract's (verbs.mojo).
+# kci_contract's (verbs.mojo), and so is the name grammar (selection.mojo).
+#
+# DEPLOY, reserved. When its body lands, a DEPLOY step names a CELL (one
+# deploy target: an account or project in one region), and the cell names
+# its CLOUD (the deploy-target adapter that turns resources into calls). A
+# platform stays OS + CPU only; it never names a cloud. No field for either
+# exists yet.
+#
+# VALIDATIONS, reserved. A step will carry `validation { name: ... }` blocks
+# that check its end state. The parser refuses one as "needs a newer kci",
+# so a file written for a later kci is refused clearly, and
+# `--only validation:<name>` is refused because no stage declares one.
+#
+# SELECTION. `resolve_selection` turns `kci run --only ...` into the steps
+# to run (file order, whatever the order on the command line) and the run's
+# scope. A selector that matches nothing in the stage is refused, listing
+# the stage's step and validation names: a selective run that runs nothing
+# is never a pass. Any `--only` makes the run SELECTIVE, even one that
+# selects every step.
 #
 # `validate_stage_graph` holds every rule the parser cannot see field by
 # field; a parsed graph is always a valid one. Paths are kept as written: a
@@ -30,11 +48,21 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from kci_contract import ACTION_BUILD, ACTION_DEPLOY, ACTION_PUBLISH, require_release_platform
+from kci_contract import (
+    SCOPE_FULL,
+    SCOPE_SELECTIVE,
+    STEP_KIND_BUILD,
+    STEP_KIND_DEPLOY,
+    STEP_KIND_PUBLISH,
+    STEP_NAME_MAX_BYTES,
+    Selector,
+    is_step_name,
+    require_release_platform,
+)
 
-comptime NAME_MAX_BYTES: Int = 63
-"""Longest stage or step name: a stage name is also a CI job id and a CI
-environment name."""
+comptime NAME_MAX_BYTES: Int = STEP_NAME_MAX_BYTES
+"""Longest stage or step name: a stage name is also a CI job id and a
+GitHub environment name (kci_contract states the number)."""
 
 
 struct StageStep(Copyable, Movable):
@@ -60,10 +88,10 @@ struct StageStep(Copyable, Movable):
         self.line = line
 
     def is_build(self) -> Bool:
-        return self.kind == ACTION_BUILD
+        return self.kind == STEP_KIND_BUILD
 
     def is_publish(self) -> Bool:
-        return self.kind == ACTION_PUBLISH
+        return self.kind == STEP_KIND_PUBLISH
 
 
 struct Stage(Copyable, Movable):
@@ -149,20 +177,9 @@ def joined_names(names: List[String]) -> String:
 
 
 def is_stage_or_step_name(name: String) -> Bool:
-    """`[a-z][a-z0-9-]*`, at most `NAME_MAX_BYTES` bytes, not ending in `-`."""
-    var b = name.as_bytes()
-    if len(b) == 0 or len(b) > NAME_MAX_BYTES:
-        return False
-    for i in range(len(b)):
-        var c = Int(b[i])
-        var lower = c >= 97 and c <= 122
-        if i == 0:
-            if not lower:
-                return False
-            continue
-        if not (lower or (c >= 48 and c <= 57) or c == 45):
-            return False
-    return Int(b[len(b) - 1]) != 45
+    """`[a-z][a-z0-9-]*`, at most `NAME_MAX_BYTES` bytes, not ending in `-`
+    (kci_contract's `is_step_name`)."""
+    return is_step_name(name)
 
 
 def _at(source: String, line: Int) -> String:
@@ -178,12 +195,12 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
             + String("'; a step name is [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
             + String(" bytes, not ending in '-'")
         )
-    if step.kind == ACTION_DEPLOY:
+    if step.kind == STEP_KIND_DEPLOY:
         raise Error(
             _at(source, step.line) + where
             + String(" is a DEPLOY step: that kind needs a newer kci (this kci runs BUILD and PUBLISH steps)")
         )
-    if step.kind != ACTION_BUILD and step.kind != ACTION_PUBLISH:
+    if step.kind != STEP_KIND_BUILD and step.kind != STEP_KIND_PUBLISH:
         if step.kind.byte_length() == 0:
             raise Error(_at(source, step.line) + where + String(" has no kind (BUILD or PUBLISH)"))
         raise Error(
@@ -198,7 +215,7 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
         raise Error(_at(source, step.line) + where + String(": ") + String(e))
     if step.declarations.byte_length() == 0:
         raise Error(_at(source, step.line) + where + String(" has no declarations (the artifact declarations file)"))
-    if step.kind == ACTION_BUILD:
+    if step.kind == STEP_KIND_BUILD:
         if step.channels.byte_length() > 0 or step.channel.byte_length() > 0:
             raise Error(
                 _at(source, step.line) + where
@@ -224,7 +241,7 @@ def validate_stage_graph(g: StageGraph, source: String) raises:
             raise Error(
                 _at(source, s.line) + String("stage name '") + s.name
                 + String("' is not [a-z][a-z0-9-]*, at most ") + String(NAME_MAX_BYTES)
-                + String(" bytes, not ending in '-' (it is also a CI job id and a CI environment name)")
+                + String(" bytes, not ending in '-' (it is also a CI job id and a GitHub environment name)")
             )
         for j in range(i):
             if g.stages[j].name == s.name:
@@ -254,3 +271,74 @@ def validate_stage_graph(g: StageGraph, source: String) raises:
                         _at(source, s.steps[k].line) + String("stage '") + s.name + String("' has two steps named '")
                         + s.steps[k].name + String("' (first on line ") + String(s.steps[m].line) + String(")")
                     )
+
+
+# ---- selection -----------------------------------------------------------------
+
+
+struct Selection(Copyable, Movable):
+    """What one `kci run` runs of a stage (file header, SELECTION).
+
+    `steps[i]` says whether the stage's step i runs; the steps run in file
+    order. `validations` names the validations selected on their own (empty
+    until the format has validations). `only` is every selector, canonical,
+    in the order given. `scope` is FULL or SELECTIVE.
+
+    Layout: owned values only. No pointer field."""
+
+    var steps: List[Bool]
+    var validations: List[String]
+    var only: List[String]
+    var scope: String
+
+    def __init__(out self):
+        self.steps = List[Bool]()
+        self.validations = List[String]()
+        self.only = List[String]()
+        self.scope = String(SCOPE_FULL)
+
+    def selected_count(self) -> Int:
+        var n = 0
+        for i in range(len(self.steps)):
+            if self.steps[i]:
+                n += 1
+        return n
+
+
+def _names_of(stage: Stage) -> String:
+    var steps = joined_names(stage.step_names())
+    return (
+        String("its steps: ") + steps
+        + String("; its validations: (none: no stage declares one yet)")
+    )
+
+
+def resolve_selection(stage: Stage, selectors: List[Selector]) raises -> Selection:
+    """The steps of `stage` that `selectors` select (file header). No
+    selector selects every step, FULL. Refuses a selector that matches
+    nothing in the stage, naming the stage's step and validation names."""
+    var sel = Selection()
+    for i in range(len(stage.steps)):
+        sel.steps.append(len(selectors) == 0)
+    if len(selectors) == 0:
+        return sel^
+    sel.scope = String(SCOPE_SELECTIVE)
+    for i in range(len(selectors)):
+        ref s = selectors[i]
+        sel.only.append(s.canonical())
+        if s.is_validation():
+            raise Error(
+                String("--only '") + s.canonical() + String("' matches nothing: stage '") + stage.name
+                + String("' declares no validations (validations need a newer kci); ") + _names_of(stage)
+            )
+        var found = False
+        for k in range(len(stage.steps)):
+            if stage.steps[k].name == s.name:
+                sel.steps[k] = True
+                found = True
+        if not found:
+            raise Error(
+                String("--only '") + s.canonical() + String("' matches no step of stage '") + stage.name
+                + String("'; ") + _names_of(stage)
+            )
+    return sel^

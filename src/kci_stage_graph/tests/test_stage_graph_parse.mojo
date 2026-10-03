@@ -170,6 +170,24 @@ def test_step_kinds() raises:
     )
 
 
+def test_validation_needs_a_newer_kci() raises:
+    # `step.validation` is reserved: refused, naming its line, like DEPLOY
+    var text = _one_stage(
+        String(" name: \"b\"\n step {\n name: \"s\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\"\n")
+        + String(" validation { name: \"smoke\" }\n }\n")
+    )
+    assert_equal(
+        _refusal(text),
+        String("machine file: line 6: step 's' of stage 'b' declares a validation: validations need a newer kci")
+        + String(" (this kci runs BUILD and PUBLISH steps)"),
+    )
+    # before the step's name is read, the step is named by its stage
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n step { validation { name: \"v\" } name: \"s\" }\n")),
+        String("line 4: a step of stage 'b' declares a validation"),
+    )
+
+
 def test_step_inputs() raises:
     _assert_refused(
         _one_stage(String(" name: \"b\"\n step { name: \"s\" kind: BUILD declarations: \"d\" }\n")),
