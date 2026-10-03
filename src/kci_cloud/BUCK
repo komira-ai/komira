@@ -6,7 +6,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # built-in clouds; every cloud declares every catalog type), the validate
 # phase (graph, coverage and limit findings, one pass, one refusal text),
 # plan / apply / destroy that validate before lowering, and the conformance
-# kit. Names no cloud; the in-memory reference clouds are kci_cloud_mem.
+# kit. Names no cloud; the fake clouds are kci_cloud_fake.
 #
 # komira_proto_codec is here for the welded tests, which read graphs in the
 # proto3 JSON form an author writes.
