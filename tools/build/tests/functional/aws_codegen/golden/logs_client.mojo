@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 4
+#   generator    : aws-client-gen version 5
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -159,6 +159,10 @@ struct CloudWatchLogsGetLogEventsRequest(Copyable, Movable, Deinitable):
         self.limit = Optional[Int32]()
         self.start_from_head = Optional[Bool]()
         self.unmask = Optional[Bool]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -349,6 +353,10 @@ struct CloudWatchLogsGetLogEventsResponse(Copyable, Movable, Deinitable):
         self.next_forward_token = Optional[String]()
         self.next_backward_token = Optional[String]()
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -450,6 +458,10 @@ struct CloudWatchLogsInvalidParameterException(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -505,6 +517,10 @@ struct CloudWatchLogsOutputLogEvent(Copyable, Movable, Deinitable):
         self.timestamp = Optional[Int64]()
         self.message = Optional[String]()
         self.ingestion_time = Optional[Int64]()
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -605,6 +621,10 @@ struct CloudWatchLogsResourceNotFoundException(Copyable, Movable, Deinitable):
     def __init__(out self):
         pass
 
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
+
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
@@ -652,6 +672,10 @@ struct CloudWatchLogsServiceUnavailableException(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         pass
+
+    def __init__(out self, *, copy: Self):
+        """Explicit, never bitwise: a List copies its elements with it."""
+        self = copy.copy()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""

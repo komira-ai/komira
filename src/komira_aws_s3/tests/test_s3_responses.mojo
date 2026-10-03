@@ -465,10 +465,7 @@ def test_delete_objects_result() raises:
     var resp = AwsResponse.of_text(200, body)
     resp.add_header(String("x-amz-request-charged"), String("requester"))
     var out = parse_delete_objects_response(resp)
-    # Read in place. A List.copy() of these lists has corrupted the heap of
-    # this test binary under the pinned Mojo compiler (List[T] where T has
-    # the generated explicit __deinit__), so the rows here do not copy.
-    ref deleted = out.deleted.value()
+    var deleted = out.deleted.value().copy()
     assert_equal(len(deleted), 2)
     assert_equal(deleted[0].key.value(), "data/part-0.parquet")
     assert_false(Bool(deleted[0].delete_marker))
@@ -479,7 +476,7 @@ def test_delete_objects_result() raises:
         deleted[1].delete_marker_version_id.value(),
         "A._w1z6EFiCF5uhtQMDal9JDkID9tQ7F",
     )
-    ref errors = out.errors.value()
+    var errors = out.errors.value().copy()
     assert_equal(len(errors), 2)
     assert_equal(errors[0].key.value(), "locked/a.parquet")
     assert_equal(errors[0].version_id.value(), "3/L4kqtJlcpXroDTDmJ+rmSpXd3dIbrHY")
@@ -489,6 +486,56 @@ def test_delete_objects_result() raises:
     assert_equal(errors[1].code.value(), "InternalError")
     assert_false(Bool(errors[1].version_id))
     assert_equal(out.request_charged.value(), "requester")
+
+
+def test_delete_objects_result_copies_deeply() raises:
+    # A copy of the result, or of either list, owns its own members:
+    # destroying it leaves the parsed result whole. Each key is longer than
+    # a String's inline capacity, so it is a heap buffer that a shallow
+    # (memcpy) copy of the list would share and then free on destruction.
+    var long0 = String("warehouse/sales/year=2026/part-00000.parquet")
+    var long1 = String("warehouse/sales/year=2026/part-00001.parquet")
+    var version = String("A._w1z6EFiCF5uhtQMDal9JDkID9tQ7F")
+    var failed = String("warehouse/locked/year=2026/part-00002.parquet")
+    var body = String(
+        "<DeleteResult "
+        + _NS
+        + "><Deleted><Key>"
+        + long0
+        + "</Key></Deleted><Deleted><Key>"
+        + long1
+        + "</Key><DeleteMarker>true</DeleteMarker><DeleteMarkerVersionId>"
+        + version
+        + "</DeleteMarkerVersionId></Deleted><Error><Key>"
+        + failed
+        + "</Key><Code>AccessDenied</Code>"
+        + "<Message>Access Denied for this object key</Message></Error>"
+        + "</DeleteResult>"
+    )
+    var out = parse_delete_objects_response(AwsResponse.of_text(200, body))
+    for _round in range(3):
+        var deleted = out.deleted.value().copy()
+        assert_equal(deleted[1].key.value(), long1)
+        _ = deleted^
+        var errors = out.errors.value().copy()
+        assert_equal(errors[0].key.value(), failed)
+        _ = errors^
+        var whole = out.copy()
+        assert_equal(whole.deleted.value()[0].key.value(), long0)
+        _ = whole^
+        # Allocations the size of the keys, to take any buffer the copies
+        # freed from under the result.
+        var filler = List[String]()
+        for _i in range(32):
+            filler.append(String("x") * 48)
+        assert_equal(out.deleted.value()[0].key.value(), long0)
+        assert_equal(out.deleted.value()[1].key.value(), long1)
+        assert_equal(out.deleted.value()[1].delete_marker_version_id.value(), version)
+        assert_equal(out.errors.value()[0].key.value(), failed)
+        assert_equal(
+            out.errors.value()[0].message.value(), "Access Denied for this object key"
+        )
+        assert_equal(len(filler), 32)
 
 
 def test_delete_objects_quiet_result() raises:
@@ -547,6 +594,7 @@ def main() raises:
     test_head_error_has_no_body()
     test_redirect_names_its_code()
     test_delete_objects_result()
+    test_delete_objects_result_copies_deeply()
     test_delete_objects_quiet_result()
     test_delete_objects_200_error_is_raised()
     print("OK")

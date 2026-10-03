@@ -81,7 +81,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "4";
+pub const AWS_GENERATOR_VERSION: &str = "5";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -1144,6 +1144,19 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
 
         // -- copy ----------------------------------------------------------
+        // An explicit copy constructor: the 1.0.0 compiler can report the
+        // synthesized one of a struct with an explicit `__deinit__` as
+        // trivial (it did for S3's `DeletedObject`: three `Optional[String]`
+        // and an `Optional[Bool]`), and `List.copy()` then copies the
+        // elements with memcpy, so two lists share each String buffer and
+        // the first one destroyed frees it under the other. A user-defined
+        // constructor is never trivial.
+        self.line("def __init__(out self, *, copy: Self):");
+        self.push();
+        self.line("\"\"\"Explicit, never bitwise: a List copies its elements with it.\"\"\"");
+        self.line("self = copy.copy()");
+        self.pop();
+        self.blank();
         self.line("def copy(self) -> Self:");
         self.push();
         self.line("\"\"\"Deep clone. Explicit, not implicit: every member is heap-owning.\"\"\"");
