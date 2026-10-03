@@ -4,7 +4,6 @@ load("@komira//tools/build/mojo:download.bzl", "pinned_file")
 load(":defs.bzl", "botocore_model")
 load(
     ":models.bzl",
-    "BOTOCORE_ENDPOINT_ONLY",
     "BOTOCORE_MODELS",
     "BOTOCORE_PARTITIONS_PATH",
     "botocore_endpoint_rules_path",
@@ -82,17 +81,15 @@ archive_files(
 )
 
 # The endpoint data, every file of it read here and nowhere else: the
-# endpoint ruleset of each service of models.bzl (BOTOCORE_MODELS and
-# BOTOCORE_ENDPOINT_ONLY), the partition table their `aws.partition` reads,
-# botocore's endpoint test cases for each, and the model of each
-# BOTOCORE_ENDPOINT_ONLY service, against which a test client's bindings
-# are checked. Each file is a sub-target named by its path
+# endpoint ruleset of each service of models.bzl (BOTOCORE_MODELS), the
+# partition table their `aws.partition` reads, and botocore's endpoint test
+# cases for each. Each file is a sub-target named by its path
 # (`botocore_endpoint_file`), read by the generated clients
 # (`botocore_model(...).endpoint_rules` / `.partitions`), komira_aws_core's
 # endpoint ruleset tests (test_s3_endpoint_rules, test_endpoint_rules_library)
 # and the generated clients' endpoint tests
 # (komira//tools/build/proto-codegen/aws_endpoint_rules).
-_ENDPOINT_SERVICES = sorted(BOTOCORE_MODELS.keys() + BOTOCORE_ENDPOINT_ONLY.keys())
+_ENDPOINT_SERVICES = sorted(BOTOCORE_MODELS.keys())
 
 archive_files(
     name = "endpoint_rules",
@@ -102,7 +99,7 @@ archive_files(
         p
         for s in _ENDPOINT_SERVICES
         for p in [botocore_endpoint_rules_path(s), botocore_endpoint_tests_path(s)]
-    ] + [botocore_model_path(s) for s in sorted(BOTOCORE_ENDPOINT_ONLY)],
+    ],
     strip_prefix = "botocore-1.43.70",
     visibility = ["PUBLIC"],
 )

@@ -18,9 +18,6 @@ ruleset, `endpoint-rule-set-1.json` beside the model, is
 `botocore_model("logs").partitions`. Both are sub-targets of BUCK's
 `:endpoint_rules`, the one place the archive's endpoint files are read
 (`botocore_endpoint_file`).
-
-BOTOCORE_ENDPOINT_ONLY names the services whose endpoint files are read with
-no client generated from their model: service -> api version.
 """
 
 BOTOCORE_MODELS = {
@@ -38,14 +35,10 @@ BOTOCORE_MODELS = {
     ),
 }
 
-BOTOCORE_ENDPOINT_ONLY = {}
-
 def _api_version(service):
     if service in BOTOCORE_MODELS:
         return BOTOCORE_MODELS[service].api_version
-    if service in BOTOCORE_ENDPOINT_ONLY:
-        return BOTOCORE_ENDPOINT_ONLY[service]
-    fail("botocore service `{}` is in neither BOTOCORE_MODELS nor BOTOCORE_ENDPOINT_ONLY".format(service))
+    fail("botocore service `{}` is not in BOTOCORE_MODELS".format(service))
 
 def botocore_model_path(service):
     """The model's path in the archive, under its top directory."""

@@ -1,8 +1,6 @@
 load(
     "@komira//third_party/botocore:models.bzl",
-    "BOTOCORE_PARTITIONS_PATH",
     "botocore_endpoint_file",
-    "botocore_endpoint_rules_path",
     "botocore_endpoint_tests_path",
     "botocore_model",
     "botocore_model_path",
@@ -60,6 +58,8 @@ aws_client(
 # botocore's S3 endpoint cases is resolved through it.
 _S3_MODEL = botocore_model_path("s3")
 
+_S3 = botocore_model("s3")
+
 aws_client(
     name = "endpoint_bindings",
     model = "model/endpoint_bindings.json",
@@ -75,12 +75,12 @@ aws_client(
         "PutTarget",
         "WriteGetObjectResponse",
     ],
-    endpoint_rules = botocore_endpoint_file(botocore_endpoint_rules_path("s3")),
-    partitions = botocore_endpoint_file(BOTOCORE_PARTITIONS_PATH),
+    endpoint_rules = _S3.endpoint_rules,
+    partitions = _S3.partitions,
     deps = _RUNTIME,
     test_srcs = ["test_endpoint_bindings.mojo"],
     test_data = {"test_endpoint_bindings.mojo": _ENDPOINT_TESTS["s3"] | {
-        _S3_MODEL: botocore_model("s3").model,
+        _S3_MODEL: _S3.model,
         "model/endpoint_bindings.json": "model/endpoint_bindings.json",
     }},
 )
