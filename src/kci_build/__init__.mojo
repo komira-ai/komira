@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_build -- one BUILD action of a stage: one build per declared artifact,
+# kci_build -- one BUILD step of a stage: one build per declared artifact,
 #   each into its own empty directory, every result verified, then
 #   `release.json`.
 # =============================================================================
@@ -11,12 +11,12 @@
 #                           against the checkout, the stamp derived from git
 #   supervisor_runner.mojo  SupervisorRunner: real processes (komira_supervisor)
 #   scripted_runner.mojo    ScriptedRunner: the test double
-#   build.mojo              run_build: the flow, and the action's part of the
-#                           run's result document
+#   build.mojo              run_build: the flow (and the --plan path), and
+#                           the step's part of the run's result document
 #
 # What to build, and with which program, is the declarations file's
 # (kci_artifact_declaration); what a build must leave is checked by
-# kci_release_set.verify_member, the same function `kci publish` runs. The
+# kci_release_set.verify_member, the same function a PUBLISH step runs. The
 # command line is the kci binary's (one parser for every verb); this package
 # parses none.
 # =============================================================================

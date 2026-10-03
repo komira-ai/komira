@@ -1,18 +1,20 @@
 # =============================================================================
-# src/kci_build/request.mojo -- what one BUILD action of a stage is asked to
+# src/kci_build/request.mojo -- what one BUILD step of a stage is asked to
 #   do, and how it ends.
 # =============================================================================
 #
 # Every input arrives in `BuildRequest`; nothing under kci_build reads the
 # environment or parses a command line (the kci binary's one parser builds
-# the request from its flags and the machine file's BUILD action).
+# the request from its flags and the machine file's BUILD step).
 #
 # How a build ends is an OUTCOME word and an error id from kci_contract;
 # the exit number follows from those two (kci_contract's exit table), so
 # this package spells no exit number:
 #
 #   SUCCEEDED      every declared artifact was built and verified, and
-#                  `release.json` was written
+#                  `release.json` was written; under `plan`, every
+#                  declaration rendered for the resolved revision and
+#                  nothing was built
 #   REFUSED        an input, the checkout, or a build's output breaks the
 #                  contract; later artifacts not built. Error ids:
 #                  KCI-E-DECLARATION, KCI-E-PLATFORM, KCI-E-REVISION,
@@ -49,12 +51,15 @@ comptime DEFAULT_BUILD_TIMEOUT_S: Int = 3600
 
 
 struct BuildRequest(Copyable, Movable):
-    """The inputs of one BUILD action. `release_dir` is the top release
-    directory (`--release-dir`); this action writes only under
-    `<release_dir>/<platform>` (kci_contract's layout).
+    """The inputs of one BUILD step. `step_name` is the step's name in the
+    machine file (the result's `steps[].name`). `release_dir` is the top
+    release directory (`--release-dir`); this step writes only under
+    `<release_dir>/<platform>` (kci_contract's layout). `plan` is `kci run
+    --plan`: resolve and render, build nothing (build.mojo).
 
     Layout: owned values only. No pointer field."""
 
+    var step_name: String
     var declarations_file: String
     var work_dir: String
     var release_dir: String
@@ -63,8 +68,10 @@ struct BuildRequest(Copyable, Movable):
     var platform: String
     var run: RunIdentity
     var build_timeout_s: Int
+    var plan: Bool
 
     def __init__(out self, var run: RunIdentity):
+        self.step_name = String("")
         self.declarations_file = String("")
         self.work_dir = String("")
         self.release_dir = String("")
@@ -73,15 +80,16 @@ struct BuildRequest(Copyable, Movable):
         self.platform = String("")
         self.run = run^
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
+        self.plan = False
 
     def platform_dir(self) raises -> String:
-        """`<release_dir>/<platform>`: the directory this action builds into,
+        """`<release_dir>/<platform>`: the directory this step builds into,
         and what `{release_dir}` stands for in the declarations."""
         return release_platform_dir(self.release_dir, self.platform)
 
 
 struct BuildOutcome(Copyable, Movable):
-    """How a BUILD action ended: its outcome, the error id (empty on
+    """How a BUILD step ended: its outcome, the error id (empty on
     success), one message, and on success the lines to print (one per
     member, then `SET_HASH <hex>`) and the set hash.
 

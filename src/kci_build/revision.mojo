@@ -24,7 +24,7 @@
 # `{revision_id}`, `{source_commit}`, `{build_number}` and `{timestamp_ms}`.
 # Steps 4 to 6 are the rule of tools/build/package/release_version.sh (the
 # newest first-parent commit at or below C that touches anything but
-# documentation, so a documentation-only commit never raises N). kci publish
+# documentation, so a documentation-only commit never raises N). A PUBLISH step
 # compares every built package against that script's output at the release
 # commit and refuses a difference, so if the two ever disagree no package of
 # the run is shipped.

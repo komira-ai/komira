@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_build/tests/test_build_flow.mojo
-#   One BUILD action over ScriptedRunner and MemoryRecorder: one build per
+#   One BUILD step over ScriptedRunner and MemoryRecorder: one build per
 #   declared artifact, in file order, each into its own empty directory under
 #   <--release-dir>/<platform>; every stop (exit, signal, timeout, not
 #   startable, every verify_member refusal, a symlinked entry) with its
@@ -11,7 +11,8 @@
 #   a later build rewriting an earlier member refused before release.json;
 #   release.json (major 2: revision, platform, produced_by) last on success,
 #   with the set hash printed; the RUNNING record before the first effect,
-#   and the action's row, artifacts and error in the result document.
+#   and the step's row, artifacts and error in the result document; and
+#   --plan: the revision resolved, nothing built, no release directory.
 # =============================================================================
 #
 # Every file a build would have left (package, manifest.json, metadata.json)
@@ -34,8 +35,8 @@ from komira_crypto import hex_lower_array_32, sha256_string
 
 from kci_artifact_declaration import ReleaseStamp, read_artifact_declarations, render_build_argv
 from kci_contract import (
-    ACTION_BUILD,
     ARTIFACT_BUILT,
+    ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
     ERROR_CANNOT_TELL,
     ERROR_DECLARATION,
@@ -53,6 +54,7 @@ from kci_contract import (
     OUTCOME_SUCCEEDED,
     RETRY_SAFE,
     STATUS_RUNNING,
+    STEP_KIND_BUILD,
     MemoryRecorder,
     RunIdentity,
     RunRecorder,
@@ -148,6 +150,7 @@ def _request(root: String, decls_text: String = String(_THREE)) raises -> BuildR
     r.revision_id = String(_REV)
     r.platform = String(_PLATFORM)
     r.build_timeout_s = 99
+    r.step_name = String("build-linux")
     return r^
 
 
@@ -523,8 +526,8 @@ def _refused_before_running(tag: String, var req: BuildRequest, error_id: String
     assert_equal(len(runner.calls), 0)
     assert_false(exists(req.log_dir))
     assert_equal(result.error.id, error_id)
-    assert_equal(len(result.actions), 1)
-    assert_equal(result.actions[0].kind, String(ACTION_BUILD))
+    assert_equal(len(result.steps), 1)
+    assert_equal(result.steps[0].kind, String(STEP_KIND_BUILD))
     assert_equal(len(result.artifacts), 0)
 
 
@@ -1037,7 +1040,53 @@ def test_a_symlinked_member_dir_is_refused() raises:
 # ---- the release identity and the result document --------------------------
 
 
-def test_release_json_is_major_2_and_the_result_records_the_action() raises:
+def test_plan_builds_nothing_and_creates_no_release_dir() raises:
+    var root = _fresh(String("plan"))
+    var req = _request(root)
+    req.plan = True
+    var runner = ScriptedRunner()
+    var git = _git_ok()
+    var result = KciRunResult(String("run"), String("run"))
+    var rec = MemoryRecorder()
+    var outcome = run_build(req, result, rec, runner, git)
+    assert_equal(outcome.exit_code(), EXIT_OK, outcome.message)
+    # the revision was resolved (every git read ran) and no build ran
+    assert_equal(git.remaining(), 0)
+    assert_equal(len(runner.calls), 0)
+    # nothing under --release-dir: no platform directory, no release.json
+    assert_false(exists(req.release_dir))
+    assert_false(exists(_release_json(req)))
+    assert_true(outcome.message.find(String("nothing was built")) >= 0, outcome.message)
+    # the RUNNING record came first; the step's row names the step
+    assert_equal(len(rec.statuses), 1)
+    assert_equal(len(result.steps), 1)
+    assert_equal(result.steps[0].name, String("build-linux"))
+    assert_equal(result.steps[0].kind, String(STEP_KIND_BUILD))
+    assert_equal(result.steps[0].outcome, String(OUTCOME_SUCCEEDED))
+    # one WOULD_BUILD row per declared artifact, in file order; no set hash
+    var names = _names()
+    assert_equal(len(result.artifacts), len(names))
+    for i in range(len(names)):
+        assert_equal(result.artifacts[i].effect, String(ARTIFACT_WOULD_BUILD))
+        assert_equal(result.artifacts[i].name, names[i])
+        assert_equal(result.artifacts[i].revision, String(_REV))
+        assert_equal(result.artifacts[i].platform, String(_PLATFORM))
+    assert_equal(result.set_hash, String(""))
+    result.plan = True
+    var done = result.finish_record(outcome.outcome.copy(), 1)
+    assert_equal(done.exit_code, EXIT_OK)
+
+
+def test_plan_still_refuses_what_a_run_would_refuse() raises:
+    var req = _request(_fresh(String("plan_rev")))
+    req.plan = True
+    req.revision_id = String("a1b2c3d")
+    _refused_before_running(
+        String("plan_rev"), req^, String(ERROR_REVISION), String("kci build: --revision-id 'a1b2c3d' is not a full commit id")
+    )
+
+
+def test_release_json_is_major_2_and_the_result_records_the_step() raises:
     var root = _fresh(String("identity"))
     var req = _request(root)
     var runner = ScriptedRunner()
@@ -1060,21 +1109,23 @@ def test_release_json_is_major_2_and_the_result_records_the_action() raises:
     for i in range(len(r.entries)):
         assert_equal(r.entries[i].platform, String(_PLATFORM))
     # the result: one RUNNING record so far (FINISHED is the caller's), the
-    # action's row, one BUILT row per member naming the revision, the set hash
+    # step's row, one BUILT row per member naming the revision, the set hash
     assert_equal(len(rec.statuses), 1)
     assert_equal(rec.statuses[0], String(STATUS_RUNNING))
     assert_true(rec.records[0].find(String('"revision":"') + String(_REV) + String('"')) >= 0, rec.records[0])
     assert_true(rec.records[0].find(String('"run_id":"gh-7"')) >= 0, rec.records[0])
-    assert_equal(len(result.actions), 1)
-    assert_equal(result.actions[0].kind, String(ACTION_BUILD))
-    assert_equal(result.actions[0].platform, String(_PLATFORM))
-    assert_equal(result.actions[0].outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(len(result.steps), 1)
+    assert_equal(result.steps[0].kind, String(STEP_KIND_BUILD))
+    assert_equal(result.steps[0].platform, String(_PLATFORM))
+    assert_equal(result.steps[0].outcome, String(OUTCOME_SUCCEEDED))
+    assert_equal(result.steps[0].name, String("build-linux"))
+    assert_true(result.steps[0].selected)
     assert_false(result.has_error)
     assert_equal(result.set_hash, String(_SET_THREE))
     assert_equal(len(result.artifacts), 3)
     for i in range(len(result.artifacts)):
         ref a = result.artifacts[i]
-        assert_equal(a.action, String(ARTIFACT_BUILT))
+        assert_equal(a.effect, String(ARTIFACT_BUILT))
         assert_equal(a.revision, String(_REV))
         assert_equal(a.platform, String(_PLATFORM))
         assert_equal(a.subdir, String("linux-64"))
@@ -1151,7 +1202,7 @@ def test_a_failed_build_is_exit_4_safe_to_retry_and_recorded() raises:
     assert_equal(outcome.exit_code(), EXIT_FAILED)
     assert_equal(result.error.id, String(ERROR_BUILD_FAILED))
     assert_equal(result.error.message, outcome.message)
-    assert_equal(result.actions[0].outcome, String(OUTCOME_FAILED))
+    assert_equal(result.steps[0].outcome, String(OUTCOME_FAILED))
     assert_equal(len(result.artifacts), 0)
     assert_equal(result.set_hash, String(""))
     var done = result.finish_record(outcome.outcome.copy(), 1)

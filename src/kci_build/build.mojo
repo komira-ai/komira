@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_build/build.mojo -- one BUILD action: one build per declared
+# src/kci_build/build.mojo -- one BUILD step: one build per declared
 #   artifact, each into its own empty directory, then `release.json` last.
 # =============================================================================
 #
@@ -18,12 +18,19 @@
 #    validate (kci_artifact_declaration).
 # 1. `recorder.begin` gets the RUNNING record (kci_contract's result
 #    document) BEFORE the first effect (the first mkdir, the first git
-#    command). A recorder that cannot record stops the action FAILED with
+#    command). A recorder that cannot record stops the step FAILED with
 #    nothing done.
 # 2. Derive the release stamp from git at `--revision-id`
 #    (revision.mojo, through the `git` runner): refused for a shallow
 #    clone, a HEAD that is not the revision, or modified tracked files,
 #    before any build runs.
+#    PLAN (`req.plan`, `kci run --plan`) stops here: each declaration's argv
+#    is rendered for the resolved stamp (a declaration that does not render
+#    is REFUSED, as it would be in a real run), and nothing else happens: no
+#    build runs, the platform's release directory is not created and no
+#    `release.json` is written. The git reads above did run, and their logs
+#    went to `--log-dir` (never under `--release-dir`). Each artifact gets
+#    an `artifacts[]` row with effect WOULD_BUILD.
 # 3. For each artifact, in declarations-file order, one at a time (the order
 #    is the contract's: a metapackage declared last reads, under
 #    `{release_dir}`, the manifests of every artifact above it, each already
@@ -39,7 +46,7 @@
 #         artifact, the command line and the end of stderr; a build that
 #         cannot be started is INDETERMINATE; either way, stop;
 #      d. `kci_release_set.verify_member(name, <P>/<name>)`, and the
-#         manifest's `platform` must be the action's or `noarch`: REFUSED
+#         manifest's `platform` must be the step's or `noarch`: REFUSED
 #         otherwise; stop.
 # 4. Only when every artifact passed, and before `release.json`:
 #      a. `<P>` must hold exactly the declared member directories: a build
@@ -52,17 +59,17 @@
 #    Then write `<P>/release.json` LAST (kci.release_set major 2: the
 #    revision, the platform, `produced_by` = --run-id/--attempt, the members
 #    and the set hash). It is the commit marker: a run that stopped leaves
-#    member directories and no `release.json`, and `kci publish` refuses a
+#    member directories and no `release.json`, and a PUBLISH step refuses a
 #    directory without one.
-# 5. The run's result document gets this action's row (kind BUILD, the
-#    platform, the outcome), one `artifacts[]` row per member (action BUILT,
-#    with the revision and the member's platform), the set hash, and the
-#    first error. Writing the FINISHED record is the caller's: a stage may
-#    hold more actions.
+# 5. The run's result document gets this step's row (its name, kind BUILD,
+#    the platform, the outcome), one `artifacts[]` row per member (effect
+#    BUILT, or WOULD_BUILD under plan, with the revision and the member's
+#    platform), the set hash, and the first error. Writing the FINISHED
+#    record is the caller's: a stage may hold more steps.
 #
 # Nothing run-specific reaches a member's files: the run id and attempt are
 # in `release.json` (outside the set hash) and in the result, never in an
-# argv (a build's manifest.json is written inside cached build actions, and a
+# argv (a build's manifest.json is written inside cached Buck2 actions, and a
 # per-run value would make every run a cache miss).
 #
 # Human progress lines go to STDERR; the outcome's message and lines are the
@@ -90,8 +97,8 @@ from std.os.path import exists, isdir, realpath
 from kci_artifact_declaration import read_artifact_declarations, render_build_argv
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
 from kci_contract import (
-    ACTION_BUILD,
     ARTIFACT_BUILT,
+    ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
     ERROR_CANNOT_TELL,
     ERROR_DECLARATION,
@@ -105,8 +112,9 @@ from kci_contract import (
     OUTCOME_INDETERMINATE,
     OUTCOME_REFUSED,
     RELEASE_MANIFEST_NAME,
-    ResultAction,
+    STEP_KIND_BUILD,
     ResultArtifact,
+    ResultStep,
     RunRecorder,
     require_full_commit_id,
     require_member_platform,
@@ -284,9 +292,11 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
     mut runner: R,
     mut git: G,
     mut members: List[ReleaseMember],
+    mut planned: List[String],
 ) -> BuildOutcome:
     """Steps 0 to 4 of the file header; `members` gets the verified members
-    of a run that wrote `release.json`."""
+    of a run that wrote `release.json`, `planned` the artifact names a plan
+    would build."""
     try:
         require_release_platform(req.platform)
     except e:
@@ -346,6 +356,32 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
             + String(", commit time ") + String(stamp.timestamp_ms) + String(" ms"),
             file=_STDERR,
         )
+        if req.plan:
+            # PLAN (file header): render every declaration, build nothing,
+            # create nothing under --release-dir.
+            var would = List[String]()
+            for i in range(len(decls.artifacts)):
+                var name = decls.artifacts[i].name.copy()
+                var argv: List[String]
+                try:
+                    argv = render_build_argv(decls, name, pdir, req.platform, stamp)
+                except e:
+                    return _refused(String(ERROR_DECLARATION), String("artifact '") + name + String("': ") + String(e))
+                var line = String("")
+                for k in range(len(argv)):
+                    if k > 0:
+                        line += String(" ")
+                    line += argv[k]
+                print(String("kci build: plan: would build ") + name + String(": ") + line, file=_STDERR)
+                would.append(name^)
+            var o = BuildOutcome.succeeded(
+                String("kci build: plan: ") + String(len(would))
+                + String(" artifact(s) would be built into ") + pdir + String("; nothing was built"),
+            )
+            for i in range(len(would)):
+                o.lines.append(String("WOULD_BUILD ") + would[i])
+            planned = would^
+            return o^
         makedirs(pdir, exist_ok=True)
         var out = realpath(pdir)
         var built = List[ReleaseMember]()
@@ -388,7 +424,7 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
                 return _refused(
                     String(ERROR_PLATFORM_MISMATCH),
                     String("artifact '") + name + String("': its manifest's ") + String(e)
-                    + String(" (this action builds for ") + req.platform + String(")"),
+                    + String(" (this step builds for ") + req.platform + String(")"),
                 )
             built.append(m^)
         var names = List[String]()
@@ -441,19 +477,32 @@ def _build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
 
 
 def _record_result(
-    req: BuildRequest, o: BuildOutcome, members: List[ReleaseMember], mut result: KciRunResult
+    req: BuildRequest,
+    o: BuildOutcome,
+    members: List[ReleaseMember],
+    planned: List[String],
+    mut result: KciRunResult,
 ) raises:
     """Step 5 of the file header."""
-    result.actions.append(ResultAction(String(ACTION_BUILD), req.platform.copy(), o.outcome.copy()))
+    result.steps.append(
+        ResultStep(req.step_name.copy(), String(STEP_KIND_BUILD), req.platform.copy(), o.outcome.copy())
+    )
     if o.error_id.byte_length() > 0:
         result.set_error(o.error_id.copy(), o.message.copy())
     if not o.ok():
         return
+    for i in range(len(planned)):
+        var row = ResultArtifact()
+        row.effect = String(ARTIFACT_WOULD_BUILD)
+        row.name = planned[i].copy()
+        row.platform = req.platform.copy()
+        row.revision = req.revision_id.copy()
+        result.artifacts.append(row^)
     result.set_hash = o.set_hash.copy()
     for i in range(len(members)):
         ref m = members[i]
         var row = ResultArtifact()
-        row.action = String(ARTIFACT_BUILT)
+        row.effect = String(ARTIFACT_BUILT)
         row.artifact_type = m.manifest.artifact_type.copy()
         row.build = m.build()
         row.file = m.manifest.file.copy()
@@ -469,20 +518,21 @@ def _record_result(
 def run_build[R: ProcessRunner, G: ProcessRunner, C: RunRecorder](
     req: BuildRequest, mut result: KciRunResult, mut recorder: C, mut runner: R, mut git: G
 ) -> BuildOutcome:
-    """One BUILD action (file header). `git` runs the git commands of
+    """One BUILD step (file header). `git` runs the git commands of
     revision.mojo, `runner` the builds: two seams, so a test scripts each on
     its own. `recorder.begin` is called once, before the first effect; the
-    action's row, artifacts, set hash and first error go into `result`.
+    step's row, artifacts, set hash and first error go into `result`.
     Never raises."""
     var members = List[ReleaseMember]()
-    var o = _build(req, result, recorder, runner, git, members)
+    var planned = List[String]()
+    var o = _build(req, result, recorder, runner, git, members, planned)
     try:
-        _record_result(req, o, members, result)
+        _record_result(req, o, members, planned, result)
     except e:
         var lost = BuildOutcome(
             String(OUTCOME_INDETERMINATE),
             String(ERROR_CANNOT_TELL),
-            o.message + String("\nkci build: the result document could not record this action: ") + String(e),
+            o.message + String("\nkci build: the result document could not record this step: ") + String(e),
         )
         return lost^
     return o^
