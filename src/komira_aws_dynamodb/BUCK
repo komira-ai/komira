@@ -45,8 +45,7 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # end against independently computed signatures) and test_no_env_reads
 # (the generated module reads no environment).
 #
-# No test here talks to the service. Integration tests against LocalStack
-# join with the test-services area that runs it on the farm.
+# No test here talks to the service.
 
 _DYNAMODB = botocore_model("dynamodb")
 

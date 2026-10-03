@@ -4,21 +4,19 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check")
 
 # mojo_aws_client in client mode, checked at GENERATION only. run_tests.sh (test
 # 35) builds :komira_aws_logs_client_send_surface by name, never this
-# package's pattern: the client library itself does not compile here, since
-# client-mode code imports komira_http_core and the transport half of
-# komira_aws_core, and no stub of either exists in this cell. What is pinned
-# is that `mode = "client"` reaches the generator without `--pure-only`: the
-# generated module carries the signed-send surface, its komira_http_core import
-# and the error builder that reads an error's code and message through
-# komira_aws_core's aws_json_error_info. (Pure mode leaving all of that out
-# is the `absent` of ../mojo_aws_client's gen_check.)
-#
-# Client-mode code is compiled against the REAL komira_aws_core, the HTTP
-# client and its welded tests in the komira cell: komira//src/komira_aws_s3
-# (restXml) and komira//src/komira_aws_sqs (awsJson) are client mode. This
-# cell cannot depend on those libraries (each cell's MojoPkgTSet is a
-# different type), and a stub of the transport here would be a second
-# copy of the send signature to keep in step.
+# package's pattern. What is pinned is that `mode = "client"` reaches the
+# generator without `--pure-only`: the generated module carries the
+# signed-send surface, its komira_http_core import and the error builder
+# that reads an error's code and message through komira_aws_core's
+# aws_json_error_info. (Pure mode leaving all of that out is the `absent`
+# of ../mojo_aws_client's gen_check.) The client library itself is not
+# compiled here: client-mode code imports komira_http_core and the
+# transport half of komira_aws_core, and this cell neither depends on the
+# komira cell's (each cell's MojoPkgTSet is a different type) nor stubs
+# them, since a stub would be a second copy of the send signature to keep
+# in step. It is compiled against the REAL core, with its welded tests, in
+# the komira cell: komira//src/komira_aws_s3 (restXml) and
+# komira//src/komira_aws_sqs (awsJson) are client mode.
 
 _LOGS = botocore_model("logs")
 

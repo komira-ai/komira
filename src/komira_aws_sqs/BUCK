@@ -44,11 +44,11 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # LocalStack endpoints, and two requests signed end to end against
 # independently computed signatures), test_no_env_reads (the generated
 # module reads no environment) and test_sqs_client (the generated client
-# over a scripted connector: a call answered, and a missing queue raised
-# under its query code).
+# over a scripted connector: a call answered, a missing queue raised under
+# its query code, and the GetQueueUrl request as it reached the wire,
+# through komira_aws_core's AwsEchoConnector).
 #
-# No test here talks to the service. Integration tests against LocalStack
-# join with the test-services area that runs it on the farm.
+# No test here talks to the service.
 
 _SQS = botocore_model("sqs")
 

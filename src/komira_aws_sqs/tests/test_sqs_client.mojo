@@ -6,14 +6,26 @@
 # client raises the query code, AWS.SimpleQueueService.NonExistentQueue, as
 # botocore and the Go v2 SDK report it. Both answers are a POST's, and the
 # error is a 400, so nothing is retried.
+#
+# Then the GetQueueUrl request as it reached the wire: the client is given
+# komira_aws_core's AwsEchoConnector, whose answer is an awsJson error
+# naming the request head, so the row asserts the request line, the Host
+# the endpoint ruleset resolved, the awsJson target and query-mode headers
+# and the SigV4 scope, through the generated client.
 from komira_aws_sqs.komira_aws_sqs import (
     SQSEndpointConfig,
     SQSGetQueueUrlRequest,
     SQSSQSClient,
 )
-from komira_aws_core import AwsCredential, StaticCredsSource
+from komira_aws_core import (
+    AWS_ECHO_CODE,
+    AwsCredential,
+    AwsEchoConnector,
+    StaticCredsSource,
+)
+from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
-from std.testing import assert_equal, assert_raises
+from std.testing import assert_equal, assert_raises, assert_true
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -63,12 +75,12 @@ def _mk_missing() raises -> ScriptedConnector:
     )
 
 
-def _client(
-    mk: def () raises thin -> ScriptedConnector,
-) raises -> SQSSQSClient[ScriptedConnector, StaticCredsSource]:
+def _client[C: Connector](
+    mk: def () raises thin -> C,
+) raises -> SQSSQSClient[C, StaticCredsSource]:
     var config = SQSEndpointConfig()
     config.endpoint = Optional[String](String("http://127.0.0.1:9324"))
-    return SQSSQSClient[ScriptedConnector, StaticCredsSource](
+    return SQSSQSClient[C, StaticCredsSource](
         mk,
         StaticCredsSource(
             AwsCredential(
@@ -99,7 +111,34 @@ def test_a_missing_queue_is_raised_under_its_query_code() raises:
         _ = client.get_queue_url(SQSGetQueueUrlRequest(String("gone")))
 
 
+def _mk_echo() raises -> AwsEchoConnector:
+    return AwsEchoConnector.json()
+
+
+def test_get_queue_url_on_the_wire() raises:
+    var client = _client(_mk_echo)
+    var wire = String("")
+    try:
+        _ = client.get_queue_url(SQSGetQueueUrlRequest(String("jobs")))
+    except e:
+        var text = String(e)
+        var marker = String("GetQueueUrl failed: HTTP 400 ") + AWS_ECHO_CODE + " "
+        var at = text.find(marker)
+        assert_true(at >= 0, text)
+        wire = String(text[byte = at + marker.byte_length() : text.byte_length()]).lower()
+    assert_true(wire.startswith("post / http/1.1 | "), wire)
+    for want in [
+        "host: 127.0.0.1:9324",
+        "x-amz-target: amazonsqs.getqueueurl",
+        "x-amzn-query-mode: true",
+        "content-type: application/x-amz-json-1.0",
+        "/us-east-1/sqs/aws4_request, signedheaders=",
+    ]:
+        assert_true(wire.find(want) >= 0, String(want) + " is not in " + wire)
+
+
 def main() raises:
     test_get_queue_url()
     test_a_missing_queue_is_raised_under_its_query_code()
+    test_get_queue_url_on_the_wire()
     print("OK")
