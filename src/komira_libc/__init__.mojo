@@ -10,10 +10,11 @@
 # declaration per binary regardless of how many packages call it.
 #
 # Currently houses:
-#   * posix.mojo — `_read_env` (the one `getenv(3)` primitive, for platform
-#     handshake values and test-runner variables only; configuration is never
-#     read from the environment), the `access(2)` path probes, and
-#     `_thread_self`.
+#   * posix.mojo — the one `getenv(3)` declaration and its two readers:
+#     `_read_env` (platform handshake values and test-runner variables only;
+#     configuration is never read from the environment) and `_read_env_into`
+#     (secret material only, copied into a caller's byte buffer so it can be
+#     wiped); the `access(2)` path probes; and `_thread_self`.
 #
 # DO NOT add inline `external_call["getenv", ...]` calls anywhere
 # else, and do not add configuration readers here: configuration is a
