@@ -94,6 +94,8 @@ def test_the_metapackage_is_last_and_holds_every_library() raises:
     var labels = _flag_values(argv, String("--label"))
     assert_equal(len(labels), 1)
     assert_true(labels[0].endswith(String(_REV)))
+    # The label names the one verb for stages, `kci run`.
+    assert_equal(labels[0], String("kci run ") + String(_REV))
 
 
 def main() raises:

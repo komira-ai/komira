@@ -88,7 +88,7 @@ artifacts {
   args: "--extra-file"
   args: "info/licenses/LICENSE=LICENSE"
   args: "--label"
-  args: "kci build {revision_id}"
+  args: "kci run {revision_id}"
   args: "--out-dir"
   args: "{out_dir}"
 }
