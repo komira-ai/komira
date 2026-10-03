@@ -119,6 +119,7 @@ mojo_deps(
     name = "deps_lint",
     buck = "BUCK",
     srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
 )
 
 export_file(name = "tests/fixtures/tls/leaf_cert.pem", visibility = ["PUBLIC"])
