@@ -36,7 +36,16 @@
 from komira_encoding import base64_decode, base64_encode
 
 from ._flat_json import parse_top_level_strings
-from ._text import sub
+from ._text import inf64, nan64, sub, utf8_valid
+from ._time import (
+    DAY_NAMES,
+    MONTH_NAMES,
+    civil,
+    digits_at,
+    expect_byte,
+    from_fields,
+    parse_iso8601,
+)
 
 
 comptime AWS_TS_UNIX = 0
@@ -96,9 +105,9 @@ def aws_token_f64(v: Float64) -> AwsJsonToken:
     """A double: a number, or the string "NaN" / "Infinity" / "-Infinity"."""
     if v != v:
         return AwsJsonToken(AWS_JSON_STRING, String("NaN"))
-    if v == _inf():
+    if v == inf64():
         return AwsJsonToken(AWS_JSON_STRING, String("Infinity"))
-    if v == -_inf():
+    if v == -inf64():
         return AwsJsonToken(AWS_JSON_STRING, String("-Infinity"))
     return AwsJsonToken(AWS_JSON_NUMBER, String(v))
 
@@ -149,11 +158,11 @@ def aws_f64_from_token(tok: AwsJsonToken) raises -> Float64:
         return _number(tok.text)
     if tok.kind == AWS_JSON_STRING:
         if tok.text == "NaN":
-            return _nan()
+            return nan64()
         if tok.text == "Infinity":
-            return _inf()
+            return inf64()
         if tok.text == "-Infinity":
-            return -_inf()
+            return -inf64()
     raise Error("an awsJson double is neither a number nor NaN / Infinity")
 
 
@@ -175,7 +184,7 @@ def aws_ts_from_token(tok: AwsJsonToken) raises -> Float64:
         raise Error("an awsJson timestamp is neither a number nor a string")
     var b = tok.text.as_bytes()
     if len(b) >= 20 and b[4] == UInt8(0x2D) and b[7] == UInt8(0x2D):
-        return _parse_iso8601(tok.text)
+        return parse_iso8601(tok.text)
     if len(b) >= 29 and b[3] == UInt8(0x2C):
         return _parse_rfc822(tok.text)
     return _number(tok.text)
@@ -252,6 +261,22 @@ def aws_error_message_from_body(body: String) -> String:
     return String("")
 
 
+def aws_error_code_from_body(body: List[UInt8]) -> String:
+    """`aws_error_code_from_body` of a body held as bytes: "" when they are
+    not well-formed UTF-8."""
+    if not utf8_valid(Span(body)):
+        return String("")
+    return aws_error_code_from_body(String(unsafe_from_utf8=Span(body)))
+
+
+def aws_error_message_from_body(body: List[UInt8]) -> String:
+    """`aws_error_message_from_body` of a body held as bytes: "" when they
+    are not well-formed UTF-8."""
+    if not utf8_valid(Span(body)):
+        return String("")
+    return aws_error_message_from_body(String(unsafe_from_utf8=Span(body)))
+
+
 def _clean_message(m: String) -> String:
     var b = m.as_bytes()
     var cut = len(b)
@@ -273,16 +298,6 @@ def _clean_message(m: String) -> String:
 # -----------------------------------------------------------------------------
 # Numbers and calendar
 # -----------------------------------------------------------------------------
-
-
-def _nan() -> Float64:
-    var z = Float64(0.0)
-    return z / z
-
-
-def _inf() -> Float64:
-    var z = Float64(0.0)
-    return Float64(1.0) / z
 
 
 def _number(text: String) raises -> Float64:
@@ -331,35 +346,9 @@ def _pad(mut out: String, v: Int, width: Int):
     out += s
 
 
-def _civil(days: Int) -> Tuple[Int, Int, Int]:
-    """(year, month, day) of a day count since 1970-01-01."""
-    var z = days + 719468
-    var era = z // 146097
-    var doe = z - era * 146097
-    var yoe = (doe - doe // 1460 + doe // 36524 - doe // 146096) // 365
-    var y = yoe + era * 400
-    var doy = doe - (365 * yoe + yoe // 4 - yoe // 100)
-    var mp = (5 * doy + 2) // 153
-    var d = doy - (153 * mp + 2) // 5 + 1
-    var m = mp + 3 if mp < 10 else mp - 9
-    if m <= 2:
-        y += 1
-    return (y, m, d)
-
-
-def _days_from_civil(y0: Int, m: Int, d: Int) -> Int:
-    var y = y0 - 1 if m <= 2 else y0
-    var era = y // 400
-    var yoe = y - era * 400
-    var mp = m - 3 if m > 2 else m + 9
-    var doy = (153 * mp + 2) // 5 + d - 1
-    var doe = yoe * 365 + yoe // 4 - yoe // 100 + doy
-    return era * 146097 + doe - 719468
-
-
 def _iso8601(ms: Int) -> String:
     var secs = ms // 1000
-    var ymd = _civil(secs // 86400)
+    var ymd = civil(secs // 86400)
     var t = secs % 86400
     var out = String("")
     _pad(out, ymd[0], 4)
@@ -379,18 +368,14 @@ def _iso8601(ms: Int) -> String:
     return out^
 
 
-comptime _DAYS = "SunMonTueWedThuFriSat"
-comptime _MONTHS = "JanFebMarAprMayJunJulAugSepOctNovDec"
-
-
 def _rfc822(secs: Int) -> String:
     var days = secs // 86400
-    var ymd = _civil(days)
+    var ymd = civil(days)
     var t = secs % 86400
     var wd = (days + 4) % 7  # 1970-01-01 was a Thursday
-    var out = sub(String(_DAYS), wd * 3, wd * 3 + 3) + ", "
+    var out = sub(String(DAY_NAMES), wd * 3, wd * 3 + 3) + ", "
     _pad(out, ymd[2], 2)
-    out += " " + sub(String(_MONTHS), (ymd[1] - 1) * 3, ymd[1] * 3) + " "
+    out += " " + sub(String(MONTH_NAMES), (ymd[1] - 1) * 3, ymd[1] * 3) + " "
     _pad(out, ymd[0], 4)
     out += " "
     _pad(out, t // 3600, 2)
@@ -402,99 +387,26 @@ def _rfc822(secs: Int) -> String:
     return out^
 
 
-def _digits(b: Span[UInt8, _], at: Int, n: Int) raises -> Int:
-    if at + n > len(b):
-        raise Error("an AWS timestamp is truncated")
-    var v = 0
-    for i in range(at, at + n):
-        if b[i] < UInt8(0x30) or b[i] > UInt8(0x39):
-            raise Error("an AWS timestamp has a non-digit where a digit belongs")
-        v = v * 10 + Int(b[i] - UInt8(0x30))
-    return v
-
-
-def _expect(b: Span[UInt8, _], at: Int, c: UInt8) raises:
-    if at >= len(b) or b[at] != c:
-        raise Error("an AWS timestamp is malformed")
-
-
-def _from_fields(
-    y: Int, mo: Int, d: Int, h: Int, mi: Int, s: Int
-) raises -> Int:
-    if mo < 1 or mo > 12 or d < 1 or d > 31 or h > 23 or mi > 59 or s > 60:
-        raise Error("an AWS timestamp has a field out of range")
-    var days = _days_from_civil(y, mo, d)
-    var back = _civil(days)
-    if back[1] != mo or back[2] != d:
-        raise Error("an AWS timestamp names a day that does not exist")
-    return days * 86400 + h * 3600 + mi * 60 + s
-
-
-def _parse_iso8601(text: String) raises -> Float64:
-    """YYYY-MM-DDTHH:MM:SS[.f+](Z|+HH:MM|-HH:MM)."""
-    var b = text.as_bytes()
-    var y = _digits(b, 0, 4)
-    _expect(b, 4, UInt8(0x2D))
-    var mo = _digits(b, 5, 2)
-    _expect(b, 7, UInt8(0x2D))
-    var d = _digits(b, 8, 2)
-    if b[10] != UInt8(0x54) and b[10] != UInt8(0x74):
-        raise Error("an AWS timestamp is malformed")
-    var h = _digits(b, 11, 2)
-    _expect(b, 13, UInt8(0x3A))
-    var mi = _digits(b, 14, 2)
-    _expect(b, 16, UInt8(0x3A))
-    var s = _digits(b, 17, 2)
-    var i = 19
-    var frac = Float64(0.0)
-    if i < len(b) and b[i] == UInt8(0x2E):
-        i += 1
-        var scale = Float64(0.1)
-        var start = i
-        while i < len(b) and b[i] >= UInt8(0x30) and b[i] <= UInt8(0x39):
-            frac += Float64(Int(b[i] - UInt8(0x30))) * scale
-            scale /= 10.0
-            i += 1
-        if i == start:
-            raise Error("an AWS timestamp has an empty fraction")
-    var offset = 0
-    if i < len(b) and (b[i] == UInt8(0x5A) or b[i] == UInt8(0x7A)):
-        i += 1
-    elif i < len(b) and (b[i] == UInt8(0x2B) or b[i] == UInt8(0x2D)):
-        var sign = 1 if b[i] == UInt8(0x2B) else -1
-        var oh = _digits(b, i + 1, 2)
-        _expect(b, i + 3, UInt8(0x3A))
-        var om = _digits(b, i + 4, 2)
-        offset = sign * (oh * 3600 + om * 60)
-        i += 6
-    else:
-        raise Error("an AWS timestamp has no time zone")
-    if i != len(b):
-        raise Error("an AWS timestamp has text after it")
-    var secs = _from_fields(y, mo, d, h, mi, s) - offset
-    return Float64(secs) + frac
-
-
 def _parse_rfc822(text: String) raises -> Float64:
     """`Www, DD Mmm YYYY HH:MM:SS GMT` (IMF-fixdate)."""
     var b = text.as_bytes()
     if len(b) != 29:
         raise Error("an AWS timestamp is malformed")
-    var d = _digits(b, 5, 2)
+    var d = digits_at(b, 5, 2)
     var mon = sub(text, 8, 11)
     var mo = 0
-    var months = String(_MONTHS)
+    var months = String(MONTH_NAMES)
     for k in range(12):
         if sub(months, k * 3, k * 3 + 3) == mon:
             mo = k + 1
     if mo == 0:
         raise Error("an AWS timestamp has an unknown month")
-    var y = _digits(b, 12, 4)
-    var h = _digits(b, 17, 2)
-    _expect(b, 19, UInt8(0x3A))
-    var mi = _digits(b, 20, 2)
-    _expect(b, 22, UInt8(0x3A))
-    var s = _digits(b, 23, 2)
+    var y = digits_at(b, 12, 4)
+    var h = digits_at(b, 17, 2)
+    expect_byte(b, 19, UInt8(0x3A))
+    var mi = digits_at(b, 20, 2)
+    expect_byte(b, 22, UInt8(0x3A))
+    var s = digits_at(b, 23, 2)
     if sub(text, 25, 29) != " GMT":
         raise Error("an AWS timestamp is not in GMT")
-    return Float64(_from_fields(y, mo, d, h, mi, s))
+    return Float64(from_fields(y, mo, d, h, mi, s))

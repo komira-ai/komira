@@ -23,7 +23,7 @@
 # byte lists that drop at function return, so this matters here.
 # =============================================================================
 
-from komira_http.client.auth import BearerTokenSource
+from komira_http_client.auth import BearerTokenSource
 
 from komira_k8s.k8s_text import strip_trailing_ws
 

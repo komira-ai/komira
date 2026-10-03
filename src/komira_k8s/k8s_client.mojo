@@ -30,7 +30,7 @@
 # rotation) via cfg.read_token().
 # =============================================================================
 
-from komira_http.client.auth import BearerTokenProvider
+from komira_http_client.auth import BearerTokenProvider
 
 from komira_k8s.k8s_config import InClusterConfig, K8sTokenSource
 from komira_k8s.k8s_tls import (

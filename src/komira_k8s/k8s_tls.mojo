@@ -42,26 +42,26 @@ from komira_async.reactor.reactor import Reactor
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 from komira_async.runtime.runtime_trait import Runtime
 
-from komira_http.client.auth import AuthProvider
-from komira_http.client.body import BytesBody, EmptyBody
-from komira_http.client.client import (
+from komira_http_client.auth import AuthProvider
+from komira_http_client.body import BytesBody, EmptyBody
+from komira_http_client.client import (
     HttpClient,
     build_get_request,
     build_request_with_body,
 )
-from komira_http.client.header_map import HeaderMap
-from komira_http.client.pool import VERIFY_PEER, VERIFY_SKIP
-from komira_http.client.service import ClientRequest
-from komira_http.client.url import Url
-from komira_http.transport.kernel_tcp import KernelTcpConnector
-from komira_http.client.tls_connector import TlsConnector
-from komira_http.codec.types import (
+from komira_http_client.header_map import HeaderMap
+from komira_http_client.pool import VERIFY_PEER, VERIFY_SKIP
+from komira_http_client.service import ClientRequest
+from komira_http_client.url import Url
+from komira_http_core.transport.kernel_tcp import KernelTcpConnector
+from komira_http_client.tls_connector import TlsConnector
+from komira_http_core.codec.types import (
     HTTP_METHOD_DELETE,
     HTTP_METHOD_GET,
     HTTP_METHOD_POST,
     HttpMethod,
 )
-from komira_http.tls.s2n_shim import TlsConfig
+from komira_http_core.tls.s2n_shim import TlsConfig
 
 from komira_k8s.k8s_text import owned_utf8_from_span
 
@@ -186,7 +186,7 @@ def k8s_https_request_authed[
 
     auth.apply(headers) injects `Authorization: Bearer <token>` (the token is
     re-read per request for projected-token rotation — the seam lives in
-    `komira_http.client.auth`, not hand-wired here). The request is built into
+    `komira_http_client.auth`, not hand-wired here). The request is built into
     a `ClientRequest`, sent via `HttpClient.send_buffered[RT]` (which owns ALL
     body accumulation on its reactor-park path — no borrow across the park
     here), and the buffered body is mapped to the typed `HttpResponse`.
