@@ -135,7 +135,7 @@ def test_example_file_renders_the_stamped_library_then_the_metapackage() raises:
             "--extra-file",
             "info/licenses/LICENSE=LICENSE",
             "--label",
-            "kci build a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
+            "kci run a1b2c3d4e5f60718293a4b5c6d7e8f9012345678",
             "--out-dir",
             "/work/rel/komira_all",
         ),
