@@ -21,7 +21,10 @@
 # case of either kind, or one this client could resolve, changes it. The
 # other 228 are resolved. A case that sets no `ResourceArn` is resolved
 # with the plain table name `table_name`, which every operation sends:
-# not an ARN, so the ruleset's ARN rules do not apply to it.
+# not an ARN, so the ruleset's ARN rules do not apply to it (a named row
+# below pins that). A case's parameters are the whole set the ruleset
+# sees, so the config's SDK-default `AccountIdEndpointMode` is cleared
+# before a case's own are set.
 #
 # The signed rows are the whole send-side chain -- built, resolved, signed
 # with komira_aws_core's build_sigv4_signed_request -- for a fixed clock
@@ -213,6 +216,9 @@ def _case_config(tc: JsonValue, mut table: String) raises -> DynamoDBEndpointCon
     """The generated config holding the case's parameters, and in `table`
     its ResourceArn (else the plain table name every operation sends)."""
     var c = DynamoDBEndpointConfig()
+    # A case's parameters are the whole set the ruleset sees, so the mode
+    # the config starts with (the SDKs' `preferred`) is cleared first.
+    c.account_id_endpoint_mode = Optional[String]()
     table = String("table_name")
     var pi = _find(tc, "params")
     if pi < 0:
@@ -275,6 +281,17 @@ def _check_case(rules: EndpointRuleSet, tc: JsonValue, mut why: String) raises -
                 if t.signing_name != "dynamodb" or t.signing_region != want_region:
                     why = "signs as " + t.signing_name + "/" + t.signing_region
                     return False
+            else:
+                # A custom endpoint needs no region to resolve, and there is
+                # then none to sign with.
+                try:
+                    _ = aws_signing_target(got, String(""), String("dynamodb"))
+                    why = "signed with no region"
+                    return False
+                except e:
+                    if String(e).find("no signing region") < 0:
+                        why = "signing refused with: " + String(e)
+                        return False
         except e:
             why = "raised: " + String(e)
             return False
@@ -359,14 +376,23 @@ def test_fips_and_dual_stack() raises:
 
 def test_account_based_endpoint() raises:
     # The account-based host (`<account>.ddb.<region>.amazonaws.com`) is
-    # chosen only when `account_id_endpoint_mode` says so. Unset, the
-    # ruleset sees no mode and answers the regional host even with an
-    # account id: AWS SDKs default the AWS::Auth::AccountIdEndpointMode
-    # built-in to `preferred`, and this config, which reads nothing, leaves
-    # that choice to its caller.
+    # chosen by `account_id_endpoint_mode`, which starts as `preferred`, the
+    # AWS SDKs' default for the AWS::Auth::AccountIdEndpointMode built-in:
+    # an account id alone picks it. Cleared, the ruleset sees no mode and
+    # answers the regional host even with an account id.
+    var by_default = DynamoDBEndpointConfig(String("us-east-1"))
+    assert_equal(by_default.account_id_endpoint_mode.value(), "preferred")
+    by_default.account_id = Optional[String](String("111111111111"))
+    assert_equal(_resolve(by_default).url, "https://111111111111.ddb.us-east-1.amazonaws.com")
     var unset = DynamoDBEndpointConfig(String("us-east-1"))
     unset.account_id = Optional[String](String("111111111111"))
+    unset.account_id_endpoint_mode = Optional[String]()
     assert_equal(_resolve(unset).url, "https://dynamodb.us-east-1.amazonaws.com")
+    # Without an account id, `preferred` answers the regional host.
+    assert_equal(
+        _resolve(DynamoDBEndpointConfig(String("us-east-1"))).url,
+        "https://dynamodb.us-east-1.amazonaws.com",
+    )
     var preferred = DynamoDBEndpointConfig(String("us-east-1"))
     preferred.account_id = Optional[String](String("111111111111"))
     preferred.account_id_endpoint_mode = Optional[String](String("preferred"))
@@ -390,6 +416,16 @@ def test_account_based_endpoint() raises:
     required.account_id_endpoint_mode = Optional[String](String("required"))
     with assert_raises(contains="AccountIdEndpointMode is required but no AccountID was provided"):
         _ = _resolve(required)
+    # A plain table name is not an ARN, so the ARN rules do not apply to
+    # it: with `required` and an account id it still takes the account
+    # endpoint from that id.
+    var named = DynamoDBEndpointConfig(String("us-east-1"))
+    named.account_id = Optional[String](String("111111111111"))
+    named.account_id_endpoint_mode = Optional[String](String("required"))
+    assert_equal(
+        _resolve(named, String("table_name")).url,
+        "https://111111111111.ddb.us-east-1.amazonaws.com",
+    )
 
 
 def test_custom_endpoint() raises:
