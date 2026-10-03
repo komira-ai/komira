@@ -1,13 +1,13 @@
-# The release declarations (kci.release.v1.ArtifactDeclarations): what
-# `kci build` builds for a release of komira, in this file's order, and the
-# set `kci publish` ships. .github/workflows/kci.yml reads this file
+# The release declarations (kci.release.v1.ArtifactDeclarations): what a
+# BUILD step (`kci run --stage <S>`) builds for a release of komira, in this
+# file's order, and the set a PUBLISH step ships. .github/workflows/kci.yml reads this file
 # (KCI_DECLARATIONS). Changing it changes what is released: CODEOWNERS
 # requires the release approver's review for everything under release/.
 #
 # The first release is one library and its metapackage. kci builds them one
 # at a time, in THIS ORDER, each into its own empty directory under the
 # release directory R (`{release_dir}`: the platform's directory,
-# <--release-dir>/<platform>), with the git-derived stamp S of `kci build
+# <--release-dir>/<platform>), with the git-derived stamp S of `kci run
 # --revision-id` (src/kci_artifact_declaration/contract.mojo):
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
@@ -25,12 +25,12 @@
 # every artifact above it, already built and verified. Its members are every
 # library of this file, one `--member-manifest` each; adding a library is
 # two edits here: its declaration above the metapackage, and its manifest in
-# the metapackage's args. kci publish refuses a set whose metapackage misses
+# the metapackage's args. A PUBLISH step refuses a set whose metapackage misses
 # a library, and the welded test
 # src/kci_artifact_declaration/tests/test_release_artifacts_file.mojo refuses
 # it at build time.
 #
-# A FIRST-TIME NAME is not approved here: `kci publish` refuses to upload a
+# A FIRST-TIME NAME is not approved here: a PUBLISH step refuses to upload a
 # name the channel does not hold unless the run names it with
 # `--claim-new-name` (kci.yml's input claim_new_names). The first release
 # claims komira_encoding and komira_all.
