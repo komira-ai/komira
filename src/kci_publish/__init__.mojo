@@ -1,22 +1,22 @@
-"""`kci_publish` -- one PUBLISH action of a stage (`kci run --stage S`, or its
-alias `kci publish --stage S`): publish the release set `kci build` left in
+"""`kci_publish` -- one PUBLISH step of a stage (`kci run --stage S`): publish
+the release set a BUILD step left in
 `<release-dir>/<platform>/` to a conda channel, or refuse it whole.
 
 THE CONTRACT, IN ORDER. Step 0 checks the set before any request: every
 declared artifact is in the release directory and nothing else is, each member
-re-verified over its bytes by the SAME function `kci build` ran
+re-verified over its bytes by the SAME function a BUILD step ran
 (`kci_release_set.verify_member`), lockstep against `--release-version`, the
 requirement closure, and the set hash against `--expect-set-hash`. Step 1 reads
 the channel by DOWNLOAD (other bytes under one of our file names stops the run;
 a name the channel has never held must be claimed). Steps 2 to 4 upload the
 members still missing, read every member back, and only then publish the
 metapackage; the missing members upload on up to `--concurrency` worker
-threads. Step 6 is the action's part of the run's result document
+threads. Step 6 is the step's part of the run's result document
 (kci_contract's `kci.result`): an outcome word, an error id, one artifact
 row per file. The exit number is kci_contract's: a release whose every file
 is already in the channel with the same bytes is NOOP, exit 0.
 
-The release is the one `--revision-id` names, built for the action's
+The release is the one `--revision-id` names, built for the step's
 platform: `release.json` must say both. For a channel that publishes with
 OIDC trusted publishing the stage must be the environment its push identity
 names.
@@ -89,7 +89,7 @@ from .report import (
     REASON_STOP_NEW_NAME,
     FileRow,
     PublishReport,
-    artifact_action_of,
+    artifact_effect_of,
     record_publish_result,
 )
 from .run import run_publish
