@@ -189,7 +189,7 @@ comptime EXPR_JSON_EXTRACT: UInt8 = 19
 #
 # Eval-arm lives in `komira_compiler/compiler_eval_column.mojo`
 # (like EXPR_JSON_EXTRACT).  The kernel
-# entry points are in `komira_kernels/temporal_extract.mojo`.
+# entry points are in `komira_eval/temporal_extract.mojo`.
 #
 # Unit semantics:
 #   - EXTRACT_YEAR / MONTH / DAY / HOUR / MINUTE / SECOND / QUARTER
@@ -313,7 +313,7 @@ comptime EXPR_UDF_CALL: UInt8 = 25
 # `{op, left, right}` and an n-ary fold over it is linear, so it reads as a
 # one-line addition. MEASURED: **dozens of non-test modules switch on the
 # `BIN_*` op space** — `expr_to_runtime` (numeric opcode compilation),
-# `komira_kernels/expr_interpreter`, `expr_kernel_templates`, `builtin_binary_fns`,
+# `komira_eval/expr_interpreter`, `expr_kernel_templates`, `builtin_binary_fns`,
 # `ivp_expr_codec`, `row_capability`, `optimizer_expr` among them — and a
 # STRING-PRODUCING member arriving at any of those AS A BINARY OP is a silent
 # mishandling, not a refusal. Nothing measures that space the way the
@@ -2556,7 +2556,7 @@ struct UdfCallData(Movable):
       precedent); execution then REFUSES by name rather than guessing.
     * `in_type` / `out_type` — the argument's and the result's `ArrowType`.
       ⚠ `ArrowType` AND NOT THE ENGINE'S `DT_*` TAG, DELIBERATELY. `DT_*` is a
-      `komira_udf` vocabulary this package cannot import (udf depends on
+      `komira_eval` vocabulary this package cannot import (eval depends on
       core), and it is spelled THREE INCOMPATIBLE WAYS in this tree —
       `schema_descriptor.DT_I64` is 3 while `row_block.DT_I64` and
       `column_format_storage.DT_I64` are both 1 — so a bare `UInt8` here would
