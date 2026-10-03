@@ -1,0 +1,21 @@
+load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
+
+# The multi-node routing types of a broker cluster
+# (`komira/broker/v1/broker.proto`, package
+# `komira.broker.v1`): BrokerClusterMap, NodeEndpoint, PartitionLeader,
+# NodeLoad, ClusterConfig. Generated into the Mojo package
+# `komira_broker_proto`:
+#
+#   from komira_broker_proto.broker import BrokerClusterMap
+#
+# A leaf: it imports no other `.proto`. `komira_supervisor_proto` imports it.
+# The `.proto` sits at its import path so the path matches the proto package.
+# The generated message structs conform to the `komira_proto_codec` codec runtime,
+# the only Mojo dependency. A generated package has no tests of its own; it is
+# exercised by the tests of the libraries that depend on it.
+mojo_proto_library(
+    name = "komira_broker_proto",
+    srcs = ["komira/broker/v1/broker.proto"],
+    deps = ["//src/komira_proto_codec:komira_proto_codec"],
+    visibility = ["PUBLIC"],
+)
