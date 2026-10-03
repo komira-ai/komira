@@ -32,14 +32,12 @@
 # build flips them on. ⛔ A wall time taken with them ON is not comparable to
 # one taken with them OFF.
 #
-# Storage mechanism: the `_Global` + `Atomic` process-lifetime counter idiom
-# (the same one `keyeq_census` and `compiler_dict_mat_counter` use) — no
+# Storage mechanism: `GlobalCounterTable` (`global_counter.mojo`), the shared
+# process-lifetime counter primitive (the same one `keyeq_census` uses) — no
 # `unsafe_from_address`, no wildcard-origin field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounterTable
 
 
 # -----------------------------------------------------------------------------
@@ -64,31 +62,9 @@ comptime RXC_DICTMAT_ROWS: Int = 9     # rows densified by _materialize_dict_to_
 comptime RXC_DICTMAT_BYTES: Int = 10   # bytes those densifications produced
 
 
-def _init_rxcensus_counters() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn (non-raising): allocate the counter table once per
-    process, all slots zeroed."""
-    var raw = alloc[AtomicI64](RXC_N_SLOTS)
-    for i in range(RXC_N_SLOTS):
-        (raw + i).unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(
-            Scalar[DType.int64](0)
-        )
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _RXCENSUS_COUNTERS = _Global[
-    "komira_core_instr_rxcensus_counters",
-    _init_rxcensus_counters,
+comptime _RXCENSUS_COUNTERS = GlobalCounterTable[
+    "komira_core_instr_rxcensus_counters", RXC_N_SLOTS
 ]
-
-
-@always_inline
-def _rxcensus_add_impl(slot: Int, n: Int) raises:
-    # SAFETY: FFI boundary — `get_or_create_ptr` targets KGEN-runtime
-    # static storage (process-lifetime); the wildcard origin is the stdlib
-    # `_Global` API's own return type and is confined to this helper.
-    var gp = _RXCENSUS_COUNTERS.get_or_create_ptr()
-    var base = UnsafePointer(to=gp[][])
-    _ = (base + slot)[].fetch_add(Int64(n))
 
 
 @always_inline
@@ -96,22 +72,14 @@ def rxcensus_add(slot: Int, n: Int):
     """Add `n` to counter `slot`. NON-RAISING on purpose: an instrument must
     never change the control flow of the code it observes. A swallowed error
     can only mean the table failed to allocate, which reads as a zero slot."""
-    try:
-        _rxcensus_add_impl(slot, n)
-    except:
-        pass
+    _RXCENSUS_COUNTERS.try_add(slot, n)
 
 
 def rxcensus_read(slot: Int) raises -> Int:
     """Read one counter."""
-    var gp = _RXCENSUS_COUNTERS.get_or_create_ptr()
-    var base = UnsafePointer(to=gp[][])
-    return Int((base + slot)[].load())
+    return _RXCENSUS_COUNTERS.read(slot)
 
 
 def rxcensus_reset() raises:
     """Zero every counter (harness setup between cells/reps)."""
-    var gp = _RXCENSUS_COUNTERS.get_or_create_ptr()
-    var base = UnsafePointer(to=gp[][])
-    for i in range(RXC_N_SLOTS):
-        (base + i)[].store(Scalar[DType.int64](0))
+    _RXCENSUS_COUNTERS.reset()

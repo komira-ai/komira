@@ -58,44 +58,17 @@
 # COST. ONE relaxed `fetch_add` per gather CALL (per record x column x row
 # range), never per row, on the narrow and fallback arms only.
 #
-# Same `_Global` + `Atomic` idiom as `join_index_window_counter.mojo` -- no
-# environment read, no `unsafe_from_address` laundering, no wildcard-origin
-# field.
+# Same `GlobalCounter` primitive (`global_counter.mojo`) as
+# `join_index_window_counter.mojo` -- no environment read, no
+# `unsafe_from_address` laundering, no wildcard-origin field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounter
 
 
-def _init_gw_typed() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the TYPED-narrow counter once per process."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-def _init_gw_fallback() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the FALLBACK counter once per process."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-def _init_gw_wide() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate the WIDE-fallback counter once per process."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _GW_TYPED = _Global["komira_core_gather_narrow_typed", _init_gw_typed]
-comptime _GW_NARROW_FB = _Global[
-    "komira_core_gather_narrow_fallback", _init_gw_fallback
-]
-comptime _GW_WIDE_FB = _Global[
-    "komira_core_gather_wide_fallback", _init_gw_wide
-]
+comptime _GW_TYPED = GlobalCounter["komira_core_gather_narrow_typed"]
+comptime _GW_NARROW_FB = GlobalCounter["komira_core_gather_narrow_fallback"]
+comptime _GW_WIDE_FB = GlobalCounter["komira_core_gather_wide_fallback"]
 
 
 @always_inline
@@ -115,11 +88,7 @@ def gather_note_narrow_typed(colrows: Int) raises:
     Args:
         colrows: Elements this call copied through the typed-store loop.
     """
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
-    var g = _GW_TYPED.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(colrows))
+    _GW_TYPED.add(colrows)
 
 
 @always_inline
@@ -137,20 +106,14 @@ def gather_note_width_fallback(colrows: Int, width: Int) raises:
         # A width WITH a typed arm reached the fallback anyway. That is the
         # defect this file exists to make visible, and it is counted separately
         # so the assertion can be `== 0` rather than a comparison.
-        # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-        var n = _GW_NARROW_FB.get_or_create_ptr()
-        _ = n[][].fetch_add(Int64(colrows))
+        _GW_NARROW_FB.add(colrows)
     else:
-        # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-        var w = _GW_WIDE_FB.get_or_create_ptr()
-        _ = w[][].fetch_add(Int64(colrows))
+        _GW_WIDE_FB.add(colrows)
 
 
 def gather_narrow_typed_colrows() raises -> Int:
     """Column-rows served by a width-2 / width-1 typed-store arm."""
-    # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-    var g = _GW_TYPED.get_or_create_ptr()
-    return Int(g[][].load())
+    return _GW_TYPED.read()
 
 
 def gather_narrow_fallback_colrows() raises -> Int:
@@ -160,9 +123,7 @@ def gather_narrow_fallback_colrows() raises -> Int:
     or mis-gated narrow arm turns positive, and no value assertion anywhere can
     see that happen because both arms produce identical bytes.
     """
-    # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-    var n = _GW_NARROW_FB.get_or_create_ptr()
-    return Int(n[][].load())
+    return _GW_NARROW_FB.read()
 
 
 def gather_wide_fallback_colrows() raises -> Int:
@@ -172,19 +133,11 @@ def gather_wide_fallback_colrows() raises -> Int:
     POSITIVE on the same run, or `narrow == 0` is also satisfied by a fallback
     that was deleted and by a fixture that gathered nothing.
     """
-    # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-    var w = _GW_WIDE_FB.get_or_create_ptr()
-    return Int(w[][].load())
+    return _GW_WIDE_FB.read()
 
 
 def reset_gather_width_counters() raises:
     """Reset all three process-wide counters to 0 (test setup)."""
-    # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-    var g = _GW_TYPED.get_or_create_ptr()
-    g[][].store(Scalar[DType.int64](0))
-    # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-    var n = _GW_NARROW_FB.get_or_create_ptr()
-    n[][].store(Scalar[DType.int64](0))
-    # SAFETY: FFI carve-out (see `gather_note_narrow_typed`).
-    var w = _GW_WIDE_FB.get_or_create_ptr()
-    w[][].store(Scalar[DType.int64](0))
+    _GW_TYPED.reset()
+    _GW_NARROW_FB.reset()
+    _GW_WIDE_FB.reset()

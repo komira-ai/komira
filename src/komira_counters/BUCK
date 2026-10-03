@@ -8,7 +8,15 @@ mojo_library(
         "//src/komira_atomic_alias:komira_atomic_alias",
     ],
     test_srcs = [
+        "tests/test_gather_width_counter.mojo",
         "tests/test_global_counter.mojo",
+        "tests/test_join_index_window_counter.mojo",
+        "tests/test_keyeq_census.mojo",
+        "tests/test_parquet_read_counter.mojo",
+        "tests/test_planner_scale_counter.mojo",
+        "tests/test_rxcensus.mojo",
+        "tests/test_strdrain_counter.mojo",
+        "tests/test_string_eq_arm_counter.mojo",
     ],
     visibility = ["PUBLIC"],
 )

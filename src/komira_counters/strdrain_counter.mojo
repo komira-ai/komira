@@ -51,34 +51,24 @@
 # taxes both drain arms identically; a count that only runs in one arm cannot
 # compare the arms.
 #
-# Same `_Global` + `Atomic` idiom as `planner_scale_counter.mojo` and
-# `join_index_window_counter.mojo` -- no environment read, no
-# `unsafe_from_address` laundering, no wildcard-origin field.
+# Same `GlobalCounter` primitive (`global_counter.mojo`) as
+# `planner_scale_counter.mojo` and `join_index_window_counter.mojo` -- no
+# environment read, no `unsafe_from_address` laundering, no wildcard-origin
+# field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounter
 
 
-def _init_sd_counter() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate one counter cell per process (init 0)."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _SD_CALLS = _Global["komira_core_strdrain_calls", _init_sd_counter]
-comptime _SD_VALUES = _Global["komira_core_strdrain_values", _init_sd_counter]
-comptime _SD_BYTES = _Global["komira_core_strdrain_bytes", _init_sd_counter]
-comptime _SD_AGGDICT_CALLS = _Global[
-    "komira_core_strdrain_aggdict_calls", _init_sd_counter
+comptime _SD_CALLS = GlobalCounter["komira_core_strdrain_calls"]
+comptime _SD_VALUES = GlobalCounter["komira_core_strdrain_values"]
+comptime _SD_BYTES = GlobalCounter["komira_core_strdrain_bytes"]
+comptime _SD_AGGDICT_CALLS = GlobalCounter["komira_core_strdrain_aggdict_calls"]
+comptime _SD_AGGDICT_STAGE_VALUES = GlobalCounter[
+    "komira_core_strdrain_aggdict_stage_values"
 ]
-comptime _SD_AGGDICT_STAGE_VALUES = _Global[
-    "komira_core_strdrain_aggdict_stage_values", _init_sd_counter
-]
-comptime _SD_AGGDICT_BUILDER_VALUES = _Global[
-    "komira_core_strdrain_aggdict_builder_values", _init_sd_counter
+comptime _SD_AGGDICT_BUILDER_VALUES = GlobalCounter[
+    "komira_core_strdrain_aggdict_builder_values"
 ]
 
 
@@ -148,18 +138,10 @@ comptime SD_OWNER_CD_SERIAL = 2
 comptime SD_OWNER_CD_PARALLEL = 3
 """agg_count_distinct_parallel._execute_count_distinct_agg_parallel (s6)."""
 
-comptime _SD_OWNER_0 = _Global[
-    "komira_core_strdrain_owner0", _init_sd_counter
-]
-comptime _SD_OWNER_1 = _Global[
-    "komira_core_strdrain_owner1", _init_sd_counter
-]
-comptime _SD_OWNER_2 = _Global[
-    "komira_core_strdrain_owner2", _init_sd_counter
-]
-comptime _SD_OWNER_3 = _Global[
-    "komira_core_strdrain_owner3", _init_sd_counter
-]
+comptime _SD_OWNER_0 = GlobalCounter["komira_core_strdrain_owner0"]
+comptime _SD_OWNER_1 = GlobalCounter["komira_core_strdrain_owner1"]
+comptime _SD_OWNER_2 = GlobalCounter["komira_core_strdrain_owner2"]
+comptime _SD_OWNER_3 = GlobalCounter["komira_core_strdrain_owner3"]
 
 
 @always_inline
@@ -169,37 +151,35 @@ def strdrain_note_owner(owner: Int, n_values: Int) raises:
     owner pair always sums to its family slot."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
     if owner == 0:
-        _ = _SD_OWNER_0.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_OWNER_0.add(n_values)
     elif owner == 1:
-        _ = _SD_OWNER_1.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_OWNER_1.add(n_values)
     elif owner == 2:
-        _ = _SD_OWNER_2.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_OWNER_2.add(n_values)
     else:
-        _ = _SD_OWNER_3.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_OWNER_3.add(n_values)
 
 
 def strdrain_owner_values(owner: Int) raises -> Int:
     """Values attributed to owner function `owner` since the last reset."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
     if owner == 0:
-        return Int(_SD_OWNER_0.get_or_create_ptr()[][].load())
+        return _SD_OWNER_0.read()
     elif owner == 1:
-        return Int(_SD_OWNER_1.get_or_create_ptr()[][].load())
+        return _SD_OWNER_1.read()
     elif owner == 2:
-        return Int(_SD_OWNER_2.get_or_create_ptr()[][].load())
-    return Int(_SD_OWNER_3.get_or_create_ptr()[][].load())
+        return _SD_OWNER_2.read()
+    return _SD_OWNER_3.read()
 
 
-comptime _SD_SITE_0 = _Global["komira_core_strdrain_site0", _init_sd_counter]
-comptime _SD_SITE_1 = _Global["komira_core_strdrain_site1", _init_sd_counter]
-comptime _SD_SITE_2 = _Global["komira_core_strdrain_site2", _init_sd_counter]
-comptime _SD_SITE_3 = _Global["komira_core_strdrain_site3", _init_sd_counter]
-comptime _SD_SITE_4 = _Global["komira_core_strdrain_site4", _init_sd_counter]
-comptime _SD_SITE_5 = _Global["komira_core_strdrain_site5", _init_sd_counter]
-comptime _SD_SITE_6 = _Global["komira_core_strdrain_site6", _init_sd_counter]
-comptime _SD_SITE_7 = _Global["komira_core_strdrain_site7", _init_sd_counter]
+comptime _SD_SITE_0 = GlobalCounter["komira_core_strdrain_site0"]
+comptime _SD_SITE_1 = GlobalCounter["komira_core_strdrain_site1"]
+comptime _SD_SITE_2 = GlobalCounter["komira_core_strdrain_site2"]
+comptime _SD_SITE_3 = GlobalCounter["komira_core_strdrain_site3"]
+comptime _SD_SITE_4 = GlobalCounter["komira_core_strdrain_site4"]
+comptime _SD_SITE_5 = GlobalCounter["komira_core_strdrain_site5"]
+comptime _SD_SITE_6 = GlobalCounter["komira_core_strdrain_site6"]
+comptime _SD_SITE_7 = GlobalCounter["komira_core_strdrain_site7"]
 
 
 @always_inline
@@ -213,43 +193,41 @@ def strdrain_note_site(site: Int, n_values: Int) raises:
     """
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
     if site == 0:
-        _ = _SD_SITE_0.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_0.add(n_values)
     elif site == 1:
-        _ = _SD_SITE_1.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_1.add(n_values)
     elif site == 2:
-        _ = _SD_SITE_2.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_2.add(n_values)
     elif site == 3:
-        _ = _SD_SITE_3.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_3.add(n_values)
     elif site == 4:
-        _ = _SD_SITE_4.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_4.add(n_values)
     elif site == 5:
-        _ = _SD_SITE_5.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_5.add(n_values)
     elif site == 6:
-        _ = _SD_SITE_6.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_6.add(n_values)
     else:
-        _ = _SD_SITE_7.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+        _SD_SITE_7.add(n_values)
 
 
 def strdrain_site_values(site: Int) raises -> Int:
     """Values attributed to site family `site` since the last reset."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
     if site == 0:
-        return Int(_SD_SITE_0.get_or_create_ptr()[][].load())
+        return _SD_SITE_0.read()
     elif site == 1:
-        return Int(_SD_SITE_1.get_or_create_ptr()[][].load())
+        return _SD_SITE_1.read()
     elif site == 2:
-        return Int(_SD_SITE_2.get_or_create_ptr()[][].load())
+        return _SD_SITE_2.read()
     elif site == 3:
-        return Int(_SD_SITE_3.get_or_create_ptr()[][].load())
+        return _SD_SITE_3.read()
     elif site == 4:
-        return Int(_SD_SITE_4.get_or_create_ptr()[][].load())
+        return _SD_SITE_4.read()
     elif site == 5:
-        return Int(_SD_SITE_5.get_or_create_ptr()[][].load())
+        return _SD_SITE_5.read()
     elif site == 6:
-        return Int(_SD_SITE_6.get_or_create_ptr()[][].load())
-    return Int(_SD_SITE_7.get_or_create_ptr()[][].load())
+        return _SD_SITE_6.read()
+    return _SD_SITE_7.read()
 
 
 # -----------------------------------------------------------------------------
@@ -270,32 +248,19 @@ def strdrain_site_values(site: Int) raises -> Int:
 # never entered (so neither arm counter could have moved for a reason the arm
 # choice had any part in), while `calls > 0 and stage == 0 and builder == 0` is
 # IMPOSSIBLE and indicts the instrument rather than the lever.
-comptime _SD_RX_CALLS = _Global[
-    "komira_core_strdrain_rx_calls", _init_sd_counter
-]
-comptime _SD_RX_STAGE = _Global[
-    "komira_core_strdrain_rx_stage", _init_sd_counter
-]
-comptime _SD_RX_BUILDER = _Global[
-    "komira_core_strdrain_rx_builder", _init_sd_counter
-]
-comptime _SD_CDP_CALLS = _Global[
-    "komira_core_strdrain_cdp_calls", _init_sd_counter
-]
-comptime _SD_CDP_STAGE = _Global[
-    "komira_core_strdrain_cdp_stage", _init_sd_counter
-]
-comptime _SD_CDP_BUILDER = _Global[
-    "komira_core_strdrain_cdp_builder", _init_sd_counter
-]
+comptime _SD_RX_CALLS = GlobalCounter["komira_core_strdrain_rx_calls"]
+comptime _SD_RX_STAGE = GlobalCounter["komira_core_strdrain_rx_stage"]
+comptime _SD_RX_BUILDER = GlobalCounter["komira_core_strdrain_rx_builder"]
+comptime _SD_CDP_CALLS = GlobalCounter["komira_core_strdrain_cdp_calls"]
+comptime _SD_CDP_STAGE = GlobalCounter["komira_core_strdrain_cdp_stage"]
+comptime _SD_CDP_BUILDER = GlobalCounter["komira_core_strdrain_cdp_builder"]
 
 
 @always_inline
 def strdrain_note_rx_call() raises:
     """Record ONE string key column emitted by the RADIX untyped hash-agg
     drain. Counted BEFORE the arm branch — the REACH witness."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _ = _SD_RX_CALLS.get_or_create_ptr()[][].fetch_add(Int64(1))
+    _SD_RX_CALLS.incr()
 
 
 @always_inline
@@ -303,8 +268,7 @@ def strdrain_note_rx_stage(n_values: Int) raises:
     """Values the radix drain emitted through the INCUMBENT staging arm."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _ = _SD_RX_STAGE.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+    _SD_RX_STAGE.add(n_values)
 
 
 @always_inline
@@ -312,16 +276,14 @@ def strdrain_note_rx_builder(n_values: Int) raises:
     """Values the radix drain emitted through the `ArrowStringBuilder` arm."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _ = _SD_RX_BUILDER.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+    _SD_RX_BUILDER.add(n_values)
 
 
 @always_inline
 def strdrain_note_cdp_call() raises:
     """Record ONE string key column emitted by the PARALLEL count-distinct
     executor. Counted BEFORE the arm branch — the REACH witness."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _ = _SD_CDP_CALLS.get_or_create_ptr()[][].fetch_add(Int64(1))
+    _SD_CDP_CALLS.incr()
 
 
 @always_inline
@@ -329,8 +291,7 @@ def strdrain_note_cdp_stage(n_values: Int) raises:
     """Values the parallel count-distinct emitted through the INCUMBENT arm."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _ = _SD_CDP_STAGE.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+    _SD_CDP_STAGE.add(n_values)
 
 
 @always_inline
@@ -338,44 +299,37 @@ def strdrain_note_cdp_builder(n_values: Int) raises:
     """Values the parallel count-distinct emitted through the builder arm."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _ = _SD_CDP_BUILDER.get_or_create_ptr()[][].fetch_add(Int64(n_values))
+    _SD_CDP_BUILDER.add(n_values)
 
 
 def strdrain_rx_calls() raises -> Int:
     """String key columns emitted by the radix drain. Nonzero == REACHED."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    return Int(_SD_RX_CALLS.get_or_create_ptr()[][].load())
+    return _SD_RX_CALLS.read()
 
 
 def strdrain_rx_stage_values() raises -> Int:
     """Radix-drain values through the incumbent staging arm."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    return Int(_SD_RX_STAGE.get_or_create_ptr()[][].load())
+    return _SD_RX_STAGE.read()
 
 
 def strdrain_rx_builder_values() raises -> Int:
     """Radix-drain values through the `ArrowStringBuilder` arm."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    return Int(_SD_RX_BUILDER.get_or_create_ptr()[][].load())
+    return _SD_RX_BUILDER.read()
 
 
 def strdrain_cdp_calls() raises -> Int:
     """String key columns emitted by the parallel count-distinct executor."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    return Int(_SD_CDP_CALLS.get_or_create_ptr()[][].load())
+    return _SD_CDP_CALLS.read()
 
 
 def strdrain_cdp_stage_values() raises -> Int:
     """Parallel count-distinct values through the incumbent staging arm."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    return Int(_SD_CDP_STAGE.get_or_create_ptr()[][].load())
+    return _SD_CDP_STAGE.read()
 
 
 def strdrain_cdp_builder_values() raises -> Int:
     """Parallel count-distinct values through the `ArrowStringBuilder` arm."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    return Int(_SD_CDP_BUILDER.get_or_create_ptr()[][].load())
+    return _SD_CDP_BUILDER.read()
 
 
 # -----------------------------------------------------------------------------
@@ -392,19 +346,11 @@ def strdrain_note_from_strings(n_values: Int, n_bytes: Int) raises:
     cannot drift away from the cost it stands for the way a parallel walk over
     call sites would.
     """
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime
-    # static storage (process-lifetime); the wildcard is the stdlib `_Global`
-    # API's own return type, confined to this helper.
-    var gc = _SD_CALLS.get_or_create_ptr()
-    _ = gc[][].fetch_add(Int64(1))
+    _SD_CALLS.incr()
     if n_values != 0:
-        # SAFETY: FFI carve-out (see above).
-        var gv = _SD_VALUES.get_or_create_ptr()
-        _ = gv[][].fetch_add(Int64(n_values))
+        _SD_VALUES.add(n_values)
     if n_bytes != 0:
-        # SAFETY: FFI carve-out (see above).
-        var gb = _SD_BYTES.get_or_create_ptr()
-        _ = gb[][].fetch_add(Int64(n_bytes))
+        _SD_BYTES.add(n_bytes)
 
 
 @always_inline
@@ -416,9 +362,7 @@ def strdrain_note_aggdict_call() raises:
     `strdrain_aggdict_calls` is 0 never entered the site, so its two arm
     counters are zero for a reason the arm choice had no part in.
     """
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_AGGDICT_CALLS.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(1))
+    _SD_AGGDICT_CALLS.incr()
 
 
 @always_inline
@@ -428,9 +372,7 @@ def strdrain_note_aggdict_stage(n_values: Int) raises:
     took the staging arm."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_AGGDICT_STAGE_VALUES.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(n_values))
+    _SD_AGGDICT_STAGE_VALUES.add(n_values)
 
 
 @always_inline
@@ -440,9 +382,7 @@ def strdrain_note_aggdict_builder(n_values: Int) raises:
     builder arm."""
     if n_values == 0:
         return
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_AGGDICT_BUILDER_VALUES.get_or_create_ptr()
-    _ = g[][].fetch_add(Int64(n_values))
+    _SD_AGGDICT_BUILDER_VALUES.add(n_values)
 
 
 # -----------------------------------------------------------------------------
@@ -453,76 +393,59 @@ def strdrain_note_aggdict_builder(n_values: Int) raises:
 def strdrain_calls() raises -> Int:
     """`StringArray.from_strings*` calls since the last reset — the class's
     reach denominator for the cell."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_CALLS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _SD_CALLS.read()
 
 
 def strdrain_values() raises -> Int:
     """Values staged through `List[String]` since the last reset. An UPPER
     BOUND on every site in the class simultaneously."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_VALUES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _SD_VALUES.read()
 
 
 def strdrain_bytes() raises -> Int:
     """Value bytes staged through `List[String]` since the last reset."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_BYTES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _SD_BYTES.read()
 
 
 def strdrain_aggdict_calls() raises -> Int:
     """String key columns emitted by the converted site. Nonzero == REACHED."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_AGGDICT_CALLS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _SD_AGGDICT_CALLS.read()
 
 
 def strdrain_aggdict_stage_values() raises -> Int:
     """Values the converted site drained through the incumbent staging arm."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_AGGDICT_STAGE_VALUES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _SD_AGGDICT_STAGE_VALUES.read()
 
 
 def strdrain_aggdict_builder_values() raises -> Int:
     """Values the converted site drained through the `ArrowStringBuilder`
     arm."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    var g = _SD_AGGDICT_BUILDER_VALUES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _SD_AGGDICT_BUILDER_VALUES.read()
 
 
 def reset_strdrain_counters() raises:
     """Reset every counter to 0 (test setup / per-cell delta harness)."""
-    # SAFETY: FFI carve-out (see `strdrain_note_from_strings`).
-    _SD_CALLS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_VALUES.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_BYTES.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_AGGDICT_CALLS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_AGGDICT_STAGE_VALUES.get_or_create_ptr()[][].store(
-        Scalar[DType.int64](0)
-    )
-    _SD_AGGDICT_BUILDER_VALUES.get_or_create_ptr()[][].store(
-        Scalar[DType.int64](0)
-    )
-    _SD_SITE_0.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_1.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_2.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_3.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_4.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_5.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_6.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_SITE_7.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_OWNER_0.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_OWNER_1.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_OWNER_2.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_OWNER_3.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_RX_CALLS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_RX_STAGE.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_RX_BUILDER.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_CDP_CALLS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_CDP_STAGE.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _SD_CDP_BUILDER.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
+    _SD_CALLS.reset()
+    _SD_VALUES.reset()
+    _SD_BYTES.reset()
+    _SD_AGGDICT_CALLS.reset()
+    _SD_AGGDICT_STAGE_VALUES.reset()
+    _SD_AGGDICT_BUILDER_VALUES.reset()
+    _SD_SITE_0.reset()
+    _SD_SITE_1.reset()
+    _SD_SITE_2.reset()
+    _SD_SITE_3.reset()
+    _SD_SITE_4.reset()
+    _SD_SITE_5.reset()
+    _SD_SITE_6.reset()
+    _SD_SITE_7.reset()
+    _SD_OWNER_0.reset()
+    _SD_OWNER_1.reset()
+    _SD_OWNER_2.reset()
+    _SD_OWNER_3.reset()
+    _SD_RX_CALLS.reset()
+    _SD_RX_STAGE.reset()
+    _SD_RX_BUILDER.reset()
+    _SD_CDP_CALLS.reset()
+    _SD_CDP_STAGE.reset()
+    _SD_CDP_BUILDER.reset()

@@ -110,55 +110,47 @@
 # measurable. The `structural_id` memo means the
 # fold itself runs at most once per distinct source per query anyway.
 #
-# Same `_Global` + `Atomic` idiom as `join_index_window_counter.mojo` -- no
+# Same `GlobalCounter` primitive (`global_counter.mojo`) as
+# `join_index_window_counter.mojo` -- no
 # environment read, no `unsafe_from_address` laundering, no wildcard-origin
 # field.
 # =============================================================================
 
-from komira_atomic_alias import AtomicI64
-from std.ffi import _Global
-from std.memory import OwnedPointer, UnsafePointer, alloc
+from komira_counters.global_counter import GlobalCounter
 
 
-def _init_ps_counter() -> OwnedPointer[AtomicI64]:
-    """`_Global` init_fn: allocate one counter cell per process (init 0)."""
-    var raw = alloc[AtomicI64](1)
-    raw.unsafe_bitcast[Scalar[DType.int64]]().unsafe_write(Scalar[DType.int64](0))
-    return OwnedPointer[AtomicI64](unsafe_from_raw_pointer=raw)
-
-
-comptime _PS_INLINE_SCANS = _Global[
-    "komira_core_planner_scale_inline_scans", _init_ps_counter
+comptime _PS_INLINE_SCANS = GlobalCounter[
+    "komira_core_planner_scale_inline_scans"
 ]
-comptime _PS_INLINE_COPY_BYTES = _Global[
-    "komira_core_planner_scale_inline_copy_bytes", _init_ps_counter
+comptime _PS_INLINE_COPY_BYTES = GlobalCounter[
+    "komira_core_planner_scale_inline_copy_bytes"
 ]
-comptime _PS_INLINE_SHARE_BYTES = _Global[
-    "komira_core_planner_scale_inline_share_bytes", _init_ps_counter
+comptime _PS_INLINE_SHARE_BYTES = GlobalCounter[
+    "komira_core_planner_scale_inline_share_bytes"
 ]
-comptime _PS_AGG_CSE_CALLS = _Global[
-    "komira_core_planner_scale_agg_cse_calls", _init_ps_counter
+comptime _PS_AGG_CSE_CALLS = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_calls"
 ]
-comptime _PS_AGG_CSE_GROUPED_NODES = _Global[
-    "komira_core_planner_scale_agg_cse_grouped_nodes", _init_ps_counter
+comptime _PS_AGG_CSE_GROUPED_NODES = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_grouped_nodes"
 ]
-comptime _PS_AGG_CSE_GATE_SKIPS = _Global[
-    "komira_core_planner_scale_agg_cse_gate_skips", _init_ps_counter
+comptime _PS_AGG_CSE_GATE_SKIPS = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_gate_skips"
 ]
-comptime _PS_AGG_CSE_HASH_CALLS = _Global[
-    "komira_core_planner_scale_agg_cse_hash_calls", _init_ps_counter
+comptime _PS_AGG_CSE_HASH_CALLS = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_hash_calls"
 ]
-comptime _PS_AGG_CSE_CHEAP_CALLS = _Global[
-    "komira_core_planner_scale_agg_cse_cheap_calls", _init_ps_counter
+comptime _PS_AGG_CSE_CHEAP_CALLS = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_cheap_calls"
 ]
-comptime _PS_AGG_CSE_FOLDS = _Global[
-    "komira_core_planner_scale_agg_cse_folds", _init_ps_counter
+comptime _PS_AGG_CSE_FOLDS = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_folds"
 ]
-comptime _PS_AGG_CSE_HASH_BYTES = _Global[
-    "komira_core_planner_scale_agg_cse_hash_bytes", _init_ps_counter
+comptime _PS_AGG_CSE_HASH_BYTES = GlobalCounter[
+    "komira_core_planner_scale_agg_cse_hash_bytes"
 ]
-comptime _PS_CONTENT_HASH_BYTES = _Global[
-    "komira_core_planner_scale_content_hash_bytes", _init_ps_counter
+comptime _PS_CONTENT_HASH_BYTES = GlobalCounter[
+    "komira_core_planner_scale_content_hash_bytes"
 ]
 
 
@@ -178,19 +170,11 @@ def planner_scale_note_inline(copy_bytes: Int, share_bytes: Int) raises:
     A resolution contributes to exactly one of the two on a per-COLUMN basis
     (the share is column-gated), so `copy + share` is the batch's whole buffer
     footprint and the split says which mechanism moved it."""
-    # SAFETY: FFI carve-out — `get_or_create_ptr` targets KGEN-runtime static
-    # storage (process-lifetime); the wildcard is the stdlib `_Global` API's own
-    # return type, confined to this helper.
-    var gs = _PS_INLINE_SCANS.get_or_create_ptr()
-    _ = gs[][].fetch_add(Int64(1))
+    _PS_INLINE_SCANS.incr()
     if copy_bytes != 0:
-        # SAFETY: FFI carve-out (see above).
-        var gc = _PS_INLINE_COPY_BYTES.get_or_create_ptr()
-        _ = gc[][].fetch_add(Int64(copy_bytes))
+        _PS_INLINE_COPY_BYTES.add(copy_bytes)
     if share_bytes != 0:
-        # SAFETY: FFI carve-out (see above).
-        var gh = _PS_INLINE_SHARE_BYTES.get_or_create_ptr()
-        _ = gh[][].fetch_add(Int64(share_bytes))
+        _PS_INLINE_SHARE_BYTES.add(share_bytes)
 
 
 @always_inline
@@ -201,26 +185,18 @@ def planner_scale_note_agg_cse(grouped_nodes: Int, gate_skipped: Bool) raises:
         grouped_nodes: GROUPED aggregate nodes found in the post-optimize plan.
         gate_skipped: True iff the reachability gate short-circuited the pass.
     """
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var gc = _PS_AGG_CSE_CALLS.get_or_create_ptr()
-    _ = gc[][].fetch_add(Int64(1))
+    _PS_AGG_CSE_CALLS.incr()
     if grouped_nodes != 0:
-        # SAFETY: FFI carve-out (see above).
-        var gn = _PS_AGG_CSE_GROUPED_NODES.get_or_create_ptr()
-        _ = gn[][].fetch_add(Int64(grouped_nodes))
+        _PS_AGG_CSE_GROUPED_NODES.add(grouped_nodes)
     if gate_skipped:
-        # SAFETY: FFI carve-out (see above).
-        var gk = _PS_AGG_CSE_GATE_SKIPS.get_or_create_ptr()
-        _ = gk[][].fetch_add(Int64(1))
+        _PS_AGG_CSE_GATE_SKIPS.incr()
 
 
 @always_inline
 def planner_scale_note_agg_cse_hash() raises:
     """Record ONE `structural_hash()` call made by the agg-CSE collect walk.
     Reads 0 for a pass the gate short-circuited — that is the whole point."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var gh = _PS_AGG_CSE_HASH_CALLS.get_or_create_ptr()
-    _ = gh[][].fetch_add(Int64(1))
+    _PS_AGG_CSE_HASH_CALLS.incr()
 
 
 @always_inline
@@ -228,9 +204,7 @@ def planner_scale_note_agg_cse_cheap() raises:
     """Record ONE `structural_hash_modulo_inmem_id()` call — the CHEAP key the
     agg-CSE pass groups candidates by before deciding which pairs are worth an
     exact content hash. Folds ZERO resident bytes by construction."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var gh = _PS_AGG_CSE_CHEAP_CALLS.get_or_create_ptr()
-    _ = gh[][].fetch_add(Int64(1))
+    _PS_AGG_CSE_CHEAP_CALLS.incr()
 
 
 @always_inline
@@ -238,9 +212,7 @@ def planner_scale_note_agg_cse_fold() raises:
     """Record ONE aggregate subtree the pass actually folded (an exact hash with
     `count >= 2`). Separates "this cell hashed and it was NECESSARY" from "this
     cell hashed for nothing"."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var gf = _PS_AGG_CSE_FOLDS.get_or_create_ptr()
-    _ = gf[][].fetch_add(Int64(1))
+    _PS_AGG_CSE_FOLDS.incr()
 
 
 @always_inline
@@ -252,9 +224,7 @@ def planner_scale_note_agg_cse_hash_bytes(n: Int) raises:
     rather than disappear)."""
     if n == 0:
         return
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var gb = _PS_AGG_CSE_HASH_BYTES.get_or_create_ptr()
-    _ = gb[][].fetch_add(Int64(n))
+    _PS_AGG_CSE_HASH_BYTES.add(n)
 
 
 @always_inline
@@ -262,9 +232,7 @@ def planner_scale_note_content_hash_bytes(n: Int) raises:
     """Record `n` bytes folded by a content hash. Called from
     `Column._fold_buffer_bytes` — the ONE place the O(bytes) fold happens — so
     the count cannot drift from the cost it stands for."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var gb = _PS_CONTENT_HASH_BYTES.get_or_create_ptr()
-    _ = gb[][].fetch_add(Int64(n))
+    _PS_CONTENT_HASH_BYTES.add(n)
 
 
 # -----------------------------------------------------------------------------
@@ -274,106 +242,75 @@ def planner_scale_note_content_hash_bytes(n: Int) raises:
 
 def planner_scale_inline_scans() raises -> Int:
     """Registry-handle scans inlined into a plan since the last reset."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_INLINE_SCANS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_INLINE_SCANS.read()
 
 
 def planner_scale_inline_copy_bytes() raises -> Int:
     """Buffer bytes DEEP-COPIED by the registry inline. The share path
     copies only share-ineligible columns, so over offset-0, full-length
     batches this reads 0."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_INLINE_COPY_BYTES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_INLINE_COPY_BYTES.read()
 
 
 def planner_scale_inline_share_bytes() raises -> Int:
     """Buffer bytes Arc-SHARED by the registry inline. Zero for a copying
     implementation, whatever its scan count."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_INLINE_SHARE_BYTES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_INLINE_SHARE_BYTES.read()
 
 
 def planner_scale_agg_cse_calls() raises -> Int:
     """`_apply_dup_agg_materialize` invocations since the last reset."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_CALLS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_CALLS.read()
 
 
 def planner_scale_agg_cse_grouped_nodes() raises -> Int:
     """GROUPED aggregate nodes counted by the gate, summed over passes."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_GROUPED_NODES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_GROUPED_NODES.read()
 
 
 def planner_scale_agg_cse_gate_skips() raises -> Int:
     """Passes the `< 2 grouped aggregates` reachability gate short-circuited."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_GATE_SKIPS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_GATE_SKIPS.read()
 
 
 def planner_scale_agg_cse_hash_calls() raises -> Int:
     """`structural_hash()` calls made by the agg-CSE collect walk."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_HASH_CALLS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_HASH_CALLS.read()
 
 
 def planner_scale_agg_cse_cheap_calls() raises -> Int:
     """CHEAP-key (`structural_hash_modulo_inmem_id`) calls. The denominator that
     keeps `hash_calls == 0` from being satisfiable by a pass that never ran."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_CHEAP_CALLS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_CHEAP_CALLS.read()
 
 
 def planner_scale_agg_cse_folds() raises -> Int:
     """Aggregate subtrees the pass materialized-and-shared."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_FOLDS.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_FOLDS.read()
 
 
 def planner_scale_agg_cse_hash_bytes() raises -> Int:
     """Content-hash bytes folded INSIDE the agg-CSE pass. The falsifier for the
     reachability gate + the cheap-key pre-grouping."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_AGG_CSE_HASH_BYTES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_AGG_CSE_HASH_BYTES.read()
 
 
 def planner_scale_content_hash_bytes() raises -> Int:
     """Bytes folded by `Column.content_hash` process-wide. Read as a DELTA
     across a region to attribute the fold to that region."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    var g = _PS_CONTENT_HASH_BYTES.get_or_create_ptr()
-    return Int(g[][].load())
+    return _PS_CONTENT_HASH_BYTES.read()
 
 
 def reset_planner_scale_counters() raises:
     """Reset every counter to 0 (test setup / per-cell delta harness)."""
-    # SAFETY: FFI carve-out (see `planner_scale_note_inline`).
-    _PS_INLINE_SCANS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_INLINE_COPY_BYTES.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_INLINE_SHARE_BYTES.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_AGG_CSE_CALLS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_AGG_CSE_GROUPED_NODES.get_or_create_ptr()[][].store(
-        Scalar[DType.int64](0)
-    )
-    _PS_AGG_CSE_GATE_SKIPS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_AGG_CSE_HASH_CALLS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_AGG_CSE_CHEAP_CALLS.get_or_create_ptr()[][].store(
-        Scalar[DType.int64](0)
-    )
-    _PS_AGG_CSE_FOLDS.get_or_create_ptr()[][].store(Scalar[DType.int64](0))
-    _PS_AGG_CSE_HASH_BYTES.get_or_create_ptr()[][].store(
-        Scalar[DType.int64](0)
-    )
-    _PS_CONTENT_HASH_BYTES.get_or_create_ptr()[][].store(
-        Scalar[DType.int64](0)
-    )
+    _PS_INLINE_SCANS.reset()
+    _PS_INLINE_COPY_BYTES.reset()
+    _PS_INLINE_SHARE_BYTES.reset()
+    _PS_AGG_CSE_CALLS.reset()
+    _PS_AGG_CSE_GROUPED_NODES.reset()
+    _PS_AGG_CSE_GATE_SKIPS.reset()
+    _PS_AGG_CSE_HASH_CALLS.reset()
+    _PS_AGG_CSE_CHEAP_CALLS.reset()
+    _PS_AGG_CSE_FOLDS.reset()
+    _PS_AGG_CSE_HASH_BYTES.reset()
+    _PS_CONTENT_HASH_BYTES.reset()
