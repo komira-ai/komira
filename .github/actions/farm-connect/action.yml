@@ -75,6 +75,8 @@ runs:
         oauth-client-id: ${{ inputs.ts-client-id }}
         audience: ${{ inputs.ts-audience }}
         tags: tag:ci
+        # The log of a public repository is public: no tailnet status, no addresses.
+        log-mode: quiet
 
     # The same check as the tailnet-probe workflow's: a TCP connection to the
     # farm's port, retried for a minute because a new node can take a few
@@ -101,7 +103,6 @@ runs:
           sleep 5
         done
         echo "::error title=farm-connect::the farm does not answer from this job after joining the tailnet. Not building: with no farm buck2 would build on this runner. Look at the tailnet policy (tag:ci to tag:farm, the farm's port only), whether the farm's nodes are up, and the trust credential's subject."
-        tailscale status 2>&1 | sed 's/^/tailscale: /' | head -20 || true
         exit 1
 
     - name: write the farm's machine buckconfig
