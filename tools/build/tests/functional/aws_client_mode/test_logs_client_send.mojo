@@ -7,15 +7,17 @@
 # builder refuses of its arguments, echoes each argument as an `x-stub-*`
 # header (the body as `x-stub-body`), then the `extra` headers as given, and
 # takes its status and body from the endpoint host (`status-<NNN>.invalid`,
-# `status-<NNN>-html.invalid`, else 200). So what is checked here is the
+# `status-<NNN>-html.invalid`, `status-<NNN>-errortype.invalid`, else 200). So what is checked here is the
 # generated code: that `send` takes the credential (session token included)
 # from its source, resolves the endpoint from the region or hands the
 # override on whole, passes the request body as built, the content type as
 # its own argument (from a Content-Type header in any case) and X-Amz-Target
 # as the only signed extra header, and calls the connector factory; that
 # `get_log_events` goes through `send`, parses a 200, and turns a non-2xx
-# into an error naming the operation, the status and the parsed code and
-# message, never the raw body. Signing is tested in
+# into an error naming the operation, the status and the code and message
+# komira_aws_core's aws_json_error_info reads (an X-Amzn-Errortype code
+# included), never the raw body. It sends neither `retry_safe` nor
+# `s3_200_error` (the transport's defaults, False). Signing is tested in
 # komira//src/komira_aws_core.
 from komira_aws_logs_client.komira_aws_logs_client import (
     CloudWatchLogsCloudWatchLogsClient,
@@ -110,6 +112,9 @@ def test_send_hands_the_transport() raises:
     # transport's own argument and is not repeated there.
     assert_equal(res.header(String("x-stub-extra-count")), "1")
     assert_equal(res.header(String("X-Amz-Target")), "Logs_20140328.GetLogEvents")
+    # GetLogEvents is not marked retry-safe and Logs is not S3.
+    assert_equal(res.header(String("x-stub-retry-safe")), "false")
+    assert_equal(res.header(String("x-stub-s3-200-error")), "false")
 
 
 def test_send_keeps_the_session_token() raises:
@@ -202,6 +207,29 @@ def test_get_log_events_error_names_code_and_message() raises:
     assert_true(raised)
 
 
+def test_get_log_events_error_takes_the_errortype_header() raises:
+    # The body names no code; the X-Amzn-Errortype header does. Only an
+    # error builder that reads the response through aws_json_error_info
+    # (headers, then body) finds it.
+    var client = _client_at(String("status-404-errortype.invalid"))
+    var raised = False
+    try:
+        _ = client.get_log_events(_request())
+    except e:
+        raised = True
+        var err = String(e)
+        assert_true(
+            err.startswith(
+                "CloudWatchLogsCloudWatchLogs.GetLogEvents failed: HTTP 404"
+            )
+        )
+        assert_true(err.find("ResourceNotFoundException") >= 0)
+        assert_true(err.find("internal.amazon.com") < 0)
+        assert_true(err.find("no such group") >= 0)
+        assert_true(err.find("/private/x") < 0)
+    assert_true(raised)
+
+
 def test_get_log_events_error_never_echoes_the_body() raises:
     # Not JSON, so the error readers find no code and no message in it:
     # whatever reaches the error is the generated code's doing.
@@ -239,5 +267,6 @@ def main() raises:
     test_get_log_events_goes_through_send()
     test_get_log_events_parses_a_200()
     test_get_log_events_error_names_code_and_message()
+    test_get_log_events_error_takes_the_errortype_header()
     test_get_log_events_error_never_echoes_the_body()
     test_creds_source_threads_through()

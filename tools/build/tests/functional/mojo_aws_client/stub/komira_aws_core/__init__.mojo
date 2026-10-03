@@ -6,8 +6,8 @@ komira//tools/build/proto-codegen). A library of this cell cannot depend
 on it (a mojo_library of another cell carries another cell's MojoPkgTSet
 type), and nothing generates this file: it is kept by hand, in step with
 the names and signatures the generator imports for an awsJson module
-(emit_aws/mod.rs AWS_IMPORTS: the `Always` rows, and the `ClientOnly` rows
-below). It cannot fall behind that table unnoticed: the GetLogEvents
+(emit_aws/mod.rs AWS_IMPORTS: the `Always` and `PureOnly` rows, and the
+`ClientOnly` rows below). It cannot fall behind that table unnoticed: the GetLogEvents
 clients of this package (pure) and of ../aws_client_mode (client) are
 compiled against it, from the import block the generator writes out of
 AWS_IMPORTS, so a name that table adds to either mode and this file lacks
@@ -21,28 +21,31 @@ as in the real core; `body_text` here refuses any non-ASCII byte rather
 than validating UTF-8.
 
 The client half (the end of this file): `AwsCredential`, `AwsCredsSource`,
-`AwsEndpoint`, `Header`, `HttpResult` and `resolve_endpoint` have the real
-core's types and signatures, and behave as the real ones do for what a
-generated client calls; `AwsEndpoint.https` checks nothing of the host.
-`send_sigv4_signed_request` is not in komira//src/komira_aws_core yet (its
-signed_request.mojo builds the signed request; the transport half lands
-with the HTTP library). Its signature here is the call the generator emits
-(emit_aws/mod.rs, the client's `send`): the contract the real transport
-has to meet, and the line to re-check this stub against when it lands.
+`AwsEndpoint`, `Header`, `HttpResult`, `AwsErrorInfo`, `aws_json_error_info`,
+`resolve_endpoint` and `send_sigv4_signed_request` have the real core's
+types and signatures, and behave as the real ones do for what a generated
+client calls; `AwsEndpoint.https` checks nothing of the host. The real
+`send_sigv4_signed_request` is komira//src/komira_aws_core/aws_send.mojo
+(a connector factory, standard-mode retries, the signed request of
+signed_request.mojo); signed_request.mojo's header states the signature,
+and this one keeps it, or both change together.
 
 `send_sigv4_signed_request` is a test double, not a transport. It refuses
 what the real request builder refuses of its arguments (an `extra` header
 named Host, Content-Type or Content-Length, in any case; CR or LF in a
 header, the path or the content type), calls the client's connector
-factory, signs nothing and sends nothing. It answers with one `x-stub-*`
-header per argument it was given (of the credential, the access key id and
-whether a session token is set, never a secret), the request body as
+factory once, signs nothing, sends nothing and never retries. It answers
+with one `x-stub-*` header per argument it was given (of the credential,
+the access key id and whether a session token is set, never a secret;
+`retry_safe` and `s3_200_error` as "true" or "false"), the request body as
 `x-stub-body` (ASCII only), then the `extra` headers as given, so that a
 caller's test can read what the generated `send` hands the transport. The
 status and body come from the endpoint host: `status-<NNN>.invalid`
 answers NNN with an awsJson error body (`__type`, `message` and a detail
 member no error should echo), `status-<NNN>-html.invalid` answers NNN with
-a non-JSON body, and any other host answers 200 with
+a non-JSON body, `status-<NNN>-errortype.invalid` answers NNN with the code
+only in an `X-Amzn-Errortype` header (the body has a message and no
+`__type`) and an `x-amzn-RequestId`, and any other host answers 200 with
 `{"nextForwardToken":"f/1","events":[]}`.
 
 The error readers read `__type` (then `code`) and `message` (then
@@ -50,6 +53,10 @@ The error readers read `__type` (then `code`) and `message` (then
 answer "" for any other body; the bytes overloads answer "" for a non-ASCII
 body where the real ones validate UTF-8. `aws_error_code` keeps what the
 real one keeps of a `__type` value, without its length cap.
+`aws_json_error_info` takes the code from `x-amzn-query-error` (the text
+before its one `;`), else `X-Amzn-Errortype`, else the body, and the request
+id from `x-amzn-RequestId`, as the real one does; the request id here is
+not length-capped or checked for control bytes.
 """
 
 from komira_json import JsonValue, parse_json_value
@@ -116,6 +123,22 @@ struct AwsResponse(Copyable, Movable):
     def add_header(mut self, var name: String, var value: String):
         self.header_names.append(name^)
         self.header_values.append(value^)
+
+    def header(self, name: String) -> String:
+        """The first value of `name` (case-insensitive), "" when absent."""
+        var want = name.lower()
+        for i in range(len(self.header_names)):
+            if self.header_names[i].lower() == want:
+                return self.header_values[i].copy()
+        return String("")
+
+    def has_header(self, name: String) -> Bool:
+        """True when a header named `name` (case-insensitive) is set."""
+        var want = name.lower()
+        for i in range(len(self.header_names)):
+            if self.header_names[i].lower() == want:
+                return True
+        return False
 
     def body_text(self) raises -> String:
         return _ascii_text(self.body)
@@ -353,6 +376,73 @@ struct HttpResult(Copyable, Movable):
         r.header_values = self.header_values^
         return r^
 
+    def to_response(self) -> AwsResponse:
+        """A copy of this result as an `AwsResponse`, for a caller that
+        keeps the result (a client's error builder)."""
+        var r = AwsResponse(self.status, self.body.copy())
+        r.header_names = self.header_names.copy()
+        r.header_values = self.header_values.copy()
+        return r^
+
+
+struct AwsErrorInfo(Copyable, Movable):
+    """A failed AWS response: `status`, the error `code` ("" when the
+    response names none), the `message` ("" when it carries none) and the
+    `request_id` ("" when absent)."""
+
+    var status: Int
+    var code: String
+    var message: String
+    var request_id: String
+
+    def __init__(
+        out self,
+        status: Int,
+        code: String,
+        message: String,
+        request_id: String,
+    ):
+        self.status = status
+        self.code = code
+        self.message = message
+        self.request_id = request_id
+
+    def to_error(self, what: String) -> Error:
+        """An `Error` saying `what` failed, with the status, code, message
+        and request id."""
+        var s = what + " failed: HTTP " + String(self.status)
+        if self.code.byte_length() > 0:
+            s += " " + self.code
+        if self.message.byte_length() > 0:
+            s += ": " + self.message
+        if self.request_id.byte_length() > 0:
+            s += " (request id " + self.request_id + ")"
+        return Error(s)
+
+
+def aws_json_error_info(resp: AwsResponse) -> AwsErrorInfo:
+    """The `AwsErrorInfo` of an awsJson response: the code from
+    `x-amzn-query-error`, else `X-Amzn-Errortype`, else the body."""
+    var code = String("")
+    if resp.has_header(String("x-amzn-query-error")):
+        var v = resp.header(String("x-amzn-query-error"))
+        var semi = v.find(";")
+        if semi > 0 and v.find(";", semi + 1) < 0:
+            code = aws_error_code(_sub(v, 0, semi))
+    if code.byte_length() == 0 and resp.has_header(String("X-Amzn-Errortype")):
+        code = aws_error_code(resp.header(String("X-Amzn-Errortype")))
+    if code.byte_length() == 0:
+        code = aws_error_code_from_body(resp.body)
+    var request_id = resp.header(String("x-amzn-RequestId"))
+    if request_id.find(" ") >= 0:
+        request_id = String("")
+    return AwsErrorInfo(
+        resp.status,
+        code,
+        aws_error_message_from_body(resp.body),
+        request_id,
+    )
+
 
 def send_sigv4_signed_request[
     C: Connector
@@ -365,8 +455,10 @@ def send_sigv4_signed_request[
     endpoint: AwsEndpoint,
     uri: String,
     content_type: String,
-    var body: List[UInt8],
-    var extra: List[Header],
+    body: List[UInt8],
+    extra: List[Header],
+    retry_safe: Bool = False,
+    s3_200_error: Bool = False,
 ) raises -> HttpResult:
     """The test double described in the module docstring."""
     if _has_crlf(uri) or _has_crlf(content_type):
@@ -384,11 +476,16 @@ def send_sigv4_signed_request[
     _ = mk_connector()
     var status = 200
     var reply = String('{"nextForwardToken":"f/1","events":[]}')
+    var errortype = False
     if endpoint.host.startswith("status-") and endpoint.host.endswith(".invalid"):
         var label = _sub(endpoint.host, 7, endpoint.host.byte_length() - 8)
         if label.endswith("-html"):
             status = Int(_sub(label, 0, label.byte_length() - 5))
             reply = String("<html>upstream detail /private/x</html>")
+        elif label.endswith("-errortype"):
+            status = Int(_sub(label, 0, label.byte_length() - 10))
+            reply = String('{"message":"no such group","detail":"/private/x"}')
+            errortype = True
         else:
             status = Int(label)
             reply = String(
@@ -396,6 +493,12 @@ def send_sigv4_signed_request[
                 + '"message":"no such group","detail":"/private/x"}'
             )
     var res = HttpResult(status, _bytes(reply))
+    if errortype:
+        res.add_header(
+            String("X-Amzn-Errortype"),
+            String("ResourceNotFoundException:http://internal.amazon.com/"),
+        )
+        res.add_header(String("x-amzn-RequestId"), String("req-0001"))
     res.add_header(String("x-stub-method"), method)
     res.add_header(String("x-stub-access-key-id"), cred.access_key_id)
     res.add_header(
@@ -415,6 +518,14 @@ def send_sigv4_signed_request[
     res.add_header(String("x-stub-uri"), uri)
     res.add_header(String("x-stub-content-type"), content_type)
     res.add_header(String("x-stub-body"), _ascii_text(body))
+    res.add_header(
+        String("x-stub-retry-safe"),
+        String("true") if retry_safe else String("false"),
+    )
+    res.add_header(
+        String("x-stub-s3-200-error"),
+        String("true") if s3_200_error else String("false"),
+    )
     res.add_header(String("x-stub-extra-count"), String(len(extra)))
     for i in range(len(extra)):
         res.add_header(extra[i].name, extra[i].value)
