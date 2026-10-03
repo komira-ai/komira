@@ -1031,6 +1031,87 @@ mod tests {
         assert!(src.contains("resolve_endpoint(self._endpoint_override, tiny_host("));
     }
 
+    /// A restXml S3 model (serviceId `S3`) of three operations whose
+    /// requestUri starts with `/{Bucket}`, emitted with the `s3`
+    /// customization, with `r` or without a ruleset. `context` is the
+    /// Bucket member's `contextParam` clause (with its leading comma).
+    fn emit_s3_paths(r: Option<&AwsEndpointRules>, context: &str) -> Result<String, String> {
+        let m = parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
+                    "protocol": "rest-xml", "serviceFullName": "Tiny S3",
+                    "serviceId": "S3", "signatureVersion": "s3",
+                    "auth": ["aws.auth#sigv4"], "uid": "s3-2026-10-02"}},
+                "operations": {{
+                    "GetKey": {{"name": "GetKey",
+                        "http": {{"method": "GET", "requestUri": "/{{Bucket}}/{{Key+}}"}},
+                        "input": {{"shape": "KeyIn"}}}},
+                    "List": {{"name": "List",
+                        "http": {{"method": "GET", "requestUri": "/{{Bucket}}?list-type=2"}},
+                        "input": {{"shape": "In"}}}},
+                    "HeadIt": {{"name": "HeadIt",
+                        "http": {{"method": "HEAD", "requestUri": "/{{Bucket}}"}},
+                        "input": {{"shape": "In"}}}}}},
+                "shapes": {{
+                    "In": {{"type": "structure", "required": ["Bucket"], "members": {{
+                        "Bucket": {{"shape": "Str", "location": "uri",
+                                   "locationName": "Bucket"{context}}}}}}},
+                    "KeyIn": {{"type": "structure", "required": ["Bucket", "Key"], "members": {{
+                        "Bucket": {{"shape": "Str", "location": "uri",
+                                   "locationName": "Bucket"{context}}},
+                        "Key": {{"shape": "Str", "location": "uri", "locationName": "Key"}}}}}},
+                    "Str": {{"type": "string"}}}}}}"#
+        ))
+        .unwrap();
+        let ops: Vec<String> = ["GetKey", "HeadIt", "List"].iter().map(|s| s.to_string()).collect();
+        let lowering = lower_aws_service(&m, "s3", &ops, "s3.json", "aws.s3").unwrap();
+        let prov = AwsProvenance { model_key: "s3/2026-10-02", model_sha256: "m" };
+        let options = AwsEmitOptions { pure_only: true, s3: true, ..Default::default() };
+        emit_aws_module_with_endpoints(&lowering, &AwsOverrides::empty(), "s3", options, Some(prov), r)
+            .map(|e| e.source)
+    }
+
+    const BUCKET_CONTEXT: &str = r#", "contextParam": {"name": "Bucket"}"#;
+
+    #[test]
+    fn s3_with_a_ruleset_leaves_the_bucket_to_the_ruleset() {
+        let src = emit_s3_paths(Some(&rules(S3_LIKE)), BUCKET_CONTEXT).unwrap();
+        // The bucket is dropped from the path, and a path left empty is the
+        // root; the query stays.
+        for want in [
+            "AwsRestUri.expand(String(\"/{Key+}\"), _ln, _lv)",
+            "AwsRestUri.expand(String(\"/?list-type=2\"), _ln, _lv)",
+            "AwsRestUri.expand(String(\"/\"), _ln, _lv)",
+        ] {
+            assert!(src.contains(want), "`{want}` missing from\n{src}");
+        }
+        assert!(!src.contains("_ln.append(String(\"Bucket\"))"), "{src}");
+        assert!(src.contains("#                  and a leading /{Bucket} dropped from each path:"), "{src}");
+        assert!(src.contains("_ln.append(String(\"Key\"))"), "{src}");
+        // The ruleset is given the bucket.
+        assert!(src.contains("params.set_string(String(\"Bucket\"), input.bucket)"), "{src}");
+    }
+
+    #[test]
+    fn s3_without_a_ruleset_keeps_the_bucket_in_the_path() {
+        let src = emit_s3_paths(None, BUCKET_CONTEXT).unwrap();
+        for want in [
+            "AwsRestUri.expand(String(\"/{Bucket}/{Key+}\"), _ln, _lv)",
+            "AwsRestUri.expand(String(\"/{Bucket}?list-type=2\"), _ln, _lv)",
+            "AwsRestUri.expand(String(\"/{Bucket}\"), _ln, _lv)",
+        ] {
+            assert!(src.contains(want), "`{want}` missing from\n{src}");
+        }
+        assert!(!src.contains("dropped from each path"), "{src}");
+    }
+
+    #[test]
+    fn s3_refuses_to_drop_a_bucket_the_ruleset_is_not_given() {
+        let e = emit_s3_paths(Some(&rules(S3_LIKE)), "").unwrap_err();
+        assert!(e.contains("the bucket would be sent nowhere"), "{e}");
+        assert!(e.contains("{Bucket}"), "{e}");
+    }
+
     #[test]
     fn omit_preamble_mode_refuses_a_ruleset() {
         let m = model("", MEMBERS, "");

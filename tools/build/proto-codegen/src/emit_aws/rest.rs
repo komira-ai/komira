@@ -42,7 +42,7 @@
 
 use super::proto::{AwsProtocol, Binding};
 use super::{escape, ts_const, AwsEmitter};
-use crate::aws_in::{AwsLocation, AwsOperationFacts, AwsTimestampFormat, AwsXmlNamespace};
+use crate::aws_in::{AwsLocation, AwsOperationFacts, AwsPathParam, AwsTimestampFormat, AwsXmlNamespace};
 use crate::ir::{IrField, IrMessage, IrMethod, IrType, Label, ScalarKind};
 
 /// The restJson1 binding.
@@ -319,6 +319,59 @@ impl AwsEmitter<'_> {
     // The request
     // ======================================================================
 
+    /// The `requestUri` a request is built from, its labels, and the label
+    /// the endpoint ruleset fills instead (`None`: the model's, unchanged).
+    ///
+    /// `s3` with an endpoint ruleset drops a leading `/{Bucket}` label: the
+    /// ruleset puts the bucket in the URL it chooses (the virtual host, or
+    /// the endpoint's path for path-style addressing), so the model's path
+    /// would name it twice. botocore drops it for the same reason
+    /// (`remove_bucket_from_url_paths_from_model`, botocore/handlers.py). A
+    /// path left empty is the root, `/`, which `AwsEndpoint.target_for`
+    /// joins to the endpoint's path as botocore's `_urljoin` does
+    /// (`/{Bucket}?list-type=2` is `/?list-type=2`, sent to a path-style
+    /// endpoint as `/<bucket>?list-type=2`). The dropped member must be the
+    /// ruleset's `Bucket` context parameter, or the bucket would be sent
+    /// nowhere: anything else is refused.
+    fn rest_request_uri(
+        &self,
+        facts: &AwsOperationFacts,
+        msg: &IrMessage,
+        members: &[Bound],
+    ) -> Result<(String, Vec<AwsPathParam>, Option<&'static str>), String> {
+        const LABEL: &str = "Bucket";
+        let unchanged = Ok((facts.request_uri.clone(), facts.path_params.clone(), None));
+        if !self.options.s3 || self.endpoint_rules.is_none() {
+            return unchanged;
+        }
+        let rest = match facts.request_uri.strip_prefix("/{Bucket}") {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') || rest.starts_with('?') => rest,
+            _ => return unchanged,
+        };
+        let b = members
+            .iter()
+            .find(|b| b.location == AwsLocation::Uri && b.wire == LABEL)
+            .ok_or_else(|| {
+                format!(
+                    "emit_aws: `{}` requestUri `{}` has the label `{{{LABEL}}}`, and the \
+                     input shape `{}` binds no `uri` member to it",
+                    facts.name, facts.request_uri, msg.name
+                )
+            })?;
+        let mf = self.facts.member(&msg.fq_name, &b.field.name)?;
+        if mf.context_param.as_deref() != Some(LABEL) {
+            return Err(format!(
+                "emit_aws: `{}`.{} fills the label `{{{LABEL}}}` of requestUri `{}`, which \
+                 the `s3` customization leaves to the endpoint ruleset, and it is not \
+                 the ruleset's `{LABEL}` context parameter: the bucket would be sent nowhere",
+                msg.name, b.field.name, facts.request_uri
+            ));
+        }
+        let uri = if rest.starts_with('/') { rest.to_string() } else { format!("/{rest}") };
+        let params = facts.path_params.iter().filter(|p| p.name != LABEL).cloned().collect();
+        Ok((uri, params, Some(LABEL)))
+    }
+
     fn emit_rest_request_builder(&mut self, m: &IrMethod, facts: &AwsOperationFacts) -> Result<(), String> {
         let in_ty = self.op_input_type(m);
         let fp = self.fn_prefix();
@@ -338,9 +391,10 @@ impl AwsEmitter<'_> {
         self.emit_validate_call(m);
 
         // -- the URI: labels, then the query --------------------------------
+        let (request_uri, path_params, ruleset_label) = self.rest_request_uri(facts, &msg, &members)?;
         self.line("var _ln = List[String]()");
         self.line("var _lv = List[String]()");
-        for param in &facts.path_params {
+        for param in &path_params {
             let b = members
                 .iter()
                 .find(|b| b.location == AwsLocation::Uri && b.wire == param.name)
@@ -383,7 +437,10 @@ impl AwsEmitter<'_> {
             }
         }
         for b in members.iter().filter(|b| b.location == AwsLocation::Uri) {
-            if !facts.path_params.iter().any(|p| p.name == b.wire) {
+            if ruleset_label == Some(b.wire.as_str()) {
+                continue;
+            }
+            if !path_params.iter().any(|p| p.name == b.wire) {
                 return Err(format!(
                     "emit_aws: `{}`.{} is a `uri` member named `{}`, and requestUri `{}` \
                      has no such label",
@@ -393,7 +450,7 @@ impl AwsEmitter<'_> {
         }
         self.line(&format!(
             "var _uri = AwsRestUri.expand(String(\"{}\"), _ln, _lv)",
-            escape(&facts.request_uri)
+            escape(&request_uri)
         ));
         for b in members.iter().filter(|b| b.location == AwsLocation::QueryString) {
             self.emit_query_member(&msg, b)?;

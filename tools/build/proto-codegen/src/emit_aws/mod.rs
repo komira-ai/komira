@@ -45,7 +45,7 @@ pub struct AwsEmitOptions {
     pub s3: bool,
 }
 
-/// The `s3` customization: what botocore does to S3 responses beyond the
+/// The `s3` customization: what botocore does to S3 beyond the
 /// model, each from `botocore/handlers.py` at the pinned tag.
 ///
 /// - `_handle_200_error`: a 200 response whose body is an `<Error>` (or is
@@ -56,6 +56,10 @@ pub struct AwsEmitOptions {
 ///   <message>`).
 /// - `handle_expires_header`: an `Expires` header that is not a valid date
 ///   leaves the member unset, and the rest of the response still parses.
+/// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
+///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
+///   puts the bucket in the URL it chooses (`rest_request_uri` in
+///   `rest.rs`).
 pub const S3_CUSTOMIZATION: &str = "s3";
 
 /// The protocols this emitter implements, by botocore name. Anything else is
@@ -820,6 +824,10 @@ impl<'a> AwsEmitter<'a> {
         if self.options.s3 {
             self.line("#   customize    : s3 (botocore handlers.py: 200-with-<Error> as an");
             self.line("#                  error, an invalid Expires header left unset)");
+            if self.endpoint_rules.is_some() {
+                self.line("#                  and a leading /{Bucket} dropped from each path:");
+                self.line("#                  the endpoint ruleset puts the bucket in the URL");
+            }
         }
         self.line("#");
         if !self.options.pure_only {

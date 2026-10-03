@@ -68,10 +68,11 @@ checks each named owner exists in them, and they are copied into the
 package next to the generated module. Each needs the other.
 
 Customizations. `customizations` is a closed set, checked here: `s3` applies
-botocore's S3 response handling the model does not state (a 200 whose
-body is an <Error> is an error; an `Expires` header that is not a date is
-left unset), and the generator refuses it unless the model's serviceId is
-`S3` and its protocol is restXml.
+botocore's S3 handling the model does not state (a 200 whose body is an
+<Error> is an error; an `Expires` header that is not a date is left unset;
+with `endpoint_rules`, a request path's leading `/{Bucket}` is dropped,
+because the ruleset puts the bucket in the URL), and the generator refuses
+it unless the model's serviceId is `S3` and its protocol is restXml.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_aws_core; komira_json for a JSON
