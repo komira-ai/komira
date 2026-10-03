@@ -12,7 +12,8 @@
 # byte, and prints the first differing lines when they do not. Each
 # <must contain> is then looked for in the GENERATED module, independently of
 # the golden, so a golden re-copied over a regression still goes red. Lines
-# match with their leading spaces removed, so a needle may span lines.
+# match WHOLE, with their leading spaces removed, so a needle may span lines
+# and cannot match the tail of a longer line.
 set -eu
 abspath() { case "$1" in /*) printf '%s\n' "$1" ;; *) printf '%s/%s\n' "$PWD" "$1" ;; esac; }
 BB=$(abspath "$1"); MODE=$2; shift 2
@@ -75,18 +76,20 @@ cmp)
         echo "aws_codegen: a probe was generated and no golden names it" >&2
         bad=1
     fi
-    # One line per file, leading spaces dropped; \036 stands for a newline.
+    # One line per file, leading spaces dropped; \036 stands for a newline,
+    # and also opens the file, so every line, and every needle, starts with
+    # one: a needle matches whole lines only.
     flat() { sed 's/^ *//' | tr '\n' '\036'; }
-    flat < "$GEN_DIR/$MODULE.mojo" > "$T/flat"
+    { printf '\036'; flat < "$GEN_DIR/$MODULE.mojo"; } > "$T/flat"
     for want in "$@"; do
-        if ! grep -qF -- "$(printf '%s\n' "$want" | flat)" "$T/flat"; then
+        if ! grep -qF -- "$(printf '\036%s\n' "$want" | flat)" "$T/flat"; then
             echo "aws_codegen: $MODULE.mojo does not contain:" >&2
             printf '%s\n' "$want" >&2
             bad=1
         fi
     done
     [ "$bad" = 0 ] || exit 1
-    printf 'equal to the golden: %s\n' "$MODULE.mojo" > "$STAMP"
+    printf 'equal to the golden, and %s must_contain held: %s\n' "$#" "$MODULE.mojo" > "$STAMP"
     ;;
 *)
     echo "aws_codegen: unknown mode $MODE" >&2

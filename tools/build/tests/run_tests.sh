@@ -199,10 +199,12 @@
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen). The client module must also
-#      contain the strings its must_contain names (the caller's
-#      HttpClientConfig reaching the send), and a must_contain whose lines
-#      the module holds only non-adjacently goes red. The tiny model's
+#      go red (tests//negative/aws_codegen). Each client module (logs and
+#      the tiny restJson1 model) must also contain, as whole lines, the
+#      strings its must_contain names (the caller's HttpClientConfig
+#      reaching the send); a must_contain whose lines the module holds only
+#      non-adjacently, or only as the tail of a longer line, goes red, and
+#      for no other reason. The tiny model's
 #      pure-mode client (komira//tools/build/proto-codegen/aws_rest_json)
 #      generated exactly its package's files, and its welded tests ran: see
 #      test 36.
@@ -916,6 +918,13 @@ expect_green aws_codegen tests//functional/aws_codegen:
 expect_red aws_codegen_golden_differs "differs from the golden" tests//negative/aws_codegen:golden_differs
 expect_red aws_codegen_accepted "expected a refusal, and the generator exited 0" tests//negative/aws_codegen:accepted
 expect_red aws_codegen_missing_contains "does not contain" tests//negative/aws_codegen:missing_contains
+expect_red aws_codegen_prefixed_contains "does not contain" tests//negative/aws_codegen:prefixed_contains
+# Their modules equal the goldens, so the must_contain check is their only red.
+for n in missing_contains prefixed_contains; do
+    if grep -qF -- "differs from the golden" "$LOG/aws_codegen_$n.log"; then
+        fail "aws_codegen_$n: also red for a golden difference (see $LOG/aws_codegen_$n.log)"
+    fi
+done
 
 # 35
 RT=tests//negative/rust_test

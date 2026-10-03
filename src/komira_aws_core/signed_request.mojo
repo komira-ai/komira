@@ -8,7 +8,16 @@
 # exact SigV4-signed request, at the time the clock says. It opens no
 # socket. The transport half, `send_sigv4_signed_request`, takes the same
 # arguments plus the HTTP client and its configuration, calls this, and
-# hands the bytes to the HTTP client; it lands with the HTTP library.
+# hands the bytes to the HTTP client; it lands with the HTTP library. The
+# generated clients already call it, in this argument order:
+#
+#   send_sigv4_signed_request[C](mk_connector, http_config, method, cred,
+#       region, service, endpoint, path, content_type, body, extra)
+#
+# where `mk_connector` is the client's `def () raises thin -> C` factory and
+# `http_config` the caller's `HttpClientConfig`, which has no default. The
+# generator's golden tests pin that order
+# (tools/build/tests/functional/aws_codegen); change both together.
 #
 # Every operation header in `extra` is SIGNED. awsJson services include
 # X-Amz-Target in the canonical request, so an unsigned one is answered

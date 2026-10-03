@@ -3,11 +3,12 @@
 `aws_codegen_golden` generates a module (and optionally its layout probe) in
 one action, whose directory is the `[gen]` sub-target, and compares it with
 the checked-in goldens in a second action, the default output. The second
-action also requires each `must_contain` string in the GENERATED module (lines
-compared with leading spaces removed, so a string may span lines): a property
-that holds even when someone re-copies the golden over a regression. To update a
-golden after a deliberate change to the emitter, build `[gen]` and copy the
-file over the golden.
+action also requires each `must_contain` string in the GENERATED module, as
+whole lines compared with leading spaces removed, so a string may span lines:
+a property that holds even when someone re-copies the golden over a
+regression. An empty `must_contain` string is refused at analysis, since it
+would match every module. To update a golden after a deliberate change to the
+emitter, build `[gen]` and copy the file over the golden.
 
 `aws_codegen_refusal` runs the generator on inputs it must refuse, and passes
 only when it exits non-zero, says `expect` on stderr and writes no file.
@@ -26,6 +27,11 @@ def _common(ctx):
     return bb, gen, script
 
 def _golden_impl(ctx):
+    for s in ctx.attrs.must_contain:
+        if s.strip() == "":
+            fail("{}: a must_contain entry is empty; it matches every module".format(
+                ctx.label,
+            ))
     bb, gen, script = _common(ctx)
     gen_dir = ctx.actions.declare_output(ctx.label.name + "_gen", dir = True)
     probe = "1" if ctx.attrs.golden_probe else "0"

@@ -44,7 +44,8 @@ is refused by the generator, in the build.
 
 Mode. `pure` emits the shapes and `build_<op>_request` / `parse_<op>_response`
 with no transport (`--pure-only`); `client` adds the signed-send surface,
-which imports the komira_aws_core transport names and komira_http_core.
+which imports the komira_aws_core transport names, komira_http_core and
+komira_http_client (the constructor's `HttpClientConfig`).
 
 Overrides. `overrides` is the generator's hand-override manifest (a JSON
 file naming, per operation, the hand-written owner of its plain verb), and
@@ -54,9 +55,10 @@ package next to the generated module. Each needs the other.
 
 Runtime. `deps` is required and non-empty, and nothing is added to it: the
 generated code imports its runtime (komira_aws_core, komira_json, and in
-client mode komira_http_core), which the caller names as `komira//`
-labels, or as stubs in a test. They are the library's `deps`, so they take
-what `mojo_library.deps` takes; `<name>_gen` sees only their count.
+client mode komira_http_core and komira_http_client), which the caller names
+as `komira//` labels, or as stubs in a test. They are the library's `deps`,
+so they take what `mojo_library.deps` takes; `<name>_gen` sees only their
+count.
 
 Every refusal of the rule happens at analysis, in `<name>_gen`, so a BUCK
 file with one wrong aws_client still loads.
@@ -133,7 +135,7 @@ def _aws_client_gen_impl(ctx):
             fail("{}: `operations` names `{}` twice".format(ctx.label, op))
         seen[op] = True
     if ctx.attrs.runtime_dep_count == 0:
-        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, komira_json, and in client mode komira_http_core); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
+        fail("{}: `deps` is empty. The generated code imports its runtime (komira_aws_core, komira_json, and in client mode komira_http_core and komira_http_client); name it, as komira// labels. No runtime is added by default.".format(ctx.label))
     if ctx.attrs.overrides and not ctx.attrs.hand_srcs:
         fail("{}: `overrides` is set and `hand_srcs` is empty: the manifest names hand-written owners, and they are its `hand_srcs`".format(ctx.label))
     if ctx.attrs.hand_srcs and not ctx.attrs.overrides:
