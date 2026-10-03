@@ -135,6 +135,21 @@ push_verdicts_rule = rule(
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 
+def _mojo_deps_impl(ctx):
+    if not ctx.attrs.srcs:
+        fail("mojo_deps {}: srcs is empty, so it would check nothing".format(ctx.label))
+    staged, copy = _stage(ctx, [ctx.attrs.buck] + ctx.attrs.srcs)
+    return _lint(ctx, "mojo_deps", [], [copy[ctx.attrs.buck.short_path]] + [copy[s.short_path] for s in ctx.attrs.srcs], staged)
+
+mojo_deps_rule = rule(
+    impl = _mojo_deps_impl,
+    doc = "The `deps` of the package's mojo_library (the BUCK file in `buck`) name every `komira_*` module that the Mojo files in `srcs` import, library files and tests alike. A missing dep fails the build of the package; this finds it from the text, so a dependency list is checked in review as well as at build time. Extra deps are allowed.",
+    attrs = _COMMON | {
+        "buck": attrs.source(),
+        "srcs": attrs.list(attrs.source()),
+    },
+)
+
 def _lint_suite_impl(ctx):
     if not ctx.attrs.lints:
         fail("lint_suite {}: lints is empty".format(ctx.label))
@@ -220,6 +235,9 @@ def no_endpoint(**kwargs):
 def push_verdicts(**kwargs):
     push_verdicts_rule(**_linux(kwargs))
 
+def mojo_deps(**kwargs):
+    mojo_deps_rule(**_linux(kwargs))
+
 def tar_member(**kwargs):
     tar_member_rule(**_linux(kwargs))
 
@@ -233,6 +251,7 @@ def markdown_docs(**kwargs):
 action_pins = declares_docs(action_pins)
 lint_suite = declares_docs(lint_suite_rule)
 markdown_docs = declares_docs(markdown_docs)
+mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
 push_verdicts = declares_docs(push_verdicts)
 shell_lint = declares_docs(shell_lint)

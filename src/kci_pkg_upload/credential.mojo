@@ -9,7 +9,7 @@
 # THIS surface?", and a credential that holds one secret states which surfaces
 # it may be presented to.
 #
-# `komira_http`'s `AuthProvider` / `BearerTokenSource` cannot serve this:
+# `komira_http_client`'s `AuthProvider` / `BearerTokenSource` cannot serve this:
 # `AuthProvider.apply` takes an immutable `self`, so it cannot hold a lazily
 # minted token, and neither trait renders a surface-specific shape. Those two
 # facts are the whole justification for a separate vocabulary.

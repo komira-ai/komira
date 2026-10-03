@@ -41,7 +41,7 @@
 # =============================================================================
 
 from komira_crypto import blake2b_256, hex_lower, sha256
-from komira_http.codec.types import HTTP_METHOD_POST
+from komira_http_core.codec.types import HTTP_METHOD_POST
 
 from .coordinate import PackageFile, normalize_distribution_name
 from .core_metadata import (

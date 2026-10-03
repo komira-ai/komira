@@ -195,7 +195,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
         protocols: JSON_BODY_PROTOCOLS,
     },
     AwsImport {
-        module: "komira_http.transport.io_stream",
+        module: "komira_http_core.transport.io_stream",
         names: &["Connector"],
         mode: AwsImportMode::ClientOnly,
         protocols: ALL_PROTOCOLS,

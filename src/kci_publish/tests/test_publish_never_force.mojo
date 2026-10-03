@@ -15,7 +15,7 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_true
 
-from komira_http.codec.types import HTTP_METHOD_POST
+from komira_http_core.codec.types import HTTP_METHOD_POST
 
 from kci_pkg_upload import SURFACE_PREFIX_DEV, PkgRequest, RegistrySet, ScriptedCredential
 from kci_publish import PublishCredential, PublishReport, PublishTarget, RunOptions, ScriptedChannel, run_publish

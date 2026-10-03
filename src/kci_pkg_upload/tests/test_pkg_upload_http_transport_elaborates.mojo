@@ -24,8 +24,8 @@ from std.ffi import abort
 from std.sys import argv
 from std.testing import assert_true
 
-from komira_http.client.tls_connector import TlsConnector, build_public_ca_tls_connector
-from komira_http.transport.kernel_tcp import KernelTcpConnector
+from komira_http_client.tls_connector import TlsConnector, build_public_ca_tls_connector
+from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_secret_store import SecretValue
 
 from kci_pkg_upload.approved_names import ApprovedNames

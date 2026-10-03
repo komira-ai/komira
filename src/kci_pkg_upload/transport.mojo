@@ -23,12 +23,12 @@
 # seam. No UnsafePointer, no wildcard origin.
 # =============================================================================
 
-from komira_http.client.client import HttpClient, build_request_with_body
-from komira_http.client.body import BytesBody, EmptyBody
-from komira_http.client.header_map import HeaderMap
-from komira_http.client.url import Url
-from komira_http.codec.types import HttpMethod
-from komira_http.transport.io_stream import Connector
+from komira_http_client.client import HttpClient, build_request_with_body
+from komira_http_client.body import BytesBody, EmptyBody
+from komira_http_client.header_map import HeaderMap
+from komira_http_client.url import Url
+from komira_http_core.codec.types import HttpMethod
+from komira_http_core.transport.io_stream import Connector
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.runtime.blocking_runtime import BlockingRuntime
 
@@ -58,7 +58,7 @@ def ascii_eq_ignore_case(a: String, b: String) -> Bool:
 struct PkgRequest(Copyable, Movable, Deinitable):
     """One registry HTTP call.
 
-      method  — an `HTTP_METHOD_*` code (komira_http).
+      method  — an `HTTP_METHOD_*` code (komira_http_core).
       host    — the HOST this call goes to.
       path    — the path INCLUDING any query string.
       header_names / header_values — parallel lists, in send order.
@@ -238,7 +238,7 @@ struct ScriptedPkgTransport(PkgTransport, Deinitable):
 
 
 # =============================================================================
-# HttpPkgTransport[C] — the PRODUCTION transport over komira_http.
+# HttpPkgTransport[C] — the PRODUCTION transport over komira_http_client.
 # =============================================================================
 
 

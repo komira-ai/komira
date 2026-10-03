@@ -81,7 +81,7 @@ from komira_json import (
     parse_json_bytes,
     parse_json_value,
 )
-from komira_http.transport.io_stream import Connector
+from komira_http_core.transport.io_stream import Connector
 
 
 # ---------------------------------------------------------------------------

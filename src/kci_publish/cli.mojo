@@ -43,8 +43,8 @@
 from std.ffi import abort
 from std.pathlib import Path
 
-from komira_http.client.tls_connector import TlsConnector, build_public_ca_tls_connector
-from komira_http.transport.kernel_tcp import KernelTcpConnector
+from komira_http_client.tls_connector import TlsConnector, build_public_ca_tls_connector
+from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_secret_store import SecretStore, SecretValue
 
 from kci_artifact_declaration import read_artifact_declarations

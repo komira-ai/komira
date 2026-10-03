@@ -5,10 +5,10 @@ load("//functional/gcp_client:defs.bzl", "gen_check")
 # aws_client in client mode, checked at GENERATION only. run_tests.sh (test
 # 35) builds :komira_aws_logs_client_send_surface by name, never this
 # package's pattern: the client library itself does not compile here, since
-# client-mode code imports komira_http and the transport half of
+# client-mode code imports komira_http_core and the transport half of
 # komira_aws_core, and no stub of either exists in this cell. What is pinned
 # is that `mode = "client"` reaches the generator without `--pure-only`: the
-# generated module carries the signed-send surface, its komira_http import
+# generated module carries the signed-send surface, its komira_http_core import
 # and the error builder that reads an error's code and message through
 # komira_aws_core. (Pure mode leaving all of that out is the `absent` of
 # ../aws_client's gen_check.)
@@ -38,7 +38,7 @@ gen_check(
     gen = ":komira_aws_logs_client[gen]",
     present = [
         "mode         : client",
-        "from komira_http.transport.io_stream import Connector",
+        "from komira_http_core.transport.io_stream import Connector",
         "send_sigv4_signed_request,",
         "[C: Connector, T: AwsCredsSource](Movable, Deinitable):",
         "var code = aws_error_code_from_body(res.body)",
