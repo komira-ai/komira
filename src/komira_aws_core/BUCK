@@ -3,7 +3,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The ONE hand-written AWS core under the generated komira_aws_<svc> clients:
 # the AwsCredential value; SigV4 header and query signing over komira_crypto;
 # the AWS SDK default credential provider chain and region resolution; and
-# the socket-free half of a generated client's send: AwsRequest / HttpResult,
+# the socket-free half of a generated client's send: AwsRequest / AwsResponse /
+# HttpResult (bodies as bytes), AwsErrorInfo,
 # the awsJson scalar codec and error shape, endpoint and partition resolution
 # (AWS_ENDPOINT_URL[_<SERVICE>], FIPS, dual-stack), the AwsCredsSource trait,
 # and the SigV4-signed request builder; and the interpreter of the endpoint
@@ -22,11 +23,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # test_credential_wire checks each credential request builder byte for byte
 # against tests/fixtures/*.request, and test_signed_request each signed
 # service request against one recorded from an independent SigV4
-# implementation (fake keys, fixed clock). test_s3_endpoint_rules runs every
-# case of botocore's S3 endpoint tests through the ruleset interpreter
-# (endpoint_rules.mojo) over S3's published ruleset, and requires each to
-# pass. test_env_source_only scans the package's own sources, staged as its
-# data, for any environment read outside sources.mojo.
+# implementation (fake keys, fixed clock), each payload-signing arm against
+# AWS's published S3 example, and the suite's get-vanilla-query* cases
+# through the request builder (the suite staged as for
+# test_sigv4_test_suite). The suite's post-x-www-form-urlencoded cases are
+# not put through the builder: they sign Content-Length, which the builder
+# never signs, so test_sigv4_test_suite alone covers them.
+# test_s3_endpoint_rules runs every case of botocore's S3 endpoint tests
+# through the ruleset interpreter (endpoint_rules.mojo) over S3's published
+# ruleset, and requires each to pass. test_env_source_only scans the
+# package's own sources, staged as its data, for any environment read
+# outside sources.mojo.
 _FIXTURES = glob(["tests/fixtures/*"])
 
 # botocore's S3 endpoint ruleset, partition table and endpoint test cases,
@@ -54,6 +61,7 @@ mojo_library(
     test_srcs = [
         "tests/test_aws_codec.mojo",
         "tests/test_aws_json.mojo",
+        "tests/test_aws_response.mojo",
         "tests/test_credential_chain.mojo",
         "tests/test_credential_wire.mojo",
         "tests/test_creds_source.mojo",
@@ -70,7 +78,12 @@ mojo_library(
     test_data = {
         "tests/test_credential_chain.mojo": _FIXTURES,
         "tests/test_credential_wire.mojo": _FIXTURES,
-        "tests/test_signed_request.mojo": _FIXTURES,
+        # The fixtures at the path the list form stages them at (the
+        # test's _FIX), so they can sit beside the aws_c_auth mapping.
+        "tests/test_signed_request.mojo": {
+            package_name() + "/" + f: f
+            for f in _FIXTURES
+        } | {"aws_c_auth": "//third_party/aws_c_auth:files"},
         "tests/test_env_source_only.mojo": glob(["*.mojo"]),
         "tests/test_sigv4_test_suite.mojo": {
             "aws_c_auth": "//third_party/aws_c_auth:files",

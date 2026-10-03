@@ -219,7 +219,8 @@
 #      response. GetLogEvents' error shapes have no members in that model, so
 #      the error-shape check pins only that the generated shape is memberless
 #      (it decodes nothing); an error's code and message are read by
-#      komira_aws_core, stubbed here, and are tested on the real core in P06.
+#      komira_aws_core, stubbed here, and are tested in
+#      komira//src/komira_aws_core.
 #      Exactly the package's files are generated, nothing of an operation not
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is

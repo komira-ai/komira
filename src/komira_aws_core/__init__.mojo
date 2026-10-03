@@ -15,7 +15,11 @@ clients.
   `CredentialTransport` trait (`credential_transport.mojo`); this package
   opens no socket.
 - `aws_request.mojo`: `AwsRequest` (unsigned, what a generated
-  `build_<op>_request` returns) and `HttpResult`.
+  `build_<op>_request` returns), `AwsResponse` (what a generated
+  `parse_<op>_response` reads) and `HttpResult` (what a transport returns).
+  Every body is bytes.
+- `aws_error.mojo`: `AwsErrorInfo` (status, code, message, request id of a
+  failed response) and `aws_json_error_info`.
 - `aws_codec.mojo`: the awsJson scalar encoding (`AwsJsonToken`, the
   `aws_token_*` encoders and decoders, the AWS_TS_* timestamp formats) and
   the error shape (`aws_error_code*`, `aws_error_message_from_body`).
@@ -27,7 +31,7 @@ clients.
 - `creds_source.mojo`: the `AwsCredsSource` trait a generated client signs
   through, a static source and the cached default chain.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
-  of a send.
+  of a send, and `AwsPayloadSigning` (hashed, unsigned or precomputed).
 - `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
   library; `partitions.mojo`: `AwsPartitionSet`, the partitions.json table
@@ -75,7 +79,13 @@ from .aws_json import (
     aws_ts_from_json,
     aws_ts_to_json,
 )
-from .aws_request import AwsRequest, HttpResult
+from .aws_error import (
+    AWS_REQUEST_ID_MAX_BYTES,
+    AwsErrorInfo,
+    aws_json_error_info,
+    aws_request_id,
+)
+from .aws_request import AwsRequest, AwsResponse, HttpResult
 from .credential import AwsCredential
 from .creds_source import (
     AWS_CREDENTIAL_ADVISORY_REFRESH_SECONDS,
@@ -144,7 +154,7 @@ from .shared_config import (
     select_profile,
     shared_file_paths,
 )
-from .signed_request import build_sigv4_signed_request
+from .signed_request import AwsPayloadSigning, build_sigv4_signed_request
 from .sigv4 import (
     EMPTY_PAYLOAD_SHA256,
     MAX_PRESIGN_EXPIRES_SECONDS,

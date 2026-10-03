@@ -24,7 +24,7 @@ pub const SUPPORTED_JSON_VERSIONS: &[&str] = &["1.0", "1.1"];
 
 /// The generator version written into every generated header. Bump it when
 /// the emitted text changes for the same model, operation list and options.
-pub const AWS_GENERATOR_VERSION: &str = "2";
+pub const AWS_GENERATOR_VERSION: &str = "3";
 
 /// The hand-written AWS core every generated module imports from: codecs,
 /// SigV4, credential providers, endpoints, retry and the signed-request
@@ -65,6 +65,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
             "AWS_TS_RFC822",
             "AWS_TS_UNIX",
             "AwsRequest",
+            "AwsResponse",
             "aws_blob_from_json",
             "aws_error_code",
             "aws_error_code_from_body",
@@ -98,7 +99,7 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     },
     AwsImport {
         module: "komira_json",
-        names: &["JsonValue", "parse_json_value"],
+        names: &["JsonValue", "parse_json_bytes", "parse_json_value"],
         mode: AwsImportMode::Always,
     },
     AwsImport {
@@ -1875,13 +1876,13 @@ impl<'a> AwsEmitter<'a> {
                 let expr = self.host_prefix_expr(hp, &m.input.fq_name)?;
                 self.line(&format!("req.host_prefix = {expr}"));
             }
-            self.line("req.body = input.to_aws_json().serialize()");
+            self.line("req.set_body_text(input.to_aws_json().serialize())");
             self.line("return req^");
             self.pop();
             self.blank();
 
             self.line(&format!(
-                "def {fp}parse_{}_response(body: String) raises -> {out_ty}:",
+                "def {fp}parse_{}_response(resp: AwsResponse) raises -> {out_ty}:",
                 m.name
             ));
             self.push();
@@ -1891,14 +1892,14 @@ impl<'a> AwsEmitter<'a> {
             ));
             self.line("    operations with no output still answer 200 with no bytes, and");
             self.line("    `parses_operations_with_empty_json_bodies` states it.\"\"\"");
-            self.line("if body.byte_length() == 0:");
+            self.line("if len(resp.body) == 0:");
             self.push();
             self.line(&format!(
                 "return {out_ty}.from_aws_json(parse_json_value(String(\"{{}}\")))"
             ));
             self.pop();
             self.line(&format!(
-                "return {out_ty}.from_aws_json(parse_json_value(body))"
+                "return {out_ty}.from_aws_json(parse_json_bytes(resp.body))"
             ));
             self.pop();
             self.blank();
@@ -2149,7 +2150,7 @@ impl<'a> AwsEmitter<'a> {
             self.line("var res = self.send(req^)");
             self.line("if not aws_is_error_status(res.status):");
             self.push();
-            self.line(&format!("return {fp}parse_{}_response(res.body)", m.name));
+            self.line(&format!("return {fp}parse_{}_response(res^.into_response())", m.name));
             self.pop();
             self.line(&format!(
                 "raise _{}_error(String(\"{}\"), res)",
@@ -2307,7 +2308,7 @@ mod tests {
         assert_eq!(rows.len(), 1, "exactly one row imports JsonValue");
         let row = rows[0];
         assert_eq!(row.module, "komira_json");
-        assert_eq!(row.names, &["JsonValue", "parse_json_value"]);
+        assert_eq!(row.names, &["JsonValue", "parse_json_bytes", "parse_json_value"]);
         assert_eq!(row.mode, AwsImportMode::Always);
     }
 }

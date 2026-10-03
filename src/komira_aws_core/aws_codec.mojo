@@ -36,7 +36,7 @@
 from komira_encoding import base64_decode, base64_encode
 
 from ._flat_json import parse_top_level_strings
-from ._text import sub
+from ._text import sub, utf8_valid
 
 
 comptime AWS_TS_UNIX = 0
@@ -250,6 +250,22 @@ def aws_error_message_from_body(body: String) -> String:
     except:
         pass
     return String("")
+
+
+def aws_error_code_from_body(body: List[UInt8]) -> String:
+    """`aws_error_code_from_body` of a body held as bytes: "" when they are
+    not well-formed UTF-8."""
+    if not utf8_valid(Span(body)):
+        return String("")
+    return aws_error_code_from_body(String(unsafe_from_utf8=Span(body)))
+
+
+def aws_error_message_from_body(body: List[UInt8]) -> String:
+    """`aws_error_message_from_body` of a body held as bytes: "" when they
+    are not well-formed UTF-8."""
+    if not utf8_valid(Span(body)):
+        return String("")
+    return aws_error_message_from_body(String(unsafe_from_utf8=Span(body)))
 
 
 def _clean_message(m: String) -> String:
