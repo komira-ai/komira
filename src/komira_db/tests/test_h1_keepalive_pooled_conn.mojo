@@ -7,7 +7,7 @@
 # (`_MockConn`). THIS file proves it spans a SECOND, REAL backend: the S3 / HTTP-1.1
 # keep-alive TRANSPORT connection — a dialed TLS/TCP byte-stream to an origin, the
 # pooled "resource" the existing ad-hoc `_H1CacheEntry[S]` / `_h1_idle_conn` /
-# `_streaming_idle_pool` cache (komira_http/client/client.mojo) keys by `PoolKey`.
+# `_streaming_idle_pool` cache (komira_http_client/client.mojo) keys by `PoolKey`.
 #
 # THE POOLED RESOURCE: `H1KeepAliveConn[S]` — a keep-alive H1 transport connection
 # wrapping a real `IoStream` conformer (`ScriptedStream`, with its heap-owning
@@ -74,8 +74,8 @@ from komira_core.collections.slab import Slab
 
 from komira_db.pool import Pool, PooledResource
 
-from komira_http.client.pool import PoolKey, VERIFY_PEER
-from komira_http.transport.scripted import ScriptedStream
+from komira_http_client.pool import PoolKey, VERIFY_PEER
+from komira_http_core.transport.scripted import ScriptedStream
 
 
 # =============================================================================
