@@ -241,9 +241,11 @@
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
 #      copied into the package, the header names its owner, and a caller test
-#      imports it. A client-mode client is checked at generation only
-#      (tests//functional/aws_client_mode): it carries the signed-send
-#      surface, the komira_http_core import and the error builder. Refused at
+#      imports it. A client-mode client (tests//functional/aws_client_mode)
+#      carries the signed-send surface, the komira_http_core import and the
+#      error builder, and builds against the same stubs with their client
+#      half, once its layout probe and a caller test of what its send hands
+#      the transport and of its error builder pass. Refused at
 #      analysis: empty, joined or repeated `operations`, empty `deps`,
 #      `overrides` without `hand_srcs` and the reverse, a hand_srcs entry
 #      that is a label, not `.mojo`, or named like a generated file, and a
@@ -965,7 +967,7 @@ expect_red aws_client_joined_operations 'is not a botocore operation name' tests
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime
 expect_red aws_client_unknown_operation 'declares no operation(s) ["GetLogEvent"]' tests//negative/mojo_aws_client:unknown_operation
 expect_red aws_client_caller_test_red 'GATED TEST FAILED: tests//negative/mojo_aws_client:caller_test_red:test_logs_deliberate_failure.mojo' tests//negative/mojo_aws_client:caller_test_red
-expect_green aws_client_mode tests//functional/aws_client_mode:komira_aws_logs_client_send_surface
+expect_green aws_client_mode tests//functional/aws_client_mode:
 expect_red aws_client_duplicate_operation '`operations` names `GetLogEvents` twice' tests//negative/mojo_aws_client:duplicate_operation
 expect_red aws_client_overrides_without_hand_srcs '`overrides` is set and `hand_srcs` is empty' tests//negative/mojo_aws_client:overrides_without_hand_srcs
 expect_red aws_client_hand_srcs_without_overrides '`hand_srcs` is set and `overrides` is not' tests//negative/mojo_aws_client:hand_srcs_without_overrides
