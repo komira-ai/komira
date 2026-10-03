@@ -53,6 +53,15 @@ clients.
 - `endpoint_signing.mojo`: `aws_signing_target`, a resolved endpoint as the
   signer takes it (`AwsSigningTarget`: the `AwsEndpoint`, signing name and
   region, and headers), refusing an auth scheme this core cannot sign.
+- `aws_send.mojo`: `send_sigv4_signed_request`, the transport half of a
+  send a generated client calls: signed, sent over komira_http_client
+  through a `Connector`, and retried; `send_sigv4_signed_request_with`
+  over injected seams (`AwsHttpTransport`, the clocks, the retry loop and
+  budget), and `AwsConnectorTransport`.
+- `aws_retry.mojo`: `AwsRetryClassifier`, the AWS SDKs' standard retry
+  conditions for komira_retry over an `AwsAttempt`, with
+  `aws_standard_retry_policy`; a request that is not retry-safe is resent
+  only when the service cannot have acted on it.
 - `s3_wire.mojo`: `s3_copy_source`, `s3_content_range_total` and
   `s3_apply_request_checksum` (over `s3_crc32` / `s3_checksum_crc32`), the
   S3 header values no model states.
@@ -136,6 +145,27 @@ from .aws_text import (
     aws_text_media,
     aws_text_ts,
     aws_ts_from_text,
+)
+from .aws_retry import (
+    AWS_RETRY_COST,
+    AWS_STANDARD_MAX_ATTEMPTS,
+    AWS_TIMEOUT_RETRY_COST,
+    AwsAttempt,
+    AwsRetryClassifier,
+    aws_is_throttling_code,
+    aws_method_is_idempotent,
+    aws_standard_retry_policy,
+    aws_transport_error_kind,
+)
+from .aws_send import (
+    AwsConnectorTransport,
+    AwsHttpTransport,
+    AwsMonotonicClock,
+    AwsReactorSleeper,
+    aws_system_retry_loop,
+    aws_response_error_code,
+    send_sigv4_signed_request,
+    send_sigv4_signed_request_with,
 )
 from .aws_xml import (
     aws_rest_xml_error,
@@ -296,6 +326,7 @@ from .sources import (
     MapFiles,
     ProcessEnv,
     ProcessFiles,
+    SystemAwsClock,
     amz_date_from_unix,
 )
 from .sts_credentials import (
