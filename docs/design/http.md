@@ -31,7 +31,7 @@ client:  HttpClient[C].send_buffered ─► pool probe ─► (miss) resolve + C
             stream.negotiated_protocol() == h2 ? h2 driver : h1 OutboundDriver ─► response
 ```
 
-### How does an HTTP server built on komira_http serve a request?
+### How does an HTTP server built on komira_http_server serve a request?
 
 `HttpServer[G]` (`src/komira_http_server/server.mojo`) owns one listener, one `Reactor[NoopSink]` (epoll on Linux, kqueue on macOS), a `Slab[ConnEntry]` of connections and a 4,096-byte read buffer (`REQ_BUF_BYTES`). `HttpServerConfig` sets the port (0 asks the kernel for one), the backlog (4,096), the parser limits and `Expect: 100-continue` handling, and binds to 127.0.0.1 unless built with `with_port_bind_any`. `G` is the gRPC dispatcher and defaults to `NoopGrpcDispatch`.
 
@@ -51,7 +51,7 @@ The four dispatch methods close any connection that is TLS or HTTP/2. Only `serv
 
 The dispatcher is passed to each call, not stored. `RequestDispatcher.dispatch[RT](mut reactor, var req) raises -> HttpResponse` owns routing and error mapping; a raise becomes a 500. `serve_one_iteration_dispatch` requires `RT.Sink == NoopSink` with a `comptime assert`, so the reactor it lends is the one it polls.
 
-`GcpServerlessEntry` (`src/komira_http_server/serving/serverless_entry.mojo`) is the ready-made loop for a platform that routes requests to a listener. It holds one listen port, which defaults to 8080 and which a binary parses from its own flag with `parse_serve_port`: the library reads no environment. `serve` calls `tls_init()`, binds 0.0.0.0, and calls `serve_one_iteration_over` with a 50 ms poll timeout forever; `serve_chained` does the same through the chained round. Its runtime type is `GcpCloudRunRuntime[NoopSink]`, imported from `komira_async` (`komira_async.runtime.gcp_cloud_run_runtime`), which `komira_http` does not define; it is used only as `RT`.
+`GcpServerlessEntry` (`src/komira_http_server/serving/serverless_entry.mojo`) is the ready-made loop for a platform that routes requests to a listener. It holds one listen port, which defaults to 8080 and which a binary parses from its own flag with `parse_serve_port`: the library reads no environment. `serve` calls `tls_init()`, binds 0.0.0.0, and calls `serve_one_iteration_over` with a 50 ms poll timeout forever; `serve_chained` does the same through the chained round. Its runtime type is `GcpCloudRunRuntime[NoopSink]`, imported from `komira_async` (`komira_async.runtime.gcp_cloud_run_runtime`), which the HTTP packages do not define; it is used only as `RT`.
 
 ### How is an HTTP/1.1 request parsed and a response framed?
 
