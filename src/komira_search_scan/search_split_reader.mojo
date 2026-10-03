@@ -119,7 +119,7 @@ def decode_search_split_position(
 struct SearchSplitReader(SplitReader, Movable, Deinitable):
     """Reads one split's hits, by rank, from where it was opened to the end.
 
-    Built by `SearchScanRuntime.open_split`, which checked the binding, the
+    Built by `SearchScanResolver.open_split`, which checked the binding, the
     analyzer and the position before parsing the split."""
 
     var _core: SearchCore

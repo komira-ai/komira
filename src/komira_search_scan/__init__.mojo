@@ -10,7 +10,7 @@
 #     and identity corpus (a `ScanBinding` over {index, field, query,
 #     analyzer_fp}, generation LIVE or pinned); `SearchIndexCatalog`, the
 #     store seam, with the in-process `InMemorySearchIndexCatalog`; and
-#     `SearchScanRuntime`, the tier-2 `ScanSourceResolver` an engine executes
+#     `SearchScanResolver`, the tier-2 `ScanSourceResolver` an engine executes
 #     (one split per split object live at the resolved generation).
 #   * search_split_reader.mojo -- `SearchSplitReader`, which reads one split's
 #     hits by rank, and the kind's split-position encoding.
@@ -46,12 +46,12 @@ from .search_scan_kind import (
     InMemorySearchIndexCatalog,
     SEARCH_SCAN_KIND_NAME,
     SearchIndexCatalog,
-    SearchScanRuntime,
+    SearchScanResolver,
     search_scan_binding,
     search_scan_descriptor,
     search_scan_identity_corpus,
     search_scan_kind_id,
-    search_scan_runtime,
+    search_scan_resolver,
     search_split_key,
 )
 

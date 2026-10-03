@@ -14,14 +14,15 @@
 # WHAT THIS MODULE OWNS (PURE, S3-FREE, unit-testable on the core edge)
 # -----------------------------------------------------------------------------
 #   * QueryIR — the query config (a single `match` over ONE text
-#     field). Copyable POD-ish (String + Int + AnalyzerConfig value) — rides on
-#     the Copyable Searcher plan-spec without deep-copying split bytes.
+#     field). Copyable POD-ish (String + Int + AnalyzerConfig value) — a
+#     per-split copy (merge.mojo) never deep-copies split bytes.
 #   * _read_docstore_blob — the fail-loud, bounds-checked doc-store reader
 #     (split.mojo has the DocStoreBuilder WRITER + the
 #     SplitView.docstore_region() accessor; the reader lives here). Returns a
 #     Span tied to the docstore_region's INNER-field origin.
 #   * hit_schema — the cached HitBatch schema (_score Float64 / _id Int64 /
-#     _source STRING), shared by SearchCore + the Searcher spec.
+#     _source STRING), shared by SearchCore + the `komira.search.index` scan
+#     kind (komira_search_scan).
 #   * SearchCore — the Movable-only read core: owns a PRE-PARSED SplitView + a
 #     deserialized TermDictionary (both built at CONSTRUCTION: SplitView.parse
 #     and TermDictionary.deserialize each consume owned bytes, and search(self)
@@ -47,7 +48,7 @@
 #   * _decode_posting_list + _read_docstore_blob stay INTRA-package (komira_search)
 #     — no UnsafePointer crosses a module boundary.
 #
-# NOTE: the scan-resolver conformance (`SearchScanRuntime`, `SearchSplitReader`)
+# NOTE: the scan-resolver conformance (`SearchScanResolver`, `SearchSplitReader`)
 # lives in the HIGHER package komira_search_scan, NOT here.
 # =============================================================================
 
@@ -130,9 +131,9 @@ comptime HIT_COL_SOURCE: String = "_source"
 def hit_schema() raises -> Schema:
     """The HitBatch schema: `_score Float64`, `_id Int64`, `_source STRING`.
 
-    Eagerly built (cheap — three Fields). The Searcher spec caches a copy of
-    this at construction and SearchMorselSource asserts each assembled
-    column's arrow_type against it (the BatchMorselSource schema-tag guard)."""
+    Eagerly built (cheap — three Fields). The `komira.search.index` scan kind
+    (komira_search_scan) states it as its scan schema, and its
+    `search_split_hits` checks each assembled column's arrow_type against it."""
     var sb = SchemaBuilder()
     sb.add_field(Field(HIT_COL_SCORE, ArrowType.FLOAT64, False))
     sb.add_field(Field(HIT_COL_ID, ArrowType.INT64, False))
@@ -501,10 +502,9 @@ struct AggResults(Movable, Deinitable):
 struct QueryIR(Copyable, Movable, Deinitable):
     """The query: a single `match` over ONE text field.
 
-    Copyable so it rides on the Copyable Searcher plan-spec: the plan cache
-    / CSE structurally copies every source, so the query must be a Copyable
-    runtime value. All fields are Copyable (String + Int + AnalyzerConfig value
-    + the `Optional[ArcPointer[Expr]]` filter carrier — see below).
+    Copyable so a caller can take a per-split copy (merge.mojo rewrites
+    top_k / shard_size on it) without sharing mutable state. All fields are
+    Copyable (String + Int + AnalyzerConfig value + the `Optional[ArcPointer[Expr]]` filter carrier — see below).
 
     Contract: `analyzer_config` MUST satisfy `is_tokenized()` (FIELD_CLASS_TEXT)
     — `analyze_text` RAISES otherwise. The OpenSearch shim that builds the
@@ -560,10 +560,9 @@ struct QueryIR(Copyable, Movable, Deinitable):
     trait-`Copyable`, synthesized — no explicit copy machinery: carry
     the filter as `Optional[ArcPointer[Expr]]`. `ArcPointer[T]` IS Copyable (a
     refcount bump — shared read-only ownership of the IMMUTABLE predicate tree,
-    which is exactly the semantics when the plan cache / CSE structurally copies
-    the spec). This is NOT the banned use of ArcPointer (to make a List /
-    byte-slab ELEMENT Copyable); this is a single plan-spec field, never
-    slab-stored.
+    which is exactly the semantics when a per-split copy is taken). This is NOT
+    the banned use of ArcPointer (to make a List / byte-slab ELEMENT Copyable);
+    this is a single QueryIR field, never slab-stored.
     """
 
     var field_name: String
@@ -1273,8 +1272,8 @@ struct _TopKHeap(Movable, Deinitable):
 # The per-doc evaluator of the ACCEPTED pushed-down predicate (QueryIR.filter).
 # The engine's vectorized Filter kernels operate on Arrow columns, not
 # per-doc scalar fast-field reads. These helpers walk the SAME engine `Expr`
-# vocabulary the gate (Searcher._pushdown_supported) accepts, so the gate's
-# accept-set == this eval-set (the two-way SourceLike contract).
+# vocabulary the gate (komira_search_scan's FastFieldPushdownGate) accepts, so
+# the gate's accept-set == this eval-set.
 #
 # NULL handling (EXACT-only, load-bearing): a null cell (the scalar accessor
 # returns None) FAILS the predicate (Arrow/OpenSearch three-valued logic) — so

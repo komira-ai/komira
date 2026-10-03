@@ -92,17 +92,17 @@ from komira_search_scan.search_scan_kind import (
     SEARCH_RESOLVED_GENERATION,
     SEARCH_SCAN_KIND_NAME,
     SEARCH_SPLIT_KEY_INVALID,
-    SearchScanRuntime,
+    SearchScanResolver,
     search_scan_binding,
     search_scan_descriptor,
     search_scan_identity_corpus,
     search_scan_kind_id,
-    search_scan_runtime,
+    search_scan_resolver,
     search_split_key,
 )
 
 
-comptime _Runtime = SearchScanRuntime[InMemorySearchIndexCatalog]
+comptime _Resolver = SearchScanResolver[InMemorySearchIndexCatalog]
 
 
 # -----------------------------------------------------------------------------
@@ -254,7 +254,7 @@ def _assert_rows(got: List[String], want: List[String], what: String) raises:
         assert_equal(got[i], want[i], what + ": row " + String(i))
 
 
-def _open(rt: _Runtime, binding: ScanBinding) raises -> ScanOpened:
+def _open(rt: _Resolver, binding: ScanBinding) raises -> ScanOpened:
     var exec_binding = resolve_for_execution(rt, binding)
     return drain_scan(rt, ScanRequest(exec_binding^))
 
@@ -293,7 +293,7 @@ def test_the_kind_name_is_komira_search_index() raises:
 
 
 def test_hits_equal_search_core_called_directly() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var b = rt.build_binding(_params(Optional(String("alpha"))))
@@ -310,7 +310,7 @@ def test_hits_equal_search_core_called_directly() raises:
 def test_the_erased_kind_serves_the_same_rows() raises:
     var cat = _catalog()
     _ = cat.publish(String("logs"), _split_a())
-    var r = search_scan_runtime(cat^)
+    var r = search_scan_resolver(cat^)
     assert_equal(r.kind_id(), search_scan_kind_id())
     var b = r.build_binding(_params(Optional(String("alpha"))))
     var exec_binding = resolve_for_execution(r, b)
@@ -327,7 +327,7 @@ def test_the_erased_kind_serves_the_same_rows() raises:
 
 
 def test_the_generation_is_re_resolved_per_execution() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var cached = rt.build_binding(_params(Optional(String("alpha"))))
     assert_equal(cached.snapshot_token, UInt64(0), "a LIVE plan carries 0")
@@ -352,7 +352,7 @@ def test_the_generation_is_re_resolved_per_execution() raises:
 
 
 def test_the_cache_key_survives_a_publish() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var before = rt.build_binding(_params(Optional(String("alpha"))))
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
@@ -377,7 +377,7 @@ def test_the_cache_key_survives_a_publish() raises:
 
 
 def test_a_stated_generation_is_a_pin() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var p1 = _params(Optional(String("alpha")))
@@ -416,7 +416,7 @@ def test_a_stated_generation_is_a_pin() raises:
 
 
 def test_a_no_query_scan_returns_every_live_doc() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var cached = rt.build_binding(_params(None))
     assert_equal(cached.params.get_str(String("query")), String(""))
@@ -439,7 +439,7 @@ def test_a_no_query_scan_returns_every_live_doc() raises:
 
 
 def test_a_stopword_only_query_still_matches_nothing() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var o = _open(rt, rt.build_binding(_params(Optional(String("the")))))
     assert_equal(o.num_rows(), 0, "match semantics unchanged by the no-query scan")
@@ -457,7 +457,7 @@ def _eq_str(col: String, v: String) -> Expr:
 
 
 def test_fast_field_conjuncts_are_lowered_into_the_search() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var b = rt.build_binding(_params(Optional(String("alpha"))))
@@ -491,7 +491,7 @@ def test_fast_field_conjuncts_are_lowered_into_the_search() raises:
 
 
 def test_a_limit_caps_the_rows() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var e = resolve_for_execution(rt, rt.build_binding(_params(None)))
@@ -522,7 +522,7 @@ def test_the_identity_corpus_passes_the_core_audit() raises:
 
 
 def test_an_unknown_index_is_refused_by_name() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     var p = ScanParams()
     p.put_str(String("index"), String("nope"))
     p.put_str(String("field"), String("body"))
@@ -538,7 +538,7 @@ def test_an_unknown_index_is_refused_by_name() raises:
 
 
 def test_analyzer_drift_is_refused_by_name() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var p = _params(Optional(String("alpha")))
     p.put_u64(String("analyzer_fp"), analyzer_config_fingerprint(_cfg()) + 1)
@@ -557,7 +557,7 @@ def test_analyzer_drift_is_refused_at_execution() raises:
     # passing `build_binding`, and must be refused there by name -- else it
     # silently matches a different term set. The binding is made directly
     # with `search_scan_binding`, so `build_binding`'s check never runs.
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var stale = search_scan_binding(
         String("logs"),
@@ -579,7 +579,7 @@ def test_analyzer_drift_is_refused_at_execution() raises:
 def test_a_foreign_binding_and_a_missing_param_are_refused() raises:
     var cat = _catalog()
     _ = cat.publish(String("logs"), _split_a())
-    var r = search_scan_runtime(cat^)
+    var r = search_scan_resolver(cat^)
     # `index` is the one required param (`field` is derived).
     var p = ScanParams()
     p.put_str(String("field"), String("body"))
@@ -632,7 +632,7 @@ def _two_field_catalog() raises -> InMemorySearchIndexCatalog:
 
 
 def test_an_omitted_field_is_derived_when_the_index_has_one() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var derived = rt.build_binding(_index_only_params(String("alpha")))
@@ -663,7 +663,7 @@ def test_an_omitted_field_is_derived_when_the_index_has_one() raises:
 
 
 def test_an_omitted_field_is_refused_by_name_when_the_index_has_several() raises:
-    var rt = _Runtime(_two_field_catalog())
+    var rt = _Resolver(_two_field_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var raised = False
     try:
@@ -678,7 +678,7 @@ def test_an_omitted_field_is_refused_by_name_when_the_index_has_several() raises
     assert_true(raised, "two analyzed fields: the kind refuses to guess")
     # Through the ERASED form too (the registry path a context takes).
     var cat = _two_field_catalog()
-    var r = search_scan_runtime(cat^)
+    var r = search_scan_resolver(cat^)
     var raised2 = False
     try:
         _ = r.build_binding(_index_only_params(String("")))
@@ -689,7 +689,7 @@ def test_an_omitted_field_is_refused_by_name_when_the_index_has_several() raises
 
 
 def test_an_explicit_field_is_honoured_on_a_many_field_index() raises:
-    var rt = _Runtime(_two_field_catalog())
+    var rt = _Resolver(_two_field_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var b = rt.build_binding(_params(Optional(String("alpha"))))
     assert_equal(b.params.get_str(String("field")), String("body"))
@@ -755,12 +755,12 @@ def _tail(xs: List[String], start: Int) -> List[String]:
     return out^
 
 
-def _request(rt: _Runtime, query: Optional[String]) raises -> ScanRequest:
+def _request(rt: _Resolver, query: Optional[String]) raises -> ScanRequest:
     return ScanRequest(resolve_for_execution(rt, rt.build_binding(_params(query))))
 
 
 def test_the_plan_is_one_bounded_split_per_live_split() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var req = _request(rt, Optional(String("alpha")))
@@ -787,7 +787,7 @@ def test_the_plan_is_one_bounded_split_per_live_split() raises:
 
 
 def test_a_reader_returns_its_split_in_one_poll_then_end() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var req = _request(rt, Optional(String("alpha")))
     var plan = rt.plan_splits(req)
@@ -807,7 +807,7 @@ def test_a_reader_returns_its_split_in_one_poll_then_end() raises:
 
 
 def _resume_case(query: String, what: String) raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var want = _direct_rows(_split_a(), query)
     assert_true(len(want) >= 2, what + ": the case needs two ranks")
@@ -831,7 +831,7 @@ def _resume_case(query: String, what: String) raises:
     # The erased reader, one rank per poll, reads the same ranks in order.
     var cat = _catalog()
     _ = cat.publish(String("logs"), _split_a())
-    var r = search_scan_runtime(cat^)
+    var r = search_scan_resolver(cat^)
     var ereq = ScanRequest(
         resolve_for_execution(r, r.build_binding(_params(Optional(query))))
     )
@@ -858,7 +858,7 @@ def test_a_resumed_split_reads_exactly_the_rest() raises:
 
 
 def test_a_limit_cut_keeps_the_top_ranked_rows() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     _ = rt.catalog_mut().publish(String("logs"), _split_b())
     var e = resolve_for_execution(rt, rt.build_binding(_params(None)))
@@ -875,7 +875,7 @@ def _end(id: UInt32) -> Optional[SplitPosition]:
 
 
 def _expect_open_refused(
-    rt: _Runtime, req: ScanRequest, split: ScanSplit, name: String, what: String
+    rt: _Resolver, req: ScanRequest, split: ScanSplit, name: String, what: String
 ) raises:
     var raised = False
     try:
@@ -887,7 +887,7 @@ def _expect_open_refused(
 
 
 def test_a_bad_position_or_split_key_is_refused_by_name() raises:
-    var rt = _Runtime(_catalog())
+    var rt = _Resolver(_catalog())
     _ = rt.catalog_mut().publish(String("logs"), _split_a())
     var req = _request(rt, Optional(String("alpha")))
     var id = search_scan_kind_id()

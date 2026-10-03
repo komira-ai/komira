@@ -15,8 +15,8 @@
 #   * `SearchIndexCatalog` -- the trait a store implements so the kind can ask
 #     "which generation is live" and "which splits were live at generation g";
 #     `InMemorySearchIndexCatalog` is the in-process conformer;
-#   * `SearchScanRuntime[C]` -- the tier-2 `ScanSourceResolver` the engine
-#     executes, and `search_scan_runtime(catalog^)`, which erases it. Its
+#   * `SearchScanResolver[C]` -- the tier-2 `ScanSourceResolver` the engine
+#     executes, and `search_scan_resolver(catalog^)`, which erases it. Its
 #     splits are read by `SearchSplitReader` (`search_split_reader.mojo`).
 #
 # THE SPLITS. A scan reads one split per split object live at the resolved
@@ -299,7 +299,7 @@ def search_scan_identity_corpus() raises -> ScanIdentityCorpus:
     derived_params.put_str(String(SEARCH_PARAM_QUERY), String("error"))
     c.add(
         String("field_derived"),
-        SearchScanRuntime[InMemorySearchIndexCatalog](
+        SearchScanResolver[InMemorySearchIndexCatalog](
             one_field^
         ).build_binding(derived_params),
     )
@@ -572,7 +572,7 @@ def _lower_fast_field_conjuncts(
     return acc^
 
 
-struct SearchScanRuntime[C: SearchIndexCatalog](
+struct SearchScanResolver[C: SearchIndexCatalog](
     ScanSourceResolver, Movable, Deinitable
 ):
     """`komira.search.index`, executable. Owns its catalog.
@@ -596,7 +596,7 @@ struct SearchScanRuntime[C: SearchIndexCatalog](
     def _refuse_foreign(self, binding: ScanBinding, verb: String) raises:
         if binding.kind_id != search_scan_kind_id():
             raise Error(
-                String("SearchScanRuntime.")
+                String("SearchScanResolver.")
                 + verb
                 + String(": refusing foreign kind '")
                 + binding.kind_name
@@ -863,8 +863,8 @@ def _check_analyzer(
         )
 
 
-def search_scan_runtime[
+def search_scan_resolver[
     C: SearchIndexCatalog
 ](var catalog: C) -> ErasedScanSourceResolver:
-    """The registrable form: `ctx.register_scan_kind(search_scan_runtime(c^))`."""
-    return ErasedScanSourceResolver(SearchScanRuntime[C](catalog^))
+    """The registrable form: `ctx.register_scan_kind(search_scan_resolver(c^))`."""
+    return ErasedScanSourceResolver(SearchScanResolver[C](catalog^))
