@@ -15,6 +15,14 @@
 #      drain of a writer shard (publish, merge into `_base`, retire, reap each
 #      chunk, reap the drained shard) the index generation never goes down, and
 #      a publish afterwards still moves it.
+#   4. test_reap_is_fenced_against_a_publish_after_the_drained_check: a publish
+#      that lands in a writer shard after the reaper has decided the shard is
+#      drained must survive the reap.
+#   5. test_reap_never_deletes_a_key_it_did_not_list_first: the same late
+#      publish on a shard the fence cannot see (its chunks were reaped before
+#      generation floors existed, so the seal lands on a free slot) still
+#      survives, because the reaper only deletes keys it listed before the
+#      drained check.
 #
 # Everything runs against the in-memory stores, with no network. `_HookStore`
 # wraps the shared in-memory store to stage the two interleavings a single
@@ -394,6 +402,92 @@ def test_generation_survives_draining_and_reaping_a_shard() raises:
     assert_true(g4 > g3, "a publish after the reap moves the generation")
 
     _ = store^
+
+
+# =============================================================================
+# 4. A publish after the drained check survives the reap.
+# =============================================================================
+
+
+def test_reap_is_fenced_against_a_publish_after_the_drained_check() raises:
+    var inner = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 2)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+
+    # Drain the writer's shard: two publishes, both retired and reaped.
+    var w = _shard_meta(inner, shard_id)
+    _ = w.publish(_summary(1, Int64(2)))
+    _ = w.publish(_summary(2, Int64(2)))
+    w.retire_at(Int64(0), Int64(0))
+    w.retire_at(Int64(1), Int64(0))
+    assert_true(w.reap_chunk(Int64(0), _GRACE_MS, _GRACE_MS), "chunk 0 reaped")
+    assert_true(w.reap_chunk(Int64(1), _GRACE_MS, _GRACE_MS), "chunk 1 reaped")
+
+    # The writer is still alive and its next publish goes to slot 2: the
+    # create-if-absent of chunk 2 is the moment that publish lands (the head
+    # pointer advance is deferred). Stage it right after the reaper's drained
+    # check has read the manifest.
+    var late = _summary(77, Int64(5))
+    var late_key = chunk_key(lineage, Int64(2)).raw()
+    var hooks = _HookStore(
+        inner.clone(),
+        lineage + "/tombstones/",
+        late_key.copy(),
+        encode_chunk(encode_split_summary(late), Int64(5)),
+        String(""),
+        String(""),
+    )
+    var r = reap_drained_shards(hooks, _META, String("logs"))
+
+    # The published chunk is still there and still holds the split.
+    var raw = inner.get(Path.parse(late_key))
+    var got = decode_split_summary(decode_chunk_body(raw))
+    assert_true(_uuid_eq(got.split_uuid, _uuid(77)), "the late publish survived")
+    assert_equal(r.shards_reaped, 0, "a shard that took a publish is not reaped")
+
+    # Once the late split is retired and reaped too, the shard is drained for
+    # real and the next sweep removes it.
+    var w2 = _shard_meta(inner, shard_id)
+    w2.retire_at(Int64(2), Int64(0))
+    assert_true(w2.reap_chunk(Int64(2), _GRACE_MS, _GRACE_MS), "chunk 2 reaped")
+    var r2 = reap_drained_shards(_plain_hooks(inner), _META, String("logs"))
+    assert_equal(r2.shards_reaped, 1, "the drained shard is reaped")
+    assert_equal(_count_under(inner, lineage), 0, "nothing is left behind")
+
+    _ = inner^
+
+
+def test_reap_never_deletes_a_key_it_did_not_list_first() raises:
+    var inner = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 3)
+    var lineage = shard_manifest_prefix(_META, shard_id)
+    var w = _shard_meta(inner, shard_id)
+    _ = w.publish(_summary(1, Int64(2)))
+    _ = w.publish(_summary(2, Int64(2)))
+    w.retire_at(Int64(0), Int64(0))
+    w.retire_at(Int64(1), Int64(0))
+    assert_true(w.reap_chunk(Int64(0), _GRACE_MS, _GRACE_MS), "chunk 0 reaped")
+    assert_true(w.reap_chunk(Int64(1), _GRACE_MS, _GRACE_MS), "chunk 1 reaped")
+    # A shard drained before generation floors existed has none, so the
+    # reaper reads generation 0 and seals slot 0, not the writer's slot 2.
+    inner.delete(Path.parse(lineage + "/_GENERATION_FLOOR"))
+
+    var late_key = chunk_key(lineage, Int64(2)).raw()
+    var hooks = _HookStore(
+        inner.clone(),
+        lineage + "/tombstones/",
+        late_key.copy(),
+        encode_chunk(encode_split_summary(_summary(88, Int64(5))), Int64(5)),
+        String(""),
+        String(""),
+    )
+    var r = reap_drained_shards(hooks, _META, String("logs"))
+    assert_equal(r.shards_reaped, 1, "the unfenced shard is reaped")
+    var raw = inner.get(Path.parse(late_key))
+    var got = decode_split_summary(decode_chunk_body(raw))
+    assert_true(_uuid_eq(got.split_uuid, _uuid(88)), "the late publish survived")
+
+    _ = inner^
 
 
 def main() raises:

@@ -40,9 +40,12 @@ from komira_objectstore import (
     CasManifestStore,
     ConditionalWriteStore,
     RetryPolicy,
+    WritePrecondition,
+    chunk_key,
     decode_chunk_body,
+    encode_chunk,
 )
-from komira_objectstore.cas_manifest import is_not_found
+from komira_objectstore.cas_manifest import is_not_found, is_precondition
 from komira_objectstore.path import Path
 from komira_objectstore.store import CloneableConditionalWriteStore
 from komira_objectstore.sublineage_shard_keys import (
@@ -153,9 +156,13 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
             if not _contains(dead, seq):
                 try:
                     var chunk = self._manifest.read_chunk(seq)
-                    out.append(
-                        LiveSplitEntry(seq, decode_split_summary(chunk))
-                    )
+                    # An empty body is the fence seal `reap_drained_shards`
+                    # writes, never a split (an encoded summary is never
+                    # empty). One a crashed reaper left behind is skipped.
+                    if len(chunk) > 0:
+                        out.append(
+                            LiveSplitEntry(seq, decode_split_summary(chunk))
+                        )
                 except e:
                     # Only a proven absence is skipped. The store's error
                     # names the object key, so matching a bare "404" would
@@ -565,13 +572,41 @@ def generation_across_shards[
 #     reads of older indexes. There is one per index, so leaving its empty
 #     shell costs a bounded amount.
 #
-# Reaping a shard first records its final generation in the index's
-# `_RETIRED_SHARDS` record, so the index generation does not drop when the
-# shard stops being listed (generation.mojo). It then deletes every object
-# under `<index>/meta/_lineage/<id>/`: the head, the log-start marker, the
-# generation floor, tombstones, metadata, and any manifest remnant. Deletes
-# are idempotent, since deleting an absent key succeeds. Afterwards the shard
-# no longer appears in `_discover_shard_ids`.
+# The writer that owns a drained shard may still be alive, and its next
+# publish can land between the reaper's drained check and its deletes. That
+# publish must not be deleted. Per shard, in this order:
+#
+#   1. Snapshot: LIST every key under the shard.
+#   2. Read the shard's generation `g`. For a drained shard that is exactly
+#      the slot of the writer's next publish: every chunk it committed was
+#      reaped through `reap_chunk`, which raised the generation floor past
+#      it first.
+#   3. The drained check (no live splits, no pending tombstones).
+#   4. Fence: create-if-absent a seal chunk (empty body) at slot `g`. A
+#      publish is the create-if-absent of the same slot, so exactly one of
+#      the two wins. If the publish already took it, the create fails with a
+#      precondition error and the shard is left alone. If the seal wins, the
+#      writer's publish moves to a later slot.
+#   5. Record the shard's final generation, `g + 1` (the seal is a chunk),
+#      in the index's `_RETIRED_SHARDS` record, so the index generation does
+#      not drop when the shard stops being listed (generation.mojo).
+#   6. Delete only the snapshot's keys, then the seal. A publish is the
+#      creation of a key that did not exist, so it is never in the snapshot
+#      and never deleted, even when the fence could not see its slot (a shard
+#      whose chunks were reaped before generation floors existed reads a `g`
+#      below the writer's slot; the seal then lands on a free slot and fences
+#      nothing).
+#
+# A reaper that crashes after step 4 leaves a seal that replay skips; the
+# next sweep finds the shard drained again and finishes it. Deletes are
+# idempotent, since deleting an absent key succeeds. Afterwards the shard no
+# longer appears in `_discover_shard_ids`.
+#
+# What this does not repair: a publish that slips past the fence survives as
+# a chunk whose earlier chunks and head are gone, and a cold reader that
+# recovers that shard's head by LIST refuses the gap. The publish is not
+# lost, but the shard needs the same gap-tolerant recovery as any lineage
+# whose chunks were reaped out of order.
 
 
 @fieldwise_init
@@ -584,29 +619,25 @@ struct DrainedShardReapResult(
       shards_examined: writer shards considered (`_base` and the unsharded
                        lineage are never counted).
       shards_reaped:   drained shards deleted.
-      objects_deleted: objects deleted across the reaped shards.
+      shards_fenced:   drained shards left alone because a publish took the
+                       fenced slot after the drained check.
+      objects_deleted: objects deleted across the reaped shards, seals
+                       included.
     """
 
     var shards_examined: Int
     var shards_reaped: Int
+    var shards_fenced: Int
     var objects_deleted: Int
 
 
 def _shard_is_drained[
-    Storage: CloneableConditionalWriteStore
-](
-    storage: Storage,
-    lineage_prefix: String,
-    index_name: String,
-) raises -> Bool:
-    """True iff the shard at `lineage_prefix` has no live splits and no
-    pending tombstones. A shard whose head is already gone but which still
-    has a stray object replays as empty, so it counts as drained and the
-    remnant gets deleted."""
-    var manifest = CasManifestStore[Storage](
-        storage.clone(), lineage_prefix.copy(), RetryPolicy.default()
-    )
-    var meta = SearchMetastore[Storage](manifest^, index_name.copy())
+    Storage: ConditionalWriteStore
+](meta: SearchMetastore[Storage]) raises -> Bool:
+    """True iff the shard has no live splits and no pending tombstones. A
+    shard whose head is already gone but which still has a stray object
+    replays as empty, so it counts as drained and the remnant gets
+    deleted."""
     var live = meta._replay_live_entries()
     if len(live) > 0:
         return False
@@ -616,36 +647,31 @@ def _shard_is_drained[
     return True
 
 
-def _delete_all_under_prefix[
+def _keys_under_prefix[
     Storage: CloneableConditionalWriteStore
-](storage: Storage, lineage_prefix: String) raises -> Int:
-    """Delete every object under `<lineage_prefix>/` and return how many were
-    deleted.
+](storage: Storage, lineage_prefix: String) raises -> List[String]:
+    """Every object key under `<lineage_prefix>/`.
 
     In-memory backends LIST flat keys in `objects`; cloud backends may fold
     subdirectories into `common_prefixes`, so this descends into those. A
     shard tree is at most `<shard>/{manifest,tombstones,_meta}/<file>`, with
     `_meta/` nesting one level further (`dedup/<producer>/<seq>.seq`), so two
     levels of descent cover it."""
-    var scan_prefix = lineage_prefix + "/"
-    var deleted = 0
-    var listed = storage.list_with_delimiter(Path.parse(scan_prefix))
+    var keys = List[String]()
+    var listed = storage.list_with_delimiter(Path.parse(lineage_prefix + "/"))
     for i in range(len(listed.objects)):
-        storage.delete(Path.parse(listed.objects[i].location))
-        deleted += 1
+        keys.append(listed.objects[i].location)
     for j in range(len(listed.common_prefixes)):
         var sub = listed.common_prefixes[j]
         var sub_listed = storage.list_with_delimiter(Path.parse(sub))
         for k in range(len(sub_listed.objects)):
-            storage.delete(Path.parse(sub_listed.objects[k].location))
-            deleted += 1
+            keys.append(sub_listed.objects[k].location)
         for m in range(len(sub_listed.common_prefixes)):
             var sub2 = sub_listed.common_prefixes[m]
             var sub2_listed = storage.list_with_delimiter(Path.parse(sub2))
             for q in range(len(sub2_listed.objects)):
-                storage.delete(Path.parse(sub2_listed.objects[q].location))
-                deleted += 1
-    return deleted
+                keys.append(sub2_listed.objects[q].location)
+    return keys^
 
 
 def reap_drained_shards[
@@ -663,12 +689,14 @@ def reap_drained_shards[
     construction; `_base` is skipped explicitly.
 
     Safe to run after every compaction pass: a shard still in use has live
-    splits, and a shard with tombstones inside their grace period is skipped.
+    splits, a shard with pending tombstones is skipped, and a publish that
+    lands after the drained check is fenced (see the block above).
     Idempotent: a reaped shard no longer appears in the LIST, and deleting an
     absent key succeeds."""
     var shard_ids = _discover_shard_ids(storage, index_meta_prefix)
     var examined = 0
     var reaped = 0
+    var fenced = 0
     var objects_deleted = 0
     for i in range(len(shard_ids)):
         if is_reserved_shard_id(shard_ids[i]):
@@ -677,20 +705,37 @@ def reap_drained_shards[
         var lineage_prefix = shard_manifest_prefix(
             index_meta_prefix, shard_ids[i]
         )
-        if _shard_is_drained(storage, lineage_prefix, index_name):
-            # Record the shard's final generation before deleting anything,
-            # so the index generation keeps counting it (generation.mojo).
-            record_retired_shard(
-                storage,
-                index_meta_prefix,
-                shard_ids[i],
-                _lineage_generation(storage, lineage_prefix, index_name),
+        var snapshot = _keys_under_prefix(storage, lineage_prefix)
+        var manifest = CasManifestStore[Storage](
+            storage.clone(), lineage_prefix.copy(), RetryPolicy.default()
+        )
+        var meta = SearchMetastore[Storage](manifest^, index_name.copy())
+        var g = meta.generation()
+        if not _shard_is_drained(meta):
+            continue
+        var seal = chunk_key(lineage_prefix, g)
+        try:
+            _ = storage.conditional_put(
+                seal,
+                encode_chunk(List[UInt8](), Int64(0)),
+                WritePrecondition.if_none_match_star(),
             )
-            var n = _delete_all_under_prefix(storage, lineage_prefix)
-            objects_deleted += n
-            reaped += 1
+        except e:
+            if not is_precondition(String(e)):
+                raise e^
+            fenced += 1
+            continue
+        record_retired_shard(
+            storage, index_meta_prefix, shard_ids[i], g + Int64(1)
+        )
+        for k in range(len(snapshot)):
+            storage.delete(Path.parse(snapshot[k]))
+        storage.delete(seal)
+        objects_deleted += len(snapshot) + 1
+        reaped += 1
     return DrainedShardReapResult(
         shards_examined=examined,
         shards_reaped=reaped,
+        shards_fenced=fenced,
         objects_deleted=objects_deleted,
     )
