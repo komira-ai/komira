@@ -58,7 +58,7 @@
 #     union and top-k stay in SearchCore).
 #
 # SEARCH SOURCE (the read side; the engine-facing source edge lives in
-# komira_search_runtime)
+# komira_search_scan)
 #   * QueryIR — the query config (a `match` over ONE text field): field_name +
 #     query_text + top_k + analyzer_config. Copyable POD-ish so it rides on a
 #     Copyable searcher plan-spec.

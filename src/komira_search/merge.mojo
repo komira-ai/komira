@@ -56,8 +56,8 @@ from komira_core.collections.slab import Slab
 # express that: `List[T]` HARD-REQUIRES `T: Copyable`, and `SearchResult` is
 # Movable-only (it carries a Movable-only `RecordBatch`). So the N per-split
 # results ride a `Slab[SearchResult]` — the project's canonical Movable-only
-# container, already used for the Movable-only `_SearchState` of the search
-# runtime's source. Slab's `__getitem__` returns a TIGHT-origin
+# container, already used for the Movable-only `_SearchState` of the former
+# search source. Slab's `__getitem__` returns a TIGHT-origin
 # `ref [self._bytes] T` — NOT a wildcard
 # `MutExternalOrigin` cast — so this is NOT a byte-slab+wildcard trap (the
 # heap-owning inner fields' liveness is tracked through the tight origin, exactly
