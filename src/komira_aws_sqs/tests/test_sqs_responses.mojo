@@ -6,13 +6,17 @@
 # Errors. SQS answers an error with the shape name in the body's `__type`
 # (`com.amazonaws.sqs#QueueDoesNotExist`) and, as an awsQueryCompatible
 # service, the legacy query code in an `x-amzn-query-error` header
-# (`AWS.SimpleQueueService.NonExistentQueue;Sender`). A caller reads the
-# failure through komira_aws_core's `aws_json_error_info`, whose code is the
-# shape name, the name of the generated error struct; the query code is not
-# read (the pinned model states no custom code for any error of these
-# operations, so the generator has nothing to map it from).
+# (`AWS.SimpleQueueService.NonExistentQueue;Sender`). The pinned model omits
+# those codes (no error shape has an `error.code`), but the live service
+# sends them, and two differ from the shape name on these operations:
+# QueueDoesNotExist arrives as AWS.SimpleQueueService.NonExistentQueue and
+# QueueNameExists as QueueAlreadyExists. A caller reads the failure through
+# komira_aws_core's `aws_json_error_info`, whose code is the header's query
+# code, as botocore and the Go v2 SDK report it; the shape name, the name of
+# the generated error struct, is the body's `__type`.
 from komira_aws_sqs.komira_aws_sqs import (
     SQSQueueDoesNotExist,
+    SQSQueueNameExists,
     SQSReceiptHandleIsInvalid,
     parse_create_queue_response,
     parse_delete_message_response,
@@ -22,7 +26,12 @@ from komira_aws_sqs.komira_aws_sqs import (
     parse_receive_message_response,
     parse_set_queue_attributes_response,
 )
-from komira_aws_core import AwsResponse, aws_is_error_status, aws_json_error_info
+from komira_aws_core import (
+    AwsResponse,
+    aws_error_code_from_body,
+    aws_is_error_status,
+    aws_json_error_info,
+)
 from komira_json import parse_json_value
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
@@ -133,16 +142,40 @@ def test_queue_does_not_exist() raises:
             + '"message":"The specified queue does not exist."}'
         ),
     )
-    resp.add_header(String("x-amzn-query-error"), String("AWS.SimpleQueueService.NonExistentQueue;Sender"))
-    resp.add_header(String("x-amzn-RequestId"), String("e9b0a6c4-0000-4000-8000-1234567890ab"))
+    resp.add_header(
+        String("x-amzn-query-error"),
+        String("AWS.SimpleQueueService.NonExistentQueue;Sender"),
+    )
+    resp.add_header(
+        String("x-amzn-RequestId"), String("e9b0a6c4-0000-4000-8000-1234567890ab")
+    )
     assert_true(aws_is_error_status(resp.status))
     var info = aws_json_error_info(resp)
-    assert_equal(info.code, "QueueDoesNotExist")
+    assert_equal(info.code, "AWS.SimpleQueueService.NonExistentQueue")
+    assert_equal(aws_error_code_from_body(resp.body), "QueueDoesNotExist")
     assert_equal(info.message, "The specified queue does not exist.")
     assert_equal(info.request_id, "e9b0a6c4-0000-4000-8000-1234567890ab")
     # The modeled error shape carries the message.
     var e = SQSQueueDoesNotExist.from_aws_json(parse_json_value(resp.body_text()))
     assert_equal(e.message.value(), "The specified queue does not exist.")
+
+
+def test_queue_name_exists() raises:
+    # CreateQueue of an existing name with other attributes.
+    var resp = AwsResponse.of_text(
+        400,
+        String(
+            '{"__type":"com.amazonaws.sqs#QueueNameExists",'
+            + '"message":"A queue already exists with the same name and a'
+            + ' different value for attribute VisibilityTimeout"}'
+        ),
+    )
+    resp.add_header(String("x-amzn-query-error"), String("QueueAlreadyExists;Sender"))
+    var info = aws_json_error_info(resp)
+    assert_equal(info.code, "QueueAlreadyExists")
+    assert_equal(aws_error_code_from_body(resp.body), "QueueNameExists")
+    var e = SQSQueueNameExists.from_aws_json(parse_json_value(resp.body_text()))
+    assert_true(e.message.value().find("VisibilityTimeout") >= 0)
 
 
 def test_receipt_handle_is_invalid_from_the_header() raises:
@@ -172,6 +205,7 @@ def main() raises:
     test_empty_results()
     test_a_body_that_is_not_json_is_refused()
     test_queue_does_not_exist()
+    test_queue_name_exists()
     test_receipt_handle_is_invalid_from_the_header()
     test_throttled_without_a_body()
     print("OK")
