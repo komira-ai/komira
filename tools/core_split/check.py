@@ -54,7 +54,9 @@ def deps_check(a):
         n+=1
         if not os.path.exists(b): bad.append('%s: no BUCK file'%pkg); continue
         want,problems=D.derive_deps(a.tree,pkg,known,a.symbols); have=D.buck_deps(b)
-        for p in problems: bad.append(p)
+        libs,notlibs=D.local_c_libraries(a.tree,pkg); own,_=D.load_symbols(a.symbols)
+        have,lp=D.local_dep_problems(have,libs,notlibs,pkg,own,D.own_symbols_called(a.tree,pkg,a.symbols))
+        for p in problems+lp: bad.append(p)
         if want!=have: bad.append('%s: BUCK deps %s != derived %s (missing %s, extra %s)'%(pkg,have,want,sorted(set(want)-set(have)),sorted(set(have)-set(want))))
     if a.core:
         c=open(os.path.join(a.core,'komira_core','native','komira_core_posix.c')).read()
