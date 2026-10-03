@@ -34,6 +34,7 @@ mojo_library(
         "tests/test_exprx_operator_overloads.mojo",
         "tests/test_exprx_to_expr.mojo",
         "tests/test_like_underscore_is_one_character.mojo",
+        "tests/test_q6_untyped_mvp.mojo",
         "tests/test_row_date_trunc_kerneldirect.mojo",
         "tests/test_row_decimal_filter_kerneldirect.mojo",
         "tests/test_row_decimal_mixedscale_filter_kerneldirect.mojo",
