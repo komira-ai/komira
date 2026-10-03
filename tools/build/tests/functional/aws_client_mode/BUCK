@@ -1,22 +1,29 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
 load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
-load("//functional/mojo_gcp_client:defs.bzl", "gen_check")
+load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 
-# mojo_aws_client in client mode, checked at GENERATION only. run_tests.sh (test
-# 35) builds :komira_aws_logs_client_send_surface by name, never this
-# package's pattern. What is pinned is that `mode = "client"` reaches the
-# generator without `--pure-only`: the generated module carries the
-# signed-send surface, its komira_http_core import and the error builder
-# that reads an error's code and message through komira_aws_core's
-# aws_json_error_info. (Pure mode leaving all of that out is the `absent`
-# of ../mojo_aws_client's gen_check.) The client library itself is not
-# compiled here: client-mode code imports komira_http_core and the
-# transport half of komira_aws_core, and this cell neither depends on the
-# komira cell's (each cell's MojoPkgTSet is a different type) nor stubs
-# them, since a stub would be a second copy of the send signature to keep
-# in step. It is compiled against the REAL core, with its welded tests, in
-# the komira cell: komira//src/komira_aws_s3 (restXml) and
-# komira//src/komira_aws_sqs (awsJson) are client mode.
+# mojo_aws_client in client mode. `buck2 build tests//functional/aws_client_mode:`
+# builds the client, which runs its welded tests (the generated layout probe,
+# then test_logs_client_send), and the checks below; run_tests.sh (test 35)
+# builds this package.
+#
+# The runtime is ../mojo_aws_client's stubs (a library of this cell cannot
+# depend on a mojo_library of the komira cell; see that BUCK):
+# komira_aws_core with its client half, whose `send_sigv4_signed_request` is
+# a test double that answers with the arguments it was given, and
+# komira_http_core's Connector trait. Compiling the generated module against
+# them is what keeps the stubs in step with the import block the generator
+# writes from emit_aws/mod.rs AWS_IMPORTS, for the rows that apply to an
+# awsJson module: a client-mode row for every protocol or for awsJson that
+# the stub lacks fails this build. The client-mode rows of the other
+# protocols (restJson, restXml, S3, endpoint rules) are compiled by no
+# target of this cell.
+#
+# What is pinned besides: `mode = "client"` reaches the generator without
+# `--pure-only`, so the generated module carries the signed-send surface, its
+# komira_http_core import and the error builder that reads an error's code
+# and message through komira_aws_core. (Pure mode leaving all of that out is
+# the `absent` of ../mojo_aws_client's gen_check.)
 
 _LOGS = botocore_model("logs")
 
@@ -26,8 +33,10 @@ mojo_aws_client(
     model = _LOGS.model,
     model_sha256 = _LOGS.sha256,
     operations = ["GetLogEvents"],
+    test_srcs = ["test_logs_client_send.mojo"],
     deps = [
         "//functional/mojo_aws_client:komira_aws_core",
+        "//functional/mojo_aws_client:komira_http_core",
         "//functional/mojo_aws_client:komira_json",
     ],
 )
@@ -50,4 +59,14 @@ gen_check(
         "var code = info.code.copy()",
         "var msg = info.message.copy()",
     ],
+)
+
+# The client ran exactly these tests, and each passed.
+tests_check(
+    name = "komira_aws_logs_client_tests",
+    expect = [
+        "_layout_probe",
+        "test_logs_client_send",
+    ],
+    markers = ":komira_aws_logs_client[tests]",
 )

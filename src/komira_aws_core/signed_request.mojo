@@ -8,7 +8,12 @@
 # exact SigV4-signed request, at the time the clock says. It opens no
 # socket. The transport half, `send_sigv4_signed_request` (aws_send.mojo),
 # takes the same arguments plus the connector factory, calls this once per
-# attempt, and hands the request to komira_http_client.
+# attempt, and hands the request to komira_http_client. Its ten leading
+# parameters are the ones a generated client's `send` passes
+# (emit_aws/mod.rs); the two after them (`retry_safe`, `s3_200_error`) have
+# defaults, so the same call also compiles against the tests cell's
+# stand-in (tools/build/tests/functional/mojo_aws_client/stub/komira_aws_core),
+# which has only the ten.
 #
 # Every operation header in `extra` is SIGNED. awsJson services include
 # X-Amz-Target in the canonical request, so an unsigned one is answered
