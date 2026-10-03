@@ -2619,7 +2619,7 @@ def _h1_method_is_replay_safe(method_code: UInt8) -> Bool:
     ⛔ DO NOT ADD PUT/DELETE HERE, as urllib3's
     `Retry.DEFAULT_ALLOWED_METHODS` (GET/HEAD/PUT/DELETE/OPTIONS) does.
     `test_row1_not_replay_safe_with_bytes_written_is_not_retried`
-    (`komira_http/tests/test_h1_pool_stale_conn_retry_safety.mojo`) is the
+    (`komira_http_client/tests/test_h1_pool_stale_conn_retry_safety.mojo`) is the
     falsifier: a PUT whose bytes had reached the wire on a
     reaped keepalive connection would be replayed onto a fresh one and answer a
     cheerful 200, for a request the server may already have executed."""

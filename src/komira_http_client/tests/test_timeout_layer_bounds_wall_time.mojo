@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/tests/test_timeout_layer_bounds_wall_time.mojo
+# komira_http_client/tests/test_timeout_layer_bounds_wall_time.mojo
 #   A TIMEOUT LAYER THAT SAMPLES THE CLOCK AFTER THE CALL RETURNS DOES NOT
 #   BOUND THE CALL. IT LABELS IT.
 # =============================================================================

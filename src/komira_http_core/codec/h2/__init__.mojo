@@ -5,8 +5,8 @@
 #
 #
 # Curated re-exports for the RFC-9113 HTTP/2 codec surface. The parent
-# `komira_http.codec.__init__` re-exports a focused subset of these so
-# consumers can `from komira_http.codec import H2Frame, ...` without
+# `komira_http_core.codec.__init__` re-exports a focused subset of these so
+# consumers can `from komira_http_core.codec import H2Frame, ...` without
 # the sub-path.
 #
 # Spec: RFC 9113 (HTTP/2) + RFC 7541 (HPACK).

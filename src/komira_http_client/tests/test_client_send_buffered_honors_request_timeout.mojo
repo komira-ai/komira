@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/tests/test_client_send_buffered_honors_request_timeout.mojo
+# komira_http_client/tests/test_client_send_buffered_honors_request_timeout.mojo
 #   `HttpClient.with_request_timeout_us(...)` + `send_buffered(...)` must
 #   HONOR the configured wall-clock budget.
 # =============================================================================

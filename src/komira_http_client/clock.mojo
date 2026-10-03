@@ -210,7 +210,7 @@ struct MockClock(Clock, Movable, Deinitable):
 #     time it reports is whatever the test decided to say. It cannot observe
 #     what the code under test actually did.
 #   * The `AutoAdvancingClock` / `IncrementingClock` idiom in
-#     `komira_http/tests/test_timeout_layer.mojo` advances on EVERY `now_us()`
+#     `komira_http_client/tests/test_timeout_layer.mojo` advances on EVERY `now_us()`
 #     CALL. That is exactly backwards: a client BUSY-POLLING in a tight loop
 #     reads the clock more often than a client that parks, so the spinning
 #     client is REWARDED with elapsed time it never spent, and a deadline

@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/transport/stream_park.mojo — THE park primitive.
+# komira_http_core/transport/stream_park.mojo — THE park primitive.
 # =============================================================================
 #
 # ONE way for a driver to wait on a stream. Every driver that owns an

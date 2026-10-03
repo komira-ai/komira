@@ -64,7 +64,7 @@ comptime CONN_STATE_READING: UInt8 = 0
 state transitions here and reads go through `read_app()` / writes
 through `write_app()`.
 
-Numeric value matches `komira_http.transport.connection.CONN_STATE_READING`."""
+Numeric value matches `komira_http_server.connection.CONN_STATE_READING`."""
 
 
 comptime CONN_STATE_CLOSED: UInt8 = 255

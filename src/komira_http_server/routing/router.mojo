@@ -150,12 +150,12 @@ def _parse_pattern(pattern: String) raises -> _ParsedPattern:
         if sb[0] == UInt8(0x2A):    # '*'
             if sl != 1:
                 raise Error(
-                    "komira_http.routing: wildcard '*' must be a "
+                    "komira_http_server.routing: wildcard '*' must be a "
                     "single-character segment in pattern '" + pattern + "'"
                 )
             if i != n - 1:
                 raise Error(
-                    "komira_http.routing: wildcard '*' must be the last "
+                    "komira_http_server.routing: wildcard '*' must be the last "
                     "segment in pattern '" + pattern + "'"
                 )
             segs.append(_Segment(
@@ -166,7 +166,7 @@ def _parse_pattern(pattern: String) raises -> _ParsedPattern:
         elif sb[0] == UInt8(0x3A):  # ':'
             if sl < 2:
                 raise Error(
-                    "komira_http.routing: param segment ':' missing name "
+                    "komira_http_server.routing: param segment ':' missing name "
                     "in pattern '" + pattern + "'"
                 )
             var name = String("")
@@ -238,7 +238,7 @@ struct Router(Movable, Deinitable):
         """
         if pattern.byte_length() == 0:
             raise Error(
-                "komira_http.routing: pattern must not be empty"
+                "komira_http_server.routing: pattern must not be empty"
             )
         # Check duplicate.
         var i = 0
@@ -246,7 +246,7 @@ struct Router(Movable, Deinitable):
             ref ex = self._routes[i]
             if ex.method == method and ex.pattern == pattern:
                 raise Error(
-                    "komira_http.routing: duplicate route registration: "
+                    "komira_http_server.routing: duplicate route registration: "
                     + method.name() + " " + pattern
                 )
             i = i + 1

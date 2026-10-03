@@ -236,7 +236,7 @@ struct MiddlewareChain(Movable, Deinitable):
     # legs — the building blocks for driving the chain
     # AROUND a real `RequestDispatcher` (see transport/dispatch.mojo's
     # `serve_read_round_dispatch_chained`). The chain CANNOT call the dispatcher
-    # itself (that would force `komira_http.middleware` to depend on the
+    # itself (that would force `komira_http_server.middleware` to depend on the
     # transport's `RequestDispatcher` trait — and the transport already imports
     # the chain, so it would be a cycle). Instead the chain exposes its `before`
     # leg (run the builtins + the user/auth middleware's `before`) and its

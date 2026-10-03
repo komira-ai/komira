@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/tests/test_request_timeout_binds_on_h2_and_h1.mojo
+# komira_http_client/tests/test_request_timeout_binds_on_h2_and_h1.mojo
 # =============================================================================
 #
 # ⛔ THE FINDING IS THE ASYMMETRY, NOT ONE SLOW REQUEST.

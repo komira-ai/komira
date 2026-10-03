@@ -3,8 +3,8 @@
 # =============================================================================
 #
 # Curated re-exports for the RFC-7230 parser surface. The parent
-# `komira_http.codec.__init__` re-exports these so consumers can
-# `from komira_http.codec import parse_request_head, ParseLimits` without
+# `komira_http_core.codec.__init__` re-exports these so consumers can
+# `from komira_http_core.codec import parse_request_head, ParseLimits` without
 # typing the sub-path.
 # =============================================================================
 

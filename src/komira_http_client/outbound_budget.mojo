@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/client/outbound_budget.mojo — A BUDGET MAY NOT EXCEED THE DEADLINE
+# komira_http_client/outbound_budget.mojo — A BUDGET MAY NOT EXCEED THE DEADLINE
 #   OF THE CONTEXT IT RUNS INSIDE.
 # =============================================================================
 #

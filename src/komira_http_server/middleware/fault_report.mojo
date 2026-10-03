@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/middleware/fault_report.mojo — ATTRIBUTE every boundary 500.
+# komira_http_server/middleware/fault_report.mojo — ATTRIBUTE every boundary 500.
 # =============================================================================
 #
 # THE PROBLEM. Without this file a 500 out of a

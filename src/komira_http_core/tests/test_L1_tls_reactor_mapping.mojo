@@ -2,7 +2,7 @@
 mapping.
 
 Tests `outcome_to_interest` and `outcome_to_conn_state` from
-`komira_http.tls.handshake_state` against the contract:
+`komira_http_core.tls.handshake_state` against the contract:
 
   - S2N_BLOCKED_ON_READ  → INTEREST_READ
   - S2N_BLOCKED_ON_WRITE → INTEREST_WRITE

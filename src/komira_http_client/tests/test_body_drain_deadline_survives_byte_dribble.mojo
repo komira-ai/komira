@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_http/tests/test_body_drain_deadline_survives_byte_dribble.mojo
+# komira_http_client/tests/test_body_drain_deadline_survives_byte_dribble.mojo
 #   The RESPONSE-BODY drain's wall-clock deadline must be EVALUATED even while
 #   the peer is delivering bytes. A peer that dribbles is still a stuck peer.
 # =============================================================================
