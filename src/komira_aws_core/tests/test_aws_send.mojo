@@ -13,7 +13,8 @@
 # Rows: one success, a 503 retried then answered (and its retry re-signed
 # at a later X-Amz-Date), the attempt limit and its exact backoff for a
 # fixed seed, a throttle and a dial failure resent for a POST, a 500 and a
-# dropped response not resent for a POST (and resent for a PUT), S3's
+# dropped response not resent for a POST (and resent for a PUT), a
+# conditional PUT not resent after a 500 but resent after a throttle, S3's
 # 200-with-<Error> retried for an operation that can answer one and read as
 # a 200 for one that cannot, a 4xx returned as it is, the budget, the
 # request as it reached the wire (komira_aws_core's AwsEchoConnector), and
@@ -163,6 +164,7 @@ def _send[X: AwsHttpTransport](
     uri: String,
     body: String = "",
     s3_200_error: Bool = False,
+    conditional: Bool = False,
 ) raises -> HttpResult:
     var budget = NoBudget()
     return send_sigv4_signed_request_with(
@@ -180,6 +182,7 @@ def _send[X: AwsHttpTransport](
         _bytes(body),
         List[Header](),
         s3_200_error=s3_200_error,
+        conditional=conditional,
     )
 
 
@@ -296,6 +299,51 @@ def test_a_post_is_not_resent_after_a_500() raises:
     assert_equal(aws_response_error_code(res), "InternalFailure")
     assert_equal(len(t.sent), 1)
     assert_equal(len(loop.sleeper().slept), 0)
+
+
+def test_a_conditional_put_is_not_resent_after_a_500() raises:
+    # A PUT is idempotent, so an unconditional one is resent after a 500
+    # (test_503_retried_and_re_signed). A conditional one is not: had the
+    # service applied it, the resend would be answered 412 and the caller
+    # would take its own write for a lost race.
+    var c = ScriptedConnector.with_stream(
+        _response(500, "Internal Server Error", "<Error><Code>InternalError</Code></Error>")
+    )
+    c.arm_next(
+        _response(
+            412,
+            "Precondition Failed",
+            "<Error><Code>PreconditionFailed</Code></Error>",
+        )
+    )
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = _send(
+        t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
+        conditional=True,
+    )
+    assert_equal(res.status, 500)
+    assert_equal(len(t.sent), 1)
+    assert_equal(len(loop.sleeper().slept), 0)
+
+
+def test_a_conditional_put_is_resent_after_a_throttle() raises:
+    # A throttling code says the service refused the request, so even a
+    # conditional one is sent again.
+    var c = ScriptedConnector.with_stream(
+        _response(503, "Slow Down", "<Error><Code>SlowDown</Code></Error>")
+    )
+    c.arm_next(_response(200, "OK", ""))
+    var t = _transport(c^)
+    var clock = SteppingClock(_T0, 1)
+    var loop = _loop()
+    var res = _send(
+        t, clock, loop, String("PUT"), String("s3"), String("/b/k"), "data",
+        conditional=True,
+    )
+    assert_equal(res.status, 200)
+    assert_equal(len(t.sent), 2)
 
 
 def test_a_dropped_response() raises:
@@ -519,6 +567,8 @@ def main() raises:
     test_a_post_is_resent_after_a_throttle()
     test_a_post_is_resent_after_a_failed_dial()
     test_a_post_is_not_resent_after_a_500()
+    test_a_conditional_put_is_not_resent_after_a_500()
+    test_a_conditional_put_is_resent_after_a_throttle()
     test_a_dropped_response()
     test_s3_200_with_error_is_retried()
     test_a_200_is_a_200_unless_the_operation_says_otherwise()

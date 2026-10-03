@@ -74,7 +74,11 @@
 # HEAD, OPTIONS, PUT, DELETE; the AWS REST APIs define their PUT and DELETE
 # operations as replaceable) or when the caller states that the operation
 # is safe to repeat (`retry_safe`, for an operation whose model makes it so,
-# such as an idempotency token the caller set). botocore resends every
+# such as an idempotency token the caller set), and is not conditional: a
+# request carrying a precondition (`If-Match`, `If-None-Match`, which
+# `send_sigv4_signed_request_with` is told by `conditional`) is never
+# retry-safe, because a resend of one the service applied is answered 412,
+# and the caller would take its own write for a lost race. botocore resends every
 # operation, POST included, which can repeat an awsJson write (an SQS
 # SendMessage, a DynamoDB UpdateItem) after a 500 the service answered
 # having already applied it. For a request that is not retry-safe:

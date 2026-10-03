@@ -24,7 +24,11 @@
 # the verb sends, through the generated client and its endpoint ruleset.
 #
 # The retries are test_s3_retry's: it drives the same send with a sleeper
-# that records, so no row here waits a real backoff.
+# that records, so no row here waits a real backoff. The last row drives the
+# verbs over injected seams (`<op>_with`): a transport over one scripted
+# connector, a fixed signing clock and a retry loop whose sleeper records,
+# the raw response answered, and a conditional PutObject not resent after a
+# 500 that an unconditional one is.
 from komira_aws_s3.komira_aws_s3 import (
     S3AbortMultipartUploadRequest,
     S3DeleteObjectRequest,
@@ -49,7 +53,18 @@ from komira_aws_core import (
     s3_content_range_total,
     s3_copy_source,
 )
+from komira_aws_core import AwsConnectorTransport, FixedClock
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_retry import (
+    Backoff,
+    Jitter,
+    ManualClock,
+    NoBudget,
+    RecordingSleeper,
+    RetryLoop,
+    RetryPolicy,
+    SplitMix64Rng,
+)
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
 
@@ -450,8 +465,73 @@ def test_copy_and_delete_on_the_wire() raises:
         _check(_wire(e), "DELETE /lake/b HTTP/1.1")
 
 
+def _never() raises -> ScriptedConnector:
+    raise Error("a verb over injected seams dialed through the factory")
+
+
+def _loop() raises -> RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng]:
+    return RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+        RetryPolicy(
+            Backoff(initial_ms=1000, multiplier=2.0, max_ms=20_000, jitter=Jitter.full()),
+            max_attempts=3,
+            deadline_ms=Int64(600_000),
+        ),
+        ManualClock(),
+        RecordingSleeper(),
+        SplitMix64Rng(7),
+    )
+
+
+def test_verbs_over_injected_seams() raises:
+    # `<op>_with` sends over the transport, signing clock and retry loop it
+    # is given, never through the client's connector factory, and answers
+    # the response as it came, so a caller reads a 206 or a 412 itself.
+    var script = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            "<Error><Code>InternalError</Code></Error>",
+        )
+    )
+    script.arm_next(_answer(200, "OK", "", 'ETag: "e2"\r\n'))
+    script.arm_next(
+        _answer(206, "Partial Content", "0123", "Content-Range: bytes 4-7/8\r\n")
+    )
+    var transport = AwsConnectorTransport[ScriptedConnector](script^)
+    var clock = FixedClock(1790000000)
+    var budget = NoBudget()
+    var client = _client(_never, _creds())
+    # A conditional PutObject that met a 500 is not sent again: had S3
+    # applied it, the resend would be answered 412.
+    var put = S3PutObjectRequest(String("lake"), String("manifest.json"))
+    put.set_body(_bytes(String("{}")))
+    put.set_if_match(String('"e1"'))
+    var loop = _loop()
+    var res = client.put_object_with(
+        put, transport, clock, loop, budget, conditional=True
+    )
+    assert_equal(res.status, 500)
+    assert_equal(len(loop.sleeper().slept), 0)
+    # Unconditional, the same 500 is retried (the next answer is the 200).
+    var put2 = S3PutObjectRequest(String("lake"), String("other.json"))
+    put2.set_body(_bytes(String("{}")))
+    var loop2 = _loop()
+    var res2 = client.put_object_with(put2, transport, clock, loop2, budget)
+    assert_equal(res2.status, 200)
+    assert_equal(res2.header(String("etag")), '"e2"')
+    # A ranged GetObject answers the raw 206, which the parser reads.
+    var get = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
+    get.set_range_(String("bytes=4-7"))
+    var loop3 = _loop()
+    var res3 = client.get_object_with(get, transport, clock, loop3, budget)
+    assert_equal(res3.status, 206)
+    assert_equal(res3.header(String("content-range")), "bytes 4-7/8")
+    assert_equal(len(res3.body), 4)
+
+
 def main() raises:
     test_conditional_put_loses_the_race()
+    test_verbs_over_injected_seams()
     test_ranged_get_206()
     test_list_two_pages()
     test_multipart_create_upload_complete()

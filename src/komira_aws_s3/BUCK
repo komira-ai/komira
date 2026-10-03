@@ -48,7 +48,8 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # test_s3_client drives the generated client verb by verb (a 412 race, a
 # 206 range read, two list pages, a multipart upload, an abort 404, a HEAD
 # 404, and each verb's request as it reached the wire, through
-# komira_aws_core's AwsEchoConnector), and test_s3_retry drives the same
+# komira_aws_core's AwsEchoConnector, and the verbs over injected seams,
+# `<op>_with`), and test_s3_retry drives the same
 # send with a recording sleeper and a stepping clock (a 503 retried and
 # signed again at a later date, the attempt limit, a 200-with-<Error>
 # retried, and the POSTs not resent).
@@ -96,8 +97,7 @@ mojo_aws_client(
     deps = [
         "//src/komira_aws_core:komira_aws_core",
         "//src/komira_http_core:komira_http_core",
-        # Imported only by tests/test_s3_retry.mojo (its manual clock and
-        # recording sleeper); the generated module does not import it.
+        # The client's `send_with` and `<op>_with` take a komira_retry loop.
         "//src/komira_retry:komira_retry",
         "//src/komira_xml:komira_xml",
     ],
