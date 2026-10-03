@@ -1,0 +1,55 @@
+syntax = "proto3";
+
+package example.copy.v1;
+
+// Layouts that the Mojo 1.0.0 compiler may treat as a trivially copyable
+// struct when the generated type has no explicit copy constructor: a few
+// Optional[String] fields plus one scalar Optional.
+message OptStrings {
+  optional string a = 1;
+  optional string b = 2;
+  optional string c = 3;
+  optional bool d = 4;
+}
+
+message OptStringsInt {
+  optional string a = 1;
+  optional string b = 2;
+  optional string c = 3;
+  optional int64 d = 4;
+}
+
+// Plain proto3 fields: bare String and scalars.
+message PlainStrings {
+  string a = 1;
+  string b = 2;
+  string c = 3;
+  bool d = 4;
+}
+
+message Leaf {
+  string name = 1;
+}
+
+enum Color {
+  COLOR_UNSET = 0;
+  COLOR_RED = 1;
+}
+
+// Every storage shape the emitter produces: repeated, map, nested message,
+// enum, bytes, a oneof with String / message / scalar arms.
+message Everything {
+  string id = 1;
+  repeated string tags = 2;
+  map<string, string> labels = 3;
+  Leaf leaf = 4;
+  repeated Leaf leaves = 5;
+  optional string note = 6;
+  Color color = 7;
+  bytes blob = 8;
+  oneof choice {
+    string text = 9;
+    Leaf node = 10;
+    int64 number = 11;
+  }
+}

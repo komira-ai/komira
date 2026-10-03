@@ -27,8 +27,20 @@
 # reason). So the two recursive `Value` fields — `struct_value` and
 # `list_value` — are stored as `List[Struct]` / `List[ListValue]` holding
 # 0-or-1 elements. A `List` is a finitely-sized pointer+len+cap regardless
-# of element type — it breaks the cycle and keeps the struct trivially
-# `Copyable`.
+# of element type — it breaks the cycle and keeps the struct `Copyable`.
+#
+# -- Copy constructors --------------------------------------------------------
+# `Value`, `Struct`, `ListValue` and `_StructEntry` each define an explicit
+# `def __init__(out self, *, copy: Self)` that copies every field with its
+# own `.copy()` (the two boxes copy through `Struct` and `ListValue`'s own
+# constructors). A synthesized copy constructor has been reported to be
+# treated as trivial for some layouts of a struct with an explicit
+# `__deinit__` (which `Struct` and `ListValue` need, see their
+# destructors), letting `List.copy()` memcpy elements that own heap
+# buffers. That was not reproduced for these types; the explicit
+# constructors make the deep copy explicit regardless. The other
+# heap-owning well-known types (`StringValue`, `BytesValue`, `FieldMask`,
+# `Any`) define one for the same reason.
 #
 # -- The `Value` oneof --------------------------------------------------------
 # `Value` is a 6-arm oneof. It is modelled with an `Int` discriminant `kind`
@@ -116,6 +128,15 @@ struct Value(Proto3JsonWkt, Copyable, Movable):
     var list_value: List[ListValue]
 
     # -- constructors -----------------------------------------------------
+
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (module header)."""
+        self.kind = copy.kind
+        self.number_value = copy.number_value
+        self.string_value = copy.string_value.copy()
+        self.bool_value = copy.bool_value
+        self.struct_value = copy.struct_value.copy()
+        self.list_value = copy.list_value.copy()
 
     @staticmethod
     def null() -> Self:
@@ -300,6 +321,11 @@ struct Struct(Proto3JsonWkt, Copyable, Movable):
         """An empty `Struct` (`{}`)."""
         return Self(List[String](), List[Value]())
 
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (module header)."""
+        self.keys = copy.keys.copy()
+        self.values = copy.values.copy()
+
     def put(mut self, key: String, var value: Value):
         """Set `key` to `value`. `Struct.fields` is a `map<string, Value>`,
         so a key already present is REPLACED in place (last write wins, and
@@ -404,6 +430,10 @@ struct ListValue(Proto3JsonWkt, Copyable, Movable):
         """An empty `ListValue` (`[]`)."""
         return Self(List[Value]())
 
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (module header)."""
+        self.values = copy.values.copy()
+
     def add(mut self, var value: Value):
         """Append a `Value` to the array."""
         self.values.append(value^)
@@ -485,6 +515,11 @@ struct _StructEntry(Serializable, Copyable, Movable):
 
     var key: String
     var value: Value
+
+    def __init__(out self, *, copy: Self):
+        """Deep copy: each field via its own `.copy()` (module header)."""
+        self.key = copy.key.copy()
+        self.value = copy.value.copy()
 
     def encode[E: WireEncoder](self, mut enc: E) raises:
         enc.write_string_field(1, "key", self.key)

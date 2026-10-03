@@ -1,6 +1,7 @@
 //! The REST binding: each member of an operation's input and output shape
 //! is bound to a part of the HTTP message by its `location`, and whatever
-//! is left is the body (restJson1, with the JSON body codec).
+//! is left is the body: restJson1 with the JSON body codec, restXml with the
+//! XML body codec (`xml_codec`).
 //!
 //! Request (`build_<op>_request`):
 //!
@@ -19,6 +20,14 @@
 //!   its text), else a JSON object of every member with no location (`{}`
 //!   when none is set), else nothing. A body carries a `Content-Type`
 //!   unless a `header` member already set one.
+//! - restXml differs only in the body: a structure payload is an XML
+//!   document whose root element is named by the payload member's
+//!   `locationName` (else the target shape's, else the shape name), and
+//!   nothing when unset; the members with no location are the children of
+//!   a root element named by the operation input's `locationName` (else
+//!   the input shape's, else its name), and nothing when none is set (as
+//!   botocore's `RestXMLSerializer` writes them). A root carries the
+//!   `xmlNamespace` of its reference, else of its shape.
 //!
 //! Response (`parse_<op>_response`): `header` and `headers` members from
 //! the response headers, a `statusCode` member from the status, and the
@@ -31,13 +40,16 @@
 //! `aws_text_*` writers and `aws_*_from_text` readers; a timestamp uses the
 //! member's resolved format (`aws_in::resolve_timestamp_format`).
 
-use super::proto::Binding;
+use super::proto::{AwsProtocol, Binding};
 use super::{escape, ts_const, AwsEmitter};
-use crate::aws_in::{AwsLocation, AwsOperationFacts, AwsTimestampFormat};
+use crate::aws_in::{AwsLocation, AwsOperationFacts, AwsPathParam, AwsTimestampFormat, AwsXmlNamespace};
 use crate::ir::{IrField, IrMessage, IrMethod, IrType, Label, ScalarKind};
 
 /// The restJson1 binding.
 pub(super) struct AwsRestJson;
+
+/// The restXml binding: the REST binding with the XML body codec.
+pub(super) struct AwsRestXml;
 
 /// The content type of a body that is not JSON: a blob payload, a string
 /// payload. A JSON body is `<PREFIX>_CONTENT_TYPE`.
@@ -100,10 +112,66 @@ impl Binding for AwsRestJson {
     }
 }
 
+impl Binding for AwsRestXml {
+    fn header_protocol(&self, em: &AwsEmitter) -> String {
+        format!("{} (restXml)", em.meta.protocol)
+    }
+
+    fn emit_wire_constants(&self, em: &mut AwsEmitter) {
+        let p = em.prefix.to_uppercase();
+        em.line(&format!(
+            "comptime {p}_CONTENT_TYPE: String = \"application/xml\""
+        ));
+    }
+
+    fn emit_request_builder(
+        &self,
+        em: &mut AwsEmitter,
+        m: &IrMethod,
+        facts: &AwsOperationFacts,
+    ) -> Result<(), String> {
+        em.emit_rest_request_builder(m, facts)
+    }
+
+    fn emit_response_parser(
+        &self,
+        em: &mut AwsEmitter,
+        m: &IrMethod,
+        facts: &AwsOperationFacts,
+    ) -> Result<(), String> {
+        em.emit_rest_response_parsers(m, facts)
+    }
+
+    fn default_content_type(&self, _em: &AwsEmitter) -> String {
+        "String(\"\")".to_string()
+    }
+
+    fn send_notes(&self) -> &'static [&'static str] {
+        &[
+            "    A request with a body carries its own `Content-Type` header; one",
+            "    without a body is signed and sent with none.",
+        ]
+    }
+
+    fn error_info_binding(&self) -> Option<&'static str> {
+        Some("var info = aws_rest_xml_error(res.to_response())")
+    }
+
+    fn error_code_and_message(&self) -> (&'static str, &'static str) {
+        ("info.code.copy()", "info.message.copy()")
+    }
+
+    fn error_code_doc(&self) -> &'static str {
+        "restXml error code"
+    }
+}
+
 /// Where one member of a top-level shape goes, and the facts the binding
 /// needs about it.
 struct Bound {
     field: IrField,
+    /// The member's name in the model.
+    member: String,
     wire: String,
     location: AwsLocation,
     required: bool,
@@ -114,6 +182,14 @@ struct Bound {
 }
 
 impl AwsEmitter<'_> {
+    /// The REST protocol's name in docstrings.
+    fn rest_name(&self) -> &'static str {
+        match self.protocol {
+            AwsProtocol::RestXml => "restXml",
+            _ => "restJson1",
+        }
+    }
+
     fn message_by_fq(&self, fq: &str) -> Result<&IrMessage, String> {
         self.messages
             .values()
@@ -134,6 +210,7 @@ impl AwsEmitter<'_> {
                 .unwrap_or(false);
             out.push(Bound {
                 field: f.clone(),
+                member: mf.member_name.clone(),
                 wire: mf.wire_name.clone(),
                 location: mf.location,
                 required: mf.required,
@@ -245,6 +322,59 @@ impl AwsEmitter<'_> {
     // The request
     // ======================================================================
 
+    /// The `requestUri` a request is built from, its labels, and the label
+    /// the endpoint ruleset fills instead (`None`: the model's, unchanged).
+    ///
+    /// `s3` with an endpoint ruleset drops a leading `/{Bucket}` label: the
+    /// ruleset puts the bucket in the URL it chooses (the virtual host, or
+    /// the endpoint's path for path-style addressing), so the model's path
+    /// would name it twice. botocore drops it for the same reason
+    /// (`remove_bucket_from_url_paths_from_model`, botocore/handlers.py). A
+    /// path left empty is the root, `/`, which `AwsEndpoint.target_for`
+    /// joins to the endpoint's path as botocore's `_urljoin` does
+    /// (`/{Bucket}?list-type=2` is `/?list-type=2`, sent to a path-style
+    /// endpoint as `/<bucket>?list-type=2`). The dropped member must be the
+    /// ruleset's `Bucket` context parameter, or the bucket would be sent
+    /// nowhere: anything else is refused.
+    fn rest_request_uri(
+        &self,
+        facts: &AwsOperationFacts,
+        msg: &IrMessage,
+        members: &[Bound],
+    ) -> Result<(String, Vec<AwsPathParam>, Option<&'static str>), String> {
+        const LABEL: &str = "Bucket";
+        let unchanged = Ok((facts.request_uri.clone(), facts.path_params.clone(), None));
+        if !self.options.s3 || self.endpoint_rules.is_none() {
+            return unchanged;
+        }
+        let rest = match facts.request_uri.strip_prefix("/{Bucket}") {
+            Some(rest) if rest.is_empty() || rest.starts_with('/') || rest.starts_with('?') => rest,
+            _ => return unchanged,
+        };
+        let b = members
+            .iter()
+            .find(|b| b.location == AwsLocation::Uri && b.wire == LABEL)
+            .ok_or_else(|| {
+                format!(
+                    "emit_aws: `{}` requestUri `{}` has the label `{{{LABEL}}}`, and the \
+                     input shape `{}` binds no `uri` member to it",
+                    facts.name, facts.request_uri, msg.name
+                )
+            })?;
+        let mf = self.facts.member(&msg.fq_name, &b.field.name)?;
+        if mf.context_param.as_deref() != Some(LABEL) {
+            return Err(format!(
+                "emit_aws: `{}`.{} fills the label `{{{LABEL}}}` of requestUri `{}`, which \
+                 the `s3` customization leaves to the endpoint ruleset, and it is not \
+                 the ruleset's `{LABEL}` context parameter: the bucket would be sent nowhere",
+                msg.name, b.field.name, facts.request_uri
+            ));
+        }
+        let uri = if rest.starts_with('/') { rest.to_string() } else { format!("/{rest}") };
+        let params = facts.path_params.iter().filter(|p| p.name != LABEL).cloned().collect();
+        Ok((uri, params, Some(LABEL)))
+    }
+
     fn emit_rest_request_builder(&mut self, m: &IrMethod, facts: &AwsOperationFacts) -> Result<(), String> {
         let in_ty = self.op_input_type(m);
         let fp = self.fn_prefix();
@@ -257,15 +387,17 @@ impl AwsEmitter<'_> {
         ));
         self.push();
         self.line(&format!(
-            "\"\"\"`{}` — the restJson1 request, serialised and NOT signed.\"\"\"",
-            facts.name
+            "\"\"\"`{}` — the {} request, serialised and NOT signed.\"\"\"",
+            facts.name,
+            self.rest_name()
         ));
         self.emit_validate_call(m);
 
         // -- the URI: labels, then the query --------------------------------
+        let (request_uri, path_params, ruleset_label) = self.rest_request_uri(facts, &msg, &members)?;
         self.line("var _ln = List[String]()");
         self.line("var _lv = List[String]()");
-        for param in &facts.path_params {
+        for param in &path_params {
             let b = members
                 .iter()
                 .find(|b| b.location == AwsLocation::Uri && b.wire == param.name)
@@ -308,7 +440,10 @@ impl AwsEmitter<'_> {
             }
         }
         for b in members.iter().filter(|b| b.location == AwsLocation::Uri) {
-            if !facts.path_params.iter().any(|p| p.name == b.wire) {
+            if ruleset_label == Some(b.wire.as_str()) {
+                continue;
+            }
+            if !path_params.iter().any(|p| p.name == b.wire) {
                 return Err(format!(
                     "emit_aws: `{}`.{} is a `uri` member named `{}`, and requestUri `{}` \
                      has no such label",
@@ -318,7 +453,7 @@ impl AwsEmitter<'_> {
         }
         self.line(&format!(
             "var _uri = AwsRestUri.expand(String(\"{}\"), _ln, _lv)",
-            escape(&facts.request_uri)
+            escape(&request_uri)
         ));
         for b in members.iter().filter(|b| b.location == AwsLocation::QueryString) {
             self.emit_query_member(&msg, b)?;
@@ -355,7 +490,9 @@ impl AwsEmitter<'_> {
         }
 
         // -- the body --------------------------------------------------------
-        if let Some(b) = members.iter().find(|b| b.is_payload) {
+        if self.protocol == AwsProtocol::RestXml {
+            self.emit_xml_request_body(facts, &msg, &members)?;
+        } else if let Some(b) = members.iter().find(|b| b.is_payload) {
             let access = self.open_member(&msg, b, "input");
             match (&b.field.label, &b.field.ty) {
                 (Label::Repeated, _) | (_, IrType::List(_)) | (_, IrType::Map(_, _)) => {
@@ -404,10 +541,205 @@ impl AwsEmitter<'_> {
             self.line("req.set_body_text(_body.serialize())");
             self.set_content_type_default(&format!("String({p}_CONTENT_TYPE)"));
         }
+        self.emit_s3_request_checksum(facts, &msg, &members)?;
         self.line("return req^");
         self.pop();
         self.blank();
         Ok(())
+    }
+
+    /// `s3`: an operation whose `httpChecksum` names a
+    /// `requestAlgorithmMember` sends the request checksum current AWS SDKs
+    /// send by default (`when_supported`): `s3_apply_request_checksum`, over
+    /// the built body, with the header that member is bound to. The same
+    /// call serves an operation that requires the checksum
+    /// (`requestChecksumRequired`), as botocore's does. Nothing without the
+    /// customization, or for an operation with no such member; one of those
+    /// that requires a checksum never gets here (`check_request_checksums`).
+    fn emit_s3_request_checksum(
+        &mut self,
+        facts: &AwsOperationFacts,
+        msg: &IrMessage,
+        members: &[Bound],
+    ) -> Result<(), String> {
+        if !self.options.s3 {
+            return Ok(());
+        }
+        let Some(member) = facts
+            .http_checksum
+            .as_ref()
+            .and_then(|c| c.request_algorithm_member.as_ref())
+        else {
+            return Ok(());
+        };
+        let b = members.iter().find(|b| &b.member == member).ok_or_else(|| {
+            format!(
+                "emit_aws: `{}` names `{member}` as its httpChecksum \
+                 requestAlgorithmMember, and its input shape `{}` has no such member",
+                facts.name, msg.name
+            )
+        })?;
+        if b.location != AwsLocation::Header {
+            return Err(format!(
+                "emit_aws: `{}`.{member} is `{}`'s httpChecksum requestAlgorithmMember \
+                 and is not bound to a header; the checksum algorithm travels as one",
+                msg.name, facts.name
+            ));
+        }
+        // Whether the caller can carry another algorithm's value: an input
+        // member bound to an `x-amz-checksum-*` header (PutObject's
+        // ChecksumSHA256 and the like; DeleteObjects has none).
+        let value_members = members.iter().any(|m| {
+            m.location == AwsLocation::Header
+                && m.wire.to_ascii_lowercase().starts_with("x-amz-checksum-")
+        });
+        self.line(&format!(
+            "s3_apply_request_checksum(req, String(\"{}\"), value_members={})",
+            escape(&b.wire),
+            if value_members { "True" } else { "False" }
+        ));
+        Ok(())
+    }
+
+    /// The restXml request body (see the module doc): the structure payload
+    /// as a document, a blob or string payload as its bytes, or the body
+    /// members as the children of the input's root element.
+    fn emit_xml_request_body(
+        &mut self,
+        facts: &AwsOperationFacts,
+        msg: &IrMessage,
+        members: &[Bound],
+    ) -> Result<(), String> {
+        let p = self.prefix.to_uppercase();
+        if let Some(b) = members.iter().find(|b| b.is_payload) {
+            match (&b.field.label, &b.field.ty) {
+                (Label::Repeated, _) | (_, IrType::List(_)) | (_, IrType::Map(_, _)) => {
+                    return Err(format!(
+                        "emit_aws: `{}`.{} is the payload and is a list or a map; a \
+                         payload is a structure, a blob or a string",
+                        msg.name, b.field.name
+                    ))
+                }
+                (_, IrType::Message(_)) => {
+                    let (root, ns) = self.xml_payload_root(msg, b)?;
+                    // An unset structure payload is no body at all.
+                    let access = self.open_member(msg, b, "input");
+                    self.line("var _w = XmlWriter()");
+                    self.xml_root_open(&root, &ns);
+                    self.line(&format!("{access}.write_aws_xml(_w)"));
+                    self.line("aws_xml_end(_w)");
+                    self.line("aws_xml_set_body(req, _w)");
+                    self.set_content_type_default(&format!("String({p}_CONTENT_TYPE)"));
+                    self.close_member(b);
+                }
+                (_, IrType::Scalar(ScalarKind::Bytes)) => {
+                    let access = self.open_member(msg, b, "input");
+                    self.line(&format!("req.body = {access}.copy()"));
+                    self.set_content_type_default(&format!("String(\"{BLOB_CONTENT_TYPE}\")"));
+                    self.close_member(b);
+                }
+                (_, IrType::Scalar(ScalarKind::String)) | (_, IrType::Enum(_))
+                    if b.timestamp.is_none() =>
+                {
+                    let access = self.open_member(msg, b, "input");
+                    self.line(&format!("req.set_body_text({access})"));
+                    self.set_content_type_default(&format!("String(\"{TEXT_CONTENT_TYPE}\")"));
+                    self.close_member(b);
+                }
+                _ => {
+                    return Err(format!(
+                        "emit_aws: `{}`.{} is the payload and is neither a structure, a \
+                         blob nor a string",
+                        msg.name, b.field.name
+                    ))
+                }
+            }
+            return Ok(());
+        }
+        let mut body: Vec<&Bound> = members
+            .iter()
+            .filter(|b| b.location == AwsLocation::Body)
+            .collect();
+        if body.is_empty() {
+            return Ok(());
+        }
+        body.sort_by_key(|b| {
+            self.facts
+                .member(&msg.fq_name, &b.field.name)
+                .map(|m| m.declared_index)
+                .unwrap_or(usize::MAX)
+        });
+        let shape = self.facts.shape(&msg.name)?;
+        let root = facts
+            .input_location_name
+            .clone()
+            .or_else(|| shape.location_name.clone())
+            .unwrap_or_else(|| msg.name.clone());
+        let ns = facts
+            .input_xml_namespace
+            .clone()
+            .or_else(|| shape.xml_namespace.clone());
+        // No body member set is no body at all.
+        if body.iter().any(|b| b.required) {
+            self.line("var _xb = True");
+        } else {
+            self.line("var _xb = False");
+            for b in &body {
+                self.line(&format!("if {}:", self.presence_test_on("input", msg, &b.field)));
+                self.push();
+                self.line("_xb = True");
+                self.pop();
+            }
+        }
+        self.line("if _xb:");
+        self.push();
+        self.line("var _w = XmlWriter()");
+        self.xml_root_open(&root, &ns);
+        for b in &body {
+            self.emit_xml_member_write(msg, &b.field, "input", "_w")?;
+        }
+        self.line("aws_xml_end(_w)");
+        self.line("aws_xml_set_body(req, _w)");
+        self.set_content_type_default(&format!("String({p}_CONTENT_TYPE)"));
+        self.pop();
+        Ok(())
+    }
+
+    /// Opens the document's root element `root` on the writer `_w`.
+    fn xml_root_open(&mut self, root: &str, ns: &Option<AwsXmlNamespace>) {
+        self.line(&format!("aws_xml_start(_w, String(\"{}\"))", escape(root)));
+        if let Some(ns) = ns {
+            self.line(&format!(
+                "aws_xml_namespace(_w, String(\"{}\"), String(\"{}\"))",
+                escape(&ns.prefix),
+                escape(&ns.uri)
+            ));
+        }
+    }
+
+    /// The root element of a structure payload `b` of `msg`: the member's
+    /// `locationName`, else the target shape's, else the shape's name; and
+    /// the member's `xmlNamespace`, else the target shape's.
+    fn xml_payload_root(
+        &self,
+        msg: &IrMessage,
+        b: &Bound,
+    ) -> Result<(String, Option<AwsXmlNamespace>), String> {
+        let mf = self.facts.member(&msg.fq_name, &b.field.name)?;
+        let target = self.facts.shape(&mf.shape)?;
+        let root = if mf.has_location_name {
+            mf.wire_name.clone()
+        } else {
+            target
+                .location_name
+                .clone()
+                .unwrap_or_else(|| mf.shape.clone())
+        };
+        let ns = mf
+            .xml_namespace
+            .clone()
+            .or_else(|| target.xml_namespace.clone());
+        Ok((root, ns))
     }
 
     fn emit_query_member(&mut self, msg: &IrMessage, b: &Bound) -> Result<(), String> {
@@ -534,8 +866,9 @@ impl AwsEmitter<'_> {
             ));
             self.push();
             self.line(&format!(
-                "\"\"\"`{}` — the restJson1 response without its body: the status and",
-                facts.name
+                "\"\"\"`{}` — the {} response without its body: the status and",
+                facts.name,
+                self.rest_name()
             ));
             self.line(&format!(
                 "    the headers. `resp.body` is not read, so a caller can parse these"
@@ -554,8 +887,10 @@ impl AwsEmitter<'_> {
             ));
             self.push();
             self.line(&format!(
-                "\"\"\"`{}` — the restJson1 response: `parse_{}_head`, and the body",
-                facts.name, m.name
+                "\"\"\"`{}` — the {} response: `parse_{}_head`, and the body",
+                facts.name,
+                self.rest_name(),
+                m.name
             ));
             self.line("    as the payload (unset when the body is empty).\"\"\"");
             self.line(&format!("var out = {fp}parse_{}_head(resp)", m.name));
@@ -578,14 +913,66 @@ impl AwsEmitter<'_> {
         ));
         self.push();
         self.line(&format!(
-            "\"\"\"`{}` — the restJson1 response: the bound headers and status, and",
-            facts.name
+            "\"\"\"`{}` — the {} response: the bound headers and status, and",
+            facts.name,
+            self.rest_name()
         ));
         self.line("    the body (an empty body sets nothing).\"\"\"");
+        self.emit_s3_200_error_check(facts, &members);
         self.emit_rest_response_body(&msg, &members, true)?;
         self.pop();
         self.blank();
         Ok(())
+    }
+
+    /// `s3`: a 200 response whose body is an `<Error>` (or is not XML) is
+    /// raised as the error an HTTP 500 is, in the client's text for one
+    /// (`<Service>.<Op> failed: HTTP 500 <code> <message>`), for an
+    /// operation that has an output shape whose payload is not a blob or a
+    /// string (botocore `_handle_200_error` and `_should_handle_200_error`).
+    /// A streaming payload is read by `parse_<op>_head`, which never checks.
+    /// Nothing without the customization.
+    fn emit_s3_200_error_check(&mut self, facts: &AwsOperationFacts, members: &[Bound]) {
+        if !self.options.s3 || facts.output_shape.is_none() {
+            return;
+        }
+        let raw_payload = members.iter().any(|b| {
+            b.is_payload
+                && matches!(
+                    b.field.ty,
+                    IrType::Scalar(ScalarKind::Bytes | ScalarKind::String) | IrType::Enum(_)
+                )
+        });
+        if raw_payload {
+            return;
+        }
+        let svc = self.ty_name(&self.lowering.model.files[0].services[0].name);
+        self.line("if aws_xml_body_is_error(resp):");
+        self.push();
+        self.line("var _ei = aws_rest_xml_error(resp)");
+        self.line("raise Error(");
+        self.push();
+        self.line(&format!(
+            "String(\"{}.{} failed: HTTP 500 \")",
+            escape(&svc),
+            escape(&facts.name)
+        ));
+        self.line("+ _ei.code");
+        self.line("+ String(\" \")");
+        self.line("+ _ei.message");
+        self.pop();
+        self.line(")");
+        self.pop();
+    }
+
+    /// `s3`: whether the header member `b` is S3's optional `Expires`
+    /// timestamp, which is left unset when it does not parse (botocore
+    /// `handle_expires_header`).
+    fn s3_expires_is_lenient(&self, b: &Bound, required: bool) -> bool {
+        self.options.s3
+            && !required
+            && b.timestamp.is_some()
+            && b.wire.eq_ignore_ascii_case("Expires")
     }
 
     /// The parser's body: every member read from its location into `out`,
@@ -598,8 +985,18 @@ impl AwsEmitter<'_> {
     ) -> Result<(), String> {
         let out_ty = self.ty_name(&msg.mojo_name);
         let has_payload = members.iter().any(|b| b.is_payload);
-        let json_body = !has_payload && members.iter().any(|b| b.location == AwsLocation::Body);
-        if json_body {
+        let xml = self.protocol == AwsProtocol::RestXml;
+        // A response has no URI or query, so a restXml member bound to one
+        // is read from the body (Smithy restXml; `IgnoreQueryParamsInResponse`).
+        let from_body = |b: &Bound| {
+            b.location == AwsLocation::Body
+                || (xml && matches!(b.location, AwsLocation::Uri | AwsLocation::QueryString))
+        };
+        let body = !has_payload && members.iter().any(|b| from_body(b));
+        if body && xml {
+            // An empty body is a root with no members.
+            self.line("var node = aws_xml_parse(resp.body)");
+        } else if body {
             self.line("var v = JsonValue.empty_object()");
             self.line("if len(resp.body) > 0:");
             self.push();
@@ -612,8 +1009,12 @@ impl AwsEmitter<'_> {
         // Required members are constructor arguments: read into locals.
         for b in members.iter().filter(|b| b.required) {
             let local = format!("_r_{}", b.field.name);
-            if b.location == AwsLocation::Body && !has_payload {
-                self.emit_json_read_required(msg, &b.field, &what)?;
+            if from_body(b) && !has_payload {
+                if xml {
+                    self.emit_xml_read_required(msg, &b.field, &what, true)?;
+                } else {
+                    self.emit_json_read_required(msg, &b.field, &what)?;
+                }
                 continue;
             }
             self.line(&format!("var {local} = {}", self.default_expr(msg, &b.field)?));
@@ -636,8 +1037,12 @@ impl AwsEmitter<'_> {
             .collect();
         self.line(&format!("var out = {out_ty}({})", args.join(", ")));
         for b in members.iter().filter(|b| !b.required) {
-            if b.location == AwsLocation::Body && !has_payload {
-                self.emit_json_read_optional(msg, &b.field)?;
+            if from_body(b) && !has_payload {
+                if xml {
+                    self.emit_xml_read_optional(msg, &b.field, true)?;
+                } else {
+                    self.emit_json_read_optional(msg, &b.field)?;
+                }
                 continue;
             }
             if b.is_payload {
@@ -659,6 +1064,12 @@ impl AwsEmitter<'_> {
     /// The payload member's value from the (non-empty) body.
     fn rest_payload_read(&self, msg: &IrMessage, b: &Bound) -> Result<String, String> {
         Ok(match (&b.field.label, &b.field.ty) {
+            (Label::Single | Label::Optional, IrType::Message(_))
+                if self.protocol == AwsProtocol::RestXml =>
+            {
+                let ty = self.value_type(msg, &b.field)?;
+                format!("{ty}.from_aws_xml(aws_xml_parse(resp.body))")
+            }
             (Label::Single | Label::Optional, IrType::Message(_)) => {
                 let ty = self.value_type(msg, &b.field)?;
                 format!("{ty}.from_aws_json(parse_json_bytes(resp.body))")
@@ -752,7 +1163,20 @@ impl AwsEmitter<'_> {
                     }
                     (_, ty) => {
                         let v = self.rest_from_text(msg, b, ty, &field)?;
-                        assign(self, &v);
+                        if self.s3_expires_is_lenient(b, required) {
+                            // `s3`: an Expires that is not a date is left
+                            // unset (botocore handle_expires_header).
+                            self.line("try:");
+                            self.push();
+                            assign(self, &v);
+                            self.pop();
+                            self.line("except:");
+                            self.push();
+                            self.line("pass");
+                            self.pop();
+                        } else {
+                            assign(self, &v);
+                        }
                     }
                 }
                 self.pop();
@@ -771,8 +1195,18 @@ impl AwsEmitter<'_> {
                     "var {raw} = aws_prefix_headers(resp, String(\"{}\"))",
                     escape(&b.wire)
                 ));
-                self.line(&format!("if len({raw}) > 0:"));
-                self.push();
+                // botocore sets a prefix-header map whether or not a header
+                // carries the prefix (`BaseRestParser._parse_non_payload_attrs`,
+                // shared by every REST protocol; the restXml corpus's
+                // `HttpPrefixHeadersAreNotPresent`). restXml follows it here.
+                // restJson1 still leaves the map unset when no header carries
+                // the prefix: aligning it changes the restJson1 goldens, so it
+                // is deferred to a change that bumps AWS_GENERATOR_VERSION.
+                let guarded = self.protocol != AwsProtocol::RestXml;
+                if guarded {
+                    self.line(&format!("if len({raw}) > 0:"));
+                    self.push();
+                }
                 self.line(&format!("var {tmp} = Dict[String, {vt}]()"));
                 self.line(&format!("for _i in range(len({raw})):"));
                 self.push();
@@ -780,7 +1214,9 @@ impl AwsEmitter<'_> {
                 self.line(&format!("{tmp}[{raw}[_i].name] = {value}"));
                 self.pop();
                 assign(self, &format!("{tmp}^"));
-                self.pop();
+                if guarded {
+                    self.pop();
+                }
             }
         }
         Ok(())
