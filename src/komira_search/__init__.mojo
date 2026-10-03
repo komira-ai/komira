@@ -74,8 +74,8 @@
 # other packages and do not change this module's surface.
 #
 # Dependencies (cycle-free):
-#   komira_search -> komira_eval   (FNV byte kernel for the posting build)
-#   komira_search -> komira_core   (StringColumnView / StringArray / Schema)
+#   komira_search -> komira_core   (StringColumnView / StringArray / Schema,
+#                                   and the FNV byte kernel for the posting build)
 #   komira_search -> komira_lz4    (the `_source` block codec)
 # =============================================================================
 
