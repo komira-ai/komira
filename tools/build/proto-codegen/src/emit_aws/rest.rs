@@ -551,8 +551,11 @@ impl AwsEmitter<'_> {
     /// `s3`: an operation whose `httpChecksum` names a
     /// `requestAlgorithmMember` sends the request checksum current AWS SDKs
     /// send by default (`when_supported`): `s3_apply_request_checksum`, over
-    /// the built body, with the header that member is bound to. Nothing
-    /// without the customization, or for an operation with no such member.
+    /// the built body, with the header that member is bound to. The same
+    /// call serves an operation that requires the checksum
+    /// (`requestChecksumRequired`), as botocore's does. Nothing without the
+    /// customization, or for an operation with no such member; one of those
+    /// that requires a checksum never gets here (`check_request_checksums`).
     fn emit_s3_request_checksum(
         &mut self,
         facts: &AwsOperationFacts,

@@ -343,12 +343,30 @@ pub struct AwsOperationFacts {
     /// `endpoint.hostPrefix` — a per-operation host prefix.
     pub host_prefix: Option<String>,
     pub http_checksum: Option<AwsHttpChecksum>,
+    /// `httpChecksumRequired`: the trait that predates `httpChecksum`, which
+    /// requires a request checksum and names no algorithm member.
+    pub http_checksum_required: bool,
     /// `staticContextParams`: ruleset parameters this operation always
     /// resolves its endpoint with, in declared order.
     pub static_context_params: Vec<(String, AwsStaticValue)>,
     /// `operationContextParams`: ruleset parameters taken from the input by
     /// a path (`{"path": "A.B"}`), as (parameter, path), in declared order.
     pub operation_context_params: Vec<(String, String)>,
+}
+
+impl AwsOperationFacts {
+    /// Whether every request of this operation must carry a checksum:
+    /// `httpChecksumRequired`, or `httpChecksum.requestChecksumRequired`
+    /// (botocore's `request_checksum_required`). The emitter refuses such an
+    /// operation where the generated client would send none
+    /// (`checksum-required`).
+    pub fn request_checksum_required(&self) -> bool {
+        self.http_checksum_required
+            || self
+                .http_checksum
+                .as_ref()
+                .is_some_and(|c| c.request_checksum_required)
+    }
 }
 
 /// The `httpChecksum` trait, flattened.
@@ -1295,26 +1313,6 @@ impl<'a> AwsLowerer<'a> {
             ));
         }
 
-        // REFUSED, by name: an operation whose request must carry a checksum
-        // (`httpChecksumRequired`, or `httpChecksum.requestChecksumRequired`).
-        // The generated client sends none, so the service would reject every
-        // request.
-        let checksum_required = op
-            .get("httpChecksumRequired")
-            .and_then(Json::as_bool)
-            .unwrap_or(false)
-            || op
-                .get("httpChecksum")
-                .and_then(|c| c.get("requestChecksumRequired"))
-                .and_then(Json::as_bool)
-                .unwrap_or(false);
-        if checksum_required {
-            return Err(format!(
-                "aws front-end: REFUSED checksum-required: operation `{op_name}` \
-                 requires a request checksum, and the generated client sends none"
-            ));
-        }
-
         let facts = AwsOperationFacts {
             name: op_name.to_string(),
             ir_method_name: ir_method_name.clone(),
@@ -1389,6 +1387,10 @@ impl<'a> AwsLowerer<'a> {
                     .map(|a| a.iter().filter_map(Json::as_str).map(String::from).collect())
                     .unwrap_or_default(),
             }),
+            http_checksum_required: op
+                .get("httpChecksumRequired")
+                .and_then(Json::as_bool)
+                .unwrap_or(false),
             static_context_params: static_context_params(op, op_name)?,
             operation_context_params: operation_context_params(op, op_name)?,
         };
@@ -1884,23 +1886,22 @@ mod tests {
     }
 
     #[test]
-    fn a_required_checksum_is_a_named_refusal() {
-        for op in [
-            r#", "httpChecksumRequired": true"#,
-            r#", "httpChecksum": {"requestChecksumRequired": true}"#,
+    fn a_required_checksum_lowers_and_is_recorded() {
+        // The front-end lowers it; whether the client can send the checksum
+        // is the emitter's question (emit_aws `checksum-required`).
+        for (op, required) in [
+            (r#", "httpChecksumRequired": true"#, true),
+            (r#", "httpChecksum": {"requestChecksumRequired": true}"#, true),
+            (r#", "httpChecksumRequired": false"#, false),
+            (
+                r#", "httpChecksum": {"requestChecksumRequired": false, "requestAlgorithmMember": "M"}"#,
+                false,
+            ),
+            ("", false),
         ] {
-            assert_eq!(
-                refusal_of(&tiny_model("", op, "Str")).as_deref(),
-                Some("checksum-required"),
-                "{op}"
-            );
-        }
-        // An optional checksum (the client may send none) lowers.
-        for op in [
-            r#", "httpChecksumRequired": false"#,
-            r#", "httpChecksum": {"requestChecksumRequired": false, "requestAlgorithmMember": "M"}"#,
-        ] {
-            lower_tiny(&tiny_model("", op, "Str")).unwrap();
+            let l = lower_tiny(&tiny_model("", op, "Str")).unwrap();
+            let facts = l.facts.operation("Op").unwrap();
+            assert_eq!(facts.request_checksum_required(), required, "{op}");
         }
     }
 

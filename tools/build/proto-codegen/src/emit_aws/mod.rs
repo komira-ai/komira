@@ -58,10 +58,14 @@ pub struct AwsEmitOptions {
 ///   leaves the member unset, and the rest of the response still parses.
 /// - `resolve_request_checksum_algorithm` / `apply_request_checksum`
 ///   (botocore/httpchecksum.py, under the default `when_supported`): an
-///   operation whose `httpChecksum` names a `requestAlgorithmMember`
-///   (PutObject, UploadPart) sends `x-amz-checksum-crc32` and the algorithm
-///   header, `CRC32` when the caller chose none, unless the caller set an
-///   `x-amz-checksum-*` header (`s3_apply_request_checksum`).
+///   operation whose `httpChecksum` names a `requestAlgorithmMember` sends
+///   `x-amz-checksum-crc32` and the algorithm header, `CRC32` when the
+///   caller chose none, unless the caller set an `x-amz-checksum-*` header
+///   (`s3_apply_request_checksum`). That covers the operations where the
+///   checksum is optional (PutObject, UploadPart) and those where it is
+///   required (`requestChecksumRequired`: DeleteObjects, PutBucket* and the
+///   like), which are refused without the customization
+///   ([`check_request_checksums`]).
 /// - `remove_bucket_from_url_paths_from_model`: with an endpoint ruleset,
 ///   a requestUri's leading `/{Bucket}` is dropped, because the ruleset
 ///   puts the bucket in the URL it chooses (`rest_request_uri` in
@@ -497,6 +501,7 @@ pub fn emit_aws_module_with_endpoints(
             lowering.service.service, lowering.service.service_id, lowering.service.protocol
         ));
     }
+    check_request_checksums(&lowering.facts, options)?;
     if selected.protocol == AwsProtocol::RestXml {
         xml_codec::check_rest_xml_features(&lowering.facts)?;
     }
@@ -512,6 +517,37 @@ pub fn emit_aws_module_with_endpoints(
         structs: em.structs,
         parameterised: em.parameterised,
     })
+}
+
+/// REFUSED, by name (`checksum-required`): an operation whose every request
+/// must carry a checksum (`httpChecksumRequired`, or
+/// `httpChecksum.requestChecksumRequired`), unless the module sends one.
+/// Only the `s3` customization does, for an operation whose `httpChecksum`
+/// names a `requestAlgorithmMember` (`emit_s3_request_checksum` in
+/// `rest.rs`): botocore sends CRC32 there whether the checksum is required
+/// or only supported (`resolve_request_checksum_algorithm`), and so does the
+/// generated builder. Anywhere else the client would send none, and the
+/// service would reject every request.
+fn check_request_checksums(facts: &AwsFacts, options: AwsEmitOptions) -> Result<(), String> {
+    for (name, op) in facts.operations() {
+        if !op.request_checksum_required() {
+            continue;
+        }
+        let sent = options.s3
+            && op
+                .http_checksum
+                .as_ref()
+                .is_some_and(|c| c.request_algorithm_member.is_some());
+        if !sent {
+            return Err(format!(
+                "emit_aws: REFUSED checksum-required: operation `{name}` requires a \
+                 request checksum, and the generated client sends one only with the \
+                 `{S3_CUSTOMIZATION}` customization, for an operation whose httpChecksum \
+                 names a requestAlgorithmMember"
+            ));
+        }
+    }
+    Ok(())
 }
 
 /// The layout probe for `emitted`: one `size_of` per struct it declares.

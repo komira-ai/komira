@@ -947,9 +947,20 @@ mod tests {
                     "Put": {{"name": "Put", "http": {{"method": "PUT", "requestUri": "/p"}},
                         "input": {{"shape": "PutIn"}},
                         "httpChecksum": {{"requestAlgorithmMember": "ChecksumAlgorithm",
-                            "requestChecksumRequired": false}}}}}},
+                            "requestChecksumRequired": false}}}},
+                    "Purge": {{"name": "Purge",
+                        "http": {{"method": "POST", "requestUri": "/p?purge"}},
+                        "input": {{"shape": "PurgeIn"}},
+                        "httpChecksum": {{"requestAlgorithmMember": "ChecksumAlgorithm",
+                            "requestChecksumRequired": true}}}}}},
                 "shapes": {{
                     "In": {{"type": "structure", "members": {{}}}},
+                    "PurgeIn": {{"type": "structure", "payload": "Purge", "members": {{
+                        "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                            "locationName": "x-amz-sdk-checksum-algorithm"}},
+                        "Purge": {{"shape": "PurgeDoc", "locationName": "Purge"}}}}}},
+                    "PurgeDoc": {{"type": "structure", "members": {{
+                        "Key": {{"shape": "Str"}}}}}},
                     "PutIn": {{"type": "structure", "payload": "Body", "members": {{
                         "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
                             "locationName": "x-amz-sdk-checksum-algorithm"}},
@@ -972,7 +983,7 @@ mod tests {
         let lowering = lower_aws_service(
             &model,
             "s3",
-            &["Head", "Get", "GetBytes", "GetText", "Drop", "Put"].map(String::from),
+            &["Head", "Get", "GetBytes", "GetText", "Drop", "Put", "Purge"].map(String::from),
             "s3.json",
             "aws.s3",
         )?;
@@ -1036,8 +1047,81 @@ mod tests {
             .find("s3_apply_request_checksum(req, String(\"x-amz-sdk-checksum-algorithm\"))")
             .expect("the checksum");
         assert!(body < sum && sum < put.find("return req^").expect("return"), "{put}");
+        // A required checksum (`Purge`) is the same call, after its XML
+        // document is set.
+        let purge = builder(&src, "s3_build_purge_request");
+        let body = purge.find("aws_xml_set_body(req, _w)").expect("the body");
+        let sum = purge
+            .find("s3_apply_request_checksum(req, String(\"x-amz-sdk-checksum-algorithm\"))")
+            .expect("the checksum");
+        assert!(body < sum && sum < purge.find("return req^").expect("return"), "{purge}");
         // Nowhere else: no other operation names an algorithm member.
+        assert_eq!(src.matches("s3_apply_request_checksum(").count(), 2, "{src}");
+    }
+
+    /// A one-operation restXml model whose operation carries `checksum`
+    /// (its httpChecksum traits), emitted with or without the `s3`
+    /// customization.
+    fn emit_checksum_op(checksum: &str, s3: bool) -> Result<String, String> {
+        let model = parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
+                    "protocol": "rest-xml", "serviceFullName": "Tiny S3",
+                    "serviceId": "S3", "signatureVersion": "s3",
+                    "auth": ["aws.auth#sigv4"], "uid": "s3-2026-10-02"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "PUT", "requestUri": "/op"}},
+                    "input": {{"shape": "In"}}{checksum}}}}},
+                "shapes": {{"In": {{"type": "structure", "members": {{
+                    "ChecksumAlgorithm": {{"shape": "Str", "location": "header",
+                        "locationName": "x-amz-sdk-checksum-algorithm"}},
+                    "A": {{"shape": "Str"}}}}}}, {STR}}}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        let lowering =
+            lower_aws_service(&model, "s3", &["Op".to_string()], "s3.json", "aws.s3")?;
+        let options = AwsEmitOptions {
+            pure_only: true,
+            omit_preamble: true,
+            s3,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_client(&lowering, &AwsOverrides::empty(), "s3", options).map(|(_, s)| s)
+    }
+
+    #[test]
+    fn a_required_checksum_is_refused_where_the_client_sends_none() {
+        let refusal = |checksum: &str, s3: bool| {
+            let e = emit_checksum_op(checksum, s3).unwrap_err();
+            crate::aws_conformance::refusal_name(&e)
+        };
+        let with_member = r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm",
+            "requestChecksumRequired": true}"#;
+        // Without the customization nothing computes one.
+        for checksum in [with_member, r#", "httpChecksumRequired": true"#] {
+            assert_eq!(refusal(checksum, false).as_deref(), Some("checksum-required"), "{checksum}");
+        }
+        // With it, only where the model names the algorithm member: the
+        // older trait names none.
+        assert_eq!(
+            refusal(r#", "httpChecksumRequired": true"#, true).as_deref(),
+            Some("checksum-required")
+        );
+        assert_eq!(
+            refusal(r#", "httpChecksum": {"requestChecksumRequired": true}"#, true).as_deref(),
+            Some("checksum-required")
+        );
+        let src = emit_checksum_op(with_member, true).unwrap();
         assert_eq!(src.matches("s3_apply_request_checksum(").count(), 1, "{src}");
+        // An optional checksum is never refused, and without the
+        // customization none is sent.
+        for checksum in [
+            r#", "httpChecksumRequired": false"#,
+            r#", "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm"}"#,
+        ] {
+            let src = emit_checksum_op(checksum, false).unwrap();
+            assert!(!src.contains("s3_apply_request_checksum"), "{src}");
+        }
     }
 
     #[test]
