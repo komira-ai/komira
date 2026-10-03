@@ -1448,10 +1448,11 @@ impl<'a> AwsEmitter<'a> {
         self.line("    This client builds its `HttpClient` inside the core, so the config");
         self.line("    is the only way a caller can bound it. A process serving requests");
         self.line("    under a platform deadline (Cloud Run, Lambda) MUST pass");
-        self.line("    `HttpClientConfig.for_serving_ceiling(ceiling)`; only a process with");
-        self.line("    no containing deadline (a job, a CLI, a test) passes");
-        self.line("    `HttpClientConfig.defaults()`, whose budget is 600s. A default here");
-        self.line("    would silently exceed the serving ceiling, so there is none.\"\"\"");
+        self.line("    `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling in");
+        self.line("    microseconds; only a process with no containing deadline (a job, a");
+        self.line("    CLI, a test) passes `HttpClientConfig.defaults()`, whose budget is");
+        self.line("    600s. A default here would silently exceed the serving ceiling, so");
+        self.line("    there is none.\"\"\"");
         self.blank();
         self.line("var _mk_connector: def () raises thin -> Self.C");
         self.line("# Handed to `send_sigv4_signed_request` on every send, unchanged.");
@@ -1546,17 +1547,6 @@ impl<'a> AwsEmitter<'a> {
         self.line("extra.append(Header(n^, req.header_values[_i].copy()))");
         self.pop();
         self.pop();
-        self.line("# The operation's `endpoint.hostPrefix` (\"\" for most) goes on the host");
-        self.line("# of the endpoint this send resolves, override or not, as the AWS SDKs");
-        self.line("# inject it; the core refuses it on an IP-literal host.");
-        self.line("var endpoint = resolve_endpoint(");
-        self.push();
-        self.line(&format!(
-            "self._endpoint_override, {}_host(self._region.copy())",
-            self.module_name
-        ));
-        self.pop();
-        self.line(").with_host_prefix(req.host_prefix)");
         self.line("return send_sigv4_signed_request[Self.C](");
         self.push();
         self.line("self._mk_connector,");
@@ -1565,7 +1555,10 @@ impl<'a> AwsEmitter<'a> {
         self.line("cred,");
         self.line("self._region.copy(),");
         self.line(&format!("String({p}_SERVICE),"));
-        self.line("endpoint^,");
+        self.line(&format!(
+            "resolve_endpoint(self._endpoint_override, {}_host(self._region.copy())),",
+            self.module_name
+        ));
         self.line("req.uri.copy(),");
         self.line("content_type^,");
         self.line("req.body.copy(),");

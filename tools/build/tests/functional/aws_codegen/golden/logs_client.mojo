@@ -722,10 +722,11 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
         This client builds its `HttpClient` inside the core, so the config
         is the only way a caller can bound it. A process serving requests
         under a platform deadline (Cloud Run, Lambda) MUST pass
-        `HttpClientConfig.for_serving_ceiling(ceiling)`; only a process with
-        no containing deadline (a job, a CLI, a test) passes
-        `HttpClientConfig.defaults()`, whose budget is 600s. A default here
-        would silently exceed the serving ceiling, so there is none."""
+        `HttpClientConfig.for_serving_ceiling(ceiling_us)`, the ceiling in
+        microseconds; only a process with no containing deadline (a job, a
+        CLI, a test) passes `HttpClientConfig.defaults()`, whose budget is
+        600s. A default here would silently exceed the serving ceiling, so
+        there is none."""
 
     var _mk_connector: def () raises thin -> Self.C
     # Handed to `send_sigv4_signed_request` on every send, unchanged.
@@ -787,12 +788,6 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
                 content_type = req.header_values[_i].copy()
             else:
                 extra.append(Header(n^, req.header_values[_i].copy()))
-        # The operation's `endpoint.hostPrefix` ("" for most) goes on the host
-        # of the endpoint this send resolves, override or not, as the AWS SDKs
-        # inject it; the core refuses it on an IP-literal host.
-        var endpoint = resolve_endpoint(
-            self._endpoint_override, komira_aws_logs_host(self._region.copy())
-        ).with_host_prefix(req.host_prefix)
         return send_sigv4_signed_request[Self.C](
             self._mk_connector,
             self._http_config.copy(),
@@ -800,7 +795,7 @@ struct CloudWatchLogsCloudWatchLogsClient[C: Connector, T: AwsCredsSource](Movab
             cred,
             self._region.copy(),
             String(CLOUDWATCHLOGS_SERVICE),
-            endpoint^,
+            resolve_endpoint(self._endpoint_override, komira_aws_logs_host(self._region.copy())),
             req.uri.copy(),
             content_type^,
             req.body.copy(),
