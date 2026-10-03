@@ -1,0 +1,1648 @@
+syntax = "proto3";
+
+package komira.plan.v1;
+
+import "komira/plan/v1/plan_vocabulary.proto";
+
+// THE MESSAGE LAYER — a `LogicalPlan` as BYTES.
+//
+// `plan_vocabulary.proto` (DERIVED from the engine's own `comptime` tag
+// declarations) says what the enumerated tag spaces ARE. This file says what a
+// NODE is. It is HAND-WRITTEN, and it imports the vocabulary rather than
+// restating it: a hand-written `enum PlanTag` beside the derived one would
+// reintroduce the two-sources-of-truth problem exactly one level down.
+//
+// THE CONTRACT THIS FILE EXISTS TO MEET
+// -------------------------------------
+//   plan -> bytes -> plan'   with   structural_hash(plan) == structural_hash(plan')
+//
+// `structural_hash` is FNV-1a over the plan's TEXT RENDER, so it is the
+// strongest single statement available that the wire format loses nothing —
+// it is what `EngineContext`'s Layer-1 plan-compile cache keys on, so if it
+// survives, the decoded plan IS the same plan to the engine. It is also not
+// sufficient on its own, and the round-trip test does not treat it as such:
+// the render does not emit `output_schema`, and a field can reach a plan
+// without reaching the render. The round trip is therefore checked in three
+// legs: LEG 1 compares `structural_hash` (the text render), LEG 2 the output
+// schema, and LEG 3 — the IR-equality leg — the decoded structure itself.
+//
+// ⚠ BYTE IDENTITY IS NOT A PROPERTY OF THIS FORMAT. READ THIS BEFORE YOU HASH
+// -----------------------------------------------------------------------------
+// There is NO canonical encoding. Two byte-different messages can be the same
+// plan, and both are correct:
+//
+//   * proto3 permits omitting a default-valued scalar. `protoc` omits them;
+//     the Mojo encoder writes them explicitly, so the two encodings of the
+//     IDENTICAL message differ by roughly half (a simple scan is about 430
+//     bytes from the Mojo encoder and 300 from protoc). Both decode to the
+//     same plan.
+//   * Fields may be written in any order.
+//   * A varint may be encoded non-minimally.
+//   * Slots a tag does not read survive decode and re-encode, and the plan's
+//     equality cannot see them.
+//
+// SO: THE PLAN IS THE MEANING, and `structural_hash` is the identity relation.
+// Do NOT compare plan bytes for equality, use them as a cache key, sign them,
+// or deduplicate on them — every one of those silently assumes a canonical form
+// that does not exist. A frozen byte fixture of a plan makes a CHANGE visible
+// in review; it is not a claim that the encoding is unique, which is why such
+// a fixture is best kept beside protoc's own different-but-equal bytes for the
+// same plan.
+//
+// Defining a canonical form IS possible (omit defaults, order fields by number)
+// and is deliberately NOT done here — it is a format-wide encoder change that
+// needs its own falsifier. Until then the property is written down rather than
+// left to be assumed.
+//
+// ⚠ AND THE READER HAS BUDGETS, WHICH NO WRITER CAN RAISE
+// -----------------------------------------------------------------------------
+// A conformant producer must stay inside these. They are a property of the
+// READER's stack and memory rather than of the schema, so no field carries them
+// and no message can negotiate them:
+//
+//   nesting depth   <=      64  length-delimited records (envelope counts as 1)
+//   framed records  <=  65,536
+//   encoded size    <=   16 MiB
+//
+// Without these budgets, a few hundred bytes of pathological nesting can kill
+// the decoding process outright — a stack overflow, not an error a caller
+// could catch. `komira_plan_wire`'s admission check (`plan_wire_admit`) holds
+// the full table and the reasoning behind each number.
+//
+// WHAT IS DELIBERATELY *NOT* HERE
+// -------------------------------
+// Nothing in this file is a live pointer, a handle, or a process-local id.
+//   * `ScanBinding.handle` / `registry_epoch` are NOT on the wire. A handle is
+//     an index into a registry that exists in ONE process; carrying it would
+//     let a decoded plan name a slot in a registry that never existed. A
+//     decoded binding is UNBOUND, which is exactly what the epoch gate
+//     (`scan_binding_gate.check_plan_scan_bindings`) already treats as the
+//     safe case.
+//   * `UdfData.registered_handle_id` is NOT on the wire. Same reason, and the
+//     failure mode is worse than ScanBinding's: it is a slot+generation into a
+//     `UdfRegistry` that exists in ONE process, and a low slot at generation 0
+//     exists in almost ANY registry — so a carried handle would not merely be
+//     stale, it would PLAUSIBLY resolve, to a different function. A decoded
+//     UDF is UNBOUND and the peer re-mints by resolving `name`.
+//   * `UdfCallData.handle` is NOT on the wire, and `WireUdfCall` has no field
+//     to put one in. Same rule, one altitude down from `UdfData`, with the
+//     same plausibly-resolving failure mode; the receiver re-mints by
+//     resolving `name`.
+//   * A UDF with no resolvable `name` — one minted from a live in-process
+//     closure — is REFUSED, not encoded. `WireUdf` carries a DESCRIPTION, and
+//     a description a peer cannot resolve is not one. `WireUdfCall` inherits
+//     that rule verbatim.
+//   * There is no `in_memory` arm. `InMemorySource` holds
+//     `ArcPointer[Slab[RecordBatch]]` — LIVE HEAP DATA INSIDE THE IR — and
+//     that is the single fact that makes a plan unserializable. It is EXEMPT
+//     in `plan_vocabulary.proto` for the same reason, and the codec RAISES on
+//     it by name rather than encoding something lossy.
+//
+// FIELD NUMBERS ARE PERMANENT. Same rule as the vocabulary: MAY add a new
+// field with a new number; MAY NEVER renumber, reuse, or delete without
+// reserving.
+//
+// ⚠ REVIEW ALONE DOES NOT HOLD THAT RULE. A foreign stub binds to field
+// numbers exactly as it binds to enum values — protoc compiles
+// `WireField.dtype_code = 3` into every generated reader exactly as it compiles
+// `ARROW_TYPE_INT32 = 6`. Swapping `dtype_code = 3` with `nullable = 4` makes
+// protoc read a column's TYPE CODE as its NULLABILITY FLAG, with no error
+// anywhere, and NO MOJO-TO-MOJO TEST CAN SEE IT: renumbering this file moves
+// the generated encoder and the generated decoder TOGETHER. Field numbers
+// therefore belong in an append-only ledger checked against protoc's own
+// descriptor set, which refuses a RENUMBER, a REUSE, an unreserved DELETE, a
+// retired-number REUSE and a wire-class change at a fixed number, each BY
+// NAME. Regenerating golden bytes must run that same check first, so a
+// regold cannot turn a foreign-decode check green over a corrupted schema.
+//
+// That check is about PERMANENCE (did a carried field move). A separate one is
+// about COMPLETENESS: derive the ENGINE-side field universe from the struct
+// declarations and fail on a field the codec never mentions.
+//
+// ★ WRITING A FRONTEND? START WITH THE BYTES, NOT WITH THIS FILE.
+// A schema tells you what is EXPRESSIBLE; a byte vector tells you what to
+// PRODUCE. Exact bytes of a few representative plans — a scan, a filter over a
+// scan, a join, an aggregate and TPC-H Q1 — beside protoc's own decode of
+// each, are the vectors to produce against. Mojo encoding and Mojo decoding
+// through ONE implementation cannot find a systematic error, because it is
+// symmetric and therefore invisible; protoc — not the codec — is the oracle.
+//
+// ⚠ THE MOJO ENCODER IS NOT BYTE-CANONICAL, AND A FRONTEND MUST NOT MATCH IT.
+// proto3 permits omitting a default-valued scalar. protoc omits them; this
+// encoder writes them explicitly, so its output is substantially LARGER than
+// the reference implementation's for the same plan. Emit whatever your
+// protobuf library emits — the Mojo decoder accepts protoc's own output — and
+// compare two plans by DECODED STRUCTURE, never by bytes.
+
+// ===========================================================================
+// Arrow schema — `komira_core.arrow.schema.{Field, Schema}`
+// ===========================================================================
+
+// A `Field`, TOTALLY. Every `var` on the engine struct has a slot here,
+// including the ones no in-tree producer sets today: a codec that can only
+// express the states its public constructors can build is exactly how a field
+// gets silently dropped, and `Field` carries six of them
+// (`_tz`, `_dict_index_type`, `_union_type_ids`, `_flags`, metadata, children).
+message WireField {
+  string name = 1;
+  // `ArrowType.type_id` verbatim. NOT offset like the vocabulary enums —
+  // `ArrowType` is a bare UInt8 space on the engine, not a proto enum, and 0
+  // (`NULL`) is reachable, so `has_arrow_type` presence is carried by the field
+  // being required-by-construction rather than by an unspecified zero.
+  //
+  // ⚠ TWO NUMBERINGS, ONE SPACE — READ THIS BEFORE WRITING A FRONTEND. The
+  // derived `ArrowType` enum in plan_vocabulary.proto is OFFSET (+1) like every
+  // other vocabulary space; THIS FIELD IS NOT. The enum is the derived
+  // MEMBERSHIP REGISTER — the set of type ids that exist and their stable
+  // names — and this field carries the engine value. A writer emits
+  // `ArrowType.type_id`; a reader validates it against the enum by subtracting
+  // one, and MUST REFUSE an id the enum does not publish. Narrowing an unknown
+  // uint32 into the engine's UInt8 does not fail, it renames the column's type
+  // (300 -> 44, FIXED_SIZE_BINARY) and nothing downstream compares a binding's
+  // schema to anything. The Mojo codec's `_arrow_type_from_wire` is the
+  // reference implementation of that refusal.
+  uint32 arrow_type_id = 2;
+  // A codec-local DType code. `DType` has no stable numeric identity in the
+  // Mojo stdlib, so the codec owns an explicit table and RAISES on a DType it
+  // has no code for — the alternative (deriving `dtype` from `arrow_type`) is
+  // lossy for `DType.index`, which `ArrowType.from_dtype` folds onto INT64.
+  //
+  // ★ AN ENUM, NOT A BARE `uint32`, BECAUSE "LANGUAGE-AGNOSTIC" REQUIRES IT.
+  // A Python or Excel frontend that decoded `dtype_code: 5` from a bare
+  // integer would have NOWHERE TO LOOK UP WHAT 5 IS — in a format whose whole
+  // purpose is that four languages share one plan. `DTypeCode` is a real enum
+  // in `plan_vocabulary.proto`, DERIVED from the codec's own `_DT_*` table,
+  // so protoc names it: `dtype_code: _DT_INT64`.
+  //
+  // ⚠ THE BYTES ARE THE SAME AS A `uint32`. proto3 encodes an enum as a varint
+  // exactly as it encodes a `uint32`, so the enum names the VALUE SPACE and
+  // does not change the format. A field-number ledger should classify such a
+  // change `RETYPE` (same wire class) rather than `WIRECLASS`, which is why a
+  // ledger publishes a type column.
+  //
+  // ⚠ AND IT IS AN OPEN ENUM, WHICH IS WHY 13 STAYING RESERVED STILL MATTERS.
+  // proto3 PRESERVES an unrecognised enum value in the field rather than
+  // dropping it to unknown-fields (measured: `18 63` decodes as
+  // `dtype_code: 99`). So a future `_DT_INDEX = 13` written by a newer producer
+  // survives an older reader intact — and that reader still REFUSES it, because
+  // `_dtype_from_wire` raises on any code it has no DType for. Naming the
+  // values did not weaken the refusal.
+  //
+  // ⚠ WIRE 0 IS A REAL CODE HERE (`_DT_INVALID`), so `DTypeCode` has no
+  // `*_WIRE_UNSPECIFIED` and an absent field is indistinguishable from an
+  // explicit invalid. That is correct for a DType, and it is why this space
+  // has no entry in `plan_wire_vocabulary.mojo` — a vocabulary `*_from_wire`
+  // raises on wire 0 — and the codec keeps its own hand-written table instead.
+  DTypeCode dtype_code = 3;
+  bool nullable = 4;
+  int64 decimal_precision = 5;
+  int64 decimal_scale = 6;
+  string tz = 7;
+  // Same UInt8 space, same refusal rule, and READ BY NEITHER the plan render
+  // nor the output-schema comparison — so an unchecked narrowing here is
+  // silent at EVERY value, not merely at a corpus's.
+  uint32 dict_index_type_id = 8;
+  repeated int64 union_type_ids = 9;
+  int64 flags = 10;
+  repeated string metadata_keys = 11;
+  repeated string metadata_values = 12;
+  repeated string child_names = 13;
+  // Same UInt8 space, same refusal rule, once PER ELEMENT.
+  repeated uint32 child_type_ids = 14;
+  repeated bool child_nullables = 15;
+}
+
+// ⚠ ONE FLAT LEVEL OF NESTING, BECAUSE THAT IS WHAT THE ENGINE STORES.
+// `Schema` keeps a field's children as three parallel `List`s per field
+// (`_field_child_names` / `_child_types` / `_child_nullables`), so a child has
+// a name, a type id and a nullability and NOTHING ELSE — no children of its
+// own. `list<struct<list<...>>>` is therefore not representable HERE because
+// it is not representable THERE. This is a faithful mirror of the engine's
+// storage, not an additional restriction imposed by the wire.
+message WireSchema {
+  repeated WireField fields = 1;
+  // ⚠ TABLE-LEVEL kv metadata — `Schema._metadata_keys` / `_metadata_values`.
+  //
+  // NOT `WireField.metadata_keys/metadata_values` (11/12). Those are `Field`'s
+  // pair and describe ONE COLUMN; these describe THE TABLE. They are distinct
+  // `var`s on distinct structs that happen to share a name, so a coverage
+  // check that decides "carried" by searching the codec for `\b<field>\b`
+  // would credit `Schema._metadata_keys` because `_field_to_wire` mentions
+  // `f._metadata_keys`.
+  //
+  // Without these two numbers the pair would be DROPPED UNCONDITIONALLY on
+  // every round trip: `_schema_from_wire` rebuilds through `SchemaBuilder`,
+  // which has no table-metadata channel at all. Every schema the codec touches
+  // can hold it —
+  // `LogicalPlan.output_schema`, `ScanData.schema`, `ScanBinding.schema`,
+  // `ParquetSource.schema_cached` — and `Schema.write_to` PRINTS the pair, so
+  // it is part of the type's own identity rendering.
+  //
+  // Parallel lists, same rule as `WireField`'s pair: the decoder REFUSES a
+  // length mismatch by name rather than truncating to the shorter one.
+  repeated string metadata_keys = 2;
+  repeated string metadata_values = 3;
+}
+
+// ===========================================================================
+// ScalarValue — `komira_core.plan.scalar_value.ScalarValue`
+// ===========================================================================
+
+// TOTAL, for the same reason `WireField` is: 18 `var`s, 18 slots. The struct
+// is a flat union whose active arm is `kind` + `dtype`, and every other field
+// is zero — so the encoding is cheap on the wire (proto3 omits zeros) without
+// the codec having to know which arm is live.
+//
+// ⚠ WHY THIS IS NOT A `oneof`.
+// `WirePlan` has no separate tag beside its `oneof`, because such a tag would
+// be a SECOND statement of what the arm already says, so the two could
+// disagree. `kind` is not that shape, for three reasons:
+//
+//   * THE DISCRIMINATOR IS A PAIR, NOT A FIELD. `SCALAR_KIND_DTYPE` (engine 0,
+//     and the DEFAULT every legacy scalar carries) means "the live value is
+//     named by `dtype`" — so the union's real arm set is
+//     {DTYPE} x DType  ∪  {the 10 out-of-band kinds}. A `oneof` over `kind`
+//     alone cannot express it; a `oneof` over the product would publish 23 arms
+//     for a struct with 18 fields, and the DTYPE half would still be a flat
+//     value discriminated by a second field.
+//   * THE ARMS OVERLAP BY CONSTRUCTION, WHICH A `oneof` FORBIDS. DECIMAL256
+//     reuses `dec128_low`/`dec128_high` for its LOW 128 bits and
+//     `dec128_precision`/`_scale` for its precision; BINARY reuses
+//     `string_val`; TIME and DURATION both use `int_val` + `time_unit`. Giving
+//     each arm its own storage means either duplicating those fields — a second
+//     source of truth for the same bits, which is the disease — or sharing
+//     sub-messages that re-create the flat-plus-tag shape one level down.
+//   * WHAT THE `oneof` BUYS `WirePlan` IS THE ARM-PRESENCE CHECK, and the
+//     equivalent here is a VALIDATED discriminator. A decoder that did
+//     `v._kind = UInt8(Int(w.kind))` with no check would turn 11 into a scalar
+//     reading a field nothing wrote, and 256 into 0. So `kind` is a declared
+//     enum from the derived vocabulary and an out-of-vocabulary value RAISES
+//     by name.
+//
+// So the tagged union stays; the tag stops being unvalidated. If the arms are
+// ever given disjoint storage, revisit — the argument above is about THIS
+// struct's layout and says so.
+message WireScalar {
+  // The codec's own DType code — see `WireField.dtype_code` for the full
+  // argument and for why this is an enum rather than a `uint32`. Here the
+  // naming matters MORE, not less: `kind` = SCALAR_KIND_DTYPE (engine 0, the
+  // default every legacy scalar carries) means "the live value is named by
+  // `dtype`", so this field IS the discriminator for the whole DTYPE half of
+  // the union, and a reader that could not name it could not tell which arm
+  // is live.
+  DTypeCode dtype_code = 1;
+  int64 int_val = 2;
+  double float_val = 3;
+  string string_val = 4;
+  bool bool_val = 5;
+  // ⚠ MEANING CHANGED AT format_version 2. This was a bare `uint32` carrying
+  // `ScalarValue._kind` VERBATIM, which the decoder narrowed to UInt8 with no
+  // check. It is now the derived `ScalarKind` space, +1 offset like every other
+  // vocabulary field: wire 1 = SCALAR_KIND_DTYPE (engine 0). Wire 0 is
+  // SCALAR_KIND_WIRE_UNSPECIFIED and the decoder REFUSES it, which is the whole
+  // point of the offset — under the old numbering an ABSENT `kind` decoded as
+  // DTYPE, so a frontend that never wrote the field produced a valid-looking
+  // scalar instead of a refusal.
+  ScalarKind kind = 6;
+  int64 dec128_high = 7;
+  int64 dec128_low = 8;
+  int64 dec128_precision = 9;
+  int64 dec128_scale = 10;
+  int32 date32_val = 11;
+  int64 ts_micros = 12;
+  // The DType a NULL scalar is null OF — same table, same enum. A typed null
+  // is not the same value as an untyped one, which is exactly the kind of
+  // distinction a reader that sees `13: 5` cannot make.
+  DTypeCode null_dtype_code = 13;
+  int32 iv_months = 14;
+  int32 iv_days = 15;
+  int64 iv_nanos = 16;
+  // ⚠ MEANING CHANGED AT format_version 2, same as `kind`. Read TOGETHER with
+  // `int_val` on the TIME and DURATION arms, so a wrong unit is a silently
+  // wrong VALUE — nanoseconds read as seconds — and never a decode failure.
+  // That is exactly why it may not be a `uint32` the decoder trusts.
+  ScalarTimeUnit time_unit = 17;
+  int64 dec256_high_lo = 18;
+  int64 dec256_high_hi = 19;
+  // ⚠ MEANING CHANGED AT format_version 2, same as `kind`. The `XL_ERR_*` code
+  // of a SCALAR_KIND_ERROR literal — core-owned; a frontend copies its error
+  // code onto it verbatim.
+  // An unknown code taken verbatim becomes a DIFFERENT error, which is worse
+  // than not being an error at all.
+  ExcelErrorCode error_code = 20;
+}
+
+// ===========================================================================
+// The scan leaf
+// ===========================================================================
+
+message WireParam {
+  string key = 1;
+  // ⚠ MEANING CHANGED AT format_version 2, AND IT IS A NARROW-BEFORE-VALIDATE
+  // HAZARD. Computing `UInt8(Int(e.tag))` and comparing the RESULT against the
+  // `PARAM_*` constants would turn a wire tag of 256 into 0 and decode it as
+  // `PARAM_STR`, 257 as `PARAM_I64` — every out-of-range value aliasing onto a
+  // legal one instead of hitting the `else` that raises. It is the same class
+  // `_arrow_type_from_wire` refuses (300 -> 44, silently renaming a column's
+  // type). So this is a declared enum with the +1 offset, refused before any
+  // narrowing happens.
+  ParamTag tag = 2;
+  string s = 3;
+  int64 i = 4;
+  double f = 5;
+}
+
+message WirePushdownGate {
+  // ⚠ MEANING CHANGED AT format_version 2. Was a bare `uint32`, narrowed with
+  // no check. `PushdownGate.mode` decides whether a source is asked to evaluate
+  // a predicate at all, so a decoded wrong mode is a plan that reads more rows
+  // than it should (REJECT_ALL read as ACCEPT_ALL) or silently loses pushdown.
+  PushdownGateMode mode = 1;
+  // NOT an enum, and deliberately NOT offset: a BITMASK over the `GATE_OP_*`
+  // bit positions. The vocabulary EXCLUDES `GATE_OP*` from the
+  // `PushdownGateMode` space for this reason — folding a mask into a +1-offset
+  // enum would make every stored gate mean something else.
+  uint32 allowed_binary_ops = 2;    // bitmask over GATE_OP_*
+  bool allow_and_recurse = 3;
+  bool allow_in_list = 4;
+  bool require_stat_friendly_col = 5;
+}
+
+// `komira_core.source.scan_binding.ScanBinding` MINUS `handle` and
+// `registry_epoch` — see the header. Everything else is pure data by
+// construction; that is the entire point of the type.
+message WireScanBinding {
+  uint32 kind_id = 1;
+  string kind_name = 2;
+  string name = 3;
+  repeated WireParam params = 4;
+  WireSchema schema = 5;
+  uint64 fingerprint = 6;
+  uint64 structural_id = 7;
+  WirePushdownGate pushdown_gate = 8;
+  repeated string pushdown_extra_cols = 9;
+  // ⚠ MEANING CHANGED AT format_version 2. Was a bare `uint32`, narrowed with
+  // no check. This one byte is the whole identity/freshness split: PINNED means
+  // `snapshot_token` IS identity and is folded into `identity_hash`; LIVE means
+  // it is excluded and re-resolved at execution start. A decoded wrong value is
+  // therefore a PLAN CACHE correctness fault — a stale token replayed, or a
+  // cache that never hits — and not a decode error anyone would see.
+  SnapshotPolicy snapshot_policy = 10;
+  uint64 snapshot_token = 11;
+  SourceOrientation orientation = 12;
+  // ⚠ TWO FIELDS FOR ONE VALUE, AND THE SECOND IS NOT OPTIONAL POLISH.
+  // `ScanBinding.legacy_source_type` defaults to
+  // `SCAN_LEGACY_SOURCE_TYPE_NONE = 255` — "this kind declares no legacy
+  // type" — and 255 is NOT a member of the derived `SourceType` enum,
+  // because the vocabulary derives that space from the engine's `SOURCE_*`
+  // constants and the sentinel is declared in `scan_binding.mojo` under a
+  // different prefix. Folding the sentinel INTO the enum would put a
+  // hand-written member in a derived space; mapping it onto some other
+  // SOURCE_* value would silently retype every kind that declares none. So
+  // the presence bit carries "declared / not declared" and the enum carries
+  // the value only when there is one.
+  // This field is required, not optional polish: without it
+  // `source_type_to_wire(255)` RAISES and NO binding-backed scan whose kind
+  // leaves the field at its default can be encoded at all — which is most of
+  // them. A round trip whose leaf is a ParquetSource cannot see this; one
+  // whose leaf is a binding can.
+  bool has_legacy_source_type = 16;
+  SourceType legacy_source_type = 13;
+  // `SourceVariant` keeps the ORIGINAL tag for a migrated arm
+  // (`SourceVariant(tag=..., binding=...)`), so ORC and ARROW_ZSTD are
+  // distinguishable on the wire and reconstruct as themselves rather than
+  // collapsing onto SOURCE_VARIANT_BINDING.
+  SourceVariantTag variant_tag = 14;
+  // `ScanBinding.stats: Optional[TableStats]`. Carried as presence only in
+  // v1: the codec RAISES if it is populated, rather than dropping it. See the
+  // komira_plan_wire codec's coverage ledger.
+  bool has_stats = 15;
+}
+
+// `komira_core.source.parquet_source.ParquetSource`.
+//
+// `mtime_ns` IS on the wire. The vocabulary marks SOURCE_VARIANT_PARQUET
+// EXEMPT because an mtime is environment-local — that is a statement about
+// PORTABILITY (the same bytes read on another machine describe a different
+// file), not about ROUND-TRIPPING. Carrying it verbatim is what makes
+// `fingerprint()` byte-identical across `plan -> bytes -> plan'`, and the
+// alternative — re-statting at decode — would silently change a plan's
+// identity whenever the file was touched between encode and decode.
+message WireParquetSource {
+  repeated string paths = 1;
+  WireSchema schema = 2;
+  bool has_name = 3;
+  string name = 4;
+  uint64 mtime_ns = 5;
+  repeated WireField partition_cols = 6;
+  repeated WirePartitionValueRow partition_values = 7;
+  bool hive_dir_scan = 8;
+  // `hive_predicate: Optional[PartitionPredicatePod]` and
+  // `fs_descriptor: FsDescriptorPod`. Presence only in v1 — the codec RAISES
+  // on a populated predicate or a non-local descriptor rather than dropping.
+  bool has_hive_predicate = 9;
+  bool fs_is_local = 10;
+}
+
+message WirePartitionValueRow {
+  repeated string values = 1;
+}
+
+// ⚠ THERE IS NO `variant_tag` HERE, AND THAT IS NOT AN OVERSIGHT.
+// `SourceVariantTag` is a DERIVED enum and `SOURCE_VARIANT_PARQUET` is
+// `reserved 1` in it — the vocabulary marks the arm EXEMPT. Naming the parquet
+// arm would have meant either un-reserving a deliberately reserved number,
+// is the discriminator instead, which is what a oneof is for; the original
+// migrated tag (ORC vs ARROW_ZSTD vs ...) is carried INSIDE `WireScanBinding`,
+// where every value it can take is a live member of the generated enum.
+message WireScanSource {
+  oneof payload {
+    WireParquetSource parquet = 1;
+    WireScanBinding binding = 2;
+  }
+}
+
+// ===========================================================================
+// Expr
+// ===========================================================================
+
+message WireColRef {
+  string name = 1;
+  ColSide side = 2;
+}
+
+// ★★ CARRIED BY THE FORMAT, REFUSED BY THIS ENGINE. READ THIS BEFORE EMITTING
+// ONE — it is the single most likely thing a GENERATED client gets wrong.
+//
+// Addressing a column by ORDINAL is what a client does when it has a schema and
+// no name-resolution layer, which is the normal shape of an Excel or a Python
+// frontend. Every in-tree producer emits `col_ref`, so no Mojo caller ever
+// reached this arm; THE FIRST NON-MOJO PRODUCER IS EXACTLY WHO DOES.
+//
+// An ordinal is dangerous here: `col_idx: 1` against a three-column schema —
+// SEMANTICALLY CORRECT, a few hundred bytes, inside every budget and inside
+// the index bound — can END THE PROCESS without the refusal below: a stack
+// dump, not a catchable error. An ordinal's frame of reference
+// is a schema no optimizer pass promises to preserve: projection pushdown, late
+// materialization and scan binding are all keyed on NAMES, and
+// `compiler_helpers.collect_expr_cols` yields no name for this tag at all.
+//
+// ★ SEND `WireColRef` WITH THE NAME. The fix is one line in the producer: your
+// message has already serialized the schema, so `WireSchema.fields[i].name` is
+// in the same bytes you are writing. The door refuses an ordinal by name
+// (`PLAN_WIRE_UNSUPPORTED_COL_IDX`, endpoint code 28) and the message TELLS YOU
+// the name to send instead.
+//
+// ⚠ THE MESSAGE AND ITS FIELD NUMBER STAY. Bytes already written remain
+// decodable, the codec keeps its encode and decode arms, and a future build
+// that executes ordinals needs no format change — the refusal is a statement
+// about what THIS build runs, which is why it lives in the value gate and not
+// in the codec's shape ledger. The other untrusted boundary in this repo
+// (`komira_ivp`) reached the same decision first: its six-tag Expr allow-list
+// omits EXPR_COL_IDX.
+message WireColIdx {
+  int64 index = 1;
+}
+
+message WireBinaryOp {
+  BinaryOp op = 1;
+  WireExpr left = 2;
+  WireExpr right = 3;
+}
+
+message WireUnaryOp {
+  UnaryOp op = 1;
+  WireExpr child = 2;
+}
+
+message WireAlias {
+  WireExpr child = 1;
+  string name = 2;
+}
+
+message WireInList {
+  WireExpr child = 1;
+  repeated WireScalar values = 2;
+}
+
+// `CastData`, TOTALLY — all SIX `var`s, and FOUR of them are invisible to the
+// plan render.
+//
+// ⚠ THE RENDER EMITS `Cast(<child>, <target>)` AND NOTHING ELSE. `target_arrow`,
+// `decimal_precision`, `decimal_scale` and `try_cast` reach no render at any
+// value, so `structural_hash` cannot see one of them go missing — which is why
+// each has its own slot here rather than being derived at decode. Deriving
+// `target_arrow` from `target` drops the Arrow logical type
+// (`cast_preserving_arrow` exists to keep it: `Expr.cast(child,
+// src.cast_target())` alone loses it), and for DATE32 / TIMESTAMP_* /
+// DECIMAL128 that is a different cast, not a tidier one.
+message WireCast {
+  WireExpr child = 1;
+  // `CastData.target: DType`, through the codec's own DType code table — the
+  // same table `WireField.dtype_code` uses, and for the same reason: `DType`
+  // has no stable numeric identity in the Mojo stdlib. `DType.invalid` is a
+  // REACHABLE value here (`cast_to_decimal` sets it), and it is wire code 0.
+  DTypeCode target_dtype_code = 2;
+  // `CastData.target_arrow: ArrowType.type_id` VERBATIM — NOT offset, exactly
+  // like `WireField.arrow_type_id`, and validated against the derived
+  // ArrowType membership register by the same `_arrow_type_from_wire`. See
+  // that field's comment for why a narrowing without a membership check
+  // renames a type rather than failing.
+  uint32 target_arrow_type_id = 3;
+  // Non-zero ONLY for `cast(x AS DECIMAL(p, s))`; 0/0 for every other target.
+  int64 decimal_precision = 4;
+  int64 decimal_scale = 5;
+  // `TRY_CAST` — a bad input yields NULL instead of raising. A flag, not a
+  // sibling tag, on the engine side; a flag here for the same reason. Dropping
+  // it turns a query that returns NULLs into one that RAISES, and no render
+  // anywhere prints it.
+  bool try_cast = 6;
+}
+
+// ★ THE ONE CROSS-EDGE FROM THE EXPRESSION TREE BACK INTO THE PLAN TREE.
+//
+// `CorrelatedSubqueryData.inner_plan` is the only `LogicalPlan`-typed field
+// anywhere outside a plan node's own child slot, which is what makes this the
+// arm that closes the plan <-> expr cycle. Everything above this line is a
+// tree; with this message the message graph is MUTUALLY RECURSIVE, and
+// `recursion_breaking_edges` in the emitter is what decides which edges become
+// `List[T]` recursion boxes. Declaring this message changes that decision for
+// other edges of the graph as well, which is a real, compiler-visible
+// consequence of declaring the cycle and not a thing to work around by
+// declaring `inner_plan` `repeated`.
+//
+// ⚠ IT IS ALSO THE FIELD A PLAN-NODE-ONLY WALK NEVER LOOKS AT. An epoch gate
+// (`scan_binding_gate`) that walked only plan nodes would silently skip every
+// plan hanging off one — a memory-safety check whose caller saw success.
+// Anything that claims to walk "every scan in the plan" has to cross this
+// edge; on the Mojo side the accessor to search for is
+// `corr_subq_inner_plan_ref`.
+message WireCorrelatedSubquery {
+  WirePlan inner_plan = 1;
+  // The OUTER-scope column names this subquery correlates with. The plan
+  // render prints only their COUNT (`outer_refs=#2`), so a codec that carried
+  // the right number of wrong names renders identically — the IR-equality leg
+  // is what compares them.
+  repeated string outer_refs = 2;
+  CorrelatedKind kind = 3;
+  // Populated ONLY for CORR_KIND_IN_CORRELATED (empty otherwise, and the codec
+  // REFUSES a decode that pairs a non-IN kind with a non-empty column: the
+  // engine's factories cannot build that state, so accepting it would mean
+  // silently dropping the columns or silently changing the kind).
+  string in_lhs_col = 4;
+  string in_rhs_col = 5;
+}
+
+// ★ THE ARM WHOSE ENTIRE PAYLOAD IS INVISIBLE TO THE PLAN RENDER.
+//
+// `Expr.write_to` emits the literal seven characters `When(...)` for an
+// EXPR_WHEN — no conditions, no results, no ELSE, no case COUNT. So
+// `structural_hash` cannot tell `CASE WHEN a>3 THEN 1 ELSE 0 END` from
+// `CASE WHEN b<9 THEN 7 ELSE 7 END`, and a codec that dropped every case would
+// render byte-identically. It is the purest case of a payload the render
+// does not carry: there is no value at which LEG 1 looks.
+//
+// LEG 2 is nearly as blind. `_infer_expr_field` types a CASE as the type of
+// its FIRST THEN clause (`logical_plan.mojo`), so dropping cases 1..n changes
+// no output schema either. The IR-equality leg is the only thing that compares
+// the payload at all, which is why the corpus puts a When in a FILTER
+// PREDICATE with TWO differing cases.
+message WireWhenCase {
+  WireExpr condition = 1;
+  WireExpr result = 2;
+}
+
+message WireWhen {
+  // ORDER IS SEMANTIC — a CASE returns the FIRST matching branch, so two cases
+  // swapped is a different expression, not a re-ordering. `repeated` preserves
+  // it; a map keyed on anything would not.
+  repeated WireWhenCase cases = 1;
+  // `WhenData.default` — the ELSE branch. NOT named `default` here because
+  // that reads as "the value when the field is absent" to every proto reader,
+  // and it is the opposite: a CASE with no ELSE is not expressible in this
+  // engine (`WhenData.default` is a non-Optional `OwnedPointer[Expr]`), so an
+  // absent `default_expr` is malformed and the codec refuses it.
+  WireExpr default_expr = 2;
+}
+
+// `AggFnData` — an aggregate used AS AN EXPRESSION (`EXPR_AGG_FN`), which is a
+// different thing from the `WireAggExpr` an AGGREGATE node carries. This one
+// is produced by the ColExpr `.max()` / `.sum()` / ... factories and consumed
+// by the `optimizer_scalar_broadcast` rule; it appears inside a predicate,
+// where no aggregate node exists.
+//
+// ⚠ `op` REUSES THE `AggFn` VOCABULARY, WHICH HAS THIRTEEN MEMBERS AND NO
+// COUNT CONSTANT IN THE ENGINE. `agg_expr.mojo` declares AGG_SUM..AGG_VAR_SAMP
+// as thirteen free `comptime`s with nothing asserting how many there are — a
+// drift hazard, and it is why the derived vocabulary's `AGG_FN_WIRE_MEMBERS` is
+// pinned against a hardcoded 13 in the round-trip test rather than derived on
+// both sides of the comparison.
+message WireAggFn {
+  AggFn op = 1;
+  WireExpr child = 2;
+}
+
+// ---------------------------------------------------------------------------
+// THE FLAT SCALAR PAYLOADS. Four arms whose payloads are a child
+// or two plus a small fixed set of scalars — no lists, no cross-edges.
+//
+// ⚠ ALL FOUR ARE FULLY RENDERED, WHICH IS THE OPPOSITE OF THE `WireWhen`
+// SITUATION AND IS WORTH SAYING BECAUSE IT IS NOT A PROPERTY OF THIS FILE.
+// `Expr.write_to` emits `Extract(unit=<n>, <child>)`, `MathFn(op=<n>,
+// <child>)`, `MathFn2(op=<n>, <l>, <r>)` and `Substring(<child>, start=<n>,
+// length=<n>)` — every carried scalar appears, so LEG 1 covers these arms and a
+// dropped field is red in the plan TEXT. That is a property of `write_to`
+// today, not a guarantee this format has, so the round trip's IR-equality leg
+// reads them anyway: the day someone shortens one of those renders (as the
+// EXPR_WHEN arm already is) the wire coverage must not shorten with it.
+// ---------------------------------------------------------------------------
+
+// `ExtractData` — `EXPR_EXTRACT`, a calendar / clock field pulled out of a
+// DATE32 or TIMESTAMP_* column, or a `date_trunc` to a period start.
+message WireExtract {
+  // ⚠ THE SPARSEST VOCABULARY IN THE FORMAT. The engine's EXTRACT_* space is
+  // two disjoint runs — fields 0..6 and truncations 16..25 — so engine values
+  // 7..15 are DECLARED BY NOTHING and `extract_field_is_declared` returns
+  // False for them. That is why the decode side goes through
+  // `extract_field_from_wire` (a MEMBERSHIP test) rather than a range check:
+  // wire 12 narrows losslessly into a UInt8 and is still not a unit, and a
+  // decoder that accepted it would name a `date_trunc` period that does not
+  // exist rather than failing.
+  ExtractField unit = 1;
+  WireExpr child = 2;
+}
+
+// `MathFnData` — `EXPR_MATH_FN`, UNARY scalar math (sin / cos / sqrt / asin /
+// radians). Always FLOAT64 out, null in -> null out.
+message WireMathFn {
+  // MATH_SIN IS ENGINE VALUE 0 — the same reason every other space in this
+  // format is offset by one on the wire. proto3 cannot distinguish an absent
+  // enum from an explicit zero, so a `sin` encoded at wire 0 would be
+  // indistinguishable from a field nobody wrote.
+  MathFn1 op = 1;
+  WireExpr child = 2;
+}
+
+// `MathFn2Data` — `EXPR_MATH_FN2`, BINARY scalar math (atan2 / pow).
+message WireMathFn2 {
+  // MATH2_ATAN2 is engine value 0; same offset, same reason.
+  MathFn2 op = 1;
+  // ORDER IS SEMANTIC AND BOTH OPERANDS ARE THE SAME TYPE, which is the trap
+  // this pair is built against: `atan2(y, x)` and `pow(base, exp)` are both
+  // non-commutative, so a codec that wrote `left` into the `right` slot
+  // produces a plan that is well-typed, executes fine, and computes a
+  // different number. The corpus therefore never uses two equal operands.
+  WireExpr left = 2;
+  WireExpr right = 3;
+}
+
+// `StringFnData` — `EXPR_STRING_FN`, UNARY scalar string functions (upper /
+// lower / trim / ...). The string-side twin of `WireMathFn`, and deliberately
+// the same shape.
+message WireStringFn {
+  // STRFN_UPPER IS ENGINE VALUE 0 — the same reason every other space in this
+  // format is offset by one on the wire. proto3 cannot distinguish an absent
+  // enum from an explicit zero, so an `upper` encoded at wire 0 would be
+  // indistinguishable from a field nobody wrote.
+  //
+  // ⚠ UNLIKE `WireMathFn`, THIS OP DETERMINES THE OUTPUT TYPE. `WireMathFn` is
+  // always FLOAT64 whatever its op is, so dropping its `op` produces a wrong
+  // NUMBER in a right-typed column; dropping this one produces a column of the
+  // wrong TYPE, which `_check_output_schema` refuses. That is a better failure,
+  // but it is a different one — do not reason from the MathFn arm's precedent.
+  StringFn op = 1;
+  WireExpr child = 2;
+}
+
+// `StringFnNData` — `EXPR_STRING_FN_N`, the MULTI-ARGUMENT scalar string
+// functions (concat / concat_ws / replace / lpad / rpad / repeat / strpos).
+//
+// ⚠ THE FIRST `repeated WireExpr` IN THIS FILE, and it is not the same shape
+// as `WireWhen.cases` (a repeated MESSAGE with two named expr fields) or
+// `WireAggExpr`'s four presence-tagged slots. Those two exist because their
+// arities are FIXED and their operands have MEANINGS; here neither is true —
+// `concat` has no fixed arity at all, and slot 2 of `replace(s,from,to)` has
+// nothing in common with slot 2 of `lpad(s,n,pad)`.
+//
+// ⛔ AND THAT IS WHY LOSING AN ARGUMENT MUST BE VISIBLE IN THE TEXT LEG.
+// proto3 `repeated` cannot distinguish "wrote 2" from "wrote 3, dropped one"
+// — there is no length prefix on the field, only a count of occurrences — so
+// `Expr.write_to`'s arm renders `n=<count>` beside the arguments themselves.
+// Without it `concat('a','b')` and `concat('a','b','')` render identically,
+// and the round trip's structural-hash leg agrees while the plan differs.
+message WireStringFnN {
+  // STRFNN_CONCAT IS ENGINE VALUE 0 — the same offset-by-one as every other
+  // space here, and for the same reason: proto3 cannot distinguish an absent
+  // enum from an explicit zero, so a `concat` encoded at wire 0 would be
+  // indistinguishable from a field nobody wrote.
+  //
+  // ⚠ THIS OP DETERMINES THE OUTPUT TYPE **AND** THE LEGAL ARITY. Dropping it
+  // renders a `strpos` as a `concat` — an INT64 column decoded as Utf8 — and
+  // a 2-argument node as one whose arity table demands 3. Both are refusals
+  // rather than wrong values, but they are refusals a long way from here.
+  StringFnN op = 1;
+  // ORDER IS SEMANTIC FOR EVERY MEMBER. `replace(s,a,b)` and `lpad(s,n,p)` are
+  // obviously position-dependent; so is `concat`, whose operands are joined in
+  // sequence, and `strpos(haystack, needle)`, which is not symmetric. The
+  // corpus therefore never uses two equal arguments — the same rule
+  // `WireMathFn2` states for its non-commutative pair.
+  repeated WireExpr args = 2;
+}
+
+// `UdfCallData` — `EXPR_UDF_CALL` (engine tag 25), a REGISTERED SCALAR UDF
+// applied to ONE expression. `UdfCallData` MINUS `handle`.
+//
+// ★ THE THIRD INSTANCE OF ONE RULE, NOT A NEW SHAPE. `WireScanBinding` is
+// `ScanBinding` minus `handle`/`registry_epoch`; `WireUdf` is `UdfData` minus
+// `registered_handle_id`; this is `UdfCallData` minus `handle`. The rule is the
+// header's: nothing in this file is a live pointer, a handle, or a
+// process-local id.
+//
+// ⛔ AND HERE THE STRIPPED HANDLE'S FAILURE MODE IS THE WORST OF THE THREE. It
+// is a slot+generation into a `UdfRegistry` that exists in ONE process, and a
+// low slot at generation 0 exists in almost ANY registry — so a carried handle
+// would not merely be stale, it would PLAUSIBLY resolve, to a DIFFERENT
+// function. The field is not merely omitted, it is UNSPELLABLE: there is no
+// wire slot to write one into, which is why this message has four fields and
+// not five. A decoded `EXPR_UDF_CALL` is UNBOUND, and the receiver RE-MINTS by
+// resolving `name` against ITS OWN registry
+// (`UdfRegistry.resolve_unique_by_name`).
+//
+// ⚠ THAT RE-MINT HAPPENS AT EXACTLY ONE SITE AND IT IS NOT A PRE-FLIGHT.
+// `udf_expr_execution._run_one_udf_call` is the only caller of
+// `resolve_unique_by_name`. It is reached per BATCH from
+// `materialize_udf_columns` -> `_append_udf_columns`, i.e. inside
+// `execute_plan_bytes`'s PHASE 3, so an unresolvable name surfaces as
+// PLAN_ENDPOINT_EXECUTION_FAILED(20) — `UDF_REGISTRY_NAME_NOT_REGISTERED`
+// carries no `PLAN_WIRE_` token for `plan_endpoint_code_for_wire_token` to
+// classify.
+//
+// ⛔ THERE IS NO PRE-FLIGHT RESOLUTION. `plan_endpoint` runs PHASE 0 SIZE,
+// 1 ADMIT, 2 DECODE, 3 EXECUTE, names no registry, and imports none, so an
+// unresolvable UDF is NOT refused before any data is read: it fails during
+// execution, as above.
+//
+// ⛔ THE THUNK IS NOT HERE AND MUST NOT BECOME A FIELD, for the three reasons
+// `UdfCallData`'s own header gives: a wildcard-origin fn pointer in a plan-IR
+// field, a `komira_core` -> `komira_engine_operators` package CYCLE, and an
+// unserializable value in a wire type.
+//
+// ⛔ THERE IS NO `call_site_salt` / `operator_factory_id` ANALOGUE. Those are
+// `UdfData`'s — the OPERATOR node's — not this one's. This node's cache
+// identity is its render, which prints `h=-` once the handle is stripped.
+message WireUdfCall {
+  // ★ THE RESOLUTION KEY, and the only field no peer could derive.
+  // `WireUdf.name` is the identical statement one altitude up. Non-empty by
+  // construction: an empty name is what makes a UDF non-describable
+  // (`UdfDescriptor.is_describable()`), and a non-describable UDF is REFUSED
+  // at encode rather than carried.
+  string name = 1;
+  // `UdfCallData.in_type: ArrowType.type_id` VERBATIM — NOT offset, exactly
+  // like `WireField.arrow_type_id` and `WireCast.target_arrow_type_id`, and
+  // validated on decode by the same `_arrow_type_from_wire` membership check.
+  //
+  // ⛔ CARRYING BOTH DTYPES IS WHAT KEEPS A REAL CROSS-CHECK ALIVE, and it is
+  // NOT a second declaration of them. `udf_expr_execution._run_one_udf_call`
+  // compares both against the fingerprints the REGISTERED INSTANCE was bound
+  // with. If the wire dropped them and the decoder re-derived them FROM THE
+  // REGISTRY, that check would compare a value to itself — an assertion that
+  // cannot fail. The producer states what it expected; the receiver's registry
+  // states what it has; a disagreement is a NAMED refusal instead of a
+  // reinterpretation of somebody's bytes at the wrong width.
+  //
+  // ⚠ NEITHER IS A CUSTOMER STATEMENT. `out` is a transcript of the one
+  // `returns=` token (Python) or of the function's own signature (Mojo); `in`
+  // is derived from the ARGUMENT EXPRESSION's resolved type. Both encoder arms
+  // read the numbers off the node they are encoding.
+  uint32 in_arrow_type_id = 2;
+  uint32 out_arrow_type_id = 3;
+  // The argument. Any expression, INCLUDING another `WireUdfCall`; nesting is
+  // the whole reason `EXPR_UDF_CALL` is a tag rather than a node flag.
+  //
+  // ⛔ SINGULAR, AND IT MAY NOT BECOME `repeated`. `register_scalar` is unary
+  // by definition (`def (Scalar[T]) raises thin -> Scalar[O]`) and
+  // `PythonUdf.__call__` takes exactly one argument, so a repeated field would
+  // put a shape on the wire that no registration verb can produce.
+  WireExpr child = 4;
+}
+
+// `SubstringData` — `EXPR_SUBSTRING`, SQL `substring(s, start, length)` over a
+// string column.
+message WireSubstring {
+  WireExpr child = 1;
+  // 1-BASED, SQL SEMANTICS, AND `0` IS A MEANINGFUL VALUE RATHER THAN AN
+  // ABSENCE — `substring(s, 0, 3)` clamps the take to the string's first
+  // character but still spends one of the three on the pre-string position.
+  // proto3 omits a zero-valued scalar, so an encoder that never wrote this
+  // field and one that wrote 0 emit identical bytes; the corpus uses a
+  // non-zero start for exactly that reason.
+  int64 start = 2;
+  // NEGATIVE IS A SENTINEL FAMILY, so this field's own DEFAULT IS -1 and not 0.
+  // Dropping it therefore does not merely lose a bound — it converts every
+  // open-ended substring into a zero-length one, which is a plan that returns
+  // empty strings rather than a plan that raises.
+  //
+  // ⚠ `-1` IS "TO END OF STRING" (the two-argument `substring(s, start)` form)
+  // and `-k` for k >= 2 is "to end, dropping k-1 trailing CHARACTERS" — the
+  // encoding `left(s, NEGATIVE)` desugars to. So a decoder may NOT clamp a
+  // negative to -1: doing so turns
+  // `left('abcde', -3)` into `'abcde'` instead of `'ab'`, a silent wrong answer
+  // on a plan that crossed the wire rather than a refusal.
+  int64 length = 3;
+}
+
+// ---------------------------------------------------------------------------
+// THE STRING-AND-STRUCT BATCH. Six arms over flat payloads.
+//
+// ⚠ THIS BATCH IS WHERE THE RENDER STOPS BEING A RELIABLE LEG AGAIN, AND IN A
+// NEW WAY. The `Extract`/`MathFn`/`Substring` batch printed every scalar it
+// carried, so LEG 1 caught every dropped field. `Expr.write_to`'s REGEXP arm
+// prints four of its seven fields CONDITIONALLY — `flags` and `group_name`
+// only when non-empty, `group` only for EXTRACT / EXTRACT_ALL, `replacement`
+// only for REPLACE — so the same field is visible on one op and invisible on
+// another. And the JSON_EXTRACT arm never prints `output_type` at ANY value on
+// ANY op, and `_infer_expr_field` has no EXPR_JSON_EXTRACT arm at all (it
+// falls through to the `else`, ArrowType.NULL), so LEG 2 cannot see it either.
+// ---------------------------------------------------------------------------
+
+// `StringOpData` — `EXPR_STRING_OP`, the four fixed-pattern string predicates.
+message WireStringOp {
+  // STR_CONTAINS IS ENGINE VALUE 0 — the same reason every space in this
+  // format is offset by one on the wire.
+  StringOp op = 1;
+  WireExpr child = 2;
+  // The literal to match against. NOT a regex — `STR_LIKE` here is the SQL
+  // LIKE pattern, and `EXPR_REGEXP` below is a different node with a
+  // different vocabulary.
+  string pattern = 3;
+}
+
+// `RegexpData` — `EXPR_REGEXP`, the ten-member `regexp_*` family.
+message WireRegexp {
+  // REGEXP_LIKE is engine value 0; same offset, same reason.
+  RegexpOp op = 1;
+  WireExpr child = 2;
+  string pattern = 3;
+  // ⚠ RENDERED ONLY WHEN `op == REGEXP_REPLACE`. `Expr.write_to` gates this
+  // field on the op, so a `RegexpData` carrying a replacement under any OTHER
+  // op prints identically to one carrying none — and `Expr.regexp(...)`, the
+  // total factory, will build exactly that. LEG 1 is blind to this field on
+  // nine of the ten ops.
+  string replacement = 4;
+  // ⚠ RENDERED ONLY WHEN NON-EMPTY. `""` and "the field was never written"
+  // are the same bytes AND the same render, which is the proto3 default trap
+  // and the render-suppression trap at once.
+  string flags = 5;
+  // ⚠ RENDERED ONLY WHEN `op` IS REGEXP_EXTRACT OR REGEXP_EXTRACT_ALL — and
+  // its own default is 0, which proto3 omits. So on the other eight ops this
+  // field is invisible to LEG 1 at every value, and on all ten it is invisible
+  // to LEG 2 (`_infer_expr_field` reads only `op`).
+  int64 group = 6;
+  // Rendered only when non-empty. Resolved to a group index at EXECUTION time
+  // by `RegexProgram.group_index_for_name`, because the pattern is not
+  // compiled until then — so this is a plan-level string, not an index, and
+  // it is not derivable from `group`.
+  string group_name = 7;
+}
+
+// `StructFieldData` — `EXPR_STRUCT_FIELD`, BY-NAME projection out of a STRUCT.
+message WireStructField {
+  WireExpr parent = 1;
+  string field_name = 2;
+}
+
+// `StructFieldIdxData` — `EXPR_STRUCT_FIELD_IDX`, the BY-INDEX twin.
+//
+// ⚠ A SEPARATE MESSAGE AND A SEPARATE TAG, NOT A `oneof` INSIDE ONE. The two
+// are the `EXPR_COL_REF` / `EXPR_COL_IDX` bound-twin shape: the by-name form
+// linear-scans `_field_names` at eval time and the by-idx form indexes
+// `_children` directly, so they are different nodes with different eval costs
+// and different failure modes, and a codec that folded one into the other
+// would produce a plan that executes differently.
+message WireStructFieldIdx {
+  WireExpr parent = 1;
+  int64 field_idx = 2;
+}
+
+// `MapGetData` — `EXPR_MAP_GET`, per-row `map[key]` projection.
+message WireMapGet {
+  // ⚠ TWO RECURSION BOXES IN A NON-INTERCHANGEABLE ORDER, the `WireMathFn2`
+  // trap in a new place: `parent` and `key` are both `WireExpr`, so a codec
+  // that wrote one into the other's slot emits a structurally valid message.
+  // The corpus therefore never gives this arm two equal children.
+  WireExpr parent = 1;
+  WireExpr key = 2;
+}
+
+// `JsonExtractData` — `EXPR_JSON_EXTRACT`, SQL `->` / `->>` over JSON text.
+message WireJsonExtract {
+  WireExpr parent = 1;
+  // ★ REPEATED, NOT THE JOINED PATH STRING. The render rebuilds `$.a.b` from
+  // the segments, so the joined form is AMBIGUOUS in a way the list is not:
+  // `["a.b"]` and `["a", "b"]` print identically. Carrying the segments means
+  // the wire is the more precise of the two representations, and the decoder
+  // does not re-run `parse_json_path` (which cannot produce the first list at
+  // all, and would silently re-derive rather than read).
+  repeated string path_segments = 2;
+  // ★ THE FIELD NO OTHER LEG READS AT ANY VALUE. `Expr.write_to`'s
+  // JSON_EXTRACT arm prints the parent, the path and the `->` / `->>` mode and
+  // stops — `output_type` is not in it — and `_infer_expr_field` has NO
+  // EXPR_JSON_EXTRACT arm, so the node types as ArrowType.NULL and LEG 2 is
+  // blind too. Every current factory DERIVES it (`ArrowType.STRING`, always),
+  // so a decoder that called one of them instead of reading this field would
+  // be indistinguishable from a correct one over every plan built that way —
+  // and would silently truncate a typed `json_extract[Int64]`. That is the
+  // hazard `cast_preserving_arrow` exists for, and this field exists so it is
+  // not repeated here. Carried as the VERBATIM
+  // `ArrowType.type_id` (a uint32, checked on the way back by
+  // `_arrow_type_from_wire`), for the same reason `WireField.arrow_type_id` is.
+  uint32 output_arrow_type_id = 3;
+  // `->` (true, attaches `ARROW:extension:name = "komira.ext.json"`)
+  // vs `->>` (false, plain STRING). Rendered as `mode=->` /
+  // `mode=->>`, so LEG 1 does cover this one — which is exactly why it cannot
+  // stand in for `output_arrow_type_id` above.
+  bool preserve_extension_metadata = 4;
+}
+
+// ===========================================================================
+// The window payload — SHARED by the three window arms
+// ===========================================================================
+//
+// `EXPR_WINDOW_FN`, `PLAN_PARTITION_BY` and `PLAN_PARTITION_TOPN` are three
+// surfaces over one idea, and `PartitionFrame` is literally the same struct in
+// two of them (`WindowFnData.frame` and `PartitionExpr.frame`). It is declared
+// ONCE here for that reason: two frame messages would be two places for the
+// five bounds to drift apart.
+
+// `komira_core.plan.partition_expr.PartitionFrame`, all five `var`s.
+//
+// ⚠ NOT ONE OF THESE FIVE REACHES ANY RENDER, ON ANY ARM, AT ANY VALUE.
+// `Expr.write_to`'s WINDOW_FN arm prints `func`, `col`, `offset` and the two
+// list LENGTHS and stops; `plan_display`'s PartitionBy arm prints the key
+// names and a `<n> funcs` COUNT, so a `PartitionExpr`'s frame is not even
+// reached. `_infer_expr_field` has no WINDOW_FN arm at all, and
+// `partition_expr_output_field` reads `func` / `column` / `has_default` /
+// `alias_name` only. So LEG 1 and LEG 2 are both blind to the frame, on every
+// arm, and the IR-equality leg is the ONLY thing that can see one go missing.
+//
+// ⚠ AND THE FRAME IS DERIVABLE-LOOKING, WHICH IS THE HAZARD. Every one of the
+// ~20 `ColExpr` window factories passes `PartitionFrame.default_ordered()` or
+// `_rolling_frame(n)`, so a decoder that RE-DERIVED the frame from `func` and
+// `arg_offset` instead of reading these five fields would be
+// indistinguishable from a correct one over every plan the fluent surface
+// builds — and would silently rewrite the frame of every plan built through
+// `PartitionExpr.agg_with_frame` / `.with_frame(...)`, which are public and
+// total. Same shape as `cast_preserving_arrow`; carried, never derived.
+message WireFrame {
+  FrameUnits units = 1;
+  FrameBound start_tag = 2;
+  // SIGNED, and negative in real frames: `ColExpr._rolling_frame(n)` builds a
+  // PRECEDING bound with a negative offset. A uint32 here would be a silent
+  // sign flip on every rolling window.
+  int64 start_offset = 3;
+  FrameBound end_tag = 4;
+  int64 end_offset = 5;
+}
+
+// `komira_core.plan.expr.WindowFnData`, all seven `var`s.
+message WireWindowFn {
+  // ⚠ THE SPARSEST TAG SPACE IN THE FORMAT AFTER ExtractField: three disjoint
+  // runs, 0..5 (ranking), 10..14 (offset), 20..24 (aggregate), with 6..9 and
+  // 15..19 DECLARED BY NOTHING. Both directions go through
+  // `window_fn_{to,from}_wire`, which test MEMBERSHIP (`window_fn_is_declared`)
+  // rather than a bound — a hole value narrows into a `UInt8` losslessly and
+  // is still not a window function.
+  WindowFn func = 1;
+  string arg_col = 2;
+  int64 arg_offset = 3;
+  WireFrame frame = 4;
+  // ★ THE RENDER PRINTS THE LENGTHS OF THE FIRST TWO AND NOTHING ABOUT THE
+  // THIRD. `WindowFn(func=…, col=…, offset=…, partition_by=#2, order_by=#1)`
+  // — so LEG 1 sees the two COUNTS and never a NAME, and `descending` is
+  // invisible at every value including its length. The three are NOT parallel
+  // (`descending` is per-ORDER-key; `partition_by` is unrelated), so nothing
+  // about one may be derived from another.
+  repeated string partition_by = 5;
+  repeated string order_by = 6;
+  repeated bool descending = 7;
+}
+
+// ⚠ THE NODE KIND IS STATED ONCE. Field 1 (`ExprTag tag`) is RESERVED, and
+// the arm of `node` that is set IS the node kind.
+//
+// A separate tag field would be a TOTAL FUNCTION of which arm of `node` is
+// set — one tag per arm, a bijection `_expr_to_wire` would compute on the way
+// out and `_expr_from_wire` would re-derive on the way in. An encoder that
+// computed the tag from the arm ordinal and discarded the engine's `e.tag`
+// would produce byte-identical output, which shows the carried value adds
+// nothing.
+//
+// WHY RESERVED RATHER THAN CHECKED. A frontend that is not Mojo writes these
+// bytes. A second discriminator is a second thing it can get wrong, and it
+// gets NOTHING for computing it right: every proto3 runtime (`WhichOneof` in
+// Python, the generated `Node` case in Go/C#, `prost`'s Rust enum) hands a
+// writer exactly one way to say which arm is set and GUARANTEES at most one
+// is. Keeping the field and refusing on disagreement would also close the
+// silent case, but it obliges every frontend to restate a fact it has already
+// stated and rests correctness on a runtime check. Omitting it makes the
+// disagreement UNREPRESENTABLE, which is strictly stronger.
+//
+// NO TAG NEEDS TO TRAVEL WITHOUT AN ARM. The only armless `EXPR_*` tags are
+// BETWEEN and SORT_KEY, and `Expr` declares no payload field for either, so
+// `_expr_to_wire` REFUSES them by name (`PLAN_WIRE_UNSUPPORTED_EXPR_TAG`) at
+// the ENCODER. If a genuinely payload-free node is ever added it gets an
+// EMPTY message arm (`message WireFooNode {}`), not a tag: one discriminator.
+//
+// FIELD 1 IS RESERVED FOREVER. A writer that emits it is still decoded
+// correctly — proto3's skip-and-keep rule ignores it and the arm is always
+// right. Re-allocating the number would make such a writer's tag arrive as
+// some new field's value, which is the silent wrong answer the field-number
+// permanence rule at the top of this file exists to prevent.
+message WireExpr {
+  reserved 1;
+  reserved "tag";
+  oneof node {
+    WireColRef col_ref = 2;
+    WireColIdx col_idx = 3;
+    WireScalar literal = 4;
+    WireBinaryOp binary_op = 5;
+    WireUnaryOp unary_op = 6;
+    WireAlias alias = 7;
+    WireInList in_list = 8;
+    WireCast cast = 9;
+    WireCorrelatedSubquery correlated_subquery = 10;
+    WireWhen when = 11;
+    WireAggFn agg_fn = 12;
+    // ⚠ FIELD NUMBER IS NOT ARM ORDINAL. protoc-gen-mojo's `_oneof0_case`
+    // counts arms from 1 in DECLARATION ORDER, so these four are arms 12..15
+    // while being fields 13..16. Getting it wrong does not fail to encode; it
+    // encodes the NEXT arm's empty `Optional` and ABORTS the process.
+    WireExtract extract = 13;
+    WireMathFn math_fn = 14;
+    WireMathFn2 math_fn2 = 15;
+    WireSubstring substring = 16;
+    // The string-and-struct batch: fields 17..22, ARMS 16..21.
+    WireStringOp string_op = 17;
+    WireRegexp regexp = 18;
+    WireStructField struct_field = 19;
+    WireStructFieldIdx struct_field_idx = 20;
+    WireMapGet map_get = 21;
+    WireJsonExtract json_extract = 22;
+    // The window-fn batch: field 23, ARM 22.
+    WireWindowFn window_fn = 23;
+    // Field 24, ARM 23. APPENDED, so the field number and the arm ordinal
+    // stay one apart exactly as every arm above does — see the ordinal
+    // warning on the `extract` arm.
+    WireStringFn string_fn = 24;
+    // Field 25, ARM 24. APPENDED, so the field number and the arm ordinal
+    // stay one apart exactly as every arm above does — see the ordinal
+    // warning on the `extract` arm.
+    WireStringFnN string_fn_n = 25;
+    // Field 26, ARM 25. APPENDED, so the field number and the arm ordinal
+    // stay one apart exactly as every arm above does — see the ordinal
+    // warning on the `extract` arm.
+    //
+    // ★ THIS ARM IS HOW A UDF EXPRESSION CROSSES THE WIRE. `EXPR_UDF_CALL`
+    // (engine tag 25) is what a Python dataframe UDF expression such as
+    // `df["y"] = affine(df["x"])` builds, and this message is what carries it.
+    WireUdfCall udf_call = 26;
+  }
+}
+
+message WireAggExpr {
+  AggFn func = 1;
+  // The engine's `AggExpr` has FOUR named `Optional[Expr]` slots and they are
+  // SPARSE — `num_children()` stops at the first empty one, so a payload with
+  // (child, None, child2, None) cannot be enumerated by walking. They are
+  // carried as four independent presence-tagged slots for that reason, NOT as
+  // a `repeated` list, which would densify and lose the arity.
+  bool has_child0 = 2;
+  WireExpr child0 = 3;
+  bool has_child1 = 4;
+  WireExpr child1 = 5;
+  bool has_child2 = 6;
+  WireExpr child2 = 7;
+  bool has_child3 = 8;
+  WireExpr child3 = 9;
+  bool has_alias_name = 10;
+  string alias_name = 11;
+}
+
+// ===========================================================================
+// LogicalPlan
+// ===========================================================================
+
+message WireScanNode {
+  WireScanSource source = 1;
+  bool has_schema = 2;
+  WireSchema schema = 3;
+  bool has_projection = 4;
+  repeated string projection = 5;
+  bool has_filter = 6;
+  WireExpr filter = 7;
+  bool has_row_count = 8;
+  int64 row_count = 9;
+  SourceOrientation source_kind = 10;
+  // `ScanData.table_stats: Optional[TableStats]`. Presence only; the codec
+  // RAISES if populated.
+  bool has_table_stats = 11;
+}
+
+// One entry of `UdfData.input_columns` / `output_columns`, which are
+// `List[Tuple[String, UInt8]]` in the engine. A tuple has no proto spelling;
+// this is the pair, named.
+message WireUdfColumn {
+  string name = 1;
+  // The engine's DTYPE TAG (`dtag_*`), carried as a number rather than as a
+  // vocabulary enum member ON PURPOSE: the dtype-tag space is declared in
+  // `komira_eval`'s schema descriptor, not among the `SOURCE_*`/`PLAN_*`
+  // constants the vocabulary derives its enums from. Minting a
+  // hand-written enum here would put a second derivation of that space in the
+  // tree — the exact two-sources-of-truth problem a single derived vocabulary
+  // exists to remove. The codec RANGE-CHECKS it on decode instead.
+  uint32 dtype_tag = 2;
+}
+
+// `komira_core.plan.udf_data.UdfData` MINUS `registered_handle_id` and MINUS
+// `is_restartable` — the same shape, and for the same two reasons, as
+// `WireScanBinding` is `ScanBinding` minus `handle`/`registry_epoch`.
+//
+// ★ `registered_handle_id` IS NOT ON THE WIRE, AND THAT IS THE WHOLE DESIGN.
+// It is an index-plus-generation into a `UdfRegistry` that exists in ONE
+// process. Carrying it would let a decoded plan name a slot in a registry that
+// never existed — and, worse, name it PLAUSIBLY: slot 3 generation 0 exists in
+// almost any registry. A decoded UDF is therefore UNBOUND, exactly as a
+// decoded `ScanBinding` is, and the peer re-mints its own handle by resolving
+// `name` against ITS OWN registry.
+//
+// ★ AND THIS MESSAGE ONLY EVER CARRIES A **DESCRIBABLE** UDF. A UDF minted
+// from a live in-process closure has no resolvable `name`, so the far side has
+// nothing to resolve and the codec RAISES rather than encoding a description
+// that cannot be honoured. That is the `InMemorySource` rule — live data inside
+// the IR is refused at the wire while staying usable in-process — applied to
+// live CODE inside the IR. Two tiers, one precedent.
+//
+// `is_restartable` is DERIVED from `parallelism_tag` by the constructor ("so
+// the two can never disagree"), so carrying it would let a hostile message
+// assert a derived fact. It is recomputed at decode.
+message WireUdf {
+  // UDF_KIND_MAP / _FILTER / _AGG. Carried as a number for the same reason
+  // `WireUdfColumn.dtype_tag` is; range-checked on decode.
+  uint32 kind = 1;
+  // ★ THE RESOLUTION KEY. Non-empty by construction — an empty name is what
+  // makes a UDF non-describable, and a non-describable UDF never reaches this
+  // message.
+  //
+  // ⛔ AND `operator_factory_id` BELOW IS **NOT** AN IDENTITY; do not resolve
+  // on it. One id can be declared by several distinct conformers, and the
+  // Map1/Map2 sugar derives its id from the COLUMN NAMES,
+  // so two different functions over the same columns collide. It rides so the
+  // round trip is lossless, not so a peer can key on it.
+  string name = 2;
+  repeated WireUdfColumn input_columns = 3;
+  repeated WireUdfColumn output_columns = 4;
+  uint32 null_mode = 5;
+  uint32 stability = 6;
+  uint32 parallelism_tag = 7;
+  repeated string partition_keys = 8;
+  repeated string order_keys = 9;
+  bool has_vector_path = 10;
+  uint32 operator_factory_id = 11;
+  // Disambiguates two SDK call sites of the SAME function, which is what keeps
+  // plan-CSE from sharing them. Part of the identity the round trip must
+  // preserve byte-for-byte.
+  uint32 call_site_salt = 12;
+}
+
+message WireFilterNode {
+  WireExpr predicate = 1;
+  WirePlan child = 2;
+  // `FilterData.udf: Optional[OwnedPointer[UdfData]]`. Presence bit.
+  //
+  // ⚠ A UDF INSTANCE is a Mojo FUNCTION POINTER; it is not data and cannot be
+  // bytes. That is true of the INSTANCE and NOT of the NODE. The
+  // node is a DESCRIPTION — kind, name, column maps, tags — and a description
+  // is data. What cannot be bytes is the instance the description resolves to,
+  // and that is `registered_handle_id`, which `WireUdf` does not carry.
+  bool has_udf = 3;
+  // Present iff `has_udf`. Carried only when the UDF is DESCRIBABLE; the codec
+  // RAISES by name on a live-closure UDF rather than encoding a description no
+  // peer could resolve.
+  WireUdf udf = 4;
+}
+
+message WireProjectNode {
+  repeated WireExpr exprs = 1;
+  WirePlan child = 2;
+  bool is_cse_introduced = 3;
+  bool has_udf = 4;
+  // See `WireFilterNode.udf`.
+  WireUdf udf = 5;
+}
+
+message WireAggregateNode {
+  repeated WireExpr group_by = 1;
+  repeated WireAggExpr agg_exprs = 2;
+  WirePlan child = 3;
+  bool has_estimated_groups = 4;
+  int64 estimated_groups = 5;
+  bool has_udf = 6;
+  // See `WireFilterNode.udf`.
+  WireUdf udf = 7;
+}
+
+message WireJoinNode {
+  WirePlan left = 1;
+  WirePlan right = 2;
+  repeated string left_on = 3;
+  repeated string right_on = 4;
+  JoinType join_type = 5;
+  JoinAlgo algo_hint = 6;
+  bool has_residual = 7;
+  WireExpr residual = 8;
+}
+
+message WireSortNode {
+  repeated string keys = 1;
+  repeated bool descending = 2;
+  repeated bool nulls_first = 3;
+  WirePlan child = 4;
+}
+
+message WireLimitNode {
+  int64 n = 1;
+  int64 offset = 2;
+  WirePlan child = 3;
+}
+
+message WireDistinctNode {
+  bool has_columns = 1;
+  repeated string columns = 2;
+  WirePlan child = 3;
+  bool has_estimated_groups = 4;
+  int64 estimated_groups = 5;
+}
+
+message WireTopNNode {
+  repeated string keys = 1;
+  repeated bool descending = 2;
+  repeated bool nulls_first = 3;
+  int64 n = 4;
+  WirePlan child = 5;
+}
+
+// ⚠ EVERY BRANCH MUST ADVERTISE THE UNION'S OWN `WirePlan.output_schema`, AND
+// THE ENGINE DOES NOT COERCE. `LogicalPlan.union` is the one factory that TAKES
+// its output schema instead of deriving it ("the caller is responsible"), so the
+// decoder's generic derived-vs-carried check is a TAUTOLOGY on this node.
+//
+// A UNION over one parquet scan of `[id, qty, name]` declaring
+// `[id, qty, name, bonus]` is a few hundred valid bytes, and accepting it
+// would surface only at execution, as if the bytes were fine and the run had
+// failed. That is backwards: the plan promises a column no branch produces,
+// and every node above it resolves against the promise. So a divergent branch
+// is refused by name at decode (`PLAN_WIRE_OUTPUT_SCHEMA_DIVERGED`), as is a
+// UNION with NO children.
+message WireUnionNode {
+  repeated WirePlan children = 1;
+}
+
+// `komira_core.plan.partition_expr.PartitionExpr`, all seven `var`s.
+//
+// ⚠ NO RENDER DESCENDS INTO ONE OF THESE. `plan_display`'s PartitionBy arm
+// prints the partition keys, the order keys, and `<n> funcs` — a COUNT. So
+// LEG 1 sees how MANY partition expressions a node has and nothing about any
+// of them: not the func, not the column, not the offset, not the default, not
+// the frame, not the alias. That is the `WhenData` situation (a render of
+// seven characters) with a count attached, and it is why every one of these
+// seven is carried explicitly and compared only by the IR-equality leg.
+//
+// LEG 2 does see FOUR of them, indirectly and lossily:
+// `partition_expr_output_field` derives the output Field's NAME from
+// `alias_name` (or from `func` and the expr index), its TYPE from `func` and
+// `column`, and its NULLABILITY from `func`, `column` and `has_default`. So a
+// dropped `alias_name` or a shifted `func` is a schema diff — and `offset`,
+// `default_value` and the whole frame reach neither leg.
+message WirePartitionExpr {
+  WindowFn func = 1;
+  string column = 2;
+  int64 offset = 3;
+  // ★ CARRIED AT EVERY VALUE, WITH ITS PRESENCE FLAG BESIDE IT. `default_value`
+  // is a NON-optional `ScalarValue` on the engine and `has_default` is a
+  // separate `Bool`, so the pair has three meaningful states, not two: absent
+  // (has_default false, value is the null `ScalarValue()`), present-and-null,
+  // and present-and-set. `lag_default` / `lead_default` are the only factories
+  // that set the flag, and `has_default` is the ONLY one of the seven that
+  // reaches the output schema (it decides LAG/LEAD nullability), so a codec
+  // that inferred the flag from the value being non-null would produce a plan
+  // whose nullability flipped on a NULL default.
+  WireScalar default_value = 4;
+  bool has_default = 5;
+  WireFrame frame = 6;
+  string alias_name = 7;
+}
+
+message WirePartitionByNode {
+  repeated string partition_keys = 1;
+  repeated string order_keys = 2;
+  // ⚠ PARALLEL TO `order_keys`, NOT TO `partition_keys`. `plan_validator`
+  // reports `len(order_keys) != len(descending)` as a validation failure, and
+  // the partition scan sink reads `descending[i]` across the ORDER KEYS with
+  // nothing else bounding it, so the door enforces the pairing under
+  // `PLAN_WIRE_INCONSISTENT_COUNT`: send one flag per order key, or none.
+  // (Its twin is `WirePartitionTopNNode.descending` against `sort_keys`; see
+  // that field.)
+  repeated bool descending = 3;
+  repeated WirePartitionExpr partition_exprs = 4;
+  WirePlan child = 5;
+}
+
+message WirePartitionTopNNode {
+  repeated string partition_keys = 1;
+  repeated string sort_keys = 2;
+  // ★ ONE FLAG PER `sort_keys` ENTRY, ENFORCED AT THE DOOR. A SHORTER list
+  // would crash the process: the partition top-n sink reads `descending[0]`
+  // guarded only by `len(sort_keys) == 1`, and `descending[i]` across the sort
+  // keys. `plan_validator` states the invariant, but it only runs on plans
+  // this process built, where the two lists are constructed together.
+  // ⚠ AND proto3 OMITS AN EMPTY REPEATED FIELD ENTIRELY, so "I sent no flags"
+  // and "I sent a shorter list" are the same bytes and the same refusal.
+  repeated bool descending = 3;
+  int64 k = 4;
+  // ⚠ THE RENDER NAMES ONLY TWO OF THE SIXTEEN. `plan_display` prints
+  // `func=ROW_NUMBER` for 0, `func=RANK` for 1, and `func=FUNC_<n>` for
+  // everything else — so LEG 1 can tell 0 from 1 from "something", and cannot
+  // tell PF_SUM from PF_MIN. The wire goes through the derived vocabulary,
+  // which tests MEMBERSHIP, so an undeclared func is refused rather than
+  // rendered as `FUNC_7`.
+  WindowFn func = 5;
+  // ⚠ NOT DERIVABLE FROM `k`, AND THE `-1` SENTINEL NEVER REACHES HERE.
+  // `PartitionTopNData.__init__` resolves `over_fetch_k < 0` to `k` at
+  // construction, and the fuse-partition-topn optimizer passes `k + 16`
+  // explicitly for RANK. So the STORED value is what is carried and the
+  // decoder passes it explicitly — re-passing the sentinel would silently
+  // collapse every RANK node's tie buffer back to `k`.
+  int64 over_fetch_k = 6;
+  // `Optional[String]`, and the None case is what the render omits: a node
+  // with no rank column prints `sort=[...])` and one with an EMPTY rank column
+  // name prints `sort=[...], output_rank_col=)`. Presence is carried
+  // separately for the ordinary proto3 reason — an absent string and an empty
+  // one are the same bytes, and here they are different output SCHEMAS (the
+  // Some case appends an Int64 column).
+  bool has_output_rank_col_name = 7;
+  string output_rank_col_name = 8;
+  WirePlan child = 9;
+}
+
+// `komira_core.plan.logical_plan.AsofTolerance`, all THREE `var`s.
+//
+// ⚠ THE RENDER PRINTS THE KIND AND NEVER THE NUMBER, AND OMITS THE WHOLE
+// THING AT `NONE`. `plan_display`'s AsofJoin arm is
+// `if not aj.tolerance.is_none(): writer.write(", tolerance=",
+// _asof_tolerance_name(aj.tolerance.tag))` — so LEG 1 can tell INT64 from
+// FLOAT64 and cannot tell a tolerance of 5 from one of 5000, and at the
+// DEFAULT kind it cannot see the field at all. A corpus that used
+// `AsofTolerance.none()` would be testing a suppressed render.
+//
+// ⚠ ALL THREE SLOTS ARE CARRIED, NOT JUST THE ONE `kind` SELECTS.
+// `AsofTolerance` is `@fieldwise_init` and public, so
+// `AsofTolerance(tag=ASOF_TOL_INT64, int_val=5, float_val=2.5)` is a state the
+// plan builder can produce — the two named factories zero the other slot, but
+// nothing enforces that. A codec that re-derived the inactive slot from `kind`
+// would silently rewrite such a struct, and the IR-equality leg is the only
+// thing that would ever see it.
+message WireAsofTolerance {
+  AsofToleranceKind kind = 1;
+  int64 int_val = 2;
+  double float_val = 3;
+}
+
+// `komira_core.plan.logical_plan_variants.AsofJoinData`, all twelve `var`s.
+//
+// ⚠ THE FOUR PRE-SORT HINT LISTS REACH NO RENDER AT ANY VALUE. `plan_display`
+// prints `AsofJoin(strategy=…, on=<l>=<r>, by=[…]<, tolerance=…>)` and stops —
+// `left_sort_keys`, `left_sort_desc`, `right_sort_keys` and `right_sort_desc`
+// are absent from the text whether they are empty or not, and
+// `LogicalPlan.asof_join` does not read them into the output schema either
+// (that is left-columns + right-columns-forced-nullable). So four of the
+// twelve are held by the IR-equality leg ALONE, and their failure mode is the
+// bad kind: a non-empty pre-sort hint asserts "this side is ALREADY sorted,
+// skip the sort phase", so dropping one costs time while INVENTING one on a
+// side that is not sorted produces wrong rows.
+//
+// ⚠ THE `by=[…]` RENDER IS SIZED FROM `left_keys`. The loop is
+// `for i in range(len(aj.left_keys))` and indexes `aj.right_keys[i]`, so a
+// `right_keys` LONGER than `left_keys` renders identically to a truncated one.
+// The two lists are semantically parallel and nothing enforces it.
+message WireAsofJoinNode {
+  repeated string left_keys = 1;
+  repeated string right_keys = 2;
+  string left_asof = 3;
+  string right_asof = 4;
+  AsofDirection strategy = 5;
+  WireAsofTolerance tolerance = 6;
+  repeated string left_sort_keys = 7;
+  repeated bool left_sort_desc = 8;
+  repeated string right_sort_keys = 9;
+  repeated bool right_sort_desc = 10;
+  WirePlan left = 11;
+  WirePlan right = 12;
+}
+
+// `komira_core.plan.logical_plan_variants.ViewRefData` — ONE of its two
+// `var`s. The other is `output_schema`, and it is DELIBERATELY ABSENT.
+//
+// ★ THERE IS NO SECOND SCHEMA HERE, BECAUSE IT WOULD BE UNOBSERVABLE.
+// `LogicalPlan.view_ref` copies its ONE argument into BOTH
+// `LogicalPlan.output_schema` and `ViewRefData.output_schema`, and no producer
+// reassigns a plan node's `output_schema` after construction (every such
+// assignment is a `self.` inside an `__init__`). So the two are equal in every
+// constructible state, and a `WireSchema` here would be a FORGEABLE DUPLICATE
+// of `WirePlan.output_schema` — the `ScanData.source_path` situation exactly.
+//
+// A slot no mutation can disturb is a slot that tests nothing: an encoder that
+// wrote `p.output_schema` in place of `d.output_schema` would pass every round
+// trip. The payload copy is therefore DERIVED at decode by handing
+// `WirePlan.output_schema` to the factory, which is what puts it in both
+// slots, and the codec's coverage ledger lists `ViewRefData.output_schema` as
+// deliberately uncarried.
+//
+// The consequence, stated so nobody has to rediscover it: `_check_output_schema`
+// is now a TAUTOLOGY on this arm, the same way it is on PLAN_UNION, because the
+// factory RESTORES the schema from the wire rather than deriving anything.
+//
+// WHAT A DECODED VIEW REFERENCE MEANS. It names a definition that lives
+// OUTSIDE the plan, so decoding one does not resolve it: the leaf arrives
+// UNRESOLVED, exactly as `ctx.view(handle)` produces it, and
+// `view_resolution_pass` is what turns it into a subtree — in whatever process
+// holds a registry with that name. That is the honest semantics for a wire
+// format: carry the reference, never a snapshot of someone else's registry.
+message WireViewRefNode {
+  string view_name = 1;
+}
+
+// `komira_core.plan.logical_plan_variants.CseRefData` — ONE of its two
+// `var`s, for the same reason as WireViewRefNode above:
+// `LogicalPlan.cse_ref` copies its one schema argument into both slots, so a
+// duplicate on the wire could not be made to fail, and it is derived at decode
+// instead. Same uncarried-ledger entry, same tautological `_check_output_schema`.
+//
+// ⚠ THIS IS THE ONE NODE WHOSE `structural_hash` IS NOT FNV-1a OF ITS RENDER.
+// `LogicalPlan.structural_hash` special-cases PLAN_CSE_REF to RETURN
+// `canonical_hash` (re-CSE idempotence), so LEG 1's hash assertion on a bare
+// CSE-ref leaf is literally an assertion that this one uint64 survived — and
+// on a plan that merely CONTAINS one it is back to being over the text, which
+// prints `CseRef(canonical_hash=<n>)`.
+message WireCseRefNode {
+  uint64 canonical_hash = 1;
+}
+
+// `komira_core.plan.logical_plan_variants.CastToVarcharData` — one `var`.
+//
+// ⚠ THE RENDER IS FIFTEEN CHARACTERS AND CARRIES NO FIELD: `CastToVarchar()`.
+// That is honest here — the node HAS no field but its child — but the node's
+// own output schema is DERIVED (`LogicalPlan.cast_to_varchar` builds the
+// per-column STRING mirror of the child's, preserving each column's name and
+// NULLABILITY), so `_check_output_schema` is doing real work on this arm and a
+// corpus whose child columns were uniformly nullable would not notice a
+// decoder that flattened nullability.
+message WireCastToVarcharNode {
+  WirePlan child = 1;
+}
+
+// ⚠ THE NODE KIND IS STATED ONCE: field 1 (`PlanTag tag`) is RESERVED. Read
+// the block above `WireExpr` for the full argument; it applies verbatim. The
+// plan-side armless tags are CONVERT_COLUMN_TO_ROW and CONVERT_ROW_TO_COLUMN,
+// which no producer emits (`insert_orientation_conversions` raises a deferral
+// rather than materializing one) and which `_plan_to_wire` REFUSES by name at
+// the ENCODER — so nothing that could travel without an arm lacks a way to
+// travel.
+//
+// ⚠ A separate tag would not even be observable. Flipping bit 0 of it moves it
+// to a DIFFERENT tag whose arm is then absent, so the decoder raises — every
+// time, at every value. The refusal comes from the arm-presence check and
+// never from anything READING the tag, and a perturbation whose every outcome
+// is a refusal proves range validation, not use.
+message WirePlan {
+  reserved 1;
+  reserved "tag";
+  // ⚠ FIELD 3 IS RESERVED: `uint32 orientation_plus_one`, a wire half of a
+  // row/column plan orientation (COLUMN=1, ROW=2, offset +1 like every
+  // vocabulary space). The engine is columnar only and has no plan orientation,
+  // so the field could only ever be a slot an encoder fills with a HARDCODED
+  // constant and no decoder reads — bytes the format would spend to carry a
+  // fact with one possible value.
+  //
+  // ⛔ IT IS NOT RESERVED FOR TIDINESS. A slot with one distinct value across
+  // every plan (so an encoder that hardcoded it is byte-identical), and that
+  // nothing any reader consults when it is patched on the wire, is an
+  // unobservable slot: it tests nothing and hides nothing, so it leaves the
+  // format rather than being carried.
+  //
+  // The number and the name are reserved forever: a producer that still writes
+  // field 3 is decoded correctly here by proto3's skip-and-keep rule — but only
+  // for as long as nothing else takes the number. The retired number belongs
+  // in the field-number ledger as well, so that a deletion of these two lines
+  // (which protoc cannot see) is still refused.
+  reserved 3;
+  reserved "orientation_plus_one";
+  WireSchema output_schema = 2;
+  oneof node {
+    WireScanNode scan = 4;
+    WireFilterNode filter = 5;
+    WireProjectNode project = 6;
+    WireAggregateNode aggregate = 7;
+    WireJoinNode join = 8;
+    WireSortNode sort = 9;
+    WireLimitNode limit = 10;
+    WireDistinctNode distinct = 11;
+    WireTopNNode topn = 12;
+    WireUnionNode union_all = 13;
+    // The window-fn batch: fields 14..15, ARMS 11..12. (Field number is not
+    // arm ordinal — see the same warning on WireExpr's oneof.)
+    WirePartitionByNode partition_by = 14;
+    WirePartitionTopNNode partition_topn = 15;
+    // The plan-leftovers batch: fields 16..19, ARMS 13..16. With these four
+    // every MATERIALIZABLE plan tag has an arm; the only `PLAN_*` tags without
+    // one are CONVERT_COLUMN_TO_ROW and CONVERT_ROW_TO_COLUMN, which
+    // `insert_orientation_conversions` refuses to emit, so no plan in the tree
+    // carries one.
+    WireAsofJoinNode asof_join = 16;
+    WireViewRefNode view_ref = 17;
+    WireCseRefNode cse_ref = 18;
+    WireCastToVarcharNode cast_to_varchar = 19;
+  }
+}
+
+// ===========================================================================
+// ★ WHERE THE ROWS GO — `komira_core.arrow.write_target.WriteTarget`
+// ===========================================================================
+
+// A DESTINATION. `COPY <query> TO '<path>' (FORMAT …, COMPRESSION …)`, and
+// nothing else.
+//
+// ★ WHY THIS IS AN ENVELOPE FIELD AND NOT A `PLAN_WRITE` ARM ON `WirePlan`'s
+// ONEOF. A oneof arm would make a SIDE EFFECT placeable anywhere in the tree —
+// under a join, below a filter, twice — and every optimizer pass,
+// `structural_hash`, `_check_output_schema`, `plan_validator` and
+// `plan_wire_check_values` would then have to be taught what a write MEANS in
+// each of those positions. None of them can be, because the answer is "that is
+// not a thing a query does". As an envelope field the arithmetic is fixed and
+// permanent: ONE envelope is ONE statement, so it has at most ONE destination,
+// and no pass has to know the field exists.
+//
+// ⛔ AND THERE IS NO CTAS ARM, DELIBERATELY AND PERMANENTLY. `CREATE TABLE …
+// AS` registers its result through `SqlCatalog.add_in_memory`, which builds an
+// `InMemorySource` — LIVE HEAP DATA INSIDE THE IR — and that is the shape the
+// codec's oldest refusal (`PLAN_WIRE_UNSUPPORTED_SOURCE_IN_MEMORY`, code 8)
+// exists to reject. A CTAS carried here would create a receiver-side table that
+// NO SUBSEQUENT PLAN COULD REFERENCE OVER THE WIRE: the effect would be
+// unreachable from the medium that caused it. See `SourceVariantTag`'s
+// `SOURCE_VARIANT_IN_MEMORY` exemption in plan_vocabulary.proto.
+message WireWriteTarget {
+  // The destination, VERBATIM as the producer wrote it. Not resolved, not
+  // canonicalised, not checked — the receiver's filesystem is the only one that
+  // can answer any of those, and a producer-side check is a claim about a
+  // machine it cannot see. An empty path is REFUSED on decode: it is the one
+  // value that is certainly not a destination, and proto3 cannot distinguish it
+  // from an absent field.
+  string path = 1;
+  WriteFormat format = 2;
+  WriteCompression codec = 3;
+}
+
+// THE ENVELOPE. A bare `WirePlan` on the wire has no way to say which build
+// wrote it; a decoder that cannot tell "old plan" from "corrupt bytes" will
+// eventually execute one as the other.
+message WirePlanEnvelope {
+  // ⚠ "ADDING A FIELD DOES NOT BUMP IT" IS THE RULE AND `write_target` IS ITS
+  // COUNTEREXAMPLE. That rule is written for fields whose OMISSION IS HARMLESS:
+  // proto3 forward compatibility means an old reader skips what it does not
+  // know, which is safe exactly when skipping loses nothing the caller needed.
+  //
+  // Skipping field 3 loses THE ENTIRE POINT OF THE MESSAGE. An unaware reader
+  // ignores it, runs the query, returns rows, writes NO FILE, and RAISES
+  // NOTHING — which is `PLAN_ENDPOINT_PRODUCER_SQL_WRITE_STATEMENT_DROPPED(36)`
+  // reproduced one layer down, by the very mechanism that was supposed to make
+  // 36 unnecessary.
+  //
+  // SO THE VERSION IS A MINIMUM READER CAPABILITY, not a format generation:
+  //   * a plan-only envelope declares 2, and every reader from 2 onwards runs it
+  //   * a WRITE-CARRYING envelope declares 3, and a reader that speaks only 2
+  //     REFUSES IT BY NAME rather than silently returning rows
+  // The reader's check is SET MEMBERSHIP (`{2, 3}` today), never equality and
+  // never `>=`: a future version whose meaning genuinely changed must be able to
+  // leave the set. See `PLAN_WIRE_FORMAT_VERSION` and `PlanWireVersionSet` in
+  // komira_plan_wire's codec and admission check.
+  //
+  // ⚠ A DECODER MUST ALSO REFUSE AN UNDERSTATED VERSION — field 3 present with
+  // `format_version < 3`. Bumping the writer does not help against bytes the
+  // writer did not write, and an understated write envelope is precisely the
+  // shape an old reader mis-executes. Refusing it is what makes "declare 3" a
+  // rule a producer cannot skip rather than a convention it may forget.
+  uint32 format_version = 1;
+  WirePlan plan = 2;
+  // ABSENT = return the rows (today's behaviour, unchanged).
+  // PRESENT = write them THERE, and also return them.
+  WireWriteTarget write_target = 3;
+}
