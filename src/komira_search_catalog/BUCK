@@ -14,7 +14,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # splits hiding their inputs across shards. Those two import komira_core for
 # its slab collection. The third covers the retire and reap end of a split's
 # life: a store error that only names "404" is raised, not taken for a
-# reaped chunk.
+# reaped chunk, and the generation never goes down while chunks and drained
+# shards are reaped.
 mojo_library(
     name = "komira_search_catalog",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),

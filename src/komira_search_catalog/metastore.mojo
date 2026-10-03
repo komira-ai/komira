@@ -53,6 +53,13 @@ from komira_objectstore.sublineage_shard_keys import (
     _discover_shard_ids,
 )
 
+from komira_search_catalog.generation import (
+    generation_floor_key,
+    decode_generation_floor,
+    raise_generation_floor,
+    read_retired_shards,
+    record_retired_shard,
+)
 from komira_search_catalog.split_summary import (
     LiveSplitEntry,
     SPLIT_SUMMARY_VERSION,
@@ -197,19 +204,41 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
         return out^
 
     def generation(self) raises -> Int64:
-        """The catalog generation: head.chunk_seq + 1, the number of
-        committed chunks. A query planner folds this into its plan-cache key,
-        so it must change whenever the catalog changes; otherwise a query
-        issued after a publish could be answered from a plan cached before
-        it.
+        """The catalog generation: the number of chunks this lineage has ever
+        committed, max(head.chunk_seq + 1, the generation floor). A query
+        planner folds this into its plan-cache key, so it must change
+        whenever the catalog changes; otherwise a query issued after a
+        publish could be answered from a plan cached before it. It also never
+        goes down: a cold reader finds the head by LISTing chunks, and reaping
+        deletes chunks, so `reap_chunk` first raises the floor to cover the
+        chunk it deletes (see generation.mojo). The floor is read after the
+        head, which is the order that argument needs.
 
         Reads `read_head_fresh()` for the same reason as
         `_replay_live_entries`. `num_chunks()` resolves through `read_head()`
         and, on a cold handle, would return the stale deferred head, so the
         generation would not move after a publish. On a cold handle this
         costs a LIST rather than a GET, which the query path already pays in
-        the replay; a writer's warm handle stays at zero requests."""
-        return self._manifest.read_head_fresh().chunk_seq + Int64(1)
+        the replay; a writer's warm handle stays at zero requests for the
+        head. The floor costs one GET."""
+        var from_head = self._manifest.read_head_fresh().chunk_seq + Int64(1)
+        var floor = self._generation_floor()
+        if floor > from_head:
+            return floor
+        return from_head
+
+    def _generation_floor(self) raises -> Int64:
+        """This lineage's durable generation floor, 0 when none was written."""
+        try:
+            return decode_generation_floor(
+                self._manifest.get_object(
+                    generation_floor_key(self._manifest.prefix()).raw()
+                )
+            )
+        except e:
+            if is_not_found(String(e)):
+                return Int64(0)
+            raise e^
 
     def retire(mut self, chunk_seq: Int64) raises -> None:
         """Tombstone `chunk_seq`, stamped with the current wall clock. The
@@ -275,6 +304,13 @@ struct SearchMetastore[Storage: ConditionalWriteStore](
             raise e^
         if now_ms - sched < grace_ms:
             return False  # grace period not over; keep the tombstone.
+        # The chunk is about to stop being listed. Raise the floor to cover it
+        # first, so a reader that recovers the head by LIST cannot compute a
+        # lower generation than one that still saw this chunk.
+        var prefix = self._manifest.prefix()
+        raise_generation_floor(
+            self._manifest.store_mut(), prefix, chunk_seq + Int64(1)
+        )
         try:
             self._manifest.reap(chunk_seq)
         except e:
@@ -457,31 +493,54 @@ def list_live_splits_across_shards[
     return out^
 
 
+def _lineage_generation[
+    Storage: CloneableConditionalWriteStore
+](storage: Storage, lineage_prefix: String, index_name: String) raises -> Int64:
+    var manifest = CasManifestStore[Storage](
+        storage.clone(), lineage_prefix.copy(), RetryPolicy.default()
+    )
+    var meta = SearchMetastore[Storage](manifest^, index_name.copy())
+    return meta.generation()
+
+
 def generation_across_shards[
     Storage: CloneableConditionalWriteStore
 ](storage: Storage, index_meta_prefix: String, index_name: String) raises -> Int64:
-    """The index-level generation: the sum of `generation()` over every
-    sub-lineage plus the unsharded lineage. It is not a unique global
-    version; it only has to change whenever the catalog changes, and any
-    publish in any shard increases the sum."""
-    var total = Int64(0)
+    """The index-level generation: the sum over shard ids of each shard's
+    generation, plus the unsharded lineage's. A shard id counts once, as
+    max(its live `generation()`, the value recorded when it was reaped), and
+    a reaped shard keeps counting its recorded value.
+
+    It is not a unique global version. It changes whenever the catalog
+    changes (any publish in any shard raises the sum) and it never goes down
+    (see generation.mojo for the argument). The retired-shards record is read
+    after every live shard, which is the order that argument needs."""
     var shard_ids = _discover_shard_ids(storage, index_meta_prefix)
+    var live = List[Int64]()
     for i in range(len(shard_ids)):
-        var lineage_prefix = shard_manifest_prefix(
-            index_meta_prefix, shard_ids[i]
+        live.append(
+            _lineage_generation(
+                storage,
+                shard_manifest_prefix(index_meta_prefix, shard_ids[i]),
+                index_name,
+            )
         )
-        var manifest = CasManifestStore[Storage](
-            storage.clone(), lineage_prefix^, RetryPolicy.default()
-        )
-        var meta = SearchMetastore[Storage](manifest^, index_name.copy())
-        total += meta.generation()
-    var legacy_manifest = CasManifestStore[Storage](
-        storage.clone(), index_meta_prefix.copy(), RetryPolicy.default()
-    )
-    var legacy_meta = SearchMetastore[Storage](
-        legacy_manifest^, index_name.copy()
-    )
-    total += legacy_meta.generation()
+    var total = _lineage_generation(storage, index_meta_prefix, index_name)
+    var retired = read_retired_shards(storage, index_meta_prefix)
+    for i in range(len(shard_ids)):
+        var recorded = retired.generation_of(shard_ids[i])
+        if recorded > live[i]:
+            total += recorded
+        else:
+            total += live[i]
+    for j in range(len(retired)):
+        var still_listed = False
+        for i in range(len(shard_ids)):
+            if retired.find(shard_ids[i]) == j:
+                still_listed = True
+                break
+        if not still_listed:
+            total += retired.generations[j]
     return total
 
 
@@ -506,10 +565,13 @@ def generation_across_shards[
 #     reads of older indexes. There is one per index, so leaving its empty
 #     shell costs a bounded amount.
 #
-# Reaping a shard deletes every object under `<index>/meta/_lineage/<id>/`:
-# the head, the log-start marker, tombstones, metadata, and any manifest
-# remnant. Deletes are idempotent, since deleting an absent key succeeds.
-# Afterwards the shard no longer appears in `_discover_shard_ids`.
+# Reaping a shard first records its final generation in the index's
+# `_RETIRED_SHARDS` record, so the index generation does not drop when the
+# shard stops being listed (generation.mojo). It then deletes every object
+# under `<index>/meta/_lineage/<id>/`: the head, the log-start marker, the
+# generation floor, tombstones, metadata, and any manifest remnant. Deletes
+# are idempotent, since deleting an absent key succeeds. Afterwards the shard
+# no longer appears in `_discover_shard_ids`.
 
 
 @fieldwise_init
@@ -616,6 +678,14 @@ def reap_drained_shards[
             index_meta_prefix, shard_ids[i]
         )
         if _shard_is_drained(storage, lineage_prefix, index_name):
+            # Record the shard's final generation before deleting anything,
+            # so the index generation keeps counting it (generation.mojo).
+            record_retired_shard(
+                storage,
+                index_meta_prefix,
+                shard_ids[i],
+                _lineage_generation(storage, lineage_prefix, index_name),
+            )
             var n = _delete_all_under_prefix(storage, lineage_prefix)
             objects_deleted += n
             reaped += 1

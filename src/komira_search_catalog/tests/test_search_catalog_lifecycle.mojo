@@ -8,6 +8,13 @@
 #      contains "404" only because the object key does (here the index name)
 #      is a real failure. Replay must raise it, not skip the chunk as if it had
 #      been reaped. A genuine not-found is still skipped.
+#   2. test_generation_survives_reaping_the_top_chunk: retiring and reaping the
+#      newest chunk of a lineage must not lower the generation a fresh reader
+#      computes.
+#   3. test_generation_survives_draining_and_reaping_a_shard: through the whole
+#      drain of a writer shard (publish, merge into `_base`, retire, reap each
+#      chunk, reap the drained shard) the index generation never goes down, and
+#      a publish afterwards still moves it.
 #
 # Everything runs against the in-memory stores, with no network. `_HookStore`
 # wraps the shared in-memory store to stage the two interleavings a single
@@ -268,6 +275,125 @@ def test_store_error_naming_404_is_not_absence() raises:
     assert_equal(len(live), 5, "a reaped chunk is skipped, the rest listed")
 
     _ = inner^
+
+
+# =============================================================================
+# 2. Reaping the newest chunk does not lower the generation.
+# =============================================================================
+
+
+def test_generation_survives_reaping_the_top_chunk() raises:
+    var store = SharedInMemoryConditionalStore()
+    var w = _shard_meta(store, make_shard_id(String("node"), 0))
+    for i in range(3):
+        _ = w.publish(_summary(i, Int64(2)))
+    var g0 = generation_across_shards(store, _META, String("logs"))
+
+    # Retire and reap the newest chunk (seq 2). A fresh reader recovers the
+    # head by LIST, and chunk 2 is no longer listed.
+    w.retire_at(Int64(2), Int64(0))
+    assert_true(
+        w.reap_chunk(Int64(2), _GRACE_MS, _GRACE_MS), "chunk 2 reaped"
+    )
+    var g1 = generation_across_shards(store, _META, String("logs"))
+    assert_true(
+        g1 >= g0,
+        "reaping the top chunk lowered the generation from "
+        + String(g0)
+        + " to "
+        + String(g1),
+    )
+
+    # A publish still moves it. (It goes to another shard: publishing into
+    # this one would leave chunk 2 as a hole below chunk 3, and a cold
+    # reader's head recovery refuses a lineage with a hole.)
+    var other = _shard_meta(store, make_shard_id(String("node"), 9))
+    _ = other.publish(_summary(3, Int64(2)))
+    var g2 = generation_across_shards(store, _META, String("logs"))
+    assert_true(g2 > g1, "a publish after the reap moves the generation")
+
+    _ = store^
+
+
+# =============================================================================
+# 3. Draining and reaping a writer shard never lowers the generation.
+# =============================================================================
+
+
+def test_generation_survives_draining_and_reaping_a_shard() raises:
+    var store = SharedInMemoryConditionalStore()
+    var shard_id = make_shard_id(String("node"), 1)
+    var w = _shard_meta(store, shard_id)
+    _ = w.publish(_summary(1, Int64(3)))
+    _ = w.publish(_summary(2, Int64(4)))
+
+    # The compactor merges both into `_base`.
+    var inputs = List[UInt8]()
+    var u1 = _uuid(1)
+    var u2 = _uuid(2)
+    for k in range(16):
+        inputs.append(u1[k])
+    for k in range(16):
+        inputs.append(u2[k])
+    var base = _shard_meta(store, String("_base"))
+    _ = base.publish(
+        make_merged_split_summary(
+            _uuid(7),
+            Int64(7),
+            Int64(999),
+            Int64(0),
+            Int64(6),
+            String("logs"),
+            String("body"),
+            String("index/logs/splits/merged-7.split"),
+            Int64(1),
+            inputs^,
+        )
+    )
+    var g0 = generation_across_shards(store, _META, String("logs"))
+
+    w.retire_at(Int64(0), Int64(0))
+    w.retire_at(Int64(1), Int64(0))
+    var g1 = generation_across_shards(store, _META, String("logs"))
+    assert_true(g1 >= g0, "retire lowered the generation")
+
+    assert_true(w.reap_chunk(Int64(0), _GRACE_MS, _GRACE_MS), "chunk 0 reaped")
+    assert_true(w.reap_chunk(Int64(1), _GRACE_MS, _GRACE_MS), "chunk 1 reaped")
+    var g2 = generation_across_shards(store, _META, String("logs"))
+    assert_true(
+        g2 >= g1,
+        "reaping the shard's chunks lowered the generation from "
+        + String(g1)
+        + " to "
+        + String(g2),
+    )
+
+    var r = reap_drained_shards(store, _META, String("logs"))
+    assert_equal(r.shards_reaped, 1, "the drained writer shard is reaped")
+    assert_equal(
+        _count_under(store, shard_manifest_prefix(_META, shard_id)),
+        0,
+        "nothing is left under the reaped shard",
+    )
+    var g3 = generation_across_shards(store, _META, String("logs"))
+    assert_true(
+        g3 >= g2,
+        "reaping the drained shard lowered the generation from "
+        + String(g2)
+        + " to "
+        + String(g3),
+    )
+
+    # The merged split is still the whole live set, and a new publish moves
+    # the generation past every value seen so far.
+    var live = list_live_splits_across_shards(store, _META, String("logs"))
+    assert_equal(len(live), 1, "only the merged split is live")
+    assert_true(_uuid_eq(live[0].split_uuid, _uuid(7)), "it is the merged one")
+    _ = base.publish(_summary(8, Int64(1)))
+    var g4 = generation_across_shards(store, _META, String("logs"))
+    assert_true(g4 > g3, "a publish after the reap moves the generation")
+
+    _ = store^
 
 
 def main() raises:

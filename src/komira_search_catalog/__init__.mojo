@@ -9,6 +9,9 @@ sub-lineages. It is the store behind the `SearchIndexCatalog` seam of
     and reaps splits on one append-only manifest lineage; the cross-shard
     read over per-writer sub-lineages; and the reaper for drained writer
     shards.
+  * generation: the durable records (a per-lineage generation floor and the
+    index's retired-shards record) that keep the generation from going down
+    when chunks and drained shards are reaped.
 
 Everything is generic over `komira_objectstore`'s conditional-write store
 traits. No cloud client is named here: the caller writes the split object
