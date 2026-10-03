@@ -5,14 +5,16 @@
 from std.sys import size_of
 
 from komira_aws_tiny_xml.komira_aws_tiny_xml import (
-    TinyConfig as _P0,
-    TinyPart as _P1,
-    TinyPingRequest as _P2,
-    TinyPingResponse as _P3,
-    TinyPutThingRequest as _P4,
-    TinyPutThingResponse as _P5,
-    TinySetConfigRequest as _P6,
-    TinySetConfigResponse as _P7,
+    S3Config as _P0,
+    S3GetBlobRequest as _P1,
+    S3GetBlobResponse as _P2,
+    S3GetBytesResponse as _P3,
+    S3GetPolicyResponse as _P4,
+    S3Part as _P5,
+    S3PutThingRequest as _P6,
+    S3PutThingResponse as _P7,
+    S3SetConfigRequest as _P8,
+    S3SetConfigResponse as _P9,
 )
 
 comptime _SIZE_P0 = size_of[_P0]()
@@ -23,7 +25,9 @@ comptime _SIZE_P4 = size_of[_P4]()
 comptime _SIZE_P5 = size_of[_P5]()
 comptime _SIZE_P6 = size_of[_P6]()
 comptime _SIZE_P7 = size_of[_P7]()
+comptime _SIZE_P8 = size_of[_P8]()
+comptime _SIZE_P9 = size_of[_P9]()
 
 
 def main():
-    print(_SIZE_P0 + _SIZE_P1 + _SIZE_P2 + _SIZE_P3 + _SIZE_P4 + _SIZE_P5 + _SIZE_P6 + _SIZE_P7)
+    print(_SIZE_P0 + _SIZE_P1 + _SIZE_P2 + _SIZE_P3 + _SIZE_P4 + _SIZE_P5 + _SIZE_P6 + _SIZE_P7 + _SIZE_P8 + _SIZE_P9)

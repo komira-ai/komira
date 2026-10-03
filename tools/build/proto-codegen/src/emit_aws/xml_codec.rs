@@ -32,8 +32,8 @@
 //! member bound to an XML attribute (`xml-attribute`), and a map in a body
 //! (`xml-map`). A map bound to prefixed headers, or to the query of a
 //! request, is the REST binding's and is not refused; a response has no
-//! query, so there a query-bound map is a body map and is refused when
-//! emitted.
+//! URI or query, so a map bound to either in an output shape is a body map
+//! and is refused too.
 
 use super::proto::BodyCodec;
 use super::{escape, ts_const, AwsEmitter};
@@ -105,6 +105,27 @@ pub(super) fn check_rest_xml_features(facts: &AwsFacts) -> Result<(), String> {
                  refused.",
                 m.member_name, m.shape
             ));
+        }
+    }
+    // A response has no URI or query: a member of an output shape bound to
+    // either is read from the body (`xml_read_from_body`), so a map there is
+    // a body map.
+    for (op, o) in facts.operations() {
+        let Some(out) = &o.output_shape else { continue };
+        let Some(fq) = &facts.shape(out)?.ir_fq_name else { continue };
+        for ((owner, field), m) in facts.members() {
+            if owner == fq
+                && matches!(m.location, AwsLocation::Uri | AwsLocation::QueryString)
+                && reaches_map(facts, &m.shape)?
+            {
+                return Err(format!(
+                    "emit_aws: REFUSED xml-map: member `{}` of `{owner}` (`{field}`), the \
+                     output of `{op}`, is a map bound to the URI or the query (shape `{}`). \
+                     A response has neither, so it is read from the XML body, and the \
+                     restXml codec does not read maps.",
+                    m.member_name, m.shape
+                ));
+            }
         }
     }
     Ok(())
@@ -780,6 +801,35 @@ mod tests {
     }
 
     #[test]
+    fn a_query_bound_map_in_an_output_shape_is_refused_before_emission() {
+        let shapes = format!(
+            r#""In": {{"type": "structure", "members": {{}}}},
+               "Out": {{"type": "structure", "members": {{
+                   "Q": {{"shape": "M", "location": "querystring"}}}}}},
+               "M": {{"type": "map", "key": {{"shape": "Str"}}, "value": {{"shape": "Str"}}}},
+               {STR}"#
+        );
+        let model = parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "protocol": "rest-xml", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "uid": "tiny-2026-10-02"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "PUT", "requestUri": "/op"}},
+                    "input": {{"shape": "In"}}, "output": {{"shape": "Out"}}}}}},
+                "shapes": {{{shapes}}}}}"#
+        ))
+        .unwrap();
+        let lowering =
+            lower_aws_service(&model, "tiny", &["Op".to_string()], "tiny.json", "aws.tiny")
+                .unwrap();
+        let e = super::check_rest_xml_features(&lowering.facts).unwrap_err();
+        assert!(e.contains("REFUSED xml-map:"), "{e}");
+        assert!(e.contains("the output of `Op`"), "{e}");
+    }
+
+    #[test]
     fn the_body_is_the_input_root_with_members_in_declared_order() {
         let shapes = format!(
             r#""In": {{"type": "structure", "members": {{
@@ -877,15 +927,23 @@ mod tests {
     fn emit_s3(service_id: &str) -> Result<String, String> {
         let model = parse(&format!(
             r#"{{"version": "2.0",
-                "metadata": {{"apiVersion": "2006-03-01", "endpointPrefix": "s3",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "s3",
                     "protocol": "rest-xml", "serviceFullName": "Tiny S3",
                     "serviceId": "{service_id}", "signatureVersion": "s3",
-                    "auth": ["aws.auth#sigv4"], "uid": "s3-2006-03-01"}},
+                    "auth": ["aws.auth#sigv4"], "uid": "s3-2026-10-02"}},
                 "operations": {{
                     "Head": {{"name": "Head", "http": {{"method": "HEAD", "requestUri": "/h"}},
                         "input": {{"shape": "In"}}, "output": {{"shape": "HeadOut"}}}},
                     "Get": {{"name": "Get", "http": {{"method": "GET", "requestUri": "/g"}},
-                        "input": {{"shape": "In"}}, "output": {{"shape": "GetOut"}}}}}},
+                        "input": {{"shape": "In"}}, "output": {{"shape": "GetOut"}}}},
+                    "GetBytes": {{"name": "GetBytes",
+                        "http": {{"method": "GET", "requestUri": "/b"}},
+                        "input": {{"shape": "In"}}, "output": {{"shape": "BytesOut"}}}},
+                    "GetText": {{"name": "GetText",
+                        "http": {{"method": "GET", "requestUri": "/t"}},
+                        "input": {{"shape": "In"}}, "output": {{"shape": "TextOut"}}}},
+                    "Drop": {{"name": "Drop", "http": {{"method": "DELETE", "requestUri": "/d"}},
+                        "input": {{"shape": "In"}}}}}},
                 "shapes": {{
                     "In": {{"type": "structure", "members": {{}}}},
                     "HeadOut": {{"type": "structure", "members": {{
@@ -893,15 +951,20 @@ mod tests {
                         "Size": {{"shape": "Str"}}}}}},
                     "GetOut": {{"type": "structure", "payload": "Body", "members": {{
                         "Body": {{"shape": "Blob", "streaming": true}}}}}},
+                    "BytesOut": {{"type": "structure", "payload": "Body", "members": {{
+                        "Body": {{"shape": "Bytes"}}}}}},
+                    "TextOut": {{"type": "structure", "payload": "Text", "members": {{
+                        "Text": {{"shape": "Str"}}}}}},
                     "Ts": {{"type": "timestamp"}},
                     "Blob": {{"type": "blob", "streaming": true}},
+                    "Bytes": {{"type": "blob"}},
                     {STR}}}}}"#
         ))
         .map_err(|e| e.to_string())?;
         let lowering = lower_aws_service(
             &model,
             "s3",
-            &["Head".to_string(), "Get".to_string()],
+            &["Head", "Get", "GetBytes", "GetText", "Drop"].map(String::from),
             "s3.json",
             "aws.s3",
         )?;
@@ -917,19 +980,37 @@ mod tests {
     #[test]
     fn the_s3_customization_is_refused_for_another_service() {
         let e = emit_s3("Tiny").unwrap_err();
-        assert!(e.contains("applies only to S3's restXml model"), "{e}");
+        assert!(e.contains("is refused unless the model's serviceId is `S3`"), "{e}");
+    }
+
+    /// The text of the parser `name` in `src`, up to the next definition.
+    fn parser<'a>(src: &'a str, name: &str) -> &'a str {
+        let at = src.find(&format!("def {name}(")).expect(name);
+        let rest = &src[at..];
+        let end = rest[1..].find("\ndef ").map_or(rest.len(), |e| e + 1);
+        &rest[..end]
     }
 
     #[test]
-    fn s3_raises_a_200_error_body_unless_the_payload_is_a_blob() {
+    fn s3_raises_a_200_error_body_unless_the_payload_is_a_blob_or_a_string() {
         let src = emit_s3("S3").unwrap();
-        // In the Head parser, before its body is read; not in Get's, whose
-        // payload is a blob.
-        let head = &src[src.find("def s3_parse_head_response").expect("head parser")..];
+        // In the Head parser, before its body is read, raised as the error
+        // an HTTP 500 is.
+        let head = parser(&src, "s3_parse_head_response");
         let check = head.find("if aws_xml_body_is_error(resp):").expect("the 200 check");
         assert!(check < head.find("aws_xml_parse(resp.body)").expect("body"), "{src}");
+        // Named as the client's error builder names the service: the type
+        // prefix, then the service name.
+        assert!(head.contains("String(\"S3S3.Head failed: HTTP 500 \")"), "{head}");
+        // Not where the payload is a blob, streaming (`Get`, read by its head
+        // parser) or not (`GetBytes`), or a string (`GetText`).
+        for name in ["s3_parse_get_bytes_response", "s3_parse_get_text_response"] {
+            assert!(!parser(&src, name).contains("aws_xml_body_is_error"), "{src}");
+        }
+        assert!(!parser(&src, "s3_parse_get_head").contains("aws_xml_body_is_error"), "{src}");
+        // Nor for an operation with no output shape (`Drop`).
+        assert!(!parser(&src, "s3_parse_drop_response").contains("aws_xml_body_is_error"), "{src}");
         assert_eq!(src.matches("if aws_xml_body_is_error(resp):").count(), 1, "{src}");
-        assert!(src.contains("Head: HTTP 200 with an <Error> body, handled as HTTP 500"), "{src}");
     }
 
     #[test]

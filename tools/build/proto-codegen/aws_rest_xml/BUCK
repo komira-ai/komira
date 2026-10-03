@@ -6,11 +6,16 @@ load(":model.bzl", "TINY_REST_XML")
 # compiled against the real komira_aws_core and komira_xml: a label after a
 # literal query, a header, the input's root element in its namespace, a
 # wrapped list with renamed items, a flattened list of structures, a
-# structure payload, a streaming blob output payload, and the two `s3`
-# response behaviors.
+# structure payload, blob (streaming and not) and string output payloads,
+# an operation with no output, and the two `s3` response behaviors.
 #
 # The library is gated by its layout probe and test_tiny_rest_xml, which
 # checks the requests it builds and the responses it reads, byte for byte.
+# The aws_codegen functional tests hold the text of the same module to a
+# golden, and check that exactly these two welded tests ran and exactly the
+# package's files were generated (a gen_check and a tests_check, which live
+# in the tests cell and so cannot be loaded here). run_tests.sh builds this
+# package (test 36). The model's digest is stated once, in model.bzl.
 # botocore's rest-xml conformance corpus is run against the same emitter by
 # //tools/build/proto-codegen:aws_conformance_test.
 
@@ -27,6 +32,8 @@ aws_client(
     model_sha256 = TINY_REST_XML.sha256,
     operations = [
         "GetBlob",
+        "GetBytes",
+        "GetPolicy",
         "PutThing",
         "SetConfig",
     ],

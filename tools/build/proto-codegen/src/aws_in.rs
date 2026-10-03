@@ -763,7 +763,7 @@ impl<'a> AwsLowerer<'a> {
             fault: flag(s, "fault"),
             retryable: s.get("retryable").is_some(),
             location_name: str_of(s, "locationName"),
-            xml_namespace: xml_ns(s.get("xmlNamespace")),
+            xml_namespace: xml_ns(s.get("xmlNamespace"), &format!("shape `{name}`"))?,
             payload: str_of(s, "payload"),
             required: s
                 .get("required")
@@ -810,7 +810,8 @@ impl<'a> AwsLowerer<'a> {
             f.element_shape = Some(member_shape_name(m, name)?);
             f.list_member_location_name =
                 m.get("locationName").and_then(Json::as_str).map(String::from);
-            f.list_member_xml_namespace = xml_ns(m.get("xmlNamespace"));
+            f.list_member_xml_namespace =
+                xml_ns(m.get("xmlNamespace"), &format!("the member of list `{name}`"))?;
             // A member-level `flattened` on the list's own `member` node.
             if m.get("flattened").and_then(Json::as_bool) == Some(true) {
                 f.flattened = true;
@@ -1155,7 +1156,10 @@ impl<'a> AwsLowerer<'a> {
             declared_index: idx,
             idempotency_token: flag(mo, "idempotencyToken"),
             flattened: flag(mo, "flattened"),
-            xml_namespace: xml_ns(mo.get("xmlNamespace")),
+            xml_namespace: xml_ns(
+                mo.get("xmlNamespace"),
+                &format!("member `{owner}.{mname}`"),
+            )?,
             xml_attribute: flag(mo, "xmlAttribute"),
             streaming: flag(mo, "streaming"),
             event_payload: flag(mo, "eventpayload"),
@@ -1326,7 +1330,10 @@ impl<'a> AwsLowerer<'a> {
                 .and_then(|i| i.get("locationName"))
                 .and_then(Json::as_str)
                 .map(String::from),
-            input_xml_namespace: op.get("input").and_then(|i| xml_ns(i.get("xmlNamespace"))),
+            input_xml_namespace: xml_ns(
+                op.get("input").and_then(|i| i.get("xmlNamespace")),
+                &format!("the input of operation `{op_name}`"),
+            )?,
             output_shape: output_shape.map(String::from),
             result_wrapper: op
                 .get("output")
@@ -1498,7 +1505,7 @@ fn lower_metadata(root: &JsonObject, service: &str) -> Result<AwsServiceMeta, St
         service_full_name: need("serviceFullName")?,
         service_abbreviation: str_of(m, "serviceAbbreviation"),
         global_endpoint: str_of(m, "globalEndpoint"),
-        xml_namespace: xml_ns(m.get("xmlNamespace")),
+        xml_namespace: xml_ns(m.get("xmlNamespace"), "the service metadata")?,
         aws_query_compatible: m.get("awsQueryCompatible").is_some(),
         checksum_format: str_of(m, "checksumFormat"),
         uid: need("uid")?,
@@ -1632,17 +1639,35 @@ fn as_i64(v: &Json) -> Option<i64> {
     }
 }
 
-fn xml_ns(v: Option<&Json>) -> Option<AwsXmlNamespace> {
-    match v? {
-        Json::Str(uri) => Some(AwsXmlNamespace {
+/// The `xmlNamespace` trait `v` of `what` (`None` when absent): the bare
+/// URI string, or an object with a string `uri` and an optional string
+/// `prefix`. Any other spelling is an error naming `what`, so a namespace
+/// is never dropped from a document without notice.
+fn xml_ns(v: Option<&Json>, what: &str) -> Result<Option<AwsXmlNamespace>, String> {
+    let malformed = || {
+        format!(
+            "aws front-end: the `xmlNamespace` of {what} is neither a URI string nor an \
+             object with a string `uri` and an optional string `prefix`"
+        )
+    };
+    match v {
+        None => Ok(None),
+        Some(Json::Str(uri)) => Ok(Some(AwsXmlNamespace {
             prefix: String::new(),
             uri: uri.clone(),
-        }),
-        o @ Json::Object(_) => Some(AwsXmlNamespace {
-            prefix: o.get("prefix").and_then(Json::as_str).unwrap_or("").to_string(),
-            uri: o.get("uri").and_then(Json::as_str)?.to_string(),
-        }),
-        _ => None,
+        })),
+        Some(o @ Json::Object(_)) => {
+            let uri = o.get("uri").and_then(Json::as_str).ok_or_else(malformed)?;
+            let prefix = match o.get("prefix") {
+                None => "",
+                Some(p) => p.as_str().ok_or_else(malformed)?,
+            };
+            Ok(Some(AwsXmlNamespace {
+                prefix: prefix.to_string(),
+                uri: uri.to_string(),
+            }))
+        }
+        Some(_) => Err(malformed()),
     }
 }
 
@@ -1819,6 +1844,32 @@ mod tests {
     #[test]
     fn the_tiny_model_lowers() {
         lower_tiny(&tiny_model("", "", "Str")).unwrap();
+    }
+
+    #[test]
+    fn xml_namespace_is_a_string_or_a_uri_object_with_an_optional_prefix() {
+        let ns = |src: &str| xml_ns(Some(&crate::json::parse(src).unwrap()), "x");
+        let want = |prefix: &str, uri: &str| {
+            Some(AwsXmlNamespace {
+                prefix: prefix.to_string(),
+                uri: uri.to_string(),
+            })
+        };
+        assert_eq!(xml_ns(None, "x").unwrap(), None);
+        assert_eq!(ns(r#""urn:a""#).unwrap(), want("", "urn:a"));
+        assert_eq!(ns(r#"{"uri": "urn:a"}"#).unwrap(), want("", "urn:a"));
+        assert_eq!(ns(r#"{"prefix": "p", "uri": "urn:a"}"#).unwrap(), want("p", "urn:a"));
+        for bad in [r#"{"prefix": "p"}"#, r#"{"uri": 5}"#, r#"{"uri": "u", "prefix": 1}"#, "7"] {
+            let e = ns(bad).unwrap_err();
+            assert!(e.contains("the `xmlNamespace` of x is neither"), "{bad}: {e}");
+        }
+    }
+
+    #[test]
+    fn a_malformed_xml_namespace_is_refused_naming_where_it_is() {
+        let e = lower_tiny(&tiny_model(r#", "xmlNamespace": {"prefix": "p"}"#, "", "Str"))
+            .unwrap_err();
+        assert!(e.contains("the `xmlNamespace` of the service metadata"), "{e}");
     }
 
     #[test]

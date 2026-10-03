@@ -20,8 +20,8 @@
 //! records the sha256 of each.
 //!
 //! `--customization s3` applies botocore's S3 response handling the model
-//! does not state (`emit_aws::S3_CUSTOMIZATION`); it is refused for any
-//! model but S3's.
+//! does not state (`emit_aws::S3_CUSTOMIZATION`); it is refused unless the
+//! model's serviceId is `S3` and its protocol is restXml.
 
 use std::path::PathBuf;
 

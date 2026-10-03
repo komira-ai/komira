@@ -5,16 +5,18 @@
 # belongs in the override module named below, never here — see the
 # HAND-OVERRIDE SEAM section at the end of this header.
 #
-#   service      : Tiny Example Service
+#   service      : Tiny restXml Example
 #   botocore id  : tiny
-#   api version  : 2026-09-30
+#   api version  : 2026-10-02
 #   protocol     : rest-xml (restXml)
-#   model key    : tiny/2026-09-30
-#   model sha256 : 47dc951fe9a3275e5621a62760272d6bb58fb18a56de58f0c179f793882cba05
-#   operations   : Ping, PutThing, SetConfig
-#   shapes       : 8 messages, 0 enums
+#   model key    : tiny/2026-10-02
+#   model sha256 : 7f960b9d0f5a4c8b06d4f3338c525c68bef960651af9318bae43810df3675a49
+#   operations   : GetBlob, GetBytes, GetPolicy, PutThing, SetConfig
+#   shapes       : 10 messages, 0 enums
 #   generator    : aws-client-gen version 4
 #   mode         : pure (no transport)
+#   customize    : s3 (botocore handlers.py: 200-with-<Error> as an
+#                  error, an invalid Expires header left unset)
 #
 # HAND-OVERRIDE SEAM: no overrides are declared for this service.
 # ===========================================================================
@@ -83,12 +85,12 @@ from komira_xml import (
 # ---------------------------------------------------------------------------
 # §0 — wire constants. Every one is read from the model's `metadata`.
 # ---------------------------------------------------------------------------
-comptime TINY_SERVICE: String = "tiny"
-comptime TINY_ENDPOINT_PREFIX: String = "tiny"
-comptime TINY_CONTENT_TYPE: String = "application/xml"
+comptime S3_SERVICE: String = "s3"
+comptime S3_ENDPOINT_PREFIX: String = "s3"
+comptime S3_CONTENT_TYPE: String = "application/xml"
 
 def komira_aws_tiny_xml_host(region: String) raises -> String:
-    """`tiny.<region>.amazonaws.com`.
+    """`s3.<region>.amazonaws.com`.
 
         ⚠ REGIONAL. An empty region here would sign against a host with a
         doubled dot and fail as DNS — an error that says nothing about the
@@ -98,13 +100,13 @@ def komira_aws_tiny_xml_host(region: String) raises -> String:
             "komira_aws_tiny_xml_host: REFUSED an EMPTY region — this is a REGIONAL"
             " service and there is no global endpoint to fall back to."
         )
-    return String("tiny.") + region + String(".amazonaws.com")
+    return String("s3.") + region + String(".amazonaws.com")
 
 
 # ---------------------------------------------------------------------------
-# `TinyConfig` — AWS shape `Config`.
+# `S3Config` — AWS shape `Config`.
 # ---------------------------------------------------------------------------
-struct TinyConfig(Copyable, Movable, Deinitable):
+struct S3Config(Copyable, Movable, Deinitable):
     """AWS shape `Config` — 2 member(s), 0 required by the model.
 
         Required members are plain fields taken by `__init__`; every other
@@ -150,10 +152,10 @@ struct TinyConfig(Copyable, Movable, Deinitable):
             aws_xml_write_f64(w, String("Ratio"), self.ratio.value())
 
     @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinyConfig:
+    def from_aws_xml(node: XmlNode) raises -> S3Config:
         """Read this shape from its element. An element the shape does not
             name is ignored; a non-list member that occurs twice takes the last."""
-        var out = TinyConfig()
+        var out = S3Config()
         var _xc_enabled = aws_xml_child(node, String("Enabled"))
         if _xc_enabled >= 0:
             out.set_enabled(aws_xml_bool_of(node.children[_xc_enabled]))
@@ -164,9 +166,199 @@ struct TinyConfig(Copyable, Movable, Deinitable):
 
 
 # ---------------------------------------------------------------------------
-# `TinyPart` — AWS shape `Part`.
+# `S3GetBlobRequest` — AWS shape `GetBlobRequest`.
 # ---------------------------------------------------------------------------
-struct TinyPart(Copyable, Movable, Deinitable):
+struct S3GetBlobRequest(Copyable, Movable, Deinitable):
+    """AWS shape `GetBlobRequest` — 0 member(s), 0 required by the model.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and is OMITTED from the document when
+        unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
+        written as its empty wrapper element and an unset one is absent."""
+
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        pass
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        return out^
+
+    def write_aws_xml(self, mut w: XmlWriter) raises:
+        """This shape's member elements, into the element the caller opened."""
+        pass
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> S3GetBlobRequest:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = S3GetBlobRequest()
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `S3GetBlobResponse` — AWS shape `GetBlobResponse`.
+# ---------------------------------------------------------------------------
+struct S3GetBlobResponse(Copyable, Movable, Deinitable):
+    """AWS shape `GetBlobResponse` — 1 member(s), 0 required by the model.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and is OMITTED from the document when
+        unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
+        written as its empty wrapper element and an unset one is absent."""
+
+    # `body` -> wire `Body`
+    var body: Optional[List[UInt8]]
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        self.body = Optional[List[UInt8]]()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        out.body = self.body.copy()
+        return out^
+
+    def set_body(mut self, var value: List[UInt8]):
+        self.body = Optional[List[UInt8]](value^)
+
+    def write_aws_xml(self, mut w: XmlWriter) raises:
+        """This shape's member elements, into the element the caller opened."""
+        if self.body:
+            aws_xml_write_blob(w, String("Body"), Span(self.body.value()))
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> S3GetBlobResponse:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = S3GetBlobResponse()
+        var _xc_body = aws_xml_child(node, String("Body"))
+        if _xc_body >= 0:
+            out.set_body(aws_xml_blob_of(node.children[_xc_body]))
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `S3GetBytesResponse` — AWS shape `GetBytesResponse`.
+# ---------------------------------------------------------------------------
+struct S3GetBytesResponse(Copyable, Movable, Deinitable):
+    """AWS shape `GetBytesResponse` — 1 member(s), 0 required by the model.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and is OMITTED from the document when
+        unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
+        written as its empty wrapper element and an unset one is absent."""
+
+    # `body` -> wire `Body`
+    var body: Optional[List[UInt8]]
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        self.body = Optional[List[UInt8]]()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        out.body = self.body.copy()
+        return out^
+
+    def set_body(mut self, var value: List[UInt8]):
+        self.body = Optional[List[UInt8]](value^)
+
+    def write_aws_xml(self, mut w: XmlWriter) raises:
+        """This shape's member elements, into the element the caller opened."""
+        if self.body:
+            aws_xml_write_blob(w, String("Body"), Span(self.body.value()))
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> S3GetBytesResponse:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = S3GetBytesResponse()
+        var _xc_body = aws_xml_child(node, String("Body"))
+        if _xc_body >= 0:
+            out.set_body(aws_xml_blob_of(node.children[_xc_body]))
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `S3GetPolicyResponse` — AWS shape `GetPolicyResponse`.
+# ---------------------------------------------------------------------------
+struct S3GetPolicyResponse(Copyable, Movable, Deinitable):
+    """AWS shape `GetPolicyResponse` — 1 member(s), 0 required by the model.
+
+        Required members are plain fields taken by `__init__`; every other
+        member is `Optional[...]` and is OMITTED from the document when
+        unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
+        written as its empty wrapper element and an unset one is absent."""
+
+    # `policy` -> wire `Policy`
+    var policy: Optional[String]
+
+    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
+    # synthesis is not co-inductive and its cycle guard caches a
+    # negative, so a shape that reaches itself through the recursion
+    # box cannot prove itself. Field destructors still run;
+    # ownership is unchanged.
+    def __deinit__(deinit self):
+        pass
+
+    def __init__(out self):
+        self.policy = Optional[String]()
+
+    def copy(self) -> Self:
+        """Deep clone. Explicit, not implicit: every member is heap-owning."""
+        var out = Self()
+        out.policy = self.policy.copy()
+        return out^
+
+    def set_policy(mut self, var value: String):
+        self.policy = Optional[String](value^)
+
+    def write_aws_xml(self, mut w: XmlWriter) raises:
+        """This shape's member elements, into the element the caller opened."""
+        if self.policy:
+            aws_xml_write_string(w, String("Policy"), self.policy.value())
+
+    @staticmethod
+    def from_aws_xml(node: XmlNode) raises -> S3GetPolicyResponse:
+        """Read this shape from its element. An element the shape does not
+            name is ignored; a non-list member that occurs twice takes the last."""
+        var out = S3GetPolicyResponse()
+        var _xc_policy = aws_xml_child(node, String("Policy"))
+        if _xc_policy >= 0:
+            out.set_policy(aws_xml_string_of(node.children[_xc_policy]))
+        return out^
+
+
+# ---------------------------------------------------------------------------
+# `S3Part` — AWS shape `Part`.
+# ---------------------------------------------------------------------------
+struct S3Part(Copyable, Movable, Deinitable):
     """AWS shape `Part` — 2 member(s), 0 required by the model.
 
         Required members are plain fields taken by `__init__`; every other
@@ -212,10 +404,10 @@ struct TinyPart(Copyable, Movable, Deinitable):
             aws_xml_write_blob(w, String("Digest"), Span(self.digest.value()))
 
     @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinyPart:
+    def from_aws_xml(node: XmlNode) raises -> S3Part:
         """Read this shape from its element. An element the shape does not
             name is ignored; a non-list member that occurs twice takes the last."""
-        var out = TinyPart()
+        var out = S3Part()
         var _xc_number = aws_xml_child(node, String("Number"))
         if _xc_number >= 0:
             out.set_number(Int32(aws_xml_int_of(node.children[_xc_number], 32)))
@@ -226,99 +418,9 @@ struct TinyPart(Copyable, Movable, Deinitable):
 
 
 # ---------------------------------------------------------------------------
-# `TinyPingRequest` — AWS shape `PingRequest`.
+# `S3PutThingRequest` — AWS shape `PutThingRequest`.
 # ---------------------------------------------------------------------------
-struct TinyPingRequest(Copyable, Movable, Deinitable):
-    """AWS shape `PingRequest` — 0 member(s), 0 required by the model.
-
-        Required members are plain fields taken by `__init__`; every other
-        member is `Optional[...]` and is OMITTED from the document when
-        unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
-        written as its empty wrapper element and an unset one is absent."""
-
-
-    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
-    # synthesis is not co-inductive and its cycle guard caches a
-    # negative, so a shape that reaches itself through the recursion
-    # box cannot prove itself. Field destructors still run;
-    # ownership is unchanged.
-    def __deinit__(deinit self):
-        pass
-
-    def __init__(out self):
-        pass
-
-    def copy(self) -> Self:
-        """Deep clone. Explicit, not implicit: every member is heap-owning."""
-        var out = Self()
-        return out^
-
-    def write_aws_xml(self, mut w: XmlWriter) raises:
-        """This shape's member elements, into the element the caller opened."""
-        pass
-
-    @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinyPingRequest:
-        """Read this shape from its element. An element the shape does not
-            name is ignored; a non-list member that occurs twice takes the last."""
-        var out = TinyPingRequest()
-        return out^
-
-
-# ---------------------------------------------------------------------------
-# `TinyPingResponse` — AWS shape `PingResponse`.
-# ---------------------------------------------------------------------------
-struct TinyPingResponse(Copyable, Movable, Deinitable):
-    """AWS shape `PingResponse` — 1 member(s), 0 required by the model.
-
-        Required members are plain fields taken by `__init__`; every other
-        member is `Optional[...]` and is OMITTED from the document when
-        unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
-        written as its empty wrapper element and an unset one is absent."""
-
-    # `message` -> wire `Message`
-    var message: Optional[String]
-
-    # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
-    # synthesis is not co-inductive and its cycle guard caches a
-    # negative, so a shape that reaches itself through the recursion
-    # box cannot prove itself. Field destructors still run;
-    # ownership is unchanged.
-    def __deinit__(deinit self):
-        pass
-
-    def __init__(out self):
-        self.message = Optional[String]()
-
-    def copy(self) -> Self:
-        """Deep clone. Explicit, not implicit: every member is heap-owning."""
-        var out = Self()
-        out.message = self.message.copy()
-        return out^
-
-    def set_message(mut self, var value: String):
-        self.message = Optional[String](value^)
-
-    def write_aws_xml(self, mut w: XmlWriter) raises:
-        """This shape's member elements, into the element the caller opened."""
-        if self.message:
-            aws_xml_write_string(w, String("Message"), self.message.value())
-
-    @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinyPingResponse:
-        """Read this shape from its element. An element the shape does not
-            name is ignored; a non-list member that occurs twice takes the last."""
-        var out = TinyPingResponse()
-        var _xc_message = aws_xml_child(node, String("Message"))
-        if _xc_message >= 0:
-            out.set_message(aws_xml_string_of(node.children[_xc_message]))
-        return out^
-
-
-# ---------------------------------------------------------------------------
-# `TinyPutThingRequest` — AWS shape `PutThingRequest`.
-# ---------------------------------------------------------------------------
-struct TinyPutThingRequest(Copyable, Movable, Deinitable):
+struct S3PutThingRequest(Copyable, Movable, Deinitable):
     """AWS shape `PutThingRequest` — 6 member(s), 1 required by the model.
 
         Required members are plain fields taken by `__init__`; every other
@@ -337,7 +439,7 @@ struct TinyPutThingRequest(Copyable, Movable, Deinitable):
     # `tags` -> wire `Tags`
     var tags: Optional[List[String]]
     # `parts` -> wire `Part`
-    var parts: Optional[List[TinyPart]]
+    var parts: Optional[List[S3Part]]
 
     # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
     # synthesis is not co-inductive and its cycle guard caches a
@@ -353,7 +455,7 @@ struct TinyPutThingRequest(Copyable, Movable, Deinitable):
         self.size = Optional[Int64]()
         self.created = Optional[Float64]()
         self.tags = Optional[List[String]]()
-        self.parts = Optional[List[TinyPart]]()
+        self.parts = Optional[List[S3Part]]()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
@@ -377,8 +479,8 @@ struct TinyPutThingRequest(Copyable, Movable, Deinitable):
     def set_tags(mut self, var value: List[String]):
         self.tags = Optional[List[String]](value^)
 
-    def set_parts(mut self, var value: List[TinyPart]):
-        self.parts = Optional[List[TinyPart]](value^)
+    def set_parts(mut self, var value: List[S3Part]):
+        self.parts = Optional[List[S3Part]](value^)
 
     def write_aws_xml(self, mut w: XmlWriter) raises:
         """This shape's member elements, into the element the caller opened."""
@@ -398,11 +500,11 @@ struct TinyPutThingRequest(Copyable, Movable, Deinitable):
                 aws_xml_end(w)
 
     @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinyPutThingRequest:
+    def from_aws_xml(node: XmlNode) raises -> S3PutThingRequest:
         """Read this shape from its element. An element the shape does not
             name is ignored; a non-list member that occurs twice takes the last."""
         var _r_name = String("")
-        var out = TinyPutThingRequest(_r_name^)
+        var out = S3PutThingRequest(_r_name^)
         var _xc_size = aws_xml_child(node, String("Size"))
         if _xc_size >= 0:
             out.set_size(aws_xml_int_of(node.children[_xc_size], 64))
@@ -417,18 +519,18 @@ struct TinyPutThingRequest(Copyable, Movable, Deinitable):
             out.set_tags(_v_tags^)
         var _xs_parts = aws_xml_list_items(node, String("Part"), String("member"), True)
         if _xs_parts:
-            var _v_parts = List[TinyPart]()
+            var _v_parts = List[S3Part]()
             for _xi1 in range(len(_xs_parts.value())):
-                _v_parts.append(TinyPart.from_aws_xml(_xs_parts.value()[_xi1]))
+                _v_parts.append(S3Part.from_aws_xml(_xs_parts.value()[_xi1]))
             out.set_parts(_v_parts^)
         return out^
 
 
 # ---------------------------------------------------------------------------
-# `TinyPutThingResponse` — AWS shape `PutThingResponse`.
+# `S3PutThingResponse` — AWS shape `PutThingResponse`.
 # ---------------------------------------------------------------------------
-struct TinyPutThingResponse(Copyable, Movable, Deinitable):
-    """AWS shape `PutThingResponse` — 4 member(s), 0 required by the model.
+struct S3PutThingResponse(Copyable, Movable, Deinitable):
+    """AWS shape `PutThingResponse` — 5 member(s), 0 required by the model.
 
         Required members are plain fields taken by `__init__`; every other
         member is `Optional[...]` and is OMITTED from the document when
@@ -437,12 +539,14 @@ struct TinyPutThingResponse(Copyable, Movable, Deinitable):
 
     # `e_tag` -> wire `ETag`
     var e_tag: Optional[String]
+    # `expires` -> wire `Expires`
+    var expires: Optional[Float64]
     # `size` -> wire `Size`
     var size: Optional[Int64]
     # `tags` -> wire `Tags`
     var tags: Optional[List[String]]
     # `parts` -> wire `Part`
-    var parts: Optional[List[TinyPart]]
+    var parts: Optional[List[S3Part]]
 
     # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
     # synthesis is not co-inductive and its cycle guard caches a
@@ -454,14 +558,16 @@ struct TinyPutThingResponse(Copyable, Movable, Deinitable):
 
     def __init__(out self):
         self.e_tag = Optional[String]()
+        self.expires = Optional[Float64]()
         self.size = Optional[Int64]()
         self.tags = Optional[List[String]]()
-        self.parts = Optional[List[TinyPart]]()
+        self.parts = Optional[List[S3Part]]()
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
         out.e_tag = self.e_tag.copy()
+        out.expires = self.expires.copy()
         out.size = self.size.copy()
         out.tags = self.tags.copy()
         out.parts = self.parts.copy()
@@ -470,14 +576,17 @@ struct TinyPutThingResponse(Copyable, Movable, Deinitable):
     def set_e_tag(mut self, var value: String):
         self.e_tag = Optional[String](value^)
 
+    def set_expires(mut self, var value: Float64):
+        self.expires = Optional[Float64](value^)
+
     def set_size(mut self, var value: Int64):
         self.size = Optional[Int64](value^)
 
     def set_tags(mut self, var value: List[String]):
         self.tags = Optional[List[String]](value^)
 
-    def set_parts(mut self, var value: List[TinyPart]):
-        self.parts = Optional[List[TinyPart]](value^)
+    def set_parts(mut self, var value: List[S3Part]):
+        self.parts = Optional[List[S3Part]](value^)
 
     def write_aws_xml(self, mut w: XmlWriter) raises:
         """This shape's member elements, into the element the caller opened."""
@@ -495,10 +604,10 @@ struct TinyPutThingResponse(Copyable, Movable, Deinitable):
                 aws_xml_end(w)
 
     @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinyPutThingResponse:
+    def from_aws_xml(node: XmlNode) raises -> S3PutThingResponse:
         """Read this shape from its element. An element the shape does not
             name is ignored; a non-list member that occurs twice takes the last."""
-        var out = TinyPutThingResponse()
+        var out = S3PutThingResponse()
         var _xc_size = aws_xml_child(node, String("Size"))
         if _xc_size >= 0:
             out.set_size(aws_xml_int_of(node.children[_xc_size], 64))
@@ -510,17 +619,17 @@ struct TinyPutThingResponse(Copyable, Movable, Deinitable):
             out.set_tags(_v_tags^)
         var _xs_parts = aws_xml_list_items(node, String("Part"), String("member"), True)
         if _xs_parts:
-            var _v_parts = List[TinyPart]()
+            var _v_parts = List[S3Part]()
             for _xi1 in range(len(_xs_parts.value())):
-                _v_parts.append(TinyPart.from_aws_xml(_xs_parts.value()[_xi1]))
+                _v_parts.append(S3Part.from_aws_xml(_xs_parts.value()[_xi1]))
             out.set_parts(_v_parts^)
         return out^
 
 
 # ---------------------------------------------------------------------------
-# `TinySetConfigRequest` — AWS shape `SetConfigRequest`.
+# `S3SetConfigRequest` — AWS shape `SetConfigRequest`.
 # ---------------------------------------------------------------------------
-struct TinySetConfigRequest(Copyable, Movable, Deinitable):
+struct S3SetConfigRequest(Copyable, Movable, Deinitable):
     """AWS shape `SetConfigRequest` — 1 member(s), 1 required by the model.
 
         Required members are plain fields taken by `__init__`; every other
@@ -529,7 +638,7 @@ struct TinySetConfigRequest(Copyable, Movable, Deinitable):
         written as its empty wrapper element and an unset one is absent."""
 
     # `config` -> wire `Config` (required)
-    var config: TinyConfig
+    var config: S3Config
 
     # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
     # synthesis is not co-inductive and its cycle guard caches a
@@ -539,7 +648,7 @@ struct TinySetConfigRequest(Copyable, Movable, Deinitable):
     def __deinit__(deinit self):
         pass
 
-    def __init__(out self, var config: TinyConfig):
+    def __init__(out self, var config: S3Config):
         self.config = config^
 
     def copy(self) -> Self:
@@ -550,35 +659,36 @@ struct TinySetConfigRequest(Copyable, Movable, Deinitable):
     def write_aws_xml(self, mut w: XmlWriter) raises:
         """This shape's member elements, into the element the caller opened."""
         aws_xml_start(w, String("Config"))
-        aws_xml_namespace(w, String(""), String("https://tiny.example.com/doc/2026-09-30/"))
+        aws_xml_namespace(w, String(""), String("https://tiny.example.com/doc/"))
         self.config.write_aws_xml(w)
         aws_xml_end(w)
 
     @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinySetConfigRequest:
+    def from_aws_xml(node: XmlNode) raises -> S3SetConfigRequest:
         """Read this shape from its element. An element the shape does not
             name is ignored; a non-list member that occurs twice takes the last."""
         var _xc_config = aws_xml_child(node, String("Config"))
         if _xc_config < 0:
-            raise Error("TinySetConfigRequest.from_aws_xml: required member `Config` is absent from the response.")
-        var _r_config = TinyConfig.from_aws_xml(node.children[_xc_config])
-        var out = TinySetConfigRequest(_r_config^)
+            raise Error("S3SetConfigRequest.from_aws_xml: required member `Config` is absent from the response.")
+        var _r_config = S3Config.from_aws_xml(node.children[_xc_config])
+        var out = S3SetConfigRequest(_r_config^)
         return out^
 
 
 # ---------------------------------------------------------------------------
-# `TinySetConfigResponse` — AWS shape `SetConfigResponse`.
+# `S3SetConfigResponse` — AWS shape `SetConfigResponse`.
 # ---------------------------------------------------------------------------
-struct TinySetConfigResponse(Copyable, Movable, Deinitable):
-    """AWS shape `SetConfigResponse` — 1 member(s), 0 required by the model.
+struct S3SetConfigResponse(Copyable, Movable, Deinitable):
+    """AWS shape `SetConfigResponse` — 0 member(s), 0 required by the model.
+
+        SYNTHESISED: the operation declares no shape here, so its request
+        or response binds nothing and has no body.
 
         Required members are plain fields taken by `__init__`; every other
         member is `Optional[...]` and is OMITTED from the document when
         unset. PRESENCE IS NOT EMPTINESS: an explicitly-set empty list is
         written as its empty wrapper element and an unset one is absent."""
 
-    # `config` -> wire `Config`
-    var config: Optional[TinyConfig]
 
     # PORT(1.0.0): explicit destructor — 1.0.0's `Deinitable`
     # synthesis is not co-inductive and its cycle guard caches a
@@ -589,32 +699,22 @@ struct TinySetConfigResponse(Copyable, Movable, Deinitable):
         pass
 
     def __init__(out self):
-        self.config = Optional[TinyConfig]()
+        pass
 
     def copy(self) -> Self:
         """Deep clone. Explicit, not implicit: every member is heap-owning."""
         var out = Self()
-        out.config = self.config.copy()
         return out^
-
-    def set_config(mut self, var value: TinyConfig):
-        self.config = Optional[TinyConfig](value^)
 
     def write_aws_xml(self, mut w: XmlWriter) raises:
         """This shape's member elements, into the element the caller opened."""
-        if self.config:
-            aws_xml_start(w, String("Config"))
-            self.config.value().write_aws_xml(w)
-            aws_xml_end(w)
+        pass
 
     @staticmethod
-    def from_aws_xml(node: XmlNode) raises -> TinySetConfigResponse:
+    def from_aws_xml(node: XmlNode) raises -> S3SetConfigResponse:
         """Read this shape from its element. An element the shape does not
             name is ignored; a non-list member that occurs twice takes the last."""
-        var out = TinySetConfigResponse()
-        var _xc_config = aws_xml_child(node, String("Config"))
-        if _xc_config >= 0:
-            out.set_config(TinyConfig.from_aws_xml(node.children[_xc_config]))
+        var out = S3SetConfigResponse()
         return out^
 
 
@@ -629,25 +729,62 @@ struct TinySetConfigResponse(Copyable, Movable, Deinitable):
 # AWS account, which is not a gate anyone can run per-commit.
 # ===========================================================================
 
-def build_ping_request(input: TinyPingRequest) raises -> AwsRequest:
-    """`Ping` — the restXml request, serialised and NOT signed."""
+def build_get_blob_request(input: S3GetBlobRequest) raises -> AwsRequest:
+    """`GetBlob` — the restXml request, serialised and NOT signed."""
     var _ln = List[String]()
     var _lv = List[String]()
-    var _uri = AwsRestUri.expand(String("/ping"), _ln, _lv)
+    var _uri = AwsRestUri.expand(String("/blob"), _ln, _lv)
     var req = AwsRequest(String("GET"), _uri.target())
     return req^
 
-def parse_ping_response(resp: AwsResponse) raises -> TinyPingResponse:
-    """`Ping` — the restXml response: the bound headers and status, and
-        the body (an empty body sets nothing)."""
-    var node = aws_xml_parse(resp.body)
-    var out = TinyPingResponse()
-    var _xc_message = aws_xml_child(node, String("Message"))
-    if _xc_message >= 0:
-        out.set_message(aws_xml_string_of(node.children[_xc_message]))
+def parse_get_blob_head(resp: AwsResponse) raises -> S3GetBlobResponse:
+    """`GetBlob` — the restXml response without its body: the status and
+        the headers. `resp.body` is not read, so a caller can parse these
+        before the streaming `Body` body arrives."""
+    var out = S3GetBlobResponse()
     return out^
 
-def build_put_thing_request(input: TinyPutThingRequest) raises -> AwsRequest:
+def parse_get_blob_response(resp: AwsResponse) raises -> S3GetBlobResponse:
+    """`GetBlob` — the restXml response: `parse_get_blob_head`, and the body
+        as the payload (unset when the body is empty)."""
+    var out = parse_get_blob_head(resp)
+    if len(resp.body) > 0:
+        out.set_body(resp.body.copy())
+    return out^
+
+def build_get_bytes_request(input: S3GetBlobRequest) raises -> AwsRequest:
+    """`GetBytes` — the restXml request, serialised and NOT signed."""
+    var _ln = List[String]()
+    var _lv = List[String]()
+    var _uri = AwsRestUri.expand(String("/bytes"), _ln, _lv)
+    var req = AwsRequest(String("GET"), _uri.target())
+    return req^
+
+def parse_get_bytes_response(resp: AwsResponse) raises -> S3GetBytesResponse:
+    """`GetBytes` — the restXml response: the bound headers and status, and
+        the body (an empty body sets nothing)."""
+    var out = S3GetBytesResponse()
+    if len(resp.body) > 0:
+        out.set_body(resp.body.copy())
+    return out^
+
+def build_get_policy_request(input: S3GetBlobRequest) raises -> AwsRequest:
+    """`GetPolicy` — the restXml request, serialised and NOT signed."""
+    var _ln = List[String]()
+    var _lv = List[String]()
+    var _uri = AwsRestUri.expand(String("/policy"), _ln, _lv)
+    var req = AwsRequest(String("GET"), _uri.target())
+    return req^
+
+def parse_get_policy_response(resp: AwsResponse) raises -> S3GetPolicyResponse:
+    """`GetPolicy` — the restXml response: the bound headers and status, and
+        the body (an empty body sets nothing)."""
+    var out = S3GetPolicyResponse()
+    if len(resp.body) > 0:
+        out.set_policy(resp.body_text())
+    return out^
+
+def build_put_thing_request(input: S3PutThingRequest) raises -> AwsRequest:
     """`PutThing` — the restXml request, serialised and NOT signed."""
     var _ln = List[String]()
     var _lv = List[String]()
@@ -669,7 +806,7 @@ def build_put_thing_request(input: TinyPutThingRequest) raises -> AwsRequest:
     if _xb:
         var _w = XmlWriter()
         aws_xml_start(_w, String("PutThingRequest"))
-        aws_xml_namespace(_w, String(""), String("https://tiny.example.com/doc/2026-09-30/"))
+        aws_xml_namespace(_w, String(""), String("https://tiny.example.com/doc/"))
         if input.size:
             aws_xml_write_int(_w, String("Size"), Int64(input.size.value()))
         if input.created:
@@ -687,16 +824,29 @@ def build_put_thing_request(input: TinyPutThingRequest) raises -> AwsRequest:
         aws_xml_end(_w)
         aws_xml_set_body(req, _w)
         if not req.has_header(String("Content-Type")):
-            req.set_header(String("Content-Type"), String(TINY_CONTENT_TYPE))
+            req.set_header(String("Content-Type"), String(S3_CONTENT_TYPE))
     return req^
 
-def parse_put_thing_response(resp: AwsResponse) raises -> TinyPutThingResponse:
+def parse_put_thing_response(resp: AwsResponse) raises -> S3PutThingResponse:
     """`PutThing` — the restXml response: the bound headers and status, and
         the body (an empty body sets nothing)."""
+    if aws_xml_body_is_error(resp):
+        var _ei = aws_rest_xml_error(resp)
+        raise Error(
+            String("S3S3.PutThing failed: HTTP 500 ")
+            + _ei.code
+            + String(" ")
+            + _ei.message
+        )
     var node = aws_xml_parse(resp.body)
-    var out = TinyPutThingResponse()
+    var out = S3PutThingResponse()
     if resp.has_header(String("ETag")):
         out.set_e_tag(aws_header_field(resp, String("ETag")))
+    if resp.has_header(String("Expires")):
+        try:
+            out.set_expires(aws_ts_from_text(aws_header_field(resp, String("Expires")), AWS_TS_RFC822))
+        except:
+            pass
     var _xc_size = aws_xml_child(node, String("Size"))
     if _xc_size >= 0:
         out.set_size(aws_xml_int_of(node.children[_xc_size], 64))
@@ -708,13 +858,13 @@ def parse_put_thing_response(resp: AwsResponse) raises -> TinyPutThingResponse:
         out.set_tags(_v_tags^)
     var _xs_parts = aws_xml_list_items(node, String("Part"), String("member"), True)
     if _xs_parts:
-        var _v_parts = List[TinyPart]()
+        var _v_parts = List[S3Part]()
         for _xi1 in range(len(_xs_parts.value())):
-            _v_parts.append(TinyPart.from_aws_xml(_xs_parts.value()[_xi1]))
+            _v_parts.append(S3Part.from_aws_xml(_xs_parts.value()[_xi1]))
         out.set_parts(_v_parts^)
     return out^
 
-def build_set_config_request(input: TinySetConfigRequest) raises -> AwsRequest:
+def build_set_config_request(input: S3SetConfigRequest) raises -> AwsRequest:
     """`SetConfig` — the restXml request, serialised and NOT signed."""
     var _ln = List[String]()
     var _lv = List[String]()
@@ -722,20 +872,19 @@ def build_set_config_request(input: TinySetConfigRequest) raises -> AwsRequest:
     var req = AwsRequest(String("PUT"), _uri.target())
     var _w = XmlWriter()
     aws_xml_start(_w, String("Config"))
-    aws_xml_namespace(_w, String(""), String("https://tiny.example.com/doc/2026-09-30/"))
+    aws_xml_namespace(_w, String(""), String("https://tiny.example.com/doc/"))
     input.config.write_aws_xml(_w)
     aws_xml_end(_w)
     aws_xml_set_body(req, _w)
     if not req.has_header(String("Content-Type")):
-        req.set_header(String("Content-Type"), String(TINY_CONTENT_TYPE))
+        req.set_header(String("Content-Type"), String(S3_CONTENT_TYPE))
     return req^
 
-def parse_set_config_response(resp: AwsResponse) raises -> TinySetConfigResponse:
+def parse_set_config_response(resp: AwsResponse) raises -> S3SetConfigResponse:
     """`SetConfig` — the restXml response: the bound headers and status, and
         the body (an empty body sets nothing)."""
-    var out = TinySetConfigResponse()
-    if len(resp.body) > 0:
-        out.set_config(TinyConfig.from_aws_xml(aws_xml_parse(resp.body)))
+    _ = resp
+    var out = S3SetConfigResponse()
     return out^
 
 

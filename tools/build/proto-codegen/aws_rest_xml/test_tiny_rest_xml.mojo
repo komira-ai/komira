@@ -3,8 +3,9 @@
 # it builds (target, headers and XML body) and the responses it reads
 # (headers, a wrapped and a flattened list, a structure), each compared
 # exactly, and the two `s3` behaviors: a 200 whose body is an <Error> is
-# raised unless the output payload is a blob, and an Expires header that is
-# not a date is left unset.
+# raised as an HTTP 500 is, unless the output payload is a blob or a string
+# or the operation has no output, and an Expires header that is not a date
+# is left unset.
 from komira_aws_tiny_xml.komira_aws_tiny_xml import (
     S3Config,
     S3GetBlobRequest,
@@ -14,7 +15,10 @@ from komira_aws_tiny_xml.komira_aws_tiny_xml import (
     build_put_thing_request,
     build_set_config_request,
     parse_get_blob_response,
+    parse_get_bytes_response,
+    parse_get_policy_response,
     parse_put_thing_response,
+    parse_set_config_response,
 )
 from komira_aws_core import AwsResponse
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
@@ -100,10 +104,10 @@ def test_put_thing_response() raises:
         ),
     )
     resp.add_header(String("ETag"), String('"abc"'))
-    resp.add_header(String("Expires"), String("Thu, 01 Jan 2026 00:00:00 GMT"))
+    resp.add_header(String("Expires"), String("Thu, 01 Oct 2026 00:00:00 GMT"))
     var out = parse_put_thing_response(resp)
     assert_equal(out.e_tag.value(), '"abc"')
-    assert_equal(out.expires.value(), Float64(1767225600.0))
+    assert_equal(out.expires.value(), Float64(1790812800.0))
     assert_equal(out.size.value(), Int64(7))
     var tags = out.tags.value().copy()
     assert_equal(len(tags), 2)
@@ -139,10 +143,13 @@ def test_s3_a_200_error_body_is_raised() raises:
     var body = String(
         "<Error><Code>InternalError</Code><Message>try again</Message></Error>"
     )
-    with assert_raises(contains="handled as HTTP 500: InternalError try again"):
+    # In the client's text for an HTTP 500 with that code and message.
+    with assert_raises(
+        contains="PutThing failed: HTTP 500 InternalError try again"
+    ):
         _ = parse_put_thing_response(AwsResponse.of_text(200, body))
     # A body cut short in transit is not XML, and is raised too.
-    with assert_raises(contains="handled as HTTP 500"):
+    with assert_raises(contains="PutThing failed: HTTP 500 "):
         _ = parse_put_thing_response(
             AwsResponse.of_text(200, String("<PutThingResponse><Si"))
         )
@@ -150,9 +157,26 @@ def test_s3_a_200_error_body_is_raised() raises:
 
 def test_s3_a_blob_payload_is_never_an_error_body() raises:
     var body = String("<Error><Code>InternalError</Code></Error>")
+    # Streaming (read by its head parser) and not.
     var out = parse_get_blob_response(AwsResponse.of_text(200, body))
     assert_equal(len(out.body.value()), body.byte_length())
+    var got = parse_get_bytes_response(AwsResponse.of_text(200, body))
+    var bytes = got.body.value().copy()
+    assert_equal(len(bytes), body.byte_length())
+    for i in range(len(bytes)):
+        assert_equal(bytes[i], body.as_bytes()[i])
     _ = S3GetBlobRequest()
+
+
+def test_s3_a_string_payload_is_never_an_error_body() raises:
+    var body = String("<Error><Code>InternalError</Code></Error>")
+    var out = parse_get_policy_response(AwsResponse.of_text(200, body))
+    assert_equal(out.policy.value(), body)
+
+
+def test_s3_an_operation_with_no_output_never_reads_an_error_body() raises:
+    var body = String("<Error><Code>InternalError</Code></Error>")
+    _ = parse_set_config_response(AwsResponse.of_text(200, body))
 
 
 def test_a_body_that_is_not_utf8_is_refused() raises:
@@ -171,4 +195,6 @@ def main() raises:
     test_s3_an_expires_that_is_not_a_date_is_left_unset()
     test_s3_a_200_error_body_is_raised()
     test_s3_a_blob_payload_is_never_an_error_body()
+    test_s3_a_string_payload_is_never_an_error_body()
+    test_s3_an_operation_with_no_output_never_reads_an_error_body()
     test_a_body_that_is_not_utf8_is_refused()

@@ -812,11 +812,14 @@ impl AwsEmitter<'_> {
     }
 
     /// `s3`: a 200 response whose body is an `<Error>` (or is not XML) is
-    /// raised as an error handled as an HTTP 500, for an operation whose
-    /// output payload is not a blob or a string (botocore
-    /// `_handle_200_error`). Nothing without the customization.
+    /// raised as the error an HTTP 500 is, in the client's text for one
+    /// (`<Service>.<Op> failed: HTTP 500 <code> <message>`), for an
+    /// operation that has an output shape whose payload is not a blob or a
+    /// string (botocore `_handle_200_error` and `_should_handle_200_error`).
+    /// A streaming payload is read by `parse_<op>_head`, which never checks.
+    /// Nothing without the customization.
     fn emit_s3_200_error_check(&mut self, facts: &AwsOperationFacts, members: &[Bound]) {
-        if !self.options.s3 {
+        if !self.options.s3 || facts.output_shape.is_none() {
             return;
         }
         let raw_payload = members.iter().any(|b| {
@@ -829,13 +832,15 @@ impl AwsEmitter<'_> {
         if raw_payload {
             return;
         }
+        let svc = self.ty_name(&self.lowering.model.files[0].services[0].name);
         self.line("if aws_xml_body_is_error(resp):");
         self.push();
         self.line("var _ei = aws_rest_xml_error(resp)");
         self.line("raise Error(");
         self.push();
         self.line(&format!(
-            "String(\"{}: HTTP 200 with an <Error> body, handled as HTTP 500: \")",
+            "String(\"{}.{} failed: HTTP 500 \")",
+            escape(&svc),
             escape(&facts.name)
         ));
         self.line("+ _ei.code");
@@ -1076,8 +1081,13 @@ impl AwsEmitter<'_> {
                     "var {raw} = aws_prefix_headers(resp, String(\"{}\"))",
                     escape(&b.wire)
                 ));
-                // botocore sets a restXml prefix-header map whether or not a
-                // header carries the prefix (`HttpPrefixHeadersAreNotPresent`).
+                // botocore sets a prefix-header map whether or not a header
+                // carries the prefix (`BaseRestParser._parse_non_payload_attrs`,
+                // shared by every REST protocol; the restXml corpus's
+                // `HttpPrefixHeadersAreNotPresent`). restXml follows it here.
+                // restJson1 still leaves the map unset when no header carries
+                // the prefix: aligning it changes the restJson1 goldens, so it
+                // is deferred to a change that bumps AWS_GENERATOR_VERSION.
                 let guarded = self.protocol != AwsProtocol::RestXml;
                 if guarded {
                     self.line(&format!("if len({raw}) > 0:"));

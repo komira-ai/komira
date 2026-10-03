@@ -192,18 +192,21 @@
 #      refuse, and with this machine's, pass.
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
 #      GetLogEvents module, pure and client, a restJson1 client of a tiny
-#      model, and the layout probe of each, equal their text goldens byte for
-#      byte; the generator refuses an empty or missing operation list, an
-#      operation the model lacks, a protocol it does not implement, a restXml
-#      model reaching a union, an XML attribute or a body map, the `s3`
-#      customization on another model or an unknown customization, a
+#      model, a restXml module of a tiny S3-shaped model (pure, with the `s3`
+#      customization), and the layout probe of each, equal their text goldens
+#      byte for byte; the generator refuses an empty or missing operation
+#      list, an operation the model lacks, a protocol it does not implement, a
+#      restXml model reaching a union, an XML attribute or a body map, the
+#      `s3` customization unless the model's serviceId is `S3` and its
+#      protocol restXml, or an unknown customization, a
 #      missing, malformed (not 64 lowercase hex digits) or wrong
 #      --model-sha256, a zero-byte model, and --probe-import without
 #      --probe-out, and writes no file when it refuses. A golden that
 #      differs, and a refusal check given inputs the generator accepts, both
-#      go red (tests//negative/aws_codegen). The tiny model's pure-mode
-#      client (komira//tools/build/proto-codegen/aws_rest_json) generated
-#      exactly its package's files, and its welded tests ran: see test 36.
+#      go red (tests//negative/aws_codegen). The tiny models' pure-mode
+#      clients (komira//tools/build/proto-codegen/aws_rest_json and
+#      aws_rest_xml) generated exactly their packages' files, and their
+#      welded tests ran: see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
 #      every one counted. In tests//negative/rust_test a failing #[test]

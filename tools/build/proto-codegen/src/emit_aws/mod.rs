@@ -40,8 +40,8 @@ pub struct AwsEmitOptions {
     pub emit_model_json: bool,
     pub pure_only: bool,
     pub omit_preamble: bool,
-    /// The `s3` customization (see [`S3_CUSTOMIZATION`]): accepted only for
-    /// S3's restXml model.
+    /// The `s3` customization (see [`S3_CUSTOMIZATION`]): refused unless the
+    /// model's serviceId is `S3` and its protocol is restXml.
     pub s3: bool,
 }
 
@@ -49,9 +49,11 @@ pub struct AwsEmitOptions {
 /// model, each from `botocore/handlers.py` at the pinned tag.
 ///
 /// - `_handle_200_error`: a 200 response whose body is an `<Error>` (or is
-///   not XML) is an error, handled as an HTTP 500, for every operation whose
-///   output payload is not a blob or a string. `parse_<op>_response` raises
-///   it, naming the code and message.
+///   not XML) is an error, handled as an HTTP 500, for every operation that
+///   has an output shape whose payload is not a blob or a string
+///   (`_should_handle_200_error`). `parse_<op>_response` raises it in the
+///   client's text for an HTTP 500 (`<Service>.<Op> failed: HTTP 500 <code>
+///   <message>`).
 /// - `handle_expires_header`: an `Expires` header that is not a valid date
 ///   leaves the member unset, and the rest of the response still parses.
 pub const S3_CUSTOMIZATION: &str = "s3";
@@ -86,6 +88,13 @@ pub enum AwsImportMode {
     /// conformance driver's), when its protocol's body is not JSON: that
     /// convention is JSON, so it needs the JSON runtime the body does not.
     ModelJson,
+    /// A module generated with the `s3` customization, in either mode: the
+    /// 200-with-`<Error>` check its parsers make.
+    S3,
+    /// Client mode, or a pure module generated with the `s3` customization:
+    /// the error reader, which the client's error builder and the `s3`
+    /// 200-with-`<Error>` check both call.
+    ClientOrS3,
 }
 
 /// One `from <module> import <names>` group of [`AWS_IMPORTS`].
@@ -246,8 +255,14 @@ pub const AWS_IMPORTS: &[AwsImport] = &[
     },
     AwsImport {
         module: AWS_CORE,
-        names: &["aws_rest_xml_error", "aws_xml_body_is_error"],
-        mode: AwsImportMode::Always,
+        names: &["aws_rest_xml_error"],
+        mode: AwsImportMode::ClientOrS3,
+        protocols: XML_BODY_PROTOCOLS,
+    },
+    AwsImport {
+        module: AWS_CORE,
+        names: &["aws_xml_body_is_error"],
+        mode: AwsImportMode::S3,
         protocols: XML_BODY_PROTOCOLS,
     },
     AwsImport {
@@ -316,17 +331,19 @@ pub fn aws_import_section_for(
     pure_only: bool,
     endpoint_rules: bool,
 ) -> String {
-    aws_import_section_with(protocols, pure_only, endpoint_rules, false)
+    aws_import_section_with(protocols, pure_only, endpoint_rules, false, false)
 }
 
 /// [`aws_import_section_for`], with the [`AwsImportMode::ModelJson`] rows
-/// when `model_json` is set. A name two applying rows both hold is imported
+/// when `model_json` is set and the [`AwsImportMode::S3`] rows when `s3` is
+/// (the `s3` customization). A name two applying rows both hold is imported
 /// once, where its first row puts it.
 pub fn aws_import_section_with(
     protocols: &[AwsProtocol],
     pure_only: bool,
     endpoint_rules: bool,
     model_json: bool,
+    s3: bool,
 ) -> String {
     let mut groups: Vec<(&str, Vec<&str>)> = Vec::new();
     for row in AWS_IMPORTS {
@@ -337,6 +354,12 @@ pub fn aws_import_section_with(
             continue;
         }
         if !model_json && row.mode == AwsImportMode::ModelJson {
+            continue;
+        }
+        if !s3 && row.mode == AwsImportMode::S3 {
+            continue;
+        }
+        if pure_only && !s3 && row.mode == AwsImportMode::ClientOrS3 {
             continue;
         }
         if !row.protocols.iter().any(|p| protocols.contains(p)) {
@@ -458,8 +481,9 @@ pub fn emit_aws_module_with_endpoints(
         && (lowering.service.service_id != "S3" || selected.protocol != AwsProtocol::RestXml)
     {
         return Err(format!(
-            "emit_aws: the `{S3_CUSTOMIZATION}` customization applies only to S3's restXml \
-             model, and service `{}` has serviceId `{}` and protocol `{}`",
+            "emit_aws: the `{S3_CUSTOMIZATION}` customization is refused unless the model's \
+             serviceId is `S3` and its protocol is restXml, and service `{}` has serviceId \
+             `{}` and protocol `{}`",
             lowering.service.service, lowering.service.service_id, lowering.service.protocol
         ));
     }
@@ -794,7 +818,7 @@ impl<'a> AwsEmitter<'a> {
             if self.options.pure_only { "pure (no transport)" } else { "client" }
         ));
         if self.options.s3 {
-            self.line("#   customizations: s3 (botocore handlers.py: 200-with-<Error> as an");
+            self.line("#   customize    : s3 (botocore handlers.py: 200-with-<Error> as an");
             self.line("#                  error, an invalid Expires header left unset)");
         }
         self.line("#");
@@ -868,6 +892,7 @@ impl<'a> AwsEmitter<'a> {
             self.options.pure_only,
             self.endpoint_rules.is_some(),
             self.options.emit_model_json,
+            self.options.s3,
         );
         self.out.push_str(&section);
         self.blank();
@@ -1862,7 +1887,7 @@ impl<'a> AwsEmitter<'a> {
 /// `protocols` needs. The conformance driver emits this ONCE ahead of its
 /// concatenated suites.
 pub fn pure_preamble(protocols: &[AwsProtocol], with_model_json: bool) -> String {
-    let mut em = aws_import_section_with(protocols, true, false, with_model_json);
+    let mut em = aws_import_section_with(protocols, true, false, with_model_json, false);
     em.push_str("\n\n");
     if with_model_json {
         em.push_str("def _aws_bytes_to_string(b: List[UInt8]) -> String:\n");
@@ -2083,20 +2108,28 @@ mod tests {
             assert!(s.contains("from komira_xml import (\n    XmlNode,\n    XmlWriter,\n)"), "{s}");
             assert!(s.contains("    aws_xml_write_string,"), "{s}");
             assert!(!s.contains("komira_json"), "{s}");
-            let m = aws_import_section_with(&[p], pure_only, false, true);
+            let m = aws_import_section_with(&[p], pure_only, false, true, false);
             assert!(m.contains("from komira_json import JsonValue"), "{m}");
             assert!(m.contains("    aws_json_f64,"), "{m}");
         }
-        // A pure module reads restXml errors too: the `s3` customization's
-        // 200-with-<Error> check raises one.
+        // A client reads restXml errors; a pure module only with the `s3`
+        // customization, whose 200-with-<Error> check raises one. Only that
+        // customization takes the check itself.
+        let plain_pure = aws_import_section(p, true);
+        assert!(!plain_pure.contains("aws_rest_xml_error"), "{plain_pure}");
+        assert!(!plain_pure.contains("aws_xml_body_is_error"), "{plain_pure}");
+        let plain_client = aws_import_section(p, false);
+        assert!(plain_client.contains("    aws_rest_xml_error,"), "{plain_client}");
+        assert!(!plain_client.contains("aws_xml_body_is_error"), "{plain_client}");
         for pure_only in [true, false] {
-            assert!(aws_import_section(p, pure_only).contains("    aws_rest_xml_error,"));
+            let s3 = aws_import_section_with(&[p], pure_only, false, false, true);
+            assert!(s3.contains("    aws_rest_xml_error,\n    aws_xml_body_is_error,\n"), "{s3}");
         }
         // The model rows add nothing a JSON-body module does not already
         // import: the section is the same text with and without them.
         for p in JSON_BODY_PROTOCOLS {
             assert_eq!(
-                aws_import_section_with(&[*p], true, false, true),
+                aws_import_section_with(&[*p], true, false, true, false),
                 aws_import_section(*p, true)
             );
         }
@@ -2109,6 +2142,7 @@ mod tests {
             true,
             false,
             true,
+            false,
         );
         assert_eq!(s.matches("    JsonValue,").count(), 1, "{s}");
         assert_eq!(s.matches("    aws_json_f64,").count(), 1, "{s}");

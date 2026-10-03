@@ -31,6 +31,18 @@
    "http": {"method": "GET", "requestUri": "/blob"},
    "input": {"shape": "GetBlobRequest"},
    "output": {"shape": "GetBlobResponse"}
+  },
+  "GetBytes": {
+   "name": "GetBytes",
+   "http": {"method": "GET", "requestUri": "/bytes"},
+   "input": {"shape": "GetBlobRequest"},
+   "output": {"shape": "GetBytesResponse"}
+  },
+  "GetPolicy": {
+   "name": "GetPolicy",
+   "http": {"method": "GET", "requestUri": "/policy"},
+   "input": {"shape": "GetBlobRequest"},
+   "output": {"shape": "GetPolicyResponse"}
   }
  },
  "shapes": {
@@ -73,6 +85,16 @@
    "type": "structure",
    "members": {"Body": {"shape": "Blob", "streaming": true}},
    "payload": "Body"
+  },
+  "GetBytesResponse": {
+   "type": "structure",
+   "members": {"Body": {"shape": "Blob"}},
+   "payload": "Body"
+  },
+  "GetPolicyResponse": {
+   "type": "structure",
+   "members": {"Policy": {"shape": "String"}},
+   "payload": "Policy"
   },
   "Config": {
    "type": "structure",
