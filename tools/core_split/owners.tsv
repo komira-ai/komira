@@ -26,6 +26,8 @@ komira_connect	origin/lib/komira_connect
 komira_crypto	origin/lib/komira_crypto-encoding
 komira_csv	origin/lib/komira_csv
 komira_db	origin/lib/komira_db
+komira_db_postgres	origin/lib/komira_db
+komira_db_sqlite	origin/lib/komira_db
 komira_deploy_bundle	origin/lib/komira_factory_build
 komira_eval	origin/lib/komira_eval
 komira_factory_build	origin/lib/komira_factory_build
