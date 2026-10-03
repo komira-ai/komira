@@ -30,7 +30,10 @@ komira_deploy_bundle	origin/lib/komira_factory_build
 komira_eval	origin/lib/komira_eval
 komira_factory_build	origin/lib/komira_factory_build
 komira_grpc	origin/lib/komira_grpc
-komira_http	origin/lib/komira_http
+komira_http_client	origin/lib/komira_http
+komira_http_core	origin/lib/komira_http
+komira_http_server	origin/lib/komira_http
+komira_http_status_hook	origin/lib/komira_http
 komira_jsonl	origin/lib/komira_jsonl
 komira_jwks	origin/lib/komira_jwks
 komira_k8s	origin/lib/komira_k8s
@@ -42,10 +45,10 @@ komira_oci	origin/lib/komira_oci
 komira_orc	origin/lib/komira_orc
 komira_pg	origin/lib/komira_pg
 komira_placement	origin/lib/komira_placement
+komira_plan_proto	origin/lib/komira_rpc_plan
 komira_plan_wire	origin/lib/komira_plan_wire
 komira_pod_boot	origin/lib/komira_pod_boot
 komira_rpc_bundle	origin/lib/komira_deploy_compose
-komira_rpc_plan	origin/lib/komira_rpc_plan
 komira_search	origin/lib/komira_search
 komira_secret_registry	origin/lib/komira_secret_registry
 komira_secret_store	origin/lib/komira_secret_store
