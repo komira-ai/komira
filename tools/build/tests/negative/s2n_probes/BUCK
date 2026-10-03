@@ -1,0 +1,14 @@
+load("@komira//third_party/s2n-tls:features.bzl", "S2N_FEATURES")
+load("@komira//third_party/s2n-tls:srcs.bzl", "PROBES")
+load("//functional/s2n_probes:defs.bzl", "s2n_probe")
+
+# The s2n-tls feature probes that do not compile on linux x86_64 (glibc, the
+# zig C toolchain): the ones third_party/s2n-tls/features.bzl leaves out, so
+# the feature is not defined for the build. Each target must fail to build.
+# c_libs_tests.sh (sourced by run_tests.sh) builds each as an expect_red; the
+# passing probes are tests//functional/s2n_probes.
+[
+    cxx_library(**s2n_probe(name, flags))
+    for name, flags in PROBES.items()
+    if name not in S2N_FEATURES
+]
