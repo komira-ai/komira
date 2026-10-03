@@ -6,7 +6,13 @@
 # monotonic clock and a sleeper that records. A recording transport keeps
 # each attempt's signed request as it reached the HTTP client.
 #
-# Rows: a PutObject retried after a 503 is signed again at a later
+# `Wire.send` does what the generated client's `send` does with a resolved
+# target, `s3_200_error` included: the client passes it for the operations
+# that can answer a 200 with an <Error> (aws-client-gen's s3
+# customization), here CopyObject and CompleteMultipartUpload.
+# test_s3_client drives the generated client itself.
+#
+# Rows: a PutObject retried after a 503 SlowDown is signed again at a later
 # X-Amz-Date for the same path-style target; a GetObject that keeps getting
 # 503 SlowDown gives up after the standard mode's three sends and returns
 # the last answer, which raises as SlowDown; a CopyObject 200-with-<Error>
@@ -138,7 +144,9 @@ struct Wire(Movable):
             aws_standard_retry_policy(), ManualClock(), RecordingSleeper(), SplitMix64Rng(11)
         )
 
-    def send(mut self, req: AwsRequest, target: AwsSigningTarget) raises -> HttpResult:
+    def send(
+        mut self, req: AwsRequest, target: AwsSigningTarget, s3_200_error: Bool = False
+    ) raises -> HttpResult:
         """What the generated client's `send` does with a resolved target."""
         var extra = List[Header]()
         for i in range(len(target.header_names)):
@@ -168,6 +176,7 @@ struct Wire(Movable):
             content_type,
             req.body,
             extra,
+            s3_200_error=s3_200_error,
         )
 
     def slept(self) -> Int:
@@ -256,7 +265,7 @@ def test_copy_200_with_error_is_retried() raises:
         )
     )
     var w = Wire(c^)
-    var res = w.send(build_copy_object_request(input), target)
+    var res = w.send(build_copy_object_request(input), target, s3_200_error=True)
     assert_equal(len(w.t.sent), 2)
     var out = parse_copy_object_response(res^.into_response())
     assert_equal(out.copy_object_result.value().e_tag.value(), '"9b2c"')
@@ -276,7 +285,9 @@ def test_complete_200_with_error_is_not_resent() raises:
     var c = ScriptedConnector.with_stream(_internal_200())
     c.arm_next(_answer(200, "OK", "<CompleteMultipartUploadResult/>"))
     var w = Wire(c^)
-    var res = w.send(build_complete_multipart_upload_request(input), target)
+    var res = w.send(
+        build_complete_multipart_upload_request(input), target, s3_200_error=True
+    )
     # A POST: S3 may have completed the upload, so it is not resent; the
     # parser raises the answer as the 500 it is.
     assert_equal(len(w.t.sent), 1)

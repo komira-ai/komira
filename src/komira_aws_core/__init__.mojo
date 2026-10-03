@@ -62,6 +62,9 @@ clients.
   conditions for komira_retry over an `AwsAttempt`, with
   `aws_standard_retry_policy`; a request that is not retry-safe is resent
   only when the service cannot have acted on it.
+- `echo_connector.mojo`: `AwsEchoConnector`, a test double whose stream
+  answers each request with an error naming the request head as it reached
+  the wire, so a test of a generated client asserts each verb's request.
 - `s3_wire.mojo`: `s3_copy_source`, `s3_content_range_total` and
   `s3_apply_request_checksum` (over `s3_crc32` / `s3_checksum_crc32`), the
   S3 header values no model states.
@@ -153,9 +156,12 @@ from .aws_retry import (
     AwsAttempt,
     AwsRetryClassifier,
     aws_is_throttling_code,
+    aws_is_transient_code,
+    aws_is_transient_status,
     aws_method_is_idempotent,
     aws_standard_retry_policy,
     aws_transport_error_kind,
+    aws_transport_error_unsent,
 )
 from .aws_send import (
     AwsConnectorTransport,
@@ -166,6 +172,12 @@ from .aws_send import (
     aws_response_error_code,
     send_sigv4_signed_request,
     send_sigv4_signed_request_with,
+)
+from .echo_connector import (
+    AWS_ECHO_CODE,
+    AwsEchoConnector,
+    AwsEchoStream,
+    aws_echo_head,
 )
 from .aws_xml import (
     aws_rest_xml_error,

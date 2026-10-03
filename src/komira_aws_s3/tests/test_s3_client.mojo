@@ -14,13 +14,20 @@
 # Rows: a conditional PutObject that loses the race (412), a ranged
 # GetObject (206), two ListObjectsV2 pages, CreateMultipartUpload,
 # UploadPart and CompleteMultipartUpload, an AbortMultipartUpload of an
-# upload that is gone (404 NoSuchUpload), a HeadObject 404 (no body), and
-# the client's retries: a 503 SlowDown and a CopyObject 200-with-<Error>,
-# each answered on the second attempt. Those two wait the standard mode's
-# first backoff for real (at most 1 s); test_s3_retry drives the same
-# send with a recording sleeper.
+# upload that is gone (404 NoSuchUpload), and a HeadObject 404 (no body).
+# None of those answers is retried, so no row waits.
+#
+# Then each verb's request as it reached the wire: the client is given
+# komira_aws_core's AwsEchoConnector, whose answer is an S3 error naming
+# the request head, so a row asserts the request line (the path-style
+# target, the bucket once), the Host, the signing scope and the headers
+# the verb sends, through the generated client and its endpoint ruleset.
+#
+# The retries are test_s3_retry's: it drives the same send with a sleeper
+# that records, so no row here waits a real backoff.
 from komira_aws_s3.komira_aws_s3 import (
     S3AbortMultipartUploadRequest,
+    S3DeleteObjectRequest,
     S3CompleteMultipartUploadRequest,
     S3CompletedMultipartUpload,
     S3CompletedPart,
@@ -35,7 +42,9 @@ from komira_aws_s3.komira_aws_s3 import (
     S3UploadPartRequest,
 )
 from komira_aws_core import (
+    AWS_ECHO_CODE,
     AwsCredential,
+    AwsEchoConnector,
     StaticCredsSource,
     s3_content_range_total,
     s3_copy_source,
@@ -211,43 +220,6 @@ def _mk_head_404() raises -> ScriptedConnector:
     return ScriptedConnector.with_stream(_answer(404, "Not Found", ""))
 
 
-def _mk_503_then_ok() raises -> ScriptedConnector:
-    var c = ScriptedConnector.with_stream(
-        _answer(
-            503,
-            "Slow Down",
-            "<Error><Code>SlowDown</Code><Message>Please reduce your request"
-            " rate.</Message></Error>",
-        )
-    )
-    c.arm_next(_answer(200, "OK", "hello", "Content-Type: text/plain\r\n"))
-    return c^
-
-
-def _mk_copy_200_error_then_ok() raises -> ScriptedConnector:
-    var c = ScriptedConnector.with_stream(
-        _answer(
-            200,
-            "OK",
-            '<?xml version="1.0" encoding="UTF-8"?>\n<Error><Code>InternalError'
-            "</Code><Message>We encountered an internal error. Please try"
-            " again.</Message></Error>",
-        )
-    )
-    c.arm_next(
-        _answer(
-            200,
-            "OK",
-            String("<CopyObjectResult ")
-            + _NS
-            + "><LastModified>2026-10-01T12:00:00.000Z</LastModified>"
-            + "<ETag>&quot;9b2cf535f27731c974343645a3985328&quot;</ETag>"
-            + "</CopyObjectResult>",
-        )
-    )
-    return c^
-
-
 # ---- the rows --------------------------------------------------------------------
 
 
@@ -345,22 +317,137 @@ def test_head_404_has_no_body() raises:
         )
 
 
-def test_503_slow_down_is_retried() raises:
-    var client = _client(_mk_503_then_ok, _creds())
-    var out = client.get_object(S3GetObjectRequest(String("lake"), String("k")))
-    assert_equal(String(unsafe_from_utf8=Span(out.body.value())), "hello")
+# ---- the requests on the wire ----------------------------------------------------
 
 
-def test_copy_200_with_error_is_retried() raises:
-    var client = _client(_mk_copy_200_error_then_ok, _creds())
-    var input = S3CopyObjectRequest(
-        String("lake"), s3_copy_source(String("lake"), String("a")), String("b")
-    )
-    var out = client.copy_object(input)
-    assert_equal(
-        out.copy_object_result.value().e_tag.value(),
-        '"9b2cf535f27731c974343645a3985328"',
-    )
+comptime _Echo = S3S3Client[AwsEchoConnector, StaticCredsSource]
+
+
+def _mk_echo() raises -> AwsEchoConnector:
+    return AwsEchoConnector.xml()
+
+
+def _echo() raises -> _Echo:
+    return _Echo(_mk_echo, _creds(), String("us-east-1"), _config())
+
+
+def _wire(e: Error) raises -> String:
+    """The request head an echo answered with, lower-cased."""
+    var text = String(e)
+    var marker = String("failed: HTTP 400 ") + AWS_ECHO_CODE + " "
+    var at = text.find(marker)
+    if at < 0:
+        raise Error("not the echo's answer: " + text)
+    return String(text[byte = at + marker.byte_length() : text.byte_length()]).lower()
+
+
+def _check(wire: String, line: String, *wants: String) raises:
+    """`wire` starts with the request line `line` and holds every header
+    line of `wants`, and what every S3 request carries: the endpoint's
+    Host and a SigV4 signature scoped to us-east-1 and s3."""
+    assert_true(wire.startswith(line.lower() + " | "), line + " is not the start of " + wire)
+    var all = List[String]()
+    for w in wants:
+        all.append(w)
+    all.append(String("host: 127.0.0.1:9000"))
+    all.append(String("/us-east-1/s3/aws4_request, signedheaders="))
+    all.append(String("x-amz-content-sha256: "))
+    for i in range(len(all)):
+        assert_true(wire.find(all[i].lower()) >= 0, all[i] + " is not in " + wire)
+
+
+def test_put_object_on_the_wire() raises:
+    var client = _echo()
+    var input = S3PutObjectRequest(String("lake"), String("manifest.json"))
+    input.set_body(_bytes(String('{"v":2}')))
+    input.set_if_none_match(String("*"))
+    try:
+        _ = client.put_object(input)
+        raise Error("the echo answered PutObject with a success")
+    except e:
+        _check(
+            _wire(e),
+            "PUT /lake/manifest.json HTTP/1.1",
+            "if-none-match: *",
+            "x-amz-checksum-crc32: ",
+            "content-length: 7",
+        )
+
+
+def test_get_object_on_the_wire() raises:
+    var client = _echo()
+    var input = S3GetObjectRequest(String("lake"), String("data/a.parquet"))
+    input.set_range_(String("bytes=0-9"))
+    try:
+        _ = client.get_object(input)
+        raise Error("the echo answered GetObject with a success")
+    except e:
+        _check(_wire(e), "GET /lake/data/a.parquet HTTP/1.1", "range: bytes=0-9")
+
+
+def test_list_objects_v2_on_the_wire() raises:
+    var client = _echo()
+    var input = S3ListObjectsV2Request(String("lake"))
+    input.set_prefix(String("data/"))
+    try:
+        _ = client.list_objects_v2(input)
+        raise Error("the echo answered ListObjectsV2 with a success")
+    except e:
+        _check(_wire(e), "GET /lake?list-type=2&prefix=data%2F HTTP/1.1")
+
+
+def test_multipart_on_the_wire() raises:
+    var client = _echo()
+    try:
+        _ = client.create_multipart_upload(
+            S3CreateMultipartUploadRequest(String("lake"), String("big.bin"))
+        )
+        raise Error("the echo answered CreateMultipartUpload with a success")
+    except e:
+        _check(_wire(e), "POST /lake/big.bin?uploads HTTP/1.1")
+    var part = S3UploadPartRequest(String("lake"), String("big.bin"), Int32(1), String("u1"))
+    part.set_body(_bytes(String("part one")))
+    try:
+        _ = client.upload_part(part)
+        raise Error("the echo answered UploadPart with a success")
+    except e:
+        _check(
+            _wire(e),
+            "PUT /lake/big.bin?partNumber=1&uploadId=u1 HTTP/1.1",
+            "x-amz-checksum-crc32: ",
+        )
+    try:
+        _ = client.complete_multipart_upload(
+            S3CompleteMultipartUploadRequest(String("lake"), String("big.bin"), String("u1"))
+        )
+        raise Error("the echo answered CompleteMultipartUpload with a success")
+    except e:
+        _check(_wire(e), "POST /lake/big.bin?uploadId=u1 HTTP/1.1")
+    try:
+        _ = client.abort_multipart_upload(
+            S3AbortMultipartUploadRequest(String("lake"), String("big.bin"), String("u1"))
+        )
+        raise Error("the echo answered AbortMultipartUpload with a success")
+    except e:
+        _check(_wire(e), "DELETE /lake/big.bin?uploadId=u1 HTTP/1.1")
+
+
+def test_copy_and_delete_on_the_wire() raises:
+    var client = _echo()
+    try:
+        _ = client.copy_object(
+            S3CopyObjectRequest(
+                String("lake"), s3_copy_source(String("lake"), String("a")), String("b")
+            )
+        )
+        raise Error("the echo answered CopyObject with a success")
+    except e:
+        _check(_wire(e), "PUT /lake/b HTTP/1.1", "x-amz-copy-source: lake/a")
+    try:
+        _ = client.delete_object(S3DeleteObjectRequest(String("lake"), String("b")))
+        raise Error("the echo answered DeleteObject with a success")
+    except e:
+        _check(_wire(e), "DELETE /lake/b HTTP/1.1")
 
 
 def main() raises:
@@ -370,6 +457,9 @@ def main() raises:
     test_multipart_create_upload_complete()
     test_abort_of_a_gone_upload_is_404()
     test_head_404_has_no_body()
-    test_503_slow_down_is_retried()
-    test_copy_200_with_error_is_retried()
+    test_put_object_on_the_wire()
+    test_get_object_on_the_wire()
+    test_list_objects_v2_on_the_wire()
+    test_multipart_on_the_wire()
+    test_copy_and_delete_on_the_wire()
     print("OK")

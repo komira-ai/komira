@@ -19,12 +19,11 @@
 # deadline (`aws_standard_retry_policy`).
 #
 # S3's 200 whose body is an <Error> (botocore's `_handle_200_error`) is read
-# here as a 500 for any S3 request but GET and HEAD, the requests whose
-# operations AWS documents as answering it (CopyObject, UploadPartCopy,
-# CompleteMultipartUpload, DeleteObjects among them). A GET's body may be an
-# object whose content is an XML document with an <Error> root, which this
-# layer cannot tell from the error; the generated parser of a GET operation
-# whose output is not a payload still raises it, as a 500, without a retry.
+# here as a 500 when the caller says the operation can answer one
+# (`s3_200_error`). The generated S3 client says so for each operation
+# botocore's `_should_handle_200_error` names: one with an output shape
+# whose payload is not a blob or a string, so not GetObject, whose body may
+# be an object that is itself an XML document with an <Error> root.
 #
 # `send_sigv4_signed_request_with` is the same send over injected seams:
 # the transport (`AwsHttpTransport`), the signing clock, the retry loop (its
@@ -36,12 +35,22 @@
 # The connector is made once per call, so the attempts of one call share
 # its HTTP client (and a kept-alive connection) and the connector's dials.
 # The HTTP client runs on a `BlockingRuntime`: the call blocks its thread.
+# Nothing is pooled across calls.
+#
+# A RESPONSE BODY IS BUFFERED WHOLE, up to komira_http_client's default cap
+# of 100 MiB (`HttpClientConfig.max_response_body_bytes`). A larger body,
+# such as an S3 GetObject of a bigger object without a Range, fails with
+# `HttpError[BODY_TOO_LARGE]` and is not retried; read such an object in
+# ranges.
 #
 # The retry loop runs on komira_clock's monotonic clock and waits in a
 # reactor (`AwsReactorSleeper`), not on komira_retry's `SystemClock` and
-# `SystemSleeper`: those call `std.time`, whose `nanosleep` declaration
-# conflicts with komira_async's in one program, so a binary holding the
-# HTTP client cannot also hold them.
+# `SystemSleeper`. Those call `std.time.sleep`, whose foreign declaration of
+# libc's `nanosleep` has a different signature from the one komira_async's
+# reactor makes (it passes the timespec as a byte pointer and returns an
+# Int32), and one program cannot hold both declarations: a binary holding
+# the HTTP client cannot also hold them. Once those declarations agree,
+# `aws_system_retry_loop` becomes komira_retry's `system_retry_loop`.
 # =============================================================================
 
 from komira_async.ops.waker_sink import NoopSink
@@ -78,11 +87,7 @@ from .aws_xml import aws_xml_body_is_error, aws_xml_error_info
 from .credential import AwsCredential
 from .credential_transport import CredentialHttpRequest
 from .endpoint import AwsEndpoint
-from .signed_request import (
-    AwsPayloadSigning,
-    build_sigv4_signed_request,
-    is_s3_signing_name,
-)
+from .signed_request import AwsPayloadSigning, build_sigv4_signed_request
 from .sigv4 import Header
 from .sources import AwsClock, SystemAwsClock
 
@@ -178,18 +183,23 @@ struct AwsMonotonicClock(MonotonicClock, Movable, Deinitable):
 
 struct AwsReactorSleeper(Sleeper, Movable, Deinitable):
     """Blocks the calling thread for a retry's wait in a reactor with
-    nothing registered (epoll or kqueue with a timeout)."""
+    nothing registered (epoll or kqueue with a timeout). The reactor is
+    made on the first wait, so a call that is never retried makes none."""
 
-    var _rt: BlockingRuntime[NoopSink]
+    var _rt: Optional[BlockingRuntime[NoopSink]]
 
-    def __init__(out self) raises:
-        self._rt = BlockingRuntime[NoopSink].new(NoopSink(_placeholder=UInt8(0)))
+    def __init__(out self):
+        self._rt = None
 
     def sleep_ms(mut self, ms: Int64) raises:
         if ms <= 0:
             return
         var deadline = Int64(Int(now_ns())) + ms * 1_000_000
-        ref reactor = self._rt.reactor()
+        if not self._rt:
+            self._rt = BlockingRuntime[NoopSink].new(
+                NoopSink(_placeholder=UInt8(0))
+            )
+        ref reactor = self._rt.value().reactor()
         while True:
             var left_us = (deadline - Int64(Int(now_ns()))) // 1000
             if left_us <= 0:
@@ -270,6 +280,7 @@ def send_sigv4_signed_request_with[
     body: List[UInt8],
     extra: List[Header],
     retry_safe: Bool = False,
+    s3_200_error: Bool = False,
     payload: AwsPayloadSigning = AwsPayloadSigning.hashed(),
 ) raises -> HttpResult:
     """`send_sigv4_signed_request` over the given seams (module header).
@@ -280,11 +291,10 @@ def send_sigv4_signed_request_with[
     the first successful response, or the last failed one once no retry
     follows. Raises when the last attempt got no response, naming the
     transport's error and why it was not retried. `retry_safe` states that
-    the operation may be repeated though its method is not idempotent."""
+    the operation may be repeated though its method is not idempotent;
+    `s3_200_error` that a 200 whose body is an <Error> is S3's error (the
+    module header)."""
     var safe = retry_safe or aws_method_is_idempotent(method)
-    var s3_200_error = (
-        is_s3_signing_name(service) and method != "GET" and method != "HEAD"
-    )
     var classifier = AwsRetryClassifier()
     retry.start()
     while True:
@@ -337,12 +347,14 @@ def send_sigv4_signed_request[C: Connector](
     body: List[UInt8],
     extra: List[Header],
     retry_safe: Bool = False,
+    s3_200_error: Bool = False,
 ) raises -> HttpResult:
     """Sign `method uri` for (`region`, `service`) with `cred`, send it to
     `endpoint` over a connector `mk_connector` makes, and retry as the AWS
     SDKs' standard mode does (aws_retry.mojo): at most three sends, full
     jitter from 1 s, every attempt signed at the wall clock's time. The
     content type and every `extra` header are signed (signed_request.mojo).
+    `retry_safe` and `s3_200_error` are `send_sigv4_signed_request_with`'s.
     Returns the last response; raises when the last attempt got none."""
     var transport = AwsConnectorTransport[C](mk_connector())
     var clock = SystemAwsClock()
@@ -363,4 +375,5 @@ def send_sigv4_signed_request[C: Connector](
         body,
         extra,
         retry_safe=retry_safe,
+        s3_200_error=s3_200_error,
     )

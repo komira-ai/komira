@@ -7,15 +7,20 @@
 # and the sleeping are komira_retry's; `aws_standard_retry_policy` is the
 # AWS SDKs' standard retry mode in its terms.
 #
-# What is retried follows botocore's standard mode
-# (botocore/retries/standard.py, at the release third_party/botocore pins):
+# What is retried follows botocore's standard mode, botocore/retries/
+# standard.py at the release third_party/botocore pins. test_aws_retry
+# reads that file from the pinned archive (`:retries`) and checks every
+# entry of its lists and every constant below against it:
 #
 #   transient   a transport error (botocore: ConnectionError,
-#               HTTPClientError); a status 500, 502, 503 or 504; the codes
-#               RequestTimeout, RequestTimeoutException and InternalError.
-#               S3's 200 whose body is an <Error> counts as a 500 (botocore's
-#               s3 `_handle_200_error`), read by `send_sigv4_signed_request`.
-#   throttled   the codes of `_THROTTLED_ERROR_CODES`: Throttling,
+#               HTTPClientError); a status of `_TRANSIENT_STATUS_CODES`
+#               (500, 502, 503, 504); a code of `_TRANSIENT_ERROR_CODES`
+#               (RequestTimeout, RequestTimeoutException,
+#               PriorRequestNotComplete). S3's 200 whose body is an <Error>
+#               counts as a 500 (botocore's s3 `_handle_200_error`), read by
+#               `send_sigv4_signed_request` for the operations its generated
+#               client names.
+#   throttled   a code of `_THROTTLED_ERROR_CODES`: Throttling,
 #               ThrottlingException, ThrottledException,
 #               RequestThrottledException, TooManyRequestsException,
 #               ProvisionedThroughputExceededException,
@@ -24,8 +29,44 @@
 #               RequestThrottled, SlowDown, PriorRequestNotComplete and
 #               EC2ThrottledException.
 #
-# A retry costs 5 from a retry budget, and 10 when the transport timed out
-# (botocore's `_RETRY_COST` and `_TIMEOUT_RETRY_COST`).
+# A retry costs 5 from a retry budget (`_RETRY_COST`), and 10 when the
+# transport timed out (`_TIMEOUT_RETRY_REQUEST`). Three sends in all
+# (`DEFAULT_MAX_ATTEMPTS`), waiting a uniform draw from [0, min(2^(i-1),
+# 20)] seconds before send i+1 (`ExponentialBackoff`, `_BASE` 2,
+# `_MAX_BACKOFF` 20).
+#
+# Two things the pinned release has that this does not, both outside what
+# standard mode does by default there: `_SERVICE_MAX_ATTEMPTS` gives
+# dynamodb and dynamodb-streams 4 attempts, which a DynamoDB client in
+# client mode passes as `aws_standard_retry_policy(4)`; and a second retry
+# path behind botocore's `NEW_RETRIES_ENABLED` switch (a non-throttle base
+# of 0.05 s, the `x-amz-retry-after` header, a retry cost of 14). Nothing
+# here reads that switch.
+#
+# A TRANSPORT ERROR IS READ FROM ITS MESSAGE, in the spelling of the stack
+# that raises it:
+#
+#   not sent    the dial failed before a request byte was written:
+#               komira_http_client's `HttpError[CONNECT_FAILED]`,
+#               `HttpError[CONNECT_TIMEOUT]` and
+#               `HttpError[TLS_HANDSHAKE_FAILED]`; the kernel dial's
+#               `TcpStream.connect: ...` (refused, unreachable, timed out);
+#               the TLS dial's `TlsConnector.connect: handshake failed ...`
+#               and its handshake deadline, unless the handshake refused a
+#               certificate; name resolution's `DnsError[TRANSIENT]` and
+#               `DnsError[RESOLVE_FAILED]`. Also what komira_http_client
+#               raises having proved the peer took no action:
+#               `HttpError[RETRYABLE_TRANSPORT]` carrying its
+#               `[NOTHING-WRITTEN]` token, an HTTP/2 RST_STREAM
+#               REFUSED_STREAM (RFC 9113 section 8.7), and the HTTP/2 GOAWAY
+#               class `is_h2_goaway_unprocessed` names.
+#   maybe sent  `HttpError[IO_ERROR]`, `[RETRYABLE_TRANSPORT]` without that
+#               proof (the peer can read a whole request, act on it and die
+#               before its first response byte), `[EOF_MID_RESPONSE]` and
+#               `[TIMEOUT]`.
+#   neither     anything else: a certificate refused, a name that does not
+#               exist (`DnsError[NXDOMAIN]`), a malformed URL, a body over
+#               the client's limit. Not retried.
 #
 # ONE RULE IS STRICTER THAN BOTOCORE: a request that is not RETRY-SAFE is
 # resent only when the service cannot have acted on it. A request is
@@ -38,13 +79,12 @@
 # SendMessage, a DynamoDB UpdateItem) after a 500 the service answered
 # having already applied it. For a request that is not retry-safe:
 #
-#   resent      a dial that failed before any byte was sent (CONNECT_FAILED,
-#               CONNECT_TIMEOUT, TLS_HANDSHAKE_FAILED); a throttling code
-#               (the service refused the request); RequestTimeout and
-#               RequestTimeoutException (the service never read the whole
-#               request);
-#   not resent  a transport error once the request may have been written,
-#               500, 502, 503, 504 and InternalError.
+#   resent      a transport error before the request was sent (above); a
+#               throttling code (the service refused the request);
+#               RequestTimeout and RequestTimeoutException (the service
+#               never read the whole request);
+#   not resent  a transport error once the request may have been sent, and
+#               500, 502, 503 and 504.
 #
 # What botocore's standard mode also does and this does not: retry an error
 # shape the model marks `retryable` (no model this repository generates from
@@ -54,6 +94,8 @@
 # `send_sigv4_signed_request_with`).
 # =============================================================================
 
+from komira_http_client.h2_client import is_h2_goaway_unprocessed
+from komira_http_client.state_machine import HTTP_NOTHING_WRITTEN_TOKEN
 from komira_retry import Backoff, Jitter, RetryClassifier, RetryPolicy, Verdict
 
 from ._text import sub
@@ -62,11 +104,12 @@ from .creds_source import AWS_CREDENTIAL_MANDATORY_REFRESH_SECONDS
 
 # botocore: `DEFAULT_MAX_ATTEMPTS` of standard mode, every send counted.
 comptime AWS_STANDARD_MAX_ATTEMPTS = 3
-# botocore's ExponentialBackoff: base 1 s doubling, capped at 20 s
-# (`_MAX_BACKOFF`), drawn uniformly from [0, cap] (full jitter).
+# botocore's ExponentialBackoff: base 1 s doubling (`_BASE` 2), capped at
+# 20 s (`_MAX_BACKOFF`), drawn uniformly from [0, cap] (full jitter).
 comptime AWS_RETRY_BASE_MS = 1000
 comptime AWS_RETRY_MAX_BACKOFF_MS = 20_000
-# A retry costs this from a budget, and a timed-out one AWS_TIMEOUT_RETRY_COST.
+# A retry costs `_RETRY_COST` from a budget, and a timed-out one
+# `_TIMEOUT_RETRY_REQUEST`.
 comptime AWS_RETRY_COST = 5
 comptime AWS_TIMEOUT_RETRY_COST = 10
 
@@ -122,13 +165,23 @@ def aws_is_throttling_code(code: String) -> Bool:
     )
 
 
+def aws_is_transient_code(code: String) -> Bool:
+    """botocore's `_TRANSIENT_ERROR_CODES` (standard mode)."""
+    return (
+        code == "RequestTimeout"
+        or code == "RequestTimeoutException"
+        or code == "PriorRequestNotComplete"
+    )
+
+
+def aws_is_transient_status(status: Int) -> Bool:
+    """botocore's `_TRANSIENT_STATUS_CODES` (standard mode)."""
+    return status == 500 or status == 502 or status == 503 or status == 504
+
+
 def _is_unread_request_code(code: String) -> Bool:
     """The service timed out reading the request, so did not act on it."""
     return code == "RequestTimeout" or code == "RequestTimeoutException"
-
-
-def _is_transient_status(status: Int) -> Bool:
-    return status == 500 or status == 502 or status == 503 or status == 504
 
 
 def aws_transport_error_kind(message: String) -> String:
@@ -147,22 +200,60 @@ def aws_transport_error_kind(message: String) -> String:
     return sub(message, start, end)
 
 
-def _is_unsent_kind(kind: String) -> Bool:
-    """A dial that failed before any request byte was written."""
-    return (
+def _tls_dial_failed(message: String) -> Bool:
+    """The TLS dial failed or ran out of time in its handshake, and not
+    because it refused the peer's certificate."""
+    var failed = message.startswith(
+        "TlsConnector.connect: handshake failed"
+    ) or message.startswith("TlsConnector.connect: TLS handshake to ")
+    return failed and message.lower().find("certificate") < 0
+
+
+def aws_transport_error_unsent(message: String) -> Bool:
+    """Whether the transport error `message` was raised before any request
+    byte reached the peer, or with komira_http_client's proof that the peer
+    took no action (the module header's `not sent`)."""
+    var kind = aws_transport_error_kind(message)
+    if (
         kind == "CONNECT_FAILED"
         or kind == "CONNECT_TIMEOUT"
         or kind == "TLS_HANDSHAKE_FAILED"
+    ):
+        return True
+    if kind == "RETRYABLE_TRANSPORT":
+        return (
+            message.find(HTTP_NOTHING_WRITTEN_TOKEN) >= 0
+            or message.find("RST_STREAM(REFUSED_STREAM)") >= 0
+        )
+    if kind.byte_length() > 0:
+        return is_h2_goaway_unprocessed(message)
+    return (
+        message.startswith("TcpStream.connect: ")
+        or _tls_dial_failed(message)
+        or message.startswith("DnsError[TRANSIENT]")
+        or message.startswith("DnsError[RESOLVE_FAILED]")
     )
 
 
-def _is_sent_transient_kind(kind: String) -> Bool:
+def _maybe_sent_kind(kind: String) -> Bool:
     """A transport failure once the request may have been written."""
     return (
         kind == "IO_ERROR"
         or kind == "RETRYABLE_TRANSPORT"
         or kind == "EOF_MID_RESPONSE"
         or kind == "TIMEOUT"
+    )
+
+
+def _is_timeout(message: String) -> Bool:
+    """A connect or read timeout (botocore's ConnectTimeoutError and
+    ReadTimeoutError, which cost `_TIMEOUT_RETRY_REQUEST`)."""
+    var kind = aws_transport_error_kind(message)
+    return (
+        kind == "CONNECT_TIMEOUT"
+        or kind == "TIMEOUT"
+        or message.startswith("TcpStream.connect: connect timed out")
+        or message.startswith("TlsConnector.connect: TLS handshake to ")
     )
 
 
@@ -217,30 +308,28 @@ struct AwsRetryClassifier(RetryClassifier, Copyable, Movable):
 
     def classify(self, outcome: AwsAttempt) -> Verdict:
         if outcome.status < 0:
-            var kind = aws_transport_error_kind(outcome.transport_error)
-            var cost = AWS_TIMEOUT_RETRY_COST if (
-                kind == "CONNECT_TIMEOUT" or kind == "TIMEOUT"
+            var message = outcome.transport_error.copy()
+            var cost = AWS_TIMEOUT_RETRY_COST if _is_timeout(
+                message
             ) else AWS_RETRY_COST
-            if _is_unsent_kind(kind):
+            if aws_transport_error_unsent(message):
                 return Verdict.transient(
                     String("transport error before the request was sent: ")
-                    + outcome.transport_error,
+                    + message,
                     cost=cost,
                 )
-            if _is_sent_transient_kind(kind):
+            if _maybe_sent_kind(aws_transport_error_kind(message)):
                 if not outcome.retry_safe:
                     return Verdict.stop(
                         String("transport error after the request may have")
                         + " been sent, on a request that is not retry-safe: "
-                        + outcome.transport_error
+                        + message
                     )
                 return Verdict.transient(
-                    String("transport error: ") + outcome.transport_error,
+                    String("transport error: ") + message,
                     cost=cost,
                 )
-            return Verdict.stop(
-                String("transport error: ") + outcome.transport_error
-            )
+            return Verdict.stop(String("transport error: ") + message)
         var what = String("HTTP ") + String(outcome.status)
         if outcome.code.byte_length() > 0:
             what += String(" ") + outcome.code
@@ -248,7 +337,9 @@ struct AwsRetryClassifier(RetryClassifier, Copyable, Movable):
             return Verdict.throttle(String("throttled: ") + what)
         if _is_unread_request_code(outcome.code):
             return Verdict.transient(String("transient: ") + what)
-        if _is_transient_status(outcome.status) or outcome.code == "InternalError":
+        if aws_is_transient_status(outcome.status) or aws_is_transient_code(
+            outcome.code
+        ):
             if not outcome.retry_safe:
                 return Verdict.stop(
                     String("not resent, the request is not retry-safe: ") + what
