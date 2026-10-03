@@ -2,13 +2,43 @@
 # The welded test tests/test_declaration_render.mojo reads this file (staged
 # as its test data), so it always parses, validates and renders.
 #
-# kci runs, per artifact, with D a fresh EMPTY directory:
-#   buck2 build <target> --out D
-# and ships what the ONE `manifest.json` left at the top of D describes (its
-# `name` must equal the artifact's `name` below, exactly).
+# kci runs the artifacts one at a time, in THIS FILE'S ORDER, with R the
+# release directory and S the git-derived stamp (contract.mojo):
 #
-# `build` is in the build system's args, not the artifacts': the build
-# system's args come first.
+#   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
+#     -c komira.package_timestamp_ms=<T> \
+#     //src/komira_encoding:komira_encoding_conda[release] --out R/komira_encoding
+#   buck2 run //tools/build/package:komira_pack -- conda-meta --name komira_all \
+#     --member-manifest R/komira_encoding/manifest.json ... --out-dir R/komira_all
+#
+# and ships what the ONE `manifest.json` left at the top of each output
+# directory describes (its `name` must equal the artifact's `name` below,
+# exactly).
+#
+# THE STAMP. `{build_number}`, `{source_commit}` and `{timestamp_ms}` are
+# derived by kci from git at `kci build --revision-id` (the same rule as
+# tools/build/package/release_version.sh), never typed and never read from
+# the environment. The three `-c komira.package_*` keys are `[komira]` keys,
+# read at ANALYSIS by conda_package (tools/build/package/conda.bzl), so a `-c`
+# on the command line does reach them (unlike `[buck2_re_client]`, below).
+# Measured: `buck2 build -c komira.package_stamp=154 -c
+# komira.package_commit=<C> -c komira.package_timestamp_ms=<T>` of the target
+# below left `komira_encoding-1.0.0-h<8 hex of C>_154.conda` whose metadata
+# says `build_number` 154, `source_commit` C, `timestamp_ms` T, `stamped`
+# true. Without them `[release]` does not exist (an unstamped build is not a
+# release), so a declaration that forgets the stamp fails here rather than
+# shipping.
+#
+# THE METAPACKAGE is the LAST declaration: `{release_dir}` holds every
+# artifact above it, already built and verified, so it names their manifests.
+# It is built by komira_pack through `buck2 run` (a program name, so the file
+# needs no absolute path), whose cwd is kci's `--work-dir`: the LICENSE below
+# is the repository's. Its members must be every library of this file (one
+# metapackage per subdir, all libraries in it: a recommendation the CEO has
+# not answered; kci publish enforces it).
+#
+# `build` / `run` are in the build systems' args, not the artifacts': the
+# build system's args come first.
 #
 # Which farm buck2 builds on is the MACHINE's configuration, not this file's:
 # a buckconfig buck2 reads when its daemon starts, `/etc/buckconfig.d/<file>`
@@ -22,14 +52,32 @@
 # `buck2 build --out D` copies the ONE default output of the ONE target
 # named: a directory output's contents land directly in D. A conda_package's
 # `[release]` (tools/build/package/conda.bzl) is that directory:
-# `komira_encoding-<version>-0.conda`, `manifest.json` (kci artifact-manifest
-# format, `name` "komira_encoding") and `metadata.json`. It exists only for a
-# stamped build, so an unstamped one fails here rather than shipping.
+# `komira_encoding-<version>-<build>.conda`, `manifest.json` (kci
+# artifact-manifest format, `name` "komira_encoding") and `metadata.json`.
+#
+# `schema_version` is the file format's major (kci_contract's format table):
+# kci refuses a file without it, and one written for a newer kci.
+
+schema_version: 1
 
 build_systems {
   name: "buck2"
   executable: "buck2"
   args: "build"
+  args: "-c"
+  args: "komira.package_stamp={build_number}"
+  args: "-c"
+  args: "komira.package_commit={source_commit}"
+  args: "-c"
+  args: "komira.package_timestamp_ms={timestamp_ms}"
+}
+
+build_systems {
+  name: "komira_pack"
+  executable: "buck2"
+  args: "run"
+  args: "//tools/build/package:komira_pack"
+  args: "--"
 }
 
 artifacts {
@@ -37,5 +85,27 @@ artifacts {
   build_system: "buck2"
   args: "//src/komira_encoding:komira_encoding_conda[release]"
   args: "--out"
+  args: "{out_dir}"
+}
+
+artifacts {
+  name: "komira_all"
+  build_system: "komira_pack"
+  args: "conda-meta"
+  args: "--name"
+  args: "komira_all"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_encoding/manifest.json"
+  args: "--license"
+  args: "Apache-2.0"
+  args: "--summary"
+  args: "Every komira library of one release."
+  args: "--home"
+  args: "https://github.com/komira-ai/komira"
+  args: "--extra-file"
+  args: "info/licenses/LICENSE=LICENSE"
+  args: "--label"
+  args: "kci build {revision_id}"
+  args: "--out-dir"
   args: "{out_dir}"
 }

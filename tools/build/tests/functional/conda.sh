@@ -249,6 +249,14 @@ if [ -z "$problems" ]; then
     cmp -s "$W/pack1/manifest.json" "$MANIFEST" || problems="$problems manifest-differs"
     cmp -s "$W/pack1/metadata.json" "$METADATA" || problems="$problems metadata-differs"
     check "$W/pack1" "$LIBPKG" 2> "$W/check_ok.err" || problems="$problems check-refused-a-good-package"
+    # A package whose file name sorts AFTER metadata.json (komira_* sorts before it, rest_url after):
+    # the check finds the .conda among the three files, never by its position in a sorted listing.
+    "$PACK" conda --name rest_url --import-name komira_encoding --stamp 0 --timestamp-ms 0 --subdir linux-64 \
+        --mojo-pin "$pin" --license Apache-2.0 --summary "$SUMMARY" --home https://github.com/komira-ai/komira \
+        --payload "$LIBPKG" --sources "$SRCS" --extra-file "info/licenses/LICENSE=$ROOT/LICENSE" \
+        --label "$LABEL" --out-dir "$W/pack_late" 2> "$W/pack_late.err" || problems="$problems pack-late-failed"
+    "$PACK" conda-check --dir "$W/pack_late" --kind library --name rest_url --import-name komira_encoding --expect-subdir linux-64 \
+        --mojo-pin "$pin" --payload "$LIBPKG" --out "$W/check_late.marker" 2> "$W/check_late.err" || problems="$problems check-refused-a-late-sorting-name"
     # One byte of the payload changed: a different package (only its pkg member and the
     # checksums over it), which the check refuses against the real payload and accepts against its own.
     cp "$LIBPKG" "$W/payload2.mojoc" && chmod u+w "$W/payload2.mojoc" && printf 'X' | dd of="$W/payload2.mojoc" bs=1 seek=100 conv=notrunc 2> /dev/null
