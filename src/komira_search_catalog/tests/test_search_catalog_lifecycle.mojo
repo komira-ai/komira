@@ -69,9 +69,9 @@ from komira_search_catalog.metastore import (
     generation_across_shards,
     list_live_splits_across_shards,
     make_shard_id,
-    reap_drained_shards,
     shard_manifest_prefix,
 )
+from komira_search_catalog.shard_reaper import reap_drained_shards
 
 
 comptime _META: String = "index/logs/meta"
