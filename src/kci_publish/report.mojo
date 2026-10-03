@@ -1,84 +1,95 @@
 # =============================================================================
-# src/kci_publish/report.mojo -- contract step 6: one JSON report per run
-#   (`--report`), and the lines printed beside it.
+# src/kci_publish/report.mojo -- how a PUBLISH action ended, and its part of
+#   the run's result document (kci_contract's `kci.result`).
 # =============================================================================
 #
-#   {"channel": .., "dry_run": bool, "exit_code": n,
-#    "files": [{"action": .., "file": "<subdir>/<file>", "indexed": bool,
-#               "name": .., "sha256": .., "state_after": ..,
-#               "state_before": ..}, ...in upload order],
-#    "release_commit": .., "set_hash": .., "verdict": ..}
+# `PublishReport` is the action's working record: the REASON it stopped (a
+# word of this file, kept for people and for the result's error id), whether
+# any upload LANDED in this run, one row per file, and the lines printed
+# beside it. It is not a document: the one document is the result file, and
+# `record_publish_result` puts this action's part into it.
 #
-# Keys sorted, compact, one trailing newline. ⛔ NO SECRET: nothing a
-# credential produced is placed in the report or the lines -- only file
-# names, digests, states and the channel's answers, which kci_pkg_upload has
-# already passed through its credential-echo redaction.
+# THE OUTCOME follows from the reason and from whether an upload landed
+# (kci_contract's outcome words; the exit number is the contract's, so this
+# package spells none):
 #
-# THE EXIT CODES (one table; the release job treats {0, 6} as green):
-#   0 PUBLISHED           every member and the metapackage present and read back
-#   2 USAGE
-#   3 REFUSED             step 0: the set, lockstep, closure, set hash
-#   4 FAILED              an upload answered definitively, not as success
-#   5 CANNOT_TELL         a read could not be answered
-#   6 ALREADY_PUBLISHED   every file present and identical; nothing uploaded
-#   7 STOP_DIFFERENT_BYTES same file name, other sha256
-#   8 STOP_NEW_NAME       an unclaimed new name, or a claim that is not new
-#   9 PARTIAL             members still absent after the bounded retries
-#  10 READ_BACK_MISMATCH
-# In 4, 5 (after step 1), 7 (after step 1), 9 and 10 some members may have
-# been uploaded and the metapackage never was.
+#   reason                 nothing landed       an upload landed   error id
+#   PUBLISHED              SUCCEEDED            SUCCEEDED          -
+#   ALREADY_PUBLISHED      NOOP                 (cannot happen)    -
+#   REFUSED                REFUSED              (cannot happen)    the check's
+#   STOP_NEW_NAME          REFUSED              PARTIAL            KCI-E-PUBLISH-NEW-NAME
+#   STOP_DIFFERENT_BYTES   REFUSED              PARTIAL            KCI-E-PUBLISH-DIFFERENT-BYTES
+#   FAILED                 FAILED               PARTIAL            KCI-E-PUBLISH-UPLOAD, or
+#                                                                  KCI-E-CREDENTIAL
+#   CANNOT_TELL            INDETERMINATE        INDETERMINATE      KCI-E-CANNOT-TELL
+#   PARTIAL                PARTIAL              PARTIAL            KCI-E-PUBLISH-UPLOAD
+#   READ_BACK_MISMATCH     PARTIAL, retry       PARTIAL, retry     KCI-E-PUBLISH-READ-BACK
+#                          NEEDS_HUMAN          NEEDS_HUMAN
+#
+# So publishing a release whose every file is already in the channel with
+# the same bytes is NOOP: exit 0, the end state holds. It is not a red job,
+# and there is no second "green" number. A dry run that found nothing wrong
+# is SUCCEEDED (exit 0) with every file it would send marked WOULD_UPLOAD.
+#
+# ⛔ NO SECRET: nothing a credential produced is placed in a row, a line or
+# the error message -- only file names, digests, states and the channel's
+# answers, which kci_pkg_upload has already passed through its
+# credential-echo redaction.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from std.pathlib import Path
+from kci_contract import (
+    ACTION_PUBLISH,
+    ARTIFACT_ALREADY_PRESENT,
+    ARTIFACT_NOT_REACHED,
+    ARTIFACT_UPLOADED,
+    ARTIFACT_WOULD_UPLOAD,
+    ERROR_CANNOT_TELL,
+    ERROR_PUBLISH_DIFFERENT_BYTES,
+    ERROR_PUBLISH_NEW_NAME,
+    ERROR_PUBLISH_READ_BACK,
+    ERROR_PUBLISH_UPLOAD,
+    OUTCOME_FAILED,
+    OUTCOME_INDETERMINATE,
+    OUTCOME_NOOP,
+    OUTCOME_PARTIAL,
+    OUTCOME_REFUSED,
+    OUTCOME_SUCCEEDED,
+    RETRY_NEEDS_HUMAN,
+    ResultAction,
+    ResultArtifact,
+    exit_code_of,
+    platform_of_conda_subdir,
+    require_error_id,
+)
+from kci_contract import RunResult as KciRunResult
 
-from komira_json import JsonValue
-
-from .plan import STATE_NOT_READ, PublishTarget, state_name
+from .plan import STATE_ABSENT, STATE_NOT_READ, STATE_SAME, PublishTarget, state_name
 
 
-comptime EXIT_PUBLISHED: Int = 0
-comptime EXIT_USAGE: Int = 2
-comptime EXIT_REFUSED: Int = 3
-comptime EXIT_FAILED: Int = 4
-comptime EXIT_CANNOT_TELL: Int = 5
-comptime EXIT_ALREADY_PUBLISHED: Int = 6
-comptime EXIT_STOP_DIFFERENT_BYTES: Int = 7
-comptime EXIT_STOP_NEW_NAME: Int = 8
-comptime EXIT_PARTIAL: Int = 9
-comptime EXIT_READ_BACK_MISMATCH: Int = 10
+comptime REASON_PUBLISHED: String = "PUBLISHED"
+comptime REASON_ALREADY_PUBLISHED: String = "ALREADY_PUBLISHED"
+comptime REASON_REFUSED: String = "REFUSED"
+comptime REASON_FAILED: String = "FAILED"
+comptime REASON_CANNOT_TELL: String = "CANNOT_TELL"
+comptime REASON_STOP_DIFFERENT_BYTES: String = "STOP_DIFFERENT_BYTES"
+comptime REASON_STOP_NEW_NAME: String = "STOP_NEW_NAME"
+comptime REASON_PARTIAL: String = "PARTIAL"
+comptime REASON_READ_BACK_MISMATCH: String = "READ_BACK_MISMATCH"
 
-
-def verdict_name(code: Int) -> String:
-    if code == EXIT_PUBLISHED:
-        return String("PUBLISHED")
-    if code == EXIT_USAGE:
-        return String("USAGE")
-    if code == EXIT_REFUSED:
-        return String("REFUSED")
-    if code == EXIT_FAILED:
-        return String("FAILED")
-    if code == EXIT_CANNOT_TELL:
-        return String("CANNOT_TELL")
-    if code == EXIT_ALREADY_PUBLISHED:
-        return String("ALREADY_PUBLISHED")
-    if code == EXIT_STOP_DIFFERENT_BYTES:
-        return String("STOP_DIFFERENT_BYTES")
-    if code == EXIT_STOP_NEW_NAME:
-        return String("STOP_NEW_NAME")
-    if code == EXIT_PARTIAL:
-        return String("PARTIAL")
-    if code == EXIT_READ_BACK_MISMATCH:
-        return String("READ_BACK_MISMATCH")
-    return String("EXIT(") + String(code) + String(")")
+comptime ACTION_WORD_UPLOADED: String = "uploaded"
+"""A file row's `action` when this run's upload of it landed."""
 
 
 struct FileRow(Copyable, Movable):
-    """One file's row of the report. Layout: owned values. No pointer."""
+    """One file's row. Layout: owned values. No pointer."""
 
     var name: String
     var file: String
+    var subdir: String
+    var file_name: String
+    var version: String
     var sha256_hex: String
     var state_before: Int
     var action: String
@@ -88,6 +99,9 @@ struct FileRow(Copyable, Movable):
     def __init__(out self, t: PublishTarget):
         self.name = t.coordinate.distribution.copy()
         self.file = t.where()
+        self.subdir = t.coordinate.subdir.copy()
+        self.file_name = t.coordinate.file_name.copy()
+        self.version = t.coordinate.version.copy()
         self.sha256_hex = t.sha256_hex.copy()
         self.state_before = STATE_NOT_READ
         self.action = String("none")
@@ -96,35 +110,110 @@ struct FileRow(Copyable, Movable):
 
 
 struct PublishReport(Copyable, Movable):
-    """The run's outcome. Layout: owned values only. No pointer field."""
+    """How the action ended (file header). Layout: owned values only. No
+    pointer field."""
 
-    var exit_code: Int
+    var reason: String
+    var error_id: String
     var channel: String
     var dry_run: Bool
     var set_hash: String
     var release_commit: String
+    var has_produced_by: Bool
+    var produced_by_run_id: String
+    var produced_by_attempt: Int
     var files: List[FileRow]
     var lines: List[String]
 
     def __init__(out self):
-        self.exit_code = EXIT_PUBLISHED
+        self.reason = String(REASON_PUBLISHED)
+        self.error_id = String("")
         self.channel = String("")
         self.dry_run = False
         self.set_hash = String("")
         self.release_commit = String("")
+        self.has_produced_by = False
+        self.produced_by_run_id = String("")
+        self.produced_by_attempt = 0
         self.files = List[FileRow]()
         self.lines = List[String]()
 
     @staticmethod
-    def refused(code: Int, var message: String) -> PublishReport:
-        """A report for a run stopped before step 1: `message`'s lines and
-        `code`."""
+    def refused(var error_id: String, var message: String) -> PublishReport:
+        """A report for a run stopped by a check before any request:
+        `message`'s lines, reason REFUSED."""
         var r = PublishReport()
-        r.exit_code = code
+        r.stop(String(REASON_REFUSED), error_id^, message^)
+        return r^
+
+    def stop(mut self, var reason: String, var error_id: String, message: String):
+        """End with `reason` and `error_id`, adding `message`'s lines, then
+        the RESULT line."""
+        self.reason = reason^
+        self.error_id = error_id^
         var parts = message.split(String("\n"))
         for i in range(len(parts)):
-            r.lines.append(String(parts[i]))
-        return r^
+            if String(parts[i]).byte_length() > 0:
+                self.lines.append(String(parts[i]))
+        self.finish_line()
+
+    def end(mut self, var reason: String):
+        """End with `reason` and the error id that reason carries (file
+        header), then the RESULT line."""
+        var id = String("")
+        if reason == REASON_STOP_NEW_NAME:
+            id = String(ERROR_PUBLISH_NEW_NAME)
+        elif reason == REASON_STOP_DIFFERENT_BYTES:
+            id = String(ERROR_PUBLISH_DIFFERENT_BYTES)
+        elif reason == REASON_FAILED or reason == REASON_PARTIAL:
+            id = String(ERROR_PUBLISH_UPLOAD)
+        elif reason == REASON_CANNOT_TELL:
+            id = String(ERROR_CANNOT_TELL)
+        elif reason == REASON_READ_BACK_MISMATCH:
+            id = String(ERROR_PUBLISH_READ_BACK)
+        self.reason = reason^
+        self.error_id = id^
+        self.finish_line()
+
+    def landed(self) -> Bool:
+        """Whether any upload of this run landed."""
+        for i in range(len(self.files)):
+            if self.files[i].action == ACTION_WORD_UPLOADED:
+                return True
+        return False
+
+    def outcome(self) -> String:
+        """The outcome word (file header)."""
+        if self.reason == REASON_PUBLISHED:
+            return String(OUTCOME_SUCCEEDED)
+        if self.reason == REASON_ALREADY_PUBLISHED:
+            return String(OUTCOME_NOOP)
+        if self.reason == REASON_CANNOT_TELL:
+            return String(OUTCOME_INDETERMINATE)
+        if self.reason == REASON_PARTIAL or self.reason == REASON_READ_BACK_MISMATCH:
+            return String(OUTCOME_PARTIAL)
+        if self.landed():
+            return String(OUTCOME_PARTIAL)
+        if self.reason == REASON_FAILED:
+            return String(OUTCOME_FAILED)
+        return String(OUTCOME_REFUSED)  # REFUSED, STOP_NEW_NAME, STOP_DIFFERENT_BYTES
+
+    def retry(self) -> String:
+        """Retry advice stronger than the exit number's default, or "" for
+        the default (kci_contract's exit table)."""
+        if self.reason == REASON_READ_BACK_MISMATCH:
+            return String(RETRY_NEEDS_HUMAN)
+        return String("")
+
+    def exit_code(self) raises -> Int:
+        """The exit number (kci_contract's exit table)."""
+        if self.error_id.byte_length() > 0:
+            require_error_id(self.error_id)
+        return exit_code_of(self.outcome(), self.error_id)
+
+    def ok(self) -> Bool:
+        var o = self.outcome()
+        return o == OUTCOME_SUCCEEDED or o == OUTCOME_NOOP
 
     def has_line_containing(self, needle: String) -> Bool:
         for i in range(len(self.lines)):
@@ -134,39 +223,65 @@ struct PublishReport(Copyable, Movable):
 
     def finish_line(mut self):
         self.lines.append(
-            String("RESULT exit=")
-            + String(self.exit_code)
-            + String(" verdict=")
-            + verdict_name(self.exit_code)
+            String("RESULT outcome=")
+            + self.outcome()
+            + String(" reason=")
+            + self.reason
             + String(" set_hash=")
             + self.set_hash
         )
 
 
-def render_report(r: PublishReport) raises -> String:
-    """The report JSON (see the file header)."""
-    var files = JsonValue.empty_array()
+def artifact_action_of(row: FileRow, dry_run: Bool) -> String:
+    """A file row's `artifacts[].action` in the result document."""
+    if row.action == ACTION_WORD_UPLOADED:
+        return String(ARTIFACT_UPLOADED)
+    if row.action == "skipped" or (row.action == "none" and row.state_before == STATE_SAME):
+        return String(ARTIFACT_ALREADY_PRESENT)
+    if dry_run and row.action == "none" and row.state_before == STATE_ABSENT:
+        return String(ARTIFACT_WOULD_UPLOAD)
+    return String(ARTIFACT_NOT_REACHED)
+
+
+def record_publish_result(
+    r: PublishReport, revision: String, platform: String, mut result: KciRunResult
+) raises:
+    """Put this action's part into the run's result document: its row (kind
+    PUBLISH), the channel, the dry-run flag, the recomputed set hash, who
+    produced the release, one artifact row per file, and the first error
+    (its message is the report's lines, which hold no secret)."""
+    var outcome = r.outcome()
+    result.actions.append(ResultAction(String(ACTION_PUBLISH), platform.copy(), outcome.copy()))
+    result.channel = r.channel.copy()
+    result.dry_run = r.dry_run
+    if r.set_hash.byte_length() > 0:
+        result.set_hash = r.set_hash.copy()
+    if r.has_produced_by:
+        result.has_release_produced_by = True
+        result.release_produced_by_run_id = r.produced_by_run_id.copy()
+        result.release_produced_by_attempt = r.produced_by_attempt
     for i in range(len(r.files)):
         ref f = r.files[i]
-        var row = JsonValue.empty_object()
-        row.set_member(String("action"), JsonValue.from_string(f.action.copy()))
-        row.set_member(String("file"), JsonValue.from_string(f.file.copy()))
-        row.set_member(String("indexed"), JsonValue.from_bool(f.indexed))
-        row.set_member(String("name"), JsonValue.from_string(f.name.copy()))
-        row.set_member(String("sha256"), JsonValue.from_string(f.sha256_hex.copy()))
-        row.set_member(String("state_after"), JsonValue.from_string(state_name(f.state_after)))
-        row.set_member(String("state_before"), JsonValue.from_string(state_name(f.state_before)))
-        files.push(row^)
-    var doc = JsonValue.empty_object()
-    doc.set_member(String("channel"), JsonValue.from_string(r.channel.copy()))
-    doc.set_member(String("dry_run"), JsonValue.from_bool(r.dry_run))
-    doc.set_member(String("exit_code"), JsonValue.from_number(String(r.exit_code)))
-    doc.set_member(String("files"), files^)
-    doc.set_member(String("release_commit"), JsonValue.from_string(r.release_commit.copy()))
-    doc.set_member(String("set_hash"), JsonValue.from_string(r.set_hash.copy()))
-    doc.set_member(String("verdict"), JsonValue.from_string(verdict_name(r.exit_code)))
-    return doc.serialize() + String("\n")
-
-
-def write_report(r: PublishReport, path: String) raises:
-    Path(path).write_text(render_report(r))
+        var row = ResultArtifact()
+        row.action = artifact_action_of(f, r.dry_run)
+        row.artifact_type = String("CONDA")
+        row.file = f.file_name.copy()
+        row.indexed = f.indexed
+        row.name = f.name.copy()
+        row.platform = platform_of_conda_subdir(f.subdir)
+        row.revision = revision.copy()
+        row.sha256 = f.sha256_hex.copy()
+        row.state_after = state_name(f.state_after)
+        row.state_before = state_name(f.state_before)
+        row.subdir = f.subdir.copy()
+        row.version = f.version.copy()
+        result.artifacts.append(row^)
+    if r.error_id.byte_length() > 0:
+        var message = String("")
+        for i in range(len(r.lines)):
+            if r.lines[i].startswith(String("RESULT ")):
+                continue
+            if message.byte_length() > 0:
+                message += String("\n")
+            message += r.lines[i]
+        result.set_error(r.error_id.copy(), message^)
