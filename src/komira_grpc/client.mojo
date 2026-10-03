@@ -1349,7 +1349,7 @@ struct GrpcClient[C: Connector](Movable, Deinitable):
         GrpcError(DEADLINE_EXCEEDED) so the caller sees a typed status —
         the in-flight read aborts at the next poll boundary.
 
-        This mirrors `komira_http.collect_body` but raises a GrpcError
+        This mirrors `komira_http_client.response_body.collect_body` but raises a GrpcError
         (with the `[grpc:N]` prefix) rather than a raw HttpError, so the
         whole gRPC call path raises one consistent error shape.
         """
