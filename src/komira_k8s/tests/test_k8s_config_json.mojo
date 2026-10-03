@@ -50,8 +50,8 @@ from komira_k8s.k8s_client import (
     pod_log_subpath,
 )
 from komira_k8s.k8s_config import K8sTokenSource
-from komira_http.client.auth import BearerTokenProvider, StaticTokenSource
-from komira_http.client.header_map import HeaderMap
+from komira_http_client.auth import BearerTokenProvider, StaticTokenSource
+from komira_http_client.header_map import HeaderMap
 
 
 # The fixtures are declared as test data, and the test runs from the directory
