@@ -225,24 +225,24 @@ def test_resolve_names_the_built_in_clouds() raises:
     """There is no plugin path: an id that is not built in is refused, naming
     every built-in cloud and the closest one when it is within two edits."""
     var clouds = Clouds(Catalog.v1())
-    clouds.add(CloudEntry(CloudId(String("mem")), True, _ints(10, 11), List[Absence]()))
-    var lite = List[Absence]()
-    lite.append(Absence(11, NOT_YET, String("no runner")))
-    clouds.add(CloudEntry(CloudId(String("mem-lite")), False, _ints(10), lite^))
-    assert_true(clouds.resolve(String("mem-lite")) == CloudId(String("mem-lite")))
-    assert_equal(clouds.ids()[1], "mem-lite")
+    clouds.add(CloudEntry(CloudId(String("fake")), True, _ints(10, 11), List[Absence]()))
+    var limited = List[Absence]()
+    limited.append(Absence(11, NOT_YET, String("no runner")))
+    clouds.add(CloudEntry(CloudId(String("fake-limited")), False, _ints(10), limited^))
+    assert_true(clouds.resolve(String("fake-limited")) == CloudId(String("fake-limited")))
+    assert_equal(clouds.ids()[1], "fake-limited")
 
     var raised = False
     try:
-        _ = clouds.resolve(String("mme"))
+        _ = clouds.resolve(String("faek"))
     except e:
         raised = True
         var t = String(e)
         assert_true(
-            _has(t, 'kci: "mme" is not a cloud built into this kci (built in: mem, mem-lite)'),
+            _has(t, 'kci: "faek" is not a cloud built into this kci (built in: fake, fake-limited)'),
             t,
         )
-        assert_true(_has(t, 'did you mean "mem"?'), t)
+        assert_true(_has(t, 'did you mean "fake"?'), t)
     assert_true(raised, "a typo is refused")
 
     raised = False
@@ -251,7 +251,7 @@ def test_resolve_names_the_built_in_clouds() raises:
     except e:
         raised = True
         var t = String(e)
-        assert_true(_has(t, "(built in: mem, mem-lite)"), t)
+        assert_true(_has(t, "(built in: fake, fake-limited)"), t)
         assert_false(_has(t, "did you mean"), "no suggestion when nothing is close: " + t)
     assert_true(raised, "a cloud this kci was not built with is refused")
     print("  test_resolve_names_the_built_in_clouds: PASS")
