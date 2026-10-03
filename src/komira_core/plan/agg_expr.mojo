@@ -1046,7 +1046,7 @@ def median(expr: ColExpr) -> AggExpr:
     | arm | capacity | reached by a customer door? |
     |---|---|---|
     | `_ext_median_inplace` (`komira_engine_operators/agg_extended_grouped.mojo`) | **unbounded — exact** | **YES — all five, every type, 0-key AND grouped** |
-    | `MedianOp[dt].finalize` (`komira_agg/hash_agg_op_dt.mojo`) | **unbounded — exact** | no (the typed-marker route only) |
+    | `MedianOp[dt].finalize` (`komira_eval/hash_agg_op_dt.mojo`) | **unbounded — exact** | no (the typed-marker route only) |
     | `MedianAggregator.finalize` (`aggregators_struct_builtin.mojo`) | 64, FIRST-64 retention | **NO — no plan** |
     | `MedianF64.finalize` (`komira_engine_operators/agg/agg_state_slab.mojo`) | 64, FIRST-64 retention | **NO — no plan** |
 
