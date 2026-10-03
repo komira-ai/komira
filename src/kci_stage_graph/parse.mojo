@@ -38,6 +38,10 @@
 # `platform`, `declarations`, `channels`, `channel`, each at most once. A
 # `:` before a `{` is optional; a scalar may be quoted or bare.
 #
+# RESERVED: `step.validation` (a block). It is in the golden list so its
+# name is taken, and the parser refuses it as "needs a newer kci", the same
+# treatment as `kind: DEPLOY` (graph.mojo).
+#
 # Every refusal starts `<source>: line N:`. The parser refuses an unknown
 # field at any level, a scalar set twice, and a block never closed; every
 # other rule is graph.mojo's `validate_stage_graph`, run before the graph is
@@ -78,6 +82,7 @@ def machine_field_names() -> List[String]:
     out.append(String("step.declarations"))
     out.append(String("step.channels"))
     out.append(String("step.channel"))
+    out.append(String("step.validation"))
     return out^
 
 
@@ -131,6 +136,14 @@ def _parse_step(mut c: TokenCursor, source: String, stage_name: String, open_lin
             s.channels = _scalar(c, f.text, source)
         elif f.text == "channel":
             s.channel = _scalar(c, f.text, source)
+        elif f.text == "validation":
+            var named = where
+            if s.name.byte_length() > 0:
+                named = String("step '") + s.name + String("' of stage '") + stage_name + String("'")
+            raise Error(
+                _at(source, f.line) + named
+                + String(" declares a validation: validations need a newer kci (this kci runs BUILD and PUBLISH steps)")
+            )
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
