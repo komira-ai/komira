@@ -375,7 +375,7 @@ def _scalar_cmp_i32_widening(
 # ELSE, so `WHERE v > 0` over an `int8` / `int16` / `uint8` / `uint16` /
 # `uint32` / `float32` column, or `WHERE v = TRUE` over a `bool` one, fell to the
 # `else` and raised `unsupported column type for predicate: <t>`. MEASURED on the
-# cross-surface matrix at `8972406938`: 80 units over 18 cells, and DuckDB
+# cross-surface matrix: 80 units over 18 cells, and DuckDB
 # v1.5.3 answers every one of those 18 (`cross_surface_duckdb_oracle.tsv`).
 #
 # ⛔⛔ AND THE HALF THAT GETS SKIPPED IS THE **FLOAT LITERAL**. Each arm is
