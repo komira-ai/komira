@@ -13,8 +13,11 @@ load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 # a test double that answers with the arguments it was given, and
 # komira_http_core's Connector trait. Compiling the generated module against
 # them is what keeps the stubs in step with the import block the generator
-# writes from emit_aws/mod.rs AWS_IMPORTS: a client-mode name that table
-# adds and the stub lacks fails this build.
+# writes from emit_aws/mod.rs AWS_IMPORTS, for the rows that apply to an
+# awsJson module: a client-mode row for every protocol or for awsJson that
+# the stub lacks fails this build. The client-mode rows of the other
+# protocols (restJson, restXml, S3, endpoint rules) are compiled by no
+# target of this cell.
 #
 # What is pinned besides: `mode = "client"` reaches the generator without
 # `--pure-only`, so the generated module carries the signed-send surface, its
