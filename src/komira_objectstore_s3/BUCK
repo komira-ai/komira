@@ -11,13 +11,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # closed range conversion and the checks a 206 must pass, listing drained
 # with a continuation guard and keys URL-decoded, the conditional PUT,
 # multipart, S3ConditionalStore (one bucket as a
-# CloneableConditionalWriteStore and RangeFetchStore) and S3PresignSigner
-# (an ObjectUrlSigner over komira_aws_core's sigv4_presign).
+# CloneableConditionalWriteStore and RangeFetchStore), S3PresignSigner
+# (an ObjectUrlSigner over komira_aws_core's sigv4_presign) and S3Fs (one
+# bucket as komira_fs's read-only FileSystem: listings, ranged reads of one
+# object version, one-request footers; its settings in S3FsOptions).
 #
 # komira_core is a dependency for one type: the ByteView of
-# komira_objectstore's RangeFetchStore signature. komira_async is the tests':
-# the fake S3 connector implements komira_http_core's Connector over its
-# reactor and runtime.
+# komira_objectstore's RangeFetchStore signature, and S3Fs's buffers.
+# komira_async is the tests': the fake S3 connector implements
+# komira_http_core's Connector over its reactor and runtime.
+# komira_runtime_paths is test_s3_fs_clone's scratch directory.
 #
 # The tests are hermetic, no socket: komira_http_core's ScriptedConnector
 # (S3's answers, one stream per request), a fake S3 connector in the tests
@@ -33,7 +36,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # each other status as a named StoreError, clones, and
 # komira_objectstore's CasManifestStore over S3 meeting a 409
 # ConditionalRequestConflict), test_s3_presign (presigned URLs against an
-# independent SigV4 query signer at fixed 2026 clocks) and
+# independent SigV4 query signer at fixed 2026 clocks), test_s3_fs (S3Fs
+# over the fake, which can also refuse requests past a budget or into a
+# trapped key: one request per footer, near ranges in one request, one
+# version per fetch, listings, and a Hive partition prune that never reads
+# the pruned partition), test_s3_fs_clone (LocalFs and S3Fs clones; an S3Fs
+# clone builds its own store), test_s3_fs_options (S3FsOptions) and
 # test_no_env_reads (the package's sources read no environment).
 mojo_library(
     name = "komira_objectstore_s3",
@@ -43,9 +51,11 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_aws_s3:komira_aws_s3",
         "//src/komira_core:komira_core",
+        "//src/komira_fs:komira_fs",
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore:komira_objectstore",
         "//src/komira_retry:komira_retry",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
         "tests/test_no_env_reads.mojo": {
@@ -57,6 +67,9 @@ mojo_library(
         "tests/test_no_env_reads.mojo",
         "tests/test_s3_basics.mojo",
         "tests/test_s3_conditional_store.mojo",
+        "tests/test_s3_fs.mojo",
+        "tests/test_s3_fs_clone.mojo",
+        "tests/test_s3_fs_options.mojo",
         "tests/test_s3_presign.mojo",
         "tests/test_s3_store.mojo",
         "tests/test_s3_wire.mojo",
