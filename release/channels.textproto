@@ -1,0 +1,37 @@
+# The release channels (src/kci_release_channel): where `kci publish` may
+# push, and how. .github/workflows/kci.yml reads this file (KCI_CHANNELS) and
+# publishes to the channel named `komira` (KCI_CHANNEL). CODEOWNERS requires
+# the release approver's review for everything under release/.
+#
+# `komira` is the production conda channel on prefix.dev, public (anyone may
+# read it anonymously). A package name and version published there is
+# permanent: kci never overwrites a file, and the first upload of each name
+# needs an explicit `--claim-new-name`.
+#
+# The credential is TRUSTED PUBLISHING (OIDC): the channel trusts the GitHub
+# repository komira-ai/komira, the workflow file kci.yml and the GitHub
+# environment prod. The prod job of kci.yml mints the job's ID token and
+# exchanges it with prefix.dev for a short-lived upload token, so no secret
+# exists anywhere, and the declaration names none. `push_identity` is the
+# subject claim of that token: the only principal that may push.
+#
+# `location` is the channel's address on prefix.dev, `https://<host>/<channel>`:
+# uploads go to https://prefix.dev/api/v1/upload/komira, reads to
+# https://prefix.dev/komira/<subdir>/repodata.json and its files. The welded
+# test src/kci_release_channel/tests/test_release_channels_file.mojo reads
+# this file through the real parser.
+
+# The file format's major (kci_contract's format table): kci refuses a file
+# without it, and one written for a newer kci.
+schema_version: 1
+
+channel {
+  name: "komira"
+  visibility: PUBLIC
+  repository {
+    artifact_type: CONDA
+    location: "https://prefix.dev/komira"
+    push_identity: "repo:komira-ai/komira:environment:prod"
+    credential { kind: OIDC_TRUSTED_PUBLISHING }
+  }
+}

@@ -1,0 +1,94 @@
+# The release declarations (kci.release.v1.ArtifactDeclarations): what
+# `kci build` builds for a release of komira, in this file's order, and the
+# set `kci publish` ships. .github/workflows/kci.yml reads this file
+# (KCI_DECLARATIONS). Changing it changes what is released: CODEOWNERS
+# requires the release approver's review for everything under release/.
+#
+# The first release is one library and its metapackage. kci builds them one
+# at a time, in THIS ORDER, each into its own empty directory under the
+# release directory R (`{release_dir}`: the platform's directory,
+# <--release-dir>/<platform>), with the git-derived stamp S of `kci build
+# --revision-id` (src/kci_artifact_declaration/contract.mojo):
+#
+#   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
+#     -c komira.package_timestamp_ms=<T> \
+#     //src/komira_encoding:komira_encoding_conda[release] --out R/komira_encoding
+#   buck2 run //tools/build/package:komira_pack -- conda-meta --name komira_all \
+#     --member-manifest R/komira_encoding/manifest.json ... --out-dir R/komira_all
+#
+# THE STAMP is never typed here: `{build_number}`, `{source_commit}` and
+# `{timestamp_ms}` are placeholders kci fills from git. A library built
+# without them has no `[release]` sub-target, so a declaration that forgets
+# the stamp fails at build rather than shipping.
+#
+# THE METAPACKAGE `komira_all` is the LAST declaration: `{release_dir}` holds
+# every artifact above it, already built and verified. Its members are every
+# library of this file, one `--member-manifest` each; adding a library is
+# two edits here: its declaration above the metapackage, and its manifest in
+# the metapackage's args. kci publish refuses a set whose metapackage misses
+# a library, and the welded test
+# src/kci_artifact_declaration/tests/test_release_artifacts_file.mojo refuses
+# it at build time.
+#
+# A FIRST-TIME NAME is not approved here: `kci publish` refuses to upload a
+# name the channel does not hold unless the run names it with
+# `--claim-new-name` (kci.yml's input claim_new_names). The first release
+# claims komira_encoding and komira_all.
+#
+# Which farm buck2 builds on is the runner's machine configuration
+# (docs/ci.md), not this file's.
+#
+# The file format's major (kci_contract's format table): kci refuses a file
+# without it, and one written for a newer kci.
+
+schema_version: 1
+
+build_systems {
+  name: "buck2"
+  executable: "buck2"
+  args: "build"
+  args: "-c"
+  args: "komira.package_stamp={build_number}"
+  args: "-c"
+  args: "komira.package_commit={source_commit}"
+  args: "-c"
+  args: "komira.package_timestamp_ms={timestamp_ms}"
+}
+
+build_systems {
+  name: "komira_pack"
+  executable: "buck2"
+  args: "run"
+  args: "//tools/build/package:komira_pack"
+  args: "--"
+}
+
+artifacts {
+  name: "komira_encoding"
+  build_system: "buck2"
+  args: "//src/komira_encoding:komira_encoding_conda[release]"
+  args: "--out"
+  args: "{out_dir}"
+}
+
+artifacts {
+  name: "komira_all"
+  build_system: "komira_pack"
+  args: "conda-meta"
+  args: "--name"
+  args: "komira_all"
+  args: "--member-manifest"
+  args: "{release_dir}/komira_encoding/manifest.json"
+  args: "--license"
+  args: "Apache-2.0"
+  args: "--summary"
+  args: "Every komira library of one release."
+  args: "--home"
+  args: "https://github.com/komira-ai/komira"
+  args: "--extra-file"
+  args: "info/licenses/LICENSE=LICENSE"
+  args: "--label"
+  args: "kci build {revision_id}"
+  args: "--out-dir"
+  args: "{out_dir}"
+}
