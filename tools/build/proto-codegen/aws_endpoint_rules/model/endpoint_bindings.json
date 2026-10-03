@@ -1,0 +1,143 @@
+{
+ "version": "2.0",
+ "metadata": {
+  "apiVersion": "2026-10-02",
+  "endpointPrefix": "s3",
+  "jsonVersion": "1.1",
+  "protocol": "json",
+  "serviceFullName": "Endpoint Bindings Test Service",
+  "serviceId": "Endpoint Bindings",
+  "signatureVersion": "v4",
+  "signingName": "s3",
+  "targetPrefix": "EndpointBindings_20261002",
+  "uid": "endpoint-bindings-2026-10-02"
+ },
+ "operations": {
+  "CopyObject": {
+   "name": "CopyObject",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "CopyObjectRequest"},
+   "output": {"shape": "Empty"},
+   "staticContextParams": {"DisableS3ExpressSessionAuth": {"value": true}}
+  },
+  "CreateBucket": {
+   "name": "CreateBucket",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "CreateBucketRequest"},
+   "output": {"shape": "Empty"},
+   "staticContextParams": {
+    "DisableAccessPoints": {"value": true},
+    "UseS3ExpressControlEndpoint": {"value": true}
+   }
+  },
+  "GetObject": {
+   "name": "GetObject",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "GetObjectRequest"},
+   "output": {"shape": "Empty"}
+  },
+  "ListBuckets": {
+   "name": "ListBuckets",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "ListBucketsRequest"},
+   "output": {"shape": "Empty"}
+  },
+  "ListDirectoryBuckets": {
+   "name": "ListDirectoryBuckets",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "ListDirectoryBucketsRequest"},
+   "output": {"shape": "Empty"},
+   "staticContextParams": {"UseS3ExpressControlEndpoint": {"value": true}}
+  },
+  "ListObjects": {
+   "name": "ListObjects",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "ListObjectsRequest"},
+   "output": {"shape": "Empty"}
+  },
+  "PutTarget": {
+   "name": "PutTarget",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "PutTargetRequest"},
+   "output": {"shape": "Empty"},
+   "operationContextParams": {"Bucket": {"path": "Target.Bucket"}}
+  },
+  "WriteGetObjectResponse": {
+   "name": "WriteGetObjectResponse",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "WriteGetObjectResponseRequest"},
+   "output": {"shape": "Empty"},
+   "staticContextParams": {"UseObjectLambdaEndpoint": {"value": true}}
+  }
+ },
+ "shapes": {
+  "BucketName": {"type": "string"},
+  "CopyObjectRequest": {
+   "type": "structure",
+   "required": ["Bucket", "CopySource", "Key"],
+   "members": {
+    "Bucket": {"shape": "BucketName", "contextParam": {"name": "Bucket"}},
+    "CopySource": {"shape": "CopySource", "contextParam": {"name": "CopySource"}},
+    "Key": {"shape": "ObjectKey", "contextParam": {"name": "Key"}}
+   }
+  },
+  "CopySource": {"type": "string"},
+  "CreateBucketRequest": {
+   "type": "structure",
+   "required": ["Bucket"],
+   "members": {
+    "Bucket": {"shape": "BucketName", "contextParam": {"name": "Bucket"}}
+   }
+  },
+  "Empty": {"type": "structure", "members": {}},
+  "GetObjectRequest": {
+   "type": "structure",
+   "required": ["Bucket", "Key"],
+   "members": {
+    "Bucket": {"shape": "BucketName", "contextParam": {"name": "Bucket"}},
+    "Key": {"shape": "ObjectKey", "contextParam": {"name": "Key"}}
+   }
+  },
+  "ListBucketsRequest": {"type": "structure", "members": {}},
+  "ListDirectoryBucketsRequest": {"type": "structure", "members": {}},
+  "ListObjectsRequest": {
+   "type": "structure",
+   "required": ["Bucket"],
+   "members": {
+    "Bucket": {"shape": "BucketName", "contextParam": {"name": "Bucket"}},
+    "Prefix": {"shape": "Prefix", "contextParam": {"name": "Prefix"}}
+   }
+  },
+  "ObjectKey": {"type": "string"},
+  "Prefix": {"type": "string"},
+  "PutTargetRequest": {
+   "type": "structure",
+   "members": {
+    "Target": {"shape": "Target"}
+   }
+  },
+  "RequestRoute": {"type": "string"},
+  "RequestToken": {"type": "string"},
+  "Target": {
+   "type": "structure",
+   "members": {
+    "Bucket": {"shape": "BucketName"}
+   }
+  },
+  "WriteGetObjectResponseRequest": {
+   "type": "structure",
+   "required": ["RequestRoute", "RequestToken"],
+   "members": {
+    "RequestRoute": {"shape": "RequestRoute"},
+    "RequestToken": {"shape": "RequestToken"}
+   }
+  }
+ },
+ "clientContextParams": {
+  "Accelerate": {"type": "boolean"},
+  "DisableMultiRegionAccessPoints": {"type": "boolean"},
+  "DisableS3ExpressSessionAuth": {"type": "boolean"},
+  "ForcePathStyle": {"type": "boolean"},
+  "UseArnRegion": {"type": "boolean"}
+ }
+}

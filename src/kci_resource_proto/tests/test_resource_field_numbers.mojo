@@ -24,10 +24,24 @@
 # them from the generated code would agree with it by construction.
 #
 # ALSO PINNED: the two v1 `Resource.body` arms (10 service, 11 job) by number
-# AND by which field each fills; the HELD numbers (body 12 to 19 for the later
-# types, 90 for the escape hatch, `Resource` 3, `Value` 4) decode as unknown
-# today, so nothing else has taken them; the retired field 4 is ignored; and
-# every enum's ordinals in both directions, held values undeclared.
+# AND by which field each fills; the HELD numbers (body 12 to 18 for the later
+# types, 90 for the escape hatch, `Resource` 3, 5 and 6, `Value` 4, `Image` 4,
+# `Service` 13, `Job` 8) decode as unknown today, so nothing else has taken
+# them; the retired field 4 is ignored; and every enum's ordinals in both
+# directions, held values undeclared.
+#
+# THE FIELDS ADDED AFTER THE FIRST DRAFT, each pinned the same two ways:
+# `Image.platform` 3 (an OCI-style string), `SecretRef` 1 name, 2 store and
+# 3 version, `Service.secret_env` 12, `Job.env` 6 and `Job.secret_env` 7. And
+# `test_added_numbers_are_kept` restates them with decode and encode ONLY, so
+# it compiles against a schema without them and fails there at run time: a
+# number the schema does not declare is dropped on re-encode, and a number
+# whose wire shape changed does not decode to the same bytes.
+#
+# RENAMED, NUMBERS KEPT: `StepOutput { step = 1, name = 2 }` (was
+# `ActionOutput { action, name }`) and `Portability.CLOUD_BOUND = 2` (was
+# `PLATFORM_BOUND`). PRESENCE: `Scale.min`, `Job.max_retries`,
+# `SecretRef.store` and `SecretRef.version` tell "not written" from zero.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -42,7 +56,10 @@ from kci_resource_proto.resource import (
     Ref,
     Resource,
     ResourceList,
+    Scale,
+    SecretRef,
     Service,
+    StepOutput,
     Uses,
     Value,
 )
@@ -104,6 +121,13 @@ def _hex(b: List[UInt8]) -> String:
 # fixed field, or a length-delimited record whose canonical content is empty)
 # is dropped, recursively. What this cannot see (an empty sub-message, such as
 # `public {}`) is pinned by the named-field and oneof-case assertions instead.
+#
+# ⚠ AND IT WRITES A MESSAGE'S PLAIN FIELDS BEFORE ITS ONEOF FIELDS (an
+# `Image` with a digest and a platform comes out as 3 then 2). Protobuf fixes
+# the order of records only WITHIN one field number (a repeated field), so the
+# canonical form also sorts each level's records by field number, stably:
+# records of different fields compare in any order, a repeated field's
+# elements keep theirs.
 
 
 def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
@@ -121,8 +145,33 @@ def _read_varint(b: List[UInt8], mut pos: Int, mut ok: Bool) -> UInt64:
 
 
 def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
-    """`b` as a message with every zero-valued record dropped, recursively.
-    False when `b` does not parse as a message (it is then compared raw)."""
+    """`b` as a message with every zero-valued record dropped, recursively,
+    and its records sorted stably by field number. False when `b` does not
+    parse as a message (it is then compared raw)."""
+    var fields = List[Int]()
+    var records = List[List[UInt8]]()
+    if not _canon_records(b, fields, records):
+        return False
+    # Stable insertion sort by field number: equal numbers keep their order.
+    var order = List[Int]()
+    for i in range(len(fields)):
+        var j = len(order)
+        order.append(i)
+        while j > 0 and fields[order[j - 1]] > fields[i]:
+            order[j] = order[j - 1]
+            j -= 1
+        order[j] = i
+    for k in range(len(order)):
+        ref rec = records[order[k]]
+        for x in range(len(rec)):
+            out.append(rec[x])
+    return True
+
+
+def _canon_records(
+    b: List[UInt8], mut fields: List[Int], mut records: List[List[UInt8]]
+) -> Bool:
+    """The non-zero records of `b`, each canonicalized, in wire order."""
     var pos = 0
     var ok = True
     while pos < len(b):
@@ -135,8 +184,11 @@ def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
             if not ok:
                 return False
             if v != 0:
-                _varint(out, tag)
-                _varint(out, v)
+                var rec = List[UInt8]()
+                _varint(rec, tag)
+                _varint(rec, v)
+                fields.append(Int(tag >> 3))
+                records.append(rec^)
         elif wt == _LEN:
             var n = Int(_read_varint(b, pos, ok))
             if not ok or pos + n > len(b):
@@ -149,10 +201,13 @@ def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
             if not _canon(content, inner):
                 inner = content^
             if len(inner) > 0:
-                _varint(out, tag)
-                _varint(out, UInt64(len(inner)))
+                var rec = List[UInt8]()
+                _varint(rec, tag)
+                _varint(rec, UInt64(len(inner)))
                 for k in range(len(inner)):
-                    out.append(inner[k])
+                    rec.append(inner[k])
+                fields.append(Int(tag >> 3))
+                records.append(rec^)
         elif wt == 1 or wt == 5:
             var width = 8 if wt == 1 else 4
             if pos + width > len(b):
@@ -162,9 +217,12 @@ def _canon(b: List[UInt8], mut out: List[UInt8]) -> Bool:
                 if b[pos + k] != 0:
                     nonzero = True
             if nonzero:
-                _varint(out, tag)
+                var rec = List[UInt8]()
+                _varint(rec, tag)
                 for k in range(width):
-                    out.append(b[pos + k])
+                    rec.append(b[pos + k])
+                fields.append(Int(tag >> 3))
+                records.append(rec^)
             pos += width
         else:
             return False
@@ -230,22 +288,50 @@ def _scale(lo: Int, hi: Int) -> List[UInt8]:
     return b^
 
 
-def _action_output(action: String, name: String) -> List[UInt8]:
+def _step_output(step: String, name: String) -> List[UInt8]:
     var b = List[UInt8]()
-    _str(b, 1, action)
+    _str(b, 1, step)
     _str(b, 2, name)
     return b^
 
 
-def _image_from_action(action: String, name: String) -> List[UInt8]:
+def _image_from_step(step: String, name: String) -> List[UInt8]:
     var b = List[UInt8]()
-    _msg(b, 1, _action_output(action, name))
+    _msg(b, 1, _step_output(step, name))
     return b^
 
 
 def _image_digest(digest: String) -> List[UInt8]:
     var b = List[UInt8]()
     _str(b, 2, digest)
+    return b^
+
+
+def _secret(name: String) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, name)
+    return b^
+
+
+def _secret_pinned(name: String, store: String, version: String) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, name)
+    _str(b, 2, store)
+    _str(b, 3, version)
+    return b^
+
+
+def _entry(key: String, value: List[UInt8]) -> List[UInt8]:
+    """One map entry: 1 key, 2 value (a message)."""
+    var b = List[UInt8]()
+    _str(b, 1, key)
+    _msg(b, 2, value)
+    return b^
+
+
+def _literal(s: String) -> List[UInt8]:
+    var b = List[UInt8]()
+    _str(b, 1, s)
     return b^
 
 
@@ -312,7 +398,8 @@ def test_value_arms() raises:
     assert_equal(v3.ref_.value().resource, "jobs")
     _same(encode_proto(v3), rf, "Value.ref")
 
-    # 4 is held for a secret reference: undeclared today, so unknown.
+    # 4 is held: a secret never rides a Value (it is a `SecretRef` on the
+    # service or job). Undeclared today, so unknown.
     var sec = List[UInt8]()
     _msg(sec, 4, _ref("stripe_key"))
     var v4 = decode_proto[Value](sec.copy())
@@ -321,12 +408,13 @@ def test_value_arms() raises:
 
 
 def test_image_arms() raises:
-    """Image: oneof source { 1 output, 2 digest }."""
+    """Image: oneof source { 1 output, 2 digest }. StepOutput: 1 step,
+    2 name."""
     var o = List[UInt8]()
-    _msg(o, 1, _action_output("build", "docs_bundle"))
+    _msg(o, 1, _step_output("build", "docs_bundle"))
     var c = decode_proto[Image](o.copy())
     assert_equal(c._oneof0_case, 1)
-    assert_equal(c.output.value().action, "build")
+    assert_equal(c.output.value().step, "build", "StepOutput field 1 is `step`")
     assert_equal(c.output.value().name, "docs_bundle")
     _same(encode_proto(c), o, "Image.output")
 
@@ -336,7 +424,102 @@ def test_image_arms() raises:
     assert_equal(cd._oneof0_case, 2)
     assert_equal(cd.digest.value(), "sha256:cd")
     _same(encode_proto(cd), d, "Image.digest")
+
+    # No platform: the field is empty (a reader takes the v1 default,
+    # linux/amd64).
+    assert_equal(cd.platform, "", "Image.platform is empty when not written")
+
+    var so = decode_proto[StepOutput](_step_output("images", "api_image"))
+    assert_equal(so.step, "images")
+    assert_equal(so.name, "api_image", "StepOutput field 2 is `name`")
     print("  test_image_arms: PASS")
+
+
+def test_image_platform() raises:
+    """Image: 3 platform, an OCI-style string, beside either source arm."""
+    var o = List[UInt8]()
+    _msg(o, 1, _step_output("build", "api_image"))
+    _str(o, 3, "linux/amd64")
+    var io = decode_proto[Image](o.copy())
+    assert_equal(io._oneof0_case, 1, "platform does not touch the source arm")
+    assert_equal(io.output.value().name, "api_image")
+    assert_equal(io.platform, "linux/amd64", "Image field 3 is `platform`")
+    _same(encode_proto(io), o, "Image.output + platform")
+
+    var d = List[UInt8]()
+    _str(d, 2, "sha256:ef")
+    _str(d, 3, "linux/amd64")
+    var idg = decode_proto[Image](d.copy())
+    assert_equal(idg._oneof0_case, 2)
+    assert_equal(idg.digest.value(), "sha256:ef")
+    assert_equal(idg.platform, "linux/amd64")
+    _same(encode_proto(idg), d, "Image.digest + platform")
+
+    # A platform this kci does not accept still decodes, verbatim: the schema
+    # cannot refuse it, the validate phase does (linux/amd64 only in v1).
+    var other = List[UInt8]()
+    _str(other, 2, "sha256:12")
+    _str(other, 3, "darwin/arm64")
+    var io2 = decode_proto[Image](other.copy())
+    assert_equal(io2.platform, "darwin/arm64")
+    _same(encode_proto(io2), other, "Image.platform other value")
+    print("  test_image_platform: PASS")
+
+
+def test_secret_ref() raises:
+    """SecretRef: 1 name, 2 store, 3 version; store and version have
+    presence. A reference, never a value."""
+    var b = _secret_pinned("db_password", "default", "7")
+    var s = decode_proto[SecretRef](b.copy())
+    assert_equal(s.name, "db_password", "SecretRef field 1 is `name`")
+    assert_equal(s.store.value(), "default", "SecretRef field 2 is `store`")
+    assert_equal(s.version.value(), "7", "SecretRef field 3 is `version`")
+    _same(encode_proto(s), b, "SecretRef")
+
+    # Not written: absent. Written empty: present and empty.
+    var bare = decode_proto[SecretRef](_secret("db_password"))
+    assert_true(not Bool(bare.store), "an unwritten store is absent")
+    assert_true(not Bool(bare.version), "an unwritten version is absent")
+    var e = List[UInt8]()
+    _str(e, 1, "db_password")
+    _str(e, 3, "")
+    var se = decode_proto[SecretRef](e.copy())
+    assert_true(Bool(se.version), "a version written empty is present")
+    assert_equal(se.version.value(), "")
+    assert_true(not Bool(se.store))
+
+    var held = _secret("db_password")
+    _str(held, 4, "not-a-field")
+    var sh = decode_proto[SecretRef](held.copy())
+    _same(encode_proto(sh), _secret("db_password"), "SecretRef has no field 4")
+    print("  test_secret_ref: PASS")
+
+
+def test_added_numbers_are_kept() raises:
+    """Decode and encode only, nothing read by name: every number added after
+    the first draft must survive a round trip. Against a schema that lacks one
+    it is unknown, dropped on re-encode, and this fails."""
+    var img = List[UInt8]()
+    _str(img, 2, "sha256:01")
+    _str(img, 3, "linux/amd64")
+    _same(encode_proto(decode_proto[Image](img.copy())), img, "Image 3")
+
+    var sec = _secret_pinned("db_password", "default", "3")
+    _same(
+        encode_proto(decode_proto[SecretRef](sec.copy())), sec, "SecretRef 2 and 3"
+    )
+
+    var svc = List[UInt8]()
+    _uint(svc, 2, 8080)
+    _msg(svc, 12, _entry("DB_PASSWORD", _secret("db_password")))
+    _same(encode_proto(decode_proto[Service](svc.copy())), svc, "Service 12")
+
+    var job = List[UInt8]()
+    _str(job, 2, "report")
+    _msg(job, 6, _entry("MODE", _literal("full")))
+    _msg(job, 7, _entry("API_TOKEN", _secret("api_token")))
+    _same(encode_proto(decode_proto[Job](job.copy())), job, "Job 6 and 7")
+    print("  test_added_numbers_are_kept: PASS")
 
 
 # ---- Resource and its body arms --------------------------------------------------
@@ -381,13 +564,13 @@ def test_resource_body_arms_are_10_and_11() raises:
 
 
 def test_held_body_numbers_are_undeclared() raises:
-    """12 to 19 are held for the later types (worker, table, bucket, queue,
-    secret, site, domain, mail_relay) and 90 for the escape hatch. Today each
-    decodes as an unknown field: no arm set, dropped on re-encode. When a type
-    lands at its held number this test changes with it; anything else taking
-    one of these numbers is a mistake."""
+    """12 to 18 are held for the later types (worker, table, bucket, queue,
+    secret, site, domain) and 90 for the escape hatch. Today each decodes as
+    an unknown field: no arm set, dropped on re-encode. When a type lands at
+    its held number this test changes with it; anything else taking one of
+    these numbers is a mistake."""
     var held = List[Int]()
-    for n in range(12, 20):
+    for n in range(12, 19):
         held.append(n)
     held.append(90)
     var head = List[UInt8]()
@@ -424,6 +607,44 @@ def test_fields_3_and_4_are_not_declared() raises:
     print("  test_fields_3_and_4_are_not_declared: PASS")
 
 
+def test_reserved_now_built_later_numbers_are_undeclared() raises:
+    """The numbers held for shapes that land later as additions: `Resource` 5
+    (cloud_settings) and 6 (physical_name), `Image` 4 (artifact_ref), and the
+    `artifact_ref` arm of a later `source` on `Service` 13 and `Job` 8. Each
+    decodes as unknown today: dropped on re-encode."""
+    var rhead = List[UInt8]()
+    _str(rhead, 1, "r")
+    var rb = rhead.copy()
+    _empty(rb, 5)
+    _str(rb, 6, "kept-name")
+    _same(
+        encode_proto(decode_proto[Resource](rb.copy())),
+        rhead,
+        "Resource 5 and 6 are held",
+    )
+
+    var ihead = List[UInt8]()
+    _str(ihead, 2, "sha256:aa")
+    var ib = ihead.copy()
+    _empty(ib, 4)
+    var ii = decode_proto[Image](ib.copy())
+    assert_equal(ii._oneof0_case, 2, "Image 4 is not a source arm today")
+    _same(encode_proto(ii), ihead, "Image 4 is held")
+
+    var shead = List[UInt8]()
+    _uint(shead, 2, 8080)
+    var sb = shead.copy()
+    _empty(sb, 13)
+    _same(encode_proto(decode_proto[Service](sb.copy())), shead, "Service 13")
+
+    var jhead = List[UInt8]()
+    _str(jhead, 2, "report")
+    var jb = jhead.copy()
+    _empty(jb, 8)
+    _same(encode_proto(decode_proto[Job](jb.copy())), jhead, "Job 8")
+    print("  test_reserved_now_built_later_numbers_are_undeclared: PASS")
+
+
 def test_resource_header_fields() raises:
     """Resource: 1 id, 2 uses; then the body."""
     var u = List[UInt8]()
@@ -450,11 +671,12 @@ def test_resource_header_fields() raises:
     print("  test_resource_header_fields: PASS")
 
 
-# ---- the ten types ---------------------------------------------------------------
+# ---- the v1 types: service and job -------------------------------------------------
 
 
 def test_service() raises:
-    """Service: 1 image .. 9 max_concurrency; oneof { 10 public, 11 internal }."""
+    """Service: 1 image .. 9 max_concurrency; oneof { 10 public, 11 internal };
+    12 secret_env."""
     var env_value = List[UInt8]()
     _msg(env_value, 3, _ref_out("jobs", Output.HOST))
     var env_entry = List[UInt8]()
@@ -462,7 +684,7 @@ def test_service() raises:
     _msg(env_entry, 2, env_value)
 
     var b = List[UInt8]()
-    _msg(b, 1, _image_from_action("build", "api_image"))
+    _msg(b, 1, _image_from_step("build", "api_image"))
     _uint(b, 2, 8080)
     _str(b, 3, "serve")
     _str(b, 3, "--fast")
@@ -473,8 +695,9 @@ def test_service() raises:
     _msg(b, 8, _duration(30))
     _uint(b, 9, 80)
     _empty(b, 10)
+    _msg(b, 12, _entry("DB_PASSWORD", _secret("db_password")))
     var s = decode_proto[Service](b.copy())
-    assert_equal(s.image.value().output.value().action, "build")
+    assert_equal(s.image.value().output.value().step, "build")
     assert_equal(s.image.value().output.value().name, "api_image")
     assert_equal(Int(s.port), 8080)
     assert_equal(len(s.args), 2)
@@ -486,13 +709,16 @@ def test_service() raises:
     )
     assert_equal(Int(s.size.value().cpu_millis), 1000)
     assert_equal(Int(s.size.value().memory_mb), 512)
-    assert_equal(Int(s.scale.value().min), 1)
+    assert_equal(Int(s.scale.value().min.value()), 1)
     assert_equal(Int(s.scale.value().max), 20)
     assert_equal(s.health_path, "/healthz")
     assert_equal(Int(s.request_timeout.value().seconds), 30)
     assert_equal(Int(s.max_concurrency), 80)
     assert_equal(s._oneof0_case, 1, "field 10 is `public`")
     assert_true(Bool(s.public), "field 10 is `public`")
+    assert_equal(len(s.secret_env), 1, "field 12 is `secret_env`")
+    assert_equal(s.secret_env["DB_PASSWORD"].name, "db_password")
+    assert_true("DB_PASSWORD" not in s.env, "a secret is not an env value")
     _same(encode_proto(s), b, "Service (public)")
 
     var i = List[UInt8]()
@@ -505,8 +731,30 @@ def test_service() raises:
     print("  test_service: PASS")
 
 
+def test_scale_min_has_presence() raises:
+    """Scale: 1 min (presence), 2 max. An explicit `min: 0` (scale to zero)
+    is a value; a Scale with no `min` written has none."""
+    var zero = List[UInt8]()
+    _uint(zero, 1, 0)
+    _uint(zero, 2, 5)
+    var z = decode_proto[Scale](zero.copy())
+    assert_true(Bool(z.min), "an explicit min of 0 is present")
+    assert_equal(Int(z.min.value()), 0)
+    assert_equal(Int(z.max), 5, "Scale field 2 is `max`")
+
+    var only_max = List[UInt8]()
+    _uint(only_max, 2, 5)
+    var m = decode_proto[Scale](only_max.copy())
+    assert_true(not Bool(m.min), "an unwritten min is absent")
+    _same(encode_proto(m), only_max, "Scale without min")
+    print("  test_scale_min_has_presence: PASS")
+
+
 def test_job() raises:
-    """Job: 1 image .. 5 timeout; oneof { 10 on_demand, 11 schedule }."""
+    """Job: 1 image .. 5 timeout; 6 env, 7 secret_env; oneof { 10 on_demand,
+    11 schedule }."""
+    var env_ref = List[UInt8]()
+    _msg(env_ref, 3, _ref_out("api", Output.URL))
     var sched = List[UInt8]()
     _str(sched, 1, "0 3 * * *")
     _str(sched, 2, "UTC")
@@ -516,14 +764,23 @@ def test_job() raises:
     _msg(b, 3, _size(250, 128))
     _uint(b, 4, 2)
     _msg(b, 5, _duration(900))
+    _msg(b, 6, _entry("MODE", _literal("full")))
+    _msg(b, 6, _entry("API_URL", env_ref))
+    _msg(b, 7, _entry("API_TOKEN", _secret("api_token")))
     _msg(b, 11, sched)
     var j = decode_proto[Job](b.copy())
     assert_equal(j.image.value()._oneof0_case, 2, "Image field 2 is `digest`")
     assert_equal(j.image.value().digest.value(), "sha256:ab")
     assert_equal(j.args[0], "report")
     assert_equal(Int(j.size.value().cpu_millis), 250)
-    assert_equal(Int(j.max_retries), 2)
+    assert_equal(Int(j.max_retries.value()), 2)
     assert_equal(Int(j.timeout.value().seconds), 900)
+    assert_equal(len(j.env), 2, "field 6 is `env`")
+    assert_equal(j.env["MODE"].literal.value(), "full")
+    assert_equal(j.env["API_URL"].ref_.value().resource, "api")
+    assert_equal(j.env["API_URL"].ref_.value().standard.value().value, Output.URL)
+    assert_equal(len(j.secret_env), 1, "field 7 is `secret_env`")
+    assert_equal(j.secret_env["API_TOKEN"].name, "api_token")
     assert_equal(j._oneof0_case, 2, "field 11 is `schedule`")
     assert_equal(j.schedule.value().cron, "0 3 * * *")
     assert_equal(j.schedule.value().timezone, "UTC")
@@ -535,7 +792,16 @@ def test_job() raises:
     var jd = decode_proto[Job](d.copy())
     assert_equal(jd._oneof0_case, 1, "field 10 is `on_demand`")
     assert_true(Bool(jd.on_demand))
+    assert_true(not Bool(jd.max_retries), "an unwritten max_retries is absent")
     _same(encode_proto(jd), d, "Job (on_demand)")
+
+    # An explicit "no retries" is a value, not the absence of one.
+    var nr = List[UInt8]()
+    _str(nr, 2, "once")
+    _uint(nr, 4, 0)
+    var jn = decode_proto[Job](nr.copy())
+    assert_true(Bool(jn.max_retries), "an explicit max_retries of 0 is present")
+    assert_equal(Int(jn.max_retries.value()), 0)
     print("  test_job: PASS")
 
 
@@ -552,8 +818,8 @@ def _enum_row(got_name: String, want_name: String, n: Int, what: String) raises:
 
 def test_enum_ordinals() raises:
     """Every enum value by number AND by name: the number is what is stored.
-    The held values (Output 3, 4; Access 2 to 6) render as bare numbers, i.e.
-    nothing has taken them."""
+    The held values (Output 3 to 5; Access 2 to 6) render as bare numbers,
+    i.e. nothing has taken them."""
     var outputs = List[String]()
     outputs.append("OUTPUT_UNSET")
     outputs.append("URL")
@@ -561,7 +827,7 @@ def test_enum_ordinals() raises:
     for n in range(len(outputs)):
         _enum_row(Output(n).json_name(), outputs[n], n, "Output")
         assert_equal(Output.from_json_name(outputs[n]).value, n)
-    for n in range(3, 5):
+    for n in range(3, 6):
         assert_equal(Output(n).json_name(), String(n), "Output value held")
 
     var access = List[String]()
@@ -576,11 +842,12 @@ def test_enum_ordinals() raises:
     var port = List[String]()
     port.append("PORTABILITY_UNSET")
     port.append("PORTABLE")
-    port.append("PLATFORM_BOUND")
+    port.append("CLOUD_BOUND")
     for n in range(len(port)):
         _enum_row(Portability(n).json_name(), port[n], n, "Portability")
         assert_equal(Portability.from_json_name(port[n]).value, n)
     assert_equal(Portability(3).json_name(), "3", "Portability has three values")
+
     print("  test_enum_ordinals: PASS")
 
 
@@ -590,11 +857,16 @@ def main() raises:
     test_uses()
     test_value_arms()
     test_image_arms()
+    test_image_platform()
+    test_secret_ref()
+    test_added_numbers_are_kept()
     test_resource_body_arms_are_10_and_11()
     test_held_body_numbers_are_undeclared()
     test_fields_3_and_4_are_not_declared()
+    test_reserved_now_built_later_numbers_are_undeclared()
     test_resource_header_fields()
     test_service()
+    test_scale_min_has_presence()
     test_job()
     test_enum_ordinals()
     print("ALL kci.resource.v1 FIELD-NUMBER TESTS PASSED")

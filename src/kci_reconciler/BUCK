@@ -1,0 +1,30 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The provider-neutral resource-graph deploy engine core. It reconciles a
+# ResourceGraph of erased Resource nodes against LIVE actual state with the
+# verbs plan / apply / rollback / destroy, over a StateStore (write-ahead
+# intent) and per-call Creds. A per-provider conformer is a separate package
+# that imports this and implements Resource; this core names no provider.
+#
+# Deps: komira_core (Slab, the node storage of the graph) and komira_log (the
+# WARN breadcrumb a swallowed best-effort prune fault emits).
+#
+# The welded tests drive the real engine over in-memory conformers: topo
+# order, create / adopt / update, rollback and destroy with every retention
+# code, the confirmed-gone reap gate, the destroy scope, crash-then-adopt
+# recovery, the best-effort prune, and fault attribution defaulting to ours.
+mojo_library(
+    name = "kci_reconciler",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+        "//src/komira_log:komira_log",
+    ],
+    test_srcs = [
+        "tests/test_fault_domain_defaults_to_ours.mojo",
+        "tests/test_resource_graph_engine.mojo",
+        "tests/test_resource_outputs.mojo",
+        "tests/test_resource_outputs_after_mutation.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

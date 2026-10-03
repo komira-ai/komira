@@ -15,8 +15,9 @@
 #    catalog types with strings longer than the inline capacity.
 #
 # 2. The proto3 JSON form round-trips a whole list, under the camelCase names
-#    an author's tooling sees (`healthPath`, `schedule`, `timezone`), and
-#    re-encodes to the same binary bytes.
+#    an author's tooling sees (`healthPath`, `schedule`, `timezone`,
+#    `secretEnv`, `platform`, `store`, `version`), and re-encodes to the same
+#    binary bytes.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -60,8 +61,25 @@ def _long(tag: String, i: Int) -> String:
     return s^
 
 
+def _secret_entry(
+    key: String, name: String, pinned: Bool = False
+) -> List[UInt8]:
+    var secret = List[UInt8]()
+    _str(secret, 1, name)
+    if pinned:
+        _str(secret, 2, String("default"))
+        _str(secret, 3, String("12"))
+    var entry = List[UInt8]()
+    _str(entry, 1, key)
+    _msg(entry, 2, secret)
+    return entry^
+
+
 def _service_resource(i: Int) -> List[UInt8]:
     """A `service` whose every string is heap-owned."""
+    var image = List[UInt8]()
+    _str(image, 2, _long("sha256-api", i))
+    _str(image, 3, String("linux/amd64"))
     var target = List[UInt8]()
     _str(target, 1, _long("target", i))
     var uses = List[UInt8]()
@@ -73,11 +91,13 @@ def _service_resource(i: Int) -> List[UInt8]:
     _str(entry, 1, _long("KEY", i))
     _msg(entry, 2, literal)
     var svc = List[UInt8]()
+    _msg(svc, 1, image)
     _uint(svc, 2, 8080)
     _str(svc, 3, _long("arg", i))
     _msg(svc, 4, entry)
     _str(svc, 7, _long("/healthz", i))
     _msg(svc, 10, List[UInt8]())
+    _msg(svc, 12, _secret_entry(_long("SECRET", i), _long("secret_name", i)))
     var r = List[UInt8]()
     _str(r, 1, _long("api", i))
     _msg(r, 2, uses)
@@ -91,9 +111,21 @@ def _job_resource(i: Int) -> List[UInt8]:
     _str(sched, 2, _long("tz", i))
     var digest = List[UInt8]()
     _str(digest, 2, _long("sha256", i))
+    _str(digest, 3, String("linux/amd64"))
+    var literal = List[UInt8]()
+    _str(literal, 1, _long("jobvalue", i))
+    var env = List[UInt8]()
+    _str(env, 1, _long("JOBKEY", i))
+    _msg(env, 2, literal)
     var job = List[UInt8]()
     _msg(job, 1, digest)
     _str(job, 2, _long("report", i))
+    _msg(job, 6, env)
+    _msg(
+        job,
+        7,
+        _secret_entry(_long("JOBSECRET", i), _long("job_secret", i), pinned=True),
+    )
     _msg(job, 11, sched)
     var r = List[UInt8]()
     _str(r, 1, _long("job", i))
@@ -130,6 +162,19 @@ def _check_originals(lst: List[Resource], what: String) raises:
             what + ": env",
         )
         assert_equal(svc.health_path, _long("/healthz", i), what + ": health")
+        assert_equal(
+            svc.image.value().digest.value(),
+            _long("sha256-api", i),
+            what + ": service image",
+        )
+        assert_equal(
+            svc.image.value().platform, "linux/amd64", what + ": platform"
+        )
+        assert_equal(
+            svc.secret_env[_long("SECRET", i)].name,
+            _long("secret_name", i),
+            what + ": service secret_env",
+        )
         ref j = lst[2 * i + 1]
         assert_equal(j.id, _long("job", i), what + ": job id")
         ref job = j.job.value()
@@ -137,6 +182,26 @@ def _check_originals(lst: List[Resource], what: String) raises:
             job.image.value().digest.value(), _long("sha256", i), what + ": image"
         )
         assert_equal(job.args[0], _long("report", i), what + ": job args")
+        assert_equal(
+            job.env[_long("JOBKEY", i)].literal.value(),
+            _long("jobvalue", i),
+            what + ": job env",
+        )
+        assert_equal(
+            job.secret_env[_long("JOBSECRET", i)].name,
+            _long("job_secret", i),
+            what + ": job secret_env",
+        )
+        assert_equal(
+            job.image.value().platform, "linux/amd64", what + ": job platform"
+        )
+        ref js = job.secret_env[_long("JOBSECRET", i)]
+        assert_equal(js.store.value(), "default", what + ": secret store")
+        assert_equal(js.version.value(), "12", what + ": secret version")
+        assert_true(
+            not Bool(svc.secret_env[_long("SECRET", i)].version),
+            what + ": an unpinned secret has no version",
+        )
         assert_equal(job.schedule.value().cron, _long("cron", i), what + ": cron")
         assert_equal(
             job.schedule.value().timezone, _long("tz", i), what + ": timezone"
@@ -172,7 +237,16 @@ def test_json_round_trip_of_a_list() raises:
     var bytes = _list_bytes()
     var lst = decode_proto[ResourceList](bytes.copy())
     var text = encode_json(lst)
-    for key in ['"healthPath"', '"schedule"', '"timezone"', '"uses"']:
+    for key in [
+        '"healthPath"',
+        '"schedule"',
+        '"timezone"',
+        '"uses"',
+        '"secretEnv"',
+        '"platform":"linux/amd64"',
+        '"store":"default"',
+        '"version":"12"',
+    ]:
         assert_true(
             String(key) in text,
             String("proto3 JSON carries ") + String(key) + ": " + text,
