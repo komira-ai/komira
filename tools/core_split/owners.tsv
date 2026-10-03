@@ -30,7 +30,10 @@ komira_deploy_bundle	origin/lib/komira_factory_build
 komira_eval	origin/lib/komira_eval
 komira_factory_build	origin/lib/komira_factory_build
 komira_grpc	origin/lib/komira_grpc
-komira_http	origin/lib/komira_http
+komira_http_client	origin/lib/komira_http
+komira_http_core	origin/lib/komira_http
+komira_http_server	origin/lib/komira_http
+komira_http_status_hook	origin/lib/komira_http
 komira_jsonl	origin/lib/komira_jsonl
 komira_jwks	origin/lib/komira_jwks
 komira_k8s	origin/lib/komira_k8s

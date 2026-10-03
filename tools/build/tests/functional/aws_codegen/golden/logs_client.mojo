@@ -13,7 +13,7 @@
 #   model sha256 : b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30
 #   operations   : GetLogEvents
 #   shapes       : 6 messages, 0 enums
-#   generator    : aws-client-gen version 5
+#   generator    : aws-client-gen version 6
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -85,7 +85,7 @@ from komira_json import (
     parse_json_bytes,
     parse_json_value,
 )
-from komira_http.transport.io_stream import Connector
+from komira_http_core.transport.io_stream import Connector
 
 
 # ---------------------------------------------------------------------------
