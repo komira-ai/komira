@@ -291,6 +291,10 @@ pub struct IrHttpRule {
     /// `""` (no body — every leaf field is path or query), or a single
     /// field name (that field is the body).
     pub body: String,
+    /// The annotation's `additional_bindings`: further path forms of the
+    /// same method, in declaration order, each with no bindings of its own.
+    /// Empty for a rule with one form.
+    pub additional_bindings: Vec<IrHttpRule>,
 }
 
 

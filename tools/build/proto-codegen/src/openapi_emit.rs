@@ -557,6 +557,7 @@ mod tests {
                     verb: "get".into(),
                     path_template: path.into(),
                     body: String::new(),
+                    additional_bindings: vec![],
                 }),
                 routing_rule: None,
             }],

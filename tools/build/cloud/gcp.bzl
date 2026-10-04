@@ -33,6 +33,15 @@ required. `messages_only = True` emits no service. The items are joined
 with protoc-gen-mojo's list separator `+`, the options with `,`; an item
 holding either, `=` or whitespace is refused here rather than mis-split.
 
+`omit_fields` names fields (`pkg.Message.field`) left out of their
+message: a field whose type the runtime cannot represent and no caller
+reads, such as Service Usage's `Service.config` (its `ServiceConfig` reaches
+`google.protobuf.Api`, which komira_wkt does not provide, and `map<string,
+int64>` fields, which komira_proto_codec does not decode). The message is generated without it, so
+a response's value for it is skipped like any unknown key, a request never
+sends it, and the closure no longer reaches its type. A name that is not a
+field of a generated message is refused at generation.
+
 Protocol. `protocol` is the wire protocol of the generated service code,
 passed to protoc-gen-mojo as `default_protocol`. It is "rest" (JSON over
 HTTP, the default) or "grpc"; any other value is refused naming the
@@ -132,6 +141,7 @@ def _gcp_client_gen_impl(ctx):
         fail("{}: `protocol` `{}` is not one of {}".format(ctx.label, ctx.attrs.protocol, ", ".join(['"{}"'.format(p) for p in _PROTOCOLS])))
     _check_items(ctx, "roots", ctx.attrs.roots)
     _check_items(ctx, "methods", ctx.attrs.methods)
+    _check_items(ctx, "omit_fields", ctx.attrs.omit_fields)
     if ctx.attrs.bundle_proto_deps and not ctx.attrs.bundle_only:
         fail("{}: `bundle_proto_deps = True` with an empty `bundle_only`. List the files of the proto_deps closure the scope reaches; the whole closure is never bundled".format(ctx.label))
     if not ctx.attrs.bundle_proto_deps and ctx.attrs.bundle_only:
@@ -156,6 +166,8 @@ def _gcp_client_gen_impl(ctx):
         opt.append("roots=" + _LIST_SEPARATOR.join(ctx.attrs.roots))
     if ctx.attrs.methods:
         opt.append("methods=" + _LIST_SEPARATOR.join(ctx.attrs.methods))
+    if ctx.attrs.omit_fields:
+        opt.append("omit_fields=" + _LIST_SEPARATOR.join(ctx.attrs.omit_fields))
     expected = names + [_LAYOUT_PROBE]
     gen_dir = generate_proto_dir(ctx, ptc.plugin, "mojo", ",".join(opt), trees, generate, expected, import_name)
 
@@ -178,6 +190,7 @@ _gcp_client_gen = rule(
         "import_prefix": attrs.string(default = ""),
         "messages_only": attrs.bool(default = False),
         "methods": attrs.list(attrs.string(), default = []),
+        "omit_fields": attrs.list(attrs.string(), default = []),
         "proto_deps": attrs.list(attrs.dep(providers = [ProtoSrcsInfo]), default = []),
         # `protos` as written, so an entry the macro cannot derive a file
         # name from is refused here (`srcs` is the same list, resolved).
@@ -205,6 +218,7 @@ def _gcp_client(
         bundle_only,
         roots = [],
         methods = [],
+        omit_fields = [],
         messages_only = False,
         proto_deps = [],
         import_prefix = "",
@@ -224,6 +238,7 @@ def _gcp_client(
         import_prefix = import_prefix,
         messages_only = messages_only,
         methods = methods,
+        omit_fields = omit_fields,
         proto_deps = proto_deps,
         proto_paths = protos,
         protocol = protocol,

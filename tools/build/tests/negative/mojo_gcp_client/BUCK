@@ -72,6 +72,20 @@ mojo_gcp_client(
     deps = _RUNTIME,
 )
 
+# "has no field `colour`": `omit_fields` names a field the message does not
+# have, which would otherwise leave out nothing and say it had.
+mojo_gcp_client(
+    name = "omit_unknown_field",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    omit_fields = ["example.shop.v1.Item.colour"],
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
 # "which must be absent": the absence check of ../../functional/mojo_gcp_client
 # reds on a type the generated client does hold, so it can fail.
 gen_check(
