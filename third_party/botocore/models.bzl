@@ -21,10 +21,22 @@ ruleset, `endpoint-rule-set-1.json` beside the model, is
 """
 
 BOTOCORE_MODELS = {
+    # Amazon API Gateway v2 (//src/komira_aws_apigatewayv2). Its endpoint
+    # prefix and signing name are `apigateway`; the directory is
+    # `apigatewayv2`.
+    "apigatewayv2": struct(
+        api_version = "2018-11-29",
+        sha256 = "fdb831dc9be4cb380b42e21525a1a7e6e379958b7d8a3df7fd71c6c7f50df47c",
+    ),
     # Amazon DynamoDB (//src/komira_aws_dynamodb).
     "dynamodb": struct(
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
+    ),
+    # Amazon DynamoDB Streams (//src/komira_aws_dynamodbstreams).
+    "dynamodbstreams": struct(
+        api_version = "2012-08-10",
+        sha256 = "95cd147c971cd46365849c08e8c596bfd557b31a448b0bbf494d91f65d0ac62f",
     ),
     # Amazon EC2 (//src/komira_aws_ec2), an ec2Query client of twelve of its
     # operations. Its latest api version; botocore keeps the
@@ -33,11 +45,26 @@ BOTOCORE_MODELS = {
         api_version = "2016-11-15",
         sha256 = "ce3cdb5d329b380286bf5ffb312cb02ad3728916228d08143971d2f62e10e5df",
     ),
+    # Amazon ECR (//src/komira_aws_ecr).
+    "ecr": struct(
+        api_version = "2015-09-21",
+        sha256 = "3df743678897ac26e9ca4b8a04bf3007fcadf887feb3e71a50131c874cfbe757",
+    ),
+    # Amazon ECS (//src/komira_aws_ecs).
+    "ecs": struct(
+        api_version = "2014-11-13",
+        sha256 = "44e0fd74d3dd8f629bb5a2259635721806ac4c2daf17c62d38160544daf9bb3c",
+    ),
     # AWS Identity and Access Management (//src/komira_aws_iam), an awsQuery
     # client of a global service.
     "iam": struct(
         api_version = "2010-05-08",
         sha256 = "15c70eaeb15bda321fbf0e9a0db35036d67c6ccd34d38acbcad3a086b89251c5",
+    ),
+    # AWS Lambda (//src/komira_aws_lambda).
+    "lambda": struct(
+        api_version = "2015-03-31",
+        sha256 = "ff0091ee22af3ea4c1c8e7521245ebc917d68250050d62e8462c78e404f914c0",
     ),
     # Amazon CloudWatch Logs (//src/komira_aws_logs), also the worked
     # example of mojo_aws_client's docstring (//tools/build/cloud:aws.bzl).
@@ -45,12 +72,33 @@ BOTOCORE_MODELS = {
         api_version = "2014-03-28",
         sha256 = "b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30",
     ),
+    # Amazon Route 53 (//src/komira_aws_route53).
+    "route53": struct(
+        api_version = "2013-04-01",
+        sha256 = "29dae1683f6128df6cad788a27af0e1aa1ce0e71a99e99b1c4e4d6f24e2b159b",
+    ),
     # Amazon S3 (//src/komira_aws_s3). Its ruleset and endpoint test cases
     # are also run through komira_aws_core's interpreter and a generated
     # test client, whose bindings are checked against this model.
     "s3": struct(
         api_version = "2006-03-01",
         sha256 = "429763d64912af5edae4c7a0f20a8ac3e6fecf734cde5fc465016bc8badcdef9",
+    ),
+    # Amazon EventBridge Scheduler (//src/komira_aws_scheduler).
+    "scheduler": struct(
+        api_version = "2021-06-30",
+        sha256 = "428fbc6d766436e7b5394010e98987af0c738980ccab60d541dd5e5720e643e1",
+    ),
+    # AWS Secrets Manager (//src/komira_aws_secretsmanager).
+    "secretsmanager": struct(
+        api_version = "2017-10-17",
+        sha256 = "d568532fb0db48e0ce9c3c30b6f48aae734e1657105043990ef699ec48656671",
+    ),
+    # Amazon SES API v2 (//src/komira_aws_sesv2). Its endpoint prefix is
+    # `email` and its signing name `ses`.
+    "sesv2": struct(
+        api_version = "2019-09-27",
+        sha256 = "523f615366822edad2a31f43b3a93e2fcf582ee1f483176cabf939ec6bd77d23",
     ),
     # Amazon SNS (//src/komira_aws_sns), an awsQuery client.
     "sns": struct(

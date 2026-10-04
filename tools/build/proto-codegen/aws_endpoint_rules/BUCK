@@ -13,10 +13,9 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # config, the context-parameter bindings and `resolve_<op>_endpoint`. The
 # ruleset interpreter itself is komira_aws_core's subject (its
 # test_s3_endpoint_rules); this package tests what the generator binds.
-# A service client generated with its ruleset runs that service's cases
-# through every one of its operations in its own tests
-# (//src/komira_aws_logs, //src/komira_aws_sqs, //src/komira_aws_dynamodb);
-# this package keeps what no service client covers.
+# Each generated //src/komira_aws_<service> client runs its service's
+# cases through every one of its operations in its own tests; this package
+# keeps what no service client covers.
 #
 # Every upstream file is read from the botocore archive
 # //third_party/botocore pins by sha256; none is copied here.
