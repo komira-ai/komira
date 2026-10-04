@@ -1430,6 +1430,18 @@ mod tests {
     /// shapes as a label, an optional query value and a body member, and an
     /// operation with none; `ids` is the shape `Zones.Ids` targets.
     fn emit_route53(service_id: &str, route53: bool, ids: &str) -> Result<String, String> {
+        emit_route53_with(service_id, route53, ids, "", true)
+    }
+
+    /// [`emit_route53`], with `token` more members of `MakeZoneIn` (empty for
+    /// none) and in client mode unless `pure_only`.
+    fn emit_route53_with(
+        service_id: &str,
+        route53: bool,
+        ids: &str,
+        token: &str,
+        pure_only: bool,
+    ) -> Result<String, String> {
         let model = parse(&format!(
             r#"{{"version": "2.0",
                 "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "route53",
@@ -1458,7 +1470,7 @@ mod tests {
                         "Name": {{"shape": "Str", "location": "querystring", "locationName": "name"}},
                         "Ids": {{"shape": "{ids}", "location": "querystring", "locationName": "ids"}}}}}},
                     "MakeZoneIn": {{"type": "structure", "members": {{
-                        "DelegationSetId": {{"shape": "DelegationSetId"}}}}}},
+                        "DelegationSetId": {{"shape": "DelegationSetId"}}{token}}}}},
                     "PingIn": {{"type": "structure", "members": {{
                         "Name": {{"shape": "Str", "location": "querystring", "locationName": "name"}}}}}},
                     "ResourceId": {{"type": "string", "max": 32}},
@@ -1476,7 +1488,7 @@ mod tests {
             "aws.route53",
         )?;
         let options = AwsEmitOptions {
-            pure_only: true,
+            pure_only,
             omit_preamble: true,
             route53,
             ..AwsEmitOptions::default()
@@ -1522,6 +1534,32 @@ mod tests {
         let src = emit_route53("Route 53", true, "ResourceIds").unwrap();
         assert!(!src.contains("_bare.ids"), "{src}");
         assert!(src.contains("_bare.hosted_zone_id.value() = "), "{src}");
+    }
+
+    #[test]
+    fn a_filled_idempotency_token_and_a_cut_id_compose() {
+        // A client verb fills the unset token on its own copy and hands it
+        // to the public builder, which cuts the Id on a second copy and
+        // builds from that: the request carries both, and neither step
+        // undoes the other.
+        let token = r#", "Token": {"shape": "Str", "idempotencyToken": true}"#;
+        let src = emit_route53_with("Route 53", true, "Strs", token, false).unwrap();
+        let fill = "        var filled = input.copy()\n        if not filled.token:\n            \
+                    filled.token = Optional[String](aws_idempotency_token())\n        \
+                    var req = route53_build_make_zone_request(filled)\n";
+        assert_eq!(src.matches(fill).count(), 2, "{src}");
+        assert_eq!(src.matches("aws_idempotency_token()").count(), 2, "{src}");
+        assert!(src.contains("_bare.delegation_set_id.value() = "), "{src}");
+        assert!(src.contains("return _route53_build_make_zone_request_bare_ids(_bare)"), "{src}");
+        // The cut copies the filled input whole, so the token rides through
+        // it untouched, and the cut is not applied to the token.
+        assert!(!src.contains("_bare.token"), "{src}");
+        // The verbs build only through the public builder, never around
+        // the cut.
+        assert!(!src.contains("_bare_ids(filled)"), "{src}");
+        assert!(!src.contains("_bare_ids(input)"), "{src}");
+        // Operations with no token build from the input as given.
+        assert!(src.contains("var req = route53_build_get_zone_request(input)\n"), "{src}");
     }
 
     #[test]
