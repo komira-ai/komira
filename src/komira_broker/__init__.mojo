@@ -259,11 +259,11 @@ from .cluster_assignment_store import (
     StoredAssignment,
 )
 
-# Multi-node placement — the in-process agent->broker relay: the co-located
-# node's owned-partition set + apply_assignment(assigned[]) -> the START/STOP
-# ReconcileDelta the integration caller applies to the Kafka server's
-# per-partition leader map. Pure value (no DB/object-store/RPC); the agent holds
-# a borrowed ref riding the per-dispatch heartbeat value.
+# Multi-node placement — the in-process job-supervisor->broker relay: the
+# co-located node's owned-partition set + apply_assignment(assigned[]) -> the
+# START/STOP ReconcileDelta the integration caller applies to the Kafka
+# server's per-partition leader map. Pure value (no DB/object-store/RPC); the
+# job supervisor holds a borrowed ref riding the per-dispatch heartbeat value.
 from .broker_node_state import (
     BrokerNodeState,
     ReconcileDelta,

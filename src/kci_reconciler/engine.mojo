@@ -128,6 +128,10 @@ from kci_reconciler.fault_domain import (
     fault_domain_of_error,
     fault_message_of_error,
 )
+from kci_reconciler.deploy_fault import (
+    carry_deploy_fault_mark,
+    deploy_fault_message,
+)
 from kci_reconciler.state import StateStore, IntentTicket, InMemoryStateStore
 from kci_reconciler.graph import ResourceGraph, topo_sort, reverse_order
 from kci_reconciler.ownership import CellScope, ResourceKey, ownership_problem
@@ -528,25 +532,28 @@ def _node_verb_error(
     `_node_fault_domain` lets both fall through to the conformer's per-verb
     declaration — which is right, because "I looked and could not tell" must not
     veto a node that CAN tell. The explicit form is a note to the next reader of
-    that raise site, not a signal to this function."""
-    if domain == FAULT_UNSET:
-        return Error(
-            String("apply node '")
-            + lid
-            + String("' verb=")
-            + verb
-            + String(" failed: ")
-            + fault_message_of_error(inner)
-        )
-    return fault_error(
-        domain,
+    that raise site, not a signal to this function.
+
+    ⚠ A DEPLOY-FAULT MARK ON `inner` MOVES TO THE FRONT (`deploy_fault`). The
+    PERMANENT and IN-FLIGHT marks are prefix tests, so left where the inner
+    message puts them they would sit mid-message and stop counting, and a
+    proven-permanent fault would be retried like any other. This frame carries
+    the SAME fault, so it carries the mark; it never adds one, and a mark the
+    node's message only QUOTES is not at the front of `inner` and is not
+    carried. The result is `[fault=<domain>] <mark>apply node ...`, the one
+    order `deploy_fault` reads. An unmarked failure is unchanged."""
+    var body = carry_deploy_fault_mark(
+        inner,
         String("apply node '")
         + lid
         + String("' verb=")
         + verb
         + String(" failed: ")
-        + fault_message_of_error(inner),
+        + deploy_fault_message(inner),
     )
+    if domain == FAULT_UNSET:
+        return Error(body)
+    return fault_error(domain, body)
 
 
 def apply_graph[

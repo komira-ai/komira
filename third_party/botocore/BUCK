@@ -58,9 +58,11 @@ archive_files(
 _PROTOCOL_TESTS = "tests/unit/protocols"
 
 _PROTOCOL_TEST_STEMS = [
+    "ec2",
     "json",
     "json_1_0",
     "json_1_0-query-compatible",
+    "query",
     "rest-json",
     "rest-xml",
 ]
