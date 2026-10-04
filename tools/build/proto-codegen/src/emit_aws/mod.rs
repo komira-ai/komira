@@ -1079,8 +1079,7 @@ impl<'a> AwsEmitter<'a> {
         );
         self.out.push_str(&section);
         if fills_token {
-            self.out
-                .push_str(&format!("from {AWS_CORE} import aws_idempotency_token\n"));
+            self.out.push_str(&format!("from {AWS_CORE} import aws_idempotency_token\n"));
         }
         self.blank();
         self.blank();
@@ -1907,8 +1906,6 @@ impl<'a> AwsEmitter<'a> {
         self.line("extra^,");
     }
 
-    /// An operation's request, and with a ruleset the target it resolves
-    /// to: `req` and `target`, as both of its verbs send them.
     /// The input fields of `m` a client verb fills with a fresh token when
     /// the caller leaves them unset: its input's members the model marks
     /// `idempotencyToken`. botocore fills these, and only these top-level
@@ -1958,6 +1955,11 @@ impl<'a> AwsEmitter<'a> {
         Ok(false)
     }
 
+    /// An operation's request, and with a ruleset the target it resolves
+    /// to: `req` and `target`, as both of its verbs send them. A client
+    /// verb builds and resolves from a copy of its input whose unset
+    /// idempotency tokens are filled (`idempotency_fills`), once, before
+    /// the retry loop, which resends the same bytes.
     fn emit_op_request(&mut self, m: &IrMethod, ruleset: bool, p: &str) -> Result<(), String> {
         let fp = self.fn_prefix();
         let fills = self.idempotency_fills(m)?;
@@ -1970,9 +1972,7 @@ impl<'a> AwsEmitter<'a> {
             for f in &fills {
                 self.line(&format!("if not filled.{f}:"));
                 self.push();
-                self.line(&format!(
-                    "filled.{f} = Optional[String](aws_idempotency_token())"
-                ));
+                self.line(&format!("filled.{f} = Optional[String](aws_idempotency_token())"));
                 self.pop();
             }
             "filled"
@@ -2896,18 +2896,23 @@ mod tests {
                     var req = build_op_request(filled)\n";
         assert_eq!(src.matches(fill).count(), 2, "{src}");
         assert!(!src.contains("build_op_request(input)"), "{src}");
+        // One draw in each verb, and nowhere else.
+        assert_eq!(src.matches("aws_idempotency_token()").count(), 2, "{src}");
         // Only the token member is filled.
         assert!(!src.contains("filled.name"), "{src}");
 
         // A pure-mode module has no verb, and so no fill.
         let src = emit_with_token(token, "", true).unwrap();
         assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
         // A required token is the caller's: `__init__` takes it.
         let src = emit_with_token(token, r#""Token""#, false).unwrap();
         assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
         // No token, no fill and no import.
         let src = emit_with_token(r#"{"shape": "S"}"#, "", false).unwrap();
         assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
         assert!(src.contains("var req = build_op_request(input)\n"), "{src}");
     }
 
@@ -2921,6 +2926,11 @@ mod tests {
             "{e}"
         );
         assert!(e.contains("`Token`"), "{e}");
+        // The refusal is the fill's: a pure module, which has no verb to
+        // fill it, sends the member as given and is not refused.
+        let src = emit_with_token(r#"{"shape": "N", "idempotencyToken": true}"#, "", true)
+            .unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
     }
 
     #[test]
