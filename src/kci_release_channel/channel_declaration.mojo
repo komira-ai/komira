@@ -103,9 +103,11 @@ def push_identity_environment(repo: ChannelRepository) -> String:
 
     For OIDC_TRUSTED_PUBLISHING the push identity is the subject claim of the
     CI's identity token; GitHub's for a job in an environment is
-    `repo:<owner>/<repo>:environment:<name>`. This returns `<name>`: the one
-    stage (and GitHub environment) whose job may publish here, so kci can
-    refuse a publish from any other stage. "" for an API_TOKEN repository, a
+    `repo:<owner>/<repo>:environment:<name>`. This returns `<name>`: the
+    GitHub environment whose job may publish here. The stage that may publish
+    here is the one whose `environment` (by default its name) equals it, so
+    kci can refuse a publish from any other stage: stage `publish-gamma` runs
+    in environment `gamma`, whose trusted publisher names `gamma`. "" for an API_TOKEN repository, a
     repository with no credential, and a subject that names no environment
     (or an empty one, or one holding `:`)."""
     if not repo.credential:
