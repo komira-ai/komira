@@ -52,7 +52,8 @@
 # The field names are the contract (`machine_field_names`, pinned by a
 # welded golden test). Top level: `schema_version`, `stage`. A stage: `name`,
 # `after`, `environment` (default: the stage's name), `farm_connected`
-# (`true` or `false`, default false), each at most once, and `step`
+# (`true` or `false`, default false), `manual_gate` (a workflow_dispatch
+# input's name, default none), each at most once, and `step`
 # (repeated). A step: `name`, `kind`, `platform`, `artifacts`, `channels`,
 # `channel`, each at most once, and `validation` (a block, repeated). A
 # validation: `name`, `kind`, `image`, `compiler_channel`, `program`,
@@ -81,7 +82,15 @@ from komira_textproto import (
 
 from kci_api import FORMAT_MACHINE, authored_schema_version, skip_schema_version
 
-from .graph import ReleaseMachine, Stage, StageStep, StageValidation, validate_release_machine
+from .graph import (
+    NAME_MAX_BYTES,
+    ReleaseMachine,
+    Stage,
+    StageStep,
+    StageValidation,
+    is_manual_gate_name,
+    validate_release_machine,
+)
 
 
 def machine_field_names() -> List[String]:
@@ -95,6 +104,7 @@ def machine_field_names() -> List[String]:
     out.append(String("stage.after"))
     out.append(String("stage.environment"))
     out.append(String("stage.farm_connected"))
+    out.append(String("stage.manual_gate"))
     out.append(String("stage.step"))
     out.append(String("step.name"))
     out.append(String("step.kind"))
@@ -253,6 +263,7 @@ def _parse_stage(mut c: TokenCursor, source: String, ordinal: Int, open_line: In
     var seen_after = False
     var seen_environment = False
     var seen_farm = False
+    var gate_line = -1
     while True:
         var where: String
         if st.name.byte_length() > 0:
@@ -294,14 +305,25 @@ def _parse_stage(mut c: TokenCursor, source: String, ordinal: Int, open_line: In
                     + String("'; it is true or false")
                 )
             seen_farm = True
+        elif f.text == "manual_gate":
+            if gate_line >= 0:
+                _twice(source, f.line, f.text, where)
+            st.manual_gate = _scalar(c, f.text, source)
+            gate_line = f.line
         elif f.text == "step":
             var line = _open_block(c)
             st.steps.append(_parse_step(c, source, st.name, line))
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
-                + String(" (expected name, after, environment, farm_connected, step)")
+                + String(" (expected name, after, environment, farm_connected, manual_gate, step)")
             )
+    if gate_line >= 0 and not is_manual_gate_name(st.manual_gate):
+        raise Error(
+            _at(source, gate_line) + String("stage '") + st.name + String("' has manual_gate '") + st.manual_gate
+            + String("'; a manual gate is the name of a workflow_dispatch input, [a-z][a-z0-9_]*, at most ")
+            + String(NAME_MAX_BYTES) + String(" bytes")
+        )
     if not seen_environment:
         st.environment = st.name.copy()
     return st^

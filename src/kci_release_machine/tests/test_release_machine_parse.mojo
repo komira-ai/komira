@@ -301,6 +301,35 @@ def test_farm_connected() raises:
     )
 
 
+def test_manual_gate() raises:
+    # the name of a boolean workflow_dispatch input; the stage's job runs only
+    # when a manual run sets it true (kci_ci_check R13)
+    var g = parse_machine_file(
+        _one_stage(String(" name: \"p\"\n manual_gate: \"publish_prod\"\n") + _publish_step(String("prod"), String(""))),
+        String(_SRC),
+    )
+    assert_equal(g.stages[0].manual_gate, String("publish_prod"))
+    # absent: no gate
+    var h = parse_machine_file(_two_stages(), String(_SRC))
+    assert_equal(h.stage(String("prod")).manual_gate, String(""))
+    _assert_refused(
+        _one_stage(String(" name: \"p\"\n manual_gate: \"publish_prod\"\n manual_gate: \"x\"\n") + String(_BUILD_STEP)),
+        String("field 'manual_gate' is set twice in stage 'p'"),
+    )
+    for bad in ["Publish_prod", "publish-prod", "1prod", "inputs.publish_prod", ""]:
+        _assert_refused(
+            _one_stage(String(" name: \"p\"\n manual_gate: \"") + String(bad) + String("\"\n") + String(_BUILD_STEP)),
+            String("stage 'p' has manual_gate '") + String(bad)
+            + String("'; a manual gate is the name of a workflow_dispatch input, [a-z][a-z0-9_]*"),
+        )
+    # an input is not a GitHub environment, nor any other field: the refusal
+    # of an unknown field names it among the expected ones
+    _assert_refused(
+        _one_stage(String(" name: \"p\"\n gate: \"x\"\n") + String(_BUILD_STEP)),
+        String("(expected name, after, environment, farm_connected, manual_gate, step)"),
+    )
+
+
 def test_validation_reads_back_alone() raises:
     var g = parse_machine_file(_with_validation(String(_V_OK)), String(_SRC))
     ref v = g.stages[0].steps[0].validations[0]

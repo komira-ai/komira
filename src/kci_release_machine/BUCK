@@ -1,7 +1,8 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The machine file (format `kci.machine`): a release machine's stages, in
-# order, each stage's GitHub environment and whether it is farm-connected,
+# order, each stage's GitHub environment, whether it is farm-connected and
+# the workflow input that gates its job (`manual_gate`),
 # and the steps of each (BUILD, PUBLISH; DEPLOY is reserved and refused) with
 # a PUBLISH step's validations. `kci run --stage S` runs one stage; the
 # workflow consistency check (kci_ci_check) holds a CI workflow to the same

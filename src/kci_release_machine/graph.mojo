@@ -15,6 +15,14 @@
 # farm-connected stage may hold no PUBLISH step: the job that holds a tailnet
 # node must not hold a publishing token.
 #
+# `manual_gate: "<input>"` names a boolean `workflow_dispatch` input of the
+# workflow that runs the machine. The stage's job then runs only on a manual
+# run that sets that input true: never on a push, and never by default
+# (kci_ci_check rule R13 holds the workflow to it). It is a typed field, never
+# a stage or environment name: a stage whose bytes reach a release channel
+# its operator must ask for by name carries it. The input name is
+# `[a-z][a-z0-9_]*`, at most NAME_MAX_BYTES bytes (`is_manual_gate_name`).
+#
 # A STEP has a name (unique in its stage), a kind and the inputs of that
 # kind:
 #
@@ -169,7 +177,8 @@ struct StageStep(Copyable, Movable):
 struct Stage(Copyable, Movable):
     """One stage: a name, its GitHub environment (the parser sets it to the
     name when the file does not), the stage it runs after ("" for none),
-    whether it is farm-connected, and its steps in file order.
+    whether it is farm-connected, the workflow input that gates its job
+    ("" for none), and its steps in file order.
 
     Layout: owned values only. No pointer field."""
 
@@ -177,6 +186,7 @@ struct Stage(Copyable, Movable):
     var environment: String
     var after: String
     var farm_connected: Bool
+    var manual_gate: String
     var steps: List[StageStep]
     var line: Int
 
@@ -185,6 +195,7 @@ struct Stage(Copyable, Movable):
         self.environment = String("")
         self.after = String("")
         self.farm_connected = False
+        self.manual_gate = String("")
         self.steps = List[StageStep]()
         self.line = line
 
@@ -259,6 +270,23 @@ def joined_names(names: List[String]) -> String:
             s += String(", ")
         s += names[i]
     return s^
+
+
+def is_manual_gate_name(name: String) -> Bool:
+    """`[a-z][a-z0-9_]*`, at most `NAME_MAX_BYTES` bytes: the name of a
+    `workflow_dispatch` input a stage's `manual_gate` may hold."""
+    var b = name.as_bytes()
+    if len(b) == 0 or len(b) > NAME_MAX_BYTES:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var lower = c >= 97 and c <= 122
+        if i == 0:
+            if not lower:
+                return False
+        elif not (lower or (c >= 48 and c <= 57) or c == 95):
+            return False
+    return True
 
 
 def is_stage_or_step_name(name: String) -> Bool:

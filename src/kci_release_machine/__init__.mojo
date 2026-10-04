@@ -28,6 +28,7 @@ from kci_release_machine.graph import (
     StageValidation,
     Selection,
     is_digest_pinned_image,
+    is_manual_gate_name,
     is_stage_or_step_name,
     joined_names,
     resolve_selection,
