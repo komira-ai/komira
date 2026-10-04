@@ -11,16 +11,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # codec, reader or writer depends on this library, so anything added here
 # lands in each of their closures.
 #
-# The welded tests: test_no_env_reads (the package's sources read no
-# environment, import no first-party package and hold no raw pointer). It is
-# staged every source `srcs` compiles, subdirectories included, so a module
-# the scan does not read fails it.
+# The welded tests:
+# - test_values_match_parquet_thrift: every enum value and ConvertedType
+#   constant against parquet.thrift, read from the parquet-format archive
+#   //third_party/parquet-format pins by sha256 and staged at format/; no
+#   expected value is written by hand.
+# - test_no_env_reads: the package's sources read no environment, import no
+#   first-party package and hold no raw pointer. It is staged every source
+#   `srcs` compiles, subdirectories included, so a module the scan does not
+#   read fails it.
 _SRCS = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
 
 mojo_library(
     name = "komira_parquet_api",
     srcs = _SRCS,
     test_data = {
+        "tests/test_values_match_parquet_thrift.mojo": {
+            "format": "//third_party/parquet-format:files",
+        },
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
             for f in _SRCS
@@ -28,6 +36,7 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_no_env_reads.mojo",
+        "tests/test_values_match_parquet_thrift.mojo",
     ],
     visibility = ["PUBLIC"],
 )

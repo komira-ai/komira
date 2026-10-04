@@ -4,7 +4,8 @@
 #
 # These mirror the Parquet Thrift spec (parquet.thrift). Each enum is a struct
 # with a UInt8 value and comptime constants. Values match the Thrift i32
-# constants from the spec.
+# constants from the spec, as pinned by
+# tests/test_values_match_parquet_thrift.mojo, which reads parquet.thrift.
 # =============================================================================
 
 
@@ -62,6 +63,8 @@ struct Encoding(ImplicitlyCopyable, Copyable, Equatable, Writable):
 
     var value: UInt8
 
+    # Value 1 (GROUP_VAR_INT) is commented out of the spec and ALP (10) is not
+    # named yet; either prints as Encoding(<n>).
     comptime PLAIN = Encoding(0)
     comptime PLAIN_DICTIONARY = Encoding(2)  # deprecated, same as RLE_DICTIONARY
     comptime RLE = Encoding(3)
@@ -311,3 +314,42 @@ struct BoundaryOrder(ImplicitlyCopyable, Copyable, Equatable, Writable):
             writer.write("DESCENDING")
         else:
             writer.write("BoundaryOrder(", String(Int(self.value)), ")")
+
+
+# =============================================================================
+# ConvertedType values (from parquet.thrift)
+# =============================================================================
+#
+# SchemaElement.converted_type (Thrift field 6) is a plain Int; these name the
+# values readers and writers branch on. The enum is deprecated in favour of the
+# LogicalType union, but writers still emit it beside the union, and a reader
+# that maps a LogicalType annotation back onto its ConvertedType can branch on
+# one set of names. The ConvertedType members not named here (the nested-type
+# markers, the time and timestamp units, INT_32 / INT_64 and INTERVAL) are
+# listed in tests/test_values_match_parquet_thrift.mojo.
+
+# DECIMAL: a fixed-point number over INT32, INT64, BYTE_ARRAY or
+# FIXED_LEN_BYTE_ARRAY; SchemaElement.scale and .precision carry its shape.
+comptime CONVERTED_TYPE_DECIMAL = 5
+
+# Same-storage-width re-labels of a physical INT32 / INT64 column. UINT_32 and
+# UINT_64 matter for correctness: read as signed INT32 / INT64, any value past
+# the signed boundary comes back negative. DATE is an INT32 day count.
+comptime CONVERTED_TYPE_DATE = 6
+comptime CONVERTED_TYPE_UINT_32 = 13
+comptime CONVERTED_TYPE_UINT_64 = 14
+
+# Annotations on a BYTE_ARRAY column. UTF8, ENUM and JSON are UTF-8 text; BSON
+# is an embedded BSON document, which is binary. A BYTE_ARRAY carrying none of
+# the four is raw binary.
+comptime CONVERTED_TYPE_UTF8 = 0
+comptime CONVERTED_TYPE_ENUM = 4
+comptime CONVERTED_TYPE_JSON = 19
+comptime CONVERTED_TYPE_BSON = 20
+
+# Narrow integers stored in the INT32 physical type: a 1- or 2-byte value per
+# row, sign- or zero-extended to 4 bytes on disk.
+comptime CONVERTED_TYPE_UINT_8 = 11
+comptime CONVERTED_TYPE_UINT_16 = 12
+comptime CONVERTED_TYPE_INT_8 = 15
+comptime CONVERTED_TYPE_INT_16 = 16

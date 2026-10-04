@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:archive.bzl", "archive_files")
+load("@komira//tools/build/platforms:defs.bzl", "LINUX_X86_64")
+load("@komira//tools/build/mojo:download.bzl", "pinned_file")
+
+# apache/parquet-format 2.14.0, Apache-2.0 (LICENSE in the archive). Nothing
+# of it is committed here: the archive is fetched at build time, checked
+# against its sha256, and the files below extracted from it.
+pinned_file(
+    name = "parquet-format-2.14.0.tar.gz",
+    url = "https://github.com/apache/parquet-format/archive/refs/tags/apache-parquet-format-2.14.0.tar.gz",
+    sha256 = "e5b28a999b58fde4f790b2c6c5a017e728c20cecdab11591acb925ef8e6573be",
+)
+
+# Test data of //src/komira_parquet_api: parquet.thrift, the format's own
+# definition of every enum value and field id, which the package's tests read
+# their expected values from rather than restating them.
+archive_files(
+    name = "files",
+    exec_compatible_with = LINUX_X86_64,
+    archive = ":parquet-format-2.14.0.tar.gz",
+    one_tree = True,
+    files = [
+        "LICENSE",
+        "src/main/thrift/parquet.thrift",
+    ],
+    strip_prefix = "parquet-format-apache-parquet-format-2.14.0",
+    visibility = ["PUBLIC"],
+)
