@@ -271,5 +271,51 @@ def test_flags_follow_the_selected_steps() raises:
     )
 
 
+comptime _BASE: String = "0123456789abcdef0123456789abcdef01234567"
+
+
+def _pr(*extra: String) -> List[String]:
+    """A per-change check: --affected-by, and no --release-dir."""
+    var l = _args("run", "--stage", "build", "--revision-id", _REV, "--run-id", "gh-1", "--attempt", "1", "--affected-by", _BASE)
+    for s in extra:
+        l.append(String(s))
+    return l^
+
+
+def test_affected_by() raises:
+    var g = parse_machine_file(String(_MACHINE), String("m"))
+    var c = parse_kci_args(_pr("--work-dir", "/w", "--log-dir", "/l"))
+    assert_equal(c.affected_by, String(_BASE))
+    assert_equal(c.release_dir, String(""))
+    require_stage_flags(c, g.stage(String("build")), _all(g.stage(String("build"))))
+    # --plan asks and builds nothing; it combines
+    assert_true(parse_kci_args(_pr("--plan", "--work-dir", "/w", "--log-dir", "/l")).plan)
+    _refused(_pr("--work-dir", "/w", "--log-dir", "/l", "--affected-by", _BASE), String("--affected-by is given twice"))
+    var short = _pr("--work-dir", "/w", "--log-dir", "/l")
+    short[10] = String("0123456")  # --affected-by's value
+    _refused(short, String("--affected-by '0123456' is not a full commit id"))
+    _refused(
+        _pr("--only", "step:b", "--work-dir", "/w", "--log-dir", "/l"),
+        String("--affected-by and --only both select what runs"),
+    )
+    _refused(
+        _pr("--release-dir", "/r", "--work-dir", "/w", "--log-dir", "/l"),
+        String("--release-dir is not used with --affected-by: the per-change check releases nothing"),
+    )
+    # a stage holding anything but BUILD steps is refused before any flag check
+    _stage_refused(
+        _pr("--release-version", "rv"),
+        String("prod"),
+        String("--affected-by builds what a change reaches and nothing else, and stage 'prod' has the PUBLISH step 'p'"),
+    )
+    _stage_refused(
+        _pr("--work-dir", "/w", "--log-dir", "/l"),
+        String("all"),
+        String("stage 'all' has the PUBLISH step 'p'"),
+    )
+    # the BUILD step's flags are still needed
+    _stage_refused(_pr("--log-dir", "/l"), String("build"), String("kci run needs --work-dir"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

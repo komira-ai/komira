@@ -3,7 +3,7 @@
 # =============================================================================
 #
 #   kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]...
-#           [--plan] --revision-id <commit>
+#           [--affected-by <commit>] [--plan] --revision-id <commit>
 #           --run-id <id> --attempt <n> [--context <key=value>]...
 #           --release-dir <dir> [--result-file <file>] [--summary-file <file>]
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
@@ -21,8 +21,7 @@
 # (`release/machine.textproto`) when the flag is absent; a relative path is
 # relative to the directory kci is started in.
 #
-# OPERATION SELECTION. Exactly two flags select what a run does, and both
-# are positive:
+# OPERATION SELECTION. Three flags select what a run does, all positive:
 #
 #   --only step:<name> | validation:<name>   (repeatable) run only these;
 #             the run is SELECTIVE and is never reported as a full one
@@ -30,9 +29,20 @@
 #             `selectors_of` before anything is read (KCI-E-SELECTOR,
 #             exit 2); a selector naming nothing in the stage is refused
 #             after the machine file is read (KCI-E-SELECTOR-NO-MATCH, 3).
+#   --affected-by <commit>   the per-change check: every BUILD step of the
+#             stage builds exactly the units (artifacts and checks of its
+#             artifacts file) the change <commit>...--revision-id reaches,
+#             and nothing ships (kci_build affected.mojo). <commit> is a
+#             FULL commit id, like --revision-id (a CI job passes the pull
+#             request's base sha, not a branch name). The run is SELECTIVE.
+#             It is refused with --only, with --release-dir (nothing is
+#             released, so there is no release directory; without
+#             --affected-by the flag is required), and for a stage holding a
+#             step that is not a BUILD step or any validation.
 #   --plan    a dry run of the whole stage: a BUILD step resolves and
-#             renders and builds nothing; a PUBLISH step checks and reads
-#             and writes nothing to the channel.
+#             renders and builds nothing (with --affected-by: asks the
+#             affected commands and builds nothing); a PUBLISH step checks
+#             and reads and writes nothing to the channel.
 #
 # Every other flag is an input, never a selector. `--summary-file <file>`
 # (any stage) names a markdown file kci APPENDS its summary to (never
@@ -86,7 +96,7 @@ comptime CLI_VERB_HELP: String = "help"
 comptime KCI_USAGE: String = (
     "usage:\n"
     "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan]\n"
-    "          --revision-id <commit> --run-id <id> --attempt <n>\n"
+    "          [--affected-by <commit>] --revision-id <commit> --run-id <id> --attempt <n>\n"
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
@@ -95,6 +105,7 @@ comptime KCI_USAGE: String = (
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
     "--only runs only the named steps (or validations): a SELECTIVE run, never reported as a full one.\n"
+    "--affected-by <commit>: build only the units the change <commit>...--revision-id reaches (no --release-dir).\n"
     "A step's validations run after it in a FULL run; with --only, only the validations it names run.\n"
     "--plan: a dry run; a BUILD step builds nothing, a PUBLISH step checks and reads and writes nothing.\n"
     "--summary-file: a markdown file kci appends its summary to (the outcome, the steps, the NEW NAMES).\n"
@@ -152,6 +163,7 @@ struct KciCommand(Copyable, Movable):
     var store: SecretStoreChoice
     var scratch_dir: String
     var only: List[String]
+    var affected_by: String
     var seen: List[String]
 
     def __init__(out self):
@@ -174,6 +186,7 @@ struct KciCommand(Copyable, Movable):
         self.store = SecretStoreChoice.NONE
         self.scratch_dir = String("")
         self.only = List[String]()
+        self.affected_by = String("")
         self.seen = List[String]()
 
     def given(self, flag: String) -> Bool:
@@ -198,8 +211,8 @@ def usage_error(why: String) -> Error:
 def _run_common_flags() -> List[String]:
     var l = List[String]()
     for f in [
-        "--machine", "--stage", "--only", "--plan", "--revision-id", "--run-id", "--attempt", "--context",
-        "--release-dir", "--result-file", "--summary-file",
+        "--machine", "--stage", "--only", "--affected-by", "--plan", "--revision-id", "--run-id", "--attempt",
+        "--context", "--release-dir", "--result-file", "--summary-file",
     ]:
         l.append(String(f))
     return l^
@@ -278,6 +291,12 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         except e:
             raise usage_error(String(e))
         cmd.revision_id = value.copy()
+    elif flag == String("--affected-by"):
+        try:
+            require_full_commit_id(String("--affected-by"), value)
+        except e:
+            raise usage_error(String(e))
+        cmd.affected_by = value.copy()
     elif flag == String("--run-id"):
         cmd.run_id = value.copy()
     elif flag == String("--attempt"):
@@ -396,9 +415,21 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
         _set(cmd, flag, value)
         cmd.seen.append(flag^)
         i += 1
-    for f in ["--stage", "--revision-id", "--run-id", "--attempt", "--release-dir"]:
+    for f in ["--stage", "--revision-id", "--run-id", "--attempt"]:
         if not cmd.given(String(f)):
             raise usage_error(String("kci run needs ") + String(f))
+    if cmd.given(String("--affected-by")):
+        if cmd.given(String("--only")):
+            raise usage_error(
+                String("--affected-by and --only both select what runs: --affected-by builds the units a")
+                + String(" change reaches in every BUILD step of the stage; give one")
+            )
+        if cmd.given(String("--release-dir")):
+            raise usage_error(
+                String("--release-dir is not used with --affected-by: the per-change check releases nothing")
+            )
+    elif not cmd.given(String("--release-dir")):
+        raise usage_error(String("kci run needs --release-dir"))
     try:
         _ = cmd.run_identity()
     except e:
@@ -423,6 +454,19 @@ def _selected_kind(stage: Stage, sel: Selection, kind: String) -> Bool:
 def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
     """The flags of the step kinds the SELECTED steps of `stage` hold, and
     only those (file header). Raises a usage error."""
+    if cmd.affected_by.byte_length() > 0:
+        for i in range(len(stage.steps)):
+            if stage.steps[i].kind != STEP_KIND_BUILD:
+                raise usage_error(
+                    String("--affected-by builds what a change reaches and nothing else, and stage '")
+                    + stage.name + String("' has the ") + stage.steps[i].kind + String(" step '")
+                    + stage.steps[i].name + String("'")
+                )
+        if len(sel.validations) > 0:
+            raise usage_error(
+                String("--affected-by builds what a change reaches and nothing else, and stage '")
+                + stage.name + String("' has the validation '") + sel.validations[0] + String("'")
+            )
     var has_build = _selected_kind(stage, sel, String(STEP_KIND_BUILD))
     var has_publish = _selected_kind(stage, sel, String(STEP_KIND_PUBLISH))
     var which = String("stage '") + stage.name + String("'")
