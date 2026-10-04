@@ -39,7 +39,10 @@ mojo_library(
     ],
     # The public-API test reads the facade's own source to check its shape.
     test_data = {
-        "tests/test_erased_resource_public_api.mojo": ["erased_resource.mojo"],
+        "tests/test_erased_resource_public_api.mojo": [
+            "__init__.mojo",
+            "erased_resource.mojo",
+        ],
     },
     visibility = ["PUBLIC"],
 )

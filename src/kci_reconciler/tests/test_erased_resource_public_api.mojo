@@ -5,17 +5,19 @@
 # =============================================================================
 #
 # The rule: an untracked-origin pointer type may appear only in a function body
-# and in a private signature or field. `ErasedResource`'s constructor takes the
-# type-erased home and 22 fn-ptrs whose types expand to
-# `UnsafePointer[UInt8, MutUntrackedOrigin]`, so that constructor must be private.
+# and in a private signature or field, never in a public signature. The 22
+# vtable fn-ptr types expand to `UnsafePointer[UInt8, MutUntrackedOrigin]`, so
+# they live in the private struct `_ErasedVTable`, which the package does not
+# re-export, and `ErasedResource`'s one constructor takes that struct.
 #
 # §A drives a concrete conformer through `ErasedResource.erase` ONLY, and checks
 #    that every verb this file touches reaches the conformer (a verb whose value
 #    differs from the trait default, so a missing forward reads as the default).
-# §B reads erased_resource.mojo and checks the shape that keeps the constructor
-#    private: `*` first, then only underscore-named parameters; `erase` exists;
-#    and no public `def` signature in the file names a pointer type or an
-#    untracked origin.
+# §B reads erased_resource.mojo and the package `__init__.mojo` and checks:
+#    the constructor is keyword-only with only underscore-named parameters;
+#    `erase` exists; no public `def` signature, constructor included, and no
+#    `ErasedResource` field names a pointer type, an origin, or a comptime alias
+#    that expands to one; and the package does not re-export the vtable.
 # =============================================================================
 
 from std.pathlib import Path
@@ -35,6 +37,7 @@ from kci_reconciler import (
 )
 
 comptime _SRC = "src/kci_reconciler/erased_resource.mojo"
+comptime _PKG_INIT = "src/kci_reconciler/__init__.mojo"
 
 
 # =============================================================================
@@ -208,34 +211,105 @@ def test_constructor_is_keyword_only_and_underscore_named() raises:
     )
 
 
+def _pointer_words(src: String) raises -> List[String]:
+    """`UnsafePointer`, `Origin`, and the name of every `comptime` alias in
+    `src` whose definition mentions either (an alias hides the pointer type
+    from a plain text check of a signature that uses it)."""
+    var words = List[String]()
+    words.append(String("UnsafePointer"))
+    words.append(String("Origin"))
+    var lines = src.split("\n")
+    var i = 0
+    var aliases = 0
+    while i < len(lines):
+        var stripped = String(String(lines[i]).strip())
+        if stripped.startswith("comptime ") and String(" = ") in stripped:
+            var body = stripped
+            var depth = _depth_delta(stripped)
+            while depth > 0 and i + 1 < len(lines):
+                i += 1
+                var more = String(String(lines[i]).strip())
+                body += String(" ") + more
+                depth += _depth_delta(more)
+            var name_end = body.find(" = ")
+            var name = String(body[byte=9:name_end])
+            if String("UnsafePointer") in body or String("Origin") in body:
+                words.append(name)
+                aliases += 1
+        i += 1
+    # The vtable aliases; a scan that found none proves nothing.
+    assert_true(aliases >= 22, String("pointer aliases seen: ") + String(aliases))
+    return words^
+
+
+def _struct_fields(src: String, struct_name: String) -> List[String]:
+    """Every `var` field line directly in `struct <struct_name>`'s body."""
+    var out = List[String]()
+    var lines = src.split("\n")
+    var inside = False
+    for raw in lines:
+        var line = String(raw)
+        if line.startswith(String("struct ") + struct_name):
+            inside = True
+            continue
+        if inside and line.byte_length() > 0 and not line.startswith(" "):
+            break  # the next top-level item
+        if inside and line.startswith("    var "):
+            out.append(String(line.strip()))
+    return out^
+
+
 def test_no_public_signature_names_a_pointer() raises:
     var src = Path(_SRC).read_text()
+    var words = _pointer_words(src)
     var public = 0
+    var saw_init = False
     for sig in _signatures(src):
         var name = _def_name(sig)
-        if name.startswith("_") and name != String("__init__"):
-            continue  # private: a trampoline or helper
         if name == String("__init__"):
-            continue  # checked above: every parameter is private
+            saw_init = True
+        elif name.startswith("_"):
+            continue  # private: a trampoline, helper or `__deinit__`
         public += 1
-        assert_false(
-            String("UnsafePointer") in sig,
-            String("a pointer type in a public signature: ") + sig,
-        )
-        assert_false(
-            String("Origin") in sig,
-            String("an origin in a public signature: ") + sig,
-        )
-        assert_false(
-            String("OwnedPointer") in sig,
-            String("a pointer type in a public signature: ") + sig,
-        )
+        for w in words:
+            assert_false(
+                w in sig,
+                String("a pointer type (") + w + ") in a public signature: " + sig,
+            )
+        if name != String("__init__"):
+            assert_false(
+                String("OwnedPointer") in sig,
+                String("a pointer type in a public signature: ") + sig,
+            )
+    assert_true(saw_init, String("the constructor was not scanned"))
     # erase + the Resource verbs; a scan that found none proves nothing.
     assert_true(public >= 20, String("public signatures seen: ") + String(public))
+
+
+def test_fields_hold_the_vtable_privately() raises:
+    var src = Path(_SRC).read_text()
+    var words = _pointer_words(src)
+    assert_true(String("struct _ErasedVTable(") in src)
+    var fields = _struct_fields(src, String("ErasedResource("))
+    assert_equal(len(fields), 2, String("ErasedResource fields: home + vtable"))
+    for f in fields:
+        assert_true(
+            String(f[byte=4:]).startswith("_"), String("a public field: ") + f
+        )
+        for w in words:
+            assert_false(
+                w in f, String("a pointer type (") + w + ") in a field: " + f
+            )
+    var pkg = Path(_PKG_INIT).read_text()
+    assert_false(
+        String("_ErasedVTable") in pkg,
+        String("the package re-exports the private vtable"),
+    )
 
 
 def main() raises:
     test_erase_is_a_complete_way_in()
     test_constructor_is_keyword_only_and_underscore_named()
     test_no_public_signature_names_a_pointer()
+    test_fields_hold_the_vtable_privately()
     print("ALL ERASED-RESOURCE PUBLIC-API TESTS PASSED")
