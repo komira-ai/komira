@@ -563,6 +563,10 @@ fn cmdOci(alloc: Alloc, a: Args) !void {
 // is in packaging/conda/README.md.
 
 const conda_subdir = "linux-64";
+/// The kci platform of `conda_subdir` (kci_contract's platform table, which
+/// the manifest probe holds this to: kci refuses a manifest whose platform
+/// and subdir disagree).
+const conda_platform = "linux-x86_64";
 const conda_metadata = "{\"conda_pkg_format_version\":2}";
 const mojo_conda_name = "mojo-compiler";
 const payload_dir = "lib/mojo/";
@@ -939,16 +943,26 @@ fn assembleConda(alloc: Alloc, stem: []const u8, pkg_entries: []Entry, info_entr
 //                              carries. <version> is the Mojo compiler version,
 //                              <build> is `h<8 hex of the source commit>_<N>`
 //   manifest.json              the artifact manifest, exactly the contract of
-//                              kci's `kci_artifact_manifest`: seven string keys,
+//                              kci's `kci_artifact_manifest`: ten keys,
 //                              compact, in this order, one trailing newline:
-//                                artifact_type (`CONDA`), name, version, subdir,
-//                                file (the package's name above, relative to the
-//                                manifest), sha256 (of that file), metadata
-//                                (`metadata.json`, the file below)
+//                                format (`kci.artifact_manifest`),
+//                                schema_version (the integer 1), artifact_type
+//                                (`CONDA`), name, version, platform (the kci
+//                                platform of the subdir: `linux-x86_64`),
+//                                subdir, file (the package's name above,
+//                                relative to the manifest), sha256 (of that
+//                                file), metadata (`metadata.json`, the file
+//                                below)
 //   metadata.json              everything else the build knows (sorted compact
-//                              JSON): kind, build, build_number, size, depends,
-//                              mojo_pin, source_commit, stamped, timestamp_ms,
-//                              label, payload_path, payload_sha256, ...
+//                              JSON): format (`kci.conda_metadata`),
+//                              schema_version (1), kind, build, build_number,
+//                              size, depends, mojo_pin, source_commit, stamped,
+//                              timestamp_ms, label, payload_path,
+//                              payload_sha256, ...
+//
+// The format names and majors are kci's (kci_contract's format table). Nothing
+// run-specific (a run id, an attempt) is written here: these files are action
+// outputs, and a per-run value would make every run a cache miss.
 //
 // The manifest names metadata.json as a bare file name: kci's parser requires
 // `metadata` on a CONDA artifact and refuses one that is not a file next to
@@ -980,11 +994,17 @@ fn writeRefusal(alloc: Alloc, a: Args, why: []const u8) !void {
 /// The metadata file a CONDA manifest names: next to it, under this name.
 const conda_manifest_metadata = "metadata.json";
 
+/// The kci platform of a conda subdir this tool writes (only `conda_subdir`).
+fn platformFor(subdir: []const u8) []const u8 {
+    if (std.mem.eql(u8, subdir, conda_subdir)) return conda_platform;
+    fail("subdir `{s}`: this tool writes {s} only, whose kci platform is {s}", .{ subdir, conda_subdir, conda_platform });
+}
+
 fn contractManifest(alloc: Alloc, name: []const u8, version: []const u8, subdir: []const u8, file: []const u8, sha: []const u8) ![]u8 {
     var out = std.ArrayList(u8).init(alloc);
     const w = out.writer();
-    try w.writeAll("{\"artifact_type\":\"CONDA\"");
-    const vals = [_][2][]const u8{ .{ "name", name }, .{ "version", version }, .{ "subdir", subdir }, .{ "file", file }, .{ "sha256", sha }, .{ "metadata", conda_manifest_metadata } };
+    try w.writeAll("{\"format\":\"kci.artifact_manifest\",\"schema_version\":1,\"artifact_type\":\"CONDA\"");
+    const vals = [_][2][]const u8{ .{ "name", name }, .{ "version", version }, .{ "platform", platformFor(subdir) }, .{ "subdir", subdir }, .{ "file", file }, .{ "sha256", sha }, .{ "metadata", conda_manifest_metadata } };
     for (vals) |kv| {
         try w.writeAll(",\"");
         try w.writeAll(kv[0]);
@@ -1002,7 +1022,8 @@ fn emitPackage(alloc: Alloc, a: Args, stem: []const u8, conda: []const u8, name:
     try metadata.object.put("build_number", .{ .integer = number });
     try metadata.object.put("file_name", str(file));
     try metadata.object.put("name", str(name));
-    try metadata.object.put("schema", .{ .integer = 1 });
+    try metadata.object.put("format", str("kci.conda_metadata"));
+    try metadata.object.put("schema_version", .{ .integer = 1 });
     try metadata.object.put("size", .{ .integer = @intCast(conda.len) });
     try metadata.object.put("subdir", str(subdir));
     try metadata.object.put("version", str(version));
@@ -1155,17 +1176,20 @@ fn expectEq(what: []const u8, got: []const u8, want: []const u8) void {
 }
 
 /// The manifest at `path` must be exactly the contract: parsed, then rendered
-/// again, it is the same bytes (so the seven keys, their order, the compact
+/// again, it is the same bytes (so the ten keys, their order, the compact
 /// form and the newline are all checked at once).
 fn readContractManifest(alloc: Alloc, path: []const u8) !json.Value {
     const raw = readAll(alloc, path);
     const doc = json.parseFromSliceLeaky(json.Value, alloc, raw, .{}) catch |err|
         fail("{s}: not JSON: {s}", .{ path, @errorName(err) });
-    if (doc != .object or doc.object.count() != 7) fail("{s}: the manifest has exactly the seven keys artifact_type, name, version, subdir, file, sha256, metadata", .{path});
+    if (doc != .object or doc.object.count() != 10) fail("{s}: the manifest has exactly the ten keys format, schema_version, artifact_type, name, version, platform, subdir, file, sha256, metadata", .{path});
+    expectEq(path, memberStr(doc, "format", path), "kci.artifact_manifest");
+    if (memberInt(doc, "schema_version", path) != 1) fail("{s}: the manifest's schema_version is not 1", .{path});
     expectEq(path, memberStr(doc, "metadata", path), conda_manifest_metadata);
     expectEq(path, memberStr(doc, "artifact_type", path), "CONDA");
+    expectEq(path, memberStr(doc, "platform", path), platformFor(memberStr(doc, "subdir", path)));
     const again = try contractManifest(alloc, memberStr(doc, "name", path), memberStr(doc, "version", path), memberStr(doc, "subdir", path), memberStr(doc, "file", path), memberStr(doc, "sha256", path));
-    if (!std.mem.eql(u8, again, raw)) fail("{s}: not the artifact manifest format (compact JSON, keys artifact_type, name, version, subdir, file, sha256, metadata in that order, one trailing newline)", .{path});
+    if (!std.mem.eql(u8, again, raw)) fail("{s}: not the artifact manifest format (compact JSON, keys format, schema_version, artifact_type, name, version, platform, subdir, file, sha256, metadata in that order, one trailing newline)", .{path});
     return doc;
 }
 
@@ -1496,7 +1520,8 @@ fn cmdCondaCheck(alloc: Alloc, a: Args) !void {
     const md_raw = readAll(alloc, try std.fmt.allocPrint(alloc, "{s}/metadata.json", .{dir}));
     const md = try json.parseFromSliceLeaky(json.Value, alloc, md_raw, .{});
     if (!std.mem.eql(u8, try jsonLine(alloc, md), md_raw)) fail("metadata.json is not sorted compact JSON with one trailing newline", .{});
-    if (memberInt(md, "schema", "metadata") != 1) fail("metadata schema is not 1", .{});
+    expectEq("metadata format", memberStr(md, "format", "metadata"), "kci.conda_metadata");
+    if (memberInt(md, "schema_version", "metadata") != 1) fail("metadata schema_version is not 1", .{});
     expectEq("metadata kind", memberStr(md, "kind", "metadata"), kind);
     expectEq("metadata name", memberStr(md, "name", "metadata"), name);
     expectEq("metadata version", memberStr(md, "version", "metadata"), version);
