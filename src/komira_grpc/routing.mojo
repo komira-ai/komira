@@ -47,7 +47,14 @@ def build_routing_params(pairs: List[Tuple[StaticString, String]]) -> String:
     other reserved characters). Pairs join with `&` in the order given. The
     key is a `StaticString` (an emitter-supplied literal); the value is a
     runtime `String` (the captured substring). An empty `pairs` returns the
-    empty string (the emitter then skips setting the header)."""
+    empty string (the emitter then skips setting the header).
+
+    A pair whose value is EMPTY is dropped before anything else, as Google's
+    generated clients drop an empty capture: `{project=**}` matches the empty
+    string (`**` is zero or more segments), and sending `project=` would both
+    route nowhere and, under last-match-wins, overwrite an earlier non-empty
+    match for the same key (GCS CreateBucket: `parent = "projects/_"` and a
+    `bucket` whose `project` is unset)."""
     # De-duplicate by key with LAST-match-wins (the google.api.routing semantics).
     # When several routing_parameters resolve to the SAME key — e.g. GCS
     # CreateBucket, whose `parent` and `bucket.project` BOTH key `project` — the
@@ -60,6 +67,8 @@ def build_routing_params(pairs: List[Tuple[StaticString, String]]) -> String:
     var vals = List[String]()
     for i in range(len(pairs)):
         ref pair = pairs[i]
+        if pair[1].byte_length() == 0:
+            continue
         var k = String(pair[0])
         var found = -1
         for j in range(len(keys)):
