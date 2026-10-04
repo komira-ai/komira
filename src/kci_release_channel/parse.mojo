@@ -2,8 +2,10 @@
 # kci_release_channel/parse.mojo -- read a channels file.
 # =============================================================================
 #
-# The channels file is textproto, every channel defined once:
+# The channels file is textproto, every channel defined once, under its
+# format's major (kci_contract's format table, `kci.channels`):
 #
+#   schema_version: 1
 #   channel {
 #     name: "beta"
 #     visibility: PRIVATE
@@ -15,7 +17,12 @@
 #     }
 #   }
 #
-# `channel` is the only top-level field; `name`, `visibility` and `repository`
+# `schema_version` is read FIRST, before any other field (kci_contract's
+# `authored_schema_version`): missing, set twice, not an integer, or a major
+# this kci does not read is refused, so a file written for a newer kci says
+# "needs a newer kci" rather than naming a field the newer major added.
+#
+# `schema_version` and `channel` are the only top-level fields; `name`, `visibility` and `repository`
 # (repeated) the only channel fields; `artifact_type`, `location`,
 # `push_identity` and `credential` (at most once) the only repository fields;
 # `kind` and `secret_name` the only credential fields. A `:` before a `{` is optional,
@@ -45,6 +52,8 @@ from komira_textproto import (
     TokenCursor,
     lex,
 )
+
+from kci_contract import FORMAT_CHANNELS, authored_schema_version, skip_schema_version
 
 from .channel_credential import ChannelCredential
 from .channel_declaration import (
@@ -273,16 +282,21 @@ def _parse_channel(
 def parse_channels_file(text: String) raises -> List[ChannelDeclaration]:
     """Parse and validate a channels file. Raises on the first refusal, by a
     message naming the offending field, channel, repository or location."""
-    var c = TokenCursor(lex(text, String(_SOURCE)), String(_SOURCE))
+    var tokens = lex(text, String(_SOURCE))
+    _ = authored_schema_version(tokens, String(FORMAT_CHANNELS), String(_SOURCE))
+    var c = TokenCursor(tokens^, String(_SOURCE))
     var out = List[ChannelDeclaration]()
     while not c.at_end():
         var f = c.expect(TOKEN_WORD)
+        if f.text == "schema_version":
+            skip_schema_version(c)
+            continue
         if f.text != "channel":
             raise Error(
                 _at(f.line)
                 + String("unknown top-level field '")
                 + f.text
-                + String("' (expected channel)")
+                + String("' (expected schema_version, channel)")
             )
         var open_line = _open_block(c)
         out.append(_parse_channel(c, len(out) + 1, open_line))
