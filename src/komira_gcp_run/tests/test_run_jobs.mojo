@@ -57,7 +57,9 @@ comptime _T1 = Int64(1790843415)
 
 comptime _PARENT = "projects/demo-project/locations/us-central1"
 comptime _NAME = "projects/demo-project/locations/us-central1/jobs/build"
-comptime _EXECUTION = "projects/demo-project/locations/us-central1/jobs/build/executions/build-x7k2p"
+comptime _EXECUTION = (
+    "projects/demo-project/locations/us-central1/jobs/build/executions/build-x7k2p"
+)
 
 # The job as a caller states it.
 comptime _JOB = (
@@ -359,7 +361,9 @@ def test_get_execution() raises:
     assert_true(
         ex.conditions[0].state == Condition_State(Condition_State.CONDITION_SUCCEEDED)
     )
-    assert_equal(ex.log_uri, "https://console.cloud.google.com/logs/viewer?project=demo-project")
+    assert_equal(
+        ex.log_uri, "https://console.cloud.google.com/logs/viewer?project=demo-project"
+    )
 
 
 def test_cancel_execution() raises:

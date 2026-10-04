@@ -52,13 +52,13 @@ comptime _RT = BlockingRuntime[NoopSink]
 # 2026-09-30T12:00:00Z.
 comptime _T0 = Int64(1790769600)
 
-comptime _NAME = "projects/demo-project/locations/us-central1/services/board"
+comptime _NAME = "projects/demo-project/locations/us-central1/services/web"
 
 # The service as a caller states it.
 comptime _SERVICE = (
-    '{"labels":{"app":"board"},"ingress":"INGRESS_TRAFFIC_ALL","template":{'
-    + '"serviceAccount":"board-runtime@demo-project.iam.gserviceaccount.com",'
-    + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/board@sha256:0f1e",'
+    '{"labels":{"app":"web"},"ingress":"INGRESS_TRAFFIC_ALL","template":{'
+    + '"serviceAccount":"web-runtime@demo-project.iam.gserviceaccount.com",'
+    + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/web@sha256:0f1e",'
     + '"args":["--port=8080"],"env":[{"name":"MODE","value":"serve"},'
     + '{"name":"SMTP_PASSWORD","valueSource":{"secretKeyRef":{"secret":"smtp-password",'
     + '"version":"3"}}}],"ports":[{"containerPort":8080}]}],'
@@ -67,13 +67,13 @@ comptime _SERVICE = (
 
 # The same service as the client writes it, after its name.
 comptime _SERVICE_WIRE_TAIL = (
-    '"description":"","uid":"","generation":"0","labels":{"app":"board"},'
+    '"description":"","uid":"","generation":"0","labels":{"app":"web"},'
     + '"annotations":{},"creator":"","lastModifier":"","client":"","clientVersion":"",'
     + '"ingress":"INGRESS_TRAFFIC_ALL","launchStage":"LAUNCH_STAGE_UNSPECIFIED",'
     + '"template":{"revision":"","labels":{},"annotations":{},'
     + '"scaling":{"minInstanceCount":0,"maxInstanceCount":4},'
-    + '"serviceAccount":"board-runtime@demo-project.iam.gserviceaccount.com",'
-    + '"containers":[{"name":"","image":"us-docker.pkg.dev/demo-project/apps/board@sha256:0f1e",'
+    + '"serviceAccount":"web-runtime@demo-project.iam.gserviceaccount.com",'
+    + '"containers":[{"name":"","image":"us-docker.pkg.dev/demo-project/apps/web@sha256:0f1e",'
     + '"command":[],"args":["--port=8080"],"env":[{"name":"MODE","value":"serve"},'
     + '{"name":"SMTP_PASSWORD","valueSource":{"secretKeyRef":{"secret":"smtp-password",'
     + '"version":"3"}}}],"ports":[{"name":"","containerPort":8080}],"volumeMounts":[],'
@@ -92,28 +92,30 @@ comptime _SERVICE_WIRE_TAIL = (
 comptime _OPERATION = (
     '{"name":"projects/demo-project/locations/us-central1/operations/0f8e3a",'
     + '"metadata":{"@type":"type.googleapis.com/google.cloud.run.v2.Service",'
-    + '"name":"projects/demo-project/locations/us-central1/services/board"},'
+    + '"name":"projects/demo-project/locations/us-central1/services/web"},'
     + '"done":false}'
 )
 
 # The service as the service answers it.
 comptime _SERVICE_ANSWER = (
-    '{"name":"projects/demo-project/locations/us-central1/services/board",'
+    '{"name":"projects/demo-project/locations/us-central1/services/web",'
     + '"uid":"5c2e8a1d-7f3b-4e0a-9d6c-1b2a3c4d5e6f","generation":"3",'
-    + '"labels":{"app":"board"},"createTime":"2026-09-30T12:00:00.250Z",'
+    + '"labels":{"app":"web"},"createTime":"2026-09-30T12:00:00.250Z",'
     + '"creator":"deployer@demo-project.iam.gserviceaccount.com",'
     + '"ingress":"INGRESS_TRAFFIC_ALL","launchStage":"GA",'
     + '"template":{"scaling":{"maxInstanceCount":4},'
-    + '"serviceAccount":"board-runtime@demo-project.iam.gserviceaccount.com",'
-    + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/board@sha256:0f1e",'
+    + '"serviceAccount":"web-runtime@demo-project.iam.gserviceaccount.com",'
+    + '"containers":[{"image":"us-docker.pkg.dev/demo-project/apps/web@sha256:0f1e",'
     + '"ports":[{"name":"http1","containerPort":8080}]}]},'
     + '"traffic":[{"type":"TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST","percent":100}],'
     + '"observedGeneration":"3","terminalCondition":{"type":"Ready",'
     + '"state":"CONDITION_SUCCEEDED","lastTransitionTime":"2026-09-30T12:00:00Z"},'
-    + '"latestReadyRevision":"projects/demo-project/locations/us-central1/services/board/revisions/board-00003-kxv",'
-    + '"latestCreatedRevision":"projects/demo-project/locations/us-central1/services/board/revisions/board-00003-kxv",'
-    + '"uri":"https://board-5q2kx3abcd-uc.a.run.app",'
-    + '"urls":["https://board-123456789012.us-central1.run.app"],'
+    + '"latestReadyRevision":"projects/demo-project/locations/us-central1/services/web/'
+    + 'revisions/web-00003-kxv",'
+    + '"latestCreatedRevision":"projects/demo-project/locations/us-central1/services/web/'
+    + 'revisions/web-00003-kxv",'
+    + '"uri":"https://web-5q2kx3abcd-uc.a.run.app",'
+    + '"urls":["https://web-123456789012.us-central1.run.app"],'
     + '"etag":"\\"COi_1bQGEJDq\\"","newFieldFromALaterApi":{"x":1}}'
 )
 
@@ -211,7 +213,7 @@ def test_create_service() raises:
     var op = c.create_service[_RT](
         decode_json[CreateServiceRequest](
             String('{"parent":"projects/demo-project/locations/us-central1",')
-            + '"serviceId":"board","service":'
+            + '"serviceId":"web","service":'
             + _SERVICE
             + "}"
         ),
@@ -220,7 +222,7 @@ def test_create_service() raises:
     assert_equal(
         _wire(capture),
         _expected(
-            "POST /v2/projects/demo-project/locations/us-central1/services?serviceId=board",
+            "POST /v2/projects/demo-project/locations/us-central1/services?serviceId=web",
             String('{"name":"",') + _SERVICE_WIRE_TAIL,
         ),
     )
@@ -261,9 +263,9 @@ def test_get_service() raises:
     assert_true(ready.state == Condition_State(Condition_State.CONDITION_SUCCEEDED))
     assert_equal(
         svc.latest_ready_revision,
-        "projects/demo-project/locations/us-central1/services/board/revisions/board-00003-kxv",
+        "projects/demo-project/locations/us-central1/services/web/revisions/web-00003-kxv",
     )
-    assert_equal(svc.uri, "https://board-5q2kx3abcd-uc.a.run.app")
+    assert_equal(svc.uri, "https://web-5q2kx3abcd-uc.a.run.app")
     assert_equal(len(svc.urls), 1)
     assert_equal(svc.etag, '"COi_1bQGEJDq"')
 
@@ -372,14 +374,14 @@ def test_list_revisions() raises:
         capture,
         '{"revisions":[{"name":"'
         + _NAME
-        + '/revisions/board-00003-kxv","generation":"1",'
+        + '/revisions/web-00003-kxv","generation":"1",'
         + '"createTime":"2026-09-30T12:00:00Z","service":"'
         + _NAME
-        + '","containers":[{"image":"us-docker.pkg.dev/demo-project/apps/board@sha256:0f1e"}],'
+        + '","containers":[{"image":"us-docker.pkg.dev/demo-project/apps/web@sha256:0f1e"}],'
         + '"scalingStatus":{"desiredMinInstanceCount":1},"timeout":"300s"},'
         + '{"name":"'
         + _NAME
-        + '/revisions/board-00002-pqr","generation":"1"}],'
+        + '/revisions/web-00002-pqr","generation":"1"}],'
         + '"nextPageToken":"CgVib2FyZA=="}',
     )
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
@@ -396,7 +398,7 @@ def test_list_revisions() raises:
     )
     assert_equal(len(page.revisions), 2)
     ref r0 = page.revisions[0]
-    assert_equal(r0.name, String(_NAME) + "/revisions/board-00003-kxv")
+    assert_equal(r0.name, String(_NAME) + "/revisions/web-00003-kxv")
     assert_equal(r0.service, _NAME)
     assert_equal(r0.create_time.value().seconds, _T0)
     assert_equal(r0.timeout.value().seconds, Int64(300))
@@ -411,14 +413,14 @@ def test_delete_revision() raises:
     ref reactor = rt.reactor()
     var op = c.delete_revision[_RT](
         decode_json[DeleteRevisionRequest](
-            String('{"name":"') + _NAME + '/revisions/board-00001-abc","etag":"\\"x1\\""}'
+            String('{"name":"') + _NAME + '/revisions/web-00001-abc","etag":"\\"x1\\""}'
         ),
         reactor,
     )
     assert_equal(
         _wire(capture),
         _expected(
-            String("DELETE /v2/") + _NAME + "/revisions/board-00001-abc?etag=%22x1%22"
+            String("DELETE /v2/") + _NAME + "/revisions/web-00001-abc?etag=%22x1%22"
         ),
     )
     assert_false(op.done)

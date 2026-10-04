@@ -148,14 +148,20 @@ def _expected(head: String, message: String, body: String) -> String:
 
 
 def test_create_service_already_exists() raises:
-    var message = String("Resource 'board' already exists in project private-project.")
+    var message = String("Resource 'web' already exists in project private-project.")
     var body = _envelope(409, "ALREADY_EXISTS", message)
     var c = _services("409 Conflict", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.create_service[_RT](decode_json[CreateServiceRequest](String('{"parent":"projects/private-project/locations/us-central1","serviceId":"board","service":{}}')), reactor)
+        _ = c.create_service[_RT](
+            decode_json[CreateServiceRequest](
+                '{"parent":"projects/private-project/locations/us-central1",'
+                + '"serviceId":"web","service":{}}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -166,14 +172,21 @@ def test_create_service_already_exists() raises:
 
 
 def test_get_service_not_found() raises:
-    var message = String("Resource 'projects/private-project/locations/us-central1/services/board' was not found")
+    var message = String(
+        "Resource 'projects/private-project/locations/us-central1/services/web' was not found"
+    )
     var body = _envelope(404, "NOT_FOUND", message)
     var c = _services("404 Not Found", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.get_service[_RT](decode_json[GetServiceRequest](String('{"name":"projects/private-project/locations/us-central1/services/board"}')), reactor)
+        _ = c.get_service[_RT](
+            decode_json[GetServiceRequest](
+                '{"name":"projects/private-project/locations/us-central1/services/web"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -184,14 +197,22 @@ def test_get_service_not_found() raises:
 
 
 def test_list_services_permission_denied() raises:
-    var message = String("Permission 'run.services.list' denied on resource 'projects/private-project/locations/-' (or resource may not exist).")
+    var message = String(
+        "Permission 'run.services.list' denied on resource 'projects/private-project/"
+        + "locations/-' (or resource may not exist)."
+    )
     var body = _envelope(403, "PERMISSION_DENIED", message)
     var c = _services("403 Forbidden", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.list_services[_RT](decode_json[ListServicesRequest](String('{"parent":"projects/private-project/locations/-"}')), reactor)
+        _ = c.list_services[_RT](
+            decode_json[ListServicesRequest](
+                '{"parent":"projects/private-project/locations/-"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -202,14 +223,23 @@ def test_list_services_permission_denied() raises:
 
 
 def test_update_service_invalid_argument() raises:
-    var message = String("Violation in UpdateServiceRequest.service.template.containers: should contain exactly one container for private-project")
+    var message = String(
+        "Violation in UpdateServiceRequest.service.template.containers: should contain "
+        + "exactly one container for private-project"
+    )
     var body = _envelope(400, "INVALID_ARGUMENT", message)
     var c = _services("400 Bad Request", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.update_service[_RT](decode_json[UpdateServiceRequest](String('{"service":{"name":"projects/private-project/locations/us-central1/services/board"}}')), reactor)
+        _ = c.update_service[_RT](
+            decode_json[UpdateServiceRequest](
+                '{"service":{"name":"projects/private-project/locations/us-central1/services/'
+                + 'web"}}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -220,14 +250,20 @@ def test_update_service_invalid_argument() raises:
 
 
 def test_delete_service_aborted() raises:
-    var message = String("Etag stale does not match the current etag of private-project board.")
+    var message = String("Etag stale does not match the current etag of private-project web.")
     var body = _envelope(409, "ABORTED", message)
     var c = _services("409 Conflict", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.delete_service[_RT](decode_json[DeleteServiceRequest](String('{"name":"projects/private-project/locations/us-central1/services/board","etag":"stale"}')), reactor)
+        _ = c.delete_service[_RT](
+            decode_json[DeleteServiceRequest](
+                '{"name":"projects/private-project/locations/us-central1/services/web",'
+                + '"etag":"stale"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -238,14 +274,21 @@ def test_delete_service_aborted() raises:
 
 
 def test_list_revisions_not_found() raises:
-    var message = String("Resource 'projects/private-project/locations/us-central1/services/board' was not found")
+    var message = String(
+        "Resource 'projects/private-project/locations/us-central1/services/web' was not found"
+    )
     var body = _envelope(404, "NOT_FOUND", message)
     var c = _revisions("404 Not Found", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.list_revisions[_RT](decode_json[ListRevisionsRequest](String('{"parent":"projects/private-project/locations/us-central1/services/board"}')), reactor)
+        _ = c.list_revisions[_RT](
+            decode_json[ListRevisionsRequest](
+                '{"parent":"projects/private-project/locations/us-central1/services/web"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -256,19 +299,31 @@ def test_list_revisions_not_found() raises:
 
 
 def test_delete_revision_failed_precondition() raises:
-    var message = String("Revision board-00003-kxv of private-project is serving traffic and cannot be deleted.")
+    var message = String(
+        "Revision web-00003-kxv of private-project is serving traffic and cannot be deleted."
+    )
     var body = _envelope(400, "FAILED_PRECONDITION", message)
     var c = _revisions("400 Bad Request", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.delete_revision[_RT](decode_json[DeleteRevisionRequest](String('{"name":"projects/private-project/locations/us-central1/services/board/revisions/board-00003-kxv"}')), reactor)
+        _ = c.delete_revision[_RT](
+            decode_json[DeleteRevisionRequest](
+                '{"name":"projects/private-project/locations/us-central1/services/web/'
+                + 'revisions/web-00003-kxv"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
         got,
-        _expected("DELETE DeleteRevision: HTTP 400, FAILED_PRECONDITION (code 9)", message, body),
+        _expected(
+            "DELETE DeleteRevision: HTTP 400, FAILED_PRECONDITION (code 9)",
+            message,
+            body,
+        ),
     )
     assert_false("private-project" in got)
 
@@ -281,7 +336,13 @@ def test_create_job_already_exists() raises:
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.create_job[_RT](decode_json[CreateJobRequest](String('{"parent":"projects/private-project/locations/us-central1","jobId":"build","job":{}}')), reactor)
+        _ = c.create_job[_RT](
+            decode_json[CreateJobRequest](
+                '{"parent":"projects/private-project/locations/us-central1","jobId":"build",'
+                + '"job":{}}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -292,14 +353,21 @@ def test_create_job_already_exists() raises:
 
 
 def test_get_job_not_found() raises:
-    var message = String("Resource 'projects/private-project/locations/us-central1/jobs/build' was not found")
+    var message = String(
+        "Resource 'projects/private-project/locations/us-central1/jobs/build' was not found"
+    )
     var body = _envelope(404, "NOT_FOUND", message)
     var c = _jobs("404 Not Found", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.get_job[_RT](decode_json[GetJobRequest](String('{"name":"projects/private-project/locations/us-central1/jobs/build"}')), reactor)
+        _ = c.get_job[_RT](
+            decode_json[GetJobRequest](
+                '{"name":"projects/private-project/locations/us-central1/jobs/build"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -317,7 +385,12 @@ def test_list_jobs_unauthenticated() raises:
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.list_jobs[_RT](decode_json[ListJobsRequest](String('{"parent":"projects/private-project/locations/us-central1"}')), reactor)
+        _ = c.list_jobs[_RT](
+            decode_json[ListJobsRequest](
+                '{"parent":"projects/private-project/locations/us-central1"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -328,14 +401,21 @@ def test_list_jobs_unauthenticated() raises:
 
 
 def test_update_job_invalid_argument() raises:
-    var message = String("Violation in UpdateJobRequest.job.template: required for private-project")
+    var message = String(
+        "Violation in UpdateJobRequest.job.template: required for private-project"
+    )
     var body = _envelope(400, "INVALID_ARGUMENT", message)
     var c = _jobs("400 Bad Request", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.update_job[_RT](decode_json[UpdateJobRequest](String('{"job":{"name":"projects/private-project/locations/us-central1/jobs/build"}}')), reactor)
+        _ = c.update_job[_RT](
+            decode_json[UpdateJobRequest](
+                '{"job":{"name":"projects/private-project/locations/us-central1/jobs/build"}}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -353,7 +433,12 @@ def test_delete_job_failed_precondition() raises:
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.delete_job[_RT](decode_json[DeleteJobRequest](String('{"name":"projects/private-project/locations/us-central1/jobs/build"}')), reactor)
+        _ = c.delete_job[_RT](
+            decode_json[DeleteJobRequest](
+                '{"name":"projects/private-project/locations/us-central1/jobs/build"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -371,7 +456,12 @@ def test_run_job_resource_exhausted() raises:
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.run_job[_RT](decode_json[RunJobRequest](String('{"name":"projects/private-project/locations/us-central1/jobs/build"}')), reactor)
+        _ = c.run_job[_RT](
+            decode_json[RunJobRequest](
+                '{"name":"projects/private-project/locations/us-central1/jobs/build"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -382,14 +472,23 @@ def test_run_job_resource_exhausted() raises:
 
 
 def test_get_execution_not_found() raises:
-    var message = String("Resource 'projects/private-project/locations/us-central1/jobs/build/executions/build-x7k2p' was not found")
+    var message = String(
+        "Resource 'projects/private-project/locations/us-central1/jobs/build/executions/"
+        + "build-x7k2p' was not found"
+    )
     var body = _envelope(404, "NOT_FOUND", message)
     var c = _executions("404 Not Found", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.get_execution[_RT](decode_json[GetExecutionRequest](String('{"name":"projects/private-project/locations/us-central1/jobs/build/executions/build-x7k2p"}')), reactor)
+        _ = c.get_execution[_RT](
+            decode_json[GetExecutionRequest](
+                '{"name":"projects/private-project/locations/us-central1/jobs/build/'
+                + 'executions/build-x7k2p"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -407,25 +506,43 @@ def test_cancel_execution_failed_precondition() raises:
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.cancel_execution[_RT](decode_json[CancelExecutionRequest](String('{"name":"projects/private-project/locations/us-central1/jobs/build/executions/build-x7k2p"}')), reactor)
+        _ = c.cancel_execution[_RT](
+            decode_json[CancelExecutionRequest](
+                '{"name":"projects/private-project/locations/us-central1/jobs/build/'
+                + 'executions/build-x7k2p"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
         got,
-        _expected("POST CancelExecution: HTTP 400, FAILED_PRECONDITION (code 9)", message, body),
+        _expected(
+            "POST CancelExecution: HTTP 400, FAILED_PRECONDITION (code 9)",
+            message,
+            body,
+        ),
     )
     assert_false("private-project" in got)
 
 
 def test_get_operation_not_found() raises:
-    var message = String("Operation projects/private-project/locations/us-central1/operations/0f8e3a not found.")
+    var message = String(
+        "Operation projects/private-project/locations/us-central1/operations/0f8e3a not "
+        + "found."
+    )
     var body = _envelope(404, "NOT_FOUND", message)
     var c = _operations("404 Not Found", body)
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.get_operation[_RT](decode_json[GetOperationRequest](String('{"name":"projects/private-project/locations/us-central1/operations/0f8e3a"}')), reactor)
+        _ = c.get_operation[_RT](
+            decode_json[GetOperationRequest](
+                '{"name":"projects/private-project/locations/us-central1/operations/0f8e3a"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(
@@ -443,7 +560,13 @@ def test_wait_operation_unavailable() raises:
     ref reactor = rt.reactor()
     var got = String("")
     try:
-        _ = c.wait_operation[_RT](decode_json[WaitOperationRequest](String('{"name":"projects/private-project/locations/us-central1/operations/0f8e3a","timeout":"30s"}')), reactor)
+        _ = c.wait_operation[_RT](
+            decode_json[WaitOperationRequest](
+                '{"name":"projects/private-project/locations/us-central1/operations/0f8e3a",'
+                + '"timeout":"30s"}'
+            ),
+            reactor,
+        )
     except e:
         got = String(e)
     assert_equal(

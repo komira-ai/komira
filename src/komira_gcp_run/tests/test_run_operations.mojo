@@ -94,11 +94,11 @@ def test_get_operation_done_with_a_service() raises:
         String('{"name":"')
         + _OP
         + '","metadata":{"@type":"type.googleapis.com/google.cloud.run.v2.Service",'
-        + '"name":"projects/demo-project/locations/us-central1/services/board"},'
+        + '"name":"projects/demo-project/locations/us-central1/services/web"},'
         + '"done":true,"response":{"@type":"type.googleapis.com/google.cloud.run.v2.Service",'
-        + '"name":"projects/demo-project/locations/us-central1/services/board",'
+        + '"name":"projects/demo-project/locations/us-central1/services/web",'
         + '"generation":"4","terminalCondition":{"type":"Ready","state":"CONDITION_SUCCEEDED"},'
-        + '"uri":"https://board-5q2kx3abcd-uc.a.run.app"}}',
+        + '"uri":"https://web-5q2kx3abcd-uc.a.run.app"}}',
     )
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
@@ -112,13 +112,13 @@ def test_get_operation_done_with_a_service() raises:
     ref response = op.response.value()
     assert_equal(response.type_url, "type.googleapis.com/google.cloud.run.v2.Service")
     var svc = decode_json_lenient[Service](response.json_members.serialize())
-    assert_equal(svc.name, "projects/demo-project/locations/us-central1/services/board")
+    assert_equal(svc.name, "projects/demo-project/locations/us-central1/services/web")
     assert_equal(svc.generation, Int64(4))
     assert_true(
         svc.terminal_condition.value().state
         == Condition_State(Condition_State.CONDITION_SUCCEEDED)
     )
-    assert_equal(svc.uri, "https://board-5q2kx3abcd-uc.a.run.app")
+    assert_equal(svc.uri, "https://web-5q2kx3abcd-uc.a.run.app")
 
 
 def test_get_operation_still_running() raises:
@@ -143,7 +143,7 @@ def test_wait_operation_done_with_an_error() raises:
         capture,
         String('{"name":"')
         + _OP
-        + '","done":true,"error":{"code":9,"message":"Revision board-00004-zzq is not'
+        + '","done":true,"error":{"code":9,"message":"Revision web-00004-zzq is not'
         + ' ready and cannot serve traffic.","details":[{"@type":'
         + '"type.googleapis.com/google.rpc.ErrorInfo","reason":"HEALTH_CHECK_FAILED"}]}}',
     )
@@ -167,7 +167,7 @@ def test_wait_operation_done_with_an_error() raises:
     ref status = op.error.value()
     assert_equal(status.code, Int32(9))
     assert_equal(
-        status.message, "Revision board-00004-zzq is not ready and cannot serve traffic."
+        status.message, "Revision web-00004-zzq is not ready and cannot serve traffic."
     )
     assert_equal(len(status.details), 1)
     assert_equal(status.details[0].type_url, "type.googleapis.com/google.rpc.ErrorInfo")
