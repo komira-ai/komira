@@ -42,7 +42,8 @@ struct PackageCoordinate(Copyable, Movable, Deinitable):
       substrate    — a substrate ordinal (see the header).
       repo         — HOST + PATH with no scheme and no trailing slash, e.g.
                      `pypi.org` / `test.pypi.org` for a warehouse,
-                     `<host>/<channel>` for a prefix.dev conda channel.
+                     `<host>/<namespace>` or `<host>/<namespace>/<channel>`
+                     for a prefix.dev conda channel.
       distribution — the distribution name as the producer wrote it.
       version      — the version string.
       subdir       — `linux-64` | `osx-arm64` | `noarch`. A conda channel

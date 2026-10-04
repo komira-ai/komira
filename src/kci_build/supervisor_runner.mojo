@@ -3,8 +3,11 @@
 #   komira_supervisor: the one place the BUILD step starts a real process.
 # =============================================================================
 #
-# The child inherits this process's environment unchanged: kci adds no
-# variable and removes none. Its stdout and stderr are drained concurrently
+# The child inherits this process's environment unchanged unless the spec
+# gives an explicit one (`RunSpec.set_env`); then it gets exactly that list
+# and nothing else. kci adds no variable of its own either way. An explicit
+# environment that is empty is refused before anything starts: komira_
+# supervisor reads an empty envp as "inherit". Its stdout and stderr are drained concurrently
 # into the two files named by the spec, so neither pipe can fill and stall
 # it. Past `timeout_s` it is stopped (SIGTERM, then SIGKILL after
 # `grace_ms`) and the result says `timed_out`.
@@ -29,6 +32,7 @@ from kci_build.runner import (
     ProcessRunner,
     RunResult,
     RunSpec,
+    check_child_env,
     tail_text,
 )
 
@@ -69,6 +73,10 @@ struct SupervisorRunner(ProcessRunner):
             child.with_arg(spec.argv[i])
         if spec.cwd.byte_length() > 0:
             child.set_cwd(spec.cwd)
+        if spec.env:
+            # `env` is a public field: re-check, an empty list would inherit
+            check_child_env(spec.env.value())
+            child.set_env(spec.env.value().copy())
         var out = _Sink(spec.stdout_path, Int32(0))
         var err = _Sink(spec.stderr_path, Int32(0))
         var sup = Supervisor()

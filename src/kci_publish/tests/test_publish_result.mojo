@@ -25,7 +25,12 @@
 #       NOOP, exit 0 (not a separate "already published" number), every row
 #       ALREADY_PRESENT, no upload;
 #   (5) every reason has one outcome, by the table in report.mojo, with and
-#       without an upload landed.
+#       without an upload landed;
+#   (6) NEW NAMES in the result: a name the channel holds no file of is one
+#       `new_names[]` row {stage, step, channel, name}; a name it holds is
+#       none; the document holds no `expect_set_hash` key; a dry run over an
+#       API-token channel records the credential probe NOT_OIDC, a real run
+#       records none.
 #
 # Hermetic: TEST_TMPDIR, ScriptedChannel, StaticSecretStore; no network.
 # =============================================================================
@@ -59,6 +64,7 @@ from kci_contract import (
 from kci_contract import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
+    ActionsOidcEnv,
     REASON_ALREADY_PUBLISHED,
     REASON_CANNOT_TELL,
     REASON_FAILED,
@@ -67,7 +73,6 @@ from kci_publish import (
     REASON_READ_BACK_MISMATCH,
     REASON_REFUSED,
     REASON_STOP_DIFFERENT_BYTES,
-    REASON_STOP_NEW_NAME,
     FileRow,
     NoWaitSleeper,
     PublishCredential,
@@ -78,7 +83,9 @@ from kci_publish import (
     publish_flow,
 )
 from kci_publish.release_fixture import (
+    example_channel_path,
     EXAMPLE_HOST,
+    EXAMPLE_STAGE,
     EXAMPLE_TOKEN_SECRET,
     ExampleRelease,
     example_targets,
@@ -108,8 +115,8 @@ def _bytes(s: String) -> List[UInt8]:
     return out^
 
 
-def _channel() -> ScriptedChannel:
-    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+def _channel() raises -> ScriptedChannel:
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
     ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
     ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
     ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
@@ -131,14 +138,14 @@ def _registry(var ch: ScriptedChannel) -> RegistrySet[ScriptedChannel, PublishCr
     return RegistrySet[ScriptedChannel, PublishCredential](ch^, PublishCredential())
 
 
-def _flow(req: PublishRequest, mut reg: RegistrySet[ScriptedChannel, PublishCredential]) -> _Ran:
+def _flow(req: PublishRequest, mut reg: RegistrySet[ScriptedChannel, PublishCredential]) raises -> _Ran:
     var store = StaticSecretStore()
     store.put(String(EXAMPLE_TOKEN_SECRET), String(_TOKEN))
     var sl = NoWaitSleeper()
     var result = KciRunResult(String("run"), String("publish"))
     var rec = MemoryRecorder()
     var rep = publish_flow(
-        req, result, rec, reg, ScriptedPkgTransport(), store, RunOptions(2, 0, 2, 0, 0, 2, 0), sl
+        req, result, rec, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, RunOptions(2, 0, 2, 0, 0, 2, 0), sl
     )
     return _Ran(rep^, result^, rec^)
 
@@ -174,8 +181,10 @@ def test_the_result_of_a_publish() raises:
     assert_equal(res.steps[0].platform, String("linux-x86_64"))
     assert_equal(res.steps[0].outcome, String(OUTCOME_SUCCEEDED))
     assert_equal(res.channel, String("example-stable"))
-    assert_equal(res.set_hash, req.expect_set_hash)
-    assert_equal(res.expect_set_hash, req.expect_set_hash)
+    assert_equal(res.set_hash, r.set_hash(req.platform_dir()))
+    # the channel held older files of every name: nothing is new
+    assert_equal(len(res.new_names), 0)
+    assert_equal(res.steps[0].credential_probe, String(""))
     assert_false(res.plan)
     assert_false(res.has_error)
     assert_true(res.has_release_produced_by)
@@ -204,6 +213,7 @@ def test_the_result_of_a_publish() raises:
     assert_equal(render_result(back), text)
     assert_equal(back.exit_code, EXIT_OK)
     _no_token(ran.rep, text)
+    assert_true(text.find(String("expect_set_hash")) < 0, text)
     # (4) the same step again over the channel it filled: NOOP, exit 0
     var writes = reg.transport().write_count()
     var again = _flow(req, reg)
@@ -269,8 +279,6 @@ def test_one_outcome_per_reason() raises:
     _is(String(REASON_PUBLISHED), True, String("SUCCEEDED"), EXIT_OK)
     _is(String(REASON_ALREADY_PUBLISHED), False, String("NOOP"), EXIT_OK)
     _is(String(REASON_REFUSED), False, String("REFUSED"), EXIT_REFUSED)
-    _is(String(REASON_STOP_NEW_NAME), False, String("REFUSED"), EXIT_REFUSED)
-    _is(String(REASON_STOP_NEW_NAME), True, String("PARTIAL"), EXIT_PARTIAL)
     _is(String(REASON_STOP_DIFFERENT_BYTES), False, String("REFUSED"), EXIT_REFUSED)
     _is(String(REASON_STOP_DIFFERENT_BYTES), True, String("PARTIAL"), EXIT_PARTIAL)
     _is(String(REASON_FAILED), False, String("FAILED"), EXIT_FAILED)
@@ -284,8 +292,46 @@ def test_one_outcome_per_reason() raises:
     print("  test_one_outcome_per_reason: PASS")
 
 
+def test_new_names_in_the_result() raises:
+    var r = ExampleRelease()
+    var req = write_example_inputs(r, _root(String("names")), String("example-stable"))
+    # older files of both libraries, none of the metapackage
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
+    ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
+    ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
+    var reg = _registry(ch^)
+    var ran = _flow(req, reg)
+    assert_equal(ran.rep.exit_code(), EXIT_OK, String("\n").join(ran.rep.lines))
+    ref res = ran.result
+    assert_equal(len(res.new_names), 1)
+    assert_equal(res.new_names[0].stage, String(EXAMPLE_STAGE))
+    assert_equal(res.new_names[0].step, String("publish"))
+    assert_equal(res.new_names[0].channel, String("example-stable"))
+    assert_equal(res.new_names[0].name, String("komira"))
+    var text = _finished(res, ran.rep)
+    assert_true(
+        text.find(String('"new_names":[{"channel":"example-stable","name":"komira","stage":"publish-prod","step":"publish"}]')) >= 0,
+        text,
+    )
+    # a dry run: the same names, and the probe of a token channel is NOT_OIDC
+    var plan = write_example_inputs(r, _root(String("names_plan")), String("example-stable"), True)
+    var ch2 = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
+    ch2.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
+    ch2.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
+    var reg2 = _registry(ch2^)
+    var ran2 = _flow(plan, reg2)
+    assert_equal(ran2.rep.exit_code(), EXIT_OK, String("\n").join(ran2.rep.lines))
+    assert_equal(len(ran2.result.new_names), 1)
+    assert_equal(ran2.result.steps[0].credential_probe, String("NOT_OIDC"))
+    assert_equal(reg2.transport().write_count(), 0)
+    var text2 = _finished(ran2.result, ran2.rep)
+    assert_true(text2.find(String('"credential_probe":"NOT_OIDC"')) >= 0, text2)
+    print("  test_new_names_in_the_result: PASS")
+
+
 def main() raises:
     test_the_result_of_a_publish()
+    test_new_names_in_the_result()
     test_a_stop_records_its_error()
     test_one_outcome_per_reason()
     print("test_publish_result: ALL PASS")
