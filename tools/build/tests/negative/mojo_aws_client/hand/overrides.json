@@ -1,0 +1,11 @@
+{
+  "service": "logs",
+  "overrides": [
+    {
+      "operation": "GetLogEvents",
+      "hand_module": "hand_owner",
+      "hand_symbol": "get_log_events",
+      "reason": "A fixture override for the mojo_aws_client analysis refusals; no target that names it reaches the generator."
+    }
+  ]
+}

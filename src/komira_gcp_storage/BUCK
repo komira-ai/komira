@@ -1,0 +1,96 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Cloud Storage over gRPC: a client of google.storage.v2.Storage generated at
+# build time (mojo_gcp_client, `protocol = "grpc"`) from googleapis's
+# storage.proto at the pinned commit (//tools/vendor/googleapis:storage_v2;
+# nothing of it is copied here). `StorageClient[C, T]` calls komira_grpc's
+# GrpcClient with classic gRPC, takes each call's bearer token from a
+# komira_gcp_core GcpTokenSource `T`, sets each method's
+# `x-goog-request-params` from its `(google.api.routing)` annotation, and
+# raises a non-OK gRPC status through komira_gcp_core (the google.rpc.Code,
+# never the server's text). It reads no environment and holds no
+# credential.
+#
+# `methods` is what an object store and a bucket provisioner call:
+#   - objects: GetObject, ListObjects, DeleteObject, StartResumableWrite;
+#     ReadObject (server streaming) and WriteObject (client streaming), both
+#     shapes komira_grpc carries. WriteObject has no routing annotation, so
+#     its caller sets the routing header on the call's CallOptions.
+#   - buckets: CreateBucket, GetBucket, DeleteBucket, and the bucket IAM
+#     read-modify-write, GetIamPolicy and SetIamPolicy.
+# A method joins the list with its own case in the tests below.
+#
+# `bundle_only` is the part of the storage_v2 closure those methods reach;
+# every file the plugin generates must hold a reachable type.
+#
+# The library is gated by its layout probe and these tests:
+# test_storage_client (each method over a scripted connector: the call, its
+# one bearer token, its routing header, the request bytes and a response
+# decoded from bytes written by hand; the gRPC status error shape),
+# test_storage_messages (the conditional-write and range-read requests,
+# round-tripped and, for create-if-absent, byte for byte) and
+# test_no_env_reads (the generated files read no environment).
+#
+# No test here talks to the service.
+_GENERATED = [
+    "__init__.mojo",
+    "_layout_probe.mojo",
+    "date.mojo",
+    "expr.mojo",
+    "iam_policy.mojo",
+    "options.mojo",
+    "policy.mojo",
+    "storage.mojo",
+]
+
+mojo_gcp_client(
+    name = "komira_gcp_storage",
+    bundle_only = [
+        "google/iam/v1/iam_policy.proto",
+        "google/iam/v1/options.proto",
+        "google/iam/v1/policy.proto",
+        "google/storage/v2/storage.proto",
+        "google/type/date.proto",
+        "google/type/expr.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "Storage.CreateBucket",
+        "Storage.DeleteBucket",
+        "Storage.DeleteObject",
+        "Storage.GetBucket",
+        "Storage.GetIamPolicy",
+        "Storage.GetObject",
+        "Storage.ListObjects",
+        "Storage.ReadObject",
+        "Storage.SetIamPolicy",
+        "Storage.StartResumableWrite",
+        "Storage.WriteObject",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:storage_v2"],
+    protocol = "grpc",
+    protos = [],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "gen/" + f: ":komira_gcp_storage_gen[{}]".format(f)
+            for f in _GENERATED
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_storage_client.mojo",
+        "tests/test_storage_messages.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_grpc:komira_grpc",
+        # Imported only by tests/test_storage_client.mojo (HttpClient and Url
+        # for its scripted connector); the generated module does not import it.
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)

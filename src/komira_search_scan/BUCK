@@ -1,0 +1,26 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The `komira.search.index` scan kind: a search index read as a relation of
+# hit rows. Its binding builder, identity corpus, in-memory catalog and the
+# tier-2 resolver an engine executes, plus the split reader and fast-field
+# pushdown gate the kind uses. It sits above komira_search and implements the
+# komira_scan_resolver contract, so neither the search core nor this package
+# depends on an engine.
+#
+# Both welded tests are executor-free: they build splits in memory and drive
+# the kind through core's `resolve_for_execution`, its split plan and readers,
+# and `drain_scan`.
+mojo_library(
+    name = "komira_search_scan",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+        "//src/komira_scan_resolver:komira_scan_resolver",
+        "//src/komira_search:komira_search",
+    ],
+    test_srcs = [
+        "tests/test_search_scan_kind.mojo",
+        "tests/test_search_source_conformance.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

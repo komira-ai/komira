@@ -17,7 +17,7 @@
 #        worker (//tools/build/examples/s2n_tls:test_s2n_handshake[run_check]);
 #      - s2n-tls's feature defines: every probe named in
 #        third_party/s2n-tls/features.bzl compiles (tests//functional/s2n_probes), and
-#        every other probe fails to;
+#        every other probe fails to (tests//negative/s2n_probes);
 #      - neither test binary exports a dynamic symbol (both libraries are
 #        compiled with hidden visibility, so nothing in them can interpose on
 #        a library the Mojo runtime loads).
@@ -34,7 +34,7 @@ expect_green aws_lc_kat "//tools/build/examples/aws_lc:test_aws_lc[run_check]"
 expect_green s2n_handshake "//tools/build/examples/s2n_tls:test_s2n_handshake[run_check]"
 
 features=$(grep -o '"S2N_[A-Z0-9_]*"' "$ROOT/third_party/s2n-tls/features.bzl" | tr -d '"')
-probes=$(cd "$ROOT" && "$BUCK2" uquery 'kind(cxx_library, tests//functional/s2n_probes:)' 2> "$LOG/s2n_probes_query.log" |
+probes=$(cd "$ROOT" && "$BUCK2" uquery 'kind(cxx_library, tests//functional/s2n_probes: + tests//negative/s2n_probes:)' 2> "$LOG/s2n_probes_query.log" |
     sed -n 's/.*:probe_//p')
 if [ -z "$probes" ] || [ -z "$features" ]; then
     fail "s2n probes: no probes or no features found (see $LOG/s2n_probes_query.log)"
@@ -44,7 +44,7 @@ else
     expect_green s2n_probes_enabled "${enabled[@]}"
     for p in $probes; do
         if ! printf '%s\n' "$features" | grep -qx "$p"; then
-            expect_red "s2n_probe_disabled_$p" "error:" "tests//functional/s2n_probes:probe_$p"
+            expect_red "s2n_probe_disabled_$p" "error:" "tests//negative/s2n_probes:probe_$p"
         fi
     done
 fi

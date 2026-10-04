@@ -24,6 +24,11 @@
 # for, as a number of milliseconds (`retry_delay_ms`; the retry classifier's
 # server delay). `gcp_status_error` is the contract the generated
 # REST clients call (proto-codegen `emit_rest.rs`, `GCP_STATUS_ERROR`).
+#
+# The same API called over gRPC answers with a gRPC status instead;
+# `gcp_grpc_status_error` (at the end of this file) is the generated gRPC
+# clients' contract, under the same rule: the server's text is counted, never
+# kept.
 # =============================================================================
 
 from komira_json import JsonValue, JSON_STRING, parse_json_bytes
@@ -336,3 +341,249 @@ def gcp_status_error(
 ) -> Error:
     """The `Error` a generated REST client raises for a non-2xx response."""
     return parse_gcp_status(verb, rpc, http_status, body).to_error()
+
+
+# =============================================================================
+# gRPC statuses.
+# =============================================================================
+#
+# A Google API called over gRPC states its failure as a gRPC status: the
+# `grpc-status` trailer (or a trailers-only response), with a free-text
+# `grpc-message` beside it. komira_grpc raises such a status as
+# `[grpc:N] <grpc-message>`, and a call whose retries ran out as
+# `[grpc-retry:EXHAUSTED] gave up replaying <rpc> after <A> attempt(s) ...
+# Last: [grpc:N] <grpc-message>`. The generated gRPC clients (proto-codegen
+# `emit.rs`, `GCP_GRPC_STATUS_ERROR`) read `N` and hand it here with that
+# text, and raise what comes back. As with the REST envelope, the text is
+# counted and never kept: a `grpc-message` carries what an `error.message`
+# carries.
+#
+# The raised text keeps ONE machine-readable part, a `[grpc:C]` anchor in
+# front, where `C` is the google.rpc.Code. It is the anchor komira_grpc's
+# `parse_grpc_status_code` and `is_retryable_grpc_error` read, so a caller
+# classifies a mapped error the way it classifies komira_grpc's own (for
+# example, `parse_grpc_status_code(String(e)) == CODE_UNAUTHENTICATED` to drop
+# a cached token). The anchor is a number this package wrote; no server byte
+# is in it.
+
+comptime _GRPC_ANCHOR = "[grpc:"
+comptime _GRPC_RETRY_EXHAUSTED = "[grpc-retry:EXHAUSTED]"
+comptime _GRPC_RETRY_ATTEMPTS = " after "
+
+
+def code_from_grpc_status(grpc_status: Int) -> Int:
+    """The `google.rpc.Code` of a gRPC status.
+
+    gRPC's status codes are google.rpc.Code's, number for number (gRPC
+    doc/statuscodes.md; google/rpc/code.proto), so a code in 0..16 maps to
+    itself. Any other value is UNKNOWN: a client receiving a status it does
+    not know treats it as UNKNOWN (the same document)."""
+    if grpc_status < CODE_OK or grpc_status > CODE_UNAUTHENTICATED:
+        return CODE_UNKNOWN
+    return grpc_status
+
+
+def _find_bytes(hay: String, needle: String, start: Int) -> Int:
+    """The byte offset of the first `needle` in `hay` at or after `start`, or
+    -1."""
+    var h = hay.as_bytes()
+    var n = needle.as_bytes()
+    var i = start
+    while i + len(n) <= len(h):
+        var j = 0
+        while j < len(n) and h[i + j] == n[j]:
+            j += 1
+        if j == len(n):
+            return i
+        i += 1
+    return -1
+
+
+def _status_text_bytes(text: String) -> Int:
+    """The byte length of what follows the first `[grpc:N]` anchor of `text`
+    (and the one space after it): the `grpc-message`, or komira_grpc's own
+    text for a status it derived. All of `text` when it has no anchor."""
+    var b = text.as_bytes()
+    var at = _find_bytes(text, _GRPC_ANCHOR, 0)
+    if at < 0:
+        return len(b)
+    var i = at + _GRPC_ANCHOR.byte_length()
+    while i < len(b) and b[i] != UInt8(ord("]")):
+        i += 1
+    if i >= len(b):
+        return 0
+    i += 1
+    if i < len(b) and b[i] == UInt8(ord(" ")):
+        i += 1
+    return len(b) - i
+
+
+def _retry_attempts(text: String) -> Int:
+    """The attempt count of komira_grpc's retry-exhaustion error, or 1 when
+    `text` is not one (a call that failed on its only attempt)."""
+    if not text.startswith(_GRPC_RETRY_EXHAUSTED):
+        return 1
+    var at = _find_bytes(text, _GRPC_RETRY_ATTEMPTS, 0)
+    if at < 0:
+        return 1
+    var b = text.as_bytes()
+    var i = at + _GRPC_RETRY_ATTEMPTS.byte_length()
+    var n = 0
+    var digits = 0
+    while i < len(b) and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
+        if digits < 6:
+            n = n * 10 + Int(b[i] - UInt8(ord("0")))
+        digits += 1
+        i += 1
+    if n < 1 or digits > 6:
+        return 1
+    return n
+
+
+@fieldwise_init
+struct GcpGrpcStatusError(Copyable, Movable, Deinitable):
+    """A failed Google API call over gRPC, as much as can be said without the
+    server's text.
+
+    `grpc_status` is the number the server sent (or the runtime derived, for
+    a deadline or a cancellation); `code()` is its `google.rpc.Code`.
+    `message_bytes` is the byte length of the status text, what followed
+    `[grpc:N]` in the transport's error: the `grpc-message`, or komira_grpc's
+    own text for a status it derived. The text itself is not kept.
+    `attempts` is how many times the call was sent: 1, or the count
+    komira_grpc's retry-exhaustion error states."""
+
+    var rpc: String
+    var grpc_status: Int
+    var message_bytes: Int
+    var attempts: Int
+
+    @staticmethod
+    def from_transport_text(
+        rpc: String, grpc_status: Int, text: String
+    ) -> Self:
+        """Classify the error text komira_grpc raised for a call to `rpc`,
+        whose status anchor reads `grpc_status`. Keeps no byte of `text`."""
+        return Self(
+            rpc.copy(), grpc_status, _status_text_bytes(text), _retry_attempts(text)
+        )
+
+    def code(self) -> Int:
+        """The canonical `google.rpc.Code` (`code_from_grpc_status`)."""
+        return code_from_grpc_status(self.grpc_status)
+
+    def message(self) -> String:
+        """The error text: a `[grpc:C]` anchor with the google.rpc.Code, the
+        RPC, the code and its name, the attempt count of a call whose retries
+        ran out, and a byte count. A status outside google.rpc.Code is named
+        as received."""
+        var out = (
+            String(_GRPC_ANCHOR)
+            + String(self.code())
+            + "] gRPC "
+            + self.rpc
+            + ": "
+            + code_name(self.code())
+            + " (code "
+            + String(self.code())
+            + ")"
+        )
+        if self.code() != self.grpc_status:
+            out += ", grpc-status " + String(self.grpc_status)
+        if self.attempts > 1:
+            out += ", retries exhausted after " + String(self.attempts) + " attempts"
+        out += ", error text " + String(self.message_bytes) + " bytes"
+        return out^
+
+    def to_error(self) -> Error:
+        return Error(self.message())
+
+
+def gcp_grpc_status_error(rpc: String, grpc_status: Int, text: String) -> Error:
+    """The `Error` a generated gRPC client raises for a call that ended in a
+    non-OK gRPC status. `rpc` is the method's path (`/pkg.Service/Method`),
+    `grpc_status` the number of the status anchor in `text`, and `text` the
+    error komira_grpc raised, which is read and not kept."""
+    return GcpGrpcStatusError.from_transport_text(rpc, grpc_status, text).to_error()
+
+
+def _digits_at(text: String, at: Int) -> Tuple[Int, Int]:
+    """The decimal number starting at byte `at` of `text` and the byte just
+    past it, or (-1, at) when no digit is there. At most 18 digits are read,
+    so the value fits an Int."""
+    var b = text.as_bytes()
+    var i = at
+    var v = 0
+    while i < len(b) and i - at < 18 and b[i] >= UInt8(ord("0")) and b[i] <= UInt8(ord("9")):
+        v = v * 10 + (Int(b[i]) - ord("0"))
+        i += 1
+    if i == at:
+        return (-1, at)
+    return (v, i)
+
+
+def _starts_at(text: String, tag: String, at: Int) -> Bool:
+    """Whether `tag` occurs in `text` at byte `at`."""
+    return _find_bytes(text, tag, at) == at
+
+
+def gcp_grpc_error_code(rpc: String, text: String) -> Int:
+    """The `google.rpc.Code` in an error a generated gRPC client raised for a
+    call to `rpc`, or -1 when `text` is not such an error.
+
+    `text` must be exactly what `gcp_grpc_status_error(rpc, ...)` renders:
+    the code, the grpc-status, the attempt count and the byte count are read
+    back and the message is rebuilt from them, so an error from another RPC,
+    an error raised before any status arrived (which a generated client
+    passes on unchanged), komira_grpc's own `[grpc:N] ...` text, or a message
+    that merely contains `(code N)` returns -1. A caller that maps statuses
+    onto its own errors reads the code here instead of parsing the message
+    itself."""
+    var b = text.as_bytes()
+    if not text.startswith(_GRPC_ANCHOR):
+        return -1
+    var anchor = _digits_at(text, _GRPC_ANCHOR.byte_length())
+    if anchor[0] < 0:
+        return -1
+    var head = String("] gRPC ") + rpc + ": "
+    if not _starts_at(text, head, anchor[1]):
+        return -1
+    var at = _find_bytes(text, " (code ", anchor[1] + head.byte_length())
+    if at < 0:
+        return -1
+    var code = _digits_at(text, at + 7)
+    if code[0] < 0 or code[0] != anchor[0]:
+        return -1
+    var rest = code[1]
+    if rest >= len(b) or b[rest] != UInt8(ord(")")):
+        return -1
+    rest += 1
+    var grpc_status = code[0]
+    var gs_tag = String(", grpc-status ")
+    if _starts_at(text, gs_tag, rest):
+        var gs = _digits_at(text, rest + gs_tag.byte_length())
+        if gs[0] < 0:
+            return -1
+        grpc_status = gs[0]
+        rest = gs[1]
+    var attempts = 1
+    var ra_tag = String(", retries exhausted after ")
+    if _starts_at(text, ra_tag, rest):
+        var ra = _digits_at(text, rest + ra_tag.byte_length())
+        if ra[0] < 0:
+            return -1
+        attempts = ra[0]
+        rest = ra[1]
+        if not _starts_at(text, " attempts", rest):
+            return -1
+        rest += String(" attempts").byte_length()
+    var et_tag = String(", error text ")
+    if not _starts_at(text, et_tag, rest):
+        return -1
+    var mb = _digits_at(text, rest + et_tag.byte_length())
+    if mb[0] < 0:
+        return -1
+    var rebuilt = GcpGrpcStatusError(rpc.copy(), grpc_status, mb[0], attempts)
+    if rebuilt.message() != text:
+        return -1
+    return rebuilt.code()

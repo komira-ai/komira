@@ -1,0 +1,24 @@
+{
+ "version": "2.0",
+ "metadata": {
+  "apiVersion": "2026-09-30",
+  "endpointPrefix": "tiny",
+  "protocol": "rest-xml",
+  "serviceFullName": "Tiny Example Service",
+  "serviceId": "Tiny",
+  "signatureVersion": "v4",
+  "uid": "tiny-2026-09-30"
+ },
+ "operations": {
+  "Ping": {
+   "name": "Ping",
+   "http": {"method": "PUT", "requestUri": "/ping"},
+   "input": {"shape": "PingRequest", "locationName": "PingRequest"}
+  }
+ },
+ "shapes": {
+  "PingRequest": {"type": "structure", "members": {"Kind": {"shape": "String", "xmlAttribute": true, "locationName": "kind"}}},
+  
+  "String": {"type": "string"}
+ }
+}

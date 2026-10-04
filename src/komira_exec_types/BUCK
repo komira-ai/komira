@@ -1,0 +1,14 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The result and error types that cross the operator / scheduler / caller boundary: EngineError, ExecResult, ProcessResult, QueryContext, the byte-budget parser, the PartitionBy output contract.
+mojo_library(
+    name = "komira_exec_types",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_arrow:komira_arrow",
+    ],
+    test_srcs = [
+        "tests/test_engine_error.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

@@ -8,16 +8,27 @@
 //! aws-client-gen --model <service-2.json> --model-sha256 <hex>
 //!     --service <botocore id> --operations <Op>[,<Op>...]
 //!     --module <name> --out <file.mojo>
-//!     [--pure-only] [--emit-model-json]
+//!     [--pure-only] [--emit-model-json] [--customization s3]
 //!     [--overrides <manifest> [--hand-src <file.mojo>]...]
 //!     [--probe-out <_layout_probe.mojo> [--probe-import <dotted path>]]
+//!     [--endpoint-rules <endpoint-rule-set-1.json> --partitions <partitions.json>]
 //! ```
+//!
+//! `--endpoint-rules` and `--partitions` (botocore's ruleset for the service
+//! and its partition table, always together) make the module resolve
+//! endpoints through the ruleset: both are embedded in it, and the header
+//! records the sha256 of each.
+//!
+//! `--customization s3` applies botocore's S3 response handling the model
+//! does not state (`emit_aws::S3_CUSTOMIZATION`); it is refused unless the
+//! model's serviceId is `S3` and its protocol is restXml.
 
 use std::path::PathBuf;
 
 use komira_proto_codegen::aws_in::lower_aws_service;
 use komira_proto_codegen::emit_aws::{
-    emit_aws_module, emit_layout_probe, AwsEmitOptions, AwsProvenance,
+    emit_aws_module_with_endpoints, emit_layout_probe, AwsEmitOptions, AwsEndpointRules,
+    AwsProvenance, S3_CUSTOMIZATION,
 };
 use komira_proto_codegen::json::parse;
 use komira_proto_codegen::overrides::AwsOverrides;
@@ -33,6 +44,8 @@ struct Args {
     hand_srcs: Vec<PathBuf>,
     probe_out: Option<PathBuf>,
     probe_import: Option<String>,
+    endpoint_rules: Option<PathBuf>,
+    partitions: Option<PathBuf>,
     options: AwsEmitOptions,
 }
 
@@ -94,6 +107,22 @@ fn run() -> Result<String, String> {
         overrides.check_symbols(&sources)?;
     }
 
+    let endpoint_rules = match (&args.endpoint_rules, &args.partitions) {
+        (Some(r), Some(p)) => {
+            let rb = std::fs::read(r).map_err(|e| format!("read {}: {e}", r.display()))?;
+            let pb = std::fs::read(p).map_err(|e| format!("read {}: {e}", p.display()))?;
+            let rt = std::str::from_utf8(&rb)
+                .map_err(|e| format!("{} is not UTF-8: {e}", r.display()))?;
+            let pt = std::str::from_utf8(&pb)
+                .map_err(|e| format!("{} is not UTF-8: {e}", p.display()))?;
+            Some(
+                AwsEndpointRules::parse(rt, &sha256::hex(&rb), pt, &sha256::hex(&pb))
+                    .map_err(|e| format!("{} / {}: {e}", r.display(), p.display()))?,
+            )
+        }
+        _ => None,
+    };
+
     let lowering = lower_aws_service(
         &model,
         &args.service,
@@ -104,7 +133,7 @@ fn run() -> Result<String, String> {
 
     // The botocore data key: `botocore/data/<service>/<api version>/`.
     let model_key = format!("{}/{}", args.service, lowering.service.api_version);
-    let emitted = emit_aws_module(
+    let emitted = emit_aws_module_with_endpoints(
         &lowering,
         &overrides,
         &args.module,
@@ -113,6 +142,7 @@ fn run() -> Result<String, String> {
             model_key: &model_key,
             model_sha256: &args.model_sha256,
         }),
+        endpoint_rules.as_ref(),
     )?;
 
     if emitted.source.trim().is_empty() {
@@ -138,7 +168,7 @@ fn run() -> Result<String, String> {
     let f = &lowering.model.files[0];
     Ok(format!(
         "aws-client-gen: {} {} -> {} ({} operations, {} messages, {} enums, {} \
-         overrides, {} bytes{})",
+         overrides, {} bytes{}{})",
         args.service,
         lowering.service.protocol,
         args.out.display(),
@@ -149,6 +179,15 @@ fn run() -> Result<String, String> {
         emitted.source.len(),
         match &probe {
             Some(_) => format!(", probe of {} structs", emitted.structs.len()),
+            None => String::new(),
+        },
+        match &endpoint_rules {
+            Some(r) => format!(
+                ", endpoint ruleset of {} parameters embedded in {} + {} bytes",
+                r.params.len(),
+                r.ruleset.len(),
+                r.partitions.len()
+            ),
             None => String::new(),
         }
     ))
@@ -173,6 +212,8 @@ fn parse_args() -> Result<Args, String> {
     let mut hand_srcs = Vec::new();
     let mut probe_out = None;
     let mut probe_import = None;
+    let mut endpoint_rules = None;
+    let mut partitions = None;
     let mut options = AwsEmitOptions::default();
     let mut i = 0;
     while i < argv.len() {
@@ -192,8 +233,20 @@ fn parse_args() -> Result<Args, String> {
             "--hand-src" => hand_srcs.push(PathBuf::from(take(&mut i)?)),
             "--probe-out" => probe_out = Some(PathBuf::from(take(&mut i)?)),
             "--probe-import" => probe_import = Some(take(&mut i)?),
+            "--endpoint-rules" => endpoint_rules = Some(PathBuf::from(take(&mut i)?)),
+            "--partitions" => partitions = Some(PathBuf::from(take(&mut i)?)),
             "--emit-model-json" => options.emit_model_json = true,
             "--pure-only" => options.pure_only = true,
+            "--customization" => {
+                let c = take(&mut i)?;
+                if c != S3_CUSTOMIZATION {
+                    return Err(format!(
+                        "--customization `{c}` is not one this generator has; the set is \
+                         `{S3_CUSTOMIZATION}`"
+                    ));
+                }
+                options.s3 = true;
+            }
             "--operations" => {
                 operations = Some(
                     take(&mut i)?
@@ -227,6 +280,13 @@ fn parse_args() -> Result<Args, String> {
             "--model-sha256 `{model_sha256}` is not 64 lowercase hex digits"
         ));
     }
+    if endpoint_rules.is_some() != partitions.is_some() {
+        return Err(
+            "--endpoint-rules and --partitions go together: the ruleset's aws.partition \
+             reads the partition table"
+                .into(),
+        );
+    }
     if probe_import.is_some() && probe_out.is_none() {
         return Err("--probe-import names the probe's import, so it needs --probe-out".into());
     }
@@ -241,6 +301,8 @@ fn parse_args() -> Result<Args, String> {
         hand_srcs,
         probe_out,
         probe_import,
+        endpoint_rules,
+        partitions,
         options,
     })
 }

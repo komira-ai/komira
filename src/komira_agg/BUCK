@@ -1,0 +1,24 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The aggregate kernels: the Aggregator, the built-in aggregate functions and
+# the hash-aggregate state machines, over the UDF trait surface.
+mojo_library(
+    name = "komira_agg",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_core:komira_core",
+        "//src/komira_udf:komira_udf",
+    ],
+    test_srcs = [
+        "tests/test_agg_fn_agg.mojo",
+        "tests/test_minmax_float_nan_order_independence.mojo",
+        "tests/test_typed_col_corr_kerneldirect.mojo",
+        "tests/test_typed_col_count_distinct_kerneldirect.mojo",
+        "tests/test_typed_col_count_distinct_nan_total_order.mojo",
+        "tests/test_typed_col_median_kerneldirect.mojo",
+        "tests/test_typed_col_median_nan_total_order.mojo",
+        "tests/test_typed_col_stddev_var_numeric_input_kerneldirect.mojo",
+        "tests/test_udf_trait_surface.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
