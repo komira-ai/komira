@@ -1,0 +1,34 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Read a deployed workload's metric time series: the sibling of the cloud-log
+# reader in `kci_logs`. A cloud-neutral `CloudMetricSource` trait keyed on the
+# provider's own handle (a Cloud Run service resource name, an ECS service
+# ARN), the value types that cross it, a not-configured default that refuses
+# and a scripted double; and the pure GCP (`timeSeries.list`, server-side
+# aggregated) and AWS (`GetMetricData`) request builders and allow-listed
+# parsers. No live conformer and no caller, on purpose: `__init__.mojo` says
+# why and what would change that. No socket: the transport is a trait.
+#
+# The one dep is `kci_logs`, for the bounded JSON scanner its cloud-log
+# parsers use. Two welded tests: test_cloud_metric_source pins every request
+# shape and refusal, the quoted `int64Value`, the CloudWatch parallel-array
+# length check and the `PartialData` refusal, with no network;
+# test_no_env_reads checks that the package's sources read no environment.
+mojo_library(
+    name = "komira_cloud_metrics",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_logs:kci_logs",
+    ],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in glob(["*.mojo"])
+        },
+    },
+    test_srcs = [
+        "tests/test_cloud_metric_source.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
