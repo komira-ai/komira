@@ -115,6 +115,10 @@ def _mk_rejected() raises -> ScriptedConnector:
     )
 
 
+def _never() raises -> ScriptedConnector:
+    raise Error("the client opened a connection")
+
+
 def _mk_echo() raises -> AwsEchoConnector:
     return AwsEchoConnector.json()
 
@@ -306,10 +310,12 @@ def test_send_email_on_the_wire() raises:
 def test_send_email_to_a_multi_region_endpoint_is_refused() raises:
     # An `EndpointId` sends to a multi-region endpoint, which the ruleset
     # signs with SigV4a; komira_aws_core signs SigV4 only, so the client
-    # refuses before anything reaches the wire.
+    # refuses before anything reaches the wire. Its connector factory
+    # raises if it is ever called, so the refusal naming SigV4a is also
+    # the proof that no connection was opened.
     var config = SESv2EndpointConfig(String("us-east-1"))
-    var client = SESv2SESv2Client[AwsEchoConnector, StaticCredsSource](
-        _mk_echo,
+    var client = SESv2SESv2Client[ScriptedConnector, StaticCredsSource](
+        _never,
         HttpClientConfig.defaults(),
         StaticCredsSource(AwsCredential(String("AKIDEXAMPLE"), String("secret"), String(""))),
         String("us-east-1"),

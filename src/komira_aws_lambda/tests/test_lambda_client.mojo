@@ -7,7 +7,8 @@
 # invoke, URL update or delete of a missing function (404), and a
 # concurrency the service refuses (400). None is a status or code botocore
 # retries, so each call is one request. A read and an invoke are answered
-# successfully.
+# successfully, and an invoke of a function that threw (a 200 carrying
+# `X-Amz-Function-Error`) returns with that error set rather than raising.
 #
 # Then each verb's request as it reached the wire: the client is given
 # komira_aws_core's AwsEchoConnector, whose answer is an error naming the
@@ -92,6 +93,19 @@ def _mk_invoked() raises -> ScriptedConnector:
             "OK",
             '{"statusCode":200,"body":"ok"}',
             "X-Amz-Executed-Version: $LATEST\r\n",
+        )
+    )
+
+
+def _mk_function_failed() raises -> ScriptedConnector:
+    # The function ran and threw: Lambda still answers 200, names the
+    # failure in `X-Amz-Function-Error`, and the payload is the error.
+    return ScriptedConnector.with_stream(
+        _answer(
+            200,
+            "OK",
+            '{"errorMessage":"boom","errorType":"Error"}',
+            "X-Amz-Executed-Version: $LATEST\r\nX-Amz-Function-Error: Unhandled\r\n",
         )
     )
 
@@ -210,6 +224,19 @@ def test_invoke_answered() raises:
     assert_equal(out.executed_version.value(), "$LATEST")
     var payload = out.payload.value().copy()
     assert_equal(String(unsafe_from_utf8=Span(payload)), '{"statusCode":200,"body":"ok"}')
+    assert_true(not out.function_error)
+
+
+def test_invoke_of_a_function_that_failed_returns() raises:
+    # A function error is the function's, not the call's: `invoke` returns
+    # with `function_error` set and the error payload intact, and does not
+    # raise.
+    var client = _client(_mk_function_failed)
+    var out = client.invoke(_invoke())
+    assert_equal(out.status_code.value(), Int32(200))
+    assert_equal(out.function_error.value(), "Unhandled")
+    var payload = out.payload.value().copy()
+    assert_equal(String(unsafe_from_utf8=Span(payload)), '{"errorMessage":"boom","errorType":"Error"}')
 
 
 # ---- one error per verb ------------------------------------------------------
@@ -424,6 +451,7 @@ def test_update_function_url_config_on_the_wire() raises:
 def main() raises:
     test_get_function_answered()
     test_invoke_answered()
+    test_invoke_of_a_function_that_failed_returns()
     test_add_permission_conflict()
     test_create_function_conflict()
     test_create_function_url_config_conflict()
