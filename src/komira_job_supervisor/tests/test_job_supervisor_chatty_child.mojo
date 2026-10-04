@@ -2,11 +2,11 @@
 # komira_job_supervisor/tests/test_job_supervisor_chatty_child.mojo
 # =============================================================================
 #
-# REGRESSION TEST for the job-supervisor pipe-drain DEADLOCK. The original job supervisor drained the child's stdout/stderr pipes ONLY
-# post-exit; a child that writes more than the OS pipe buffer (~64 KiB) to
-# stdout BEFORE exiting fills the pipe, blocks on write(), and NEVER reaches
-# exit -> the job supervisor's exit-poll never fires -> the run loop heartbeats forever
-# (deadlock).
+# REGRESSION TEST for the pipe-drain DEADLOCK. A supervisor that drains the
+# child's stdout/stderr pipes ONLY after exit deadlocks on a child that writes
+# more than the OS pipe buffer (~64 KiB) before exiting: the child blocks on
+# write() and never exits, so the exit poll never fires and the run loop
+# heartbeats forever.
 #
 # THE FIX: incremental NON-BLOCKING drain during the run loop. Each
 # poll_and_drain() call reads whatever stdout/stderr is ready RIGHT NOW (the
@@ -16,7 +16,7 @@
 #
 # WHY THIS IS A DEFAULT (non-cluster) TEST: it only spawns a LOCAL shell child
 # (`/bin/sh -c 'for ...; echo ...'`) and drives the job supervisor's lifecycle stepping
-# methods directly — no job-manager, no network, no S3. It is a welded test of
+# methods directly: no heartbeat endpoint, no network, no object store. It is a welded test of
 # //src/komira_job_supervisor:komira_job_supervisor.
 #
 # FAIL-FIRST: with the pre-fix post-exit-only drain, the poll loop below would
@@ -35,8 +35,36 @@ from std.testing import assert_equal, assert_true, assert_false
 
 from komira_supervisor.supervisor import ChildSpec
 
-from komira_job_supervisor import JobSupervisorConfig, PlainJobSupervisor
+from komira_objectstore import InMemoryConditionalStore
+
+from komira_job_supervisor import (
+    HeartbeatOutcome,
+    HeartbeatReporter,
+    JobSupervisor,
+    JobSupervisorConfig,
+    SupervisorHeartbeat,
+)
 from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase
+
+
+struct SilentReporter(HeartbeatReporter):
+    """Counts heartbeats and delivers none (this test sends none)."""
+
+    var beats: Int
+
+    def __init__(out self):
+        self.beats = 0
+
+    def report(mut self, hb: SupervisorHeartbeat) -> HeartbeatOutcome:
+        self.beats += 1
+        return HeartbeatOutcome(True, False, 200)
+
+
+comptime TestSupervisor = JobSupervisor[SilentReporter, InMemoryConditionalStore]
+
+
+def _supervisor(var config: JobSupervisorConfig) -> TestSupervisor:
+    return TestSupervisor(config^, SilentReporter(), None)
 
 
 def _sleep_ms(ms: Int):
@@ -48,20 +76,19 @@ def _sleep_ms(ms: Int):
 
 
 def _chatty_job_supervisor_config() -> JobSupervisorConfig:
-    """A trivial JobSupervisorConfig (the loopback host/port are never used — this test
-    drives the lifecycle stepping methods directly, no heartbeat). The stdout
-    byte budget is generous so the full capture is asserted (no truncation)."""
+    """A trivial JobSupervisorConfig (the heartbeat URL is never used: this
+    test drives the lifecycle stepping methods directly). The stdout byte
+    budget is generous so the full capture is asserted (no truncation)."""
     var argv = List[String]()
     return JobSupervisorConfig(
-        String("00000000-0000-0000-0000-0000000000aa"),
-        String("pod-chatty"),
+        String("job-chatty"),
+        String("instance-chatty"),
         String("/bin/sh"),
         argv^,
-        String("127.0.0.1"),
-        UInt16(1),
-        1,    # heartbeat_interval_secs (unused here)
-        100,  # max_stderr_lines
-        64 * 1024 * 1024,  # max_stdout_bytes — generous, no truncation
+        String("http://127.0.0.1:1/heartbeat"),
+        heartbeat_interval_secs=1,
+        max_stderr_lines=100,
+        max_stdout_bytes=64 * 1024 * 1024,  # generous, no truncation
     )
 
 
@@ -82,7 +109,7 @@ def test_chatty_child_no_deadlock_full_capture() raises:
         " ...padding_padding_padding_padding_padding...\"; i=$((i+1)); done"
     )
 
-    var job_supervisor = PlainJobSupervisor(_chatty_job_supervisor_config())
+    var job_supervisor = _supervisor(_chatty_job_supervisor_config())
     job_supervisor.spawn_child_spec(ChildSpec.shell(cmd))
     assert_true(job_supervisor.spawned, "chatty child spawned")
 
@@ -149,17 +176,16 @@ def test_chatty_child_stdout_budget_truncation() raises:
 
     # A SMALL stdout budget (32 KiB) so the ~200 KiB of output is truncated.
     var argv = List[String]()
-    var job_supervisor = PlainJobSupervisor(
+    var job_supervisor = _supervisor(
         JobSupervisorConfig(
-            String("00000000-0000-0000-0000-0000000000bb"),
-            String("pod-chatty-cap"),
+            String("job-chatty-cap"),
+            String("instance-chatty-cap"),
             String("/bin/sh"),
             argv^,
-            String("127.0.0.1"),
-            UInt16(1),
-            1,
-            100,
-            32 * 1024,  # max_stdout_bytes — small, forces truncation
+            String("http://127.0.0.1:1/heartbeat"),
+            heartbeat_interval_secs=1,
+            max_stderr_lines=100,
+            max_stdout_bytes=32 * 1024,  # small, forces truncation
         )
     )
     job_supervisor.spawn_child_spec(ChildSpec.shell(cmd))
@@ -221,7 +247,7 @@ def main() raises:
     test_chatty_child_stdout_budget_truncation()
     print(
         "PASS test_job_supervisor_chatty_child (a child writing >128 KiB to stdout"
-        " before exit no longer deadlocks the job supervisor: incremental non-blocking"
+        " before exit does not deadlock the supervisor: incremental non-blocking"
         " drain keeps the pipe empty, full capture asserted, COMPLETED; the"
         " stdout byte budget caps the in-memory log + flags truncation)"
     )

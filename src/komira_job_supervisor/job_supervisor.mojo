@@ -1,41 +1,37 @@
 # =============================================================================
-# komira_job_supervisor/job_supervisor.mojo — the job supervisor run loop.
+# komira_job_supervisor/job_supervisor.mojo: the supervisor run loop.
 # =============================================================================
 #
-# The pod-side supervisor: spawn the job binary, heartbeat the job-manager,
-# handle cancel, and on child exit analyze the result + send a terminal
-# heartbeat.
+# Spawn the job, heartbeat while it runs, act on a cancel, and when it exits
+# classify the result and send one terminal heartbeat.
 #
-# LIFECYCLE:
-#   1. send the INITIAL Running heartbeat (ASSIGNED -> RUNNING in the DB).
-#   2. Supervisor.spawn(ChildSpec) the job binary.
-#   3. LOOP, every heartbeat_interval:
-#        a. drain the child's stderr into the ring (forensics).
-#        b. poll the child for exit (try_wait); if exited, break to (4).
-#        c. POST a Running heartbeat; if the response is {cancel:true},
-#           Supervisor.terminate(grace) the child + mark CANCELLED + break.
-#   4. ANALYZE the exit (ExitInfo -> Completed / Cancelled / Failed) ->
-#      build a FailureReport on Failed (exit_code / signal / stderr_tail /
-#      panic_message) -> send the TERMINAL heartbeat (COMPLETED/FAILED/
-#      CANCELLED) -> return.
+# LIFECYCLE (`run_job_supervisor`):
+#   0. with --binary-key: fetch the binary from the binary store (boot.mojo).
+#   1. an initial RUNNING heartbeat.
+#   2. spawn the job (komira_supervisor's Supervisor + ChildSpec).
+#   3. loop, every --heartbeat-interval-secs:
+#        a. drain stdout/stderr without blocking (stderr into the forensics
+#           ring, stdout into the logs.txt capture and the live stream);
+#        b. poll the child for exit; if it exited, go to 4;
+#        c. a RUNNING heartbeat; if the reply asks to cancel, terminate the
+#           child (SIGTERM, a 5 s grace, SIGKILL) and go to 4.
+#   4. classify the exit (exit 0 -> COMPLETED; a cancel -> CANCELLED;
+#      anything else -> FAILED with a FailureReport), send the terminal
+#      heartbeat, and with a log store write logs.txt (and crash_report.json
+#      on FAILED).
 #
-# THE `JobSupervisor` STRUCT vs `run_job_supervisor`: the lifecycle is decomposed into discrete
-# stepping methods on an `JobSupervisor` struct (spawn_child / do_heartbeat /
-# poll_and_drain / finalize) so a SAME-PROCESS e2e test can INTERLEAVE the
-# job supervisor's heartbeat POSTs with the job-manager service's `run_once` serving (the
-# job-supervisor-loop-wants-to-block vs server-loop-wants-to-block problem the brief
-# flagged). `run_job_supervisor(config)` composes the same steps into the continuous
-# blocking loop the prod binary runs.
+# WHAT THE EMBEDDING BINARY SUPPLIES: the configuration (flags), a
+# `HeartbeatReporter` R (`HttpHeartbeatReporter[A]` ships, with
+# `NoHeartbeatAuth`), and optionally the two object stores S, any
+# komira_objectstore `ConditionalWriteStore` (s3_store.mojo builds S3 ones).
 #
-# MVP SCOPE (deferred, noted in __init__.mojo): S3 binary download, S3 log
-# upload, crash-report-to-S3, reactor-driven async stderr drain (this uses a
-# simple post-exit `drain_pipe` + an incremental pre-exit drain), proto-binary
-# heartbeat (this uses proto3-JSON).
+# `JobSupervisor[R, S]` exposes the lifecycle as stepping methods
+# (spawn_child / do_heartbeat / poll_and_drain / analyze_exit /
+# finalize_heartbeat) so a test can drive one step at a time;
+# `run_job_supervisor` composes them into the blocking loop.
 #
-# ENCAPSULATION + gap6: the Supervisor encapsulates ALL fd/pipe/pid internals
-# (komira_supervisor) — the job supervisor only sees typed scalars + Strings. The stderr
-# ring is owned Strings. No UnsafePointer crosses any boundary; no wildcard
-# origin. Mojo 1.0.0b1.
+# The Supervisor encapsulates every fd, pipe and pid; this file sees typed
+# scalars and Strings. No pointer type crosses a boundary.
 # =============================================================================
 
 from std.ffi import external_call
@@ -48,14 +44,9 @@ from komira_supervisor.supervisor import (
 
 
 # =============================================================================
-# §0 — _sleep_secs — a usleep-backed second-granularity pause.
-#
-# We use `usleep` (single-arg, returns Int32) instead of stdlib `time.sleep`
-# (which declares `nanosleep`): an AOT binary that links komira_async (whose
-# reactor declares its OWN `external_call["nanosleep", ...]`) hit a "conflicting
-# nanosleep signature" legalization failure. `usleep` is a DISTINCT symbol from
-# either nanosleep decl, so it sidesteps the conflict (same fix as
-# komira_supervisor._sleep_ms).
+# §0: _sleep_secs. `usleep`, not std's time.sleep: komira_async's reactor
+# declares its own `nanosleep`, and a second declaration with another
+# signature fails to legalize.
 # =============================================================================
 def _sleep_secs(secs: Int):
     """Sleep `secs` whole seconds via usleep (microsecond granularity)."""
@@ -63,39 +54,33 @@ def _sleep_secs(secs: Int):
         return
     _ = external_call["usleep", Int32](UInt32(secs * 1_000_000))
 
+from komira_objectstore.store import ConditionalWriteStore
+
 from komira_job_supervisor.job_supervisor_config import JobSupervisorConfig
-from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase, JobSupervisorState, FailureReport
-from komira_job_supervisor.boot import (
-    download_binary,
-    make_s3_client_from_chain,
-    make_s3_client_over,
-    make_tls_s3_client_from_chain,
-    mk_job_supervisor_s3_plain_connector,
-    mk_job_supervisor_s3_tls_connector,
+from komira_job_supervisor.job_supervisor_state import (
+    JobSupervisorPhase,
+    JobSupervisorState,
+    FailureReport,
 )
+from komira_job_supervisor.boot import download_binary
 from komira_job_supervisor.heartbeat_client import (
     SupervisorHeartbeat,
     HeartbeatOutcome,
-    send_heartbeat_blocking,
+    HeartbeatReporter,
 )
 from komira_job_supervisor.upload import upload_crash_report, upload_logs
 from komira_job_supervisor.log_streamer import LogStreamSink
-
-from komira_job_supervisor.s3_client import JobSupervisorS3Client
-from komira_http_client.tls_connector import TlsConnector
-from komira_http_core.transport.io_stream import Connector
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 
 import komira_log as log
 from komira_log import ArgStr
 
 
 # =============================================================================
-# §1 — stderr ring helpers.
+# §1: stderr ring helpers.
 # =============================================================================
 def _split_lines(text: String) -> List[String]:
     """Split captured stderr text into lines (on '\\n'), dropping a trailing
-    empty line. The job supervisor keeps the last N for failure forensics."""
+    empty line. The supervisor keeps the last N for failure forensics."""
     var lines = List[String]()
     var cur = String("")
     var bytes = text.as_bytes()
@@ -140,35 +125,19 @@ def _detect_panic(lines: List[String]) -> Optional[String]:
 
 
 # =============================================================================
-# §2 — JobSupervisor — the supervisor state machine, decomposed into stepping methods.
+# §2: JobSupervisor, the lifecycle as stepping methods.
 # =============================================================================
 struct JobSupervisor[
-    C: Connector,
+    R: HeartbeatReporter,
+    S: ConditionalWriteStore,
 ](Movable):
-    """The job supervisor for ONE job. Owns the `JobSupervisorConfig`, the
-    `JobSupervisorState`, the `Supervisor` (the spawned child), and the stderr ring.
-
-    The stepping methods (spawn_child / do_heartbeat / poll_and_drain /
-    finalize_heartbeat) are the SAME steps `run_job_supervisor` composes into the
-    continuous loop — exposed individually so a same-process e2e can interleave
-    them with the job-manager service's serving.
-
-    ★ `C` IS THE **S3** TRANSPORT, AND ONLY THE S3 TRANSPORT.
-    `KernelTcpConnector` for MinIO/LocalStack over plaintext,
-    `TlsConnector[KernelTcpConnector]` for real S3 or an `https://` endpoint.
-    `run_job_supervisor` picks it from `JobSupervisorConfig.s3_uses_tls()`; the aliases
-    `PlainJobSupervisor` / `TlsJobSupervisor` below are the two instantiations that exist.
-
-    ⚠ THE HEARTBEAT TRANSPORT IS **NOT** `C`, AND THAT ASYMMETRY IS DELIBERATE
-    RATHER THAN AN OVERSIGHT. The heartbeat client is built per-POST inside
-    `send_heartbeat_blocking` and lives no longer than the call, so its
-    transport can be a RUNTIME bool (`config.jm_uses_tls()`) with no type
-    parameter at all. The S3 client is a FIELD -- it outlives the call and is
-    handed to `LogStreamSink` on every drain -- so its transport has to be in
-    the type. Making both type parameters would force every construction site to
-    name two, and the second would always be inferable from config."""
+    """The supervisor for ONE job: its config, its heartbeat reporter `R`,
+    the optional log store `S`, the run state, the spawned child and the
+    captured output (module header)."""
 
     var config: JobSupervisorConfig
+    var reporter: Self.R
+    var log_store: Optional[Self.S]
     var state: JobSupervisorState
     var supervisor: Supervisor
     var stderr_ring: List[String]
@@ -177,38 +146,35 @@ struct JobSupervisor[
     var child_exited: Bool
     var exit_info: ExitInfo
 
-    # Incremental-drain state (the deadlock fix). Non-blocking reads arrive in
-    # arbitrary chunks that do NOT align on line boundaries, so each stream
-    # carries a partial-line accumulator; a complete line (terminated by '\n')
-    # is flushed into the corresponding ring. The stdout byte budget caps the
-    # in-memory capture (a chatty job can produce unbounded stdout — we bound
-    # it to avoid a new OOM and flag truncation).
+    # Non-blocking reads arrive in chunks that do not align on lines, so each
+    # stream keeps a partial-line accumulator. The stdout byte budget bounds
+    # the in-memory capture and flags truncation.
     var stdout_partial: String
     var stderr_partial: String
-    var stdout_bytes: Int       # running total of stdout bytes captured
-    var stdout_truncated: Bool  # set once max_stdout_bytes is exceeded
-    var capture_nonblocking: Bool  # fds set O_NONBLOCK yet?
+    var stdout_bytes: Int
+    var stdout_truncated: Bool
+    var capture_nonblocking: Bool
 
-    # Streaming-log state. `log_sink` accumulates stdout into 64 KiB / 10s
-    # chunks; `stream_client` is the attached S3 client used to PUT each chunk
-    # DURING the run. Both are engaged only when a log bucket is configured AND
-    # a client is attached (attach_stream_client) — otherwise the sink is
-    # `disabled()` and the job supervisor keeps the in-memory logs.txt path.
+    # The live stdout stream; engaged iff a log store was supplied.
     var log_sink: LogStreamSink
-    var stream_client: Optional[JobSupervisorS3Client[Self.C]]
 
-    def __init__(out self, var config: JobSupervisorConfig):
-        # Build the (initially disabled) streaming sink BEFORE moving config.
+    def __init__(
+        out self,
+        var config: JobSupervisorConfig,
+        var reporter: Self.R,
+        var log_store: Optional[Self.S],
+    ):
         var sink = LogStreamSink.disabled()
-        if config.log_bucket:
+        if log_store:
             sink = LogStreamSink(
-                String(config.log_bucket.value()),
-                String(config.job_id),
+                String(config.log_prefix),
                 config.log_chunk_bytes,
                 config.log_flush_secs * 1000,  # secs -> ms
-                False,  # not enabled until a client is attached
+                True,
             )
         self.config = config^
+        self.reporter = reporter^
+        self.log_store = log_store^
         self.state = JobSupervisorState()
         self.supervisor = Supervisor()
         self.stderr_ring = List[String]()
@@ -222,7 +188,6 @@ struct JobSupervisor[
         self.stdout_truncated = False
         self.capture_nonblocking = False
         self.log_sink = sink^
-        self.stream_client = Optional[JobSupervisorS3Client[Self.C]]()
 
     # ---- a heartbeat value from the current state ----
 
@@ -236,9 +201,9 @@ struct JobSupervisor[
         if self.state.message:
             msg = Optional[String](self.state.message.value())
         return SupervisorHeartbeat(
-            String(self.config.job_id),
+            String(self.config.job_name),
             phase,
-            String(self.config.pod_name),
+            String(self.config.instance_name),
             self.state.progress,
             msg^,
             failure^,
@@ -247,85 +212,61 @@ struct JobSupervisor[
     # ---- step: spawn the child ----
 
     def spawn_child(mut self) raises:
-        """Spawn the job binary (MVP: a local path + argv). The trivial-child
-        e2e seeds a `ChildSpec.shell(...)` via `spawn_child_spec` instead — the
-        prod path builds the spec from config here. When an S3 binary was
-        downloaded, `binary_download_path` is where it landed (defaults to
-        `job_binary_path` for the local-binary MVP path)."""
+        """Spawn the job from config: `binary_download_path` (which is
+        `job_binary_path` unless a fetched binary was written elsewhere) with
+        `job_argv`."""
         var spec = ChildSpec(String(self.config.binary_download_path))
         for ref a in self.config.job_argv:
             spec.with_arg(a)
         self.spawn_child_spec(spec^)
 
     def spawn_child_spec(mut self, var spec: ChildSpec) raises:
-        """Spawn an explicit ChildSpec (the e2e uses ChildSpec.shell for a
-        deterministic trivial child). Raises if posix_spawn fails."""
+        """Spawn an explicit ChildSpec (a test can pass ChildSpec.shell).
+        Raises if the spawn fails."""
         var pid = self.supervisor.spawn(spec)
         if pid <= Int32(0):
             raise Error(
                 String("job supervisor: spawn failed for job ")
-                + self.config.job_id
+                + self.config.job_name
                 + String(" (rc=")
                 + String(Int(pid))
                 + String(")")
             )
         self.spawned = True
-        # Make the capture-pipe read ends non-blocking so the incremental drain
-        # read (read_available) can run every loop iteration WITHOUT parking the
-        # heartbeat loop. This is the core of the deadlock fix: without it a
-        # chatty child fills the ~64 KiB pipe buffer, blocks on write(), and
-        # never exits, so the exit-poll never fires.
+        # Non-blocking capture pipes, so every loop iteration can drain what
+        # is ready without parking the loop. Without this a chatty child fills
+        # the ~64 KiB pipe buffer, blocks on write() and never exits.
         _ = self.supervisor.set_nonblocking(self.supervisor.stdout_fd())
         _ = self.supervisor.set_nonblocking(self.supervisor.stderr_fd())
         self.capture_nonblocking = True
 
-    # ---- streaming logs: attach the S3 client + engage the sink ----
-
-    def attach_stream_client(mut self, var client: JobSupervisorS3Client[Self.C]):
-        """Attach an S3 client for LIVE log streaming and engage the sink. Only
-        engages when a log bucket is configured (the sink was built non-disabled
-        in __init__ in that case); a no-op effect on a no-bucket config (the
-        sink stays disabled, the client is simply held). Call BEFORE spawn so the
-        first drained stdout streams. Idempotent — re-attaching replaces the
-        client."""
-        self.stream_client = Optional[JobSupervisorS3Client[Self.C]](client^)
-        if self.config.log_bucket:
-            self.log_sink.enabled = True
+    # ---- the live stdout stream ----
 
     def _flush_stream_to_eof(mut self):
-        """On terminal, flush the final partial chunk through the attached
-        client (best-effort). A no-op when streaming is not engaged."""
+        """On exit, write the final partial chunk (best-effort)."""
         if not self.log_sink.enabled:
             return
-        if self.stream_client:
-            ref c = self.stream_client.value()
-            self.log_sink.flush_final[Self.C](c)
+        if self.log_store:
+            ref st = self.log_store.value()
+            self.log_sink.flush_final[Self.S](st)
 
     def _tick_stream_timer(mut self):
-        """Time-based flush opportunity (called from the heartbeat loop so a
-        quiet-but-nonempty chunk flushes on the interval even when no new stdout
-        arrives). A no-op when streaming is not engaged."""
+        """A time-based flush opportunity, so a quiet but non-empty chunk is
+        written on the interval even when no new stdout arrives."""
         if not self.log_sink.enabled:
             return
-        if self.stream_client:
-            ref c = self.stream_client.value()
-            self.log_sink.maybe_flush[Self.C](c)
+        if self.log_store:
+            ref st = self.log_store.value()
+            self.log_sink.maybe_flush[Self.S](st)
 
     # ---- step: send one heartbeat for the current RUNNING state ----
 
     def do_heartbeat(mut self) -> HeartbeatOutcome:
-        """POST one RUNNING heartbeat. On {cancel:true}, mark
-        cancel_requested (the caller acts on it — see act_on_cancel). Best-effort
-        — a network failure is logged + swallowed (never crashes the loop)."""
+        """Report one RUNNING heartbeat. A reply asking to cancel sets
+        cancel_requested (see act_on_cancel). Best-effort: a failure is an
+        outcome, never a raise."""
         var hb = self._make_heartbeat(JobSupervisorPhase.running())
-        var outcome = send_heartbeat_blocking(
-            self.config.jm_host,
-            self.config.jm_port,
-            hb,
-            self.config.jm_uses_tls(),
-            self.config.jm_auth_mode,
-            self.config.jm_auth_audience(),
-        )
+        var outcome = self.reporter.report(hb)
         if outcome.ok and outcome.cancel:
             self.state.cancel_requested = True
         return outcome
@@ -333,9 +274,9 @@ struct JobSupervisor[
     # ---- step: act on a cancel request (terminate the child) ----
 
     def act_on_cancel(mut self, grace_ms: Int):
-        """If the job-manager requested cancellation, SIGTERM->grace->SIGKILL
-        the child and mark the job supervisor CANCELLED. Idempotent: a no-op if the child
-        already exited."""
+        """If a heartbeat reply asked to cancel, SIGTERM -> grace -> SIGKILL
+        the child and mark the job CANCELLED. A no-op if the child already
+        exited."""
         if not self.state.cancel_requested:
             return
         if self.child_exited:
@@ -350,7 +291,7 @@ struct JobSupervisor[
         """Incrementally drain BOTH capture pipes (non-blocking) AND poll the
         child for exit. This is the deadlock fix: every call drains whatever
         stdout/stderr is ready RIGHT NOW so the pipe never fills (a child that
-        writes >64 KiB before exiting no longer blocks on write() forever).
+        writes more than a pipe buffer before exiting never blocks on write()).
 
         Order matters: drain FIRST (relieve any pipe pressure so a blocked
         write() can complete and the child can reach exit), THEN try_wait. On
@@ -428,17 +369,13 @@ struct JobSupervisor[
         NOT align on line boundaries, so a partial line is held until the next
         chunk completes it (or _final_drain flushes the tail).
 
-        For STDOUT, the RAW byte chunk is ALSO fed to the streaming sink BEFORE
-        line-parsing — the streamed `{job_id}/chunks/{n}.log` objects reconstruct
-        (by concatenation) to the child's exact stdout byte stream, newlines and
-        all. This is what makes logs visible LIVE during the run and removes the
-        in-memory byte cap as the limit (only the current sub-threshold chunk
-        lives in memory). The in-memory stdout ring + its byte budget remain for
-        the optional terminal logs.txt summary, but no longer bound total
-        stdout."""
-        if is_stdout and self.log_sink.enabled and self.stream_client:
-            ref c = self.stream_client.value()
-            self.log_sink.feed_stdout(text, c)
+        For STDOUT, the raw chunk also goes to the stream sink BEFORE line
+        parsing, so the `{log_prefix}/chunks/{n}.log` objects concatenate to
+        the child's exact stdout bytes. The in-memory ring (bounded by
+        --max-stdout-bytes) is only the logs.txt summary."""
+        if is_stdout and self.log_sink.enabled and self.log_store:
+            ref st = self.log_store.value()
+            self.log_sink.feed_stdout[Self.S](text, st)
         var bytes = text.as_bytes()
         for i in range(len(bytes)):
             var c = bytes[i]
@@ -522,22 +459,14 @@ struct JobSupervisor[
         )
 
     def finalize_heartbeat(mut self) -> HeartbeatOutcome:
-        """Send the TERMINAL heartbeat (the current terminal phase) so the DB
-        transitions COMPLETED / FAILED / CANCELLED. Best-effort."""
+        """Report the TERMINAL heartbeat (COMPLETED / FAILED / CANCELLED).
+        Best-effort."""
         var hb = self._make_heartbeat(self.state.phase)
-        return send_heartbeat_blocking(
-            self.config.jm_host,
-            self.config.jm_port,
-            hb,
-            self.config.jm_uses_tls(),
-            self.config.jm_auth_mode,
-            self.config.jm_auth_audience(),
-        )
+        return self.reporter.report(hb)
 
     def log_lines(self) -> List[String]:
-        """Assemble the captured log lines for upload: stdout first, then
-        stderr (the MVP single-object `logs.txt` content). A v0.5 hardening
-        splits stdout / stderr into separate objects + chunks them."""
+        """The logs.txt content: the captured stdout lines, then the stderr
+        lines."""
         var lines = List[String]()
         for ref l in self.stdout_ring:
             lines.append(l)
@@ -545,37 +474,16 @@ struct JobSupervisor[
             lines.append(l)
         return lines^
 
-    def upload_terminal_artifacts(mut self) raises:
-        """(DEPLOYMENT-REAL) Best-effort terminal S3 upload: logs.txt always,
-        plus crash_report.json on FAILED. Builds a fresh production JobSupervisorS3Client
-        (credentials via the chain + clock via the helper). The per-upload
-        failures are swallowed inside upload_logs / upload_crash_report (they
-        return Bool); this method only raises if the client itself can't be
-        constructed (e.g. no credentials), which the caller treats as
-        best-effort."""
-        if self.config.s3_uses_tls():
-            var tls_client = make_tls_s3_client_from_chain(
-                self.config.s3_region, self.config.s3_endpoint
-            )
-            _ = upload_logs[TlsConnector[KernelTcpConnector]](
-                self.config, tls_client, self.log_lines()
-            )
-            if self.state.phase == JobSupervisorPhase.failed() and self.state.failure:
-                _ = upload_crash_report[TlsConnector[KernelTcpConnector]](
-                    self.config,
-                    tls_client,
-                    self.state.failure.value().copy(),
-                )
+    def upload_terminal_artifacts(mut self):
+        """With a log store: write logs.txt, and crash_report.json on FAILED.
+        Best-effort; a no-op without a log store."""
+        if not self.log_store:
             return
-        var client = make_s3_client_from_chain(
-            self.config.s3_region, self.config.s3_endpoint
-        )
-        _ = upload_logs[KernelTcpConnector](
-            self.config, client, self.log_lines()
-        )
+        ref st = self.log_store.value()
+        _ = upload_logs[Self.S](self.config, st, self.log_lines())
         if self.state.phase == JobSupervisorPhase.failed() and self.state.failure:
-            _ = upload_crash_report[KernelTcpConnector](
-                self.config, client, self.state.failure.value().copy()
+            _ = upload_crash_report[Self.S](
+                self.config, st, self.state.failure.value().copy()
             )
 
     def terminal_phase(self) -> JobSupervisorPhase:
@@ -583,95 +491,40 @@ struct JobSupervisor[
 
 
 # =============================================================================
-# §3 — run_job_supervisor — the continuous blocking loop (the prod path).
+# §3: run_job_supervisor, the blocking loop.
 # =============================================================================
-# The two instantiations that exist. Named so a call site says which transport
-# it means instead of spelling a nested generic.
-comptime PlainJobSupervisor = JobSupervisor[KernelTcpConnector]
-comptime TlsJobSupervisor = JobSupervisor[TlsConnector[KernelTcpConnector]]
-
-
-def run_job_supervisor(var config: JobSupervisorConfig) raises:
-    """The prod job supervisor lifecycle, over the S3 transport the CONFIG selects.
-
-    ★ THIS IS THE ONE PLACE THE JOB SUPERVISOR'S S3 TRANSPORT IS CHOSEN. When there
-    was no choice to make, `JobSupervisor` held a plaintext S3 client and the binary download, the live log stream
-    and the terminal upload were all plaintext, unconditionally. A job supervisor
-    pointed at real S3 therefore signed a correct SigV4 request for an
-    `https://` URL -- `S3Config.aws(region)` is HTTPS -- and sent it in the
-    clear to port 443.
-
-    `s3_uses_tls()` is derived from the endpoint (absent => real AWS => TLS;
-    otherwise the endpoint's own scheme), so a MinIO deploy keeps the plaintext
-    arm byte-for-byte and needs no new env var to do it.
-
-    ⚠ THE BRANCH IS AT THE TOP AND MONOMORPHISES THE WHOLE LOOP. It is not a
-    per-call dispatch: `run_job_supervisor_over[C]` is instantiated twice and each
-    instantiation is entirely one transport, so no code path can mix them."""
-    if config.s3_uses_tls():
-        run_job_supervisor_over[TlsConnector[KernelTcpConnector]](
-            config^, mk_job_supervisor_s3_tls_connector
-        )
-    else:
-        run_job_supervisor_over[KernelTcpConnector](
-            config^, mk_job_supervisor_s3_plain_connector
-        )
-
-
-def run_job_supervisor_over[
-    C: Connector,
+def run_job_supervisor[
+    R: HeartbeatReporter,
+    S: ConditionalWriteStore,
 ](
     var config: JobSupervisorConfig,
-    mk_connector: def () raises thin -> C,
-) raises:
-    """The prod job supervisor lifecycle over an EXPLICIT S3 transport `C`: initial
-    Running heartbeat -> spawn -> the poll-then-heartbeat loop (terminate on
-    cancel) -> analyze exit -> terminal heartbeat. Blocks until the child exits
-    (or is cancelled). `run_job_supervisor` above is the entry the prod binary's `main`
-    calls; this is what it dispatches to.
+    var reporter: R,
+    var binary_store: Optional[S],
+    var log_store: Optional[S],
+) raises -> JobSupervisorPhase:
+    """Run one job to its end and return its terminal phase (module header).
 
-    MVP: a simple poll-then-sleep loop (reactor-async drain deferred). The grace
-    window for a cancel is 5s (5000ms).
-
-    DEPLOYMENT-REAL: when `config.binary_s3_uri` is set, the job supervisor downloads +
-    SHA-verifies + chmods the binary from S3 BEFORE spawn (reusing the
-    production JobSupervisorS3Client + the credential chain + the clock helper), and on
-    terminal uploads logs (+ a crash-report on FAILED) to the log bucket. When
-    no S3 URI is configured the job supervisor runs the LOCAL job_binary_path and skips
-    the S3 path entirely (the MVP / in-process e2e path)."""
+    `binary_store` is required iff the config names a --binary-key;
+    `log_store` is optional (without it there is no live stream and no
+    terminal upload). Raises only before the job is spawned (a missing
+    store, a failed fetch, a failed spawn); after that every failure is
+    reported, not raised."""
     comptime GRACE_MS = 5000
-    var uses_s3 = config.uses_s3_binary()
-    var job_supervisor = JobSupervisor[C](config^)
+    if config.uses_binary_store():
+        if not binary_store:
+            raise Error(
+                "job supervisor: --binary-key is set but no binary store was"
+                " supplied"
+            )
+        _ = download_binary[S](config, binary_store.value())
+    _ = binary_store^
 
-    # 0. (DEPLOYMENT-REAL) download the job binary from S3 before spawn.
-    if uses_s3:
-        var dl_client = make_s3_client_over[C](
-            mk_connector, job_supervisor.config.s3_region, job_supervisor.config.s3_endpoint
-        )
-        _ = download_binary[C](job_supervisor.config, dl_client)
+    var job_supervisor = JobSupervisor[R, S](config^, reporter^, log_store^)
 
-    # 1. initial Running heartbeat (ASSIGNED -> RUNNING).
+    # 1. initial RUNNING heartbeat.
     _ = job_supervisor.do_heartbeat()
 
-    # 1b. (DEPLOYMENT-REAL) engage LIVE log streaming when a log bucket is
-    #     configured: attach a fresh production S3 client so each drained stdout
-    #     chunk PUTs to `{log_bucket}/{job_id}/chunks/{n}.log` DURING the run.
-    #     Best-effort — a client-construction failure must NOT abort the job, so
-    #     it is swallowed (the terminal logs.txt path still runs).
-    if job_supervisor.config.log_bucket:
-        try:
-            var stream_client = make_s3_client_over[C](
-                mk_connector, job_supervisor.config.s3_region, job_supervisor.config.s3_endpoint
-            )
-            job_supervisor.attach_stream_client(stream_client^)
-        except e:
-            log.warn[
-                "job supervisor: log-stream client build failed (best-effort, falling"
-                " back to terminal logs.txt): {}",
-                "komira_job_supervisor",
-            ](ArgStr(String(e)))
-
-    # 2. spawn the job binary.
+    # 2. spawn the job.
     job_supervisor.spawn_child()
 
     # 3. poll-then-heartbeat loop.
@@ -684,41 +537,27 @@ def run_job_supervisor_over[
         if outcome.ok and outcome.cancel:
             job_supervisor.act_on_cancel(GRACE_MS)
             break
-        # Sleep the heartbeat interval (MVP: a coarse whole-second sleep; the
-        # reactor-deadline await is the deferred hardening).
         var slept = 0
         while slept < hb_interval:
             _sleep_secs(1)
             slept += 1
-            # Drain + check exit each second so a fast child is noticed promptly.
+            # Drain and check for exit every second so a fast child is
+            # noticed promptly.
             job_supervisor.poll_and_drain()
             if job_supervisor.child_exited:
                 break
-            # Time-based streaming flush: a quiet-but-nonempty chunk flushes on
-            # the flush interval even when no new stdout arrived this second.
             job_supervisor._tick_stream_timer()
         if job_supervisor.child_exited:
             break
 
-    # 4. analyze the exit + send the terminal heartbeat.
+    # 4. classify, report the terminal phase, write the record.
     job_supervisor.analyze_exit()
     _ = job_supervisor.finalize_heartbeat()
+    job_supervisor.upload_terminal_artifacts()
 
-    # 5. (DEPLOYMENT-REAL) best-effort S3 upload of logs (+ crash-report on
-    #    FAILED) to the log bucket. Skipped when no log bucket is configured.
-    #    A fresh client is built (the download client was dropped after spawn)
-    #    so credentials/clock are re-resolved at terminal time.
-    if job_supervisor.config.log_bucket:
-        try:
-            job_supervisor.upload_terminal_artifacts()
-        except e:
-            # Best-effort: the heartbeat already carried the forensics.
-            log.warn[
-                "job supervisor: terminal S3 upload failed (best-effort): {}",
-                "komira_job_supervisor",
-            ](ArgStr(String(e)))
-
+    var phase = job_supervisor.terminal_phase()
     log.info["job supervisor: job {} finished phase={}", "komira_job_supervisor"](
-        ArgStr(job_supervisor.config.job_id),
-        ArgStr(job_supervisor.terminal_phase().wire_str()),
+        ArgStr(job_supervisor.config.job_name),
+        ArgStr(String(phase.wire_str())),
     )
+    return phase

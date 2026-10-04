@@ -1,10 +1,10 @@
 # =============================================================================
-# komira_job_supervisor/tests/e2e/test_job_supervisor_stream_logs_e2e.mojo -- the job supervisor streams
-# a running job's stdout to a real MinIO in chunks.
+# komira_job_supervisor/tests/e2e/test_job_supervisor_stream_logs_e2e.mojo --
+# the supervisor streams a running job's stdout to a real MinIO in chunks.
 # =============================================================================
 #
-# While the job runs, the job supervisor puts its stdout to
-# `{job_id}/chunks/{n}.log` each time the chunk threshold is crossed (2 KiB
+# While the job runs, the supervisor writes its stdout to
+# `{log_prefix}/chunks/{n}.log` each time the chunk threshold is crossed (2 KiB
 # here). The test proves:
 #   * at least one chunk is uploaded BEFORE the job exits (the live
 #     property: `log_sink.uploaded_count >= 1` while `child_exited` is
@@ -14,25 +14,27 @@
 #   * the chunks, read back from the server in index order and
 #     concatenated, equal the job's whole stdout, byte for byte.
 #
-# The test drives the job supervisor directly (attach_stream_client, spawn_child_spec,
-# the poll_and_drain / _tick_stream_timer loop run_job_supervisor runs), so no job
-# manager is needed. Flags and verdicts as in test_job_supervisor_s3_e2e.mojo.
+# The test drives the supervisor directly (a log store, spawn_child_spec, the
+# poll_and_drain / _tick_stream_timer loop run_job_supervisor runs), so no
+# heartbeat endpoint is needed. Flags and verdicts as in
+# test_job_supervisor_s3_e2e.mojo.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
 
-from komira_job_supervisor.job_supervisor import PlainJobSupervisor
 from komira_job_supervisor.job_supervisor_config import JobSupervisorConfig
 from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase
-from komira_job_supervisor.boot import make_s3_client_over, mk_job_supervisor_s3_plain_connector
-from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_supervisor.supervisor import ChildSpec
 
 from job_supervisor_minio_e2e import (
+    E2eStore,
+    E2eSupervisor,
     JobSupervisorTestBucket,
+    SilentReporter,
     open_job_supervisor_test_bucket,
     point_job_supervisor_at,
     sleep_ms,
+    supervisor_store,
     text_of,
 )
 
@@ -41,21 +43,16 @@ comptime _BURSTS = 6
 comptime _BURST_WIDTH = 4000
 
 
-def _stream_config(bucket: JobSupervisorTestBucket, job_id: String) -> JobSupervisorConfig:
-    """A log bucket and a 2 KiB chunk threshold, so each ~4 KiB burst
-    flushes a chunk. The job is a ChildSpec.shell; no binary URI."""
+def _stream_config(log_prefix: String) -> JobSupervisorConfig:
+    """A log prefix and a 2 KiB chunk threshold, so each ~4 KiB burst
+    flushes a chunk. The job is a ChildSpec.shell; no binary key."""
     return JobSupervisorConfig(
-        String(job_id),
-        String("test-pod-stream"),
-        String(""),
+        String("job-stream"),
+        String("test-instance-stream"),
+        String("/bin/sh"),
         List[String](),
-        String("127.0.0.1"),
-        UInt16(1),
-        5,
-        100,
-        log_bucket=Optional[String](bucket.bucket()),
-        s3_endpoint=Optional[String](bucket.endpoint()),
-        s3_region=bucket.region(),
+        String("http://127.0.0.1:1/beat"),
+        log_prefix=String(log_prefix),
         log_chunk_bytes=2 * 1024,
         log_flush_secs=1,
     )
@@ -63,7 +60,7 @@ def _stream_config(bucket: JobSupervisorTestBucket, job_id: String) -> JobSuperv
 
 def test_stream_chunks_during_run(mut bucket: JobSupervisorTestBucket) raises:
     print("[stream-e2e] chunked stdout -> MinIO during the run")
-    var job_id = bucket.key("job-stream-0001")
+    var log_prefix = bucket.key("job-stream-0001")
 
     # Six bursts of one ~4 KiB line, 0.4 s apart: ~24 KiB over ~2.4 s.
     var script = String(
@@ -73,12 +70,12 @@ def test_stream_chunks_during_run(mut bucket: JobSupervisorTestBucket) raises:
         "i=$((i+1)); sleep 0.4; done"
     )
 
-    var job_supervisor = PlainJobSupervisor(_stream_config(bucket, job_id))
-    # Attached before the spawn, so the first drained chunk streams.
-    job_supervisor.attach_stream_client(
-        make_s3_client_over[KernelTcpConnector](
-            mk_job_supervisor_s3_plain_connector, bucket.region(), Optional[String](bucket.endpoint())
-        )
+    # The log store is given at construction, so the first drained chunk
+    # streams.
+    var job_supervisor = E2eSupervisor(
+        _stream_config(log_prefix),
+        SilentReporter(),
+        Optional[E2eStore](supervisor_store(bucket)),
     )
     job_supervisor.spawn_child_spec(ChildSpec.shell(script))
 
@@ -96,13 +93,13 @@ def test_stream_chunks_during_run(mut bucket: JobSupervisorTestBucket) raises:
     assert_true(job_supervisor.child_exited, "the job did not exit")
     job_supervisor.analyze_exit()
     assert_true(job_supervisor.terminal_phase() == JobSupervisorPhase.completed(), "the job must be COMPLETED")
-    assert_true(saw_chunk_before_exit, "no chunk was uploaded before the job exited")
+    assert_true(saw_chunk_before_exit, "no chunk was written before the job exited")
 
     var produced = job_supervisor.log_sink.chunks_produced()
     print("[stream-e2e]   chunks produced: " + String(produced))
     assert_true(produced >= 2, "expected >= 2 chunks, got " + String(produced))
 
-    var prefix = job_id + "/chunks/"
+    var prefix = log_prefix + "/chunks/"
     var listed = List[String]()
     bucket.client().list_keys(prefix, listed)
     print("[stream-e2e]   chunk objects listed: " + String(len(listed)))

@@ -1,29 +1,20 @@
 # =============================================================================
-# komira_job_supervisor/job_supervisor_state.mojo — the job supervisor's run-loop state.
+# komira_job_supervisor/job_supervisor_state.mojo: the run loop's state.
 # =============================================================================
 #
-# The pod-side supervisor's in-loop state. The job supervisor is a SINGLE
-# poll-then-heartbeat loop (no concurrent heartbeat and child-wait tasks), so
-# the state is a plain
-# struct the loop reads / writes directly — no mutex, no watch.
+# The supervisor is a single poll-then-heartbeat loop, so its state is a plain
+# struct the loop reads and writes directly (no mutex).
 #
-#   JobSupervisorPhase    — the four job-supervisor-reported phases (RUNNING / COMPLETED /
-#                   FAILED / CANCELLED). These map 1:1 onto the wire `phase`
-#                   string the job-manager's heartbeat handler parses
-#                   (`_phase_from_wire`), and onto the JobStore FSM target
-#                   phases.
-#   FailureReport — the forensic payload attached to a FAILED terminal
-#                   heartbeat (exit_code / signal / stderr_tail / panic_message /
-#                   last_record_offset). Serialized into the proto3-JSON
-#                   `failure` sub-object the handler's `_failure_from_json`
-#                   parses.
-#   JobSupervisorState    — phase + progress + message + Optional[FailureReport] +
-#                   cancel_requested. The loop mutates this as the child runs
-#                   and the job-manager's heartbeat responses arrive.
+#   JobSupervisorPhase : the four phases a supervisor reports (RUNNING /
+#                        COMPLETED / FAILED / CANCELLED), mapped onto the wire
+#                        `JobPhase` enum by heartbeat_client.mojo.
+#   FailureReport      : the forensics on a FAILED heartbeat (exit_code /
+#                        signal / stderr_tail / panic_message /
+#                        last_record_offset).
+#   JobSupervisorState : phase + progress + message + Optional[FailureReport] +
+#                        cancel_requested.
 #
-# ENCAPSULATION + gap6: ordinary owned value structs (String / Optional /
-# List[String] / POD Int32). NOT stored in any byte-slab, no UnsafePointer, no
-# wildcard origin. Mojo 1.0.0b1.
+# Owned value structs only; no pointer type, no byte-slab.
 # =============================================================================
 
 
@@ -31,14 +22,11 @@
 # §1 — JobSupervisorPhase — the four job-supervisor-reported phases.
 # =============================================================================
 struct JobSupervisorPhase(Copyable, Movable, ImplicitlyCopyable):
-    """A job-supervisor-reported job phase. Job supervisors only ever report the four
-    terminal-ish phases — RUNNING (periodic liveness) + the three terminals
-    (COMPLETED / FAILED / CANCELLED). PENDING / ASSIGNED / RECONCILING are
-    control-plane-internal and a job supervisor reporting them is a wire validation
-    error (the handler raises a 4xx).
+    """A phase the supervisor reports: RUNNING (periodic liveness) or one of
+    the three terminals (COMPLETED / FAILED / CANCELLED). The wire enum has
+    other values; a supervisor never reports them.
 
-    Stored as a small Int tag; `wire_str()` projects the SCREAMING_SNAKE form
-    the heartbeat handler's `_phase_from_wire` accepts."""
+    Stored as a small Int tag; `wire_str()` is the SCREAMING_SNAKE name."""
 
     var _tag: Int32  # 0=RUNNING 1=COMPLETED 2=FAILED 3=CANCELLED
 
@@ -81,7 +69,7 @@ struct JobSupervisorPhase(Copyable, Movable, ImplicitlyCopyable):
         return self._tag != Int32(0)
 
     def wire_str(self) -> StaticString:
-        """The SCREAMING_SNAKE wire token the heartbeat handler accepts."""
+        """The SCREAMING_SNAKE name of the phase."""
         if self._tag == Int32(0):
             return "RUNNING"
         if self._tag == Int32(1):
@@ -108,9 +96,8 @@ struct FailureReport(Movable):
                           for failure diagnosis.
       panic_message     — the extracted panic line when stderr contains
                           "panic" / "panicked" (Some) else None.
-      last_record_offset — reserved for the data-plane's last-processed offset
-                          (always None in the MVP — the trivial child doesn't
-                          report progress)."""
+      last_record_offset — reserved for a job's last-processed offset (the
+                          supervisor itself leaves it None)."""
 
     var exit_code: Optional[Int32]
     var signal: Optional[Int32]
@@ -150,16 +137,15 @@ struct FailureReport(Movable):
 # §3 — JobSupervisorState — the loop's working state.
 # =============================================================================
 struct JobSupervisorState(Movable):
-    """The job supervisor's in-loop state. The single poll-then-heartbeat
-    loop reads / writes this directly (no mutex — single-threaded MVP).
+    """The supervisor's in-loop state, read and written by the single
+    poll-then-heartbeat loop.
 
       phase             — the current job supervisor phase (starts RUNNING).
-      progress          — Optional[Int32] progress percent (None in the MVP;
-                          the trivial child doesn't report progress).
+      progress          — Optional[Int32] progress percent (None unless set).
       message           — Optional[String] human status line.
       failure           — Some only once the child is analyzed as Failed.
-      cancel_requested  — set True when a heartbeat response carries
-                          {cancel:true}; the loop then terminates the child."""
+      cancel_requested  — set True when a heartbeat reply asks to cancel;
+                          the loop then terminates the child."""
 
     var phase: JobSupervisorPhase
     var progress: Optional[Int32]

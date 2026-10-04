@@ -1,44 +1,30 @@
 # =============================================================================
 # komira_job_supervisor/tests/test_heartbeat_no_credential_in_clear.mojo
-#   A CREDENTIAL NEVER RIDES A PLAINTEXT HEARTBEAT: nothing minted, nothing sent.
+#   A CREDENTIAL NEVER RIDES A PLAINTEXT HEARTBEAT: nothing produced, nothing
+#   sent.
 # =============================================================================
 #
-# ⛔⛔ THE DEFECT. `send_heartbeat_blocking` minted a token
-# whenever the declared posture was not `none` -- REGARDLESS OF `use_tls` --
-# and then dialled. `PodLoaderSupervisorConfig.from_env` and
-# `JobSupervisorConfig.from_env` both accepted (plaintext, gcp-metadata). So a
-# Google-signed OIDC ID token could go out in the CLEAR, readable on every hop,
-# for an `http://` audience Cloud Run does not even serve.
+# `HttpHeartbeatReporter[A]` delivers each beat as an HTTP POST, authenticated
+# by the operator's `HeartbeatAuth` conformer `A`. When `A` attaches a
+# credential, an http:// URL would put that credential on every hop in the
+# clear, so the pair is refused: when the reporter is built, and again before
+# every beat, before `A` is asked and before anything is dialled.
 #
-# ⚠ HOW THE PAIR ARISES, EVEN THOUGH PLACEMENT REFUSES IT. `GcpCloudProvider`
-# refuses (http, gcp-metadata) before any cloud call. But the startup script
-# fetches the scheme and the posture with the OPTIONAL `curl -sf … || true`
-# form, so a transient metadata failure on the SCHEME alone exports it EMPTY (=
-# http) on the VM while the posture arrives intact -- after placement, where no
-# placement check can see it. `pod_boot_contract.mojo` said that downgrade
-# "carries no credential ... never a leak". It carried one.
+# WHAT THIS TEST IS. Beats through the REAL reporter at a 127.0.0.1 listener,
+# reading BOTH ends: the auth conformer's call count, the reporter's outcome,
+# and whether the listener was dialled and what it was sent.
 #
-# ★ WHAT THIS TEST IS. It sends one beat through the REAL
-# `send_heartbeat_blocking` body (the one place the transport, the scheme and
-# the posture are chosen together) at a 127.0.0.1 listener, and reads BOTH
-# ends: the minter's call count, the client's outcome, and whether the listener
-# was dialled and what it was sent.
-#
-# ⚠ WHY THE MINTER IS SCRIPTED, AND WHY THAT IS NOT A SHORTCUT. The production
-# `GcpMetadataMinter` dials `metadata.google.internal`, which does not resolve
-# on a build box: driven through it, the unfixed code ALSO sends nothing (the
-# mint fails first), so "no connection" would pass vacuously on exactly the
-# code it exists to catch. `send_heartbeat_blocking_with_minter` is the seam;
-# `send_heartbeat_blocking` is it with the production minter, and nothing else.
-#
-# ⚠ EVERY CASE HAS A CONTROL: the same listener SEES a legal plaintext dial,
-# and the legal credential posture (TLS, gcp-metadata) still mints and still
-# dials. Without them, "zero connections" is satisfied by a listener that sees
-# nothing, and "zero mints" by a guard that refuses every credentialed beat.
+# EVERY CASE HAS A CONTROL: the same listener SEES a legal plaintext dial (no
+# credential), and the legal credential pair (TLS, a credential-attaching
+# auth) still asks the conformer and still dials. Without them, "zero
+# connections" is satisfied by a listener that sees nothing, and "zero calls"
+# by a guard that refuses every credentialed beat. A conformer that RAISES
+# yields AUTH_UNAVAILABLE and no dial: a failed credential never falls through
+# to an unauthenticated POST.
 #
 # ENCAPSULATION: the raw-socket SERVER and the pthread are this test's own FFI
-# boundary; the code under test
-# never exposes a pointer. The thread's box holds only fixed-size fields.
+# boundary; the code under test never exposes a pointer. The thread's box
+# holds only fixed-size fields.
 # =============================================================================
 
 from std.ffi import external_call
@@ -46,24 +32,27 @@ from std.memory import OwnedPointer, UnsafePointer, alloc
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_true
 
+from komira_http_client.header_map import HeaderEntry
+
 from komira_job_supervisor.job_supervisor_state import JobSupervisorPhase, FailureReport
+from komira_job_supervisor.heartbeat_auth import HeartbeatAuth, NoHeartbeatAuth
 from komira_job_supervisor.heartbeat_client import (
-    HEARTBEAT_STATUS_AUTH_REFUSED,
     HEARTBEAT_STATUS_AUTH_UNAVAILABLE,
+    HttpHeartbeatReporter,
     SupervisorHeartbeat,
-    send_heartbeat_blocking_with_minter,
-)
-from komira_job_supervisor.jm_auth import JmAuthMode, JmTokenMinter, jm_audience
-
-
-comptime _CANNED_JWT: String = (
-    "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJodHRwczovL2ptLmV4YW1wbGUifQ.c2lnbmF0dXJl"
 )
 
 
-struct ScriptedMinter(JmTokenMinter):
-    """Returns a canned, real-looking JWT and COUNTS its calls, so "nothing was
-    minted" is an assertion rather than an inference."""
+comptime _CANNED_TOKEN: String = (
+    "eyJhbGciOiJSUzI1NiJ9.eyJhdWQiOiJodHRwczovL2hiLmV4YW1wbGUifQ.c2lnbmF0dXJl"
+)
+comptime _PATH: String = "/hb/v1"
+
+
+struct ScriptedAuth(HeartbeatAuth):
+    """A credential-attaching conformer: a canned bearer token, and a COUNT
+    of its calls, so "nothing was produced" is an assertion rather than an
+    inference."""
 
     var token: String
     var calls: Int
@@ -72,9 +61,45 @@ struct ScriptedMinter(JmTokenMinter):
         self.token = token^
         self.calls = 0
 
-    def mint(mut self, audience: String) raises -> String:
+    def name(self) -> String:
+        return String("scripted-bearer")
+
+    def attaches_credential(self) -> Bool:
+        return True
+
+    def headers(
+        mut self, method: String, url: String, body: List[UInt8]
+    ) raises -> List[HeaderEntry]:
         self.calls += 1
-        return self.token
+        var out = List[HeaderEntry]()
+        out.append(
+            HeaderEntry(
+                name=String("Authorization"),
+                value=String("Bearer ") + self.token,
+            )
+        )
+        return out^
+
+
+struct FailingAuth(HeartbeatAuth):
+    """A credential-attaching conformer whose every call raises."""
+
+    var calls: Int
+
+    def __init__(out self):
+        self.calls = 0
+
+    def name(self) -> String:
+        return String("failing-bearer")
+
+    def attaches_credential(self) -> Bool:
+        return True
+
+    def headers(
+        mut self, method: String, url: String, body: List[UInt8]
+    ) raises -> List[HeaderEntry]:
+        self.calls += 1
+        raise Error("scripted: the credential source answered 404")
 
 
 def _contains(haystack: String, needle: String) -> Bool:
@@ -277,12 +302,12 @@ struct _LoopbackBeat(Movable):
         self.head = head^
 
 
-def _beat_through_loopback(
-    use_tls: Bool, mode: JmAuthMode, mut minter: ScriptedMinter, wait_ms: Int32
-) raises -> _LoopbackBeat:
-    """Send ONE heartbeat to a 127.0.0.1 listener through the REAL
-    `send_heartbeat_blocking` body (transport + scheme + posture chosen there),
-    with the scripted minter, and report both ends."""
+def _beat_through_loopback[
+    A: HeartbeatAuth
+](use_tls: Bool, mut reporter_out: Optional[HttpHeartbeatReporter[A]], var auth: A, wait_ms: Int32) raises -> _LoopbackBeat:
+    """Build a REAL `HttpHeartbeatReporter[A]` for a 127.0.0.1 listener, send
+    ONE beat through it, and report both ends. The reporter is handed back
+    through `reporter_out` so the caller can read its auth's call count."""
     var listen_fd = _server_listen()
     var port = _bound_port(listen_fd)
 
@@ -308,23 +333,18 @@ def _beat_through_loopback(
         raise Error("test: pthread_create failed for the loopback listener")
 
     var hb = SupervisorHeartbeat(
-        String("11111111-2222-3333-4444-555555555555"),
+        String("job-cleartext-guard"),
         JobSupervisorPhase.running(),
-        String("pod-cleartext-guard"),
+        String("instance-cleartext-guard"),
         Optional[Int32](),
         Optional[String](),
         Optional[FailureReport](),
     )
     var scheme = String("https") if use_tls else String("http")
-    var outcome = send_heartbeat_blocking_with_minter[ScriptedMinter](
-        String("127.0.0.1"),
-        port,
-        hb,
-        use_tls,
-        mode,
-        jm_audience(scheme, String("127.0.0.1"), port),
-        minter,
-    )
+    var url = scheme + String("://127.0.0.1:") + String(port) + _PATH
+    var reporter = HttpHeartbeatReporter[A](url, auth^)
+    var outcome = reporter.report(hb)
+    reporter_out = Optional[HttpHeartbeatReporter[A]](reporter^)
 
     var retval: UInt64 = UInt64(0)
     _ = external_call["pthread_join", Int32](
@@ -378,105 +398,108 @@ def _bytes_contain(hay: List[UInt8], needle: String) -> Bool:
     return False
 
 
-def test_no_credential_is_minted_or_sent_over_a_plaintext_dial() raises:
-    """⛔⛔ (plaintext, gcp-metadata) IS REFUSED BEFORE THE MINT AND BEFORE THE
-    DIAL: zero mints, zero connections, and its own status.
-
-    RED before the fix: the scripted minter was called once, the listener got a
-    connection, and that connection's head carried `authorization: bearer
-    <token>` in the clear."""
-    var minter = ScriptedMinter(_CANNED_JWT)
-    var r = _beat_through_loopback(
-        False, JmAuthMode.gcp_metadata(), minter, Int32(3000)
-    )
-    var leaked = _bytes_contain(r.head, _CANNED_JWT)
-    assert_equal(
-        r.connections,
-        0,
-        "⛔ a (plaintext, gcp-metadata) heartbeat DIALLED the job manager"
-        " (bearer token readable on that plaintext connection: "
-        + String(leaked)
-        + "). A posture that attaches a credential must never ride a plaintext"
-        " dial; it is refused before the dial",
-    )
-    assert_equal(
-        minter.calls,
-        0,
-        "⛔ a (plaintext, gcp-metadata) heartbeat MINTED an ID token it could"
-        " only have sent in the clear. The refusal comes before the mint",
-    )
-    assert_false(r.ok, "a refused beat is not ok")
-    assert_equal(
-        r.status,
-        HEARTBEAT_STATUS_AUTH_REFUSED,
-        "the refusal is its own status: not AUTH_UNAVAILABLE (-1, the mint"
-        " failed) and not 0 (never connected, a network blip)",
-    )
-    # Asked of the OUTCOME, not of the constants (a constant-vs-constant check
-    # folds at compile time and only warns): the status this beat came back
-    # with is not a real HTTP status, not "never connected", and not "the mint
-    # failed".
+def test_a_credential_over_plaintext_is_refused_at_construction() raises:
+    """(http, credential-attaching auth) is REFUSED when the reporter is
+    built: the conformer is never asked, and the refusal names the auth, not
+    the credential."""
+    var auth = ScriptedAuth(_CANNED_TOKEN)
+    var refused = False
+    var msg = String("")
+    try:
+        var r = HttpHeartbeatReporter[ScriptedAuth](
+            String("http://127.0.0.1:9/hb/v1"), auth^
+        )
+        _ = r^
+    except e:
+        refused = True
+        msg = String(e)
     assert_true(
-        r.status < 0
-        and r.status != 0
-        and r.status != HEARTBEAT_STATUS_AUTH_UNAVAILABLE,
-        "the refused beat's status is negative, and distinct from both 0 and"
-        " AUTH_UNAVAILABLE",
+        refused,
+        "a credential-attaching auth over an http:// URL must be refused when"
+        " the reporter is built",
+    )
+    assert_true(_contains(msg, String("scripted-bearer")), "names the auth: " + msg)
+    assert_false(
+        _contains(msg, String("eyJ")), "the refusal carries no credential"
     )
 
-    # CONTROL 1: the SAME listener DOES see a plaintext dial when one is legal.
-    # Without this, `connections == 0` above is satisfied by a listener that
-    # cannot see anything.
-    var none_minter = ScriptedMinter(_CANNED_JWT)
-    var p = _beat_through_loopback(
-        False, JmAuthMode.none(), none_minter, Int32(20000)
+    # CONTROL: the same auth over https:// is accepted (nothing is dialled by
+    # construction), and has not been asked for a credential yet.
+    var ok = HttpHeartbeatReporter[ScriptedAuth](
+        String("https://hb.example.com/hb/v1"), ScriptedAuth(_CANNED_TOKEN)
+    )
+    assert_true(ok.uses_tls(), "CONTROL: an https URL selects TLS")
+    assert_equal(ok.auth().calls, 0, "CONTROL: construction asks for nothing")
+    print("  test_a_credential_over_plaintext_is_refused_at_construction: PASS")
+
+
+def test_the_loopback_sees_exactly_the_legal_beats() raises:
+    # CONTROL 1: the listener DOES see a plaintext dial when one is legal (no
+    # credential). Without this, `connections == 0` below is satisfied by a
+    # listener that cannot see anything.
+    var none_rep = Optional[HttpHeartbeatReporter[NoHeartbeatAuth]]()
+    var p = _beat_through_loopback[NoHeartbeatAuth](
+        False, none_rep, NoHeartbeatAuth(), Int32(20000)
     )
     assert_equal(
-        p.connections,
-        1,
-        "CONTROL: (plaintext, none) is a legal posture and DOES dial -- the"
-        " listener sees it",
+        p.connections, 1, "CONTROL: (plaintext, none) dials; the listener sees it"
     )
     var p_head = _request_head_lower(p.head)
     assert_true(
-        p_head.startswith(String("post /internal/heartbeat")),
-        "CONTROL: what it sent is the plaintext heartbeat POST: " + p_head,
+        p_head.startswith(String("post ") + _PATH),
+        "CONTROL: it sent the heartbeat POST to the URL's path: " + p_head,
+    )
+    assert_true(
+        _contains(p_head, String("content-type: application/protobuf")),
+        "CONTROL: the body is protobuf",
     )
     assert_false(
         _contains(p_head, String("authorization")),
         "CONTROL: (plaintext, none) carries no credential",
     )
-    assert_equal(none_minter.calls, 0, "CONTROL: posture `none` never mints")
 
-    # CONTROL 2: the LEGAL credential posture -- (TLS, gcp-metadata) -- still
-    # mints and still dials, and its first bytes are a TLS handshake record, not
-    # a plaintext POST. Without this, the case above is satisfied by a guard
-    # that refuses every credentialed beat.
-    var tls_minter = ScriptedMinter(_CANNED_JWT)
-    var t = _beat_through_loopback(
-        True, JmAuthMode.gcp_metadata(), tls_minter, Int32(20000)
+    # CONTROL 2: the LEGAL credential pair (TLS, credential-attaching auth)
+    # still asks the conformer and still dials, and its first bytes are a TLS
+    # handshake record, not a plaintext POST.
+    var tls_rep = Optional[HttpHeartbeatReporter[ScriptedAuth]]()
+    var t = _beat_through_loopback[ScriptedAuth](
+        True, tls_rep, ScriptedAuth(_CANNED_TOKEN), Int32(20000)
     )
     assert_equal(
-        tls_minter.calls, 1, "CONTROL: (TLS, gcp-metadata) still mints"
+        tls_rep.value().auth().calls, 1, "CONTROL: (TLS, credential) asks once"
     )
-    assert_equal(t.connections, 1, "CONTROL: (TLS, gcp-metadata) still dials")
+    assert_equal(t.connections, 1, "CONTROL: (TLS, credential) dials")
     assert_true(
-        len(t.head) >= 2
-        and Int(t.head[0]) == 0x16
-        and Int(t.head[1]) == 0x03,
-        "CONTROL: (TLS, gcp-metadata) opens with a TLS HANDSHAKE record (0x16"
+        len(t.head) >= 2 and Int(t.head[0]) == 0x16 and Int(t.head[1]) == 0x03,
+        "CONTROL: (TLS, credential) opens with a TLS HANDSHAKE record (0x16"
         " 0x03), not a plaintext POST",
     )
     assert_false(
-        _bytes_contain(t.head, _CANNED_JWT),
+        _bytes_contain(t.head, _CANNED_TOKEN),
         "CONTROL: the token is not readable in the TLS connection's first bytes",
     )
-    print(
-        "  test_no_credential_is_minted_or_sent_over_a_plaintext_dial: PASS"
+
+    # FAIL CLOSED: a conformer that raises yields AUTH_UNAVAILABLE and NO
+    # dial, never an unauthenticated POST.
+    var fail_rep = Optional[HttpHeartbeatReporter[FailingAuth]]()
+    var f = _beat_through_loopback[FailingAuth](
+        True, fail_rep, FailingAuth(), Int32(3000)
     )
+    assert_equal(fail_rep.value().auth().calls, 1, "the conformer was asked")
+    assert_equal(
+        f.connections, 0, "a failed credential must not fall through to a dial"
+    )
+    assert_false(f.ok, "a beat with no credential is not ok")
+    assert_equal(
+        f.status,
+        HEARTBEAT_STATUS_AUTH_UNAVAILABLE,
+        "its own status: not 0 (never connected, a network blip)",
+    )
+    print("  test_the_loopback_sees_exactly_the_legal_beats: PASS")
 
 
 def main() raises:
     print("test_heartbeat_no_credential_in_clear:")
-    test_no_credential_is_minted_or_sent_over_a_plaintext_dial()
+    test_a_credential_over_plaintext_is_refused_at_construction()
+    test_the_loopback_sees_exactly_the_legal_beats()
     print("test_heartbeat_no_credential_in_clear: ALL PASS")
