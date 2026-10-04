@@ -190,6 +190,10 @@ def _path_is_directory(path: String) -> Bool:
     `as_c_string_slice()` is a mutating method (appends a NUL) — needs an owned
     local that outlives the `external_call`."""
     var probe = path + String("/.")
+    # SAFETY: `as_c_string_slice()` returns a NUL-terminated view whose buffer
+    # is owned by `probe`, which lives until the end of this function, so it
+    # outlives the synchronous call. `access` reads the path during the call
+    # and keeps no pointer to it; the pointer does not escape this function.
     var rc = external_call["access", Int32](
         probe.as_c_string_slice().unsafe_ptr(), Int32(0)  # F_OK == 0
     )
@@ -212,6 +216,8 @@ def _path_is_executable(path: String) -> Bool:
     `as_c_string_slice()` is a mutating method (appends a NUL) — needs an owned
     local that outlives the `external_call`."""
     var p = path
+    # SAFETY: as above: the NUL-terminated buffer is owned by `p`, which
+    # outlives the synchronous `access` call, and the pointer does not escape.
     var rc = external_call["access", Int32](
         p.as_c_string_slice().unsafe_ptr(), Int32(1)  # X_OK == 1
     )
