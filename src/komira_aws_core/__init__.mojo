@@ -43,6 +43,13 @@ clients.
   FIPS and dual-stack, from the standard settings only).
 - `creds_source.mojo`: the `AwsCredsSource` trait a generated client signs
   through, a static source and the cached default chain.
+- `shared_creds.mojo`: `SharedCredsSource`, a Copyable credential source
+  whose clones share one refreshing source behind a lock (single flight).
+- `http_credential_transport.mojo`: `SchemeSplitCredentialTransport`, the
+  `CredentialTransport` that sends `http` and `https` requests over two
+  `AwsHttpTransport`s; `process_creds.mojo`: `ProcessCredsSource`, the
+  default chain over the process's environment, files and network, shared,
+  and `process_creds_source`.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
   of a send, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
   `is_s3_signing_name`, the signing names signed by S3's rules.
@@ -245,6 +252,15 @@ from .creds_source import (
     DefaultChainCredsSource,
     StaticCredsSource,
     expiration_unix_seconds,
+)
+from .shared_creds import SHARED_CREDS_REFRESH_FAILED, SharedCredsSource
+from .http_credential_transport import SchemeSplitCredentialTransport
+from .process_creds import (
+    ProcessChainCredsSource,
+    ProcessCredentialTransport,
+    ProcessCredsSource,
+    process_credential_transport,
+    process_creds_source,
 )
 from .credential_chain import (
     MAX_SOURCE_PROFILE_DEPTH,
