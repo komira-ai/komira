@@ -953,6 +953,24 @@ struct PbDecoder(WireDecoder):
                 sub.skip()
         out[k] = val
 
+    def read_into_string_i64_map(
+        mut self, mut out: Dict[String, Int64]
+    ) raises:
+        var sub = self._entry_decoder()
+        var k = String("")
+        var val = Int64(0)
+        while True:
+            var key = sub.next_field()
+            if key.end:
+                break
+            if key.field_no == 1:
+                k = sub.read_string()
+            elif key.field_no == 2:
+                val = sub.read_i64()
+            else:
+                sub.skip()
+        out[k] = val
+
     def read_into_i64_string_map(
         mut self, mut out: Dict[Int64, String]
     ) raises:

@@ -394,6 +394,68 @@ def test_tagged_empty_repeated_and_map() raises:
 
 
 # =============================================================================
+# Corpus message — Aliases { map<string,int64> aliases }, the shape of Secret
+# Manager's `Secret.version_aliases`, its body written as the generator
+# emits it.
+# =============================================================================
+
+
+@fieldwise_init
+struct Aliases(Serializable):
+    var aliases: Dict[String, Int64]
+
+    def encode[E: WireEncoder](self, mut enc: E) raises:
+        enc.begin_map_field(1, "aliases")
+        for entry in self.aliases.items():
+            enc.begin_map_entry()
+            enc.write_string_field(1, "key", entry.key)
+            enc.write_i64_field(2, "value", entry.value)
+            enc.end_map_entry()
+        enc.end_map_field()
+
+    @staticmethod
+    def decode[D: WireDecoder](mut dec: D) raises -> Self:
+        var aliases: Dict[String, Int64] = Dict[String, Int64]()
+        while True:
+            var key = dec.next_field()
+            if key.end:
+                break
+            if key.field_no == 1 or key.json_name == "aliases":
+                dec.read_into_string_i64_map(aliases)
+            else:
+                dec.skip()
+        return Aliases(aliases^)
+
+
+def test_string_i64_map_roundtrip() raises:
+    """A `map<string,int64>` round-trips on both backends, an int64 past
+    2^53 included, and its proto3-JSON value is read as either the quoted
+    decimal text the mapping writes or a bare number."""
+    var m = Dict[String, Int64]()
+    m[String("current")] = Int64(3)
+    m[String("big")] = Int64(9007199254740993)
+    m[String("neg")] = Int64(-7)
+    var orig = Aliases(m^)
+
+    var jb = decode_json[Aliases](encode_json(orig))
+    assert_equal(len(jb.aliases), 3, "json: 3 aliases")
+    assert_equal(jb.aliases[String("current")], Int64(3), "json: current")
+    assert_equal(jb.aliases[String("big")], Int64(9007199254740993), "json: big")
+    assert_equal(jb.aliases[String("neg")], Int64(-7), "json: neg")
+
+    var pb = decode_proto[Aliases](encode_proto[Aliases](orig))
+    assert_equal(len(pb.aliases), 3, "pb: 3 aliases")
+    assert_equal(pb.aliases[String("current")], Int64(3), "pb: current")
+    assert_equal(pb.aliases[String("big")], Int64(9007199254740993), "pb: big")
+    assert_equal(pb.aliases[String("neg")], Int64(-7), "pb: neg")
+
+    var quoted = decode_json[Aliases](String('{"aliases":{"a":"12","b":-4}}'))
+    assert_equal(quoted.aliases[String("a")], Int64(12), "quoted int64 value")
+    assert_equal(quoted.aliases[String("b")], Int64(-4), "bare int64 value")
+    print("  test_string_i64_map_roundtrip: PASS")
+
+
+# =============================================================================
 # Round-trip tests — each runs BOTH backends.
 # =============================================================================
 
@@ -630,4 +692,5 @@ def main() raises:
     test_pooled_scratch_buffer_reuse()
     test_tagged_repeated_and_map_roundtrip()
     test_tagged_empty_repeated_and_map()
+    test_string_i64_map_roundtrip()
     print("test_proto_codec_roundtrip: ALL PASS")
