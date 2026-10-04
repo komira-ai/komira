@@ -17,7 +17,7 @@ from komira_oci.oci_layout_fixture import write_test_layout
 from komira_oci.oci_layout_reader import read_oci_layout
 from komira_oci.oci_push import LayoutPusher
 
-from kci_contract import (
+from kci_api import (
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
     ARTIFACT_UPLOADED,

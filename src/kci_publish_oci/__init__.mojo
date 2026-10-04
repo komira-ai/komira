@@ -6,7 +6,7 @@
 #   arm.mojo  `publish_layout` over komira_oci's LayoutPusher: kci's checks
 #             (full revision, released platform, the layout's own os/arch is
 #             the step's), `--plan`, and the push's end state as a
-#             kci_contract outcome and error id; `record_image_publish`
+#             kci_api outcome and error id; `record_image_publish`
 #
 # Not wired into `kci run` yet: an image step needs a cell, which is the
 # deploy side (arm.mojo's header).

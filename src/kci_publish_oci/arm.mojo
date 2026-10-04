@@ -6,7 +6,7 @@
 # `publish_layout(pusher, layout_dir, registry, repository, revision,
 # platform, plan) -> ImagePublish` is a THIN arm over komira_oci's
 # `LayoutPusher`: it states kci's checks and maps the push's end state onto
-# kci_contract's outcome words and error ids. The push itself (tag read
+# kci_api's outcome words and error ids. The push itself (tag read
 # first, blobs, manifest by digest, tag, read back, the bounded retries) is
 # komira_oci's and is not restated here.
 #
@@ -19,7 +19,7 @@
 #      hashes every blob); a layout that does not is REFUSED
 #      (KCI-E-IMAGE-PUSH).
 #   4. the layout's own platform (its config's `os/arch`) is the step's
-#      platform in OCI spelling (kci_contract `oci_platform_of`), else
+#      platform in OCI spelling (kci_api `oci_platform_of`), else
 #      REFUSED (KCI-E-IMAGE-PLATFORM): an image for another CPU is never
 #      tagged with this release's revision.
 # Under `plan` the arm stops after these checks and sends NOTHING: the row is
@@ -65,7 +65,7 @@ from komira_oci.oci_push import (
 )
 from komira_oci.oci_transport import OciTransport
 
-from kci_contract import (
+from kci_api import (
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
     ARTIFACT_UPLOADED,
@@ -88,14 +88,14 @@ from kci_contract import (
     require_full_commit_id,
     require_release_platform,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 
 comptime ARTIFACT_TYPE_OCI_IMAGE: String = "OCI_IMAGE"
 """`artifacts[].artifact_type` of an image row."""
 
 
 struct ImagePublish(Copyable, Movable):
-    """How one image push ended: a kci_contract outcome word, an error id
+    """How one image push ended: a kci_api outcome word, an error id
     ("" on success), a message, and the image's artifact row.
 
     Layout: owned values only. No pointer field."""
@@ -117,7 +117,7 @@ struct ImagePublish(Copyable, Movable):
         return self.outcome == OUTCOME_SUCCEEDED or self.outcome == OUTCOME_NOOP
 
     def exit_code(self) raises -> Int:
-        """The exit number (kci_contract's exit table)."""
+        """The exit number (kci_api's exit table)."""
         return exit_code_of(self.outcome, self.error_id)
 
 
