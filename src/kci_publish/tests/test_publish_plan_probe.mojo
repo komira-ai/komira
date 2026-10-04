@@ -33,8 +33,8 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_encoding import base64_url_encode_nopad
 from komira_secret_store import SecretValue
 
-from kci_contract import ERROR_CREDENTIAL, EXIT_FAILED, EXIT_OK, MemoryRecorder, render_result
-from kci_contract import RunResult as KciRunResult
+from kci_api import ERROR_CREDENTIAL, EXIT_FAILED, EXIT_OK, MemoryRecorder, render_result
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_pkg_upload.transport import PkgResponse
 from kci_pkg_upload.wire import bytes_of

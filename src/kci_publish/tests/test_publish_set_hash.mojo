@@ -18,7 +18,7 @@
 #       line names both hashes, nothing was recorded as RUNNING, and the
 #       channel saw ZERO requests (no read, no write). There is no
 #       approved-hash input: the set a release publishes is the one its
-#       declarations and its build produced, and the result records the
+#       artifacts and its build produced, and the result records the
 #       recomputed hash for each channel it reaches.
 #
 # Hermetic: TEST_TMPDIR and ScriptedChannel; no network.
@@ -28,8 +28,8 @@ from std.ffi import external_call
 from std.os import getenv, makedirs
 from std.testing import assert_equal, assert_true
 
-from kci_contract import ERROR_MEMBER, EXIT_REFUSED, MemoryRecorder
-from kci_contract import RunResult as KciRunResult
+from kci_api import ERROR_MEMBER, EXIT_REFUSED, MemoryRecorder
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet
 from kci_publish import (
     ActionsOidcEnv,

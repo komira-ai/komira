@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_publish/report.mojo -- how a PUBLISH step ended, and its part of
-#   the run's result document (kci_contract's `kci.result`).
+#   the run's result document (kci_api's `kci.result`).
 # =============================================================================
 #
 # `PublishReport` is the step's working record: the REASON it stopped (a
@@ -10,7 +10,7 @@
 # `record_publish_result` puts this step's part into it.
 #
 # THE OUTCOME follows from the reason and from whether an upload landed
-# (kci_contract's outcome words; the exit number is the contract's, so this
+# (kci_api's outcome words; the exit number is the contract's, so this
 # package spells none):
 #
 #   reason                 nothing landed       an upload landed   error id
@@ -45,7 +45,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     STEP_KIND_PUBLISH,
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
@@ -69,7 +69,7 @@ from kci_contract import (
     platform_of_conda_subdir,
     require_error_id,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 
 from .plan import STATE_ABSENT, STATE_NOT_READ, STATE_SAME, PublishTarget, state_name
 
@@ -211,13 +211,13 @@ struct PublishReport(Copyable, Movable):
 
     def retry(self) -> String:
         """Retry advice stronger than the exit number's default, or "" for
-        the default (kci_contract's exit table)."""
+        the default (kci_api's exit table)."""
         if self.reason == REASON_READ_BACK_MISMATCH:
             return String(RETRY_NEEDS_HUMAN)
         return String("")
 
     def exit_code(self) raises -> Int:
-        """The exit number (kci_contract's exit table)."""
+        """The exit number (kci_api's exit table)."""
         if self.error_id.byte_length() > 0:
             require_error_id(self.error_id)
         return exit_code_of(self.outcome(), self.error_id)

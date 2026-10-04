@@ -12,14 +12,14 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # other bytes, or a listing that could not be read, stops the run with nothing
 # written. Names the channel has never held are REPORTED (NEW NAMES, in the
 # result and a job-summary block), never refused: which names a release
-# publishes is its declarations file's. A later stage's NEW NAMES are read
+# publishes is its artifacts file's. A later stage's NEW NAMES are read
 # anonymously (lookahead) so its approver sees them before approving. A dry
 # run writes nothing; under CI it exchanges an OIDC channel's token and
 # discards it (the credential probe). Then the missing members are uploaded by up to
 # `--concurrency` worker threads (komira_fork_join; never with `force`), every
 # member is read back, and the metapackage goes last. The credential is
 # the channel's own (kci_release_channel), resolved once. The step ends in a
-# kci_contract outcome word and error id, and puts its rows into the run's one
+# kci_api outcome word and error id, and puts its rows into the run's one
 # result document; no exit number is spelled here, and a release already in
 # the channel byte for byte is NOOP, exit 0. Nothing here names a channel, an
 # account or an organisation.
@@ -32,9 +32,9 @@ mojo_library(
     import_name = "kci_publish",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_artifact_declaration:kci_artifact_declaration",
-        "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
-        "//src/kci_contract:kci_contract",
+        "//src/kci_artifact:kci_artifact",
+        "//src/kci_artifact_proto:kci_artifact_proto",
+        "//src/kci_api:kci_api",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_release_channel:kci_release_channel",
         "//src/kci_release_set:kci_release_set",

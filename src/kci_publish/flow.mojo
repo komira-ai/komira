@@ -11,8 +11,8 @@
 #      kci releases (KCI-E-PLATFORM), --revision-id is a full commit id
 #      (KCI-E-REVISION), the concurrency is 1..16 and the stage is named
 #      (KCI-E-USAGE);
-#   2. STEP 0, every check before any request (REFUSED): the declarations
-#      (KCI-E-DECLARATION); `<release-dir>/<platform>/release.json` names
+#   2. STEP 0, every check before any request (REFUSED): the artifacts
+#      (KCI-E-ARTIFACT); `<release-dir>/<platform>/release.json` names
 #      this run's revision (KCI-E-REVISION-MISMATCH) and platform
 #      (KCI-E-PLATFORM-MISMATCH); the release directory member by member
 #      (`inputs.mojo`; `release.json`'s set hash must be what the members
@@ -72,12 +72,12 @@ from komira_http_client.tls_connector import TlsConnector, build_public_ca_tls_c
 from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_secret_store import SecretStore, SecretValue
 
-from kci_artifact_declaration import read_artifact_declarations
-from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
-from kci_contract import (
+from kci_artifact import read_artifacts
+from kci_artifact_proto.artifact import Artifacts
+from kci_api import (
     ERROR_CHANNEL,
     ERROR_CREDENTIAL,
-    ERROR_DECLARATION,
+    ERROR_ARTIFACT,
     ERROR_FORMAT,
     ERROR_MEMBER,
     ERROR_PLATFORM,
@@ -95,7 +95,7 @@ from kci_contract import (
     require_full_commit_id,
     require_release_platform,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import (
     SURFACE_PREFIX_DEV,
     AnonymousCredential,
@@ -109,7 +109,7 @@ from kci_pkg_upload.prefix_dev_registry import prefix_dev_channel
 from kci_release_channel import (
     ARTIFACT_TYPE_CONDA,
     ChannelCredential,
-    ChannelDeclaration,
+    Channel,
     find_channel,
     parse_channels_file,
     push_identity_environment,
@@ -136,7 +136,7 @@ struct PreparedRelease(Movable):
 
     var loaded: LoadedRelease
     var release_version: ReleaseVersion
-    var channel: ChannelDeclaration
+    var channel: Channel
     var credential: Optional[ChannelCredential]
     var targets: List[PublishTarget]
 
@@ -144,7 +144,7 @@ struct PreparedRelease(Movable):
         out self,
         var loaded: LoadedRelease,
         var release_version: ReleaseVersion,
-        var channel: ChannelDeclaration,
+        var channel: Channel,
         var credential: Optional[ChannelCredential],
         var targets: List[PublishTarget],
     ):
@@ -204,11 +204,11 @@ def _step0(req: PublishRequest) -> _Step0:
         dir = req.platform_dir()
     except e:
         return _Step0(String(ERROR_USAGE), String("--release-dir: ") + String(e))
-    var decls: ArtifactDeclarations
+    var arts: Artifacts
     try:
-        decls = read_artifact_declarations(req.declarations_file)
+        arts = read_artifacts(req.artifacts_file)
     except e:
-        return _Step0(String(ERROR_DECLARATION), String(e))
+        return _Step0(String(ERROR_ARTIFACT), String(e))
     var manifest_path = dir + String("/") + String(RELEASE_MANIFEST_NAME)
     if exists(manifest_path):
         var recorded: ReleaseManifest
@@ -231,7 +231,7 @@ def _step0(req: PublishRequest) -> _Step0:
             )
     var loaded: LoadedRelease
     try:
-        loaded = load_release(decls, dir)
+        loaded = load_release(arts, dir)
         require_conda_only(loaded.members)
     except e:
         return _Step0(String(ERROR_MEMBER), String(e))
@@ -245,7 +245,7 @@ def _step0(req: PublishRequest) -> _Step0:
         require_closure(loaded.members)
     except e:
         return _Step0(String(ERROR_MEMBER), String(e))
-    var channel: ChannelDeclaration
+    var channel: Channel
     var targets: List[PublishTarget]
     var credential: Optional[ChannelCredential]
     var environment: String

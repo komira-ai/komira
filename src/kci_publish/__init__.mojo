@@ -9,13 +9,13 @@ re-verified over its bytes by the SAME function a BUILD step ran
 requirement closure, and `release.json`'s set hash against the recomputation.
 Step 1 reads the channel by DOWNLOAD (other bytes under one of our file names
 stops the run) and reports every name the channel has never held (NEW NAMES):
-which names a release publishes is its declarations file's, never a per-run
+which names a release publishes is its artifacts file's, never a per-run
 claim. Steps 2 to 4 upload the
 members still missing, read every member back, and only then publish the
 metapackage; the missing members upload on up to `--concurrency` worker
 threads. Step 6 is the step's part of the run's result document
-(kci_contract's `kci.result`): an outcome word, an error id, one artifact
-row per file. The exit number is kci_contract's: a release whose every file
+(kci_api's `kci.result`): an outcome word, an error id, one artifact
+row per file. The exit number is kci_api's: a release whose every file
 is already in the channel with the same bytes is NOOP, exit 0.
 
 The release is the one `--revision-id` names, built for the step's
