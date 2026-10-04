@@ -1,7 +1,8 @@
 //! The REST client emitter: for `ProtocolMode::Rest`, one client method per
-//! unary method carrying a `(google.api.http)` annotation, on a client that
-//! starts at the service's `(google.api.default_host)` (or, with none, refuses
-//! to send until its caller names a host).
+//! unary or server-streaming method carrying a `(google.api.http)`
+//! annotation, on a client that starts at the service's
+//! `(google.api.default_host)` (or, with none, refuses to send until its
+//! caller names a host).
 
 use std::fmt::Write as _;
 
@@ -10,8 +11,6 @@ use crate::mojo_names::rpc_method_name;
 use crate::path_template::{
     percent_encode_simple, BodyDesignator, FieldPartition, PathSegment, PathTemplate, VarPattern,
 };
-
-const REST_PORT: &str = "0";
 
 /// The result of emitting one REST service.
 #[derive(Clone, Debug)]
@@ -44,6 +43,35 @@ pub const GCP_TOKEN_SOURCE: &str = "GcpTokenSource";
 /// and `error.details` can carry resource names and request data.
 pub const GCP_STATUS_ERROR: &str = "gcp_status_error";
 
+/// The server-stream reader of [`GCP_CORE`]. Its contract:
+/// `def gcp_rest_stream_items(verb: String, rpc: String, http_status: Int, body: List[UInt8]) raises -> List[String]`
+/// returns the elements of the JSON array a server-streaming method answers
+/// with over REST, each as its JSON text, in stream order; raises an element
+/// that is a `google.rpc.Status` envelope (a failure after the 200 was sent)
+/// through [`GCP_STATUS_ERROR`]; and refuses a body that is not a JSON array
+/// by its byte count, never its bytes.
+pub const GCP_REST_STREAM_ITEMS: &str = "gcp_rest_stream_items";
+
+/// Whether `m` is emitted as a REST server-streaming method: it streams its
+/// responses and not its requests. A client-streaming or bidi method has no
+/// REST mapping (one HTTP request carries one request message) and is
+/// refused by name (`emit_rest_service`).
+pub fn is_rest_server_stream(m: &IrMethod) -> bool {
+    m.server_streaming && !m.client_streaming
+}
+
+/// The import a REST-target file adds when one of its services has a
+/// server-streaming method ([`is_rest_server_stream`]), and only then: the
+/// other files' imports stay as they were.
+pub fn rest_stream_import(file: &IrFile) -> Option<String> {
+    let any = file
+        .services
+        .iter()
+        .flat_map(|s| s.methods.iter())
+        .any(|m| m.http_rule.is_some() && is_rest_server_stream(m));
+    any.then(|| format!("from {GCP_CORE} import {GCP_REST_STREAM_ITEMS}"))
+}
+
 /// The import block a REST-target file needs (replaces the gRPC import set in
 /// `emit.rs::emit_header` when `ProtocolMode::Rest`). One source line per
 /// emitted entry, no trailing blank — the header owns surrounding blanks.
@@ -72,9 +100,9 @@ pub fn rest_imports() -> &'static [&'static str] {
 /// Emit the REST client struct for `svc`, looking up request messages in
 /// `file` alone ([`emit_rest_service_in`] with no other files). Returns the
 /// generated source, or a hard error naming the service and method for: a
-/// streaming method (it has no REST form, and a kept method that silently
-/// generated nothing would be a client missing a method its target listed),
-/// an un-annotated method (the missing-annotation rule), a
+/// client-streaming or bidi method (it has no REST form, and a kept method
+/// that silently generated nothing would be a client missing a method its
+/// target listed), an un-annotated method (the missing-annotation rule), a
 /// `(google.api.default_host)` that is not a plain host name, or a binding
 /// or query field with no REST form.
 pub fn emit_rest_service(
@@ -98,18 +126,24 @@ pub fn emit_rest_service_in(
     let mut w = Writer::new();
 
     // Refusals first, before any text: a service is emitted whole or not at
-    // all.
+    // all. A client-streaming or bidi method has no REST/JSON form (one HTTP
+    // request carries one request message), annotated or not; a target names
+    // every method it generates (`methods`), so one here was ASKED FOR, and
+    // skipping it would leave the client silently without it. A
+    // server-streaming method has one: its whole stream is one HTTP
+    // response, a JSON array (`is_rest_server_stream`).
     for m in &svc.methods {
-        if m.client_streaming || m.server_streaming {
-            let shape = match (m.client_streaming, m.server_streaming) {
-                (true, true) => "bidirectional-streaming",
-                (true, false) => "client-streaming",
-                _ => "server-streaming",
+        if m.client_streaming {
+            let shape = if m.server_streaming {
+                "bidirectional-streaming"
+            } else {
+                "client-streaming"
             };
             return Err(format!(
                 "service `{}` method `{}` is {shape}, and a `rest` target generates \
-                 unary methods only (a streaming method has no REST/JSON form): \
-                 drop it from `methods`, or generate it with `default_protocol=grpc`",
+                 unary and server-streaming methods only (one HTTP request carries \
+                 one request message, so it has no REST/JSON form): drop it from \
+                 `methods`, or generate it with `default_protocol=grpc`",
                 svc.name, m.name
             ));
         }
@@ -190,6 +224,18 @@ pub fn emit_rest_service_in(
         }
     }
     w.blank();
+    // The port and scheme, for an endpoint other than the service's own: an
+    // emulator speaks plaintext HTTP on a port of its own (the Firestore,
+    // Pub/Sub and Datastore emulators), which Google's client libraries dial
+    // when pointed at it. The defaults are the public endpoint's: https on
+    // the scheme's port.
+    w.line("var _rest_port: UInt16");
+    w.line("\"\"\"The port the request URLs name; 0, the default, is the scheme's.\"\"\"");
+    w.blank();
+    w.line("var _rest_plaintext: Bool");
+    w.line("\"\"\"Whether the request URLs are `http` rather than `https`. False");
+    w.line("    unless `set_rest_endpoint` says otherwise.\"\"\"");
+    w.blank();
     w.line("def __init__(out self, var client: HttpClient[Self.C], var token_source: Self.T):");
     w.indent();
     w.line("\"\"\"Construct with no default headers.\"\"\"");
@@ -197,6 +243,8 @@ pub fn emit_rest_service_in(
     w.line("self._token_source = token_source^");
     w.line("self._default_headers = HeaderMap()");
     w.line(&format!("self._rest_host = String(\"{initial_host}\")"));
+    w.line("self._rest_port = UInt16(0)");
+    w.line("self._rest_plaintext = False");
     w.dedent();
     w.blank();
     w.line("def __init__(");
@@ -211,6 +259,8 @@ pub fn emit_rest_service_in(
     w.line("self._token_source = token_source^");
     w.line("self._default_headers = default_headers^");
     w.line(&format!("self._rest_host = String(\"{initial_host}\")"));
+    w.line("self._rest_port = UInt16(0)");
+    w.line("self._rest_plaintext = False");
     w.dedent();
     w.blank();
     w.line("def set_rest_host(mut self, var host: String):");
@@ -220,6 +270,19 @@ pub fn emit_rest_service_in(
     w.line("    resolution and the injected `Host:` header. An empty host makes");
     w.line("    every method refuse to send.\"\"\"");
     w.line("self._rest_host = host^");
+    w.dedent();
+    w.blank();
+    w.line("def set_rest_endpoint(mut self, var host: String, port: UInt16, plaintext: Bool):");
+    w.indent();
+    w.line("\"\"\"Point the request URLs at an endpoint other than the service's");
+    w.line("    public one: `host`, `port` (0 for the scheme's own) and, with");
+    w.line("    `plaintext`, `http` instead of `https`, which is how an emulator");
+    w.line("    serves. The connector must match the scheme: the `HttpClient`");
+    w.line("    refuses an `http` URL over a TLS connector and an `https` one over");
+    w.line("    a plaintext connector. The bearer token is sent either way.\"\"\"");
+    w.line("self._rest_host = host^");
+    w.line("self._rest_port = port");
+    w.line("self._rest_plaintext = plaintext");
     w.dedent();
     w.blank();
     // The no-host refusal, called first in every method: before the token
@@ -495,7 +558,8 @@ fn query_items(
     Ok(items)
 }
 
-/// Emit one annotated unary REST method. Returns whether its code calls
+/// Emit one annotated unary or server-streaming REST method. Returns
+/// whether its code calls
 /// `base64_encode` (a `bytes` query parameter), whose import the file then
 /// needs.
 fn emit_rest_method(
@@ -599,24 +663,49 @@ fn emit_rest_method(
     let verb = rule.verb.as_str();
     let has_body = !matches!(part.body, BodyDesignator::None);
 
+    let streaming = is_rest_server_stream(m);
+    let ret_ty = if streaming {
+        format!("List[{resp_ty}]")
+    } else {
+        resp_ty.clone()
+    };
     w.line(&format!(
         "def {method_name}[RT: Runtime](mut self, req: {req_ty}, \
-         mut reactor: Reactor[RT.Sink]) raises -> {resp_ty}:"
+         mut reactor: Reactor[RT.Sink]) raises -> {ret_ty}:"
     ));
     w.indent();
-    if bindings.len() == 1 {
+    let target = if bindings.len() == 1 {
+        format!("`{}`", rule.path_template)
+    } else {
+        bindings
+            .iter()
+            .map(|(b, _)| format!("`{}`", b.path_template))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    if streaming {
+        // The whole stream is one HTTP response, a JSON array of responses
+        // (`GCP_REST_STREAM_ITEMS`), read to its end before this returns.
+        let which = if bindings.len() == 1 {
+            ""
+        } else {
+            ", to the first path the request's values match"
+        };
+        w.line(&format!(
+            "\"\"\"{} {target} — REST/JSON, server-streaming{which}: every response",
+            verb.to_uppercase(),
+        ));
+        w.line("    of the stream, in order, once the stream has ended.\"\"\"");
+    } else if bindings.len() == 1 {
         w.line(&format!(
             "\"\"\"{} `{}` — REST/JSON.\"\"\"",
             verb.to_uppercase(),
             rule.path_template
         ));
     } else {
-        let paths: Vec<String> =
-            bindings.iter().map(|(b, _)| format!("`{}`", b.path_template)).collect();
         w.line(&format!(
-            "\"\"\"{} {} — REST/JSON, to the first path the request's values match.\"\"\"",
+            "\"\"\"{} {target} — REST/JSON, to the first path the request's values match.\"\"\"",
             verb.to_uppercase(),
-            paths.join(", ")
         ));
     }
     // No host, no request: refused before the token source is asked and
@@ -634,9 +723,15 @@ fn emit_rest_method(
     // -- query params --------------------------------------------------------
     emit_query_build(w, &items);
 
-    w.line(&format!(
-        "var url = Url.https(self._rest_host.copy(), UInt16({REST_PORT}), path^)"
-    ));
+    w.line("var url: Url");
+    w.line("if self._rest_plaintext:");
+    w.indent();
+    w.line("url = Url.http(self._rest_host.copy(), self._rest_port, path^)");
+    w.dedent();
+    w.line("else:");
+    w.indent();
+    w.line("url = Url.https(self._rest_host.copy(), self._rest_port, path^)");
+    w.dedent();
     if !items.is_empty() {
         w.line("url.query = query^");
     }
@@ -735,6 +830,26 @@ fn emit_rest_method(
     // -- response decode -----------------------------------------------------
     // Lenient: a field the server added after these protos were pinned is
     // skipped, not an error (the proto3 JSON forward-compatibility rule).
+    if streaming {
+        // Each element through the same lenient codec read as a unary
+        // response; an error element raises in the core, not here.
+        w.line(&format!(
+            "var _rest_items = {GCP_REST_STREAM_ITEMS}(String(\"{}\"), String(\"{}\"), status_int, resp_bytes)",
+            verb.to_uppercase(),
+            m.name
+        ));
+        w.line(&format!("var _rest_out = List[{resp_ty}]()"));
+        w.line("for _rest_item in _rest_items:");
+        w.indent();
+        w.line(&format!(
+            "_rest_out.append(decode_json_lenient[{resp_ty}](_rest_item))"
+        ));
+        w.dedent();
+        w.line("return _rest_out^");
+        w.dedent();
+        w.blank();
+        return Ok(needs_base64);
+    }
     w.line(
         "var resp_text = String(unsafe_from_utf8=Span(resp_bytes))",
     );
@@ -1496,13 +1611,17 @@ mod tests {
         );
     }
 
-    fn streaming_svc(client: bool, server: bool, annotated: bool) -> (IrFile, IrService) {
+    fn stream_method(
+        client_streaming: bool,
+        server_streaming: bool,
+        annotated: bool,
+    ) -> (IrFile, IrService) {
         let req = IrMessage {
             name: "Req".into(),
             mojo_name: "Req".into(),
             fq_name: ".tiny.rest.v1.Req".into(),
             is_map_entry: false,
-            fields: vec![],
+            fields: vec![scalar_field("parent", ScalarKind::String)],
             oneofs: vec![],
         };
         let ty = TypeRef { fq_name: ".tiny.rest.v1.Req".into(), mojo_name: "Req".into() };
@@ -1510,16 +1629,16 @@ mod tests {
             name: "Svc".into(),
             default_host: None,
             methods: vec![IrMethod {
-                name: "Stream".into(),
+                name: "RunQuery".into(),
                 input: ty.clone(),
                 output: ty,
-                client_streaming: client,
-                server_streaming: server,
+                client_streaming,
+                server_streaming,
                 idempotent: false,
                 http_rule: annotated.then(|| IrHttpRule {
-                    verb: "get".into(),
-                    path_template: "/v1/stream".into(),
-                    body: "".into(),
+                    verb: "post".into(),
+                    path_template: "/v1/{parent=projects/*}:runQuery".into(),
+                    body: "*".into(),
                     additional_bindings: vec![],
                 }),
                 routing_rule: None,
@@ -1529,29 +1648,67 @@ mod tests {
     }
 
     #[test]
-    fn streaming_method_is_refused_by_name() {
-        for (client, server, shape) in [
-            (false, true, "server-streaming"),
-            (true, false, "client-streaming"),
-            (true, true, "bidirectional-streaming"),
-        ] {
-            let (file, svc) = streaming_svc(client, server, true);
-            let err = emit_rest_service(&file, &svc).unwrap_err();
-            assert!(
-                err.contains(&format!("service `Svc` method `Stream` is {shape}")),
-                "{err}"
-            );
-            assert!(err.contains("drop it from `methods`"), "{err}");
+    fn server_streaming_method_reads_the_array_through_the_core() {
+        let (file, svc) = stream_method(false, true, true);
+        let emit = emit_rest_service(&file, &svc).unwrap();
+        let src = &emit.source;
+        assert!(
+            src.contains("mut reactor: Reactor[RT.Sink]) raises -> List[Req]:"),
+            "{src}"
+        );
+        // The no-host refusal comes first, as for a unary method.
+        let guard = src.find("self._rest_require_host(String(\"run_query\"))").unwrap();
+        // The status line is checked first, as for a unary method.
+        let status = src.find("if status_int < 200 or status_int >= 300:").unwrap();
+        let items = src
+            .find("var _rest_items = gcp_rest_stream_items(String(\"POST\"), String(\"RunQuery\"), status_int, resp_bytes)")
+            .unwrap();
+        assert!(guard < status && status < items);
+        assert!(src.contains("_rest_out.append(decode_json_lenient[Req](_rest_item))"));
+        assert!(src.contains("return _rest_out^"));
+        // No unary decode of the whole body.
+        assert!(!src.contains("return decode_json_lenient[Req](resp_text)"));
+        assert_eq!(
+            rest_stream_import(&file).as_deref(),
+            Some("from komira_gcp_core import gcp_rest_stream_items")
+        );
+    }
+
+    #[test]
+    fn a_file_without_a_stream_method_imports_no_stream_reader() {
+        let (file, _) = stream_method(false, false, true);
+        assert_eq!(rest_stream_import(&file), None);
+    }
+
+    #[test]
+    fn client_streaming_and_bidi_methods_are_refused_by_name() {
+        // Annotated or not: the shape is the reason it has no REST form, and
+        // an annotation would not give it one.
+        for annotated in [true, false] {
+            for (server, shape) in [(false, "client-streaming"), (true, "bidirectional-streaming")] {
+                let (file, svc) = stream_method(true, server, annotated);
+                let err = emit_rest_service(&file, &svc).unwrap_err();
+                assert!(
+                    err.contains(&format!("service `Svc` method `RunQuery` is {shape}")),
+                    "{err}"
+                );
+                assert!(err.contains("drop it from `methods`"), "{err}");
+                assert!(err.contains("`default_protocol=grpc`"), "{err}");
+                assert_eq!(rest_stream_import(&file), None);
+            }
         }
     }
 
     #[test]
-    fn unannotated_streaming_method_is_refused_as_streaming() {
-        // The shape is the reason it has no REST form; an annotation would
-        // not give it one.
-        let (file, svc) = streaming_svc(false, true, false);
+    fn unannotated_server_streaming_method_is_refused_for_its_annotation() {
+        // A server-streaming method has a REST form, so what it lacks is the
+        // `(google.api.http)` rule, and that is what the refusal names.
+        let (file, svc) = stream_method(false, true, false);
         let err = emit_rest_service(&file, &svc).unwrap_err();
-        assert!(err.contains("method `Stream` is server-streaming"), "{err}");
+        assert!(
+            err.contains("method `RunQuery` has no `(google.api.http)` annotation"),
+            "{err}"
+        );
     }
 
     fn with_host(host: Option<&str>) -> Result<RestServiceEmit, String> {
@@ -1625,7 +1782,7 @@ mod tests {
         let body = &e.source[e.source.find("def m[RT: Runtime]").unwrap()..];
         let guard = body.find("self._rest_require_host(String(\"m\"))").unwrap();
         assert!(guard < body.find("access_token()").unwrap());
-        assert!(guard < body.find("var url = ").unwrap());
+        assert!(guard < body.find("var url").unwrap());
         assert!(guard < body.find("send_buffered").unwrap());
     }
 
@@ -2188,6 +2345,26 @@ mod tests {
             rest_imports()[0],
             format!("from {GCP_CORE} import {GCP_TOKEN_SOURCE}, {GCP_STATUS_ERROR}")
         );
+    }
+
+    #[test]
+    fn an_endpoint_override_sets_host_port_and_scheme() {
+        let e = one_method(vec![], "post", "/v2/entries:list", "*").unwrap();
+        let src = &e.source;
+        assert!(src.contains(
+            "def set_rest_endpoint(mut self, var host: String, port: UInt16, plaintext: Bool):"
+        ));
+        // The public endpoint's defaults, in both constructors.
+        assert_eq!(src.matches("self._rest_port = UInt16(0)").count(), 2);
+        assert_eq!(src.matches("self._rest_plaintext = False").count(), 2);
+        let http = src
+            .find("url = Url.http(self._rest_host.copy(), self._rest_port, path^)")
+            .unwrap();
+        let https = src
+            .find("url = Url.https(self._rest_host.copy(), self._rest_port, path^)")
+            .unwrap();
+        let branch = src.find("if self._rest_plaintext:").unwrap();
+        assert!(branch < http && http < https, "{src}");
     }
 
     #[test]

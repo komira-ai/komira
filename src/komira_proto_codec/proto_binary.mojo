@@ -1006,6 +1006,10 @@ struct PbDecoder(WireDecoder):
     def skip(mut self) raises:
         self.pos = pb_skip_field(Span(self.backing), self.pos, self._cur_wire)
 
+    def keep_null_fields(mut self, spellings: StringSlice):
+        """No-op — the binary wire has no `null`."""
+        pass
+
     def expect_fields(
         mut self, message_name: StringSlice, accepted: StringSlice
     ) raises:
