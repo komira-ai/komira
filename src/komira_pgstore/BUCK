@@ -24,6 +24,9 @@ mojo_library(
         "//src/komira_async:komira_async",
         "//src/komira_atomic_alias:komira_atomic_alias",
         "//src/komira_collections:komira_collections",
+        # group_commit hands komira_core's Slab to komira_objectstore's
+        # coalescing window, whose API is typed on it.
+        "//src/komira_core:komira_core",
         "//src/komira_objectstore:komira_objectstore",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
