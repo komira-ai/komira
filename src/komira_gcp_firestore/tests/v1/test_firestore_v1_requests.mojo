@@ -15,10 +15,11 @@
 # the generated path expansion encodes); the service reads `%28default%29`
 # as `(default)`.
 #
-# Two parts of the bodies are NOT from the reference: the default-valued
-# keys komira_proto_codec's JsonEncoder writes today (`"transaction":""`,
-# `"updateTransforms":[]`), as test_logging_requests explains for Cloud
-# Logging. The API reads each as unset.
+# One part of the bodies is NOT from the reference: the default-valued key
+# komira_proto_codec's JsonEncoder writes today (`"transaction":""`), as
+# test_logging_requests explains for Cloud Logging. The API reads it as
+# unset. An empty list or map (a write's `updateTransforms`) is omitted, as
+# the proto3 JSON mapping omits it.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
@@ -131,7 +132,7 @@ def test_commit_create_if_absent() raises:
     ref reactor = rt.reactor()
     _ = c.commit[_RT](req, reactor)
     var body = String(
-        '{"writes":[{"updateTransforms":[],"currentDocument":{"exists":false},'
+        '{"writes":[{"currentDocument":{"exists":false},'
         + '"update":{"name":"projects/demo-project/databases/(default)/documents/items/a",'
         + '"fields":{"value":{"stringValue":"v"}}}}],"transaction":""}'
     )
@@ -160,11 +161,11 @@ def test_commit_update_time_precondition_and_delete() raises:
     ref reactor = rt.reactor()
     _ = c.commit[_RT](req, reactor)
     var body = String(
-        '{"writes":[{"updateTransforms":[],'
+        '{"writes":[{'
         + '"currentDocument":{"updateTime":"2026-09-02T10:00:00.123456Z"},'
         + '"update":{"name":"projects/demo-project/databases/(default)/documents/items/a",'
         + '"fields":{"value":{"stringValue":"v"}}}},'
-        + '{"updateTransforms":[],'
+        + '{'
         + '"delete":"projects/demo-project/databases/(default)/documents/items/b"}],'
         + '"transaction":""}'
     )
