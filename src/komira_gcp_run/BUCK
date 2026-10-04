@@ -28,8 +28,19 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # which only the API's service configuration states (run_v2.yaml), not a
 # .proto; operations.proto's own bindings (`/v1/{name=operations/**}`) are
 # not Run's. operations_mixin.proto restates the two rules a poller needs on
-# operations.proto's messages, and test_run_operations_mixin holds them to
-# run_v2.yaml at the pin.
+# operations.proto's messages, and test_run_operations_mixin reads both
+# rules and the default host out of run_v2.yaml at the pin and holds the
+# proto and the generated client to them. This is the one restated piece of
+# upstream data here: it goes when the generator applies a service
+# configuration's `http.rules` itself.
+#
+# Methods whose request is the whole body (`body: "*"`: RunJob,
+# CancelExecution, WaitOperation) also write the path-bound `name` into the
+# body, with the value the path carries, and the codec writes each field at
+# its default. google/api/http.proto puts only the fields the path does not
+# bind in such a body; the service binds the path's value and reads a
+# default as unset, so the extra fields carry nothing it uses. The tests
+# pin those exact bodies, so a change to either shows up there.
 #
 # `bundle_only` is the part of the run_v2 closure those methods reach.
 # `module_names` gives two files their modules: `k8s.min.proto` (its stem
@@ -110,6 +121,7 @@ mojo_gcp_client(
         "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_run_gen"},
         "tests/test_run_operations_mixin.mojo": {
             "gen": ":komira_gcp_run_gen",
+            "operations_mixin.proto": "operations_mixin.proto",
             "run_v2.yaml": "//tools/vendor/googleapis:googleapis[google/cloud/run/v2/run_v2.yaml]",
         },
     },
