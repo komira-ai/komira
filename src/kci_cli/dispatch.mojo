@@ -14,7 +14,7 @@
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
 #      (KCI-E-FORMAT);
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
-#      message lists the stages); then the selection (kci_stage_graph
+#      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
 #      REFUSED (KCI-E-SELECTOR-NO-MATCH, exit 3, naming S's steps and
 #      validations); then the flags the SELECTED steps' kinds take
@@ -29,11 +29,11 @@
 #      to the result; a step `--only` did not select gets a row with
 #      `selected: false` and no outcome. The run stops at the first step
 #      that does not end SUCCEEDED or NOOP;
-#   5. the run's outcome is its worst step's (kci_contract's `worst_outcome`),
+#   5. the run's outcome is its worst step's (kci_api's `worst_outcome`),
 #      and PARTIAL when a step fails after an earlier PUBLISH step changed
 #      the channel; the FINISHED record, then the exit number
-#      (kci_contract's exit table), which is the return value.
-#   6. the LAST stderr line is the run's evidence (kci_contract
+#      (kci_api's exit table), which is the return value.
+#   6. the LAST stderr line is the run's evidence (kci_api
 #      `run_evidence_line`): `kci: FULL run of stage S: <OUTCOME>`, or
 #      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`.
 #      The result document says the same in `scope` and `only`. A selective
@@ -66,7 +66,7 @@ from komira_clock import now_unix_ms
 
 from kci_build import BuildRequest
 from kci_ci_check import CANNOT_TELL, ChannelsFile, channels_paths, check_workflow, id_token_stages
-from kci_contract import (
+from kci_api import (
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
     ERROR_FORMAT,
@@ -93,18 +93,18 @@ from kci_contract import (
     run_evidence_line,
     worst_outcome,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_publish import PublishRequest
-from kci_release_set.member import file_sha256_hex
-from kci_stage_graph import (
+from kci_release_machine import (
+    ReleaseMachine,
     Selection,
     Stage,
-    StageGraph,
     StageStep,
     machine_schema_version,
     parse_machine_file,
     resolve_selection,
 )
+from kci_release_set.member import file_sha256_hex
 
 from .args import (
     CLI_VERB_CI_CHECK,
@@ -123,7 +123,7 @@ comptime _STDERR: FileDescriptor = FileDescriptor(2)
 
 
 struct StepEnd(Copyable, Movable):
-    """How one step ended: its outcome and first error id (kci_contract),
+    """How one step ended: its outcome and first error id (kci_api),
     the lines to print, retry advice stronger than the exit number's ("" for
     the default), and whether it changed something outside this machine.
 
@@ -207,7 +207,7 @@ def _read(path: String) raises -> String:
     return Path(path).read_text()
 
 
-def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> StageGraph:
+def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMachine:
     """Step 1 of the file header; raises `<error id>\\n<message>`."""
     if not isfile(cmd.machine):
         raise Error(
@@ -219,7 +219,7 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> StageGraph:
         _ = machine_schema_version(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT_VERSION) + String("\n") + String(e))
-    var g: StageGraph
+    var g: ReleaseMachine
     try:
         g = parse_machine_file(text, cmd.machine)
     except e:
@@ -313,7 +313,7 @@ def run_stage_with[S: StageSteps](cmd: KciCommand, mut steps: S, mut recorder: C
         result.only.append(selectors[i].canonical())
     if len(selectors) > 0:
         result.scope = String(SCOPE_SELECTIVE)
-    var g: StageGraph
+    var g: ReleaseMachine
     try:
         g = _load_graph(cmd, result)
     except e:
@@ -390,7 +390,7 @@ def ci_check_with(cmd: KciCommand, mut recorder: CliRecorder) -> Int:
     """`kci ci check` (file header). Returns the exit number."""
     var result = KciRunResult(String(VERB_CI_CHECK), String("ci check"))
     result.started_at_ms = _now()
-    var g: StageGraph
+    var g: ReleaseMachine
     try:
         g = _load_graph(cmd, result)
     except e:
