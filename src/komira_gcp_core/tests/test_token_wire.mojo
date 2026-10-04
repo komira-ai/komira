@@ -58,7 +58,17 @@ comptime _LOGGING_AUD = "https://logging.googleapis.com/"
 # RS256 signatures of the dummy key over the signing inputs below, computed
 # by OpenSSL through Python's `cryptography` (RSASSA-PKCS1-v1_5, SHA-256),
 # base64url without padding. PKCS#1 v1.5 is deterministic: the same key and
-# input give the same bytes.
+# input give the same bytes. To reproduce both with the openssl CLI, with K
+# the archive's storage/v1/test_service_account.not-a-test.json:
+#
+#   b64() { basenc --base64url -w0 | tr -d '='; }
+#   jq -r .private_key "$K" > key.pem
+#   KID=$(jq -r .private_key_id "$K"); EM=$(jq -r .client_email "$K")
+#   H=$(printf '{"typ":"JWT","alg":"RS256","kid":"%s"}' "$KID" | b64)
+#   C=$(printf '{"iat":1790000000,"exp":1790003600,"iss":"%s","aud":"https://oauth2.googleapis.com/token","scope":"https://www.googleapis.com/auth/cloud-platform"}' "$EM" | b64)
+#   printf '%s.%s' "$H" "$C" | openssl dgst -sha256 -sign key.pem | b64    # _GRANT_SIG
+#   C=$(printf '{"iss":"%s","sub":"%s","iat":1790000000,"exp":1790003600,"aud":"https://logging.googleapis.com/"}' "$EM" "$EM" | b64)
+#   printf '%s.%s' "$H" "$C" | openssl dgst -sha256 -sign key.pem | b64    # _SELF_SIG
 comptime _GRANT_SIG = (
     "WGf5rEAcb4ZueHBeG1tNAUatKL0lq3bK3jJqqvOWobSUE2YdqY3ohctvcFKh_1Xnc4seMid"
     "SQeuHBHtIdQx8WK3XetEOaZctvt0AAuIg5xnlMJYG6JBjw37oB6gZXhF-EimlEPpFSLOlSt"

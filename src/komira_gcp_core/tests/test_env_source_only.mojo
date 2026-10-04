@@ -10,11 +10,16 @@
 # `external_call`. An allowed entry must exist and must actually read the
 # environment, so a stale entry fails too.
 #
-# The one allowed file is sources.mojo, the `EnvSource` seam. What is READ
-# through it is checked too (test_names_are_googles): every `env.get(` in the
-# package takes an `ENV_*` constant, and every `ENV_*` constant is one of the
-# variables Google's auth libraries read (_GOOGLE below). A new variable
-# fails here until it is added to _GOOGLE with the library that reads it.
+# The one allowed file is sources.mojo, the `EnvSource` seam. `ProcessEnv`,
+# the seam's process-environment side, is constructed in exactly one place,
+# adc.mojo's production entry, and named nowhere else but sources.mojo and
+# the package root's re-export (test_process_env_sites). What is READ through
+# the seam is checked too (test_names_are_googles): in every file that takes
+# an `EnvSource`, every `.get(` is an `env.get(` of an `ENV_*` constant, and
+# every `ENV_*` constant is one of the variables Google's auth libraries
+# read (_GOOGLE below). A new variable fails here until it is added to
+# _GOOGLE with the library that reads it. That each of the five is actually
+# read somewhere is test_adc's check, not this one's.
 #
 # The scan is not vacuous: it must see the token contract, the V4 signer, the
 # chain, and every other source the package has.
@@ -156,13 +161,14 @@ def _ident_at(text: String, at: Int) -> String:
     return String(StringSlice(unsafe_from_utf8=b[at:end]))
 
 
-def _quoted_after(text: String, at: Int) -> String:
+def _quoted_after(text: String, at: Int) raises -> String:
     """The first double-quoted string at or after byte `at`, on its line."""
     var q = text.find("\"", at)
     var nl = text.find("\n", at)
     if q < 0 or (nl >= 0 and nl < q):
         return String("")
     var close = text.find("\"", q + 1)
+    assert_true(close >= 0, "an unterminated string after byte " + String(at))
     var b = text.as_bytes()
     return String(StringSlice(unsafe_from_utf8=b[q + 1 : close]))
 
@@ -192,7 +198,10 @@ def test_names_are_googles() raises:
             )
             declared.append(ident)
             at = text.find("comptime ENV_", at + 1)
-    # Pass 2: every `env.get(` takes one of those constants.
+    # Pass 2: every `env.get(` takes one of those constants; and in a file
+    # that takes an `EnvSource` (sources.mojo, which defines it, aside),
+    # every `.get(` is such an `env.get(`, so a read through another name
+    # (`e.get("X")`) is not missed.
     for i in range(len(names)):
         var name = String(names[i])
         if not name.endswith(".mojo"):
@@ -200,6 +209,13 @@ def test_names_are_googles() raises:
         var text: String
         with open(String(_DIR) + "/" + name, "r") as f:
             text = f.read()
+        if name != "sources.mojo" and _count(text, "EnvSource") > 0:
+            assert_equal(
+                _count(text, ".get("),
+                _count(text, "env.get(ENV_"),
+                name + " takes an EnvSource and calls a .get( that is not"
+                " env.get(ENV_...)",
+            )
         var at = text.find("env.get(")
         while at >= 0:
             var ident = _ident_at(text, at + 8)
@@ -214,7 +230,39 @@ def test_names_are_googles() raises:
     assert_true(reads >= len(google), "only " + String(reads) + " env.get( reads seen")
 
 
+def test_process_env_sites() raises:
+    # ProcessEnv reads the real environment: one construction, in adc.mojo's
+    # production entry, and no other file but sources.mojo (which defines
+    # it) and the root's re-export may name it.
+    var names = listdir(String(_DIR))
+    var constructions = 0
+    for i in range(len(names)):
+        var name = String(names[i])
+        if not name.endswith(".mojo"):
+            continue
+        var text: String
+        with open(String(_DIR) + "/" + name, "r") as f:
+            text = f.read()
+        if name == "sources.mojo":
+            continue
+        var built = _count(text, "ProcessEnv(")
+        if name == "adc.mojo":
+            constructions += built
+            continue
+        assert_equal(built, 0, name + " constructs a ProcessEnv")
+        if name == "__init__.mojo":
+            continue
+        assert_equal(
+            _count(text, "ProcessEnv"),
+            0,
+            name + " names ProcessEnv; only adc.mojo's production entry may"
+            " use the process environment",
+        )
+    assert_equal(constructions, 1, "adc.mojo constructs ProcessEnv once")
+
+
 def main() raises:
     test_scan()
     test_names_are_googles()
+    test_process_env_sites()
     print("OK")
