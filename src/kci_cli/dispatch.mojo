@@ -381,7 +381,7 @@ def _validate_request(cmd: KciCommand, stage: Stage, step: StageStep, v: StageVa
     var req = ValidateRequest(v.copy())
     req.stage = stage.name.copy()
     req.step_name = step.name.copy()
-    req.declarations_file = step.declarations.copy()
+    req.artifacts_file = step.artifacts.copy()
     req.channels_file = step.channels.copy()
     req.channel = step.channel.copy()
     req.release_dir = cmd.release_dir.copy()

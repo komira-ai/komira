@@ -15,10 +15,10 @@ from kci_release_machine import parse_machine_file
 comptime _MACHINE: String = (
     "schema_version: 1\n"
     "stage { name: \"build\"\n"
-    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" }\n"
+    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "}\n"
     "stage { name: \"gamma\" after: \"build\"\n"
-    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\"\n"
     "    validation { name: \"install\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"release/s.mojo\"\n"
     "      image: \"r.example.invalid/p@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n"
@@ -172,7 +172,7 @@ def test_a_part_job_holds_no_token_no_environment_and_needs_the_step_job() raise
 def test_a_later_stage_needs_every_job_of_a_split_stage() raises:
     var three = String(_MACHINE) + String(
         "stage { name: \"prod\" after: \"gamma\"\n"
-        "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+        "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
         "         channels: \"c.textproto\" channel: \"prod\" }\n"
         "}\n"
     )
