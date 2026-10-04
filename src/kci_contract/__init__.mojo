@@ -12,9 +12,13 @@
 #   formats.mojo       the format table and the version policy
 #   run_identity.mojo  --run-id / --attempt / --context
 #   revision.mojo      full commit ids, ArtifactRef(revision, platform, name)
-#   platform.mojo      the platform table (conda subdirs, released or reserved)
-#   layout.mojo        produced file names, the release directory layout
-#   verbs.mojo         verbs and action kinds
+#   platform.mojo      the platform table (conda subdirs, released or
+#                      reserved; the OCI os/arch spelling)
+#   layout.mojo        produced file names, the release directory layout,
+#                      the default machine file
+#   selection.mojo     `--only step:|validation:` selectors, step names, the
+#                      FULL / SELECTIVE scope of a run
+#   verbs.mojo         the one verb (`run`), step kinds, validation kinds
 #   result.mojo        the result document, RunRecorder, MemoryRecorder
 #
 # Pure: no file I/O, no clock, no environment, no process.
@@ -30,22 +34,26 @@ from kci_contract.errors import (
     ERROR_DECLARATION,
     ERROR_FORMAT,
     ERROR_FORMAT_VERSION,
+    ERROR_IMAGE_PLATFORM,
+    ERROR_IMAGE_PUSH,
     ERROR_INTERNAL,
     ERROR_MEMBER,
     ERROR_PLATFORM,
     ERROR_PLATFORM_MISMATCH,
     ERROR_PUBLISH_DIFFERENT_BYTES,
-    ERROR_PUBLISH_NEW_NAME,
     ERROR_PUBLISH_READ_BACK,
     ERROR_PUBLISH_UPLOAD,
     ERROR_RESULT_FILE,
     ERROR_REVISION,
     ERROR_REVISION_MISMATCH,
+    ERROR_SELECTOR,
+    ERROR_SELECTOR_NO_MATCH,
     ERROR_SET_HASH,
     ERROR_STAGE_ENVIRONMENT,
-    ERROR_STAGE_KIND,
     ERROR_STAGE_UNKNOWN,
     ERROR_USAGE,
+    ERROR_VALIDATION,
+    ERROR_WORKFLOW_MISMATCH,
     ErrorRow,
     error_table,
     is_error_id,
@@ -77,7 +85,6 @@ from kci_contract.formats import (
     FORMAT_MACHINE,
     FORMAT_RELEASE_SET,
     FORMAT_RESULT,
-    FORMAT_STAGES,
     KIND_AUTHORED,
     KIND_PRODUCED,
     SCHEMA_VERSION_KEY,
@@ -92,6 +99,7 @@ from kci_contract.formats import (
 )
 from kci_contract.layout import (
     ARTIFACT_MANIFEST_NAME,
+    DEFAULT_MACHINE_FILE,
     RELEASE_MANIFEST_NAME,
     member_dir,
     release_manifest_path,
@@ -125,7 +133,9 @@ from kci_contract.platform import (
     PLATFORM_NOARCH,
     PlatformRow,
     conda_subdir_of,
+    oci_platform_of,
     platform_of_conda_subdir,
+    platform_of_oci,
     platform_row,
     platform_table,
     require_artifact_platform,
@@ -137,17 +147,31 @@ from kci_contract.result import (
     ARTIFACT_BUILT,
     ARTIFACT_NOT_REACHED,
     ARTIFACT_UPLOADED,
+    ARTIFACT_WOULD_BUILD,
     ARTIFACT_WOULD_UPLOAD,
+    CREDENTIAL_PROBE_MINTED,
+    CREDENTIAL_PROBE_NOT_OIDC,
+    CREDENTIAL_PROBE_NOT_UNDER_CI,
     KCI_VERSION,
     STATUS_FINISHED,
     STATUS_RUNNING,
+    VALIDATION_NOT_REACHED,
+    VALIDATION_VALIDATED,
+    VALIDATION_WOULD_VALIDATE,
+    WORKFLOW_NOT_REACHED,
+    WORKFLOW_PATH_PREFIX,
     MemoryRecorder,
-    ResultAction,
     ResultArtifact,
     ResultError,
+    ResultNewName,
+    ResultStep,
+    ResultValidation,
+    ResultValidationCheck,
     RunRecorder,
     RunResult,
-    all_artifact_actions,
+    all_artifact_effects,
+    all_credential_probes,
+    all_validation_effects,
     parse_result,
     render_result,
     reserved_result_keys,
@@ -167,18 +191,30 @@ from kci_contract.run_identity import (
     require_context_value,
     require_run_id,
 )
+from kci_contract.selection import (
+    SCOPE_FULL,
+    SCOPE_SELECTIVE,
+    SELECTOR_STEP,
+    SELECTOR_VALIDATION,
+    STEP_NAME_MAX_BYTES,
+    Selector,
+    is_step_name,
+    parse_selector,
+    parse_selectors,
+    require_scope,
+    run_evidence_line,
+    scope_of,
+)
 from kci_contract.verbs import (
-    ACTION_BUILD,
-    ACTION_DEPLOY,
-    ACTION_PUBLISH,
-    VERB_BUILD,
-    VERB_CI_CHECK,
-    VERB_PUBLISH,
+    STEP_KIND_BUILD,
+    STEP_KIND_DEPLOY,
+    STEP_KIND_PUBLISH,
+    VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VERB_RUN,
-    VERB_STAGES,
-    alias_action_kind,
-    all_action_kinds,
+    all_step_kinds,
+    all_validation_kinds,
     all_verbs,
-    require_action_kind,
+    require_step_kind,
+    require_validation_kind,
     require_verb,
 )

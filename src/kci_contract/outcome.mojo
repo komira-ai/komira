@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_contract/outcome.mojo -- the closed vocabularies of a run's verdict:
-#   the OUTCOME of a run or of one action, and the RETRY advice that goes
+#   the OUTCOME of a run or of one step, and the RETRY advice that goes
 #   with it.
 # =============================================================================
 #
@@ -11,14 +11,15 @@
 #   NOOP               the end state already held; nothing was changed
 #                      (publishing identical bytes that are already published)
 #   REFUSED            a check refused; nothing external changed
-#   FAILED             an action failed and no external effect landed
+#   FAILED             a step failed and no external effect landed
 #   PARTIAL            some effect landed and the rest did not
 #   INTERRUPTED        kci was stopped mid-run (a result file still saying
 #                      RUNNING is read as this)
-#   VALIDATION_FAILED  reserved for the deploy side; nothing emits it yet
+#   VALIDATION_FAILED  a validation of what a step produced failed (a
+#                      release's install smoke; the deploy side's later)
 #   INDETERMINATE      kci cannot say whether the end state holds; never a pass
 #   CANCELLED          the driver cancelled the run; whether an effect landed
-#                      is told by the result's actions and artifacts
+#                      is told by the result's steps and artifacts
 #
 # Retry advice:
 #
@@ -107,7 +108,7 @@ def require_retry(word: String) raises:
 
 
 def outcome_rank(word: String) raises -> Int:
-    """How bad an outcome is, for "the run's outcome is its worst action's":
+    """How bad an outcome is, for "the run's outcome is its worst step's":
     SUCCEEDED and NOOP are best, INDETERMINATE worst. Two outcomes of equal
     rank never meet in one run except SUCCEEDED with NOOP, where SUCCEEDED
     wins (something was changed)."""
