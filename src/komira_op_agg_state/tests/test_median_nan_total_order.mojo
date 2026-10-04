@@ -90,12 +90,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.unified.agg.storage.aggregators_struct_builtin import (
+from komira_op_agg_state.aggregators_struct_builtin import (
     MAX_MEDIAN_VALUES,
     MedianAggregator,
     MedianState,
 )
-from komira_engine_operators.agg.agg_state_slab import MedianF64
+from komira_op_agg_state.agg_state_slab import MedianF64
 
 
 # -----------------------------------------------------------------------------

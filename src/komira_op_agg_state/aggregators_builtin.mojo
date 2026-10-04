@@ -43,13 +43,13 @@
 #     until Phase H specializes per-(agg_fn, T))
 # =============================================================================
 
-from komira_eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     float_max_fold_f64,
     float_max_identity_f64,
     float_min_fold_f64,
     float_min_identity_f64,
 )
-from komira_engine_operators.unified.agg.storage.aggregator_trait import (
+from komira_op_agg_state.aggregator_trait import (
     Aggregator,
 )
 

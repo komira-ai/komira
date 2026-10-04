@@ -72,7 +72,7 @@
 # =============================================================================
 
 
-from komira_engine_operators.stage_primitives.dense_hash_agg_table import (
+from komira_op_agg_state.dense_hash_agg_table import (
     DENSE_INITIAL_CAPACITY,
     _DenseAggDirectory,
 )

@@ -36,8 +36,8 @@
 # `finalize` (the user-facing parent surface).
 # =============================================================================
 
-from komira_eval.agg_fn import AggFn, PodState
-from komira_eval.simd_of import SimdOf
+from komira_udf.agg_fn import AggFn, PodState
+from komira_kernels.simd_of import SimdOf
 
 
 trait _AggFnFusedKernel(AggFn):

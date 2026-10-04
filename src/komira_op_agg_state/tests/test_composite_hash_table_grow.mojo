@@ -23,13 +23,13 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.stage_primitives.composite_hash_table import (
+from komira_op_agg_state.composite_hash_table import (
     CompositeHashTable2F64,
 )
-from komira_engine_operators.agg.agg_state_slab import (
+from komira_op_agg_state.agg_state_slab import (
     SumF64, KeyHashFnv2, KeyEqElementwise2,
 )
-from komira_eval.composite_key import ColumnValue, KeyValue2
+from komira_expr.composite_key import ColumnValue, KeyValue2
 
 
 def _key_i64_i64(a: Int64, b: Int64) -> KeyValue2:

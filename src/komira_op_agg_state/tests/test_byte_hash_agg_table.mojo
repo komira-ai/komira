@@ -23,12 +23,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_raises, assert_true
 
-from komira_engine_operators.stage_primitives.byte_hash_agg_table import (
+from komira_op_agg_state.byte_hash_agg_table import (
     BYTE_DENSE_INITIAL_CAPACITY,
     ByteHashAggTableF64,
     ByteHashAggTableI64,
 )
-from komira_engine_operators.agg.agg_state_slab import (
+from komira_op_agg_state.agg_state_slab import (
     CountI64,
     MaxI64,
     MinI64,

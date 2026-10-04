@@ -43,7 +43,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.stage_primitives.growable_hash_set_i64 import (
+from komira_op_agg_state.growable_hash_set_i64 import (
     GrowableHashSetI64,
 )
 

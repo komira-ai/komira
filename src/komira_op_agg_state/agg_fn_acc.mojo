@@ -63,13 +63,13 @@ from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.schema import RecordBatch
 from komira_core.accumulator_trait import Accumulator
 from komira_core.io.heap_region import HeapRegion
-from komira_eval.agg_fn import AggFn
-from komira_eval.pod_state_gate import assert_pod_state
-from komira_eval.simd_of import SimdOf
-from komira_engine_operators._internal.agg_fn_fused_kernel import (
+from komira_udf.agg_fn import AggFn
+from komira_agg.pod_state_gate import assert_pod_state
+from komira_kernels.simd_of import SimdOf
+from komira_op_agg_state.agg_fn_fused_kernel import (
     _AggFnFusedKernel,
 )
-from komira_eval.schema_descriptor import (
+from komira_udf.schema_descriptor import (
     dtag_to_dtype,
     dtag_to_arrow_type_id,
     dtag_name,

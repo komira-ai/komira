@@ -4,9 +4,9 @@
 
 from std.memory import alloc
 
-from komira_engine_operators.accumulator_set import AccumulatorSet
-from komira_engine_operators.dyn_accumulator import DynAccumulator
-from komira_engine_operators.columnar_acc_typed import SumI64Acc, CountI64Acc, MinI64Acc
+from komira_op_agg_state.accumulator_set import AccumulatorSet
+from komira_op_agg_state.dyn_accumulator import DynAccumulator
+from komira_op_agg_state.columnar_acc_typed import SumI64Acc, CountI64Acc, MinI64Acc
 
 
 def test_heterogeneous_accumulator_set() raises:

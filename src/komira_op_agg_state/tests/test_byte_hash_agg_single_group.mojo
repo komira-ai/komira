@@ -15,10 +15,10 @@
 
 from std.testing import TestSuite, assert_equal
 
-from komira_engine_operators.stage_primitives.byte_hash_agg_table import (
+from komira_op_agg_state.byte_hash_agg_table import (
     ByteHashAggTableF64,
 )
-from komira_engine_operators.agg.agg_state_slab import SumF64
+from komira_op_agg_state.agg_state_slab import SumF64
 
 
 def _key_bytes(s: String) -> List[UInt8]:

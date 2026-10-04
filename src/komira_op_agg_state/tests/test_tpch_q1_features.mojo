@@ -6,7 +6,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.aggregate import (
+from komira_op_agg_state.aggregate import (
     MultiAggAccumulator,
     CompositeKeyAggregator,
     AggAccumulator,

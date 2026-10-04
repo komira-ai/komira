@@ -498,7 +498,7 @@ def count_star_aos_thunk(
 # byte-for-byte.
 # =============================================================================
 
-from komira_engine_operators.unified.agg.storage.aggregators_builtin import (
+from komira_op_agg_state.aggregators_builtin import (
     SumF64 as _SumF64,
     MinF64 as _MinF64,
     MaxF64 as _MaxF64,

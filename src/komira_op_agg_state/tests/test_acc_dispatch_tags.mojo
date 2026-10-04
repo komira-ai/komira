@@ -19,7 +19,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_not_equal
 
-from komira_engine_operators.columnar_agg_accumulator import (
+from komira_op_agg_state.columnar_agg_accumulator import (
     ACC_MIN_UTF8,
     ACC_MAX_UTF8,
     ACC_SUM_INT64,

@@ -22,7 +22,7 @@
 #   - `contains()` returns True for inserted, False for absent.
 # =============================================================================
 
-from komira_engine_operators.stage_primitives.hashset_parametric import (
+from komira_op_agg_state.hashset_parametric import (
     HashSet1,
     HashSet2,
     HashSet3,

@@ -5,7 +5,7 @@
 # ERR-COUNT-DISTINCT-GROWABLE-SUBSTRATE —
 # direct unit tests for the new growable single-Int64-key SET primitive
 # (`GrowableHashSetI64` in
-# `komira_engine_operators/stage_primitives/growable_hash_set_i64.mojo`),
+# `komira_op_agg_state/growable_hash_set_i64.mojo`),
 # the replacement for the legacy 16-cap `HashSetI64` in the
 # `CountDistinctI64ToF64` conformer + the BREAKER_DISTINCT single-key
 # path.
@@ -34,7 +34,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.stage_primitives.growable_hash_set_i64 import (
+from komira_op_agg_state.growable_hash_set_i64 import (
     GrowableHashSetI64,
 )
 

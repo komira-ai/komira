@@ -73,11 +73,11 @@ from komira_core.collections.multi_column_builder import (
     column_slot,
 )
 
-from komira_eval.stage_program import ProjectsLike
-from komira_eval.column_resolver import ColumnResolver
-from komira_eval.row_builder import _build_row_n, _read_row_field
-from komira_eval.auto_komira_schema import AutoKomiraSchema
-from komira_eval.row_udf import RowMapUdf
+from komira_expr.stage_program import ProjectsLike
+from komira_udf.column_resolver import ColumnResolver
+from komira_udf.row_builder import _build_row_n, _read_row_field
+from komira_udf.auto_komira_schema import AutoKomiraSchema
+from komira_udf.row_udf import RowMapUdf
 
 
 @fieldwise_init

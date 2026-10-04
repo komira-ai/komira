@@ -14,7 +14,7 @@
 from std.memory import alloc
 from std.testing import assert_equal, assert_true
 
-from komira_engine_operators.accumulator_set import (
+from komira_op_agg_state.accumulator_set import (
     AosAccKernel,
     sum_count_f64_aos_thunk,
 )

@@ -7,10 +7,10 @@ from std.memory import alloc
 from komira_core.arrow import ArrowType, Column
 from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.accumulator_trait import Accumulator
-from komira_engine_operators.columnar_acc_typed import (
+from komira_op_agg_state.columnar_acc_typed import (
     SumI64Acc, CountI64Acc, MinI64Acc, MaxI64Acc, SumF64KahanAcc,
 )
-from komira_engine_operators.columnar_acc_agg import CountDistinctAcc
+from komira_op_agg_state.columnar_acc_agg import CountDistinctAcc
 
 
 def _make_gids(values: List[Int]) -> UnsafePointer[Int, MutUntrackedOrigin]:

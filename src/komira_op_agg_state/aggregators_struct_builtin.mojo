@@ -13,12 +13,12 @@
 #
 # References:
 #   - an internal doc §3.1, §6.1
-#   - komira-mojo/src/komira_engine_operators/unified/agg/storage/aggregator_with_struct_trait.mojo
+#   - src/komira_op_agg_state/aggregator_with_struct_trait.mojo
 # =============================================================================
 
 from std.math import sqrt
 
-from komira_engine_operators.unified.agg.storage.aggregator_with_struct_trait import (
+from komira_op_agg_state.aggregator_with_struct_trait import (
     AggregatorWithStruct,
 )
 
@@ -223,7 +223,7 @@ struct StddevSampAggregator(
         if state.count <= UInt64(1):
             # NaN via 0.0 / 0.0; Mojo produces a quiet NaN here.
             # (Float64.__nan__() is not exposed; this is the canonical
-            # constant-NaN idiom across komira-mojo.)
+            # constant-NaN idiom across the codebase.)
             return Float64(0.0) / Float64(0.0)
         var n_minus_1 = Float64(state.count - UInt64(1))
         return sqrt(state.m2 / n_minus_1)
@@ -806,7 +806,7 @@ struct MedianState(
 #    doors may not share one NaN policy, is
 #    an internal doc.
 #
-# Gated by `komira_engine_operators/tests/test_median_nan_total_order.mojo`
+# Gated by `komira_op_agg_state/tests/test_median_nan_total_order.mojo`
 # (720-ordering exhaustive sweep on BOTH bodies, both sides of the cap).
 # -----------------------------------------------------------------------------
 

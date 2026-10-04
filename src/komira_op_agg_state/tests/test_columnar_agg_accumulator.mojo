@@ -9,7 +9,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_engine_operators.columnar_agg_accumulator import (
+from komira_op_agg_state.columnar_agg_accumulator import (
     ColumnarAccumulator,
     ACC_MIN_UTF8,
     ACC_MAX_UTF8,

@@ -43,17 +43,17 @@
 #   - composite_hash_table.mojo — `_CompositeHashTableF64` (the List-storage,
 #     open-addressing in-tree template the dense directory mirrors).
 #   - komira_eval/agg_op_traits.mojo — HashAggOpF64/I64/I32/F32 traits.
-#   - komira_engine_operators/agg/agg_state_slab.mojo — AggOp conformers.
+#   - komira_op_agg_state/agg_state_slab.mojo — AggOp conformers.
 # =============================================================================
 
-from komira_eval.agg_op_traits import (
+from komira_agg.agg_op_traits import (
     HashAggOpF32,
     HashAggOpF64,
     HashAggOpI32,
     HashAggOpI64,
 )
 
-from komira_engine_operators.stage_primitives.dense_hash_agg_table import (
+from komira_op_agg_state.dense_hash_agg_table import (
     DENSE_INITIAL_CAPACITY,
     _DenseAggDirectory,
 )

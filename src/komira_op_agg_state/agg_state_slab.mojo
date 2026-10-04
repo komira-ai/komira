@@ -35,19 +35,19 @@
 #     conformers).
 # =============================================================================
 
-from komira_eval.float_quotient_order import (
+from komira_udf.float_quotient_order import (
     float_max_fold_f64,
     float_max_identity_f64,
     float_min_fold_f64,
     float_min_identity_f64,
 )
-from komira_eval.agg_op_traits import (
+from komira_agg.agg_op_traits import (
     HashAggOpF32,
     HashAggOpF64,
     HashAggOpI32,
     HashAggOpI64,
 )
-from komira_eval.composite_key import (
+from komira_expr.composite_key import (
     KeyValue1, KeyValue2, KeyValue3, KeyValue4,
     hash_key_value1, hash_key_value2, hash_key_value3, hash_key_value4,
     eq_key_value1, eq_key_value2, eq_key_value3, eq_key_value4,
@@ -68,7 +68,7 @@ from komira_eval.composite_key import (
 # for the AGG_STDDEV_SAMP wireup. Same POD shape; numerically-stable
 # Welford one-pass + Chan combine semantics inherited from
 # StddevSampAggregator.
-from komira_engine_operators.unified.agg.storage.aggregators_struct_builtin import (
+from komira_op_agg_state.aggregators_struct_builtin import (
     median_of_reservoir_nan_last,
     LargestKState,
     MedianState,

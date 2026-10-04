@@ -7,12 +7,12 @@
 #    as carrying "the identical NaN barrier" to `PercentileAcc`. MEASURED
 #    2026-09-15 by reading both:
 #
-#      • `PercentileAcc`          — komira_engine_operators/columnar_acc_agg.mojo:86
+#      • `PercentileAcc`          — komira_op_agg_state/columnar_acc_agg.mojo:86
 #        EXCLUDES NaN at update (`if v == v:` in `update_batch`, with an
 #        explicit `# NaN EXCLUSION` block). Interpolated: `pos = q*(n-1)`,
 #        floor, linear interpolation — exactly Excel PERCENTILE.INC.
 #
-#      • `PercentileAccumulator`  — komira_engine_operators/statistical_accumulators.mojo:78
+#      • `PercentileAccumulator`  — komira_op_agg_state/statistical_accumulators.mojo:78
 #        ⛔ DOES **NOT** EXCLUDE NaN. `insert` appends unconditionally; there is
 #        no `v == v` test anywhere in the struct. And it is NOT the same
 #        function: `result()` is NEAREST-RANK (`idx = ceil(p*n) - 1`, clamped)
@@ -26,7 +26,7 @@
 #
 # ⚠ AND `PercentileAccumulator` IS OFF EVERY ROUTE. Measured 2026-09-15: its
 #   only occurrence outside its own file and its own tests is a bare re-export
-#   in `komira_engine_operators/aggregate.mojo:25`. Nothing instantiates it.
+#   in `komira_op_agg_state/aggregate.mojo:25`. Nothing instantiates it.
 #   So this file pins a LATENT defect; it does not repair a shipped one.
 #
 # ---------------------------------------------------------------------------
@@ -47,7 +47,7 @@
 #    documented contract, not a bug fix. What changes is ONLY that NaN is
 #    ORDERED (last, and counted) instead of scrambling the sort. Whether this
 #    struct should exist at all — it is OFF the AGG_MEDIAN route and off every
-#    plan route, reachable only from `komira_engine_operators.aggregate` and
+#    plan route, reachable only from `komira_op_agg_state.aggregate` and
 #    its own tests — is recorded in
 #    an internal doc §5.
 #
@@ -65,7 +65,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.statistical_accumulators import (
+from komira_op_agg_state.statistical_accumulators import (
     PercentileAccumulator,
 )
 

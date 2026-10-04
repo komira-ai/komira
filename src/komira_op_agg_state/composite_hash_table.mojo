@@ -53,14 +53,14 @@
 #   - WSC RFC v1.1 §2.3 line 323 (CompositeHashTable multi-key primitive).
 #   - WSC-SPIKE-H2O h2o_expr_nodes.mojo §6 (CompositeHashTable canonical).
 #   - komira_eval/composite_key.mojo — KeyValueN runtime values + hash helpers.
-#   - komira_engine_operators/agg/agg_state_slab.mojo — AggOp + KeyHashFn /
+#   - komira_op_agg_state/agg_state_slab.mojo — AggOp + KeyHashFn /
 #     KeyEqFn conformers.
 #   - NARY-HASHAGG analog: stage_primitives/hash_agg.mojo (KeyTuple family).
 # =============================================================================
 
-from komira_eval.agg_op_traits import HashAggOpF64, HashAggOpI64
-from komira_eval.composite_key import ColumnValue, KeyValue2, KeyValue3
-from komira_engine_operators.agg.agg_state_slab import (
+from komira_agg.agg_op_traits import HashAggOpF64, HashAggOpI64
+from komira_expr.composite_key import ColumnValue, KeyValue2, KeyValue3
+from komira_op_agg_state.agg_state_slab import (
     KeyHashFn2, KeyEqFn2, KeyHashFn3, KeyEqFn3,
 )
 

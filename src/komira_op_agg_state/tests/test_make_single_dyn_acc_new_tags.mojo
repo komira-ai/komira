@@ -26,8 +26,8 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_core.arrow import Column
-from komira_engine_operators.accumulator_factory import make_single_dyn_acc
-from komira_engine_operators.columnar_agg_accumulator import (
+from komira_op_agg_state.accumulator_factory import make_single_dyn_acc
+from komira_op_agg_state.columnar_agg_accumulator import (
     ACC_SUM_F64,
     ACC_COUNT_STAR,
     ACC_MIN_F64,

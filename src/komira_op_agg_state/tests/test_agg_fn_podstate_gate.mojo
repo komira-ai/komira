@@ -27,15 +27,15 @@
 from std.testing import TestSuite, assert_equal, assert_true
 from std.collections import Array
 
-from komira_eval.agg_fn import AggFn, PodState
-from komira_eval.pod_state_gate import (
+from komira_udf.agg_fn import AggFn, PodState
+from komira_agg.pod_state_gate import (
     assert_pod_state,
     _is_pod_field,
     _is_pod_scalar,
     _is_pod_inline_array,
 )
-from komira_eval.schema_descriptor import schema_of, DT_F64
-from komira_engine_operators.agg_fn_acc import AggFnAcc
+from komira_udf.schema_descriptor import schema_of, DT_F64
+from komira_op_agg_state.agg_fn_acc import AggFnAcc
 
 
 # =============================================================================

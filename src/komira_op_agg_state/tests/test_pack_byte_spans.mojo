@@ -11,7 +11,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_engine_operators.stage_primitives.pack_byte_spans import (
+from komira_op_agg_state.pack_byte_spans import (
     pack_2_byte_spans_u64,
     unpack_2_byte_spans_u64,
     pack_3_byte_spans_u64,

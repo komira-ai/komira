@@ -62,7 +62,7 @@
 
 from std.memory import unsafe_memcmp
 
-from komira_eval.agg_op_traits import (
+from komira_agg.agg_op_traits import (
     HashAggOpF32,
     HashAggOpF64,
     HashAggOpI32,

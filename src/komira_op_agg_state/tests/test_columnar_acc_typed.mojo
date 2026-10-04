@@ -11,18 +11,18 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_false
 
-from komira_engine_operators.columnar_acc_typed import (
+from komira_op_agg_state.columnar_acc_typed import (
     SumI64Acc,
     CountI64Acc,
     MinI64Acc,
     MaxI64Acc,
     SumF64KahanAcc,
 )
-from komira_engine_operators.columnar_acc_utf8 import (
+from komira_op_agg_state.columnar_acc_utf8 import (
     MinUtf8Acc,
     MaxUtf8Acc,
 )
-from komira_engine_operators.columnar_acc_agg import (
+from komira_op_agg_state.columnar_acc_agg import (
     PercentileAcc,
     CountDistinctAcc,
 )

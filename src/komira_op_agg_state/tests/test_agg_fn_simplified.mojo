@@ -35,16 +35,16 @@ from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.schema import (
     Field, SchemaBuilder, RecordBatch, RecordBatchBuilder,
 )
-from komira_eval.agg_fn import AggFn, PodState
-from komira_eval.schema_descriptor import (
+from komira_udf.agg_fn import AggFn, PodState
+from komira_udf.schema_descriptor import (
     SchemaDescriptor,
     schema_of,
     _derive_schema,
     DT_F64,
     DT_I64,
 )
-from komira_eval.auto_komira_schema import AutoKomiraSchema
-from komira_engine_operators.agg_fn_acc import AggFnAcc
+from komira_udf.auto_komira_schema import AutoKomiraSchema
+from komira_op_agg_state.agg_fn_acc import AggFnAcc
 from komira_core.io.heap_region import HeapRegion
 
 

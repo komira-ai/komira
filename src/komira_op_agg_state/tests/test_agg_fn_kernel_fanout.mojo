@@ -34,30 +34,30 @@ from komira_core.arrow.primitive_array import PrimitiveArray
 from komira_core.arrow.schema import (
     Field, SchemaBuilder, RecordBatch, RecordBatchBuilder,
 )
-from komira_eval.agg_fn import AggFn
-from komira_engine_operators.agg_fn_acc import AggFnAcc
+from komira_udf.agg_fn import AggFn
+from komira_op_agg_state.agg_fn_acc import AggFnAcc
 
-from komira_eval.builtin_agg_fns_states import (
+from komira_agg.builtin_agg_fns_states import (
     RowI64, RowF64,
     SumStateI64, SumStateF64,
     MinMaxStateI64, MinMaxStateF64,
     CountState, AvgStateF64,
 )
-from komira_eval.builtin_agg_fns_sum import (
+from komira_agg.builtin_agg_fns_sum import (
     SumI8, SumI16, SumI32, SumI64, SumU64, SumF32, SumF64,
 )
-from komira_eval.builtin_agg_fns_minmax import (
+from komira_agg.builtin_agg_fns_minmax import (
     MinI8, MinI64, MinF64, MaxI8, MaxI64, MaxF64,
 )
-from komira_eval.builtin_agg_fns_count import (
+from komira_agg.builtin_agg_fns_count import (
     CountI8, CountI64, CountF64,
 )
-from komira_eval.builtin_agg_fns_avg import AvgI64, AvgF64
-from komira_eval.builtin_agg_fns_firstlast import (
+from komira_agg.builtin_agg_fns_avg import AvgI64, AvgF64
+from komira_agg.builtin_agg_fns_firstlast import (
     FirstI64, LastI64, FirstF64, LastF64,
 )
-from komira_eval.builtin_agg_fns_bool import AnyBool, AllBool, CountBool
-from komira_eval.builtin_agg_fns_vec import (
+from komira_agg.builtin_agg_fns_bool import AnyBool, AllBool, CountBool
+from komira_agg.builtin_agg_fns_vec import (
     SumI64Vec, SumF64Vec, MinI64Vec, MaxI64Vec, CountI64Vec, AvgF64Vec,
 )
 from komira_core.io.heap_region import HeapRegion

@@ -16,7 +16,7 @@
 # lowering arm + feed driver will emit at the runtime path).
 # =============================================================================
 
-from komira_engine_operators.stage_primitives.byte_hashset import ByteHashSet
+from komira_op_agg_state.byte_hashset import ByteHashSet
 
 
 # -----------------------------------------------------------------------------

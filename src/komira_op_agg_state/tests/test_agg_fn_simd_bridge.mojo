@@ -5,7 +5,7 @@
 # UDF-PHASE-B3-7-PREREQ (RFC §6.4 prerequisite primitive). Tests the
 # `_invoke_update_chunk[G: _AggFnFusedKernel, W]` + `_invoke_finalize_simd[G:
 # _AggFnFusedKernel]` free functions in
-# `komira_engine_operators/agg_fn_acc.mojo`. These functions are the
+# `komira_op_agg_state/agg_fn_acc.mojo`. These functions are the
 # typed bridges that let a comptime-`G: _AggFnFusedKernel`-bounded call site
 # dispatch into the `G.update_chunk[W]` and `G.finalize` static methods
 # (the _AggFnFusedKernel surface from B3-2). They would FAIL at pre-B3-7-PREREQ
@@ -22,12 +22,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true, assert_almost_equal
 
-from komira_eval.agg_fn import AggFn, PodState
-from komira_eval.schema_descriptor import schema_of, DT_F64
-from komira_eval.simd_of import SimdOf
-from komira_engine_operators._internal.agg_fn_fused_kernel import _AggFnFusedKernel
+from komira_udf.agg_fn import AggFn, PodState
+from komira_udf.schema_descriptor import schema_of, DT_F64
+from komira_kernels.simd_of import SimdOf
+from komira_op_agg_state.agg_fn_fused_kernel import _AggFnFusedKernel
 
-from komira_engine_operators.agg_fn_acc import (
+from komira_op_agg_state.agg_fn_acc import (
     _invoke_update_chunk,
     _invoke_finalize_simd,
 )

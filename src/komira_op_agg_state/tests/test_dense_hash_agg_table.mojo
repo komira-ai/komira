@@ -27,14 +27,14 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.stage_primitives.hash_agg_table import (
+from komira_op_agg_state.hash_agg_table import (
     HashAggTableF64,
     HashAggTableI64,
 )
-from komira_engine_operators.stage_primitives.dense_hash_agg_table import (
+from komira_op_agg_state.dense_hash_agg_table import (
     DENSE_INITIAL_CAPACITY,
 )
-from komira_engine_operators.agg.agg_state_slab import (
+from komira_op_agg_state.agg_state_slab import (
     CountI64,
     MaxI64,
     MinI64,

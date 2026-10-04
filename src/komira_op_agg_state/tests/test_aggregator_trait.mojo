@@ -47,10 +47,10 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from komira_engine_operators.unified.agg.storage.aggregator_trait import (
+from komira_op_agg_state.aggregator_trait import (
     Aggregator,
 )
-from komira_engine_operators.unified.agg.storage.aggregators_builtin import (
+from komira_op_agg_state.aggregators_builtin import (
     SumF64,
     SumI64,
     CountStar,

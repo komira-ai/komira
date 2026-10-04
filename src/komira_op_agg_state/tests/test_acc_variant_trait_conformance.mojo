@@ -31,7 +31,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 from komira_core.arrow import Column
 
 from komira_core.accumulator_trait import Accumulator
-from komira_engine_operators.columnar_acc_typed_extra import (
+from komira_op_agg_state.columnar_acc_typed_extra import (
     CountStarAcc,
     MinF64Acc,
     MaxF64Acc,
