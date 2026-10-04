@@ -176,8 +176,8 @@ def run_authorizer_pump[
             if message.byte_length() == 0:
                 message = (
                     String(
-                        "authorizer-cannot-decide: the control plane could not"
-                        " be asked (answer ordinal "
+                        "authorizer-cannot-decide: the upstream authority"
+                        " could not be asked (answer ordinal "
                     )
                     + String(answer.kind)
                     + String(

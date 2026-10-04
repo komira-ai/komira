@@ -175,10 +175,11 @@ def parse_api_gateway_authorizer_event(
 
     ⚠ EVERY OTHER FIELD IS OPTIONAL AND DEFAULTS TO EMPTY, deliberately. A
     missing `routeArn` or `identitySource` cannot change the decision — the
-    decision is a function of the credential and of the control plane's answer —
-    so refusing on their absence would convert an AWS payload revision into a
-    total outage while buying no safety. What is NOT optional is the shape
-    assertion, because that is the one that keeps a different event out.
+    decision is a function of the credential and of the upstream authority's
+    answer — so refusing on their absence would convert an AWS payload
+    revision into a total outage while buying no safety. What is NOT optional
+    is the shape assertion, because that is the one that keeps a different
+    event out.
 
     Raises:
         If the payload is not an object, is not version 2.0, or is not a

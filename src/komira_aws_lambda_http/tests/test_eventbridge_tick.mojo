@@ -15,13 +15,13 @@
 # version`, and the difference is the whole reason it is written here. That test
 # drives a TRUNCATED 2.0 EVENT (`rawPath` + `requestContext.http`, `version`
 # removed) and asserts the version rule. This one drives the SCHEDULER PAYLOAD —
-# the two-key `{"httpMethod":…,"path":…}` object our own conformer renders — and
-# asserts that the apigw arm refuses THAT. They exercise the same line today and
-# they are falsified by different futures: a carve-out admitting the tick shape
-# into the apigw converter (the "helpful" change somebody makes when a cron
-# 500s) leaves the existing test green and turns this one red. A test pinned to
-# the FIXTURE somebody would add a carve-out for is not the same test as one
-# pinned to the rule.
+# the two-key `{"httpMethod":…,"path":…}` object the deploy side renders —
+# and asserts that the apigw arm refuses THAT. They exercise the same line
+# today and they are falsified by different futures: a carve-out admitting the
+# tick shape into the apigw converter (the "helpful" change somebody makes
+# when a cron 500s) leaves the existing test green and turns this one red. A
+# test pinned to the FIXTURE somebody would add a carve-out for is not the same
+# test as one pinned to the rule.
 #
 # ⛔ AND (c) IS THE ONE THAT WOULD HAVE CAUGHT THE FORBIDDEN IMPLEMENTATION.
 # `test_a_truncated_2_0_event_is_an_ERROR_and_NOT_a_tick_for_the_root` drives a
@@ -124,9 +124,9 @@ from komira_aws_lambda_http.pump import (
 
 comptime _Rt = AwsLambdaRuntime[NoopSink]
 
-# ⛔ THE FIXTURE IS THE RENDERER'S OUTPUT, BYTE FOR BYTE. It is what
-# `komira_aws_iac/aws_scheduled_call_conformer.mojo:scheduled_call_input_payload`
-# emits for `path: "/internal/tick/reconcile"` + `http_method: "POST"` — two
+# ⛔ THE FIXTURE IS THE RENDERER'S OUTPUT, BYTE FOR BYTE. It is what the deploy
+# side's schedule renderer (not part of this package) emits for
+# `path: "/internal/tick/reconcile"` + `http_method: "POST"` — two
 # members, `httpMethod` first, no whitespace. Writing a prettier fixture here
 # would test a payload nothing produces.
 comptime _TICK_RECONCILE: String = (
@@ -331,9 +331,9 @@ def _must_raise_tick(payload: String, because: String) raises:
 
 def test_the_rendered_tick_becomes_the_route_it_names() raises:
     """THE BASELINE, and it is the far side of a contract that had no far side.
-    `scheduled_call_input_payload`'s docstring says the receiving handler "has to
-    READ them" and its header admits "NOTHING IN THIS TREE CHECKS THAT THE
-    HANDLER HONOURS IT". This is that check."""
+    The renderer's contract says the receiving handler has to READ the two
+    members, and nothing on the render side can check that the handler honours
+    it. This is that check."""
     var req = eventbridge_tick_event_to_request(String(_TICK_RECONCILE))
     assert_equal(req.method.code, HTTP_METHOD_POST)
     assert_equal(req.path, String("/internal/tick/reconcile"))
@@ -354,8 +354,8 @@ def test_the_key_spellings_are_the_ones_the_renderer_emits() raises:
 
 def test_the_method_comes_from_httpMethod_and_is_not_assumed_POST() raises:
     """ONE differing field from the baseline: `httpMethod` is `GET`. A converter
-    that hardcoded POST (the renderer's default, and the only verb the two
-    authored crons use) passes every other test in this file."""
+    that hardcoded POST (the renderer's default, and the commonest scheduled
+    verb) passes every other test in this file."""
     var req = eventbridge_tick_event_to_request(
         String('{"httpMethod":"GET","path":"/internal/tick/reconcile"}')
     )
@@ -378,8 +378,8 @@ def test_a_query_in_the_path_becomes_the_query_string() raises:
     """§4 — CROSS-CLOUD AGREEMENT. The GCP peer delivers a real HTTP request to
     `<service url> + path`, so a query written into `path` survives to the
     handler there BY CONSTRUCTION. Not splitting it here would make the SAME
-    bundle field mean two different things on two clouds, and the AWS half of the
-    disagreement would 404 inside a scheduler metric nobody reads."""
+    schedule field mean two different things on two clouds, and the AWS half of
+    the disagreement would 404 inside a scheduler metric nobody reads."""
     var req = eventbridge_tick_event_to_request(
         String('{"httpMethod":"POST","path":"/internal/tick/reconcile?deep=1"}')
     )
@@ -507,8 +507,8 @@ def test_refuses_a_payload_with_no_path_rather_than_defaulting_to_the_root() rai
     """⛔⛔ THE REFUSAL THAT MAKES THE FALLBACK READER IMPOSSIBLE TO WRITE BY
     ACCIDENT, and the one this converter's whole no-defaulting rule exists for.
 
-    `scheduled_call_input_payload` maps an empty `path` to `"/"` and an empty
-    `http_method` to `"POST"` — the proto's own defaults, applied on the RENDER
+    The schedule renderer maps an empty `path` to `"/"` and an empty verb to
+    `"POST"` — the schedule's own defaults, applied on the RENDER
     side where the author's intent is known. Applying the same defaults on the
     READ side is EXACTLY the machinery that turns a truncated event from some
     other source into "a tick for `/` by POST": every field the reader needed was
@@ -524,7 +524,7 @@ def test_refuses_a_payload_with_no_path_rather_than_defaulting_to_the_root() rai
 
 def test_refuses_a_payload_with_no_httpMethod() raises:
     """The other half of the no-defaulting rule. `POST` is the renderer's default
-    AND the verb both authored crons use, which is precisely what would make
+    AND the commonest scheduled verb, which is precisely what would make
     defaulting it here look harmless."""
     _must_raise_tick(
         String('{"path":"/internal/tick/reconcile"}'),
@@ -555,8 +555,8 @@ def test_refuses_a_non_string_member() raises:
 
 
 def test_refuses_a_path_that_does_not_start_with_a_slash() raises:
-    """The third and last place this is refused (`validate.mojo` at authoring
-    time, `scheduled_call_input_payload` at render time, here on the read side).
+    """The third and last place this is refused (the deploy side's validation
+    at authoring time, its renderer at render time, here on the read side).
     Prefixing one back would launder a symptom into a route that dispatches
     somewhere."""
     _must_raise_tick(
@@ -571,8 +571,8 @@ def test_refuses_an_unrecognised_verb_INSTEAD_of_letting_it_405() raises:
 
     On the API Gateway arm the sender is a CLIENT: an odd verb is a request-level
     condition the dispatcher answers 405, and raising would file a bad request on
-    the Lambda ERROR channel and page somebody. Here the sender is this
-    repository's own bundle (`crons[].http_method`), so an odd verb is deploy
+    the Lambda ERROR channel and page somebody. Here the sender is the deploy
+    side's own schedule (the schedule's verb), so an odd verb is deploy
     data that is wrong — a deployment fault, which is what the ERROR channel is
     for. A 405 answered to a scheduler is visible to nobody and the backstop
     simply never ticks."""

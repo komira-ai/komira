@@ -213,10 +213,9 @@ def test_refuses_a_TOKEN_authorizer_event() raises:
 
 
 def test_refuses_a_JWT_authorizer_event() raises:
-    """`JWT` is not a Lambda authorizer, and the door refuses to CREATE one
-    (`api_gateway_v2_client`: the built-in JWT authorizer validates RS256 and
-    this control plane mints ES256). If one is ever configured anyway, this
-    runtime must not pretend to be it."""
+    """`JWT` is not a Lambda authorizer: API Gateway validates a JWT itself,
+    with no function invoked. If one is ever routed here anyway, this runtime
+    must not pretend to be it."""
     assert_true(_refused(_with_type_json(String("JWT"))))
 
 
@@ -259,9 +258,9 @@ def test_a_minimal_but_WELL_SHAPED_event_parses_with_empty_optionals() raises:
     """⚠ THE SCOPE OF THE REFUSALS, STATED. Only the three SHAPE fields are
     required. A payload revision that dropped `routeArn` or `identitySource`
     must not become a total outage, because neither can change the decision —
-    the decision is a function of the credential and of the control plane's
-    answer. A missing credential is then the DECIDER's deny, not the parser's
-    refusal, which is where it belongs."""
+    the decision is a function of the credential and of the upstream
+    authority's answer. A missing credential is then the DECIDER's deny, not
+    the parser's refusal, which is where it belongs."""
     var ev = parse_api_gateway_authorizer_event(
         String('{"version": "2.0", "type": "REQUEST"}')
     )
@@ -357,7 +356,7 @@ def test_a_DENY_serializes_false() raises:
 
 
 def test_UNAVAILABLE_is_not_an_allow() raises:
-    """⛔ "The control plane could not be asked" must never serialize as an
+    """⛔ "The upstream authority could not be asked" must never serialize as an
     allow. `AUTHZ_ANSWER_UNAVAILABLE` never reaches the wire at all in the
     deployed shape (the pump routes it to the ERROR channel), and if it ever
     did, it must be `false`."""

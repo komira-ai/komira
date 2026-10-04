@@ -15,8 +15,8 @@
 #
 # So a scheduled call's `path` and `http_method` cannot travel in a request
 # line, because there is no request. They travel as DATA, in `Target.Input`,
-# rendered on the deploy side by exactly ONE function (`komira_aws_iac`'s
-# `scheduled_call_input_payload`) as
+# rendered on the deploy side by exactly ONE place (the deploy side's schedule
+# renderer) as
 #
 #   {"httpMethod":"POST","path":"/internal/tick/reconcile"}
 #
@@ -183,7 +183,7 @@ from komira_json import JsonValue, parse_json_value
 from .apigw_v2 import _method_from_name
 
 
-# The two members `scheduled_call_input_payload` renders, and the ONLY two this
+# The two members the schedule renderer emits, and the ONLY two this
 # converter accepts (§2). ⛔ THE SPELLINGS ARE THE CONTRACT — the render side
 # pins them with a test for the same reason, and a handler expecting `method`
 # against a payload carrying `httpMethod` produces a function that runs, reports
@@ -231,7 +231,7 @@ def classify_lambda_event(event_json: String) raises -> Int:
                 "lambda-event: the invocation payload is not a JSON object."
                 " This function serves exactly two shapes — an API Gateway"
                 " payload-format-2.0 proxy event, and the EventBridge Scheduler"
-                " `Target.Input` tick this repository renders"
+                " `Target.Input` tick the deploy side renders"
                 ' ({"httpMethod":…,"path":…}) — and an array or a scalar is'
                 " neither. If this fired, something other than API Gateway or"
                 " EventBridge Scheduler is pointed at this function."
@@ -246,7 +246,7 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
     """Convert one EventBridge Scheduler `Target.Input` tick payload into the
     `HttpRequest` the shipped `RequestDispatcher` already takes.
 
-    The payload is `scheduled_call_input_payload`'s output and nothing else:
+    The payload is the schedule renderer's output and nothing else:
 
         {"httpMethod":"POST","path":"/internal/tick/reconcile"}
 
@@ -254,9 +254,9 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
     `version` (it is an API Gateway event, §1), when it carries any member
     outside the two-key contract (§2), when either key is absent, empty, or not
     a string, when the path does not start with `/`, or when the verb is not one
-    this repository's `HttpMethod` table knows (§3). Every one of those is a case
+    the shared `HttpMethod` table knows (§3). Every one of those is a case
     where a "best effort" request would fire a BACKSTOP on a route nobody
-    authored.
+    scheduled.
 
     Field coverage (every one is asserted by a falsifier):
       `version`     -> must be ABSENT; its presence is the refusal (§1)
@@ -270,8 +270,8 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
         raise Error(
             String(
                 "eventbridge-tick: the invocation payload is not a JSON object."
-                " A scheduled tick is the `Target.Input` rendered by"
-                " `scheduled_call_input_payload`, which is always a two-member"
+                " A scheduled tick is the `Target.Input` rendered by the"
+                " deploy side's schedule renderer, which is always a two-member"
                 ' object ({"httpMethod":…,"path":…}).'
             )
         )
@@ -288,7 +288,7 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
                 " API Gateway events belong to"
                 " `apigw_v2.api_gateway_v2_event_to_request`; if this fired on a"
                 " real scheduled tick, something is rendering `Target.Input`"
-                " other than `scheduled_call_input_payload`."
+                " other than the deploy side's schedule renderer."
             )
         )
 
@@ -303,15 +303,16 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
             + String(
                 "', which is not part of the scheduled-call contract. That"
                 " contract is exactly two members — `httpMethod` and `path` —"
-                " rendered by `scheduled_call_input_payload` and by nothing"
-                " else. ⚠ THE SHAPE THIS REFUSAL EXISTS FOR is a REST-API"
-                " (payload format 1.0) PROXY EVENT: it carries NO `version`, and"
+                " rendered by the deploy side's schedule renderer and by"
+                " nothing else. ⚠ THE SHAPE THIS REFUSAL EXISTS FOR is a"
+                " REST-API (payload format 1.0) PROXY EVENT: it carries NO"
+                " `version`, and"
                 " it carries `httpMethod` and `path` at the top level with the"
                 " same spellings as this contract — so a discriminator reading"
                 " `version` alone would convert a caller's public request into"
                 " an internal scheduled call, discarding its body, headers and"
                 " query. Extra members are refused rather than ignored because"
-                " this payload has exactly ONE author in this repository, so an"
+                " this payload has exactly ONE author (that renderer), so an"
                 " unknown member is a different event shape and not a newer"
                 " peer."
             )
@@ -334,12 +335,12 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
                 " IS THE DELIBERATE INVERSION of the API Gateway arm, which maps"
                 " an unrecognised verb to HTTP_METHOD_UNKNOWN and lets the"
                 " dispatcher answer 405. There the sender is a CLIENT and an odd"
-                " verb is a request-level condition; here the sender is this"
-                " repository's own bundle (`crons[].http_method`, rendered by"
-                " `scheduled_call_input_payload`), so an odd verb is deploy data"
-                " that is wrong — a deployment fault, which belongs on the"
-                " invocation ERROR channel. A 405 answered to a scheduler is"
-                " visible to nobody and the backstop simply never ticks."
+                " verb is a request-level condition; here the sender is the"
+                " deploy side's own schedule (the schedule's verb, rendered"
+                " into `Target.Input` at deploy time), so an odd verb is"
+                " deploy data that is wrong — a deployment fault, which belongs"
+                " on the invocation ERROR channel. A 405 answered to a scheduler"
+                " is visible to nobody and the backstop simply never ticks."
             )
         )
     req.method = method
@@ -350,9 +351,9 @@ def eventbridge_tick_event_to_request(event_json: String) raises -> HttpRequest:
             String("eventbridge-tick: `path` = '")
             + raw_path
             + String(
-                "' does not start with '/'. `validate.mojo:_check_cron_spec`"
-                " governs this at authoring time and"
-                " `scheduled_call_input_payload` refuses it again at render"
+                "' does not start with '/'. The deploy side's schedule"
+                " validation governs this at authoring time and its"
+                " schedule renderer refuses it again at render"
                 " time; this is the third and last place, on the READ side,"
                 " because a path that lost its leading slash between the three"
                 " is a symptom and prefixing one back would launder it into a"
@@ -377,7 +378,7 @@ def _require_string_member(event: JsonValue, key: String) raises -> String:
     """One contract member: present, a JSON string, and NON-EMPTY.
 
     ⛔ ALL THREE ARE REFUSALS AND NONE IS A DEFAULT — this is where §1's rule
-    lands in code. `scheduled_call_input_payload` maps an empty `path` to `"/"`
+    lands in code. The schedule renderer maps an empty `path` to `"/"`
     and an empty `http_method` to `"POST"` on the RENDER side, where the author's
     intent is known; supplying those same values on the READ side is exactly the
     machinery that lets a payload which is NOT a tick be read as "a tick for `/`
@@ -389,8 +390,8 @@ def _require_string_member(event: JsonValue, key: String) raises -> String:
             + String(
                 "` member. Both members of the scheduled-call contract are"
                 " REQUIRED on the read side, and neither is defaulted — a"
-                " payload missing one was not rendered by"
-                " `scheduled_call_input_payload`, and inventing the missing"
+                " payload missing one was not rendered by the deploy side's"
+                " schedule renderer, and inventing the missing"
                 " value is how a truncated event from some other source becomes"
                 " a well-formed tick that fires a backstop."
             )
@@ -402,7 +403,7 @@ def _require_string_member(event: JsonValue, key: String) raises -> String:
             + key
             + String(
                 "` is present but is not a JSON string."
-                " `scheduled_call_input_payload` renders both members as string"
+                " The schedule renderer emits both members as string"
                 " literals, so a non-string here means the payload was assembled"
                 " by something else."
             )
@@ -413,9 +414,10 @@ def _require_string_member(event: JsonValue, key: String) raises -> String:
             String("eventbridge-tick: `")
             + key
             + String(
-                "` is present but EMPTY. The renderer substitutes the proto's"
-                " default before emitting (`/` for the path, `POST` for the"
-                " method), so an empty value never leaves it; accepting one here"
+                "` is present but EMPTY. The renderer substitutes the"
+                " schedule's default before emitting (`/` for the path, `POST`"
+                " for the method), so an empty value never leaves it; accepting"
+                " one here"
                 " would mean re-deriving that default from a payload whose"
                 " author is unknown."
             )
@@ -449,7 +451,7 @@ def _slice(s: String, start: Int, end: Int) -> String:
     for the same job. That loop re-ENCODES each byte as its own code point, so a
     path carrying any byte >= 0x80 — a UTF-8 route, a percent-decoded segment —
     comes back mojibake, silently, and the tick dispatches to a route that is not
-    the one the bundle authored. The split point itself is safe either way (an
+    the one the schedule named. The split point itself is safe either way (an
     ASCII `?` cannot occur inside a multi-byte sequence, every continuation byte
     being >= 0x80), but the BYTES ON EITHER SIDE OF IT are not."""
     var b = s.as_bytes()
