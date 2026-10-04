@@ -150,3 +150,20 @@ mojo_gcp_client(
     protos = [],
     deps = _RUNTIME,
 )
+
+# "method `WatchItems` is bidirectional-streaming": a method that streams its
+# requests, listed in a "rest" client's `methods`, is refused by name at
+# generation, never skipped into a client that lacks a method its target
+# lists.
+mojo_gcp_client(
+    name = "rest_streaming_method",
+    bundle_only = [
+        "example/shop/v1/item.proto",
+        "example/shop/v1/watch.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = ["WatchService.WatchItems"],
+    proto_deps = ["//functional/mojo_gcp_client:watch_api"],
+    protos = [],
+    deps = _RUNTIME,
+)

@@ -1,6 +1,8 @@
 //! The REST client emitter: for `ProtocolMode::Rest`, one client method per
 //! unary or server-streaming method carrying a `(google.api.http)`
-//! annotation.
+//! annotation, on a client that starts at the service's
+//! `(google.api.default_host)` (or, with none, refuses to send until its
+//! caller names a host).
 
 use std::fmt::Write as _;
 
@@ -10,16 +12,12 @@ use crate::path_template::{
     percent_encode_simple, BodyDesignator, FieldPartition, PathSegment, PathTemplate, VarPattern,
 };
 
-const REST_HOST: &str = "localhost";
-
-/// The result of emitting one REST service — the generated text plus any
-/// per-method validation notes.
+/// The result of emitting one REST service.
 #[derive(Clone, Debug)]
 pub struct RestServiceEmit {
     /// The generated client-struct source (already indented; appended raw to
     /// the file buffer by the caller).
     pub source: String,
-    pub notes: Vec<String>,
 }
 
 /// The hand-written GCP core the generated REST clients import from (its
@@ -97,21 +95,46 @@ pub fn rest_imports() -> &'static [&'static str] {
 }
 
 /// Emit the REST client struct for `svc`, looking up request messages in
-/// `file`. Returns the generated source + validation notes, or a hard error
-/// for an un-annotated unary method (the missing-annotation LOUD rule).
+/// `file`. Returns the generated source, or a hard error naming the service
+/// and method for: a client-streaming or bidi method (it has no REST form,
+/// and a kept method that silently generated nothing would be a client
+/// missing a method its target listed), an un-annotated method (the missing-annotation
+/// rule), or a `(google.api.default_host)` that is not a plain host name.
 pub fn emit_rest_service(
     file: &IrFile,
     svc: &IrService,
 ) -> Result<RestServiceEmit, String> {
     let mut w = Writer::new();
-    let notes: Vec<String> = Vec::new();
+
+    // Refusals first, before any text: a service is emitted whole or not at
+    // all. A client-streaming or bidi method has no REST/JSON form (one HTTP
+    // request carries one request message), annotated or not; a target names
+    // every method it generates (`methods`), so one here was ASKED FOR, and
+    // skipping it would leave the client silently without it. A
+    // server-streaming method has one: its whole stream is one HTTP
+    // response, a JSON array (`is_rest_server_stream`).
+    for m in &svc.methods {
+        if m.client_streaming {
+            let shape = if m.server_streaming {
+                "bidirectional-streaming"
+            } else {
+                "client-streaming"
+            };
+            return Err(format!(
+                "service `{}` method `{}` is {shape}, and a `rest` target generates \
+                 unary and server-streaming methods only (one HTTP request carries \
+                 one request message, so it has no REST/JSON form): drop it from \
+                 `methods`, or generate it with `default_protocol=grpc`",
+                svc.name, m.name
+            ));
+        }
+    }
+    let fq_service = fq_service_name(file, svc);
+    let default_host = rest_default_host(&fq_service, svc)?;
 
     let struct_name = format!("{}Client", svc.name);
     w.blank();
-    w.line(&format!(
-        "# REST/JSON client for `{}.{}`.",
-        file.proto_package, svc.name
-    ));
+    w.line(&format!("# REST/JSON client for `{fq_service}`."));
     w.line(&format!(
         "struct {struct_name}[C: Connector, T: {GCP_TOKEN_SOURCE}](Movable, Deinitable):"
     ));
@@ -158,19 +181,29 @@ pub fn emit_rest_service(
     w.line("var _default_headers: HeaderMap");
     w.line("\"\"\"Headers merged into every request. Empty unless given.\"\"\"");
     w.blank();
-    // The REST base host. Defaults to the offline `localhost` placeholder (the
-    // scripted-loopback fast path — no DNS); a LIVE caller re-points it at the
-    // real public host via `set_rest_host`. The URL host feeds BOTH the
-    // dial-target DNS resolution and the injected `Host:` header, so the live
-    // dial requires the real host HERE (SNI on the TLS connector is not the
-    // dial target).
+    // The REST base host. It starts at the service's own
+    // `(google.api.default_host)`; with none declared it starts empty, and
+    // every method refuses to send (`_rest_require_host`) until the caller
+    // names one. Never a placeholder: whatever host the URL names receives
+    // the bearer token. The URL host feeds BOTH the dial-target DNS
+    // resolution and the injected `Host:` header (SNI on the TLS connector is
+    // not the dial target).
+    let initial_host = default_host.as_deref().unwrap_or("");
     w.line("var _rest_host: String");
-    w.line("\"\"\"The host the request URLs target. Defaults to the offline");
-    w.line(&format!(
-        "    `{REST_HOST}` placeholder; a live caller sets the real public host via"
-    ));
-    w.line("    `set_rest_host` (it drives BOTH the dial DNS target and the `Host:`");
-    w.line("    header).\"\"\"");
+    w.line("\"\"\"The host the request URLs target: it drives BOTH the dial DNS");
+    match &default_host {
+        Some(h) => {
+            w.line("    target and the `Host:` header. Starts at the service's");
+            w.line(&format!(
+                "    `google.api.default_host`, `{h}`; `set_rest_host` replaces it.\"\"\""
+            ));
+        }
+        None => {
+            w.line("    target and the `Host:` header. Starts empty: the service declares");
+            w.line("    no `google.api.default_host`, so every method refuses to send until");
+            w.line("    `set_rest_host` names a host.\"\"\"");
+        }
+    }
     w.blank();
     // The port and scheme, for an endpoint other than the service's own: an
     // emulator speaks plaintext HTTP on a port of its own (the Firestore,
@@ -190,7 +223,7 @@ pub fn emit_rest_service(
     w.line("self._client = client^");
     w.line("self._token_source = token_source^");
     w.line("self._default_headers = HeaderMap()");
-    w.line(&format!("self._rest_host = String(\"{REST_HOST}\")"));
+    w.line(&format!("self._rest_host = String(\"{initial_host}\")"));
     w.line("self._rest_port = UInt16(0)");
     w.line("self._rest_plaintext = False");
     w.dedent();
@@ -206,19 +239,17 @@ pub fn emit_rest_service(
     w.line("self._client = client^");
     w.line("self._token_source = token_source^");
     w.line("self._default_headers = default_headers^");
-    w.line(&format!("self._rest_host = String(\"{REST_HOST}\")"));
+    w.line(&format!("self._rest_host = String(\"{initial_host}\")"));
     w.line("self._rest_port = UInt16(0)");
     w.line("self._rest_plaintext = False");
     w.dedent();
     w.blank();
     w.line("def set_rest_host(mut self, var host: String):");
     w.indent();
-    w.line("\"\"\"Point the request URLs at a real public host (e.g.");
-    w.line("    `logging.googleapis.com`) for a LIVE dial. The URL host feeds BOTH");
-    w.line("    the dial-target DNS resolution and the injected `Host:` header;");
-    w.line(&format!(
-        "    the default `{REST_HOST}` is the offline scripted-loopback path.\"\"\""
-    ));
+    w.line("\"\"\"Point the request URLs at `host` (a regional or private endpoint,");
+    w.line("    or a test server). The URL host feeds BOTH the dial-target DNS");
+    w.line("    resolution and the injected `Host:` header. An empty host makes");
+    w.line("    every method refuse to send.\"\"\"");
     w.line("self._rest_host = host^");
     w.dedent();
     w.blank();
@@ -233,6 +264,29 @@ pub fn emit_rest_service(
     w.line("self._rest_host = host^");
     w.line("self._rest_port = port");
     w.line("self._rest_plaintext = plaintext");
+    w.dedent();
+    w.blank();
+    // The no-host refusal, called first in every method: before the token
+    // source is asked and before anything is dialled.
+    w.line("def _rest_require_host(self, method: String) raises:");
+    w.indent();
+    w.line("\"\"\"Raise, naming the method, when no host is set.\"\"\"");
+    w.line("if self._rest_host.byte_length() == 0:");
+    w.indent();
+    let why = match &default_host {
+        Some(h) => format!(
+            "the host was set empty (the service's google.api.default_host is {h}); \
+             call set_rest_host(host) with a host before sending"
+        ),
+        None => format!(
+            "{fq_service} declares no google.api.default_host; \
+             call set_rest_host(host) before sending"
+        ),
+    };
+    w.line(&format!(
+        "raise Error(String(\"{struct_name}.\") + method + String(\": no REST host: {why}\"))"
+    ));
+    w.dedent();
     w.dedent();
     w.blank();
     // The default-header merge helper — appends each default header into the
@@ -263,34 +317,57 @@ pub fn emit_rest_service(
                 svc.name, m.name
             ));
         };
-        if m.client_streaming {
-            // A target names every method it generates (`methods`), so a
-            // client-streaming or bidi method here was ASKED FOR: skipping it
-            // would leave the client silently without it. Refuse it by name.
-            let shape = if m.server_streaming {
-                "bidirectional-streaming"
-            } else {
-                "client-streaming"
-            };
-            return Err(format!(
-                "method `{}.{}` is {shape}, which has no REST mapping (one HTTP \
-                 request carries one request message); a rest target may name \
-                 unary and server-streaming methods only. Generate it with \
-                 protocol = \"grpc\"",
-                svc.name, m.name
-            ));
-        }
         emit_rest_method(&mut w, file, m, rule)?;
     }
 
     w.dedent();
     Ok(RestServiceEmit {
         source: w.into_source(),
-        notes,
     })
 }
 
-/// Emit one annotated unary REST method.
+/// The full proto name of `svc`: `pkg.Service`, or the bare service name for
+/// a file that declares no package.
+fn fq_service_name(file: &IrFile, svc: &IrService) -> String {
+    if file.proto_package.is_empty() {
+        svc.name.clone()
+    } else {
+        format!("{}.{}", file.proto_package, svc.name)
+    }
+}
+
+/// The host a generated client of `svc` starts at: its
+/// `(google.api.default_host)`, or `None` when it declares none. googleapis
+/// writes the option as a bare host (`logging.googleapis.com`), and some
+/// services as `host:443`; the port is dropped, as the client always speaks
+/// HTTPS on the default port. Anything else (another port, a scheme, a path,
+/// an empty value, a character outside a DNS name) is refused by name rather
+/// than written into the client.
+fn rest_default_host(fq_service: &str, svc: &IrService) -> Result<Option<String>, String> {
+    let Some(declared) = &svc.default_host else {
+        return Ok(None);
+    };
+    let host = declared.strip_suffix(":443").unwrap_or(declared);
+    let dns_name = !host.is_empty()
+        && host.len() <= 253
+        && host.split('.').all(|label| {
+            !label.is_empty()
+                && label.len() <= 63
+                && !label.starts_with('-')
+                && !label.ends_with('-')
+                && label.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-')
+        });
+    if !dns_name {
+        return Err(format!(
+            "service `{fq_service}` declares `(google.api.default_host)` = {declared:?}, \
+             which is not a host name (optionally `:443`): a REST client sends to it over \
+             HTTPS on the default port"
+        ));
+    }
+    Ok(Some(host.to_string()))
+}
+
+/// Emit one annotated unary or server-streaming REST method.
 fn emit_rest_method(
     w: &mut Writer,
     file: &IrFile,
@@ -386,7 +463,9 @@ fn emit_rest_method(
             rule.path_template
         ));
     }
-
+    // No host, no request: refused before the token source is asked and
+    // before anything is dialled.
+    w.line(&format!("self._rest_require_host(String(\"{method_name}\"))"));
 
     // -- path substitution ---------------------------------------------------
     emit_path_build(w, &template, &bool_fields);
@@ -997,6 +1076,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Svc".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "DoThing".into(),
                 input: TypeRef {
@@ -1034,6 +1114,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "GetShelf".into(),
                 input: TypeRef {
@@ -1080,6 +1161,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Svc".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "GetThing".into(),
                 input: TypeRef {
@@ -1116,7 +1198,11 @@ mod tests {
         );
     }
 
-    fn stream_method(client_streaming: bool, server_streaming: bool) -> (IrFile, IrService) {
+    fn stream_method(
+        client_streaming: bool,
+        server_streaming: bool,
+        annotated: bool,
+    ) -> (IrFile, IrService) {
         let req = IrMessage {
             name: "Req".into(),
             mojo_name: "Req".into(),
@@ -1125,22 +1211,18 @@ mod tests {
             fields: vec![scalar_field("parent", ScalarKind::String)],
             oneofs: vec![],
         };
+        let ty = TypeRef { fq_name: ".tiny.rest.v1.Req".into(), mojo_name: "Req".into() };
         let svc = IrService {
             name: "Svc".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "RunQuery".into(),
-                input: TypeRef {
-                    fq_name: ".tiny.rest.v1.Req".into(),
-                    mojo_name: "Req".into(),
-                },
-                output: TypeRef {
-                    fq_name: ".tiny.rest.v1.Req".into(),
-                    mojo_name: "Req".into(),
-                },
+                input: ty.clone(),
+                output: ty,
                 client_streaming,
                 server_streaming,
                 idempotent: false,
-                http_rule: Some(IrHttpRule {
+                http_rule: annotated.then(|| IrHttpRule {
                     verb: "post".into(),
                     path_template: "/v1/{parent=projects/*}:runQuery".into(),
                     body: "*".into(),
@@ -1153,20 +1235,21 @@ mod tests {
 
     #[test]
     fn server_streaming_method_reads_the_array_through_the_core() {
-        let (file, svc) = stream_method(false, true);
+        let (file, svc) = stream_method(false, true, true);
         let emit = emit_rest_service(&file, &svc).unwrap();
-        assert!(emit.notes.is_empty(), "{:?}", emit.notes);
         let src = &emit.source;
         assert!(
             src.contains("mut reactor: Reactor[RT.Sink]) raises -> List[Req]:"),
             "{src}"
         );
+        // The no-host refusal comes first, as for a unary method.
+        let guard = src.find("self._rest_require_host(String(\"run_query\"))").unwrap();
         // The status line is checked first, as for a unary method.
         let status = src.find("if status_int < 200 or status_int >= 300:").unwrap();
         let items = src
             .find("var _rest_items = gcp_rest_stream_items(String(\"POST\"), String(\"RunQuery\"), status_int, resp_bytes)")
             .unwrap();
-        assert!(status < items);
+        assert!(guard < status && status < items);
         assert!(src.contains("_rest_out.append(decode_json_lenient[Req](_rest_item))"));
         assert!(src.contains("return _rest_out^"));
         // No unary decode of the whole body.
@@ -1179,19 +1262,139 @@ mod tests {
 
     #[test]
     fn a_file_without_a_stream_method_imports_no_stream_reader() {
-        let (file, _) = stream_method(false, false);
+        let (file, _) = stream_method(false, false, true);
         assert_eq!(rest_stream_import(&file), None);
     }
 
     #[test]
     fn client_streaming_and_bidi_methods_are_refused_by_name() {
-        for (server, shape) in [(false, "client-streaming"), (true, "bidirectional-streaming")] {
-            let (file, svc) = stream_method(true, server);
-            let err = emit_rest_service(&file, &svc).unwrap_err();
-            assert!(err.contains(shape), "{err}");
-            assert!(err.contains("protocol = \"grpc\""), "{err}");
-            assert_eq!(rest_stream_import(&file), None);
+        // Annotated or not: the shape is the reason it has no REST form, and
+        // an annotation would not give it one.
+        for annotated in [true, false] {
+            for (server, shape) in [(false, "client-streaming"), (true, "bidirectional-streaming")] {
+                let (file, svc) = stream_method(true, server, annotated);
+                let err = emit_rest_service(&file, &svc).unwrap_err();
+                assert!(
+                    err.contains(&format!("service `Svc` method `RunQuery` is {shape}")),
+                    "{err}"
+                );
+                assert!(err.contains("drop it from `methods`"), "{err}");
+                assert!(err.contains("`default_protocol=grpc`"), "{err}");
+                assert_eq!(rest_stream_import(&file), None);
+            }
         }
+    }
+
+    #[test]
+    fn unannotated_server_streaming_method_is_refused_for_its_annotation() {
+        // A server-streaming method has a REST form, so what it lacks is the
+        // `(google.api.http)` rule, and that is what the refusal names.
+        let (file, svc) = stream_method(false, true, false);
+        let err = emit_rest_service(&file, &svc).unwrap_err();
+        assert!(
+            err.contains("method `RunQuery` has no `(google.api.http)` annotation"),
+            "{err}"
+        );
+    }
+
+    fn with_host(host: Option<&str>) -> Result<RestServiceEmit, String> {
+        with_host_in("tiny.rest.v1", host)
+    }
+
+    fn with_host_in(package: &str, host: Option<&str>) -> Result<RestServiceEmit, String> {
+        let req = IrMessage {
+            name: "Req".into(),
+            mojo_name: "Req".into(),
+            fq_name: ".tiny.rest.v1.Req".into(),
+            is_map_entry: false,
+            fields: vec![],
+            oneofs: vec![],
+        };
+        let ty = TypeRef { fq_name: ".tiny.rest.v1.Req".into(), mojo_name: "Req".into() };
+        let svc = IrService {
+            name: "Logging".into(),
+            default_host: host.map(str::to_string),
+            methods: vec![IrMethod {
+                name: "M".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(IrHttpRule {
+                    verb: "post".into(),
+                    path_template: "/v2/entries:list".into(),
+                    body: "*".into(),
+                }),
+                routing_rule: None,
+            }],
+        };
+        let mut file = file_with(vec![req], svc.clone());
+        file.proto_package = package.to_string();
+        emit_rest_service(&file, &svc)
+    }
+
+    #[test]
+    fn the_client_starts_at_the_declared_default_host() {
+        let e = with_host(Some("logging.googleapis.com")).unwrap();
+        assert_eq!(
+            e.source.matches("self._rest_host = String(\"logging.googleapis.com\")").count(),
+            2,
+            "both constructors start at the default host"
+        );
+        assert!(!e.source.contains("localhost"));
+        assert!(e.source.contains("self._rest_require_host(String(\"m\"))"));
+    }
+
+    #[test]
+    fn a_port_443_default_host_drops_the_port() {
+        let e = with_host(Some("logging.googleapis.com:443")).unwrap();
+        assert!(e.source.contains("self._rest_host = String(\"logging.googleapis.com\")"));
+        assert!(!e.source.contains(":443"));
+    }
+
+    #[test]
+    fn no_default_host_starts_empty_and_every_method_refuses_first() {
+        let e = with_host(None).unwrap();
+        assert_eq!(e.source.matches("self._rest_host = String(\"\")").count(), 2);
+        assert!(!e.source.contains("localhost"));
+        assert!(e.source.contains(
+            "no REST host: tiny.rest.v1.Logging declares no google.api.default_host; \
+             call set_rest_host(host) before sending"
+        ));
+        // The guard is the method's first statement: before the token
+        // source is asked, before the URL is built.
+        let body = &e.source[e.source.find("def m[RT: Runtime]").unwrap()..];
+        let guard = body.find("self._rest_require_host(String(\"m\"))").unwrap();
+        assert!(guard < body.find("access_token()").unwrap());
+        assert!(guard < body.find("var url").unwrap());
+        assert!(guard < body.find("send_buffered").unwrap());
+    }
+
+    #[test]
+    fn a_default_host_that_is_not_a_host_name_is_refused() {
+        for bad in [
+            "",
+            "https://logging.googleapis.com",
+            "logging.googleapis.com:8443",
+            "logging.googleapis.com/v2",
+            "-bad.example.com",
+            "a..b",
+            "bad host",
+            "x\"y",
+        ] {
+            let err = with_host(Some(bad)).unwrap_err();
+            assert!(
+                err.contains("service `tiny.rest.v1.Logging` declares `(google.api.default_host)`"),
+                "{bad}: {err}"
+            );
+        }
+        // A file with no package names the bare service, not `.Logging`.
+        let err = with_host_in("", Some("https://logging.googleapis.com")).unwrap_err();
+        assert!(
+            err.contains("service `Logging` declares `(google.api.default_host)`"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1217,6 +1420,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "CreateBook".into(),
                 input: TypeRef {
@@ -1278,6 +1482,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "Revoke".into(),
                 input: TypeRef {
@@ -1333,6 +1538,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "GetBook".into(),
                 input: TypeRef {
@@ -1385,6 +1591,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "GetShelf".into(),
                 input: TypeRef {
@@ -1446,6 +1653,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "ListShelf".into(),
                 input: TypeRef {
@@ -1508,6 +1716,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "InsertShelf".into(),
                 input: TypeRef {
@@ -1561,6 +1770,7 @@ mod tests {
         };
         let svc = IrService {
             name: "Library".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "DeleteShelf".into(),
                 input: TypeRef {
@@ -1601,6 +1811,7 @@ mod tests {
         let ty = TypeRef { fq_name: ".tiny.rest.v1.Req".into(), mojo_name: "Req".into() };
         let svc = IrService {
             name: "Logging".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),

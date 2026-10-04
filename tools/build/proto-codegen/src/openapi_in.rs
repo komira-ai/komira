@@ -423,6 +423,7 @@ impl OpenApiLowerer {
         }
         Ok(vec![IrService {
             name: "OpenApiService".to_string(),
+            default_host: None,
             methods,
         }])
     }

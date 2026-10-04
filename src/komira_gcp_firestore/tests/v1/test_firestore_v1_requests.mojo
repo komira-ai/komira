@@ -243,7 +243,26 @@ def test_run_query_posts_the_structured_query() raises:
     assert_true(String('"limit":10') in body)
 
 
+def test_a_fresh_client_starts_at_the_default_host() raises:
+    # No `set_rest_host`: Firestore declares `option (google.api.default_host)
+    # = "firestore.googleapis.com"`, and the generated client starts there,
+    # on https at the scheme's port. Read off a fresh client; nothing is sent.
+    var c = _Client(
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(
+                ScriptedStream.from_read_script(_ok(String("{}")))
+            )
+        ),
+        StaticTokenSource(String("test-access-token")),
+    )
+    assert_equal(c._rest_host, _HOST)
+    assert_equal(c._rest_port, UInt16(0))
+    assert_equal(c._rest_plaintext, False)
+    assert_equal(c._client._connector.connect_call_count(), 0)
+
+
 def main() raises:
+    test_a_fresh_client_starts_at_the_default_host()
     test_commit_create_if_absent()
     test_commit_update_time_precondition_and_delete()
     test_batch_get_names_the_documents()

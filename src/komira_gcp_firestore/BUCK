@@ -24,9 +24,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # with one JSON array, which the client returns as a List (an error element
 # at its end raises like a failed status). It reads no environment.
 #
-# A live caller MUST call `set_rest_host("firestore.googleapis.com")` (or
-# `set_rest_endpoint` for an emulator): the generated client starts at the
-# offline `localhost` placeholder.
+# The generated client starts at the service's `(google.api.default_host)`,
+# firestore.googleapis.com, on https; `set_rest_host` or (for an emulator)
+# `set_rest_endpoint` points it elsewhere.
 #
 # `bundle_only` is the part of the firestore_v1 closure those methods reach.
 # Gated by its layout probe and the tests in tests/v1, hand-written against

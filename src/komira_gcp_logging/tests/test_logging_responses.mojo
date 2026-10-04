@@ -64,7 +64,6 @@ def _list(body: String) raises -> ListLogEntriesResponse:
     var c = LoggingServiceV2Client[ScriptedConnector, StaticTokenSource](
         http^, StaticTokenSource(String("test-access-token"))
     )
-    c.set_rest_host(String("logging.googleapis.com"))
     var names = List[String]()
     names.append(String("projects/demo-project"))
     var req = ListLogEntriesRequest(
@@ -265,7 +264,6 @@ def test_no_content_is_an_empty_page() raises:
     var c = LoggingServiceV2Client[ScriptedConnector, StaticTokenSource](
         http^, StaticTokenSource(String("test-access-token"))
     )
-    c.set_rest_host(String("logging.googleapis.com"))
     var names = List[String]()
     names.append(String("projects/demo-project"))
     var req = ListLogEntriesRequest(

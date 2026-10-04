@@ -1,0 +1,35 @@
+// A REST service beside a streaming method: GetItem is unary, WatchItems
+// bidirectional-streaming. A rest target may list GetItem; listing WatchItems
+// is refused, since a method that streams its requests has no REST/JSON form
+// (one HTTP request carries one request message).
+syntax = "proto3";
+
+package komira.test.feed.v1;
+
+import "google/api/annotations.proto";
+
+service Feed {
+  rpc GetItem(GetItemRequest) returns (Item) {
+    option (google.api.http) = {
+      get: "/v1/{name=items/*}"
+    };
+  }
+
+  rpc WatchItems(stream WatchItemsRequest) returns (stream Item) {
+    option (google.api.http) = {
+      get: "/v1/items:watch"
+    };
+  }
+}
+
+message GetItemRequest {
+  string name = 1;
+}
+
+message WatchItemsRequest {
+  string prefix = 1;
+}
+
+message Item {
+  string name = 1;
+}
