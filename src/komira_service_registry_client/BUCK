@@ -1,0 +1,25 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The peer client for the service registry: what a deployed service holds to
+# turn a peer's NAME into the URL it dials. RemotePeerDirectory[T] adds a TTL
+# cache and a bounded serve-stale policy over a RegistryTransport seam; every
+# lookup failure is a PeerResolution value, never an exception. It speaks the
+# discovery route of komira_service_registry's HTTP contract and carries no
+# auth. The one production transport (LiveRegistryTransport) is a plain GET over
+# komira_http_client on the komira_async blocking runtime; the tests drive the
+# client through in-file transport conformers, with no socket.
+
+mojo_library(
+    name = "komira_service_registry_client",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_service_registry:komira_service_registry",
+    ],
+    test_srcs = [
+        "tests/test_peer_client.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
