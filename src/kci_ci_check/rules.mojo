@@ -36,43 +36,44 @@
 #       naming another stage, or one that is a variable, is a
 #       disagreement), and a part job (R9) the literal name of the stage it
 #       runs a part of
-#   R6  a pull request's code runs only in a pull request's per-change
-#       check. [Amended: before, no trigger could be `pull_request`.]
+#   R6  a pull request's code runs only in the job of the machine file's
+#       PULL_REQUEST stage, in the same workflow as the release stages.
+#       [Amended: before, no trigger could be `pull_request`.] The rule
+#       itself is in pull_request.mojo:
 #         * `pull_request_target` is never a trigger (it runs a pull
 #           request's code with the base repository's secrets);
-#         * a workflow with a `pull_request` trigger is a PULL REQUEST
-#           WORKFLOW: `pull_request` is its only trigger, and its jobs run
-#           only the machine file's PULL_REQUEST stages (the typed `trigger`
-#           field, kci_release_machine). Every other workflow is a RELEASE
-#           WORKFLOW and runs only PUSH stages. A job named after a stage of
-#           the other kind, or running a part of one, is a disagreement, and
-#           R1 asks a job only for each stage of the workflow's own kind; a
-#           `pull_request` trigger when the machine file declares no
-#           PULL_REQUEST stage is a disagreement;
-#         * a PULL_REQUEST stage's job runs in no environment (R2), holds
-#           `id-token: write` only when the stage is farm-connected (R4: the
-#           farm connection exchanges it; a PULL_REQUEST stage never
-#           publishes), and its one `kci run` (R5) carries `--affected-by
-#           ${{ github.event.pull_request.base.sha }}`, written so (the base
-#           commit of the pull request; quotes and the spacing inside
-#           `${{ }}` aside); every `actions/checkout` step of the job has
-#           `with: fetch-depth: 0`, and there is one (kci reads the change
-#           from git and refuses a shallow clone). What it runs is a BUILD
-#           step: the machine file refuses any other kind in such a stage, so
-#           no publish or deploy step is reachable from a pull request;
-#         * FORK PULL REQUESTS: a farm-connected PULL_REQUEST stage's job
-#           carries the job-level condition `if: github.event.pull_request.
-#           head.repo.full_name == github.repository` (bare or inside
-#           `${{ }}`, nothing else), so a pull request from a fork never
-#           runs its code on a job that joins the farm's network; a fork's
-#           change reaches the farm only when a maintainer pushes it to a
-#           branch of this repository. A job that is not farm-connected holds
-#           no credential (no environment, no identity token) and needs no
-#           condition;
+#         * `pull_request` is a trigger exactly when the machine file
+#           declares a PULL_REQUEST stage (the typed `trigger` field,
+#           kci_release_machine), and R1 asks a job for that stage too;
+#         * when it is, every job but the PULL_REQUEST stage's is
+#           RELEASE-ONLY: a PUSH stage's job, and a part job of one, carries
+#           a job-level `if:` that is a conjunction (`&&`, no `||`; bare or
+#           inside `${{ }}`) with a term `github.event_name !=
+#           'pull_request'` or `github.event_name == '<event>'` naming
+#           another event. No release job, environment, publishing token or
+#           release tailnet node is reached from a pull request;
+#         * the PULL_REQUEST stage's job carries the job-level condition
+#           `if: github.event.pull_request.head.repo.full_name ==
+#           github.repository` (bare or inside `${{ }}`, nothing else): a
+#           pull request from a fork runs nothing (its code reaches the farm
+#           only when a maintainer pushes it to a branch of this
+#           repository), and a push or a manual run skips the job;
+#         * that job runs the whole stage in one job (no part job), in no
+#           environment (R2); its `permissions` hold `contents: read` and
+#           `id-token: write` only (R4 allows the identity token only when
+#           the stage is farm-connected: the farm connection exchanges it;
+#           a PULL_REQUEST stage never publishes); its one `kci run` (R5)
+#           carries `--affected-by ${{ github.event.pull_request.base.sha
+#           }}`, written so (the base commit of the pull request; quotes and
+#           the spacing inside `${{ }}` aside); every `actions/checkout`
+#           step of the job has `with: fetch-depth: 0`, and there is one
+#           (kci reads the change from git and refuses a shallow clone).
+#           What it runs is a BUILD step: the machine file refuses any other
+#           kind in such a stage, so nothing is published or deployed from a
+#           pull request;
 #         * a PUSH stage's `kci run` never carries `--affected-by`.
-#   R7  a release workflow's `workflow_dispatch` takes an input `revision`
-#       (the commit a manual run releases); a pull request workflow has no
-#       `workflow_dispatch` (R6)
+#   R7  `workflow_dispatch` takes an input `revision` (the commit a manual
+#       run releases)
 #   R8  every `uses:` is pinned to a full 40-hex commit id, except the one
 #       local action `./.github/actions/farm-connect` (a local action is part
 #       of the checked-out commit; the `uses:` inside it are pinned by its
@@ -127,24 +128,12 @@ from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
 from kci_release_channel import Channel, find_channel, parse_channels_file
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
+from .pull_request import check_pull_request_job, check_release_only
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
 
 comptime FARM_CONNECT_ACTION: String = "./.github/actions/farm-connect"
 """The one local action a workflow may use (R8), and the step a
 farm-connected stage's job must have (R11)."""
-
-comptime PULL_REQUEST_BASE_EXPRESSION: String = "github.event.pull_request.base.sha"
-"""What a PULL_REQUEST stage's `kci run --affected-by` passes, inside
-`${{ }}` (R6): the pull request's base commit, a full commit id."""
-
-comptime SAME_REPOSITORY_CONDITION: String = "github.event.pull_request.head.repo.full_name == github.repository"
-"""The job-level `if:` a farm-connected PULL_REQUEST stage's job carries
-(R6): a fork's pull request never runs on a farm-connected job."""
-
-comptime CHECKOUT_ACTION: String = "actions/checkout@"
-"""The checkout action's `uses:` prefix; under R6 each such step of a
-PULL_REQUEST stage's job fetches the full history."""
-
 
 struct ChannelsFile(Copyable, Movable):
     """A channels file's path, as a machine-file step names it, and its
@@ -505,6 +494,7 @@ def _check_job(
     machine_path: String,
     split: Bool,
     after_jobs: List[String],
+    pr_trigger: Bool,
     mut findings: List[String],
 ):
     var where = _at(doc, job) + String("job '") + job_id + String("'")
@@ -608,8 +598,15 @@ def _check_job(
         )
     # R6: what a PULL_REQUEST stage's job runs, and that a PUSH stage's does not
     if st.is_pull_request():
-        _check_pull_request_job(doc, job_id, job, st, calls, findings)
+        var values = List[String]()
+        var given = List[Bool]()
+        for i in range(len(calls)):
+            values.append(calls[i].affected_by.copy())
+            given.append(calls[i].has_affected_by)
+        check_pull_request_job(doc, job_id, job, values, given, findings)
     else:
+        if pr_trigger:
+            check_release_only(doc, job_id, job, st.name, findings)
         for i in range(len(calls)):
             if calls[i].has_affected_by:
                 findings.append(
@@ -627,69 +624,15 @@ def _check_job(
     _check_calls_common(doc, job_id, job, calls, machine_path, findings)
 
 
-def _is_expression(text: String, expression: String) -> Bool:
-    """`text` is `${{ <expression> }}`, the spacing inside the braces
-    aside."""
-    var t = String(text.strip())
-    if not t.startswith(String("${{")) or not t.endswith(String("}}")) or t.byte_length() < 5:
-        return False
-    var inner = String(String(t[byte = 3 : t.byte_length() - 2]).strip())
-    return inner == expression
-
-
-def _check_pull_request_job(
-    doc: WorkflowDoc, job_id: String, job: Int, st: Stage, calls: List[KciRunCall], mut findings: List[String]
-):
-    """R6 for the job of a PULL_REQUEST stage (file header): the base
-    commit, the full history, and the fork condition."""
-    var where = _at(doc, job) + String("job '") + job_id + String("': R6: stage '") + job_id + String("' is a PULL_REQUEST stage")
-    var want = String("${{ ") + String(PULL_REQUEST_BASE_EXPRESSION) + String(" }}")
-    for i in range(len(calls)):
-        if not calls[i].has_affected_by:
-            findings.append(
-                where + String(", so its `kci run` carries --affected-by ") + want
-                + String(" (the per-change check of the pull request)")
-            )
-        elif not _is_expression(calls[i].affected_by, String(PULL_REQUEST_BASE_EXPRESSION)):
-            findings.append(
-                where + String(": `--affected-by ") + calls[i].affected_by + String("`; it passes ") + want
-                + String(", written so")
-            )
-    var checkouts = 0
-    var steps = doc.items(doc.child(job, String("steps")))
-    for i in range(len(steps)):
-        var u = doc.child(steps[i], String("uses"))
-        if u < 0 or doc.kind(u) != NODE_SCALAR or not doc.text(u).startswith(String(CHECKOUT_ACTION)):
-            continue
-        checkouts += 1
-        var depth = doc.child(doc.child(steps[i], String("with")), String("fetch-depth"))
-        if depth < 0 or doc.kind(depth) != NODE_SCALAR or doc.text(depth) != String("0"):
-            findings.append(
-                _at(doc, u) + String("job '") + job_id + String("': R6: its checkout has no `with: fetch-depth: 0`;")
-                + String(" kci reads the change from git and refuses a shallow clone")
-            )
-    if checkouts == 0:
-        findings.append(
-            where + String(", so the job checks out the full history (`uses: ") + String(CHECKOUT_ACTION)
-            + String("<sha>` with `fetch-depth: 0`); it has no checkout step")
-        )
-    if st.farm_connected:
-        var cond = doc.child(job, String("if"))
-        var ok = False
-        if cond >= 0 and doc.kind(cond) == NODE_SCALAR:
-            var text = doc.text(cond)
-            ok = String(text.strip()) == String(SAME_REPOSITORY_CONDITION) or _is_expression(
-                text, String(SAME_REPOSITORY_CONDITION)
-            )
-        if not ok:
-            findings.append(
-                where + String(" and farm-connected, so the job carries `if: ") + String(SAME_REPOSITORY_CONDITION)
-                + String("`: a pull request from a fork never runs its code on a job that joins the farm's network")
-            )
-
-
 def _check_part_job(
-    doc: WorkflowDoc, job_id: String, job: Int, st: Stage, g: ReleaseMachine, machine_path: String, mut findings: List[String]
+    doc: WorkflowDoc,
+    job_id: String,
+    job: Int,
+    st: Stage,
+    g: ReleaseMachine,
+    machine_path: String,
+    pr_trigger: Bool,
+    mut findings: List[String],
 ):
     """R2, R3, R4, R11 for a job that runs a part of stage `st` (file
     header, R9); then R10 and R12."""
@@ -727,6 +670,9 @@ def _check_part_job(
                 + also
             )
             break
+    # R6: a part of a release stage is release-only too
+    if pr_trigger:
+        check_release_only(doc, job_id, job, st.name, findings)
     var calls = _job_calls(doc, job)
     _check_calls_common(doc, job_id, job, calls, machine_path, findings)
 
@@ -832,27 +778,6 @@ def _stage_index(g: ReleaseMachine, name: String) -> Int:
     return -1
 
 
-def _kind_mismatch(
-    doc: WorkflowDoc, job_id: String, job: Int, st: Stage, pr_workflow: Bool, mut findings: List[String]
-) -> Bool:
-    """R6: a job runs a stage of the other kind than its workflow's. Says
-    so and returns True; the job is then checked no further."""
-    if st.is_pull_request() == pr_workflow:
-        return False
-    var where = _at(doc, job) + String("R6: job '") + job_id + String("' runs stage '") + st.name + String("', ")
-    if st.is_pull_request():
-        findings.append(
-            where + String("a PULL_REQUEST stage, in a workflow not triggered by pull_request: its job belongs")
-            + String(" in the pull request's workflow")
-        )
-    else:
-        findings.append(
-            where + String("a PUSH stage, in a workflow triggered by pull_request: a release stage never runs a")
-            + String(" pull request's code")
-        )
-    return True
-
-
 def check_workflow_doc(
     doc: WorkflowDoc, g: ReleaseMachine, token_stages: List[String], machine_path: String
 ) -> List[String]:
@@ -866,32 +791,30 @@ def check_workflow_doc(
     var triggers = _triggers(doc, on)
     if len(triggers) == 0:
         findings.append(String("R6: the workflow has no `on:` triggers"))
-    var pr_workflow = _member(triggers, String("pull_request"))
-    var pr_stages = 0
+    var pr_trigger = _member(triggers, String("pull_request"))
+    var pr_stages = List[String]()
     for i in range(len(g.stages)):
         if g.stages[i].is_pull_request():
-            pr_stages += 1
+            pr_stages.append(g.stages[i].name.copy())
     for i in range(len(triggers)):
         if triggers[i] == String("pull_request_target"):
             findings.append(
                 _at(doc, on) + String("R6: trigger 'pull_request_target': it runs a pull request's code with the")
                 + String(" base repository's secrets, and no workflow has it")
             )
-        elif triggers[i] == String("pull_request") and pr_stages == 0:
+        elif triggers[i] == String("pull_request") and len(pr_stages) == 0:
             findings.append(
                 _at(doc, on) + String("R6: trigger 'pull_request': the machine file declares no PULL_REQUEST stage,")
-                + String(" and a release workflow never runs a pull request's code")
+                + String(" and a release stage never runs a pull request's code")
             )
-        elif pr_workflow and triggers[i] != String("pull_request"):
-            findings.append(
-                _at(doc, on) + String("R6: trigger '") + triggers[i]
-                + String("' in a workflow triggered by pull_request: such a workflow has no other trigger")
-                + String(" (its job passes the pull request's base commit)")
-            )
-    if not pr_workflow:
-        var inputs = doc.child(doc.child(on, String("workflow_dispatch")), String("inputs"))
-        if doc.child(inputs, String("revision")) < 0:
-            findings.append(_at(doc, on) + String("R7: workflow_dispatch takes no input `revision` (the commit a manual run releases)"))
+    if len(pr_stages) > 0 and not pr_trigger:
+        findings.append(
+            _at(doc, on) + String("R6: the machine file declares the PULL_REQUEST stage '") + pr_stages[0]
+            + String("', so the workflow has a `pull_request` trigger (its job is the pull request's check)")
+        )
+    var inputs = doc.child(doc.child(on, String("workflow_dispatch")), String("inputs"))
+    if doc.child(inputs, String("revision")) < 0:
+        findings.append(_at(doc, on) + String("R7: workflow_dispatch takes no input `revision` (the commit a manual run releases)"))
     # R4, workflow level
     if _id_token_write(doc, doc.child(root, String("permissions"))):
         findings.append(
@@ -908,14 +831,17 @@ def check_workflow_doc(
     var part_stage = List[String]()
     for i in range(len(job_ids)):
         part_stage.append(String(""))
-        var own = _stage_index(g, job_ids[i])
-        if own >= 0:
-            _ = _kind_mismatch(doc, job_ids[i], job_nodes[i], g.stages[own], pr_workflow, findings)
+        if g.has_stage(job_ids[i]):
             continue
         var calls = _job_calls(doc, job_nodes[i])
         if len(calls) == 1 and calls[0].has_only and g.has_stage(calls[0].stage):
             var of = _stage_index(g, calls[0].stage)
-            if not _kind_mismatch(doc, job_ids[i], job_nodes[i], g.stages[of], pr_workflow, findings):
+            if g.stages[of].is_pull_request():
+                findings.append(
+                    _at(doc, job_nodes[i]) + String("R6: job '") + job_ids[i] + String("' runs a part of stage '")
+                    + calls[0].stage + String("', a PULL_REQUEST stage, which runs whole in the job of its name")
+                )
+            else:
                 part_stage[i] = calls[0].stage.copy()
             continue
         findings.append(
@@ -925,9 +851,6 @@ def check_workflow_doc(
         )
     for i in range(len(g.stages)):
         ref st = g.stages[i]
-        # a stage of the other kind runs in the other workflow (R6)
-        if st.is_pull_request() != pr_workflow:
-            continue
         var found = -1
         for j in range(len(job_ids)):
             if job_ids[j] == st.name:
@@ -952,10 +875,10 @@ def check_workflow_doc(
                     after_jobs.append(job_ids[j].copy())
         _check_job(
             doc, job_ids[found], job_nodes[found], st, _member(token_stages, st.name), machine_path, len(parts) > 0,
-            after_jobs, findings,
+            after_jobs, pr_trigger, findings,
         )
         for k in range(len(parts)):
-            _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, findings)
+            _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, pr_trigger, findings)
         if split:
             _check_split(doc, st, job_ids[found], job_nodes[found], job_ids, job_nodes, parts, findings)
     # R8

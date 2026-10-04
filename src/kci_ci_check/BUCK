@@ -10,11 +10,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `after`, `id-token: write` exactly on the stages that publish by OIDC
 # trusted publishing or are farm-connected, the farm-connect action exactly on
 # the farm-connected stages, one literal `kci run --stage <id>` per job with a
-# `--summary-file`, a pull_request trigger only on a workflow whose jobs run
-# the machine file's PULL_REQUEST stages (no environment, `--affected-by` the
-# pull request's base commit, the full history, never a fork's code on a
-# farm-connected job), a `revision` input on a release workflow's
-# workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
+# `--summary-file`, a pull_request trigger exactly when the machine file
+# declares a PULL_REQUEST stage, whose job is then the only one a pull request
+# runs (same-repository pull requests only, no environment, `contents: read`
+# and the farm connection's token, `--affected-by` the pull request's base
+# commit, the full history) while every other job's `if:` keeps a pull request
+# out, a `revision` input on workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
 # action excepted), no `--only` on a release job unless the stage is SPLIT
 # (the job named after the stage runs its steps, other jobs run its
 # validations, and together they run each step and validation exactly once;
@@ -47,10 +48,10 @@ mojo_library(
         # one stage split over jobs whose --only parts run all of it once
         # (R1 and R9 as amended)
         "tests/test_ci_split_stage.mojo",
-        # R6 as amended: a pull request workflow running only PULL_REQUEST
-        # stages (no environment, the base commit, the full history, no fork
-        # on a farm-connected job), the release workflow beside it, one
-        # mutation per branch
+        # R6 as amended: one workflow; on pull_request only the PULL_REQUEST
+        # stage's job runs (no fork, no environment, minimal permissions, the
+        # base commit, the full history), every release job keeps a pull
+        # request out; one mutation per branch
         "tests/test_ci_pull_request.mojo",
         # the repository's own kci.yml held to its own release/machine.textproto
         "tests/test_repo_kci_yml.mojo",

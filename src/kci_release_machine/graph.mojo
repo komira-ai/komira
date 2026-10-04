@@ -16,15 +16,15 @@
 # node must not hold a publishing token.
 #
 # `trigger` says which CI event runs the stage's job: PUSH (the default: a
-# release workflow, run on a push or by hand) or PULL_REQUEST (the per-change
-# check of a pull request: `kci run --stage <S> --affected-by <base>`, in a
-# workflow triggered by `pull_request`, which kci_ci_check holds). A
-# PULL_REQUEST stage runs a pull request's code, so it may hold BUILD steps
-# only (nothing is published or deployed from it), runs in NO GitHub
-# environment (an `environment` field is refused, and none is defaulted:
-# an environment's secrets and approvals never reach a pull request), runs
-# after no stage and no stage runs after it (its job is in another workflow
-# than the release stages'). It may be farm-connected.
+# release stage, run on a push or by hand) or PULL_REQUEST (the per-change
+# check of a pull request: `kci run --stage <S> --affected-by <base>`, the
+# one job of the workflow that runs on `pull_request`, as kci_ci_check R6
+# holds). A PULL_REQUEST stage runs a pull request's code, so it may hold
+# BUILD steps only (nothing is published or deployed from it), runs in NO
+# GitHub environment (an `environment` field is refused, and none is
+# defaulted: an environment's secrets and approvals never reach a pull
+# request), runs after no stage and no stage runs after it (its job runs on
+# a pull request, where no release job runs). It may be farm-connected.
 #
 # A STEP has a name (unique in its stage), a kind and the inputs of that
 # kind:
@@ -583,7 +583,7 @@ def _check_pull_request_stage(source: String, g: ReleaseMachine, i: Int) raises:
     if s.after.byte_length() > 0:
         raise Error(
             _at(source, s.line) + where + String(" and runs after '") + s.after
-            + String("': its job is in the pull request's workflow, which runs no release stage")
+            + String("': its job runs on a pull request, where no release stage runs")
         )
     for j in range(len(g.stages)):
         if g.stages[j].after == s.name:
