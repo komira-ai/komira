@@ -185,14 +185,7 @@ impl<'a> Emitter<'a> {
 
     fn emit_rest_service_or_panic(&mut self, svc: &IrService) {
         match crate::emit_rest::emit_rest_service(self.file, svc) {
-            Ok(emit) => {
-                self.buf.push_str(&emit.source);
-                // Validation notes (streaming methods skipped) — emitted as a
-                // trailing comment block so they are visible in the output.
-                for note in &emit.notes {
-                    self.buf.push_str(&format!("# REST-NOTE: {note}\n"));
-                }
-            }
+            Ok(emit) => self.buf.push_str(&emit.source),
             Err(e) => panic!("REST emit failed for service `{}`: {e}", svc.name),
         }
     }
@@ -2175,6 +2168,7 @@ mod mojo_100_service_client_tests {
             enums: vec![],
             services: vec![IrService {
                 name: "Thing".to_string(),
+                default_host: None,
                 methods: vec![IrMethod {
                     name: "DoThing".to_string(),
                     input: tref("Req"),
@@ -2283,6 +2277,7 @@ mod gcp_grpc_client_tests {
             enums: vec![],
             services: vec![IrService {
                 name: "Thing".to_string(),
+                default_host: None,
                 methods: vec![
                     method("Get", false, false),
                     method("Watch", false, true),

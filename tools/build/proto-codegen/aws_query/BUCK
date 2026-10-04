@@ -1,0 +1,110 @@
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+load(":model.bzl", "TINY_EC2", "TINY_QUERY")
+
+# Clients of two tiny models, compiled against the real komira_aws_core and
+# komira_xml. Each library is gated by its layout probe and its own caller
+# test, welded into it:
+#
+# - komira_aws_tiny_query (pure mode): test_tiny_query, the awsQuery
+#   requests it builds and the responses it reads, byte for byte.
+# - komira_aws_tiny_query_client (client mode, same model):
+#   test_tiny_query_client, the client over a scripted connector and
+#   komira_aws_core's echo connector.
+# - komira_aws_tiny_ec2 (pure mode): test_tiny_ec2, the ec2Query requests
+#   and responses, byte for byte.
+#
+# The aws_codegen functional tests hold the text of each module to a golden
+# (the query client module to the HttpClientConfig pins as well), and check
+# that exactly each library's two welded tests ran and exactly its files
+# were generated (gen_check and tests_check, which live in the tests cell
+# and so cannot be loaded here). run_tests.sh builds this package (test 36).
+# Each model's digest is stated once, in model.bzl. botocore's query and ec2
+# conformance corpus is run against the same emitter by
+# //tools/build/proto-codegen:aws_conformance_test.
+
+export_file(
+    name = "tiny_ec2.json",
+    visibility = ["PUBLIC"],
+)
+
+export_file(
+    name = "tiny_query.json",
+    visibility = ["PUBLIC"],
+)
+
+# An awsQuery client of a tiny model, pure mode: the form body of a request
+# holding every scalar kind, a wrapped list, a flattened list whose member
+# is renamed, a flattened and a wrapped map, a nested structure holding a
+# list of structures; a response read from its <SendThingResult> element (a
+# wrapped list, a flattened and a wrapped map, a structure, a timestamp); an
+# operation with no input and no output; and the <ErrorResponse> error
+# document.
+mojo_aws_client(
+    name = "komira_aws_tiny_query",
+    mode = "pure",
+    model = "tiny_query.json",
+    model_sha256 = TINY_QUERY.sha256,
+    operations = [
+        "Ping",
+        "SendThing",
+    ],
+    service = "tiny",
+    test_srcs = ["test_tiny_query.mojo"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_xml:komira_xml",
+    ],
+)
+
+# The same model in client mode, compiled against the real transport
+# (komira_http_client and komira_http_core) and gated by its layout probe and
+# test_tiny_query_client: a call answered over a scripted connector, an
+# <ErrorResponse> raised under its code and message, and a request as it
+# reached the wire (komira_aws_core's AwsEchoConnector). No socket is opened.
+mojo_aws_client(
+    name = "komira_aws_tiny_query_client",
+    mode = "client",
+    model = "tiny_query.json",
+    model_sha256 = TINY_QUERY.sha256,
+    operations = [
+        "Ping",
+        "SendThing",
+    ],
+    service = "tiny",
+    test_srcs = ["test_tiny_query_client.mojo"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        # The client's `send_with` takes a komira_retry loop.
+        "//src/komira_retry:komira_retry",
+        "//src/komira_xml:komira_xml",
+    ],
+)
+
+# An ec2Query client of a tiny model, generated in pure mode: the ec2 names
+# (a `queryName`, a `locationName` capitalized, a plain member name kept), a
+# list of structures (`Filter.<i>.Name`) holding a list, ec2 lists never
+# wrapped and an empty one writing nothing; a response read from the root,
+# with wrapped `item` lists of structures; an operation with no input and no
+# output; and the <Response><Errors><Error> error document. Gated by its
+# layout probe and test_tiny_ec2, byte for byte.
+mojo_aws_client(
+    name = "komira_aws_tiny_ec2",
+    mode = "pure",
+    model = "tiny_ec2.json",
+    model_sha256 = TINY_EC2.sha256,
+    operations = [
+        "DescribeThings",
+        "Ping",
+    ],
+    service = "tiny",
+    test_srcs = ["test_tiny_ec2.mojo"],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_xml:komira_xml",
+    ],
+)

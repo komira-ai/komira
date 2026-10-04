@@ -28,6 +28,11 @@ WHAT LIVES HERE (the four concerns):
   * fault_domain.mojo    — WHOSE FAULT a failure is (FAULT_* + the raise-site
                            token + `FaultAttribution`), with the unclassified
                            case reading as OURS.
+  * deploy_fault.mojo    — the PERMANENT and IN-FLIGHT marks a raiser stamps
+                           on a fault (stop retrying at once only on a proven-
+                           permanent fault; reset the fault streak only for an
+                           accepted, bounded wait), prefix-checked so a message
+                           that quotes a marked fault inherits nothing.
   * ownership.mojo       — the cell scope: `ResourceKey (machine, cell,
                            resource)` (the store key), `OwnerStamp` (the
                            identity an object carries, born with it),
@@ -39,6 +44,12 @@ WHAT LIVES HERE (the four concerns):
                            verbs.
   * digest.mojo          — `ModelledDigest`: every modelled field, never
                            provenance.
+  * unpinned_plan.mojo   — what a plan renders for a service's or job's image
+                           whose build step has not run yet
+                           (`UNPINNED-NOT-A-DIGEST:<step>/<name>`), refused
+                           unless the caller passes an `UnpinnedImages`
+                           record, which lists each one by node and step
+                           output.
   * engine.mojo          — the verbs (`plan_graph` / `apply_graph` /
                            `apply_graph_tracked` / `rollback_create` /
                            `destroy_graph`, and the owned forms
@@ -95,6 +106,18 @@ from kci_reconciler.fault_domain import (
     fault_domain_of_error,
     fault_message_of_error,
 )
+from kci_reconciler.deploy_fault import (
+    PERMANENT_FAULT_PREFIX,
+    IN_FLIGHT_FAULT_MARKER,
+    IN_FLIGHT_FAULT_PREFIX,
+    fault_is_permanent,
+    mark_permanent_fault,
+    fault_is_in_flight,
+    mark_in_flight_fault,
+    fault_is_retryable,
+    deploy_fault_message,
+    carry_deploy_fault_mark,
+)
 from kci_reconciler.erased_resource import ErasedResource
 from kci_reconciler.graph import (
     ResourceGraph,
@@ -146,4 +169,14 @@ from kci_reconciler.engine import (
     rollback_create,
     destroy_graph,
     destroy_graph_owned,
+)
+from kci_reconciler.unpinned_plan import (
+    UNPINNED_PLAN_DIGEST_PREFIX,
+    UNPINNED_KIND_SERVICE,
+    UNPINNED_KIND_JOB,
+    UnpinnedImage,
+    UnpinnedImages,
+    is_unpinned_plan_digest,
+    unpinned_build_ref,
+    unpinned_image_digest,
 )
