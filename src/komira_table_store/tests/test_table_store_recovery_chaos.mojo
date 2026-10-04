@@ -18,7 +18,7 @@
 #        leaves ZERO durable state of that txn. Recovery sees nothing of it.
 #   (I2) DURABLE-BUT-UNACKED — the create-CAS WON (the chunk object is in the
 #        bucket) but the process died before the caller observed the 200 AND
-#        before the cached `_HEAD` advanced. The §5 contract: the object's
+#        before the cached `_HEAD` advanced. The recovery contract: the object's
 #        presence == its create-CAS won == it committed, so recovery (LIST,
 #        bucket-is-truth) MUST recover it as committed. We forge this by writing
 #        the chunk object directly + NOT advancing `_HEAD` (or advancing it
@@ -44,9 +44,6 @@
 # origins / unsafe_from_address / take_pointee. The forged WAL states are
 # written through the store's typed `conditional_put` / `chunk_key` /
 # `encode_chunk` surface; the reference history is plain owned Lists.
-#
-# Design: the table-store correctness-slice design §5 (recovery) +
-#   §2 (commit-chunk-as-one-create atomicity).
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -70,8 +67,8 @@ from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import WritePrecondition
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
     encode_commit_chunk,
@@ -184,7 +181,7 @@ struct RefModel(Movable, Deinitable):
             while j >= 0:
                 ref w = c.writes[j]
                 if bytes_eq(w.key, key):
-                    if w.op == PG_OP_TOMBSTONE:
+                    if w.op == TS_OP_TOMBSTONE:
                         return Optional[List[UInt8]](None)
                     return Optional(w.value.copy())
                 j -= 1
@@ -263,7 +260,7 @@ def _commit_one[
     var t = ts.begin()
     for i in range(len(ws)):
         ref w = ws[i]
-        if w.op == PG_OP_TOMBSTONE:
+        if w.op == TS_OP_TOMBSTONE:
             t.delete(w.key.copy())
         else:
             t.insert(w.key.copy(), w.row.copy())
@@ -287,13 +284,13 @@ def _gen_write_set(mut rng: Rng, si: Int, n_keys: Int) -> List[WriteOp]:
             continue
         seen.append(ki)
         if rng.next_int(5) == 0:
-            ws.append(WriteOp(PG_OP_TOMBSTONE, _key(ki), List[UInt8]()))
+            ws.append(WriteOp(TS_OP_TOMBSTONE, _key(ki), List[UInt8]()))
         else:
             var v = _b(String("v") + String(si) + String("_") + String(ki))
-            ws.append(WriteOp(PG_OP_PUT, _key(ki), v^))
+            ws.append(WriteOp(TS_OP_PUT, _key(ki), v^))
     if len(ws) == 0:
         ws.append(
-            WriteOp(PG_OP_PUT, _key(0), _b(String("v") + String(si)))
+            WriteOp(TS_OP_PUT, _key(0), _b(String("v") + String(si)))
         )
     return ws^
 
@@ -308,8 +305,8 @@ def test_recovery_crash_at_every_position_fs() raises:
     var n_keys = 6
     for s in range(n_seeds):
         var seed = UInt64(0xDEAD0000 + s * 0x1000193)
-        var root = (_scratch_dir() + String("/pg_chaos_fs_")) + _unique() + String("_") + String(s)
-        var prefix = String("pg/chaos/i5")
+        var root = (_scratch_dir() + String("/ts_chaos_fs_")) + _unique() + String("_") + String(s)
+        var prefix = String("ts/chaos/i5")
         # seed the root dir once
         var seed_store = LocalFsConditionalStore(root.copy())
         _ = seed_store^
@@ -365,7 +362,7 @@ def test_recovery_crash_at_every_position_shared() raises:
     for s in range(n_seeds):
         var seed = UInt64(0xBEEF0000 + s * 0x1000193)
         var shared = SharedInMemoryConditionalStore()
-        var prefix = String("pg/chaos/i5_shared/s") + String(s)
+        var prefix = String("ts/chaos/i5_shared/s") + String(s)
         var rng = Rng(seed)
         var refm = RefModel()
         var ti = 0
@@ -446,7 +443,7 @@ def test_recovery_durable_but_unacked_shared() raises:
         " recovery (bucket-is-truth) recovers it as committed"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/chaos/i2/") + _unique()
+    var prefix = String("ts/chaos/i2/") + _unique()
     var refm = RefModel()
 
     # Commit two txns normally (so _HEAD exists at seq 1).
@@ -457,17 +454,17 @@ def test_recovery_durable_but_unacked_shared() raises:
         )
     )
     var ws0 = List[WriteOp]()
-    ws0.append(WriteOp(PG_OP_PUT, _key(0), _b("zero")))
+    ws0.append(WriteOp(TS_OP_PUT, _key(0), _b("zero")))
     _ = _commit_one(ts, ws0.copy())
     var rw0 = List[RefWrite]()
-    rw0.append(RefWrite(PG_OP_PUT, _key(0), _b("zero")))
+    rw0.append(RefWrite(TS_OP_PUT, _key(0), _b("zero")))
     refm.append(rw0^)
 
     var ws1 = List[WriteOp]()
-    ws1.append(WriteOp(PG_OP_PUT, _key(1), _b("one")))
+    ws1.append(WriteOp(TS_OP_PUT, _key(1), _b("one")))
     _ = _commit_one(ts, ws1.copy())
     var rw1 = List[RefWrite]()
-    rw1.append(RefWrite(PG_OP_PUT, _key(1), _b("one")))
+    rw1.append(RefWrite(TS_OP_PUT, _key(1), _b("one")))
     refm.append(rw1^)
     _ = ts^
 
@@ -475,11 +472,11 @@ def test_recovery_durable_but_unacked_shared() raises:
     # `_HEAD` (it still points at seq 1). The crash struck after the create-CAS
     # 200 but before the head advance + before the caller observed the ack.
     var ws2 = List[WriteOp]()
-    ws2.append(WriteOp(PG_OP_PUT, _key(2), _b("two")))
+    ws2.append(WriteOp(TS_OP_PUT, _key(2), _b("two")))
     _forge_chunk_shared(shared, prefix, Int64(2), ws2^)
-    # The §5 outcome: the write IS durable, so recovery recovers it as committed.
+    # The recovery outcome: the write IS durable, so recovery recovers it as committed.
     var rw2 = List[RefWrite]()
-    rw2.append(RefWrite(PG_OP_PUT, _key(2), _b("two")))
+    rw2.append(RefWrite(TS_OP_PUT, _key(2), _b("two")))
     refm.append(rw2^)
 
     var rec = TableStore[SharedInMemoryConditionalStore].open(
@@ -511,7 +508,7 @@ def test_recovery_stale_head_shared() raises:
         " (authoritative LIST) still finds every committed chunk"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/chaos/i3/") + _unique()
+    var prefix = String("ts/chaos/i3/") + _unique()
     var refm = RefModel()
     var n = 6
 
@@ -524,10 +521,10 @@ def test_recovery_stale_head_shared() raises:
     var total_recs = Int64(0)
     for i in range(n):
         var ws = List[WriteOp]()
-        ws.append(WriteOp(PG_OP_PUT, _key(i), _b(String("v") + String(i))))
+        ws.append(WriteOp(TS_OP_PUT, _key(i), _b(String("v") + String(i))))
         _ = _commit_one(ts, ws.copy())
         var rw = List[RefWrite]()
-        rw.append(RefWrite(PG_OP_PUT, _key(i), _b(String("v") + String(i))))
+        rw.append(RefWrite(TS_OP_PUT, _key(i), _b(String("v") + String(i))))
         refm.append(rw^)
         total_recs += Int64(1)
     _ = ts^
@@ -552,7 +549,7 @@ def test_recovery_stale_head_shared() raises:
 
     # ALSO: a commit OVER the stale-head store must land at the AUTHORITATIVE
     # head+1 (= n), not the stale-head+1 (= 2) — the OCC/create-CAS coupling
-    # (§8) must not be fooled by the lagging cache.
+    # must not be fooled by the lagging cache.
     _force_head_shared(shared, prefix, Int64(1), Int64(2))  # re-stale it
     var ts2 = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
@@ -561,7 +558,7 @@ def test_recovery_stale_head_shared() raises:
         )
     )
     var ws_new = List[WriteOp]()
-    ws_new.append(WriteOp(PG_OP_PUT, _key(99), _b("new")))
+    ws_new.append(WriteOp(TS_OP_PUT, _key(99), _b("new")))
     var lsn = _commit_one(ts2, ws_new^)
     assert_equal(
         lsn, Int64(n),
@@ -585,7 +582,7 @@ def test_recovery_torn_create_fails_loud_shared() raises:
         " MUST fail LOUD, never silently truncate / misparse"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/chaos/i4/") + _unique()
+    var prefix = String("ts/chaos/i4/") + _unique()
 
     # Commit two clean txns (seq 0,1; _HEAD at 1).
     var ts = TableStore[SharedInMemoryConditionalStore].open(
@@ -596,7 +593,7 @@ def test_recovery_torn_create_fails_loud_shared() raises:
     )
     for i in range(2):
         var ws = List[WriteOp]()
-        ws.append(WriteOp(PG_OP_PUT, _key(i), _b(String("v") + String(i))))
+        ws.append(WriteOp(TS_OP_PUT, _key(i), _b(String("v") + String(i))))
         _ = _commit_one(ts, ws.copy())
     _ = ts^
 
@@ -646,7 +643,7 @@ def test_recovery_pre_append_crash_shared() raises:
         " never committed; recovery shows NONE of its writes (no dirty state)"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/chaos/i1/") + _unique()
+    var prefix = String("ts/chaos/i1/") + _unique()
     var refm = RefModel()
 
     var ts = TableStore[SharedInMemoryConditionalStore].open(
@@ -657,15 +654,15 @@ def test_recovery_pre_append_crash_shared() raises:
     )
     # commit one clean txn
     var ws = List[WriteOp]()
-    ws.append(WriteOp(PG_OP_PUT, _key(0), _b("committed")))
+    ws.append(WriteOp(TS_OP_PUT, _key(0), _b("committed")))
     _ = _commit_one(ts, ws.copy())
     var rw = List[RefWrite]()
-    rw.append(RefWrite(PG_OP_PUT, _key(0), _b("committed")))
+    rw.append(RefWrite(TS_OP_PUT, _key(0), _b("committed")))
     refm.append(rw^)
 
     # Now BEGIN + buffer a write, then crash (drop the store) WITHOUT commit.
     # The buffered write only ever lived in RAM (writes touch the store at
-    # commit, §3.2) — so nothing of it is durable.
+    # commit) — so nothing of it is durable.
     var t = ts.begin()
     t.insert(_key(1), _b("never-committed"))
     # do NOT commit — drop the txn + the store (the crash).

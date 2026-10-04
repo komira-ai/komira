@@ -8,11 +8,9 @@
 # test pins exact snapshot LSNs and asserts exact bytes, so it is reproducible
 # and belongs in the fast lane. Tests (b) and (d) are the DISCRIMINATING ones:
 # they go RED on a naive "read-latest / append-without-OCC" implementation and
-# GREEN only on the §3.4 design (see the discriminating-proof tests at the
+# GREEN only on the OCC commit-loop design (see the discriminating-proof tests at the
 # bottom, which exercise the property directly and would fail on the naive
 # shape).
-#
-# Design: the table-store correctness-slice design §7.
 #
 # Runs against InMemoryConditionalStore (single-thread, deterministic) AND
 # LocalFsConditionalStore (real filesystem — the durability/recovery test (e)
@@ -43,9 +41,9 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 
 from komira_table_store.key_index import KeyValue
 from komira_table_store.table_store_codec import (
-    PG_COMMIT_FORMAT_VERSION,
-    PG_OP_PUT,
-    PG_SCHEMA_VERSION_UNSET,
+    TS_COMMIT_FORMAT_VERSION,
+    TS_OP_PUT,
+    TS_SCHEMA_VERSION_UNSET,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
@@ -137,7 +135,7 @@ def _commit_delete(
 
 def test_a_commit_atomicity() raises:
     print("[a] commit atomicity (all-or-nothing)")
-    var ts = _new_mem_store(String("pg/a"))
+    var ts = _new_mem_store(String("ts/a"))
 
     # In-flight txn writing 3 keys; a SECOND txn pins the (empty) snapshot
     # BEFORE commit and must see NONE of the in-flight rows.
@@ -182,7 +180,7 @@ def test_a_commit_atomicity() raises:
 
 def test_b_snapshot_isolation() raises:
     print("[b] snapshot isolation (stable view) — DISCRIMINATING")
-    var ts = _new_mem_store(String("pg/b"))
+    var ts = _new_mem_store(String("ts/b"))
 
     var s0 = _commit_put(ts, String("k"), String("v0"))  # LSN 0
     assert_equal(s0, Int64(0), "v0 at LSN 0")
@@ -216,7 +214,7 @@ def test_b_snapshot_isolation() raises:
 
 def test_c_read_your_own_writes() raises:
     print("[c] read-your-own-writes")
-    var ts = _new_mem_store(String("pg/c"))
+    var ts = _new_mem_store(String("ts/c"))
     _ = _commit_put(ts, String("k"), String("v0"))  # LSN 0
 
     var t = ts.begin()
@@ -252,7 +250,7 @@ def test_c_read_your_own_writes() raises:
 
 def test_d_occ_write_write_deterministic() raises:
     print("[d] OCC write-write (deterministic) — DISCRIMINATING")
-    var ts = _new_mem_store(String("pg/d"))
+    var ts = _new_mem_store(String("ts/d"))
     var s0 = _commit_put(ts, String("k"), String("v0"))  # LSN 0
     assert_equal(s0, Int64(0), "v0 at LSN 0")
 
@@ -327,7 +325,7 @@ def test_e_recovery_in_memory() raises:
     )
 
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/e/mem")
+    var prefix = String("ts/e/mem")
 
     # ---- scope 1: write the five txns, then DROP the TableStore ----
     var head_seq: Int64
@@ -390,7 +388,7 @@ def test_e_recovery_in_memory() raises:
 def test_e_recovery_local_fs() raises:
     print("[e] durability / recovery (LocalFs — TRUE crash-recovery on disk)")
     var root = (_scratch_dir() + String("/table_store_test_e_")) + _unique()
-    var prefix = String("pg/e/fs")
+    var prefix = String("ts/e/fs")
 
     # ---- scope 1: write, then DROP the TableStore (simulating a crash) ----
     var head_seq: Int64
@@ -455,7 +453,7 @@ def _scan_str(rows: List[KeyValue]) -> String:
 
 def test_f_scan_at_snapshot() raises:
     print("[f] scan-at-snapshot (version + key set + RYOW)")
-    var ts = _new_mem_store(String("pg/f"))
+    var ts = _new_mem_store(String("ts/f"))
     # commit (a,1),(b,1),(c,1),(d,1) -> LSNs 0..3
     _ = _commit_put(ts, String("a"), String("1"))
     _ = _commit_put(ts, String("b"), String("1"))
@@ -542,7 +540,7 @@ def _max_key_64() -> List[UInt8]:
 
 def test_g_unbounded_upper_scan_high_byte_key() raises:
     print("[g] HIGH-1: scan_from includes a high-byte key the 64×0xFF sentinel drops")
-    var ts = _new_mem_store(String("pg/g"))
+    var ts = _new_mem_store(String("ts/g"))
     # Commit a spread of TEXT-pk-shaped keys, incl. an EMPTY key and a 70-byte
     # all-0xFF key that sorts AT/ABOVE the old 64×0xFF sentinel.
     var t = ts.begin()
@@ -608,7 +606,7 @@ def test_g_unbounded_upper_scan_high_byte_key() raises:
 #     DISCRIMINATING: the pre-fix "local hit wins / no scan WAL fallback" code
 #     returns the handle's OWN stale version (stale read / resurrected
 #     tombstone) and drops cross-handle keys from scan (phantom-absence). The
-#     production shape this slice validates is MANY stateless workers, each a
+#     deployed shape this slice validates is MANY stateless workers, each a
 #     TableStore over ONE shared prefix — a reader MUST observe other handles'
 #     commits committed <= its snapshot.
 # =============================================================================
@@ -634,7 +632,7 @@ def test_h_cross_handle_snapshot_isolation() raises:
         "[h] cross-handle SI on a shared store — DISCRIMINATING (MUST-FIX #1)"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/h")
+    var prefix = String("ts/h")
 
     # Handle H commits PUT k=v1 (LSN 0) and PUT m=mv (LSN 1, a key only H ever
     # touches — proves scan picks up H's keys cross-handle for a G-reader too).
@@ -719,7 +717,7 @@ def test_h_cross_handle_snapshot_isolation() raises:
 
 
 # =============================================================================
-# (i) MUST-FIX #2 — §8 head-coupling: commit's OCC + slot claim MUST use the
+# (i) MUST-FIX #2 — OCC head-coupling: commit's OCC + slot claim MUST use the
 #     AUTHORITATIVE head, not the cached _HEAD (which lags cross-handle). The
 #     pre-fix lag window never opens single-process; this test forces the cached
 #     _HEAD to LAG the authoritative tail and asserts an overlapping-write txn
@@ -730,7 +728,7 @@ def test_h_cross_handle_snapshot_isolation() raises:
 def test_i_commit_uses_authoritative_head() raises:
     print("[i] commit consults authoritative head — DISCRIMINATING (MUST-FIX #2)")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/i")
+    var prefix = String("ts/i")
 
     # Handle H1 seeds k=v0 (LSN 0). The shared _HEAD object now says chunk 0.
     var H1 = _open_shared(shared, prefix)
@@ -749,13 +747,13 @@ def test_i_commit_uses_authoritative_head() raises:
     # k=v_other is written DIRECTLY at slot 1 (winning the create-CAS at the
     # chunk key) WITHOUT advancing the shared `_HEAD` object — then we REWIND
     # `_HEAD` to still say chunk_seq 0. This is the cross-process lag window the
-    # §8 coupling guards: the cached `read_head()` returns 0 (stale) while
+    # OCC/create-CAS coupling guards: the cached `read_head()` returns 0 (stale) while
     # `read_head_authoritative()` LISTs the bucket and returns the true tail 1.
     # (Both local stores advance cached `_HEAD` synchronously in-process, so the
     # lag window never opens via the normal append path — we open it by hand.)
     var direct = shared.clone()
     var conflict_ws = List[WriteOp]()
-    conflict_ws.append(WriteOp(PG_OP_PUT, _b("k"), _b("v_other")))
+    conflict_ws.append(WriteOp(TS_OP_PUT, _b("k"), _b("v_other")))
     var conflict_body = encode_commit_chunk(Int64(0), conflict_ws)
     # base_offset = 1 (slot 0 carried 1 record). encode_chunk wraps the body in
     # the store's chunk envelope with the record_count.
@@ -818,7 +816,7 @@ def test_i_commit_uses_authoritative_head() raises:
 # (j) MUST-FIX #2(b) — try_append_at_seq is a SINGLE-SLOT CAS: a pre-occupied
 #     candidate_seq returns None (412 / precondition) and NEVER escalates to a
 #     higher slot. Contrast with plain append's cached-head escalation. This is
-#     the primitive the §8 coupling relies on (the won slot is ALWAYS exactly
+#     the primitive the OCC/create-CAS coupling relies on (the won slot is ALWAYS exactly
 #     occ_validated_head + 1).
 # =============================================================================
 
@@ -826,7 +824,7 @@ def test_i_commit_uses_authoritative_head() raises:
 def test_j_try_append_at_seq_no_escalation() raises:
     print("[j] try_append_at_seq single-slot, no escalation (MUST-FIX #2b)")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/j")
+    var prefix = String("ts/j")
 
     var wal = CasManifestStore[SharedInMemoryConditionalStore](
         store=shared.clone(), prefix=prefix.copy(),
@@ -835,7 +833,7 @@ def test_j_try_append_at_seq_no_escalation() raises:
 
     # Occupy slot 0 with a real commit chunk.
     var ws0 = List[WriteOp]()
-    ws0.append(WriteOp(PG_OP_PUT, _b("a"), _b("0")))
+    ws0.append(WriteOp(TS_OP_PUT, _b("a"), _b("0")))
     var body0 = encode_commit_chunk(Int64(-1), ws0)
     var w0 = wal.try_append_at_seq(Int64(0), Int64(0), body0, Int64(1))
     assert_true(Bool(w0), "slot 0 won")
@@ -845,7 +843,7 @@ def test_j_try_append_at_seq_no_escalation() raises:
     # slot 1. A plain append would re-read the cached head and escalate to the
     # next free slot — try_append_at_seq must NOT.
     var ws1 = List[WriteOp]()
-    ws1.append(WriteOp(PG_OP_PUT, _b("b"), _b("1")))
+    ws1.append(WriteOp(TS_OP_PUT, _b("b"), _b("1")))
     var body1 = encode_commit_chunk(Int64(-1), ws1)
     var w_again = wal.try_append_at_seq(Int64(0), Int64(0), body1, Int64(1))
     assert_false(
@@ -877,7 +875,7 @@ def test_discriminating_b_si_falsifies_read_latest() raises:
     # If the impl read the LATEST chain entry (naive read-latest), an
     # S0-pinned reader would observe a later commit. We assert it does NOT.
     print("[disc-b] SI falsifies read-latest")
-    var ts = _new_mem_store(String("pg/disc_b"))
+    var ts = _new_mem_store(String("ts/disc_b"))
     _ = _commit_put(ts, String("k"), String("v0"))  # LSN 0
     var reader = ts.begin()  # S0 = 0
     _ = _commit_put(ts, String("k"), String("v1"))  # LSN 1 — newest is v1
@@ -895,7 +893,7 @@ def test_discriminating_d_occ_falsifies_blind_append() raises:
     # committed. We assert exactly ONE of the two same-key concurrent writers
     # commits and the other raises 40001.
     print("[disc-d] OCC falsifies blind-append (lost update)")
-    var ts = _new_mem_store(String("pg/disc_d"))
+    var ts = _new_mem_store(String("ts/disc_d"))
     _ = _commit_put(ts, String("k"), String("v0"))  # LSN 0
     var tA = ts.begin()
     var tB = ts.begin()
@@ -924,7 +922,7 @@ def test_discriminating_d_occ_falsifies_blind_append() raises:
 # =============================================================================
 # (k) WAL format version — the magic's trailing digit IS a format version.
 #     decode_commit_chunk parses it, reserves schema_version, and REJECTS an
-#     unknown version (flag-day insurance, analytics convergence §6 items 1+2).
+#     unknown version (flag-day insurance for a later columnar format).
 # =============================================================================
 
 
@@ -933,15 +931,15 @@ def test_k_format_version_roundtrip() raises:
     # A normal encode produces a format-version-2 body whose schema_version is
     # the reserved 0 (the storage layer never schematizes the row in this slice).
     var ws = List[WriteOp]()
-    ws.append(WriteOp(PG_OP_PUT, _b("k1"), _b("r1")))
-    ws.append(WriteOp(PG_OP_PUT, _b("k2"), _b("r2")))
+    ws.append(WriteOp(TS_OP_PUT, _b("k1"), _b("r1")))
+    ws.append(WriteOp(TS_OP_PUT, _b("k2"), _b("r2")))
     var body = encode_commit_chunk(Int64(7), ws)
 
     var chunk = decode_commit_chunk(body)
     assert_equal(chunk.snapshot_lsn, Int64(7), "snapshot_lsn survives round-trip")
     assert_equal(
         chunk.schema_version,
-        PG_SCHEMA_VERSION_UNSET,
+        TS_SCHEMA_VERSION_UNSET,
         "reserved schema_version reads back as 0",
     )
     assert_equal(len(chunk.write_set), 2, "both writes survive round-trip")
@@ -984,7 +982,7 @@ def _decode_keys_raises(body: List[UInt8]) -> Bool:
 def test_k_reject_unknown_format_version() raises:
     print("[k] DISCRIMINATING — decode REJECTS an unknown format version")
     var ws = List[WriteOp]()
-    ws.append(WriteOp(PG_OP_PUT, _b("k1"), _b("r1")))
+    ws.append(WriteOp(TS_OP_PUT, _b("k1"), _b("r1")))
     var good = encode_commit_chunk(Int64(0), ws)
     # Baseline: the well-formed body decodes cleanly (no false-positive reject).
     assert_false(_decode_raises(good), "well-formed v2 body decodes OK")
@@ -994,7 +992,7 @@ def test_k_reject_unknown_format_version() raises:
     # (offset 3, the magic's high byte) to ASCII '9'. This is the case a
     # version-check-REMOVED build would happily MISPARSE (the prefix is valid,
     # the rest of the body is a perfectly-formed v2 layout) — so it is the test
-    # that goes RED if CHANGE 1's `version != PG_COMMIT_FORMAT_VERSION` reject is
+    # that goes RED if CHANGE 1's `version != TS_COMMIT_FORMAT_VERSION` reject is
     # deleted. We assert it RAISES.
     var bumped = good.copy()
     bumped[3] = UInt8(0x39)  # ASCII '9' -> format version 9, which we do not know
@@ -1026,7 +1024,7 @@ def test_k_reject_unknown_format_version() raises:
     # Sanity on the constant the reject compares against (guards an accidental
     # version bump that forgets to update the layout/tests).
     assert_equal(
-        Int(PG_COMMIT_FORMAT_VERSION),
+        Int(TS_COMMIT_FORMAT_VERSION),
         2,
         "current WAL commit-chunk format version is 2",
     )

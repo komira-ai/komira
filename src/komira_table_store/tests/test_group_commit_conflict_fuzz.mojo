@@ -5,7 +5,7 @@
 #   arbitration / per-member OCC is a SILENT LOST-UPDATE.
 # =============================================================================
 #
-# The crux of Phase-3 is `PgGroupCommitCodec.encode`: it folds (1) intra-batch
+# The crux of Phase-3 is `TableStoreGroupCommitCodec.encode`: it folds (1) intra-batch
 # arbitration (first-in-batch-wins) + (2) per-member OCC vs the durable head +
 # (3) the winners' write-set MERGE into ONE chunk body. A bug in (1) or (2) does
 # NOT crash — it silently merges TWO conflicting writes for the SAME key into one
@@ -25,7 +25,7 @@
 #     - EXACTLY-ONE-WINNER-PER-KEY: the set of keys in the merged body == the set
 #       of keys the reference model says the winners own.
 #     - LOSERS GET 40001: every member the reference says loses has a loser
-#       outcome (PG_GC_LOSS_INTRA or PG_GC_LOSS_OCC); every winner has a winner
+#       outcome (TS_GC_LOSS_INTRA or TS_GC_LOSS_OCC); every winner has a winner
 #       index; the win/loss partition is COMPLETE (every member in exactly one).
 #
 # A missed intersection would (a) put a second write for a claimed key into the
@@ -58,20 +58,20 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
 from komira_objectstore.coalescing_window import EncodedBatch
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
+    TS_OP_PUT,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
     encode_commit_chunk,
 )
 from komira_table_store.group_commit import (
-    PG_GC_LOSS_INTRA,
-    PG_GC_LOSS_OCC,
-    PG_GC_WIN,
-    PgGroupCommitCodec,
-    PgGroupCommitItem,
-    PgGroupHead,
-    PgGroupOutcome,
+    TS_GC_LOSS_INTRA,
+    TS_GC_LOSS_OCC,
+    TS_GC_WIN,
+    TableStoreGroupCommitCodec,
+    TableStoreGroupCommitItem,
+    TableStoreGroupHead,
+    TableStoreGroupOutcome,
     arbitrate_intra_batch,
 )
 
@@ -101,15 +101,15 @@ def _row(n: Int) -> List[UInt8]:
     return out^
 
 
-def _member_l(snapshot: Int64, keys: List[Int]) -> PgGroupCommitItem:
+def _member_l(snapshot: Int64, keys: List[Int]) -> TableStoreGroupCommitItem:
     """A member that writes `keys` (each a PUT) at `snapshot`."""
     var ws = List[WriteOp]()
     for i in range(len(keys)):
-        ws.append(WriteOp(PG_OP_PUT, _key(keys[i]), _row(keys[i])))
-    return PgGroupCommitItem(snapshot, ws^)
+        ws.append(WriteOp(TS_OP_PUT, _key(keys[i]), _row(keys[i])))
+    return TableStoreGroupCommitItem(snapshot, ws^)
 
 
-def _member(snapshot: Int64, *ks: Int) -> PgGroupCommitItem:
+def _member(snapshot: Int64, *ks: Int) -> TableStoreGroupCommitItem:
     """A member that writes the variadic `ks` keys (each a PUT) at `snapshot`."""
     var keys = List[Int]()
     for i in range(len(ks)):
@@ -117,8 +117,8 @@ def _member(snapshot: Int64, *ks: Int) -> PgGroupCommitItem:
     return _member_l(snapshot, keys)
 
 
-def _slab_of(items: List[PgGroupCommitItem]) raises -> Slab[PgGroupCommitItem]:
-    var s = Slab[PgGroupCommitItem]()
+def _slab_of(items: List[TableStoreGroupCommitItem]) raises -> Slab[TableStoreGroupCommitItem]:
+    var s = Slab[TableStoreGroupCommitItem]()
     for i in range(len(items)):
         s.append(items[i].copy())
     return s^
@@ -148,7 +148,7 @@ struct _Rng(Movable, Deinitable):
 # =============================================================================
 
 
-def _ref_expected_winner_keys(items: List[PgGroupCommitItem]) raises -> List[Int]:
+def _ref_expected_winner_keys(items: List[TableStoreGroupCommitItem]) raises -> List[Int]:
     """The reference set of (raw int) keys the winners SHOULD own, computed
     independently of the codec: walk members in drain order; a member SURVIVES
     iff none of its keys is already claimed by an earlier survivor; a survivor
@@ -180,7 +180,7 @@ def _ref_expected_winner_keys(items: List[PgGroupCommitItem]) raises -> List[Int
     return claimed^
 
 
-def _ref_survives_mask(items: List[PgGroupCommitItem]) raises -> List[Bool]:
+def _ref_survives_mask(items: List[TableStoreGroupCommitItem]) raises -> List[Bool]:
     """The reference survives[i] mask (first-in-batch-wins) — the same logic as
     _ref_expected_winner_keys but returning the per-member partition."""
     var survives = List[Bool]()
@@ -221,15 +221,15 @@ def _merged_keys(body: List[UInt8]) raises -> List[Int]:
     return out^
 
 
-def _new_empty_codec() raises -> PgGroupCommitCodec[_Store]:
+def _new_empty_codec() raises -> TableStoreGroupCommitCodec[_Store]:
     """A codec over an EMPTY WAL (auth head = -1, no committed competitor chunks)
     — the per-member OCC arm is a no-op, so encode tests ONLY the intra-batch
     arbitration + merge (the OCC arm has its own seeded test)."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=0)
     var wal = CasManifestStore[_Store](
-        store=slow^, prefix=String("pg/fuzz"), retry=RetryPolicy.fast_test()
+        store=slow^, prefix=String("ts/fuzz"), retry=RetryPolicy.fast_test()
     )
-    return PgGroupCommitCodec[_Store](wal^)
+    return TableStoreGroupCommitCodec[_Store](wal^)
 
 
 # =============================================================================
@@ -252,7 +252,7 @@ def test_conflict_fuzz_no_lost_update_exactly_one_winner_per_key() raises:
     for seed in range(1, SEEDS + 1):
         var rng = _Rng(UInt64(seed) * UInt64(2654435761))
         var n = 2 + rng.below(6)  # 2..7 members.
-        var items = List[PgGroupCommitItem]()
+        var items = List[TableStoreGroupCommitItem]()
         for _ in range(n):
             var nk = 1 + rng.below(3)  # 1..3 keys per member.
             var keys = List[Int]()
@@ -271,7 +271,7 @@ def test_conflict_fuzz_no_lost_update_exactly_one_winner_per_key() raises:
         # Drive the codec (encode over an empty WAL — OCC arm no-op).
         var codec = _new_empty_codec()
         var slab = _slab_of(items)
-        var batch = codec.encode(slab, PgGroupHead(Int64(-1), Int64(0)))
+        var batch = codec.encode(slab, TableStoreGroupHead(Int64(-1), Int64(0)))
 
         # (a) NO LOST UPDATE — every merged key appears exactly once.
         var merged = _merged_keys(batch.body)
@@ -334,8 +334,8 @@ def test_conflict_fuzz_no_lost_update_exactly_one_winner_per_key() raises:
             loser_seen[pair[0]] = True
             # a loser carries an INTRA or OCC kind (40001), never a WIN.
             assert_true(
-                pair[1].kind == PG_GC_LOSS_INTRA
-                or pair[1].kind == PG_GC_LOSS_OCC,
+                pair[1].kind == TS_GC_LOSS_INTRA
+                or pair[1].kind == TS_GC_LOSS_OCC,
                 String("seed ")
                 + String(seed)
                 + ": loser member "
@@ -369,7 +369,7 @@ def test_conflict_fuzz_no_lost_update_exactly_one_winner_per_key() raises:
 # =============================================================================
 
 
-def _all_winners_stub_merge(items: List[PgGroupCommitItem]) raises -> List[Int]:
+def _all_winners_stub_merge(items: List[TableStoreGroupCommitItem]) raises -> List[Int]:
     """The BUGGY arbitration: treat EVERY member as a winner + merge ALL their
     write-sets (no key-intersection check at all). This is the silent-lost-update
     bug the fuzz must catch. Returns the merged key ints (with dups)."""
@@ -394,7 +394,7 @@ def test_red_all_winners_stub_is_a_lost_update() raises:
     merges it once (member-0 wins, member-1 is an intra-batch loser), the stub
     merges it twice. We assert the stub's merge HAS a duplicate AND the real
     codec's merge does NOT — the exact predicate that discriminates the bug."""
-    var items = List[PgGroupCommitItem]()
+    var items = List[TableStoreGroupCommitItem]()
     items.append(_member(Int64(-1), 3, 4))  # member 0: {3,4}
     items.append(_member(Int64(-1), 3, 5))  # member 1: {3,5} (3 dup!)
 
@@ -418,7 +418,7 @@ def test_red_all_winners_stub_is_a_lost_update() raises:
     # The REAL codec merges key 3 ONCE (member 1 loses intra-batch).
     var codec = _new_empty_codec()
     var slab = _slab_of(items)
-    var batch = codec.encode(slab, PgGroupHead(Int64(-1), Int64(0)))
+    var batch = codec.encode(slab, TableStoreGroupHead(Int64(-1), Int64(0)))
     var real_merged = _merged_keys(batch.body)
     var real_dup = False
     for a in range(len(real_merged)):
@@ -441,7 +441,7 @@ def test_red_all_winners_stub_is_a_lost_update() raises:
     assert_equal(len(batch.loser_outcomes), 1)
     ref lpair = batch.loser_outcomes[0]
     assert_equal(lpair[0], 1)
-    assert_equal(lpair[1].kind, PG_GC_LOSS_INTRA)
+    assert_equal(lpair[1].kind, TS_GC_LOSS_INTRA)
 
 
 # =============================================================================
@@ -451,7 +451,7 @@ def test_red_all_winners_stub_is_a_lost_update() raises:
 
 
 def test_per_member_occ_stale_snapshot_loses_to_committed_competitor() raises:
-    """The per-member OCC arm (PG_GC_LOSS_OCC). Seed the WAL with a COMMITTED
+    """The per-member OCC arm (TS_GC_LOSS_OCC). Seed the WAL with a COMMITTED
     chunk at seq 0 touching key 7 (a competitor that landed after some member's
     snapshot). A member with snapshot=-1 (BEFORE seq 0) whose write-set touches
     key 7 must be an OCC LOSER; a member writing a DISJOINT key (key 9) at the
@@ -462,10 +462,10 @@ def test_per_member_occ_stale_snapshot_loses_to_committed_competitor() raises:
     # Seed a committed competitor chunk at seq 0 touching key 7.
     var slow = SharedInMemorySlowCasStore(slow_ticks=0)
     var seed_wal = CasManifestStore[_Store](
-        store=slow.clone(), prefix=String("pg/occ"), retry=RetryPolicy.fast_test()
+        store=slow.clone(), prefix=String("ts/occ"), retry=RetryPolicy.fast_test()
     )
     var competitor = List[WriteOp]()
-    competitor.append(WriteOp(PG_OP_PUT, _key(7), _row(7)))
+    competitor.append(WriteOp(TS_OP_PUT, _key(7), _row(7)))
     # encode_commit_chunk + try_append_at_seq lands it at slot 0.
     from komira_table_store.table_store_codec import encode_commit_chunk
 
@@ -477,16 +477,16 @@ def test_per_member_occ_stale_snapshot_loses_to_committed_competitor() raises:
     # Now the codec sees auth_head = {chunk_seq=0}. Two members both at
     # snapshot=-1 (before the competitor): one touches key 7 (OCC loser), one
     # touches key 9 (OCC winner — disjoint from the competitor).
-    var codec = PgGroupCommitCodec[_Store](
+    var codec = TableStoreGroupCommitCodec[_Store](
         CasManifestStore[_Store](
-            slow.clone(), String("pg/occ"), RetryPolicy.fast_test()
+            slow.clone(), String("ts/occ"), RetryPolicy.fast_test()
         )
     )
-    var items = List[PgGroupCommitItem]()
+    var items = List[TableStoreGroupCommitItem]()
     items.append(_member(Int64(-1), 9))  # member 0: disjoint -> WIN
     items.append(_member(Int64(-1), 7))  # member 1: stale on 7 -> OCC LOSS
     var slab = _slab_of(items)
-    var batch = codec.encode(slab, PgGroupHead(Int64(0), Int64(1)))
+    var batch = codec.encode(slab, TableStoreGroupHead(Int64(0), Int64(1)))
 
     # member 0 wins (key 9 not in the competitor); member 1 loses OCC (key 7 was
     # committed at seq 0 > its snapshot -1).
@@ -495,7 +495,7 @@ def test_per_member_occ_stale_snapshot_loses_to_committed_competitor() raises:
     assert_equal(len(batch.loser_outcomes), 1)
     ref lpair = batch.loser_outcomes[0]
     assert_equal(lpair[0], 1)
-    assert_equal(lpair[1].kind, PG_GC_LOSS_OCC)
+    assert_equal(lpair[1].kind, TS_GC_LOSS_OCC)
     # The merged body carries ONLY key 9 (the winner) — member 1's stale write to
     # key 7 is NEVER merged (no lost update against the committed competitor).
     var merged = _merged_keys(batch.body)
@@ -509,7 +509,7 @@ def test_per_member_occ_stale_snapshot_loses_to_committed_competitor() raises:
 
 
 def _ref_occ_combined_winner_keys(
-    items: List[PgGroupCommitItem],
+    items: List[TableStoreGroupCommitItem],
     committed: List[List[Int]],
 ) raises -> List[Int]:
     """The COMBINED reference (intra-batch arbitration + per-member OCC), computed
@@ -606,7 +606,7 @@ def test_conflict_fuzz_occ_combined_seeded_competitors() raises:
         var slow = SharedInMemorySlowCasStore(slow_ticks=0)
         var seed_wal = CasManifestStore[_Store](
             store=slow.clone(),
-            prefix=String("pg/occfuzz"),
+            prefix=String("ts/occfuzz"),
             retry=RetryPolicy.fast_test(),
         )
         var committed = List[List[Int]]()
@@ -623,7 +623,7 @@ def test_conflict_fuzz_occ_combined_seeded_competitors() raises:
                         break
                 if not dup:
                     comp_keys.append(k)
-                    comp_ws.append(WriteOp(PG_OP_PUT, _key(k), _row(k)))
+                    comp_ws.append(WriteOp(TS_OP_PUT, _key(k), _row(k)))
             var body = encode_commit_chunk(Int64(c - 1), comp_ws)
             var maybe = seed_wal.try_append_at_seq(
                 Int64(c), Int64(c), body^, Int64(len(comp_keys))
@@ -635,7 +635,7 @@ def test_conflict_fuzz_occ_combined_seeded_competitors() raises:
 
         # Build N members with MIXED snapshots in [-1, auth_head] + overlapping keys.
         var nmem = 2 + rng.below(5)  # 2..6 members.
-        var items = List[PgGroupCommitItem]()
+        var items = List[TableStoreGroupCommitItem]()
         for _ in range(nmem):
             var snap = Int64(rng.below(n_comp + 1) - 1)  # -1..auth_head
             var nk = 1 + rng.below(3)
@@ -652,14 +652,14 @@ def test_conflict_fuzz_occ_combined_seeded_competitors() raises:
             items.append(_member_l(snap, keys))
 
         # Drive the codec over the seeded WAL.
-        var codec = PgGroupCommitCodec[_Store](
+        var codec = TableStoreGroupCommitCodec[_Store](
             CasManifestStore[_Store](
-                slow.clone(), String("pg/occfuzz"), RetryPolicy.fast_test()
+                slow.clone(), String("ts/occfuzz"), RetryPolicy.fast_test()
             )
         )
         var slab = _slab_of(items)
         var batch = codec.encode(
-            slab, PgGroupHead(auth_head_seq, Int64(n_comp))
+            slab, TableStoreGroupHead(auth_head_seq, Int64(n_comp))
         )
         var merged = _merged_keys(batch.body)
 
@@ -811,7 +811,7 @@ def test_arbitrate_intra_batch_first_in_batch_wins_deterministic() raises:
     members both colliding with an earlier survivor both lose (a later member is
     NOT checked against earlier LOSERS — so a chain a>b>c where a wins, b loses to
     a, c collides only with b's key is still a WINNER if it does not touch a's)."""
-    var items = List[PgGroupCommitItem]()
+    var items = List[TableStoreGroupCommitItem]()
     items.append(_member(Int64(-1), 1, 2))  # 0: {1,2} WIN
     items.append(_member(Int64(-1), 2, 3))  # 1: shares 2 -> LOSS
     items.append(_member(Int64(-1), 3, 4))  # 2: shares 3 only w/ LOSER 1 -> WIN

@@ -75,8 +75,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 from komira_objectstore.store import ConditionalWriteStore
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
 )
@@ -232,7 +232,7 @@ def _wal_visible_at[
         var j = len(ws) - 1
         while j >= 0:
             if bytes_eq(ws[j].key, key):
-                if ws[j].op == PG_OP_TOMBSTONE:
+                if ws[j].op == TS_OP_TOMBSTONE:
                     return Optional[List[UInt8]](None)
                 return Optional(ws[j].row.copy())
             j -= 1
@@ -307,7 +307,7 @@ def _run_thread(mut arg: _ThreadArg) raises:
             var bval = List[UInt8]()
             for bi in range(len(buf_keys)):
                 if bytes_eq(buf_keys[bi], k):
-                    if buf_ops[bi] == PG_OP_TOMBSTONE:
+                    if buf_ops[bi] == TS_OP_TOMBSTONE:
                         bs = 2
                     else:
                         bs = 1
@@ -339,12 +339,12 @@ def _run_thread(mut arg: _ThreadArg) raises:
             var found = False
             for bi in range(len(buf_keys)):
                 if bytes_eq(buf_keys[bi], k):
-                    buf_ops[bi] = PG_OP_PUT
+                    buf_ops[bi] = TS_OP_PUT
                     buf_vals[bi] = v.copy()
                     found = True
                     break
             if not found:
-                buf_ops.append(PG_OP_PUT)
+                buf_ops.append(TS_OP_PUT)
                 buf_keys.append(k.copy())
                 buf_vals.append(v.copy())
 
@@ -354,12 +354,12 @@ def _run_thread(mut arg: _ThreadArg) raises:
             var found = False
             for bi in range(len(buf_keys)):
                 if bytes_eq(buf_keys[bi], k):
-                    buf_ops[bi] = PG_OP_TOMBSTONE
+                    buf_ops[bi] = TS_OP_TOMBSTONE
                     buf_vals[bi] = List[UInt8]()
                     found = True
                     break
             if not found:
-                buf_ops.append(PG_OP_TOMBSTONE)
+                buf_ops.append(TS_OP_TOMBSTONE)
                 buf_keys.append(k.copy())
                 buf_vals.append(List[UInt8]())
 
@@ -511,7 +511,7 @@ def _audit_merged_history(
                         " update) for k" + String(ki) + " at seq " + String(s2),
                     )
                     prev = s2
-                    if ws[wi].op == PG_OP_PUT:
+                    if ws[wi].op == TS_OP_PUT:
                         for vv in range(len(vals)):
                             assert_false(
                                 bytes_eq(vals[vv], ws[wi].row),
@@ -542,7 +542,7 @@ def _run_thread_property(
         + " steps over " + String(n_keys) + " overlapping keys"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/sithread/k") + String(k) + String("_s")
+    var prefix = String("ts/sithread/k") + String(k) + String("_s")
     prefix += String(Int(base_seed % UInt64(100000)))
 
     # Seed a known starting value for every key (so reads have a defined base).

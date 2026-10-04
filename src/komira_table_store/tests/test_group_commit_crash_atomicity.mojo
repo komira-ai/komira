@@ -57,22 +57,22 @@ from komira_objectstore.coalescing_window import (
 )
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
+    TS_OP_PUT,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
 )
 from komira_table_store.group_commit import (
-    PG_GC_WIN,
-    PgGroupCommitFactory,
-    PgGroupCommitItem,
-    PgGroupOutcome,
+    TS_GC_WIN,
+    TableStoreGroupCommitFactory,
+    TableStoreGroupCommitItem,
+    TableStoreGroupOutcome,
 )
 from komira_table_store.table_store import TableStore
 
 
 comptime _Slow = SharedInMemorySlowCasStore
-comptime _Factory = PgGroupCommitFactory[_Slow]
+comptime _Factory = TableStoreGroupCommitFactory[_Slow]
 comptime _Window = CoalescingWindow[_Factory]
 
 
@@ -96,10 +96,10 @@ def _row(tag: Int) -> List[UInt8]:
     return out^
 
 
-def _member(snapshot: Int64, key: Int, tag: Int) -> PgGroupCommitItem:
+def _member(snapshot: Int64, key: Int, tag: Int) -> TableStoreGroupCommitItem:
     var ws = List[WriteOp]()
-    ws.append(WriteOp(PG_OP_PUT, _key(key), _row(tag)))
-    return PgGroupCommitItem(snapshot, ws^)
+    ws.append(WriteOp(TS_OP_PUT, _key(key), _row(tag)))
+    return TableStoreGroupCommitItem(snapshot, ws^)
 
 
 def _new_reactor() raises -> Reactor[NoopSink]:
@@ -113,7 +113,7 @@ def _new_window(
     var slow: _Slow, prefix: String, policy: FlushPolicy
 ) raises -> _Window:
     var factory = _Factory(slow^, prefix)
-    return _Window(RamAccumulator[PgGroupCommitItem](), policy, factory^)
+    return _Window(RamAccumulator[TableStoreGroupCommitItem](), policy, factory^)
 
 
 def _drive_to_done(
@@ -171,7 +171,7 @@ def test_crash_atomicity_recovery_folds_all_winners_whole() raises:
     subset. The merged chunk is one atomic create-CAS unit; replay folds it
     whole, so there is no 'some winners committed, some lost' state."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=2)  # park on the create-CAS
-    var prefix = String("pg/gc/crash/win")
+    var prefix = String("ts/gc/crash/win")
 
     var window = _new_window(slow.clone(), prefix, FlushPolicy.count_only(1000))
     var reactor = _new_reactor()
@@ -186,7 +186,7 @@ def test_crash_atomicity_recovery_folds_all_winners_whole() raises:
     assert_equal(len(outcomes), 4)
     for i in range(len(outcomes)):
         ref pair = outcomes[i]
-        assert_equal(pair[1].kind, PG_GC_WIN, "all four disjoint members win")
+        assert_equal(pair[1].kind, TS_GC_WIN, "all four disjoint members win")
 
     # COLD-BOOT RECOVERY: a fresh TableStore replays the WAL — ALL FOUR visible.
     assert_equal(
@@ -217,7 +217,7 @@ def test_crash_atomicity_crash_before_cas_persists_nothing() raises:
     actual PUT only on the FINAL tick (after slow_ticks PENDINGs), so dropping
     before that tick means the slot bytes were never written."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=3)
-    var prefix = String("pg/gc/crash/none")
+    var prefix = String("ts/gc/crash/none")
     var keys: List[Int] = [11, 22, 33]
 
     var head_before = _head_seq(slow.clone(), prefix)
@@ -269,7 +269,7 @@ def test_crash_atomicity_loser_never_in_durable_chunk() raises:
     durability layer: a missed intersection would have merged BOTH writes for key
     55 into the chunk (two records for one key)."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=1)
-    var prefix = String("pg/gc/crash/loser")
+    var prefix = String("ts/gc/crash/loser")
 
     var window = _new_window(slow.clone(), prefix, FlushPolicy.count_only(1000))
     var reactor = _new_reactor()

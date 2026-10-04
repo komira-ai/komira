@@ -1,15 +1,14 @@
 # =============================================================================
 # src/komira_table_store/tests/test_table_store_head_regression_torn_read.mojo
-#   P0 CONCURRENCY BUG (found in production) — the
-#   table-store-on-GCS `_HEAD`-advance protocol corrupts under a 2nd / interrupted
-#   writer, producing a torn read at a fresh open.
+#   P0 CONCURRENCY BUG — the table store's `_HEAD`-advance protocol corrupts
+#   under a 2nd / interrupted writer, producing a torn read at a fresh open.
 # =============================================================================
 #
-# THE PROD SYMPTOM. Running a 2nd writer (a seeding CLI) against the LIVE
-# table-store-on-GCS store corrupted it: a fresh API boot's `begin()` / open
-# followed the durable `_HEAD` pointer to a chunk it does NOT fully point at,
-# then `cas_manifest: truncated i64 at offset 0` — and every subsequent open
-# (API boot) crash-looped. Killing a writer mid-commit left the same torn state.
+# THE SYMPTOM. A 2nd writer committing to the same prefix as a running
+# writer corrupted the store: a fresh handle's `begin()` / open followed the
+# durable `_HEAD` pointer to a chunk it does NOT fully point at, then
+# `cas_manifest: truncated i64 at offset 0` — and every subsequent open failed
+# the same way. Killing a writer mid-commit left the same torn state.
 #
 # THE ROOT-CAUSE TWO-PART DEFECT (confirmed by reading the commit/advance call
 # sites — `CasManifestStore._try_advance_head_fast` + `_recover_head_by_list`):
@@ -30,8 +29,9 @@
 #   (B) A regressed / torn `_HEAD` (or a present-but-not-yet-durable chunk it
 #       points at) makes a fresh `read_head()` decode a `_HEAD` whose
 #       `chunk_seq` is below the true durable tail, so a `begin()` snapshot
-#       pins a STALE-LOW LSN that silently MISSES committed rows — the prod
-#       "2nd writer corrupted the store; fresh boots can't see the data".
+#       pins a STALE-LOW LSN that silently MISSES committed rows — to a
+#       reader, the 2nd writer corrupted the store and a fresh open cannot see
+#       the data.
 #
 # THE INVARIANT THE FIX ESTABLISHES (Delta/Iceberg-style, the same class as the
 # cold-catalog-412 fix + the broker `_HEAD`-advance work): the chunk objects are
@@ -51,7 +51,7 @@
 #        a chunk_seq BELOW the true durable tail. Post-fix: monotone — `_HEAD`
 #        stays at the true tail.
 #   T2 — end-to-end: TWO share-nothing handles over ONE prefix interleave
-#        commits (the API + seeding CLI shape); a THIRD fresh handle opens and
+#        commits (two independent writers); a THIRD fresh handle opens and
 #        its `begin()` snapshot MUST see EVERY committed row (no stale-low head
 #        miss) and its open MUST NOT raise a torn-read.
 #
@@ -79,7 +79,7 @@ from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import WritePrecondition
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
+    TS_OP_PUT,
     WriteOp,
     encode_commit_chunk,
 )
@@ -115,7 +115,7 @@ def _open_ts(backing: _Store, prefix: String) raises -> TableStore[_Store]:
 
 
 def test_fast_head_advance_never_regresses() raises:
-    """Forge the EXACT prod race at the `_HEAD`-advance call site: the durable
+    """Forge the EXACT race at the `_HEAD`-advance call site: the durable
     `_HEAD` is already at a HIGH seq, while a writer WINS a LOWER (still-free)
     slot and its best-effort fast advance carries a matching etag — so the
     advance lands `ManifestHead(lower_seq, ...)`, REGRESSING `_HEAD` below the
@@ -137,7 +137,7 @@ def test_fast_head_advance_never_regresses() raises:
     FAILS ON CURRENT CODE (`_try_advance_head_fast`): `read_head()` after the
     slot-1 win returns chunk_seq 1 (the regression). (Red before the fix.)"""
     var backing = _Store()
-    var prefix = String("pg/head_regress_t1")
+    var prefix = String("ts/head_regress_t1")
     var probe = backing.clone()
 
     # Forge the WAL: durable chunks at slots 0 and 2 (slot 1 left FREE), with the
@@ -186,7 +186,7 @@ def test_fast_head_advance_never_regresses() raises:
 
 def _one_put(k: String, v: String) -> List[WriteOp]:
     var ws = List[WriteOp]()
-    ws.append(WriteOp(PG_OP_PUT, _b(k), _b(v)))
+    ws.append(WriteOp(TS_OP_PUT, _b(k), _b(v)))
     return ws^
 
 
@@ -217,8 +217,8 @@ def _forge_chunk(
 
 
 def test_two_writers_fresh_open_sees_all_rows() raises:
-    """The PROD shape: TWO share-nothing handles over ONE prefix (the API worker
-    + a seeding CLI) interleave commits; a THIRD fresh handle then opens and
+    """The two-writer shape: TWO share-nothing handles over ONE prefix
+    interleave commits; a THIRD fresh handle then opens and
     its `begin()` snapshot MUST see EVERY committed row, and the open must NOT
     raise a torn read.
 
@@ -230,12 +230,12 @@ def test_two_writers_fresh_open_sees_all_rows() raises:
     FAILS ON CURRENT CODE: writer B's fast `_HEAD` advance can regress the
     pointer that writer A advanced (the (A) defect), so a fresh handle's cached
     `read_head()` pins a stale-low snapshot and MISSES the rows committed above
-    it — exactly "the 2nd writer corrupted the store; fresh boots can't see the
-    data". (Red before the fix.)"""
+    it — exactly the "2nd writer corrupted the store; a fresh open cannot see the
+    data" symptom. (Red before the fix.)"""
     var backing = _Store()
-    var prefix = String("pg/head_regress_t2")
+    var prefix = String("ts/head_regress_t2")
 
-    # Two share-nothing handles (the API worker + the seeding CLI), each its own
+    # Two share-nothing handles (two independent writers), each its own
     # TableStore over a clone of the same backing map / same prefix.
     var a = _open_ts(backing, prefix)
     var b = _open_ts(backing, prefix)
@@ -251,7 +251,7 @@ def test_two_writers_fresh_open_sees_all_rows() raises:
         tb.insert(_b(String("b") + String(i)), _b(String("bv") + String(i)))
         _ = b.commit(tb^)
 
-    # A THIRD fresh handle opens (a cold API boot). Its begin() must pin the TRUE
+    # A THIRD fresh handle opens (a cold open). Its begin() must pin the TRUE
     # authoritative tail; reading every committed key must return its value.
     var fresh = _open_ts(backing, prefix)
     var ft = fresh.begin()
@@ -307,9 +307,9 @@ def test_two_writers_fresh_open_sees_all_rows() raises:
 
 
 def test_interrupted_writer_durable_chunk_no_torn_open() raises:
-    """The killed-mid-commit shape (prod): a writer wins a chunk slot's create-
+    """The killed-mid-commit shape: a writer wins a chunk slot's create-
     CAS (the chunk is FULLY durable) but the process dies BEFORE the `_HEAD`
-    advance. The §5 contract: the chunk's PRESENCE == it committed, so a fresh
+    advance. The recovery contract: the chunk's PRESENCE == it committed, so a fresh
     open's authoritative LIST recovery MUST recover it — and a stale-LOW (or
     absent) `_HEAD` must NEVER make the open raise a torn read.
 
@@ -323,7 +323,7 @@ def test_interrupted_writer_durable_chunk_no_torn_open() raises:
     LIST — this guards that the interrupted-writer state stays recoverable and
     that the monotone-advance fix did not regress that recovery.)"""
     var backing = _Store()
-    var prefix = String("pg/head_regress_t3")
+    var prefix = String("ts/head_regress_t3")
 
     var ts = _open_ts(backing, prefix)
     for i in range(2):

@@ -1,12 +1,7 @@
 # =============================================================================
 # src/komira_table_store/tests/test_partitioned_table_store.mojo
-#   WS-2 — PartitionedTableStore router + per-shard commit (RELAXED §10 scope).
-#   (heap Model-2 sharding campaign).
+#   PartitionedTableStore router + per-shard commit (relaxed-semantics scope).
 # =============================================================================
-#
-# Design: the heap key-space partition design
-#   §1.5 (router shell, wrap-not-edit) + §5 (single-shard fast path) +
-#   §10 (the relaxed-semantics build target) + §10.3 (what WS-2 drops).
 #
 # The DISCRIMINATING falsifiers for the shard-aware router, asserted against the
 # REAL TableStore OCC substrate over a SharedInMemoryConditionalStore (Arc-shared
@@ -25,9 +20,9 @@
 #       aborts 40001.
 #   (5) cross-shard write v1 behavior — a DML whose keys span >1 shard is
 #       REJECTED with the discriminable CROSS_SHARD_TXN_UNSUPPORTED_V1 token
-#       (WS-3 deferral), NEVER a silent partial apply.
+#       (cross-shard atomic DML is deferred), NEVER a silent partial apply.
 #   (6) RANGE routing — covering-shard pruning + single-shard ordered scan.
-#   (7) disjoint-shard ISOLATION (the headline §5 win) — two txns with
+#   (7) disjoint-shard ISOLATION (the headline single-shard win) — two txns with
 #       OVERLAPPING snapshots on DIFFERENT shards BOTH commit, NO false
 #       conflict (independent per-shard `_HEAD` slots; would 40001 if the
 #       shards had collapsed onto one lineage).
@@ -44,7 +39,7 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 
 from komira_table_store.key_index import KeyValue
-from komira_table_store.table_store_codec import bytes_eq, WriteOp, PG_OP_PUT
+from komira_table_store.table_store_codec import bytes_eq, WriteOp, TS_OP_PUT
 from komira_table_store.table_store import (
     TableStore,
     Txn,
@@ -170,7 +165,7 @@ def test_1_single_shard_route_commit_readback() raises:
     print("[1] single-shard route + commit + read-back")
     var ps = _open_partitioned(
         SharedInMemoryConditionalStore(),
-        String("pg/ws2/single"),
+        String("ts/ws2/single"),
         PartitionSpec.hash(4),
     )
     assert_true(ps.is_partitioned(), "K=4 HASH is partitioned")
@@ -214,7 +209,7 @@ def test_2_none_table_byte_identical_to_plain() raises:
     var plain = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
             store=plain_store.clone(),
-            prefix=String("pg/ws2/none/plain"),
+            prefix=String("ts/ws2/none/plain"),
             retry=RetryPolicy.fast_test(),
         )
     )
@@ -243,7 +238,7 @@ def test_2_none_table_byte_identical_to_plain() raises:
     var none_store = SharedInMemoryConditionalStore()
     var none = _open_partitioned(
         none_store.clone(),
-        String("pg/ws2/none/router"),
+        String("ts/ws2/none/router"),
         PartitionSpec.none(),
     )
     assert_false(none.is_partitioned(), "NONE spec is NOT partitioned")
@@ -296,7 +291,7 @@ def test_3_kshard_routing_and_concat_scan() raises:
     print("[3] k>=2 routing + cross-shard concat scan (union, no loss/dup)")
     var ps = _open_partitioned(
         SharedInMemoryConditionalStore(),
-        String("pg/ws2/k4"),
+        String("ts/ws2/k4"),
         PartitionSpec.hash(4),
     )
 
@@ -364,7 +359,7 @@ def test_4_per_shard_occ_conflict_aborts() raises:
     # shard's UNCHANGED TableStore.commit (per-shard OCC is preserved verbatim).
     var ps = _open_partitioned(
         SharedInMemoryConditionalStore(),
-        String("pg/ws2/occ"),
+        String("ts/ws2/occ"),
         PartitionSpec.hash(4),
     )
     var key = String("contended")
@@ -408,15 +403,15 @@ def test_4_per_shard_occ_conflict_aborts() raises:
 
 # =============================================================================
 # (5) cross-shard write v1 behavior — a DML spanning >1 shard is REJECTED with
-#     the discriminable token, NEVER partial-applied (the safe choice, §10.2 G1).
+#     the discriminable token, NEVER partial-applied (the safe choice).
 # =============================================================================
 
 
 def test_5_cross_shard_write_rejected_not_partial() raises:
-    print("[5] cross-shard DML REJECTED (WS-3 deferral), not partial-applied")
+    print("[5] cross-shard DML REJECTED (deferred), not partial-applied")
     var ps = _open_partitioned(
         SharedInMemoryConditionalStore(),
-        String("pg/ws2/xshard"),
+        String("ts/ws2/xshard"),
         PartitionSpec.hash(4),
     )
     # Find two keys that route to DISTINCT shards (so one txn buffering both is a
@@ -447,12 +442,12 @@ def test_5_cross_shard_write_rejected_not_partial() raises:
     except e:
         assert_true(
             is_cross_shard_unsupported(String(e)),
-            "cross-shard DML rejected with the WS-3 token: " + String(e),
+            "cross-shard DML rejected with the cross-shard token: " + String(e),
         )
         rejected = True
     assert_true(
         rejected,
-        "a >1-shard DML MUST be rejected loudly (WS-3), never partial-applied",
+        "a >1-shard DML MUST be rejected loudly, never partial-applied",
     )
 
     # NO partial corruption: NEITHER key is committed (the rejection happened
@@ -484,7 +479,7 @@ def test_6_range_routing_and_covering_prune() raises:
     bounds.append(_b("t"))
     var ps = _open_partitioned(
         SharedInMemoryConditionalStore(),
-        String("pg/ws2/range"),
+        String("ts/ws2/range"),
         PartitionSpec.range(bounds^),
     )
     assert_equal(ps.shard_count(), 3, "2 boundaries -> 3 shards")
@@ -501,7 +496,7 @@ def test_6_range_routing_and_covering_prune() raises:
     assert_equal(cover[0], 0, "covering band starts at shard 0")
     assert_equal(cover[1], 1, "covering band ends at shard 1 (prunes shard 2)")
 
-    # WS-4 unbounded-side SATURATION (the route_range has_lo/has_hi fix): an
+    # Unbounded-side SATURATION (the route_range has_lo/has_hi fix): an
     # unbounded UPPER (`pk >= "n"`, has_hi=False) must cover `[route("n") ..
     # last]` = shards {1, 2}, NOT collapse to `[1 .. route(empty)=0]` (empty).
     var cover_hi = ps.route_range(_b("n"), List[UInt8](), True, False)
@@ -533,7 +528,7 @@ def test_6_range_routing_and_covering_prune() raises:
 
 # =============================================================================
 # (7) disjoint-shard ISOLATION — two txns with OVERLAPPING snapshots on
-#     DIFFERENT shards BOTH commit, NO false conflict (the headline §5 win).
+#     DIFFERENT shards BOTH commit, NO false conflict (the headline single-shard win).
 # =============================================================================
 
 
@@ -553,7 +548,7 @@ def test_7_disjoint_shard_overlapping_txns_both_commit() raises:
     # assert NEITHER raises (no 40001) and BOTH values are durable.
     var ps = _open_partitioned(
         SharedInMemoryConditionalStore(),
-        String("pg/ws2/disjoint"),
+        String("ts/ws2/disjoint"),
         PartitionSpec.hash(4),
     )
 
@@ -624,4 +619,4 @@ def main() raises:
     test_5_cross_shard_write_rejected_not_partial()
     test_6_range_routing_and_covering_prune()
     test_7_disjoint_shard_overlapping_txns_both_commit()
-    print("\nALL WS-2 PartitionedTableStore tests passed.")
+    print("\nALL PartitionedTableStore tests passed.")

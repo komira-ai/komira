@@ -5,9 +5,7 @@
 #   posture; the base OCC path is multi-writer-safe by construction.
 # =============================================================================
 #
-# Design driver: "There can be any number of callers and it
-# should just work, just like any number of callers to Postgres just works."
-# Design: the table-store multi-writer design note.
+# Design driver: any number of concurrent callers must just work.
 #
 # THE CLAIM THIS TEST PROVES. A table store commit is ONE create-CAS append at
 # EXACTLY `auth_head+1` (`try_append_at_seq`) gated by an OCC first-committer-
@@ -35,13 +33,13 @@
 # `CasManifestStore` commit loop that runs on GCS UNCHANGED (the store is a
 # backend selector; the OCC code is store-generic — table_store.mojo:9-12).
 #
-# THE MULTI-WRITER POSTURE (memo Phase 1, load-bearing). Every writer opens with
+# THE MULTI-WRITER POSTURE (load-bearing). Every writer opens with
 # `with_writer_lease_fastpath=False`. The lease fast-path caches
 # a LOCAL head and can MISS the OCC window `(local_head, real_head]` a sibling
-# extended — a missed-conflict hole under concurrency (memo §2(a)). It MUST be
+# extended — a missed-conflict hole under concurrency. It MUST be
 # OFF for multi-writer; the base path OCC-validates against the AUTHORITATIVE
 # LIST head every commit. (The lease epochs default (0,0) = no fence — the
-# irreducible-TOCTOU epoch fence of memo §2(b)/§2(c) is not engaged.)
+# irreducible-TOCTOU epoch fence is not engaged.)
 #
 # WHAT THIS TEST ADDS over test_table_store_concurrency.mojo (which hammers ONE HOT
 # key + private keys and audits the HOT version-chain):
@@ -149,7 +147,7 @@ def _open_writer(
     store: SharedInMemoryConditionalStore, prefix: String, retry: RetryPolicy
 ) raises -> TableStore[SharedInMemoryConditionalStore]:
     """Open a multi-writer-posture TableStore over a clone() of the shared store:
-    lease fast-path OFF (memo Phase 1), the given retry policy. Every writer in
+    lease fast-path OFF, the given retry policy. Every writer in
     this test uses this so the OCC always validates against the AUTHORITATIVE
     LIST head (no lease-cached-head missed-conflict hole)."""
     return TableStore[SharedInMemoryConditionalStore].open(
@@ -345,7 +343,7 @@ def _run_multiwriter_union(k: Int, rows_per_writer: Int64) raises:
         + String(Int(rows_per_writer)) + " distinct rows -> ONE lineage"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/mw_union/k") + String(k) + String("_") + _unique()
+    var prefix = String("ts/mw_union/k") + String(k) + String("_") + _unique()
 
     var results = Slab[OwnedPointer[_WriterResults]]()
     for _w in range(k):
@@ -497,7 +495,7 @@ def test_t1_multiwriter_union_32() raises:
 def test_t2_forced_conflict_clean_40001() raises:
     print("[T2] forced write-write conflict -> CLEAN typed 40001 (no torn read)")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/mw_conflict/") + _unique()
+    var prefix = String("ts/mw_conflict/") + _unique()
 
     var ts = _open_writer(shared, prefix, RetryPolicy.fast_test())
 
@@ -597,7 +595,7 @@ def test_t3_zero_budget_loser_clean_conflict() raises:
         "[T3] zero-budget loser -> CLEAN typed conflict (never a torn read)"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/mw_exhaust/") + _unique()
+    var prefix = String("ts/mw_exhaust/") + _unique()
 
     # A policy with ZERO retry budget (base/cap=1us, max_retries=0): a writer
     # configured to give up on the first sign of contention. It MUST still get a
@@ -684,7 +682,7 @@ def test_t3_zero_budget_loser_clean_conflict() raises:
 def test_t4_sustained_sequential_rpc_no_wedge() raises:
     print("[T4] sustained sequential-RPC leg (h2 WINDOW_UPDATE guard)")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/mw_seq/") + _unique()
+    var prefix = String("ts/mw_seq/") + _unique()
 
     var ts = _open_writer(shared, prefix, RetryPolicy.fast_test())
 

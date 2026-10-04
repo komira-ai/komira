@@ -29,12 +29,10 @@
 #   5. OCC-UNDER-LEASE SOUNDNESS — a conflicting txn under lease still aborts
 #      40001; SI/MVCC semantics UNCHANGED.
 #
-# Design: the lease fast-path scope note;
-#   broker `_LocalHeadCache` cas_manifest.mojo:523-597 (the elision MECHANISM).
+# The elision MECHANISM mirrors `_LocalHeadCache` in
+#   komira_objectstore/cas_manifest.mojo.
 # =============================================================================
 
-from std.ffi import external_call
-from std.memory import OwnedPointer, UnsafePointer, alloc
 from std.testing import assert_equal, assert_false, assert_true
 
 from komira_collections.slab import Slab
@@ -66,8 +64,8 @@ from komira_objectstore.types import (
 
 from komira_table_store.key_index import KeyValue
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
     encode_commit_chunk,
@@ -335,8 +333,8 @@ def test_1a_byte_identity_single_writer() raises:
     print(
         "[1a] lease-vs-LIST byte-identity — single-writer — DISCRIMINATING"
     )
-    var off = _new_mem_store(String("pg/li/1a_off"), False)
-    var on = _new_mem_store(String("pg/li/1a_on"), True)
+    var off = _new_mem_store(String("ts/li/1a_off"), False)
+    var on = _new_mem_store(String("ts/li/1a_on"), True)
 
     _drive_single_writer_workload(off)
     _drive_single_writer_workload(on)
@@ -396,8 +394,8 @@ def test_2_list_elision_count() raises:
     # the lease, so we WARM both stores past it, then measure the steady-state
     # delta, isolating the lease's effect.)
     var n = 6
-    var off = _new_counting_store(String("pg/li/2_off"), False)
-    var on = _new_counting_store(String("pg/li/2_on"), True)
+    var off = _new_counting_store(String("ts/li/2_off"), False)
+    var on = _new_counting_store(String("ts/li/2_on"), True)
 
     # WARMUP: one commit on each (establishes the durable `_HEAD` + warms ON's
     # local lease head). Then RESET the counters so we measure only steady state.
@@ -479,7 +477,7 @@ def test_3_412_relist_fallback() raises:
     # Two TableStore handles over ONE shared store (clone shares the map). A is
     # the lease-holder (warm); B is a sibling writer with no lease.
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/li/3")
+    var prefix = String("ts/li/3")
     var a = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
             store=shared.clone(), prefix=prefix.copy(),
@@ -546,7 +544,7 @@ def test_3_412_relist_fallback() raises:
 
 def test_4_stale_lease_fence() raises:
     print("[4] stale-lease fence — superseded epoch rejected at create-CAS")
-    var ts = _new_mem_store(String("pg/li/4"), False)
+    var ts = _new_mem_store(String("ts/li/4"), False)
     # A first clean commit (no lease) establishes a tail.
     var lsn0 = _commit_put(ts, String("k"), String("v0"))
     assert_equal(lsn0, Int64(0), "[4] first commit at slot 0")
@@ -601,7 +599,7 @@ def test_4_stale_lease_fence() raises:
 def test_5_occ_under_lease_soundness() raises:
     print("[5] OCC-under-lease soundness — first-committer-wins still 40001")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/li/5")
+    var prefix = String("ts/li/5")
     var a = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
             store=shared.clone(), prefix=prefix.copy(),
@@ -692,7 +690,7 @@ def test_1b_byte_identity_concurrent() raises:
 
     # OFF run.
     var shared_off = SharedInMemoryConditionalStore()
-    var poff = String("pg/li/1b_off")
+    var poff = String("ts/li/1b_off")
     var a_off = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
             store=shared_off.clone(), prefix=poff.copy(),
@@ -715,7 +713,7 @@ def test_1b_byte_identity_concurrent() raises:
 
     # ON run (A holds the lease).
     var shared_on = SharedInMemoryConditionalStore()
-    var pon = String("pg/li/1b_on")
+    var pon = String("ts/li/1b_on")
     var a_on = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
             store=shared_on.clone(), prefix=pon.copy(),

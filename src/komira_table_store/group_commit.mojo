@@ -5,40 +5,40 @@
 #   `CoalescingWindow` primitive (komira_objectstore/coalescing_window.mojo).
 # =============================================================================
 #
-# WHY: the landed table store serialization queue (pgwire `_pg_kick_next_queued_
-# commit`) starts ONE queued commit at a time — N concurrent commits cost N
+# WHY: a caller that serializes commits through a queue starts ONE queued
+# commit at a time — N concurrent commits cost N
 # create-CAS round-trips. Group-commit COALESCES N non-conflicting commits into
 # ONE merged chunk = ONE create-CAS. The queue IS the coalescing window (it
 # deepens under contention — exactly when coalescing pays).
 #
 # THE SEAM → table store MAPPING (the four CoalescingWindow seams + the appender):
-#   * Item    = PgGroupCommitItem{snapshot_lsn, write_set} — the per-member
+#   * Item    = TableStoreGroupCommitItem{snapshot_lsn, write_set} — the per-member
 #               payload, built from each conn's extracted Txn.
-#   * Head    = PgGroupHead{chunk_seq, next_offset} — from the AUTHORITATIVE
-#               ManifestHead (the §8 OCC-coupling head).
-#   * Outcome = PgGroupOutcome{kind, commit_lsn, intra_batch_seq} — the COMPOSITE
+#   * Head    = TableStoreGroupHead{chunk_seq, next_offset} — from the AUTHORITATIVE
+#               ManifestHead (the OCC-coupling head).
+#   * Outcome = TableStoreGroupOutcome{kind, commit_lsn, intra_batch_seq} — the COMPOSITE
 #               LSN: commit_lsn = the SHARED chunk_seq (all winners atomically
 #               visible at the one slot — the gapless-monotone invariant
 #               _fold_wal_range / _replay_into_index / _occ_check require);
 #               intra_batch_seq = the arbitration order within the slot (CDC /
 #               audit total order; SI ignores it).
-#   * H reader (PgHeadReader) — reads `read_head_authoritative()` (a LIST, NOT
-#               poll-shapeable per the landed §design; the landed prelude OCC
+#   * H reader (TableStoreHeadReader) — reads `read_head_authoritative()` (a LIST, NOT
+#               poll-shapeable; the single-txn prelude OCC
 #               stays blocking too) SYNCHRONOUSLY in read_head_start, encodes the
 #               {chunk_seq, next_offset} pair into the CasReadResult body, returns
 #               READY. decode_head decodes it back.
-#   * C codec (PgGroupCommitCodec) — THE CRUX. Folds intra-batch arbitration
+#   * C codec (TableStoreGroupCommitCodec) — THE CRUX. Folds intra-batch arbitration
 #               (first-in-batch-wins) + per-member OCC (real key-intersection vs
 #               the durable head, IDENTICAL to TableStore._occ_check) + the
 #               winners' write-set MERGE into ONE chunk body. See its docstring.
-#   * A appender (PgExactSlotAppender) — the EXACT-SLOT create-CAS at auth_head+1
+#   * A appender (TableStoreExactSlotAppender) — the EXACT-SLOT create-CAS at auth_head+1
 #               via the in-tree AsyncManifestAppendOp[Store] (the OCC mode — an
 #               escalated slot would be a silent lost-update). A 412 -> LOST_SLOT
 #               -> the spine's LIVE 412-loop re-reads head + re-arbitrates (a
 #               member can now lose to a freshly-landed chunk) + re-encodes the
 #               WHOLE batch + re-appends at the new auth_head+1.
 #
-# THE §8 COUPLING IS PRESERVED: the spine reads the authoritative head ONCE; the
+# THE OCC/CREATE-CAS COUPLING IS PRESERVED: the spine reads the authoritative head ONCE; the
 # SAME `auth` feeds BOTH head_slot (= auth.chunk_seq + 1) AND encode's per-member
 # OCC window `(member_snapshot, auth.chunk_seq]`. A WON create-CAS at exactly
 # auth.chunk_seq+1 proves the OCC window covered every committed conflict for
@@ -120,20 +120,20 @@ from komira_table_store.table_store import (
 
 
 # =============================================================================
-# §0 — the per-member outcome taxonomy.
+# The per-member outcome taxonomy.
 # =============================================================================
 # A member of a coalesced batch ends in exactly one of three states:
-comptime PG_GC_WIN: UInt8 = 0  # merged into the chunk; commit_lsn = shared slot.
-comptime PG_GC_LOSS_INTRA: UInt8 = 1  # lost intra-batch arbitration (40001).
-comptime PG_GC_LOSS_OCC: UInt8 = 2  # lost per-member OCC vs the durable head (40001).
+comptime TS_GC_WIN: UInt8 = 0  # merged into the chunk; commit_lsn = shared slot.
+comptime TS_GC_LOSS_INTRA: UInt8 = 1  # lost intra-batch arbitration (40001).
+comptime TS_GC_LOSS_OCC: UInt8 = 2  # lost per-member OCC vs the durable head (40001).
 
 
 # =============================================================================
-# §1 — Item / Head / Outcome.
+# Item / Head / Outcome.
 # =============================================================================
 
 
-struct PgGroupCommitItem(Copyable, Movable, Deinitable):
+struct TableStoreGroupCommitItem(Copyable, Movable, Deinitable):
     """One member of a coalesced group-commit batch: a single txn's pinned
     snapshot + its buffered write-set (RYOW already deduped by key). Built from a
     conn's extracted open Txn. Copyable (WriteOp is Copyable; the list is plain) —
@@ -153,8 +153,8 @@ struct PgGroupCommitItem(Copyable, Movable, Deinitable):
         self.write_set = write_set^
 
 
-struct PgGroupHead(Copyable, Movable, Deinitable):
-    """The authoritative manifest head the encode conditions on (the §8 coupling
+struct TableStoreGroupHead(Copyable, Movable, Deinitable):
+    """The authoritative manifest head the encode conditions on (the OCC/create-CAS coupling
     head). POD.
 
     Field layout:
@@ -171,12 +171,12 @@ struct PgGroupHead(Copyable, Movable, Deinitable):
         self.next_offset = next_offset
 
 
-struct PgGroupOutcome(Copyable, Movable, Deinitable):
+struct TableStoreGroupOutcome(Copyable, Movable, Deinitable):
     """The per-member result handed back to each conn. POD (Copyable — the
     primitive collects outcomes in a List[Tuple[Int, Outcome]]).
 
     Field layout:
-      var kind: UInt8          — PG_GC_WIN / PG_GC_LOSS_INTRA / PG_GC_LOSS_OCC.
+      var kind: UInt8          — TS_GC_WIN / TS_GC_LOSS_INTRA / TS_GC_LOSS_OCC.
       var commit_lsn: Int64    — the SHARED won slot (valid only on WIN; -1 else).
       var intra_batch_seq: Int — the arbitration order within the slot (WIN only).
     """
@@ -191,24 +191,24 @@ struct PgGroupOutcome(Copyable, Movable, Deinitable):
         self.intra_batch_seq = intra_batch_seq
 
     @staticmethod
-    def win(commit_lsn: Int64, intra_batch_seq: Int) -> PgGroupOutcome:
-        return PgGroupOutcome(PG_GC_WIN, commit_lsn, intra_batch_seq)
+    def win(commit_lsn: Int64, intra_batch_seq: Int) -> TableStoreGroupOutcome:
+        return TableStoreGroupOutcome(TS_GC_WIN, commit_lsn, intra_batch_seq)
 
     @staticmethod
-    def loss_intra() -> PgGroupOutcome:
-        return PgGroupOutcome(PG_GC_LOSS_INTRA, Int64(-1), -1)
+    def loss_intra() -> TableStoreGroupOutcome:
+        return TableStoreGroupOutcome(TS_GC_LOSS_INTRA, Int64(-1), -1)
 
     @staticmethod
-    def loss_occ() -> PgGroupOutcome:
-        return PgGroupOutcome(PG_GC_LOSS_OCC, Int64(-1), -1)
+    def loss_occ() -> TableStoreGroupOutcome:
+        return TableStoreGroupOutcome(TS_GC_LOSS_OCC, Int64(-1), -1)
 
     @always_inline
     def is_win(self) -> Bool:
-        return self.kind == PG_GC_WIN
+        return self.kind == TS_GC_WIN
 
     @always_inline
     def is_loss(self) -> Bool:
-        return self.kind != PG_GC_WIN
+        return self.kind != TS_GC_WIN
 
 
 # Little-endian i64 framing for the head body the reader hands the codec (a
@@ -237,10 +237,10 @@ def _encode_head_body(chunk_seq: Int64, next_offset: Int64) -> List[UInt8]:
 
 
 # =============================================================================
-# §2 — PgHeadReader (SEAM 2: AuthHeadReader).
+# TableStoreHeadReader (SEAM 2: AuthHeadReader).
 # =============================================================================
 # Reads the AUTHORITATIVE manifest head (read_head_authoritative — a LIST, the
-# §8 OCC-coupling head). The landed table store design keeps the head-read BLOCKING
+# OCC-coupling head). The landed table store design keeps the head-read BLOCKING
 # (a LIST is not poll-shapeable via the AsyncCasStore ABI, and on the warm path
 # it hits the local cache — no RTT), so read_head_start does the read
 # SYNCHRONOUSLY and returns READY immediately (no park) — identical to the
@@ -254,7 +254,7 @@ def _encode_head_body(chunk_seq: Int64, next_offset: Int64) -> List[UInt8]:
 # WAL handle; only the typed CasReadResult crosses the seam.
 
 
-struct PgHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
+struct TableStoreHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
     AuthHeadReader, Movable, Deinitable
 ):
     var _wal: CasManifestStore[Self.Store]
@@ -268,8 +268,8 @@ struct PgHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
     def read_head_start[
         S: WakerSink & Movable & Deinitable,
     ](mut self, mut reactor: Reactor[S]) raises -> CasOpProgress:
-        # Synchronous authoritative head-read (LIST / warm cache). The §8
-        # coupling head: the same head the create-CAS targets at +1. Stash the
+        # Synchronous authoritative head-read (LIST / warm cache). The OCC-coupling
+        # head: the same head the create-CAS targets at +1. Stash the
         # encoded body for take_read; report READY (no park).
         var head = self._wal.read_head_authoritative()
         self._pending = Optional[List[UInt8]](
@@ -286,7 +286,7 @@ struct PgHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
 
     def take_read(mut self) raises -> CasReadResult:
         if not self._pending:
-            raise Error("PgHeadReader.take_read: no staged head")
+            raise Error("TableStoreHeadReader.take_read: no staged head")
         var body = self._pending.take()
         return CasReadResult(absent=False, body=body^, etag=String(""))
 
@@ -325,7 +325,7 @@ struct PgHeadReader[Store: ConditionalWriteStore & AsyncCasStore](
 
 
 # =============================================================================
-# §3 — pure arbitration + per-member OCC (the conflict-fuzz reference targets).
+# Pure arbitration + per-member OCC (the conflict-fuzz reference targets).
 # =============================================================================
 # These are EXTRACTED as free functions so the conflict-fuzz test can drive them
 # directly against a reference model (a missed key-intersection is a SILENT
@@ -344,7 +344,7 @@ def _write_sets_intersect(a: List[WriteOp], b: List[WriteOp]) -> Bool:
     return False
 
 
-def arbitrate_intra_batch(items: List[PgGroupCommitItem]) -> List[Bool]:
+def arbitrate_intra_batch(items: List[TableStoreGroupCommitItem]) -> List[Bool]:
     """INTRA-BATCH arbitration: FIRST-IN-BATCH-WINS (tiebreak = drain / FIFO
     order = the items' index order — ratified). Returns a parallel
     `survives_intra[i]` mask: member i SURVIVES the intra-batch round iff its
@@ -383,7 +383,7 @@ def _occ_member_conflicts_wal[
     snapshot is stale). IDENTICAL key-intersection to TableStore._occ_check.
     Raises a RETRYABLE-tagged error on a torn-create in-flight chunk (the caller
     re-reads + re-arbitrates). Reads through the caller's `wal` ref so BOTH the
-    `PgGroupCommitCodec` (its own clone) AND the production `_group_prelude`
+    `TableStoreGroupCommitCodec` (its own clone) AND the live `_group_prelude`
     (the borrowed TableStore WAL) run the SAME OCC logic — no second copy."""
     var seq = snapshot + Int64(1)
     while seq <= auth_head_seq:
@@ -415,9 +415,9 @@ def encode_group_batch[
     Store: ConditionalWriteStore & AsyncCasStore,
 ](
     mut wal: CasManifestStore[Store],
-    members: List[PgGroupCommitItem],
+    members: List[TableStoreGroupCommitItem],
     auth_head_seq: Int64,
-) raises -> Tuple[List[WriteOp], List[Int], List[PgGroupOutcome]]:
+) raises -> Tuple[List[WriteOp], List[Int], List[TableStoreGroupOutcome]]:
     """THE ONE DOMAIN-LOGIC IMPLEMENTATION for the group-commit fold (the
     share-the-codec refactor). Folds, in order, over `members` +
     the authoritative head seq:
@@ -432,54 +432,54 @@ def encode_group_batch[
     torn-create / retryable read inside the OCC scan re-raises (the caller
     re-drives the WHOLE fold).
 
-    BOTH consumers call THIS function — `PgGroupCommitCodec.encode` (over its own
-    `CasManifestStore` clone) AND the production `_group_prelude` (over the
+    BOTH consumers call THIS function — `TableStoreGroupCommitCodec.encode` (over its own
+    `CasManifestStore` clone) AND the live `_group_prelude` (over the
     borrowed `TableStore` WAL). So the 400-seed conflict-fuzz (which drives the
-    codec) DIRECTLY covers the production arbitration + per-member OCC + merge:
+    codec) DIRECTLY covers the live arbitration + per-member OCC + merge:
     there is no second copy to drift. The Mojo-bound-forced parkable PLUMBING
     (the store-agnostic FSM + 412-loop in `AsyncGroupCommitOp` / the spine's
     create-CAS) is the DRIVER around this shared domain logic, documented as the
-    accepted, precedented seam (see §7)."""
+    accepted, precedented seam."""
     var n = len(members)
     var survives = arbitrate_intra_batch(members)
     var merged = List[WriteOp]()
     var winner_idxs = List[Int]()
-    var outcomes = List[PgGroupOutcome]()
+    var outcomes = List[TableStoreGroupOutcome]()
     for _ in range(n):
-        outcomes.append(PgGroupOutcome.loss_intra())  # default; overwritten below
+        outcomes.append(TableStoreGroupOutcome.loss_intra())  # default; overwritten below
     for i in range(n):
         if not survives[i]:
             # Intra-batch loser — never enters the merged write-set.
-            outcomes[i] = PgGroupOutcome.loss_intra()
+            outcomes[i] = TableStoreGroupOutcome.loss_intra()
             continue
         # Per-member OCC: the member's OWN snapshot vs (snapshot, auth_head_seq].
         var conflicts = _occ_member_conflicts_wal[Store](
             wal, members[i].snapshot_lsn, auth_head_seq, members[i].write_set
         )
         if conflicts:
-            outcomes[i] = PgGroupOutcome.loss_occ()
+            outcomes[i] = TableStoreGroupOutcome.loss_occ()
             continue
         # WINNER — merge its write-set + record the winner idx (the WIN outcome's
         # commit_lsn is stamped on the create-CAS win).
         for wi in range(len(members[i].write_set)):
             merged.append(members[i].write_set[wi].copy())
         winner_idxs.append(i)
-        outcomes[i] = PgGroupOutcome.win(Int64(-1), len(winner_idxs) - 1)
+        outcomes[i] = TableStoreGroupOutcome.win(Int64(-1), len(winner_idxs) - 1)
     return (merged^, winner_idxs^, outcomes^)
 
 
 # =============================================================================
-# §4 — PgGroupCommitCodec (SEAM 3: BatchCodec) — THE CRUX.
+# TableStoreGroupCommitCodec (SEAM 3: BatchCodec) — THE CRUX.
 # =============================================================================
 # encode folds THREE things, in this order, over the buffered members + the
 # decoded authoritative head:
 #   1. INTRA-BATCH arbitration (first-in-batch-wins) — arbitrate_intra_batch.
 #      A later member intersecting an earlier SURVIVOR's keys is an intra-batch
-#      loser (PG_GC_LOSS_INTRA -> 40001); never enters the merged write-set.
+#      loser (TS_GC_LOSS_INTRA -> 40001); never enters the merged write-set.
 #   2. PER-MEMBER OCC vs the DURABLE head — for each intra-batch survivor, scan
 #      chunks `(member_snapshot, auth.chunk_seq]` for any key intersecting THAT
 #      member's write-set (IDENTICAL key-intersection to TableStore._occ_check).
-#      A stale-snapshot conflict is an OCC loser (PG_GC_LOSS_OCC -> 40001).
+#      A stale-snapshot conflict is an OCC loser (TS_GC_LOSS_OCC -> 40001).
 #   3. MERGE the surviving winners' write-sets into ONE chunk body
 #      (encode_commit_chunk) — the single create-CAS payload. winner_idxs are the
 #      winners' orig indices in arbitration (drain) order; loser_outcomes carry
@@ -488,16 +488,16 @@ def encode_group_batch[
 # The codec owns its OWN CasManifestStore[Store] clone for the OCC read_chunk
 # scan (the OCC scan is non-empty ONLY under actual contention; it stays blocking
 # inside encode, exactly as the landed prelude OCC scan does — the CPU/sync
-# ENCODE phase). The §8 coupling: encode's OCC upper bound == head_slot's slot-1
+# ENCODE phase). The OCC/create-CAS coupling: encode's OCC upper bound == head_slot's slot-1
 # == the SAME auth the appender create-CASes at +1.
 
 
-struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
+struct TableStoreGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
     BatchCodec, Movable, Deinitable
 ):
-    comptime Item = PgGroupCommitItem
-    comptime Head = PgGroupHead
-    comptime Outcome = PgGroupOutcome
+    comptime Item = TableStoreGroupCommitItem
+    comptime Head = TableStoreGroupHead
+    comptime Outcome = TableStoreGroupOutcome
 
     # The OCC-scan WAL clone (read_chunk over (member_snapshot, auth_head]).
     var _wal: CasManifestStore[Self.Store]
@@ -505,20 +505,20 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
     def __init__(out self, var wal: CasManifestStore[Self.Store]):
         self._wal = wal^
 
-    def decode_head(mut self, var rr: CasReadResult) raises -> PgGroupHead:
+    def decode_head(mut self, var rr: CasReadResult) raises -> TableStoreGroupHead:
         if rr.absent:
-            return PgGroupHead(chunk_seq=Int64(-1), next_offset=Int64(0))
+            return TableStoreGroupHead(chunk_seq=Int64(-1), next_offset=Int64(0))
         var chunk_seq = _get_i64_le(rr.body, 0)
         var next_offset = _get_i64_le(rr.body, 8)
-        return PgGroupHead(chunk_seq=chunk_seq, next_offset=next_offset)
+        return TableStoreGroupHead(chunk_seq=chunk_seq, next_offset=next_offset)
 
-    def head_slot(self, ref auth: PgGroupHead) -> Int64:
-        # The EXACT slot = auth_head + 1 (the §8 coupling — the OCC window upper
+    def head_slot(self, ref auth: TableStoreGroupHead) -> Int64:
+        # The EXACT slot = auth_head + 1 (the OCC/create-CAS coupling — the OCC window upper
         # bound is auth.chunk_seq, so the commit lands at chunk_seq+1, no
         # un-checked gap below the commit).
         return auth.chunk_seq + Int64(1)
 
-    def estimate_bytes(self, ref it: PgGroupCommitItem) -> Int:
+    def estimate_bytes(self, ref it: TableStoreGroupCommitItem) -> Int:
         # The size contribution = the member's write-set byte total (rough — the
         # framing overhead is small). Used only by the size band; the table store forces
         # EXPLICIT flushes (the queue drain), so this is informational.
@@ -528,18 +528,18 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
         return n
 
     def encode(
-        mut self, ref items: Slab[PgGroupCommitItem], var auth: PgGroupHead
-    ) raises -> EncodedBatch[PgGroupOutcome]:
+        mut self, ref items: Slab[TableStoreGroupCommitItem], var auth: TableStoreGroupHead
+    ) raises -> EncodedBatch[TableStoreGroupOutcome]:
         # SHARE-THE-CODEC: the arbitration + per-member OCC +
         # merge is the ONE shared `encode_group_batch` free function — the SAME
-        # implementation the production `_group_prelude` calls. The codec adapts
+        # implementation the live `_group_prelude` calls. The codec adapts
         # only the Slab[Item] -> List[Item] view + the EncodedBatch packaging
         # (winner_idxs + the (orig_idx, 40001) loser_outcomes the spine ABI
         # wants); the domain logic lives in exactly one place. So the 400-seed
-        # conflict-fuzz (which drives THIS encode) directly covers the production
+        # conflict-fuzz (which drives THIS encode) directly covers the live
         # arbitration + OCC + merge.
         var n = items.len()
-        var view = List[PgGroupCommitItem]()
+        var view = List[TableStoreGroupCommitItem]()
         for i in range(n):
             view.append(items[i].copy())
         var folded = encode_group_batch[Self.Store](
@@ -552,7 +552,7 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
 
         # Repackage the shared (merged, winner_idxs, outcomes[parallel]) fold
         # into the spine ABI's (winner_idxs, loser_outcomes[(orig_idx, 40001)]).
-        var loser_outcomes = List[Tuple[Int, PgGroupOutcome]]()
+        var loser_outcomes = List[Tuple[Int, TableStoreGroupOutcome]]()
         for i in range(n):
             if outcomes[i].is_loss():
                 loser_outcomes.append((i, outcomes[i].copy()))
@@ -563,7 +563,7 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
         # — we record auth.chunk_seq, the head it was validated against). Replay
         # / cross-handle OCC reads only the KEYS, never the header snapshot.
         var body = encode_commit_chunk(auth.chunk_seq, merged)
-        return EncodedBatch[PgGroupOutcome](
+        return EncodedBatch[TableStoreGroupOutcome](
             body^,
             Int64(len(merged)),
             Optional[List[UInt8]](),
@@ -576,14 +576,14 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
 
     def winner_outcome(
         self, orig_idx: Int, intra_batch_seq: Int, append: AppendResult
-    ) -> PgGroupOutcome:
+    ) -> TableStoreGroupOutcome:
         # COMPOSITE LSN: the SHARED chunk_seq (all winners atomically visible at
         # this slot) + the intra_batch_seq (arbitration order within the slot).
-        return PgGroupOutcome.win(append.chunk_seq, intra_batch_seq)
+        return TableStoreGroupOutcome.win(append.chunk_seq, intra_batch_seq)
 
 
 # =============================================================================
-# §5 — PgExactSlotAppender (SEAM 5: BatchAppender) — the EXACT-SLOT write.
+# TableStoreExactSlotAppender (SEAM 5: BatchAppender) — the EXACT-SLOT write.
 # =============================================================================
 # The EXACT-SLOT create-CAS at auth_head+1 (the OCC mode — an escalated slot is a
 # silent lost-update). Drives the in-tree parkable AsyncManifestAppendOp[Store]
@@ -598,7 +598,7 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
 # across the park — only typed CasOpProgress / AppendOutcome cross the seam.
 
 
-struct PgExactSlotAppender[Store: ConditionalWriteStore & AsyncCasStore](
+struct TableStoreExactSlotAppender[Store: ConditionalWriteStore & AsyncCasStore](
     BatchAppender, Movable, Deinitable
 ):
     var _wal: CasManifestStore[Self.Store]
@@ -664,7 +664,7 @@ struct PgExactSlotAppender[Store: ConditionalWriteStore & AsyncCasStore](
 
 
 # =============================================================================
-# §6 — PgGroupCommitFactory (SpineFactory) — mints a fresh spine per flush.
+# TableStoreGroupCommitFactory (SpineFactory) — mints a fresh spine per flush.
 # =============================================================================
 # The window calls make_spine(items^, reason) on each flush. The factory holds
 # the CLONEABLE store + the WAL prefix and builds a FRESH CasManifestStore clone
@@ -673,14 +673,14 @@ struct PgExactSlotAppender[Store: ConditionalWriteStore & AsyncCasStore](
 # inner map (so they see the same committed data); each holds its OWN handle.
 
 
-struct PgGroupCommitFactory[
+struct TableStoreGroupCommitFactory[
     Store: CloneableConditionalWriteStore & AsyncCasStore
 ](SpineFactory, Movable, Deinitable):
     comptime Storage = Self.Store
-    comptime H = PgHeadReader[Self.Store]
-    comptime C = PgGroupCommitCodec[Self.Store]
-    comptime A = PgExactSlotAppender[Self.Store]
-    comptime Item = PgGroupCommitItem
+    comptime H = TableStoreHeadReader[Self.Store]
+    comptime C = TableStoreGroupCommitCodec[Self.Store]
+    comptime A = TableStoreExactSlotAppender[Self.Store]
+    comptime Item = TableStoreGroupCommitItem
 
     var _store: Self.Store
     var _prefix: String
@@ -690,44 +690,44 @@ struct PgGroupCommitFactory[
         self._prefix = prefix^
 
     def make_spine(
-        mut self, var items: Slab[PgGroupCommitItem], reason: UInt8
+        mut self, var items: Slab[TableStoreGroupCommitItem], reason: UInt8
     ) raises -> _CoalesceSpine[
         Self.Store,
-        PgHeadReader[Self.Store],
-        PgGroupCommitCodec[Self.Store],
-        PgExactSlotAppender[Self.Store],
+        TableStoreHeadReader[Self.Store],
+        TableStoreGroupCommitCodec[Self.Store],
+        TableStoreExactSlotAppender[Self.Store],
     ]:
-        var reader = PgHeadReader[Self.Store](
+        var reader = TableStoreHeadReader[Self.Store](
             CasManifestStore[Self.Store](
                 self._store.clone(), self._prefix.copy()
             )
         )
-        var codec = PgGroupCommitCodec[Self.Store](
+        var codec = TableStoreGroupCommitCodec[Self.Store](
             CasManifestStore[Self.Store](
                 self._store.clone(), self._prefix.copy()
             )
         )
-        var appender = PgExactSlotAppender[Self.Store](
+        var appender = TableStoreExactSlotAppender[Self.Store](
             CasManifestStore[Self.Store](
                 self._store.clone(), self._prefix.copy()
             )
         )
         return _CoalesceSpine[
             Self.Store,
-            PgHeadReader[Self.Store],
-            PgGroupCommitCodec[Self.Store],
-            PgExactSlotAppender[Self.Store],
+            TableStoreHeadReader[Self.Store],
+            TableStoreGroupCommitCodec[Self.Store],
+            TableStoreExactSlotAppender[Self.Store],
         ](reader^, codec^, appender^, items^, reason)
 
 
 # =============================================================================
-# §7 — AsyncGroupCommitOp + the group_commit_async_* driver (the PRODUCTION
-#      pgwire graft state).
+# AsyncGroupCommitOp + the group_commit_async_* driver (the reactor-driven
+#      group-commit path).
 # =============================================================================
-# WHY a STORE-AGNOSTIC carried op (NOT the CoalescingWindow front-end): the
-# pgwire `PgWireServer[Store]` struct is bound on the BASE `ConditionalWriteStore`
-# (it is instantiated with non-cloneable in-mem stores in tests), so a
-# `CoalescingWindow[PgGroupCommitFactory[Store]]` (which requires
+# WHY a STORE-AGNOSTIC carried op (NOT the CoalescingWindow front-end): a
+# server that embeds this state may be bound on the BASE `ConditionalWriteStore`
+# (and instantiated with non-cloneable in-mem stores in tests), so a
+# `CoalescingWindow[TableStoreGroupCommitFactory[Store]]` (which requires
 # `CloneableConditionalWriteStore`) CANNOT be a server field in Mojo 1.0.0b1
 # (a struct field's type must satisfy the struct's own param bound). So the
 # carried-across-park group state mirrors the landed single-txn `AsyncCommitOp`:
@@ -736,12 +736,12 @@ struct PgGroupCommitFactory[
 # `[Store: ... & AsyncCasStore]`) reconstruct the transient
 # `AsyncManifestAppendOp[Store]` each poll from the POD mirror, EXACTLY as
 # `commit_async_*` does. The arbitration + per-member OCC logic is the SAME logic
-# the `PgGroupCommitCodec` / `arbitrate_intra_batch` (proven by the conflict-fuzz)
-# uses — here it runs inline over the SERVER's borrowed `TableStore[Store]` (no
+# the `TableStoreGroupCommitCodec` / `arbitrate_intra_batch` (proven by the conflict-fuzz)
+# uses — here it runs inline over the caller's borrowed `TableStore[Store]` (no
 # clone needed; the driver lives in this module so the WAL handle never crosses a
 # boundary).
 #
-# THE §8 COUPLING (preserved IDENTICALLY to the single-txn path): the synchronous
+# THE OCC/CREATE-CAS COUPLING (preserved IDENTICALLY to the single-txn path): the synchronous
 # prelude reads the AUTHORITATIVE head ONCE; the SAME head feeds BOTH the
 # per-member OCC window `(member_snapshot, auth_head]` AND the merged create-CAS
 # slot (auth_head+1). A WON slot proves the OCC window covered every conflict for
@@ -753,8 +753,8 @@ struct PgGroupCommitFactory[
 # ONE chunk body = ONE create-CAS slot. Replay folds all winners at the shared
 # commit_lsn or none (the conflict-fuzz / crash-atomicity tests prove this).
 #
-# stale-reuse: AsyncGroupCommitOp is a plain owned struct (a `List[PgGroupCommitItem]` +
-# a `List[PgGroupOutcome]` + PODs + an error String). NO byte-slab + wildcard,
+# stale-reuse: AsyncGroupCommitOp is a plain owned struct (a `List[TableStoreGroupCommitItem]` +
+# a `List[TableStoreGroupOutcome]` + PODs + an error String). NO byte-slab + wildcard,
 # NO pointer; the in-flight create-CAS op lives INSIDE the WAL's `_store`
 # conformer across the park (reconstructed each poll from the POD mirror).
 
@@ -772,9 +772,9 @@ struct AsyncGroupCommitOp(Movable, Deinitable):
     String).
 
     Field layout:
-      var _members: List[PgGroupCommitItem]  — the N batch members (in drain /
+      var _members: List[TableStoreGroupCommitItem]  — the N batch members (in drain /
                                                FIFO order = arbitration order).
-      var _outcomes: List[PgGroupOutcome]    — parallel to _members; valid on
+      var _outcomes: List[TableStoreGroupOutcome]    — parallel to _members; valid on
                                                DONE (each WIN carries the shared
                                                commit_lsn + its intra_batch_seq;
                                                each LOSS carries 40001).
@@ -790,8 +790,8 @@ struct AsyncGroupCommitOp(Movable, Deinitable):
                                                412 re-arbitrate).
     """
 
-    var _members: List[PgGroupCommitItem]
-    var _outcomes: List[PgGroupOutcome]
+    var _members: List[TableStoreGroupCommitItem]
+    var _outcomes: List[TableStoreGroupOutcome]
     var _phase: UInt8
     var _attempt: Int
     var _err: String
@@ -807,11 +807,11 @@ struct AsyncGroupCommitOp(Movable, Deinitable):
     # 412 re-arbitrate overwrites them on the next attempt.
     var _winner_idxs: List[Int]
     var _merged_write_set: List[WriteOp]
-    var _outcome_skel: List[PgGroupOutcome]
+    var _outcome_skel: List[TableStoreGroupOutcome]
 
-    def __init__(out self, var members: List[PgGroupCommitItem]):
+    def __init__(out self, var members: List[TableStoreGroupCommitItem]):
         self._members = members^
-        self._outcomes = List[PgGroupOutcome]()
+        self._outcomes = List[TableStoreGroupOutcome]()
         self._phase = _AGC_PHASE_RUNNING
         self._attempt = 0
         self._err = String("")
@@ -823,7 +823,7 @@ struct AsyncGroupCommitOp(Movable, Deinitable):
         self._merged_count = Int64(0)
         self._winner_idxs = List[Int]()
         self._merged_write_set = List[WriteOp]()
-        self._outcome_skel = List[PgGroupOutcome]()
+        self._outcome_skel = List[TableStoreGroupOutcome]()
 
     @always_inline
     def member_count(self) -> Int:
@@ -841,7 +841,7 @@ struct AsyncGroupCommitOp(Movable, Deinitable):
     def err_text(self) -> String:
         return self._err
 
-    def outcome_at(self, i: Int) raises -> PgGroupOutcome:
+    def outcome_at(self, i: Int) raises -> TableStoreGroupOutcome:
         """The member-i outcome (caller checks is_done() first)."""
         if self._phase != _AGC_PHASE_DONE:
             raise Error("AsyncGroupCommitOp.outcome_at: not done")
@@ -853,7 +853,7 @@ struct AsyncGroupCommitOp(Movable, Deinitable):
         self._phase = _AGC_PHASE_ERR
         self._err = msg^
 
-    def _finish(mut self, var outcomes: List[PgGroupOutcome]):
+    def _finish(mut self, var outcomes: List[TableStoreGroupOutcome]):
         self._phase = _AGC_PHASE_DONE
         self._outcomes = outcomes^
 
@@ -869,18 +869,18 @@ def _group_prelude[
     Store: ConditionalWriteStore & AsyncCasStore,
 ](
     mut store: TableStore[Store],
-    members: List[PgGroupCommitItem],
+    members: List[TableStoreGroupCommitItem],
     auth_head: ManifestHead,
-) raises -> Tuple[List[WriteOp], List[Int], List[PgGroupOutcome]]:
+) raises -> Tuple[List[WriteOp], List[Int], List[TableStoreGroupOutcome]]:
     """The synchronous prelude over the authoritative `auth_head` — a THIN
     delegation to the ONE shared `encode_group_batch` (the
     share-the-codec refactor). The arbitration (first-in-batch-wins) + per-member
     OCC (key-intersection over `(snapshot, auth_head]`) + winners' write-set
-    MERGE all live in `encode_group_batch`, which the `PgGroupCommitCodec` ALSO
-    calls — so the production fold and the codec fold are the SAME code (no second
+    MERGE all live in `encode_group_batch`, which the `TableStoreGroupCommitCodec` ALSO
+    calls — so the live fold and the codec fold are the SAME code (no second
     copy to drift; the 400-seed conflict-fuzz covers this path directly). The OCC
     scan reads through the borrowed TableStore WAL (`store.wal_mut()`), the SAME
-    handle the create-CAS targets at +1 (the §8 coupling). A torn-create /
+    handle the create-CAS targets at +1 (the OCC/create-CAS coupling). A torn-create /
     retryable read inside the OCC scan re-raises (the driver re-drives the WHOLE
     prelude). Returns (merged_write_set, winner_member_idxs[in arbitration order],
     outcome skeleton[parallel to members; winners carry a WIN placeholder, losers
@@ -907,7 +907,7 @@ def group_commit_async_start[
     An ALL-LOSER batch (no winners survive arbitration + OCC) finishes
     immediately DONE with no create-CAS (every member already has its 40001)."""
     if op.member_count() == 0:
-        op._finish(List[PgGroupOutcome]())
+        op._finish(List[TableStoreGroupOutcome]())
         return Int64(0)
     return _group_begin_attempt[Store, S](store, op, reactor)
 
@@ -936,12 +936,12 @@ def _group_begin_attempt[
     # --- synchronous prelude: read the AUTHORITATIVE head + arbitrate + OCC. ---
     # LEASE FAST-PATH: `read_auth_head_leased` elides the
     # per-batch authoritative head read (LIST + per-chunk record-count replay)
-    # when the lease is held + the local head is warm — this is the PRODUCTION
-    # path, so the lease MUST elide its per-batch head read too (the single-writer
+    # when the lease is held + the local head is warm — this is the
+    # group-commit path callers use, so the lease MUST elide its per-batch head read too (the single-writer
     # win the lease exists for). With the flag off it is byte-identical to
     # `read_auth_head()`.
     var auth_head: ManifestHead
-    var prelude: Tuple[List[WriteOp], List[Int], List[PgGroupOutcome]]
+    var prelude: Tuple[List[WriteOp], List[Int], List[TableStoreGroupOutcome]]
     try:
         auth_head = store.read_auth_head_leased()
         prelude = _group_prelude[Store](store, op._members, auth_head)
@@ -1097,7 +1097,7 @@ def _group_after_cas_ready[
         # from (no re-run, no drift).
         var outcomes = op._outcome_skel.copy()
         for wi in range(len(op._winner_idxs)):
-            outcomes[op._winner_idxs[wi]] = PgGroupOutcome.win(commit_lsn, wi)
+            outcomes[op._winner_idxs[wi]] = TableStoreGroupOutcome.win(commit_lsn, wi)
         op._finish(outcomes^)
         return Int64(0)
     # 412 via take->None (defensive) — re-run the prelude + re-park. LEASE: the

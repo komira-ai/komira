@@ -95,7 +95,7 @@ def _store_handle(
     """A TableStore handle over a slow AsyncCasStore sharing `inner`'s map."""
     var slow = SharedInMemorySlowCasStore(inner=inner^, slow_ticks=slow_ticks)
     var wal = CasManifestStore[_Store](
-        store=slow^, prefix=String("pg/park"), retry=RetryPolicy.fast_test()
+        store=slow^, prefix=String("ts/park"), retry=RetryPolicy.fast_test()
     )
     return TableStore[_Store].open(wal^)
 
@@ -133,8 +133,8 @@ def test_commit_parks_and_other_conn_completes() raises:
     var reactor = _new_reactor()
 
     # ONE shared backend; two TableStore handles (conn A + conn B) — the
-    # production share-nothing shape (each pgwire conn owns a TableStore handle
-    # over ONE shared object store).
+    # share-nothing shape (each connection owns a TableStore handle over ONE
+    # shared object store).
     var backing = SharedInMemoryConditionalStore()
     # slow_ticks=2 => each create-CAS yields PENDING twice before completing, so
     # A's commit genuinely PARKS on the reactor (does not complete inline).

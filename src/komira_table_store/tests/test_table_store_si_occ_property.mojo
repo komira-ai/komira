@@ -98,7 +98,7 @@ def test_c_si_writeskew_both_commit() raises:
     the SI guarantee boundary explicitly (INV-1)."""
     print("[c-si-writeskew] SI is NOT serializable (write-skew ADMITTED)")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/writeskew")
+    var prefix = String("ts/writeskew")
 
     # Seed x=0, y=0 (LSN 0).
     var seed = _open_shared(shared, prefix)
@@ -180,7 +180,7 @@ def _drive_fcw_n(n: Int) raises:
     Assert exactly one first-round winner, N-1 first-round 40001s, and a clean
     strictly-increasing HOT chain with no duplicate value (no lost update)."""
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/fcw/n") + String(n)
+    var prefix = String("ts/fcw/n") + String(n)
 
     # Seed HOT = "base" (LSN 0) so all writers share a common pinned snapshot.
     var seed = _open_shared(shared, prefix)
@@ -329,7 +329,7 @@ def test_c_cross_handle_fold() raises:
     cross-handle fold is symmetric + snapshot-correct (INV-2/INV-3)."""
     print("[c-cross-handle-fold] B folds A's just-committed chunk at B's snapshot")
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/xhandle")
+    var prefix = String("ts/xhandle")
 
     # Handle A commits k=vA (LSN 0).
     var A = _open_shared(shared, prefix)

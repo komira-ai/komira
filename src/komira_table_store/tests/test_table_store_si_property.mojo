@@ -11,7 +11,7 @@
 # explainable by SOME serial-ish SI schedule" — we try hard to find an
 # interleaving that violates SI.
 #
-# WHAT SI MEANS HERE (the properties asserted, design §4 / §3.4):
+# WHAT SI MEANS HERE (the properties asserted):
 #   * NO lost update             — first-committer-wins; a W-W conflict on a key
 #                                  committed after our snapshot ABORTS the loser.
 #   * NO dirty read              — a reader never sees an uncommitted write.
@@ -47,8 +47,6 @@
 # origins / unsafe_from_address / take_pointee. Sessions / the reference model
 # are plain owned structs in plain Lists (reuse-safe trivially), never byte-slab
 # elements.
-#
-# Design: the table-store correctness-slice design §3.4 / §4 / §7.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -63,8 +61,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 from komira_objectstore.store import ConditionalWriteStore
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     bytes_eq,
 )
 from komira_table_store.table_store import (
@@ -121,7 +119,7 @@ def _key(i: Int) -> List[UInt8]:
 # value written (or tombstone). Indexed by its commit-LSN == its position.
 @fieldwise_init
 struct RefWrite(Copyable, Movable, Deinitable):
-    var op: UInt8  # PG_OP_PUT | PG_OP_TOMBSTONE
+    var op: UInt8  # TS_OP_PUT | TS_OP_TOMBSTONE
     var key: List[UInt8]
     var value: List[UInt8]
 
@@ -162,7 +160,7 @@ struct RefModel(Movable, Deinitable):
             while j >= 0:
                 ref w = c.writes[j]
                 if bytes_eq(w.key, key):
-                    if w.op == PG_OP_TOMBSTONE:
+                    if w.op == TS_OP_TOMBSTONE:
                         return Optional[List[UInt8]](None)
                     return Optional(w.value.copy())
                 j -= 1
@@ -235,10 +233,10 @@ struct Session(Copyable, Movable, Deinitable):
         buffer. The Txn is a pure value {snapshot, write_set}, so a rebuilt Txn
         with the same snapshot + same buffered ops is observationally identical
         to the original for get/scan/commit (the store never persists buffered
-        writes before commit — §3.2)."""
+        writes before commit)."""
         var t = Txn(self.snapshot)
         for i in range(len(self.buf_keys)):
-            if self.buf_ops[i] == PG_OP_TOMBSTONE:
+            if self.buf_ops[i] == TS_OP_TOMBSTONE:
                 t.delete(self.buf_keys[i].copy())
             else:
                 t.update(self.buf_keys[i].copy(), self.buf_vals[i].copy())
@@ -249,7 +247,7 @@ struct Session(Copyable, Movable, Deinitable):
         1 = buffered PUT (use ryow_value), 2 = buffered TOMBSTONE (invisible)."""
         for i in range(len(self.buf_keys)):
             if bytes_eq(self.buf_keys[i], key):
-                if self.buf_ops[i] == PG_OP_TOMBSTONE:
+                if self.buf_ops[i] == TS_OP_TOMBSTONE:
                     return 2
                 return 1
         return 0
@@ -368,11 +366,11 @@ def run_si_history[
             var v = _b(
                 String("s") + String(si) + String("_st") + String(step)
             )
-            s.buffer(PG_OP_PUT, k, v)
+            s.buffer(TS_OP_PUT, k, v)
 
         elif action < 8:
             # DELETE (TOMBSTONE): mirror in the session.
-            s.buffer(PG_OP_TOMBSTONE, k, List[UInt8]())
+            s.buffer(TS_OP_TOMBSTONE, k, List[UInt8]())
 
         elif action < 9:
             # ABORT: nothing persists. Reference unchanged.
@@ -524,7 +522,7 @@ def test_si_property_in_memory_seed_sweep() raises:
     var n_seeds = 64
     for s in range(n_seeds):
         var seed = UInt64(0xC0FFEE00 + s * 0x1000193)
-        var prefix = String("pg/siprop/mem/s") + String(s)
+        var prefix = String("ts/siprop/mem/s") + String(s)
         var ts = _new_mem_ts(prefix)
         # 4 sessions, 6 overlapping keys, 120 micro-actions per history.
         run_si_history(ts, seed, 4, 6, 120, String("mem"))
@@ -541,7 +539,7 @@ def test_si_property_shared_seed_sweep() raises:
     for s in range(n_seeds):
         var seed = UInt64(0xBADC0DE0 + s * 0x1000193)
         var shared = SharedInMemoryConditionalStore()
-        var prefix = String("pg/siprop/shared/s") + String(s)
+        var prefix = String("ts/siprop/shared/s") + String(s)
         var ts = _new_shared_ts(shared, prefix)
         run_si_history(ts, seed, 4, 6, 120, String("shared"))
         _ = ts^
@@ -557,7 +555,7 @@ def test_si_property_high_contention_few_keys() raises:
     var n_seeds = 48
     for s in range(n_seeds):
         var seed = UInt64(0x5EED1234 + s * 0x1000193)
-        var prefix = String("pg/siprop/hot/s") + String(s)
+        var prefix = String("ts/siprop/hot/s") + String(s)
         var ts = _new_mem_ts(prefix)
         # 6 sessions on just 2 keys => heavy write-write overlap.
         run_si_history(ts, seed, 6, 2, 200, String("hot"))

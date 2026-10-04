@@ -1,15 +1,14 @@
 # =============================================================================
 # src/komira_table_store/tests/test_table_store_list_delimiter_audit.mojo
-#   C-LIST-DELIMITER (PRIORITY 1) — the highest-leverage production-bug guard.
+#   C-LIST-DELIMITER (PRIORITY 1) — the highest-leverage real-backend bug guard.
 # =============================================================================
 #
-# THE BUG CLASS (recurring; hit 3x in the broker rollout — team-lead memory
-# "Real-S3 LIST-delimiter trap"): object-store sub-dir enumeration that folds
+# THE BUG CLASS (recurring): object-store sub-dir enumeration that folds
 # ONLY `listed.objects` (never `listed.common_prefixes`) returns EMPTY on real
 # S3/GCS — but PASSES on the in-memory store, which IGNORES the delimiter and
 # dumps every key under the prefix into `objects` (`common_prefixes` always
 # empty). A nested-prefix enumeration that folds objects-only therefore silently
-# regresses to EMPTY on production while every offline test stays green.
+# regresses to EMPTY on a real backend while every offline test stays green.
 #
 # WHAT THIS TEST PROVES (the audit, made a test):
 #   1. THE S-5 STORE IS DELIMITER-FAITHFUL. A unit assertion that the new
@@ -210,7 +209,7 @@ def test_table_store_recovery_over_faithful_store_nonvacuous() raises:
         " (non-vacuous)"
     )
     var shared = DelimiterFaithfulConditionalStore()
-    var prefix = String("pg/listdelim/recover")
+    var prefix = String("ts/listdelim/recover")
 
     # ---- COMMIT a known, NON-EMPTY history (8 chunks: 4 keys overwritten +
     #      a final tombstone) on the WRITER handle. ----

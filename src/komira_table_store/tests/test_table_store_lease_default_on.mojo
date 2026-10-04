@@ -16,7 +16,7 @@
 #
 # THREE GUARDS (all RED-verifiable):
 #   1. DEFAULT-ON ELISION — a TableStore constructed with NO enable call (the
-#      production default) elides EVERY steady-state authoritative-head LIST AND
+#      default) elides EVERY steady-state authoritative-head LIST AND
 #      every per-chunk replay GET. RED if anyone reverts the default to OFF (the
 #      counts go > 0 because the cold LIST path runs on each commit).
 #   2. ESCAPE-HATCH — a TableStore constructed with the lease DISABLED (via the
@@ -36,8 +36,7 @@
 # pattern; reuse-safe (no heap fields): POD counters, no byte-slab element with a heap-owning inner
 # field).
 #
-# Design: the lease fast-path scope note;
-#   the default-OFF coverage at test_table_store_lease_listelision.mojo (5 tests) +
+# Related coverage: the default-OFF tests in test_table_store_lease_listelision.mojo (5 tests) +
 #   test_table_store_lease_enablement_battery.mojo (6-part flip-readiness battery).
 # =============================================================================
 
@@ -66,8 +65,8 @@ from komira_objectstore.types import (
 )
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
 )
@@ -217,7 +216,7 @@ def _commit_put[
 
 # =============================================================================
 # (1) DEFAULT-ON ELISION — a store constructed with NO enable call (the
-#     production default) elides EVERY steady-state LIST + replay-GET.
+#     default) elides EVERY steady-state LIST + replay-GET.
 #
 #     RED-VERIFY: revert the `__init__` default to OFF (`_lease_fastpath_enabled
 #     = False`) -> the default store no longer warms a lease head -> every
@@ -229,12 +228,12 @@ def _commit_put[
 def test_1_default_on_elides_list_and_replay() raises:
     print("[1] DEFAULT-ON elision — NO enable call still elides the LIST + replay")
     var n = 6
-    # CONSTRUCT WITH NO ENABLE CALL — this is the production default: the lease is ON at construction; the cold local head warms on the
+    # CONSTRUCT WITH NO ENABLE CALL — this is the default: the lease is ON at construction; the cold local head warms on the
     # first commit, then every subsequent commit elides the authoritative read.
     var on = TableStore[_CountingConditionalStore].open(
         CasManifestStore[_CountingConditionalStore](
             store=_CountingConditionalStore(),
-            prefix=String("pg/don/1"),
+            prefix=String("ts/don/1"),
             retry=RetryPolicy.fast_test(),
         )
     )
@@ -298,7 +297,7 @@ def test_2_escape_hatch_reaches_list_fallback() raises:
     var off = TableStore[_CountingConditionalStore].open(
         CasManifestStore[_CountingConditionalStore](
             store=_CountingConditionalStore(),
-            prefix=String("pg/don/2"),
+            prefix=String("ts/don/2"),
             retry=RetryPolicy.fast_test(),
         ),
         with_writer_lease_fastpath=False,
@@ -385,7 +384,7 @@ def test_3_412_fallback_no_data_loss_default_on() raises:
         " DEFAULT-ON: disjoint monotone offsets, ZERO terminal-fails"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/don/3")  # SAME lineage (same prefix) for both handles.
+    var prefix = String("ts/don/3")  # SAME lineage (same prefix) for both handles.
 
     # TWO DEFAULT-CONSTRUCTED handles over the shared store (no enable call -> both
     # lease-ON under ). This is the multi-writer-same-lineage regime.

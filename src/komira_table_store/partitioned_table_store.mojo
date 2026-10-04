@@ -1,20 +1,17 @@
 # =============================================================================
 # komira_table_store/partitioned_table_store.mojo
-#   WS-2 — the shard-aware ROUTER + per-shard commit (the RELAXED §10 scope).
-#   (heap Model-2 sharding campaign).
+#   The shard-aware ROUTER + per-shard commit (the relaxed-semantics scope).
 # =============================================================================
 #
-# Source of truth:
-#   the heap key-space partition design
-#     §1.5  — the router shell: PartitionedTableStore WRAPS, does NOT edit,
-#             TableStore.commit (additively, in a new type).
-#     §5    — the single-shard fast path: a write collapsing to ONE shard runs
-#             that shard's `TableStore.commit()` UNCHANGED (one create-CAS).
-#     §10   — THE BUILD TARGET: the relaxed-semantics (DynamoDB-shaped) variant.
-#     §10.3 — what this DROPS vs full-transparent: §2.4 topology-epoch closure,
-#             §2.3 HASH k-way ordered merge, §2.5 falsifier-as-gate.
-#     §1.4  — the ADR §4 constraint: routing policy (hash%K / route / route_range)
-#             is CALLER policy here in the table store, NOT in the neutral kernel.
+# Shape:
+#   * PartitionedTableStore WRAPS, does NOT edit, TableStore.commit (additively,
+#     in a new type).
+#   * The single-shard fast path: a write collapsing to ONE shard runs that
+#     shard's `TableStore.commit()` UNCHANGED (one create-CAS).
+#   * The build target is the relaxed-semantics (DynamoDB-shaped) variant; what
+#     it DROPS vs a fully transparent design is listed below.
+#   * Routing policy (hash%K / route / route_range) is CALLER policy here in the
+#     table store, NOT in the neutral kernel.
 #
 # WHAT THIS IS — a SIDECAR router the common case never touches.
 # ---------------------------------------------------------------------------
@@ -22,33 +19,33 @@
 # NONE`). For the >99% of tables that are NONE, the SQL executor holds a plain
 # `TableStore[Store]` exactly as today and this type is NEVER constructed
 # (zero-overhead-at-1). When a table IS flagged, `PartitionedTableStore` owns N
-# `TableStore[Store]` instances (one per shard sub-lineage, bound via the WS-1
-# `ShardedLineage.shard_store`) behind a router. The commit core is NOT modified;
+# `TableStore[Store]` instances (one per shard sub-lineage, bound via the
+# `ShardedLineage.shard_store` kernel) behind a router. The commit core is NOT modified;
 # N instances of it are fanned out behind `route()`.
 #
-# THE RELAXED §10 SCOPE (what WS-2 builds, and what it deliberately does NOT).
+# THE RELAXED SCOPE (what this router builds, and what it deliberately does NOT).
 # ---------------------------------------------------------------------------
 #  * BUILDS: the router + per-shard OCC↔create-CAS (each shard's unchanged
-#    `TableStore.commit`), the single-shard fast path (§5), the NONE-table
+#    `TableStore.commit`), the single-shard fast path, the NONE-table
 #    byte-identical default, and the cross-shard UNORDERED read = per-shard scan
 #    + CONCAT (live `enumerate_live_shards`).
-#  * DROPS (per §10.3 / §10.7): the §2.4 pinned-topology-epoch ordered-scan
-#    closure, the §2.3 HASH k-way ordered merge, the §2.5 falsifier-as-gate.
+#  * DROPS: the pinned-topology-epoch ordered-scan closure and the HASH k-way
+#    ordered merge.
 #    Cross-shard analytical/range scans go to the columnar tier (out of scope).
-#  * DEFERS: cross-shard ATOMIC multi-shard DML → WS-3 (2PC). v1 single-shard
+#  * DEFERS: cross-shard ATOMIC multi-shard DML (a later cross-shard 2PC). v1 single-shard
 #    DML is the fast path; a write that would span shards in one txn is REJECTED
-#    with a clear "cross-shard txn not supported in v1 (WS-3)" Error — NEVER a
-#    silent partial non-atomic apply that corrupts (§10.2 G1 / §10.7 WS-3 split).
-#  * DEFERS: cross-partition global UNIQUE → WS-5 (the un-partitioned global-
-#    guard lineage, §10.8). This file does NOT build the guard lineage.
+#    with a clear "cross-shard txn not supported in v1" Error — NEVER a
+#    silent partial non-atomic apply that corrupts.
+#  * DEFERS: cross-partition global UNIQUE (a later un-partitioned global-
+#    guard lineage). This file does NOT build the guard lineage.
 #
 # THE HARD COLLISION BOUNDARY (wrap-not-edit).
 # ---------------------------------------------------------------------------
 # This module WRAPS `TableStore`. It does NOT edit `TableStore.commit` /
 # `_occ_check` / `try_append_at_seq` / `cas_manifest.mojo`. The per-shard OCC
-# coupling (the §8 snapshot↔create-CAS arbiter) is the SHIPPED, unchanged
+# coupling (the snapshot↔create-CAS arbiter) is the SHIPPED, unchanged
 # `TableStore.commit`; a same-shard conflict aborts with the shard's own 40001
-# exactly as today. WS-2 only adds the routing layer above.
+# exactly as today. This module only adds the routing layer above.
 #
 # Encapsulation / stale-reuse (the repository pointer rules).
 # ---------------------------------------------------------------------------
@@ -59,7 +56,7 @@
 #     (NOT a raw cross-boundary handle); each shard's store is a `clone()` of the
 #     shared store so all N reach the SAME logical bucket (one bucket, N
 #     `_lineage/<shard>` prefixes). Raw key arithmetic stays INSIDE the substrate
-#     (`CasManifestStore`) and the WS-1 path builders — never crossing a boundary.
+#     (`CasManifestStore`) and the `ShardedLineage` path builders — never crossing a boundary.
 #   * stale-reuse: the N `TableStore[Store]` instances are held in
 #     `Slab[OwnedPointer[TableStore[Store]]]` — the EXACT SI-1 correction
 #     (`_idx_indexes: Slab[OwnedPointer[KeyIndex]]`, table_store.mojo:561). The
@@ -95,7 +92,7 @@ from komira_table_store.table_store import (
 
 
 # =============================================================================
-# Partition-spec kinds (the per-table catalog axis, §1.1).
+# Partition-spec kinds (the per-table catalog axis).
 # =============================================================================
 
 comptime PART_SPEC_NONE: UInt8 = 0
@@ -107,21 +104,21 @@ ask `is_partitioned()` and short-circuit."""
 comptime PART_SPEC_RANGE: UInt8 = 1
 """RANGE(boundaries[]) — K shards by ordered key-range split points. The
 recommended default for partitioned tables (range locality → ordered scans touch
-few adjacent shards; §1.1). `route` = binary_search(boundaries, key) over the
+few adjacent shards). `route` = binary_search(boundaries, key) over the
 `bytes_cmp` total order."""
 
 comptime PART_SPEC_HASH: UInt8 = 2
 """HASH(K) — K shards, shard = hash_shard_to_id(key_bytes) % K. For a single
 non-splittable hot key (the max(id)++ insert storm) where RANGE pins the whole
-tail to one shard and only hashing spreads it (§1.1). Point-lookup-dominated."""
+tail to one shard and only hashing spreads it. Point-lookup-dominated."""
 
 
 # =============================================================================
-# The cross-shard-txn rejection token (WS-3 deferral, §10.2 G1 / §10.7).
+# The cross-shard-txn rejection token (cross-shard atomic DML is deferred).
 # =============================================================================
 #
 # A DML whose WriteOps route to P > 1 shards is the DynamoDB `TransactWriteItems`
-# analog — deferred to WS-3 (cross-shard 2PC). In v1 it is REJECTED with this
+# analog — deferred to a later cross-shard 2PC. In v1 it is REJECTED with this
 # discriminable token rather than partial-applied (which would land one shard's
 # rows at one commit_lsn and the other's at another, silently re-opening the torn
 # cross-keyspace read invariant #3 protects). The token mirrors the TableStore
@@ -131,22 +128,21 @@ comptime CROSS_SHARD_UNSUPPORTED_TOKEN: String = "CROSS_SHARD_TXN_UNSUPPORTED_V1
 
 @always_inline
 def is_cross_shard_unsupported(msg: String) -> Bool:
-    """True iff `msg` is the v1 cross-shard-DML rejection (WS-3 deferral). A
-    caller that genuinely needs cross-shard atomicity must wait for WS-3's
-    `HeapTxnControlStore`; v1 keeps single-shard DML as the whole write guarantee
-    (§10.7 v1 floor) and rejects a spanning DML LOUDLY rather than corrupting."""
+    """True iff `msg` is the v1 cross-shard-DML rejection. A caller that
+    genuinely needs cross-shard atomicity must wait for a cross-shard 2PC; v1
+    keeps single-shard DML as the whole write guarantee and rejects a spanning DML LOUDLY rather than corrupting."""
     return msg.find(CROSS_SHARD_UNSUPPORTED_TOKEN) >= 0
 
 
 # =============================================================================
-# Routing primitives — CALLER policy (ADR §4 / §1.4: NOT in the neutral kernel).
+# Routing primitives — CALLER policy (NOT in the neutral kernel).
 # =============================================================================
 #
-# These are the genuine net-new of WS-2: the per-KEY map (a heap keyspace
+# These are the genuine net-new of this router: the per-KEY map (a heap keyspace
 # partition), as opposed to the kernel's per-WRITER identity (`make_shard_id`).
 # They live HERE in the table store — never reaching down into `komira_objectstore` —
 # so the kernel stays routing-policy-agnostic (it does not bake hash%K OR
-# replicate-all, which would pre-empt the §8 decision).
+# replicate-all, which would pre-empt that decision).
 
 
 @always_inline
@@ -180,7 +176,7 @@ def hash_shard_to_id(key_bytes: List[UInt8], k: Int) -> Int:
 
 
 struct PartitionSpec(Copyable, Movable, Deinitable):
-    """The per-table partition policy (§1.1). A plain value struct — POD `kind`
+    """The per-table partition policy. A plain value struct — POD `kind`
     + `k` (Int) + owned-byte `range_boundaries: List[List[UInt8]]` held by value
     (NOT a slab element; reuse-safe (no heap fields)). Boundaries are the K-1 ascending split keys
     for a RANGE spec (`boundaries[i]` is the EXCLUSIVE upper bound of shard i, so
@@ -234,7 +230,7 @@ struct PartitionSpec(Copyable, Movable, Deinitable):
 
 
 # =============================================================================
-# PartitionedTableStore — the shard-aware router (WS-2, relaxed §10 scope).
+# PartitionedTableStore — the shard-aware router (relaxed scope).
 # =============================================================================
 
 
@@ -242,11 +238,11 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
     Movable, Deinitable
 ):
     """The shard-aware router over N per-shard `TableStore[Store]` instances —
-    the first user-visible partitioning slice (§1.5). Owns one `TableStore` per
-    shard (bound to its sub-lineage prefix via the WS-1 `ShardedLineage`), routes
+    the first user-visible partitioning slice. Owns one `TableStore` per
+    shard (bound to its sub-lineage prefix via the `ShardedLineage` kernel), routes
     each write by `route(pk)` to its shard's WAL, and serves cross-shard
     unordered reads by per-shard scan + concat. WRAPS — never edits —
-    `TableStore.commit` (the per-shard §8 OCC↔create-CAS arbiter is unchanged).
+    `TableStore.commit` (the per-shard OCC↔create-CAS arbiter is unchanged).
 
     Fields:
       var _shards: Slab[OwnedPointer[TableStore[Store]]]
@@ -296,10 +292,10 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         The CALLER (which holds the concrete cloneable `Store`) hands in the
         store + the table prefix + the spec; this builder derives the K shard
         ids (`p0`, `p1`, … — stable dense ordinals, the partition-ordinal naming
-        distinct from the WS-1 per-WRITER `make_shard_id`), binds a
-        `CasManifestStore` to each shard's sub-lineage prefix via the WS-1
+        distinct from the kernel's per-WRITER `make_shard_id`), binds a
+        `CasManifestStore` to each shard's sub-lineage prefix via
         `ShardedLineage.shard_store`, and `TableStore.open`s each (replaying its
-        own WAL tail — recovery composes per shard with NO kernel change, §1.2).
+        own WAL tail — recovery composes per shard with NO kernel change).
 
         A NON-partitioned spec (NONE or K<=1) is still legal here (it builds a
         1-shard router whose single shard is the WHOLE keyspace) — but the
@@ -314,7 +310,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
             n = 1
         for i in range(n):
             var sid = _partition_shard_id(i)
-            # WS-1 kernel: a fresh CasManifestStore bound to this shard's
+            # The kernel: a fresh CasManifestStore bound to this shard's
             # sub-lineage prefix, backed by a clone() of the shared store.
             var wal = lineage.shard_store(sid)
             var ts = TableStore[Self.Store].open(wal^)
@@ -380,12 +376,12 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         """The shard id (sub-lineage segment) of slot `i`."""
         return self._shard_ids[i]
 
-    # ---- shard TableStore access (the WS-4 Leg C driver-seam bridge) ----------
+    # ---- shard TableStore access (the driver-seam bridge) ----------
 
     def shard_store_ref(
         mut self, slot: Int
     ) -> ref [origin_of(self._shards[slot][])] TableStore[Self.Store]:
-        """A MUTABLE REFERENCE to shard `slot`'s `TableStore` (the WS-4 Leg C
+        """A MUTABLE REFERENCE to shard `slot`'s `TableStore` (the driver
         seam). The partition-aware SQL driver threads THIS ref into the FROZEN
         `execute_sql` / `execute_sql_dual` executor (`mut store: TableStore[Store]`)
         so a partitioned table's statement runs against the ONE routed shard's
@@ -397,7 +393,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         slot's store; the router stays the SOLE owner of the N shard stores."""
         return self._shards[slot][]
 
-    # ---- routing (caller policy, §1.4) ---------------------------------------
+    # ---- routing (caller policy) ---------------------------------------
 
     @always_inline
     def route(self, key: List[UInt8]) -> Int:
@@ -410,7 +406,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
           * NONE / K<=1: slot 0 (the whole keyspace lives in one lineage).
         Routes over the FULL encoded memcomparable key bytes (v1: the partition
         key is the whole key; a composite-prefix partition key is a future
-        catalog refinement, §4)."""
+        catalog refinement)."""
         if not self._spec.is_partitioned():
             return 0
         if self._spec.kind == PART_SPEC_HASH:
@@ -450,7 +446,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         WITHIN a shard, not which shards the band covers, so a closed band is the
         safe covering superset for any bound-inclusivity).
           * RANGE: the contiguous covering set `[route(lo) .. route(hi)]` — a
-            range query touches few adjacent shards (the RANGE locality win, §4).
+            range query touches few adjacent shards (the RANGE locality win).
             An UNBOUNDED side is SATURATED, not routed: `has_lo == False` (the
             `pk <= hi` / `pk < hi` shape) covers `[0 .. route(hi)]`; `has_hi ==
             False` (the `pk >= lo` / `pk > lo` shape) covers `[route(lo) ..
@@ -460,7 +456,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
             unbounded-upper bug (a `WHERE pk >= <above-the-top-split>` would
             return ZERO rows). Saturating the missing side is the fix.
           * HASH / NONE: ALL shards (HASH destroys range locality — the honest
-            cost the operator accepted; §4). For NONE this is the single shard.
+            cost the operator accepted). For NONE this is the single shard.
         Returns slot ordinals in ascending order, de-duplicated."""
         var out = List[Int]()
         if not self._spec.is_partitioned() or self._spec.kind == PART_SPEC_HASH:
@@ -479,10 +475,10 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
             i += 1
         return out^
 
-    # ---- single-shard commit (the §5 fast path; multi-shard → WS-3 reject) ---
+    # ---- single-shard commit (the fast path; multi-shard → reject) ---
 
     def commit(mut self, var txn: Txn) raises -> CommitResult:
-        """Commit `txn` via the SINGLE-SHARD fast path (§5).
+        """Commit `txn` via the SINGLE-SHARD fast path.
 
         1. Route EVERY WriteOp's key. If they collapse to ONE shard → that
            shard's existing `TableStore.commit()` runs UNCHANGED (one chunk, one
@@ -490,20 +486,20 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
            shard MVCC filter). Per-shard throughput = today's single-lineage
            throughput; N shards = N independent `_HEAD` slots.
         2. If the WriteOps span P > 1 shards → REJECT with the discriminable
-           `CROSS_SHARD_TXN_UNSUPPORTED_V1` Error (WS-3 deferral, §10.7). This is
-           the SAFE choice (§10.2 G1): a clear loud rejection, NEVER a partial
+           `CROSS_SHARD_TXN_UNSUPPORTED_V1` Error (cross-shard atomic DML is deferred). This is
+           the SAFE choice: a clear loud rejection, NEVER a partial
            non-atomic apply that lands rows at uncoordinated commit_lsns and
            silently re-opens the torn cross-keyspace read (invariant #3).
         3. A read-only txn (empty write-set) routes to shard 0 and commits there
            (a no-op create-CAS-free read-only result, same as today).
 
-        WS-4 LEG A — the begin==commit-shard invariant is now STRUCTURALLY
-        ENFORCED (replaces WS-2's docstring-only precondition).
+        The begin==commit-shard invariant is STRUCTURALLY ENFORCED (it replaced
+        an earlier docstring-only precondition).
         `txn` MUST have been begun (`begin_on` / `begin_for_key`) on the SAME
         shard its write-set routes to. The txn carries a per-shard snapshot (that
         shard's head); committing a txn begun on shard X but whose keys route to
         shard Y would run shard Y's create-CAS against a snapshot pinned to shard
-        X's head — a silent OCC-arbiter mismatch (the §8 coupling validates the
+        X's head — a silent OCC-arbiter mismatch (the OCC/create-CAS coupling validates the
         OCC window against shard Y's head while the snapshot came from shard X, so
         a concurrent shard-Y committer between the two heads is INVISIBLE to the
         OCC scan = an isolation hole). The router's `begin_on` / `begin_for_key`
@@ -511,7 +507,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         write-set and ASSERT the routed target slot == `txn.shard_slot`. A
         mismatch RAISES the discriminable `CROSS_SHARD_TXN_UNSUPPORTED_V1` token
         (a cross-shard txn — a write begun on one shard whose keys land on
-        another is exactly the multi-shard atomicity case WS-3 owns; in v1 it is
+        another is exactly the multi-shard atomicity case a later cross-shard 2PC owns; in v1 it is
         a LOUD reject, never a silent shard-Y create-CAS on a shard-X snapshot).
         A txn whose `shard_slot` is `_TXN_SHARD_UNBOUND` (a raw
         `TableStore.begin()` handed in directly, NOT through the router's
@@ -519,15 +515,15 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         legacy direct-begin caller keeps working, but every router-begun txn is
         now structurally checked.
 
-        WRAP-NOT-EDIT: the per-shard OCC↔create-CAS coupling (the §8 arbiter) is
+        WRAP-NOT-EDIT: the per-shard OCC↔create-CAS coupling is
         the SHIPPED, byte-unchanged `TableStore.commit`; a same-shard conflict
-        aborts with that shard's own 40001. WS-2 adds routing above + WS-4 adds
+        aborts with that shard's own 40001. This router adds routing above and
         the begin==commit assertion; neither edits the commit core."""
         var target = self._route_write_set(txn.write_set)
         # target == -1 means an empty write-set (read-only); route to shard 0.
         if target < 0:
             target = 0
-        # WS-4 LEG A: STRUCTURAL begin==commit-shard enforcement. A router-begun
+        # STRUCTURAL begin==commit-shard enforcement. A router-begun
         # txn carries the begin shard on `shard_slot` (>= 0); a mismatch with the
         # routed target is a cross-shard txn -> LOUD reject (never a silent
         # snapshot/head mismatch). `_TXN_SHARD_UNBOUND` (-1, a raw direct begin)
@@ -543,8 +539,8 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
                 " ONE shard's head; committing it against a DIFFERENT shard would"
                 " run that shard's create-CAS against the wrong snapshot (a silent"
                 " OCC-arbiter mismatch / isolation hole). Begin the txn on the"
-                " shard its keys route to (`begin_for_key`), or wait for WS-3's"
-                " cross-shard 2PC."
+                " shard its keys route to (`begin_for_key`); cross-shard 2PC is"
+                " not supported in v1."
             )
         return self._shards[target][].commit(txn^)
 
@@ -552,7 +548,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
     def _route_write_set(self, write_set: List[WriteOp]) raises -> Int:
         """Route the whole write-set: return the single target shard slot, or
         raise if the keys span P > 1 shards. Returns -1 for an empty write-set
-        (read-only). The single-shard collapse check of §5 step 1."""
+        (read-only). The single-shard collapse check."""
         var n = len(write_set)
         if n == 0:
             return -1
@@ -566,24 +562,23 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
                     + String(first)
                     + " and "
                     + String(s)
-                    + "); cross-shard atomic writes are deferred to WS-3 (the"
-                    " cross-shard 2PC). v1 supports single-shard DML only —"
-                    " choose a partition key that keeps the DML single-shard,"
-                    " or wait for WS-3."
+                    + "); cross-shard atomic writes (a cross-shard 2PC) are not"
+                    " supported in v1. v1 supports single-shard DML only —"
+                    " choose a partition key that keeps the DML single-shard."
                 )
         return first
 
-    # ---- per-shard txn lifecycle (the per-shard SI snapshot, §10.3) ----------
+    # ---- per-shard txn lifecycle (the per-shard SI snapshot) ----------
 
     def begin_on(mut self, shard_slot: Int) raises -> Txn:
         """Begin a txn pinned to ONE shard's snapshot (the per-shard SI head, the
-        component §10.3 KEEPS). The write path buffers into the returned Txn and
+        component the relaxed scope KEEPS). The write path buffers into the returned Txn and
         commits via `commit` (which re-routes + single-shard-collapses). A caller
         that knows the target shard (point lookup / single-shard DML) begins
         directly on it; a write whose keys all land on `shard_slot` commits with
         no cross-shard work. The snapshot is that shard's `TableStore.begin()`.
 
-        WS-4 LEG A: STAMP the begin shard onto the returned `Txn.shard_slot` so
+        STAMP the begin shard onto the returned `Txn.shard_slot` so
         `commit` can structurally enforce begin==commit (a mismatched commit
         raises). The shard's own `begin()` returns an UNBOUND txn; we bind it
         here."""
@@ -595,7 +590,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         """Begin a txn on the shard that `key` routes to (the common single-key
         DML / point-lookup entry). Equivalent to `begin_on(route(key))`.
 
-        WS-4 LEG A: STAMP the routed begin shard onto `Txn.shard_slot` (the
+        STAMP the routed begin shard onto `Txn.shard_slot` (the
         begin==commit-shard binding) so a later commit whose keys route elsewhere
         is caught structurally."""
         var slot = self.route(key)
@@ -608,28 +603,28 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         interaction). Routes to that shard's unchanged `TableStore.abort`."""
         self._shards[shard_slot][].abort(txn^)
 
-    # ---- point lookup: prune to ONE shard (§4 / §10.3 the marquee read) ------
+    # ---- point lookup: prune to ONE shard (the marquee read) ------
 
     def get(mut self, txn: Txn, key: List[UInt8]) raises -> Optional[List[UInt8]]:
         """Point lookup `WHERE pk = key`: route to the ONE shard the key lives on
         and probe ONLY that shard's `TableStore.get` (one-shard cost, NO scatter).
         Strongly consistent, single-shard — the relaxation does NOT touch this
-        (point lookups stay the marquee fast path, §10.2). `txn` MUST have been
+        (point lookups stay the marquee fast path). `txn` MUST have been
         begun on the SAME shard (`begin_for_key`/`begin_on(route(key))`) so the
         snapshot is that shard's head."""
         var slot = self.route(key)
         return self._shards[slot][].get(txn, key)
 
-    # ---- cross-shard UNORDERED scan = per-shard scan + CONCAT (§10.3) ---------
+    # ---- cross-shard UNORDERED scan = per-shard scan + CONCAT ---------
     #
-    # The relaxed-§10 read: a cross-shard scan returns the UNION of all shards'
+    # The relaxed-scope read: a cross-shard scan returns the UNION of all shards'
     # rows, per-shard order preserved WITHIN a shard, shards concatenated in slot
-    # order. NO global k-way ordered merge (DROPPED, §10.3), NO LWW dedup (a
+    # order. NO global k-way ordered merge (DROPPED), NO LWW dedup (a
     # disjoint heap partition has NO cross-shard duplicates — a key lives in
-    # exactly one shard, §2.1). This is the DynamoDB-shaped Scan contract: SQL-
+    # exactly one shard). This is the DynamoDB-shaped Scan contract: SQL-
     # legal-for-free since SQL leaves result order unspecified absent ORDER BY.
     # A genuinely ordered scan (ORDER BY pk over the whole table) is NOT served
-    # here — it goes to the columnar tier or pays §2's machinery (out of WS-2).
+    # here — it goes to the columnar tier or needs an ordered-merge machinery this router does not build.
 
     def scan_all_concat(
         mut self, lo: List[UInt8], hi: List[UInt8]
@@ -638,14 +633,14 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         over the COVERING shards (RANGE prunes to adjacent shards; HASH/NONE
         scatter to all). Each shard is scanned at ITS OWN fresh snapshot
         (`begin()` per shard — a cross-shard autocommit read is NOT a single
-        global cut; §10.2 / F3, which is the table store default + SQL-legal). Rows
+        global cut, which is the table store default + SQL-legal). Rows
         are concatenated in shard-slot order, NO global merge, NO dedup. Returns
         the union of all covering shards' visible rows.
 
         RELAXED CONTRACT: the inter-shard order is unspecified (per-shard order
         preserved within a shard). A correct Postgres app cannot depend on result
-        order without ORDER BY — so this is the DynamoDB Scan contract rendered on
-        pgwire, SQL-legal-for-free (§10.5 F1)."""
+        order without ORDER BY — so this is the DynamoDB Scan contract, and it is
+        SQL-legal for free."""
         # Both bounds present (an explicit `[lo, hi)` bounded scan) -> has_lo /
         # has_hi True (no saturation; route both ends of the covering band).
         var slots = self.route_range(lo, hi, True, True)
@@ -677,12 +672,12 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
     # ---- live-shard discovery (the OPEN-time durability probe, NOT read fan-out)
 
     def enumerate_live_shards(self) raises -> List[String]:
-        """The LIST-delimiter-safe live-shard discovery (the WS-1 kernel's
+        """The LIST-delimiter-safe live-shard discovery (the kernel's
         `ShardedLineage.enumerate_live_shards`, unions `common_prefixes` +
         `objects`).
 
         READ FAN-OUT vs. DURABILITY PROBE (review MED-1 — read this plainly).
-        WS-2 cross-shard READS (`route_range` / `scan_all_concat` /
+        Cross-shard READS (`route_range` / `scan_all_concat` /
         `scan_all_from_concat`) fan out over the DECLARED routing set
         `self._shard_ids` (the K slots this router was opened with) — they do
         NOT call `enumerate_live_shards`. The declared set is authoritative for
@@ -694,7 +689,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         reports which declared slots have durable committed data, and `open` uses
         it to FAIL LOUD on a reopen-with-smaller-K (a live shard ordinal >= K =
         orphaned rows). It discovers topology LIVE (NOT a snapshot-pinned epoch —
-        the §2.4 topology-epoch pin is DROPPED, §10.3) and tolerates the brief
+        the topology-epoch pin is DROPPED) and tolerates the brief
         duplicate-or-missing window of racing a split; a shard with NO committed
         chunk yet does not appear here. It remains exposed for operational
         introspection (which shards hold data), but it is NOT on the read path."""
@@ -758,7 +753,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
 @always_inline
 def _partition_shard_id(ordinal: Int) -> String:
     """The stable dense partition-ordinal shard id (`p0`, `p1`, …). DISTINCT from
-    the WS-1 per-WRITER `make_shard_id` (node/pid/worker identity): a heap
+    the kernel's per-WRITER `make_shard_id` (node/pid/worker identity): a heap
     keyspace partition is a per-KEY map, so its shards are DENSE ORDINALS the
     catalog records, NOT writer identities. Never the reserved `_base` (the `p`
     prefix keeps the partition shards disjoint from the compactor's `_base`
@@ -770,7 +765,7 @@ def _partition_shard_id(ordinal: Int) -> String:
 def _partition_ordinal_of(shard_id: String) -> Int:
     """Parse the dense ordinal out of a partition shard id (`p7` -> 7). Returns
     -1 if `shard_id` is NOT a `p<digits>` partition id (e.g. the compactor's
-    reserved `_base`, or a foreign WS-1 per-writer id) — such ids are not this
+    reserved `_base`, or a foreign per-writer id) — such ids are not this
     router's declared partition shards and the open-assert ignores them. The
     inverse of `_partition_shard_id`. Parses over the raw ASCII bytes (the
     established char-level idiom; String indexing yields slices, not chars)."""

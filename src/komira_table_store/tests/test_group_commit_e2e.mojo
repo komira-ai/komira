@@ -5,7 +5,7 @@
 #   real reactor.
 # =============================================================================
 #
-# THE GATE: drive a `CoalescingWindow[PgGroupCommitFactory[_Slow]]` over a
+# THE GATE: drive a `CoalescingWindow[TableStoreGroupCommitFactory[_Slow]]` over a
 # controllable-slow in-mem AsyncCasStore (SharedInMemorySlowCasStore, slow_ticks
 # > 0) on a REAL reactor (kqueue/epoll). Feed N members, force(EXPLICIT) (the
 # queue-drain analog), and drive the in-flight spine to done. Assert:
@@ -57,22 +57,22 @@ from komira_objectstore.coalescing_window import (
 )
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
+    TS_OP_PUT,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
 )
 from komira_table_store.group_commit import (
-    PG_GC_WIN,
-    PgGroupCommitFactory,
-    PgGroupCommitItem,
-    PgGroupOutcome,
+    TS_GC_WIN,
+    TableStoreGroupCommitFactory,
+    TableStoreGroupCommitItem,
+    TableStoreGroupOutcome,
 )
 from komira_table_store.table_store import TableStore
 
 
 comptime _Slow = SharedInMemorySlowCasStore
-comptime _Factory = PgGroupCommitFactory[_Slow]
+comptime _Factory = TableStoreGroupCommitFactory[_Slow]
 comptime _Window = CoalescingWindow[_Factory]
 
 
@@ -96,11 +96,11 @@ def _row(n: Int) -> List[UInt8]:
     return out^
 
 
-def _member(snapshot: Int64, *ks: Int) -> PgGroupCommitItem:
+def _member(snapshot: Int64, *ks: Int) -> TableStoreGroupCommitItem:
     var ws = List[WriteOp]()
     for i in range(len(ks)):
-        ws.append(WriteOp(PG_OP_PUT, _key(ks[i]), _row(ks[i])))
-    return PgGroupCommitItem(snapshot, ws^)
+        ws.append(WriteOp(TS_OP_PUT, _key(ks[i]), _row(ks[i])))
+    return TableStoreGroupCommitItem(snapshot, ws^)
 
 
 def _new_reactor() raises -> Reactor[NoopSink]:
@@ -114,7 +114,7 @@ def _new_window(
     var slow: _Slow, prefix: String, policy: FlushPolicy
 ) raises -> _Window:
     var factory = _Factory(slow^, prefix)
-    return _Window(RamAccumulator[PgGroupCommitItem](), policy, factory^)
+    return _Window(RamAccumulator[TableStoreGroupCommitItem](), policy, factory^)
 
 
 def _drive_to_done(
@@ -165,7 +165,7 @@ def test_group_commit_coalesces_disjoint_into_one_chunk() raises:
       (3) the intra_batch_seq values are DISTINCT (0,1,2 — arbitration order);
       (4) the merged chunk carries all three members' keys."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=2)  # park on the create-CAS
-    var prefix = String("pg/gc/disjoint")
+    var prefix = String("ts/gc/disjoint")
     var head_before = _head_seq(slow.clone(), prefix)
     assert_equal(head_before, Int64(-1), "empty WAL starts at head -1")
 
@@ -201,7 +201,7 @@ def test_group_commit_coalesces_disjoint_into_one_chunk() raises:
     for i in range(len(outcomes)):
         ref pair = outcomes[i]
         assert_equal(
-            pair[1].kind, PG_GC_WIN, "disjoint member must WIN, member " + String(pair[0])
+            pair[1].kind, TS_GC_WIN, "disjoint member must WIN, member " + String(pair[0])
         )
         if shared_lsn == Int64(-2):
             shared_lsn = pair[1].commit_lsn
@@ -239,7 +239,7 @@ def test_group_commit_overlap_exactly_one_winner_per_key() raises:
     (also key 42) is an intra-batch LOSER (40001). The merged chunk carries key
     42 ONCE (no lost update) + key 99."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=1)
-    var prefix = String("pg/gc/overlap")
+    var prefix = String("ts/gc/overlap")
 
     var window = _new_window(slow.clone(), prefix, FlushPolicy.count_only(1000))
     var reactor = _new_reactor()
@@ -260,7 +260,7 @@ def test_group_commit_overlap_exactly_one_winner_per_key() raises:
     var loser_idx = -1
     for i in range(len(outcomes)):
         ref pair = outcomes[i]
-        if pair[1].kind == PG_GC_WIN:
+        if pair[1].kind == TS_GC_WIN:
             win_count += 1
         else:
             loss_count += 1
@@ -298,7 +298,7 @@ def test_group_commit_winners_visible_through_tablestore() raises:
     the WAL at open) sees EVERY winner's row at the shared commit_lsn — the
     atomic-visibility property (all-or-nothing at the one slot)."""
     var slow = SharedInMemorySlowCasStore(slow_ticks=1)
-    var prefix = String("pg/gc/visible")
+    var prefix = String("ts/gc/visible")
 
     var window = _new_window(slow.clone(), prefix, FlushPolicy.count_only(1000))
     var reactor = _new_reactor()

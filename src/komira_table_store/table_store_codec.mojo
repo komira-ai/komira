@@ -9,9 +9,6 @@
 # POD-of-owned-bytes shape (op: UInt8, seq: Int64, key/value: List[UInt8]) —
 # the documented reuse-safe trivially shape.
 #
-# Design: the table-store correctness-slice design
-# §1 (row + version encoding) + §2 (WAL chunk format).
-#
 # -----------------------------------------------------------------------------
 # Encapsulation / stale-reuse discipline (the repository pointer rules)
 # -----------------------------------------------------------------------------
@@ -21,31 +18,30 @@
 #   * `RowVersion` / `WriteOp` / `CommitChunk` are POD-of-owned-bytes STACK
 #     values (Int64 / Int32 / Bool + List[UInt8]). They are stored in plain
 #     `List`s, NEVER in a byte-backed `Slab` whose element owns an inner heap
-#     field — so the stale-reuse byte-slab+wildcard trap is N/A by construction (§1.3).
+#     field — so the stale-reuse byte-slab+wildcard trap is N/A by construction.
 #     `schema_version: Int32` is a plain POD scalar — no heap, no pointer.
 #
 # WAL FORMAT VERSION: the commit-chunk magic's trailing ASCII digit IS the
-# format version (PG_COMMIT_FORMAT_VERSION). `decode_commit_chunk` parses it and
+# format version (TS_COMMIT_FORMAT_VERSION). `decode_commit_chunk` parses it and
 # REJECTS an unknown version (no silent misparse). Version 2 reserves a
 # `schema_version: Int32` header slot so the WAL can evolve into columnar
-# analytics later without a reformat (analytics convergence design §6 items 1+2).
+# analytics later without a reformat.
 # =============================================================================
 
 
 # Write-op tags.
-comptime PG_OP_PUT: UInt8 = 0
-comptime PG_OP_TOMBSTONE: UInt8 = 1
+comptime TS_OP_PUT: UInt8 = 0
+comptime TS_OP_TOMBSTONE: UInt8 = 1
 
 # Commit-chunk magic ("PGCn" little-endian sanity guard). 'P'=0x50 'G'=0x47
 # 'C'=0x43; the TRAILING ASCII DIGIT is a real FORMAT VERSION, not decoration.
 # The first three bytes "PGC" are the lineage tag; the fourth byte ('1','2',...)
-# is the format version. So the magic = `PG_COMMIT_MAGIC_PREFIX | (('0'+v) << 24)`.
+# is the format version. So the magic = `TS_COMMIT_MAGIC_PREFIX | (('0'+v) << 24)`.
 #
 # Version history:
 #   v1 ("PGC1", 0x31434750): magic | snapshot_lsn | n_writes | WriteOp[]
 #   v2 ("PGC2", 0x32434750): magic | snapshot_lsn | SCHEMA_VERSION(i32) |
-#                            n_writes | WriteOp[]   (the row-image-contract slot;
-#                            see convergence design §6 item 2)
+#                            n_writes | WriteOp[]   (the row-image-contract slot)
 #   v3 ("PGC3", 0x33434750): magic | snapshot_lsn | SCHEMA_VERSION(i32) |
 #                            STAMP_LSN(i64) | n_writes | WriteOp[]
 #                            (ADAPTIVE INDEX SHARDING Option-A S-b
@@ -62,46 +58,44 @@ comptime PG_OP_TOMBSTONE: UInt8 = 1
 # an EXPLICIT `stamp_lsn = L`: the index fold uses `stamp_lsn` (NOT `S_shard`) as
 # the row's `commit_lsn`. This is the exact generalization of D1-b's
 # `lo_lsn = MIN(input commit_lsn)`-explicit decoupling. A `stamp_lsn` of -1
-# (`PG_STAMP_LSN_UNSET`, the default) means "absent — fold at the WAL seq" and
+# (`TS_STAMP_LSN_UNSET`, the default) means "absent — fold at the WAL seq" and
 # encodes a byte-identical v2 chunk, so EVERY existing single-WAL caller (heap +
 # k=1 index, group-commit, async-commit) is UNCHANGED on the wire.
 #
 # `decode_commit_chunk` parses the version digit out of the magic and REJECTS an
 # unknown version with a clear typed error (it does NOT silently misparse a
-# foreign / future layout). This is the flag-day insurance the LTAP analytics
-# convergence (the analytics convergence design, §6 items
-# 1+2) requires so the WAL format can evolve into columnar analytics later
-# WITHOUT a reformat.
+# foreign / future layout). This is the flag-day insurance that lets the WAL format evolve into columnar
+# analytics later WITHOUT a reformat.
 
 # The "PGC" lineage tag (low 24 bits): 'P'=0x50 'G'=0x47 'C'=0x43 -> LE 0x434750.
-comptime PG_COMMIT_MAGIC_PREFIX: UInt32 = 0x434750
+comptime TS_COMMIT_MAGIC_PREFIX: UInt32 = 0x434750
 
 # The DEFAULT WAL commit-chunk format version (the trailing digit of the magic).
 # Bumped 1 -> 2 when `schema_version` was reserved in the header (CHANGE 2). The
 # default stays 2: a chunk with no explicit DML-LSN stamp (`stamp_lsn == -1`)
 # encodes v2 byte-identically. Version 3 is emitted ONLY when a caller passes an
 # explicit `stamp_lsn >= 0` (the Option-A S-b sharded-index path).
-comptime PG_COMMIT_FORMAT_VERSION: UInt32 = 2
+comptime TS_COMMIT_FORMAT_VERSION: UInt32 = 2
 
 # The v3 format version — emitted ONLY when an explicit `stamp_lsn >= 0` is
 # supplied (the Option-A S-b cross-WAL DML-LSN stamp). v3 carries an i64
 # `stamp_lsn` slot after `schema_version`.
-comptime PG_COMMIT_FORMAT_VERSION_V3: UInt32 = 3
+comptime TS_COMMIT_FORMAT_VERSION_V3: UInt32 = 3
 
 # The full magic for the DEFAULT (v2) version: prefix | (('0' + version) << 24).
 # '0' = 0x30, so version 2 -> 0x32 in the high byte -> 0x32434750 ("PGC2").
-comptime PG_COMMIT_MAGIC: UInt32 = PG_COMMIT_MAGIC_PREFIX | (
-    (UInt32(0x30) + PG_COMMIT_FORMAT_VERSION) << UInt32(24)
+comptime TS_COMMIT_MAGIC: UInt32 = TS_COMMIT_MAGIC_PREFIX | (
+    (UInt32(0x30) + TS_COMMIT_FORMAT_VERSION) << UInt32(24)
 )
 
 # The full magic for v3 ("PGC3", 0x33434750).
-comptime PG_COMMIT_MAGIC_V3: UInt32 = PG_COMMIT_MAGIC_PREFIX | (
-    (UInt32(0x30) + PG_COMMIT_FORMAT_VERSION_V3) << UInt32(24)
+comptime TS_COMMIT_MAGIC_V3: UInt32 = TS_COMMIT_MAGIC_PREFIX | (
+    (UInt32(0x30) + TS_COMMIT_FORMAT_VERSION_V3) << UInt32(24)
 )
 
 # The "no explicit DML-LSN stamp" sentinel: the chunk's rows fold at the WAL seq
 # (the default single-WAL behavior). encode emits a v2 chunk for this value.
-comptime PG_STAMP_LSN_UNSET: Int64 = -1
+comptime TS_STAMP_LSN_UNSET: Int64 = -1
 
 
 @always_inline
@@ -112,12 +106,12 @@ def _format_version_from_magic(magic: UInt32) raises -> UInt32:
     chunk), or if the high byte is not an ASCII digit '0'..'9' (a garbage
     version byte). The caller then branches on the returned version and REJECTS
     any version it does not know how to decode — never silently misparses."""
-    if (magic & UInt32(0x00FFFFFF)) != PG_COMMIT_MAGIC_PREFIX:
+    if (magic & UInt32(0x00FFFFFF)) != TS_COMMIT_MAGIC_PREFIX:
         raise Error(
             "table_store_codec: bad commit-chunk magic prefix (got "
             + String(Int(magic))
             + ', want "PGC" lineage '
-            + String(Int(PG_COMMIT_MAGIC_PREFIX))
+            + String(Int(TS_COMMIT_MAGIC_PREFIX))
             + ")"
         )
     var digit = (magic >> UInt32(24)) & UInt32(0xFF)
@@ -136,7 +130,7 @@ def _format_version_from_magic(magic: UInt32) raises -> UInt32:
 
 @fieldwise_init
 struct RowVersion(Copyable, Movable, Deinitable):
-    """One immutable version of a key (§1.2). The begin-LSN-only stamp:
+    """One immutable version of a key. The begin-LSN-only stamp:
     `commit_lsn` is the commit chunk_seq that created this version (its
     "xmin"); the version's "xmax" is implicit — the `commit_lsn` of the NEXT
     chain entry (or +inf for the newest). `is_tombstone` marks a DELETE.
@@ -162,12 +156,12 @@ struct RowVersion(Copyable, Movable, Deinitable):
 
 @fieldwise_init
 struct WriteOp(Copyable, Movable, Deinitable):
-    """One buffered write in a txn's in-RAM write-set (§3.2). `op` is
-    PG_OP_PUT | PG_OP_TOMBSTONE. The write-set is deduped by key (last write
+    """One buffered write in a txn's in-RAM write-set. `op` is
+    TS_OP_PUT | TS_OP_TOMBSTONE. The write-set is deduped by key (last write
     per key wins) at buffer time. POD-of-owned-bytes.
 
     Field layout:
-      var op: UInt8             — PG_OP_PUT | PG_OP_TOMBSTONE.
+      var op: UInt8             — TS_OP_PUT | TS_OP_TOMBSTONE.
       var key: List[UInt8]      — the primary key bytes.
       var row: List[UInt8]      — the row image bytes (empty for TOMBSTONE).
     """
@@ -241,11 +235,11 @@ def _put_bytes_lp(mut out: List[UInt8], b: List[UInt8]):
 
 
 # =============================================================================
-# CommitChunk encode / decode (§2 wire layout — format versions 2 + 3)
+# CommitChunk encode / decode (wire layout — format versions 2 + 3)
 # =============================================================================
 #
 # v2 (DEFAULT — no explicit DML-LSN stamp):
-#   off  0  [ magic         : u32 LE ]   # PG_COMMIT_MAGIC (incl. format version)
+#   off  0  [ magic         : u32 LE ]   # TS_COMMIT_MAGIC (incl. format version)
 #   off  4  [ snapshot_lsn  : i64 LE ]   # the snapshot this txn read at (audit)
 #   off 12  [ schema_version: i32 LE ]   # reserved row-image schema id (v2+);
 #                                        #   written constant 0 in this slice.
@@ -258,7 +252,7 @@ def _put_bytes_lp(mut out: List[UInt8], b: List[UInt8]):
 # v3 (Option-A S-b — explicit DML-LSN stamp): IDENTICAL to v2 except an i64
 # `stamp_lsn` slot is INSERTED after `schema_version`, shifting `n_writes` +
 # the WriteOp body down 8 bytes:
-#   off  0  [ magic         : u32 LE ]   # PG_COMMIT_MAGIC_V3
+#   off  0  [ magic         : u32 LE ]   # TS_COMMIT_MAGIC_V3
 #   off  4  [ snapshot_lsn  : i64 LE ]
 #   off 12  [ schema_version: i32 LE ]
 #   off 16  [ stamp_lsn     : i64 LE ]   # the HEAP DML-LSN L (>= 0); the index
@@ -269,8 +263,7 @@ def _put_bytes_lp(mut out: List[UInt8], b: List[UInt8]):
 # `schema_version` sits right after `snapshot_lsn` so the fixed header stays
 # laid out as [magic][snapshot_lsn][schema_version][...][n_writes]. It is
 # RESERVED here (always 0) so the columnarizer can later decode WAL rows into
-# typed columns keyed by this id WITHOUT a WAL reformat (convergence design §6
-# item 2). `stamp_lsn` is the Option-A S-b cross-WAL DML-LSN (v3 only).
+# typed columns keyed by this id WITHOUT a WAL reformat. `stamp_lsn` is the Option-A S-b cross-WAL DML-LSN (v3 only).
 # -----------------------------------------------------------------------------
 
 # Header byte offsets. Single source of truth for both the full decode and the
@@ -292,19 +285,19 @@ comptime _OFF_WRITES_V3: Int = 32
 # opaque bytes at the storage layer (the row-image encoding contract lives in
 # the SQL layer / columnarizer — see the design's "row-image encoding contract"
 # subsection); 0 = "unschematized opaque row image" (degenerate-mode default).
-comptime PG_SCHEMA_VERSION_UNSET: Int32 = 0
+comptime TS_SCHEMA_VERSION_UNSET: Int32 = 0
 
 
 def encode_commit_chunk(
     snapshot_lsn: Int64,
     write_set: List[WriteOp],
-    stamp_lsn: Int64 = PG_STAMP_LSN_UNSET,
+    stamp_lsn: Int64 = TS_STAMP_LSN_UNSET,
 ) -> List[UInt8]:
     """Encode a txn's entire write-set + snapshot into one immutable commit
     chunk body. The whole body is ONE create-CAS object — atomicity by
-    construction (§2).
+    construction.
 
-    `stamp_lsn` (Option-A S-b, default `PG_STAMP_LSN_UNSET` = -1) — the explicit
+    `stamp_lsn` (Option-A S-b, default `TS_STAMP_LSN_UNSET` = -1) — the explicit
     cross-WAL DML-LSN `L`. When `-1` (the default, EVERY single-WAL caller), this
     emits a v2 chunk that is BYTE-IDENTICAL to the pre-S-b format (the index/heap
     fold stamps rows at the WAL seq). When `>= 0` (a SHARDED secondary-index
@@ -312,24 +305,24 @@ def encode_commit_chunk(
     index fold stamps rows at `L` (the heap DML-LSN), NOT this shard WAL's slot —
     the invariant-#3 per-lineage single-commit-LSN re-scope.
 
-    `schema_version` is RESERVED (written as `PG_SCHEMA_VERSION_UNSET` = 0) in
+    `schema_version` is RESERVED (written as `TS_SCHEMA_VERSION_UNSET` = 0) in
     this correctness slice: the row image stays opaque bytes at the storage
     layer, and the row-image encoding contract is owned by the SQL layer /
     columnarizer. Reserving the header slot now is the flag-day insurance that
     lets the columnarizer decode rows into typed columns later without a WAL
-    reformat (convergence design §6 item 2)."""
+    reformat."""
     var out = List[UInt8]()
     if stamp_lsn < Int64(0):
         # v2 — no explicit stamp; byte-identical to the pre-S-b wire format.
-        _put_u32_le(out, PG_COMMIT_MAGIC)
+        _put_u32_le(out, TS_COMMIT_MAGIC)
         _put_i64_le(out, snapshot_lsn)
-        _put_i32_le(out, PG_SCHEMA_VERSION_UNSET)
+        _put_i32_le(out, TS_SCHEMA_VERSION_UNSET)
         _put_i64_le(out, Int64(len(write_set)))
     else:
         # v3 — explicit DML-LSN stamp (the sharded-index cross-WAL path).
-        _put_u32_le(out, PG_COMMIT_MAGIC_V3)
+        _put_u32_le(out, TS_COMMIT_MAGIC_V3)
         _put_i64_le(out, snapshot_lsn)
-        _put_i32_le(out, PG_SCHEMA_VERSION_UNSET)
+        _put_i32_le(out, TS_SCHEMA_VERSION_UNSET)
         _put_i64_le(out, stamp_lsn)
         _put_i64_le(out, Int64(len(write_set)))
     for i in range(len(write_set)):
@@ -350,7 +343,7 @@ struct CommitChunk(Movable, Deinitable):
                                        this slice; see encode_commit_chunk).
       var stamp_lsn: Int64           — the Option-A S-b explicit cross-WAL DML-LSN
                                        (>= 0 for a v3 sharded-index chunk;
-                                       `PG_STAMP_LSN_UNSET` = -1 for a v2 chunk =
+                                       `TS_STAMP_LSN_UNSET` = -1 for a v2 chunk =
                                        "fold at the WAL seq"). The fold reads THIS
                                        (when >= 0) as the row's commit_lsn.
       var write_set: List[WriteOp]   — plain List, reuse-safe trivially.
@@ -389,33 +382,33 @@ def decode_commit_chunk(body: List[UInt8]) raises -> CommitChunk:
     corrupt / non-table-store chunk fails loud, and an UNKNOWN format version is
     REJECTED with a clear typed error rather than silently misparsed.
 
-    v2 chunks decode with `stamp_lsn == PG_STAMP_LSN_UNSET` (-1 = "fold at the
+    v2 chunks decode with `stamp_lsn == TS_STAMP_LSN_UNSET` (-1 = "fold at the
     WAL seq"). v3 chunks carry an explicit `stamp_lsn >= 0` (the Option-A S-b
     cross-WAL DML-LSN)."""
     var magic = _get_u32_le(body, 0)
     # CHANGE 1: parse the format version out of the magic and branch on it. An
     # unknown version is rejected — we never misparse a foreign / future layout.
     var version = _format_version_from_magic(magic)
-    if version != PG_COMMIT_FORMAT_VERSION and (
-        version != PG_COMMIT_FORMAT_VERSION_V3
+    if version != TS_COMMIT_FORMAT_VERSION and (
+        version != TS_COMMIT_FORMAT_VERSION_V3
     ):
         raise Error(
             "table_store_codec: unsupported commit-chunk format version "
             + String(Int(version))
             + " (this build decodes versions "
-            + String(Int(PG_COMMIT_FORMAT_VERSION))
+            + String(Int(TS_COMMIT_FORMAT_VERSION))
             + " + "
-            + String(Int(PG_COMMIT_FORMAT_VERSION_V3))
+            + String(Int(TS_COMMIT_FORMAT_VERSION_V3))
             + ")"
         )
     var snapshot_lsn = _get_i64_le(body, _OFF_SNAPSHOT_LSN)
     var schema_version = _get_i32_le(body, _OFF_SCHEMA_VERSION)
     # The fixed prefix up through schema_version is shared; n_writes + the
     # WriteOp body sit at a version-dependent offset (v3 inserts an i64 stamp).
-    var stamp_lsn = PG_STAMP_LSN_UNSET
+    var stamp_lsn = TS_STAMP_LSN_UNSET
     var off_n_writes = _OFF_N_WRITES
     var off = _OFF_WRITES
-    if version == PG_COMMIT_FORMAT_VERSION_V3:
+    if version == TS_COMMIT_FORMAT_VERSION_V3:
         stamp_lsn = _get_i64_le(body, _OFF_STAMP_LSN_V3)
         off_n_writes = _OFF_N_WRITES_V3
         off = _OFF_WRITES_V3
@@ -438,28 +431,28 @@ def decode_commit_chunk(body: List[UInt8]) raises -> CommitChunk:
 
 def decode_commit_chunk_keys(body: List[UInt8]) raises -> List[List[UInt8]]:
     """Decode ONLY the keys touched by a commit chunk (the OCC fast-path scan
-    — §3.4 reads other chunks' keys to intersect against our write-set). Skips
+    — the OCC check reads other chunks' keys to intersect against our write-set). Skips
     the row payloads to avoid copying them on the conflict-check hot path.
 
     Routes through the SAME magic + format-version validation as
     `decode_commit_chunk` — an unknown version is rejected, not misparsed."""
     var magic = _get_u32_le(body, 0)
     var version = _format_version_from_magic(magic)
-    if version != PG_COMMIT_FORMAT_VERSION and (
-        version != PG_COMMIT_FORMAT_VERSION_V3
+    if version != TS_COMMIT_FORMAT_VERSION and (
+        version != TS_COMMIT_FORMAT_VERSION_V3
     ):
         raise Error(
             "table_store_codec: unsupported commit-chunk format version "
             + String(Int(version))
             + " in key-decode (this build decodes versions "
-            + String(Int(PG_COMMIT_FORMAT_VERSION))
+            + String(Int(TS_COMMIT_FORMAT_VERSION))
             + " + "
-            + String(Int(PG_COMMIT_FORMAT_VERSION_V3))
+            + String(Int(TS_COMMIT_FORMAT_VERSION_V3))
             + ")"
         )
     var off_n_writes = _OFF_N_WRITES
     var off = _OFF_WRITES
-    if version == PG_COMMIT_FORMAT_VERSION_V3:
+    if version == TS_COMMIT_FORMAT_VERSION_V3:
         off_n_writes = _OFF_N_WRITES_V3
         off = _OFF_WRITES_V3
     var n_writes = Int(_get_i64_le(body, off_n_writes))

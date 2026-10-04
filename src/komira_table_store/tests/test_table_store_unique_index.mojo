@@ -1,37 +1,37 @@
 # =============================================================================
 # src/komira_table_store/tests/test_table_store_unique_index.mojo
 #   SI-7 UNIQUE enforcement — the STORAGE-LEVEL discriminating falsifiers for
-#   the §7 first-committer-wins protocol over a pk-SUFFIXED unique index.
+#   the first-committer-wins protocol over a pk-SUFFIXED unique index.
 # =============================================================================
 #
-# These probe the §7 protocol DIRECTLY against the real `TableStore` primitives
-# (begin / commit / index_scan_visible / register_index), with the §7.2 guard
+# These probe the protocol DIRECTLY against the real `TableStore` primitives
+# (begin / commit / index_scan_visible / register_index), with the guard
 # key + post-conflict 40001-vs-23505 discriminator implemented in test helpers
 # (`_commit_unique` / `_apply_unique_insert_statement`) so the falsifiers
 # exercise the ACTUAL OCC substrate — not a mock. The SQL-face flip (SI-5
 # non-enforcing → enforcing) lives in `sql_executor.mojo`; this file is the
 # substrate proof that the protocol is loop-free and correct.
 #
-# The four named falsifiers (design §7 / slice-3 / slice-4):
-#   (a) CONCURRENT first-committer-wins (§7.2) — two threads INSERT the same
+# The four named falsifiers:
+#   (a) CONCURRENT first-committer-wins — two threads INSERT the same
 #       unique value at the SAME pinned snapshot ⇒ EXACTLY ONE commits, the
 #       loser terminates 23505 (NOT both-commit, NOT a perpetual 40001 loop,
 #       NOT a 23505 for the winner). THE one. Real OS threads + a start barrier
 #       that forces the co-pin (without it the OS may serialize the threads and
 #       the loser fast-fails at buffer time, a DIFFERENT path that does not
-#       exercise §7.2).
-#   (b) INTRA-TXN same-value (§7.3) — single INSERT of two rows sharing the
+#       exercise the post-conflict recheck).
+#   (b) INTRA-TXN same-value — single INSERT of two rows sharing the
 #       unique value ⇒ 23505, ZERO heap rows committed (the pre-check fires
 #       BEFORE any create-CAS append; `wal_head_seq` is unchanged).
-#   (c) NULL trap (§7.5) — multiple NULLs allowed (NULL ≠ NULL); a CONTRAST
+#   (c) NULL trap — multiple NULLs allowed (NULL ≠ NULL); a CONTRAST
 #       GUARD proves the unique check is still LIVE for non-null values.
-#   (d) COLD-TIER injectivity (§7.4 / slice-4(e)) — the SQL-face form is now LIVE
+#   (d) COLD-TIER injectivity — the SQL-face form is now LIVE
 #       at the DRIVER tier: see the driver's cold-tier lifecycle test,
 #       `test_b_cold_aware_unique_rejects_columnarized_reaped_duplicate`. The
 #       LEAF-level variant stays out of scope by design (the reuse-safe leaf has
 #       NO columnar dep). Documented at the bottom.
 #
-# THE GUARD KEY (§7.2a — the one net-new keyspace this protocol introduces).
+# THE GUARD KEY (the one net-new keyspace this protocol introduces).
 # With pk-SUFFIXED keys two duplicate-value inserts write DISTINCT composite
 # keys (`U||pk1` vs `U||pk2`) — so they do NOT naturally OCC-conflict (the
 # create-CAS serializes them but absent extra machinery BOTH commit). The guard
@@ -96,16 +96,16 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
 # =============================================================================
 # Storage-level key helpers — lifted from test_table_store_secondary_index.mojo. We
 # hand-encode the 4-byte big-endian lineage-ordinal prefix that
-# `TableStore._key_lineage_ord` reads, staying on the table store leaf (no pgsql
+# `TableStore._key_lineage_ord` reads, staying on the table store leaf (no SQL-layer
 # codec import). The unique index keyspace + the guard keyspace are two DISJOINT
-# high-band ordinals (§7.2a — one guard ordinal per unique index).
+# high-band ordinals (one guard ordinal per unique index).
 # =============================================================================
 
 comptime _IDX_BAND: Int32 = 0x40000000  # the unique index lineage ordinal
 comptime _GUARD_BAND: Int32 = 0x50000000  # the disjoint guard keyspace ordinal
 comptime _HEAP_TID: Int32 = 0  # the heap table ordinal (low band)
 
-# A 1-byte NULL marker for the unique segment: matches the §3.2c shape (0x00 =
+# A 1-byte NULL marker for the unique segment: matches the SQL layer's NULL-marker shape (0x00 =
 # NULL, anything else = present). A NULL unique value is EXEMPT from every check.
 comptime _NULL_SEG: UInt8 = 0x00
 
@@ -130,7 +130,7 @@ def _heap_key(pk: UInt8) -> List[UInt8]:
 def _uidx_key(lineage: Int32, seg: UInt8, pk: UInt8) -> List[UInt8]:
     """A pk-SUFFIXED unique index entry key: high-band lineage prefix ++
     [seg byte][pk byte]. Two rows with the same `seg` (unique value) but
-    different `pk` produce DISTINCT keys (§7.4 chosen keying) — the constraint
+    different `pk` produce DISTINCT keys — the constraint
     is a prefix-multiplicity property, NEVER a key collision."""
     var out = _ord_prefix(lineage)
     out.append(seg)
@@ -139,7 +139,7 @@ def _uidx_key(lineage: Int32, seg: UInt8, pk: UInt8) -> List[UInt8]:
 
 
 def _guard_key(seg: UInt8) -> List[UInt8]:
-    """The §7.2a guard key: guard-band prefix ++ [seg byte] — NO pk suffix. Two
+    """The guard key: guard-band prefix ++ [seg byte] — NO pk suffix. Two
     inserts of the SAME unique value buffer the IDENTICAL guard key, forcing the
     create-CAS write-WRITE conflict that makes the OCC the uniqueness arbiter."""
     var out = _ord_prefix(_GUARD_BAND)
@@ -201,7 +201,7 @@ def _live_pks_for_value[
     mut store: TableStore[Store], txn: Txn, lineage: Int32, seg: UInt8
 ) raises -> List[UInt8]:
     """The pk-suffix set of the LIVE unique entries under value `seg` at the txn
-    snapshot. The §7 uniqueness probe: `index_scan_visible` over the value's
+    snapshot. The uniqueness probe: `index_scan_visible` over the value's
     pk-suffix sub-range, projected to the distinct decoded pk bytes."""
     var lo = _uprefix_lo(lineage, seg)
     var hi = _uprefix_hi(lineage, seg)
@@ -214,7 +214,7 @@ def _live_pks_for_value[
 
 
 # =============================================================================
-# The §7 protocol, implemented against the real TableStore primitives.
+# The protocol, implemented against the real TableStore primitives.
 # =============================================================================
 
 
@@ -223,9 +223,9 @@ def _buffer_unique_insert(
 ) raises:
     """Buffer ONE unique-index INSERT's three WriteOps into `txn` (invariant #1
     — heap + index + guard share the ONE write-set): the heap PUT, the
-    pk-suffixed index PUT, and — for a NON-NULL value — the guard PUT (§7.2a).
+    pk-suffixed index PUT, and — for a NON-NULL value — the guard PUT.
     A NULL value buffers heap + index but NO guard (a NULL must never conflict
-    with another NULL — §7.5)."""
+    with another NULL)."""
     txn.insert(_heap_key(pk), _b("row"))
     txn.insert(_uidx_key(lineage, seg, pk), List[UInt8]())  # non-covering
     if not is_null:
@@ -241,7 +241,7 @@ def _unique_recheck_or_23505[
     self_pk: UInt8,
     is_null: Bool,
 ) raises -> Bool:
-    """§7.2 steps 1–3 — the 40001-vs-23505 discriminator. Called after a `commit`
+    """Steps 1–3 of the unique-commit protocol — the 40001-vs-23505 discriminator. Called after a `commit`
     returns OCC_CONFLICT 40001. Re-begins at a FRESH snapshot S' (now > the
     winner's commit_lsn) and re-runs the per-unique-key prefix scan:
       * if a LIVE entry under `seg` has a pk != self_pk ⇒ raise TERMINAL 23505
@@ -278,14 +278,14 @@ def _commit_unique[
     cap: Int,
     mut conflicts: Int64,
 ) raises:
-    """The §7.2 executor-side unique commit protocol, loop-free by construction.
+    """The executor-side unique commit protocol, loop-free by construction.
     Begin -> buffer the heap+index+guard writes -> commit. On a 40001, run the
     post-conflict recheck: it RAISES terminal 23505 (and we propagate, never
     retrying) if a competing committed value exists, else re-drives the txn body
     at a fresh snapshot. `cap` bounds the heap-conflict retry path (a livelock
     backstop; the unique path EXITS before re-commit, so it can never spin).
 
-    The (1) buffer-time fast-fail (§7.1) is ALSO applied here on the first
+    The (1) buffer-time fast-fail is ALSO applied here on the first
     attempt: an already-committed dup visible at the pinned snapshot S raises
     23505 immediately without paying a commit round-trip. It is a latency
     optimization, NEVER the arbiter (S cannot see a concurrent uncommitted
@@ -294,8 +294,8 @@ def _commit_unique[
     while attempt < cap:
         attempt += 1
         var t = store.begin()
-        # (1) buffer-time fast-fail prefix scan (§7.1) — catches an ALREADY-
-        # committed dup visible at S. Skipped for NULL (§7.5).
+        # (1) buffer-time fast-fail prefix scan — catches an ALREADY-
+        # committed dup visible at S. Skipped for NULL.
         if not is_null:
             var pre = _live_pks_for_value(store, t, lineage, seg)
             for i in range(len(pre)):
@@ -316,13 +316,13 @@ def _commit_unique[
                 raise e^  # terminal — propagate (should not arise from commit).
             if is_occ_conflict(em) or is_commit_retryable(em):
                 conflicts += Int64(1)
-                # §7.2 post-conflict recheck: raises terminal 23505 if a
+                # post-conflict recheck: raises terminal 23505 if a
                 # competing value is now live; else returns True to re-drive.
                 _ = _unique_recheck_or_23505(store, lineage, seg, pk, is_null)
                 continue  # heap-key 40001 (no competing value) — re-drive.
             raise e^  # genuine unexpected error.
     raise Error(
-        "PG_COMMIT_RETRYABLE: _commit_unique exhausted "
+        "TS_COMMIT_RETRYABLE: _commit_unique exhausted "
         + String(cap)
         + " attempts (retryable)"
     )
@@ -337,22 +337,22 @@ def _apply_unique_insert_statement[
     pks: List[UInt8],
     nulls: List[Bool],
 ) raises:
-    """One logical multi-row INSERT under a unique index. Runs the §7.3 INTRA-
+    """One logical multi-row INSERT under a unique index. Runs the INTRA-
     STATEMENT pre-check over the statement's OWN rows BEFORE buffering ANY
     WriteOp, then a single commit of the whole statement. The pre-check is
     REQUIRED even under pk-suffixed keying: `Txn._buffer` dedups by EXACT key,
     and two pk-suffixed index PUTs have DISTINCT keys, so the buffer silently
-    accepts both — only this pre-check raises (the §7.3 silent-data-loss hole).
+    accepts both — only this pre-check raises (the silent-data-loss hole).
 
-    NULL values never enter `seen` (NULL != NULL — §7.5). On a duplicate the
+    NULL values never enter `seen` (NULL != NULL). On a duplicate the
     whole statement raises 23505 BEFORE any append (atomic abort: `wal_head_seq`
     is unchanged)."""
-    # §7.3 intra-statement pre-check — scan the statement's own rows.
+    # intra-statement pre-check — scan the statement's own rows.
     var seen_seg = List[UInt8]()
     var seen_pk = List[UInt8]()
     for r in range(len(segs)):
         if nulls[r]:
-            continue  # NULL exempt (§7.5).
+            continue  # NULL exempt.
         for s in range(len(seen_seg)):
             if seen_seg[s] == segs[r] and seen_pk[s] != pks[r]:
                 raise Error(
@@ -372,7 +372,7 @@ def _apply_unique_insert_statement[
 
 
 # =============================================================================
-# (a) CONCURRENT first-committer-wins (§7.2) — THE one. Real OS threads.
+# (a) CONCURRENT first-committer-wins — THE one. Real OS threads.
 # =============================================================================
 
 
@@ -460,7 +460,7 @@ def _run_u_writer(mut arg: _UArg) raises:
 
     # Pin S, buffer the writes, THEN hit the start barrier so BOTH threads have
     # pinned the SAME head (seeded at LSN 0) before EITHER commits. This forces
-    # the §7.2 path (the buffer-time scan sees nothing at S — the create-CAS
+    # the recheck path (the buffer-time scan sees nothing at S — the create-CAS
     # guard conflict is the sole arbiter), not the serialized fast-fail path. The
     # FIRST txn is carried in an Optional so the ownership tracker sees a single
     # well-defined liveness across the retry loop (each iteration `take()`s it
@@ -491,7 +491,7 @@ def _run_u_writer(mut arg: _UArg) raises:
                 terminal = True  # 23505 — TERMINAL, break the loop.
             elif is_occ_conflict(em) or is_commit_retryable(em):
                 results_ptr[].conflicts += Int64(1)
-                # §7.2 post-conflict recheck: RAISES terminal 23505 if the peer
+                # post-conflict recheck: RAISES terminal 23505 if the peer
                 # committed a competing value (the FCW loser path); else returns
                 # to re-drive (heap-key 40001 — does not arise in this 2-writer
                 # same-value test, so the recheck always terminates here).
@@ -547,7 +547,7 @@ def _join_u_writer(tid: Int64) -> Int32:
 
 def _run_fcw(seed_committed: Bool) raises -> Int64:
     """Drive the 2-thread FCW race once. Returns the WINNER's pk (the live
-    surviving entry's pk). Asserts the §7.2 invariants. `seed_committed` seeds an
+    surviving entry's pk). Asserts the invariants. `seed_committed` seeds an
     unrelated heap row so `begin()` pins a real head (the threads still race the
     FIRST insert of the unique value)."""
     var shared = SharedInMemoryConditionalStore()
@@ -626,7 +626,7 @@ def _run_fcw(seed_committed: Bool) raises -> Int64:
         if results[wi][].commits == Int64(1):
             winner_pk = pkvals[wi]
 
-    # --- THE assertions (§7.2 slice-3(a)) ---
+    # --- THE assertions ---
     # EXACTLY ONE committed — NOT both-commit.
     assert_equal(
         total_commits, Int64(1), "FCW: EXACTLY ONE thread commits (no both-commit)"
@@ -666,7 +666,7 @@ def _run_fcw(seed_committed: Bool) raises -> Int64:
 def test_a_concurrent_first_committer_wins() raises:
     print(
         "[a] CONCURRENT first-committer-wins — 2 threads, same unique value,"
-        " EXACTLY ONE commits, loser 23505 (§7.2 slice-3(a))"
+        " EXACTLY ONE commits, loser 23505"
     )
     # Run a few times to shake out scheduling — each run is independently
     # asserted (exactly-one-commit / loser-23505 / no-error / winner-identity).
@@ -682,7 +682,7 @@ def test_a_concurrent_first_committer_wins() raises:
 # =============================================================================
 # (a-disc) DISCRIMINATING SELF-TEST — a stub that retries a unique 40001 like an
 # ordinary 40001 (NO post-conflict 23505 conversion) BOTH-COMMITS. This proves
-# the FCW falsifier is not a tautology: the §7.2 discriminator is load-bearing.
+# the FCW falsifier is not a tautology: the discriminator is load-bearing.
 # =============================================================================
 
 
@@ -696,7 +696,7 @@ def _commit_unique_BROKEN_no_recheck[
     cap: Int,
 ) raises -> Bool:
     """A deliberately-WRONG variant: on a 40001 it re-drives the txn body WITHOUT
-    the post-conflict unique recheck — exactly the §7.2 stub the design warns
+    the post-conflict unique recheck — exactly the stub the design warns
     against. Returns True iff it committed. With the guard key forcing the
     conflict, the loser re-begins at S' (now containing the winner's guard +
     index entry), re-buffers, and — because the guard key already exists at a
@@ -726,7 +726,7 @@ def _commit_unique_BROKEN_no_recheck[
 def test_a_disc_stub_both_commits() raises:
     print(
         "[a-disc] DISCRIMINATING — a no-recheck stub BOTH-commits (proves the"
-        " §7.2 discriminator is load-bearing)"
+        " discriminator is load-bearing)"
     )
     # Deterministic single-thread reproduction of the both-commit hazard: commit
     # pk=1 (winner), then run the BROKEN no-recheck committer for pk=2 at a stale
@@ -756,20 +756,20 @@ def test_a_disc_stub_both_commits() raises:
         len(live),
         2,
         "DISCRIMINATING: the no-recheck stub both-commits (2 live entries) —"
-        " the correct §7.2 protocol yields exactly 1",
+        " the correct protocol yields exactly 1",
     )
     print("    [OK] (a-disc) — stub both-commits, so the FCW assert discriminates")
 
 
 # =============================================================================
-# (b) INTRA-TXN same-value (§7.3) — single statement, two rows, same value.
+# (b) INTRA-TXN same-value — single statement, two rows, same value.
 # =============================================================================
 
 
 def test_b_intra_txn_same_value() raises:
     print(
         "[b] INTRA-TXN same-value — single INSERT of two rows sharing the unique"
-        " value ⇒ 23505, ZERO heap rows committed (§7.3 slice-3(b))"
+        " value ⇒ 23505, ZERO heap rows committed"
     )
     var store = _new_mem_store(String("uniq_b/") + _unique())
     var lineage = _IDX_BAND
@@ -819,7 +819,7 @@ def test_b_disc_buffer_dedup_does_not_catch() raises:
         " so a buffer-dedup 'check' would both-commit (proves (b)'s pre-check"
         " is independently required)"
     )
-    # Prove the §7.3 hazard: WITHOUT the pre-check, buffering two pk-suffixed
+    # Prove the hazard: WITHOUT the pre-check, buffering two pk-suffixed
     # rows of the same value into one txn commits BOTH heap rows + BOTH index
     # entries (the buffer dedups by EXACT key; the keys differ).
     var store = _new_mem_store(String("uniq_b_disc/") + _unique())
@@ -850,7 +850,7 @@ def test_b_disc_buffer_dedup_does_not_catch() raises:
 
 
 # =============================================================================
-# (c) NULL trap (§7.5) — multiple NULLs allowed; CONTRAST GUARD proves the
+# (c) NULL trap — multiple NULLs allowed; CONTRAST GUARD proves the
 #     unique check is still LIVE for non-null values.
 # =============================================================================
 
@@ -858,7 +858,7 @@ def test_b_disc_buffer_dedup_does_not_catch() raises:
 def test_c_null_multiple_allowed() raises:
     print(
         "[c] NULL trap — multiple NULLs in a unique index all commit; CONTRAST"
-        " GUARD: a non-null duplicate still raises 23505 (§7.5 slice-3(c))"
+        " GUARD: a non-null duplicate still raises 23505"
     )
     var store = _new_mem_store(String("uniq_c/") + _unique())
     var lineage = _IDX_BAND
@@ -909,7 +909,7 @@ def test_c_null_multiple_allowed() raises:
 
 
 # =============================================================================
-# (d) COLD-TIER injectivity (§7.4 / slice-4(e)) — the SQL-face form is NOW
+# (d) COLD-TIER injectivity — the SQL-face form is NOW
 #     COVERED at the driver tier.
 # =============================================================================
 #
@@ -935,7 +935,7 @@ def test_c_null_multiple_allowed() raises:
 
 
 def main() raises:
-    print("== table store SI-7 UNIQUE enforcement (storage-level §7 protocol) ==")
+    print("== table store SI-7 UNIQUE enforcement (storage-level protocol) ==")
     # Discriminating self-tests FIRST (prove the falsifiers are not tautologies).
     test_a_disc_stub_both_commits()
     test_b_disc_buffer_dedup_does_not_catch()
@@ -948,5 +948,5 @@ def main() raises:
     print(
         "[OK] test_table_store_unique_index — (a) concurrent FCW + (b) intra-txn +"
         " (c) NULL + discriminating self-tests — exactly-one-commit, terminal"
-        " 23505, no both-commit / no perpetual 40001 loop (§7)"
+        " 23505, no both-commit / no perpetual 40001 loop"
     )

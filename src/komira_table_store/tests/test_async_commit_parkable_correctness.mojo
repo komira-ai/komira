@@ -18,7 +18,7 @@
 #                                DISJOINT key -> the parked commit re-reads the auth
 #                                head + re-appends at new head+1; BOTH commit gapless
 #                                (INV-4 FCW non-conflict / INV-7 gapless).
-#     C-OCC-COUPLING-PARK      — the §8 hole stays closed ACROSS a park: a committer
+#     C-OCC-COUPLING-PARK      — the OCC-coupling hole stays closed ACROSS a park: a committer
 #                                that lands DURING A's park is SEEN by A's resume-edge
 #                                re-OCC (the re-read uses the AUTHORITATIVE head, NOT
 #                                a park-cached head). RED if the head were park-cached.
@@ -90,7 +90,7 @@ from komira_table_store.table_store import (
 
 
 comptime _Store = SharedInMemorySlowCasStore
-comptime _PREFIX = "pg/parkcorrect"
+comptime _PREFIX = "ts/parkcorrect"
 
 
 # =============================================================================
@@ -325,21 +325,21 @@ def test_c_park_disjoint_reappend() raises:
 
 
 # =============================================================================
-# C-OCC-COUPLING-PARK — the §8 hole stays closed ACROSS a park. The resume-edge
+# C-OCC-COUPLING-PARK — the OCC-coupling hole stays closed ACROSS a park. The resume-edge
 # re-read uses the AUTHORITATIVE head (NOT a park-cached head): a committer that
 # lands DURING A's park is SEEN by A's re-OCC.
 #
 # Discrimination: A pins its snapshot at head H. A competitor commits an
 # OVERLAPPING key at H+1 DURING A's park. If A's resume re-OCC re-read the
 # AUTHORITATIVE head it sees H+1 and LOSES (correct). If it used a PARK-CACHED
-# head (== H, frozen at start) it would MISS H+1 and wrongly COMMIT — the §8
-# bug. So `op_a.is_error()` (40001) is the GREEN, discriminating outcome; a
-# wrong COMMIT would be the RED §8 regression.
+# head (== H, frozen at start) it would MISS H+1 and wrongly COMMIT — the
+# OCC-coupling bug. So `op_a.is_error()` (40001) is the GREEN, discriminating outcome; a
+# wrong COMMIT would be the RED OCC-coupling regression.
 # =============================================================================
 def test_c_occ_coupling_park() raises:
     print(
         "[C-OCC-COUPLING-PARK] the resume-edge re-OCC uses the AUTHORITATIVE head"
-        " — a committer landing during the park is seen (§8 stays closed)"
+        " — a committer landing during the park is seen (the OCC coupling stays closed)"
     )
     var reactor = _new_reactor()
     var backing = SharedInMemoryConditionalStore()
@@ -361,7 +361,7 @@ def test_c_occ_coupling_park() raises:
     assert_false(op_a.is_done() or op_a.is_error(), "A is parked")
 
     # COMPETITOR: commits the SAME key 'k' DURING A's park window. This lands at a
-    # slot ABOVE the head A read at START. If the §8 coupling holds, A's resume-edge
+    # slot ABOVE the head A read at START. If the OCC/create-CAS coupling holds, A's resume-edge
     # re-OCC re-reads the auth head, sees this chunk, and LOSES.
     var comp_lsn = _commit_sync_one(backing.clone(), reactor, "k", "from-COMP")
     assert_true(comp_lsn > seed_lsn, "the competitor landed ABOVE A's start head")
@@ -369,21 +369,21 @@ def test_c_occ_coupling_park() raises:
     # Drive A to terminal.
     _drive_op_to_done(a, op_a, reactor, park_a)
 
-    # THE §8 DISCRIMINATOR: A must LOSE (40001). A wrong COMMIT here would mean the
+    # THE OCC-COUPLING DISCRIMINATOR: A must LOSE (40001). A wrong COMMIT here would mean the
     # resume re-OCC used a park-cached head that missed the competitor's H+1 chunk.
     assert_true(
         op_a.is_error(),
         "A LOST (40001) — the resume-edge re-OCC re-read the AUTHORITATIVE head"
         " and SAW the competitor's overlapping commit landed during the park. A"
-        " wrong COMMIT here would be the §8 park-cached-head regression.",
+        " wrong COMMIT here would be the park-cached-head regression.",
     )
 
     # The competitor's value is the durable one (A's lost write left no trace —
-    # the §8 coupling guarantees the create-CAS slot is the sole arbiter).
+    # the OCC/create-CAS coupling guarantees the create-CAS slot is the sole arbiter).
     var got_k = _read_back(backing.clone(), "k")
     assert_true(
         Bool(got_k) and bytes_eq(got_k.value(), _b("from-COMP")),
-        "'k' holds the COMPETITOR's value (A's overlapping write lost — §8 closed)",
+        "'k' holds the COMPETITOR's value (A's overlapping write lost — OCC coupling closed)",
     )
     _ = a^
     print("  test_c_occ_coupling_park: PASS")
@@ -395,12 +395,11 @@ def test_c_occ_coupling_park() raises:
 #
 # THE LAYERING (a finding worth pinning): `commit_async_poll` does NOT swallow a
 # transport RAISE from the conformer — it deliberately PROPAGATES it. The CATCH
-# site is the SERVE LOOP (`_pg_resume_parked_commit`'s `try/except poll_e`), which
-# turns the raise into a clean conn-drop + ErrorResponse while OTHER conns keep
-# serving. So the DRIVER-LEVEL contract is: the raise propagates, and CATCHING it
+# site is the caller's serve loop, which is expected to turn the raise into a
+# clean connection drop while OTHER connections keep serving. So the DRIVER-LEVEL contract is: the raise propagates, and CATCHING it
 # leaves the store fully healthy (a sibling keeps committing, no corruption). The
-# "other conns keep serving across the raise" property is proven at the WIRE level
-# (test_pgwire_async_commit_parkable_wire — C-PARK-STORE-RAISE wire arm).
+# "other connections keep serving across the raise" property belongs to that
+# serve loop and is not tested here.
 # =============================================================================
 def test_c_park_store_raise() raises:
     print(

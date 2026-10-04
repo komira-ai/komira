@@ -224,7 +224,7 @@ def _real_handle(
     for the competitor commit + the durable read-back verifier."""
     var slow = SharedInMemorySlowCasStore(inner=inner^, slow_ticks=0)
     var wal = CasManifestStore[_RealStore](
-        store=slow^, prefix=String("pg/start412"), retry=RetryPolicy.fast_test()
+        store=slow^, prefix=String("ts/start412"), retry=RetryPolicy.fast_test()
     )
     return TableStore[_RealStore].open(wal^)
 
@@ -237,7 +237,7 @@ def _victim_handle(
     var slow = SharedInMemorySlowCasStore(inner=inner^, slow_ticks=0)
     var dbl = _OneShot412OnStartStore(slow^)
     var wal = CasManifestStore[_Store](
-        store=dbl^, prefix=String("pg/start412"), retry=RetryPolicy.fast_test()
+        store=dbl^, prefix=String("ts/start412"), retry=RetryPolicy.fast_test()
     )
     return TableStore[_Store].open(wal^)
 

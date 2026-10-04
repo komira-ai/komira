@@ -5,14 +5,11 @@
 #
 # The hot-row store: a key -> version-chain map, rebuildable from the WAL
 # (so it holds NO durable truth). Visibility at a snapshot LSN is a pure
-# function of the chain (§4): the newest version with `commit_lsn <= S`,
+# function of the chain: the newest version with `commit_lsn <= S`,
 # suppressed if it is a tombstone.
 #
-# Design: the table-store correctness-slice design
-# §1.4 (index representation) + §4 (MVCC visibility).
-#
 # -----------------------------------------------------------------------------
-# stale-reuse / encapsulation discipline (the repository pointer rules) — §1.3 NON-NEGOTIABLE
+# stale-reuse / encapsulation discipline (the repository pointer rules) — NON-NEGOTIABLE
 # -----------------------------------------------------------------------------
 #   * The index stores version chains in a `List[KeyChain]` inside a plain
 #     `List` — NOT a `Slab[T]` whose element owns an inner `List` (the
@@ -23,8 +20,8 @@
 # =============================================================================
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     RowVersion,
     WriteOp,
     bytes_cmp,
@@ -50,7 +47,7 @@ struct KeyValue(Copyable, Movable, Deinitable):
 # commit_lsn + tombstone flag exposed (NOT collapsed to None like `visible_at`).
 # =============================================================================
 #
-# SI-6c: a correct hot+cold dual-tier merge (design §9 step 3) must be
+# SI-6c: a correct hot+cold dual-tier merge must be
 # LWW-by-`commit_lsn` with TOMBSTONE-WINS, NOT a naive hot-else-cold fallback.
 # The bare `visible_at` collapses BOTH "no version <= S" AND "the winning
 # version is a tombstone" to the SAME `None`, so a merge built on it cannot tell
@@ -126,11 +123,11 @@ struct KeyChain(Copyable, Movable, Deinitable):
         self.chain.append(v^)
 
     def visible_at(self, snapshot: Int64) -> Optional[List[UInt8]]:
-        """The row visible at snapshot LSN `S` (§4): the LAST chain entry with
+        """The row visible at snapshot LSN `S`: the LAST chain entry with
         `commit_lsn <= S`. None if (a) no such entry exists (the key did not
         exist as of `S`) or (b) that entry is a tombstone (deleted as of `S`).
         Linear scan from the tail (chains are short in the correctness slice;
-        a production build uses binary search)."""
+        a faster build would use binary search)."""
         var i = len(self.chain) - 1
         while i >= 0:
             ref v = self.chain[i]
@@ -168,9 +165,9 @@ struct KeyChain(Copyable, Movable, Deinitable):
 struct KeyIndex(Movable, Deinitable):
     """The in-RAM memtable: a `List[KeyChain]` kept sorted by key (byte-
     lexicographic), so `scan(lo, hi)` is a bounded walk and `chain_for` is a
-    binary search. Rebuildable from the WAL — holds no durable truth (§1.4).
+    binary search. Rebuildable from the WAL — holds no durable truth.
 
-    A production build swaps the sorted `List` + binary search for a skiplist /
+    A faster build would swap the sorted `List` + binary search for a skiplist /
     B-tree; for the CORRECTNESS slice a sorted `List` is sufficient and keeps
     the slice free of a net-new concurrent index primitive.
 
@@ -217,7 +214,7 @@ struct KeyIndex(Movable, Deinitable):
         if pos < len(self.entries) and bytes_eq(self.entries[pos].key, key):
             return pos
         # Insert a fresh empty chain at `pos` (keep the list sorted). Build a
-        # new list — the correctness slice is small; a production build uses a
+        # new list — the correctness slice is small; a faster build would use a
         # structure with O(log n) insert.
         var rebuilt = List[KeyChain]()
         for i in range(pos):
@@ -233,7 +230,7 @@ struct KeyIndex(Movable, Deinitable):
         commit slot). Appends a RowVersion to the key's chain (ascending —
         commit_lsn is monotone across the WAL)."""
         var idx = self._chain_idx_or_insert(w.key)
-        var is_tomb = w.op == PG_OP_TOMBSTONE
+        var is_tomb = w.op == TS_OP_TOMBSTONE
         self.entries[idx].append_version(
             RowVersion(commit_lsn, is_tomb, w.row.copy())
         )
@@ -247,7 +244,7 @@ struct KeyIndex(Movable, Deinitable):
     def visible_at(
         self, key: List[UInt8], snapshot: Int64
     ) -> Optional[List[UInt8]]:
-        """The row visible for `key` at snapshot `S` (§4), or None if invisible
+        """The row visible for `key` at snapshot `S`, or None if invisible
         (absent or tombstoned as of `S`)."""
         var idx = self._find_idx(key)
         if idx < 0:

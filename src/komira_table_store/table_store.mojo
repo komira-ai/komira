@@ -11,12 +11,8 @@
 # code runs on the in-memory / shared-in-memory (real threads) / local-fs
 # conformers today and S3/GCS later UNCHANGED.
 #
-# Design: the table-store correctness-slice design
-#   §3 (commit protocol) + §4 (visibility) + §5 (recovery) + §6 (interface)
-#   + §8 (the ONE correctness subtlety: OCC head/create-CAS coupling).
-#
 # -----------------------------------------------------------------------------
-# THE LOAD-BEARING CORRECTNESS SUBTLETY (§8 — get this exactly right)
+# THE LOAD-BEARING CORRECTNESS SUBTLETY (get this exactly right)
 # -----------------------------------------------------------------------------
 # The OCC window's upper bound and the create-CAS target slot are COUPLED.
 #   * `begin()` MAY pin its snapshot from the cached `_HEAD` (`read_head`) — a
@@ -42,7 +38,7 @@
 #     method (avoids a borrowed pointer field nulled between uses, which the
 #     pointer rules ban).
 #   * Row versions / write-sets are plain byte `List`s with inline version
-#     stamps, never heap-owning `Slab` element fields (stale-reuse §1.3).
+#     stamps, never heap-owning `Slab` element fields.
 #   * ZERO wildcard origins / `unsafe_from_address` / `take_pointee`.
 #
 # -----------------------------------------------------------------------------
@@ -82,9 +78,9 @@ from komira_collections.slab import Slab
 from komira_table_store.key_index import KeyIndex, KeyValue, VisibleVersion
 from komira_table_store.table_store_codec import (
     CommitChunk,
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
-    PG_STAMP_LSN_UNSET,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
+    TS_STAMP_LSN_UNSET,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
@@ -96,7 +92,7 @@ from komira_table_store.table_store_codec import (
 @always_inline
 def _fold_lsn_for_chunk(seq: Int64, chunk: CommitChunk) -> Int64:
     """The commit_lsn a decoded chunk's rows fold AT (Option-A S-b). For a
-    single-WAL chunk (`stamp_lsn == PG_STAMP_LSN_UNSET` = -1, EVERY heap + k=1
+    single-WAL chunk (`stamp_lsn == TS_STAMP_LSN_UNSET` = -1, EVERY heap + k=1
     index chunk) the fold uses the WAL `seq` exactly as before — byte-identical.
     For a SHARDED secondary-index chunk that carries an EXPLICIT `stamp_lsn >= 0`
     (the heap DML-LSN `L`), the fold uses `L`, NOT this shard WAL's slot — the
@@ -134,12 +130,12 @@ comptime OCC_CONFLICT_TOKEN: String = "OCC_CONFLICT 40001"
 # the txn (re-begin at a fresh snapshot + retry), exactly as it does on an OCC
 # 40001. The token is discriminable by message substring (the store's own
 # convention; the CAS-manifest append embeds "(retryable)" too).
-comptime COMMIT_RETRYABLE_TOKEN: String = "PG_COMMIT_RETRYABLE"
+comptime COMMIT_RETRYABLE_TOKEN: String = "TS_COMMIT_RETRYABLE"
 
 # A TERMINAL unique-constraint violation (SQLSTATE 23505 — unique_violation).
 # Distinct from BOTH retry classes above: a 23505 is NEVER retried (the
 # competing distinct-pk value was OBSERVED live under the unique prefix, so the
-# constraint is genuinely violated — design §7). The SI-7 UNIQUE enforcement
+# constraint is genuinely violated). The SI-7 UNIQUE enforcement
 # protocol raises an Error carrying this token from three sites: the buffer-time
 # fast-fail prefix scan, the intra-statement pre-check, and the executor-side
 # post-conflict recheck (which converts a guard-key 40001 into a terminal 23505
@@ -156,7 +152,7 @@ def is_unique_violation(msg: String) -> Bool:
     (SQLSTATE 23505). The discriminable signal the SQL face maps to
     unique_violation. Unlike `is_occ_conflict` / `is_commit_retryable`, a 23505
     is NEVER retried — observing the competing value is the terminal condition
-    that structurally prevents a perpetual 40001 loop (design §7.2c)."""
+    that structurally prevents a perpetual 40001 loop."""
     return msg.find(UNIQUE_VIOLATION_TOKEN) >= 0
 
 
@@ -252,7 +248,7 @@ struct CommitResult(Copyable, Movable, Deinitable):
     (`AppendResult.attempts`) — how many create-CAS attempts the winning append
     took (1 = won first try; >1 = lost the slot to a concurrent committer and
     re-drove). This is the per-lineage CONTENTION signal the adaptive-index-
-    sharding governor reacts to (design §8/§14.1: slot-race contention, NOT the
+    sharding governor reacts to (slot-race contention, NOT the
     OCC-redrive count). 0 for a read-only txn (no append). POD-only — reuse-safe (no heap fields)."""
 
     var commit_lsn: Int64
@@ -275,7 +271,7 @@ struct CommitResult(Copyable, Movable, Deinitable):
 # Txn — the by-value transaction handle (snapshot + write-set buffer).
 # =============================================================================
 
-# WS-4 Leg A: the sentinel for a txn NOT bound to a partition shard (a plain /
+# The sentinel for a txn NOT bound to a partition shard (a plain /
 # NONE-table `TableStore.begin()` — the single-lineage path). A partition router
 # overwrites it with the real shard slot at begin; `PartitionedTableStore.commit`
 # only enforces the begin==commit invariant when the slot is >= 0, so every plain
@@ -293,12 +289,12 @@ struct Txn(Movable, Deinitable):
     plain `List[WriteOp]`, deduped by key (last write per key wins), NOT a
     `Slab` (reuse-safe trivially).
 
-    WS-4 LEG A — the SHARD-BINDING tag. `shard_slot` is
+    THE SHARD-BINDING tag. `shard_slot` is
     the partition shard SLOT a `PartitionedTableStore` pinned this txn's snapshot
     on (set by the router's `begin_on` / `begin_for_key`). It makes the
     begin==commit-shard invariant STRUCTURALLY enforced: `PartitionedTableStore.
     commit` asserts the routed target slot == `shard_slot` and raises (the
-    cross-shard token) on a mismatch, replacing WS-2's docstring-only
+    cross-shard token) on a mismatch, replacing an earlier docstring-only
     precondition. A PLAIN (un-partitioned) `TableStore.begin()` leaves it at the
     `_TXN_SHARD_UNBOUND` sentinel (-1) — the NONE / single-lineage path never
     consults it, so the field is byte-inert for every non-partitioned caller
@@ -310,7 +306,7 @@ struct Txn(Movable, Deinitable):
       var write_set: List[WriteOp]  — buffered mutations, deduped by key.
       var is_open: Bool             — False after commit/abort (use-after-end
                                        guard).
-      var shard_slot: Int           — WS-4 Leg A: the partition shard slot this
+      var shard_slot: Int           — the partition shard slot this
                                        txn is bound to (-1 = _TXN_SHARD_UNBOUND,
                                        the plain/NONE path).
     """
@@ -337,25 +333,25 @@ struct Txn(Movable, Deinitable):
 
     def insert(mut self, var key: List[UInt8], var row: List[UInt8]) raises:
         """Buffer a PUT (RAM-only). insert/update are both PUT at this layer —
-        insert-vs-update existence semantics are a SQL-binder concern (§3.2)."""
+        insert-vs-update existence semantics are a SQL-binder concern."""
         if not self.is_open:
             raise Error("Txn.insert: transaction is not open")
-        self._buffer(PG_OP_PUT, key^, row^)
+        self._buffer(TS_OP_PUT, key^, row^)
 
     def update(mut self, var key: List[UInt8], var row: List[UInt8]) raises:
         """Buffer a PUT (RAM-only). Same as insert at this layer."""
         if not self.is_open:
             raise Error("Txn.update: transaction is not open")
-        self._buffer(PG_OP_PUT, key^, row^)
+        self._buffer(TS_OP_PUT, key^, row^)
 
     def delete(mut self, var key: List[UInt8]) raises:
         """Buffer a TOMBSTONE (RAM-only)."""
         if not self.is_open:
             raise Error("Txn.delete: transaction is not open")
-        self._buffer(PG_OP_TOMBSTONE, key^, List[UInt8]())
+        self._buffer(TS_OP_TOMBSTONE, key^, List[UInt8]())
 
     def buffered(self, key: List[UInt8]) -> Optional[WriteOp]:
-        """The txn's own buffered op for `key`, if any (the RYOW probe — §3.3).
+        """The txn's own buffered op for `key`, if any (the RYOW probe).
         A reader checks this FIRST, overriding the snapshot view."""
         for i in range(len(self.write_set)):
             if bytes_eq(self.write_set[i].key, key):
@@ -367,14 +363,14 @@ struct Txn(Movable, Deinitable):
 # AsyncCommitOp — the carried-across-park state for a poll-shaped commit.
 # =============================================================================
 # (table-store P2). The parkable commit's in-flight state, owned by
-# the caller (PgConnState's Slab) across the create-CAS round-trip. The
+# the caller (e.g. on a per-connection `Slab`) across the create-CAS round-trip. The
 # TableStore drives it via `commit_async_start`/`commit_async_poll`; the
 # IN-FLIGHT create-CAS op (transport buffers) lives inside the `_wal._store`
 # conformer (the stale-reuse contract), NOT here — this struct holds ONLY the consumed
 # txn's snapshot + write-set (the OCC + chunk-body inputs), the attempt counter,
 # the in-flight slot/auth-head, and the terminal outcome. Plain owned values +
 # PODs — NO byte-slab, NO wildcard origin, NO pointer (trivially reuse-safe, including
-# when stored on PgConnState's Slab by the concrete-origin Slab access).
+# when stored on a caller's `Slab` via the concrete-origin Slab access).
 #
 # NOT a TableStore method-state: the op is SEPARATE from the store so the serve
 # loop can hold it on the per-connection state across the park while the store
@@ -400,10 +396,10 @@ struct AsyncCommitOp(Movable, Deinitable):
     the write-set List + the error String.
 
     stale-reuse: a plain owned struct (snapshot Int64 + a `List[WriteOp]` + PODs + an
-    error String). It is NOT a byte-slab element itself; when held on
-    PgConnState's `Slab[PgConnState]` it is reached via the concrete-origin Slab
-    access (no wildcard cast) — the same reuse-safe argument as every other
-    PgConnState heap-owning field."""
+    error String). It is NOT a byte-slab element itself; when a caller holds
+    it on a `Slab` it is reached via the concrete-origin Slab access (no
+    wildcard cast), so the reuse-safe argument is the same as for any other
+    heap-owning field reached that way."""
 
     var _snapshot: Int64
     var _write_set: List[WriteOp]
@@ -458,7 +454,7 @@ struct AsyncCommitOp(Movable, Deinitable):
     @always_inline
     def snapshot_lsn_value(self) -> Int64:
         """The consumed txn's pinned snapshot (group-commit reads it to build the
-        member's PgGroupCommitItem). POD read, no move."""
+        member's TableStoreGroupCommitItem). POD read, no move."""
         return self._snapshot
 
     def write_set_copy(self) -> List[WriteOp]:
@@ -501,9 +497,8 @@ struct AsyncCommitOp(Movable, Deinitable):
     def terminal_committed(commit_lsn: Int64) -> AsyncCommitOp:
         """A TERMINAL (already-DONE, committed) op carrying `commit_lsn` + an
         EMPTY write-set. Group-commit's fan-out synthesizes one
-        per WINNER member conn so the EXISTING `_pg_finish_commit_terminal` (the
-        battle-tested win reply + finalize_explicit_commit_win + S-4 clear + LOW-1
-        per-conn try/except) drives the terminal — the write-set was ALREADY
+        per WINNER member so the caller's single-commit terminal handling (the win
+        reply and its finalize step) drives the terminal — the write-set was ALREADY
         folded into the index by the group driver's finalize_commit_win, so the
         synthesized op's write-set is empty (the terminal helper only reads
         is_done()/take_result(), never re-folds)."""
@@ -525,8 +520,8 @@ struct AsyncCommitOp(Movable, Deinitable):
     def terminal_error(var msg: String) -> AsyncCommitOp:
         """A TERMINAL (already-ERR) op carrying `msg` (an OCC 40001 / retryable).
         Group-commit's fan-out synthesizes one per LOSER member conn so the
-        EXISTING `_pg_finish_commit_terminal` drives the loss reply (the SQLSTATE
-        ErrorResponse + finalize_explicit_commit_loss undo + S-4 clear + LOW-1) —
+        caller's single-commit terminal handling drives the loss reply (the
+        SQLSTATE error and its undo step) —
         the loser's write-set NEVER entered the merged chunk (never persisted)."""
         var op = AsyncCommitOp(
             _snapshot=Int64(0),
@@ -586,12 +581,12 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # OCC-STARVATION FIX (see `begin()` / `_note_observed_auth`). Monotone
     # high-water mark of AUTHORITATIVE tails this handle has read. POD Int64.
     var _observed_auth_seq: Int64
-    # SECONDARY INDEX (SI design §2.2 / §5.1) — the per-index memtable family,
+    # SECONDARY INDEX — the per-index memtable family,
     # routed purely by the leading 4-byte lineage ordinal of each WriteOp key.
     #   * `_idx_lineage_ords[i]` is index i's disjoint high-band lineage ordinal.
     #   * `_idx_indexes[i]` is index i's memtable, boxed in an OwnedPointer.
     #
-    # CONTAINER (SI design §2.2 — SINGLE-OWNER `Slab[OwnedPointer[KeyIndex]]`):
+    # CONTAINER (SINGLE-OWNER `Slab[OwnedPointer[KeyIndex]]`):
     # a single-owner Slab of single-owner OwnedPointer boxes. The TableStore is
     # the SOLE owner of the index family — it is never copied (no clone() ever
     # escapes), so the container is single-owner end to end; NO ArcPointer (the
@@ -624,7 +619,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # `_idx_lineage_ords[i]` folds into `_idx_indexes[i][]` (Slab index -> deref
     # the OwnedPointer); a heap-ordinal key folds into `_index`. The fold ROUTING
     # lives HERE in TableStore, NOT in KeyIndex.apply_write_set (which is a method
-    # on ONE memtable and physically cannot route to a sibling — SI design §5.1).
+    # on ONE memtable and physically cannot route to a sibling).
     var _idx_lineage_ords: List[Int32]
     var _idx_indexes: Slab[OwnedPointer[KeyIndex]]
     # -------------------------------------------------------------------------
@@ -643,7 +638,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # MECHANISM; the writer lease-epoch is the correctness LICENSE ("I am the
     # sole live writer; my local head is authoritative for my next commit").
     #
-    # CORRECTNESS (the load-bearing invariant — _LocalHeadCache §538-544): the
+    # CORRECTNESS (the load-bearing invariant — the same one `_LocalHeadCache` states): the
     # local head is NEVER a correctness oracle. The chunk create-CAS slot stays
     # the SOLE OCC arbiter (gaplessness + offset density). A WRONG/STALE local
     # head can only LOSE the slot (412) — never commit a wrong offset. On a 412
@@ -718,7 +713,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
 
     # ---- secondary-index memtable registration + routed write-set fold -------
     #
-    # SI design §2.2 / §5.1. The index lineage ordinals MUST be registered
+    # The index lineage ordinals MUST be registered
     # BEFORE any WAL chunk carrying their keys is folded (live commit OR replay),
     # so the fold can route an index-lineage WriteOp to its own memtable. The SQL
     # layer registers an index's lineage ordinal at `open()` (after recovering
@@ -730,7 +725,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         already-known ordinal is a no-op — the SQL layer re-registers every
         catalog index at open()).
 
-        CATCH-UP FOLD (SI §8 recovery): a register that arrives AFTER the store
+        CATCH-UP FOLD: a register that arrives AFTER the store
         has already folded WAL history (`_folded_seq > -1` — the open()-replay
         ran, or a prior read advanced the cache) must re-fold the ALREADY-FOLDED
         range `[log_start, _folded_seq]` into the NEW index memtable. Otherwise
@@ -799,7 +794,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     ):
         """Fold a committed write-set at `commit_lsn`, ROUTING each WriteOp by
         its leading 4-byte lineage ordinal into `_index` (heap) OR the matching
-        `_idx_indexes[i]` (SI design §5.1 — the routing lives in TableStore, the
+        `_idx_indexes[i]` (the routing lives in TableStore, the
         ONE place that can reach a sibling memtable). The same dispatch is used by
         the live commit, the open-time replay, and the cross-handle fold so the
         three paths produce byte-identical memtables (recovery byte-identity)."""
@@ -812,7 +807,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
             else:
                 self._idx_indexes[slot][].apply_write(commit_lsn, w)
 
-    # ---- recovery: rebuild _index from the WAL (bucket-is-truth, §5) ----
+    # ---- recovery: rebuild _index from the WAL (bucket-is-truth) ----
 
     @staticmethod
     def open(
@@ -820,11 +815,11 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         with_writer_lease_fastpath: Bool = True,
     ) raises -> Self:
         """Construct + replay `[log_start .. head_authoritative]` ascending
-        into the index (§5). Uses `read_head_authoritative` (NOT the cached
+        into the index. Uses `read_head_authoritative` (NOT the cached
         `_HEAD`) — recovery is a correctness path that must see the true
         highest-committed slot. A version is visible iff it is the newest
         `<= S` non-tombstone — a pure function of the reconstructed chain, so
-        recovered state == pre-crash committed state (§5 proof).
+        recovered state == pre-crash committed state.
 
         `with_writer_lease_fastpath` — the lease LIST-elision fast-path's
         DEFAULT-ON escape-hatch, forwarded to `__init__`. Pass
@@ -854,7 +849,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         register-before-replay it is C GETs total: the single `replay()` scan
         already visits every chunk and `_route_apply_write_set` already routes
         to every registered memtable (the `_replay_into_index` comment was
-        written for EXACTLY this ordering). Measured on the production 8-chunk
+        written for EXACTLY this ordering). Measured on an 8-chunk
         store: the catalog/index-registration phase dropped from ~6s to ~1s.
         Do NOT collapse this back to `open()` + per-index `register_index`
         without re-introducing the K·C re-fold.
@@ -924,7 +919,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
             offset 0`.
           * `_read_head_inner` already treats an ABSENT `_HEAD` as "the cache
             is unusable, LIST the bucket" (the pointer is a CACHE; the bucket
-            is the source of truth — RFC §3.3 step 4). A TORN `_HEAD` is the
+            is the source of truth). A TORN `_HEAD` is the
             same condition, but it escaped as an UNCLASSIFIED error.
           * So `begin()` — which callers reasonably treat as infallible
             snapshot-pinning and place OUTSIDE their commit-retry try — killed
@@ -988,7 +983,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         # (the slot sequence is monotone gapless — no sort needed).
         while seq <= head.chunk_seq:
             var chunk = self._read_chunk_settled(seq)
-            # SI §5.1/§8 — route each WriteOp by its lineage ordinal into the
+            # Route each WriteOp by its lineage ordinal into the
             # heap memtable OR the matching index memtable (the catalog indexes
             # were register_index'd before this replay, so the routing knows
             # every index lineage; a chunk written before an index existed simply
@@ -1016,7 +1011,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         commit/read). `-1` for an empty log (nothing committed yet). No object
         is written on begin.
 
-        P0 STALE-LOW-HEAD FIX (the prod torn-read). The cached
+        P0 STALE-LOW-HEAD FIX (a stale snapshot after a second writer). The cached
         durable `_HEAD` is advanced only best-effort and can LAG the true tail (a
         2nd / interrupted writer committed chunks but the `_HEAD` pointer never
         caught up). Pinning a snapshot straight off the lagging `_HEAD` made a
@@ -1024,8 +1019,9 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         (`_folded_seq = read_head_authoritative().chunk_seq`) — pin a snapshot
         BELOW chunks it had already folded, so `get()`/`scan()` (which fold only
         `(_folded_seq, snapshot]`, a no-op when snapshot <= _folded_seq) served
-        a stale view that MISSED the just-committed rows. That is the prod "the
-        2nd writer corrupted the store; fresh boots can't see the data".
+        a stale view that MISSED the just-committed rows. To a reader it
+        looks as if the 2nd writer corrupted the store: a fresh handle cannot
+        see the data.
 
         `_folded_seq` is a SOUND lower bound on the visible tail (every chunk
         <= it is durably folded into this handle's index, observed via the
@@ -1089,22 +1085,22 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         _ = txn^
 
     def commit(mut self, var txn: Txn) raises -> CommitResult:
-        """The OCC-check-then-create-CAS loop (§3.4). On success, folds the
+        """The OCC-check-then-create-CAS loop. On success, folds the
         committed write-set into `_index` at the won commit_lsn and returns
         `CommitResult.committed(commit_lsn)`. Raises an `OCC_CONFLICT`-tagged
         Error (SQLSTATE 40001) on first-committer-wins loss.
 
-        THE COUPLING (§8): the OCC window upper bound is the AUTHORITATIVE head
+        THE COUPLING: the OCC window upper bound is the AUTHORITATIVE head
         and the create-CAS lands at EXACTLY `auth_head + 1`. Winning that slot
         proves the OCC window `(snapshot, auth_head]` covered every committed
         conflict; a 412 forces re-read-authoritative + re-OCC against the now-
         visible competitor chunk.
 
-        BYTE-IDENTICAL: delegates to `_commit_impl` with `PG_STAMP_LSN_UNSET`
+        BYTE-IDENTICAL: delegates to `_commit_impl` with `TS_STAMP_LSN_UNSET`
         (-1), so the chunk encodes v2 and the fold stamps rows at the WON WAL
         slot exactly as before. The explicit-DML-LSN path is `commit_index_shard`
         (Option-A S-b)."""
-        return self._commit_impl(txn^, PG_STAMP_LSN_UNSET)
+        return self._commit_impl(txn^, TS_STAMP_LSN_UNSET)
 
     def commit_index_shard(
         mut self,
@@ -1129,10 +1125,10 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
 
         THE GATE (mirrors the slice-4b disabled-until-proven discipline):
         `enable_separate_wal` defaults FALSE — the SEPARATE-WAL S-b path is
-        DISABLED in production until the T-INV3-* + T-CRASH-2 correctness
+        DISABLED by default until the T-INV3-* + T-CRASH-2 correctness
         falsifiers pass. When False this RAISES (a wired-but-not-yet-enabled
-        caller must opt in EXPLICITLY); the mechanism + the gate ship here, the
-        production flip (the S-c live SQL post-commit seam) is a later slice.
+        caller must opt in EXPLICITLY); the mechanism + the gate ship here; turning
+        it on by default (the S-c live SQL post-commit seam) is a later slice.
 
         `dml_lsn` MUST be `>= 0` (the heap commit's won slot). The crash contract
         (D-A4): the heap is the durable anchor — if this index-shard append never
@@ -1141,7 +1137,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         if not enable_separate_wal:
             raise Error(
                 "TableStore.commit_index_shard: the separate-index-shard-WAL"
-                " (Option-A S-b) path is DISABLED in production until the"
+                " (Option-A S-b) path is DISABLED by default until the"
                 " T-INV3-* + T-CRASH-2 correctness falsifiers pass — pass"
                 " enable_separate_wal=True to opt in."
             )
@@ -1158,7 +1154,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         mut self, var txn: Txn, stamp_lsn: Int64
     ) raises -> CommitResult:
         """The shared OCC-check-then-create-CAS commit loop. `stamp_lsn` is the
-        Option-A S-b cross-WAL DML-LSN: `PG_STAMP_LSN_UNSET` (-1) for a normal
+        Option-A S-b cross-WAL DML-LSN: `TS_STAMP_LSN_UNSET` (-1) for a normal
         single-WAL commit (the chunk encodes v2; the fold stamps rows at the WON
         WAL slot — byte-identical), or an explicit `L >= 0` for a sharded-index
         chunk (the chunk encodes v3 carrying `L`; the fold stamps the index rows
@@ -1193,9 +1189,9 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                     + " OCC/create-CAS attempts under contention (retryable)"
                 )
 
-            # --- 1. OCC first-committer-wins check (§3.4 step 1) ---
+            # --- 1. OCC first-committer-wins check ---
             # Read the AUTHORITATIVE committed tail (NOT the cached _HEAD —
-            # correctness path; §8). Scan every chunk committed strictly AFTER
+            # correctness path). Scan every chunk committed strictly AFTER
             # our snapshot: (snapshot, auth_head]. Any key there that is also
             # in our write-set => a concurrent committer already wrote a
             # conflicting key with commit_lsn > our snapshot => ABORT 40001.
@@ -1235,7 +1231,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 raise occ_e^  # genuine unexpected error
 
             # --- 2. the commit = ONE create-CAS at EXACTLY auth_head + 1 ---
-            # The slot is coupled to the OCC window upper bound (§8): we
+            # The slot is coupled to the OCC window upper bound: we
             # validated (snapshot, auth_head]; the commit lands at auth_head+1,
             # so there is no un-checked gap below the commit. The (writer,
             # current) lease epochs FENCE a stale displaced writer at the
@@ -1273,7 +1269,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 _ = self._fold_wal_range(
                     self._folded_seq + Int64(1), auth_head.chunk_seq
                 )
-                # SI §5.1 — route our own committed write-set into the heap +
+                # Route our own committed write-set into the heap +
                 # index memtables. Single-WAL (stamp_lsn == -1): heap + index
                 # WriteOps share this ONE write-set / ONE commit_lsn = the won
                 # WAL slot (invariant #1). Option-A S-b (stamp_lsn >= 0): this is
@@ -1298,7 +1294,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 # observe the per-lineage contention the auto-split reacts to.
                 return CommitResult.committed(commit_lsn, res.attempts)
 
-            # --- 412: we lost the slot to a concurrent committer (§3.4 H-conc).
+            # --- 412: we lost the slot to a concurrent committer.
             # Do NOT blindly retry the append — loop back to step 1: re-read the
             # AUTHORITATIVE head (now includes the competitor's chunk) + re-run
             # the OCC check. If they touched one of our keys we abort 40001;
@@ -1395,7 +1391,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         return auth_head^
 
     def read_auth_head(self) raises -> ManifestHead:
-        """Read the AUTHORITATIVE manifest head (LIST). The §8 OCC-coupling head:
+        """Read the AUTHORITATIVE manifest head (LIST). The OCC-coupling head:
         the group-commit driver uses it as BOTH the per-member OCC window upper
         bound AND the exact create-CAS slot (auth_head+1). Raises a retryable /
         torn-create error the caller re-drives. Base-bound (the LIST is not
@@ -1407,7 +1403,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # =========================================================================
     # The lease state (declared on the struct) + these helpers are the ONE place
     # the LIST-elision lives; the sync `commit()`, the async single-commit
-    # prelude, and the production group-commit batch path ALL route their
+    # prelude, and the group-commit batch path ALL route their
     # authoritative-head read through `lease_auth_head_for_commit` /
     # `read_auth_head_leased`, and their win/lost-slot transitions through
     # `lease_note_win` / `lease_note_lost_slot`. With the flag OFF every helper
@@ -1437,7 +1433,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     def disable_writer_lease_fastpath(mut self):
         """Turn OFF the lease fast-path + invalidate any warm local head (every
         subsequent commit reads the authoritative LIST head). For tests /
-        defensive teardown; the production path leaves it on once enabled."""
+        defensive teardown; the normal path leaves it on once enabled."""
         self._lease_fastpath_enabled = False
         self._lease_head_present = False
         self._lease_head_seq = Int64(-1)
@@ -1520,12 +1516,12 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         return auth_head^
 
     def read_auth_head_leased(mut self) raises -> ManifestHead:
-        """The lease-aware counterpart of `read_auth_head` — the production
+        """The lease-aware counterpart of `read_auth_head` — the
         group-commit batch path (`_group_begin_attempt`) calls THIS so the
         per-batch authoritative head read is elided when the lease is held. With
         the flag off it is byte-identical to `read_auth_head()` (no warm, no
         elide). Identical body to `lease_auth_head_for_commit`; the second name
-        documents the group-commit call-site intent (read the §8 OCC-coupling
+        documents the group-commit call-site intent (read the OCC-coupling
         head, lease-elided)."""
         # TEMPORARY SCAFFOLDING: the epoch fence is wired only on
         # the SYNC commit() path; this group-commit create-CAS is UNFENCED, so a
@@ -1565,7 +1561,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # NOTE (share-the-codec refactor): the per-member BOOLEAN OCC
     # that group-commit needs now lives as the SHARED `_occ_member_conflicts_wal`
     # free function in `group_commit.mojo` (which `encode_group_batch` — the ONE
-    # domain-logic fold both the codec and the production `_group_prelude` call —
+    # domain-logic fold both the codec and the live `_group_prelude` call —
     # invokes over the borrowed WAL ref). The former `occ_member_has_conflict`
     # wrapper here was a second copy of that scan routed through `_occ_check`; it
     # was removed so there is exactly one per-member OCC implementation (no
@@ -1594,12 +1590,12 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         write_set: List[WriteOp],
     ) raises:
         """Scan chunks (snapshot, auth_head] for any key intersecting our
-        write-set. Raise OCC_CONFLICT (40001) on the first overlap (§3.4).
+        write-set. Raise OCC_CONFLICT (40001) on the first overlap.
 
         For the correctness slice this replays each chunk's KEYS — O(chunks-
-        since-snapshot) per commit. A production build keys it on a side
+        since-snapshot) per commit. A faster build would key it on a side
         `key -> last-commit-LSN` map so the check is O(write-set); the
-        correctness verdict is identical either way (design §11 q3)."""
+        correctness verdict is identical either way."""
         var seq = snapshot + Int64(1)
         while seq <= auth_head.chunk_seq:
             # The authoritative head can include a chunk whose create-CAS WON but
@@ -1640,7 +1636,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # ---- reads (snapshot-authoritative + RYOW overlay) ----
     #
     # MUST-FIX #1 (BLOCKER — shared-store read correctness). The per-handle
-    # `_index` is a CACHE of the WAL up to `_folded_seq`. In the production
+    # `_index` is a CACHE of the WAL up to `_folded_seq`. In the deployed
     # shape (MANY stateless workers, each a TableStore over ONE shared prefix)
     # a handle's index is a PARTIAL view (its own open()-replay + its own
     # commits). A correct snapshot read MUST observe ALL handles' commits
@@ -1648,15 +1644,15 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # REFRESH the index by folding the WAL delta (_folded_seq, S] — extending
     # the cache up to the snapshot. The newest committed version <= S across
     # ALL handles (incl. tombstones -> None) is then a pure function of the
-    # refreshed chain (§4). RYOW overlays on top. The single-handle fast path
+    # refreshed chain. RYOW overlays on top. The single-handle fast path
     # is preserved: when the index is already current at/above S the refresh is
     # a no-op (no WAL read). SI stability: a reader pinned at S folds only up to
     # S, so chunks committed above S are never folded by this read and the <= S
     # view is stable for the txn's lifetime.
 
     def get(mut self, txn: Txn, key: List[UInt8]) raises -> Optional[List[UInt8]]:
-        """RYOW buffer first (§3.3); else the version visible at
-        `txn.snapshot_lsn` (§4), snapshot-authoritative across ALL handles on a
+        """RYOW buffer first; else the version visible at
+        `txn.snapshot_lsn`, snapshot-authoritative across ALL handles on a
         shared store. None == key invisible at this snapshot (absent or
         tombstoned)."""
         # RYOW: a buffered PUT returns its row; a buffered TOMBSTONE returns
@@ -1664,7 +1660,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         var buffered = txn.buffered(key)
         if buffered:
             ref w = buffered.value()
-            if w.op == PG_OP_TOMBSTONE:
+            if w.op == TS_OP_TOMBSTONE:
                 return Optional[List[UInt8]](None)
             return Optional(w.row.copy())
         # Buffer miss: bring the index up to the snapshot (fold cross-handle
@@ -1678,7 +1674,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         mut self, txn: Txn, lo: List[UInt8], hi: List[UInt8]
     ) raises -> List[KeyValue]:
         """Range scan `[lo, hi)` at `txn.snapshot_lsn`, RYOW-overlaid, in
-        ascending key order. Tombstoned / invisible keys suppressed (§4 / §6).
+        ascending key order. Tombstoned / invisible keys suppressed.
         The base view comes from the index AFTER folding the WAL up to the
         snapshot (so cross-handle keys are included — MUST-FIX #1, no
         phantom-absence); the RYOW buffer overlays the txn's own buffered
@@ -1703,13 +1699,13 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         # `hi` is ignored when hi_unbounded=True; pass an empty placeholder.
         return self._overlay_ryow(txn, lo, List[UInt8](), True, base^)
 
-    # ---- SECONDARY INDEX reads (SI design §6) ----
+    # ---- SECONDARY INDEX reads ----
     #
     # An index scan resolves visibility ON THE INDEX'S OWN chain (the EXISTING
     # `KeyIndex.scan_visible`, already tombstone-suppressing + snapshot-correct):
     # the index ALONE decides which `(index_key, pk)` pairs are live at S, with
-    # NO heap probe for the existence question (the inline-versioned model, §4).
-    # The cross-handle refresh (MUST-FIX #1 / SI §5.2) folds the index memtable
+    # NO heap probe for the existence question (the inline-versioned model).
+    # The cross-handle refresh (MUST-FIX #1) folds the index memtable
     # to the snapshot first, exactly like the heap scan — a stale index memtable
     # on a multi-writer prefix is a silent wrong-result hole.
     #
@@ -1770,15 +1766,15 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     def heap_visible_at(
         mut self, txn: Txn, key: List[UInt8]
     ) raises -> Optional[List[UInt8]]:
-        """The heap-deferred non-covered read (SI §6 step 5): the heap version
+        """The heap-deferred non-covered read: the heap version
         visible for `key` at the txn's snapshot. RYOW-overlaid (a same-txn
-        buffered heap write wins). SLICE-1 PRECONDITION (SI §6.1): this is the
+        buffered heap write wins). SLICE-1 PRECONDITION: this is the
         HOT-ONLY `_index.visible_at` after the cross-handle refresh — correct in
         slice 1 ONLY because NOTHING has columnarized (every heap version is
         still in the hot memtable). The general post-columnarize guarantee needs
-        the dual-tier read-merge (SI-6c, design §6.1).
+        the dual-tier read-merge (SI-6c).
 
-        SI-6c NOTE: the dual-tier (hot + cold split) merge that CLOSES the §6.1
+        SI-6c NOTE: the dual-tier (hot + cold split) merge that CLOSES the
         INDEX-hot-vs-HEAP-cold hole lives ONE TIER UP, in
         the columnar adapter's `dual_tier_read.heap_visible_at_dual_tier`, NOT
         here. That is a deliberate ENCAPSULATION decision: the cold tier is
@@ -1801,7 +1797,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         version of `key` at the txn's snapshot, with its `commit_lsn` +
         tombstone flag preserved (NOT collapsed to None) so the adapter's
         cold-split merge can compare hot-vs-cold by `commit_lsn` and let a hot
-        tombstone SUPPRESS a lower cold value (design §9 step 3 LWW-with-
+        tombstone SUPPRESS a lower cold value (LWW with
         tombstone-wins).
 
         Folds the cross-handle WAL delta up to the snapshot first (MUST-FIX #1,
@@ -1817,7 +1813,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         var buffered = txn.buffered(key)
         if buffered:
             ref w = buffered.value()
-            var is_tomb = w.op == PG_OP_TOMBSTONE
+            var is_tomb = w.op == TS_OP_TOMBSTONE
             var row = List[UInt8]()
             if not is_tomb:
                 row = w.row.copy()
@@ -1924,11 +1920,11 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
                 _ = e
                 break
             var chunk = decode_commit_chunk(body)
-            # SI §5.1/§5.2 — the cross-handle fold routes too, so an index
+            # The cross-handle fold routes too, so an index
             # memtable participates in the MUST-FIX #1 cross-handle refresh (a
             # stale index scan on a multi-writer prefix would be a silent wrong-
             # result hole). One WAL pass, one shared `_folded_seq` for all
-            # keyspaces (lockstep refresh — SI §5.2).
+            # keyspaces (lockstep refresh).
             # Option-A S-b: a sharded-index chunk folds at its explicit stamp_lsn
             # (the heap DML-LSN L), else the WAL seq (byte-identical single-WAL).
             self._route_apply_write_set(
@@ -1964,7 +1960,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         # Insert buffered PUTs that fall in range (skip tombstones).
         for wi in range(len(txn.write_set)):
             ref w = txn.write_set[wi]
-            if w.op == PG_OP_TOMBSTONE:
+            if w.op == TS_OP_TOMBSTONE:
                 continue
             if bytes_cmp(w.key, lo) < 0:
                 continue
@@ -2005,7 +2001,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # OPAQUE `_CATALOG` sidecar object under the SAME prefix as the WAL (a
     # single mutable, etag-CAS-versioned blob — same shape as `_HEAD` /
     # `_LOG_START`). The STORAGE layer round-trips the blob VERBATIM and never
-    # interprets it; the SQL layer (komira_pgsql.catalog_codec) owns the
+    # interprets it; the SQL layer (its catalog codec) owns the
     # encoding (TableSchema/ColumnDef <-> bytes) — so the reuse-safe table store
     # leaf gains NO knowledge of SQL types. These thin accessors expose the
     # sidecar through the store the SQL layer already holds, keeping the raw
@@ -2057,15 +2053,15 @@ def _sort_kv(mut xs: List[KeyValue]):
 # `AsyncCommitOp`. They carry the wider `AsyncCasStore` bound (the parkable
 # create-CAS) that the base-bound `TableStore[Store: ConditionalWriteStore]`
 # cannot express per-method in Mojo 1.0.0b1. The blocking `TableStore.commit()`
-# is untouched — InMemory / LocalFs callers (no AsyncCasStore) keep using it; the
-# reactor-driven pgwire server opts into THIS path for AsyncCasStore backends.
+# is untouched — InMemory / LocalFs callers (no AsyncCasStore) keep using it; a
+# reactor-driven caller opts into THIS path for AsyncCasStore backends.
 #
 # THE stale-reuse CONTRACT: the in-flight create-CAS op (the dialed stream + the
 # HttpClient pool's heap buffers) lives INSIDE `store.wal_mut()._store` (the
 # conformer's OWN concrete-origin handle) across the park — the `AsyncCasStore`
 # surface is start/poll/take of TYPED VALUES only. The carried-across-park state
-# is on the caller's `AsyncCommitOp` (a concrete owned value on PgConnState's
-# Slab, reuse-safe by the concrete-origin Slab access) — plain owned/POD fields,
+# is on the caller's `AsyncCommitOp` (a concrete owned value, reuse-safe on a
+# caller's `Slab` by the concrete-origin Slab access) — plain owned/POD fields,
 # NO byte-slab + wildcard cast. The transient `AsyncManifestAppendOp[Store]` each
 # poll reconstructs holds only POD + borrows the WAL per call. ZERO UnsafePointer
 # / wildcard origin / unsafe_from_address; the reactor is a per-call `mut` borrow.
@@ -2125,7 +2121,7 @@ def commit_async_poll[
         # in-mem SLOW conformer runs the sync put on the final tick + catches the
         # 412 raise into ERR). Treat it EXACTLY like the `take`-side 412 (None):
         # re-run the synchronous prelude (re-read auth head + re-OCC) + re-park
-        # the next create-CAS (§3.4 H-conc — IDENTICAL to the sync 412 loop). A
+        # the next create-CAS (IDENTICAL to the sync 412 loop). A
         # genuine OCC 40001 raised inside the prelude is then re-classified there.
         if _is_lost_slot_412(em):
             # LEASE: a 412 means the local lease head is stale —
@@ -2158,7 +2154,7 @@ def _commit_async_begin_attempt[
             + " OCC/create-CAS attempts under contention (retryable)"
         )
         return Int64(0)
-    # --- synchronous prelude: OCC first-committer-wins (§3.4 step 1). IDENTICAL
+    # --- synchronous prelude: OCC first-committer-wins. IDENTICAL
     # classification to the sync `commit`: a genuine OCC_CONFLICT (40001) errors
     # the op; a torn-create / retryable contention re-drives after a tiny backoff.
     # LEASE: `commit_prelude_occ_leased` elides the LIST head-read
@@ -2180,7 +2176,7 @@ def _commit_async_begin_attempt[
             return _commit_async_begin_attempt[Store, S](store, op, reactor)
         op._set_error(em)
         return Int64(0)
-    # --- parkable create-CAS at EXACTLY auth_head + 1 (§3.4 step 2). ---
+    # --- parkable create-CAS at EXACTLY auth_head + 1. ---
     op._candidate = auth_head.chunk_seq + Int64(1)
     op._base = auth_head.next_offset
     op._auth_head_seq = auth_head.chunk_seq
@@ -2218,7 +2214,7 @@ def _commit_async_begin_attempt[
         var em = prog.err_text()
         # A LOST-SLOT 412 surfaced as an ERR from start (the immediate-completion
         # fast path). Treat it EXACTLY like the poll-side 412: re-run the prelude
-        # + re-park (§3.4 H-conc — IDENTICAL to the sync 412 loop). The
+        # + re-park (IDENTICAL to the sync 412 loop). The
         # `_MAX_ASYNC_COMMIT_ATTEMPTS` bound still applies across the re-runs.
         if _is_lost_slot_412(em):
             store.lease_note_lost_slot()

@@ -10,7 +10,7 @@
 # the single-writer byte-identity + win-mechanism + 412/fence/OCC soundness on a
 # handful of FIXED schedules. THIS battery GENERALIZES that to a broad,
 # deterministic-random schedule SPACE and adds the stress / fault / crash / stale-reuse
-# axes a production flip needs.
+# axes a default-on flip needs.
 #
 # ALL tests use ONLY epochs (0,0) — the safe single-writer config. Non-zero
 # epochs are guarded off pending (the async/group leased entry
@@ -59,8 +59,8 @@
 # in-tree conformer pattern, reuse-safe (no heap fields): POD counters, no byte-slab element with a
 # heap-owning inner field). The reference model + schedule are plain owned Lists.
 #
-# Design: the lease fast-path scope note;
-#   broker `_LocalHeadCache` cas_manifest.mojo (the elision MECHANISM).
+# The elision MECHANISM mirrors `_LocalHeadCache` in
+#   komira_objectstore/cas_manifest.mojo.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -88,8 +88,8 @@ from komira_objectstore.types import (
 )
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
 )
@@ -156,7 +156,7 @@ def _key(i: Int) -> List[UInt8]:
 
 @fieldwise_init
 struct SchedWrite(Copyable, Movable, Deinitable):
-    var op: UInt8  # PG_OP_PUT | PG_OP_TOMBSTONE
+    var op: UInt8  # TS_OP_PUT | TS_OP_TOMBSTONE
     var key: List[UInt8]
     var value: List[UInt8]
 
@@ -206,16 +206,16 @@ def _gen_schedule(
             seen.append(ki)
             if rng.next_int(6) == 0:
                 writes.append(
-                    SchedWrite(PG_OP_TOMBSTONE, _key(ki), List[UInt8]())
+                    SchedWrite(TS_OP_TOMBSTONE, _key(ki), List[UInt8]())
                 )
             else:
                 var v = _b(
                     String("v") + String(si) + String("_") + String(ki)
                 )
-                writes.append(SchedWrite(PG_OP_PUT, _key(ki), v^))
+                writes.append(SchedWrite(TS_OP_PUT, _key(ki), v^))
         if len(writes) == 0:
             writes.append(
-                SchedWrite(PG_OP_PUT, _key(0), _b(String("v") + String(si)))
+                SchedWrite(TS_OP_PUT, _key(0), _b(String("v") + String(si)))
             )
         sched.append(SchedTxn(writes^))
     return sched^
@@ -236,7 +236,7 @@ def _autocommit_flags(seed: UInt64, n: Int) -> List[Bool]:
 # Drive one schedule against a store. When a txn is flagged autocommit, EACH of
 # its writes is committed as its own single-write txn (so a 3-write txn produces
 # 3 chunks); else the whole write-set is one txn -> one chunk. The driver mirrors
-# the production autocommit-vs-explicit decomposition at the commit-chunk level.
+# the autocommit-vs-explicit decomposition at the commit-chunk level.
 def _drive_schedule[
     Store: ConditionalWriteStore
 ](mut ts: TableStore[Store], sched: Schedule, autocommit: List[Bool]) raises:
@@ -246,7 +246,7 @@ def _drive_schedule[
             for wi in range(len(txn.writes)):
                 ref w = txn.writes[wi]
                 var t = ts.begin()
-                if w.op == PG_OP_TOMBSTONE:
+                if w.op == TS_OP_TOMBSTONE:
                     t.delete(w.key.copy())
                 else:
                     t.insert(w.key.copy(), w.value.copy())
@@ -255,7 +255,7 @@ def _drive_schedule[
             var t = ts.begin()
             for wi in range(len(txn.writes)):
                 ref w = txn.writes[wi]
-                if w.op == PG_OP_TOMBSTONE:
+                if w.op == TS_OP_TOMBSTONE:
                     t.delete(w.key.copy())
                 else:
                     t.insert(w.key.copy(), w.value.copy())
@@ -327,7 +327,7 @@ def _new_mem_store(
 #     OFF, committed WAL state BYTE-IDENTICAL every time.
 #
 # RED-VERIFICATION (how to confirm this is a genuine falsifier, not a tautology;
-# done manually — we cannot edit production from a test). Introduce a one-line
+# done manually — we cannot edit the library from a test). Introduce a one-line
 # off-by-one in `lease_note_win` (e.g. `self._lease_head_seq = won_seq + 1`):
 #   * The committed-WAL byte-identity (i) STAYS GREEN — this is the lease's CORE
 #     SAFETY GUARANTEE: the create-CAS slot is the SOLE OCC arbiter, so a stale
@@ -371,9 +371,9 @@ def test_1_property_differential_on_eq_off() raises:
         # `won_seq + 1` off-by-one in lease_note_win leaves (i) intact (self-heal)
         # but makes (ii) FAIL — at least one schedule's ON re-LISTs.
         var off = _new_mem_store(
-            String("pg/leb/1/off/s") + String(s), False
+            String("ts/leb/1/off/s") + String(s), False
         )
-        var on = _new_counting_store(String("pg/leb/1/on/s") + String(s), True)
+        var on = _new_counting_store(String("ts/leb/1/on/s") + String(s), True)
 
         # WARM the ON store past the cold-start LIST (the durable _HEAD does not
         # exist on a cold store -> the first commit pays a LIST regardless of the
@@ -520,7 +520,7 @@ def _commit_one_write[
 
 def _drive_concurrent_stress(seed: UInt64, n_rounds: Int) raises:
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/leb/2/s") + String(Int(seed))
+    var prefix = String("ts/leb/2/s") + String(Int(seed))
 
     # Three handles over the shared store. A holds the lease (warm); B, C are
     # plain siblings. (Three named handles, not a List/Slab — see the header.)
@@ -622,7 +622,7 @@ def _drive_concurrent_stress(seed: UInt64, n_rounds: Int) raises:
             var ws = rec.wal_chunk_write_set(sq)
             for wi in range(len(ws)):
                 ref w = ws[wi]
-                if w.op == PG_OP_PUT and bytes_eq(w.key, kk):
+                if w.op == TS_OP_PUT and bytes_eq(w.key, kk):
                     for sv in range(len(seen_vals)):
                         assert_false(
                             bytes_eq(seen_vals[sv], w.row),
@@ -812,7 +812,7 @@ def test_3_fault_injection_lease_recovers() raises:
         # replay the schedule with a FRESH lease-ON handle (cold head) — NO fault.
         # This is the reference final WAL state.
         var ref_map = SharedInMemoryConditionalStore()
-        var prefix = String("pg/leb/3/s") + String(s)
+        var prefix = String("ts/leb/3/s") + String(s)
         var seeder = TableStore[_FaultConditionalStore].open(
             CasManifestStore[_FaultConditionalStore](
                 store=_FaultConditionalStore(ref_map.clone()),
@@ -918,7 +918,7 @@ def test_4_crash_recovery_lease_state_loss() raises:
         var sched = _gen_schedule(seed, n_txns, n_keys, max_writes)
         var ac = _autocommit_flags(seed, len(sched.txns))
         var shared = SharedInMemoryConditionalStore()
-        var prefix = String("pg/leb/4/s") + String(s)
+        var prefix = String("ts/leb/4/s") + String(s)
 
         # The "crash points": after every txn, drop the handle + reopen a FRESH
         # lease-enabled handle over the SAME store (the lease cache dies with the
@@ -948,7 +948,7 @@ def test_4_crash_recovery_lease_state_loss() raises:
                 for wi in range(len(txn.writes)):
                     ref w = txn.writes[wi]
                     var t = ts.begin()
-                    if w.op == PG_OP_TOMBSTONE:
+                    if w.op == TS_OP_TOMBSTONE:
                         t.delete(w.key.copy())
                     else:
                         t.insert(w.key.copy(), w.value.copy())
@@ -967,7 +967,7 @@ def test_4_crash_recovery_lease_state_loss() raises:
                 var t = ts.begin()
                 for wi in range(len(txn.writes)):
                     ref w = txn.writes[wi]
-                    if w.op == PG_OP_TOMBSTONE:
+                    if w.op == TS_OP_TOMBSTONE:
                         t.delete(w.key.copy())
                     else:
                         t.insert(w.key.copy(), w.value.copy())
@@ -1037,7 +1037,7 @@ def test_5_stale_reuse_churn_soak() raises:
     )
     var n_cycles = 200
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/leb/5/churn")
+    var prefix = String("ts/leb/5/churn")
     var rng = Rng(UInt64(0x6A96000DEAD))
     var n_keys = 8
     var expected_slot = Int64(0)
@@ -1246,10 +1246,10 @@ def test_6_elision_effectiveness_broad() raises:
         var ac = _autocommit_flags(seed, len(sched.txns))
 
         var off = _new_counting_store(
-            String("pg/leb/6/off/s") + String(s), False
+            String("ts/leb/6/off/s") + String(s), False
         )
         var on = _new_counting_store(
-            String("pg/leb/6/on/s") + String(s), True
+            String("ts/leb/6/on/s") + String(s), True
         )
 
         # WARMUP: one commit on each (establishes the durable _HEAD + warms ON's

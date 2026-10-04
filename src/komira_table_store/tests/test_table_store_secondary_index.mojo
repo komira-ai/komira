@@ -17,8 +17,6 @@
 #   * does not give the index its OWN MVCC chain (inline-tombstone visibility), or
 #   * does not replay index WriteOps into the index memtable on reopen, or
 #   * does not fold cross-handle index commits (stale index scan).
-#
-# Design: the secondary-index design §2/§4/§5/§8.
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -50,7 +48,7 @@ def _scratch_dir() raises -> String:
 
 
 # =============================================================================
-# Helpers — build storage-level keys WITHOUT the pgsql codec (keep this test on
+# Helpers — build storage-level keys WITHOUT the SQL layer's codec (keep this test on
 # the table store leaf only). An index lineage ordinal lives in the disjoint high
 # band; a heap key in the low band. We hand-encode the 4-byte big-endian ordinal
 # prefix that `TableStore._key_lineage_ord` reads.
@@ -181,7 +179,7 @@ def test_0s_routing_splits_keyspaces() raises:
 
 
 # =============================================================================
-# (ii-s) inline-tombstone visibility on the INDEX'S OWN chain (the §4 core).
+# (ii-s) inline-tombstone visibility on the INDEX'S OWN chain.
 #        FAILS on a stub that does not version the index entries.
 # =============================================================================
 

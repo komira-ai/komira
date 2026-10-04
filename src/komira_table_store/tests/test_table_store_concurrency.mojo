@@ -4,14 +4,12 @@
 #   (d) real-thread OCC write-write + (g) K>=16 concurrency soak.
 # =============================================================================
 #
-# The lock-free OCC commit loop (§3.4) proved correct under genuine concurrency
+# The lock-free OCC commit loop proved correct under genuine concurrency
 # on SharedInMemoryConditionalStore (atomic-spinlock-guarded shared map, real
 # OS threads) AND LocalFsConditionalStore (real-filesystem O_EXCL). The
-# concurrency harness does NOT take the §3.4 "one serialized committer"
+# concurrency harness does NOT take the "one serialized committer"
 # simplification — it proves the lock-free OCC loop is correct under real
 # threads contending one shared store's create-CAS slot.
-#
-# Design: the table-store correctness-slice design §7(d),(g).
 #
 # Thread idiom mirrors objectstore/test_cas_manifest_concurrent_offline.mojo:
 # pthread_create with a heap-boxed arg + a per-thread heap-stable results slot
@@ -50,8 +48,8 @@ from komira_objectstore.types import (
 )
 
 from komira_table_store.table_store_codec import (
-    PG_OP_PUT,
-    PG_OP_TOMBSTONE,
+    TS_OP_PUT,
+    TS_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
     encode_commit_chunk,
@@ -140,7 +138,7 @@ def _audit_hot_chain[
     final_hot: Int64,
     tag: String,
 ) raises:
-    """MUST-FIX #3 — HOT-key version-chain audit (design §7(g)(3)). Walk EVERY
+    """MUST-FIX #3 — HOT-key version-chain audit. Walk EVERY
     committed WAL chunk, extract each version of the HOT key (commit_lsn +
     value), and assert:
       (a) commit_lsns strictly increasing with NO duplicate (the create-CAS
@@ -165,7 +163,7 @@ def _audit_hot_chain[
             if bytes_eq(w.key, hot_key):
                 # HOT is only ever PUT in this soak (never tombstoned).
                 assert_true(
-                    w.op != PG_OP_TOMBSTONE,
+                    w.op != TS_OP_TOMBSTONE,
                     tag + ": HOT never tombstoned in the soak",
                 )
                 lsns.append(seq)
@@ -258,18 +256,18 @@ def test_audit_discriminates_lost_update() raises:
         " (MUST-FIX #3)"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/audit_disc")
+    var prefix = String("ts/audit_disc")
 
     # A clean 3-version HOT chain: values 0 (thread 0 round 0), 100000 (thread 1
     # round 0), 1 (thread 0 round 1). k=2, rounds=2 covers all tokens.
     var ws0 = List[WriteOp]()
-    ws0.append(WriteOp(PG_OP_PUT, _b("HOT"), _b("0")))
+    ws0.append(WriteOp(TS_OP_PUT, _b("HOT"), _b("0")))
     _inject_chunk(shared, prefix, Int64(0), Int64(0), ws0^)
     var ws1 = List[WriteOp]()
-    ws1.append(WriteOp(PG_OP_PUT, _b("HOT"), _b("100000")))
+    ws1.append(WriteOp(TS_OP_PUT, _b("HOT"), _b("100000")))
     _inject_chunk(shared, prefix, Int64(1), Int64(1), ws1^)
     var ws2 = List[WriteOp]()
-    ws2.append(WriteOp(PG_OP_PUT, _b("HOT"), _b("1")))
+    ws2.append(WriteOp(TS_OP_PUT, _b("HOT"), _b("1")))
     _inject_chunk(shared, prefix, Int64(2), Int64(2), ws2^)
 
     var clean = TableStore[SharedInMemoryConditionalStore].open(
@@ -288,7 +286,7 @@ def test_audit_discriminates_lost_update() raises:
     # applied twice) has exactly this shape. The audit's (c) "no two chunks
     # carry the same value" check MUST fire.
     var ws_dup = List[WriteOp]()
-    ws_dup.append(WriteOp(PG_OP_PUT, _b("HOT"), _b("1")))  # DUP of slot 2's value
+    ws_dup.append(WriteOp(TS_OP_PUT, _b("HOT"), _b("1")))  # DUP of slot 2's value
     _inject_chunk(shared, prefix, Int64(3), Int64(3), ws_dup^)
 
     var bad = TableStore[SharedInMemoryConditionalStore].open(
@@ -371,7 +369,7 @@ def test_stale_low_head_does_not_starve_occ_writer() raises:
         " stale-low durable _HEAD"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/occ_starve")
+    var prefix = String("ts/occ_starve")
 
     # `victim` commits HOT once — it wins slot 0 and folds it.
     var victim = TableStore[SharedInMemoryConditionalStore].open(
@@ -495,7 +493,7 @@ def test_stale_low_head_does_not_starve_occ_writer() raises:
 #   UNCLASSIFIED — and it escaped from `begin()`, which callers reasonably
 #   treat as infallible snapshot-pinning and place OUTSIDE their commit-retry
 #   `try` (this test's own `_run_fs_writer` does exactly that, and so does the
-#   soak's production shape). One transient torn read therefore killed a whole
+#   soak's deployed shape). One transient torn read therefore killed a whole
 #   worker.
 #
 #   This is the THIRD site of the torn-read class the same lane already fixed
@@ -503,7 +501,7 @@ def test_stale_low_head_does_not_starve_occ_writer() raises:
 #   `_read_chunk_settled`); `begin()`'s pointer read was missed.
 #
 # WHY THE INJECTION IS LEGITIMATE (not a fabricated failure): a half-written
-# `_HEAD` is a state the LocalFs backend PRODUCES on its own — we MEASURED it
+# `_HEAD` is a state the LocalFs backend produces on its own — we MEASURED it
 # at ~5% of soak runs before writing this guard. `_TornHeadStore` just makes
 # that measured state DETERMINISTIC (no threads, no timing) by serving a
 # truncated body for the first N GETs of the `_HEAD` key, exactly as a
@@ -531,7 +529,7 @@ struct _TornHeadStore(
 ):
     """Wrapper over `SharedInMemoryConditionalStore` that can serve the
     `_HEAD` pointer object TORN (truncated to 3 bytes — shorter than the
-    leading Int64, so `decode_head` raises the exact production message
+    leading Int64, so `decode_head` raises the exact real-backend message
     `cas_manifest: truncated i64 at offset 0`) for a bounded number of GETs.
 
     Everything else delegates verbatim; only full-object `get` of the `_HEAD`
@@ -650,7 +648,7 @@ def test_torn_head_pointer_does_not_kill_begin() raises:
         "[torn-head] begin() survives a HALF-WRITTEN durable _HEAD pointer"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/torn_head")
+    var prefix = String("ts/torn_head")
     var writer = _seed_two_chunks(_TornHeadStore(shared.clone()), prefix)
 
     # ---- (1) a SETTLING `_HEAD` is survived, and actually re-read ----------
@@ -829,7 +827,7 @@ def _run_writer(mut arg: _WriterArg) raises:
     )
     # Each thread builds its OWN TableStore over a clone() of the shared store
     # (they contend at the shared store's create-CAS slot; the in-RAM index is
-    # per-thread, cross-thread visibility goes through the WAL — §6).
+    # per-thread, cross-thread visibility goes through the WAL).
     var ts = TableStore[SharedInMemoryConditionalStore].open(
         CasManifestStore[SharedInMemoryConditionalStore](
             store=arg.store.clone(),
@@ -920,7 +918,7 @@ def test_d_real_thread_occ() raises:
     print("[d] real-thread OCC write-write (N threads, shared HOT key)")
     var k = 8
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/d_rt")
+    var prefix = String("ts/d_rt")
 
     # Seed HOT = 0 (LSN 0) so all threads have a common starting snapshot.
     var seed = TableStore[SharedInMemoryConditionalStore].open(
@@ -1043,7 +1041,7 @@ def _run_soak(
         + " rounds (private + HOT key)"
     )
     var shared = SharedInMemoryConditionalStore()
-    var prefix = String("pg/g/k") + String(k)
+    var prefix = String("ts/g/k") + String(k)
 
     var results = Slab[OwnedPointer[_WriterResults]]()
     for _w in range(k):
@@ -1260,7 +1258,7 @@ def _run_soak_fs(k: Int, rounds: Int64) raises:
         + " rounds (O_EXCL create path)"
     )
     var root = (_scratch_dir() + String("/table_store_soak_fs_")) + _unique()
-    var prefix = String("pg/g_fs")
+    var prefix = String("ts/g_fs")
 
     # Create the root once (the first ctor is fallible; clones are infallible).
     var seed_store = LocalFsConditionalStore(root.copy())
