@@ -18,9 +18,9 @@
 #   1. ★★ GCP SENDS `int64Value` AS A JSON **STRING**. A parser that read only
 #      `doubleValue`, or that scanned for a bare number, returns ZERO POINTS for
 #      every INT64 metric — including `run.googleapis.com/request_count`, the
-#      only metric anything in this repo has ever read. ⛔ And "zero points" is
-#      ALSO the legitimate answer for a fresh deploy, so the failure looks
-#      exactly like the thing being measured. §3.
+#      metric these tests use. ⛔ And "zero points" is ALSO the legitimate
+#      answer for a fresh deploy, so the failure looks exactly like the thing
+#      being measured. §3.
 #   2. ★★ CLOUDWATCH SENDS `Timestamps` AND `Values` AS PARALLEL ARRAYS. Zipping
 #      `min(n, m)` silently drops the tail AND keeps pairing the rest, so every
 #      surviving point looks right. §6.
@@ -64,10 +64,10 @@ from komira_cloud_metrics import (
 
 
 comptime _SVC: String = (
-    "projects/example-project/locations/us-south1/services/example-svc"
+    "projects/example-project/locations/us-south1/services/example-run-svc"
 )
 comptime _ECS_SVC: String = (
-    "arn:aws:ecs:us-east-1:123456789012:service/example-cluster/example-svc"
+    "arn:aws:ecs:us-east-1:123456789012:service/example-cluster/example-ecs-svc"
 )
 comptime _METRIC: String = "run.googleapis.com/request_count"
 
@@ -92,14 +92,14 @@ def test_the_handle_is_self_addressing_on_both_clouds() raises:
     matters more than on a log line — a wrong log line usually looks wrong, and
     a wrong number never does."""
     assert_equal(service_project(_SVC), String("example-project"))
-    assert_equal(service_leaf(_SVC), String("example-svc"))
+    assert_equal(service_leaf(_SVC), String("example-run-svc"))
     assert_equal(
         timeseries_path(_SVC),
         String("/v3/projects/example-project/timeSeries"),
         "the path carries the project OUT OF THE HANDLE",
     )
     assert_equal(ecs_service_cluster(_ECS_SVC), String("example-cluster"))
-    assert_equal(ecs_service_name(_ECS_SVC), String("example-svc"))
+    assert_equal(ecs_service_name(_ECS_SVC), String("example-ecs-svc"))
     assert_equal(
         MONITORING_HOST,
         String("monitoring.googleapis.com"),
@@ -117,7 +117,7 @@ def test_a_handle_that_is_not_one_yields_EMPTY_never_a_guess() raises:
     SYNTACTICALLY FINE and returns somebody else's numbers.
 
     MUTATION: return the input, or a constant project, from any of these."""
-    assert_equal(service_project(String("example-svc")), String(""))
+    assert_equal(service_project(String("example-run-svc")), String(""))
     assert_equal(service_leaf(String("projects/p/locations/r")), String(""))
     assert_equal(timeseries_path(String("not-a-resource-name")), String(""))
     assert_equal(
@@ -141,7 +141,7 @@ def test_the_gcp_filter_is_SCOPED_to_one_service() raises:
         "the metric: " + f,
     )
     assert_true(
-        _contains(f, String('resource.labels.service_name="example-svc"')),
+        _contains(f, String('resource.labels.service_name="example-run-svc"')),
         "⛔ and the SERVICE — without this it is every service: " + f,
     )
     assert_equal(
@@ -395,7 +395,7 @@ def test_the_aws_body_is_FULLY_DIMENSIONED_or_REFUSED() raises:
         "the CLUSTER dimension: " + body,
     )
     assert_true(
-        _contains(body, String('{"Name":"ServiceName","Value":"example-svc"}')),
+        _contains(body, String('{"Name":"ServiceName","Value":"example-ecs-svc"}')),
         "and the SERVICE dimension: " + body,
     )
     assert_equal(
@@ -404,7 +404,7 @@ def test_the_aws_body_is_FULLY_DIMENSIONED_or_REFUSED() raises:
             String("CPUUtilization"),
             String("Average"),
             3600,
-            String("arn:aws:ecs:us-east-1:123456789012:service/example-svc"),
+            String("arn:aws:ecs:us-east-1:123456789012:service/example-ecs-svc"),
             MetricWindow(String("1789120800"), String("1789207200")),
         ),
         String(""),
@@ -447,7 +447,7 @@ def test_the_aws_response_pairs_its_two_PARALLEL_arrays() raises:
     are index-aligned. This is the happy path; the next test is the one that
     matters."""
     var body = String(
-        '{"MetricDataResults":[{"Id":"m1","Label":"example-svc CPUUtilization",'
+        '{"MetricDataResults":[{"Id":"m1","Label":"example-ecs-svc CPUUtilization",'
         '"Timestamps":[1789120800,1789124400],"Values":[12.5,13.75],'
         '"StatusCode":"Complete"}]}'
     )
@@ -494,7 +494,7 @@ def test_PartialData_is_a_FAULT_not_a_short_answer() raises:
 
     MUTATION: drop the `StatusCode == PartialData` arm."""
     var body = String(
-        '{"MetricDataResults":[{"Id":"m1","Label":"example-svc",'
+        '{"MetricDataResults":[{"Id":"m1","Label":"example-ecs-svc",'
         '"Timestamps":[1],"Values":[3.0],"StatusCode":"PartialData"}]}'
     )
     var page = parse_get_metric_data_body(body)

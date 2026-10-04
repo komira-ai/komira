@@ -34,6 +34,7 @@ comptime _FILES: List[String] = [
 def test_no_environment_read() raises:
     var banned: List[String] = [
         "getenv",
+        "setenv",
         "_read_env",
         "std.os",
         "EnvSource",

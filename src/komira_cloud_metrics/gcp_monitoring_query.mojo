@@ -19,7 +19,7 @@
 # not representable in a JSON number, so the mapping quotes it). A parser that
 # read only `doubleValue`, or that scanned for a bare number, comes back with
 # ZERO POINTS for every INT64 metric — including `run.googleapis.com/
-# request_count`, which is the only metric anything in this repo has ever read.
+# request_count`, the metric the tests here use.
 # ⛔ A "no points" answer is ALSO the legitimate answer for a fresh deploy, so
 # that failure would look exactly like the thing it is supposed to measure.
 #

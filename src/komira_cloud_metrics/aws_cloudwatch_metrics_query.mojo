@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # ★ WHY THE PURE AWS HALF EXISTS WITH NO CONFORMER ANYWHERE: the same reason
-# `kci_logs.aws_cloudwatch_query` was written before its live twin —
+# `kci_logs.aws_cloudwatch_query` exists as a pure builder and parser —
 # *"the surface is expressible on AWS"* is a CLAIM, and a claim about a design
 # is worth what its falsifier is worth. This file is the falsifier for
 # `CloudMetricSource`: the ONE verb, keyed on the provider's own handle, with a
@@ -13,8 +13,9 @@
 # `__init__` before assuming the GCP half is any more "done" — NEITHER arm has a
 # live conformer, and that is a decision, not a gap.
 #
-# THE WIRE (CloudWatch, JSON 1.1 over the `GraniteServiceVersion20100801` target
-# prefix — yes, really; the service's internal name predates "CloudWatch"):
+# THE WIRE (CloudWatch, awsJson 1.0 — `application/x-amz-json-1.0` — over the
+# `GraniteServiceVersion20100801` target prefix — yes, really; the service's
+# internal name predates "CloudWatch"):
 #   POST /   X-Amz-Target: GraniteServiceVersion20100801.GetMetricData
 #   {"StartTime":1789120800,"EndTime":1789207200,"ScanBy":"TimestampAscending",
 #    "MetricDataQueries":[{"Id":"m1","MetricStat":{"Metric":{

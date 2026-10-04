@@ -6,10 +6,10 @@
 #
 # WHY THIS PACKAGE EXISTS: the release tool should be able to read a deployed
 # workload's logs and metrics itself, so that nobody diagnoses a deploy with a
-# raw `gcloud` or `aws` command. The LOGS half (`kci_logs`) has a live reader on
-# both clouds and a real consumer: a failing validate step reports its own
-# container output. This is the METRICS half, and it ships ⛔ WITH NO LIVE
-# CONFORMER AND NO CALLER. That is a DECISION, argued below, not an unfinished
+# raw `gcloud` or `aws` command. The LOGS half (`kci_logs`) holds the seam, the
+# pure request builders and parsers on both clouds, and a hermetic double; its
+# live reader and its consumer stay outside this repo for now. This is the
+# METRICS half, and it ships ⛔ WITH NO LIVE CONFORMER AND NO CALLER. That is a DECISION, argued below, not an unfinished
 # sentence. §3 is the argument; §4 is what would flip it.
 #
 # ── §1 — WHAT IS HERE ───────────────────────────────────────────────────────
@@ -58,18 +58,18 @@
 #
 #   (b) A DEPLOY ASSERTING "THE NEW REVISION TOOK TRAFFIC". Cloud Run's SERVICE
 #       resource answers this EXACTLY and SYNCHRONOUSLY through its `traffic`
-#       status, which the deploy graph already reads. A metric would be a
-#       lagging, sampled restatement of a fact already held — strictly worse, and
-#       wrong for ~26 minutes.
+#       status, which a deploy can read directly. A metric would be a lagging,
+#       sampled restatement of that fact — strictly worse, and wrong for ~26
+#       minutes.
 #
-#   (c) "IS THIS SERVICE HEALTHY" AS A GATE. An `http_check` step answers it
-#       directly, now, from the caller's own observation: the MEASURED status is
+#   (c) "IS THIS SERVICE HEALTHY" AS A GATE. A synchronous HTTP check answers
+#       it directly, now, from the caller's own observation: the MEASURED status is
 #       the oracle, and a logged or metered one is compared AGAINST it.
 #
-#   (d) AN OPERATOR-FACING `kci metrics` VERB. ⛔ The LOGS half did NOT get a
-#       verb; it became an enrichment on a seam that already existed and was
-#       already being called. A metrics verb would be the first of its kind,
-#       built on no measured need.
+#   (d) AN OPERATOR-FACING `kci metrics` VERB. ⛔ The LOGS half has no verb
+#       either: its intended use is an enrichment on a seam a caller already
+#       uses, not a command of its own. A metrics verb would be the first of
+#       its kind, built on no measured need.
 #
 # ⇒ ⛔ SO THE LIBRARY HALF IS BUILT AND NOTHING CALLS IT. What that buys, and it
 #   is not nothing: the CAPABILITY is REACHABLE from the release tool's

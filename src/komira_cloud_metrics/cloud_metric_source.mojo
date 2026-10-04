@@ -78,7 +78,7 @@ struct MetricPoint(Copyable, Movable, Deinitable):
     """One aligned point of one series.
 
       * `end_time` — the bucket's END, VERBATIM as the provider spelled it
-                     (RFC3339 on GCP; epoch-millis digits on AWS). ⛔ NOT
+                     (RFC3339 on GCP; epoch-seconds digits on AWS). ⛔ NOT
                      normalised, for `CloudLogEntry.timestamp`'s reason: a
                      renderer that re-formats a provider timestamp can disagree
                      with the provider's own console, and the operator has both
@@ -229,7 +229,7 @@ trait CloudMetricSource(Movable, Deinitable):
 
       * GCP — a Cloud Run service resource name,
               `projects/<p>/locations/<r>/services/<s>`. The project is IN it,
-              which is why `run_service_metric_path` needs nothing else.
+              which is why `timeseries_path` needs nothing else.
       * AWS — an ECS service ARN,
               `arn:aws:ecs:<region>:<acct>:service/<cluster>/<service>`. The
               region, the cluster and the service name are IN it, which is what
