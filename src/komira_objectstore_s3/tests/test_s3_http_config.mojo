@@ -8,13 +8,24 @@
 #
 # Rows: a response body cap of 3 bytes refuses a 4-byte ranged read
 # (BODY_TOO_LARGE, raised at once, not retried), and a cap of 4 reads the
-# same answer (its body chunked: the client applies the cap as it decodes
-# one), through S3Store, through S3Fs and its clone, and through
+# same answer, through S3Store, through S3Fs and its clone, and through
 # S3ConditionalStore and its clone; and a 150 ms request budget against a
 # server that takes the connection and never answers ends the read of an
-# S3Fs, and of its clone, with the client's deadline error (the defaults'
-# budget is 600 s). Every connector is a ScriptedConnector: no socket.
+# S3Fs, and of its clone, with the client's request deadline error, well
+# inside 30 s (the defaults' budget is 600 s). Every connector is a
+# ScriptedConnector: no socket.
+#
+# The 206 here is chunked, though S3 answers GetObject with Content-Length:
+# komira_http_client applies the caller's `max_response_body_bytes` to a
+# chunked body and to one read to EOF, but not yet to a Content-Length one
+# (`RecvRingBody.new_content_length` takes no cap). When it does, these rows
+# gain a Content-Length answer.
+#
+# S3Store also hands `http_config` to its generated S3 client, but drives
+# every verb through the client's `<op>_with` sends over its own transport,
+# so only the transport's copy is used; these rows observe that one.
 from std.testing import assert_equal, assert_raises, assert_true
+from std.time import perf_counter_ns
 
 from komira_aws_core import AwsCredential, FixedClock, StaticCredsSource
 from komira_core.arrow.shared_aligned_buffer import SharedAlignedBuffer
@@ -38,6 +49,12 @@ comptime _Cond = S3ConditionalStore[ScriptedConnector, StaticCredsSource, FixedC
 
 comptime _STUCK_BUDGET_US: Int = 150_000
 """The request budget of the stuck-server row (150 ms)."""
+
+comptime _STUCK_WALL_LIMIT_NS: Int = 30_000_000_000
+"""How long a stuck read may take (30 s): far over the 150 ms budget, far
+under the defaults' 600 s."""
+
+comptime _REQUEST_DEADLINE = "HttpError[TIMEOUT]: request deadline exceeded"
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -87,8 +104,8 @@ def _capped(max_body: Int) -> HttpClientConfig:
 
 def _mk_one_range() raises -> ScriptedConnector:
     """ONE answer: the 206 for `bytes=0-3` of a 10-byte object, its body
-    chunked (the HTTP client applies the caller's body cap as it decodes a
-    chunked body)."""
+    chunked (see the header: the HTTP client applies the caller's body cap
+    to a chunked body, not yet to a Content-Length one)."""
     return ScriptedConnector.with_stream(
         ScriptedStream.from_read_script(
             _bytes(
@@ -107,8 +124,10 @@ def _stuck_stream() -> ScriptedStream:
 
 
 def _mk_stuck() raises -> ScriptedConnector:
-    """A server that takes the connection and never answers: every read is
-    Pending, so only the request budget ends the attempt."""
+    """A server that takes the connection and does not answer: its first
+    50,000,000 reads are Pending, far longer than the 150 ms budget, so the
+    budget ends the attempt. Past them it closes, which a client without the
+    budget meets as a transport error, not the deadline error."""
     return ScriptedConnector.with_stream(_stuck_stream())
 
 
@@ -160,13 +179,22 @@ def test_s3_conditional_store_and_its_clone_read_through_the_callers_body_cap() 
 # =============================================================================
 
 
-def _read_error(fs: _Fs) raises -> String:
+def _assert_ends_at_the_budget(fs: _Fs, who: String) raises:
+    """A read through `fs` against the stuck server raises the request
+    deadline error, and within `_STUCK_WALL_LIMIT_NS`."""
     var file = fs.open("data/a.parquet")
+    var raised = String("")
+    var t0 = Int(perf_counter_ns())
     try:
         _ = fs.read_at(file, 0, 4)
     except e:
-        return String(e)
-    return String("")
+        raised = String(e)
+    var elapsed_ns = Int(perf_counter_ns()) - t0
+    assert_true(raised.find(_REQUEST_DEADLINE) >= 0, who + " got: " + raised)
+    assert_true(
+        elapsed_ns < _STUCK_WALL_LIMIT_NS,
+        who + " took " + String(elapsed_ns) + " ns",
+    )
 
 
 def test_s3fs_and_its_clone_end_a_stuck_read_at_the_callers_budget() raises:
@@ -176,10 +204,8 @@ def test_s3fs_and_its_clone_end_a_stuck_read_at_the_callers_budget() raises:
     cfg.request_timeout_us = _STUCK_BUDGET_US
     var fs = _Fs("lake", _config(), _mk_stuck, cfg, _creds(), FixedClock(1790000000))
     var clone_fs = fs.clone()
-    var raised = _read_error(fs)
-    assert_true(raised.find("deadline exceeded") >= 0, "got: " + raised)
-    var raised_clone = _read_error(clone_fs)
-    assert_true(raised_clone.find("deadline exceeded") >= 0, "got: " + raised_clone)
+    _assert_ends_at_the_budget(fs, "the original")
+    _assert_ends_at_the_budget(clone_fs, "the clone")
 
 
 def main() raises:

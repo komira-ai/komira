@@ -7,14 +7,22 @@
 # Each store dials one ScriptedConnector from the factory, armed with:
 #   a 500 then the 206: the first read is retried and succeeds, and the
 #     success puts back what its retry cost (the quota is full again);
-#   QUOTA / COST reads each answered 500 twice: each is retried once and
-#     fails, and a failed call puts nothing back, so the quota is spent;
-#   one 500: with the quota spent, that read is not retried and raises;
+#   QUOTA / COST pairs of 500s: each read is retried once and fails, and a
+#     failed call puts nothing back, so the quota is spent;
+#   a 500 then the 206: with the quota spent, the read meets the 500, is
+#     not retried, and raises; the original's next read takes the 206,
+#     which shows the read before made one attempt (a retried one would
+#     have taken it and returned). Succeeding first time, it puts back 1,
+#     less than a retry costs;
 #   a 500 then the 206: never reached by the original.
-# The original runs the first three; its clone, taken after, reads once and
+# Every pair must be met in step: a spending read that was not retried, or a
+# quota that allowed one retry more or fewer, leaves a 500 where the script
+# expects the 206, or the 206 where it expects a 500. A store with no quota
+# retries the spent read and returns. The clone, taken after, reads once and
 # must be retried past a 500 to the 206 (from its own connector's first two
 # answers). A clone sharing the original's store, and so its quota, would
-# meet the last pair: its 500 would not be retried. Retries wait 1 ms.
+# meet the last pair with 1 left: its 500 would not be retried. Retries
+# wait 1 ms.
 from std.testing import assert_equal, assert_true
 
 from komira_aws_core import (
@@ -115,6 +123,7 @@ def _mk_quota_script() raises -> ScriptedConnector:
         c.arm_next(_internal_error())
         c.arm_next(_internal_error())
     c.arm_next(_internal_error())
+    c.arm_next(_range_0_3())
     c.arm_next(_internal_error())
     c.arm_next(_range_0_3())
     return c^
@@ -140,6 +149,8 @@ def test_an_s3fs_clone_retries_after_the_original_spent_its_quota() raises:
     except e:
         raised = String(e)
     assert_true(raised.find("status=500") >= 0, "the spent read got: " + raised)
+    # It made one attempt: the 206 after its 500 is still there.
+    assert_equal(_buf_text(fs.read_at(file, 0, 4)), "abcd")
     # The clone's own quota is full: its 500 is retried.
     var clone_fs = fs.clone()
     var clone_file = clone_fs.open("data/a.parquet")
@@ -163,6 +174,7 @@ def test_an_s3_conditional_store_clone_retries_after_the_original_spent_its_quot
     except e:
         raised = String(e)
     assert_true(raised.find("status=500") >= 0, "the spent read got: " + raised)
+    assert_equal(_text(store.get_range(path, 0, 4)), "abcd")
     var clone_store = store.clone()
     assert_equal(_text(clone_store.get_range(path, 0, 4)), "abcd")
 
