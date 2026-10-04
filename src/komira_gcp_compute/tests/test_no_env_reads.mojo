@@ -1,5 +1,5 @@
 # The generated modules read no environment, and hold only the methods the
-# callers of this package make. The generated package is staged whole as
+# BUCK file's `methods` names. The generated package is staged whole as
 # this test's data, at gen/, and the test reads every file it finds there:
 # no list of the generated files is kept here to fall behind what the
 # generator writes.
@@ -11,10 +11,9 @@
 # Scope: 39 methods on 17 clients (BUCK `methods`). Every other method of
 # the Compute Engine API is absent: no list, aggregated list, start, stop,
 # reset, setLabels/setMetadata/setMachineType/setTags or instance-group
-# method, and not
-# RegionNetworkEndpointGroups.InsertBeta, which is not a v1 method. The
-# operation is compute's own (`status`), never google.longrunning's
-# (`done`).
+# method, and not RegionNetworkEndpointGroups.InsertBeta, which is not a v1
+# method. The operation is compute's own (`status`), never
+# google.longrunning's (`done`).
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -112,7 +111,7 @@ def test_only_the_called_methods_are_generated() raises:
                 _count(body, absent[j]),
                 0,
                 files[i] + " names " + absent[j] + "; the client is scoped to"
-                " the methods its callers make",
+                " the methods its BUCK file names",
             )
 
 

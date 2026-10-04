@@ -281,7 +281,64 @@ def test_zone_operations_wait() raises:
         "POST /compute/v1/projects/demo-project/zones/us-central1-a/operations/operation-1700-abc/wait HTTP/1.1",
     )
     assert_equal(_body(capture), "")
+    # A POST with no body still states its length: Google's front end
+    # answers a bodyless POST without Content-Length with 411.
+    assert_true("\r\nContent-Length: 0\r\n" in _wire(capture))
+    assert_false("Transfer-Encoding" in _wire(capture))
     assert_true(op.status.value() == Operation_Status(Operation_Status.RUNNING))
+
+
+def test_zone_operations_wait_returns_a_failed_operation() raises:
+    # A write that failed comes back from `wait` as an HTTP 200 whose
+    # operation is DONE with `error` set: the client returns it (it does not
+    # raise), so the caller reads `error` after DONE. A field this pin does
+    # not declare is skipped, and a status it does not know reads as the
+    # zero value, never DONE.
+    var capture = _capture()
+    var answer = String(
+        '{"kind":"compute#operation","name":"operation-1700-abc",'
+        + '"status":"DONE","progress":100,"someNewField":{"x":1},'
+        + '"httpErrorStatusCode":409,"httpErrorMessage":"CONFLICT",'
+        + '"error":{"errors":[{"code":"RESOURCE_ALREADY_EXISTS",'
+        + '"message":"The resource already exists"}]}}'
+    )
+    var c = ZoneOperationsClient[SC, TS](_http(capture, answer), _token())
+    c.set_rest_host(String("localhost"))
+    var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    var op = c.wait[_RT](
+        WaitZoneOperationRequest(
+            String("operation-1700-abc"),
+            String("demo-project"),
+            String("us-central1-a"),
+        ),
+        reactor,
+    )
+    assert_true(op.status.value() == Operation_Status(Operation_Status.DONE))
+    assert_equal(op.http_error_status_code.value(), 409)
+    assert_true(op.error)
+    assert_equal(len(op.error.value().errors), 1)
+    assert_equal(
+        op.error.value().errors[0].code.value(), "RESOURCE_ALREADY_EXISTS"
+    )
+
+    var later = _capture()
+    var c2 = ZoneOperationsClient[SC, TS](
+        _http(later, '{"name":"operation-1700-abc","status":"PAUSED"}'), _token()
+    )
+    c2.set_rest_host(String("localhost"))
+    var op2 = c2.wait[_RT](
+        WaitZoneOperationRequest(
+            String("operation-1700-abc"),
+            String("demo-project"),
+            String("us-central1-a"),
+        ),
+        reactor,
+    )
+    assert_true(
+        op2.status.value()
+        == Operation_Status(Operation_Status.UNDEFINED_STATUS)
+    )
 
 
 def test_region_operations_wait() raises:
@@ -301,6 +358,8 @@ def test_region_operations_wait() raises:
         _head(capture),
         "POST /compute/v1/projects/demo-project/regions/us-central1/operations/operation-r-1/wait HTTP/1.1",
     )
+    assert_equal(_body(capture), "")
+    assert_true("\r\nContent-Length: 0\r\n" in _wire(capture))
     assert_true(op.status.value() == Operation_Status(Operation_Status.PENDING))
 
 
@@ -319,6 +378,8 @@ def test_global_operations_wait() raises:
         _head(capture),
         "POST /compute/v1/projects/demo-project/global/operations/operation-g-1/wait HTTP/1.1",
     )
+    assert_equal(_body(capture), "")
+    assert_true("\r\nContent-Length: 0\r\n" in _wire(capture))
     assert_true(op.status.value() == Operation_Status(Operation_Status.DONE))
 
 
@@ -374,6 +435,7 @@ def main() raises:
     test_instances_delete()
     test_zone_operations_get()
     test_zone_operations_wait()
+    test_zone_operations_wait_returns_a_failed_operation()
     test_region_operations_wait()
     test_global_operations_wait()
     test_regions_get_reads_the_quotas()

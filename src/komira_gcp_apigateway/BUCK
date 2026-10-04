@@ -14,8 +14,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # account the gateway calls the backend as) and of the Gateway serving it;
 # a validator reads the gateway and its config back with the two Gets.
 #
-# Not generated, with a caller: UpdateGateway, which repoints a gateway at
-# a new config. Its path names a nested field
+# Refused by the generator: UpdateGateway, which repoints a gateway at a
+# new config. Its path names a nested field
 # (`/v1/{gateway.name=projects/*/locations/*/gateways/*}`) and its
 # `update_mask` is a FieldMask message in the query; the generator captures
 # only top-level scalar fields, so it refuses the method by name. Nor the
@@ -24,7 +24,7 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # (`/v1/{name=projects/*/locations/*/operations/*}`) is declared in the
 # service's API configuration, not in the protos, whose generic route
 # (`/v1/{name=operations/**}`) does not match an API Gateway operation
-# name. Without a caller: the listings and the Api and ApiConfig updates.
+# name. Nor are the listings and the Api and ApiConfig updates generated.
 #
 # The client starts at apigateway.googleapis.com, the
 # `google.api.default_host` ApiGatewayService declares.
@@ -39,11 +39,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # copied), each sending through the generated client over komira_http_core's
 # ScriptedConnector pointed at `localhost` (no socket, no name lookup):
 # test_apigateway_requests (each method's request line, query and body, an
-# OpenAPI document's base64 contents, the `view` enum by name),
+# OpenAPI document's base64 contents, the `view` enum by name and left out
+# at its zero value, and the decoded responses of the Gets and Creates),
 # test_apigateway_errors (the google.rpc.Status envelope mapped to a code,
 # the body never quoted, and an accepted create whose operation failed),
 # test_apigateway_default_host and test_no_env_reads (no generated file
 # reads the environment; exactly the nine methods above are generated).
+# Each request's bearer header is checked in test_apigateway_default_host;
+# that the token source is asked once per request and that no token means
+# no dial is generator code shared by every REST client, tested in
+# komira_gcp_logging's test_logging_token_hook.
 #
 # No test here talks to the service.
 

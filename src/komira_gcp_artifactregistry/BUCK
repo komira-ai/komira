@@ -9,7 +9,7 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # answer through komira_gcp_core's `gcp_status_error`. It reads no
 # environment.
 #
-# `methods` is what the callers make, each for one use:
+# `methods` lists each method with the use it serves:
 #
 #   CreateRepository   a deploy creates the image repository it owns
 #   GetRepository      it reads the repository back (exists, format, URI)
@@ -18,12 +18,13 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #   GetFile            a package upload reads an uploaded file's size and
 #                      hashes back
 #
-# Not generated: the service's other methods. Two of them have callers and
-# are refused here, both on the generator: GetIamPolicy (its `options`
-# field is a message, and a REST GET can only put a scalar in the query),
-# and with it SetIamPolicy, which the same callers use as a
-# read-modify-write pair with GetIamPolicy. Docker images, packages,
-# versions, tags, rules, settings and the file listing have no caller.
+# Not generated: the service's other methods. GetIamPolicy (reading a
+# repository's IAM policy) is refused by the generator, which puts only
+# top-level scalar fields in a query: its `options` is a message, which
+# HTTP transcoding would flatten to `options.requestedPolicyVersion=3`.
+# SetIamPolicy is held with it, since an IAM edit is a read-modify-write
+# of the two. Docker images, packages, versions, tags, rules, settings and
+# the file listing are not generated either.
 #
 # CreateRepository and DeleteRepository answer a google.longrunning
 # `Operation` (`done`, then `error` or `response`). Following one needs
@@ -56,7 +57,11 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # test_artifactregistry_errors (the google.rpc.Status envelope mapped to a
 # code, the body never quoted), test_artifactregistry_default_host and
 # test_no_env_reads (no generated file reads the environment; exactly the
-# five methods above are generated).
+# five methods above are generated). Each request's bearer header is
+# checked in test_artifactregistry_default_host; that the token source is
+# asked once per request and that no token means no dial is generator code
+# shared by every REST client, tested in komira_gcp_logging's
+# test_logging_token_hook.
 #
 # No test here talks to the service.
 

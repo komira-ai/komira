@@ -10,8 +10,8 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #
 # compute.proto declares the whole API (2,087 messages and every service);
 # `methods` restricts the generated code to the methods below and the
-# messages and enums they reach, 227 structs in all. Each method is here
-# because a caller makes it:
+# messages and enums they reach, 227 structs in all. Each method is listed
+# with the use it serves:
 #
 #   Instances.Insert, Get, Delete       place, read back and remove a job VM
 #   ZoneOperations.Get, Wait            follow that VM's zonal operation
@@ -41,7 +41,12 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # method (the beta API's NEG insert is a different service; a caller that
 # needs a beta-only field cannot reach it through this client).
 # RegionOperations.Get and GlobalOperations.Get are not generated either:
-# the callers follow regional and global operations with Wait.
+# regional and global operations are followed with Wait. Nor are the
+# load-balancer teardown deletes (GlobalAddresses, SslCertificates,
+# RegionNetworkEndpointGroups, BackendBuckets, BackendServices, UrlMaps,
+# TargetHttpProxies, TargetHttpsProxies and GlobalForwardingRules Delete):
+# the set above builds and repoints a load balancer, and reaping one is
+# not yet a use this client serves.
 #
 # The operation is Compute Engine's own `Operation`
 # (google.cloud.compute.v1.Operation), not google.longrunning's: its state
@@ -56,14 +61,16 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # counterpart of botocore's idempotency-token fill). A caller that retries
 # a write sets one UUID per logical write.
 #
-# A Patch is a JSON merge patch on the server, and komira_proto_codec's
-# encoder writes every repeated field of the body, an empty one as `[]`:
-# a Patch sent with only the fields to change clears every list it left
-# empty. A caller patches with the whole resource as it read it.
+# A Patch is a JSON merge patch on the server. komira_proto_codec's encoder
+# omits an empty list or map and an unset optional field, so a Patch sends
+# only the fields the caller set and the server keeps the rest. A Patch
+# therefore cannot clear a list.
 #
 # Compute v1 answers an error with its older envelope (`error.errors[]`,
 # no `error.status`), so the canonical code is the HTTP status's: a 409 for
-# a resource that already exists is ABORTED, not ALREADY_EXISTS.
+# a resource that already exists is ABORTED, not ALREADY_EXISTS. The raised
+# text carries the first `errors[].reason` (`reason alreadyExists`), which
+# tells that 409 from any other.
 #
 # `bundle_only` is compute.proto alone: every message the methods reach is
 # declared there (extended_operations.proto contributes only options).
@@ -75,14 +82,19 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # test_compute_instances (the VM, zonal operation, region and
 # operation-wait methods, and requestId sent only when set),
 # test_compute_network (networks, subnetworks and firewalls, with the exact
-# body of a firewall patch), test_compute_load_balancing (each
-# load-balancing method), test_compute_operation (compute's Operation:
+# body of a sparse firewall patch), test_compute_load_balancing (each
+# load-balancing method, with the exact body of a sparse backend-service
+# patch), test_compute_operation (compute's Operation:
 # status names, a DONE operation with an error, no google.longrunning
 # state), test_compute_errors (the older error envelope mapped from the
-# HTTP status, the body never quoted), test_compute_default_host (every
-# client starts at compute.googleapis.com; `set_rest_host` replaces it) and
+# HTTP status with its reason, the body never quoted),
+# test_compute_default_host (every client starts at
+# compute.googleapis.com; `set_rest_host` replaces it) and
 # test_no_env_reads (no generated file reads the environment; exactly the
-# 39 methods above are generated).
+# 39 methods above are generated). Each request's bearer header is checked
+# in test_compute_instances; that the token source is asked once per
+# request and that no token means no dial is generator code shared by every
+# REST client, tested in komira_gcp_logging's test_logging_token_hook.
 #
 # No test here talks to the service.
 
