@@ -306,6 +306,110 @@ def test_overlong_varint_is_refused() raises:
     assert_true(refused, "a 6-byte varint was accepted")
 
 
+# -----------------------------------------------------------------------------
+# The exact refusal messages. Each of these four checks is backed up by a later
+# one (a decoder underflow, or `_parse_records`' own negative-count check), so a
+# test asserting only "refused" stays green with the check deleted. The message
+# names the failure; these pin which check fired.
+# -----------------------------------------------------------------------------
+def _refusal_one(b: List[UInt8]) -> String:
+    try:
+        _ = _decode_one(b)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def _refusal_set(b: List[UInt8]) -> String:
+    try:
+        _ = decode_record_batches(Span(b))
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def _refusal_split(b: List[UInt8]) -> String:
+    try:
+        _ = _split_and_parse(b)
+    except e:
+        return String(e)
+    return String("<accepted>")
+
+
+def test_fragment_tail_message() raises:
+    var b = _sample()
+    var tail = b.copy()
+    for i in range(5):
+        tail.append(b[i])
+    assert_equal(
+        _refusal_set(tail),
+        "decode_record_batches: a 5-byte fragment follows the last whole batch"
+        " (truncated message set)",
+    )
+
+
+def test_batch_length_past_the_end_message() raises:
+    var b = _sample()
+    var c = _slice(b, 0, len(b) - 1)
+    var declared = String(len(b) - 12)
+    var left = String(len(b) - 13)
+    assert_equal(
+        _refusal_one(c),
+        "decode_record_batch_v2: truncated batch: batchLength "
+        + declared
+        + " but only "
+        + left
+        + " bytes remain",
+    )
+    assert_equal(
+        _refusal_set(c),
+        "decode_record_batch_v2: truncated batch: batchLength "
+        + declared
+        + " but only "
+        + left
+        + " bytes remain",
+    )
+    assert_equal(
+        _refusal_split(c),
+        "split_record_batch_header: truncated batch: batchLength "
+        + declared
+        + " but only "
+        + left
+        + " bytes remain",
+    )
+
+
+def test_batch_length_below_header_message() raises:
+    var c = _sample()
+    _put_i32_be(c, 8, Int32(48))
+    assert_equal(
+        _refusal_one(c),
+        "decode_record_batch_v2: batchLength 48 is below the 49-byte v2 header"
+        " that follows it (corrupt batch)",
+    )
+    assert_equal(
+        _refusal_split(c),
+        "split_record_batch_header: batchLength 48 is below the 49-byte v2"
+        " header that follows it (corrupt batch)",
+    )
+
+
+def test_negative_records_count_message() raises:
+    var c = _sample()
+    _put_i32_be(c, COUNT_POS, Int32(-1))
+    _reseal(c)
+    # "(corrupt batch)" is the header check's spelling; `_parse_records`' own
+    # check omits it, so this pins that the header check fired.
+    assert_equal(
+        _refusal_one(c),
+        "decode_record_batch_v2: negative recordsCount -1 (corrupt batch)",
+    )
+    assert_equal(
+        _refusal_split(c),
+        "split_record_batch_header: negative recordsCount -1 (corrupt batch)",
+    )
+
+
 def main() raises:
     test_sample_decodes_through_every_entry_point()
     test_every_truncation_is_refused()
@@ -317,4 +421,8 @@ def main() raises:
     test_records_count_must_match_the_records()
     test_null_header_key_is_refused()
     test_overlong_varint_is_refused()
+    test_fragment_tail_message()
+    test_batch_length_past_the_end_message()
+    test_batch_length_below_header_message()
+    test_negative_records_count_message()
     print("test_kafka_record_batch_hostile: OK")

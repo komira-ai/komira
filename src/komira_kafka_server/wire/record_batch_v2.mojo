@@ -837,12 +837,18 @@ def decode_record_batches[
 ](data: Span[UInt8, origin]) raises -> List[KafkaRecord]:
     """Decode a Kafka message-set (one or more concatenated v2 RecordBatches)
     into a flat list of records. A Produce request's per-partition records field
-    can carry multiple batches; Fetch likewise concatenates batches.
+    can carry multiple batches.
 
-    Every byte must belong to a whole batch: a trailing fragment, even one too
-    short to hold `baseOffset` + `batchLength`, raises rather than being
-    dropped, because a dropped fragment is a truncated request reported as a
-    complete one."""
+    Every byte must belong to a whole batch: a trailing partial batch is
+    REFUSED (raises), whether it is a fragment too short to hold `baseOffset` +
+    `batchLength` or a batch whose `batchLength` runs past the end, rather than
+    being dropped, because a dropped fragment is a truncated request reported
+    as a complete one.
+
+    That refusal is correct for a PRODUCE request only. A FETCH response may
+    legitimately end in a partial batch (the broker cuts the message set at
+    `max_bytes`, and the client skips the tail), so a Fetch-side caller must
+    not reuse this entry point as is: it would refuse a valid response."""
     var dec = KafkaDecoder(data)
     var out = List[KafkaRecord]()
     while dec.remaining() > 0:
