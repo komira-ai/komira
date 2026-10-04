@@ -15,20 +15,29 @@
 #   [EE]  https://smithy.io/2.0/aws/protocols/aws-ec2-query-protocol.html,
 #         "Error response serialization"; botocore EC2QueryParser (RequestID)
 #   [GE]  botocore ResponseParser `_do_generic_error_parsing`: the status is
-#         the code of an empty or non-XML error body
+#         the code of an empty or non-XML error body, and of a 5xx whose
+#         body starts `<html>` (`_is_generic_error_response`)
+#   [TS]  botocore Serializer `_timestamp_iso8601` (six fraction digits) and
+#         `_timestamp_unixtimestamp` (whole seconds); komira writes a
+#         fraction as milliseconds in both (aws_query.mojo's header)
 
 from std.testing import assert_equal, assert_raises, assert_true
 
 from komira_aws_core import (
     AWS_QUERY_CONTENT_TYPE,
+    AWS_TS_ISO8601,
+    AWS_TS_UNIX,
     AwsQueryWriter,
     AwsRequest,
     AwsResponse,
+    HttpResult,
     aws_query_error,
     aws_query_key,
     aws_query_rename_last,
     aws_query_result,
     aws_query_set_body,
+    aws_response_error_code,
+    aws_text_ts,
     aws_xml_child,
     aws_xml_string_of,
 )
@@ -170,7 +179,8 @@ def test_ec2_error_document() raises:
 
 
 def test_a_bare_error_root() raises:
-    # Read as the restXml reader reads one.
+    # Read as the shared XML reader reads restXml's bare <Error>; botocore's
+    # QueryParser does not read it, and no awsQuery service sends one.
     var r = AwsResponse.of_text(
         400, "<Error><Code>Echo</Code><Message>post / http/1.1</Message></Error>"
     )
@@ -191,10 +201,49 @@ def test_an_empty_or_non_xml_body_takes_the_status() raises:
     # [GE]
     _err(AwsResponse.of_text(503, String("")), "503", "", "")
     _err(AwsResponse.of_text(502, String("<html>bad gateway")), "502", "", "")
+    # A well-formed 5xx <html> page (a load balancer's) is generic too.
+    _err(
+        AwsResponse.of_text(503, String("<html><body>busy</body></html>")),
+        "503",
+        "",
+        "",
+    )
 
 
 def test_xml_naming_no_code_has_an_empty_code() raises:
-    _err(AwsResponse.of_text(500, String("<Oops/>")), "", "", "")
+    _err(AwsResponse.of_text(400, String("<Oops/>")), "", "", "")
+    # A 4xx <html> page is XML naming no code, not a generic error.
+    _err(AwsResponse.of_text(403, String("<html/>")), "", "", "")
+
+
+def test_the_retry_classifier_reads_an_ec2_code() raises:
+    # [EE] the retry path reads the same reader, so an ec2 throttling code
+    # is not "".
+    var res = HttpResult(
+        503,
+        _bytes(
+            "<Response><Errors><Error><Code>RequestLimitExceeded</Code>"
+            + "<Message>slow down</Message></Error></Errors>"
+            + "<RequestID>r</RequestID></Response>"
+        ),
+    )
+    assert_equal(aws_response_error_code(res), "RequestLimitExceeded")
+
+
+def test_a_fraction_of_a_second() raises:
+    # [TS] pinned: milliseconds, trailing zeros cut, in date-time and in
+    # epoch-seconds (botocore: `.500000Z` and `1789473600`). A whole second
+    # is written as botocore writes it.
+    var w = AwsQueryWriter(String("Op"), String("1"))
+    w.add(String("T"), aws_text_ts(1789473600.5, AWS_TS_ISO8601))
+    w.add(String("E"), aws_text_ts(1789473600.5, AWS_TS_UNIX))
+    w.add(String("W"), aws_text_ts(1789473600.0, AWS_TS_ISO8601))
+    w.add(String("V"), aws_text_ts(1789473600.0, AWS_TS_UNIX))
+    assert_equal(
+        w.text(),
+        "Action=Op&Version=1&T=2026-09-15T12%3A00%3A00.5Z&E=1789473600.5"
+        + "&W=2026-09-15T12%3A00%3A00Z&V=1789473600",
+    )
 
 
 def test_the_message_is_cleaned_and_nothing_else_is_read() raises:
@@ -225,5 +274,7 @@ def main() raises:
     test_the_request_id_header_wins()
     test_an_empty_or_non_xml_body_takes_the_status()
     test_xml_naming_no_code_has_an_empty_code()
+    test_the_retry_classifier_reads_an_ec2_code()
+    test_a_fraction_of_a_second()
     test_the_message_is_cleaned_and_nothing_else_is_read()
     print("OK")

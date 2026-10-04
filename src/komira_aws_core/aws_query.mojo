@@ -16,10 +16,16 @@
 # `percent_encode_sequence` encodes them (Python's `quote` with
 # `safe='-._~'`): every byte of the UTF-8 text outside A-Z a-z 0-9 '-' '.'
 # '_' '~' is %XX with uppercase hex, so a space is %20 (never '+') and '/'
-# is %2F. The scalar text is aws_text.mojo's (`aws_text_*`), as botocore
-# writes it: "true" / "false", a decimal integer, a number or "NaN" /
-# "Infinity" / "-Infinity", standard padded base64, and a timestamp in the
-# member's format (date-time by default).
+# is %2F. The scalar text is aws_text.mojo's (`aws_text_*`): "true" /
+# "false", a decimal integer, a number or "NaN" / "Infinity" / "-Infinity",
+# standard padded base64, and a timestamp in the member's format
+# (date-time by default). One divergence from botocore, in the timestamp:
+# a fraction of a second is written as milliseconds with trailing zeros
+# cut, in date-time (`...T12:00:00.5Z`, where botocore's
+# `_timestamp_iso8601` writes six digits, `.500000Z`) and in epoch-seconds
+# (`1789473600.5`, where botocore's `_timestamp_unixtimestamp` truncates to
+# whole seconds). Both are valid Smithy timestamps, a whole second is
+# written as botocore writes it, and test_aws_query pins the fraction.
 #
 # Response. A successful awsQuery response is
 #
@@ -38,30 +44,27 @@
 #   <ErrorResponse><Error><Type/><Code/><Message/></Error><RequestId/></ErrorResponse>   (query)
 #   <Response><Errors><Error><Code/><Message/></Error></Errors><RequestID/></Response>   (ec2)
 #
-# and a bare <Error> root, read as aws_xml.mojo's restXml reader reads one
-# (no awsQuery service answers with it; komira_aws_core's AwsEchoConnector
-# does, and so a test can read the request through a generated client).
+# with aws_xml.mojo's `aws_xml_error_info`, the one XML error reader, which
+# the retry classifier (aws_send.mojo `aws_response_error_code`) also uses,
+# so an ec2 throttling code reaches it. That reader also reads restXml's
+# bare <Error> root, which botocore's QueryParser does not; no awsQuery
+# service answers with one, so reading it changes no answer.
 #
 # Its code is the <Code> text, cleaned and capped as aws_codec.mojo cleans
-# it; for an empty body or one that is not XML it is the HTTP status as
-# text, as botocore's generic error parsing makes it; for an XML body
-# naming no code it is "". The request id is the `x-amzn-RequestId` header,
-# else the body's <RequestId> (query) or <RequestID> (ec2). Nothing else is
-# read from the body, which can hold a secret.
+# it; for an empty body, one that is not XML, or a 5xx <html> page it is
+# the HTTP status as text, as botocore's generic error parsing makes it;
+# for other XML naming no code it is "". The request id is the
+# `x-amzn-RequestId` header, else the body's <RequestId> (query) or
+# <RequestID> (ec2). Nothing else is read from the body, which can hold a
+# secret.
 # =============================================================================
 
 from komira_xml import XmlNode
 
 from ._text import bytes_of
-from .aws_codec import _clean_message, aws_error_code
 from .aws_error import AwsErrorInfo, aws_request_id
 from .aws_request import AwsRequest, AwsResponse
-from .aws_xml import (
-    _child_trimmed,
-    _request_id_text,
-    aws_xml_child,
-    aws_xml_parse,
-)
+from .aws_xml import aws_xml_child, aws_xml_error_info, aws_xml_parse
 from .sigv4 import uri_encode
 
 
@@ -138,50 +141,10 @@ def aws_query_result(body: List[UInt8], wrapper: String) raises -> XmlNode:
     return root.children[i].copy()
 
 
-def _parse_or_none(body: List[UInt8]) -> Optional[XmlNode]:
-    """The root element of `body`, `None` when it is not well-formed."""
-    try:
-        return aws_xml_parse(body)
-    except:
-        return None
-
-
 def aws_query_error(resp: AwsResponse) -> AwsErrorInfo:
     """The `AwsErrorInfo` of an awsQuery or ec2Query error response: see
     the module header."""
     var rid = String("")
     if resp.has_header(String("x-amzn-RequestId")):
         rid = aws_request_id(resp, String("x-amzn-RequestId"))
-    if len(resp.body) == 0:
-        return AwsErrorInfo(resp.status, String(resp.status), String(""), rid)
-    var parsed = _parse_or_none(resp.body)
-    if not parsed:
-        return AwsErrorInfo(resp.status, String(resp.status), String(""), rid)
-    ref root = parsed.value()
-    var err = XmlNode()
-    var have = False
-    var i = aws_xml_child(root, String("Error"))
-    if root.local == "Error":
-        err = root.copy()
-        have = True
-    elif i >= 0:
-        err = root.children[i].copy()
-        have = True
-    else:
-        var e = aws_xml_child(root, String("Errors"))
-        if e >= 0:
-            var j = aws_xml_child(root.children[e], String("Error"))
-            if j >= 0:
-                err = root.children[e].children[j].copy()
-                have = True
-    var code = String("")
-    var message = String("")
-    if have:
-        code = aws_error_code(_child_trimmed(err, String("Code")))
-        message = _clean_message(_child_trimmed(err, String("Message")))
-    if rid.byte_length() == 0:
-        var body_rid = _child_trimmed(root, String("RequestId"))
-        if body_rid.byte_length() == 0:
-            body_rid = _child_trimmed(root, String("RequestID"))
-        rid = _request_id_text(body_rid)
-    return AwsErrorInfo(resp.status, code, message, rid)
+    return aws_xml_error_info(resp.status, resp.body, rid)
