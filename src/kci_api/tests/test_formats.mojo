@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/tests/test_formats.mojo
+# src/kci_api/tests/test_formats.mojo
 #   The format table pinned by value, and every version refusal by its
 #   message: authored (missing, too new, too old) and produced (format,
 #   major, unknown keys ignored).
@@ -9,7 +9,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_json import parse_json_value
 
-from kci_contract import (
+from kci_api import (
     FORMAT_ARTIFACT_DECLARATIONS,
     FORMAT_CHANNELS,
     FORMAT_RELEASE_SET,

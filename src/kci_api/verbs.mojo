@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/verbs.mojo -- the verb a result document names, the
+# src/kci_api/verbs.mojo -- the verb a result document names, the
 #   kinds of step a stage holds, and the kinds of validation a step holds.
 # =============================================================================
 #

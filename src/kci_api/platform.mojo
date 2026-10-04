@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/platform.mojo -- the platforms kci builds and publishes
+# src/kci_api/platform.mojo -- the platforms kci builds and publishes
 #   for, and the conda subdir of each.
 # =============================================================================
 #

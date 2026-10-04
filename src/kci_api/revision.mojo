@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/revision.mojo -- revision ids and artifact references.
+# src/kci_api/revision.mojo -- revision ids and artifact references.
 # =============================================================================
 #
 # A REVISION is a full commit id: exactly 40 lowercase hex digits. An
@@ -16,7 +16,7 @@
 # Pure functions over owned values; no pointer.
 # =============================================================================
 
-from kci_contract.platform import require_artifact_platform
+from kci_api.platform import require_artifact_platform
 
 
 def _is_lower_hex(s: String) -> Bool:

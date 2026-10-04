@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/layout.mojo -- the names of the files kci produces and the
+# src/kci_api/layout.mojo -- the names of the files kci produces and the
 #   layout of a release directory.
 # =============================================================================
 #

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/run_identity.mojo -- who is running kci: `--run-id`,
+# src/kci_api/run_identity.mojo -- who is running kci: `--run-id`,
 #   `--attempt` and `--context key=value`, checked.
 # =============================================================================
 #

@@ -25,7 +25,7 @@
 # not a full commit id and a platform kci does not release. An empty set is
 # refused: there is nothing to approve.
 #
-# `kci build` prints it, `release.json` carries it, and `kci publish`
+# The BUILD step prints it, `release.json` carries it, and the PUBLISH step
 # recomputes it from the bytes on disk and compares it with the hash the
 # release was approved under.
 #
@@ -35,7 +35,7 @@
 from komira_crypto import hex_lower_array_32, sha256_string
 
 from kci_artifact_manifest import is_sha256_hex
-from kci_contract import FORMAT_RELEASE_SET, current_major, require_full_commit_id, require_release_platform
+from kci_api import FORMAT_RELEASE_SET, current_major, require_full_commit_id, require_release_platform
 
 
 struct SetHashLine(Copyable, Movable):
