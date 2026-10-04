@@ -1,7 +1,7 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The workflow consistency check: a hand-written CI workflow
-# (.github/workflows/kci.yml) held to the machine file's stage graph. It is
+# (.github/workflows/kci.yml) held to the machine file's release machine. It is
 # library code, not a command: the welded test that holds this repository's
 # kci.yml to release/machine.textproto uses it, and `kci run` runs it at
 # start-up on the workflow it runs under (`check_running_workflow`). The
@@ -20,16 +20,16 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # is "cannot tell", never a pass. actionlint (//:workflow_lint) stays the YAML
 # validity gate.
 #
-# Deps: kci_stage_graph (the graph), kci_release_channel (which channels
-# publish by OIDC) and kci_contract (the default machine file). Pure: it
+# Deps: kci_release_machine (the graph), kci_release_channel (which channels
+# publish by OIDC) and kci_api (the default machine file). Pure: it
 # checks text it is given.
 mojo_library(
     name = "kci_ci_check",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/kci_release_channel:kci_release_channel",
-        "//src/kci_stage_graph:kci_stage_graph",
+        "//src/kci_release_machine:kci_release_machine",
     ],
     test_srcs = [
         # what the restricted reader reads, and each construct it cannot tell
