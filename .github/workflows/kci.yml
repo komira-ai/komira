@@ -1,0 +1,341 @@
+# The release of komira's conda packages through kci (docs/ci.md, "kci.yml").
+#
+# HAND-WRITTEN. The machine file (release/machine.textproto: kci's default, so
+# no `kci` line names it) owns the stage graph; this file runs it, one job per
+# stage. kci holds this file to the machine file twice: `kci run` itself, at
+# start-up under GitHub Actions (it reads this file as committed at
+# GITHUB_WORKFLOW_SHA; a mismatch is exit 3, nothing run), and the welded test
+# src/kci_ci_check/tests/test_repo_kci_yml.mojo, so a drift also fails
+# `./buck2 build //...` on every pull request. Edit both together. The rules:
+# each job's id is its stage's name and its GitHub environment the stage's
+# `environment`; its `needs` is the stage's `after`; `id-token: write` only on
+# a job whose stage publishes by trusted publishing or is farm-connected; the
+# farm-connect action exactly on the farm-connected stage; each job runs
+# exactly one `kci run --stage <its id>` with `--summary-file`, never with
+# `--only` (a release job runs its whole stage: a FULL run), and reading the
+# machine file being checked; no pull_request trigger; a `revision` input;
+# every action pinned.
+#
+#   build  on a GitHub-hosted runner joined to the build farm's tailnet
+#          (./.github/actions/farm-connect; the stage is farm_connected), in
+#          the environment `build`: builds bin/kci and runs
+#          `kci run --stage build` at the release revision, on the farm. The
+#          release directory, the kci binary and the build's result file
+#          travel to the publish jobs as one workflow artifact named for the
+#          revision, so they publish the bytes `build` verified, never
+#          rebuilt. This job holds a tailnet node and no publishing token.
+#   gamma  on a GitHub-hosted runner, in the GitHub environment `gamma`, with
+#          `id-token: write`: `kci run --stage gamma` publishes to prefix.dev
+#          komira-ai/gamma. Its job summary also lists the names new to
+#          komira-ai/prod (NEW NAMES): read it before approving prod.
+#   prod   the same, in the GitHub environment `prod` (its required reviewer
+#          approves the job), to prefix.dev komira-ai/prod. Only a manual run
+#          reaches it, so a push to main never waits on the prod approval.
+#
+# Each channel trusts this repository, this file (kci.yml) and one environment
+# (trusted publishing): no secret is stored anywhere. The publish jobs stay
+# top-level jobs of this file; a reusable-workflow call would change the
+# workflow the token names. Deploying, when there is one, is a stage and an
+# environment of its own.
+#
+# Triggers: a push to main and a manual run. NEVER pull_request: the build job
+# joins the tailnet, and the tailnet credential must not reach a pull
+# request's code.
+#
+# THE REVISION. Everything a run builds and publishes is the commit REVISION:
+# the pushed commit, or a manual run's input `revision` (a full commit id; empty
+# means the commit the run was started on). Every job checks it out, kci refuses
+# a checkout whose HEAD is not it, and every artifact and result is named for
+# it. A run that publishes requires REVISION to be on main's history, so a
+# manual run cannot publish an unmerged commit.
+#
+# ⛔ DRY RUN. Every run is a dry run (`kci run --plan`: every check and the
+# channel's reads; nothing written to a channel) unless it is a MANUAL run with
+# the input dry_run set to false. A push to main is always a dry run: the
+# DRY_RUN line of each publish job pins it, and making a push publish is a
+# reviewed change of those lines. Under CI a dry run also asks GitHub for the
+# job's ID token and exchanges it at prefix.dev, then discards the minted token
+# unused: that proves a trusted publisher accepts this job, not that it may
+# write (docs/ci.md). The first real upload to komira-ai/prod happens with the
+# release approver present.
+name: kci
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: "the commit to release (a full 40-hex commit id); empty for the commit this run starts on"
+        type: string
+        default: ""
+      dry_run:
+        description: "dry run: check and read the channels, publish nothing"
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  # A group of its own per revision, so no run is cancelled or dropped for a
+  # newer one (the reason is in ci.yml). Two runs of one revision queue.
+  group: kci-${{ inputs.revision || github.sha }}
+  cancel-in-progress: false
+
+env:
+  # The release machine: its stages, and through them the declarations, the
+  # channels file and the channels. kci reads it by convention (kci_contract's
+  # DEFAULT_MACHINE_FILE), so no `kci` line passes --machine; this name is used
+  # only by the step that skips a revision without one. The welded test
+  # test_repo_kci_yml holds it equal to kci's default.
+  KCI_MACHINE: release/machine.textproto
+  # The commit this run releases (THE REVISION, above).
+  REVISION: ${{ inputs.revision || github.sha }}
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    environment: build
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      # for farm-connect only: the token Tailscale trusts (the stage is
+      # farm-connected; it publishes nothing)
+      id-token: write
+    outputs:
+      # "true" when this revision has a release machine; the publish jobs run
+      # only then.
+      release: ${{ steps.machine.outputs.release }}
+    steps:
+      # Full history: kci and release_version.sh derive the stamp from git, and
+      # both refuse a shallow clone; kci also reads this workflow at its commit.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The farm connection: tailnet join, refusal unless the farm answers, and
+      # the machine buckconfig, from repository variables (docs/ci.md).
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+      # The same guard as ci.yml, over the file farm-connect wrote: without the
+      # linux property set the build would run on this runner.
+      - name: the buckconfig names the farm
+        run: |
+          for key in linux_x86_64_properties; do
+            ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
+              { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
+          done
+      # A revision without a release machine is not a failure of a push to
+      # main: the job says so (a warning and a summary line) and every later
+      # step, and the publish jobs, are skipped. A MANUAL run asked for a
+      # release, so there a missing machine file is a refusal.
+      - name: the release machine exists
+        id: machine
+        run: |
+          if [ -f "$KCI_MACHINE" ]; then
+            echo "release=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          msg="nothing to release: $REVISION has no $KCI_MACHINE"
+          if [ "$GITHUB_EVENT_NAME" = workflow_dispatch ]; then
+            echo "refused: $msg"
+            exit 1
+          fi
+          echo "::warning title=kci skipped::$msg"
+          echo "kci SKIPPED: $msg (build and the publish jobs did nothing)" >> "$GITHUB_STEP_SUMMARY"
+          echo "release=false" >> "$GITHUB_OUTPUT"
+      # The runnable directory: the binary and the runtime libraries it loads,
+      # so it starts on the publish jobs' runners with no environment.
+      - name: build kci
+        if: steps.machine.outputs.release == 'true'
+        run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
+      # The declarations name the program `buck2`; the repository's is the
+      # ./buck2 wrapper of this checkout.
+      - name: buck2 on PATH
+        if: steps.machine.outputs.release == 'true'
+        run: |
+          mkdir -p "$RUNNER_TEMP/bin"
+          printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
+          chmod +x "$RUNNER_TEMP/bin/buck2"
+          echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # kci first holds this workflow (as committed) to the machine file: a
+      # drift stops the run here, before anything is built.
+      - name: kci run --stage build
+        if: steps.machine.outputs.release == 'true'
+        run: |
+          "$RUNNER_TEMP/kci/kci" run --stage build \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --work-dir "$GITHUB_WORKSPACE" --release-dir "$RUNNER_TEMP/release" \
+            --log-dir "$RUNNER_TEMP/kci-logs" --result-file "$RUNNER_TEMP/kci-result-build.json" \
+            --summary-file "$GITHUB_STEP_SUMMARY"
+      - name: the build logs
+        if: failure() && steps.machine.outputs.release == 'true'
+        run: |
+          for f in "$RUNNER_TEMP"/kci-logs/*; do
+            [ -f "$f" ] && { echo "== $f"; cat "$f"; }
+          done
+          true
+      # The result file of this job, whatever the outcome: the driver's record
+      # of what kci did (kci_contract's kci.result).
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always() && steps.machine.outputs.release == 'true'
+        with:
+          name: kci-result-build-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-build.json
+          if-no-files-found: warn
+          retention-days: 90
+      # One tar, so the binary keeps its mode across the artifact store. The
+      # build's result file travels with it.
+      - name: pack the release
+        if: steps.machine.outputs.release == 'true'
+        run: tar -C "$RUNNER_TEMP" -cf "$RUNNER_TEMP/kci-release.tar" kci release kci-result-build.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: steps.machine.outputs.release == 'true'
+        with:
+          name: kci-release-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-release.tar
+          if-no-files-found: error
+          retention-days: 14
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  gamma:
+    needs: build
+    if: needs.build.outputs.release == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: gamma
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # ⛔ A push is ALWAYS a dry run: only a manual run can turn it off.
+      DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
+    steps:
+      # The machine file, the declarations, the channels file and
+      # release_version.sh at the release revision, with the full history the
+      # version (and the "on main" check, and kci's read of this workflow at
+      # its commit) needs.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kci-release-${{ env.REVISION }}
+          path: ${{ runner.temp }}/in
+      - name: unpack the release
+        run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
+      # kci compares this with every package before any request.
+      - name: release_version.sh
+        run: tools/build/package/release_version.sh "$REVISION" | tee "$RUNNER_TEMP/release_version.txt"
+      - name: what this run may do
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            echo "DRY RUN: nothing is written to komira-ai/gamma"
+          else
+            [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] ||
+              { echo "refused: only a manual run publishes"; exit 1; }
+            [ "$GITHUB_REF" = refs/heads/main ] ||
+              { echo "refused: $GITHUB_REF is not main; only main publishes"; exit 1; }
+            git merge-base --is-ancestor "$REVISION" origin/main ||
+              { echo "refused: $REVISION is not on main's history; only a merged commit is published"; exit 1; }
+            echo "PUBLISH: the release is written to komira-ai/gamma"
+          fi
+      # The channel's credential is trusted publishing (OIDC): kci reads the
+      # job's ID token itself and resolves no secret, so the store is none. kci
+      # refuses the token unless its environment is this stage's, gamma.
+      - name: kci run --stage gamma
+        run: |
+          set --
+          if [ "$DRY_RUN" = true ]; then set -- --plan; fi
+          "$RUNNER_TEMP/kci/kci" run --stage gamma \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --release-dir "$RUNNER_TEMP/release" --release-version "$RUNNER_TEMP/release_version.txt" \
+            --secret-store none --result-file "$RUNNER_TEMP/kci-result-gamma.json" \
+            --summary-file "$GITHUB_STEP_SUMMARY" "$@"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: kci-result-gamma-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-gamma.json
+          if-no-files-found: warn
+          retention-days: 90
+
+  prod:
+    needs: gamma
+    # A manual run only: a push to main stops at gamma's dry run, so it never
+    # waits on the prod environment's reviewer. (Skipped with gamma when the
+    # revision has no release machine.)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    environment: prod
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      # ⛔ A push is ALWAYS a dry run: only a manual run can turn it off.
+      DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ env.REVISION }}
+          fetch-depth: 0
+          persist-credentials: false
+      # The SAME artifact gamma published: the bytes are never rebuilt.
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: kci-release-${{ env.REVISION }}
+          path: ${{ runner.temp }}/in
+      - name: unpack the release
+        run: tar -C "$RUNNER_TEMP" -xf "$RUNNER_TEMP/in/kci-release.tar"
+      - name: release_version.sh
+        run: tools/build/package/release_version.sh "$REVISION" | tee "$RUNNER_TEMP/release_version.txt"
+      - name: what this run may do
+        run: |
+          if [ "$DRY_RUN" = true ]; then
+            echo "DRY RUN: nothing is written to komira-ai/prod"
+          else
+            [ "$GITHUB_EVENT_NAME" = workflow_dispatch ] ||
+              { echo "refused: only a manual run publishes"; exit 1; }
+            [ "$GITHUB_REF" = refs/heads/main ] ||
+              { echo "refused: $GITHUB_REF is not main; only main publishes"; exit 1; }
+            git merge-base --is-ancestor "$REVISION" origin/main ||
+              { echo "refused: $REVISION is not on main's history; only a merged commit is published"; exit 1; }
+            echo "PUBLISH: the release is written to komira-ai/prod"
+          fi
+      # kci refuses the token unless its environment is this stage's, prod.
+      - name: kci run --stage prod
+        run: |
+          set --
+          if [ "$DRY_RUN" = true ]; then set -- --plan; fi
+          "$RUNNER_TEMP/kci/kci" run --stage prod \
+            --revision-id "$REVISION" --run-id "gh-$GITHUB_RUN_ID" --attempt "$GITHUB_RUN_ATTEMPT" \
+            --context driver=github-actions --context event="$GITHUB_EVENT_NAME" \
+            --context ref="$GITHUB_REF" --context actor_id="$GITHUB_ACTOR_ID" \
+            --context run_url="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --release-dir "$RUNNER_TEMP/release" --release-version "$RUNNER_TEMP/release_version.txt" \
+            --secret-store none --result-file "$RUNNER_TEMP/kci-result-prod.json" \
+            --summary-file "$GITHUB_STEP_SUMMARY" "$@"
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: always()
+        with:
+          name: kci-result-prod-${{ env.REVISION }}
+          path: ${{ runner.temp }}/kci-result-prod.json
+          if-no-files-found: warn
+          retention-days: 90

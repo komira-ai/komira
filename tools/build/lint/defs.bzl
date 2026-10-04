@@ -102,7 +102,7 @@ def _action_pins_impl(ctx):
 
 action_pins_rule = rule(
     impl = _action_pins_impl,
-    doc = "Every `uses:` in the workflow files names a full 40-hex commit SHA. Refuses a set with no `uses:` at all.",
+    doc = "Every `uses:` in the workflow files (and local actions) names a full 40-hex commit SHA, except a local action (`./path`), which is part of the checkout. Refuses a set with no `uses:` at all.",
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 

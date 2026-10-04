@@ -5,9 +5,11 @@
 # =============================================================================
 #
 # WHY A SEAM. `GcsConditionalStore[B]` and `GcsFs[B]` are generic over exactly
-# one parameter, `B: GcsStorageBackend`. A production backend (google.storage.v2
-# over gRPC) carries its own transport generic; the seam does not, so that
-# generic terminates at the backend and never reaches the conformers above it.
+# one parameter, `B: GcsStorageBackend`. The production backend
+# (`StorageGrpcBackend`, grpc_backend.mojo: google.storage.v2 over gRPC)
+# carries its own transport, token-source and clock generics; the seam does
+# not, so they terminate at the backend and never reach the conformers above
+# it.
 # The same conformers run hermetically over `FakeGcsStorageBackend`
 # (fake_backend.mojo), with no socket.
 #

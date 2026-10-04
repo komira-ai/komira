@@ -1,18 +1,19 @@
 # Continuous integration
 
 CI is one job, `build` in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml),
-on a GitHub Actions runner that lives on the build farm. The runner is a thin
-buck2 client: it checks the repository out and asks the farm to build it.
-Nothing is compiled on the runner.
+on a GitHub-hosted runner that reaches the build farm over a tailnet. The
+runner is a thin buck2 client: it checks the repository out and asks the farm
+to build it. Nothing is compiled on the runner.
 
 | event | runs |
 |---|---|
-| push to `main` | always |
-| pull request from a branch of this repository | always |
-| pull request from a fork | only after a maintainer approves the run ([below](#pull-requests-from-forks)) |
-| manual (`workflow_dispatch`) | on the chosen ref |
+| push to `main` | the farm build |
+| pull request from a branch of this repository | the farm build |
+| pull request from a fork | no farm build; the lints that need no farm ([below](#pull-requests-from-forks)) |
+| manual (`workflow_dispatch`) | the farm build, on the chosen ref |
 
-There is no nightly run, and no separate static or lint job.
+There is no separate static or lint job. The only scheduled run is the
+[build-system self-tests](#build-system-self-tests), which is not the gate.
 
 ## What the job runs
 
@@ -20,8 +21,10 @@ There is no nightly run, and no separate static or lint job.
 ./buck2 build //...
 ./buck2 test //...
 ./buck2 build --keep-going tests//functional/...
-tools/build/tests/run_tests.sh
 ```
+
+The build is the gate: building a release target runs the tests welded to it
+and to its dependencies, so the job points at build targets and nothing else.
 
 1. **`./buck2 build //...`** builds every target of the komira cell on the
    farm. That is more than compiling:
@@ -50,71 +53,110 @@ tools/build/tests/run_tests.sh
    positive target of the `tests` cell, which `//...` does not reach (it is a
    cell of its own so that `//...` holds no target that fails by design). A
    target there that does not build fails the job; the targets that must fail
-   are `tests//negative`, built by step 4 as `expect_red`s and not by this
-   one. Every target of `tests//functional` is meant to build, so nothing
+   are `tests//negative`, built as `expect_red`s by the
+   [self-tests](#build-system-self-tests) and not by this one. Every target of `tests//functional` is meant to build, so nothing
    there is excluded: a probe or fixture that is expected to fail belongs in
    `tests//negative`.
-4. **[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md)**
-   tests what a build of `//...` does not: where actions ran, cache
-   identity across checkouts, analysis-time refusals, a `buck2 run` from a
-   fresh clone, targets that must fail by design (the `tests` cell), and
-   the `./buck2` bootstrap. It needs a Linux x86_64 client, and refuses any
-   other (exit 2), because it runs binaries the farm built for Linux x86_64,
-   and `readelf`/`objdump`, on the client.
-
-A contributor on Linux x86_64 runs the same four commands; on another
-client (macOS arm64) the first three. A green local
+A contributor runs the same three commands on any client. A green local
 `./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
 prove, dead Markdown links included (`//:docs`).
 
-There is no publish step yet. When release targets exist, publishing is a
-step after these, on pushes to `main` only, of artifacts the same job built.
+Publishing is not part of this job. It is a separate workflow,
+[kci.yml](#kciyml-the-release), which never runs for a pull request.
 
 ## The runner
 
-- A container on the farm's Kubernetes cluster, registered to this
-  repository only, with the labels `self-hosted` and `komira-farm`, running
-  one job per container and discarding it afterwards (an ephemeral runner).
-  Nothing from one job, including a fork's, survives into the next.
-- It holds `git`, and what [`./buck2`](../buck2) needs: `sh`, `curl`, `zstd`
-  and `sha256sum`. `run_tests.sh` also needs `readelf` and `objdump`, and
-  `docker` for the image run leg of the format test (skipped without it).
-  Its JSON, tar and Mach-O reads are a Mojo tool,
-  [`//tools/build/inspect:inspect`](../tools/build/inspect/inspect.mojo),
-  built on the farm like any other target.
-- The farm connection is **machine configuration**, not repository
-  configuration: the runner image carries a machine-wide buckconfig (buck2
-  reads `/etc/buckconfig.d/` and `~/.buckconfig.d/`) with the
-  `[buck2_re_client]` endpoints and the `[komira_re]` worker property set (`linux_x86_64_properties`).
-  The job reads no secret, writes no `.buckconfig.local` and names no GitHub
-  Environment. Its logs are not redacted and are public, so the endpoints in
-  that configuration must be addresses reachable only from inside the farm.
-- Give CI its own remote-execution instance name, a sub-instance such as
-  `<prefix>/ci`, so its action-cache entries are kept apart from developers'
-  on a service that keys the cache by instance (Buildbarn does; a cache tier
-  that ignores instance names, such as bazel-remote without
-  `--enable_ac_key_instance_mangling`, does not).
+A GitHub-hosted `ubuntu-24.04` virtual machine, fresh for every job, so nothing
+from one job survives into the next. It holds `git`, and what
+[`./buck2`](../buck2) needs: `sh`, `curl`, `zstd` and `sha256sum`.
+The self-tests also need `readelf` and `objdump`, and `docker` for the image
+run leg of the format test (skipped without it). Its JSON, tar and Mach-O
+reads are a Mojo tool,
+[`//tools/build/inspect:inspect`](../tools/build/inspect/inspect.mojo), built
+on the farm like any other target.
+
+### How it reaches the farm
+
+The first step of each farm job is the local action
+[`.github/actions/farm-connect`](../.github/actions/farm-connect/action.yml).
+It does three things, in this order:
+
+1. **Joins the tailnet** as a node tagged `tag:ci`
+   (`tailscale/github-action`). The credential is workload identity
+   federation: the job asks GitHub for an OIDC token and Tailscale trusts
+   tokens whose subject is this repository, so no Tailscale secret is stored
+   anywhere. The tailnet policy lets `tag:ci` reach the farm's nodes on the
+   one port of the remote-execution service and nothing else.
+2. **Refuses to go on unless the farm answers** on that port, retrying for a
+   minute. buck2 with no farm configured builds on the machine it runs on, so
+   a job that cannot reach the farm must fail, not quietly build on the runner.
+3. **Writes the farm's machine buckconfig**, `~/.buckconfig.d/farm.buckconfig`
+   (buck2 reads `~/.buckconfig.d/` and `/etc/buckconfig.d/`): the
+   `[buck2_re_client]` addresses, instance name, `tls = false` and
+   `execution_concurrency_limit`, and `linux_x86_64_properties` under
+   `[komira_re]`. Developers put the same keys in their own gitignored
+   `.buckconfig.local` ([DEVELOPMENT.md](../DEVELOPMENT.md)).
+
+A job that calls it needs `permissions: id-token: write` (to ask GitHub for the
+token) next to `contents: read`, and nothing else: the job reads no secret, holds
+no cloud role and names no GitHub Environment. The token is useful for the
+tailnet and for nothing else that trusts this repository.
+
+**The farm's endpoint is in no committed file.** It arrives as these
+repository variables (Settings > Secrets and variables > Actions > Variables):
+
+| variable | what it holds |
+|---|---|
+| `TS_CLIENT_ID`, `TS_AUDIENCE` | the Tailscale trust credential's client id and audience (identifiers, not secrets) |
+| `FARM_ADDRESS` | the remote-execution service as a URL with its port |
+| `FARM_INSTANCE` | its instance name |
+| `FARM_LINUX_X86_64_PROPERTIES` | the worker property set of the linux x86_64 actions |
+
+Variables are not masked, and a job's logs are public. The action masks the
+address, and the address is one reachable only from inside the tailnet, so
+printing it would still disclose nothing usable. `//:no_endpoint` keeps an
+endpoint out of every committed buckconfig, workflow and local action.
+
+To check the connection without a build, run the manual workflow
+[`tailnet-probe`](../.github/workflows/tailnet-probe.yml) (the same join and the
+same port check, which also prints how the path runs, direct or relayed, and
+that the ports a CI node must not reach are blocked) from a branch of this
+repository.
+
+Give CI its own remote-execution instance name, a sub-instance such as
+`<prefix>/ci`, so its action-cache entries are kept apart from developers' on a
+service that keys the cache by instance (Buildbarn does; a cache tier that
+ignores instance names, such as bazel-remote without
+`--enable_ac_key_instance_mangling`, does not).
 
 ## Pull requests from forks
 
-Remote execution runs the commands a build describes, so running a pull
-request's build is running its code on the farm's workers. A fork's pull
-request therefore runs only after a maintainer approves that run:
+A fork's pull request gets no OIDC token and no repository variables
+(GitHub withholds them from `pull_request` runs of forks), so it cannot join the
+tailnet and has no farm address. Remote execution also runs the commands a
+build describes, so running a stranger's build would be running its code on the
+farm's workers. Therefore:
 
-- **Repository setting** (Settings > Actions > General > "Approval for
-  running fork pull request workflows from contributors"): **Require approval
-  for all external contributors**. GitHub then holds every run from a fork
-  until someone with write access clicks "Approve and run" on the pull
-  request's Checks tab.
-- **Approving is a code review.** Read the whole change first, `.github/`,
-  `tools/` and every `BUCK` and `.bzl` file included: the workflow, the
-  rules and the lint scripts all run from the pull request's own tree.
-  Approve again after each new push; GitHub asks for a fresh approval.
-- The workflow uses `pull_request` only. There is no `pull_request_target`
+- The `build` job (and `core_split`'s) is **skipped** for a fork's pull
+  request: `if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository`.
+- The job **`fork-advisory`** runs instead, on a hosted runner with no tailnet,
+  no id-token and no variable: it builds the lints that need no farm
+  (`//:shell_lint //:workflow_lint //:action_pins //:push_verdicts //:no_endpoint`)
+  on the runner itself, and writes to the run's summary that no farm build ran.
+  It is not the farm verdict.
+- ⚠ A skipped job counts as passed for a required status check. Do not rely on
+  the `build` check alone to merge a fork's change: read it, push it to a branch
+  of this repository, and merge that run's green farm build.
+- **Reading the change is the review.** Read the whole change, `.github/`,
+  `tools/` and every `BUCK` and `.bzl` file included, before pushing it to a
+  branch: the workflow, the rules and the lint scripts all run from that
+  branch's tree, and anyone who can push a branch can run code on the farm.
+- The workflows use `pull_request` only. There is no `pull_request_target`
   workflow here, on purpose: it runs with the base repository's token, and
-  checking the fork's code out under it hands that token to the code.
-- The job's token is read-only (`permissions: contents: read`) and the
-  checkout does not keep it (`persist-credentials: false`).
+  checking the fork's code out under it, then joining the tailnet, would hand
+  the farm to the code.
+- A job's token is read-only (`permissions: contents: read`) and the checkout
+  does not keep it (`persist-credentials: false`).
 
 ## What farm access means
 
@@ -124,8 +166,8 @@ worker's privileges, on the worker's network, next to the shared storage: it
 can write action-cache entries for any instance directly to storage, and
 tamper with files a worker shares between actions. Denying action-cache
 writes at the client-facing endpoint does not stop that, because the action
-does not come through that endpoint. The runner living on the farm does not
-change this; approval does, by deciding whose code runs.
+does not come through that endpoint. Joining the tailnet by a hosted runner does not
+change this; deciding whose code runs does: only pushes to this repository.
 
 What closes the rest is on the service side, for the farm operator to apply:
 authenticate the storage and scheduler servers so only worker identities can
@@ -134,6 +176,162 @@ with no write access to the worker's shared cache; restrict the workers'
 network so an action cannot reach storage or the scheduler; deny
 action-cache writes at the client-facing endpoint. Until then, treat an
 approved run as able to affect every build that uses the same service.
+
+## Build-system self-tests
+
+[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md) tests what a
+build does not: where actions ran, cache identity across checkouts,
+analysis-time refusals, a `buck2 run` from a fresh clone, targets that must
+fail by design (the `tests` cell), and the `./buck2` bootstrap. It is one shell
+script of numbered cases, takes well over an hour, and is **not the gate**: the
+gate is the three build commands above. It runs in its own workflow,
+[`build_system_selftests.yml`](../.github/workflows/build_system_selftests.yml),
+on a nightly schedule and on demand, never on a push or a pull request, with
+the same farm connection and the same job permissions as `ci`. Two runs never
+overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
+
+Run it by hand on a branch of this repository:
+
+```sh
+gh workflow run build_system_selftests.yml --ref <branch>
+```
+
+or locally with `tools/build/tests/run_tests.sh`.
+
+**Direction.** The script is to be replaced, case by case, by targets of the
+`tests` cell, so that each case is cached, runs in parallel, has a name, and
+runs under `./buck2 test` or `./buck2 build` like everything else. Cases that
+look convertible from their description: 2 (gate red, ungated builds), 3
+(a binary without the dep fails to compile), 4 (incomplete closure refused),
+10 (execution platform resolution, an aquery), 13 and 14 (bundle and launcher
+parity, already remote actions), 17 (Markdown link validation), 28 and 29
+(already `tests//functional` targets), 30 (optimization levels from aquery),
+31 (lint weld), 34 to 36 (generator goldens and refusals). Cases that observe
+the client or the daemon (1, 5, 6, 7, 9, 12, 25, 32, 33) need a harness that
+can start a scratch daemon or clone and are still to be analysed.
+
+## kci.yml: the release
+
+[`.github/workflows/kci.yml`](../.github/workflows/kci.yml) releases the conda
+packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
+It is written by hand. The stages are owned by the release machine,
+[`release/machine.textproto`](../release/machine.textproto): `build`, then
+`gamma`, then `prod`. The workflow runs one job per stage; each job is named
+for its stage, runs in the stage's GitHub environment, and runs exactly one
+`kci run --stage <its name>`. kci reads `release/machine.textproto` by
+convention (its one default path), so no line of the workflow names it.
+
+| job (stage) | runner | what it does |
+|---|---|---|
+| `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
+| `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
+| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
+
+The same release directory, from the one artifact `kci-release-<REVISION>`,
+is published to each channel: it is never rebuilt. `build.set_hash`,
+`gamma.set_hash` and `prod.set_hash` in the three result files are the same
+value, and the release's `release_produced_by` names the one build run.
+
+- **One command.** kci has exactly one command, `kci run --stage S`. There is
+  no `kci build`, `kci publish` or `kci ci check`. `kci run` also takes
+  `--only step:<name>` / `--only validation:<name>` (repeatable) to run a
+  selection; such a run is recorded with `scope: SELECTIVE` and its last
+  stderr line says `-- not a full run`. The release jobs never pass `--only`
+  (rule R9), so every release run is a FULL run. `--plan` is the dry run of a
+  whole stage.
+- **The workflow is checked at start-up.** Under GitHub Actions
+  (`GITHUB_ACTIONS=true`), before it runs anything, `kci run` reads the
+  workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
+  path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
+  machine file and every channels file it names (rules R1-R12 of
+  `src/kci_ci_check/rules.mojo`: job ids are the stages, each job's
+  environment is its stage's, `needs` is the stage's `after`, `id-token:
+  write` only where a stage publishes by trusted publishing or is
+  farm-connected, one `kci run --stage <its id>` per job with
+  `--summary-file`, no `--only`, no `pull_request` trigger, a `revision`
+  input, every `uses:` pinned, `farm-connect` exactly on farm-connected
+  stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
+  finding listed, nothing run); an unreadable workflow or channels file, or a
+  missing variable, is exit 5 and never a pass. The same check is the welded
+  test `src/kci_ci_check/tests/test_repo_kci_yml.mojo`, so a drift also
+  fails `./buck2 build //...`. Consequence: a revision whose machine file
+  disagrees with the running `kci.yml` cannot be released by it (a manual run
+  of an old revision is refused, exit 3).
+- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
+  Never `pull_request`: the `build` job joins the tailnet, and the tailnet
+  credential must not reach a pull request's code.
+- **The revision.** A run releases the commit `REVISION`: the pushed commit,
+  or a manual run's input `revision` (a full commit id; empty means the commit
+  the run started on). Every job checks it out, kci refuses a checkout whose
+  HEAD is not that commit, and the artifact and result names carry it. A
+  publishing run also requires `REVISION` to be on `main`'s history, so a
+  manual run cannot publish an unmerged commit.
+- **Dry run by default.** Every run is a dry run (`--plan`) unless it is a
+  manual run with the input `dry_run` set to false; a push to `main` is always
+  a dry run, pinned by the `DRY_RUN` line of each publish job. A push runs
+  `build` and `gamma` only: `prod` runs for a manual run, so a push does not
+  wait on the prod reviewer for a dry run.
+- **What a dry run proves.** For each publish job: the release set verifies
+  (members, closure, set hash, platform); the channel's repodata and files
+  read anonymously at the URLs kci builds; the job gets a GitHub ID token
+  (`id-token: write` is there and the environment gate was passed); its
+  claims are the ones kci expects (the `environment` claim is the stage's);
+  and prefix.dev's mint endpoint accepts it, so a trusted publisher matching
+  organisation `komira-ai`, repository `komira`, workflow `kci.yml` and that
+  environment exists. The minted token is discarded unused
+  (`credential_probe: MINTED` on the step's row). It does **not** prove: that
+  the publisher that matched belongs to that channel (the mint request names
+  no channel), that it may write (a publisher saved as read-only still
+  mints), the upload request itself, or the read-back after an upload. The
+  first real gamma publish proves those for gamma.
+- **NEW NAMES, before the approval.** Which names a release publishes is
+  `release/artifacts.textproto`'s, reviewed through CODEOWNERS; there is no
+  per-run claim. Every publish step reads its channel first and reports the
+  declared names the channel holds no file of yet (NEW NAMES) in its result
+  file (`new_names[]`) and in the job summary. Because the `prod` job prints
+  nothing until it is approved, each `kci run` also reports the NEW NAMES of
+  the stages after it: **the `gamma` job's summary shows the names new to
+  `komira-ai/prod`; read it before approving `prod`.** A channel that could
+  not be read is reported "not read", never "none". A dry run reports the
+  same.
+- **One record.** Every kci invocation writes kci's result document
+  (`--result-file`, format `kci.result`): RUNNING before the first effect and
+  FINISHED on every exit, with the workflow check (`workflow`), the steps, the
+  set hash and the NEW NAMES. Each job uploads it whatever the outcome, as
+  `kci-result-<job>-<REVISION>`, and every `kci run` appends a markdown
+  summary to the job summary (`--summary-file "$GITHUB_STEP_SUMMARY"`). The
+  run is identified by `--run-id gh-<run id>`, `--attempt <run attempt>` and
+  `--context` lines. The exit numbers are kci's one table: publishing a set
+  the channel already holds, byte for byte, is exit 0.
+- **Validations.** The machine file format can declare a validation on a
+  publish step (`validation { kind: CONDA_INSTALL_SMOKE ... }`). This kci
+  cannot run one yet, so a declared validation is refused (exit 3), never
+  skipped; the release machine declares none until the validation runner
+  lands.
+- **The channels.** prefix.dev channels `komira-ai/gamma` and
+  `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
+  both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`
+  and reads to `https://prefix.dev/komira-ai/<channel>/<subdir>/repodata.json`
+  ([prefix.dev: channels](https://prefix.dev/docs/prefix/channels/concepts),
+  [API](https://prefix.dev/docs/prefix/api)).
+- **No secret.** Each channel's credential is trusted publishing: the channel
+  trusts this repository, the workflow file `kci.yml` and one GitHub
+  environment (`gamma` or `prod`), and kci exchanges the job's ID token itself
+  (audience `prefix.dev`). kci refuses a token whose environment is not the
+  stage's. The publish jobs are top-level jobs of `kci.yml` on purpose: a
+  reusable-workflow call changes the token's workflow claim. Required
+  reviewers (the release approver, on `prod`) and the deployment branch rule
+  (`main`) are GitHub environment settings, outside this file. The first
+  real upload to `komira-ai/prod` happens with the release approver present.
+- **Farm and tokens apart.** Only the `build` job joins the tailnet
+  (`farm_connected: true` on the stage; rule R11), and it publishes nothing;
+  the publish jobs hold a publishing token and no tailnet node.
+- **No release machine, no release.** While `release/machine.textproto` is
+  absent, a push to `main` is a reported skip (a warning and a summary line;
+  every later job is skipped). A manual run without it is refused (exit 1).
+- **Known residual:** the publish jobs run the kci binary the `build` job made
+  (it travels in the workflow artifact). How kci itself reaches the runner is
+  an open design question.
 
 ## merge-from-live (not yet running)
 
@@ -150,8 +348,9 @@ pull requests.
 ```sh
 ./buck2 build //... && ./buck2 test //...
 ./buck2 build --keep-going tests//functional/...
-tools/build/tests/run_tests.sh
 ```
+
+The build-system self-tests (Linux x86_64 client): `tools/build/tests/run_tests.sh`.
 
 The lints alone, without building the rest:
 

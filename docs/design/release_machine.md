@@ -26,7 +26,7 @@ Two layers produce a shipped artifact, and this document is about the first:
    the release machine.
 2. **The release machine** runs the build, then stages and publishes what it
    made, deploys it where it is a service, and validates the outcome in the
-   environment. Its driver is `komira_ci`.
+   cell it deployed to. Its driver is `komira_ci`.
 
 Held, because the libraries that implement them are not part of this
 repository yet, and described here only so the build outputs below make
@@ -136,6 +136,25 @@ tool that writes them is itself a pinned build output.
 - A program run through its bundle behaves as the executable does: arguments,
   environment, output and exit status.
 - Only linux x86_64 bundles are built.
+
+## What does this repository's release machine say?
+
+[`release/machine.textproto`](../../release/machine.textproto) (format
+`kci.machine`, read by `src/kci_stage_graph`) is komira's own release machine:
+its stages in order, and the steps of each. `kci run --stage <S>` runs one
+stage. Three stages today: `build` (one BUILD step), `gamma` and `prod` (one
+PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Three
+fields of a stage carry what the CI workflow must agree with:
+
+| field | meaning |
+|---|---|
+| `stage.environment` | the GitHub environment the stage's job runs in (default: the stage's name). A trusted-publishing channel's push identity must name it, or kci refuses the publish. |
+| `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a tailnet node never holds a publishing token. |
+| `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `install`, `extra_channel`, `program`, `tool`), selectable with `--only validation:<name>`. kci does not run validations yet and refuses a stage that would run one, rather than skip it; this repository's machine file declares none. |
+
+The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this
+file by `kci run` itself at start-up under GitHub Actions and by a welded test
+([docs/ci.md](../ci.md#kciyml-the-release)).
 
 ## Where is the code?
 

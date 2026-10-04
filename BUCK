@@ -6,12 +6,26 @@ load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdow
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
 
+# The release workflow, read by kci_ci_check's welded test, which holds it to
+# release/machine.textproto with the check `kci run` makes at start-up, so a
+# drift fails `./buck2 build //...`.
+export_file(
+    name = "kci.yml",
+    src = ".github/workflows/kci.yml",
+    visibility = ["//src/kci_ci_check:"],
+)
+
 shell_lint(
     name = "shell_lint",
     srcs = ["buck2"] + glob([".github/ci/*.sh"]),
 )
 
 WORKFLOWS = glob([".github/workflows/*.yml"])
+
+# The local actions the workflows call (.github/actions/<name>/action.yml): not
+# workflows, so actionlint does not read them, but the pins and the endpoint
+# lints do.
+ACTIONS = glob([".github/actions/*/action.yml"])
 
 workflow_lint(
     name = "workflow_lint",
@@ -21,7 +35,7 @@ workflow_lint(
 
 action_pins(
     name = "action_pins",
-    srcs = WORKFLOWS,
+    srcs = WORKFLOWS + ACTIONS,
 )
 
 push_verdicts(
@@ -35,7 +49,7 @@ no_endpoint(
     # example.* addresses, so it is only searched for addresses.
     buckconfigs = [".buckconfig", "tools/build/consumer.buckconfig"],
     gitignore = ".gitignore",
-    srcs = [".buckconfig.local.example"] + WORKFLOWS,
+    srcs = [".buckconfig.local.example"] + WORKFLOWS + ACTIONS,
 )
 
 # The shell lints of the tests cell (tools/build/tests: run_tests.sh and

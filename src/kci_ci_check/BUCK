@@ -44,6 +44,17 @@ mojo_library(
         # one stage split over jobs whose --only parts run all of it once
         # (R1 and R9 as amended)
         "tests/test_ci_split_stage.mojo",
+        # the repository's own kci.yml held to its own release/machine.textproto
+        "tests/test_repo_kci_yml.mojo",
     ],
+    # The repository's own release workflow, machine file and channels file
+    # (the root BUCK and release/BUCK).
+    test_data = {
+        "tests/test_repo_kci_yml.mojo": {
+            "channels.textproto": "//release:channels.textproto",
+            "kci.yml": "//:kci.yml",
+            "machine.textproto": "//release:machine.textproto",
+        },
+    },
     visibility = ["PUBLIC"],
 )
