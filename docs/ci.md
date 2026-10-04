@@ -19,6 +19,7 @@ There is no nightly run, and no separate static or lint job.
 ```sh
 ./buck2 build //...
 ./buck2 test //...
+./buck2 build --keep-going tests//functional/...
 tools/build/tests/run_tests.sh
 ```
 
@@ -45,7 +46,15 @@ tools/build/tests/run_tests.sh
      downloads, run on the farm like any other action.
 2. **`./buck2 test //...`** runs the standalone tests (`mojo_test` and
    friends).
-3. **[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md)**
+3. **`./buck2 build --keep-going tests//functional/...`** builds every
+   positive target of the `tests` cell, which `//...` does not reach (it is a
+   cell of its own so that `//...` holds no target that fails by design). A
+   target there that does not build fails the job; the targets that must fail
+   are `tests//negative`, built by step 4 as `expect_red`s and not by this
+   one. Every target of `tests//functional` is meant to build, so nothing
+   there is excluded: a probe or fixture that is expected to fail belongs in
+   `tests//negative`.
+4. **[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md)**
    tests what a build of `//...` does not: where actions ran, cache
    identity across checkouts, analysis-time refusals, a `buck2 run` from a
    fresh clone, targets that must fail by design (the `tests` cell), and
@@ -53,8 +62,8 @@ tools/build/tests/run_tests.sh
    other (exit 2), because it runs binaries the farm built for Linux x86_64,
    and `readelf`/`objdump`, on the client.
 
-A contributor on Linux x86_64 runs the same three commands; on another
-client (macOS arm64) the first two. A green local
+A contributor on Linux x86_64 runs the same four commands; on another
+client (macOS arm64) the first three. A green local
 `./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
 prove, dead Markdown links included (`//:docs`).
 
@@ -140,6 +149,7 @@ pull requests.
 
 ```sh
 ./buck2 build //... && ./buck2 test //...
+./buck2 build --keep-going tests//functional/...
 tools/build/tests/run_tests.sh
 ```
 
