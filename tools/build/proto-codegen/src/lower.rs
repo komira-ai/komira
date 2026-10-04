@@ -160,12 +160,26 @@ pub struct Scope {
     /// exact, as for `roots`.
     pub methods: Vec<String>,
     pub messages_only: bool,
+    /// Fields left out of their message, each named by its fully-qualified
+    /// proto name (`pkg.Message.field`, a leading `.` optional): for a field
+    /// the client's callers do not read and whose type the runtime cannot
+    /// represent (one reaching a `google.protobuf.Api`, which `komira_wkt`
+    /// does not provide, or a `map<string, int64>`, which
+    /// `komira_proto_codec` does not decode). The generated message has no
+    /// such member, so a response's value for it is skipped as an unknown
+    /// key (a lenient JSON read skips one; a binary read skips an unknown
+    /// field number), a request never sends it, and its type is reached
+    /// through it no longer. A name that is not a field of a generated
+    /// message is refused: a field of no message in the files to generate,
+    /// and one of a message the scope prunes, which would leave out nothing.
+    /// So is a member of a `oneof`.
+    pub omit_fields: Vec<String>,
 }
 
 impl Scope {
     /// True when nothing is pruned or dropped.
     pub fn is_everything(&self) -> bool {
-        !self.prunes() && !self.messages_only
+        !self.prunes() && !self.messages_only && self.omit_fields.is_empty()
     }
 
     fn prunes(&self) -> bool {
@@ -203,8 +217,25 @@ pub fn lower_scoped(
     if scope.is_everything() {
         return Ok(model);
     }
+    // Before the prune, so that the closure no longer reaches what an
+    // omitted field's type reaches; checked again after it, so that a field
+    // of a message the scope does not generate is not taken as omitted.
+    let omitted = omit_fields(&mut model, &scope.omit_fields)?;
     if scope.prunes() {
         prune(&lowerer, &mut model, scope)?;
+    }
+    for (name, msg_fq) in &omitted {
+        let generated = model
+            .files
+            .iter()
+            .flat_map(|f| f.messages.iter())
+            .any(|m| &m.fq_name == msg_fq);
+        if !generated {
+            return Err(format!(
+                "omit_fields: `{name}` is a field of `{msg_fq}`, which this scope does \
+                 not generate, so it leaves out nothing: drop it from omit_fields"
+            ));
+        }
     }
     if scope.messages_only {
         for file in &mut model.files {
@@ -226,6 +257,48 @@ pub fn lower_scoped(
             lowerer.cross_file_imports(&file.proto_path, &file.messages, &file.services);
     }
     Ok(model)
+}
+
+/// Remove each field `names` names from its message (`Scope::omit_fields`).
+/// Returns each name with the fully-qualified name of its message.
+fn omit_fields(
+    model: &mut IrModel,
+    names: &[String],
+) -> Result<Vec<(String, String)>, String> {
+    let mut omitted = Vec::new();
+    let mut seen: BTreeSet<String> = BTreeSet::new();
+    for name in names {
+        let fq = if name.starts_with('.') { name.clone() } else { format!(".{name}") };
+        if !seen.insert(fq.clone()) {
+            return Err(format!("omit_fields names `{name}` twice"));
+        }
+        let Some((msg_fq, field)) = fq.rsplit_once('.') else {
+            unreachable!("`fq` starts with a `.`")
+        };
+        let msg = model
+            .files
+            .iter_mut()
+            .flat_map(|f| f.messages.iter_mut())
+            .find(|m| m.fq_name == msg_fq)
+            .ok_or_else(|| {
+                format!(
+                    "omit_fields: `{name}` names no field of a message in the files to \
+                     generate (no message `{msg_fq}`)"
+                )
+            })?;
+        let at = msg.fields.iter().position(|f| f.name == field).ok_or_else(|| {
+            format!("omit_fields: message `{msg_fq}` has no field `{field}`")
+        })?;
+        if msg.fields[at].oneof_index.is_some() {
+            return Err(format!(
+                "omit_fields: `{name}` is a member of a oneof; leaving out one arm would \
+                 change what the others mean"
+            ));
+        }
+        msg.fields.remove(at);
+        omitted.push((name.clone(), msg_fq.to_string()));
+    }
+    Ok(omitted)
 }
 
 /// Whether `fq` (`.pkg.A.B`) is named by `name`. A name with a leading `.`
@@ -879,6 +952,16 @@ impl Lowerer {
                         verb: r.verb.ir_token().to_string(),
                         path_template: r.path_template.clone(),
                         body: r.body.clone(),
+                        additional_bindings: r
+                            .additional_bindings
+                            .iter()
+                            .map(|b| IrHttpRule {
+                                verb: b.verb.ir_token().to_string(),
+                                path_template: b.path_template.clone(),
+                                body: b.body.clone(),
+                                additional_bindings: Vec::new(),
+                            })
+                            .collect(),
                     });
                 // The `(google.api.routing)` annotation, recovered from the
                 // descriptor-set re-decode and keyed by (service, method).
@@ -1350,5 +1433,83 @@ mod nested_container_reference_edges {
             ),
             "a `map<_, Self>` member is a self-loop on its own"
         );
+    }
+}
+
+#[cfg(test)]
+mod omitted_fields {
+    use super::*;
+
+    fn scalar(name: &str) -> IrField {
+        IrField {
+            name: name.to_string(),
+            ty: IrType::Scalar(ScalarKind::String),
+            label: Label::Single,
+            proto_field_number: 1,
+            json_name: name.to_string(),
+            oneof_index: None,
+        }
+    }
+
+    fn model() -> IrModel {
+        let mut arm = scalar("arm");
+        arm.oneof_index = Some(0);
+        IrModel {
+            files: vec![IrFile {
+                proto_path: "t/fixture.proto".to_string(),
+                proto_package: "t".to_string(),
+                mojo_package: "t".to_string(),
+                messages: vec![IrMessage {
+                    name: "Config".to_string(),
+                    mojo_name: "Config".to_string(),
+                    fq_name: ".t.Config".to_string(),
+                    is_map_entry: false,
+                    fields: vec![scalar("name"), scalar("apis"), scalar("title"), arm],
+                    oneofs: Vec::new(),
+                }],
+                enums: Vec::new(),
+                services: Vec::new(),
+                imports: Vec::new(),
+            }],
+        }
+    }
+
+    fn field_names(m: &IrModel) -> Vec<String> {
+        m.files[0].messages[0].fields.iter().map(|f| f.name.clone()).collect()
+    }
+
+    #[test]
+    fn a_named_field_leaves_its_message_and_the_rest_stay_in_order() {
+        for name in ["t.Config.apis", ".t.Config.apis"] {
+            let mut m = model();
+            omit_fields(&mut m, &[name.to_string()]).unwrap();
+            assert_eq!(field_names(&m), ["name", "title", "arm"], "{name}");
+        }
+    }
+
+    #[test]
+    fn an_unknown_message_or_field_is_refused() {
+        let mut m = model();
+        let err = omit_fields(&mut m, &["t.Other.apis".to_string()]).unwrap_err();
+        assert!(err.contains("no message `.t.Other`"), "{err}");
+        let err = omit_fields(&mut m, &["t.Config.nope".to_string()]).unwrap_err();
+        assert!(err.contains("has no field `nope`"), "{err}");
+        assert_eq!(field_names(&m), ["name", "apis", "title", "arm"]);
+    }
+
+    #[test]
+    fn a_oneof_arm_or_a_repeated_name_is_refused() {
+        let mut m = model();
+        let err = omit_fields(&mut m, &["t.Config.arm".to_string()]).unwrap_err();
+        assert!(err.contains("member of a oneof"), "{err}");
+        let err = omit_fields(&mut m, &["t.Config.apis".to_string(), ".t.Config.apis".to_string()])
+            .unwrap_err();
+        assert!(err.contains("twice"), "{err}");
+    }
+
+    #[test]
+    fn omit_fields_alone_is_not_everything() {
+        let scope = Scope { omit_fields: vec!["t.Config.apis".to_string()], ..Default::default() };
+        assert!(!scope.is_everything());
     }
 }

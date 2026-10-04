@@ -378,10 +378,13 @@ def test_tagged_repeated_and_map_roundtrip() raises:
 
 def test_tagged_empty_repeated_and_map() raises:
     """An EMPTY `repeated string` + `map<string,string>` round-trips: the
-    proto3 omit-empty convention emits `[]` / `{}` and decodes back empty."""
+    proto3 JSON mapping OMITS both (an empty list or map is the field's
+    default) and the absent keys decode back empty. Sending `[]` would mean
+    "clear this list" to a merge-patch server."""
     var orig = Tagged(List[String](), Dict[String, String]())
 
     var json = encode_json(orig)
+    assert_equal(json, String("{}"), "empty list and map are omitted")
     var jb = decode_json[Tagged](json)
     assert_equal(len(jb.labels), 0, "json: empty labels")
     assert_equal(len(jb.config), 0, "json: empty config")
@@ -390,6 +393,23 @@ def test_tagged_empty_repeated_and_map() raises:
     var pb = decode_proto[Tagged](bytes^)
     assert_equal(len(pb.labels), 0, "pb: empty labels")
     assert_equal(len(pb.config), 0, "pb: empty config")
+
+    # One side empty: the omitted field leaves no stray comma before or
+    # after the field that is written.
+    var only_labels = List[String]()
+    only_labels.append(String("a"))
+    assert_equal(
+        encode_json(Tagged(only_labels^, Dict[String, String]())),
+        String('{"labels":["a"]}'),
+        "an empty map after a list leaves no trailing comma",
+    )
+    var only_config = Dict[String, String]()
+    only_config[String("env")] = String("prod")
+    assert_equal(
+        encode_json(Tagged(List[String](), only_config^)),
+        String('{"config":{"env":"prod"}}'),
+        "an empty list before a map leaves no leading comma",
+    )
     print("  test_tagged_empty_repeated_and_map: PASS")
 
 

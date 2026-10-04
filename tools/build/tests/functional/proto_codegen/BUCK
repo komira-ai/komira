@@ -408,7 +408,7 @@ proto_codegen_golden(
         name = "refuse_db_" + key,
         srcs = _SRCS,
         generate = _ALL,
-        expect_error = "protoc-gen-mojo-db does not implement roots, methods, messages_only or layout_probe",
+        expect_error = "protoc-gen-mojo-db does not implement roots, methods, omit_fields, messages_only or layout_probe",
         options = _PREFIX + "," + opt,
         plugin = "mojo-db",
     )
@@ -588,6 +588,8 @@ _REST_REFUSALS = [
     ("bytes_in_url", "field `blob` is `bytes`, which has no URL"),
     ("optional_path_var", "path variable `name` is a proto3 `optional` field"),
     ("oneof_path_leaf", "field `thing.id` is used in the path/query but is an arm of a oneof"),
+    ("repeated_message_in_query", "query field `items` is a repeated message, which has no query form"),
+    ("binding_with_another_verb", "every binding must share them"),
 ]
 
 [

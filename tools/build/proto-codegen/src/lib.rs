@@ -135,6 +135,7 @@ impl PluginParameters {
                 "roots" => p.scope.roots = parse_list(k, v)?,
                 "methods" => p.scope.methods = parse_list(k, v)?,
                 "messages_only" => p.scope.messages_only = parse_bool(k, v)?,
+                "omit_fields" => p.scope.omit_fields = parse_list(k, v)?,
                 "layout_probe" => p.layout_probe = parse_bool(k, v)?,
                 "gcp" => p.gcp = parse_bool(k, v)?,
                 "module_names" => p.module_names = parse_module_names(k, v)?,
@@ -142,7 +143,7 @@ impl PluginParameters {
                     return Err(format!(
                         "unknown option `{other}` — expected one of: default_wire, \
                          default_protocol, package_prefix, roots, methods, \
-                         messages_only, layout_probe, gcp, module_names"
+                         messages_only, omit_fields, layout_probe, gcp, module_names"
                     ))
                 }
             }
@@ -155,7 +156,7 @@ impl PluginParameters {
     pub fn require_only_package_prefix(&self, plugin: &str) -> Result<(), String> {
         if !self.scope.is_everything() || self.layout_probe {
             return Err(format!(
-                "{plugin} does not implement roots, methods, messages_only or layout_probe"
+                "{plugin} does not implement roots, methods, omit_fields, messages_only or layout_probe"
             ));
         }
         if self.gcp {
@@ -301,7 +302,7 @@ fn generate_scoped(
         // Result error rather than the emitter's panic backstop.
         for file in &model.files {
             for svc in &file.services {
-                emit_rest::emit_rest_service_in(file, svc, &model.files)?;
+                emit_rest::emit_rest_service_in(file, &model.files, svc)?;
             }
         }
     }
