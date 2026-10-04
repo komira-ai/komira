@@ -18,12 +18,11 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #   GetFile            a package upload reads an uploaded file's size and
 #                      hashes back
 #
-# Not generated: the service's other methods. GetIamPolicy (reading a
-# repository's IAM policy) is refused by the generator, which puts only
-# top-level scalar fields in a query: its `options` is a message, which
-# HTTP transcoding would flatten to `options.requestedPolicyVersion=3`.
-# SetIamPolicy is held with it, since an IAM edit is a read-modify-write
-# of the two. Docker images, packages, versions, tags, rules, settings and
+# Not generated: the service's other methods. GetIamPolicy and
+# SetIamPolicy (a repository's IAM policy, read-modify-written together)
+# have no caller yet; the generator sends GetIamPolicy's `options` message
+# as `options.requestedPolicyVersion=3`, so adding them is a `methods`
+# entry each. Docker images, packages, versions, tags, rules, settings and
 # the file listing are not generated either.
 #
 # CreateRepository and DeleteRepository answer a google.longrunning

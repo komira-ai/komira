@@ -16,9 +16,10 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #
 # Refused by the generator: UpdateGateway, which repoints a gateway at a
 # new config. Its path names a nested field
-# (`/v1/{gateway.name=projects/*/locations/*/gateways/*}`) and its
-# `update_mask` is a FieldMask message in the query; the generator captures
-# only top-level scalar fields, so it refuses the method by name. Nor the
+# (`/v1/{gateway.name=projects/*/locations/*/gateways/*}`), and a path
+# variable must name a top-level field of the request, so the generator
+# refuses the method by name (its `update_mask`, a FieldMask in the query,
+# is one parameter it does send). Nor the
 # operation poll: Create and Delete answer a google.longrunning
 # `Operation`, and its GetOperation route
 # (`/v1/{name=projects/*/locations/*/operations/*}`) is declared in the
