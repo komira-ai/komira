@@ -5,7 +5,15 @@
 
 from std.testing import TestSuite, assert_false, assert_true
 
-from kci_contract import error_table, is_error_id, is_error_id_well_formed, require_error_id
+from kci_contract import (
+    OUTCOME_REFUSED,
+    OUTCOME_VALIDATION_FAILED,
+    error_table,
+    exit_code_of,
+    is_error_id,
+    is_error_id_well_formed,
+    require_error_id,
+)
 
 
 def test_ids_are_unique_and_well_formed() raises:
@@ -21,7 +29,7 @@ def test_ids_are_unique_and_well_formed() raises:
 
 def test_grammar() raises:
     assert_true(is_error_id_well_formed(String("KCI-E-USAGE")))
-    assert_true(is_error_id_well_formed(String("KCI-E-PUBLISH-NEW-NAME")))
+    assert_true(is_error_id_well_formed(String("KCI-E-WORKFLOW-MISMATCH")))
     assert_false(is_error_id_well_formed(String("KCI-E-")))
     assert_false(is_error_id_well_formed(String("KCI-E-usage")))
     assert_false(is_error_id_well_formed(String("KCI-E-A--B")))
@@ -36,6 +44,17 @@ def test_v13_ids() raises:
     assert_true(is_error_id(String("KCI-E-SELECTOR-NO-MATCH")))
     assert_true(is_error_id(String("KCI-E-IMAGE-PLATFORM")))
     assert_true(is_error_id(String("KCI-E-IMAGE-PUSH")))
+
+
+def test_one_command_ids() raises:
+    # a new name is reported, never refused: its id is gone
+    assert_false(is_error_id(String("KCI-E-PUBLISH-NEW-NAME")))
+    assert_true(is_error_id(String("KCI-E-WORKFLOW-MISMATCH")))
+    assert_true(is_error_id(String("KCI-E-VALIDATION")))
+    # neither picks its own number: a mismatch refuses (3), a failed
+    # validation is 7
+    assert_true(exit_code_of(String(OUTCOME_REFUSED), String("KCI-E-WORKFLOW-MISMATCH")) == 3)
+    assert_true(exit_code_of(String(OUTCOME_VALIDATION_FAILED), String("KCI-E-VALIDATION")) == 7)
 
 
 def test_unknown_id_refused() raises:
