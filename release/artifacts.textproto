@@ -38,6 +38,14 @@
 # Which farm buck2 builds on is the runner's machine configuration
 # (docs/ci.md), not this file's.
 #
+# TARGETS. Each artifact names the buck2 targets it stands for in the
+# per-change check (`kci run --affected-by`, the .proto's header): every
+# `//` label of its combined args (its build system's, then its own), with
+# the `[subtarget]` removed, which the welded test of this file holds. The
+# check also needs each build system's `affected` and `build_targets`
+# commands and the `checks` list; until the affected tool lands, this file
+# declares neither, and `--affected-by` refuses it naming what is missing.
+#
 # The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
 
@@ -69,6 +77,7 @@ artifacts {
   args: "//src/komira_encoding:komira_encoding_conda[release]"
   args: "--out"
   args: "{out_dir}"
+  targets: "//src/komira_encoding:komira_encoding_conda"
 }
 
 artifacts {
@@ -91,4 +100,5 @@ artifacts {
   args: "kci run {revision_id}"
   args: "--out-dir"
   args: "{out_dir}"
+  targets: "//tools/build/package:komira_pack"
 }

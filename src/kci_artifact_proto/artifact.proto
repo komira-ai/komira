@@ -76,6 +76,40 @@
 // artifact type (the built manifest carries them), and where an artifact is
 // published to (the PUBLISH step's).
 //
+// THE PER-CHANGE CHECK (`kci run --stage <S> --affected-by <base commit>`).
+// A UNIT is an artifact or a check (`checks`: built, never shipped, no
+// manifest); both share one name space. Each unit names the build targets
+// it stands for (`targets`). A build system that owns a unit and is to take
+// part declares two commands:
+//
+//   affected       which units a change reaches. kci runs, in the work dir,
+//                  <executable> <args...> with {changed_files}, {units_file},
+//                  {base_commit} and {revision_id} substituted (the first two
+//                  are required). {changed_files} is a file holding the
+//                  paths `git diff -z --name-only --no-renames
+//                  <base>...<revision>` printed (NUL-terminated, as git
+//                  prints them); {units_file} a file of `<unit>\t<target>\n`
+//                  lines, every target of every unit THIS build system owns.
+//                  It prints, on stdout, one `UNIT <name>` line per affected
+//                  unit and exactly one verdict line: `AFFECTED <n>` (n is
+//                  the number of UNIT lines; 0 is allowed) or `WIDENED
+//                  <reason>` with no UNIT line (the change reaches every
+//                  declared unit: a file it cannot map, a change to the build
+//                  system itself). Which files widen is the tool's to say:
+//                  kci names no build tool and no path.
+//   build_targets  how a unit is built for the check: <executable> <args...>
+//                  <the unit's targets...>, no placeholder, no output
+//                  directory and no manifest (nothing ships).
+//
+// kci builds exactly the affected units (every declared unit when any
+// build system's answer is WIDENED), one at a time in file order, artifacts
+// then checks. A non-empty change reaching no unit is refused, and so is an
+// empty change; a tool that fails or prints anything else is "cannot tell",
+// never a widening. A run that names a unit without `targets`, or a build
+// system owning a unit without both commands, is refused before anything
+// runs. A BUILD step without `--affected-by` builds the artifacts only and
+// ignores `checks`, `targets` and both commands.
+//
 // Other `.proto` files import it as `kci/release/v1/artifact.proto`.
 syntax = "proto3";
 
@@ -93,6 +127,22 @@ message Artifacts {
   // before any other field is read ("needs a newer kci"). Inside a major,
   // fields are only ever added.
   int32 schema_version = 3;
+
+  // Units built by the per-change check only (file header): a lint, a doc
+  // tree, a tool, a test suite. Never built by a BUILD step without
+  // `--affected-by`, never published.
+  repeated Check checks = 4;
+}
+
+// A program and its args, for one of a build system's per-change commands.
+message Command {
+  // Required. A program name, resolved on PATH, or an absolute path (the
+  // rules of BuildSystem.executable).
+  string executable = 1;
+
+  // Args, in order; no entry may be empty. Which placeholders an arg may
+  // hold is the command's (file header).
+  repeated string args = 2;
 }
 
 // A program kci runs to build an artifact, and the flags it always gets.
@@ -110,6 +160,16 @@ message BuildSystem {
   // `["build"]`. May be empty; no entry may be. Placeholders are substituted
   // here too.
   repeated string args = 3;
+
+  // Which of this build system's units a change reaches (file header).
+  // Optional; required by `--affected-by` when the build system owns a
+  // unit.
+  Command affected = 4;
+
+  // How the per-change check builds one of this build system's units: its
+  // targets are appended (file header). Optional, except that a check
+  // needs its build system to declare it.
+  Command build_targets = 5;
 }
 
 message Artifact {
@@ -128,4 +188,21 @@ message Artifact {
   // `{out_dir}` must appear in the combined args (build system's and these):
   // otherwise kci cannot know where the outputs are.
   repeated string args = 4;
+
+  // The build targets this artifact stands for in the per-change check
+  // (file header). No entry empty, holding whitespace or a placeholder, or
+  // given twice. Optional; required by `--affected-by`.
+  repeated string targets = 5;
+}
+
+// A unit the per-change check builds and nothing ships (file header).
+message Check {
+  // `[a-z][a-z0-9_]*`, unique among the artifacts and the checks.
+  string name = 1;
+
+  // The name of a declared BuildSystem that declares `build_targets`.
+  string build_system = 2;
+
+  // Required: at least one; each entry as Artifact.targets.
+  repeated string targets = 3;
 }

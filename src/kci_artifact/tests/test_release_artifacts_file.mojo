@@ -2,7 +2,8 @@
 # src/kci_artifact/tests/test_release_artifacts_file.mojo
 #   The repository's own release artifacts, release/artifacts.textproto,
 #   read through the real reader: it parses and validates, the libraries
-#   build stamped, and the metapackage is last with every library a member.
+#   build stamped, the metapackage is last with every library a member, and
+#   each artifact's targets are the labels its args build.
 # =============================================================================
 #
 # The file is staged as test data at `artifacts.textproto` (BUCK). A typo
@@ -15,6 +16,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from kci_artifact import (
     ReleaseStamp,
+    find_build_system,
     read_artifacts,
     render_build_argv,
 )
@@ -96,6 +98,49 @@ def test_the_metapackage_is_last_and_holds_every_library() raises:
     assert_true(labels[0].endswith(String(_REV)))
     # The label names the one verb for stages, `kci run`.
     assert_equal(labels[0], String("kci run ") + String(_REV))
+
+
+def _is_label(arg: String) -> Bool:
+    """`//...` or `<cell>//...`, the cell `[A-Za-z0-9_]+`: a buck2 label in
+    THIS repository's file (kci itself names no build tool)."""
+    var at = arg.find(String("//"))
+    if at < 0:
+        return False
+    var b = arg.as_bytes()
+    for i in range(at):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95):
+            return False
+    return arg.byte_length() > at + 2
+
+
+def _strip_subtarget(label: String) -> String:
+    var at = label.find(String("["))
+    if at < 0:
+        return label.copy()
+    return String(label[byte = 0:at])
+
+
+def test_every_artifact_names_the_labels_of_its_args_as_targets() raises:
+    var d = read_artifacts(String(_FILE))
+    for i in range(len(d.artifacts)):
+        ref a = d.artifacts[i]
+        ref b = d.build_systems[find_build_system(d, a.build_system)]
+        var want = List[String]()
+        for k in range(len(b.args) + len(a.args)):
+            var arg = b.args[k].copy() if k < len(b.args) else a.args[k - len(b.args)].copy()
+            if _is_label(arg):
+                var t = _strip_subtarget(arg)
+                var seen = False
+                for j in range(len(want)):
+                    if want[j] == t:
+                        seen = True
+                if not seen:
+                    want.append(t^)
+        assert_true(len(want) > 0, a.name)
+        assert_equal(len(a.targets), len(want), a.name)
+        for k in range(len(want)):
+            assert_equal(a.targets[k], want[k], a.name)
 
 
 def main() raises:
