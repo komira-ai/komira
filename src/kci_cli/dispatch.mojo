@@ -690,6 +690,9 @@ def _run_stage[S: StageSteps](
                 end = steps.build(_build_request(cmd, step), result, recorder)
             else:
                 end = steps.publish(_publish_request(cmd, stage, step), result, recorder, cmd.store)
+                # the run's dry-run flag is the command line's: a step refused
+                # before it read its request records `plan` false
+                result.plan = cmd.plan
         except e:
             end = StepEnd(String(OUTCOME_INDETERMINATE), String(ERROR_INTERNAL), String(e))
         for k in range(len(end.lines)):

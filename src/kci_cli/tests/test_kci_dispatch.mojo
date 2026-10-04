@@ -51,6 +51,7 @@ struct FakeSteps(StageSteps, Movable):
     var workflow_fails: Bool
     var ahead_names: List[String]
     var ahead_unread: Bool
+    var publish_records_no_plan: Bool
 
     def __init__(out self):
         self.calls = List[String]()
@@ -62,6 +63,7 @@ struct FakeSteps(StageSteps, Movable):
         self.workflow_fails = False
         self.ahead_names = List[String]()
         self.ahead_unread = False
+        self.publish_records_no_plan = False
 
     def set_env(mut self, name: String, value: String):
         self.env_names.append(name.copy())
@@ -121,6 +123,10 @@ struct FakeSteps(StageSteps, Movable):
             + String(" plan=") + String(req.plan) + String(" store=") + store.name()
         )
         var end = self._next(req.step_name, String("PUBLISH"), req.platform, result)
+        if self.publish_records_no_plan:
+            # as kci_publish's report does for a step refused before it read
+            # its request
+            result.plan = False
         end.summary = String("### NEW NAMES on komira-ai/") + req.channel + String("\n\nnone\n\n")
         return end^
 
@@ -680,6 +686,20 @@ def test_no_lookahead_after_a_failure_and_the_last_stage_has_none() raises:
         b.append(String(x))
     assert_equal(kci_main_with(b, last, rec2), 0)
     assert_equal(len(last.reads), 0)
+
+
+def test_a_plan_stays_a_plan_whatever_the_step_records() raises:
+    var d = _root(String("plan_kept"))
+    var m = _release_machine(d)
+    var steps = FakeSteps()
+    steps.publish_records_no_plan = True
+    steps.ends.append(StepEnd(String(OUTCOME_REFUSED), String("KCI-E-MEMBER"), String("no release directory")))
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/plan.md")
+    assert_equal(kci_main_with(_gamma(m, "--plan", "--summary-file", summary), steps, rec), 3)
+    assert_true(_last(rec).plan)
+    var text = Path(summary).read_text()
+    assert_true(text.find(String("Dry run (--plan)")) >= 0, text)
 
 
 def test_a_refused_command_line_reaches_the_summary() raises:
