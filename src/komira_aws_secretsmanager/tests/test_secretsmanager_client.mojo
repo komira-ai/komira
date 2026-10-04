@@ -3,7 +3,9 @@
 # and komira_http_core's ScriptedConnector (no socket): a GetSecretValue
 # answered, and a DescribeSecret of a secret that does not exist, raised
 # under its code with the service's message. The error is a 400 naming no
-# code botocore retries, so nothing is retried.
+# code botocore retries, so nothing is retried. An error body carrying a
+# field besides the code and message (here a SecretString) does not reach
+# the raised text: the client's errors never carry the response body.
 #
 # Then the CreateSecret request as it reached the wire: the client is given
 # komira_aws_core's AwsEchoConnector, whose answer is an awsJson error
@@ -121,6 +123,32 @@ def test_an_error_is_raised_under_its_code() raises:
     var client = _client(_mk_err)
     with assert_raises(contains="SecretsManagerSecretsManager.DescribeSecret failed: HTTP 400 ResourceNotFoundException Secrets Manager can't find the specified secret."):
         _ = client.describe_secret(SecretsManagerDescribeSecretRequest(String("gone")))
+
+
+def _mk_canary() raises -> ScriptedConnector:
+    return ScriptedConnector.with_stream(
+        _answer(
+            400,
+            "Bad Request",
+            '{"__type":"InvalidRequestException","Message":"The secret is not valid.","SecretString":"leak-canary"}',
+            "x-amzn-RequestId: e9b0a6c4-0000-4000-8000-1234567890ac\r\n",
+        )
+    )
+
+
+def test_an_error_does_not_carry_the_body() raises:
+    var client = _client(_mk_canary)
+    var text = String("")
+    try:
+        _ = client.get_secret_value(SecretsManagerGetSecretValueRequest(String("app/db")))
+    except e:
+        text = String(e)
+    assert_true(
+        text.find("GetSecretValue failed: HTTP 400 InvalidRequestException The secret is not valid.") >= 0,
+        text,
+    )
+    assert_true(text.find("leak-canary") < 0, text)
+    assert_true(text.find("SecretString") < 0, text)
 
 
 def _mk_echo() raises -> AwsEchoConnector:
@@ -259,6 +287,7 @@ def test_a_token_the_caller_set_is_sent_as_set() raises:
 def main() raises:
     test_get_secret_value()
     test_an_error_is_raised_under_its_code()
+    test_an_error_does_not_carry_the_body()
     test_create_secret_on_the_wire()
     test_create_secret_fills_its_token_once()
     test_a_token_the_caller_set_is_sent_as_set()
