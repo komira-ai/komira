@@ -55,7 +55,7 @@
 # `komira_encoding-<version>-<build>.conda`, `manifest.json` (kci
 # artifact-manifest format, `name` "komira_encoding") and `metadata.json`.
 #
-# `schema_version` is the file format's major (kci_contract's format table):
+# `schema_version` is the file format's major (kci_api's format table):
 # kci refuses a file without it, and one written for a newer kci.
 
 schema_version: 1

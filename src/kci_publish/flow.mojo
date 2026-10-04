@@ -74,7 +74,7 @@ from komira_secret_store import SecretStore, SecretValue
 
 from kci_artifact_declaration import read_artifact_declarations
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
-from kci_contract import (
+from kci_api import (
     ERROR_CHANNEL,
     ERROR_CREDENTIAL,
     ERROR_DECLARATION,
@@ -95,7 +95,7 @@ from kci_contract import (
     require_full_commit_id,
     require_release_platform,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import (
     SURFACE_PREFIX_DEV,
     AnonymousCredential,

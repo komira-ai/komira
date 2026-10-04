@@ -51,7 +51,7 @@ from std.os.path import isdir
 from komira_json import JsonValue, parse_json_value
 
 from kci_artifact_declaration import parse_artifact_declarations
-from kci_contract import RunIdentity, release_platform_dir
+from kci_api import RunIdentity, release_platform_dir
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
 from kci_pkg_upload import content_identity_of
 from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file

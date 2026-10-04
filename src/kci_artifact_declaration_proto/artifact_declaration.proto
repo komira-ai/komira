@@ -87,7 +87,7 @@ message ArtifactDeclarations {
   repeated BuildSystem build_systems = 1;
   repeated ArtifactDeclaration artifacts = 2;
 
-  // The file's format major (kci_contract's format table,
+  // The file's format major (kci_api's format table,
   // `kci.artifact_declarations`). Required: a file without it is refused
   // naming the field to add, and a major this kci does not read is refused
   // before any other field is read ("needs a newer kci"). Inside a major,

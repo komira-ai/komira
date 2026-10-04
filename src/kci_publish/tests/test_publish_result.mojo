@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_publish/tests/test_publish_result.mojo -- contract step 6: the
-#   PUBLISH step's part of the run's one result document (kci_contract's
+#   PUBLISH step's part of the run's one result document (kci_api's
 #   `kci.result`), no secret in it, and one outcome per reason.
 # =============================================================================
 #
@@ -41,7 +41,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_secret_store import StaticSecretStore
 
-from kci_contract import (
+from kci_api import (
     STEP_KIND_PUBLISH,
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
@@ -59,7 +59,7 @@ from kci_contract import (
     parse_result,
     render_result,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
     ActionsOidcEnv,

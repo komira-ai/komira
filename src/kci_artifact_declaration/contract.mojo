@@ -26,13 +26,13 @@
 #   {out_dir}        this artifact's output directory, `{release_dir}/<name>`
 #                    (absolute, EMPTY when the build starts)
 #   {release_dir}    this platform's release directory (absolute),
-#                    `<--release-dir>/<platform>` (kci_contract's layout): it
+#                    `<--release-dir>/<platform>` (kci_api's layout): it
 #                    holds the output directory of every artifact declared
 #                    ABOVE this one, each named by its declaration name and
 #                    already verified, and nothing else that a declaration
 #                    names. The same declaration text serves every platform
 #   {platform}       the platform the release is built for, a name from
-#                    kci_contract's platform table (`linux-x86_64`)
+#                    kci_api's platform table (`linux-x86_64`)
 #   {revision_id}    the release commit (`kci build --revision-id`): the full
 #                    40-hex id of the commit checked out in the work dir
 #   {source_commit}  the stamp's commit: the newest first-parent commit at
@@ -70,7 +70,7 @@
 # Pure functions over owned values; no pointer, no process.
 # =============================================================================
 
-from kci_contract import ARTIFACT_MANIFEST_NAME, require_full_commit_id
+from kci_api import ARTIFACT_MANIFEST_NAME, require_full_commit_id
 
 comptime OUT_DIR_PLACEHOLDER: String = "{out_dir}"
 """This artifact's output directory, `{release_dir}/<name>`."""
@@ -80,7 +80,7 @@ comptime RELEASE_DIR_PLACEHOLDER: String = "{release_dir}"
 artifact declared above, already built."""
 
 comptime PLATFORM_PLACEHOLDER: String = "{platform}"
-"""The release's platform (kci_contract's platform table)."""
+"""The release's platform (kci_api's platform table)."""
 
 comptime REVISION_ID_PLACEHOLDER: String = "{revision_id}"
 """The release commit, full 40 hex (`kci build --revision-id`)."""
@@ -96,7 +96,7 @@ comptime TIMESTAMP_MS_PLACEHOLDER: String = "{timestamp_ms}"
 
 comptime KCI_MANIFEST_NAME: String = ARTIFACT_MANIFEST_NAME
 """The one kci artifact manifest a build leaves at the top of `{out_dir}`
-(kci_contract's `ARTIFACT_MANIFEST_NAME`; this name stays for callers)."""
+(kci_api's `ARTIFACT_MANIFEST_NAME`; this name stays for callers)."""
 
 
 def _ident_start(c: Int) -> Bool:
