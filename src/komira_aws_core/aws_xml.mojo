@@ -83,12 +83,14 @@
 #
 # and, as botocore's RestXMLParser does (`_do_error_parse`), takes the HTTP
 # status as the code of a response whose body is empty (a HEAD) or is not
-# XML. A body that is XML but names no code has code "". One divergence
-# from botocore: a root <Error> in a namespace (`<Error xmlns="...">`) is
-# read as the bare <Error> form, matched by local name like every other
-# element here. botocore (`_parse_error_from_body`) compares the root's tag
-# with its namespace, so such a root falls to its merge path and yields
-# code "" -- reading the code the service sent is the more useful answer.
+# XML, and of a 5xx whose root is <html> (a proxy's page, botocore's
+# `_is_generic_error_response`). A body that is other XML but names no code
+# has code "". One divergence from botocore: a root <Error> in a namespace
+# (`<Error xmlns="...">`) is read as the bare <Error> form, matched by
+# local name like every other element here. botocore
+# (`_parse_error_from_body`) compares the root's tag with its namespace, so
+# such a root falls to its merge path and yields code "" -- reading the
+# code the service sent is the more useful answer.
 # The request id is the `x-amzn-RequestId` header, else `x-amz-request-id`
 # (S3), else the body's <RequestId> (botocore's
 # `_populate_response_metadata`, then the body). Code and message are
@@ -718,11 +720,14 @@ def _child_trimmed(node: XmlNode, name: String) -> String:
 def aws_xml_error_info(
     status: Int, body: List[UInt8], request_id: String
 ) -> AwsErrorInfo:
-    """The `AwsErrorInfo` of an XML error body (<ErrorResponse><Error>, a
-    bare <Error>, or any root holding an <Error> child). The code is the
-    status, as text, when the body is empty or is not XML, and "" when it
-    is XML naming none. The request id is `request_id`, else the body's
-    <RequestId> (in <Error>, then at the root)."""
+    """The `AwsErrorInfo` of an XML error body: <ErrorResponse><Error>, a
+    bare <Error>, any root holding an <Error> child, or ec2's
+    <Response><Errors><Error>. The code is the status, as text, when the
+    body is empty or is not XML, and when the status is 5xx and the root is
+    <html> (a proxy's page; botocore's `_is_generic_error_response`); it is
+    "" when the body is other XML naming none. The request id is
+    `request_id`, else the body's <RequestId> (in <Error>, then at the
+    root), else ec2's root <RequestID>."""
     var rid = _request_id_text(request_id)
     if len(body) == 0:
         return AwsErrorInfo(status, String(status), String(""), rid)
@@ -730,6 +735,8 @@ def aws_xml_error_info(
     try:
         root = aws_xml_parse(body)
     except:
+        return AwsErrorInfo(status, String(status), String(""), rid)
+    if status >= 500 and root.local == "html":
         return AwsErrorInfo(status, String(status), String(""), rid)
     var code = String("")
     var message = String("")
@@ -744,12 +751,21 @@ def aws_xml_error_info(
         if i >= 0:
             err = root.children[i].copy()
             have = True
+        else:
+            var e = aws_xml_child(root, "Errors")
+            if e >= 0:
+                var j = aws_xml_child(root.children[e], "Error")
+                if j >= 0:
+                    err = root.children[e].children[j].copy()
+                    have = True
     if have:
         code = aws_error_code(_child_trimmed(err, "Code"))
         message = _clean_message(_child_trimmed(err, "Message"))
         body_rid = _child_trimmed(err, "RequestId")
     if body_rid.byte_length() == 0:
         body_rid = _child_trimmed(root, "RequestId")
+    if body_rid.byte_length() == 0:
+        body_rid = _child_trimmed(root, "RequestID")
     if rid.byte_length() == 0:
         rid = _request_id_text(body_rid)
     return AwsErrorInfo(status, code, message, rid)

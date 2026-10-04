@@ -1,28 +1,33 @@
-# CI for komira: one job, on a runner that lives on the build farm. See
-# docs/ci.md; in short:
+# CI for komira: one job, on a GitHub-hosted runner that reaches the build farm
+# over a tailnet. See docs/ci.md; in short:
 #
-# The runner is a thin buck2 client. `./buck2 build //...` asks the farm to
-# build every target, and a target cannot build unless the tests welded to
-# it, and to each of its dependencies, pass and every lint that guards it is
-# clean (lints are validations, tools/build/lint). `./buck2 test //...` runs
-# the standalone tests. The tests cell is a cell of its own, so //... does not
-# reach it: `./buck2 build tests//functional/...` builds every target there that
-# must work (the targets that must fail are tests//negative, which run_tests.sh
-# builds as expect_reds). The last step tests what a build does not:
-# buck2's own behaviour (where actions ran, cache identity, refusals). A
-# contributor runs the same commands locally; the last one needs a Linux
-# x86_64 client.
+# THE BUILD IS THE GATE. Building a release target runs the tests welded to it
+# and to each of its dependencies, and a target cannot build unless they pass
+# and every lint that guards it is clean (lints are validations,
+# tools/build/lint). So this job is exactly three buck2 commands, each a named
+# target set and nothing else:
+#   ./buck2 build //...                         every target builds only if its
+#                                               welded tests pass
+#   ./buck2 test //...                          the standalone tests
+#   ./buck2 build tests//functional/...         the tests cell, a cell of its
+#                                               own that //... does not reach
+# The runner is a thin buck2 client: the farm does the work. A contributor runs
+# the same commands locally. buck2's own behaviour (cache identity, refusals,
+# fresh-clone runs) is tested by a separate workflow, build_system_selftests.yml,
+# which is not part of this gate.
 #
-# The farm connection comes from the runner's machine-wide buckconfig, not
-# from this repository: the job reads no secret and names no environment.
-# The runner is registered to this repository only, with the label
-# `komira-farm`, and runs each job in a fresh container.
+# The farm connection is made by the first step, the local action
+# .github/actions/farm-connect: it joins the tailnet by workload identity
+# federation (no stored secret), refuses to go on unless the farm answers, and
+# writes the farm's machine buckconfig from repository variables, so this
+# repository names no endpoint. The job holds `id-token: write` for that
+# alone and reads no secret.
 #
-# Pull requests from forks run only after a maintainer approves the run
-# (repository setting: Actions > General > "Require approval for all
-# external contributors"). Approving runs the fork's code on the farm
-# runner, so read the change, .github/ and tools/ included, first. There is
-# no pull_request_target workflow here, on purpose.
+# A pull request from a fork gets no OIDC token and no repository variables, so
+# it cannot reach the farm: the `build` job is skipped for it and the
+# `fork-advisory` job runs the lints that need no farm. A maintainer who has
+# read the change pushes it to a branch of this repository for the farm build.
+# There is no pull_request_target workflow here, on purpose.
 name: ci
 
 on:
@@ -44,21 +49,33 @@ concurrency:
 
 jobs:
   build:
-    runs-on: [self-hosted, komira-farm]
+    # Fork pull requests get neither the OIDC token nor the repository
+    # variables, so the farm job is for this repository's own runs; a fork's
+    # pull request gets the farm-less job below.
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
     timeout-minutes: 120
     permissions:
       contents: read
+      id-token: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
       # Without the linux property set a checkout builds locally, on this
       # runner (tools/build/platforms/default); refuse rather than do that.
-      - name: the runner's buckconfig names the farm
+      - name: the buckconfig names the farm
         run: |
           for key in linux_x86_64_properties; do
             ./buck2 audit config "komira_re.$key" --style json | grep -q '": *"[^"]' ||
-              { echo "the runner's buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
+              { echo "the machine buckconfig sets no [komira_re] $key: this job would build on the runner"; exit 1; }
           done
       - name: ./buck2 build //...
         run: ./buck2 build //...
@@ -67,10 +84,36 @@ jobs:
       # --keep-going: one run lists every red positive target.
       - name: ./buck2 build tests//functional/...
         run: ./buck2 build --keep-going tests//functional/...
-      - name: tools/build/tests/run_tests.sh
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
+
+  # For a pull request from a fork, which cannot reach the farm (see the top of
+  # this file). No tailnet, no id-token, no variable: the lints of the files a
+  # fork changes that build and run on the runner itself. It is NOT the farm
+  # verdict: `build` is skipped for a fork, and the summary says so.
+  fork-advisory:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name != github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: the farm build was not run
         run: |
-          mkdir -p "$RUNNER_TEMP/tests"
-          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh
+          echo "::warning title=no farm build::this pull request comes from a fork, which cannot reach the build farm. A maintainer must read the change and push it to a branch of this repository to get the farm build."
+          {
+            echo "### No farm build"
+            echo
+            echo "This pull request comes from a fork, and a fork's workflow run gets no tailnet credential, so the \`build\` job was skipped. The checks below are the lints that need no farm. A maintainer reads the change (\`.github/\` and \`tools/\` included) and pushes it to a branch of this repository to get the farm build."
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Built on this runner (no farm configured, so buck2 builds locally): the
+      # linters are pinned downloads.
+      - name: the lints that need no farm
+        run: ./buck2 build //:shell_lint //:workflow_lint //:action_pins //:push_verdicts //:no_endpoint
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
