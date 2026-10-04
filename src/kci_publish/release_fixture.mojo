@@ -23,7 +23,7 @@
 # the derived values are filled in, so a test can make any one key wrong.
 #
 # It also renders the matching declarations file and `--release-version`
-# text, and names a set hash a test can pass as `--expect-set-hash`.
+# text, and reads back the set hash `release.json` records.
 #
 # The release identity is `revision` (a full commit id) and `platform`
 # (`linux-x86_64`); `release.json` (major 2) records them and who produced
@@ -32,10 +32,15 @@
 # `write_example_inputs` lays out a whole `--release-dir` and the files beside
 # it, and returns the PUBLISH request that publishes it.
 #
-# `EXAMPLE_CHANNELS` declares four channels on `.invalid` hosts (PUBLIC and
-# PRIVATE, API token and OIDC; each OIDC push identity names the environment
-# `EXAMPLE_STAGE`); `example_targets`
-# loads a written directory and resolves it against one of them.
+# `EXAMPLE_CHANNELS` declares six channels on `.invalid` hosts, each at a
+# namespaced location `https://<host>/example/<channel>` (PUBLIC and
+# PRIVATE, API token and OIDC; the `example-oidc*` push identities name the
+# environment `EXAMPLE_ENVIRONMENT`, and `gamma` / `prod` name environments
+# `gamma` / `prod`). Requests are built for stage `EXAMPLE_STAGE`, which runs
+# in `EXAMPLE_ENVIRONMENT`: a stage's name and its environment differ, as in
+# a release machine. `example_channel_path` is a channel's path on the host;
+# `example_targets` loads a written directory and resolves it against one of
+# them.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -280,15 +285,19 @@ struct ExampleRelease(Copyable, Movable):
 comptime EXAMPLE_HOST: String = "conda.example.invalid"
 comptime EXAMPLE_TOKEN_SECRET: String = "EXAMPLE_CONDA_TOKEN"
 
-comptime EXAMPLE_STAGE: String = "prod"
-"""The stage (and GitHub environment) the example OIDC channels publish from."""
+comptime EXAMPLE_STAGE: String = "publish-prod"
+"""The stage the example requests are built for."""
+
+comptime EXAMPLE_ENVIRONMENT: String = "prod"
+"""The GitHub environment `EXAMPLE_STAGE` runs in, and the one the
+`example-oidc*` push identities name."""
 
 comptime EXAMPLE_CHANNELS: String = """schema_version: 1 channel {
   name: "example-stable"
   visibility: PUBLIC
   repository {
     artifact_type: CONDA
-    location: "https://conda.example.invalid/example-stable"
+    location: "https://conda.example.invalid/example/stable"
     push_identity: "publisher@example.invalid"
     credential { kind: API_TOKEN secret_name: "EXAMPLE_CONDA_TOKEN" }
   }
@@ -298,7 +307,7 @@ channel {
   visibility: PRIVATE
   repository {
     artifact_type: CONDA
-    location: "https://conda.example.invalid/example-private"
+    location: "https://conda.example.invalid/example/private"
     push_identity: "publisher@example.invalid"
     credential { kind: API_TOKEN secret_name: "EXAMPLE_CONDA_TOKEN" }
   }
@@ -308,7 +317,7 @@ channel {
   visibility: PUBLIC
   repository {
     artifact_type: CONDA
-    location: "https://conda.example.invalid/example-oidc"
+    location: "https://conda.example.invalid/example/oidc"
     push_identity: "repo:example/release:environment:prod"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
@@ -318,7 +327,27 @@ channel {
   visibility: PRIVATE
   repository {
     artifact_type: CONDA
-    location: "https://conda.example.invalid/example-oidc-private"
+    location: "https://conda.example.invalid/example/oidc-private"
+    push_identity: "repo:example/release:environment:prod"
+    credential { kind: OIDC_TRUSTED_PUBLISHING }
+  }
+}
+channel {
+  name: "gamma"
+  visibility: PUBLIC
+  repository {
+    artifact_type: CONDA
+    location: "https://conda.example.invalid/example/gamma"
+    push_identity: "repo:example/release:environment:gamma"
+    credential { kind: OIDC_TRUSTED_PUBLISHING }
+  }
+}
+channel {
+  name: "prod"
+  visibility: PUBLIC
+  repository {
+    artifact_type: CONDA
+    location: "https://conda.example.invalid/example/prod"
     push_identity: "repo:example/release:environment:prod"
     credential { kind: OIDC_TRUSTED_PUBLISHING }
   }
@@ -328,6 +357,16 @@ channel {
 
 def example_channel(name: String) raises -> ChannelDeclaration:
     return find_channel(parse_channels_file(String(EXAMPLE_CHANNELS)), name)
+
+
+def example_channel_path(name: String) raises -> String:
+    """The path of channel `name` on `EXAMPLE_HOST` (`example/stable` for
+    `example-stable`): what a `ScriptedChannel` for it serves."""
+    var location = example_channel(name).repository_for(String("CONDA")).location
+    var prefix = String("https://") + String(EXAMPLE_HOST) + String("/")
+    if not location.startswith(prefix):
+        raise Error(String("example channel '") + name + String("' is not on ") + String(EXAMPLE_HOST))
+    return String(location[byte = prefix.byte_length() :])
 
 
 def example_declarations(r: ExampleRelease) raises -> ArtifactDeclarations:
@@ -350,8 +389,8 @@ def write_example_inputs(
 ) raises -> PublishRequest:
     """Write `r` under `<root>/release/<platform>/`, and beside it the
     declarations, `EXAMPLE_CHANNELS` and the `--release-version` file; return
-    the PUBLISH request for `channel` in stage `EXAMPLE_STAGE`, approving the
-    set hash `release.json` records."""
+    the PUBLISH request for `channel` in stage `EXAMPLE_STAGE`, environment
+    `EXAMPLE_ENVIRONMENT`."""
     makedirs(root, exist_ok=True)
     var dir = release_platform_dir(root + String("/release"), r.platform)
     r.write(dir)
@@ -364,10 +403,10 @@ def write_example_inputs(
     req.platform = r.platform.copy()
     req.revision_id = r.revision.copy()
     req.stage = String(EXAMPLE_STAGE)
+    req.environment = String(EXAMPLE_ENVIRONMENT)
     req.channels_file = root + String("/channels.textproto")
     req.channel = channel.copy()
     req.release_version_file = root + String("/rv.txt")
-    req.expect_set_hash = r.set_hash(dir)
     req.plan = plan
     req.step_name = String("publish")
     return req^

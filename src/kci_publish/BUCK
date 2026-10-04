@@ -5,12 +5,17 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # release set a BUILD step left in <--release-dir>/<platform>/ to a conda
 # channel, or refuse it whole. The release must be the one --revision-id names,
 # for the step's platform; an OIDC channel's push identity must name the
-# stage as its GitHub environment. Step 0 re-verifies every
+# stage's GitHub environment. Step 0 re-verifies every
 # member over its bytes with the same `kci_release_set.verify_member` the build
-# ran, then lockstep, the requirement closure and the set hash, before any
-# request. The channel is read by download; a file present with other bytes, an
-# unclaimed new name, or a listing that could not be read stops the run with
-# nothing written. Then the missing members are uploaded by up to
+# ran, then lockstep, the requirement closure and release.json's set hash,
+# before any request. The channel is read by download; a file present with
+# other bytes, or a listing that could not be read, stops the run with nothing
+# written. Names the channel has never held are REPORTED (NEW NAMES, in the
+# result and a job-summary block), never refused: which names a release
+# publishes is its declarations file's. A later stage's NEW NAMES are read
+# anonymously (lookahead) so its approver sees them before approving. A dry
+# run writes nothing; under CI it exchanges an OIDC channel's token and
+# discards it (the credential probe). Then the missing members are uploaded by up to
 # `--concurrency` worker threads (komira_fork_join; never with `force`), every
 # member is read back, and the metapackage goes last. The credential is
 # the channel's own (kci_release_channel), resolved once. The step ends in a
@@ -48,22 +53,30 @@ mojo_library(
         "tests/test_publish_lockstep.mojo",
         # 0.4: the requirement closure; exactly one metapackage of every library
         "tests/test_publish_closure.mojo",
-        # 0.5: golden set hash; a wrong --expect-set-hash sends nothing
+        # 0.5: golden set hash; a release.json of another set sends nothing
         "tests/test_publish_set_hash.mojo",
-        # 1: by download; other bytes and an unclaimed new name REFUSED (3), all same NOOP (0),
-        # unread INDETERMINATE (5)
+        # 1: by download; other bytes REFUSED (3), new names reported never refused,
+        # all same NOOP (0), unread INDETERMINATE (5) and no name new
         "tests/test_publish_channel_state.mojo",
         # 2-4: once per attempt, settle, bounded retry, read-back barrier, metapackage last;
         # --concurrency 1 and 4 end in the same state; workers really run in parallel
         "tests/test_publish_run.mojo",
         # 2: no request of any scenario says force
         "tests/test_publish_never_force.mojo",
-        # 6: the result document's rows and error, no secret, one outcome per reason
+        # 6: the result document's rows, new_names[], the probe, no secret, one outcome
+        # per reason
         "tests/test_publish_result.mojo",
-        # dry run reads only, mints nothing; the credential is the channel's; RUNNING first
+        # dry run writes nothing; the credential is the channel's; RUNNING first
         "tests/test_publish_flow.mojo",
+        # a dry run under CI mints and discards; a refused mint is red; not under CI
+        # is recorded, never a mint
+        "tests/test_publish_plan_probe.mojo",
+        # a later stage's NEW NAMES read anonymously; a PRIVATE channel is not read;
+        # the job-summary block
+        "tests/test_publish_new_names_summary.mojo",
         # the release identity: --revision-id and the platform must be release.json's;
-        # the subdir is the platform's; an OIDC channel publishes only from its stage
+        # the subdir is the platform's; an OIDC channel publishes only from its
+        # stage's environment
         "tests/test_publish_platform.mojo",
     ],
     visibility = ["PUBLIC"],
