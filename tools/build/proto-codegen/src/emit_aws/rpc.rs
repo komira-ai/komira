@@ -127,14 +127,15 @@ impl Binding for AwsJsonRpc {
         ]
     }
 
+    fn error_info_binding(&self) -> Option<&'static str> {
+        Some("var info = aws_json_error_info(res.to_response())")
+    }
+
     fn error_code_and_message(&self) -> (&'static str, &'static str) {
-        (
-            "aws_error_code_from_body(res.body)",
-            "aws_error_message_from_body(res.body)",
-        )
+        ("info.code.copy()", "info.message.copy()")
     }
 
     fn error_code_doc(&self) -> &'static str {
-        "parsed short `__type` token"
+        "awsJson error code"
     }
 }

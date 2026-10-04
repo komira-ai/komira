@@ -2,6 +2,7 @@
 # (tools/build/lint/defs.bzl), so `./buck2 build //...` fails when one finds
 # anything.
 load("@komira//tools/build/lint:defs.bzl", "action_pins", "lint_suite", "markdown_docs", "no_endpoint", "push_verdicts", "shell_lint", "workflow_lint")
+load("@komira//tools/build/lint:retired_names.bzl", "retired_names")
 
 # The licence text every published package carries (tools/build/package/conda.bzl).
 export_file(name = "LICENSE", visibility = ["PUBLIC"])
@@ -44,7 +45,8 @@ no_endpoint(
 # script as in any other. A repository using komira as a cell has no
 # `tests` cell, so there the list is empty and the target is not declared.
 # A package of the tests cell that holds a shell script declares its
-# shell_lint and is named here.
+# shell_lint and is named here. The `deps_lint` of a package whose deps are
+# checked against its imports (mojo_deps) is named here too.
 _TESTS_LINTS = [
     "tests//:shell_lint",
     "tests//functional/aws_codegen:shell_lint",
@@ -54,6 +56,11 @@ _TESTS_LINTS = [
     "tests//functional/test_data:shell_lint",
     "tests//functional/watchdog:shell_lint",
     "tests//golden:shell_lint",
+    # The deps of a package that names its imports (tools/build/lint, mojo_deps).
+    "//src/komira_http_client:deps_lint",
+    "//src/komira_http_core:deps_lint",
+    "//src/komira_http_server:deps_lint",
+    "//src/komira_http_status_hook:deps_lint",
 ] if read_root_config("cells", "tests") else []
 
 [lint_suite(
@@ -85,4 +92,25 @@ _TESTS_LINTS = [
     cells = {"tools/build/tests": "tests//:doc_tree"},
     # The planted dead links of test 17.
     unchecked = ["tools/build/tests/negative/doc_links/dead.md"],
+) for _ in _TESTS_LINTS[:1]]
+
+# Retired names (tools/build/lint/retired_names.bzl): a package or type that
+# was renamed may appear only in a dated history note, a line carrying a
+# YYYY-MM-DD date. The tree is every file of the cell (`:doc_tree`) plus the
+# dotfiles a glob skips. Each name is spelt in parts so this file does not
+# hold it.
+[retired_names(
+    name = "retired_names",
+    names = [
+        "kci" + "_contract",
+        "kci" + "_stage" + "_graph",
+        "Stage" + "Graph",
+        "kci" + "_artifact" + "_declaration",
+    ],
+    srcs = [
+        ".buckconfig",
+        ".buckconfig.local.example",
+        ".gitignore",
+    ] + glob([".github/**"]),
+    tree = ":doc_tree",
 ) for _ in _TESTS_LINTS[:1]]
