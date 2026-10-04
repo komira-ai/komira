@@ -9,45 +9,55 @@
 #
 #   1. the request's own values (REFUSED, nothing read): the platform is one
 #      kci releases (KCI-E-PLATFORM), --revision-id is a full commit id
-#      (KCI-E-REVISION), --expect-set-hash is 64 lowercase hex, the
-#      concurrency is 1..16, no claim is given twice and the stage is named
+#      (KCI-E-REVISION), the concurrency is 1..16 and the stage is named
 #      (KCI-E-USAGE);
 #   2. STEP 0, every check before any request (REFUSED): the declarations
 #      (KCI-E-DECLARATION); `<release-dir>/<platform>/release.json` names
 #      this run's revision (KCI-E-REVISION-MISMATCH) and platform
 #      (KCI-E-PLATFORM-MISMATCH); the release directory member by member
-#      (`inputs.mojo`), CONDA only, lockstep against `--release-version`,
-#      the requirement closure (KCI-E-MEMBER); the set hash
-#      (KCI-E-SET-HASH); the channel and each member's coordinate
-#      (KCI-E-CHANNEL); for a channel that publishes with OIDC trusted
-#      publishing, the stage must be the environment the channel's push
-#      identity names (KCI-E-STAGE-ENVIRONMENT: prefix.dev's trusted
-#      publisher binds one environment, and the stage IS that environment);
-#      the credential is declared, and a PRIVATE OIDC-only channel is not
-#      dry-run (KCI-E-CREDENTIAL);
+#      (`inputs.mojo`; `release.json`'s set hash must be what the members
+#      recompute to), CONDA only, lockstep against `--release-version`, the
+#      requirement closure (KCI-E-MEMBER); the channel and each member's
+#      coordinate (KCI-E-CHANNEL); for a channel that publishes with OIDC
+#      trusted publishing, the stage's GitHub environment must be the one the
+#      channel's push identity names (KCI-E-STAGE-ENVIRONMENT: prefix.dev's
+#      trusted publisher binds one environment); the credential is declared,
+#      and a PRIVATE OIDC-only channel is not dry-run (KCI-E-CREDENTIAL);
 #   3. `recorder.begin` gets the RUNNING record BEFORE the first effect (the
 #      first secret, token or channel request). A recorder that cannot
 #      record stops the step FAILED with nothing sent;
 #   4. THE CREDENTIAL comes from the channel's CONDA repository, never from a
 #      flag: an API_TOKEN by secret name (resolved through the `SecretStore`)
 #      or OIDC trusted publishing, whose token's `environment` claim must be
-#      the stage. Reads on a PUBLIC channel are anonymous; on a PRIVATE one
+#      the stage's environment. Reads on a PUBLIC channel are anonymous; on a
+#      PRIVATE one
 #      they carry the credential, so it is resolved before step 1 (an OIDC
 #      exchange included: that is the one value the run uses). On a PUBLIC
 #      channel the write value is resolved at step 2, once. A credential
 #      that cannot be had is FAILED (KCI-E-CREDENTIAL), nothing sent;
-#   5. --plan: steps 0 and 1 only. No write request and no OIDC exchange.
-#      A PUBLIC channel resolves nothing; a PRIVATE channel with an API_TOKEN
-#      resolves it for the reads;
+#   5. --plan: steps 0 and 1 only, and NO WRITE to the channel. The reads
+#      stay as above (a PUBLIC channel's anonymous; a PRIVATE API_TOKEN
+#      channel's carry the token). THE CREDENTIAL PROBE: for an OIDC channel
+#      under GitHub Actions, the plan asks for the ID token (its `environment`
+#      claim held to the stage's environment, refused before the exchange
+#      otherwise), exchanges it at the channel host's mint endpoint, and
+#      discards the minted token unused (`credential_probe` MINTED). A mint
+#      refusal is FAILED (KCI-E-CREDENTIAL), so a misconfigured trusted
+#      publisher turns the dry run red. Not under CI (neither handshake
+#      variable set) the probe is NOT_UNDER_CI, which is never a pass; a
+#      channel whose credential is not OIDC is NOT_OIDC. What a MINTED probe
+#      does not prove: that the publisher which matched belongs to this
+#      channel (the mint request names none) and that it may write;
 #   6. `run_publish` (`run.mojo`), then this step's part of the result
 #      document (`report.mojo`, `record_publish_result`). Writing the
 #      FINISHED record is the caller's: a stage may hold more steps.
 #
-# THE ONE ENVIRONMENT READ is the GitHub Actions OIDC handshake, inside
-# `GithubOidcCredential.from_actions_env`, and only for an OIDC channel
-# outside a dry run.
+# THE ONE ENVIRONMENT READ is the GitHub Actions OIDC handshake
+# (`ActionsOidcEnv`), passed in so the welded tests can give it; only an OIDC
+# channel uses it.
 #
-# `publish_release_with_store` is the same over the real HTTPS transport. A
+# `publish_release_with_store` is the same over the real HTTPS transport,
+# reading the handshake from this process (`ActionsOidcEnv.from_process`). A
 # binary without a secret store passes `NoSecretStore` (it refuses by name).
 #
 # Encapsulation: owned values and generic seams. No pointer, no wildcard
@@ -64,7 +74,7 @@ from komira_secret_store import SecretStore, SecretValue
 
 from kci_artifact_declaration import read_artifact_declarations
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
-from kci_contract import (
+from kci_api import (
     ERROR_CHANNEL,
     ERROR_CREDENTIAL,
     ERROR_DECLARATION,
@@ -75,15 +85,17 @@ from kci_contract import (
     ERROR_RESULT_FILE,
     ERROR_REVISION,
     ERROR_REVISION_MISMATCH,
-    ERROR_SET_HASH,
     ERROR_STAGE_ENVIRONMENT,
     ERROR_USAGE,
+    CREDENTIAL_PROBE_MINTED,
+    CREDENTIAL_PROBE_NOT_OIDC,
+    CREDENTIAL_PROBE_NOT_UNDER_CI,
     RELEASE_MANIFEST_NAME,
     RunRecorder,
     require_full_commit_id,
     require_release_platform,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import (
     SURFACE_PREFIX_DEV,
     AnonymousCredential,
@@ -93,6 +105,7 @@ from kci_pkg_upload import (
     StaticTokenCredential,
 )
 from kci_pkg_upload.coordinate import repo_host
+from kci_pkg_upload.prefix_dev_registry import prefix_dev_channel
 from kci_release_channel import (
     ARTIFACT_TYPE_CONDA,
     ChannelCredential,
@@ -103,6 +116,7 @@ from kci_release_channel import (
 )
 from kci_release_set.release_manifest import ReleaseManifest, read_release_manifest
 
+from .actions_env import ActionsOidcEnv
 from .inputs import LoadedRelease, load_release
 from .pause import UsleepSleeper
 from .plan import PublishTarget, resolve_targets
@@ -111,13 +125,7 @@ from .report import REASON_FAILED, PublishReport, record_publish_result
 from .request import PublishRequest
 from .run import run_publish
 from .upload import PublishCredential, RunOptions
-from .verify import (
-    is_lower_hex_64,
-    require_closure,
-    require_conda_only,
-    require_lockstep,
-    require_set_hash,
-)
+from .verify import require_closure, require_conda_only, require_lockstep
 from .workers import MAX_CONCURRENCY, MIN_CONCURRENCY, ChannelTransport, HttpChannelTransport, WorkerSleeper
 
 
@@ -170,17 +178,11 @@ def _usage(req: PublishRequest) -> String:
     """Why the request's own values are refused, or "" (file header, 1)."""
     if req.stage.byte_length() == 0:
         return String("the stage is EMPTY: a PUBLISH step runs in a named stage")
-    if not is_lower_hex_64(req.expect_set_hash):
-        return String("--expect-set-hash '") + req.expect_set_hash + String("' is not 64 lowercase hex characters")
     if req.concurrency < MIN_CONCURRENCY or req.concurrency > MAX_CONCURRENCY:
         return (
             String("--concurrency ") + String(req.concurrency) + String(" is not in ")
             + String(MIN_CONCURRENCY) + String("..") + String(MAX_CONCURRENCY)
         )
-    for i in range(len(req.claims)):
-        for j in range(i):
-            if req.claims[j] == req.claims[i]:
-                return String("--claim-new-name ") + req.claims[i] + String(" is given twice")
     return String("")
 
 
@@ -243,10 +245,6 @@ def _step0(req: PublishRequest) -> _Step0:
         require_closure(loaded.members)
     except e:
         return _Step0(String(ERROR_MEMBER), String(e))
-    try:
-        require_set_hash(loaded, req.expect_set_hash)
-    except e:
-        return _Step0(String(ERROR_SET_HASH), String(e))
     var channel: ChannelDeclaration
     var targets: List[PublishTarget]
     var credential: Optional[ChannelCredential]
@@ -268,7 +266,8 @@ def _step0(req: PublishRequest) -> _Step0:
     except e:
         return _Step0(String(ERROR_CHANNEL), String(e))
     var is_oidc = Bool(credential) and credential.value().is_oidc_trusted_publishing()
-    if is_oidc and environment != req.stage:
+    var stage_env = req.github_environment()
+    if is_oidc and environment != stage_env:
         var named = String("names no environment") if environment.byte_length() == 0 else (
             String("names environment '") + environment + String("'")
         )
@@ -276,8 +275,9 @@ def _step0(req: PublishRequest) -> _Step0:
             String(ERROR_STAGE_ENVIRONMENT),
             String("channel '") + channel.name + String("' publishes with OIDC trusted publishing, and its")
             + String(" push identity ") + named + String("; this PUBLISH step runs in stage '")
-            + req.stage + String("'. The trusted publisher accepts one environment, so the stage")
-            + String(" that publishes is named exactly that environment"),
+            + req.stage + String("', in GitHub environment '") + stage_env
+            + String("'. The trusted publisher accepts one environment, so the stage that publishes")
+            + String(" runs in exactly that environment"),
         )
     if not credential and not (req.plan and channel.is_public()):
         return _Step0(
@@ -295,9 +295,31 @@ def _step0(req: PublishRequest) -> _Step0:
     return _Step0(PreparedRelease(loaded^, rv^, channel^, credential^, targets^))
 
 
+def prepare_release(req: PublishRequest) raises -> PreparedRelease:
+    """Step 0 alone (file header, 1 and 2): every check before any request.
+    RAISES with the refusal's message. A later stage's NEW NAMES lookahead
+    reads through this, so it sees exactly what that stage's own run would
+    publish."""
+    var step0 = _step0(req)
+    if not step0.prepared:
+        var text = String("")
+        for i in range(len(step0.refusal.lines)):
+            if step0.refusal.lines[i].startswith(String("RESULT ")):
+                continue
+            if text.byte_length() > 0:
+                text += String("\n")
+            text += step0.refusal.lines[i]
+        raise Error(text^)
+    return step0.prepared.take()
+
+
 def _base_report(p: PreparedRelease, req: PublishRequest) -> PublishReport:
     var r = PublishReport()
     r.channel = p.channel.name.copy()
+    try:
+        r.channel_path = prefix_dev_channel(p.targets[0].coordinate.repo)
+    except:
+        r.channel_path = p.channel.name.copy()
     r.set_hash = p.loaded.set_hash()
     r.release_commit = p.release_version.commit.copy()
     r.plan = req.plan
@@ -307,12 +329,48 @@ def _base_report(p: PreparedRelease, req: PublishRequest) -> PublishReport:
     return r^
 
 
+def _oidc_credential[U: PkgTransport](
+    var oidc_t: U, var actions: ActionsOidcEnv, host: String, environment: String
+) raises -> GithubOidcCredential[U]:
+    """The trusted-publishing credential over `oidc_t`, from the handshake in
+    `actions`, holding the ID token's `environment` claim to `environment`.
+    RAISES naming each handshake variable that is not set."""
+    var missing = actions.missing()
+    if missing.byte_length() > 0:
+        raise Error(
+            String("GithubOidcCredential: ") + missing
+            + String(" not set. Trusted publishing needs a GitHub Actions job with `permissions: id-token: write`")
+        )
+    var url = actions.request_url.copy()
+    var token = actions.take_request_token()
+    var oidc = GithubOidcCredential[U](oidc_t^, url, token^, host.copy(), String(""))
+    oidc.with_required_environment(environment.copy())
+    return oidc^
+
+
+def _probe[U: PkgTransport](
+    var oidc_t: U, var actions: ActionsOidcEnv, host: String, environment: String
+) raises -> String:
+    """A dry run's probe of an OIDC channel's credential (file header, 5):
+    NOT_UNDER_CI when neither handshake variable is set; otherwise one ID
+    token and one exchange, the minted token dropped unused (its
+    `SecretValue` is zeroized), MINTED. RAISES when the handshake is
+    incomplete, the token's environment is not `environment`, or the
+    exchange is refused: the caller reports FAILED (KCI-E-CREDENTIAL)."""
+    if actions.is_absent():
+        return String(CREDENTIAL_PROBE_NOT_UNDER_CI)
+    var oidc = _oidc_credential(oidc_t^, actions^, host, environment)
+    _ = oidc.authorization(SURFACE_PREFIX_DEV, host)
+    return String(CREDENTIAL_PROBE_MINTED)
+
+
 def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper, C: RunRecorder](
     req: PublishRequest,
     mut result: KciRunResult,
     mut recorder: C,
     mut registry: RegistrySet[T, PublishCredential],
     var oidc_t: U,
+    var actions: ActionsOidcEnv,
     mut store: S,
     run_opts: RunOptions,
     mut sleeper: W,
@@ -327,7 +385,6 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     # ── RUNNING, before the first effect ───────────────────────────────────
     result.revision = req.revision_id.copy()
     result.platform = req.platform.copy()
-    result.expect_set_hash = req.expect_set_hash.copy()
     result.set_run(req.run)
     try:
         recorder.begin(result.begin_record())
@@ -349,6 +406,10 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
     var is_oidc = Bool(p.credential) and p.credential.value().is_oidc_trusted_publishing()
     try:
         if req.plan:
+            if is_oidc:
+                base.credential_probe = _probe(oidc_t^, actions^, host, req.github_environment())
+            else:
+                base.credential_probe = String(CREDENTIAL_PROBE_NOT_OIDC)
             if public:
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
             else:
@@ -358,17 +419,16 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
                 var auth = token.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth^)
             var nobody = AnonymousCredential()
-            return run_publish(p.targets, req.claims, registry, nobody, True, opts, sleeper, base.copy())
+            return run_publish(p.targets, registry, nobody, True, opts, sleeper, base.copy())
         if is_oidc:
-            var oidc = GithubOidcCredential[U].from_actions_env(oidc_t^, host.copy(), String(""))
-            oidc.with_required_environment(req.stage.copy())
+            var oidc = _oidc_credential(oidc_t^, actions^, host, req.github_environment())
             if public:
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, String(""))
             else:
                 var auth = oidc.authorization(SURFACE_PREFIX_DEV, host)
                 registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
                 registry.credential().arm(auth^)
-            return run_publish(p.targets, req.claims, registry, oidc, False, opts, sleeper, base.copy())
+            return run_publish(p.targets, registry, oidc, False, opts, sleeper, base.copy())
         var token = StaticTokenCredential.token_secret(
             SURFACE_PREFIX_DEV, host.copy(), store, p.credential.value().secret_name
         )
@@ -378,7 +438,7 @@ def _flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: WorkerSleeper
             var auth = token.authorization(SURFACE_PREFIX_DEV, host)
             registry.credential().configure(SURFACE_PREFIX_DEV, host^, auth.copy())
             registry.credential().arm(auth^)
-        return run_publish(p.targets, req.claims, registry, token, False, opts, sleeper, base.copy())
+        return run_publish(p.targets, registry, token, False, opts, sleeper, base.copy())
     except e:
         base.stop(
             String(REASON_FAILED),
@@ -394,18 +454,20 @@ def publish_flow[T: ChannelTransport, U: PkgTransport, S: SecretStore, W: Worker
     mut recorder: C,
     mut registry: RegistrySet[T, PublishCredential],
     var oidc_t: U,
+    var actions: ActionsOidcEnv,
     mut store: S,
     opts: RunOptions,
     mut sleeper: W,
 ) -> PublishReport:
     """One PUBLISH step over the given seams (file header): `registry`
     talks to the channel (its credential unconfigured; the flow configures
-    it), `oidc_t` carries the OIDC exchange. `recorder.begin` is called at
-    most once, before the first effect; this step's row, artifacts, set
-    hash and first error go into `result`. Never raises."""
-    var r = _flow(req, result, recorder, registry, oidc_t^, store, opts, sleeper)
+    it), `oidc_t` carries the OIDC exchange, `actions` is the runner's OIDC
+    handshake. `recorder.begin` is called at most once, before the first
+    effect; this step's row, artifacts, set hash, new names and first error
+    go into `result`. Never raises."""
+    var r = _flow(req, result, recorder, registry, oidc_t^, actions^, store, opts, sleeper)
     try:
-        record_publish_result(r, req.step_name, req.revision_id, req.platform, result)
+        record_publish_result(r, req.step_name, req.stage, req.revision_id, req.platform, result)
     except e:
         r.lines.append(String("RESULT not recorded in the result document: ") + String(e))
     return r^
@@ -433,7 +495,19 @@ def publish_release_with_store[S: SecretStore, C: RunRecorder](
     channel credential through `store`."""
     var sleeper = UsleepSleeper()
     var registry = RegistrySet[_Http, PublishCredential](_http(), PublishCredential())
-    return publish_flow(req, result, recorder, registry, _http(), store, RunOptions(), sleeper)
+    var actions: ActionsOidcEnv
+    try:
+        actions = ActionsOidcEnv.from_process()
+    except e:
+        var r = PublishReport.refused(
+            String(ERROR_CREDENTIAL), String("PUBLISH step: the GitHub Actions OIDC handshake: ") + String(e)
+        )
+        try:
+            record_publish_result(r, req.step_name, req.stage, req.revision_id, req.platform, result)
+        except:
+            pass
+        return r^
+    return publish_flow(req, result, recorder, registry, _http(), actions^, store, RunOptions(), sleeper)
 
 
 struct NoSecretStore(SecretStore, Movable):

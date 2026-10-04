@@ -9,13 +9,13 @@
 # which the validator holds to a program name or an absolute path):
 # `{out_dir}` is `<release_dir>/<artifact>`, `{release_dir}` the release
 # directory of the platform (the caller passes `<--release-dir>/<platform>`,
-# kci_contract's `release_platform_dir`), `{platform}` the platform, and the
+# kci_api's `release_platform_dir`), `{platform}` the platform, and the
 # four stamp placeholders the `ReleaseStamp`'s values
 # (contract.mojo). A PURE function: it creates no directory and runs
 # nothing; the BUILD step owns both. It expects a validated value
 # (`parse_artifact_declarations` returns only those) and refuses an unknown
 # artifact, an undeclared build system, a platform kci does not release
-# (kci_contract's `require_release_platform`), and a release_dir that is not
+# (kci_api's `require_release_platform`), and a release_dir that is not
 # an absolute path other than `/` or that ends in `/`, so a wrong call cannot
 # run a build against a relative directory.
 #
@@ -24,7 +24,7 @@
 
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
 
-from kci_contract import require_release_platform
+from kci_api import require_release_platform
 
 from .contract import BuildValues, ReleaseStamp, substitute_placeholders
 from .validate import find_artifact, find_build_system

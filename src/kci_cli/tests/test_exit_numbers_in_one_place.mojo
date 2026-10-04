@@ -1,8 +1,8 @@
 # =============================================================================
 # src/kci_cli/tests/test_exit_numbers_in_one_place.mojo -- kci's exit numbers
-#   are kci_contract's alone: no kci_cli source and not bin/kci's main may
+#   are kci_api's alone: no kci_cli source and not bin/kci's main may
 #   spell `comptime EXIT_`, `return <digit>` or `exit(<digit>`. Every exit
-#   number comes from kci_contract's table, so a renumbering is one place.
+#   number comes from kci_api's table, so a renumbering is one place.
 # =============================================================================
 #
 # The sources are staged as test data (BUCK): a new source file must be
@@ -29,7 +29,7 @@ def _offences(name: String) raises -> List[String]:
     return out^
 
 
-def test_no_exit_number_outside_kci_contract() raises:
+def test_no_exit_number_outside_kci_api() raises:
     var all = List[String]()
     for f in [
         "kci_cli_args.mojo",
@@ -40,7 +40,7 @@ def test_no_exit_number_outside_kci_contract() raises:
     ]:
         all.extend(_offences(String(f)))
     if len(all) > 0:
-        raise Error(String("an exit number spelled outside kci_contract: ") + all[0])
+        raise Error(String("an exit number spelled outside kci_api: ") + all[0])
     assert_equal(len(all), 0)
 
 

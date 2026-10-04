@@ -1,34 +1,41 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# `kci ci check`: a hand-written CI workflow (.github/workflows/kci.yml) held to
-# the machine file's stage graph. The machine file owns the graph; the workflow
-# must agree: one job per stage with the stage's name and environment, `needs`
-# = the stage's `after`, `id-token: write` exactly on the stages that publish by
-# OIDC trusted publishing, one literal `kci run --stage <id>` per job, no
-# pull_request trigger, a `revision` input on workflow_dispatch, every `uses:`
-# pinned to a commit id, no `--only` on a release job, and every `kci run`
-# reading the machine file being checked (the default, or its `--machine`).
+# The workflow consistency check: a hand-written CI workflow
+# (.github/workflows/kci.yml) held to the release machine. It is
+# library code, not a command: the welded test that holds this repository's
+# kci.yml to release/machine.textproto uses it, and `kci run` runs it at
+# start-up on the workflow it runs under (`check_running_workflow`). The
+# machine file owns the stages; the workflow must agree: one job per stage with
+# the stage's name, running in the stage's environment, `needs` = the stage's
+# `after`, `id-token: write` exactly on the stages that publish by OIDC
+# trusted publishing or are farm-connected, the farm-connect action exactly on
+# the farm-connected stages, one literal `kci run --stage <id>` per job with a
+# `--summary-file`, no pull_request trigger, a `revision` input on
+# workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
+# action excepted), no `--only` on a release job, and every `kci run` reading
+# the machine file being checked (the default, or its `--machine`).
 #
 # The workflow is read by a RESTRICTED reader of the YAML subset it uses;
 # anything else (anchors, aliases, tags, flow mappings, tabs, a second document)
 # is "cannot tell", never a pass. actionlint (//:workflow_lint) stays the YAML
 # validity gate.
 #
-# Deps: kci_stage_graph (the graph), kci_release_channel (which channels
-# publish by OIDC) and kci_contract (the default machine file). Pure: it
+# Deps: kci_release_machine (the stages), kci_release_channel (which channels
+# publish by OIDC) and kci_api (the default machine file). Pure: it
 # checks text it is given.
 mojo_library(
     name = "kci_ci_check",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/kci_release_channel:kci_release_channel",
-        "//src/kci_stage_graph:kci_stage_graph",
+        "//src/kci_release_machine:kci_release_machine",
     ],
     test_srcs = [
         # what the restricted reader reads, and each construct it cannot tell
         "tests/test_workflow_reader.mojo",
-        # a fixture that agrees, one mutation per rule R1-R10, the id-token stages
+        # a fixture that agrees, one mutation per rule R1-R12, the id-token
+        # stages, the start-up entry point
         "tests/test_ci_rules.mojo",
         # the repository's own kci.yml held to its own release/machine.textproto
         "tests/test_repo_kci_yml.mojo",

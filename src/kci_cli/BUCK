@@ -1,29 +1,29 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
 # The `kci` command line. `kci run --stage S` is THE verb for stages: it reads
-# the machine file (kci_stage_graph; --machine, default
+# the machine file (kci_release_machine; --machine, default
 # release/machine.textproto), resolves stage S and runs each of its steps in
 # order through kci_build (BUILD) or kci_publish (PUBLISH). `kci ci check` holds
 # a CI workflow to the same stages (kci_ci_check). There is no per-kind verb and
-# no alias. Every verb writes kci_contract's result document to --result-file
+# no alias. Every verb writes kci_api's result document to --result-file
 # (temp-and-rename, RUNNING before the first effect, FINISHED on every exit
-# path) and exits with kci_contract's numbers. bin/kci is its `main`.
+# path) and exits with kci_api's numbers. bin/kci is its `main`.
 #
 # The welded tests: the one parser and every usage refusal; the stage run over
 # a recording fake (order, stop at the first failure, worst outcome, PARTIAL
 # after a publish, the result records); the result file; the real libraries
 # reached through a machine file; and a scan that no kci source but
-# kci_contract spells an exit number.
+# kci_api spells an exit number.
 mojo_library(
     name = "kci_cli",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_build:kci_build_lib",
         "//src/kci_ci_check:kci_ci_check",
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/kci_publish:kci_publish_lib",
         "//src/kci_release_set:kci_release_set",
-        "//src/kci_stage_graph:kci_stage_graph",
+        "//src/kci_release_machine:kci_release_machine",
         "//src/komira_clock:komira_clock",
         "//src/komira_libc:komira_libc",
         "//src/komira_secret_env:komira_secret_env",
@@ -38,7 +38,7 @@ mojo_library(
         "tests/test_kci_result_file.mojo",
         # the real libraries through a machine file; the secret store by name
         "tests/test_kci_library_wiring.mojo",
-        # no exit number is spelled outside kci_contract
+        # no exit number is spelled outside kci_api
         "tests/test_exit_numbers_in_one_place.mojo",
     ],
     test_env = {

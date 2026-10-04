@@ -1,21 +1,30 @@
 # =============================================================================
 # src/kci_ci_check/rules.mojo -- a CI workflow held to a machine file's stage
-#   graph (`kci ci check`).
+#   graph: the workflow consistency check.
 # =============================================================================
 #
-# The machine file owns the stage graph; the workflow is written by hand and
+# The workflow consistency check is library code, not a command. Two places
+# use it: the welded test that holds this repository's kci.yml to
+# release/machine.textproto, and `kci run` at start-up, which checks the
+# workflow it runs under and refuses to run on a mismatch
+# (`check_running_workflow`).
+#
+# The machine file owns the release machine; the workflow is written by hand and
 # must agree with it. `check_workflow` returns every disagreement (empty =
 # they agree); it never stops at the first, so one run names them all:
 #
 #   R1  the workflow's job ids are exactly the machine file's stage names
 #       (a job no stage names, a stage no job runs)
-#   R2  each job runs in the GitHub environment named like its id
-#       (`environment: <id>`, or `environment: {name: <id>}` as a block)
+#   R2  each job runs in its stage's GitHub environment, the stage's
+#       `environment` (by default its name): `environment: <env>`, or
+#       `environment: {name: <env>}` as a block
 #   R3  each job's `needs` is exactly its stage's `after` (none for none)
 #   R4  `id-token: write` is in a job's own `permissions` exactly when its
-#       stage needs an identity token (it publishes to a channel whose
-#       credential is OIDC trusted publishing: `id_token_stages`); and never
-#       in the workflow-level `permissions`, which reach every job
+#       stage needs an identity token: it publishes to a channel whose
+#       credential is OIDC trusted publishing (`id_token_stages`), or it is
+#       farm-connected (the farm connection exchanges the job's identity
+#       token for a network credential). Never in the workflow-level
+#       `permissions`, which reach every job. No other job carries it
 #   R5  each job's steps invoke `kci run` exactly once, with `--stage` its
 #       own id written literally (a `--stage` naming another stage, or one
 #       that is a variable, is a disagreement)
@@ -23,13 +32,22 @@
 #       workflow never runs a pull request's code
 #   R7  `workflow_dispatch` takes an input `revision` (the commit a manual
 #       run releases)
-#   R8  every `uses:` is pinned to a full 40-hex commit id
+#   R8  every `uses:` is pinned to a full 40-hex commit id, except the one
+#       local action `./.github/actions/farm-connect` (a local action is part
+#       of the checked-out commit; the `uses:` inside it are pinned by its
+#       own gate)
 #   R9  no `kci run` carries `--only`: a release job runs its whole stage,
 #       so its result is a FULL run, never a selective one
 #   R10 each `kci run` reads the machine file being checked: a `--machine`
 #       must name that file, and a `kci run` without one reads the default
-#       (kci_contract's DEFAULT_MACHINE_FILE), which must then be that file.
+#       (kci_api's DEFAULT_MACHINE_FILE), which must then be that file.
 #       Paths are compared as written, after dropping a leading `./`
+#   R11 a job has a step `uses: ./.github/actions/farm-connect` exactly when
+#       its stage is farm-connected (the machine file's typed field, never a
+#       job name)
+#   R12 every `kci run` passes `--summary-file` (the job summary carries the
+#       run's outcome and the NEW NAMES an approver reads before approving a
+#       later stage)
 #
 # How `kci run` is found (R5): each `run:` block is split into shell words
 # (a line ending in `\` continues; quotes around a word are dropped); an
@@ -38,7 +56,7 @@
 # word ending in `;`) whose last `/`-separated part is `kci`, followed by
 # the word `run`. So `echo "... kci run ..."` is not one. Its arguments run
 # to the end of the line or the next `;` `&&` `||` `|`; `--stage`,
-# `--machine` and `--only` take the next word, or `=<v>`.
+# `--machine`, `--only` and `--summary-file` take the next word, or `=<v>`.
 #
 # A workflow the restricted reader cannot read raises (`cannot tell:`,
 # workflow_reader.mojo): the caller reports INDETERMINATE, never a pass.
@@ -46,11 +64,15 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from kci_contract import DEFAULT_MACHINE_FILE
+from kci_api import DEFAULT_MACHINE_FILE
 from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
-from kci_stage_graph import Stage, StageGraph, joined_names
+from kci_release_machine import ReleaseMachine, Stage, joined_names
 
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
+
+comptime FARM_CONNECT_ACTION: String = "./.github/actions/farm-connect"
+"""The one local action a workflow may use (R8), and the step a
+farm-connected stage's job must have (R11)."""
 
 
 struct ChannelsFile(Copyable, Movable):
@@ -72,7 +94,7 @@ def _channels_text(files: List[ChannelsFile], path: String) raises -> String:
     raise Error(String("the channels file '") + path + String("' was not given"))
 
 
-def channels_paths(g: StageGraph) -> List[String]:
+def channels_paths(g: ReleaseMachine) -> List[String]:
     """Every distinct channels path a PUBLISH step names, in file order: what
     `id_token_stages` needs read."""
     var out = List[String]()
@@ -98,7 +120,7 @@ def _channel_is_oidc(ch: ChannelDeclaration) -> Bool:
     return False
 
 
-def id_token_stages(g: StageGraph, files: List[ChannelsFile]) raises -> List[String]:
+def id_token_stages(g: ReleaseMachine, files: List[ChannelsFile]) raises -> List[String]:
     """The stages that need a CI identity token: those with a PUBLISH step
     whose channel publishes by OIDC trusted publishing. Raises when a
     channels file is not given or is refused, or names no such channel."""
@@ -161,20 +183,22 @@ def _is_kci(word: String) -> Bool:
 
 struct KciRunCall(Copyable, Movable):
     """One `kci run` found in a job: the `--stage` value ("" when absent),
-    the `--machine` value (`has_machine` False when absent), and whether it
-    carries any `--only`.
+    the `--machine` value (`has_machine` False when absent), whether it
+    carries any `--only`, and whether it passes `--summary-file`.
     Layout: owned Strings and Bools. No pointer field."""
 
     var stage: String
     var machine: String
     var has_machine: Bool
     var has_only: Bool
+    var has_summary_file: Bool
 
     def __init__(out self, var stage: String):
         self.stage = stage^
         self.machine = String("")
         self.has_machine = False
         self.has_only = False
+        self.has_summary_file = False
 
 
 def _command_position(w: List[String], j: Int) -> Bool:
@@ -226,6 +250,8 @@ def kci_run_calls(script: String) -> List[KciRunCall]:
                     call.has_machine = True
                 elif flag == String("--only"):
                     call.has_only = True
+                elif flag == String("--summary-file") and has_value:
+                    call.has_summary_file = True
                 k += 1
             out.append(call^)
     return out^
@@ -291,6 +317,8 @@ def _collect_uses(doc: WorkflowDoc, node: Int, mut findings: List[String]):
                 var v = doc.text(c)
                 var at = v.rfind(String("@"))
                 var pinned = at > 0 and not v.startswith(String("./")) and _is_full_sha(String(v[byte = at + 1 :]))
+                if v == FARM_CONNECT_ACTION:
+                    pinned = True
                 if not pinned:
                     findings.append(
                         _at(doc, c) + String("R8: `uses: ") + v
@@ -328,11 +356,12 @@ def _check_job(
     job_id: String,
     job: Int,
     st: Stage,
-    needs_token: Bool,
+    publishes_by_oidc: Bool,
     machine_path: String,
     mut findings: List[String],
 ):
     var where = _at(doc, job) + String("job '") + job_id + String("'")
+    var needs_token = publishes_by_oidc or st.farm_connected
     # R2
     var env = doc.child(job, String("environment"))
     var env_name = String("")
@@ -342,13 +371,16 @@ def _check_job(
         var n = doc.child(env, String("name"))
         if n >= 0 and doc.kind(n) == NODE_SCALAR:
             env_name = doc.text(n)
-    if env_name != job_id:
+    if env_name != st.environment:
         if env_name.byte_length() == 0:
-            findings.append(where + String(": R2: runs in no environment; it must run in `environment: ") + job_id + String("`"))
+            findings.append(
+                where + String(": R2: runs in no environment; it must run in `environment: ") + st.environment
+                + String("`")
+            )
         else:
             findings.append(
                 where + String(": R2: runs in environment '") + env_name + String("'; it must run in '")
-                + job_id + String("' (the stage's name)")
+                + st.environment + String("' (the stage's environment)")
             )
     # R3
     var needs = doc.scalar_or_list(doc.child(job, String("needs")))
@@ -367,19 +399,26 @@ def _check_job(
     # R4
     var has_token = _id_token_write(doc, doc.child(job, String("permissions")))
     if needs_token and not has_token:
+        var why = String("' publishes by OIDC trusted publishing")
+        if not publishes_by_oidc:
+            why = String("' is farm-connected")
         findings.append(
-            where + String(": R4: stage '") + job_id
-            + String("' publishes by OIDC trusted publishing, so the job needs `id-token: write` in its own permissions")
+            where + String(": R4: stage '") + job_id + why
+            + String(", so the job needs `id-token: write` in its own permissions")
         )
     if has_token and not needs_token:
         findings.append(
             where + String(": R4: has `id-token: write`, but stage '") + job_id
-            + String("' publishes to no OIDC channel; remove it")
+            + String("' publishes to no OIDC channel and is not farm-connected; remove it")
         )
-    # R5
+    # R5, R11
     var calls = List[KciRunCall]()
     var steps = doc.items(doc.child(job, String("steps")))
+    var farm_connect_steps = 0
     for i in range(len(steps)):
+        var u = doc.child(steps[i], String("uses"))
+        if u >= 0 and doc.kind(u) == NODE_SCALAR and doc.text(u) == FARM_CONNECT_ACTION:
+            farm_connect_steps += 1
         var r = doc.child(steps[i], String("run"))
         if r >= 0 and doc.kind(r) == NODE_SCALAR:
             var got = kci_run_calls(doc.text(r))
@@ -399,9 +438,24 @@ def _check_job(
                 where + String(": R5: `kci run --stage ") + s + String("` in job '") + job_id
                 + String("'; each job runs its own stage, written literally")
             )
-    # R9, R10
+    if st.farm_connected and farm_connect_steps == 0:
+        findings.append(
+            where + String(": R11: stage '") + job_id + String("' is farm-connected, so the job needs a step `uses: ")
+            + String(FARM_CONNECT_ACTION) + String("`")
+        )
+    if not st.farm_connected and farm_connect_steps > 0:
+        findings.append(
+            where + String(": R11: uses ") + String(FARM_CONNECT_ACTION) + String(", but stage '") + job_id
+            + String("' is not farm-connected (the machine file's `farm_connected`); remove it")
+        )
+    # R9, R10, R12
     for i in range(len(calls)):
         ref call = calls[i]
+        if not call.has_summary_file:
+            findings.append(
+                where + String(": R12: `kci run` passes no --summary-file; the job summary carries the outcome")
+                + String(" and the NEW NAMES an approver reads")
+            )
         if call.has_only:
             findings.append(
                 where + String(": R9: `kci run` carries --only; a release job runs its whole stage")
@@ -422,7 +476,7 @@ def _check_job(
 
 
 def check_workflow_doc(
-    doc: WorkflowDoc, g: StageGraph, token_stages: List[String], machine_path: String
+    doc: WorkflowDoc, g: ReleaseMachine, token_stages: List[String], machine_path: String
 ) -> List[String]:
     """Every disagreement between `doc` and `g` (file header); empty when
     they agree. `machine_path` is the machine file `g` was read from, as the
@@ -477,9 +531,23 @@ def check_workflow_doc(
 
 
 def check_workflow(
-    workflow_text: String, g: StageGraph, token_stages: List[String], machine_path: String
+    workflow_text: String, g: ReleaseMachine, token_stages: List[String], machine_path: String
 ) raises -> List[String]:
     """`check_workflow_doc` over a workflow's text. Raises `cannot tell:` when
     the restricted reader cannot read it."""
     var doc = read_workflow(workflow_text)
     return check_workflow_doc(doc, g, token_stages, machine_path)
+
+
+def check_running_workflow(
+    g: ReleaseMachine, channels_files: List[ChannelsFile], workflow_text: String, machine_path: String
+) raises -> List[String]:
+    """The check `kci run` makes at start-up on the workflow it runs under:
+    every disagreement between `workflow_text` and `g` (empty = they agree).
+    It is `check_workflow` with the identity-token stages read from the
+    channels files the graph names; the separate name pins the call site.
+    Raises when a channels file is not given or is refused, and `cannot
+    tell:` when the workflow cannot be read: the caller reports either as
+    CANNOT_TELL, never a pass."""
+    var token_stages = id_token_stages(g, channels_files)
+    return check_workflow(workflow_text, g, token_stages, machine_path)
