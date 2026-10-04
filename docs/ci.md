@@ -12,7 +12,8 @@ to build it. Nothing is compiled on the runner.
 | pull request from a fork | no farm build; the lints that need no farm ([below](#pull-requests-from-forks)) |
 | manual (`workflow_dispatch`) | the farm build, on the chosen ref |
 
-There is no nightly run, and no separate static or lint job.
+There is no separate static or lint job. The only scheduled run is the
+[build-system self-tests](#build-system-self-tests), which is not the gate.
 
 ## What the job runs
 
@@ -20,8 +21,10 @@ There is no nightly run, and no separate static or lint job.
 ./buck2 build //...
 ./buck2 test //...
 ./buck2 build --keep-going tests//functional/...
-tools/build/tests/run_tests.sh
 ```
+
+The build is the gate: building a release target runs the tests welded to it
+and to its dependencies, so the job points at build targets and nothing else.
 
 1. **`./buck2 build //...`** builds every target of the komira cell on the
    farm. That is more than compiling:
@@ -50,20 +53,11 @@ tools/build/tests/run_tests.sh
    positive target of the `tests` cell, which `//...` does not reach (it is a
    cell of its own so that `//...` holds no target that fails by design). A
    target there that does not build fails the job; the targets that must fail
-   are `tests//negative`, built by step 4 as `expect_red`s and not by this
-   one. Every target of `tests//functional` is meant to build, so nothing
+   are `tests//negative`, built as `expect_red`s by the
+   [self-tests](#build-system-self-tests) and not by this one. Every target of `tests//functional` is meant to build, so nothing
    there is excluded: a probe or fixture that is expected to fail belongs in
    `tests//negative`.
-4. **[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md)**
-   tests what a build of `//...` does not: where actions ran, cache
-   identity across checkouts, analysis-time refusals, a `buck2 run` from a
-   fresh clone, targets that must fail by design (the `tests` cell), and
-   the `./buck2` bootstrap. It needs a Linux x86_64 client, and refuses any
-   other (exit 2), because it runs binaries the farm built for Linux x86_64,
-   and `readelf`/`objdump`, on the client.
-
-A contributor on Linux x86_64 runs the same four commands; on another
-client (macOS arm64) the first three. A green local
+A contributor runs the same three commands on any client. A green local
 `./buck2 build //... && ./buck2 test //...` is what the first two steps of CI
 prove, dead Markdown links included (`//:docs`).
 
@@ -75,7 +69,7 @@ step after these, on pushes to `main` only, of artifacts the same job built.
 A GitHub-hosted `ubuntu-24.04` virtual machine, fresh for every job, so nothing
 from one job survives into the next. It holds `git`, and what
 [`./buck2`](../buck2) needs: `sh`, `curl`, `zstd` and `sha256sum`.
-`run_tests.sh` also needs `readelf` and `objdump`, and `docker` for the image
+The self-tests also need `readelf` and `objdump`, and `docker` for the image
 run leg of the format test (skipped without it). Its JSON, tar and Mach-O
 reads are a Mojo tool,
 [`//tools/build/inspect:inspect`](../tools/build/inspect/inspect.mojo), built
@@ -183,6 +177,39 @@ network so an action cannot reach storage or the scheduler; deny
 action-cache writes at the client-facing endpoint. Until then, treat an
 approved run as able to affect every build that uses the same service.
 
+## Build-system self-tests
+
+[`tools/build/tests/run_tests.sh`](../tools/build/tests/README.md) tests what a
+build does not: where actions ran, cache identity across checkouts,
+analysis-time refusals, a `buck2 run` from a fresh clone, targets that must
+fail by design (the `tests` cell), and the `./buck2` bootstrap. It is one shell
+script of numbered cases, takes well over an hour, and is **not the gate**: the
+gate is the three build commands above. It runs in its own workflow,
+[`build_system_selftests.yml`](../.github/workflows/build_system_selftests.yml),
+on a nightly schedule and on demand, never on a push or a pull request, with
+the same farm connection and the same job permissions as `ci`. Two runs never
+overlap. It needs a Linux x86_64 client and refuses any other (exit 2).
+
+Run it by hand on a branch of this repository:
+
+```sh
+gh workflow run build_system_selftests.yml --ref <branch>
+```
+
+or locally with `tools/build/tests/run_tests.sh`.
+
+**Direction.** The script is to be replaced, case by case, by targets of the
+`tests` cell, so that each case is cached, runs in parallel, has a name, and
+runs under `./buck2 test` or `./buck2 build` like everything else. Cases that
+look convertible from their description: 2 (gate red, ungated builds), 3
+(a binary without the dep fails to compile), 4 (incomplete closure refused),
+10 (execution platform resolution, an aquery), 13 and 14 (bundle and launcher
+parity, already remote actions), 17 (Markdown link validation), 28 and 29
+(already `tests//functional` targets), 30 (optimization levels from aquery),
+31 (lint weld), 34 to 36 (generator goldens and refusals). Cases that observe
+the client or the daemon (1, 5, 6, 7, 9, 12, 25, 32, 33) need a harness that
+can start a scratch daemon or clone and are still to be analysed.
+
 ## merge-from-live (not yet running)
 
 [`.github/workflows/merge_from_live.yml`](../.github/workflows/merge_from_live.yml)
@@ -198,8 +225,9 @@ pull requests.
 ```sh
 ./buck2 build //... && ./buck2 test //...
 ./buck2 build --keep-going tests//functional/...
-tools/build/tests/run_tests.sh
 ```
+
+The build-system self-tests (Linux x86_64 client): `tools/build/tests/run_tests.sh`.
 
 The lints alone, without building the rest:
 
