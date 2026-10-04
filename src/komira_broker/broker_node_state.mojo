@@ -1,13 +1,13 @@
 # =============================================================================
 # komira_broker/broker_node_state.mojo
-#   Multi-node control plane — the in-process agent->broker relay
+#   Multi-node control plane — the in-process job-supervisor->broker relay
 # =============================================================================
 #
-# The supervisor agent and the broker are the SAME co-located node. The agent
-# holds a borrowed `ref` to a `BrokerNodeState` and, on each heartbeat round,
-# reconciles the coordinator's `assigned_partitions[]` reply against the set
-# this node is CURRENTLY serving — all in-process, NO second listener / file /
-# RPC.
+# The job supervisor and the broker are the SAME co-located node. The job
+# supervisor holds a borrowed `ref` to a `BrokerNodeState` and, on each
+# heartbeat round, reconciles the coordinator's `assigned_partitions[]` reply
+# against the set this node is CURRENTLY serving — all in-process, NO second
+# listener / file / RPC.
 #
 # -----------------------------------------------------------------------------
 # WHAT THIS IS (the relay seam)
@@ -33,9 +33,9 @@
 # same shape as the assignment pass: pure decision here, effect at the edge.
 #
 # -----------------------------------------------------------------------------
-# ENCAPSULATION: the agent holds a borrowed `ref BrokerNodeState` that rides
-# the per-dispatch heartbeat value (a borrowed ref threaded through the
-# dispatch API, NOT a long-lived wildcard field). ZERO UnsafePointer crosses
+# ENCAPSULATION: the job supervisor holds a borrowed `ref BrokerNodeState`
+# that rides the per-dispatch heartbeat value (a borrowed ref threaded through
+# the dispatch API, NOT a long-lived wildcard field). ZERO UnsafePointer crosses
 # any boundary; no wildcard origin; no unsafe_from_address. BrokerNodeState is
 # a stack value (a String + two List[UInt32]), never a byte-slab element.
 # =============================================================================
@@ -82,8 +82,8 @@ struct BrokerNodeState(Movable):
     """The co-located node's broker-serving state: its `node_id` + the set of
     partitions it is CURRENTLY serving + the per-partition lease GENERATION this
     node holds (the writer-lease-epoch the owner stamps on
-    appends). The agent holds a borrowed `ref` to one of these and calls
-    `apply_assignment` each heartbeat round (the in-process relay).
+    appends). The job supervisor holds a borrowed `ref` to one of these and
+    calls `apply_assignment` each heartbeat round (the in-process relay).
 
     The owned set is kept SORTED ascending so `owned_partitions()` (the list the
     node reports back on its NEXT heartbeat's `owned_partitions[]`) is

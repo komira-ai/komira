@@ -232,6 +232,13 @@ pub struct IrOneof {
 pub struct IrService {
     pub name: String,
     pub methods: Vec<IrMethod>,
+    /// The service's `(google.api.default_host)` option (`logging.googleapis.com`),
+    /// recovered from the descriptor bytes (`service_options.rs`). `None` when
+    /// the service declares none, and on every path that does not recover it
+    /// (gRPC, db, OpenAPI, AWS). Read by the REST emitter: the generated
+    /// client starts at this host, and with `None` it refuses to send until
+    /// its caller names one.
+    pub default_host: Option<String>,
 }
 
 /// One RPC method.
