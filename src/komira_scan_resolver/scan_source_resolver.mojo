@@ -326,8 +326,14 @@ def refuse_discover_splits(kind_name: String) raises -> SplitDelta:
 #
 # Each takes the type-erased home byte ptr (the type-erasure handle; its
 # untracked origin is confined to these aliases, the cast sites and the
-# trampoline bodies, never a struct field) plus value-typed arguments.
+# trampoline bodies, never a public signature) plus value-typed arguments.
 # =============================================================================
+# SAFETY: these aliases are private (underscore-named, not re-exported) and
+# type only private fields of `ErasedScanSourceResolver`. Its one constructor,
+# generic over the concrete `R`, binds every fn-ptr to a trampoline for that
+# same `R`, so the reinterpret of `_home`'s bytes back to `R` is type-correct.
+# The pointer is formed from the live `_home` at each call and borrowed for that
+# call only; only the drop arm consumes the home, once, from the destructor.
 
 comptime _EpochFn = def (UnsafePointer[UInt8, MutUntrackedOrigin]) thin -> UInt64
 comptime _IsBoundFn = def (

@@ -391,6 +391,12 @@ trait SplitReader(Movable, Deinitable):
 # §3 — ErasedSplitReader — one reader behind a non-generic facade
 # =============================================================================
 
+# SAFETY: the two fn-ptr aliases below are private (underscore-named, not
+# re-exported) and type only private fields of `ErasedSplitReader`. Its one
+# constructor, generic over the concrete `R`, binds both to trampolines for that
+# same `R`, so the reinterpret of `_home`'s bytes back to `R` is type-correct.
+# The pointer is formed from the live `_home` at each call and borrowed for that
+# call only; only the drop arm consumes the home, once, from the destructor.
 comptime _PollFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin], Int64, Int64
 ) raises thin -> SplitPoll
