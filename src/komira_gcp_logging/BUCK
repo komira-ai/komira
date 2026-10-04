@@ -24,9 +24,12 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # The library is gated by its layout probe and these tests, hand-written
 # against the Cloud Logging v2 REST reference (no upstream test body is
 # copied), each sending through the generated client over komira_http_core's
-# ScriptedConnector (no socket): test_logging_default_host (a client given
-# no host dials logging.googleapis.com and names it in the Host header;
-# `set_rest_host` replaces it), test_logging_requests (the request line,
+# ScriptedConnector (no socket; a send to the default host resolves
+# logging.googleapis.com first, so those tests need a resolver):
+# test_logging_default_host (a fresh client starts at
+# logging.googleapis.com, read without sending; `set_rest_host` replaces it,
+# and the replacement is what is dialled and named in the Host header),
+# test_logging_requests (the request line,
 # Host, headers and JSON body of a first page, a next page, several
 # resource names and a caller's default header, byte for byte),
 # test_logging_responses (a page of entries with each payload arm and the
