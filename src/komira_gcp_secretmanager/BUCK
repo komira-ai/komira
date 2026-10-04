@@ -1,0 +1,86 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Secret Manager v1: a REST/JSON client generated at build time from the
+# googleapis protos //tools/vendor/googleapis:secretmanager_v1 extracts from
+# its pinned archive (nothing of them is copied here).
+# `SecretManagerServiceClient` sends through komira_http_client's
+# `HttpClient` over the komira_http_core `Connector` it is given, takes each
+# request's bearer token from a komira_gcp_core `GcpTokenSource`, and raises
+# a non-2xx answer through komira_gcp_core's `gcp_status_error`. It reads no
+# environment.
+#
+# `methods` is what komira's callers use: a secret's value is read
+# (AccessSecretVersion), a secret is created (CreateSecret) and given a new
+# value (AddSecretVersion), its versions are listed to tell whether it holds
+# one (ListSecretVersions), and secrets are listed and deleted when an
+# environment is torn down (ListSecrets, DeleteSecret). The service's other
+# methods are not generated. A method joins the list with its own rows in
+# the tests below. None of these requests has a request-id field; a retry
+# of CreateSecret or AddSecretVersion is the caller's decision (a second
+# AddSecretVersion adds a second version).
+#
+# `bundle_only` is the part of the secretmanager_v1 closure those methods
+# reach: the requests (service), the Secret and SecretVersion resources,
+# their policy member, and google.rpc.Status (a managed rotation's error).
+#
+# The client starts at secretmanager.googleapis.com, the
+# `google.api.default_host` of the pinned proto. Regional secrets
+# (`projects/*/locations/*/secrets/*`, served at
+# secretmanager.<location>.rep.googleapis.com) are every method's
+# `additional_bindings`, which the generator does not emit: a regional
+# secret name is refused before anything is sent.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Secret Manager v1 REST reference (no upstream test body is
+# copied), each sending through the generated client over komira_http_core's
+# ScriptedConnector (no socket, no DNS: the wire tests send to localhost):
+# test_secretmanager_methods (each method's request line, headers and JSON
+# body byte for byte, and its response decoded), test_secretmanager_errors
+# (one google.rpc.Status envelope per method mapped to its code, the body
+# never quoted), test_secretmanager_endpoint (the default host read without
+# sending, an override dialled, a regional secret name refused before the
+# token is asked) and test_no_env_reads (no generated module reads the
+# environment, and only the methods above are generated).
+#
+# No test here talks to the service.
+mojo_gcp_client(
+    name = "komira_gcp_secretmanager",
+    bundle_only = [
+        "google/cloud/secretmanager/v1/service.proto",
+        "google/cloud/secretmanager/v1/resources.proto",
+        "google/iam/v1/resource_policy_member.proto",
+        "google/rpc/status.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = [
+        "SecretManagerService.AccessSecretVersion",
+        "SecretManagerService.AddSecretVersion",
+        "SecretManagerService.CreateSecret",
+        "SecretManagerService.DeleteSecret",
+        "SecretManagerService.ListSecretVersions",
+        "SecretManagerService.ListSecrets",
+    ],
+    proto_deps = ["//tools/vendor/googleapis:secretmanager_v1"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_secretmanager_gen"},
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_secretmanager_endpoint.mojo",
+        "tests/test_secretmanager_errors.mojo",
+        "tests/test_secretmanager_methods.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
