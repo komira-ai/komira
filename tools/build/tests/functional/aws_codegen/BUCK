@@ -1,6 +1,7 @@
 load("@komira//third_party/botocore:models.bzl", "botocore_model")
 load("@komira//tools/build/lint:defs.bzl", "shell_lint")
 load("@komira//tools/build/proto-codegen/aws_rest_json:model.bzl", "TINY_REST_JSON")
+load("@komira//tools/build/proto-codegen/aws_query:model.bzl", "TINY_QUERY")
 load("@komira//tools/build/proto-codegen/aws_rest_xml:model.bzl", "TINY_REST_XML")
 load("//functional/mojo_gcp_client:defs.bzl", "gen_check", "tests_check")
 load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
@@ -15,12 +16,12 @@ load(":defs.bzl", "aws_codegen_golden", "aws_codegen_refusal")
 # restXml models (a non-S3 one for the customization refusals, one per
 # restXml refusal, one that requires a request checksum), a tiny Smithy RPC
 # v2 CBOR model and a tiny awsJson model that declares SigV2. The tiny
-# restJson1 and S3-shaped restXml models come from
-# komira//tools/build/proto-codegen/aws_rest_json and aws_rest_xml (model
-# and digest in each one's model.bzl), where their pure-mode clients are
-# compiled against the real runtime, which only the komira cell can depend
-# on; this package holds those clients' generated files and welded tests to
-# exact sets.
+# restJson1, S3-shaped restXml and awsQuery models come from
+# komira//tools/build/proto-codegen/aws_rest_json, aws_rest_xml and
+# aws_query (model and digest in each one's model.bzl), where their
+# pure-mode clients are compiled against the real runtime, which only the
+# komira cell can depend on; this package holds those clients' generated
+# files and welded tests to exact sets.
 
 _LOGS_SHA256 = botocore_model("logs").sha256
 
@@ -239,6 +240,98 @@ tests_check(
         "test_tiny_rest_xml",
     ],
     markers = "komira//tools/build/proto-codegen/aws_rest_xml:komira_aws_tiny_xml[tests]",
+)
+
+# An awsQuery client of a tiny model, pure mode: the form encoder of every
+# scalar kind, a wrapped list, a flattened list whose member is renamed, a
+# flattened and a wrapped map, a nested structure; the response read from
+# the operation's resultWrapper element, maps included; an operation with no
+# input and no output. The model is
+# komira//tools/build/proto-codegen/aws_query's, where the same module is
+# compiled against the real runtime and tested.
+_TINY_QUERY_OPERATIONS = ["Ping", "SendThing"]
+
+aws_codegen_golden(
+    name = "query_pure",
+    gen_args = [
+        "--model-sha256",
+        TINY_QUERY.sha256,
+        "--service",
+        "tiny",
+        "--operations",
+        ",".join(_TINY_QUERY_OPERATIONS),
+        "--pure-only",
+        "--probe-import",
+        "komira_aws_tiny_query.komira_aws_tiny_query",
+    ],
+    golden = "golden/query_pure.mojo",
+    golden_probe = "golden/query_pure_probe.mojo",
+    model = TINY_QUERY.model,
+    module = "komira_aws_tiny_query",
+)
+
+# The same module, built in the komira cell: exactly the package's three
+# files were generated, with no transport and no JSON runtime.
+gen_check(
+    name = "tiny_query_pure_scoped",
+    absent = [
+        "komira_http",
+        "komira_json",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_tiny_query.mojo",
+    ],
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query[gen]",
+    present = [
+        "protocol     : query (awsQuery)",
+        "mode         : pure (no transport)",
+        "operations   : " + ", ".join(_TINY_QUERY_OPERATIONS),
+        "model sha256 : " + TINY_QUERY.sha256,
+        "aws_query_set_body(req, q)",
+        "aws_query_result(resp.body, String(\"SendThingResult\"))",
+    ],
+)
+
+# Its layout probe and its caller test are welded into it, and each ran and
+# passed.
+tests_check(
+    name = "tiny_query_pure_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_query",
+    ],
+    markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query[tests]",
+)
+
+# The client-mode module of the same model, built in the komira cell: the
+# transport is imported, the JSON runtime is not, and errors are read as
+# awsQuery errors.
+gen_check(
+    name = "tiny_query_client_scoped",
+    absent = ["komira_json"],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "komira_aws_tiny_query_client.mojo",
+    ],
+    gen = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[gen]",
+    present = [
+        "protocol     : query (awsQuery)",
+        "mode         : client",
+        "var info = aws_query_error(res.to_response())",
+        "from komira_http_core.transport.io_stream import Connector",
+    ],
+)
+
+tests_check(
+    name = "tiny_query_client_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_query_client",
+    ],
+    markers = "komira//tools/build/proto-codegen/aws_query:komira_aws_tiny_query_client[tests]",
 )
 
 aws_codegen_refusal(

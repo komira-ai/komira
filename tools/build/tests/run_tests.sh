@@ -194,7 +194,8 @@
 #  34. aws-client-gen (tests//functional/aws_codegen): the CloudWatch Logs
 #      GetLogEvents module, pure and client, a restJson1 client of a tiny
 #      model, a restXml module of a tiny S3-shaped model (pure, with the `s3`
-#      customization), and the layout probe of each, equal their text goldens
+#      customization), an awsQuery module of a tiny model (pure), and the
+#      layout probe of each, equal their text goldens
 #      byte for byte; the generator refuses an empty or missing operation
 #      list, an operation the model lacks, a protocol it does not implement, a
 #      restXml model reaching a union, an XML attribute or a body map, the
@@ -210,8 +211,9 @@
 #      reaching the send); a must_contain whose lines the module holds only
 #      non-adjacently, or only as the tail of a longer line, goes red, and
 #      for no other reason. The tiny models' pure-mode clients
-#      (komira//tools/build/proto-codegen/aws_rest_json and aws_rest_xml)
-#      generated exactly their packages' files, and their welded tests ran:
+#      (komira//tools/build/proto-codegen/aws_rest_json, aws_rest_xml and
+#      aws_query) generated exactly their packages' files, and their welded
+#      tests ran:
 #      see test 36.
 #  35. Rust tests are part of the build (tools/build/rust, `rust_test`): the
 #      inline tests of komira_proto_codegen run as a build action and pass,
@@ -242,7 +244,9 @@
 #      the responses it reads pass; and a pure-mode restXml client of a tiny
 #      S3-shaped model with the `s3` customization
 #      (komira//tools/build/proto-codegen/aws_rest_xml), likewise, against
-#      komira_aws_core and komira_xml.
+#      komira_aws_core and komira_xml; and a pure-mode awsQuery client of a
+#      tiny model (komira//tools/build/proto-codegen/aws_query), likewise,
+#      against komira_aws_core and komira_xml.
 #      Exactly the package's files are generated, nothing of an operation not
 #      named, and exactly those two tests ran. A second client adds a
 #      hand_srcs module and the overrides manifest naming it: the module is
@@ -978,6 +982,7 @@ fi
 expect_green mojo_aws_client tests//functional/mojo_aws_client:
 expect_green aws_rest_json //tools/build/proto-codegen/aws_rest_json:
 expect_green aws_rest_xml //tools/build/proto-codegen/aws_rest_xml:
+expect_green aws_query //tools/build/proto-codegen/aws_query:
 expect_red aws_client_no_operations '`operations` is empty' tests//negative/mojo_aws_client:no_operations
 expect_red aws_client_joined_operations 'is not a botocore operation name' tests//negative/mojo_aws_client:joined_operations
 expect_red aws_client_no_runtime '`deps` is empty' tests//negative/mojo_aws_client:no_runtime

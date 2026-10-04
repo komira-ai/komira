@@ -139,7 +139,9 @@ aws_conformance_driver_src(
     corpus = _PROTOCOL_TESTS,
     ignore_list = _IGNORE_LIST,
     protocols = [
+        "ec2",
         "json",
+        "query",
         "rest-json",
         "rest-xml",
     ],
