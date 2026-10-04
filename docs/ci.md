@@ -62,7 +62,8 @@ A contributor runs the same three commands on any client. A green local
 prove, dead Markdown links included (`//:docs`).
 
 Publishing is not part of this job. It is a separate workflow,
-[kci.yml](#kciyml-the-release), which never runs for a pull request.
+[kci.yml](#kciyml-the-release), whose only job on a pull request is the
+per-change check `pr`; its release jobs never run for one.
 
 ## The runner
 
@@ -216,7 +217,7 @@ can start a scratch daemon or clone and are still to be analysed.
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
 It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto): `build`, then
-`gamma`, then `prod`. The workflow runs one job per stage, named for its
+`gamma`, then `prod`, and `pr`, the per-change check of a pull request. The workflow runs one job per stage, named for its
 stage, running in the stage's GitHub environment and running exactly one
 `kci run --stage <its name>`, except that `gamma` is split over two jobs:
 `gamma` runs its step (`--only step:publish`) and `validate` its validation
@@ -229,6 +230,7 @@ convention (its one default path), so no line of the workflow names it.
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
 | `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
 | `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
+| `pr` (the check `kci / pr`) | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), no environment, `contents: read` + `id-token: write` (for the tailnet only) | a pull request from a branch of this repository only (a fork's runs nothing): builds `//bin/kci:kci[runnable]`, checks that `release/unit_census.txt` is the graph's, then `kci run --stage pr --affected-by <the pull request's base commit>`: the units of `release/artifacts.textproto` the change reaches, built and tested on the farm. Nothing ships. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -254,8 +256,9 @@ value, and the release's `release_produced_by` names the one build run.
   `id-token: write` only where a stage publishes by trusted publishing or is
   farm-connected, one `kci run` per job with `--summary-file`, `--only` only
   in a split stage whose jobs run all of it once (a validations-only job has
-  no environment, no identity token, and needs the stage's own job), no
-  `pull_request` trigger, a `revision` input, every `uses:` pinned,
+  no environment, no identity token, and needs the stage's own job), a
+  `pull_request` trigger only the PULL_REQUEST stage's job answers (rule R6),
+  a `revision` input, every `uses:` pinned,
   `farm-connect` exactly on farm-connected stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
   missing variable, is exit 5 and never a pass. The same check is the welded
@@ -263,9 +266,16 @@ value, and the release's `release_produced_by` names the one build run.
   fails `./buck2 build //...`. Consequence: a revision whose machine file
   disagrees with the running `kci.yml` cannot be released by it (a manual run
   of an old revision is refused, exit 3).
-- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`).
-  Never `pull_request`: the `build` job joins the tailnet, and the tailnet
-  credential must not reach a pull request's code.
+- **Triggers:** a push to `main` and a manual run (`workflow_dispatch`)
+  release; a pull request to `main` runs the job `pr` and nothing else.
+  Every release job's `if:` keeps a pull request out
+  (`github.event_name != 'pull_request'`, or prod's manual-run condition), so
+  no environment, publishing token or release job is reached from a pull
+  request's code. The `pr` job's condition
+  (`github.event.pull_request.head.repo.full_name == github.repository`)
+  keeps a fork's code off the farm: a fork's run gets no tailnet credential,
+  and a maintainer reads the change and pushes it to a branch here. Rule R6
+  of `src/kci_ci_check` holds all of it.
 - **The revision.** A run releases the commit `REVISION`: the pushed commit,
   or a manual run's input `revision` (a full commit id; empty means the commit
   the run started on). Every job checks it out, kci refuses a checkout whose

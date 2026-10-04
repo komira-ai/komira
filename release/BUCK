@@ -9,9 +9,15 @@
 #   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
 #   channels.textproto   src/kci_release_channel (test_release_channels_file),
 #                        src/kci_ci_check (test_repo_kci_yml)
+#   unit_census.txt      src/kci_artifact (test_release_artifacts_file: every
+#                        census target is in some unit of artifacts.textproto)
 # The programs the machine file's validations run are in release/smoke, each a
-# mojo_test against the in-repository library.
+# mojo_test against the in-repository library. release/ci holds the commands
+# the per-change check runs (artifacts.textproto's `affected` and
+# `build_targets`) and the census tool (ci/unit_census.py).
 # Changes need the release approver's review (.github/CODEOWNERS).
+load("@komira//tools/build/lint:defs.bzl", "shell_lint")
+
 export_file(
     name = "artifacts.textproto",
     visibility = ["//src/kci_artifact:"],
@@ -25,4 +31,14 @@ export_file(
 export_file(
     name = "machine.textproto",
     visibility = ["//src/kci_ci_check:"],
+)
+
+export_file(
+    name = "unit_census.txt",
+    visibility = ["//src/kci_artifact:"],
+)
+
+shell_lint(
+    name = "shell_lint",
+    srcs = glob(["ci/*.sh"]),
 )

@@ -21,7 +21,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # wire with every field number pinned as bytes, and render argvs exactly,
 # including from `example.textproto`, staged as test data. One more reads the
 # repository's own release/artifacts.textproto through the same reader, so a
-# release file kci would refuse fails this library's build.
+# release file kci would refuse fails this library's build, and holds it to
+# release/unit_census.txt: a census target in no unit fails it too.
 mojo_library(
     name = "kci_artifact",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -49,6 +50,7 @@ mojo_library(
         # The repository's own release artifacts (release/BUCK).
         "tests/test_release_artifacts_file.mojo": {
             "artifacts.textproto": "//release:artifacts.textproto",
+            "unit_census.txt": "//release:unit_census.txt",
         },
     },
     visibility = ["PUBLIC"],

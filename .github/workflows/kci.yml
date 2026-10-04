@@ -478,6 +478,12 @@ jobs:
           printf '#!/bin/sh\nexec "%s/buck2" "$@"\n' "$GITHUB_WORKSPACE" > "$RUNNER_TEMP/bin/buck2"
           chmod +x "$RUNNER_TEMP/bin/buck2"
           echo "$RUNNER_TEMP/bin" >> "$GITHUB_PATH"
+      # Every target of the graph is in some unit's closure: the census
+      # (release/unit_census.txt) must be the graph's, and the welded test of
+      # release/artifacts.textproto holds every census target to a unit. A
+      # new target no unit reaches fails here, naming its check.
+      - name: the unit census is current
+        run: python3 release/ci/unit_census.py --check
       # kci first holds this workflow (as committed) to the machine file, then
       # builds the units the change reaches. The base is the pull request's
       # base commit, a full commit id GitHub sets.
