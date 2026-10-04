@@ -17,6 +17,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the owned scope: the store keyed (machine, cell, resource), the stamp born
 # with the object, foreign and conflict refused before any change, the closed
 # world of turned-off roles, and unmanaged differences planned, never touched.
+# The unpinned-plan test checks that an image whose build step has not run
+# yet plans as a placeholder that cannot pass for a digest, only when the
+# caller passes a record of it, and is listed by kind, node and step output.
 mojo_library(
     name = "kci_reconciler",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
@@ -31,6 +34,7 @@ mojo_library(
         "tests/test_resource_graph_engine.mojo",
         "tests/test_resource_outputs.mojo",
         "tests/test_resource_outputs_after_mutation.mojo",
+        "tests/test_unpinned_plan.mojo",
     ],
     visibility = ["PUBLIC"],
 )
