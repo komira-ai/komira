@@ -416,10 +416,10 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
     """Headers merged into every request. Empty unless given."""
 
     var _rest_host: String
-    """The host the request URLs target. Defaults to the offline
-        `localhost` placeholder; a live caller sets the real public host via
-        `set_rest_host` (it drives BOTH the dial DNS target and the `Host:`
-        header)."""
+    """The host the request URLs target: it drives BOTH the dial DNS
+        target and the `Host:` header. Starts empty: the service declares
+        no `google.api.default_host`, so every method refuses to send until
+        `set_rest_host` names a host."""
 
     var _rest_port: UInt16
     """The port the request URLs name; 0, the default, is the scheme's."""
@@ -433,7 +433,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._client = client^
         self._token_source = token_source^
         self._default_headers = HeaderMap()
-        self._rest_host = String("localhost")
+        self._rest_host = String("")
         self._rest_port = UInt16(0)
         self._rest_plaintext = False
 
@@ -447,15 +447,15 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._client = client^
         self._token_source = token_source^
         self._default_headers = default_headers^
-        self._rest_host = String("localhost")
+        self._rest_host = String("")
         self._rest_port = UInt16(0)
         self._rest_plaintext = False
 
     def set_rest_host(mut self, var host: String):
-        """Point the request URLs at a real public host (e.g.
-            `logging.googleapis.com`) for a LIVE dial. The URL host feeds BOTH
-            the dial-target DNS resolution and the injected `Host:` header;
-            the default `localhost` is the offline scripted-loopback path."""
+        """Point the request URLs at `host` (a regional or private endpoint,
+            or a test server). The URL host feeds BOTH the dial-target DNS
+            resolution and the injected `Host:` header. An empty host makes
+            every method refuse to send."""
         self._rest_host = host^
 
     def set_rest_endpoint(mut self, var host: String, port: UInt16, plaintext: Bool):
@@ -469,6 +469,11 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
         self._rest_port = port
         self._rest_plaintext = plaintext
 
+    def _rest_require_host(self, method: String) raises:
+        """Raise, naming the method, when no host is set."""
+        if self._rest_host.byte_length() == 0:
+            raise Error(String("ShapesClient.") + method + String(": no REST host: komira.test.shapes.v1.Shapes declares no google.api.default_host; call set_rest_host(host) before sending"))
+
     def _rest_apply_default_headers(self, mut headers: HeaderMap) raises:
         """Merge the per-client default headers into `headers`."""
         var _rest_i = 0
@@ -479,6 +484,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     def get_object[RT: Runtime](mut self, req: GetObjectRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/v1/{name=buckets/*/objects/**}` — REST/JSON."""
+        self._rest_require_host(String("get_object"))
         var path = String("")
         path += String("/v1")
         path += String("/")
@@ -504,6 +510,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     def cancel_operation[RT: Runtime](mut self, req: CancelOperationRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """POST `/v1/{name=operations/**}:cancel` — REST/JSON."""
+        self._rest_require_host(String("cancel_operation"))
         var path = String("")
         path += String("/v1")
         path += String("/")
@@ -535,6 +542,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     def list_things[RT: Runtime](mut self, req: ListThingsRequest, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/v1/{name=*}/things` — REST/JSON."""
+        self._rest_require_host(String("list_things"))
         var path = String("")
         path += String("/v1")
         path += String("/")
@@ -579,6 +587,7 @@ struct ShapesClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):
 
     def get_root[RT: Runtime](mut self, req: Thing, mut reactor: Reactor[RT.Sink]) raises -> Thing:
         """GET `/` — REST/JSON."""
+        self._rest_require_host(String("get_root"))
         var path = String("")
         path += String("/")
         var query = String("")

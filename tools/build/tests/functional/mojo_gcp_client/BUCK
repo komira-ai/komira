@@ -198,11 +198,60 @@ tests_check(
     markers = _TINY_GRPC + "[tests]",
 )
 
+# `protocol = "rest"` with a service that declares no
+# `(google.api.default_host)`: the client of
+# komira//tools/build/proto-codegen/gcp_rest, compiled there against the real
+# komira_http_client and komira_gcp_core. Exactly the package's files were
+# generated; the client starts with no host (never a placeholder one) and
+# every method raises the named refusal until `set_rest_host` names one.
+_NOHOST_REST = "komira//tools/build/proto-codegen/gcp_rest:komira_gcp_nohost_rest"
+
+gen_check(
+    name = "komira_gcp_nohost_rest_service",
+    absent = [
+        "localhost",
+        "gcp_grpc_status_error",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "nohost.mojo",
+    ],
+    gen = _NOHOST_REST + "[gen]",
+    present = [
+        "from komira_gcp_core import GcpTokenSource, gcp_status_error",
+        "struct NoHostServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",
+        "self._rest_host = String(\"\")",
+        ": no REST host: example.nohost.v1.NoHostService declares no google.api.default_host; call set_rest_host(host) before sending",
+        "self._rest_require_host(String(\"get_thing\"))",
+    ],
+)
+
+# The client ran exactly these tests, and each passed: the layout probe and
+# the test of the no-host refusal and of `set_rest_host`.
+tests_check(
+    name = "komira_gcp_nohost_rest_tests",
+    expect = [
+        "_layout_probe",
+        "test_nohost_rest",
+    ],
+    markers = _NOHOST_REST + "[tests]",
+)
+
 # shop.proto as a proto_deps entry, so ../../negative/mojo_gcp_client can bundle
 # it and generate its service.
 proto_srcs(
     name = "shop_api",
     visibility = ["//negative/mojo_gcp_client:"],
     srcs = ["example/shop/v1/shop.proto"],
+    proto_deps = [":shop_deps"],
+)
+
+# watch.proto, a bidirectional-streaming method, as a proto_deps entry, so
+# ../../negative/mojo_gcp_client can list it in a "rest" client and be refused.
+proto_srcs(
+    name = "watch_api",
+    visibility = ["//negative/mojo_gcp_client:"],
+    srcs = ["example/shop/v1/watch.proto"],
     proto_deps = [":shop_deps"],
 )

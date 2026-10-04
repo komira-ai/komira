@@ -23,6 +23,7 @@ pub mod path_template;
 pub mod plugin;
 pub mod retry_policy;
 pub mod routing_options;
+pub mod service_options;
 pub mod xml_equiv;
 
 pub const FEATURE_PROTO3_OPTIONAL: u64 = 1;
@@ -179,14 +180,16 @@ fn parse_bool(key: &str, value: &str) -> Result<bool, String> {
     }
 }
 
-/// Lower the request with its options and both annotation overlays, then
-/// emit: the Mojo modules, plus the layout probe when asked for. The one
-/// path of `rest`, `grpc` and `connect` targets.
+/// Lower the request with its options, both annotation overlays and the
+/// recovered `(google.api.default_host)` of each service, then emit: the Mojo
+/// modules, plus the layout probe when asked for. The one path of `rest`,
+/// `grpc` and `connect` targets.
 fn generate_scoped(
     request: &plugin::CodeGeneratorRequest,
     params: &PluginParameters,
     http_rules: http_options::HttpRuleTable,
     routing_rules: routing_options::RoutingRuleTable,
+    default_hosts: service_options::DefaultHostTable,
     mode: ProtocolMode,
 ) -> Result<Vec<(String, String)>, String> {
     if params.gcp && mode == ProtocolMode::Connect {
@@ -196,7 +199,7 @@ fn generate_scoped(
                 .to_string(),
         );
     }
-    let model = lower::lower_scoped(
+    let mut model = lower::lower_scoped(
         &request.proto_file,
         &request.file_to_generate,
         &params.package_prefix,
@@ -204,10 +207,17 @@ fn generate_scoped(
         routing_rules,
         &params.scope,
     )?;
+    for file in &mut model.files {
+        for svc in &mut file.services {
+            svc.default_host = default_hosts
+                .host_for(&file.proto_package, &svc.name)
+                .map(str::to_string);
+        }
+    }
     if mode == ProtocolMode::Rest {
-        // Pre-validate every annotated service so a missing annotation / bad
-        // template is a clean Result error rather than the emitter's panic
-        // backstop.
+        // Pre-validate every kept service so a streaming method, a missing
+        // annotation, a bad template or an unusable default host is a clean
+        // Result error rather than the emitter's panic backstop.
         for file in &model.files {
             for svc in &file.services {
                 emit_rest::emit_rest_service(file, svc)?;
@@ -236,6 +246,7 @@ pub fn generate(
         &params,
         http_options::HttpRuleTable::default(),
         routing_options::RoutingRuleTable::default(),
+        service_options::DefaultHostTable::default(),
         mode,
     )
 }
@@ -257,7 +268,8 @@ pub fn generate_with_routing(
     let routing_rules =
         routing_options::RoutingRuleTable::from_request_bytes(request_bytes)?;
     let http_rules = http_options::HttpRuleTable::from_request_bytes(request_bytes)?;
-    generate_scoped(request, &params, http_rules, routing_rules, mode)
+    let default_hosts = service_options::DefaultHostTable::from_request_bytes(request_bytes)?;
+    generate_scoped(request, &params, http_rules, routing_rules, default_hosts, mode)
 }
 
 pub fn generate_db(
@@ -304,11 +316,14 @@ pub fn generate_rest(
     }
     let http_rules =
         http_options::HttpRuleTable::from_descriptor_set_bytes(descriptor_set_bytes)?;
+    let default_hosts =
+        service_options::DefaultHostTable::from_descriptor_set_bytes(descriptor_set_bytes)?;
     generate_scoped(
         request,
         &params,
         http_rules,
         routing_options::RoutingRuleTable::default(),
+        default_hosts,
         mode,
     )
 }
@@ -337,11 +352,14 @@ pub fn respond_with_bytes(
             match ProtocolMode::parse(&params.default_protocol)? {
                 ProtocolMode::Rest => {
                     let rules = http_options::HttpRuleTable::from_request_bytes(request_bytes)?;
+                    let hosts =
+                        service_options::DefaultHostTable::from_request_bytes(request_bytes)?;
                     generate_scoped(
                         request,
                         &params,
                         rules,
                         routing_options::RoutingRuleTable::default(),
+                        hosts,
                         ProtocolMode::Rest,
                     )
                 }
