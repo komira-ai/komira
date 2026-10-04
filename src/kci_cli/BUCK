@@ -1,0 +1,63 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The `kci` command line. `kci run --stage S` is THE verb for stages: it reads
+# the machine file (kci_stage_graph; --machine, default
+# release/machine.textproto), resolves stage S and runs each of its steps in
+# order through kci_build (BUILD) or kci_publish (PUBLISH). `kci ci check` holds
+# a CI workflow to the same stages (kci_ci_check). There is no per-kind verb and
+# no alias. Every verb writes kci_contract's result document to --result-file
+# (temp-and-rename, RUNNING before the first effect, FINISHED on every exit
+# path) and exits with kci_contract's numbers. bin/kci is its `main`.
+#
+# The welded tests: the one parser and every usage refusal; the stage run over
+# a recording fake (order, stop at the first failure, worst outcome, PARTIAL
+# after a publish, the result records); the result file; the real libraries
+# reached through a machine file; and a scan that no kci source but
+# kci_contract spells an exit number.
+mojo_library(
+    name = "kci_cli",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_build:kci_build_lib",
+        "//src/kci_ci_check:kci_ci_check",
+        "//src/kci_contract:kci_contract",
+        "//src/kci_publish:kci_publish_lib",
+        "//src/kci_release_set:kci_release_set",
+        "//src/kci_stage_graph:kci_stage_graph",
+        "//src/komira_clock:komira_clock",
+        "//src/komira_libc:komira_libc",
+        "//src/komira_secret_env:komira_secret_env",
+        "//src/komira_secret_store:komira_secret_store",
+    ],
+    test_srcs = [
+        # the one parser: verbs, flags, the stage's flags, every usage refusal
+        "tests/test_kci_args.mojo",
+        # kci run over a recording fake, kci ci check, the records in order
+        "tests/test_kci_dispatch.mojo",
+        # the result file: RUNNING then FINISHED, temp-and-rename, usage errors recorded
+        "tests/test_kci_result_file.mojo",
+        # the real libraries through a machine file; the secret store by name
+        "tests/test_kci_library_wiring.mojo",
+        # no exit number is spelled outside kci_contract
+        "tests/test_exit_numbers_in_one_place.mojo",
+    ],
+    test_env = {
+        # resolved by name through --secret-store=env's store
+        "KCI_CLI_TEST_SECRET": "kci-cli-test-value",
+    },
+    test_data = {
+        "tests/test_exit_numbers_in_one_place.mojo": {
+            "kci_cli_args.mojo": "//src/kci_cli:args.mojo",
+            "kci_cli_dispatch.mojo": "//src/kci_cli:dispatch.mojo",
+            "kci_cli_library_verbs.mojo": "//src/kci_cli:library_verbs.mojo",
+            "kci_cli_recorder.mojo": "//src/kci_cli:recorder.mojo",
+            "bin_kci_main.mojo": "//bin/kci:main.mojo",
+        },
+    },
+    visibility = ["PUBLIC"],
+)
+
+export_file(name = "args.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "dispatch.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "library_verbs.mojo", visibility = ["//src/kci_cli:"])
+export_file(name = "recorder.mojo", visibility = ["//src/kci_cli:"])

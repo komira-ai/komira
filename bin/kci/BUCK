@@ -1,0 +1,15 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary")
+
+# kci: ONE binary. `kci run --stage S` runs a stage of the machine file;
+# `kci ci check` holds a CI workflow to it. A thin shell: argv goes to
+# kci_cli.kci_main. All logic and every test live in the libraries.
+mojo_binary(
+    name = "kci",
+    srcs = ["main.mojo"],
+    deps = ["//src/kci_cli:kci_cli"],
+    visibility = ["PUBLIC"],
+)
+
+# Read by kci_cli's test that no kci source but kci_contract spells an exit
+# number.
+export_file(name = "main.mojo", visibility = ["//src/kci_cli:"])

@@ -37,7 +37,9 @@
 # =============================================================================
 
 from std.ffi import external_call
-from std.os import getenv, makedirs
+from std.os import makedirs
+
+from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_false, assert_true
 
 from kci_contract import EXIT_OK, EXIT_PARTIAL, RETRY_NEEDS_HUMAN
@@ -77,9 +79,9 @@ def _ends(rep: PublishReport, reason: String, exit_code: Int, msg: String = Stri
 
 
 def _root(tag: String) raises -> String:
-    var base = getenv("TEST_TMPDIR")
+    var base = _read_env("TEST_TMPDIR")
     if base.byte_length() == 0:
-        base = getenv("TMPDIR")
+        base = _read_env("TMPDIR")
     if base.byte_length() == 0:
         raise Error("neither TEST_TMPDIR nor TMPDIR is set")
     var d = base + String("/prn_") + tag + String("_") + String(Int(external_call["getpid", Int32]()))

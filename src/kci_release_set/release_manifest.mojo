@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_release_set/release_manifest.mojo -- `release.json`: the last file
-#   `kci build` writes into a platform's release directory.
+#   the BUILD step writes into a platform's release directory.
 # =============================================================================
 #
 # Format `kci.release_set`, schema_version 2 (kci_contract's format table):
@@ -19,7 +19,7 @@
 # one trailing newline. It lives at `<release-dir>/<platform>/release.json`
 # (kci_contract's layout), next to one directory per member. It is a commit
 # marker and a convenience, never an authority: a build that stopped leaves
-# no `release.json`, and `kci publish` recomputes every member and the set
+# no `release.json`, and the PUBLISH step recomputes every member and the set
 # hash from the member directories and refuses a `release.json` that
 # differs.
 #
