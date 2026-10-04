@@ -137,6 +137,35 @@ _APIGATEWAY_V1_CLOSURE = _APIGATEWAY_V1_ROOTS + [
     "google/rpc/status.proto",
 ]
 
+# Cloud Firestore v1 (the document methods over REST and Listen over gRPC,
+# for the generated komira_gcp_firestore clients): the root and its import
+# closure, google/protobuf/* excepted. :firestore_v1 refuses this list unless
+# it is exactly that closure, so a bump that changes the imports fails the
+# build until the list follows.
+_FIRESTORE_V1_ROOTS = [
+    "google/firestore/v1/firestore.proto",
+]
+
+_FIRESTORE_V1_CLOSURE = _FIRESTORE_V1_ROOTS + [
+    "google/api/annotations.proto",
+    "google/api/client.proto",
+    "google/api/field_behavior.proto",
+    "google/api/http.proto",
+    "google/api/launch_stage.proto",
+    "google/api/routing.proto",
+    "google/firestore/v1/aggregation_result.proto",
+    "google/firestore/v1/bloom_filter.proto",
+    "google/firestore/v1/common.proto",
+    "google/firestore/v1/document.proto",
+    "google/firestore/v1/explain_stats.proto",
+    "google/firestore/v1/pipeline.proto",
+    "google/firestore/v1/query.proto",
+    "google/firestore/v1/query_profile.proto",
+    "google/firestore/v1/write.proto",
+    "google/rpc/status.proto",
+    "google/type/latlng.proto",
+]
+
 # The `(google.api.http)` method option alone, for a REST client of a proto
 # that imports nothing else of googleapis: annotations.proto and its import
 # closure, google/protobuf/* excepted. :api_http refuses this list unless it
@@ -227,6 +256,7 @@ _ALL_CLOSURES = (
     _COMPUTE_V1_CLOSURE +
     _ARTIFACTREGISTRY_V1_CLOSURE +
     _APIGATEWAY_V1_CLOSURE +
+    _FIRESTORE_V1_CLOSURE +
     _API_HTTP_CLOSURE +
     _IAM_ADMIN_V1_CLOSURE +
     _RESOURCEMANAGER_V3_CLOSURE +
@@ -289,6 +319,15 @@ proto_check(
     name = "apigateway_v1",
     roots = _APIGATEWAY_V1_ROOTS,
     srcs = [":googleapis[{}]".format(f) for f in sorted(_APIGATEWAY_V1_CLOSURE)],
+    strip_prefix = "files",
+    visibility = ["PUBLIC"],
+)
+
+# The Cloud Firestore v1 protos, for a consumer, as :logging_v2 above.
+proto_check(
+    name = "firestore_v1",
+    roots = _FIRESTORE_V1_ROOTS,
+    srcs = [":googleapis[{}]".format(f) for f in sorted(_FIRESTORE_V1_CLOSURE)],
     strip_prefix = "files",
     visibility = ["PUBLIC"],
 )

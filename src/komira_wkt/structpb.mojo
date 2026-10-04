@@ -56,6 +56,7 @@
 # =============================================================================
 
 from komira_proto_codec import (
+    ProtoNullValueEnum,
     Serializable,
     Proto3JsonWkt,
     WireEncoder,
@@ -89,12 +90,41 @@ comptime VALUE_KIND_LIST: Int = 6
 
 
 @fieldwise_init
-struct NullValue(Copyable, Movable, ImplicitlyCopyable):
-    """`google.protobuf.NullValue` — a one-member enum (`NULL_VALUE = 0`)."""
+struct NullValue(ProtoNullValueEnum, Copyable, Movable, ImplicitlyCopyable):
+    """`google.protobuf.NullValue` — a one-member enum (`NULL_VALUE = 0`).
+
+    A `ProtoEnum`, so a generated message can hold a field of it (Firestore's
+    `Value.null_value`); a `ProtoNullValueEnum`, so komira_proto_codec's JSON
+    backend writes that field as `null` and reads `null` back as
+    `NULL_VALUE`, as the protobuf JSON mapping specifies."""
 
     var value: Int
 
     comptime NULL_VALUE: Int = 0
+
+    def number(self) -> Int:
+        return self.value
+
+    def json_name(self) -> String:
+        if self.value == 0:
+            return String("NULL_VALUE")
+        return String("")
+
+    @staticmethod
+    def from_number(n: Int) -> Self:
+        return Self(n)
+
+    @staticmethod
+    def from_json_name(s: String) -> Self:
+        return Self(0)
+
+    @staticmethod
+    def is_known_json_name(s: String) -> Bool:
+        return s == "NULL_VALUE"
+
+    @staticmethod
+    def known_json_names() -> String:
+        return String("NULL_VALUE")
 
     def __eq__(self, other: Self) -> Bool:
         return self.value == other.value
