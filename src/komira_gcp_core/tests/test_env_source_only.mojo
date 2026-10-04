@@ -3,18 +3,21 @@
 # =============================================================================
 #
 # komira_gcp_core may read the environment only where Google's own auth chain
-# does (GOOGLE_APPLICATION_CREDENTIALS, metadata-server detection), and only
-# in a file named in _allowed() below with its reason. Every library source of
-# the package is staged as test data (src/komira_gcp_core/*.mojo); the test
-# reads each one and fails if a file not in _allowed() names getenv, setenv,
-# `_read_env`, komira_core_ffi or an `external_call`.
+# does, and only in a file named in _allowed() below with its reason. Every
+# library source of the package is staged as test data
+# (src/komira_gcp_core/*.mojo); the test reads each one and fails if a file
+# not in _allowed() names getenv, setenv, `_read_env`, komira_core_ffi or an
+# `external_call`. An allowed entry must exist and must actually read the
+# environment, so a stale entry fails too.
 #
-# Today _allowed() is empty: the package holds no credential-chain code yet, so
-# every source takes its configuration as parameters. When a chain source
-# lands, add it to _allowed() by file name with a one-line reason. An allowed
-# entry must exist and must actually read the environment, so a stale entry
-# fails too. The scan is not vacuous: it must see the token contract, the V4
-# signer and every other source the package has.
+# The one allowed file is sources.mojo, the `EnvSource` seam. What is READ
+# through it is checked too (test_names_are_googles): every `env.get(` in the
+# package takes an `ENV_*` constant, and every `ENV_*` constant is one of the
+# variables Google's auth libraries read (_GOOGLE below). A new variable
+# fails here until it is added to _GOOGLE with the library that reads it.
+#
+# The scan is not vacuous: it must see the token contract, the V4 signer, the
+# chain, and every other source the package has.
 # =============================================================================
 
 from std.os import listdir
@@ -26,7 +29,28 @@ comptime _DIR = "src/komira_gcp_core"
 
 # (file name, reason). A file here may read the environment; no other may.
 def _allowed() -> List[Tuple[String, String]]:
-    return []
+    return [
+        (
+            String("sources.mojo"),
+            String(
+                "the chain's EnvSource seam: ProcessEnv reads getenv through"
+                " komira_core_ffi's _read_env"
+            ),
+        ),
+    ]
+
+
+# The environment variables Google's auth libraries read, and the one each
+# is read for (google-auth for Python `environment_vars.py` and
+# `_cloud_sdk.py`; Go cloud.google.com/go/auth and compute/metadata).
+def _google() -> List[String]:
+    return [
+        String("GOOGLE_APPLICATION_CREDENTIALS"),  # the credentials file
+        String("CLOUDSDK_CONFIG"),  # gcloud's configuration directory
+        String("HOME"),  # ~/.config/gcloud
+        String("APPDATA"),  # %APPDATA%\gcloud on Windows
+        String("GCE_METADATA_HOST"),  # the metadata server's host:port
+    ]
 
 
 def _count(hay: String, needle: String) -> Int:
@@ -104,9 +128,93 @@ def test_scan() raises:
         )
     assert_true(saw_token, "token.mojo was not staged")
     assert_true(saw_v4, "v4_sign.mojo was not staged")
-    assert_true(scanned >= 7, "only " + String(scanned) + " sources staged")
+    assert_true(scanned >= 12, "only " + String(scanned) + " sources staged")
+
+
+def _contains(names: List[String], s: String) -> Bool:
+    for i in range(len(names)):
+        if names[i] == s:
+            return True
+    return False
+
+
+def _ident_at(text: String, at: Int) -> String:
+    """The identifier starting at byte `at`."""
+    var b = text.as_bytes()
+    var end = at
+    while end < len(b):
+        var c = b[end]
+        var ok = (
+            (c >= UInt8(0x41) and c <= UInt8(0x5A))
+            or (c >= UInt8(0x61) and c <= UInt8(0x7A))
+            or (c >= UInt8(0x30) and c <= UInt8(0x39))
+            or c == UInt8(0x5F)
+        )
+        if not ok:
+            break
+        end += 1
+    return String(StringSlice(unsafe_from_utf8=b[at:end]))
+
+
+def _quoted_after(text: String, at: Int) -> String:
+    """The first double-quoted string at or after byte `at`, on its line."""
+    var q = text.find("\"", at)
+    var nl = text.find("\n", at)
+    if q < 0 or (nl >= 0 and nl < q):
+        return String("")
+    var close = text.find("\"", q + 1)
+    var b = text.as_bytes()
+    return String(StringSlice(unsafe_from_utf8=b[q + 1 : close]))
+
+
+def test_names_are_googles() raises:
+    var google = _google()
+    var names = listdir(String(_DIR))
+    var declared = List[String]()
+    var reads = 0
+    # Pass 1: every `comptime ENV_<X>: StaticString = "<name>"` names one of
+    # Google's variables.
+    for i in range(len(names)):
+        var name = String(names[i])
+        if not name.endswith(".mojo"):
+            continue
+        var text: String
+        with open(String(_DIR) + "/" + name, "r") as f:
+            text = f.read()
+        var at = text.find("comptime ENV_")
+        while at >= 0:
+            var ident = _ident_at(text, at + 9)
+            var value = _quoted_after(text, at)
+            assert_true(
+                _contains(google, value),
+                name + " declares " + ident + " = \"" + value + "\", which is"
+                " not a variable Google's auth libraries read",
+            )
+            declared.append(ident)
+            at = text.find("comptime ENV_", at + 1)
+    # Pass 2: every `env.get(` takes one of those constants.
+    for i in range(len(names)):
+        var name = String(names[i])
+        if not name.endswith(".mojo"):
+            continue
+        var text: String
+        with open(String(_DIR) + "/" + name, "r") as f:
+            text = f.read()
+        var at = text.find("env.get(")
+        while at >= 0:
+            var ident = _ident_at(text, at + 8)
+            assert_true(
+                _contains(declared, ident),
+                name + " reads the environment variable named by `" + ident
+                + "`, which is not an ENV_* constant of a Google variable",
+            )
+            reads += 1
+            at = text.find("env.get(", at + 1)
+    assert_equal(len(declared), len(google), "an ENV_* constant per variable")
+    assert_true(reads >= len(google), "only " + String(reads) + " env.get( reads seen")
 
 
 def main() raises:
     test_scan()
+    test_names_are_googles()
     print("OK")
