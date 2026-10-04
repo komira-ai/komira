@@ -31,7 +31,7 @@ comptime ERROR_STAGE_UNKNOWN: String = "KCI-E-STAGE-UNKNOWN"
 comptime ERROR_STAGE_ENVIRONMENT: String = "KCI-E-STAGE-ENVIRONMENT"
 comptime ERROR_SELECTOR: String = "KCI-E-SELECTOR"
 comptime ERROR_SELECTOR_NO_MATCH: String = "KCI-E-SELECTOR-NO-MATCH"
-comptime ERROR_DECLARATION: String = "KCI-E-DECLARATION"
+comptime ERROR_ARTIFACT: String = "KCI-E-ARTIFACT"
 comptime ERROR_BUILD_FAILED: String = "KCI-E-BUILD-FAILED"
 comptime ERROR_MEMBER: String = "KCI-E-MEMBER"
 comptime ERROR_SET_HASH: String = "KCI-E-SET-HASH"
@@ -76,7 +76,7 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_STAGE_ENVIRONMENT), String("the stage is not the GitHub environment its trusted publisher names")))
     t.append(ErrorRow(String(ERROR_SELECTOR), String("an --only selector is malformed or given twice (exit 2)")))
     t.append(ErrorRow(String(ERROR_SELECTOR_NO_MATCH), String("an --only selector names no step or validation of the stage")))
-    t.append(ErrorRow(String(ERROR_DECLARATION), String("an artifact declaration is refused")))
+    t.append(ErrorRow(String(ERROR_ARTIFACT), String("an artifact is refused")))
     t.append(ErrorRow(String(ERROR_BUILD_FAILED), String("an artifact's build failed")))
     t.append(ErrorRow(String(ERROR_MEMBER), String("a built artifact's directory is refused")))
     t.append(ErrorRow(String(ERROR_SET_HASH), String("the release set's hash is not the one recorded for it")))

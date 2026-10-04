@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_artifact_declaration/contract.mojo -- the words of the build contract
+# kci_artifact/placeholders.mojo -- the placeholders and the rules of a build
 #   kci holds every build system to: the placeholders, the stamp, the order,
 #   and the one substitution it performs.
 # =============================================================================
@@ -9,7 +9,7 @@
 #   <executable> <build_system.args...> <artifact.args...>
 #
 # with every placeholder in any arg replaced by its value (below). ONE
-# ARTIFACT PER DECLARATION: the build leaves, at the top of that directory, EXACTLY ONE kci artifact manifest (//src/kci_artifact_manifest's
+# ARTIFACT PER ENTRY: the build leaves, at the top of that directory, EXACTLY ONE kci artifact manifest (//src/kci_artifact_manifest's
 # format) named `KCI_MANIFEST_NAME` (`manifest.json`), plus the files it
 # names. That is the layout of a `conda_package`'s `[release]` directory
 # (`<name>-<version>-0.conda`, `manifest.json`, `metadata.json`). kci ships
@@ -17,7 +17,7 @@
 # `require_one_manifest`: no `manifest.json` at the top, or a listing naming
 # it more than once (a directory cannot hold two, so that arm guards a
 # listing that is not one directory's top level); `require_manifest_name`:
-# a manifest whose `name` is not the declaration's, compared EXACTLY (byte
+# a manifest whose `name` is not the artifact's, compared EXACTLY (byte
 # for byte; no case folding, no trimming, no `-`/`_` equivalence).
 #
 # A placeholder is `{<identifier>}`, the identifier `[A-Za-z_][A-Za-z0-9_]*`.
@@ -28,9 +28,9 @@
 #   {release_dir}    this platform's release directory (absolute),
 #                    `<--release-dir>/<platform>` (kci_api's layout): it
 #                    holds the output directory of every artifact declared
-#                    ABOVE this one, each named by its declaration name and
-#                    already verified, and nothing else that a declaration
-#                    names. The same declaration text serves every platform
+#                    ABOVE this one, each named by its artifact name and
+#                    already verified, and nothing else that an artifact
+#                    names. The same artifact text serves every platform
 #   {platform}       the platform the release is built for, a name from
 #                    kci_api's platform table (`linux-x86_64`)
 #   {revision_id}    the release commit (`kci build --revision-id`): the full
@@ -46,7 +46,7 @@
 #                    positive decimal
 #
 # The last four are the STAMP: git-derived by kci, never typed and never
-# read from the environment, so a declaration passes them to the build as
+# read from the environment, so an artifact passes them to the build as
 # plain args (buck2: `-c komira.package_stamp={build_number}`). Any other
 # `{<identifier>}` is refused by the validator; a brace that does not
 # enclose an identifier (`{}`, `{"k": 1}`) is literal text and passed
@@ -55,9 +55,9 @@
 # substituted again. There is no escape: an arg cannot carry a literal
 # placeholder.
 #
-# ORDER. kci builds the artifacts one at a time in declarations-file order,
+# ORDER. kci builds the artifacts one at a time in artifacts-file order,
 # each only after the one above it built and was verified. That is what makes
-# `{release_dir}` useful: a later declaration (a metapackage) reads the
+# `{release_dir}` useful: a later artifact (a metapackage) reads the
 # manifests of the earlier ones, e.g. `{release_dir}/komira_encoding/
 # manifest.json`.
 #
@@ -236,7 +236,7 @@ def _placeholder_end(arg: String, i: Int) -> Int:
 def substitute_placeholders(arg: String, values: BuildValues) raises -> String:
     """`arg` with every placeholder replaced by its value, in ONE pass over
     `arg` as written (a value is never substituted again). Raises on an
-    unknown placeholder (a validated declaration holds none)."""
+    unknown placeholder (a validated artifact holds none)."""
     var b = arg.as_bytes()
     var n = len(b)
     var out = String("")
@@ -255,8 +255,8 @@ def substitute_placeholders(arg: String, values: BuildValues) raises -> String:
     return out^
 
 
-def require_one_manifest(declaration: String, top_level: List[String]) raises:
-    """Refuse unless `top_level` (the names at the top of the declaration's
+def require_one_manifest(artifact: String, top_level: List[String]) raises:
+    """Refuse unless `top_level` (the names at the top of the artifact's
     output directory) holds `KCI_MANIFEST_NAME` exactly once."""
     var n = 0
     for i in range(len(top_level)):
@@ -265,7 +265,7 @@ def require_one_manifest(declaration: String, top_level: List[String]) raises:
     if n == 0:
         raise Error(
             String("artifact '")
-            + declaration
+            + artifact
             + String("': the build left no ")
             + String(KCI_MANIFEST_NAME)
             + String(" at the top of its output directory")
@@ -273,23 +273,23 @@ def require_one_manifest(declaration: String, top_level: List[String]) raises:
     if n > 1:
         raise Error(
             String("artifact '")
-            + declaration
+            + artifact
             + String("': the output directory lists ")
             + String(KCI_MANIFEST_NAME)
             + String(" ")
             + String(n)
-            + String(" times; one artifact per declaration means exactly one")
+            + String(" times; one artifact per entry means exactly one")
         )
 
 
-def require_manifest_name(declaration: String, manifest_name: String) raises:
-    """Refuse unless the built manifest's `name` equals the declaration's
+def require_manifest_name(artifact: String, manifest_name: String) raises:
+    """Refuse unless the built manifest's `name` equals the artifact's
     name EXACTLY (byte for byte)."""
-    if manifest_name != declaration:
+    if manifest_name != artifact:
         raise Error(
             String("artifact '")
-            + declaration
+            + artifact
             + String("': the built manifest's name '")
             + manifest_name
-            + String("' is not the declaration's name (compared exactly)")
+            + String("' is not the artifact's name (compared exactly)")
         )

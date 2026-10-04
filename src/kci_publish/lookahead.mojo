@@ -4,7 +4,7 @@
 #   the PUBLISH steps of the stages after it.
 # =============================================================================
 #
-# Which names a release publishes is its declarations file's. The approver of
+# Which names a release publishes is its artifacts file's. The approver of
 # a publishing stage must see the names that stage will publish for the first
 # time BEFORE approving it. A job held for approval prints nothing until it is
 # approved, so the stage before it reports them: `kci run --stage S` reports
@@ -39,7 +39,7 @@ from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from kci_pkg_upload import SURFACE_PREFIX_DEV, RegistrySet
 from kci_pkg_upload.coordinate import repo_host
 from kci_pkg_upload.prefix_dev_registry import prefix_dev_channel
-from kci_release_channel import ChannelDeclaration
+from kci_release_channel import Channel
 
 from .channel_state import read_channel
 from .flow import prepare_release
@@ -94,7 +94,7 @@ def new_names_of(r: PublishReport, stage: String, step: String) -> NewNamesRepor
 
 def read_new_names[T: ChannelTransport](
     mut registry: RegistrySet[T, PublishCredential],
-    channel: ChannelDeclaration,
+    channel: Channel,
     targets: List[PublishTarget],
     stage: String,
     step: String,

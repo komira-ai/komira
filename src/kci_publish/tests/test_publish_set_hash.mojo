@@ -18,7 +18,7 @@
 #       line names both hashes, nothing was recorded as RUNNING, and the
 #       channel saw ZERO requests (no read, no write). There is no
 #       approved-hash input: the set a release publishes is the one its
-#       declarations and its build produced, and the result records the
+#       artifacts and its build produced, and the result records the
 #       recomputed hash for each channel it reaches.
 #
 # Hermetic: TEST_TMPDIR and ScriptedChannel; no network.

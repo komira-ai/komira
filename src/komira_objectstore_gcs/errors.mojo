@@ -5,7 +5,7 @@
 # Every GcsStorageBackend raises `StoreError[<KIND>] <method> gs://<bucket>/
 # <key> status=<http> ...`. This module names the kinds and reads one back
 # out of a raised message. The mapping from a gRPC status code onto those
-# kinds belongs to the gRPC backend, not here.
+# kinds belongs to the gRPC backend (grpc_backend.mojo), not here.
 #
 # Pure functions over String; no UnsafePointer.
 # =============================================================================

@@ -6,10 +6,10 @@
 #
 # ROWS
 #   (0) control: the good directory (two libraries and a metapackage)
-#       loads, in declaration order, and its recomputed set hash is the one
+#       loads, in artifact order, and its recomputed set hash is the one
 #       release.json records;
 #   (1) a declared artifact with no directory; an undeclared directory;
-#   (2) a manifest whose name is not the declaration's; a file whose bytes
+#   (2) a manifest whose name is not the artifact's; a file whose bytes
 #       are not the manifest's sha256; metadata disagreeing with the
 #       manifest (size); a `file` that is not a bare name (0.6: nothing
 #       outside the member directory can be named);
@@ -25,11 +25,11 @@ from std.testing import assert_equal, assert_true
 from kci_publish.inputs import load_release
 from kci_publish.release_fixture import (
     ExampleRelease,
-    example_declarations,
+    example_artifacts,
     example_loaded,
     write_text_file,
 )
-from kci_artifact_declaration import parse_artifact_declarations
+from kci_artifact import parse_artifacts
 
 
 def _root(tag: String) raises -> String:
@@ -63,9 +63,9 @@ def test_control_loads() raises:
     r.write(d)
     var loaded = example_loaded(r, d)
     assert_equal(len(loaded.members), 3)
-    assert_equal(loaded.members[0].declaration, String("komira_alpha"))
-    assert_equal(loaded.members[1].declaration, String("komira_beta"))
-    assert_equal(loaded.members[2].declaration, String("komira"))
+    assert_equal(loaded.members[0].artifact, String("komira_alpha"))
+    assert_equal(loaded.members[1].artifact, String("komira_beta"))
+    assert_equal(loaded.members[2].artifact, String("komira"))
     assert_equal(loaded.set_hash(), r.set_hash(d))
     assert_equal(loaded.set_hash().byte_length(), 64)
     print("  test_control_loads: PASS")
@@ -75,12 +75,12 @@ def test_every_declared_artifact_and_nothing_else() raises:
     var r = ExampleRelease()
     var d = _root(String("missing"))
     r.write(d)
-    var text = r.declarations_text() + String(
+    var text = r.artifacts_text() + String(
         'artifacts {\n  name: "komira_extra"\n  build_system: "buck2"\n  args: "{out_dir}"\n}\n'
     )
     var raised = False
     try:
-        _ = load_release(parse_artifact_declarations(text, String("d.textproto")), d)
+        _ = load_release(parse_artifacts(text, String("d.textproto")), d)
     except e:
         raised = True
         assert_true(String(e).find(String("artifact 'komira_extra' is declared but the release directory holds no 'komira_extra/'")) >= 0, String(e))

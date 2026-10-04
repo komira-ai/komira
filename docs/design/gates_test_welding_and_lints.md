@@ -147,6 +147,7 @@ The tests reach `ungated` in the rule and never through a label. That is why a b
 | `markdown_docs` | every relative link and anchor in every Markdown file resolves |
 | `retired_names` | no file of the cell holds a renamed package's or type's old name, except on a line carrying a `YYYY-MM-DD` date (a history note) |
 | `lint_suite` | groups lints another graph does not reach, so their validations run in any build holding the suite |
+| `retired_names` | no file of the cell holds a renamed package's or type's old name except on a line carrying a `YYYY-MM-DD` date (a history note); `tools/build/lint/retired_names.bzl`, and a target with no `names` fails at analysis |
 
 ## How is it tested?
 
