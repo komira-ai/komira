@@ -106,6 +106,12 @@ struct FakeSteps(StageSteps, Movable):
             )
         else:
             row.checks.append(
+                ResultValidationCheck(
+                    String("channel"), String("GET answers 200"), String("channel: answered 200; waited 60 of 1800 s over 5 polls"), True
+                )
+            )
+            row.checks.append(ResultValidationCheck(String("channel"), String("listed"), String("a second channel row"), True))
+            row.checks.append(
                 ResultValidationCheck(String("program"), String("N of N"), String("program: ran 61 checks, all passed"), True)
             )
         return row^
@@ -714,6 +720,27 @@ def test_only_validation_checks_what_is_published() raises:
     # --release-version is still a PUBLISH step's flag
     var rec2 = CliRecorder.memory(String(""))
     assert_equal(kci_main_with(_gamma(m, "--only", "validation:install", "--scratch-dir", "/s"), steps, rec2), 2)
+
+
+def test_a_passed_validation_summary_states_each_check() raises:
+    # The summary names what a passing validation found, not only what a
+    # failing one did: each check's first row (the channel's says how long
+    # the index was waited for, and over how many polls).
+    var d = _root(String("valpass"))
+    var m = _release_machine(d, True)
+    var steps = FakeSteps()
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    assert_equal(
+        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
+        0,
+    )
+    var text = Path(summary).read_text()
+    assert_true(text.find(String("| install | publish | SUCCEEDED |")) >= 0, text)
+    assert_true(text.find(String("| | | ok: `channel: answered 200; waited 60 of 1800 s over 5 polls` |")) >= 0, text)
+    assert_true(text.find(String("| | | ok: `program: ran 61 checks, all passed` |")) >= 0, text)
+    # a second row of a check already shown is not repeated
+    assert_equal(text.find(String("a second channel row")), -1, text)
 
 
 def test_a_failed_validation_is_exit_7_and_names_its_finding() raises:

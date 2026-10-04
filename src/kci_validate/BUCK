@@ -39,6 +39,10 @@ mojo_library(
         # VALIDATION_FAILED; the wait (absent then listed, 404 then budget
         # spent, 401 at once, another sha256 at once); --plan runs nothing
         "tests/test_conda_install_smoke.mojo",
+        # check 1 alone over a prefix.dev-shaped location: the index URL
+        # (golden), 404 for N polls then listed (the wait and the poll count
+        # reported), 404 past the budget, a 303 followed, the poll log
+        "tests/test_channel_index_wait.mojo",
         # the exact docker argv, the script, pixi.toml and the docker CLI's
         # environment, golden
         "tests/test_install_smoke_container_golden.mojo",
