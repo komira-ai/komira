@@ -1,22 +1,22 @@
 # =============================================================================
 # komira_gcp_firestore/firestore_conditional_store.mojo —
 #   FirestoreConditionalStore[T], the Firestore-backed `ConditionalWriteStore`
-#   conformer (the service registry's store).
+#   conformer.
 # =============================================================================
 #
-# WHAT THIS UNBLOCKS. `komira_service_registry`'s `ServiceDirectory[Store]` is
-# generic over ONE `ConditionalWriteStore` and needs OPPOSITE write policies on
-# its two keyspaces:
+# WHAT THIS IS FOR. A consumer written generically over ONE
+# `ConditionalWriteStore` typically needs one of two OPPOSITE write policies per
+# keyspace:
 #
-#   service/<name>          -> the URL bytes      LAST-WRITER-WINS (head + CAS,
-#                                                 retry once on 412)
-#   identity/<fingerprint>  -> the service NAME   CREATE-OR-CONFLICT (create-
-#                                                 if-absent; a 412 by a DIFFERENT
-#                                                 claimant is a REFUSAL)
+#   <collection>/<id>  LAST-WRITER-WINS    head + CAS on the returned etag,
+#                                          retry once on 412
+#   <collection>/<id>  CREATE-OR-CONFLICT  create-if-absent; a 412 means some
+#                                          OTHER writer got there first, and is
+#                                          a REFUSAL
 #
 # Five conformers existed (InMemory / SharedInMemory / DelimiterFaithful /
-# LocalFs / GcsGrpc) and none was over Firestore, so the serving app had no
-# store to bind and no `main`. This is that store.
+# LocalFs / GcsGrpc) and none was over Firestore, so such a consumer had no
+# Firestore store to bind. This is that store.
 #
 # ⭐ BOTH POLICIES ARE ALREADY FIRESTORE PRIMITIVES, and that is why this
 # conformer is thin. `FirestoreClient` has carried the two atomic `:commit`
@@ -41,10 +41,10 @@
 # PRODUCES (in `ObjectMeta`) and CONSUMES (in `WritePrecondition.if_match`), and
 # the field every caller threads is `etag`:
 #
-#     ServiceDirectory._try_last_writer_wins:
-#         var meta = self._store.head(path)
+#     a last-writer-wins publish:
+#         var meta = store.head(path)
 #         cur_etag = Optional[String](meta.etag)         # <-- etag, not version
-#         ... self._store.compare_and_swap(path, bytes, cur_etag.value())
+#         ... store.compare_and_swap(path, bytes, cur_etag.value())
 #
 # So `head()` putting the updateTime in `version` and leaving `etag` empty would
 # make every last-writer-wins publish CAS against `""`, and the manifest head
@@ -55,11 +55,11 @@
 # THE KEY MAPPING: an object key IS a Firestore document path.
 # =============================================================================
 #
-#     service/api               -> collection `service`,  document `api`
-#     identity/gcp.svc_40x.com  -> collection `identity`, document `gcp.svc_40x.com`
+#     item/api                  -> collection `item`,     document `api`
+#     owner/gcp.svc_40x.com     -> collection `owner`,    document `gcp.svc_40x.com`
 #
 # The split is at the LAST `/`, and the key must have an EVEN number of
-# segments. That is not a registry-shaped assumption — it is Firestore's own
+# segments. That is not a consumer-shaped assumption — it is Firestore's own
 # rule: a path alternates collection/document, so an odd count names a
 # COLLECTION and there is no document there to read or write. A 4-segment key
 # (`a/b/c/d`) is an ordinary sub-collection document and works unchanged.
@@ -67,8 +67,8 @@
 # ⛔ A KEY THAT CANNOT BE A DOCUMENT IS A REFUSAL, NOT A GUESS. No escaping, no
 # flattening, no synthesised segment. A conformer that silently rewrites the key
 # it was handed makes `list_with_delimiter` return something the caller cannot
-# feed back to `get`, which is the failure `ServiceDirectory._strip` would then
-# surface a hundred lines away from its cause. `Path.parse` has already rejected
+# feed back to `get`, which is a failure a consumer that strips its own key
+# prefix back off would then surface a hundred lines away from its cause. `Path.parse` has already rejected
 # `.` / `..` / empty segments before we are called, so what remains to check is
 # the segment count, the 1500-byte id limit, and Firestore's reserved `__*__`
 # form.
@@ -87,15 +87,15 @@
 #      base64 lives in `komira_encoding`, which is not in this package's dep
 #      closure. A codec dependency for a payload class the
 #      caller does not have is a cost with no buyer.
-#   2. Both registry keyspaces are text BY CONSTRUCTION: a URL is ASCII by
-#      RFC 3986, and a service name is `[a-z0-9-]`. And `ServiceDirectory`'s own
-#      `_decode` reads stored bytes back one CODEPOINT per byte while `_encode`
-#      writes UTF-8, so the contract above it is already ASCII-only — a non-ASCII
-#      body would not survive that round trip whatever this conformer did.
-#   3. A `stringValue` is READABLE IN THE FIRESTORE CONSOLE. `ResolveResult`
-#      exists so an operator can go from a bad resolution to the bytes that
-#      caused it; a base64 blob breaks that loop for every value in the store to
-#      buy generality for a payload nobody stores.
+#   2. The payloads this conformer was built for are text BY CONSTRUCTION: a
+#      URL is ASCII by RFC 3986, and a name is `[a-z0-9-]`. A consumer that
+#      decodes stored bytes one CODEPOINT per byte while encoding UTF-8 is
+#      already ASCII-only — a non-ASCII body would not survive that round trip
+#      whatever this conformer did.
+#   3. A `stringValue` is READABLE IN THE FIRESTORE CONSOLE, so an operator can
+#      go from a bad read to the bytes that caused it; a base64 blob breaks that
+#      loop for every value in the store to buy generality for a payload nobody
+#      stores.
 #
 # Widening to `bytesValue` is a real option and it is an ADDITIVE one — a second
 # field name with its own encode/decode — but it must arrive with the base64 dep
@@ -155,7 +155,7 @@ comptime FS_STORE_VALUE_FIELD: StaticString = "value"
 """The ONE document field holding the object body.
 
 ⛔ A COMPTIME CONSTANT, NEVER A CONSTRUCTOR PARAMETER — the same argument
-`komira_service_registry` makes for its two key prefixes. A configurable field
+a consumer makes for its key prefixes. A configurable field
 name is a SECOND value composition, and two compositions over one database is
 how a document written by one process becomes invisible to another with a green
 deploy on both sides."""
@@ -174,8 +174,8 @@ def _store_error(kind: String, what: String) -> Error:
     """A locally-raised `StoreError[<KIND>] ... status=<http>`.
 
     ⚠ `what` IS DEFUSED. It embeds the caller's key, and a key containing `404`
-    would otherwise make a refusal read as an absent object to
-    `ServiceDirectory._is_not_found`. Same rule as
+    would otherwise make a refusal read as an absent object to a consumer's
+    substring not-found classifier. Same rule as
     `map_firestore_error_to_store_error`; see that module's header."""
     var msg = String("StoreError[")
     msg += kind
@@ -523,8 +523,8 @@ struct FirestoreConditionalStore[
 
         ⚠ FIRESTORE HAS NO METADATA-ONLY READ. `GetObject` on GCS is a genuine
         HEAD; a Firestore document GET returns the whole document, so this costs
-        a full read. It is kept as `head` rather than made to fail because
-        `ServiceDirectory._try_last_writer_wins` and `_delete_if_present` both
+        a full read. It is kept as `head` rather than made to fail because a
+        last-writer-wins publish (head + CAS) and a head-then-delete both
         need the ETAG and the EXISTS answer, and a store whose `head` raises
         cannot serve either."""
         var key = path.raw()
@@ -582,9 +582,9 @@ struct FirestoreConditionalStore[
             # fatal, and any `get` of that key still refuses loudly.
             #
             # ⛔ The alternative was to raise here, and it fails for the WRONG
-            # REASON: `ServiceDirectory.list_endpoints` reads only `location`,
-            # so a foreign document would break a verb over a field that verb
-            # never looks at.
+            # REASON: a caller enumerating keys reads only `location`, so a
+            # foreign document would break a verb over a field that verb never
+            # looks at.
             var size = Int64(-1)
             try:
                 size = Int64(document_body_text(docs[i], key).byte_length())
@@ -685,8 +685,8 @@ struct FirestoreConditionalStore[
     ) raises -> ObjectMeta:
         """Write only if the document's current `updateTime` equals
         `expected_version`. On a stale handle this raises
-        `StoreError[PRECONDITION] … status=412` — the signal
-        `ServiceDirectory.publish_endpoint` retries once on."""
+        `StoreError[PRECONDITION] … status=412` — the signal a last-writer-wins
+        caller retries on."""
         return self.conditional_put(
             path, bytes, WritePrecondition.if_match(expected_version)
         )
@@ -697,9 +697,8 @@ struct FirestoreConditionalStore[
 
     def get(self, path: Path) raises -> List[UInt8]:
         """The whole object body. An absent document raises
-        `StoreError[NOT_FOUND] … status=404`, which is what
-        `ServiceDirectory._read` turns into a `found=False` result sourced from
-        the STORE."""
+        `StoreError[NOT_FOUND] … status=404`, which is what a reader turns into
+        an "absent" answer rather than a raise."""
         var key = path.raw()
         var parts = split_document_path(key)
         var uri = firestore_resource_uri(self._database, parts[0], parts[1])

@@ -165,11 +165,6 @@ mojo_library(
         # the tests a ManualClock.
         "//src/komira_retry:komira_retry",
         "//src/komira_rowcell:komira_rowcell",
-        # For the tests only: test_firestore_conditional_store drives the
-        # conformer through its consumer, the service registry's
-        # ServiceDirectory. The edge goes this way only; the registry never
-        # names this package.
-        "//src/komira_service_registry:komira_service_registry",
         "//src/komira_snapshotter:komira_snapshotter",
         "//src/komira_wkt:komira_wkt",
     ],
