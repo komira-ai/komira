@@ -26,6 +26,19 @@ BOTOCORE_MODELS = {
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
     ),
+    # Amazon EC2 (//src/komira_aws_ec2), an ec2Query client of the handful
+    # of operations komira calls. Its latest api version; botocore keeps the
+    # older ones beside it.
+    "ec2": struct(
+        api_version = "2016-11-15",
+        sha256 = "ce3cdb5d329b380286bf5ffb312cb02ad3728916228d08143971d2f62e10e5df",
+    ),
+    # AWS Identity and Access Management (//src/komira_aws_iam), an awsQuery
+    # client of a global service.
+    "iam": struct(
+        api_version = "2010-05-08",
+        sha256 = "15c70eaeb15bda321fbf0e9a0db35036d67c6ccd34d38acbcad3a086b89251c5",
+    ),
     # Amazon CloudWatch Logs (//src/komira_aws_logs), also the worked
     # example of mojo_aws_client's docstring (//tools/build/cloud:aws.bzl).
     "logs": struct(
@@ -38,6 +51,11 @@ BOTOCORE_MODELS = {
     "s3": struct(
         api_version = "2006-03-01",
         sha256 = "429763d64912af5edae4c7a0f20a8ac3e6fecf734cde5fc465016bc8badcdef9",
+    ),
+    # Amazon SNS (//src/komira_aws_sns), an awsQuery client.
+    "sns": struct(
+        api_version = "2010-03-31",
+        sha256 = "a89df7db9dc5e766cb8ad5d21175c9cc28baf7cabc20ebf8f8a6dd5a2f5a7d2b",
     ),
     # Amazon SQS (//src/komira_aws_sqs).
     "sqs": struct(
