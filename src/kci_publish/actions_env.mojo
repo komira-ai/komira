@@ -24,8 +24,8 @@
 # =============================================================================
 
 from std.builtin.swap import swap
-from std.os import getenv
 
+from komira_libc.posix import _read_env
 from komira_secret_store import SecretValue
 
 from kci_pkg_upload.github_oidc_credential import (
@@ -53,8 +53,11 @@ struct ActionsOidcEnv(Movable):
 
     @staticmethod
     def from_process() raises -> ActionsOidcEnv:
-        var url = getenv(String(ACTIONS_ID_TOKEN_REQUEST_URL), String(""))
-        var token = getenv(String(ACTIONS_ID_TOKEN_REQUEST_TOKEN), String(""))
+        # Read through komira_libc, the one getenv declaration: a second
+        # (std.os.getenv) in the same binary is a conflicting-signature link
+        # error once komira_libc is linked too (bin/kci links both).
+        var url = _read_env("ACTIONS_ID_TOKEN_REQUEST_URL")
+        var token = _read_env("ACTIONS_ID_TOKEN_REQUEST_TOKEN")
         return ActionsOidcEnv(url^, SecretValue.from_string(token))
 
     @staticmethod

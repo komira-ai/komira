@@ -14,6 +14,10 @@
 #   scripted_runner.mojo    ScriptedRunner: the test double
 #   build.mojo              run_build: the flow (and the --plan path), and
 #                           the step's part of the run's result document
+#   affected.mojo           run_affected: the per-change check
+#                           (`--affected-by`): the change, each build
+#                           system's affected command, exactly the units it
+#                           reaches built (every unit when WIDENED)
 #
 # What to build, and with which program, is the artifacts file's
 # (kci_artifact); what a build must leave is checked by
@@ -22,9 +26,18 @@
 # parses none.
 # =============================================================================
 
+from kci_build.affected import run_affected
 from kci_build.build import check_log_dir, check_platform_dir, resolved_path, run_build
 from kci_build.request import DEFAULT_BUILD_TIMEOUT_S, BuildOutcome, BuildRequest
-from kci_build.revision import GIT_PROGRAM, GIT_TIMEOUT_S, StampResult, derive_release_stamp
+from kci_build.revision import (
+    CHANGED_FILES_NAME,
+    GIT_PROGRAM,
+    GIT_TIMEOUT_S,
+    ChangedFiles,
+    StampResult,
+    changed_files,
+    derive_release_stamp,
+)
 from kci_build.runner import (
     STDERR_TAIL_BYTES,
     ProcessRunner,
