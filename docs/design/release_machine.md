@@ -26,7 +26,7 @@ Two layers produce a shipped artifact, and this document is about the first:
    the release machine.
 2. **The release machine** runs the build, then stages and publishes what it
    made, deploys it where it is a service, and validates the outcome in the
-   environment. Its driver is `komira_ci`.
+   cell it deployed to. Its driver is `komira_ci`.
 
 Held, because the libraries that implement them are not part of this
 repository yet, and described here only so the build outputs below make

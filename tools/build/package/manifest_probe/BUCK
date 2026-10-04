@@ -5,7 +5,7 @@ load("@komira//tools/build/package:conda.bzl", "conda_manifest_kci")
 # (src/kci_artifact_manifest), renders it again with kci's writer, and says
 # whether the bytes are the same. tools/build/tests/functional/conda_set.sh runs
 # it over the manifests the conda packages emit: the proof that what the build
-# writes is what `kci publish` reads. Nothing publishes it.
+# writes is what the PUBLISH step reads. Nothing publishes it.
 mojo_binary(
     name = "parse_manifest",
     srcs = ["parse_manifest.mojo"],
