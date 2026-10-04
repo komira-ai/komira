@@ -167,8 +167,9 @@ struct AdcOptions(Copyable, Movable, Deinitable):
     `default(scopes=...)` and a client's self-signed-JWT audience:
 
     * `scopes`: OAuth scopes. A service-account key exchanges a JWT for a
-      token with them; the metadata server and an authorized_user refresh
-      are asked for them.
+      token with them and the metadata server is asked for them. An
+      authorized_user refresh is NOT: the user's grant fixed its scopes
+      (google-auth's ADC never scopes those credentials).
     * `self_signed_jwt_audience`: `https://<service>.googleapis.com/`. A
       service-account key with no scopes signs a JWT for this audience and
       uses it as the token (google-auth `service_account.Credentials`,
@@ -397,8 +398,15 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
                 clock^, creds.key.take(), audience^, scopes^
             )
         elif creds.kind == ADC_KIND_AUTHORIZED_USER:
+            # No scopes on the refresh: a user's grant carries the scopes it
+            # was consented with, and asking for others (a client's
+            # datastore scope, say) can get `invalid_scope` for a scope the
+            # user never granted. google-auth's ADC loads the file without
+            # scopes and never applies them (`oauth2.credentials.Credentials`
+            # is `ReadOnlyScoped`, so `with_scopes_if_required` leaves it),
+            # and Go's refresh sends no `scope` either.
             self._user = AuthorizedUserFetcher[Self.XT](
-                tls^, creds.user.take(), options.scopes.copy()
+                tls^, creds.user.take(), List[String]()
             )
         else:
             raise Error("AdcFetcher: unknown credential kind " + String(creds.kind))

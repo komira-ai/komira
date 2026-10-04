@@ -583,6 +583,50 @@ def test_end_to_end_key_file(mut seen: Seen) raises:
     )
 
 
+def test_end_to_end_authorized_user_sends_no_scope(mut seen: Seen) raises:
+    # The caller asks for scopes; the refresh of a user's grant must not
+    # carry them (google-auth's ADC never scopes authorized_user
+    # credentials, and Go's refresh sends no `scope`).
+    var env = MapEnv()
+    env.set(String("HOME"), String(_HOME))
+    var files = MapFiles()
+    files.put(
+        String(_WELL_KNOWN),
+        String(
+            '{"type":"authorized_user","client_id":"cid","client_secret":"s",'
+            '"refresh_token":"r","token_uri":"https://127.0.0.1:8443/token"}'
+        ),
+    )
+    var capture = ArcPointer(List[UInt8]())
+    var tls = ScriptedConnector.with_stream_tls(
+        ScriptedStream.from_read_script_with_capture(_answer(_OK_BODY), capture)
+    )
+    var scopes = _scopes()
+    scopes.append(String("https://www.googleapis.com/auth/datastore"))
+    var src = application_default_token_source_with(
+        env,
+        files,
+        _unused(),
+        _unused(),
+        Transport(HttpClientConfig.defaults(), tls^),
+        FixedWallClock(_T0),
+        ManualClock(0),
+        AdcOptions(scopes^),
+    )
+    seen.check(env)
+    assert_equal(src.access_token(), "ya29.ADC")
+    var wire = String(unsafe_from_utf8=Span(capture[]))
+    assert_true(wire.startswith("POST /token HTTP/1.1\r\n"), wire)
+    assert_true(
+        wire.endswith(
+            "\r\n\r\ngrant_type=refresh_token&client_id=cid&client_secret=s"
+            "&refresh_token=r"
+        ),
+        wire,
+    )
+    assert_false("scope" in wire, wire)
+
+
 def test_end_to_end_always_self_signed(mut seen: Seen) raises:
     var env = MapEnv()
     env.set(String(_GAC), String(_KEY_PATH))
@@ -649,6 +693,7 @@ def main() raises:
     test_nothing_found(seen)
     test_end_to_end_metadata(seen)
     test_end_to_end_key_file(seen)
+    test_end_to_end_authorized_user_sends_no_scope(seen)
     test_end_to_end_always_self_signed(seen)
     test_every_google_variable_and_no_other(seen)
     test_probe_config()
