@@ -39,6 +39,12 @@ WHAT LIVES HERE (the four concerns):
                            verbs.
   * digest.mojo          — `ModelledDigest`: every modelled field, never
                            provenance.
+  * unpinned_plan.mojo   — what a plan renders for a service's or job's image
+                           whose build step has not run yet
+                           (`UNPINNED-NOT-A-DIGEST:<step>/<name>`), refused
+                           unless the caller passes an `UnpinnedImages`
+                           record, which lists each one by node and step
+                           output.
   * engine.mojo          — the verbs (`plan_graph` / `apply_graph` /
                            `apply_graph_tracked` / `rollback_create` /
                            `destroy_graph`, and the owned forms
@@ -146,4 +152,14 @@ from kci_reconciler.engine import (
     rollback_create,
     destroy_graph,
     destroy_graph_owned,
+)
+from kci_reconciler.unpinned_plan import (
+    UNPINNED_PLAN_DIGEST_PREFIX,
+    UNPINNED_KIND_SERVICE,
+    UNPINNED_KIND_JOB,
+    UnpinnedImage,
+    UnpinnedImages,
+    is_unpinned_plan_digest,
+    unpinned_build_ref,
+    unpinned_image_digest,
 )
