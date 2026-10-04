@@ -38,7 +38,7 @@
 # =============================================================================
 
 
-from komira_engine_operators.column_format_storage import (
+from komira_column_format.column_format_storage import (
     ColumnFormatStorage,
     VAR_DESC_OFFSET_MAX,
     _var_desc_pack,

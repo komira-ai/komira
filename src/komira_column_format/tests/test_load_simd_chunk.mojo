@@ -4,7 +4,7 @@
 #
 # UDF-PHASE-B3-7-PREREQ (RFC §6.2 prerequisite primitive). Tests the
 # `load_simd_chunk[dtype, W]` free function in
-# `komira_engine_operators/load_simd_chunk.mojo`. These tests would
+# `komira_column_format/load_simd_chunk.mojo`. These tests would
 # FAIL at pre-B3-7-PREREQ HEAD because the function did not exist.
 #
 # Coverage:
@@ -23,7 +23,7 @@ from komira_core.arrow.record_batch import RecordBatch
 from komira_core.arrow.schema import Schema, SchemaBuilder, Field
 from komira_core.arrow.arrow_types import ArrowType
 
-from komira_engine_operators.load_simd_chunk import load_simd_chunk
+from komira_column_format.load_simd_chunk import load_simd_chunk
 
 
 # =============================================================================
