@@ -151,6 +151,11 @@ comptime CREDENTIAL_PROBE_MINTED: String = "MINTED"
 comptime CREDENTIAL_PROBE_NOT_UNDER_CI: String = "NOT_UNDER_CI"
 comptime CREDENTIAL_PROBE_NOT_OIDC: String = "NOT_OIDC"
 
+comptime CREDENTIAL_PROBE_NOT_RUN_NOTE: String = "credential probe NOT RUN (not under GitHub Actions)"
+"""What the evidence line and the summary say next to the outcome of a run
+whose PUBLISH step recorded NOT_UNDER_CI: a green dry run outside CI never
+exchanged a token, so it cannot be read as covering the OIDC mint."""
+
 comptime WORKFLOW_PATH_PREFIX: String = ".github/workflows/"
 comptime WORKFLOW_NOT_REACHED: String = "not reached"
 """`workflow.reason` of a record written before the workflow check ran."""
@@ -184,6 +189,15 @@ def all_credential_probes() -> List[String]:
     out.append(String(CREDENTIAL_PROBE_NOT_UNDER_CI))
     out.append(String(CREDENTIAL_PROBE_NOT_OIDC))
     return out^
+
+
+def credential_probe_note(steps: List[ResultStep]) -> String:
+    """`CREDENTIAL_PROBE_NOT_RUN_NOTE` when a step recorded the credential
+    probe NOT_UNDER_CI, else ""."""
+    for i in range(len(steps)):
+        if steps[i].credential_probe == CREDENTIAL_PROBE_NOT_UNDER_CI:
+            return String(CREDENTIAL_PROBE_NOT_RUN_NOTE)
+    return String("")
 
 
 def reserved_result_keys() -> List[String]:
