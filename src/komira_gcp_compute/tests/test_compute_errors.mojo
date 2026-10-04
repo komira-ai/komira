@@ -6,11 +6,12 @@
 # Compute v1 answers with the older error envelope: `error.code` (the HTTP
 # status), `error.message` and an `error.errors[]` list of
 # `{message, domain, reason}`, and no `error.status` (the raised text says
-# so). The canonical code is then the HTTP status's (komira_gcp_core `code_from_http_status`): 404 is
-# NOT_FOUND, and a 409 for a resource that already exists (reason
-# `alreadyExists`) is ABORTED, the first code google/rpc/code.proto lists
-# for 409, not ALREADY_EXISTS. A caller that adopts an existing resource on
-# an insert conflict keys on the HTTP 409, not on ALREADY_EXISTS.
+# so). The canonical code is then the HTTP status's (komira_gcp_core
+# `code_from_http_status`): 404 is NOT_FOUND, and a 409 is ABORTED, the
+# first code google/rpc/code.proto lists for 409, not ALREADY_EXISTS. The
+# raised text carries the first `errors[].reason` (a fixed machine token,
+# `reason alreadyExists`), so a caller that adopts an existing resource on
+# an insert conflict tells that 409 from any other by its reason.
 #
 # The envelopes are written in the form the Compute Engine v1 error
 # reference documents; the connector is komira_http_core's
@@ -111,7 +112,8 @@ def test_not_found_without_a_status_maps_from_http() raises:
     var got = _get_raised(_answer("404 Not Found", "application/json", body))
     assert_equal(
         got,
-        String("GET Get: HTTP 404, NOT_FOUND (code 5), error.status absent or")
+        String("GET Get: HTTP 404, NOT_FOUND (code 5), reason notFound,")
+        + " error.status absent or"
         + " not a status token, error.message "
         + String(message.byte_length())
         + " bytes, body "
@@ -120,7 +122,7 @@ def test_not_found_without_a_status_maps_from_http() raises:
     )
     assert_false("private-project" in got)
     assert_false("job-vm-1" in got)
-    assert_false("notFound" in got)
+    assert_false("was not found" in got)
 
 
 def test_already_exists_on_insert_is_aborted() raises:
@@ -132,9 +134,32 @@ def test_already_exists_on_insert_is_aborted() raises:
         + '"domain":"global","reason":"alreadyExists"}]}}'
     )
     var got = _insert_raised(_answer("409 Conflict", "application/json", body))
-    assert_true(got.startswith("POST Insert: HTTP 409, ABORTED (code 10), "))
+    assert_true(
+        got.startswith("POST Insert: HTTP 409, ABORTED (code 10), reason alreadyExists, "),
+        got,
+    )
     assert_false("private-project" in got)
+    assert_false("already exists" in got)
+
+
+def test_another_conflict_has_another_reason() raises:
+    # A 409 that is not "already exists" (the network is still being
+    # created) reads differently, so an insert that adopts an existing
+    # resource does not adopt one that is not there yet.
+    var body = String(
+        '{"error":{"code":409,"message":"The resource'
+        + " 'projects/private-project/global/networks/apps' is not ready\","
+        + '"errors":[{"message":"The resource'
+        + " 'projects/private-project/global/networks/apps' is not ready\","
+        + '"domain":"global","reason":"resourceNotReady"}]}}'
+    )
+    var got = _insert_raised(_answer("409 Conflict", "application/json", body))
+    assert_true(
+        got.startswith("POST Insert: HTTP 409, ABORTED (code 10), reason resourceNotReady, "),
+        got,
+    )
     assert_false("alreadyExists" in got)
+    assert_false("private-project" in got)
 
 
 def test_permission_denied_on_a_get() raises:
@@ -182,6 +207,7 @@ def test_empty_error_body() raises:
 def main() raises:
     test_not_found_without_a_status_maps_from_http()
     test_already_exists_on_insert_is_aborted()
+    test_another_conflict_has_another_reason()
     test_permission_denied_on_a_get()
     test_rate_limited()
     test_a_front_end_page_is_counted_not_quoted()
