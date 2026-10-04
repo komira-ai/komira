@@ -5,18 +5,18 @@
 #   cannot drift apart.
 # =============================================================================
 #
-# `verify_member(declaration, dir)` refuses (RAISES, every message starting
-# `artifact '<declaration>': `), in this order:
+# `verify_member(artifact, dir)` refuses (RAISES, every message starting
+# `artifact '<artifact>': `), in this order:
 #
 #   - `dir` is a symlink, or is not a directory;
 #   - any top-level entry is a symlink (checked with lstat semantics, never
 #     followed: a link can name bytes outside the release directory, and the
 #     bare-name rule below exists so that nothing outside it can be named);
-#   - its top level holds no `manifest.json` (kci_artifact_declaration's
+#   - its top level holds no `manifest.json` (kci_artifact's
 #     `require_one_manifest`), or `manifest.json` is not a regular file; the
 #     manifest does not parse (kci_artifact_manifest's
 #     `read_artifact_manifest`);
-#   - the manifest's `name` is not the declaration's, exactly
+#   - the manifest's `name` is not the artifact's, exactly
 #     (`require_manifest_name`);
 #   - `file` or `metadata` is not a bare name in `dir` (no `/`, not `.` or
 #     `..`; the manifest format allows a relative path for `file`, the release
@@ -43,13 +43,13 @@ from std.pathlib import Path
 
 from komira_crypto import hex_lower_array_32, sha256
 
-from kci_artifact_declaration import (
+from kci_artifact import (
     KCI_MANIFEST_NAME,
     require_manifest_name,
     require_one_manifest,
 )
 from kci_artifact_manifest import ArtifactManifest, read_artifact_manifest
-from kci_contract import platform_of_conda_subdir, require_member_platform
+from kci_api import platform_of_conda_subdir, require_member_platform
 from kci_release_channel import ARTIFACT_TYPE_CONDA
 
 from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
@@ -57,12 +57,12 @@ from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
 
 struct ReleaseMember(Copyable, Movable):
     """One verified artifact directory. `dir_name` is the directory's last
-    path segment (the declaration's name); `conda` is meaningful only when
+    path segment (the artifact's name); `conda` is meaningful only when
     `has_conda` (a CONDA artifact); `size` is the file's size in bytes.
 
     Layout: owned values only. No pointer field."""
 
-    var declaration: String
+    var artifact: String
     var dir: String
     var manifest: ArtifactManifest
     var size: Int
@@ -71,12 +71,12 @@ struct ReleaseMember(Copyable, Movable):
 
     def __init__(
         out self,
-        var declaration: String,
+        var artifact: String,
         var dir: String,
         var manifest: ArtifactManifest,
         size: Int,
     ):
-        self.declaration = declaration^
+        self.artifact = artifact^
         self.dir = dir^
         self.manifest = manifest^
         self.size = size
@@ -96,14 +96,14 @@ struct ReleaseMember(Copyable, Movable):
         return String("")
 
 
-def _refuse(declaration: String, why: String) raises:
-    raise Error(String("artifact '") + declaration + String("': ") + why)
+def _refuse(artifact: String, why: String) raises:
+    raise Error(String("artifact '") + artifact + String("': ") + why)
 
 
-def _bare(declaration: String, key: String, value: String) raises:
+def _bare(artifact: String, key: String, value: String) raises:
     if value.find(String("/")) >= 0 or value == "." or value == "..":
         _refuse(
-            declaration,
+            artifact,
             String("the manifest's '")
             + key
             + String("' is '")
@@ -112,7 +112,7 @@ def _bare(declaration: String, key: String, value: String) raises:
         )
     if value == KCI_MANIFEST_NAME:
         _refuse(
-            declaration,
+            artifact,
             String("the manifest's '") + key + String("' names the manifest itself"),
         )
 
@@ -133,18 +133,18 @@ def _no_trailing_slash(path: String) -> String:
     return String(path[byte = :n])
 
 
-def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
+def verify_member(artifact: String, dir: String) raises -> ReleaseMember:
     """Check one artifact directory (file header); return what it holds."""
     if islink(_no_trailing_slash(dir)):
         _refuse(
-            declaration,
+            artifact,
             String("'")
             + dir
             + String("' is a symlink, not a directory: a link can name bytes outside the")
             + String(" release directory"),
         )
     if not isdir(dir):
-        _refuse(declaration, String("'") + dir + String("' is not a directory"))
+        _refuse(artifact, String("'") + dir + String("' is not a directory"))
     var base = dir.copy()
     if not base.endswith(String("/")):
         base += String("/")
@@ -154,26 +154,26 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
         var entry = String(raw[i])
         if islink(base + entry):
             _refuse(
-                declaration,
+                artifact,
                 String("the directory's '")
                 + entry
                 + String("' is a symlink: the directory holds regular files only, and a link")
                 + String(" can name bytes outside the release directory"),
             )
         listing.append(entry^)
-    require_one_manifest(declaration, listing)
+    require_one_manifest(artifact, listing)
     if not isfile(base + String(KCI_MANIFEST_NAME)):
         _refuse(
-            declaration,
+            artifact,
             String("its ") + String(KCI_MANIFEST_NAME) + String(" is not a regular file"),
         )
     var m = read_artifact_manifest(base + String(KCI_MANIFEST_NAME))
-    require_manifest_name(declaration, m.name)
-    _bare(declaration, String("file"), m.file)
-    _bare(declaration, String("metadata"), m.metadata)
+    require_manifest_name(artifact, m.name)
+    _bare(artifact, String("file"), m.file)
+    _bare(artifact, String("metadata"), m.metadata)
     if m.file == m.metadata:
         _refuse(
-            declaration,
+            artifact,
             String("the manifest's 'file' and 'metadata' are the same name '")
             + m.file
             + String("'"),
@@ -182,7 +182,7 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
         var entry = listing[i].copy()
         if entry != KCI_MANIFEST_NAME and entry != m.file and entry != m.metadata:
             _refuse(
-                declaration,
+                artifact,
                 String("the directory holds '")
                 + entry
                 + String("', which its manifest does not name; it holds exactly ")
@@ -194,20 +194,20 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
     # Every top-level entry was refused above if it was a symlink, so
     # `isfile` (which follows links) here means a regular file.
     if not isfile(file_path):
-        _refuse(declaration, String("its file '") + m.file + String("' is not in the directory"))
+        _refuse(artifact, String("its file '") + m.file + String("' is not in the directory"))
     if not isfile(metadata_path):
         _refuse(
-            declaration,
+            artifact,
             String("its metadata '") + m.metadata + String("' is not in the directory"),
         )
     var data = Path(file_path).read_bytes()
     var size = len(data)
     if size == 0:
-        _refuse(declaration, String("its file '") + m.file + String("' is EMPTY"))
+        _refuse(artifact, String("its file '") + m.file + String("' is EMPTY"))
     var actual = hex_lower_array_32(sha256(Span(data)))
     if actual != m.sha256_hex:
         _refuse(
-            declaration,
+            artifact,
             String("the sha256 of '")
             + m.file
             + String("' is ")
@@ -215,21 +215,21 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
             + String(" but its manifest says ")
             + m.sha256_hex,
         )
-    var member = ReleaseMember(declaration.copy(), dir.copy(), m.copy(), size)
+    var member = ReleaseMember(artifact.copy(), dir.copy(), m.copy(), size)
     if m.artifact_type == ARTIFACT_TYPE_CONDA:
         var md: CondaMetadata
         try:
             md = read_conda_metadata(metadata_path)
         except e:
-            _refuse(declaration, String(e))
+            _refuse(artifact, String(e))
             return member^
-        _agree(declaration, String("name"), md.name, m.name)
-        _agree(declaration, String("version"), md.version, m.version)
-        _agree(declaration, String("subdir"), md.subdir, m.subdir)
-        _agree(declaration, String("file_name"), md.file_name, m.file)
+        _agree(artifact, String("name"), md.name, m.name)
+        _agree(artifact, String("version"), md.version, m.version)
+        _agree(artifact, String("subdir"), md.subdir, m.subdir)
+        _agree(artifact, String("file_name"), md.file_name, m.file)
         if md.size != size:
             _refuse(
-                declaration,
+                artifact,
                 String("its metadata says size ")
                 + String(md.size)
                 + String(" but '")
@@ -240,7 +240,7 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
             )
         if not md.stamped:
             _refuse(
-                declaration,
+                artifact,
                 String("its metadata says stamped: false; an unstamped package is never released"),
             )
         member.has_conda = True
@@ -249,7 +249,7 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
 
 
 def member_platform(member: ReleaseMember, release_platform: String) raises -> String:
-    """The platform a verified member is for (kci_contract's platform table).
+    """The platform a verified member is for (kci_api's platform table).
 
     A CONDA member's platform is the one whose conda subdir its manifest
     names (`linux-64` -> `linux-x86_64`, `noarch` -> `noarch`). The artifact
@@ -264,14 +264,14 @@ def member_platform(member: ReleaseMember, release_platform: String) raises -> S
     try:
         require_member_platform(release_platform, p)
     except e:
-        _refuse(member.declaration, String(e))
+        _refuse(member.artifact, String(e))
     return p^
 
 
-def _agree(declaration: String, key: String, metadata_value: String, manifest_value: String) raises:
+def _agree(artifact: String, key: String, metadata_value: String, manifest_value: String) raises:
     if metadata_value != manifest_value:
         _refuse(
-            declaration,
+            artifact,
             String("its metadata says ")
             + key
             + String(" '")

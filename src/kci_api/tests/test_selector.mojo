@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_contract/tests/test_selector.mojo
+# src/kci_api/tests/test_selector.mojo
 #   The `--only` grammar: step:<name> and validation:<name>, every refusal by
 #   its message, the scope words, and the prefix-safe evidence line.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import (
+from kci_api import (
     SCOPE_FULL,
     SCOPE_SELECTIVE,
     STEP_NAME_MAX_BYTES,

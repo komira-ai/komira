@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/platform.mojo -- the platforms kci builds and publishes
+# src/kci_api/platform.mojo -- the platforms kci builds and publishes
 #   for, and the conda subdir of each.
 # =============================================================================
 #
@@ -20,7 +20,7 @@
 # A platform is OS + CPU and nothing else. An OCI image names the same pair
 # in its own spelling, `os/arch` (`linux/amd64`); `oci_platform_of` and
 # `platform_of_oci` translate at the image boundary only, so the machine
-# file, the declarations and the release directory keep one spelling. Both
+# file, the artifacts and the release directory keep one spelling. Both
 # directions refuse a spelling they do not know, and `noarch` has no OCI
 # spelling (an image always runs on one OS and CPU).
 #

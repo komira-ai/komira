@@ -1,24 +1,24 @@
 load("@komira//tools/build/mojo:proto.bzl", "mojo_proto_library")
 
-# The artifact declarations schema (`kci.release.v1`): the reviewed list of
+# The artifacts schema (`kci.release.v1`): the reviewed list of
 # what kci builds and publishes. A file declares build systems (a program and
 # the flags it always gets) and artifacts (a name, the build system that
 # builds it and the args appended for it). kci knows no
-# build tool by name; the contract (an empty `{out_dir}`; one artifact per
-# declaration, so exactly one kci artifact manifest, `manifest.json`, left at
-# its top, whose `name` is the declaration's) is in the .proto. Standalone: the .proto
+# build tool by name; the build rules (an empty `{out_dir}`; one artifact per
+# entry, so exactly one kci artifact manifest, `manifest.json`, left at
+# its top, whose `name` is the artifact's) are in the .proto. Standalone: the .proto
 # imports no other proto.
 #
-#   from kci_artifact_declaration_proto.artifact_declaration import (
-#       ArtifactDeclarations, ArtifactDeclaration, BuildSystem)
+#   from kci_artifact_proto.artifact import (
+#       Artifacts, Artifact, BuildSystem)
 #
 # Reading, validating and rendering a build's argv is
-# `//src/kci_artifact_declaration`, whose welded tests also round-trip this
+# `//src/kci_artifact`, whose welded tests also round-trip this
 # schema on the proto binary wire with every field number pinned as bytes.
-# Other `.proto` files import it as `kci/release/v1/artifact_declaration.proto`.
+# Other `.proto` files import it as `kci/release/v1/artifact.proto`.
 mojo_proto_library(
-    name = "kci_artifact_declaration_proto",
-    srcs = ["artifact_declaration.proto"],
+    name = "kci_artifact_proto",
+    srcs = ["artifact.proto"],
     import_prefix = "kci/release/v1",
     deps = ["//src/komira_proto_codec:komira_proto_codec"],
     visibility = ["PUBLIC"],

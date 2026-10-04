@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/tests/test_formats.mojo
+# src/kci_api/tests/test_formats.mojo
 #   The format table pinned by value, and every version refusal by its
 #   message: authored (missing, too new, too old) and produced (format,
 #   major, unknown keys ignored).
@@ -9,8 +9,8 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_json import parse_json_value
 
-from kci_contract import (
-    FORMAT_ARTIFACT_DECLARATIONS,
+from kci_api import (
+    FORMAT_ARTIFACTS,
     FORMAT_CHANNELS,
     FORMAT_RELEASE_SET,
     FORMAT_RESULT,
@@ -46,7 +46,7 @@ def test_golden_table() raises:
     # `kci.stages` went with the `stages` verb
     assert_equal(len(t), 7)
     var want = List[String]()
-    want.append(String("kci.artifact_declarations AUTHORED 1 1"))
+    want.append(String("kci.artifacts AUTHORED 1 1"))
     want.append(String("kci.channels AUTHORED 1 1"))
     want.append(String("kci.machine AUTHORED 1 1"))
     want.append(String("kci.artifact_manifest PRODUCED 1 1"))
@@ -67,8 +67,8 @@ def test_authored_control_and_refusals() raises:
         String("f.textproto: no schema_version; add `schema_version: 1` (this kci reads kci.channels up to major 1)"),
     )
     assert_equal(
-        _authored(String(FORMAT_ARTIFACT_DECLARATIONS), True, 2),
-        String("f.textproto: schema_version 2 needs a newer kci (this kci reads kci.artifact_declarations up to major 1)"),
+        _authored(String(FORMAT_ARTIFACTS), True, 2),
+        String("f.textproto: schema_version 2 needs a newer kci (this kci reads kci.artifacts up to major 1)"),
     )
     assert_equal(
         _authored(String(FORMAT_CHANNELS), True, 0),

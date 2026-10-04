@@ -17,7 +17,7 @@ from kci_release_channel import (
     ARTIFACT_TYPE_PYTHON,
     CREDENTIAL_KIND_API_TOKEN,
     ChannelCredential,
-    ChannelDeclaration,
+    Channel,
     ChannelRepository,
     find_channel,
     is_known_credential_kind,
@@ -25,11 +25,11 @@ from kci_release_channel import (
     oidc_exchange_implemented,
     parse_channels_file,
     push_identity_environment,
-    validate_channel_declarations,
+    validate_channels,
 )
 
 
-def _parse(text: String) raises -> List[ChannelDeclaration]:
+def _parse(text: String) raises -> List[Channel]:
     """`parse_channels_file` over `text` with `schema_version: 1` prepended on
     its FIRST line, so no line number a refusal names moves."""
     return parse_channels_file(String("schema_version: 1 ") + text)
@@ -73,13 +73,13 @@ def _assert_not_quoted(text: String, secret: String) raises:
 
 
 def test_control_api_token_parses() raises:
-    var decls = _parse(
+    var channels = _parse(
         _file(
             String("OCI"),
             String("    credential { kind: API_TOKEN secret_name: \"OCI_TOKEN\" }\n"),
         )
     )
-    var c = find_channel(decls, String("beta")).repository_for(
+    var c = find_channel(channels, String("beta")).repository_for(
         String(ARTIFACT_TYPE_OCI)
     ).declared_credential()
     assert_true(c.is_api_token())
@@ -93,8 +93,8 @@ def test_control_oidc_parses_on_conda_and_python() raises:
     types.append(String("CONDA"))
     types.append(String("PYTHON"))
     for i in range(len(types)):
-        var decls = _parse(_file(types[i], block))
-        var c = decls[0].repositories[0].declared_credential()
+        var channels = _parse(_file(types[i], block))
+        var c = channels[0].repositories[0].declared_credential()
         assert_true(c.is_oidc_trusted_publishing())
         assert_equal(c.secret_name, String(""))
 
@@ -396,18 +396,18 @@ def test_a_constructed_repository_without_credential_is_refused() raises:
             None,
         )
     )
-    var decls = List[ChannelDeclaration]()
-    decls.append(ChannelDeclaration(String("edge"), String("PUBLIC"), repos^))
+    var channels = List[Channel]()
+    channels.append(Channel(String("edge"), String("PUBLIC"), repos^))
     var msg = String("")
     try:
-        validate_channel_declarations(decls)
+        validate_channels(channels)
     except e:
         msg = String(e)
     if "channel 'edge' declares no credential" not in msg:
         raise Error(String("unexpected: ") + msg)
     msg = String("")
     try:
-        _ = decls[0].repositories[0].declared_credential()
+        _ = channels[0].repositories[0].declared_credential()
     except e:
         msg = String(e)
     assert_equal(msg, String("the OCI repository declares no credential"))

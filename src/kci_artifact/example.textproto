@@ -1,5 +1,5 @@
-# An example artifact declarations file (kci.release.v1.ArtifactDeclarations).
-# The welded test tests/test_declaration_render.mojo reads this file (staged
+# An example artifacts file (kci.release.v1.Artifacts).
+# The welded test tests/test_artifact_render.mojo reads this file (staged
 # as its test data), so it always parses, validates and renders.
 #
 # kci runs, per artifact, with D a fresh EMPTY directory:

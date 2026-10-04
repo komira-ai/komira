@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_artifact_declaration/contract.mojo -- the words of the build contract
+# kci_artifact/placeholders.mojo -- the placeholders and the rules of a build
 #   kci holds every build system to, and the one substitution it performs.
 # =============================================================================
 #
@@ -8,7 +8,7 @@
 #   <executable> <build_system.args...> <artifact.args...>
 #
 # with every `{out_dir}` in any arg replaced by that directory's absolute
-# path. ONE ARTIFACT PER DECLARATION: the build leaves, at the top of that
+# path. ONE ARTIFACT PER ENTRY: the build leaves, at the top of that
 # directory, EXACTLY ONE kci artifact manifest (//src/kci_artifact_manifest's
 # format) named `KCI_MANIFEST_NAME` (`manifest.json`), plus the files it
 # names. That is the layout of a `conda_package`'s `[release]` directory
@@ -17,7 +17,7 @@
 # `require_one_manifest`: no `manifest.json` at the top, or a listing naming
 # it more than once (a directory cannot hold two, so that arm guards a
 # listing that is not one directory's top level); `require_manifest_name`:
-# a manifest whose `name` is not the declaration's, compared EXACTLY (byte
+# a manifest whose `name` is not the artifact's, compared EXACTLY (byte
 # for byte; no case folding, no trimming, no `-`/`_` equivalence).
 #
 # A placeholder is `{<identifier>}`, the identifier `[A-Za-z_][A-Za-z0-9_]*`.
@@ -67,8 +67,8 @@ def substitute_out_dir(arg: String, out_dir: String) -> String:
     return arg.replace(String(OUT_DIR_PLACEHOLDER), out_dir)
 
 
-def require_one_manifest(declaration: String, top_level: List[String]) raises:
-    """Refuse unless `top_level` (the names at the top of the declaration's
+def require_one_manifest(artifact: String, top_level: List[String]) raises:
+    """Refuse unless `top_level` (the names at the top of the artifact's
     output directory) holds `KCI_MANIFEST_NAME` exactly once."""
     var n = 0
     for i in range(len(top_level)):
@@ -77,7 +77,7 @@ def require_one_manifest(declaration: String, top_level: List[String]) raises:
     if n == 0:
         raise Error(
             String("artifact '")
-            + declaration
+            + artifact
             + String("': the build left no ")
             + String(KCI_MANIFEST_NAME)
             + String(" at the top of its output directory")
@@ -85,23 +85,23 @@ def require_one_manifest(declaration: String, top_level: List[String]) raises:
     if n > 1:
         raise Error(
             String("artifact '")
-            + declaration
+            + artifact
             + String("': the output directory lists ")
             + String(KCI_MANIFEST_NAME)
             + String(" ")
             + String(n)
-            + String(" times; one artifact per declaration means exactly one")
+            + String(" times; one artifact per entry means exactly one")
         )
 
 
-def require_manifest_name(declaration: String, manifest_name: String) raises:
-    """Refuse unless the built manifest's `name` equals the declaration's
+def require_manifest_name(artifact: String, manifest_name: String) raises:
+    """Refuse unless the built manifest's `name` equals the artifact's
     name EXACTLY (byte for byte)."""
-    if manifest_name != declaration:
+    if manifest_name != artifact:
         raise Error(
             String("artifact '")
-            + declaration
+            + artifact
             + String("': the built manifest's name '")
             + manifest_name
-            + String("' is not the declaration's name (compared exactly)")
+            + String("' is not the artifact's name (compared exactly)")
         )

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/layout.mojo -- the names of the files kci produces and the
+# src/kci_api/layout.mojo -- the names of the files kci produces and the
 #   layout of a release directory.
 # =============================================================================
 #
@@ -10,15 +10,15 @@
 #
 # `<release-dir>` is a flag (`--release-dir`) and has no default path.
 #
-# The machine file (the stage graph) is the ONE file kci finds by
+# The machine file (the release machine) is the ONE file kci finds by
 # convention: `release/machine.textproto`, relative to the working
 # directory, next to `release/artifacts.textproto` and
 # `release/channels.textproto`. `kci run --machine <path>` overrides it.
-# No other file (the result file, the release directory, a declaration, a
+# No other file (the result file, the release directory, an artifact, a
 # channel file) has a default.
 #
-# A declaration's `{release_dir}` placeholder stands
-# for `<release-dir>/<platform>`, so a declaration that reads an earlier
+# An artifact's `{release_dir}` placeholder stands
+# for `<release-dir>/<platform>`, so an artifact that reads an earlier
 # member (`{release_dir}/komira_encoding/manifest.json`) is the same text on
 # every platform.
 #
