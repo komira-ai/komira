@@ -38,7 +38,7 @@
 # Which farm buck2 builds on is the runner's machine configuration
 # (docs/ci.md), not this file's.
 #
-# The file format's major (kci_contract's format table): kci refuses a file
+# The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
 
 schema_version: 1
