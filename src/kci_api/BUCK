@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The kci contract: the ONE place that states every exit number, outcome
+# kci_api: the ONE place that states every exit number, outcome
 # word, error id, document format name and schema major, produced file name,
 # release-directory layout rule and platform row that kci owns. Every other
 # kci package imports these constants and spells none of them itself, so a
@@ -14,7 +14,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests pin each table by value (a renumbering is a deliberate,
 # visible edit of a golden test) and every refusal by its message.
 mojo_library(
-    name = "kci_contract",
+    name = "kci_api",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_json:komira_json",
@@ -25,6 +25,10 @@ mojo_library(
         "tests/test_exit_table.mojo",
         # error ids: unique, well-formed, every one stated with a meaning
         "tests/test_error_ids.mojo",
+        # the verb table is exactly run; the step kinds and validation kinds
+        "tests/test_verbs.mojo",
+        # the --only selector grammar, the scope words, the evidence line
+        "tests/test_selector.mojo",
         # the format table and the version checks of authored and produced files
         "tests/test_formats.mojo",
         # schema_version of an authored textproto file, read before its parser runs
@@ -33,7 +37,7 @@ mojo_library(
         "tests/test_run_identity.mojo",
         # full commit ids and artifact references
         "tests/test_revision.mojo",
-        # the platform table and the release layout
+        # the platform table (and its OCI spelling), the release layout, the default machine file
         "tests/test_platform_layout.mojo",
         # the result document: byte-exact render, parse(render(x)) == x, refusals
         "tests/test_result_document.mojo",
