@@ -140,7 +140,7 @@ tool that writes them is itself a pinned build output.
 ## What does this repository's release machine say?
 
 [`release/machine.textproto`](../../release/machine.textproto) (format
-`kci.machine`, read by `src/kci_stage_graph`) is komira's own release machine:
+`kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
 its stages in order, and the steps of each. `kci run --stage <S>` runs one
 stage. Three stages today: `build` (one BUILD step), `gamma` and `prod` (one
 PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Three

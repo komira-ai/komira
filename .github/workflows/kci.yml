@@ -1,7 +1,7 @@
 # The release of komira's conda packages through kci (docs/ci.md, "kci.yml").
 #
 # HAND-WRITTEN. The machine file (release/machine.textproto: kci's default, so
-# no `kci` line names it) owns the stage graph; this file runs it, one job per
+# no `kci` line names it) owns the release machine; this file runs it, one job per
 # stage. kci holds this file to the machine file twice: `kci run` itself, at
 # start-up under GitHub Actions (it reads this file as committed at
 # GITHUB_WORKFLOW_SHA; a mismatch is exit 3, nothing run), and the welded test
@@ -100,7 +100,7 @@ concurrency:
 
 env:
   # The release machine: its stages, and through them the declarations, the
-  # channels file and the channels. kci reads it by convention (kci_contract's
+  # channels file and the channels. kci reads it by convention (kci_api's
   # DEFAULT_MACHINE_FILE), so no `kci` line passes --machine; this name is used
   # only by the step that skips a revision without one. The welded test
   # test_repo_kci_yml holds it equal to kci's default.
@@ -201,7 +201,7 @@ jobs:
           done
           true
       # The result file of this job, whatever the outcome: the driver's record
-      # of what kci did (kci_contract's kci.result).
+      # of what kci did (kci_api's kci.result).
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: always() && steps.machine.outputs.release == 'true'
         with:
