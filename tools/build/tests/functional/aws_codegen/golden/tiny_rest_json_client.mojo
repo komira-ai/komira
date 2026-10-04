@@ -13,7 +13,7 @@
 #   model sha256 : 75f8b51a5e483fb6c3d27804e6352092fb05a92536b730aa749d1923c838f1ee
 #   operations   : GetThing, PutThing, SetConfig
 #   shapes       : 8 messages, 0 enums
-#   generator    : aws-client-gen version 9
+#   generator    : aws-client-gen version 10
 #   mode         : client
 #
 # THE SIGNER AND THE CREDENTIAL CHAIN ARE NOT GENERATED. The transport
@@ -65,14 +65,17 @@ from komira_aws_core import (
     aws_text_media,
     aws_text_ts,
     aws_ts_from_text,
+    AwsClock,
     AwsCredential,
     AwsCredsSource,
     AwsEndpoint,
+    AwsHttpTransport,
     AwsRetryQuota,
     Header,
     HttpResult,
     resolve_endpoint,
     send_sigv4_signed_request,
+    send_sigv4_signed_request_with,
     aws_rest_json_error,
 )
 from komira_json import (
@@ -82,6 +85,13 @@ from komira_json import (
 )
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
+from komira_retry import (
+    MonotonicClock,
+    RetryBudget,
+    RetryLoop,
+    RetryRng,
+    Sleeper,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -1018,6 +1028,53 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
             extra^,
         )
 
+    def send_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, var req: AwsRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`send`, over the transport, signing clock, retry loop and budget
+            given (`komira_aws_core.send_sigv4_signed_request_with`) instead of a
+            connector from this client's factory, the wall clock and the
+            standard retry loop. It returns the response, successful or not.
+
+            The transport carries the HTTP config: `AwsConnectorTransport(
+            http_config, connector)` is built from the caller's
+            `HttpClientConfig`, as `send` builds its own from this client's. The
+            budget is the retry quota: an `AwsRetryQuota` the caller keeps, one
+            for all the calls it makes over this client, as botocore keeps one
+            per client. `send` spends this client's own quota instead.
+
+            A request carrying `If-Match` or `If-None-Match` is resent only
+            when the service cannot have acted on it (`aws_request_is_conditional`)."""
+        var cred = self._creds_source.credentials()
+        var extra = List[Header]()
+        var content_type = String(String(
+            String("")
+        ))
+        for _i in range(len(req.header_names)):
+            var n = req.header_names[_i].copy()
+            if n.lower() == String("content-type"):
+                # Header names are case-insensitive, and the substrate refuses an
+                # `extra` Content-Type in any case.
+                # The substrate takes the content type as its own argument and
+                # puts it in BOTH the signed set and the wire headers. Passing it
+                # again here would emit it twice and break the signature.
+                content_type = req.header_values[_i].copy()
+            else:
+                extra.append(Header(n^, req.header_values[_i].copy()))
+        return send_sigv4_signed_request_with(
+            transport,
+            clock,
+            retry,
+            budget,
+            req.method.copy(),
+            cred,
+            self._region.copy(),
+            String(TINYREST_SERVICE),
+            resolve_endpoint(self._endpoint_override, komira_aws_tiny_rest_host(self._region.copy())),
+            req.uri.copy(),
+            content_type^,
+            req.body.copy(),
+            extra^,
+        )
+
     def get_thing(mut self, input: TinyRestGetThingRequest) raises -> TinyRestGetThingResponse:
         """`GetThing` — GET /things/{Id}"""
         var req = build_get_thing_request(input)
@@ -1025,6 +1082,12 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
         if not aws_is_error_status(res.status):
             return parse_get_thing_response(res^.into_response())
         raise _komira_aws_tiny_rest_error(String("GetThing"), res)
+
+    def get_thing_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: TinyRestGetThingRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`GetThing` over the given seams (`send_with`): the response, successful
+            or not. `parse_get_thing_response` reads a successful one."""
+        var req = build_get_thing_request(input)
+        return self.send_with(req^, transport, clock, retry, budget)
 
     def put_thing(mut self, input: TinyRestPutThingRequest) raises -> TinyRestPutThingResponse:
         """`PutThing` — PUT /things/{Id}/{Key+}"""
@@ -1034,6 +1097,12 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
             return parse_put_thing_response(res^.into_response())
         raise _komira_aws_tiny_rest_error(String("PutThing"), res)
 
+    def put_thing_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: TinyRestPutThingRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`PutThing` over the given seams (`send_with`): the response, successful
+            or not. `parse_put_thing_response` reads a successful one."""
+        var req = build_put_thing_request(input)
+        return self.send_with(req^, transport, clock, retry, budget)
+
     def set_config(mut self, input: TinyRestSetConfigRequest) raises -> TinyRestSetConfigResponse:
         """`SetConfig` — POST /config"""
         var req = build_set_config_request(input)
@@ -1041,6 +1110,12 @@ struct TinyRestTinyRestClient[C: Connector, T: AwsCredsSource](Movable, Deinitab
         if not aws_is_error_status(res.status):
             return parse_set_config_response(res^.into_response())
         raise _komira_aws_tiny_rest_error(String("SetConfig"), res)
+
+    def set_config_with[X: AwsHttpTransport, K: AwsClock, L: MonotonicClock, S: Sleeper, R: RetryRng, B: RetryBudget](mut self, input: TinyRestSetConfigRequest, mut transport: X, mut clock: K, mut retry: RetryLoop[L, S, R], mut budget: B) raises -> HttpResult:
+        """`SetConfig` over the given seams (`send_with`): the response, successful
+            or not. `parse_set_config_response` reads a successful one."""
+        var req = build_set_config_request(input)
+        return self.send_with(req^, transport, clock, retry, budget)
 
 
 def _komira_aws_tiny_rest_error(op: String, res: HttpResult) -> Error:

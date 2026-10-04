@@ -21,6 +21,7 @@
 #   T7   build_routing_params — multi pair joins with `&`.
 #   T8   build_routing_params — empty pairs → empty string.
 #   T9   `{project=projects/*}/**` — prefix capture leaves the tail off.
+#   T12  build_routing_params — an empty value is dropped, not sent as `key=`.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true, assert_false
@@ -167,6 +168,28 @@ def test_t11_gcs_bucket_iam_routing_key() raises:
     )
 
 
+def test_t12_build_params_drops_an_empty_value() raises:
+    """T12 (regression) — an empty captured value is dropped, never sent as
+    `key=`. `{project=**}` matches "" (zero segments), so a CreateBucket whose
+    `bucket.project` is unset would otherwise overwrite `parent`'s match under
+    last-match-wins; Google's generated clients skip an empty capture."""
+    var pairs = List[Tuple[StaticString, String]]()
+    pairs.append((StaticString("project"), String("projects/_")))
+    pairs.append((StaticString("project"), String("")))
+    assert_equal(
+        build_routing_params(pairs),
+        String("project=projects%2F_"),
+        "the empty later match does not overwrite the earlier one",
+    )
+    var only_empty = List[Tuple[StaticString, String]]()
+    only_empty.append((StaticString("bucket"), String("")))
+    assert_equal(
+        build_routing_params(only_empty),
+        String(""),
+        "an empty value alone sends no header",
+    )
+
+
 def main() raises:
     test_t1_gcs_bucket_whole_value()
     test_t2_cloudrun_location_segment()
@@ -179,4 +202,5 @@ def main() raises:
     test_t9_prefix_capture_leaves_tail()
     test_t10_build_params_duplicate_key_last_wins()
     test_t11_gcs_bucket_iam_routing_key()
-    print("test_L5_routing: 11/11 PASS")
+    test_t12_build_params_drops_an_empty_value()
+    print("test_L5_routing: 12/12 PASS")

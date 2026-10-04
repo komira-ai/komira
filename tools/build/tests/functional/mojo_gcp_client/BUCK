@@ -152,6 +152,52 @@ gen_check(
     ],
 )
 
+# `protocol = "grpc"` with a service: the client of
+# komira//tools/build/proto-codegen/gcp_grpc, compiled there against the real
+# komira_grpc and komira_gcp_core (which only the komira cell can depend on),
+# one method of each streaming shape. Exactly the package's files were
+# generated; the client takes a GcpTokenSource, runs the token hook in every
+# method and raises a gRPC status through komira_gcp_core. Its tiny.mojo is
+# byte for byte the golden of ../proto_codegen (tiny_grpc_gcp), which is
+# generated from a second copy of the proto in the tests cell; this check is
+# what keeps the two copies the same API.
+_TINY_GRPC = "komira//tools/build/proto-codegen/gcp_grpc:komira_gcp_tiny_grpc"
+
+gen_check(
+    name = "komira_gcp_tiny_grpc_service",
+    absent = [
+        "P: Protocol",
+        "ProtocolConnect",
+    ],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "tiny.mojo",
+    ],
+    gen = _TINY_GRPC + "[gen]",
+    identical = {"tiny.mojo": "//functional/proto_codegen:tiny_grpc_gcp_golden"},
+    present = [
+        "from komira_gcp_core import GcpTokenSource, gcp_grpc_status_error",
+        "struct TinyServiceClient[C: Connector, T: GcpTokenSource](Movable, Deinitable):",
+        "def get_thing[RT: Runtime]",
+        "def watch_things[RT: Runtime]",
+        "def upload_things[RT: Runtime]",
+        "def sync_things[RT: Runtime]",
+        "opts.raw_metadata.set(String(\"authorization\"), String(\"Bearer \") + bearer)",
+    ],
+)
+
+# The client ran exactly these tests, and each passed: the layout probe and
+# the test of the token hook and the status mapping.
+tests_check(
+    name = "komira_gcp_tiny_grpc_tests",
+    expect = [
+        "_layout_probe",
+        "test_tiny_grpc",
+    ],
+    markers = _TINY_GRPC + "[tests]",
+)
+
 # shop.proto as a proto_deps entry, so ../../negative/mojo_gcp_client can bundle
 # it and generate its service.
 proto_srcs(

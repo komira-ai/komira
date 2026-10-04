@@ -455,7 +455,8 @@ libcrypto passes aws-lc's own self tests and SHA-256, AES-128 and ChaCha20
 known-answer vectors, and an s2n-tls client and server complete a TLS 1.3
 handshake with certificate verification, both driven from Mojo in a run
 check on a worker. Every probe named in `third_party/s2n-tls/features.bzl`
-compiles (`tests//functional/s2n_probes`) and every other probe fails to, so a feature
+compiles (`tests//functional/s2n_probes`) and every other probe fails to
+(`tests//negative/s2n_probes`), so a feature
 define cannot be added or dropped without its probe agreeing. Neither test
 binary exports a dynamic symbol.
 

@@ -322,9 +322,13 @@ files, so the client is welded like any library: the generated
 `test_srcs` entry, followed by the caller's. Output is restricted to the
 closure of `roots` (messages) and `methods` (`Service.Method`), at least one
 of them required; `messages_only` emits no service. `protocol` is "rest"
-(the default) or "grpc"; a target that emits a service is refused under
-"grpc" until mojo_gcp_client wires the gRPC transport runtime and its
-token-metadata hook, and `messages_only` output is the same under both.
+(the default) or "grpc", and `messages_only` output is the same under both.
+Either service client is `<Service>Client[C: Connector, T: GcpTokenSource]`:
+the token source (komira_gcp_core) supplies each request's bearer token. A
+"grpc" client calls komira_grpc's `GrpcClient` with classic gRPC, sets
+`authorization: Bearer <token>` on each call's `CallOptions` (the token
+hook), and raises a non-OK gRPC status through komira_gcp_core's
+`gcp_grpc_status_error`.
 `protos` takes source paths of `.proto` files only, never a label. The
 referenced googleapis files (monitored_resource, logging/type, rpc/status,
 ...) are generated as sibling modules through `bundle_only`, which
