@@ -206,3 +206,12 @@ proto_srcs(
     srcs = ["example/shop/v1/shop.proto"],
     proto_deps = [":shop_deps"],
 )
+
+# watch.proto, a streaming method, as a proto_deps entry, so
+# ../../negative/mojo_gcp_client can list it in a "rest" client and be refused.
+proto_srcs(
+    name = "watch_api",
+    visibility = ["//negative/mojo_gcp_client:"],
+    srcs = ["example/shop/v1/watch.proto"],
+    proto_deps = [":shop_deps"],
+)

@@ -24,7 +24,9 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # The library is gated by its layout probe and these tests, hand-written
 # against the Cloud Logging v2 REST reference (no upstream test body is
 # copied), each sending through the generated client over komira_http_core's
-# ScriptedConnector (no socket): test_logging_requests (the request line,
+# ScriptedConnector (no socket): test_logging_default_host (a client given
+# no host dials logging.googleapis.com and names it in the Host header;
+# `set_rest_host` replaces it), test_logging_requests (the request line,
 # Host, headers and JSON body of a first page, a next page, several
 # resource names and a caller's default header, byte for byte),
 # test_logging_responses (a page of entries with each payload arm and the
@@ -38,11 +40,9 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #
 # No test here talks to the service.
 #
-# A live caller MUST call `set_rest_host("logging.googleapis.com")` on the
-# client. The generated client starts at the offline `localhost` placeholder
-# (the emitter does not read the service's `google.api.default_host` yet),
-# and without that call the bearer token goes to whatever answers on
-# https://localhost.
+# The client starts at logging.googleapis.com, the `google.api.default_host`
+# LoggingServiceV2 declares in the pinned proto; a caller calls
+# `set_rest_host` only to reach another endpoint.
 
 mojo_gcp_client(
     name = "komira_gcp_logging",
@@ -64,6 +64,7 @@ mojo_gcp_client(
         "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_logging_gen"},
     },
     test_srcs = [
+        "tests/test_logging_default_host.mojo",
         "tests/test_logging_errors.mojo",
         "tests/test_logging_requests.mojo",
         "tests/test_logging_responses.mojo",
