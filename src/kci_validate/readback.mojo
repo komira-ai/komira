@@ -40,8 +40,8 @@ from std.os.path import isdir
 
 from komira_json import JsonValue, parse_json_value
 
-from kci_contract import ResultValidationCheck
-from kci_stage_graph import StageValidation
+from kci_api import ResultValidationCheck
+from kci_release_machine import StageValidation
 
 from .container import COMPILER_PACKAGE, ENV_DIR, channel_url_of, join_path, payload_record_name
 from .request import InstallPin

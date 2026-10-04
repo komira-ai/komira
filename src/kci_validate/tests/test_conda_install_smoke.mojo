@@ -31,7 +31,7 @@ from std.os.path import exists
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_build import ScriptedRunner, ScriptedStep
-from kci_contract import (
+from kci_api import (
     OUTCOME_SUCCEEDED,
     OUTCOME_VALIDATION_FAILED,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
@@ -42,7 +42,7 @@ from kci_contract import (
 from kci_pkg_upload import PkgResponse, ScriptedPkgTransport, content_identity_of
 from kci_publish import NoWaitSleeper
 from kci_publish.release_fixture import ExampleRelease, write_example_inputs, write_text_file
-from kci_stage_graph import StageValidation
+from kci_release_machine import StageValidation
 from kci_validate import (
     ContainerHost,
     ValidateRequest,

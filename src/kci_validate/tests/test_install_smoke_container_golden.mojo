@@ -10,7 +10,7 @@
 
 from std.testing import TestSuite, assert_equal
 
-from kci_stage_graph import StageValidation
+from kci_release_machine import StageValidation
 from kci_validate import (
     InstallPin,
     container_script,

@@ -17,8 +17,8 @@
 #                             the exact `docker` command lines
 #   readback.mojo             checks 2 to 4: records, payloads, the count
 #
-# Which validations a step has is the machine file's (kci_stage_graph); the
-# result rows are kci_contract's; processes start through kci_build's
+# Which validations a step has is the machine file's (kci_release_machine); the
+# result rows are kci_api's; processes start through kci_build's
 # ProcessRunner seam and the channel is read through kci_pkg_upload's
 # PkgTransport. The command line is the kci binary's (`kci run`).
 # =============================================================================

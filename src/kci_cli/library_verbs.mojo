@@ -46,7 +46,7 @@ from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_secret_env import EnvSecretStore, ProcessEnv
 from komira_secret_store import SecretStore, SecretValue
 
-from kci_contract import OUTCOME_VALIDATION_FAILED, VALIDATION_VALIDATED, ResultValidation, ResultValidationCheck
+from kci_api import OUTCOME_VALIDATION_FAILED, VALIDATION_VALIDATED, ResultValidation, ResultValidationCheck
 from kci_pkg_upload import HttpPkgTransport
 from kci_publish import UsleepSleeper
 from kci_validate import ContainerHost, ValidateRequest, run_install_smoke
