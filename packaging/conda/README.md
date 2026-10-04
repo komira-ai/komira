@@ -65,19 +65,24 @@ metadata.json              everything else the build knows
 ```
 
 `manifest.json` is **exactly** the artifact manifest that kci's
-`kci_artifact_manifest` parses (`kci build` writes it and `kci publish` reads
-it): seven string keys, in this order, compact, one trailing newline.
+`kci_artifact_manifest` parses (the BUILD step writes it and the PUBLISH step reads
+it): ten keys, in this order, compact, one trailing newline.
 
 ```json
-{"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
+{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
 ```
+
+`format` and `schema_version` are kci's format name and major (kci_api's
+format table): kci refuses another format or a major it does not read, and
+ignores a key it does not know inside a major it reads (a writer only ever
+adds keys inside a major). `platform` is the kci platform of `subdir`.
 
 `file` is the channel's file name, relative to the manifest; `sha256` is that
 file's; `metadata` is `metadata.json`, the file next to the manifest. The
 parser requires `metadata` on a CONDA manifest and refuses one that is not a
 bare file name (no `/`, not `.` or `..`), so copying the manifest's directory
-cannot separate the two. The parser refuses any other key, so every other fact
-is in `metadata.json` (sorted compact JSON): `schema`, `kind` (`library` or
+cannot separate the two. Every other fact is in `metadata.json` (sorted
+compact JSON): `format` (`kci.conda_metadata`), `schema_version`, `kind` (`library` or
 `metapackage`), `name`, `version`, `subdir`, `build` (the build string),
 `build_number`, `file_name`, `size`, `depends`, `timestamp_ms`,
 `source_commit`, `stamped`, `label`, and for a library `import_name`,
