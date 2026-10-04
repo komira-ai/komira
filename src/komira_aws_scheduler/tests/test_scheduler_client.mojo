@@ -14,6 +14,13 @@
 # request head, so each row asserts the request line (method, path and
 # query), the Host the endpoint ruleset resolved, the content type of a
 # request with a body, and the SigV4 scope (signing name `scheduler`).
+#
+# Last, a CreateSchedule that meets a 500 and is resent (the standard
+# retry mode resends a 500 whatever the verb), over `create_schedule_with`
+# and a transport that records each attempt: a `ClientToken` the caller set
+# rides on both attempts, unchanged, so the service can recognise the
+# resend as the same create; an unset one is not filled in, and both
+# attempts go without it.
 from komira_aws_scheduler.komira_aws_scheduler import (
     SchedulerCreateScheduleInput,
     SchedulerDeleteScheduleInput,
@@ -26,13 +33,21 @@ from komira_aws_scheduler.komira_aws_scheduler import (
 )
 from komira_aws_core import (
     AWS_ECHO_CODE,
+    AwsConnectorTransport,
     AwsCredential,
     AwsEchoConnector,
+    AwsHttpTransport,
+    AwsRetryQuota,
+    CredentialHttpRequest,
+    FixedClock,
+    HttpResult,
     StaticCredsSource,
+    aws_standard_retry_policy,
 )
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_retry import ManualClock, RecordingSleeper, RetryLoop, SplitMix64Rng
 from std.testing import assert_equal, assert_raises, assert_true
 
 
@@ -292,6 +307,78 @@ def test_delete_schedule_on_the_wire() raises:
         _check(_wire_of(String(e), "DeleteSchedule"), "delete /schedules/nightly-reap?groupname=apps", False)
 
 
+# ---- a resent create ---------------------------------------------------------
+
+
+struct Recording[X: AwsHttpTransport](AwsHttpTransport, Movable, Deinitable):
+    var inner: Self.X
+    var sent: List[CredentialHttpRequest]
+
+    def __init__(out self, var inner: Self.X):
+        self.inner = inner^
+        self.sent = List[CredentialHttpRequest]()
+
+    def send(mut self, req: CredentialHttpRequest) raises -> HttpResult:
+        self.sent.append(req.copy())
+        return self.inner.send(req)
+
+
+def _never() raises -> ScriptedConnector:
+    raise Error("a verb over injected seams dialed through the factory")
+
+
+def _resent_create(input: SchedulerCreateScheduleInput) raises -> List[String]:
+    """`input` sent over a connector that answers 500 then 200: each
+    attempt's body, as it reached the HTTP client."""
+    var script = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            '{"Message":"Unexpected error."}',
+            "X-Amzn-Errortype: InternalServerException\r\n",
+        )
+    )
+    script.arm_next(_answer(200, "OK", String('{"ScheduleArn":"') + _ARN + '"}', ""))
+    var transport = Recording(
+        AwsConnectorTransport[ScriptedConnector](HttpClientConfig.defaults(), script^)
+    )
+    var clock = FixedClock(1790812800)
+    var loop = RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+        aws_standard_retry_policy(), ManualClock(), RecordingSleeper(), SplitMix64Rng(7)
+    )
+    var budget = AwsRetryQuota()
+    var client = _client(_never)
+    var res = client.create_schedule_with(input, transport, clock, loop, budget)
+    assert_equal(res.status, 200)
+    assert_equal(len(transport.sent), 2)
+    var out = List[String]()
+    for i in range(len(transport.sent)):
+        out.append(transport.sent[i].body_text())
+    return out^
+
+
+def test_a_resent_create_carries_the_callers_token() raises:
+    var input = _create()
+    input.set_client_token(String("c0ffee00-0000-4000-8000-000000000001"))
+    var bodies = _resent_create(input)
+    assert_true(
+        bodies[0].find('"ClientToken":"c0ffee00-0000-4000-8000-000000000001"') >= 0,
+        bodies[0],
+    )
+    assert_equal(bodies[1], bodies[0])
+
+
+def test_an_unset_token_is_not_filled() raises:
+    # botocore fills an unset idempotency token with one UUID per call; this
+    # client does not, so a resent create without a token is not idempotent
+    # (the service answers the resend ConflictException). This row pins
+    # that: filling the token changes it.
+    var bodies = _resent_create(_create())
+    for i in range(len(bodies)):
+        assert_true(bodies[i].find("ClientToken") < 0, bodies[i])
+    assert_equal(bodies[1], bodies[0])
+
+
 def main() raises:
     test_create_schedule_answered()
     test_get_schedule_answered()
@@ -303,4 +390,6 @@ def main() raises:
     test_get_schedule_on_the_wire()
     test_update_schedule_on_the_wire()
     test_delete_schedule_on_the_wire()
+    test_a_resent_create_carries_the_callers_token()
+    test_an_unset_token_is_not_filled()
     print("OK")

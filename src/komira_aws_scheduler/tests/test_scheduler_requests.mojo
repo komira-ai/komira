@@ -155,6 +155,24 @@ def test_delete_schedule() raises:
     assert_equal(len(req.body), 0)
 
 
+def test_an_unset_client_token_is_omitted() raises:
+    # The model marks `ClientToken` an idempotency token, which botocore
+    # fills with a UUID when it is unset. The builder does not: an unset
+    # token is absent from the body (CreateSchedule, UpdateSchedule) and the
+    # query (DeleteSchedule), and a caller that needs a resent call to be
+    # idempotent sets it.
+    var create = SchedulerCreateScheduleInput(
+        _off(), String("nightly-reap"), String("cron(0 3 * * ? *)"), _target()
+    )
+    assert_equal(build_create_schedule_request(create).body_text().find("ClientToken"), -1)
+    var update = SchedulerUpdateScheduleInput(
+        _off(), String("nightly-reap"), String("cron(0 3 * * ? *)"), _target()
+    )
+    assert_equal(build_update_schedule_request(update).body_text().find("ClientToken"), -1)
+    var delete = SchedulerDeleteScheduleInput(String("nightly-reap"))
+    assert_equal(build_delete_schedule_request(delete).uri, "/schedules/nightly-reap")
+
+
 def test_a_label_is_percent_encoded() raises:
     # A name the model's pattern allows ([0-9a-zA-Z-_.]+) needs no encoding;
     # a space or a slash would, and is encoded rather than splitting the path.
@@ -185,6 +203,7 @@ def main() raises:
     test_get_schedule_in_a_group()
     test_update_schedule_is_the_whole_schedule()
     test_delete_schedule()
+    test_an_unset_client_token_is_omitted()
     test_a_label_is_percent_encoded()
     test_refusals_before_the_wire()
     print("OK")
