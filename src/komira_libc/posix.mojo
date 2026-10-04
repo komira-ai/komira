@@ -58,12 +58,16 @@ from std.ffi import external_call
 from std.memory import UnsafePointer
 
 
+# SAFETY: private FFI shim. The untracked-origin result is environ-managed
+# memory and never leaves this file.
 def _env_getenv_owned(var name: String) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
     """Raw `getenv(3)` over a heap `String` (guarantees NUL termination).
 
     SAFETY: the untracked-origin pointer IS the FFI boundary. The returned
     pointer is environ-managed memory; it never escapes this file.
     """
+    # SAFETY: `name` is owned by this frame and outlives the synchronous
+    # `getenv` call, which keeps no pointer to the NUL-terminated buffer.
     var name_ptr = name.as_c_string_slice().unsafe_ptr()
     return external_call["getenv", UnsafePointer[UInt8, MutUntrackedOrigin]](
         name_ptr
@@ -114,12 +118,12 @@ def _read_env(name: StaticString) -> String:
         n += 1
     if n == 0:
         return String("")
+    # The Span is length-explicit and the String constructor copies out of it
+    # before this frame returns; neither the pointer nor the Span escapes.
+    # `StringSlice(unsafe_from_utf8=)` is the byte-exact spelling — NOT
+    # `String(unsafe_from_utf8_ptr=)`, which would stop at the first NUL.
     # SAFETY: `env_ptr` is environ-managed memory, scanned to its NUL above,
-    # so `[0, n)` is in bounds. The Span is length-explicit and the String
-    # constructor copies out of it before this frame returns; neither the
-    # pointer nor the Span escapes. `StringSlice(unsafe_from_utf8=)` is the
-    # byte-exact spelling — NOT `String(unsafe_from_utf8_ptr=)`,
-    # which would stop at the first NUL (harmless here, wrong in general).
+    # so `[0, n)` is in bounds. The bytes are copied as-is, not validated.
     return String(
         StringSlice(unsafe_from_utf8=Span(unsafe_ptr=env_ptr, length=n))
     )
@@ -190,10 +194,9 @@ def _path_is_directory(path: String) -> Bool:
     `as_c_string_slice()` is a mutating method (appends a NUL) — needs an owned
     local that outlives the `external_call`."""
     var probe = path + String("/.")
-    # SAFETY: `as_c_string_slice()` returns a NUL-terminated view whose buffer
-    # is owned by `probe`, which lives until the end of this function, so it
-    # outlives the synchronous call. `access` reads the path during the call
-    # and keeps no pointer to it; the pointer does not escape this function.
+    # `access` reads the path during the call and keeps no pointer to it.
+    # SAFETY: `probe` owns the NUL-terminated buffer and lives to the end of
+    # this function, past the synchronous call; the pointer does not escape.
     var rc = external_call["access", Int32](
         probe.as_c_string_slice().unsafe_ptr(), Int32(0)  # F_OK == 0
     )
