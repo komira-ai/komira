@@ -9,7 +9,7 @@
 # new bytes (replace all three `_XXX_p384_cert_der` functions together).
 #
 # All three certs use:
-#   - validity period 2026-10-01T00:00:00Z to 2034-01-01T00:00:00Z
+#   - validity period 2024-01-01T00:00:00Z to 2034-01-01T00:00:00Z
 #   - "now" timestamp in tests = 2025-06-15T12:00:00Z (well inside)
 #   - ECDSA-with-SHA384 signatures (OID 1.2.840.10045.4.3.3)
 #   - P-384 (secp384r1) curve pubkeys (SPKI bit-string = 0x04 || 48 + 48 = 97 bytes)
