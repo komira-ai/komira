@@ -22,6 +22,7 @@ macro_rules! corpus {
 
 /// Every case file the archive target extracts, by direction and basename.
 const FILES: &[(Direction, &str, &str)] = &[
+    (Direction::Input, "ec2.json", corpus!("input/ec2.json")),
     (Direction::Input, "json.json", corpus!("input/json.json")),
     (Direction::Input, "json_1_0.json", corpus!("input/json_1_0.json")),
     (
@@ -29,8 +30,10 @@ const FILES: &[(Direction, &str, &str)] = &[
         "json_1_0-query-compatible.json",
         corpus!("input/json_1_0-query-compatible.json"),
     ),
+    (Direction::Input, "query.json", corpus!("input/query.json")),
     (Direction::Input, "rest-json.json", corpus!("input/rest-json.json")),
     (Direction::Input, "rest-xml.json", corpus!("input/rest-xml.json")),
+    (Direction::Output, "ec2.json", corpus!("output/ec2.json")),
     (Direction::Output, "json.json", corpus!("output/json.json")),
     (Direction::Output, "json_1_0.json", corpus!("output/json_1_0.json")),
     (
@@ -38,6 +41,7 @@ const FILES: &[(Direction, &str, &str)] = &[
         "json_1_0-query-compatible.json",
         corpus!("output/json_1_0-query-compatible.json"),
     ),
+    (Direction::Output, "query.json", corpus!("output/query.json")),
     (Direction::Output, "rest-json.json", corpus!("output/rest-json.json")),
     (Direction::Output, "rest-xml.json", corpus!("output/rest-xml.json")),
 ];

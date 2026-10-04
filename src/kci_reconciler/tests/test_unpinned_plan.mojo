@@ -1,0 +1,286 @@
+"""Unpinned plan: a plan over an image whose build step has not run yet.
+
+`kci run --plan` may reach a service or job whose `Image` is a step output
+(`Image.output { step, name }`) of a build step in the same run that has not
+run yet. The plan renders a placeholder in place of the digest. Two things can
+go wrong with that placeholder, and each section below checks one of them:
+
+  * §A: it passes for a digest. It must not start with `sha256:`, must say
+    NOT-A-DIGEST in words, and must name the step output it stands in for.
+  * §B: it is silent. Without a caller-owned record there is no placeholder
+    at all: the call refuses, naming the node and the step output. With a
+    record, every substitution is listed by kind, node and step output.
+  * §C: the empty record reports nothing (the control that keeps §B from
+    passing on a record that lists everything).
+  * §D: a free-text step or name forges a pin. A name like
+    `img@sha256:<64 hex>` would make the placeholder read as pinned to a
+    parser that splits on the last `@`. A step or name that is not a plain
+    identifier (`[A-Za-z0-9_.-]+`) is refused and recorded nowhere.
+"""
+
+from std.testing import assert_equal, assert_true, assert_false
+
+from kci_reconciler.unpinned_plan import (
+    UNPINNED_KIND_JOB,
+    UNPINNED_KIND_SERVICE,
+    UNPINNED_PLAN_DIGEST_PREFIX,
+    UnpinnedImages,
+    is_unpinned_plan_digest,
+    unpinned_build_ref,
+    unpinned_image_digest,
+)
+
+
+def _raised(kind: String, node_id: String, step: String, name: String) -> String:
+    """The refusal text of the no-record call, or "" if it did not raise."""
+    try:
+        _ = unpinned_image_digest(kind, node_id, step, name)
+    except e:
+        return String(e)
+    return String("")
+
+
+# =============================================================================
+# §A: the placeholder cannot pass for a digest.
+# =============================================================================
+def test_the_placeholder_is_not_digest_shaped() raises:
+    var images = UnpinnedImages()
+    var v = unpinned_image_digest(
+        UNPINNED_KIND_SERVICE, "api", "build", "api_image", images
+    )
+    assert_false(v.startswith("sha256:"), "placeholder is digest-shaped: " + v)
+    assert_true(v.startswith(UNPINNED_PLAN_DIGEST_PREFIX), v)
+    assert_true(v.find("NOT-A-DIGEST") >= 0, "placeholder must say so: " + v)
+    assert_true(is_unpinned_plan_digest(v), v)
+
+
+def test_the_placeholder_names_the_step_output() raises:
+    var images = UnpinnedImages()
+    var a = unpinned_image_digest(
+        UNPINNED_KIND_SERVICE, "api", "build", "api_image", images
+    )
+    var b = unpinned_image_digest(
+        UNPINNED_KIND_JOB, "migrate", "build", "migrate_image", images
+    )
+    assert_equal(a, UNPINNED_PLAN_DIGEST_PREFIX + "build/api_image")
+    assert_equal(unpinned_build_ref("build", "api_image"), "build/api_image")
+    # Two step outputs in, two different values out: a placeholder that
+    # ignored its argument would pass every check above.
+    assert_true(a != b, "the placeholder does not depend on the step output")
+
+
+def test_the_predicate_recognises_only_placeholders() raises:
+    assert_false(is_unpinned_plan_digest("sha256:" + "ab" * 32))
+    assert_false(is_unpinned_plan_digest("build/api_image"))
+    assert_false(is_unpinned_plan_digest(""))
+
+
+# =============================================================================
+# §B: no record, no placeholder; with a record, every one is listed.
+# =============================================================================
+def test_without_a_record_the_unpinned_image_is_refused() raises:
+    var msg = _raised(UNPINNED_KIND_SERVICE, "api", "build", "api_image")
+    assert_true(msg.byte_length() > 0, "an unpinned image was tolerated with no record")
+    assert_true(msg.find("'api'") >= 0, "refusal does not name the node: " + msg)
+    assert_true(
+        msg.find("build/api_image") >= 0,
+        "refusal does not name the step output: " + msg,
+    )
+    assert_true(msg.find(UNPINNED_KIND_SERVICE) >= 0, msg)
+    # The refusal never carries the placeholder: nothing a caller could copy.
+    assert_false(msg.find(UNPINNED_PLAN_DIGEST_PREFIX) >= 0, msg)
+
+
+def test_the_record_lists_kind_node_and_step_output() raises:
+    var images = UnpinnedImages()
+    _ = unpinned_image_digest(
+        UNPINNED_KIND_SERVICE, "api", "build", "api_image", images
+    )
+    _ = unpinned_image_digest(
+        UNPINNED_KIND_JOB, "migrate", "images", "migrate_image", images
+    )
+    assert_equal(images.count(), 2)
+    var refs = images.build_refs()
+    assert_equal(refs[0], "build/api_image")
+    assert_equal(refs[1], "images/migrate_image")
+    var rows = images.rendered_rows()
+    assert_equal(len(rows), 2)
+    assert_equal(
+        rows[0],
+        "service node 'api': image is step output 'build/api_image', not"
+        " built yet (rendered as UNPINNED-NOT-A-DIGEST:build/api_image)",
+    )
+    assert_equal(
+        rows[1],
+        "job node 'migrate': image is step output 'images/migrate_image', not"
+        " built yet (rendered as UNPINNED-NOT-A-DIGEST:images/migrate_image)",
+    )
+
+
+def test_a_re_record_of_one_node_overwrites() raises:
+    """Keyed on (kind, node): a node visited twice is counted once, and a job
+    and a service of the same name are two entries."""
+    var images = UnpinnedImages()
+    _ = unpinned_image_digest(UNPINNED_KIND_SERVICE, "a", "build", "one", images)
+    _ = unpinned_image_digest(UNPINNED_KIND_SERVICE, "a", "build", "two", images)
+    assert_equal(images.count(), 1)
+    assert_equal(images.build_refs()[0], "build/two")
+    _ = unpinned_image_digest(UNPINNED_KIND_JOB, "a", "build", "three", images)
+    assert_equal(images.count(), 2)
+
+
+def test_only_service_and_job_have_images() raises:
+    var images = UnpinnedImages()
+    var refused = False
+    try:
+        _ = unpinned_image_digest("bucket", "b", "build", "x", images)
+    except e:
+        refused = String(e).find("bucket") >= 0
+    assert_true(refused, "a kind with no image was accepted")
+    assert_equal(images.count(), 0)
+
+
+# =============================================================================
+# §C: the control. An empty record reports nothing.
+# =============================================================================
+def test_an_empty_record_reports_nothing() raises:
+    var images = UnpinnedImages()
+    assert_equal(images.count(), 0)
+    assert_equal(len(images.build_refs()), 0)
+    assert_equal(len(images.rendered_rows()), 0)
+
+
+# =============================================================================
+# §D: a step or name that is not a plain identifier is refused.
+# =============================================================================
+comptime _HEX64 = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+
+
+def _pins_a_digest(image_ref: String) -> Bool:
+    """A digest-pin parser in the shape a consumer uses: the text after the
+    last `@` (or the whole value when there is none) is `sha256:` followed by
+    exactly 64 lowercase hex characters."""
+    var at = image_ref.rfind("@")
+    var candidate = image_ref.copy()
+    if at >= 0:
+        candidate = String(image_ref[byte = at + 1 :])
+    if not candidate.startswith("sha256:"):
+        return False
+    var b = candidate.as_bytes()
+    if len(b) != 7 + 64:
+        return False
+    for i in range(7, len(b)):
+        var c = Int(b[i])
+        var digit = c >= ord("0") and c <= ord("9")
+        var lower = c >= ord("a") and c <= ord("f")
+        if not (digit or lower):
+            return False
+    return True
+
+
+def _refusal_with_record(
+    step: String, name: String, mut images: UnpinnedImages
+) -> String:
+    try:
+        _ = unpinned_image_digest(UNPINNED_KIND_SERVICE, "api", step, name, images)
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_the_parser_control_reads_a_real_pin() raises:
+    """The control: without it every §D check below could pass on a parser
+    that never finds a digest."""
+    assert_true(_pins_a_digest("repo/app@sha256:" + _HEX64))
+    assert_true(_pins_a_digest("sha256:" + _HEX64))
+    assert_false(_pins_a_digest("repo/app:latest"))
+
+
+def test_a_digest_shaped_name_is_refused() raises:
+    var name = "img@sha256:" + _HEX64
+    var images = UnpinnedImages()
+    var msg = _refusal_with_record("build", name, images)
+    assert_true(msg.byte_length() > 0, "a digest-shaped name was recorded")
+    assert_true(msg.find("'api'") >= 0, "refusal does not name the node: " + msg)
+    assert_true(msg.find("build/" + name) >= 0, "refusal does not name the step output: " + msg)
+    assert_true(msg.find("plain identifier") >= 0, msg)
+    assert_false(msg.find(UNPINNED_PLAN_DIGEST_PREFIX) >= 0, msg)
+    assert_equal(images.count(), 0)
+    # The no-record form refuses for the same reason, not only for the
+    # missing record.
+    var bare = _raised(UNPINNED_KIND_SERVICE, "api", "build", name)
+    assert_true(bare.find("plain identifier") >= 0, bare)
+
+
+def test_a_step_with_a_colon_is_refused() raises:
+    var images = UnpinnedImages()
+    var msg = _refusal_with_record("build:v1", "api_image", images)
+    assert_true(msg.find("plain identifier") >= 0, "a step with ':' was recorded: " + msg)
+    assert_true(msg.find("build:v1/api_image") >= 0, msg)
+    assert_equal(images.count(), 0)
+    var bare = _raised(UNPINNED_KIND_JOB, "migrate", "build:v1", "api_image")
+    assert_true(bare.find("plain identifier") >= 0, bare)
+
+
+def test_an_empty_step_or_name_is_refused() raises:
+    var images = UnpinnedImages()
+    assert_true(_refusal_with_record("", "api_image", images).find("plain identifier") >= 0)
+    assert_true(_refusal_with_record("build", "", images).find("plain identifier") >= 0)
+    assert_equal(images.count(), 0)
+
+
+def test_no_accepted_step_or_name_yields_a_pin() raises:
+    """Every ASCII byte, placed in both the step and the name next to
+    digest-shaped text: an accepted pair never yields a placeholder that
+    parses as pinned, and exactly the identifier bytes are accepted."""
+    var accepted = 0
+    for c in range(1, 128):
+        var ch = chr(c)
+        var step = "sha256" + ch
+        var name = ch + _HEX64
+        var images = UnpinnedImages()
+        var msg = _refusal_with_record(step, name, images)
+        var digit = c >= ord("0") and c <= ord("9")
+        var upper = c >= ord("A") and c <= ord("Z")
+        var lower = c >= ord("a") and c <= ord("z")
+        var punct = c == ord("_") or c == ord(".") or c == ord("-")
+        var plain = digit or upper or lower or punct
+        if plain:
+            assert_equal(msg, "", "an identifier byte was refused: " + msg)
+            assert_equal(images.count(), 1)
+            # Re-recording the same node overwrites, so the count holds.
+            var v = unpinned_image_digest(
+                UNPINNED_KIND_SERVICE, "api", step, name, images
+            )
+            assert_equal(images.count(), 1)
+            assert_equal(v, UNPINNED_PLAN_DIGEST_PREFIX + step + "/" + name)
+            assert_false(_pins_a_digest(v), v)
+            accepted += 1
+        else:
+            assert_true(msg.find("plain identifier") >= 0, "byte " + String(c) + " accepted")
+            assert_equal(images.count(), 0)
+    assert_equal(accepted, 26 + 26 + 10 + 3)
+    # The digest-shaped pair from the finding is refused for its '@' and ':'
+    # alone; with those removed it is accepted and still pins nothing.
+    var images = UnpinnedImages()
+    var v = unpinned_image_digest(
+        UNPINNED_KIND_SERVICE, "api", "sha256", _HEX64, images
+    )
+    assert_false(_pins_a_digest(v), v)
+
+
+def main() raises:
+    test_the_placeholder_is_not_digest_shaped()
+    test_the_placeholder_names_the_step_output()
+    test_the_predicate_recognises_only_placeholders()
+    test_without_a_record_the_unpinned_image_is_refused()
+    test_the_record_lists_kind_node_and_step_output()
+    test_a_re_record_of_one_node_overwrites()
+    test_only_service_and_job_have_images()
+    test_an_empty_record_reports_nothing()
+    test_the_parser_control_reads_a_real_pin()
+    test_a_digest_shaped_name_is_refused()
+    test_a_step_with_a_colon_is_refused()
+    test_an_empty_step_or_name_is_refused()
+    test_no_accepted_step_or_name_yields_a_pin()
+    print("test_unpinned_plan: ALL PASS")

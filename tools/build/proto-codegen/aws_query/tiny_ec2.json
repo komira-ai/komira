@@ -1,0 +1,76 @@
+{
+ "version": "2.0",
+ "metadata": {
+  "apiVersion": "2026-10-02",
+  "endpointPrefix": "tinyec2",
+  "protocol": "ec2",
+  "protocols": ["ec2"],
+  "serviceFullName": "Tiny ec2Query Example",
+  "serviceId": "TinyEc2",
+  "signatureVersion": "v4",
+  "uid": "tinyec2-2026-10-02"
+ },
+ "operations": {
+  "DescribeThings": {
+   "name": "DescribeThings",
+   "http": {"method": "POST", "requestUri": "/"},
+   "input": {"shape": "DescribeThingsRequest"},
+   "output": {"shape": "DescribeThingsResult"}
+  },
+  "Ping": {
+   "name": "Ping",
+   "http": {"method": "POST", "requestUri": "/"}
+  }
+ },
+ "shapes": {
+  "DescribeThingsRequest": {
+   "type": "structure",
+   "members": {
+    "ThingIds": {"shape": "IdList", "locationName": "ThingId"},
+    "DryRun": {"shape": "Boolean", "locationName": "dryRun"},
+    "Filters": {"shape": "FilterList", "locationName": "Filter"},
+    "Owner": {"shape": "String", "locationName": "owner", "queryName": "OwnerAlias"},
+    "maxResults": {"shape": "Integer"}
+   }
+  },
+  "DescribeThingsResult": {
+   "type": "structure",
+   "members": {
+    "RequestId": {"shape": "String", "locationName": "requestId"},
+    "Things": {"shape": "ThingList", "locationName": "thingSet"},
+    "NextToken": {"shape": "String", "locationName": "nextToken"}
+   }
+  },
+  "Filter": {
+   "type": "structure",
+   "members": {
+    "Name": {"shape": "String", "locationName": "name"},
+    "Values": {"shape": "ValueList", "locationName": "Value"}
+   }
+  },
+  "Thing": {
+   "type": "structure",
+   "members": {
+    "ThingId": {"shape": "String", "locationName": "thingId"},
+    "Size": {"shape": "Long", "locationName": "size"},
+    "Tags": {"shape": "TagList", "locationName": "tagSet"}
+   }
+  },
+  "Tag": {
+   "type": "structure",
+   "members": {
+    "Key": {"shape": "String", "locationName": "key"},
+    "Value": {"shape": "String", "locationName": "value"}
+   }
+  },
+  "IdList": {"type": "list", "member": {"shape": "String", "locationName": "ThingId"}},
+  "FilterList": {"type": "list", "member": {"shape": "Filter", "locationName": "Filter"}},
+  "ValueList": {"type": "list", "member": {"shape": "String", "locationName": "item"}},
+  "ThingList": {"type": "list", "member": {"shape": "Thing", "locationName": "item"}},
+  "TagList": {"type": "list", "member": {"shape": "Tag", "locationName": "item"}},
+  "String": {"type": "string"},
+  "Integer": {"type": "integer"},
+  "Long": {"type": "long"},
+  "Boolean": {"type": "boolean"}
+ }
+}

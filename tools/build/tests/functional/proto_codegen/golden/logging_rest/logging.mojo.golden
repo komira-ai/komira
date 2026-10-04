@@ -634,17 +634,16 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
     """Headers merged into every request. Empty unless given."""
 
     var _rest_host: String
-    """The host the request URLs target. Defaults to the offline
-        `localhost` placeholder; a live caller sets the real public host via
-        `set_rest_host` (it drives BOTH the dial DNS target and the `Host:`
-        header)."""
+    """The host the request URLs target: it drives BOTH the dial DNS
+        target and the `Host:` header. Starts at the service's
+        `google.api.default_host`, `logging.googleapis.com`; `set_rest_host` replaces it."""
 
     def __init__(out self, var client: HttpClient[Self.C], var token_source: Self.T):
         """Construct with no default headers."""
         self._client = client^
         self._token_source = token_source^
         self._default_headers = HeaderMap()
-        self._rest_host = String("localhost")
+        self._rest_host = String("logging.googleapis.com")
 
     def __init__(
         out self,
@@ -656,14 +655,19 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
         self._client = client^
         self._token_source = token_source^
         self._default_headers = default_headers^
-        self._rest_host = String("localhost")
+        self._rest_host = String("logging.googleapis.com")
 
     def set_rest_host(mut self, var host: String):
-        """Point the request URLs at a real public host (e.g.
-            `logging.googleapis.com`) for a LIVE dial. The URL host feeds BOTH
-            the dial-target DNS resolution and the injected `Host:` header;
-            the default `localhost` is the offline scripted-loopback path."""
+        """Point the request URLs at `host` (a regional or private endpoint,
+            or a test server). The URL host feeds BOTH the dial-target DNS
+            resolution and the injected `Host:` header. An empty host makes
+            every method refuse to send."""
         self._rest_host = host^
+
+    def _rest_require_host(self, method: String) raises:
+        """Raise, naming the method, when no host is set."""
+        if self._rest_host.byte_length() == 0:
+            raise Error(String("LoggingServiceV2Client.") + method + String(": no REST host: the host was set empty (the service's google.api.default_host is logging.googleapis.com); call set_rest_host(host) with a host before sending"))
 
     def _rest_apply_default_headers(self, mut headers: HeaderMap) raises:
         """Merge the per-client default headers into `headers`."""
@@ -675,6 +679,7 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
 
     def list_log_entries[RT: Runtime](mut self, req: ListLogEntriesRequest, mut reactor: Reactor[RT.Sink]) raises -> ListLogEntriesResponse:
         """POST `/v2/entries:list` — REST/JSON."""
+        self._rest_require_host(String("list_log_entries"))
         var path = String("")
         path += String("/v2")
         path += String("/entries")
@@ -701,6 +706,7 @@ struct LoggingServiceV2Client[C: Connector, T: GcpTokenSource](Movable, Deinitab
 
     def list_logs[RT: Runtime](mut self, req: ListLogsRequest, mut reactor: Reactor[RT.Sink]) raises -> ListLogsResponse:
         """GET `/v2/{parent=projects/*}/logs` — REST/JSON."""
+        self._rest_require_host(String("list_logs"))
         var path = String("")
         path += String("/v2")
         path += String("/")

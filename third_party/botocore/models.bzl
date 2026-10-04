@@ -26,6 +26,21 @@ BOTOCORE_MODELS = {
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
     ),
+    # Amazon DynamoDB Streams (//src/komira_aws_dynamodbstreams).
+    "dynamodbstreams": struct(
+        api_version = "2012-08-10",
+        sha256 = "95cd147c971cd46365849c08e8c596bfd557b31a448b0bbf494d91f65d0ac62f",
+    ),
+    # Amazon ECR (//src/komira_aws_ecr).
+    "ecr": struct(
+        api_version = "2015-09-21",
+        sha256 = "3df743678897ac26e9ca4b8a04bf3007fcadf887feb3e71a50131c874cfbe757",
+    ),
+    # Amazon ECS (//src/komira_aws_ecs).
+    "ecs": struct(
+        api_version = "2014-11-13",
+        sha256 = "44e0fd74d3dd8f629bb5a2259635721806ac4c2daf17c62d38160544daf9bb3c",
+    ),
     # Amazon CloudWatch Logs (//src/komira_aws_logs), also the worked
     # example of mojo_aws_client's docstring (//tools/build/cloud:aws.bzl).
     "logs": struct(
@@ -38,6 +53,11 @@ BOTOCORE_MODELS = {
     "s3": struct(
         api_version = "2006-03-01",
         sha256 = "429763d64912af5edae4c7a0f20a8ac3e6fecf734cde5fc465016bc8badcdef9",
+    ),
+    # AWS Secrets Manager (//src/komira_aws_secretsmanager).
+    "secretsmanager": struct(
+        api_version = "2017-10-17",
+        sha256 = "d568532fb0db48e0ce9c3c30b6f48aae734e1657105043990ef699ec48656671",
     ),
     # Amazon SQS (//src/komira_aws_sqs).
     "sqs": struct(

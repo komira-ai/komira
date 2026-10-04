@@ -29,7 +29,7 @@ mojo_gcp_client(
     protocol = "grpc",
     protos = ["example/tiny/v1/tiny.proto"],
     test_srcs = ["test_tiny_grpc.mojo"],
-    visibility = ["tests//functional/mojo_gcp_client:"],
+    visibility = ["PUBLIC"],
     deps = [
         "//src/komira_async:komira_async",
         "//src/komira_gcp_core:komira_gcp_core",

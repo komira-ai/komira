@@ -53,6 +53,15 @@
 # error, because it cannot decompress here. Control batches (attributes bit5)
 # are rejected on decode.
 #
+# -----------------------------------------------------------------------------
+# Validation: every decode entry point refuses what a Kafka broker refuses as a
+# corrupt batch: a `batchLength` below the header or beyond the buffer, a magic
+# other than 2, a CRC-32C mismatch over `attributes` to batch end, a negative
+# `recordsCount`, a record whose fields do not span exactly its declared length,
+# a null header key, bytes left after the declared records, and a message set
+# that ends in a fragment. The fields after `crc` are parsed from the checked
+# bytes. `baseOffset` and `partitionLeaderEpoch` sit outside the CRC by design.
+#
 # Encapsulation: ZERO UnsafePointer in any signature. Encode appends to an owned
 # `List[UInt8]`; decode borrows a `Span[UInt8, origin]` via the wire decoder.
 # =============================================================================
@@ -558,6 +567,99 @@ struct BatchHeader(Movable, Deinitable):
         self.is_transactional = is_transactional
 
 
+comptime _V2_HEADER_AFTER_LENGTH: Int = 49
+"""Bytes of the fixed v2 header that FOLLOW `batchLength`: partitionLeaderEpoch
+(4) + magic (1) + crc (4) + the 40 CRC-covered bytes from `attributes` through
+`recordsCount`. A smaller `batchLength` cannot hold a header."""
+
+comptime _V2_POST_CRC_HEADER: Int = 40
+"""Bytes from `attributes` through `recordsCount`: the CRC-covered header."""
+
+
+def _read_verified_batch[
+    origin: Origin[mut=False]
+](
+    mut dec: KafkaDecoder[origin], who: String, mut post_crc: List[UInt8]
+) raises -> BatchHeader:
+    """Read ONE v2 batch's header off `dec`, check its length and CRC-32C, and
+    advance `dec` past the whole batch. `post_crc` receives an owned copy of the
+    CRC-covered bytes (`attributes` to batch end); every field after `crc` is
+    read from that checked copy, so nothing parsed was skipped by the check.
+
+    Refuses (raises, naming `who`) a `batchLength` below the fixed header or
+    beyond the buffer, a magic other than 2, a CRC mismatch and a negative
+    `recordsCount`. `baseOffset` and `partitionLeaderEpoch` are outside the CRC
+    by the format's design (a broker rewrites them), so they are not checked."""
+    var base_offset = dec.get_int64()
+    var batch_length = Int(dec.get_int32())
+    if batch_length < _V2_HEADER_AFTER_LENGTH:
+        raise Error(
+            who
+            + ": batchLength "
+            + String(batch_length)
+            + " is below the "
+            + String(_V2_HEADER_AFTER_LENGTH)
+            + "-byte v2 header that follows it (corrupt batch)"
+        )
+    if batch_length > dec.remaining():
+        raise Error(
+            who
+            + ": truncated batch: batchLength "
+            + String(batch_length)
+            + " but only "
+            + String(dec.remaining())
+            + " bytes remain"
+        )
+    _ = dec.get_int32()  # partitionLeaderEpoch (outside the CRC; ignored)
+    var magic = dec.get_int8()
+    if magic != RECORD_BATCH_MAGIC_V2:
+        raise Error(
+            who
+            + ": unsupported magic "
+            + String(Int(magic))
+            + " (only v2/magic=2 is supported)"
+        )
+    var crc = dec.get_int32().cast[DType.uint32]()
+    var attr_pos = dec.pos()
+    post_crc = dec._read_raw(batch_length - 9)
+    var actual = crc32c_span(Span(post_crc))
+    if actual != crc:
+        raise Error(
+            who
+            + ": CRC-32C mismatch (the batch says "
+            + String(Int(crc))
+            + ", its bytes give "
+            + String(Int(actual))
+            + "): corrupt batch"
+        )
+    var hd = KafkaDecoder(Span(post_crc))
+    var attributes = hd.get_int16()
+    _ = hd.get_int32()  # lastOffsetDelta
+    var first_ts = hd.get_int64()  # firstTimestamp
+    _ = hd.get_int64()  # maxTimestamp
+    var producer_id = hd.get_int64()  # producerId (surfaced for dedupe)
+    var producer_epoch = hd.get_int16()  # producerEpoch
+    var base_sequence = hd.get_int32()  # baseSequence
+    var records_count = Int(hd.get_int32())
+    if records_count < 0:
+        raise Error(
+            who + ": negative recordsCount " + String(records_count) + " (corrupt batch)"
+        )
+    return BatchHeader(
+        base_offset,
+        first_ts,
+        Int(attributes & COMPRESSION_MASK),
+        (attributes & CONTROL_BATCH_BIT) != Int16(0),
+        records_count,
+        attr_pos + _V2_POST_CRC_HEADER,
+        len(post_crc) - _V2_POST_CRC_HEADER,
+        producer_id,
+        producer_epoch,
+        base_sequence,
+        (attributes & TRANSACTIONAL_BIT) != Int16(0),
+    )
+
+
 def split_record_batch_header[
     origin: Origin[mut=False]
 ](mut dec: KafkaDecoder[origin]) raises -> BatchHeader:
@@ -565,66 +667,105 @@ def split_record_batch_header[
     PAST the whole batch (header + records blob), returning the codec id and
     the byte span of the records blob.
 
-    Does NOT parse the records (they may be compressed). Rejects control
-    batches (attributes bit5). The compression codec id is returned as-is for
-    the caller to handle (0=none / 1=gzip / 2=snappy / 3=lz4 / 4=zstd)."""
-    var batch_start = dec.pos()
-    var base_offset = dec.get_int64()
-    var batch_length = Int(dec.get_int32())
-    # batchLength counts bytes AFTER the batchLength field; the whole batch
-    # ends at (position right after batchLength) + batch_length.
-    var batch_end = dec.pos() + batch_length
-    _ = dec.get_int32()  # partitionLeaderEpoch (ignored)
-    var magic = dec.get_int8()
-    if magic != RECORD_BATCH_MAGIC_V2:
-        raise Error(
-            "split_record_batch_header: unsupported magic "
-            + String(Int(magic))
-            + " (only v2/magic=2 is supported)"
-        )
-    _ = dec.get_int32()  # crc (we trust the framing; full verify is optional)
-    var attributes = dec.get_int16()
-    var compression = Int(attributes & COMPRESSION_MASK)
-    var is_control = (attributes & CONTROL_BATCH_BIT) != Int16(0)
-    var is_transactional = (attributes & TRANSACTIONAL_BIT) != Int16(0)
-    if is_control:
-        raise Error("split_record_batch_header: control batches not supported")
-
-    _ = dec.get_int32()  # lastOffsetDelta
-    var first_ts = dec.get_int64()  # firstTimestamp
-    _ = dec.get_int64()  # maxTimestamp
-    var producer_id = dec.get_int64()  # producerId (surfaced for dedupe)
-    var producer_epoch = dec.get_int16()  # producerEpoch
-    var base_sequence = dec.get_int32()  # baseSequence
-
-    var records_count = Int(dec.get_int32())
-
-    var records_pos = dec.pos()
-    var records_len = batch_end - records_pos
-    if records_len < 0:
-        raise Error(
-            "split_record_batch_header: negative records length (corrupt"
-            " batchLength field)"
-        )
-    # Advance the cursor past the records blob to the batch end so callers can
-    # iterate concatenated batches.
-    if records_len > 0:
-        _ = _read_bytes(dec, records_len)
-    _ = batch_start  # (kept for clarity; not needed downstream)
-
-    return BatchHeader(
-        base_offset,
-        first_ts,
-        compression,
-        is_control,
-        records_count,
-        records_pos,
-        records_len,
-        producer_id,
-        producer_epoch,
-        base_sequence,
-        is_transactional,
+    Does NOT parse the records (they may be compressed), but DOES check the
+    batch's length and CRC-32C (see `_read_verified_batch`), so a corrupt or
+    truncated batch is refused here rather than decompressed or stored. Rejects
+    control batches (attributes bit5). The compression codec id is returned
+    as-is for the caller to handle (0=none / 1=gzip / 2=snappy / 3=lz4 /
+    4=zstd)."""
+    var post_crc = List[UInt8]()
+    var header = _read_verified_batch(
+        dec, String("split_record_batch_header"), post_crc
     )
+    if header.is_control:
+        raise Error("split_record_batch_header: control batches not supported")
+    return header^
+
+
+def _parse_records[
+    origin: Origin[mut=False]
+](
+    mut dec: KafkaDecoder[origin],
+    records_count: Int,
+    base_offset: Int64,
+    first_timestamp: Int64,
+    who: String,
+) raises -> List[KafkaRecord]:
+    """Parse exactly `records_count` v2 records off `dec`, which must then be
+    exhausted. Refuses (raises, naming `who`) what a Kafka broker refuses as a
+    corrupt record: a negative count or record length, a record whose fields do
+    not span EXACTLY its declared length, a null header key, and bytes left over
+    after the declared records."""
+    if records_count < 0:
+        raise Error(who + ": negative recordsCount " + String(records_count))
+    var records = List[KafkaRecord]()
+    for r in range(records_count):
+        var rec_len = Int(get_varint(dec))  # length of the rest of this record
+        if rec_len < 0:
+            raise Error(
+                who + ": record " + String(r) + " has negative length " + String(rec_len)
+            )
+        if rec_len > dec.remaining():
+            raise Error(
+                who
+                + ": record "
+                + String(r)
+                + " length "
+                + String(rec_len)
+                + " exceeds the "
+                + String(dec.remaining())
+                + " bytes left"
+            )
+        var rec_start = dec.pos()
+        _ = dec.get_int8()  # record attributes (unused)
+        var ts_delta = get_varlong(dec)
+        var off_delta = get_varint(dec)
+        var key = _read_nullable_bytes(dec)
+        var value = _read_nullable_bytes(dec)
+        var headers_count = Int(get_varint(dec))
+        var headers = List[KafkaHeader]()
+        for _ in range(headers_count):
+            var hk_len = Int(get_varint(dec))
+            if hk_len < 0:
+                raise Error(
+                    who
+                    + ": record "
+                    + String(r)
+                    + " has a header with a null key (a header key is required)"
+                )
+            var hk = _read_bytes(dec, hk_len)
+            var hv = _read_nullable_bytes(dec)
+            headers.append(KafkaHeader(hk^, hv^))
+        var consumed = dec.pos() - rec_start
+        if consumed != rec_len:
+            raise Error(
+                who
+                + ": record "
+                + String(r)
+                + " declares "
+                + String(rec_len)
+                + " bytes but its fields span "
+                + String(consumed)
+            )
+        records.append(
+            KafkaRecord(
+                key^,
+                value^,
+                headers^,
+                first_timestamp + ts_delta,
+                base_offset + Int64(off_delta),
+            )
+        )
+    if dec.remaining() != 0:
+        raise Error(
+            who
+            + ": "
+            + String(dec.remaining())
+            + " bytes follow the "
+            + String(records_count)
+            + " declared records (recordsCount disagrees with the batch)"
+        )
+    return records^
 
 
 def parse_records_from_span[
@@ -636,41 +777,19 @@ def parse_records_from_span[
     first_timestamp: Int64,
 ) raises -> List[KafkaRecord]:
     """Parse `records_count` v2 records out of a PLAINTEXT records span (the
-    Record* array, already decompressed if the batch was compressed).
+    Record* array, already decompressed if the batch was compressed). The span
+    must hold exactly those records; see `_parse_records` for what is refused.
 
     `base_offset` / `first_timestamp` come from the batch header and resolve
     the per-record offset/timestamp deltas to absolute values."""
     var dec = KafkaDecoder(data)
-    var records = List[KafkaRecord]()
-    for _ in range(records_count):
-        var rec_len = Int(get_varint(dec))  # length of the rest of this record
-        var rec_end = dec.pos() + rec_len
-        _ = dec.get_int8()  # record attributes (unused)
-        var ts_delta = get_varlong(dec)
-        var off_delta = get_varint(dec)
-        var key = _read_nullable_bytes(dec)
-        var value = _read_nullable_bytes(dec)
-        var headers_count = Int(get_varint(dec))
-        var headers = List[KafkaHeader]()
-        for _ in range(headers_count):
-            var hk_len = Int(get_varint(dec))
-            var hk = _read_bytes(dec, hk_len) if hk_len >= 0 else List[UInt8]()
-            var hv = _read_nullable_bytes(dec)
-            headers.append(KafkaHeader(hk^, hv^))
-        # Defensive: if the record declared trailing bytes we didn't read,
-        # skip to its end (forward-compat with future record fields).
-        if dec.pos() < rec_end:
-            _ = _read_bytes(dec, rec_end - dec.pos())
-        records.append(
-            KafkaRecord(
-                key^,
-                value^,
-                headers^,
-                first_timestamp + ts_delta,
-                base_offset + Int64(off_delta),
-            )
-        )
-    return records^
+    return _parse_records(
+        dec,
+        records_count,
+        base_offset,
+        first_timestamp,
+        String("parse_records_from_span"),
+    )
 
 
 def decode_record_batch_v2[
@@ -679,73 +798,38 @@ def decode_record_batch_v2[
     """Decode ONE UNCOMPRESSED v2 RecordBatch off `dec` (positioned at the
     batch's baseOffset). Advances the cursor past the whole batch.
 
+    Checks the batch's length and CRC-32C and every record's framing (see
+    `_read_verified_batch` and `_parse_records`): a truncated, corrupt or
+    inconsistent batch raises and yields no records.
+
     Rejects compression != none with a clear error: this zero-dep module
     cannot decompress. The SERVER path handles compression via
     `split_record_batch_header` + decompress + `parse_records_from_span`.
     Control batches are likewise rejected.
     """
-    var base_offset = dec.get_int64()
-    var batch_length = Int(dec.get_int32())
-    _ = dec.get_int32()  # partitionLeaderEpoch (ignored)
-    var magic = dec.get_int8()
-    if magic != RECORD_BATCH_MAGIC_V2:
-        raise Error(
-            "decode_record_batch_v2: unsupported magic "
-            + String(Int(magic))
-            + " (only v2/magic=2 is supported)"
-        )
-    _ = dec.get_int32()  # crc (we trust the framing; full verify is optional)
-    var attributes = dec.get_int16()
-    var compression = attributes & COMPRESSION_MASK
-    if compression != Int16(0):
+    var post_crc = List[UInt8]()
+    var header = _read_verified_batch(
+        dec, String("decode_record_batch_v2"), post_crc
+    )
+    if header.compression_codec != 0:
         raise Error(
             "decode_record_batch_v2: compression codec "
-            + String(Int(compression))
+            + String(header.compression_codec)
             + " not supported by the zero-dep decoder; use"
             " split_record_batch_header + decompress + parse_records_from_span"
         )
-    if (attributes & CONTROL_BATCH_BIT) != Int16(0):
+    if header.is_control:
         raise Error("decode_record_batch_v2: control batches not supported")
-
-    _ = dec.get_int32()  # lastOffsetDelta
-    var first_ts = dec.get_int64()  # firstTimestamp
-    _ = dec.get_int64()  # maxTimestamp
-    _ = dec.get_int64()  # producerId
-    _ = dec.get_int16()  # producerEpoch
-    _ = dec.get_int32()  # baseSequence
-    var records_count = Int(dec.get_int32())
-
-    var records = List[KafkaRecord]()
-    for _ in range(records_count):
-        var rec_len = Int(get_varint(dec))  # length of the rest of this record
-        var rec_end = dec.pos() + rec_len
-        _ = dec.get_int8()  # record attributes (unused)
-        var ts_delta = get_varlong(dec)
-        var off_delta = get_varint(dec)
-        var key = _read_nullable_bytes(dec)
-        var value = _read_nullable_bytes(dec)
-        var headers_count = Int(get_varint(dec))
-        var headers = List[KafkaHeader]()
-        for _ in range(headers_count):
-            var hk_len = Int(get_varint(dec))
-            var hk = _read_bytes(dec, hk_len) if hk_len >= 0 else List[UInt8]()
-            var hv = _read_nullable_bytes(dec)
-            headers.append(KafkaHeader(hk^, hv^))
-        # Defensive: if the record declared trailing bytes we didn't read,
-        # skip to its end (forward-compat with future record fields).
-        if dec.pos() < rec_end:
-            _ = _read_bytes(dec, rec_end - dec.pos())
-        records.append(
-            KafkaRecord(
-                key^,
-                value^,
-                headers^,
-                first_ts + ts_delta,
-                base_offset + Int64(off_delta),
-            )
-        )
-
-    return DecodedRecordBatch(base_offset, records^)
+    var rd = KafkaDecoder(Span(post_crc))
+    _ = rd._read_raw(_V2_POST_CRC_HEADER)
+    var records = _parse_records(
+        rd,
+        header.records_count,
+        header.base_offset,
+        header.first_timestamp,
+        String("decode_record_batch_v2"),
+    )
+    return DecodedRecordBatch(header.base_offset, records^)
 
 
 def decode_record_batches[
@@ -753,10 +837,28 @@ def decode_record_batches[
 ](data: Span[UInt8, origin]) raises -> List[KafkaRecord]:
     """Decode a Kafka message-set (one or more concatenated v2 RecordBatches)
     into a flat list of records. A Produce request's per-partition records field
-    can carry multiple batches; Fetch likewise concatenates batches."""
+    can carry multiple batches.
+
+    Every byte must belong to a whole batch: a trailing partial batch is
+    REFUSED (raises), whether it is a fragment too short to hold `baseOffset` +
+    `batchLength` or a batch whose `batchLength` runs past the end, rather than
+    being dropped, because a dropped fragment is a truncated request reported
+    as a complete one.
+
+    That refusal is correct for a PRODUCE request only. A FETCH response may
+    legitimately end in a partial batch (the broker cuts the message set at
+    `max_bytes`, and the client skips the tail), so a Fetch-side caller must
+    not reuse this entry point as is: it would refuse a valid response."""
     var dec = KafkaDecoder(data)
     var out = List[KafkaRecord]()
-    while dec.remaining() >= 12:  # need at least baseOffset(8) + batchLength(4)
+    while dec.remaining() > 0:
+        if dec.remaining() < 12:  # baseOffset(8) + batchLength(4)
+            raise Error(
+                "decode_record_batches: a "
+                + String(dec.remaining())
+                + "-byte fragment follows the last whole batch (truncated"
+                " message set)"
+            )
         var decoded = decode_record_batch_v2(dec)
         for i in range(len(decoded.records)):
             out.append(decoded.records[i].copy())

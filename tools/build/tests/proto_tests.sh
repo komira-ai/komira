@@ -58,8 +58,12 @@ expect_red proto_bad_selection "which is not a .proto of the proto_deps closure"
 # komira_grpc and komira_gcp_core (komira//tools/build/proto-codegen/gcp_grpc),
 # builds only once its welded test of the token hook and the status mapping
 # passes; that client's gen_check and tests_check are in
-# tests//functional/mojo_gcp_client, which is built next.
+# tests//functional/mojo_gcp_client, which is built next. A `protocol = "rest"`
+# client of a service with no `google.api.default_host`
+# (komira//tools/build/proto-codegen/gcp_rest) builds only once its welded test
+# shows it refuses to send, before any dial, until a host is set.
 expect_green gcp_grpc_client //tools/build/proto-codegen/gcp_grpc:
+expect_green gcp_rest_client //tools/build/proto-codegen/gcp_rest:
 if "$BUCK2" build tests//functional/mojo_gcp_client: > "$LOG/mojo_gcp_client.log" 2>&1; then
     pass "mojo_gcp_client: scoped clients, their welded tests, gen_check and tests_check"
 else
@@ -75,6 +79,7 @@ expect_red gcp_client_absence_check 'which must be absent' tests//negative/mojo_
 expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_client:tests_check_can_fail
 expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
+expect_red gcp_client_rest_streaming_method 'method `WatchItems` is server-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
 
 # 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen):
 # each case runs protoc over a corpus with one option string and holds the
