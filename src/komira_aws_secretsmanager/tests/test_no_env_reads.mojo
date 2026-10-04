@@ -1,8 +1,10 @@
-# The generated client reads no environment: every input is a parameter, the
-# endpoint ones included (SecretsManagerEndpointConfig). The three generated files are
-# staged as this test's data, at gen/<file>; the test reads each one and
-# fails if any names a way to read the environment, reaches the FFI a read
-# would go through, or takes the core's ruleset-free endpoint path.
+# The generated client reads no environment: every input is a parameter,
+# the endpoint ones included (SecretsManagerEndpointConfig). The package's
+# four files (the three generated ones and the hand-written
+# secretsmanager_overrides) are staged as this test's data, at gen/<file>;
+# the test reads each one and fails if any names a way to read the
+# environment, reaches the FFI a read would go through, or takes the core's
+# ruleset-free endpoint path.
 # komira_aws_core's test_env_source_only holds the same line for the core,
 # where the one read site is its EnvSource.
 from std.testing import assert_equal, assert_true
@@ -46,6 +48,7 @@ def test_no_environment_read() raises:
         "__init__.mojo",
         "_layout_probe.mojo",
         "komira_aws_secretsmanager.mojo",
+        "secretsmanager_overrides.mojo",
     ]
     for i in range(len(files)):
         var text = _read(files[i])
@@ -73,6 +76,11 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(_count(text, '"secretsmanager.GetSecretValue"'), 1)
     assert_equal(_count(text, '"secretsmanager.PutSecretValue"'), 1)
     assert_equal(_count(text, '"secretsmanager.RestoreSecret"'), 1)
+    # DeleteSecret's plain verb is the hand-written module's: the client
+    # has only the raw one.
+    assert_equal(_count(text, "    def delete_secret("), 0)
+    assert_equal(_count(text, "    def delete_secret_raw("), 1)
+    assert_equal(_count(text, "owner  : komira_aws_secretsmanager.secretsmanager_overrides.delete_secret"), 1)
     # The client sends where the ruleset resolves each call.
     assert_equal(
         _count(
