@@ -1,0 +1,133 @@
+# Connects a GitHub-hosted job to the build farm: joins the tailnet as
+# `tag:ci`, refuses to go on unless the farm answers, and writes the farm's
+# machine buckconfig for buck2 (docs/ci.md, "The runner").
+#
+# Nothing here names the farm. Its address, instance name and worker property
+# set arrive as inputs, which a workflow takes from repository variables, so no
+# committed file holds an endpoint (checked by //:no_endpoint). The tailnet
+# credential is workload identity federation: the job asks GitHub for an OIDC
+# token and Tailscale trusts it for this repository only, so no secret is
+# stored anywhere. The calling job therefore needs
+#
+#     permissions:
+#       contents: read
+#       id-token: write
+#
+# and a pull request from a fork gets neither the token nor the variables, so
+# the caller skips a fork's job (a composite action cannot see the event).
+name: farm-connect
+description: Join the tailnet, refuse unless the farm answers, write the farm's machine buckconfig.
+
+inputs:
+  ts-client-id:
+    description: The Tailscale trust credential's client id (the repository variable TS_CLIENT_ID).
+    required: true
+  ts-audience:
+    description: The Tailscale trust credential's audience (the repository variable TS_AUDIENCE).
+    required: true
+  farm-address:
+    description: The remote-execution service as a URL with a port (the repository variable FARM_ADDRESS).
+    required: true
+  farm-instance:
+    description: The remote-execution instance name (the repository variable FARM_INSTANCE).
+    required: true
+  farm-properties:
+    description: The linux x86_64 worker property set (the repository variable FARM_LINUX_X86_64_PROPERTIES).
+    required: true
+  execution-concurrency-limit:
+    description: How many actions this client lets run on the farm at once.
+    required: false
+    default: "32"
+
+runs:
+  using: composite
+  steps:
+    # An unset repository variable reads as the empty string, and buck2 with no
+    # farm configured builds on the machine it runs on, so every input is
+    # checked before anything is joined or written.
+    - name: the farm variables are set
+      shell: bash
+      env:
+        TS_CLIENT_ID: ${{ inputs.ts-client-id }}
+        TS_AUDIENCE: ${{ inputs.ts-audience }}
+        FARM_ADDRESS: ${{ inputs.farm-address }}
+        FARM_INSTANCE: ${{ inputs.farm-instance }}
+        FARM_PROPERTIES: ${{ inputs.farm-properties }}
+      run: |
+        set -eu
+        missing=""
+        [ -n "$TS_CLIENT_ID" ] || missing="$missing TS_CLIENT_ID"
+        [ -n "$TS_AUDIENCE" ] || missing="$missing TS_AUDIENCE"
+        [ -n "$FARM_ADDRESS" ] || missing="$missing FARM_ADDRESS"
+        [ -n "$FARM_INSTANCE" ] || missing="$missing FARM_INSTANCE"
+        [ -n "$FARM_PROPERTIES" ] || missing="$missing FARM_LINUX_X86_64_PROPERTIES"
+        if [ -n "$missing" ]; then
+          echo "::error title=farm-connect::these repository variables are empty:$missing. A job run from a fork gets none of them; refusing, because buck2 would build on the runner instead of the farm."
+          exit 1
+        fi
+        # The logs are public: keep the farm's address out of them.
+        echo "::add-mask::$FARM_ADDRESS"
+        echo "::add-mask::${FARM_ADDRESS#*://}"
+
+    - name: join the tailnet
+      uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4.2.0
+      with:
+        oauth-client-id: ${{ inputs.ts-client-id }}
+        audience: ${{ inputs.ts-audience }}
+        tags: tag:ci
+        # The log of a public repository is public: no tailnet status, no addresses.
+        log-mode: quiet
+
+    # The same check as the tailnet-probe workflow's: a TCP connection to the
+    # farm's port, retried for a minute because a new node can take a few
+    # seconds to get its routes.
+    - name: refuse unless the farm answers
+      shell: bash
+      env:
+        FARM_ADDRESS: ${{ inputs.farm-address }}
+      run: |
+        set -u
+        hostport="${FARM_ADDRESS#*://}"
+        hostport="${hostport%%/*}"
+        host="${hostport%:*}"
+        port="${hostport##*:}"
+        case "$port" in
+          ''|*[!0-9]*) echo "::error title=farm-connect::FARM_ADDRESS has no numeric port"; exit 1 ;;
+        esac
+        [ -n "$host" ] && [ "$host" != "$hostport" ] || { echo "::error title=farm-connect::FARM_ADDRESS is not host:port"; exit 1; }
+        for attempt in 1 2 3 4 5 6 7 8 9 10 11 12; do
+          if timeout 5 bash -c 'exec 3<>"/dev/tcp/$0/$1"' "$host" "$port" 2>/dev/null; then
+            echo "the farm answers on its port (attempt $attempt)"
+            exit 0
+          fi
+          sleep 5
+        done
+        echo "::error title=farm-connect::the farm does not answer from this job after joining the tailnet. Not building: with no farm buck2 would build on this runner. Look at the tailnet policy (tag:ci to tag:farm, the farm's port only), whether the farm's nodes are up, and the trust credential's subject."
+        exit 1
+
+    - name: write the farm's machine buckconfig
+      shell: bash
+      env:
+        FARM_ADDRESS: ${{ inputs.farm-address }}
+        FARM_INSTANCE: ${{ inputs.farm-instance }}
+        FARM_PROPERTIES: ${{ inputs.farm-properties }}
+        CONCURRENCY: ${{ inputs.execution-concurrency-limit }}
+      run: |
+        set -eu
+        case "$CONCURRENCY" in
+          ''|*[!0-9]*) echo "::error title=farm-connect::execution-concurrency-limit is not a number"; exit 1 ;;
+        esac
+        dir="$HOME/.buckconfig.d"
+        mkdir -p "$dir"
+        {
+          echo "[buck2_re_client]"
+          echo "  engine_address = $FARM_ADDRESS"
+          echo "  action_cache_address = $FARM_ADDRESS"
+          echo "  cas_address = $FARM_ADDRESS"
+          echo "  instance_name = $FARM_INSTANCE"
+          echo "  tls = false"
+          echo "  execution_concurrency_limit = $CONCURRENCY"
+          echo "[komira_re]"
+          echo "  linux_x86_64_properties = $FARM_PROPERTIES"
+        } > "$dir/farm.buckconfig"
+        echo "wrote the farm's machine buckconfig ($dir/farm.buckconfig)"

@@ -1,0 +1,49 @@
+# Build-system self-tests: tools/build/tests/run_tests.sh, on a schedule and on
+# demand. It tests buck2's own behaviour (where actions ran, cache identity
+# across checkouts, analysis-time refusals, a `buck2 run` from a fresh clone,
+# targets that must fail by design) and is NOT the gate: the gate is the build
+# (ci.yml), where building a target runs the tests welded to it. This workflow
+# has no push or pull_request trigger, so it never holds up a change. See
+# docs/ci.md, "Build-system self-tests".
+#
+# It reaches the farm as ci.yml does, through the local action
+# .github/actions/farm-connect, and holds `id-token: write` for that alone.
+name: build-system-selftests
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 3 * * *"
+
+permissions: {}
+
+concurrency:
+  # Two runs never overlap; a run in progress is left to finish.
+  group: build-system-selftests
+  cancel-in-progress: false
+
+jobs:
+  selftests:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: ./.github/actions/farm-connect
+        with:
+          ts-client-id: ${{ vars.TS_CLIENT_ID }}
+          ts-audience: ${{ vars.TS_AUDIENCE }}
+          farm-address: ${{ vars.FARM_ADDRESS }}
+          farm-instance: ${{ vars.FARM_INSTANCE }}
+          farm-properties: ${{ vars.FARM_LINUX_X86_64_PROPERTIES }}
+      - name: tools/build/tests/run_tests.sh
+        run: |
+          mkdir -p "$RUNNER_TEMP/tests"
+          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh
+      - name: Stop buck2
+        if: always()
+        run: ./buck2 kill || true
