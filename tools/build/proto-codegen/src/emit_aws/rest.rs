@@ -41,7 +41,7 @@
 //! member's resolved format (`aws_in::resolve_timestamp_format`).
 
 use super::proto::{AwsProtocol, Binding};
-use super::{escape, ts_const, AwsEmitter};
+use super::{escape, ts_const, AwsEmitter, ROUTE53_ID_SHAPES};
 use crate::aws_in::{AwsLocation, AwsOperationFacts, AwsPathParam, AwsTimestampFormat, AwsXmlNamespace};
 use crate::ir::{IrField, IrMessage, IrMethod, IrType, Label, ScalarKind};
 
@@ -381,9 +381,13 @@ impl AwsEmitter<'_> {
         let p = self.prefix.to_uppercase();
         let msg = self.message_by_fq(&m.input.fq_name)?.clone();
         let members = self.bound_members(&msg)?;
+        let builder = if self.emit_route53_id_cut(m, facts, &msg)? {
+            format!("_{fp}build_{}_request_bare_ids", m.name)
+        } else {
+            format!("{fp}build_{}_request", m.name)
+        };
         self.line(&format!(
-            "def {fp}build_{}_request(input: {in_ty}) raises -> AwsRequest:",
-            m.name
+            "def {builder}(input: {in_ty}) raises -> AwsRequest:"
         ));
         self.push();
         self.line(&format!(
@@ -546,6 +550,98 @@ impl AwsEmitter<'_> {
         self.pop();
         self.blank();
         Ok(())
+    }
+
+    /// `route53` (`fix_route53_ids`, see
+    /// [`super::ROUTE53_CUSTOMIZATION`]): for an operation whose input has
+    /// top-level members of a [`ROUTE53_ID_SHAPES`] shape, emits
+    /// `build_<op>_request`, which copies the input, cuts each such member
+    /// to the part after its last `/`, and builds the request from the copy
+    /// through `_build_<op>_request_bare_ids`, emitted next by the caller.
+    /// True when it did; nothing, and false, without the customization or
+    /// for an operation with no such member.
+    fn emit_route53_id_cut(
+        &mut self,
+        m: &IrMethod,
+        facts: &AwsOperationFacts,
+        msg: &IrMessage,
+    ) -> Result<bool, String> {
+        if !self.options.route53 {
+            return Ok(false);
+        }
+        let mut cut = Vec::new();
+        for f in &msg.fields {
+            let mf = self.facts.member(&msg.fq_name, &f.name)?;
+            if !ROUTE53_ID_SHAPES.contains(&mf.shape.as_str()) {
+                continue;
+            }
+            if f.label == Label::Repeated || f.ty != IrType::Scalar(ScalarKind::String) {
+                return Err(format!(
+                    "emit_aws: `{}`.{} has the shape `{}`, which the `route53` \
+                     customization cuts as one string, and it is not one",
+                    msg.name, f.name, mf.shape
+                ));
+            }
+            cut.push(f.clone());
+        }
+        if cut.is_empty() {
+            return Ok(false);
+        }
+        let in_ty = self.op_input_type(m);
+        let fp = self.fn_prefix();
+        self.line(&format!(
+            "def {fp}build_{}_request(input: {in_ty}) raises -> AwsRequest:",
+            m.name
+        ));
+        self.push();
+        self.line(&format!(
+            "\"\"\"`{}` — the {} request, serialised and NOT signed. Each Route 53 Id",
+            facts.name,
+            self.rest_name()
+        ));
+        self.line("is sent as the part after its last `/`, as botocore's `fix_route53_ids`");
+        self.line("sends it, so an Id Route 53 answered with can be passed back as it came.\"\"\"");
+        self.line("var _bare = input.copy()");
+        for f in &cut {
+            let access = if self.required(msg, f) {
+                if self.is_boxed(msg, f) {
+                    format!("_bare.{}[0]", f.name)
+                } else {
+                    format!("_bare.{}", f.name)
+                }
+            } else {
+                self.line(&format!("if {}:", self.presence_test_on("_bare", msg, f)));
+                self.push();
+                self.optional_access_on("_bare", msg, f)
+            };
+            self.line(&format!("{access} = _{fp}route53_bare_id({access})"));
+            if !self.required(msg, f) {
+                self.pop();
+            }
+        }
+        self.line(&format!("return _{fp}build_{}_request_bare_ids(_bare)", m.name));
+        self.pop();
+        self.blank();
+        Ok(true)
+    }
+
+    /// `route53`: the helper each `build_<op>_request` that cuts an Id
+    /// calls, emitted once before the operations.
+    pub(super) fn emit_route53_bare_id_helper(&mut self) {
+        let fp = self.fn_prefix();
+        self.line(&format!("def _{fp}route53_bare_id(id: String) -> String:"));
+        self.push();
+        self.line("\"\"\"The part of a Route 53 Id after its last `/`, as botocore's");
+        self.line("`fix_route53_ids` sends it: `/hostedzone/Z1D633PJN98FT9` is");
+        self.line("`Z1D633PJN98FT9`, and an Id with no `/` is itself.\"\"\"");
+        self.line("var slash = id.rfind(\"/\")");
+        self.line("if slash < 0:");
+        self.push();
+        self.line("return id.copy()");
+        self.pop();
+        self.line("return String(id[byte=slash + 1 :])");
+        self.pop();
+        self.blank();
     }
 
     /// `s3`: an operation whose `httpChecksum` names a
@@ -1328,5 +1424,111 @@ mod tests {
         assert!(src.contains("_body.set_member(String(\"b\"), "), "{src}");
         assert!(!src.contains("_body.set_member(String(\"X-H\")"), "{src}");
         assert!(!src.contains("_body.set_member(String(\"q\")"), "{src}");
+    }
+
+    /// A restXml model with serviceId `service_id` holding Route 53's Id
+    /// shapes as a label, an optional query value and a body member, and an
+    /// operation with none; `ids` is the shape `Zones.Ids` targets.
+    fn emit_route53(service_id: &str, route53: bool, ids: &str) -> Result<String, String> {
+        let model = parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "route53",
+                    "protocol": "rest-xml", "serviceFullName": "Tiny Route 53",
+                    "serviceId": "{service_id}", "signatureVersion": "v4",
+                    "uid": "route53-2026-10-02"}},
+                "operations": {{
+                    "GetZone": {{"name": "GetZone",
+                        "http": {{"method": "GET", "requestUri": "/zone/{{Id}}"}},
+                        "input": {{"shape": "GetZoneIn"}}}},
+                    "ListZones": {{"name": "ListZones",
+                        "http": {{"method": "GET", "requestUri": "/zones"}},
+                        "input": {{"shape": "ListZonesIn"}}}},
+                    "MakeZone": {{"name": "MakeZone",
+                        "http": {{"method": "POST", "requestUri": "/zone"}},
+                        "input": {{"shape": "MakeZoneIn", "locationName": "MakeZoneRequest"}}}},
+                    "Ping": {{"name": "Ping",
+                        "http": {{"method": "GET", "requestUri": "/ping"}},
+                        "input": {{"shape": "PingIn"}}}}}},
+                "shapes": {{
+                    "GetZoneIn": {{"type": "structure", "required": ["Id"], "members": {{
+                        "Id": {{"shape": "ResourceId", "location": "uri", "locationName": "Id"}}}}}},
+                    "ListZonesIn": {{"type": "structure", "members": {{
+                        "HostedZoneId": {{"shape": "ResourceId", "location": "querystring",
+                            "locationName": "hostedzoneid"}},
+                        "Name": {{"shape": "Str", "location": "querystring", "locationName": "name"}},
+                        "Ids": {{"shape": "{ids}", "location": "querystring", "locationName": "ids"}}}}}},
+                    "MakeZoneIn": {{"type": "structure", "members": {{
+                        "DelegationSetId": {{"shape": "DelegationSetId"}}}}}},
+                    "PingIn": {{"type": "structure", "members": {{
+                        "Name": {{"shape": "Str", "location": "querystring", "locationName": "name"}}}}}},
+                    "ResourceId": {{"type": "string", "max": 32}},
+                    "DelegationSetId": {{"type": "string", "max": 48}},
+                    "ResourceIds": {{"type": "list", "member": {{"shape": "ResourceId"}}}},
+                    "Strs": {{"type": "list", "member": {{"shape": "Str"}}}},
+                    "Str": {{"type": "string"}}}}}}"#
+        ))
+        .map_err(|e| e.to_string())?;
+        let lowering = lower_aws_service(
+            &model,
+            "route53",
+            &["GetZone", "ListZones", "MakeZone", "Ping"].map(String::from),
+            "route53.json",
+            "aws.route53",
+        )?;
+        let options = AwsEmitOptions {
+            pure_only: true,
+            omit_preamble: true,
+            route53,
+            ..AwsEmitOptions::default()
+        };
+        emit_aws_client(&lowering, &AwsOverrides::empty(), "route53", options).map(|(_, s)| s)
+    }
+
+    #[test]
+    fn the_route53_customization_is_refused_for_another_service() {
+        let e = emit_route53("Tiny", true, "Strs").unwrap_err();
+        assert!(e.contains("is refused unless the model's serviceId is `Route 53`"), "{e}");
+    }
+
+    #[test]
+    fn the_route53_customization_cuts_each_top_level_id_before_building() {
+        let src = emit_route53("Route 53", true, "Strs").unwrap();
+        // The helper, once.
+        assert_eq!(src.matches("_route53_bare_id(id: String) -> String:").count(), 1, "{src}");
+        assert!(src.contains("var slash = id.rfind(\"/\")"), "{src}");
+        // A required label: the public builder cuts the copy and calls the
+        // builder proper, which validates and builds from it.
+        assert!(src.contains("build_get_zone_request(input: "), "{src}");
+        assert!(src.contains("_build_get_zone_request_bare_ids(input: "), "{src}");
+        assert!(src.contains("_bare.id = "), "{src}");
+        assert!(src.contains("return _"), "{src}");
+        // An optional query value, cut only when present; another member
+        // of the same input, and a list of strings, are left alone.
+        assert!(src.contains("if _bare.hosted_zone_id:"), "{src}");
+        assert!(src.contains("_bare.hosted_zone_id.value() = "), "{src}");
+        assert!(!src.contains("_bare.name"), "{src}");
+        assert!(!src.contains("_bare.ids"), "{src}");
+        // A body member.
+        assert!(src.contains("_bare.delegation_set_id.value() = "), "{src}");
+        // An operation with no Id has one builder.
+        assert!(!src.contains("build_ping_request_bare_ids"), "{src}");
+        assert!(src.contains("build_ping_request(input: "), "{src}");
+    }
+
+    #[test]
+    fn the_route53_customization_leaves_a_list_of_ids_alone() {
+        // botocore matches the member's own shape, and a list of ResourceId
+        // is a list shape, so it is sent as given.
+        let src = emit_route53("Route 53", true, "ResourceIds").unwrap();
+        assert!(!src.contains("_bare.ids"), "{src}");
+        assert!(src.contains("_bare.hosted_zone_id.value() = "), "{src}");
+    }
+
+    #[test]
+    fn without_the_route53_customization_no_id_is_cut() {
+        let src = emit_route53("Route 53", false, "Strs").unwrap();
+        assert!(!src.contains("_route53_bare_id"), "{src}");
+        assert!(!src.contains("_bare_ids"), "{src}");
+        assert!(!src.contains("_bare."), "{src}");
     }
 }

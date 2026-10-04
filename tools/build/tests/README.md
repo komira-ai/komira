@@ -636,7 +636,8 @@ writing no file: an empty or missing `--operations`, an operation the model
 lacks, a protocol it does not implement (smithy-rpc-v2-cbor), a restXml
 model that reaches a union, an XML attribute or a map in the body (each by
 its refusal name), the `s3` customization unless the model's serviceId is
-`S3` and its protocol restXml, an unknown customization, a
+`S3` and its protocol restXml, the `route53` customization unless it is
+`Route 53` and restXml, an unknown customization, a
 missing `--model-sha256`, one that is not 64 lowercase hex digits (upper case,
 or one digit short), one that is not the model's, a zero-byte model, and
 `--probe-import` without `--probe-out`.

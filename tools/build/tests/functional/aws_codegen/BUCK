@@ -255,8 +255,8 @@ aws_codegen_refusal(
     model = "model/tiny_rpcv2cbor.json",
 )
 
-# The `s3` customization is for S3's model only, and no other customization
-# exists.
+# The `s3` customization is for S3's model only, `route53` for Route 53's
+# only, and no other customization exists.
 aws_codegen_refusal(
     name = "refuse_s3_customization_on_another_service",
     expect = "customization is refused unless the model's serviceId is `S3` and its protocol is restXml",
@@ -269,6 +269,22 @@ aws_codegen_refusal(
         "Ping",
         "--customization",
         "s3",
+    ],
+    model = "model/tiny_restxml.json",
+)
+
+aws_codegen_refusal(
+    name = "refuse_route53_customization_on_another_service",
+    expect = "customization is refused unless the model's serviceId is `Route 53` and its protocol is restXml",
+    gen_args = [
+        "--model-sha256",
+        _TINY_RESTXML_SHA256,
+        "--service",
+        "tiny",
+        "--operations",
+        "Ping",
+        "--customization",
+        "route53",
     ],
     model = "model/tiny_restxml.json",
 )
