@@ -19,7 +19,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # `--concurrency` worker threads (komira_fork_join; never with `force`), every
 # member is read back, and the metapackage goes last. The credential is
 # the channel's own (kci_release_channel), resolved once. The step ends in a
-# kci_contract outcome word and error id, and puts its rows into the run's one
+# kci_api outcome word and error id, and puts its rows into the run's one
 # result document; no exit number is spelled here, and a release already in
 # the channel byte for byte is NOOP, exit 0. Nothing here names a channel, an
 # account or an organisation.
@@ -34,7 +34,7 @@ mojo_library(
     deps = [
         "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_release_channel:kci_release_channel",
         "//src/kci_release_set:kci_release_set",

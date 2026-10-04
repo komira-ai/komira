@@ -5,7 +5,7 @@
 # =============================================================================
 #
 #   request.mojo            BuildRequest, BuildOutcome (an outcome word and
-#                           an error id from kci_contract; no exit number)
+#                           an error id from kci_api; no exit number)
 #   runner.mojo             the ProcessRunner seam: RunSpec (with an optional
 #                           explicit child environment), RunResult
 #   revision.mojo           derive_release_stamp: --revision-id checked

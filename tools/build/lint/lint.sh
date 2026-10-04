@@ -45,6 +45,12 @@
 #       missing dep is a failure at build time, found here in review. The
 #       library's own name is not an import to declare. Extra deps are not a
 #       finding (a dep may be there for a macro or a link).
+#   kind "retired_names", args <tree> <prefix of tree> <name>... -- <file>...
+#       No file under <tree> (the cell's doc_tree, findings named <prefix of
+#       tree><path>) and no <file> holds a <name> (a fixed string) on a line
+#       that carries no YYYY-MM-DD date: a retired name survives only in a
+#       dated history note. Checks nothing, so fails, when the tree holds no
+#       file.
 #   kind "doc_links", tools <inspect runnable dir>, args <tree> <unchecked> [<path> <tree>]...
 #       Every relative link and #anchor in every .md file under <tree> resolves
 #       to a file, directory or heading under <tree>, with each further tree
@@ -174,6 +180,25 @@ mojo_deps)
                     echo "$f:$line: imports $mod, which the deps of $buck do not name (:$mod)" >> "$REPORT"
             done
     done
+    ;;
+retired_names)
+    [ "$1" = -- ] && shift
+    tree=$1 tprefix=$2
+    shift 2
+    : > "$T/names"
+    while [ $# -gt 0 ] && [ "$1" != -- ]; do
+        printf '%s\n' "$1" >> "$T/names"
+        shift
+    done
+    [ $# -gt 0 ] && shift
+    checked=$( (cd "$tree" && find . \( -type f -o -type l \) -print) | wc -l | tr -d ' ')
+    checked=$((checked + $#))
+    (cd "$tree" && grep -rnF -f "$T/names" . || true) | sed "s#^\./#$tprefix#" > "$T/rn.txt"
+    for f in "$@"; do
+        grep -nF -f "$T/names" "$f" | sed "s#^#$f:#" >> "$T/rn.txt" || true
+    done
+    grep -vE '[0-9]{4}-[0-9]{2}-[0-9]{2}' "$T/rn.txt" |
+        sed 's#$# -- a retired name; only a dated history note may keep it#' >> "$REPORT" || true
     ;;
 doc_links)
     INSPECT=$(abs "$1"); shift

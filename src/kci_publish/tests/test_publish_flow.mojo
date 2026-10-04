@@ -45,7 +45,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_secret_store import SecretStore, StaticSecretStore
 
-from kci_contract import (
+from kci_api import (
     ARTIFACT_WOULD_UPLOAD,
     ERROR_CREDENTIAL,
     ERROR_RESULT_FILE,
@@ -56,7 +56,7 @@ from kci_contract import (
     STATUS_RUNNING,
     MemoryRecorder,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
     ActionsOidcEnv,

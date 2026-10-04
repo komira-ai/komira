@@ -39,7 +39,7 @@ from komira_secret_store import SecretStore, SecretValue
 
 from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_publish import (
     NewNamesReport,
     PublishRequest,

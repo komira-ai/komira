@@ -34,7 +34,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_crypto import hex_lower_array_32, sha256_string
 
 from kci_artifact_declaration import ReleaseStamp, read_artifact_declarations, render_build_argv
-from kci_contract import (
+from kci_api import (
     ARTIFACT_BUILT,
     ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
@@ -59,7 +59,7 @@ from kci_contract import (
     RunIdentity,
     RunRecorder,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_build import (
     BuildOutcome,
     BuildRequest,

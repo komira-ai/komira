@@ -31,7 +31,7 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_true
 
-from kci_contract import (
+from kci_api import (
     ERROR_MEMBER,
     ERROR_PLATFORM,
     ERROR_REVISION,
@@ -42,7 +42,7 @@ from kci_contract import (
     EXIT_USAGE,
     MemoryRecorder,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
     ActionsOidcEnv,
