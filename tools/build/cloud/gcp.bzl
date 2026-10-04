@@ -40,7 +40,13 @@ accepted ones. Both service shapes are Google Cloud clients (the plugin is
 passed `gcp=true`): `<Service>Client[C: Connector, T: GcpTokenSource]`, whose
 token source (komira_gcp_core) supplies each request's bearer token. Under
 "rest" the client builds the JSON request over komira_http_client and maps a
-non-2xx response through `gcp_status_error`. Under "grpc" it calls
+non-2xx response through `gcp_status_error`; it starts at the service's
+`(google.api.default_host)`, and a client of a service that declares none
+refuses every call, before any dial, until `set_rest_host` names a host. A
+streaming method has no REST form: any streaming method a "rest" target
+keeps is refused by name at generation (so a `methods` entry naming one is
+refused, and a plugin run with no `methods` filter over a service holding one
+fails rather than skipping it). Under "grpc" it calls
 komira_grpc's `GrpcClient` with classic gRPC, sets
 `authorization: Bearer <token>` on each call's `CallOptions.raw_metadata`
 before the call (the token hook), and raises a non-OK gRPC status through

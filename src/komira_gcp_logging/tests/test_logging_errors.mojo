@@ -51,7 +51,6 @@ def _raised(var answer: List[UInt8]) raises -> String:
     var c = LoggingServiceV2Client[ScriptedConnector, StaticTokenSource](
         http^, StaticTokenSource(String("test-access-token"))
     )
-    c.set_rest_host(String("logging.googleapis.com"))
     var names = List[String]()
     names.append(String("projects/private-project-name"))
     var req = ListLogEntriesRequest(

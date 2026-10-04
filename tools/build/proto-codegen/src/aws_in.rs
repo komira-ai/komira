@@ -171,6 +171,9 @@ pub struct AwsMemberFacts {
     pub member_name: String,
     pub wire_name: String,
     pub has_location_name: bool,
+    /// `queryName`: the member's parameter name in an ec2Query request,
+    /// ahead of its `locationName`.
+    pub query_name: Option<String>,
     pub location: AwsLocation,
     /// Membership of the shape's `required` list.
     pub required: bool,
@@ -256,6 +259,9 @@ pub struct AwsShapeFacts {
     /// For a `map`: the key / value `locationName`s.
     pub map_key_location_name: Option<String>,
     pub map_value_location_name: Option<String>,
+    /// For a `map`: the key / value `queryName`s (ec2Query).
+    pub map_key_query_name: Option<String>,
+    pub map_value_query_name: Option<String>,
     /// For a `list` / `map`: the element / value AWS shape name.
     pub element_shape: Option<String>,
     pub map_key_shape: Option<String>,
@@ -652,6 +658,7 @@ pub fn lower_aws_service(
     } else {
         vec![IrService {
             name: service_struct_name(&lowerer.meta),
+            default_host: None,
             methods,
         }]
     };
@@ -843,6 +850,8 @@ impl<'a> AwsLowerer<'a> {
             f.map_key_location_name = k.get("locationName").and_then(Json::as_str).map(String::from);
             f.map_value_location_name =
                 v.get("locationName").and_then(Json::as_str).map(String::from);
+            f.map_key_query_name = k.get("queryName").and_then(Json::as_str).map(String::from);
+            f.map_value_query_name = v.get("queryName").and_then(Json::as_str).map(String::from);
         }
         Ok(f)
     }
@@ -1169,6 +1178,7 @@ impl<'a> AwsLowerer<'a> {
             member_name: mname.to_string(),
             wire_name: location_name.clone().unwrap_or_else(|| mname.to_string()),
             has_location_name: location_name.is_some(),
+            query_name: str_of(mo, "queryName"),
             location,
             required,
             declared_index: idx,

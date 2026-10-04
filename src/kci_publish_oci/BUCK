@@ -1,0 +1,29 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The OCI image arm of a PUBLISH step: a thin layer over komira_oci's
+# LayoutPusher. It checks what kci owns before any registry request (the tag
+# is the full revision id; the step's platform is released; the layout reads
+# and verifies; the layout's own os/arch is the step's platform in OCI
+# spelling), honours --plan (sends nothing), and maps the push's end state
+# onto kci_api's outcome words, error ids and one exit table: an image
+# already tagged with the same bytes is NOOP, exit 0.
+#
+# Not wired into `kci run`: an image step needs a cell (deploy side).
+#
+# Deps: kci_api and komira_oci. No file I/O except komira_oci's
+# `read_oci_layout`; the welded tests push through komira_oci's in-process
+# fake registry, so no network is used.
+mojo_library(
+    name = "kci_publish_oci",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_api:kci_api",
+        "//src/komira_oci:komira_oci",
+    ],
+    test_srcs = [
+        # one test per row of the PUSH_* mapping, the plan, the platform and
+        # revision refusals with zero requests, no credential in an error
+        "tests/test_publish_oci_arm.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
