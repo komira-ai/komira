@@ -20,7 +20,11 @@
 #   R2  each job runs in its stage's GitHub environment, the stage's
 #       `environment` (by default its name): `environment: <env>`, or
 #       `environment: {name: <env>}` as a block
-#   R3  each job's `needs` is exactly its stage's `after` (none for none)
+#   R3  each job's `needs` is exactly the jobs that run its stage's `after`
+#       (none for none): the job named after that stage, and, when that
+#       stage is split (R9), each of its part jobs too, so a later stage waits
+#       for the earlier stage's validations. [Amended with R9, PENDING A
+#       RULING.]
 #   R4  `id-token: write` is in a job's own `permissions` exactly when its
 #       stage needs an identity token: it publishes to a channel whose
 #       credential is OIDC trusted publishing (`id_token_stages`), or it is
@@ -433,6 +437,7 @@ def _check_job(
     publishes_by_oidc: Bool,
     machine_path: String,
     split: Bool,
+    after_jobs: List[String],
     mut findings: List[String],
 ):
     var where = _at(doc, job) + String("job '") + job_id + String("'")
@@ -459,17 +464,22 @@ def _check_job(
             )
     # R3
     var needs = doc.scalar_or_list(doc.child(job, String("needs")))
-    var want_after = st.after.copy()
-    var needs_ok = (len(needs) == 0 and want_after.byte_length() == 0) or (len(needs) == 1 and needs[0] == want_after)
+    var needs_ok = len(needs) == len(after_jobs)
+    for i in range(len(after_jobs)):
+        if not _member(needs, after_jobs[i]):
+            needs_ok = False
     if not needs_ok:
         var said = joined_names(needs)
         if said.byte_length() == 0:
             said = String("nothing")
-        var want = want_after.copy()
+        var want = st.after.copy()
         if want.byte_length() == 0:
             want = String("nothing")
+        var jobs_text = String("")
+        if len(after_jobs) > 1:
+            jobs_text = String(" (run by jobs ") + joined_names(after_jobs) + String(")")
         findings.append(
-            where + String(": R3: needs ") + said + String("; the stage runs after ") + want
+            where + String(": R3: needs ") + said + String("; the stage runs after ") + want + jobs_text
         )
     # R4
     var has_token = _id_token_write(doc, doc.child(job, String("permissions")))
@@ -738,9 +748,15 @@ def check_workflow_doc(
         for k in range(len(main_calls)):
             if main_calls[k].has_only:
                 split = True
+        var after_jobs = List[String]()
+        if st.after.byte_length() > 0:
+            after_jobs.append(st.after.copy())
+            for j in range(len(job_ids)):
+                if part_stage[j] == st.after:
+                    after_jobs.append(job_ids[j].copy())
         _check_job(
             doc, job_ids[found], job_nodes[found], st, _member(token_stages, st.name), machine_path, len(parts) > 0,
-            findings,
+            after_jobs, findings,
         )
         for k in range(len(parts)):
             _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, findings)
