@@ -47,27 +47,25 @@ from komira_op_agg_state.columnar_acc_typed_extra import (
 def _gids_to_int_ptr(
     mut gids: List[Int],
 ) -> UnsafePointer[Int, MutUntrackedOrigin]:
-    """List[Int].unsafe_ptr() reinterpreted under MutExternalOrigin.
+    """List[Int].unsafe_ptr() under the untracked origin the trait names.
 
     The trait uses Int (8-byte) per ADR S1 -- not UInt32 -- because Mojo
     Mojo has a JIT bug round-tripping 4-byte Scalar through Int. List[Int]
     is the canonical input shape from the production hot path.
     """
-    return UnsafePointer[Int, MutUntrackedOrigin](
-        unsafe_from_address=Int(gids.unsafe_ptr())
-    )
+    return gids.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
 
 
 def _f64_vals_to_byte_ptr(
     mut vals: List[Float64],
 ) -> UnsafePointer[UInt8, MutUntrackedOrigin]:
-    """List[Float64].unsafe_ptr() byte-bitcast under MutExternalOrigin.
+    """List[Float64].unsafe_ptr() byte-bitcast under the untracked origin.
 
     The trait takes the column data as UInt8 + offset; concrete impls
     bitcast back to Float64 internally.
     """
-    return UnsafePointer[UInt8, MutUntrackedOrigin](
-        unsafe_from_address=Int(vals.unsafe_ptr())
+    return (
+        vals.unsafe_ptr().bitcast[UInt8]().unsafe_origin_cast[MutUntrackedOrigin]()
     )
 
 

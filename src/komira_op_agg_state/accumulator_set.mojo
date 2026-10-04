@@ -10,14 +10,14 @@
 #
 # IMPORTANT: Column is NOT passed through the fn-ptr boundary. Mojo
 # has a JIT bug where moving a Column into a fn-ptr call corrupts memory
-# on return. Instead, the caller extracts the raw data pointer + offset
-# before dispatch and passes them as Int. The thunk reconstructs a
-# Slab[Int] for gids and calls the trait-conforming update_batch
-# with a Column built from the raw pointers. This avoids the bug.
+# on return. Instead, the caller hands the kernel the gid and data buffers as
+# borrowed `Span`s and the kernel's private thunk passes the trait method the
+# raw element pointers and the element offset. No address is ever carried as
+# an `Int`, and the public surface names no pointer type.
 #
 # Hot-path usage:
 #   for a in range(n_kernels):
-#       kernels[a].call(gids_raw, col_data_raw, col_offset, n)
+#       acc_set.update(a, gids, col_data, col_offset, n)
 #
 # Cold-path usage:
 #   for a in range(n_accs):
@@ -49,6 +49,7 @@ from komira_core.arrow import Column
 from komira_core.collections.slab import Slab
 
 from komira_core.accumulator_trait import Accumulator
+from komira_core.collections.dyn_value import DynValue
 from .dyn_accumulator import DynAccumulator, MAX_ACC_SIZE, _cast_acc
 
 
@@ -56,46 +57,103 @@ from .dyn_accumulator import DynAccumulator, MAX_ACC_SIZE, _cast_acc
 # MonomorphicKernel -- one monomorphized process_batch per agg expression
 # =============================================================================
 
+# The type-erased kernel entry. PRIVATE to this file: it is the one fn-ptr
+# shape of the SoA hot path, and the only place that names the raw element
+# pointers the `Accumulator.update_batch` trait method takes. fn-ptr types
+# cannot carry origin parameters, so the pointer origins are the untracked
+# one; the public `call` below builds them from borrowed `Span`s inside its own
+# body, and nothing public mentions this alias.
+comptime _SoaKernelFn = def(
+    mut DynValue[MAX_ACC_SIZE],
+    UnsafePointer[Int, MutUntrackedOrigin],
+    UnsafePointer[UInt8, MutUntrackedOrigin],
+    Int,
+    Int,
+) raises thin -> None
+
+
 struct MonomorphicKernel(Movable, Copyable):
     """One monomorphized update_batch invocation.
 
-    fn-ptr signature: (acc_ptr, gids_ptr, col_data_ptr, col_offset, n) -> None
-    All arguments are Int (raw addresses / scalars). This avoids passing
-    Column (Movable, heap-owning) through the fn-ptr boundary which triggers
-    a Mojo JIT bug.
+    The kernel names no accumulator: `call` is handed the DynAccumulator it
+    updates, so a kernel is never stale after the accumulator (or the set
+    holding it) moves, and it cannot outlive it.
 
     PERF-CRITICAL: This is the innermost loop of aggregation.
     """
-    var _fn: def(Int, Int, Int, Int, Int) raises thin -> None
-    var _acc_ptr: Int
+    var _fn: _SoaKernelFn
     var _value_col_index: Int
 
-    def __init__(
-        out self,
-        _fn: def(Int, Int, Int, Int, Int) raises thin -> None,
-        _acc_ptr: Int,
-        _value_col_index: Int,
-    ):
-        self._fn = _fn
-        self._acc_ptr = _acc_ptr
-        self._value_col_index = _value_col_index
+    def __init__(out self, value_col_index: Int):
+        """An UNWIRED kernel: `call` raises until built by `for_accumulator`.
+        The fn-ptr is private, so the only way to wire one is the type-keyed
+        constructor below."""
+        self._fn = _unwired_kernel_thunk
+        self._value_col_index = value_col_index
 
-    def call(self, gids_raw: Int, col_data_raw: Int, col_offset: Int, n: Int) raises:
-        """Execute the monomorphic kernel.
+    @staticmethod
+    def for_accumulator[T: Accumulator](value_col_index: Int) -> Self:
+        """The kernel for accumulator type `T`: `T.update_batch` is a direct
+        call inside the thunk, instantiated once per concrete type."""
+        var kernel = Self(value_col_index)
+        kernel._fn = _kernel_thunk[T]
+        return kernel^
+
+    def call[
+        og: Origin, oc: Origin
+    ](
+        self,
+        mut acc: DynAccumulator,
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
+        col_offset: Int,
+        n: Int,
+    ) raises:
+        """Execute the monomorphic kernel against `acc`.
 
         Args:
-            gids_raw: Raw address of Int gid elements. Caller owns buffer.
-            col_data_raw: Raw address of column data buffer.
+            acc: The accumulator this kernel was built for (same `T`).
+            gids: Group ids, one per row; at least `n` elements.
+            col_data: The value column's data buffer in bytes; the kernel
+                reads `n` elements starting `col_offset` elements in.
             col_offset: Element offset into the column data.
             n: Number of rows in this batch.
         """
-        self._fn(self._acc_ptr, gids_raw, col_data_raw, col_offset, n)
+        if n < 0 or n > len(gids):
+            raise Error("MonomorphicKernel.call: n exceeds the gid buffer")
+        # SAFETY: the pointers are formed from spans the caller keeps borrowed
+        # for this whole call (`og`/`oc` are tracked on the parameters); the
+        # untracked origin exists only because the fn-ptr signature cannot
+        # name them, and `update_batch` must not stash either pointer (trait
+        # contract). The mutable cast is nominal: the trait takes a mutable
+        # pointer type but the SoA kernels only read the gid and data buffers.
+        var gids_ptr = (
+            gids.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        var col_ptr = (
+            col_data.unsafe_ptr()
+            .unsafe_mut_cast[True]()
+            .unsafe_origin_cast[MutUntrackedOrigin]()
+        )
+        self._fn(acc._value, gids_ptr, col_ptr, col_offset, n)
+
+
+def _unwired_kernel_thunk(
+    mut box: DynValue[MAX_ACC_SIZE],
+    gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
+    col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
+    col_offset: Int,
+    n: Int,
+) raises -> None:
+    raise Error("MonomorphicKernel: not wired to an accumulator type")
 
 
 def _kernel_thunk[T: Accumulator](
-    acc_raw: Int,
-    gids_raw: Int,
-    col_data_raw: Int,
+    mut box: DynValue[MAX_ACC_SIZE],
+    gids_ptr: UnsafePointer[Int, MutUntrackedOrigin],
+    col_data_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
     col_offset: Int,
     n: Int,
 ) raises -> None:
@@ -104,23 +162,14 @@ def _kernel_thunk[T: Accumulator](
     PERF-CRITICAL: Instantiated once per concrete type T. T.update_batch
     is a direct call with the full body visible to the Mojo compiler.
 
-    All arguments are Int (raw pointers/scalars). The thunk builds a
-    Slab[Int] for gids and a minimal Column wrapper for the trait
-    method. This avoids passing Column through the fn-ptr boundary.
+    The thunk hands the trait method the element pointers directly; no
+    Column is built (avoids the Mojo JIT bug with Movable types in fn-ptrs).
     """
-    # SAFETY: acc_raw is the address of a live T inside DynValue storage.
-    # See _cast_acc for the full safety contract.
-    var ptr = _cast_acc[T](acc_raw)
-    # SAFETY: gids_raw is a caller-owned buffer of Int group IDs, valid for
-    # n elements. The caller (AccumulatorSet.call) owns the buffer and keeps
-    # it alive for the duration of this call.
-    var gids_ptr = UnsafePointer[Int, MutUntrackedOrigin](unsafe_from_address=gids_raw)
-    # SAFETY: col_data_raw is a pointer to the Arrow column's raw data buffer.
-    # The caller owns the Column and keeps it alive for the duration of this
-    # call. col_offset is the element offset into the buffer.
-    var col_data_ptr = UnsafePointer[UInt8, MutUntrackedOrigin](unsafe_from_address=col_data_raw)
-    # Pass raw pointers directly to the accumulator. No Column construction
-    # needed -- avoids Mojo JIT bug with Movable types in fn-ptrs.
+    # SAFETY: `box` holds a live T (see _cast_acc) and is borrowed `mut` for
+    # this call. `gids_ptr` is valid for n Int group ids and `col_data_ptr`
+    # for the column's buffer; both are borrowed by MonomorphicKernel.call
+    # for the duration of this call and are not stashed.
+    var ptr = _cast_acc[T](box)
     ptr[].update_batch(gids_ptr, col_data_ptr, col_offset, n)
 
 
@@ -166,34 +215,33 @@ struct AccumulatorSet(Movable):
         var dyn_acc = DynAccumulator.create[T](acc^)
         self.dyn_accs.append(dyn_acc^)
 
-        var kernel = MonomorphicKernel(
-            _fn=_kernel_thunk[T],
-            _acc_ptr=0,
-            _value_col_index=value_col_index,
-        )
-        self.kernels.append(kernel^)
+        self.kernels.append(MonomorphicKernel.for_accumulator[T](value_col_index))
         self.descriptors.append(AccDescriptor(
             acc_kind=acc_kind,
             value_col_index=value_col_index,
             output_field_index=output_field_index,
         ))
 
-    def finalize_wiring(mut self):
-        """Patch kernel _acc_ptrs to their final DynAccumulator addresses.
+    def update[
+        og: Origin, oc: Origin
+    ](
+        mut self,
+        index: Int,
+        gids: Span[Int, og],
+        col_data: Span[UInt8, oc],
+        col_offset: Int,
+        n: Int,
+    ) raises:
+        """Run accumulator `index`'s kernel over one batch (hot path).
 
-        SAFETY: Each kernel's _acc_ptr is set to the raw address of the
-        concrete accumulator inside the DynAccumulator's DynValue storage.
-        This is safe because AccumulatorSet owns both the kernels and the
-        dyn_accs — the DynAccumulator (and its storage) outlives the kernel.
-        The address is stable because DynValue uses inline InlineArray storage
-        (no heap indirection that could relocate).
-
-        IMPORTANT: This must be called AFTER all add() calls are complete
-        and BEFORE any kernel.call() invocations. Slab does not
-        relocate elements after append, so addresses are stable.
+        The kernel and the accumulator are looked up together here, so a
+        set that was moved since `add` still updates the right state.
         """
-        for i in range(len(self.kernels)):
-            self.kernels[i]._acc_ptr = self.dyn_accs.get_mut_interior(i).raw_ptr()
+        if index < 0 or index >= len(self.kernels):
+            raise Error("AccumulatorSet.update: accumulator index out of range")
+        self.kernels[index].call(
+            self.dyn_accs[index], gids, col_data, col_offset, n
+        )
 
     def num_accumulators(self) -> Int:
         return len(self.kernels)
@@ -205,199 +253,228 @@ struct AccumulatorSet(Movable):
 #
 # PERF-CRITICAL (Session 5 -- accumulator layout port, atom 1):
 #
-# The SoA `MonomorphicKernel` above receives a `gids_raw` pointer into a
-# dense `Vec<T>` indexed by group_id. The AoS path (FlatHashAggregator) has
-# no dense gid array -- the caller probes the HT once per row and obtains a
-# per-row `EntryHandle`. The accumulator kernel then writes into the entry's
-# per-slot region at a plan-time-known `agg_slot_offset`.
+# The SoA `MonomorphicKernel` above receives a gid buffer indexed by row and
+# updates a dense per-group array. The AoS path (FlatHashAggregator) has no
+# dense gid array -- the caller probes the HT once per row and learns where the
+# row's entry is. The accumulator kernel then writes into the entry's per-slot
+# region at a plan-time-known `agg_slot_offset`.
 #
-# Signature:
-#     fn(entries_raw, col_data_raw, col_offset, agg_slot_offset, n) -> None
+# Contract: the caller hands over the entry table as one mutable byte span
+# (`table`) and, per row, the byte offset of that row's entry inside it
+# (`entry_offsets`). Where the previous contract was a buffer of entry
+# ADDRESSES that the kernel turned back into pointers, the offsets are plain
+# integers resolved against a span the compiler tracks, so no address is ever
+# rebuilt into a pointer here. The per-row arithmetic is the same single add
+# (`base + offset`) the address-load path did.
 #
-# All arguments are Int for the same Mojo JIT-compatibility reason
-# that MonomorphicKernel uses Int-only args.
-#
-# This is the first step in extending `MonomorphicKernel` to the AoS path
-# per an internal doc §3.3 (Option C). Session 5 ships one
-# thunk (`sum_count_f64_aos_thunk`) for the ACC_SUM_COUNT_F64 16B slot, used
-# by B-2 / D-1 / Q3 / Q9 / Q18 narrow layouts. Future thunks (sum_f64_aos,
-# count_star_aos, sum_count_min_max_f64_aos) follow the same signature.
+# Kernels (a closed set, selected once per batch, not per row):
+#   AOS_KERNEL_SUM_COUNT_F64  ACC_SUM_COUNT_F64 16B slot [sum:f64][count:i64]
+#   AOS_KERNEL_SUM_F64        ACC_SUM_F64 8B slot [sum:f64]
+#   AOS_KERNEL_COUNT_STAR     ACC_COUNT_STAR 8B slot [count:i64]; the value
+#                             column is never read (it may be empty)
 #
 # Scatter rows remain 32B quartet (Option Q, §4). The AoS kernel signature
 # is for HT-side commit; merge reads 32B source into variable-width dst via
 # `_fold_agg_slots`.
 # =============================================================================
 
+comptime AOS_KERNEL_SUM_COUNT_F64: UInt8 = 0
+comptime AOS_KERNEL_SUM_F64: UInt8 = 1
+comptime AOS_KERNEL_COUNT_STAR: UInt8 = 2
+
+
 struct AosAccKernel(Movable, Copyable):
     """One monomorphized AoS commit-batch invocation.
 
-    fn-ptr signature: (entries_raw, col_data_raw, col_offset,
-                       agg_slot_offset, n) -> None
+    `table` is the entry table (one mutable byte span over every entry),
+    `entry_offsets[row]` the byte offset of row `row`'s entry in it,
+    `col_data` the value column in Arrow layout (read `col_offset` elements
+    in), and `agg_slot_offset` the byte offset of the current agg slot within
+    an entry (= `aggs_offset + layout.offsets[a]`).
 
-    `entries_raw` is the base address of a contiguous `EntryHandle` buffer
-    (one per row). `col_data_raw + col_offset` is the base of the value
-    column in Arrow layout. `agg_slot_offset` is the byte offset of the
-    current agg slot within an entry (= `aggs_offset + layout.offsets[a]`).
-
-    PERF-CRITICAL: Innermost loop of AoS aggregation. The fn-ptr
-    indirection cost is ~5 cycles per agg per batch (not per row); the
-    per-row body lives inside the thunk.
+    PERF-CRITICAL: Innermost loop of AoS aggregation. The kind is dispatched
+    once per batch (not per row); the per-row body lives in the kernel.
     """
-    var _fn: def(Int, Int, Int, Int, Int) raises thin -> None
+    var _kind: UInt8
     var _agg_slot_offset: Int
     var _value_col_index: Int
 
     def __init__(
         out self,
-        _fn: def(Int, Int, Int, Int, Int) raises thin -> None,
-        _agg_slot_offset: Int,
-        _value_col_index: Int,
+        kind: UInt8,
+        agg_slot_offset: Int,
+        value_col_index: Int,
     ):
-        self._fn = _fn
-        self._agg_slot_offset = _agg_slot_offset
-        self._value_col_index = _value_col_index
+        self._kind = kind
+        self._agg_slot_offset = agg_slot_offset
+        self._value_col_index = value_col_index
 
-    def call(
+    def call[
+        ot: Origin[mut=True], oe: Origin, oc: Origin
+    ](
         self,
-        entries_raw: Int,
-        col_data_raw: Int,
+        table: Span[UInt8, ot],
+        entry_offsets: Span[Int, oe],
+        col_data: Span[UInt8, oc],
         col_offset: Int,
         n: Int,
     ) raises:
         """Execute the AoS commit kernel for `n` rows.
 
         Args:
-            entries_raw: Raw address of a contiguous EntryHandle buffer.
-                Caller owns the buffer.
-            col_data_raw: Raw address of the value column's data buffer.
+            table: The entry table. The caller keeps it alive and unmoved.
+            entry_offsets: Byte offset of each row's entry in `table`.
+            col_data: The value column's data buffer, in bytes.
             col_offset: Element offset into the column data.
             n: Number of rows in this batch.
         """
-        self._fn(entries_raw, col_data_raw, col_offset, self._agg_slot_offset, n)
+        if self._kind == AOS_KERNEL_SUM_COUNT_F64:
+            sum_count_f64_aos_thunk(
+                table, entry_offsets, col_data, col_offset,
+                self._agg_slot_offset, n,
+            )
+        elif self._kind == AOS_KERNEL_SUM_F64:
+            sum_f64_aos_thunk(
+                table, entry_offsets, col_data, col_offset,
+                self._agg_slot_offset, n,
+            )
+        elif self._kind == AOS_KERNEL_COUNT_STAR:
+            count_star_aos_thunk(
+                table, entry_offsets, col_data, col_offset,
+                self._agg_slot_offset, n,
+            )
+        else:
+            raise Error("AosAccKernel.call: unknown kernel kind")
 
 
-# PERF-CRITICAL thunk: ACC_SUM_COUNT_F64 16B AoS slot.
+@always_inline
+def _check_aos_batch(
+    name: StringLiteral,
+    n: Int,
+    n_offsets: Int,
+    col_bytes: Int,
+    col_offset: Int,
+    elem_bytes: Int,
+) raises:
+    """Per-batch bounds the per-row loop then relies on (checked once)."""
+    if n < 0 or n > n_offsets:
+        raise Error(String(name) + ": n exceeds the entry_offsets span")
+    if elem_bytes > 0 and (col_offset < 0 or (col_offset + n) * elem_bytes > col_bytes):
+        raise Error(String(name) + ": value column span is shorter than col_offset + n")
+
+
+# PERF-CRITICAL kernel: ACC_SUM_COUNT_F64 16B AoS slot.
 # Writes two fields per row: [sum:f64 @+0][count:i64 @+8].
 # Supersedes the quartet 32B path's four stores (sum/count/min/max) when
 # the planner selects `AggLayout.sum_count_f64(n)`.
-#
-# Called via `AosAccKernel.call(entries_raw, col_data_raw, col_offset, n)`.
-# entries_raw points to a buffer of EntryHandle values -- one per row --
-# produced by the caller's find_or_create loop. col_data_raw + col_offset
-# points into the value column's Arrow buffer (Float64).
-def sum_count_f64_aos_thunk(
-    entries_raw: Int,
-    col_data_raw: Int,
+def sum_count_f64_aos_thunk[
+    ot: Origin[mut=True], oe: Origin, oc: Origin
+](
+    table: Span[UInt8, ot],
+    entry_offsets: Span[Int, oe],
+    col_data: Span[UInt8, oc],
     col_offset: Int,
     agg_slot_offset: Int,
     n: Int,
 ) raises -> None:
-    """Monomorphic kernel thunk for ACC_SUM_COUNT_F64 AoS slots.
+    """Monomorphic kernel for ACC_SUM_COUNT_F64 AoS slots.
 
     PERF-CRITICAL: Inner loop writes 2 stores/row (sum + count) instead of
     the 4 stores/row of the 32B quartet. Also halves HT footprint
     (16B/slot vs 32B/slot) so the table fits in L2 at 2x more groups.
     """
-    # SAFETY: entries_raw is a caller-owned buffer of EntryHandle values,
-    # valid for `n` elements. The caller (sink commit loop) keeps both the
-    # handle buffer and the HT alive for the duration of this call.
-    var entries_ptr = UnsafePointer[Int, MutUntrackedOrigin](
-        unsafe_from_address=entries_raw
+    _check_aos_batch(
+        "sum_count_f64_aos_thunk", n, len(entry_offsets),
+        len(col_data), col_offset, 8,
     )
-    # SAFETY: col_data_raw + col_offset points into an Arrow Float64 buffer
-    # the caller owns.  col_offset is the element offset (not byte offset).
-    var col_f64 = UnsafePointer[Float64, MutUntrackedOrigin](
-        unsafe_from_address=col_data_raw
-    ) + col_offset
+    # SAFETY: the pointers below are views of the three spans, which the
+    # caller keeps borrowed for the whole call (their origins are tracked on
+    # the parameters). `entry_offsets[row]` plus `agg_slot_offset` plus the 16
+    # slot bytes must lie inside `table` -- the caller's find_or_create loop
+    # produced the offsets from that table, and the per-batch check above
+    # covers the other two spans. The entry table is 8-byte aligned.
+    var base = table.unsafe_ptr()
+    var offs = entry_offsets.unsafe_ptr()
+    var col_f64 = col_data.unsafe_ptr().bitcast[Float64]() + col_offset
 
     # PERF-CRITICAL: Hot loop. Each iteration:
-    #   1. Load handle ptr (= entry base address) from entries buffer.
+    #   1. Load the row's entry offset.
     #   2. Load Float64 value from column.
     #   3. Write sum += value at (entry + agg_slot_offset + 0).
     #   4. Write count += 1 at (entry + agg_slot_offset + 8).
-    # EntryHandle in v0.4 is a TrivialRegisterPassable wrapper around an
-    # `UnsafePointer[UInt8, MutExternalOrigin]`. Its raw layout is a single
-    # pointer-sized Int, so reading it as Int is byte-identical. (See
-    # `EntryHandle` in flat_hash_agg.mojo for the TrivialRegisterPassable
-    # contract and zero-cost shape.)
     for row in range(n):
-        var entry_addr = (entries_ptr + row)[]
-        var slot = UnsafePointer[UInt8, MutUntrackedOrigin](
-            unsafe_from_address=entry_addr
-        ) + agg_slot_offset
+        var slot = base + (offs[row] + agg_slot_offset)
         var sum_p = slot.bitcast[Float64]()
         var count_p = (slot + 8).bitcast[Int64]()
         sum_p[] = sum_p[] + (col_f64 + row)[]
         count_p[] = count_p[] + Int64(1)
 
 
-# PERF-CRITICAL thunk: ACC_SUM_F64 8B AoS slot.
+# PERF-CRITICAL kernel: ACC_SUM_F64 8B AoS slot.
 # Writes one field per row: [sum:f64 @+0].
 # Used by Q18 (SUM-only shape) when the planner selects a layout that
 # includes ACC_SUM_F64 slots.
-def sum_f64_aos_thunk(
-    entries_raw: Int,
-    col_data_raw: Int,
+def sum_f64_aos_thunk[
+    ot: Origin[mut=True], oe: Origin, oc: Origin
+](
+    table: Span[UInt8, ot],
+    entry_offsets: Span[Int, oe],
+    col_data: Span[UInt8, oc],
     col_offset: Int,
     agg_slot_offset: Int,
     n: Int,
 ) raises -> None:
-    """Monomorphic kernel thunk for ACC_SUM_F64 AoS slots.
+    """Monomorphic kernel for ACC_SUM_F64 AoS slots.
 
     PERF-CRITICAL: Inner loop is a single f64 accumulate (1 store/row).
     Half the memory footprint of ACC_SUM_COUNT_F64 (8B vs 16B).
     """
-    # SAFETY: entries_raw is a caller-owned buffer of EntryHandle values,
-    # valid for `n` elements. The caller keeps the handle buffer and HT
-    # alive for the duration of this call.
-    var entries_ptr = UnsafePointer[Int, MutUntrackedOrigin](
-        unsafe_from_address=entries_raw
+    _check_aos_batch(
+        "sum_f64_aos_thunk", n, len(entry_offsets),
+        len(col_data), col_offset, 8,
     )
-    # SAFETY: col_data_raw + col_offset points into an Arrow Float64 buffer
-    # the caller owns. col_offset is the element offset (not byte offset).
-    var col_f64 = UnsafePointer[Float64, MutUntrackedOrigin](
-        unsafe_from_address=col_data_raw
-    ) + col_offset
+    # SAFETY: as sum_count_f64_aos_thunk, with an 8-byte slot.
+    var base = table.unsafe_ptr()
+    var offs = entry_offsets.unsafe_ptr()
+    var col_f64 = col_data.unsafe_ptr().bitcast[Float64]() + col_offset
 
     for row in range(n):
-        var entry_addr = (entries_ptr + row)[]
-        var sum_p = (UnsafePointer[UInt8, MutUntrackedOrigin](
-            unsafe_from_address=entry_addr
-        ) + agg_slot_offset).bitcast[Float64]()
+        var sum_p = (base + (offs[row] + agg_slot_offset)).bitcast[Float64]()
         sum_p[] = sum_p[] + (col_f64 + row)[]
 
 
-# PERF-CRITICAL thunk: ACC_COUNT_STAR 8B AoS slot.
+# PERF-CRITICAL kernel: ACC_COUNT_STAR 8B AoS slot.
 # Writes one field per row: [count:i64 @+0]. Ignores the value column --
 # COUNT(*) counts rows regardless of null-ness.
 # Used by CB-02 / CB-03 (COUNT(*) shape) when the planner selects a layout
-# that includes ACC_COUNT_STAR slots. col_data_raw + col_offset may be 0
-# (the caller can pass null pointers since we never dereference the column).
-def count_star_aos_thunk(
-    entries_raw: Int,
-    col_data_raw: Int,
+# that includes ACC_COUNT_STAR slots. The value column span may be empty (the
+# kernel never reads it).
+def count_star_aos_thunk[
+    ot: Origin[mut=True], oe: Origin, oc: Origin
+](
+    table: Span[UInt8, ot],
+    entry_offsets: Span[Int, oe],
+    col_data: Span[UInt8, oc],
     col_offset: Int,
     agg_slot_offset: Int,
     n: Int,
 ) raises -> None:
-    """Monomorphic kernel thunk for ACC_COUNT_STAR AoS slots.
+    """Monomorphic kernel for ACC_COUNT_STAR AoS slots.
 
     PERF-CRITICAL: Inner loop bumps count++ -- no column read. Used by
-    COUNT(*) shapes (CB-02/CB-03). The two "col_data_raw"/"col_offset"
-    parameters are unused but kept in the signature for fn-ptr
-    compatibility with the generic AosAccKernel dispatch.
+    COUNT(*) shapes (CB-02/CB-03). `col_data` / `col_offset` are unused but
+    kept in the signature so every kernel shares the AosAccKernel dispatch.
     """
-    _ = col_data_raw  # intentionally unused -- COUNT(*) ignores value column
+    _ = col_data  # intentionally unused -- COUNT(*) ignores value column
     _ = col_offset
-    # SAFETY: entries_raw is a caller-owned buffer of EntryHandle values.
-    var entries_ptr = UnsafePointer[Int, MutUntrackedOrigin](
-        unsafe_from_address=entries_raw
+    _check_aos_batch(
+        "count_star_aos_thunk", n, len(entry_offsets), 0, 0, 0,
     )
+    # SAFETY: as sum_count_f64_aos_thunk, with an 8-byte slot and no column.
+    var base = table.unsafe_ptr()
+    var offs = entry_offsets.unsafe_ptr()
     for row in range(n):
-        var entry_addr = (entries_ptr + row)[]
-        var count_p = (UnsafePointer[UInt8, MutUntrackedOrigin](
-            unsafe_from_address=entry_addr
-        ) + agg_slot_offset).bitcast[Int64]()
+        var count_p = (base + (offs[row] + agg_slot_offset)).bitcast[Int64]()
         count_p[] = count_p[] + Int64(1)
 
 
@@ -433,27 +510,25 @@ def count_star_aos_thunk(
 
 
 # -----------------------------------------------------------------------------
-# Row-thunk entry pointer: typed, not Int-laundered.
+# Row-thunk entry: a borrowed byte span, not an address.
 # -----------------------------------------------------------------------------
 #
 # PERF-CRITICAL / SAFETY (audit §4 Fix B for gap7):
 #
-# Row thunks take the entry pointer as a typed
-# `UnsafePointer[UInt8, MutExternalOrigin]`. The prior version took `Int`
-# and reconstructed the pointer via `unsafe_from_address=entry_addr`;
-# that pattern "severs lifetime tracking entirely"
-# (the internal development notes Mojo Pointer Rules). With the typed pointer threaded
-# through, the compiler anchors the thunk's write to the aggregator's
-# `_entries` buffer via `EntryHandle._ptr`'s origin chain, closing the
-# UAF hazard that narrow-layout enabled at high HT-resize cadence.
+# The public face of a row thunk, `AosRowThunk.call`, takes the entry as a
+# mutable `Span[UInt8]` over the entry's bytes. The first version took an
+# `Int` and rebuilt the pointer from it, which "severs lifetime tracking
+# entirely" (the internal development notes Mojo Pointer Rules); the second
+# took an untracked-origin pointer in a public signature, which is the same
+# hole one step removed. A span carries its origin, so the compiler anchors
+# the thunk's write to the aggregator's `_entries` buffer, closing the UAF
+# hazard that narrow-layout enabled at high HT-resize cadence.
 #
-# The origin is still `MutExternalOrigin` (wildcard) at the fn-ptr
-# boundary -- Mojo cannot parameterize fn-ptr signatures over a
-# caller-chosen origin. But "typed wildcard pointer" is materially
-# different from "Int round-trip": the compiler still knows the callee
-# writes through a pointer (not a raw integer), and the call-site
-# caller `commit_row` holds the `EntryHandle` live across the call,
-# which anchors the underlying allocation's liveness.
+# The fn-ptr beneath still takes an untracked-origin pointer, because Mojo
+# cannot parameterize fn-ptr signatures over a caller-chosen origin. That
+# fn-ptr type, the `_row_*` functions of that type, and the `_fn` field are
+# all private to this file; `call` forms the pointer from the span inside its
+# own body and nothing public names it.
 
 
 # =============================================================================
@@ -512,7 +587,7 @@ from komira_op_agg_state.aggregators_builtin import (
 # Phase G-pre retrofit: kernel math for sum / min / max
 # delegated to `SumF64.update` / `MinF64.update` / `MaxF64.update`. Count
 # remains inline (`# COUNT-EQUIV: CountStar.update on Int64 slot`).
-def row_sum_count_min_max_f64(
+def _row_sum_count_min_max_f64(
     entry_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
     agg_slot_offset: Int,
     value: Float64,
@@ -523,6 +598,10 @@ def row_sum_count_min_max_f64(
     (SumF64 / MinF64 / MaxF64). After @always_inline propagation, the
     machine code is byte-identical to the pre-retrofit thunk.
     """
+    # SAFETY: `entry_ptr` is the pointer of the entry span AosRowThunk.call
+    # was given; the slot at `agg_slot_offset` (32 bytes) lies inside that entry,
+    # a layout contract the AggCommitPlan that resolved this thunk upholds.
+    # The pointer is used within this call only.
     var ap = entry_ptr + agg_slot_offset
     var sum_p = ap.bitcast[Float64]()
     var count_p = (ap + 8).bitcast[Int64]()
@@ -551,7 +630,7 @@ def row_sum_count_min_max_f64(
 # SUM+COUNT shapes when the narrow-slot gate is enabled.
 #
 # Phase G-pre retrofit: SUM via SumF64.update; COUNT inline (see quartet thunk).
-def row_sum_count_f64(
+def _row_sum_count_f64(
     entry_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
     agg_slot_offset: Int,
     value: Float64,
@@ -561,6 +640,10 @@ def row_sum_count_f64(
     Phase G-pre: kernel math for SUM delegated to SumF64.update; COUNT
     remains inline (Int64-slot vs UInt64-State type bridging deferred).
     """
+    # SAFETY: `entry_ptr` is the pointer of the entry span AosRowThunk.call
+    # was given; the slot at `agg_slot_offset` (16 bytes) lies inside that entry,
+    # a layout contract the AggCommitPlan that resolved this thunk upholds.
+    # The pointer is used within this call only.
     var ap = entry_ptr + agg_slot_offset
     var sum_p = ap.bitcast[Float64]()
     var count_p = (ap + 8).bitcast[Int64]()
@@ -576,7 +659,7 @@ def row_sum_count_f64(
 # Writes 1 field: sum += value.
 #
 # Phase G-pre retrofit: kernel math fully delegated to SumF64.update.
-def row_sum_f64(
+def _row_sum_f64(
     entry_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
     agg_slot_offset: Int,
     value: Float64,
@@ -585,6 +668,10 @@ def row_sum_f64(
 
     Phase G-pre: SumF64.update — the canonical 1:1 trait retrofit shape.
     """
+    # SAFETY: `entry_ptr` is the pointer of the entry span AosRowThunk.call
+    # was given; the slot at `agg_slot_offset` (8 bytes) lies inside that entry,
+    # a layout contract the AggCommitPlan that resolved this thunk upholds.
+    # The pointer is used within this call only.
     var sum_p = (entry_ptr + agg_slot_offset).bitcast[Float64]()
     var s = sum_p[]
     _SumF64.update(s, value)
@@ -599,7 +686,7 @@ def row_sum_f64(
 # or a UInt64↔Int64 bitcast at the load/store boundary. Plan §6.8a
 # documents this as the in-scope-but-deferred type-bridging cleanup.
 # Increment kept inline; semantically equivalent to CountStar.update.
-def row_count_star(
+def _row_count_star(
     entry_ptr: UnsafePointer[UInt8, MutUntrackedOrigin],
     agg_slot_offset: Int,
     value: Float64,
@@ -614,49 +701,84 @@ def row_count_star(
     increment preserves storage semantics byte-for-byte.
     """
     _ = value  # intentionally unused
+    # SAFETY: `entry_ptr` is the pointer of the entry span AosRowThunk.call
+    # was given; the slot at `agg_slot_offset` (8 bytes) lies inside that entry,
+    # a layout contract the AggCommitPlan that resolved this thunk upholds.
+    # The pointer is used within this call only.
     var count_p = (entry_ptr + agg_slot_offset).bitcast[Int64]()
     # COUNT-EQUIV: CountStar.update on Int64 slot.
     count_p[] = count_p[] + Int64(1)
 
 
-# Type alias for the row thunk fn-ptr. Every row thunk must match this
-# signature. Stored inline inside AggCommitPlan's per-bucket
-# InlineArray[AosRowThunk, MAX_AGGS] fields (see agg_commit.mojo).
-#
-# Signature change (audit §4 Fix B): first argument is
-# `UnsafePointer[UInt8, MutExternalOrigin]` (typed) rather than `Int`
-# (laundered). Callers pass `EntryHandle._ptr` directly; the typed
-# pointer preserves the compiler's liveness chain to the aggregator's
-# `_entries` buffer.
-comptime AosRowThunk = def(
+# The row thunk's fn-ptr type. Every `_row_*` function above matches it.
+# PRIVATE: it names the untracked-origin pointer the fn-ptr boundary needs
+# (see the note above); `AosRowThunk` is the public handle.
+comptime _RowFn = def(
     UnsafePointer[UInt8, MutUntrackedOrigin], Int, Float64
 ) thin -> None
+
+
+struct AosRowThunk(ImplicitlyCopyable, Movable):
+    """A pre-resolved per-slot row kernel (see `resolve_row_thunk`).
+
+    Stored inline inside AggCommitPlan's per-bucket
+    InlineArray[AosRowThunk, MAX_AGGS] fields (see agg_commit.mojo). The
+    handle is one fn-ptr wide, so it costs what the bare fn-ptr did.
+    """
+    var _fn: _RowFn
+
+    def __init__(out self, tag: UInt8):
+        """Resolve `tag` to its monomorphic row kernel (plan time).
+
+        Keep in lockstep with AccTag additions in agg_layout.mojo.
+        """
+        from komira_core.agg_layout import (
+            ACC_SUM_COUNT_MIN_MAX_F64,
+            ACC_SUM_COUNT_F64,
+            ACC_SUM_F64,
+            ACC_COUNT_STAR,
+            ACC_COUNT_NONNULL,
+        )
+        if tag == ACC_SUM_COUNT_MIN_MAX_F64:
+            self._fn = _row_sum_count_min_max_f64
+        elif tag == ACC_SUM_COUNT_F64:
+            self._fn = _row_sum_count_f64
+        elif tag == ACC_SUM_F64:
+            self._fn = _row_sum_f64
+        elif tag == ACC_COUNT_STAR:
+            self._fn = _row_count_star
+        elif tag == ACC_COUNT_NONNULL:
+            self._fn = _row_count_star
+        else:
+            # Fallback: treat unknown tags as quartet (safe default that
+            # preserves the pre-port byte-identical behavior).
+            self._fn = _row_sum_count_min_max_f64
+
+    @always_inline
+    def call[
+        o: Origin[mut=True]
+    ](self, entry: Span[UInt8, o], agg_slot_offset: Int, value: Float64):
+        """Apply `value` to the slot at `agg_slot_offset` inside `entry`.
+
+        `entry` spans the row's entry bytes; the slot (up to 32 bytes, per
+        the kernel's tag) must lie inside it. `value` is ignored by the
+        count-only kernel -- the caller passes 0.0 by convention.
+        """
+        # SAFETY: the pointer is the span's own, valid while the caller
+        # keeps `entry` borrowed (it is borrowed for this call). The
+        # untracked origin exists only because the fn-ptr signature cannot
+        # name `o`; the kernel does not stash the pointer.
+        self._fn(
+            entry.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin](),
+            agg_slot_offset,
+            value,
+        )
 
 
 def resolve_row_thunk(tag: UInt8) -> AosRowThunk:
     """Plan-time dispatch: map an AccTag to its monomorphic row thunk.
 
     Called once per agg slot during AggCommitPlan construction. Never
-    called from a hot path. Keep in lockstep with AccTag additions in
-    agg_layout.mojo.
+    called from a hot path.
     """
-    from komira_core.agg_layout import (
-        ACC_SUM_COUNT_MIN_MAX_F64,
-        ACC_SUM_COUNT_F64,
-        ACC_SUM_F64,
-        ACC_COUNT_STAR,
-        ACC_COUNT_NONNULL,
-    )
-    if tag == ACC_SUM_COUNT_MIN_MAX_F64:
-        return row_sum_count_min_max_f64
-    if tag == ACC_SUM_COUNT_F64:
-        return row_sum_count_f64
-    if tag == ACC_SUM_F64:
-        return row_sum_f64
-    if tag == ACC_COUNT_STAR:
-        return row_count_star
-    if tag == ACC_COUNT_NONNULL:
-        return row_count_star
-    # Fallback: treat unknown tags as quartet (safe default that preserves
-    # the pre-port byte-identical behavior).
-    return row_sum_count_min_max_f64
+    return AosRowThunk(tag)

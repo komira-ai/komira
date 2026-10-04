@@ -129,7 +129,7 @@ struct CountStarAcc(Accumulator):
         origin_g: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
+        gids: Span[UInt32, origin_g],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
@@ -244,8 +244,8 @@ struct MinF64Acc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Float64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Float64, origin_v],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
@@ -387,8 +387,8 @@ struct MaxF64Acc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Float64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Float64, origin_v],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
@@ -528,8 +528,8 @@ struct AvgAcc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Float64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Float64, origin_v],
         num_rows: Int,
     ) raises:
         # Scalar Kahan per accumulator.rs:179-195 -- bit-identical to

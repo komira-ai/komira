@@ -41,7 +41,7 @@ def test_sum_i64_happy_path() raises:
     var vals = List[Int64]()
     vals.append(Int64(10)); vals.append(Int64(20)); vals.append(Int64(5))
     vals.append(Int64(7)); vals.append(Int64(3))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 5)
+    acc.update_batch(Span(gids), Span(vals), 5)
     var out = acc.finalize()
     assert_equal(Int(out[0]), 15)
     assert_equal(Int(out[1]), 23)
@@ -58,12 +58,12 @@ def test_sum_i64_merge_at() raises:
     gids_a.append(UInt32(0)); gids_a.append(UInt32(1))
     var vals_a = List[Int64]()
     vals_a.append(Int64(100)); vals_a.append(Int64(50))
-    a.update_batch(gids_a.unsafe_ptr(), vals_a.unsafe_ptr(), 2)
+    a.update_batch(Span(gids_a), Span(vals_a), 2)
     var gids_b = List[UInt32]()
     gids_b.append(UInt32(0)); gids_b.append(UInt32(0)); gids_b.append(UInt32(1))
     var vals_b = List[Int64]()
     vals_b.append(Int64(1)); vals_b.append(Int64(2)); vals_b.append(Int64(3))
-    b.update_batch(gids_b.unsafe_ptr(), vals_b.unsafe_ptr(), 3)
+    b.update_batch(Span(gids_b), Span(vals_b), 3)
     a.merge_at(0, b, 0)
     a.merge_at(1, b, 1)
     var out = a.finalize()
@@ -89,7 +89,7 @@ def test_count_i64_happy_path() raises:
     var gids = List[UInt32]()
     gids.append(UInt32(0)); gids.append(UInt32(1)); gids.append(UInt32(0))
     gids.append(UInt32(0)); gids.append(UInt32(2))
-    acc.update_batch(gids.unsafe_ptr(), 5)
+    acc.update_batch(Span(gids), 5)
     var out = acc.finalize()
     assert_equal(Int(out[0]), 3)
     assert_equal(Int(out[1]), 1)
@@ -103,11 +103,11 @@ def test_count_i64_merge_at() raises:
     b.ensure_capacity(2)
     var gids_a = List[UInt32]()
     gids_a.append(UInt32(0)); gids_a.append(UInt32(1))
-    a.update_batch(gids_a.unsafe_ptr(), 2)
+    a.update_batch(Span(gids_a), 2)
     var gids_b = List[UInt32]()
     gids_b.append(UInt32(0)); gids_b.append(UInt32(0)); gids_b.append(UInt32(0))
     gids_b.append(UInt32(1))
-    b.update_batch(gids_b.unsafe_ptr(), 4)
+    b.update_batch(Span(gids_b), 4)
     a.merge_at(0, b, 0)
     a.merge_at(1, b, 1)
     var out = a.finalize()
@@ -126,7 +126,7 @@ def test_min_i64_happy_path() raises:
     gids.append(UInt32(0)); gids.append(UInt32(0)); gids.append(UInt32(1))
     var vals = List[Int64]()
     vals.append(Int64(5)); vals.append(Int64(-2)); vals.append(Int64(100))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 3)
+    acc.update_batch(Span(gids), Span(vals), 3)
     var out = acc.finalize()
     assert_true(Bool(out[0]))
     assert_equal(Int(out[0].value()), -2)
@@ -142,13 +142,13 @@ def test_min_i64_merge_respects_unseen() raises:
     b.ensure_capacity(2)
     var gids_a = List[UInt32](); gids_a.append(UInt32(0))
     var vals_a = List[Int64](); vals_a.append(Int64(10))
-    a.update_batch(gids_a.unsafe_ptr(), vals_a.unsafe_ptr(), 1)
+    a.update_batch(Span(gids_a), Span(vals_a), 1)
     a.merge_at(0, b, 0)   # b[0] unseen
     var out1 = a.finalize()
     assert_equal(Int(out1[0].value()), 10)
     var gids_b = List[UInt32](); gids_b.append(UInt32(1))
     var vals_b = List[Int64](); vals_b.append(Int64(-5))
-    b.update_batch(gids_b.unsafe_ptr(), vals_b.unsafe_ptr(), 1)
+    b.update_batch(Span(gids_b), Span(vals_b), 1)
     a.merge_at(1, b, 1)
     var out2 = a.finalize()
     assert_equal(Int(out2[1].value()), -5)
@@ -161,7 +161,7 @@ def test_max_i64_happy_path() raises:
     gids.append(UInt32(0)); gids.append(UInt32(0)); gids.append(UInt32(0))
     var vals = List[Int64]()
     vals.append(Int64(1)); vals.append(Int64(100)); vals.append(Int64(42))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 3)
+    acc.update_batch(Span(gids), Span(vals), 3)
     var out = acc.finalize()
     assert_equal(Int(out[0].value()), 100)
     assert_false(Bool(out[1]))
@@ -175,8 +175,8 @@ def test_max_i64_merge() raises:
     var g = List[UInt32](); g.append(UInt32(0))
     var va = List[Int64](); va.append(Int64(50))
     var vb = List[Int64](); vb.append(Int64(200))
-    a.update_batch(g.unsafe_ptr(), va.unsafe_ptr(), 1)
-    b.update_batch(g.unsafe_ptr(), vb.unsafe_ptr(), 1)
+    a.update_batch(Span(g), Span(va), 1)
+    b.update_batch(Span(g), Span(vb), 1)
     a.merge_at(0, b, 0)
     var out = a.finalize()
     assert_equal(Int(out[0].value()), 200)
@@ -213,7 +213,7 @@ def test_min_i64_literal_int64_max_disambiguated_from_sentinel() raises:
     # gid 1 stays unseen.
     var gids = List[UInt32](); gids.append(UInt32(0))
     var vals = List[Int64](); vals.append(_INT64_MAX_LITERAL)
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 1)
+    acc.update_batch(Span(gids), Span(vals), 1)
     var out = acc.finalize()
     assert_true(Bool(out[0]),
         "gid 0 saw a real value (INT64_MAX); finalize must return Some")
@@ -230,7 +230,7 @@ def test_max_i64_literal_int64_min_disambiguated_from_sentinel() raises:
     acc.ensure_capacity(2)
     var gids = List[UInt32](); gids.append(UInt32(0))
     var vals = List[Int64](); vals.append(_INT64_MIN_LITERAL)
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 1)
+    acc.update_batch(Span(gids), Span(vals), 1)
     var out = acc.finalize()
     assert_true(Bool(out[0]),
         "gid 0 saw a real value (INT64_MIN); finalize must return Some")
@@ -253,7 +253,7 @@ def test_min_i64_merge_aligned_preserves_seen_with_sentinel_value() raises:
     src.ensure_capacity(2)
     var gids = List[UInt32](); gids.append(UInt32(0))
     var vals = List[Int64](); vals.append(_INT64_MAX_LITERAL)
-    src.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 1)
+    src.update_batch(Span(gids), Span(vals), 1)
     # Equal num_groups -> SIMD merge_aligned path.
     dst.merge_aligned(src)
     var out = dst.finalize()
@@ -271,7 +271,7 @@ def test_max_i64_merge_aligned_preserves_seen_with_sentinel_value() raises:
     src.ensure_capacity(2)
     var gids = List[UInt32](); gids.append(UInt32(0))
     var vals = List[Int64](); vals.append(_INT64_MIN_LITERAL)
-    src.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 1)
+    src.update_batch(Span(gids), Span(vals), 1)
     dst.merge_aligned(src)
     var out = dst.finalize()
     assert_true(Bool(out[0]))
@@ -289,7 +289,7 @@ def test_min_i64_real_max_loses_to_smaller_value() raises:
     var gids = List[UInt32](); gids.append(UInt32(0)); gids.append(UInt32(0))
     var vals = List[Int64]()
     vals.append(_INT64_MAX_LITERAL); vals.append(Int64(42))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 2)
+    acc.update_batch(Span(gids), Span(vals), 2)
     var out = acc.finalize()
     assert_equal(Int(out[0].value()), 42)
 
@@ -300,7 +300,7 @@ def test_max_i64_real_min_loses_to_larger_value() raises:
     var gids = List[UInt32](); gids.append(UInt32(0)); gids.append(UInt32(0))
     var vals = List[Int64]()
     vals.append(_INT64_MIN_LITERAL); vals.append(Int64(-100))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 2)
+    acc.update_batch(Span(gids), Span(vals), 2)
     var out = acc.finalize()
     assert_equal(Int(out[0].value()), -100)
 
@@ -316,7 +316,7 @@ def test_kahan_basic() raises:
     gids.append(UInt32(0)); gids.append(UInt32(0)); gids.append(UInt32(0))
     var vals = List[Float64]()
     vals.append(Float64(1.0)); vals.append(Float64(2.0)); vals.append(Float64(3.0))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 3)
+    acc.update_batch(Span(gids), Span(vals), 3)
     var out = acc.finalize()
     assert_equal(out[0], Float64(6.0))
 
@@ -336,7 +336,7 @@ def test_kahan_precision_1m_small_floats() raises:
         vals.append(Float64(0.1))
     var iters = N // batch_size
     for _ in range(iters):
-        acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), batch_size)
+        acc.update_batch(Span(gids), Span(vals), batch_size)
     var kahan_sum = acc.finalize()[0]
     var naive_sum = Float64(0.0)
     for _ in range(N):
@@ -362,8 +362,8 @@ def test_kahan_merge_at() raises:
     for _ in range(1000):
         gids.append(UInt32(0))
         vals.append(Float64(0.1))
-    a.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 1000)
-    b.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 1000)
+    a.update_batch(Span(gids), Span(vals), 1000)
+    b.update_batch(Span(gids), Span(vals), 1000)
     a.merge_at(0, b, 0)
     var merged = a.finalize()[0]
     var err_raw = merged - Float64(200.0)
@@ -441,7 +441,7 @@ def _run_cross_worker_case(imm xs: List[Float64], label: String, rel_tol: Float6
     for i in range(half):
         gids_a.append(UInt32(0))
         vals_a.append(xs[i])
-    a.update_batch(gids_a.unsafe_ptr(), vals_a.unsafe_ptr(), half)
+    a.update_batch(Span(gids_a), Span(vals_a), half)
 
     # Accumulator B sees xs[half:n] all in gid=0.
     var b = SumF64KahanAcc.new()
@@ -451,7 +451,7 @@ def _run_cross_worker_case(imm xs: List[Float64], label: String, rel_tol: Float6
     for i in range(half, n):
         gids_b.append(UInt32(0))
         vals_b.append(xs[i])
-    b.update_batch(gids_b.unsafe_ptr(), vals_b.unsafe_ptr(), n - half)
+    b.update_batch(Span(gids_b), Span(vals_b), n - half)
 
     # Cross-worker merge per accumulator.rs:198-211.
     a.merge_at(0, b, 0)
@@ -504,14 +504,14 @@ def test_kahan_cross_worker_merge_ulp_bounded() raises:
     var va = List[Float64]()
     for i in range(half_c):
         ga.append(UInt32(0)); va.append(xs_cancel[i])
-    ac.update_batch(ga.unsafe_ptr(), va.unsafe_ptr(), half_c)
+    ac.update_batch(Span(ga), Span(va), half_c)
     var bc = SumF64KahanAcc.new()
     bc.ensure_capacity(1)
     var gb = List[UInt32]()
     var vb = List[Float64]()
     for i in range(half_c, n_c):
         gb.append(UInt32(0)); vb.append(xs_cancel[i])
-    bc.update_batch(gb.unsafe_ptr(), vb.unsafe_ptr(), n_c - half_c)
+    bc.update_batch(Span(gb), Span(vb), n_c - half_c)
     ac.merge_at(0, bc, 0)
     var merged_cancel = ac.finalize()[0]
     var abs_err_cancel = _abs_f64(merged_cancel - reference_cancel)
@@ -552,12 +552,12 @@ def test_kahan_cross_worker_merge_ulp_bounded() raises:
     var gla = List[UInt32](); var vla = List[Float64]()
     for i in range(half_l):
         gla.append(UInt32(0)); vla.append(xs_ladder[i])
-    al.update_batch(gla.unsafe_ptr(), vla.unsafe_ptr(), half_l)
+    al.update_batch(Span(gla), Span(vla), half_l)
     var bl = SumF64KahanAcc.new(); bl.ensure_capacity(1)
     var glb = List[UInt32](); var vlb = List[Float64]()
     for i in range(half_l, n_l):
         glb.append(UInt32(0)); vlb.append(xs_ladder[i])
-    bl.update_batch(glb.unsafe_ptr(), vlb.unsafe_ptr(), n_l - half_l)
+    bl.update_batch(Span(glb), Span(vlb), n_l - half_l)
     al.merge_at(0, bl, 0)
     var merged_ladder = al.finalize()[0]
     var abs_err_ladder = _abs_f64(merged_ladder - ref_ladder)
@@ -628,7 +628,7 @@ def test_percentile_median_odd_count() raises:
     var vals = List[Float64]()
     vals.append(Float64(5.0)); vals.append(Float64(1.0)); vals.append(Float64(3.0))
     vals.append(Float64(2.0)); vals.append(Float64(4.0))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 5)
+    acc.update_batch(Span(gids), Span(vals), 5)
     var out = acc.finalize()
     assert_true(Bool(out[0]))
     assert_equal(out[0].value(), Float64(3.0))
@@ -642,7 +642,7 @@ def test_percentile_median_even_count_interpolation() raises:
     var vals = List[Float64]()
     vals.append(Float64(4.0)); vals.append(Float64(2.0))
     vals.append(Float64(3.0)); vals.append(Float64(1.0))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 4)
+    acc.update_batch(Span(gids), Span(vals), 4)
     var out = acc.finalize()
     var err_raw = out[0].value() - Float64(2.5)
     var err = err_raw if err_raw >= Float64(0.0) else -err_raw
@@ -657,7 +657,7 @@ def test_percentile_sorted_input() raises:
     for i in range(100):
         gids.append(UInt32(0))
         vals.append(Float64(i))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 100)
+    acc.update_batch(Span(gids), Span(vals), 100)
     var out = acc.finalize()
     var err_raw = out[0].value() - Float64(24.75)
     var err = err_raw if err_raw >= Float64(0.0) else -err_raw
@@ -672,7 +672,7 @@ def test_percentile_reverse_sorted() raises:
     for i in range(100):
         gids.append(UInt32(0))
         vals.append(Float64(99 - i))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 100)
+    acc.update_batch(Span(gids), Span(vals), 100)
     var out = acc.finalize()
     var err_raw = out[0].value() - Float64(89.1)
     var err = err_raw if err_raw >= Float64(0.0) else -err_raw
@@ -687,7 +687,7 @@ def test_percentile_all_equal() raises:
     for _ in range(50):
         gids.append(UInt32(0))
         vals.append(Float64(7.0))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 50)
+    acc.update_batch(Span(gids), Span(vals), 50)
     var out = acc.finalize()
     assert_equal(out[0].value(), Float64(7.0))
 
@@ -702,7 +702,7 @@ def test_percentile_nan_excluded() raises:
     var vals = List[Float64]()
     vals.append(Float64(1.0)); vals.append(nan_val); vals.append(Float64(3.0))
     vals.append(nan_val); vals.append(nan_val)
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 5)
+    acc.update_batch(Span(gids), Span(vals), 5)
     var out = acc.finalize()
     # Group 0: [1.0, 3.0] => median = 2.0
     assert_true(Bool(out[0]))
@@ -718,12 +718,12 @@ def test_percentile_merge_at() raises:
     b.ensure_capacity(1)
     var g1 = List[UInt32](); g1.append(UInt32(0)); g1.append(UInt32(0))
     var v1 = List[Float64](); v1.append(Float64(1.0)); v1.append(Float64(2.0))
-    a.update_batch(g1.unsafe_ptr(), v1.unsafe_ptr(), 2)
+    a.update_batch(Span(g1), Span(v1), 2)
     var g2 = List[UInt32]()
     g2.append(UInt32(0)); g2.append(UInt32(0)); g2.append(UInt32(0))
     var v2 = List[Float64]()
     v2.append(Float64(3.0)); v2.append(Float64(4.0)); v2.append(Float64(5.0))
-    b.update_batch(g2.unsafe_ptr(), v2.unsafe_ptr(), 3)
+    b.update_batch(Span(g2), Span(v2), 3)
     a.merge_at(0, b, 0)
     var out = a.finalize()
     assert_equal(out[0].value(), Float64(3.0))
@@ -744,7 +744,7 @@ def test_count_distinct_dedupes() raises:
     vals.append(Int64(1)); vals.append(Int64(2)); vals.append(Int64(1))
     vals.append(Int64(3)); vals.append(Int64(2)); vals.append(Int64(1))
     vals.append(Int64(7)); vals.append(Int64(7)); vals.append(Int64(7))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 9)
+    acc.update_batch(Span(gids), Span(vals), 9)
     var out = acc.finalize()
     assert_equal(Int(out[0]), 3)
     assert_equal(Int(out[1]), 1)
@@ -755,7 +755,7 @@ def test_count_distinct_empty_group_is_zero() raises:
     acc.ensure_capacity(3)
     var gids = List[UInt32](); gids.append(UInt32(0)); gids.append(UInt32(2))
     var vals = List[Int64](); vals.append(Int64(42)); vals.append(Int64(99))
-    acc.update_batch(gids.unsafe_ptr(), vals.unsafe_ptr(), 2)
+    acc.update_batch(Span(gids), Span(vals), 2)
     var out = acc.finalize()
     assert_equal(Int(out[0]), 1)
     assert_equal(Int(out[1]), 0)
@@ -775,8 +775,8 @@ def test_count_distinct_merge_dedupes_across_workers() raises:
     gb.append(UInt32(0)); gb.append(UInt32(0)); gb.append(UInt32(0))
     var vb = List[Int64]()
     vb.append(Int64(3)); vb.append(Int64(4)); vb.append(Int64(5))
-    a.update_batch(ga.unsafe_ptr(), va.unsafe_ptr(), 3)
-    b.update_batch(gb.unsafe_ptr(), vb.unsafe_ptr(), 3)
+    a.update_batch(Span(ga), Span(va), 3)
+    b.update_batch(Span(gb), Span(vb), 3)
     a.merge_at(0, b, 0)
     var out = a.finalize()
     assert_equal(Int(out[0]), 5)

@@ -29,24 +29,24 @@
 # with real per-type thunks.
 #
 # =============================================================================
-# SAFETY NOTE — Int-based vtable pointer passing
+# SAFETY NOTE — the vtable passes the typed storage box, not an address
 # =============================================================================
-# All vtable fn-ptr signatures use `Int` for accumulator pointers rather than
-# `UnsafePointer[T, ...]`. This is NOT integer laundering for its own sake;
-# it is the ONLY viable pattern because:
+# Every vtable fn-ptr takes the accumulator's storage box,
+# `DynValue[MAX_ACC_SIZE]`, by ordinary argument convention (`mut` for the
+# operations that change the accumulator, borrowed for the readbacks). No
+# address crosses the fn-ptr boundary as an `Int` and no pointer is rebuilt
+# from one: the compiler sees every vtable call borrow the box, so the
+# accumulator can neither be moved nor dropped while a thunk runs, and a
+# `DynAccumulator` that was moved since it was built is still found at its
+# new place on the next call.
 #
-#   1. Mojo fn-ptr type signatures cannot carry generic type params.
-#      `fn(UnsafePointer[T, ...]) -> Column` is invalid in a stored fn-ptr.
-#   2. The vtable must be type-erased (one struct for all accumulator types).
-#   3. Mojo has a JIT bug where passing Movable types (like Column)
-#      through fn-ptr calls corrupts memory on return (see accumulator_set.mojo
-#      header). Int is immune.
-#
-# The safety contract: every `raw_ptr: Int` argument to a vtable fn-ptr is
-# the address of a live, initialized concrete accumulator T stored inside a
-# DynValue[MAX_ACC_SIZE]._storage. The DynAccumulator that owns the DynValue
-# MUST outlive any use of the raw_ptr. The `_cast_acc[T]` helper below
-# centralizes the unsafe cast so the invariant is documented in one place.
+# Each thunk is monomorphised for one concrete `T` and recovers the typed
+# view with `_cast_acc[T](box)`, which delegates to `DynValue._as_ptr[T]` (the
+# origin-tied cast) and widens the origin inside its own body only. The one
+# remaining contract is the type match: the `T` a thunk is instantiated with
+# must be the `T` the box was created with, which the wiring in
+# accumulator_factory.mojo guarantees by instantiating the whole vtable for
+# one concrete type.
 # =============================================================================
 
 # =============================================================================
@@ -103,29 +103,37 @@ struct AccumulatorVTable(ImplicitlyCopyable, Movable, Copyable, Deinitable):
       - merge_at: per-gid fold (self_ptr, dst_gid, other_ptr, src_gid)
       - merge_aligned: full-column fold (self_ptr, other_ptr)
     """
-    var finalize: def(Int) raises thin -> Column[HeapRegion]
-    var flush_partial: def(Int) raises thin -> Column[HeapRegion]
-    var merge_at: def(Int, Int, Int, Int) raises thin -> None
-    var merge_aligned: def(Int, Int) raises thin -> None
-    var ensure_cap: def(Int, Int) raises thin -> None
-    var num_groups: def(Int) thin -> Int
-    var finalize_int64: def(Int, Int) thin -> Int64
-    var finalize_utf8: def(Int, Int) thin -> Optional[String]
-    var finalize_f64: def(Int, Int) thin -> Float64
-    var finalize_f64_opt: def(Int, Int) thin -> Optional[Float64]
+    var finalize: def(mut DynValue[MAX_ACC_SIZE]) raises thin -> Column[HeapRegion]
+    var flush_partial: def(mut DynValue[MAX_ACC_SIZE]) raises thin -> Column[HeapRegion]
+    var merge_at: def(
+        mut DynValue[MAX_ACC_SIZE], Int, DynValue[MAX_ACC_SIZE], Int
+    ) raises thin -> None
+    var merge_aligned: def(
+        mut DynValue[MAX_ACC_SIZE], DynValue[MAX_ACC_SIZE]
+    ) raises thin -> None
+    var ensure_cap: def(mut DynValue[MAX_ACC_SIZE], Int) raises thin -> None
+    var num_groups: def(DynValue[MAX_ACC_SIZE]) thin -> Int
+    var finalize_int64: def(DynValue[MAX_ACC_SIZE], Int) thin -> Int64
+    var finalize_utf8: def(DynValue[MAX_ACC_SIZE], Int) thin -> Optional[String]
+    var finalize_f64: def(DynValue[MAX_ACC_SIZE], Int) thin -> Float64
+    var finalize_f64_opt: def(DynValue[MAX_ACC_SIZE], Int) thin -> Optional[Float64]
 
     def __init__(
         out self,
-        finalize: def(Int) raises thin -> Column[HeapRegion],
-        flush_partial: def(Int) raises thin -> Column[HeapRegion],
-        merge_at: def(Int, Int, Int, Int) raises thin -> None,
-        merge_aligned: def(Int, Int) raises thin -> None,
-        ensure_cap: def(Int, Int) raises thin -> None,
-        num_groups: def(Int) thin -> Int,
-        finalize_int64: def(Int, Int) thin -> Int64,
-        finalize_utf8: def(Int, Int) thin -> Optional[String],
-        finalize_f64: def(Int, Int) thin -> Float64,
-        finalize_f64_opt: def(Int, Int) thin -> Optional[Float64],
+        finalize: def(mut DynValue[MAX_ACC_SIZE]) raises thin -> Column[HeapRegion],
+        flush_partial: def(mut DynValue[MAX_ACC_SIZE]) raises thin -> Column[HeapRegion],
+        merge_at: def(
+            mut DynValue[MAX_ACC_SIZE], Int, DynValue[MAX_ACC_SIZE], Int
+        ) raises thin -> None,
+        merge_aligned: def(
+            mut DynValue[MAX_ACC_SIZE], DynValue[MAX_ACC_SIZE]
+        ) raises thin -> None,
+        ensure_cap: def(mut DynValue[MAX_ACC_SIZE], Int) raises thin -> None,
+        num_groups: def(DynValue[MAX_ACC_SIZE]) thin -> Int,
+        finalize_int64: def(DynValue[MAX_ACC_SIZE], Int) thin -> Int64,
+        finalize_utf8: def(DynValue[MAX_ACC_SIZE], Int) thin -> Optional[String],
+        finalize_f64: def(DynValue[MAX_ACC_SIZE], Int) thin -> Float64,
+        finalize_f64_opt: def(DynValue[MAX_ACC_SIZE], Int) thin -> Optional[Float64],
     ):
         self.finalize = finalize
         self.flush_partial = flush_partial
@@ -139,49 +147,59 @@ struct AccumulatorVTable(ImplicitlyCopyable, Movable, Copyable, Deinitable):
         self.finalize_f64_opt = finalize_f64_opt
 
 
-# =============================================================================
-# _cast_acc — centralized unsafe cast for vtable thunks
+# _cast_acc — the one typed view of a storage box, for the vtable thunks
 # =============================================================================
 
 @always_inline
-def _cast_acc[T: Accumulator](raw_ptr: Int) -> UnsafePointer[T, MutUntrackedOrigin]:
-    """Cast a raw Int address back to a typed accumulator pointer.
+def _cast_acc[T: Accumulator](
+    ref box: DynValue[MAX_ACC_SIZE],
+) -> UnsafePointer[T, MutUntrackedOrigin]:
+    """The typed view of the accumulator stored in `box`.
 
-    SAFETY: `raw_ptr` must be the address of a live, initialized T value
-    stored inside a DynValue[MAX_ACC_SIZE]._storage buffer. The owning
-    DynAccumulator must outlive any use of the returned pointer. The
-    concrete type T must match the type originally passed to
-    DynValue.create[T]() — the caller (vtable wiring in accumulator_factory)
-    guarantees this by monomorphizing one thunk per concrete type.
+    Private to the package: it is the one place a thunk widens the
+    origin-tied pointer `DynValue._as_ptr[T]` returns, and the result never
+    leaves the thunk body that asked for it (the fn-ptr boundary carries the
+    box, not this pointer).
 
-    Uses MutExternalOrigin because fn-ptr signatures cannot carry origin
-    parameters — the origin is "external" (owned by DynAccumulator, not
-    by this thunk's stack frame).
+    SAFETY: `box` must hold a live, initialised T, created with
+    `DynValue.create[T]`; the vtable wiring in accumulator_factory
+    instantiates every thunk of a vtable with that one T. `box` is borrowed
+    for the thunk's whole run, so the storage cannot move or drop under the
+    returned pointer while the thunk body uses it; the pointer must not be
+    stored. The origin is widened (and the mutability asserted) because the
+    readback thunks borrow the box read-only while the accumulator types
+    expose their readbacks as `mut` methods; the readbacks do not change the
+    accumulator's observable state.
     """
-    return UnsafePointer[T, MutUntrackedOrigin](unsafe_from_address=raw_ptr)
+    return (
+        box._as_ptr[T]()
+        .unsafe_mut_cast[True]()
+        .unsafe_origin_cast[MutUntrackedOrigin]()
+    )
 
 
+# =============================================================================
 # =============================================================================
 # Cold-path thunks (one set per concrete type)
 # =============================================================================
 
-def _thunk_finalize[T: Accumulator](raw_ptr: Int) raises -> Column[HeapRegion]:
-    var ptr = _cast_acc[T](raw_ptr)
+def _thunk_finalize[T: Accumulator](mut acc: DynValue[MAX_ACC_SIZE]) raises -> Column[HeapRegion]:
+    var ptr = _cast_acc[T](acc)
     return ptr[].finalize_to_column()
 
 
-def _thunk_flush_partial[T: Accumulator](raw_ptr: Int) raises -> Column[HeapRegion]:
-    var ptr = _cast_acc[T](raw_ptr)
+def _thunk_flush_partial[T: Accumulator](mut acc: DynValue[MAX_ACC_SIZE]) raises -> Column[HeapRegion]:
+    var ptr = _cast_acc[T](acc)
     return ptr[].flush_partial_to_column()
 
 
-def _thunk_ensure_cap[T: Accumulator](raw_ptr: Int, n: Int) raises -> None:
-    var ptr = _cast_acc[T](raw_ptr)
+def _thunk_ensure_cap[T: Accumulator](mut acc: DynValue[MAX_ACC_SIZE], n: Int) raises -> None:
+    var ptr = _cast_acc[T](acc)
     ptr[].ensure_capacity(n)
 
 
-def _thunk_num_groups[T: Accumulator](raw_ptr: Int) -> Int:
-    var ptr = _cast_acc[T](raw_ptr)
+def _thunk_num_groups[T: Accumulator](acc: DynValue[MAX_ACC_SIZE]) -> Int:
+    var ptr = _cast_acc[T](acc)
     return ptr[].num_groups()
 
 
@@ -189,22 +207,22 @@ def _thunk_num_groups[T: Accumulator](raw_ptr: Int) -> Int:
 # Default implementations return sentinel values. Concrete per-type thunks
 # are wired via _make_vtable_for_* factories below.
 
-def _thunk_finalize_int64_default(raw_ptr: Int, gid: Int) -> Int64:
+def _thunk_finalize_int64_default(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
     """Default: return 0 (sentinel for non-int64 accumulators)."""
     return Int64(0)
 
 
-def _thunk_finalize_utf8_default(raw_ptr: Int, gid: Int) -> Optional[String]:
+def _thunk_finalize_utf8_default(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[String]:
     """Default: return None (sentinel for non-utf8 accumulators)."""
     return Optional[String](None)
 
 
-def _thunk_finalize_f64_default(raw_ptr: Int, gid: Int) -> Float64:
+def _thunk_finalize_f64_default(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Float64:
     """Default: return 0.0 (sentinel for non-f64 accumulators)."""
     return Float64(0.0)
 
 
-def _thunk_finalize_f64_opt_default(raw_ptr: Int, gid: Int) -> Optional[Float64]:
+def _thunk_finalize_f64_opt_default(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[Float64]:
     """Default: return None (sentinel for non-percentile accumulators)."""
     return Optional[Float64](None)
 
@@ -213,12 +231,15 @@ def _thunk_finalize_f64_opt_default(raw_ptr: Int, gid: Int) -> Optional[Float64]
 # Default raises -- overridden per concrete type in _make_vtable_for_*.
 
 def _thunk_merge_at_default(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
     raise Error("DynAccumulator.merge_at: not wired for this accumulator type")
 
 
-def _thunk_merge_aligned_default(self_ptr: Int, other_ptr: Int) raises -> None:
+def _thunk_merge_aligned_default(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
     raise Error("DynAccumulator.merge_aligned: not wired for this accumulator type")
 
 
@@ -256,8 +277,9 @@ struct DynAccumulator(Movable):
     flush_partial, ensure_capacity, and ownership of the concrete accumulator.
 
     Ownership model (OQ-14 Option A): DynAccumulator owns the concrete
-    accumulator storage via DynValue. MonomorphicKernel borrows it via
-    raw Int pointer (_acc_ptr). The kernel MUST NOT outlive its DynAccumulator.
+    accumulator storage via DynValue. MonomorphicKernel holds no reference
+    to it: every `call` is handed the DynAccumulator, so the kernel can be
+    neither stale after a move nor outlive it.
     """
 
     var _value: DynValue[MAX_ACC_SIZE]
@@ -295,30 +317,12 @@ struct DynAccumulator(Movable):
         var value = DynValue[MAX_ACC_SIZE].create[T](impl^)
         return Self(value^, vtable, tag)
 
-    def raw_ptr(self) -> Int:
-        """Return the raw address of the concrete accumulator storage.
-
-        Used by MonomorphicKernel to borrow the accumulator. The returned
-        Int is an opaque pointer that the kernel thunk reconstructs via
-        UnsafePointer[T] with `unsafe_from_address=raw_ptr`.
-
-        SAFETY: The returned address is only valid while this DynAccumulator
-        is alive. Do NOT cache across DynAccumulator moves or drops.
-
-        NOTE: For external callers that immediately want a typed pointer
-        (e.g. the tag-dispatch sites in columnar_agg_map.mojo), prefer
-        `as_mut[T]()` -- it delegates to the DynValue storage's
-        `_as_ptr[T]` and avoids the `unsafe_from_address=Int(...)`
-        laundering at the call site.
-        """
-        return Int(self._value._as_ptr[UInt8]())
-
     @always_inline
     def as_mut[
         _mut: Bool, o: Origin[mut=_mut], //, T: Accumulator,
-    ](ref [o] self) -> UnsafePointer[T, o]:
-        """Return a typed pointer to the concrete accumulator of type T with
-        ORIGIN TIED to `self`.
+    ](ref [o] self) -> ref [o] T:
+        """Return a reference to the concrete accumulator of type T, with
+        the borrow tied to `self`.
 
         This is the ONE call-site-facing entry for tag-dispatched access to
         the concrete accumulator inside a DynAccumulator. Every tag-dispatch
@@ -339,10 +343,8 @@ struct DynAccumulator(Movable):
           1. Caller MUST verify `self.tag == <T-matching tag>` before
              calling. Mismatched T is immediate UB (type-punned read
              of the wrong concrete accumulator state).
-          2. The returned pointer's origin `o` is tied to the receiver borrow,
-             so the compiler keeps `self` alive across every deref. Caller must
-             still not cache the pointer across a move or drop of the owning
-             DynAccumulator.
+          2. The returned reference's origin `o` is tied to the receiver
+             borrow, so the compiler keeps `self` alive across every use.
 
         WHY A METHOD AND NOT INLINE AT CALL SITES:
           Consolidating the cast in one place means the SAFETY comment
@@ -352,13 +354,13 @@ struct DynAccumulator(Movable):
         # `_value` is inline in self, so `_value._as_ptr[T]()` ties to the
         # `_value` sub-origin; re-tie to the whole-self origin `o` (mirrors
         # RecordBatch._column_ref) so the returned type matches the signature.
-        return self._value._as_ptr[T]().unsafe_origin_cast[o]()
+        return self._value._as_ptr[T]().unsafe_origin_cast[o]()[]
 
     def finalize(mut self) raises -> Column[HeapRegion]:
-        return self._vtable.finalize(self.raw_ptr())
+        return self._vtable.finalize(self._value)
 
     def flush_partial(mut self) raises -> Column[HeapRegion]:
-        return self._vtable.flush_partial(self.raw_ptr())
+        return self._vtable.flush_partial(self._value)
 
     def merge_at(
         mut self, dst_gid: Int, imm other: Self, src_gid: Int,
@@ -367,11 +369,11 @@ struct DynAccumulator(Movable):
 
         Used by ColumnarAggMap.merge_from / merge_from_partition /
         merge_from_flush for cross-worker combine.
-        SAFETY: `read other` is sufficient — the vtable thunk casts the raw
-        address to the concrete type and reads src state. The concrete
+        SAFETY: `read other` is sufficient — the vtable thunk views the
+        borrowed box as the concrete type and reads src state. The concrete
         merge_at takes `read src` for the source operand.
         """
-        self._vtable.merge_at(self.raw_ptr(), dst_gid, other.raw_ptr(), src_gid)
+        self._vtable.merge_at(self._value, dst_gid, other._value, src_gid)
 
     def merge_aligned(mut self, imm other: Self) raises:
         """Full-column merge: fold other into self (same gid space).
@@ -379,31 +381,31 @@ struct DynAccumulator(Movable):
         Used by AccumulatorEnum.merge fast path (cross-worker S3 aggregators).
         PRECONDITION: self.num_groups() == other.num_groups().
         """
-        self._vtable.merge_aligned(self.raw_ptr(), other.raw_ptr())
+        self._vtable.merge_aligned(self._value, other._value)
 
     def ensure_capacity(mut self, n_groups: Int) raises:
-        self._vtable.ensure_cap(self.raw_ptr(), n_groups)
+        self._vtable.ensure_cap(self._value, n_groups)
 
     def num_groups(self) -> Int:
-        return self._vtable.num_groups(self.raw_ptr())
+        return self._vtable.num_groups(self._value)
 
     # --- Per-gid finalize (Phase 4) ---
 
     def finalize_int64(self, gid: Int) -> Int64:
         """Read a single Int64 value at gid. Returns 0 for unseen/OOB."""
-        return self._vtable.finalize_int64(self.raw_ptr(), gid)
+        return self._vtable.finalize_int64(self._value, gid)
 
     def finalize_utf8(self, gid: Int) -> Optional[String]:
         """Read a single Optional[String] at gid. Returns None for unseen/OOB."""
-        return self._vtable.finalize_utf8(self.raw_ptr(), gid)
+        return self._vtable.finalize_utf8(self._value, gid)
 
     def finalize_f64(self, gid: Int) -> Float64:
         """Read a single Float64 at gid. Returns 0.0 for unseen/OOB."""
-        return self._vtable.finalize_f64(self.raw_ptr(), gid)
+        return self._vtable.finalize_f64(self._value, gid)
 
     def finalize_f64_optional(self, gid: Int) -> Optional[Float64]:
         """Nullable readback for percentile finalize. Returns None for
         unseen groups (matches v0.3 SQL NULL semantics for an empty /
         all-NaN group). Dispatches through dedicated vtable slot.
         """
-        return self._vtable.finalize_f64_opt(self.raw_ptr(), gid)
+        return self._vtable.finalize_f64_opt(self._value, gid)

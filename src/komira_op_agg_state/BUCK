@@ -1,4 +1,4 @@
-load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_binary", "mojo_library")
 
 # The aggregation state of the engine: the accumulators (the dynamic accumulator
 # and accumulator set, the columnar typed, extra and UTF-8 accumulators, the
@@ -52,4 +52,16 @@ mojo_library(
         "tests/test_udf_agg_acc.mojo",
     ],
     visibility = ["PUBLIC"],
+)
+
+# Microbenchmark of the accumulator update path (not a gated test); see the
+# header of the file. Run it on demand with
+# `buck2 run //src/komira_op_agg_state:agg_state_bench`.
+mojo_binary(
+    name = "agg_state_bench",
+    srcs = ["tests/bench_agg_state.mojo"],
+    deps = [
+        ":komira_op_agg_state",
+        "//src/komira_core:komira_core",
+    ],
 )

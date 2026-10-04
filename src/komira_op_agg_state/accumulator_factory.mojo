@@ -24,11 +24,13 @@
 # =============================================================================
 
 from komira_core.arrow import Column
+from komira_core.collections.dyn_value import DynValue
 
 from .accumulator_set import AccumulatorSet
 from .dyn_accumulator import (
     AccumulatorVTable,
     DynAccumulator,
+    MAX_ACC_SIZE,
     _cast_acc,
     _thunk_finalize,
     _thunk_flush_partial,
@@ -41,7 +43,6 @@ from .dyn_accumulator import (
     _thunk_merge_at_default,
     _thunk_merge_aligned_default,
 )
-from .accumulator_set import _kernel_thunk
 from .columnar_acc_typed import (
     SumI64Acc,
     CountI64Acc,
@@ -81,9 +82,9 @@ from .columnar_agg_accumulator import (
 # out-of-range gids matches AccumulatorEnum behaviour (0 / None / 0.0).
 
 # --- SumI64Acc ---
-def _fin_int64_sum(raw_ptr: Int, gid: Int) -> Int64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding SumI64Acc.
-    var ptr = _cast_acc[SumI64Acc](raw_ptr)
+def _fin_int64_sum(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding SumI64Acc.
+    var ptr = _cast_acc[SumI64Acc](acc)
     ref s = ptr[].state
     if gid >= len(s):
         return Int64(0)
@@ -91,9 +92,9 @@ def _fin_int64_sum(raw_ptr: Int, gid: Int) -> Int64:
 
 
 # --- CountI64Acc ---
-def _fin_int64_count(raw_ptr: Int, gid: Int) -> Int64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding CountI64Acc.
-    var ptr = _cast_acc[CountI64Acc](raw_ptr)
+def _fin_int64_count(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding CountI64Acc.
+    var ptr = _cast_acc[CountI64Acc](acc)
     ref s = ptr[].state
     if gid >= len(s):
         return Int64(0)
@@ -101,9 +102,9 @@ def _fin_int64_count(raw_ptr: Int, gid: Int) -> Int64:
 
 
 # --- MinI64Acc ---
-def _fin_int64_min(raw_ptr: Int, gid: Int) -> Int64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MinI64Acc.
-    var ptr = _cast_acc[MinI64Acc](raw_ptr)
+def _fin_int64_min(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MinI64Acc.
+    var ptr = _cast_acc[MinI64Acc](acc)
     ref s = ptr[].state
     ref se = ptr[].seen
     if gid >= len(s) or not se[gid]:
@@ -112,9 +113,9 @@ def _fin_int64_min(raw_ptr: Int, gid: Int) -> Int64:
 
 
 # --- MaxI64Acc ---
-def _fin_int64_max(raw_ptr: Int, gid: Int) -> Int64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MaxI64Acc.
-    var ptr = _cast_acc[MaxI64Acc](raw_ptr)
+def _fin_int64_max(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MaxI64Acc.
+    var ptr = _cast_acc[MaxI64Acc](acc)
     ref s = ptr[].state
     ref se = ptr[].seen
     if gid >= len(s) or not se[gid]:
@@ -123,9 +124,9 @@ def _fin_int64_max(raw_ptr: Int, gid: Int) -> Int64:
 
 
 # --- MinUtf8Acc ---
-def _fin_utf8_min(raw_ptr: Int, gid: Int) -> Optional[String]:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MinUtf8Acc.
-    var ptr = _cast_acc[MinUtf8Acc](raw_ptr)
+def _fin_utf8_min(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[String]:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MinUtf8Acc.
+    var ptr = _cast_acc[MinUtf8Acc](acc)
     ref s = ptr[].state
     if gid >= len(s):
         return Optional[String](None)
@@ -133,9 +134,9 @@ def _fin_utf8_min(raw_ptr: Int, gid: Int) -> Optional[String]:
 
 
 # --- MaxUtf8Acc ---
-def _fin_utf8_max(raw_ptr: Int, gid: Int) -> Optional[String]:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MaxUtf8Acc.
-    var ptr = _cast_acc[MaxUtf8Acc](raw_ptr)
+def _fin_utf8_max(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[String]:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MaxUtf8Acc.
+    var ptr = _cast_acc[MaxUtf8Acc](acc)
     ref s = ptr[].state
     if gid >= len(s):
         return Optional[String](None)
@@ -143,26 +144,26 @@ def _fin_utf8_max(raw_ptr: Int, gid: Int) -> Optional[String]:
 
 
 # --- PercentileAcc ---
-def _fin_f64_percentile(raw_ptr: Int, gid: Int) -> Float64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding PercentileAcc.
-    var ptr = _cast_acc[PercentileAcc](raw_ptr)
+def _fin_f64_percentile(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Float64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding PercentileAcc.
+    var ptr = _cast_acc[PercentileAcc](acc)
     var opt = ptr[]._finalize_one(gid)
     if opt:
         return opt.value()
     return Float64(0.0)
 
 
-def _fin_f64_opt_percentile(raw_ptr: Int, gid: Int) -> Optional[Float64]:
+def _fin_f64_opt_percentile(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[Float64]:
     """Nullable readback for percentile: returns None for unseen/empty groups."""
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding PercentileAcc.
-    var ptr = _cast_acc[PercentileAcc](raw_ptr)
+    # SAFETY: see _cast_acc — acc is a DynValue box holding PercentileAcc.
+    var ptr = _cast_acc[PercentileAcc](acc)
     return ptr[]._finalize_one(gid)
 
 
 # --- SumF64KahanAcc ---
-def _fin_f64_kahan(raw_ptr: Int, gid: Int) -> Float64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding SumF64KahanAcc.
-    var ptr = _cast_acc[SumF64KahanAcc](raw_ptr)
+def _fin_f64_kahan(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Float64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding SumF64KahanAcc.
+    var ptr = _cast_acc[SumF64KahanAcc](acc)
     ref s = ptr[].sum
     if gid >= len(s):
         return Float64(0.0)
@@ -170,9 +171,9 @@ def _fin_f64_kahan(raw_ptr: Int, gid: Int) -> Float64:
 
 
 # --- CountStarAcc ---
-def _fin_int64_count_star(raw_ptr: Int, gid: Int) -> Int64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding CountStarAcc.
-    var ptr = _cast_acc[CountStarAcc](raw_ptr)
+def _fin_int64_count_star(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding CountStarAcc.
+    var ptr = _cast_acc[CountStarAcc](acc)
     ref s = ptr[].state
     if gid >= len(s):
         return Int64(0)
@@ -180,9 +181,9 @@ def _fin_int64_count_star(raw_ptr: Int, gid: Int) -> Int64:
 
 
 # --- MinF64Acc ---
-def _fin_f64_min(raw_ptr: Int, gid: Int) -> Float64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MinF64Acc.
-    var ptr = _cast_acc[MinF64Acc](raw_ptr)
+def _fin_f64_min(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Float64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MinF64Acc.
+    var ptr = _cast_acc[MinF64Acc](acc)
     ref s = ptr[].state
     ref se = ptr[].seen
     if gid >= len(s) or not se[gid]:
@@ -190,10 +191,10 @@ def _fin_f64_min(raw_ptr: Int, gid: Int) -> Float64:
     return s[gid]
 
 
-def _fin_f64_opt_min(raw_ptr: Int, gid: Int) -> Optional[Float64]:
+def _fin_f64_opt_min(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[Float64]:
     """Nullable readback for MIN(f64): None for unseen groups."""
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MinF64Acc.
-    var ptr = _cast_acc[MinF64Acc](raw_ptr)
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MinF64Acc.
+    var ptr = _cast_acc[MinF64Acc](acc)
     ref s = ptr[].state
     ref se = ptr[].seen
     if gid >= len(s) or not se[gid]:
@@ -202,9 +203,9 @@ def _fin_f64_opt_min(raw_ptr: Int, gid: Int) -> Optional[Float64]:
 
 
 # --- MaxF64Acc ---
-def _fin_f64_max(raw_ptr: Int, gid: Int) -> Float64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MaxF64Acc.
-    var ptr = _cast_acc[MaxF64Acc](raw_ptr)
+def _fin_f64_max(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Float64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MaxF64Acc.
+    var ptr = _cast_acc[MaxF64Acc](acc)
     ref s = ptr[].state
     ref se = ptr[].seen
     if gid >= len(s) or not se[gid]:
@@ -212,10 +213,10 @@ def _fin_f64_max(raw_ptr: Int, gid: Int) -> Float64:
     return s[gid]
 
 
-def _fin_f64_opt_max(raw_ptr: Int, gid: Int) -> Optional[Float64]:
+def _fin_f64_opt_max(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[Float64]:
     """Nullable readback for MAX(f64): None for unseen groups."""
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding MaxF64Acc.
-    var ptr = _cast_acc[MaxF64Acc](raw_ptr)
+    # SAFETY: see _cast_acc — acc is a DynValue box holding MaxF64Acc.
+    var ptr = _cast_acc[MaxF64Acc](acc)
     ref s = ptr[].state
     ref se = ptr[].seen
     if gid >= len(s) or not se[gid]:
@@ -224,10 +225,10 @@ def _fin_f64_opt_max(raw_ptr: Int, gid: Int) -> Optional[Float64]:
 
 
 # --- AvgAcc ---
-def _fin_f64_avg(raw_ptr: Int, gid: Int) -> Float64:
+def _fin_f64_avg(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Float64:
     """AVG = sum / count. Sentinel 0.0 for unseen (count==0) groups."""
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding AvgAcc.
-    var ptr = _cast_acc[AvgAcc](raw_ptr)
+    # SAFETY: see _cast_acc — acc is a DynValue box holding AvgAcc.
+    var ptr = _cast_acc[AvgAcc](acc)
     ref s = ptr[].sum
     ref c = ptr[].count
     if gid >= len(s):
@@ -238,10 +239,10 @@ def _fin_f64_avg(raw_ptr: Int, gid: Int) -> Float64:
     return s[gid] / Float64(cv)
 
 
-def _fin_f64_opt_avg(raw_ptr: Int, gid: Int) -> Optional[Float64]:
+def _fin_f64_opt_avg(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Optional[Float64]:
     """Nullable readback for AVG: None for empty groups."""
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding AvgAcc.
-    var ptr = _cast_acc[AvgAcc](raw_ptr)
+    # SAFETY: see _cast_acc — acc is a DynValue box holding AvgAcc.
+    var ptr = _cast_acc[AvgAcc](acc)
     ref s = ptr[].sum
     ref c = ptr[].count
     if gid >= len(s):
@@ -254,9 +255,9 @@ def _fin_f64_opt_avg(raw_ptr: Int, gid: Int) -> Optional[Float64]:
 
 # --- CountDistinctAcc ---
 # COUNT(DISTINCT) finalize returns the deduped count as Int64 for a single gid.
-def _fin_int64_count_distinct(raw_ptr: Int, gid: Int) -> Int64:
-    # SAFETY: see _cast_acc — raw_ptr is DynValue storage holding CountDistinctAcc.
-    var ptr = _cast_acc[CountDistinctAcc](raw_ptr)
+def _fin_int64_count_distinct(acc: DynValue[MAX_ACC_SIZE], gid: Int) -> Int64:
+    # SAFETY: see _cast_acc — acc is a DynValue box holding CountDistinctAcc.
+    var ptr = _cast_acc[CountDistinctAcc](acc)
     ref bufs = ptr[].buffers
     if gid >= len(bufs):
         return Int64(0)
@@ -291,119 +292,132 @@ def _fin_int64_count_distinct(raw_ptr: Int, gid: Int) -> Int64:
 # type alignment across worker accumulators.
 
 def _merge_at_sum_i64(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding SumI64Acc.
-    var s = _cast_acc[SumI64Acc](self_ptr)
-    var o = _cast_acc[SumI64Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding SumI64Acc.
+    var s = _cast_acc[SumI64Acc](dst)
+    var o = _cast_acc[SumI64Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_count_i64(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding CountI64Acc.
-    var s = _cast_acc[CountI64Acc](self_ptr)
-    var o = _cast_acc[CountI64Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding CountI64Acc.
+    var s = _cast_acc[CountI64Acc](dst)
+    var o = _cast_acc[CountI64Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_min_i64(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MinI64Acc.
-    var s = _cast_acc[MinI64Acc](self_ptr)
-    var o = _cast_acc[MinI64Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MinI64Acc.
+    var s = _cast_acc[MinI64Acc](dst)
+    var o = _cast_acc[MinI64Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_max_i64(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MaxI64Acc.
-    var s = _cast_acc[MaxI64Acc](self_ptr)
-    var o = _cast_acc[MaxI64Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MaxI64Acc.
+    var s = _cast_acc[MaxI64Acc](dst)
+    var o = _cast_acc[MaxI64Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_min_utf8(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MinUtf8Acc.
-    var s = _cast_acc[MinUtf8Acc](self_ptr)
-    var o = _cast_acc[MinUtf8Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MinUtf8Acc.
+    var s = _cast_acc[MinUtf8Acc](dst)
+    var o = _cast_acc[MinUtf8Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_max_utf8(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MaxUtf8Acc.
-    var s = _cast_acc[MaxUtf8Acc](self_ptr)
-    var o = _cast_acc[MaxUtf8Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MaxUtf8Acc.
+    var s = _cast_acc[MaxUtf8Acc](dst)
+    var o = _cast_acc[MaxUtf8Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_percentile(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding PercentileAcc.
-    var s = _cast_acc[PercentileAcc](self_ptr)
-    var o = _cast_acc[PercentileAcc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding PercentileAcc.
+    var s = _cast_acc[PercentileAcc](dst)
+    var o = _cast_acc[PercentileAcc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_count_distinct(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding CountDistinctAcc.
-    var s = _cast_acc[CountDistinctAcc](self_ptr)
-    var o = _cast_acc[CountDistinctAcc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding CountDistinctAcc.
+    var s = _cast_acc[CountDistinctAcc](dst)
+    var o = _cast_acc[CountDistinctAcc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_kahan(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding SumF64KahanAcc.
-    var s = _cast_acc[SumF64KahanAcc](self_ptr)
-    var o = _cast_acc[SumF64KahanAcc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding SumF64KahanAcc.
+    var s = _cast_acc[SumF64KahanAcc](dst)
+    var o = _cast_acc[SumF64KahanAcc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_count_star(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding CountStarAcc.
-    var s = _cast_acc[CountStarAcc](self_ptr)
-    var o = _cast_acc[CountStarAcc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding CountStarAcc.
+    var s = _cast_acc[CountStarAcc](dst)
+    var o = _cast_acc[CountStarAcc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_min_f64(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MinF64Acc.
-    var s = _cast_acc[MinF64Acc](self_ptr)
-    var o = _cast_acc[MinF64Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MinF64Acc.
+    var s = _cast_acc[MinF64Acc](dst)
+    var o = _cast_acc[MinF64Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_max_f64(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MaxF64Acc.
-    var s = _cast_acc[MaxF64Acc](self_ptr)
-    var o = _cast_acc[MaxF64Acc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MaxF64Acc.
+    var s = _cast_acc[MaxF64Acc](dst)
+    var o = _cast_acc[MaxF64Acc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
 def _merge_at_avg(
-    self_ptr: Int, dst_gid: Int, other_ptr: Int, src_gid: Int,
+    mut dst: DynValue[MAX_ACC_SIZE], dst_gid: Int,
+    src: DynValue[MAX_ACC_SIZE], src_gid: Int,
 ) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding AvgAcc.
-    var s = _cast_acc[AvgAcc](self_ptr)
-    var o = _cast_acc[AvgAcc](other_ptr)
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding AvgAcc.
+    var s = _cast_acc[AvgAcc](dst)
+    var o = _cast_acc[AvgAcc](src)
     s[].merge_at(dst_gid, o[], src_gid)
 
 
@@ -411,103 +425,129 @@ def _merge_at_avg(
 # Per-type merge_aligned thunks (Phase 4)
 # =============================================================================
 
-def _merge_aligned_sum_i64(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding SumI64Acc.
-    var s = _cast_acc[SumI64Acc](self_ptr)
-    var o = _cast_acc[SumI64Acc](other_ptr)
+def _merge_aligned_sum_i64(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding SumI64Acc.
+    var s = _cast_acc[SumI64Acc](dst)
+    var o = _cast_acc[SumI64Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_count_i64(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding CountI64Acc.
-    var s = _cast_acc[CountI64Acc](self_ptr)
-    var o = _cast_acc[CountI64Acc](other_ptr)
+def _merge_aligned_count_i64(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding CountI64Acc.
+    var s = _cast_acc[CountI64Acc](dst)
+    var o = _cast_acc[CountI64Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_min_i64(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MinI64Acc.
-    var s = _cast_acc[MinI64Acc](self_ptr)
-    var o = _cast_acc[MinI64Acc](other_ptr)
+def _merge_aligned_min_i64(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MinI64Acc.
+    var s = _cast_acc[MinI64Acc](dst)
+    var o = _cast_acc[MinI64Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_max_i64(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MaxI64Acc.
-    var s = _cast_acc[MaxI64Acc](self_ptr)
-    var o = _cast_acc[MaxI64Acc](other_ptr)
+def _merge_aligned_max_i64(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MaxI64Acc.
+    var s = _cast_acc[MaxI64Acc](dst)
+    var o = _cast_acc[MaxI64Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_min_utf8(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MinUtf8Acc.
-    var s = _cast_acc[MinUtf8Acc](self_ptr)
-    var o = _cast_acc[MinUtf8Acc](other_ptr)
+def _merge_aligned_min_utf8(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MinUtf8Acc.
+    var s = _cast_acc[MinUtf8Acc](dst)
+    var o = _cast_acc[MinUtf8Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_max_utf8(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MaxUtf8Acc.
-    var s = _cast_acc[MaxUtf8Acc](self_ptr)
-    var o = _cast_acc[MaxUtf8Acc](other_ptr)
+def _merge_aligned_max_utf8(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MaxUtf8Acc.
+    var s = _cast_acc[MaxUtf8Acc](dst)
+    var o = _cast_acc[MaxUtf8Acc](src)
     s[].merge_aligned(o[])
 
 
 # PercentileAcc has NO merge_aligned — its merge is an append (concat per-gid
 # Float64 buffers), inherently serial. Falls back to per-gid merge_at.
-def _merge_aligned_percentile(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding PercentileAcc.
+def _merge_aligned_percentile(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding PercentileAcc.
     # Fall back to per-gid loop.
-    var s = _cast_acc[PercentileAcc](self_ptr)
-    var o = _cast_acc[PercentileAcc](other_ptr)
+    var s = _cast_acc[PercentileAcc](dst)
+    var o = _cast_acc[PercentileAcc](src)
     var n = o[].num_groups()
     for i in range(n):
         s[].merge_at(i, o[], i)
 
 
 # CountDistinctAcc has no SIMD merge — extend buffers.
-def _merge_aligned_count_distinct(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding CountDistinctAcc.
-    var s = _cast_acc[CountDistinctAcc](self_ptr)
-    var o = _cast_acc[CountDistinctAcc](other_ptr)
+def _merge_aligned_count_distinct(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding CountDistinctAcc.
+    var s = _cast_acc[CountDistinctAcc](dst)
+    var o = _cast_acc[CountDistinctAcc](src)
     var n = o[].num_groups()
     for i in range(n):
         s[].merge_at(i, o[], i)
 
 
 # SumF64KahanAcc uses scalar merge for bit-identity with v0.3.
-def _merge_aligned_kahan(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding SumF64KahanAcc.
-    var s = _cast_acc[SumF64KahanAcc](self_ptr)
-    var o = _cast_acc[SumF64KahanAcc](other_ptr)
+def _merge_aligned_kahan(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding SumF64KahanAcc.
+    var s = _cast_acc[SumF64KahanAcc](dst)
+    var o = _cast_acc[SumF64KahanAcc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_count_star(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding CountStarAcc.
-    var s = _cast_acc[CountStarAcc](self_ptr)
-    var o = _cast_acc[CountStarAcc](other_ptr)
+def _merge_aligned_count_star(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding CountStarAcc.
+    var s = _cast_acc[CountStarAcc](dst)
+    var o = _cast_acc[CountStarAcc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_min_f64(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MinF64Acc.
-    var s = _cast_acc[MinF64Acc](self_ptr)
-    var o = _cast_acc[MinF64Acc](other_ptr)
+def _merge_aligned_min_f64(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MinF64Acc.
+    var s = _cast_acc[MinF64Acc](dst)
+    var o = _cast_acc[MinF64Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_max_f64(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding MaxF64Acc.
-    var s = _cast_acc[MaxF64Acc](self_ptr)
-    var o = _cast_acc[MaxF64Acc](other_ptr)
+def _merge_aligned_max_f64(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding MaxF64Acc.
+    var s = _cast_acc[MaxF64Acc](dst)
+    var o = _cast_acc[MaxF64Acc](src)
     s[].merge_aligned(o[])
 
 
-def _merge_aligned_avg(self_ptr: Int, other_ptr: Int) raises -> None:
-    # SAFETY: see _cast_acc — both ptrs are DynValue storage holding AvgAcc.
-    var s = _cast_acc[AvgAcc](self_ptr)
-    var o = _cast_acc[AvgAcc](other_ptr)
+def _merge_aligned_avg(
+    mut dst: DynValue[MAX_ACC_SIZE], src: DynValue[MAX_ACC_SIZE],
+) raises -> None:
+    # SAFETY: see _cast_acc — both args are DynValue boxes holding AvgAcc.
+    var s = _cast_acc[AvgAcc](dst)
+    var o = _cast_acc[AvgAcc](src)
     s[].merge_aligned(o[])
 
 

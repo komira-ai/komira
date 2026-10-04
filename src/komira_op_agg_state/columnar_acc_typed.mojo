@@ -142,8 +142,8 @@ struct SumI64Acc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Int64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Int64, origin_v],
         num_rows: Int,
     ) raises:
         # NOT-VECTORIZABLE: Scatter-add to random group IDs. gids[i] are
@@ -280,7 +280,7 @@ struct CountI64Acc(Accumulator):
         origin_g: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
+        gids: Span[UInt32, origin_g],
         num_rows: Int,
     ) raises:
         # Note: no `values` arg — counting is increment-by-1. Caller pre-masks.
@@ -403,8 +403,8 @@ struct MinI64Acc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Int64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Int64, origin_v],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
@@ -541,8 +541,8 @@ struct MaxI64Acc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Int64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Int64, origin_v],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
@@ -683,8 +683,8 @@ struct SumF64KahanAcc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Float64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Float64, origin_v],
         num_rows: Int,
     ) raises:
         # Scalar Kahan per accumulator.rs:179-195. The SIMD Neumaier path

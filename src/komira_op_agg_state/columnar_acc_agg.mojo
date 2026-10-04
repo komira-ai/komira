@@ -108,8 +108,8 @@ struct PercentileAcc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values_ptr: UnsafePointer[Float64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values_ptr: Span[Float64, origin_v],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
@@ -158,8 +158,8 @@ struct PercentileAcc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values_ptr: UnsafePointer[Float64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values_ptr: Span[Float64, origin_v],
         num_rows: Int,
     ) raises:
         self.update_batch(gids, values_ptr, num_rows)
@@ -351,8 +351,8 @@ struct CountDistinctAcc(Accumulator):
         origin_g: Origin, origin_v: Origin
     ](
         mut self,
-        gids: UnsafePointer[UInt32, origin_g],
-        values: UnsafePointer[Int64, origin_v],
+        gids: Span[UInt32, origin_g],
+        values: Span[Int64, origin_v],
         num_rows: Int,
     ) raises:
         for i in range(num_rows):
