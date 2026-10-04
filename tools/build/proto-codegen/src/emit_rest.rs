@@ -459,7 +459,7 @@ fn query_items(
             continue;
         }
         // Any other well-known type is one parameter too, its JSON string
-        // (`2024-01-01T00:00:00Z`, `1.5s`), never `ts.seconds=&ts.nanos=`:
+        // (`2026-10-01T00:00:00Z`, `1.5s`), never `ts.seconds=&ts.nanos=`:
         // sending its fields would be wrong even if its file were generated.
         if tref.fq_name.starts_with(".google.protobuf.") {
             return Err(format!(
