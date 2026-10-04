@@ -13,7 +13,7 @@
 from std.testing import assert_equal, assert_raises, assert_true
 
 from komira_aws_core import AwsCredential, StaticCredsSource, SystemAwsClock
-from komira_fs_registry import FsHandle, FsHandleOver, S3Arm, S3ProdConnector
+from komira_fs_registry import FsHandleOver, S3Arm, S3ProdConnector
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.tls import TlsConfig
 from komira_http_core.transport.io_stream import Connector
@@ -23,7 +23,9 @@ from komira_objectstore_s3 import S3Config
 from komira_plan_expr.fs_descriptor_pod import FS_SCHEME_S3
 
 
-comptime _Handle = FsHandleOver[ScriptedConnector]
+comptime _Handle = FsHandleOver[ScriptedConnector, StaticCredsSource]
+comptime _ScriptedArm = S3Arm[ScriptedConnector, StaticCredsSource]
+comptime _ProdStaticHandle = FsHandleOver[S3ProdConnector, StaticCredsSource]
 
 
 def _bytes(s: String) -> List[UInt8]:
@@ -62,7 +64,7 @@ def _creds() -> StaticCredsSource:
     )
 
 
-def _text_of[C: Connector](fs: S3Arm[C], key: String) raises -> String:
+def _text_of[C: Connector](fs: S3Arm[C, StaticCredsSource], key: String) raises -> String:
     var file = fs.open(key)
     var buf = fs.read_at(file, 0, 4)
     var view = buf.view_range_ro(0, buf.len())
@@ -73,8 +75,8 @@ def _text(h: _Handle, key: String) raises -> String:
     return _text_of(h.s3_ref().value(), key)
 
 
-def _scripted_arm() raises -> S3Arm[ScriptedConnector]:
-    return S3Arm[ScriptedConnector](
+def _scripted_arm() raises -> _ScriptedArm:
+    return _ScriptedArm(
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _mk_one_range,
@@ -100,7 +102,7 @@ def test_s3_arm_reads_through_a_scripted_connector() raises:
 
 
 def test_wrapping_keeps_a_built_store() raises:
-    var fs = S3Arm[ScriptedConnector].built(
+    var fs = _ScriptedArm.built(
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _mk_one_range,
@@ -110,7 +112,7 @@ def test_wrapping_keeps_a_built_store() raises:
     )
     # Spend the built store's one answer before the wrap.
     assert_equal(_text_of(fs, "data/a.parquet"), "abcd")
-    assert_true(_Handle.is_arm_type[S3Arm[ScriptedConnector]]())
+    assert_true(_Handle.is_arm_type[_ScriptedArm]())
     var maybe = _Handle.from_typed_fs(fs^)
     assert_true(Bool(maybe))
     var h = maybe.take()
@@ -123,8 +125,8 @@ def test_wrapping_keeps_a_built_store() raises:
 
 
 def test_prod_arm_refuses_a_plaintext_endpoint() raises:
-    var h = FsHandle.from_s3(
-        S3Arm[S3ProdConnector](
+    var h = _ProdStaticHandle.from_s3(
+        S3Arm[S3ProdConnector, StaticCredsSource](
             "lake",
             S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
             _mk_tls,

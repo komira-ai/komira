@@ -11,7 +11,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 #
 # komira_runtime_paths is a library dep only because mojo_library has no
 # test-only deps: test_fs_handle_local_read takes its scratch directory from
-# `test_tmpdir()`. Do not drop it as unused.
+# `test_tmpdir()`. Do not drop it as unused. komira_retry is one likewise,
+# for test_fs_handle_shared_creds, which builds an S3Config with a retry
+# policy.
 #
 # The tests are hermetic, no socket: test_fs_handle_arms (each arm
 # constructs and clones with its tag, nothing dialed: the production S3
@@ -20,7 +22,9 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # type), test_fs_handle_local_read (a real file read through the local arm),
 # test_fs_handle_s3_read (the S3 arm read through komira_http_core's
 # ScriptedConnector, a wrapped built store kept, and the production arm
-# refusing a plaintext http:// endpoint), test_fs_handle_descriptor (a
+# refusing a plaintext http:// endpoint), test_fs_handle_shared_creds (a
+# handle and its clone sign with the credential the shared default chain
+# holds now, one refresh for both), test_fs_handle_descriptor (a
 # descriptor's tag, the named errors for GCS, Azure and an unknown scheme,
 # and a komira_core descriptor resolved by its scheme code) and
 # test_no_env_reads (the package's sources read no environment).
@@ -35,6 +39,7 @@ mojo_library(
         "//src/komira_http_core:komira_http_core",
         "//src/komira_objectstore_s3:komira_objectstore_s3",
         "//src/komira_plan_expr:komira_plan_expr",
+        "//src/komira_retry:komira_retry",
         "//tools/build/mojo/runtime_paths:komira_runtime_paths",
     ],
     test_data = {
@@ -49,6 +54,7 @@ mojo_library(
         "tests/test_fs_handle_from_typed_fs.mojo",
         "tests/test_fs_handle_local_read.mojo",
         "tests/test_fs_handle_s3_read.mojo",
+        "tests/test_fs_handle_shared_creds.mojo",
         "tests/test_no_env_reads.mojo",
     ],
     visibility = ["PUBLIC"],

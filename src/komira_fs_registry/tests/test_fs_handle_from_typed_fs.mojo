@@ -13,9 +13,12 @@ from std.testing import assert_equal, assert_false, assert_true
 from komira_async.ops.waker_sink import NoopSink
 from komira_aws_core import (
     AwsCredential,
+    AwsCredentialParams,
     FixedClock,
+    ProcessCredsSource,
     StaticCredsSource,
     SystemAwsClock,
+    process_creds_source,
 )
 from komira_fs.local_fs import LocalFs
 from komira_fs_registry import (
@@ -48,6 +51,14 @@ def _http() -> HttpClientConfig:
     return HttpClientConfig.defaults()
 
 
+def _prod_creds() raises -> ProcessCredsSource:
+    var params = AwsCredentialParams()
+    params.credential = Optional[AwsCredential](
+        AwsCredential(String("AKIDEXAMPLE"), String("secret"), String(""))
+    )
+    return process_creds_source(params, _http())
+
+
 def _creds() -> StaticCredsSource:
     return StaticCredsSource(
         AwsCredential(String("AKIDEXAMPLE"), String("secret"), String(""))
@@ -59,6 +70,11 @@ def test_arm_types() raises:
     assert_true(fs_is_registry_arm[S3Arm[S3ProdConnector]]())
     assert_false(fs_is_registry_arm[S3Arm[ScriptedConnector]]())
     assert_false(fs_is_registry_arm[S3Arm[KernelTcpConnector]]())
+    # A fixed-key source is not the production arm's: the arm's credentials
+    # are the shared refreshing chain, so a static source no longer binds it.
+    assert_false(
+        fs_is_registry_arm[S3Arm[S3ProdConnector, StaticCredsSource]]()
+    )
     assert_false(
         fs_is_registry_arm[S3Fs[S3ProdConnector, StaticCredsSource, FixedClock]]()
     )
@@ -74,7 +90,7 @@ def test_local_fs_wraps_with_the_local_tag() raises:
 
 def test_prod_s3_fs_wraps_with_the_s3_tag() raises:
     var fs = S3Arm[S3ProdConnector](
-        "lake", S3Config.aws("eu-west-1"), _never_dial, _http(), _creds(), SystemAwsClock()
+        "lake", S3Config.aws("eu-west-1"), _never_dial, _http(), _prod_creds(), SystemAwsClock()
     )
     var h = fs_handle_from_typed_fs(fs^)
     assert_true(Bool(h))
@@ -84,7 +100,7 @@ def test_prod_s3_fs_wraps_with_the_s3_tag() raises:
 
 
 def test_scripted_s3_fs_is_not_an_arm() raises:
-    var fs = S3Arm[ScriptedConnector](
+    var fs = S3Arm[ScriptedConnector, StaticCredsSource](
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _never_script,
@@ -93,13 +109,13 @@ def test_scripted_s3_fs_is_not_an_arm() raises:
         SystemAwsClock(),
     )
     # It advertises the S3 scheme, and is still not the arm's type.
-    assert_equal(S3Arm[ScriptedConnector].SCHEME, FS_SCHEME_S3)
+    assert_equal(S3Arm[ScriptedConnector, StaticCredsSource].SCHEME, FS_SCHEME_S3)
     var h = fs_handle_from_typed_fs(fs^)
     assert_false(Bool(h))
 
 
 def test_other_s3_monomorphs_are_not_arms() raises:
-    var kernel = S3Arm[KernelTcpConnector](
+    var kernel = S3Arm[KernelTcpConnector, StaticCredsSource](
         "lake",
         S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
         _never_kernel,
