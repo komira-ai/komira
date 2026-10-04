@@ -20,6 +20,9 @@
 #                  `manifest.json`, and the two refusals over what a build
 #                  left (exactly one manifest; its `name` the artifact's)
 #   render.mojo    `render_build_argv`: the argv for one artifact (pure)
+#   affected.mojo  the per-change check: the units (artifacts, then checks),
+#                  `{units_file}`, the affected and build_targets argvs, and
+#                  the grammar of an affected command's answer (pure)
 #
 # The build rules, in full in placeholders.mojo and the .proto: kci creates an EMPTY
 # directory per artifact, in artifacts-file order, runs the rendered
@@ -31,7 +34,14 @@
 # =============================================================================
 
 from kci_artifact.placeholders import (
+    BASE_COMMIT_PLACEHOLDER,
     BUILD_NUMBER_PLACEHOLDER,
+    CHANGED_FILES_PLACEHOLDER,
+    UNITS_FILE_PLACEHOLDER,
+    AffectedValues,
+    affected_placeholders,
+    is_affected_placeholder,
+    substitute_affected,
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
     PLATFORM_PLACEHOLDER,
@@ -59,6 +69,21 @@ from kci_artifact.render import render_build_argv
 from kci_artifact.validate import (
     find_artifact,
     find_build_system,
+    find_check,
     is_valid_artifact_name,
+    require_affected_ready,
     validate_artifacts,
+)
+from kci_artifact.affected import (
+    ANSWER_UNIT,
+    VERDICT_AFFECTED,
+    VERDICT_WIDENED,
+    AffectedAnswer,
+    Unit,
+    parse_affected_answer,
+    render_affected_argv,
+    render_targets_argv,
+    unit_names_of,
+    units_file_text,
+    units_of,
 )

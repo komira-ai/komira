@@ -6,7 +6,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_release_machine import machine_schema_version, parse_machine_file
+from kci_release_machine import is_digest_pinned_image, machine_schema_version, parse_machine_file
 
 
 comptime _SRC: String = "machine file"
@@ -172,10 +172,16 @@ def test_step_kinds() raises:
 
 # ---- stage environment, farm_connected, validations --------------------------
 
+comptime _IMAGE: String = (
+    "registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+)
+
 comptime _SMOKE: String = (
-    "  validation {\n    name: \"install-smoke\"\n    kind: CONDA_INSTALL_SMOKE\n    install: \"komira_all\"\n"
-    "    extra_channel: \"https://conda.modular.com/max\"\n    extra_channel: \"conda-forge\"\n"
-    "    program: \"release/smoke/smoke_komira_encoding.mojo\"\n  }\n"
+    "  validation {\n    name: \"install\"\n    kind: CONDA_INSTALL_SMOKE\n"
+    "    image: \"registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\"\n"
+    "    install: \"komira_encoding\"\n    install: \"komira_all\"\n"
+    "    compiler_channel: \"https://conda.modular.com/max\"\n    extra_channel: \"conda-forge\"\n"
+    "    program: \"release/smoke/smoke_komira_encoding.mojo\"\n    wait_for_index_seconds: 600\n  }\n"
 )
 
 
@@ -211,7 +217,22 @@ def _with_validation(fields: String) -> String:
     )
 
 
-comptime _V_OK: String = "name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"s/smoke.mojo\""
+comptime _V_REST: String = (
+    "image: \"registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\""
+    " compiler_channel: \"https://conda.modular.com/max\""
+)
+"""Every field a validation needs besides name, kind, install and program."""
+
+comptime _V_OK: String = (
+    "name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"release/smoke.mojo\" "
+    "image: \"registry.example.invalid/pixi:1@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\""
+    " compiler_channel: \"https://conda.modular.com/max\""
+)
+
+
+def _v(fields: String) -> String:
+    """`fields` plus the image and the compiler channel."""
+    return fields + String(" ") + String(_V_REST)
 
 
 def test_three_stages_read_back() raises:
@@ -228,15 +249,17 @@ def test_three_stages_read_back() raises:
     assert_equal(gm.steps[0].channel, String("gamma"))
     assert_equal(len(gm.steps[0].validations), 1)
     ref v = gm.steps[0].validations[0]
-    assert_equal(v.name, String("install-smoke"))
+    assert_equal(v.name, String("install"))
     assert_equal(v.kind, String("CONDA_INSTALL_SMOKE"))
-    assert_equal(v.install, String("komira_all"))
-    assert_equal(len(v.extra_channels), 2)
-    assert_equal(v.extra_channels[0], String("https://conda.modular.com/max"))
-    assert_equal(v.extra_channels[1], String("conda-forge"))
+    assert_equal(v.image, String(_IMAGE))
+    assert_equal(len(v.installs), 2)
+    assert_equal(v.installs[0], String("komira_encoding"))
+    assert_equal(v.installs[1], String("komira_all"))
+    assert_equal(v.compiler_channel, String("https://conda.modular.com/max"))
+    assert_equal(len(v.extra_channels), 1)
+    assert_equal(v.extra_channels[0], String("conda-forge"))
     assert_equal(v.program, String("release/smoke/smoke_komira_encoding.mojo"))
-    # an unset tool is pixi
-    assert_equal(v.tool, String("pixi"))
+    assert_equal(v.wait_for_index_seconds, 600)
     assert_equal(v.line, 18)
     var p = g.stage(String("publish-prod"))
     assert_equal(p.environment, String("prod"))
@@ -244,7 +267,7 @@ def test_three_stages_read_back() raises:
     assert_equal(len(p.steps[0].validations), 0)
     var names = gm.validation_names()
     assert_equal(len(names), 1)
-    assert_equal(names[0], String("install-smoke"))
+    assert_equal(names[0], String("install"))
 
 
 def test_stage_environment() raises:
@@ -283,7 +306,8 @@ def test_validation_reads_back_alone() raises:
     ref v = g.stages[0].steps[0].validations[0]
     assert_equal(v.name, String("v"))
     assert_equal(len(v.extra_channels), 0)
-    assert_equal(v.tool, String("pixi"))
+    # an unset wait is no wait
+    assert_equal(v.wait_for_index_seconds, 0)
     assert_equal(v.line, 11)
 
 
@@ -301,47 +325,112 @@ def test_validation_belongs_to_a_publish_step() raises:
 
 def test_validation_fields() raises:
     _assert_refused(
-        _with_validation(String("kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"s.mojo\"")),
+        _with_validation(_v(String("kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"release/s.mojo\""))),
         String("line 11: a validation of step 'publish' of stage 'p' has no name"),
     )
     _assert_refused(
-        _with_validation(String("name: \"Smoke\" kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"s.mojo\"")),
+        _with_validation(_v(String("name: \"Smoke\" kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"release/s.mojo\""))),
         String("has name 'Smoke'; a validation name is [a-z][a-z0-9-]*"),
     )
     _assert_refused(
-        _with_validation(String("name: \"v\" install: \"a\" program: \"s.mojo\"")),
+        _with_validation(_v(String("name: \"v\" install: \"a\" program: \"release/s.mojo\""))),
         String("validation 'v' of step 'publish' of stage 'p' has no kind (CONDA_INSTALL_SMOKE)"),
     )
     _assert_refused(
-        _with_validation(String("name: \"v\" kind: PYTEST install: \"a\" program: \"s.mojo\"")),
+        _with_validation(_v(String("name: \"v\" kind: PYTEST install: \"a\" program: \"release/s.mojo\""))),
         String("validation kind 'PYTEST' is not CONDA_INSTALL_SMOKE"),
     )
     _assert_refused(
-        _with_validation(String("name: \"v\" kind: CONDA_INSTALL_SMOKE program: \"s.mojo\"")),
-        String("validation 'v' of step 'publish' of stage 'p' has no install (the package to install)"),
+        _with_validation(_v(String("name: \"v\" kind: CONDA_INSTALL_SMOKE program: \"release/s.mojo\""))),
+        String("validation 'v' of step 'publish' of stage 'p' has no install (a package to install)"),
     )
     _assert_refused(
-        _with_validation(String("name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"a\"")),
-        String("has no program (the smoke program to run)"),
+        _with_validation(_v(String("name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"a\""))),
+        String("has no program (the program to run)"),
     )
     _assert_refused(
-        _with_validation(String(_V_OK) + String(" tool: conda")),
-        String("has tool 'conda'; this kci installs with pixi"),
+        _with_validation(String(_V_OK) + String(" install: \"komira_all\"")),
+        String("names install 'komira_all' twice"),
     )
     _assert_refused(
-        _with_validation(String(_V_OK) + String(" tool: pixi tool: pixi")),
-        String("field 'tool' is set twice in validation 'v'"),
+        _with_validation(String(_V_OK) + String(" install: \"Komira\"")),
+        String("has install 'Komira'; a package name is [a-z0-9_.-]+"),
     )
     _assert_refused(
-        _with_validation(String(_V_OK) + String(" timeout: 5")),
-        String("unknown field 'timeout' in validation 'v' (expected name, kind, install, extra_channel, program, tool)"),
+        _with_validation(String(_V_OK) + String(" tool: pixi")),
+        String("unknown field 'tool' in validation 'v' (expected name, kind, image, install, compiler_channel,")
+        + String(" extra_channel, program, wait_for_index_seconds)"),
+    )
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" program: \"release/t.mojo\"")),
+        String("field 'program' is set twice in validation 'v'"),
+    )
+
+
+def test_validation_image_is_pinned_by_digest() raises:
+    var base = String("name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"release/s.mojo\"")
+    base += String(" compiler_channel: \"https://conda.modular.com/max\"")
+    _assert_refused(
+        _with_validation(base),
+        String("validation 'v' of step 'publish' of stage 'p' has no image (the container image, pinned by digest)"),
+    )
+    var hex64 = String("0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef")
+    var bad = List[String]()
+    bad.append(String("ghcr.io/prefix-dev/pixi:0.67.2-bookworm-slim"))  # a tag alone
+    bad.append(String("ghcr.io/prefix-dev/pixi@sha256:") + String(hex64[byte=0:63]))  # 63 hex
+    bad.append(String("ghcr.io/prefix-dev/pixi@sha256:") + hex64.upper())  # upper case
+    bad.append(String("@sha256:") + hex64)  # no reference
+    bad.append(String("a@b@sha256:") + hex64)  # a second @
+    bad.append(String("ghcr.io/x y@sha256:") + hex64)  # a space
+    bad.append(String("ghcr.io/x@sha512:") + hex64 + hex64)  # another digest
+    for i in range(len(bad)):
+        _assert_refused(
+            _with_validation(base + String(" image: \"") + bad[i] + String("\"")),
+            String("has image '") + bad[i] + String("'; an image is pinned by digest, <reference>@sha256:<64 lowercase hex>"),
+        )
+    assert_true(is_digest_pinned_image(String(_IMAGE)))
+
+
+def test_validation_compiler_channel() raises:
+    var base = String("name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"release/s.mojo\"")
+    base += String(" image: \"") + String(_IMAGE) + String("\"")
+    _assert_refused(
+        _with_validation(base),
+        String("has no compiler_channel (the channel mojo-compiler comes from)"),
+    )
+    _assert_refused(
+        _with_validation(base + String(" compiler_channel: \"conda-forge\"")),
+        String("has compiler_channel 'conda-forge'; a compiler channel is an https:// URL"),
+    )
+    _assert_refused(
+        _with_validation(
+            base + String(" compiler_channel: \"https://conda.modular.com/max\" extra_channel: \"https://conda.modular.com/max\"")
+        ),
+        String("names 'https://conda.modular.com/max' as compiler_channel and as extra_channel"),
+    )
+
+
+def test_validation_wait_for_index_seconds() raises:
+    var g = parse_machine_file(_with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3600")), String(_SRC))
+    assert_equal(g.stages[0].steps[0].validations[0].wait_for_index_seconds, 3600)
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" wait_for_index_seconds: 3601")),
+        String("has wait_for_index_seconds 3601; it is 0 to 3600"),
+    )
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" wait_for_index_seconds: \"ten\"")),
+        String("field 'wait_for_index_seconds' of validation 'v' is 'ten'; it is a whole number of seconds"),
+    )
+    _assert_refused(
+        _with_validation(String(_V_OK) + String(" wait_for_index_seconds: 1.5")),
+        String("is '1.5'; it is a whole number of seconds"),
     )
 
 
 def test_validation_extra_channel() raises:
     _assert_refused(
-        _with_validation(String(_V_OK) + String(" extra_channel: \"http://conda.modular.com/max\"")),
-        String("has extra_channel 'http://conda.modular.com/max'; an extra channel is an https:// URL or conda-forge"),
+        _with_validation(String(_V_OK) + String(" extra_channel: \"http://conda.example.invalid/x\"")),
+        String("has extra_channel 'http://conda.example.invalid/x'; an extra channel is an https:// URL or conda-forge"),
     )
     _assert_refused(
         _with_validation(String(_V_OK) + String(" extra_channel: \"bioconda\"")),
@@ -360,15 +449,18 @@ def test_validation_extra_channel() raises:
 def test_validation_program_path() raises:
     var bad = List[String]()
     bad.append(String("/abs/smoke.mojo"))
-    bad.append(String("smoke.py"))
+    bad.append(String("release/smoke.py"))
     bad.append(String("release/../smoke.mojo"))
     bad.append(String(".mojo"))
+    # outside release/
+    bad.append(String("src/smoke.mojo"))
+    bad.append(String("releases/smoke.mojo"))
     for i in range(len(bad)):
         _assert_refused(
             _with_validation(
-                String("name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"") + bad[i] + String("\"")
+                _v(String("name: \"v\" kind: CONDA_INSTALL_SMOKE install: \"a\" program: \"") + bad[i] + String("\""))
             ),
-            String("has program '") + bad[i] + String("'; a program is a relative path to a .mojo file inside the repository"),
+            String("has program '") + bad[i] + String("'; a program is a relative path to a .mojo file under release/"),
         )
 
 

@@ -34,6 +34,14 @@
 #                  reading the checkout, or its output could not be read:
 #                  no verdict (KCI-E-CANNOT-TELL)
 #
+# The per-change check (`affected_by` set, affected.mojo) adds two ids and no
+# exit number: REFUSED with KCI-E-AFFECTED-VACUOUS (an empty change, or one
+# that reaches no declared unit) and INDETERMINATE with KCI-E-AFFECTED (an
+# affected command that could not be started, failed, timed out or answered
+# outside its grammar: never a widening). A unit whose build fails is FAILED
+# (KCI-E-BUILD-FAILED); a file without what the check needs is REFUSED
+# (KCI-E-ARTIFACT).
+#
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
@@ -56,6 +64,9 @@ struct BuildRequest(Copyable, Movable):
     release directory (`--release-dir`); this step writes only under
     `<release_dir>/<platform>` (kci_api's layout). `plan` is `kci run
     --plan`: resolve and render, build nothing (build.mojo).
+    `affected_by` is `kci run --affected-by` (the change's base, a full
+    commit id) or "": when set, the step is the per-change check
+    (affected.mojo) and `release_dir` is not used.
 
     Layout: owned values only. No pointer field."""
 
@@ -69,6 +80,7 @@ struct BuildRequest(Copyable, Movable):
     var run: RunIdentity
     var build_timeout_s: Int
     var plan: Bool
+    var affected_by: String
 
     def __init__(out self, var run: RunIdentity):
         self.step_name = String("")
@@ -81,6 +93,7 @@ struct BuildRequest(Copyable, Movable):
         self.run = run^
         self.build_timeout_s = DEFAULT_BUILD_TIMEOUT_S
         self.plan = False
+        self.affected_by = String("")
 
     def platform_dir(self) raises -> String:
         """`<release_dir>/<platform>`: the directory this step builds into,

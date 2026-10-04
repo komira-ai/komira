@@ -34,6 +34,9 @@ mojo_library(
     test_srcs = [
         "tests/test_artifact_parse.mojo",
         "tests/test_artifact_render.mojo",
+        # the per-change check: targets, checks, the two commands, the units,
+        # both argvs and the affected tool's answer grammar
+        "tests/test_artifact_units.mojo",
         "tests/test_artifact_validate.mojo",
         "tests/test_release_artifacts_file.mojo",
     ],

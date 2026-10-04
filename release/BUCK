@@ -1,9 +1,16 @@
-# The release files: what a release of komira builds (artifacts.textproto)
-# and where it is published (channels.textproto). .github/workflows/kci.yml
-# reads both by path; nothing builds them. Each is welded to the test of the
-# parser that reads it, so a file kci would refuse fails `./buck2 build //...`:
+# The release files: the release machine (machine.textproto: the stages and
+# their steps), what a release of komira builds (artifacts.textproto) and where
+# it is published (channels.textproto). .github/workflows/kci.yml names the
+# machine file, which names the other two; nothing builds them. Each is welded
+# to the test of the parser that reads it, so a file kci would refuse fails
+# `./buck2 build //...`:
+#   machine.textproto    src/kci_ci_check (test_repo_kci_yml: the machine file,
+#                        and kci.yml held to it)
 #   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
-#   channels.textproto   src/kci_release_channel (test_release_channels_file)
+#   channels.textproto   src/kci_release_channel (test_release_channels_file),
+#                        src/kci_ci_check (test_repo_kci_yml)
+# The programs the machine file's validations run are in release/smoke, each a
+# mojo_test against the in-repository library.
 # Changes need the release approver's review (.github/CODEOWNERS).
 export_file(
     name = "artifacts.textproto",
@@ -12,5 +19,10 @@ export_file(
 
 export_file(
     name = "channels.textproto",
-    visibility = ["//src/kci_release_channel:"],
+    visibility = ["//src/kci_ci_check:", "//src/kci_release_channel:"],
+)
+
+export_file(
+    name = "machine.textproto",
+    visibility = ["//src/kci_ci_check:"],
 )

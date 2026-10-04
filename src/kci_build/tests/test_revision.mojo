@@ -217,7 +217,7 @@ def test_head_not_the_revision_is_refused() raises:
         String(_PREFIX) + String("'") + String(_REV)
         + String("' is not the commit checked out in --work-dir '") + root
         + String("/repo' (HEAD is '") + String(_SRC)
-        + String("'): the stamp would name a commit whose bytes are not the ones built"),
+        + String("'): kci would name a commit whose bytes are not the ones built"),
     )
     assert_equal(len(g.calls), 2)
 
@@ -230,7 +230,7 @@ def test_modified_tracked_files_are_refused() raises:
     assert_equal(
         r.message,
         String(_PREFIX) + String("--work-dir '") + root
-        + String("/repo' has modified tracked files ( M src/komira_encoding/BUCK): the stamp")
+        + String("/repo' has modified tracked files ( M src/komira_encoding/BUCK): kci")
         + String(" would name a commit whose bytes are not the ones built"),
     )
     assert_equal(len(g.calls), 3)
