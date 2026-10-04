@@ -26,6 +26,7 @@ from komira_encoding import base64_url_decode_nopad
 from komira_gcp_core import (
     GOOGLE_OAUTH2_TOKEN_URI,
     JWT_LIFETIME_SECONDS,
+    MAX_EXPIRES_IN_SECONDS,
     METADATA_DEFAULT_HOST,
     AuthorizedUser,
     ServiceAccountKey,
@@ -531,6 +532,21 @@ def test_token_response_to_expiry() raises:
     )
     assert_equal(tok.token, "ya29.TOKEN")
     assert_equal(tok.expires_at_ms, 5_000 + 3_599_000)
+    # A string of digits is read as its number (google-auth's `int()`).
+    var s = parse_token_response(
+        _response(200, '{"access_token":"ya29.TOKEN","expires_in":"3599"}'),
+        String("E"),
+        5_000,
+    )
+    assert_equal(s.expires_at_ms, 5_000 + 3_599_000)
+    # The bound itself is accepted.
+    var most = parse_token_response(
+        _response(200, '{"access_token":"ya29.TOKEN","expires_in":31536000}'),
+        String("E"),
+        0,
+    )
+    assert_equal(most.expires_at_ms, MAX_EXPIRES_IN_SECONDS * 1000)
+    assert_equal(MAX_EXPIRES_IN_SECONDS, 31_536_000)
 
 
 def test_token_response_refusals() raises:
@@ -559,8 +575,36 @@ def test_token_response_refusals() raises:
         "the endpoint E answered 200 with no expires_in",
     )
     assert_equal(
-        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":"3599"}'),
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":"35x9"}'),
         "the endpoint E answered 200 with an expires_in that is not an integer",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":""}'),
+        "the endpoint E answered 200 with an expires_in that is not an integer",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":"-5"}'),
+        "the endpoint E answered 200 with an expires_in that is not an integer",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":"0"}'),
+        "the endpoint E answered 200 with an expires_in that is not positive",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":31536001}'),
+        "the endpoint E answered 200 with an expires_in out of range",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":9223372036854775807}'),
+        "the endpoint E answered 200 with an expires_in out of range",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":"99999999999"}'),
+        "the endpoint E answered 200 with an expires_in out of range",
+    )
+    assert_equal(
+        _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":"9999999999999999999"}'),
+        "the endpoint E answered 200 with an expires_in out of range",
     )
     assert_equal(
         _parse_error(200, '{"access_token":"ya29.SECRET","expires_in":3599.5}'),

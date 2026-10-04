@@ -79,6 +79,11 @@ grant assertion and google-auth's `_DEFAULT_TOKEN_LIFETIME_SECS`."""
 
 comptime FORM_CONTENT_TYPE: StaticString = "application/x-www-form-urlencoded"
 
+comptime MAX_EXPIRES_IN_SECONDS: Int64 = 86400 * 365
+"""The longest `expires_in` read: a year. Google's tokens live an hour; a
+larger value is refused rather than carried into the cache's millisecond
+arithmetic, where it could overflow."""
+
 comptime _MAX_DEPTH = 16
 """Nesting limit for a credentials file or token response (both are flat
 objects)."""
@@ -293,14 +298,36 @@ def token_error(res: TokenHttpResponse, what: String) -> Error:
     return Error(msg)
 
 
+def _expires_in_digits(text: String, what: String) raises -> Int64:
+    """An `expires_in` sent as a JSON string: ASCII digits only. More than
+    18 of them is out of range (the value could not fit an Int64)."""
+    var b = text.as_bytes()
+    if len(b) == 0:
+        raise Error(what + " answered 200 with an expires_in that is not an integer")
+    for i in range(len(b)):
+        if b[i] < UInt8(0x30) or b[i] > UInt8(0x39):
+            raise Error(
+                what + " answered 200 with an expires_in that is not an integer"
+            )
+    if len(b) > 18:
+        raise Error(what + " answered 200 with an expires_in out of range")
+    var v: Int64 = 0
+    for i in range(len(b)):
+        v = v * 10 + Int64(Int(b[i] - UInt8(0x30)))
+    return v
+
+
 def parse_token_response(
     res: TokenHttpResponse, what: String, now_ms: Int64
 ) raises -> AccessToken:
     """The token of a token response: a 200 whose body is a JSON object with
     a non-empty string `access_token` and a positive integer `expires_in`
-    (seconds from `now_ms`, RFC 6749 §5.1). Any other status raises
-    `token_error`. `what` names the endpoint in every error, and no error
-    repeats a body byte."""
+    (seconds from `now_ms`, RFC 6749 §5.1), as a JSON number or, as
+    google-auth also takes it, a string of digits, at most
+    `MAX_EXPIRES_IN_SECONDS`. A missing `expires_in` is refused: google-auth
+    then treats the token as never expiring, and a cache cannot. Any other
+    status raises `token_error`. `what` names the endpoint in every error,
+    and no error repeats a body byte."""
     if res.status != 200:
         raise token_error(res, what)
     var doc: JsonValue
@@ -321,15 +348,24 @@ def parse_token_response(
     if not doc.has("expires_in"):
         raise Error(what + " answered 200 with no expires_in")
     var e = doc.get("expires_in")
-    if not e.is_number() or not e.is_integral_number():
-        raise Error(what + " answered 200 with an expires_in that is not an integer")
     var secs: Int64
-    try:
-        secs = e.as_int64()
-    except:
-        raise Error(what + " answered 200 with an expires_in out of range")
+    if e.is_string():
+        # google-auth's `_parse_expiry` takes `int(expires_in)`, so a string
+        # of digits is read as its number.
+        secs = _expires_in_digits(e.as_string(), what)
+    else:
+        if not e.is_number() or not e.is_integral_number():
+            raise Error(
+                what + " answered 200 with an expires_in that is not an integer"
+            )
+        try:
+            secs = e.as_int64()
+        except:
+            raise Error(what + " answered 200 with an expires_in out of range")
     if secs <= 0:
         raise Error(what + " answered 200 with an expires_in that is not positive")
+    if secs > MAX_EXPIRES_IN_SECONDS:
+        raise Error(what + " answered 200 with an expires_in out of range")
     return AccessToken.expiring_in(token^, now_ms, secs)
 
 
