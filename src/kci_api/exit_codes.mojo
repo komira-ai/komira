@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/exit_codes.mojo -- the ONE exit-code table of every kci
+# src/kci_api/exit_codes.mojo -- the ONE exit-code table of every kci
 #   verb.
 # =============================================================================
 #
@@ -38,8 +38,8 @@
 # Pure functions; no pointer.
 # =============================================================================
 
-from kci_contract.errors import ERROR_INTERNAL, ERROR_SELECTOR, ERROR_USAGE
-from kci_contract.outcome import (
+from kci_api.errors import ERROR_INTERNAL, ERROR_SELECTOR, ERROR_USAGE
+from kci_api.outcome import (
     OUTCOME_FAILED,
     OUTCOME_INDETERMINATE,
     OUTCOME_NOOP,

@@ -49,7 +49,7 @@ from kci_artifact_declaration import (
     require_one_manifest,
 )
 from kci_artifact_manifest import ArtifactManifest, read_artifact_manifest
-from kci_contract import platform_of_conda_subdir, require_member_platform
+from kci_api import platform_of_conda_subdir, require_member_platform
 from kci_release_channel import ARTIFACT_TYPE_CONDA
 
 from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata
@@ -249,7 +249,7 @@ def verify_member(declaration: String, dir: String) raises -> ReleaseMember:
 
 
 def member_platform(member: ReleaseMember, release_platform: String) raises -> String:
-    """The platform a verified member is for (kci_contract's platform table).
+    """The platform a verified member is for (kci_api's platform table).
 
     A CONDA member's platform is the one whose conda subdir its manifest
     names (`linux-64` -> `linux-x86_64`, `noarch` -> `noarch`). The artifact
