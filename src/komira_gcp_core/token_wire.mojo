@@ -362,6 +362,15 @@ def credentials_type(doc: JsonValue, where: String) raises -> String:
     return t.as_string()
 
 
+def credentials_quota_project(doc: JsonValue, where: String) raises -> String:
+    """A credentials file's `quota_project_id`, "" when it names none.
+    gcloud writes one into an authorized_user file; a service-account key
+    may carry one. An API that bills a quota project (Firestore among them)
+    refuses user credentials without one, so the caller sends it as
+    `x-goog-user-project`."""
+    return _optional(doc, String("quota_project_id"), where)
+
+
 def _required(doc: JsonValue, field: String, where: String) raises -> String:
     if not doc.has(field):
         raise Error("the credentials file " + where + " has no \"" + field + "\"")

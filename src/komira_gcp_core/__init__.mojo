@@ -187,6 +187,7 @@ from .token_wire import (
     TokenEndpoint,
     authorized_user_from_json,
     authorized_user_refresh_request,
+    credentials_quota_project,
     credentials_type,
     jwt_grant_assertion,
     metadata_endpoint,

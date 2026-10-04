@@ -46,7 +46,10 @@
 # Not done here, and said so: no retry of the probe or of a token fetch
 # (google-auth retries the probe three times); App Engine standard's legacy
 # `app_identity` API; impersonated_service_account and
-# external_account_authorized_user files; the quota project.
+# external_account_authorized_user files; the GOOGLE_CLOUD_QUOTA_PROJECT
+# override. A file's `quota_project_id` IS read, and exposed
+# (`AdcFetcher.quota_project_id()`) for the client to send as
+# `x-goog-user-project`; sending it is the client's.
 # =============================================================================
 
 from komira_http_client.client import HttpClientConfig
@@ -77,6 +80,7 @@ from .token_wire import (
     ServiceAccountKey,
     TokenEndpoint,
     authorized_user_from_json,
+    credentials_quota_project,
     credentials_type,
     metadata_endpoint,
     metadata_ping_answered,
@@ -195,7 +199,9 @@ struct AdcOptions(Copyable, Movable, Deinitable):
 struct AdcCredentials(Movable, Deinitable):
     """The credentials the chain chose: which step (`source`), how a token
     is minted (`kind`), where (`origin`: the file's path or the metadata
-    server's URL), and the parsed credential. Not `Writable`."""
+    server's URL), the parsed credential, and the file's
+    `quota_project_id` ("" when it names none, and for the metadata
+    server). Not `Writable`."""
 
     var source: Int
     var kind: Int
@@ -203,6 +209,7 @@ struct AdcCredentials(Movable, Deinitable):
     var key: Optional[ServiceAccountKey]
     var user: Optional[AuthorizedUser]
     var metadata: Optional[TokenEndpoint]
+    var quota_project_id: String
 
     def __init__(out self, source: Int, kind: Int, var origin: String):
         self.source = source
@@ -211,6 +218,7 @@ struct AdcCredentials(Movable, Deinitable):
         self.key = None
         self.user = None
         self.metadata = None
+        self.quota_project_id = String("")
 
 
 def gcloud_adc_path[E: EnvSource](mut env: E, windows: Bool) -> String:
@@ -228,6 +236,17 @@ def gcloud_adc_path[E: EnvSource](mut env: E, windows: Bool) -> String:
     if home.byte_length() == 0:
         return String("")
     return home + "/.config/gcloud/" + String(ADC_WELL_KNOWN_FILE)
+
+
+def _require_https(endpoint: TokenEndpoint, where: String) raises:
+    """A credentials file's grant carries a credential (a signed assertion,
+    or a refresh token and client secret), and goes over the TLS transport:
+    its `token_uri` must be https."""
+    if endpoint.scheme != "https":
+        raise Error(
+            "ADC: the credentials file " + where + "'s token_uri is not an"
+            " https URL; its grant carries a credential"
+        )
 
 
 def _from_file(
@@ -257,12 +276,18 @@ def _from_file(
                 "ADC: the service-account key " + where + " needs scopes (for"
                 " the JWT bearer grant) or a self-signed JWT audience"
             )
+        if kind == ADC_KIND_SERVICE_ACCOUNT:
+            _require_https(key.token_endpoint, where)
         var out = AdcCredentials(source, kind, where.copy())
         out.key = key^
+        out.quota_project_id = credentials_quota_project(doc, where)
         return out^
     if t == "authorized_user":
+        var user = authorized_user_from_json(doc, where)
+        _require_https(user.token_endpoint, where)
         var out = AdcCredentials(source, ADC_KIND_AUTHORIZED_USER, where.copy())
-        out.user = authorized_user_from_json(doc, where)
+        out.user = user^
+        out.quota_project_id = credentials_quota_project(doc, where)
         return out^
     if t == "external_account":
         raise Error(
@@ -320,6 +345,11 @@ def resolve_adc[E: EnvSource, F: FileSource, X: GcpHttpTransport](
     var explicit = env.get(ENV_GOOGLE_APPLICATION_CREDENTIALS)
     if explicit.byte_length() > 0:
         if not files.exists(explicit):
+            if files.present(explicit):
+                raise Error(
+                    "ADC: GOOGLE_APPLICATION_CREDENTIALS names "
+                    + explicit + ", which is not a regular file"
+                )
             raise Error(
                 "ADC: GOOGLE_APPLICATION_CREDENTIALS names the file "
                 + explicit + ", which does not exist"
@@ -358,6 +388,7 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
     server), `XT` the TLS one (Google's token endpoint)."""
 
     var kind: Int
+    var _quota_project_id: String
     var _metadata: Optional[MetadataServerFetcher[Self.XP]]
     var _key: Optional[ServiceAccountKeyFetcher[Self.XT, Self.W]]
     var _jwt: Optional[SelfSignedJwtFetcher[Self.W]]
@@ -372,6 +403,7 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
         options: AdcOptions,
     ) raises:
         self.kind = creds.kind
+        self._quota_project_id = creds.quota_project_id.copy()
         self._metadata = None
         self._key = None
         self._jwt = None
@@ -408,6 +440,12 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
             )
         else:
             raise Error("AdcFetcher: unknown credential kind " + String(creds.kind))
+
+    def quota_project_id(self) -> String:
+        """The credentials file's `quota_project_id`, "" when none. A client
+        sends it as `x-goog-user-project`; Firestore, among others, refuses
+        user credentials that carry none."""
+        return self._quota_project_id.copy()
 
     def fetch(mut self, now_ms: Int64) raises -> AccessToken:
         if self._metadata:

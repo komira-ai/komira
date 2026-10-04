@@ -30,7 +30,7 @@
 # =============================================================================
 
 from std.collections import Dict
-from std.os.path import exists, isfile
+from std.os.path import exists, isfile, lexists
 
 from komira_clock import now_unix_ms
 from komira_core_ffi.posix import _read_env
@@ -90,6 +90,13 @@ trait FileSource:
     """Small whole files, read by path."""
 
     def exists(mut self, path: String) -> Bool:
+        """Whether `path` is a regular file (through any symlink)."""
+        ...
+
+    def present(mut self, path: String) -> Bool:
+        """Whether anything is at `path`: a regular file, a directory, a
+        broken symlink. Only read to say WHY a path that is not a regular
+        file cannot be used."""
         ...
 
     def read(mut self, path: String) raises -> String:
@@ -107,6 +114,9 @@ struct ProcessFiles(FileSource, Movable, Deinitable):
     def exists(mut self, path: String) -> Bool:
         return exists(path) and isfile(path)
 
+    def present(mut self, path: String) -> Bool:
+        return lexists(path)
+
     def read(mut self, path: String) raises -> String:
         try:
             with open(path, "r") as f:
@@ -116,23 +126,38 @@ struct ProcessFiles(FileSource, Movable, Deinitable):
 
 
 struct MapFiles(FileSource, Movable, Deinitable):
-    """Files held in memory. Records every path asked about or read."""
+    """Files held in memory, and paths holding something that is not a
+    regular file (`put_other`: a directory, a broken symlink). Records every
+    path asked about or read."""
 
     var files: Dict[String, String]
+    var others: List[String]
     var reads: List[String]
     var probes: List[String]
 
     def __init__(out self):
         self.files = Dict[String, String]()
+        self.others = List[String]()
         self.reads = List[String]()
         self.probes = List[String]()
 
     def put(mut self, path: String, contents: String):
         self.files[path] = contents
 
+    def put_other(mut self, path: String):
+        self.others.append(path)
+
     def exists(mut self, path: String) -> Bool:
         self.probes.append(path)
         return path in self.files
+
+    def present(mut self, path: String) -> Bool:
+        if path in self.files:
+            return True
+        for i in range(len(self.others)):
+            if self.others[i] == path:
+                return True
+        return False
 
     def read(mut self, path: String) raises -> String:
         self.reads.append(path)

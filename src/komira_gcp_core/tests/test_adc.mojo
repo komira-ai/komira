@@ -240,6 +240,8 @@ def test_env_file_kinds(mut seen: Seen) raises:
     assert_equal(c3.kind, ADC_KIND_AUTHORIZED_USER)
     assert_equal(c3.source, ADC_SOURCE_ENV_FILE)
     assert_true(Bool(c3.user))
+    assert_equal(c3.quota_project_id, "")
+    assert_equal(c.quota_project_id, "")
     assert_equal(len(probe.sent), 0)
 
 
@@ -269,6 +271,43 @@ def test_env_file_refusals(mut seen: Seen) raises:
     )
     assert_equal(len(probe.sent), 0)
     assert_false(env.was_read(String("HOME")))
+
+    # A directory (or a broken symlink) is not reported as missing.
+    var denv = MapEnv()
+    denv.set(String(_GAC), String("/secrets"))
+    var dfiles = MapFiles()
+    dfiles.put_other(String("/secrets"))
+    assert_equal(
+        _refusal(seen, denv, dfiles, probe, AdcOptions()),
+        "ADC: GOOGLE_APPLICATION_CREDENTIALS names /secrets, which is not a"
+        " regular file",
+    )
+
+    # A grant carries a credential: its token_uri must be https.
+    assert_equal(
+        _env_file_refusal(
+            seen,
+            _key_text().replace(
+                "https://oauth2.googleapis.com/token", "http://127.0.0.1:9/t"
+            ),
+            AdcOptions(_scopes()),
+        ),
+        "ADC: the credentials file /secrets/sa.json's token_uri is not an"
+        " https URL; its grant carries a credential",
+    )
+    assert_equal(
+        _env_file_refusal(
+            seen,
+            String(
+                '{"type":"authorized_user","client_id":"cid",'
+                '"client_secret":"s","refresh_token":"r",'
+                '"token_uri":"http://127.0.0.1:9/t"}'
+            ),
+            AdcOptions(),
+        ),
+        "ADC: the credentials file /secrets/sa.json's token_uri is not an"
+        " https URL; its grant carries a credential",
+    )
 
     assert_equal(
         _env_file_refusal(
@@ -593,7 +632,8 @@ def test_end_to_end_authorized_user_sends_no_scope(mut seen: Seen) raises:
         String(_WELL_KNOWN),
         String(
             '{"type":"authorized_user","client_id":"cid","client_secret":"s",'
-            '"refresh_token":"r","token_uri":"https://127.0.0.1:8443/token"}'
+            '"refresh_token":"r","token_uri":"https://127.0.0.1:8443/token",'
+            '"quota_project_id":"quota-proj"}'
         ),
     )
     var capture = ArcPointer(List[UInt8]())
@@ -624,6 +664,8 @@ def test_end_to_end_authorized_user_sends_no_scope(mut seen: Seen) raises:
         wire,
     )
     assert_false("scope" in wire, wire)
+    # The file's quota project reaches the caller.
+    assert_equal(src.fetcher().quota_project_id(), "quota-proj")
 
 
 def test_end_to_end_always_self_signed(mut seen: Seen) raises:
