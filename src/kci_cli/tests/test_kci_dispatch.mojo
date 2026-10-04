@@ -14,7 +14,7 @@ from komira_libc.posix import _read_env
 
 from kci_build import BuildRequest
 from kci_cli import CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, write_whole_file
-from kci_contract import (
+from kci_api import (
     ERROR_BUILD_FAILED,
     ERROR_PUBLISH_DIFFERENT_BYTES,
     OUTCOME_FAILED,
@@ -24,7 +24,7 @@ from kci_contract import (
     ResultStep,
     parse_result,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_publish import PublishRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -55,7 +55,7 @@ struct FakeSteps(StageSteps, Movable):
 
     def build(mut self, req: BuildRequest, mut result: KciRunResult, mut recorder: CliRecorder) -> StepEnd:
         self.calls.append(
-            String("build ") + req.platform + String(" ") + req.declarations_file + String(" ") + req.revision_id
+            String("build ") + req.platform + String(" ") + req.artifacts_file + String(" ") + req.revision_id
             + String(" ") + req.work_dir + String(" ") + req.run.run_id + String(" step=") + req.step_name
             + String(" plan=") + String(req.plan)
         )
@@ -87,13 +87,13 @@ def _machine(dir: String) raises -> String:
     write_whole_file(
         p,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" } }\n")
+        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" } }\n")
         + String("stage { name: \"prod\" after: \"build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\"")
-        + String(" declarations: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
-        + String("stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" }")
-        + String(" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
-        + String("stage { name: \"pub-then-build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"")
-        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" } }\n"),
+        + String(" artifacts: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
+        + String("stage { name: \"all\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }")
+        + String(" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\" channels: \"c.textproto\" channel: \"komira\" } }\n")
+        + String("stage { name: \"pub-then-build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"")
+        + String(" channels: \"c.textproto\" channel: \"komira\" } step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" } }\n"),
     )
     return p^
 
@@ -259,7 +259,7 @@ def test_the_machine_file() raises:
     assert_equal(kci_main_with(_run(newer, String("build")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT-VERSION"))
     var bad = d + String("/bad.textproto")
-    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" declarations: \"d\" } }\n"))
+    write_whole_file(bad, String("schema_version: 1\nstage { name: \"x\" step { name: \"d\" kind: DEPLOY platform: \"linux-x86_64\" artifacts: \"d\" } }\n"))
     assert_equal(kci_main_with(_run(bad, String("x")), steps, rec), 3)
     assert_equal(_last(rec).error.id, String("KCI-E-FORMAT"))
     assert_equal(len(steps.calls), 0)
@@ -313,9 +313,9 @@ def _ci(dir: String, workflow_text: String) raises -> Int:
     write_whole_file(
         m,
         String("schema_version: 1\n")
-        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n")
+        + String("stage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n")
         + String("stage { name: \"prod\" after: \"build\" step { name: \"p\" kind: PUBLISH platform: \"linux-x86_64\"")
-        + String(" declarations: \"d\" channels: \"") + dir + String("/c.textproto\" channel: \"komira\" } }\n"),
+        + String(" artifacts: \"d\" channels: \"") + dir + String("/c.textproto\" channel: \"komira\" } }\n"),
     )
     write_whole_file(dir + String("/c.textproto"), String(_CHANNELS))
     # every `kci run` in the fixture reads the machine file being checked (R10)

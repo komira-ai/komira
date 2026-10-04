@@ -18,7 +18,7 @@
 # what a stage does is the machine file's to say. `ci check` is a utility
 # that changes nothing.
 #
-# The machine file is `--machine`, or kci_contract's `DEFAULT_MACHINE_FILE`
+# The machine file is `--machine`, or kci_api's `DEFAULT_MACHINE_FILE`
 # (`release/machine.textproto`) when the flag is absent; a relative path is
 # relative to the directory kci is started in.
 #
@@ -27,7 +27,7 @@
 #
 #   --only step:<name> | validation:<name>   (repeatable) run only these;
 #             the run is SELECTIVE and is never reported as a full one
-#             (kci_contract selection.mojo). The grammar is checked by
+#             (kci_api selection.mojo). The grammar is checked by
 #             `selectors_of` before anything is read (KCI-E-SELECTOR,
 #             exit 2); a selector naming nothing in the stage is refused
 #             after the machine file is read (KCI-E-SELECTOR-NO-MATCH, 3).
@@ -51,15 +51,15 @@
 #
 # Only the SELECTED steps count (every step, without `--only`).
 #
-# Every refusal here is a usage error (kci_contract's KCI-E-USAGE, exit 2;
+# Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
-# `--run-id`, `--attempt` and `--context` follow kci_contract's grammar; kci
+# `--run-id`, `--attempt` and `--context` follow kci_api's grammar; kci
 # reads no CI-vendor environment variable for any of them.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     DEFAULT_MACHINE_FILE,
     STEP_KIND_BUILD,
     STEP_KIND_PUBLISH,
@@ -71,7 +71,7 @@ from kci_contract import (
     parse_selectors,
     require_full_commit_id,
 )
-from kci_stage_graph import Selection, Stage
+from kci_release_machine import Selection, Stage
 
 comptime CLI_VERB_RUN: String = "run"
 comptime CLI_VERB_CI_CHECK: String = "ci check"
@@ -398,7 +398,7 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
 
 
 def selectors_of(cmd: KciCommand) raises -> List[Selector]:
-    """Every `--only`, parsed (kci_contract `parse_selectors`): raises on a
+    """Every `--only`, parsed (kci_api `parse_selectors`): raises on a
     malformed selector or the same one twice. The caller records the
     refusal as KCI-E-SELECTOR (exit 2) before anything is read."""
     return parse_selectors(cmd.only)
