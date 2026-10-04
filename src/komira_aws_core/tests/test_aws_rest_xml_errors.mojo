@@ -109,6 +109,8 @@ def test_status_as_code() raises:
     _err(head^, "404", "", "head-id")
     # [BC] a body that is not XML (a proxy's page, a cut-short body).
     _err(AwsResponse.of_text(503, "<html><body>busy"), "503", "", "")
+    # [BC] `_is_generic_error_response`: a well-formed 5xx <html> page too.
+    _err(AwsResponse.of_text(503, "<html><body>busy</body></html>"), "503", "", "")
     _err(AwsResponse.of_text(502, "Bad Gateway"), "502", "", "")
     var notutf8: List[UInt8] = [UInt8(0x3C), UInt8(0xFF), UInt8(0x3E)]
     _err(AwsResponse(500, notutf8^), "500", "", "")

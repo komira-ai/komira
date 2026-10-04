@@ -1,0 +1,109 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+)
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# AWS Secrets Manager: an awsJson 1.1 client generated at build time from
+# botocore's secretsmanager model (//third_party/botocore, pinned by sha256;
+# nothing of it is copied here), in client mode: each operation's request
+# builder and response parser, its endpoint resolved through the service's
+# published endpoint ruleset and partition table, embedded in the module,
+# and `SecretsManagerSecretsManagerClient`, which resolves each call's
+# endpoint and sends through komira_aws_core's send_sigv4_signed_request
+# (signing name `secretsmanager`) over the komira_http_core Connector it is
+# given, retrying as botocore's standard mode does (komira_aws_core's
+# aws_retry.mojo). The client's errors carry the HTTP status, the error
+# code and the service's message, never the response body.
+#
+# `operations` is a secret's lifecycle as a deployer and a server see it:
+# a secret created with its first value, a new version put, the value read,
+# the secret described, deleted and restored. An operation joins the list
+# with its own rows in the tests below. A write's ClientRequestToken is an
+# idempotency token in the model, and the service refuses a CreateSecret
+# or PutSecretValue without one: a token the caller sets is sent as set,
+# and one left unset is filled by the client verb with a fresh version 4
+# UUID (komira_aws_core's aws_idempotency_token) before the send, so each
+# retry of the call carries the same token, as botocore fills it. The
+# request builder sends what it is given.
+#
+# DeleteSecret's plain verb is hand-written (`overrides`, `hand_srcs`):
+# secretsmanager_overrides.delete_secret refuses a recovery window together
+# with a forced delete, and a window outside 7..30, before anything is sent,
+# then calls the generated `delete_secret_raw`. The module also recognises
+# a CreateSecret refused because the name is held by a secret scheduled for
+# deletion. The model states none of this; the manifest gives the reason.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the AWS Secrets Manager API reference (no upstream test body is
+# copied): test_secretsmanager_requests (the request each operation builds,
+# exactly, and the model's bounds), test_secretsmanager_responses (each
+# result decoded, and the error forms read through komira_aws_core and the
+# modeled error shapes), test_secretsmanager_endpoints (botocore's endpoint
+# cases for secretsmanager through every operation's resolver, and the
+# regional, FIPS, dual-stack and custom endpoints), test_no_env_reads (the
+# generated module reads no environment) and test_secretsmanager_client
+# (the generated client over a scripted connector: a value read, a missing
+# secret raised under its code, and a request as it reached the wire,
+# through komira_aws_core's AwsEchoConnector; and over a transport that
+# records each attempt, a CreateSecret's filled token, the same on its
+# retry, and a token the caller set) and test_secretsmanager_delete (the
+# hand-written DeleteSecret's refusals and sends, and the held name).
+#
+# No test here talks to the service.
+
+_SECRETSMANAGER = botocore_model("secretsmanager")
+
+_ENDPOINT_TESTS = botocore_endpoint_tests_path("secretsmanager")
+
+mojo_aws_client(
+    name = "komira_aws_secretsmanager",
+    endpoint_rules = _SECRETSMANAGER.endpoint_rules,
+    mode = "client",
+    model = _SECRETSMANAGER.model,
+    hand_srcs = ["secretsmanager_overrides.mojo"],
+    model_sha256 = _SECRETSMANAGER.sha256,
+    operations = [
+        "CreateSecret",
+        "DeleteSecret",
+        "DescribeSecret",
+        "GetSecretValue",
+        "PutSecretValue",
+        "RestoreSecret",
+    ],
+    overrides = "secretsmanager_overrides.json",
+    partitions = _SECRETSMANAGER.partitions,
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "gen/" + f: ":komira_aws_secretsmanager_gen[{}]".format(f)
+            for f in [
+                "__init__.mojo",
+                "_layout_probe.mojo",
+                "komira_aws_secretsmanager.mojo",
+                "secretsmanager_overrides.mojo",
+            ]
+        },
+        "tests/test_secretsmanager_endpoints.mojo": {
+            _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_secretsmanager_client.mojo",
+        "tests/test_secretsmanager_delete.mojo",
+        "tests/test_secretsmanager_endpoints.mojo",
+        "tests/test_secretsmanager_requests.mojo",
+        "tests/test_secretsmanager_responses.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        # The client's `send_with` takes a komira_retry loop.
+        "//src/komira_retry:komira_retry",
+    ],
+)
