@@ -16,6 +16,13 @@
 # missing. `is_unpinned_plan_digest` is the one predicate a consumer that must
 # refuse to act on a placeholder uses, instead of re-spelling the prefix.
 #
+# THE STEP AND NAME ARE PLAIN IDENTIFIERS. Both are pasted into the
+# placeholder, so free text could forge a pin: a name `img@sha256:<64 hex>`
+# reads as pinned to any parser that splits on the last `@`. A step or name
+# that is not `[A-Za-z0-9_.-]+` (so no `@`, `:`, `/` or whitespace, and not
+# empty) is refused by both forms below, naming the node and the step output,
+# and recorded nowhere.
+#
 # THE RECORD IS THE PRICE OF THE PLACEHOLDER. `unpinned_image_digest` has two
 # forms. Without an `UnpinnedImages` record it always refuses, naming the node
 # and the step output. With one, it records the substitution and returns the
@@ -55,6 +62,53 @@ def is_unpinned_plan_digest(value: String) -> Bool:
 
 def _has_image(kind: String) -> Bool:
     return kind == UNPINNED_KIND_SERVICE or kind == UNPINNED_KIND_JOB
+
+
+def _is_plain_identifier(s: String) -> Bool:
+    """True iff `s` is non-empty and every byte is `[A-Za-z0-9_.-]`."""
+    var b = s.as_bytes()
+    if len(b) == 0:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var digit = c >= ord("0") and c <= ord("9")
+        var upper = c >= ord("A") and c <= ord("Z")
+        var lower = c >= ord("a") and c <= ord("z")
+        var punct = c == ord("_") or c == ord(".") or c == ord("-")
+        if not (digit or upper or lower or punct):
+            return False
+    return True
+
+
+def _check_build_ref(
+    kind: String, node_id: String, step: String, name: String
+) raises:
+    """Refuse a step or name that is not a plain identifier, naming the node
+    and the step output."""
+    var bad_part = String("")
+    var bad_value = String("")
+    if not _is_plain_identifier(step):
+        bad_part = "step"
+        bad_value = step.copy()
+    elif not _is_plain_identifier(name):
+        bad_part = "name"
+        bad_value = name.copy()
+    else:
+        return
+    raise Error(
+        "unpinned plan: "
+        + kind
+        + " node '"
+        + node_id
+        + "' reads step output '"
+        + unpinned_build_ref(step, name)
+        + "', whose "
+        + bad_part
+        + " '"
+        + bad_value
+        + "' is not a plain identifier ([A-Za-z0-9_.-]+); it would be pasted"
+        + " into the plan as free text"
+    )
 
 
 def _refuse_kind(kind: String, node_id: String) -> Error:
@@ -143,9 +197,12 @@ def unpinned_image_digest(
     kind: String, node_id: String, step: String, name: String
 ) raises -> String:
     """No record passed in: an unpinned image is refused, naming the node and
-    the step output. There is no way to get a placeholder without a record."""
+    the step output. There is no way to get a placeholder without a record. A
+    step or name that is not a plain identifier is refused for that reason
+    first."""
     if not _has_image(kind):
         raise _refuse_kind(kind, node_id)
+    _check_build_ref(kind, node_id, step, name)
     raise Error(
         "unpinned plan: "
         + kind
@@ -167,7 +224,9 @@ def unpinned_image_digest(
 ) raises -> String:
     """A record passed in: the substitution is recorded in `images` and the
     placeholder `UNPINNED-NOT-A-DIGEST:<step>/<name>` is returned. A kind with
-    no image (anything but service or job) is refused and not recorded."""
+    no image (anything but service or job), or a step or name that is not a
+    plain identifier, is refused and not recorded."""
     if not _has_image(kind):
         raise _refuse_kind(kind, node_id)
+    _check_build_ref(kind, node_id, step, name)
     return images._record(kind, node_id, step, name)
