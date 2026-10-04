@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/exit_codes.mojo -- the ONE exit-code table of every kci
+# src/kci_api/exit_codes.mojo -- the ONE exit-code table of every kci
 #   verb.
 # =============================================================================
 #
@@ -18,7 +18,7 @@
 #   6     EXIT_PARTIAL             PARTIAL, INTERRUPTED,         some effect landed and the rest did not,
 #                                  CANCELLED                     or the run stopped mid-way; look before
 #                                                                re-running
-#   7     EXIT_VALIDATION_FAILED   VALIDATION_FAILED             reserved for the deploy side
+#   7     EXIT_VALIDATION_FAILED   VALIDATION_FAILED             a validation failed
 #   8     EXIT_LEFT_BEHIND         (none yet)                    reserved: resources left behind
 #
 # A driver branches on the result document's `outcome`, `retry` and
@@ -38,8 +38,8 @@
 # Pure functions; no pointer.
 # =============================================================================
 
-from kci_contract.errors import ERROR_INTERNAL, ERROR_SELECTOR, ERROR_USAGE
-from kci_contract.outcome import (
+from kci_api.errors import ERROR_INTERNAL, ERROR_SELECTOR, ERROR_USAGE
+from kci_api.outcome import (
     OUTCOME_FAILED,
     OUTCOME_INDETERMINATE,
     OUTCOME_NOOP,
@@ -89,7 +89,7 @@ def exit_table() -> List[ExitRow]:
     t.append(ExitRow(EXIT_FAILED, String("EXIT_FAILED"), String("a step failed and no external effect landed")))
     t.append(ExitRow(EXIT_CANNOT_TELL, String("EXIT_CANNOT_TELL"), String("kci cannot say whether the end state holds")))
     t.append(ExitRow(EXIT_PARTIAL, String("EXIT_PARTIAL"), String("some effect landed and the rest did not, or the run stopped mid-way")))
-    t.append(ExitRow(EXIT_VALIDATION_FAILED, String("EXIT_VALIDATION_FAILED"), String("reserved: the deployed thing failed validation")))
+    t.append(ExitRow(EXIT_VALIDATION_FAILED, String("EXIT_VALIDATION_FAILED"), String("a validation of what a step produced failed")))
     t.append(ExitRow(EXIT_LEFT_BEHIND, String("EXIT_LEFT_BEHIND"), String("reserved: resources were left behind")))
     return t^
 

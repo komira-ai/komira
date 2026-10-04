@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The kci contract: the ONE place that states every exit number, outcome
+# kci_api: the ONE place that states every exit number, outcome
 # word, error id, document format name and schema major, produced file name,
 # release-directory layout rule and platform row that kci owns. Every other
 # kci package imports these constants and spells none of them itself, so a
@@ -14,7 +14,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # The welded tests pin each table by value (a renumbering is a deliberate,
 # visible edit of a golden test) and every refusal by its message.
 mojo_library(
-    name = "kci_contract",
+    name = "kci_api",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_json:komira_json",
@@ -25,7 +25,7 @@ mojo_library(
         "tests/test_exit_table.mojo",
         # error ids: unique, well-formed, every one stated with a meaning
         "tests/test_error_ids.mojo",
-        # the verb table is exactly run and ci-check; the step kinds
+        # the verb table is exactly run; the step kinds and validation kinds
         "tests/test_verbs.mojo",
         # the --only selector grammar, the scope words, the evidence line
         "tests/test_selector.mojo",

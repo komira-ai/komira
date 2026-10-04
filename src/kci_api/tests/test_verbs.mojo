@@ -1,20 +1,24 @@
 # =============================================================================
-# src/kci_contract/tests/test_verbs.mojo
-#   The verb table is exactly {run, ci-check}: one verb runs a stage, and no
-#   alias exists. The step kinds are BUILD, PUBLISH and the reserved DEPLOY.
+# src/kci_api/tests/test_verbs.mojo
+#   The verb table is exactly {run}: kci has one command, no alias, and no
+#   `ci check` (the workflow check is library code `kci run` runs at
+#   start-up). The step kinds are BUILD, PUBLISH and the reserved DEPLOY; the
+#   validation kinds are CONDA_INSTALL_SMOKE.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_contract import (
+from kci_api import (
     STEP_KIND_BUILD,
     STEP_KIND_DEPLOY,
     STEP_KIND_PUBLISH,
-    VERB_CI_CHECK,
+    VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VERB_RUN,
     all_step_kinds,
+    all_validation_kinds,
     all_verbs,
     require_step_kind,
+    require_validation_kind,
     require_verb,
 )
 
@@ -27,15 +31,15 @@ def _verb(word: String) -> String:
     return String("<ok>")
 
 
-def test_verb_table_is_run_and_ci_check() raises:
+def test_verb_table_is_run_only() raises:
     var v = all_verbs()
-    assert_equal(len(v), 2)
+    assert_equal(len(v), 1)
     assert_equal(v[0], String("run"))
-    assert_equal(v[1], String("ci-check"))
     assert_equal(String(VERB_RUN), String("run"))
-    assert_equal(String(VERB_CI_CHECK), String("ci-check"))
     assert_equal(_verb(String("run")), String("<ok>"))
-    assert_equal(_verb(String("ci-check")), String("<ok>"))
+    # the workflow check is not a command
+    assert_equal(_verb(String("ci-check")), String("verb 'ci-check' is not a kci verb"))
+    assert_equal(_verb(String("ci")), String("verb 'ci' is not a kci verb"))
 
 
 def test_stage_verbs_and_aliases_refused() raises:
@@ -45,6 +49,9 @@ def test_stage_verbs_and_aliases_refused() raises:
     gone.append(String("stages"))
     gone.append(String("deploy"))
     gone.append(String("validate"))
+    gone.append(String("trust"))
+    gone.append(String("leaks"))
+    gone.append(String("cells"))
     for i in range(len(gone)):
         assert_equal(_verb(gone[i]), String("verb '") + gone[i] + String("' is not a kci verb"))
 
@@ -63,6 +70,20 @@ def test_step_kinds() raises:
     except e:
         refused = String(e)
     assert_equal(refused, String("step kind 'SHIP' is not BUILD, PUBLISH or DEPLOY"))
+
+
+def test_validation_kinds() raises:
+    var k = all_validation_kinds()
+    assert_equal(len(k), 1)
+    assert_equal(k[0], String("CONDA_INSTALL_SMOKE"))
+    assert_equal(String(VALIDATION_KIND_CONDA_INSTALL_SMOKE), String("CONDA_INSTALL_SMOKE"))
+    require_validation_kind(String("CONDA_INSTALL_SMOKE"))
+    var refused = String("")
+    try:
+        require_validation_kind(String("SMOKE"))
+    except e:
+        refused = String(e)
+    assert_equal(refused, String("validation kind 'SMOKE' is not CONDA_INSTALL_SMOKE"))
 
 
 def main() raises:

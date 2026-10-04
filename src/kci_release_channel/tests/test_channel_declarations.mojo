@@ -55,6 +55,37 @@ channel: {
 }
 """
 
+# The two release channels: prefix.dev's namespaced channels, each with a
+# trusted publisher bound to one GitHub environment.
+comptime _RELEASE = """
+channel {
+  name: "gamma"
+  visibility: PUBLIC
+  repository {
+    artifact_type: CONDA
+    location: "https://prefix.dev/komira-ai/gamma"
+    push_identity: "repo:komira-ai/komira:environment:gamma"
+    credential { kind: OIDC_TRUSTED_PUBLISHING }
+  }
+}
+channel {
+  name: "prod"
+  visibility: PUBLIC
+  repository {
+    artifact_type: CONDA
+    location: "https://prefix.dev/komira-ai/prod"
+    push_identity: "repo:komira-ai/komira:environment:prod"
+    credential { kind: OIDC_TRUSTED_PUBLISHING }
+  }
+}
+"""
+
+
+def _parse(text: String) raises -> List[ChannelDeclaration]:
+    """`parse_channels_file` over `text` with `schema_version: 1` prepended on
+    its FIRST line, so no line number a refusal names moves."""
+    return parse_channels_file(String("schema_version: 1 ") + text)
+
 
 def _assert_contains(haystack: String, needle: String) raises:
     if needle not in haystack:
@@ -62,7 +93,7 @@ def _assert_contains(haystack: String, needle: String) raises:
 
 
 def test_a_channels_file_parses_in_order() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     assert_equal(len(decls), 2)
     var names = channel_names(decls)
     assert_equal(names[0], String("beta"))
@@ -74,13 +105,13 @@ def test_a_channels_file_parses_in_order() raises:
 
 
 def test_visibility_reads_back() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     assert_false(find_channel(decls, String("beta")).is_public())
     assert_true(find_channel(decls, String("stable")).is_public())
 
 
 def test_repository_for_reads_every_field() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     var r = find_channel(decls, String("stable")).repository_for(
         String(ARTIFACT_TYPE_PYTHON)
     )
@@ -109,7 +140,7 @@ def test_repository_for_reads_every_field() raises:
 
 
 def test_a_missing_repository_is_refused_not_defaulted() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     var msg = String("")
     try:
         _ = find_channel(decls, String("beta")).repository_for(
@@ -121,7 +152,7 @@ def test_a_missing_repository_is_refused_not_defaulted() raises:
 
 
 def test_an_unknown_channel_is_refused_naming_the_declared_ones() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     var msg = String("")
     try:
         _ = find_channel(decls, String("nightly"))
@@ -195,6 +226,26 @@ def test_channel_name_charset() raises:
         long += "a"
     assert_false(is_valid_channel_name(long))
     assert_true(is_valid_channel_name(String(long[byte=0:63])))
+
+
+def test_the_gamma_and_prod_channels() raises:
+    var decls = _parse(String(_RELEASE))
+    assert_equal(len(decls), 2)
+    var names = channel_names(decls)
+    assert_equal(names[0], String("gamma"))
+    assert_equal(names[1], String("prod"))
+    var g = find_channel(decls, String("gamma"))
+    assert_true(g.is_public())
+    var gr = g.repository_for(String(ARTIFACT_TYPE_CONDA))
+    assert_equal(gr.location, String("https://prefix.dev/komira-ai/gamma"))
+    assert_equal(gr.push_identity, String("repo:komira-ai/komira:environment:gamma"))
+    assert_true(gr.declared_credential().is_oidc_trusted_publishing())
+    var p = find_channel(decls, String("prod"))
+    assert_true(p.is_public())
+    var pr = p.repository_for(String(ARTIFACT_TYPE_CONDA))
+    assert_equal(pr.location, String("https://prefix.dev/komira-ai/prod"))
+    assert_equal(pr.push_identity, String("repo:komira-ai/komira:environment:prod"))
+    assert_true(pr.declared_credential().is_oidc_trusted_publishing())
 
 
 def main() raises:
