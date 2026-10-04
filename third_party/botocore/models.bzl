@@ -33,6 +33,21 @@ BOTOCORE_MODELS = {
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
     ),
+    # Amazon DynamoDB Streams (//src/komira_aws_dynamodbstreams).
+    "dynamodbstreams": struct(
+        api_version = "2012-08-10",
+        sha256 = "95cd147c971cd46365849c08e8c596bfd557b31a448b0bbf494d91f65d0ac62f",
+    ),
+    # Amazon ECR (//src/komira_aws_ecr).
+    "ecr": struct(
+        api_version = "2015-09-21",
+        sha256 = "3df743678897ac26e9ca4b8a04bf3007fcadf887feb3e71a50131c874cfbe757",
+    ),
+    # Amazon ECS (//src/komira_aws_ecs).
+    "ecs": struct(
+        api_version = "2014-11-13",
+        sha256 = "44e0fd74d3dd8f629bb5a2259635721806ac4c2daf17c62d38160544daf9bb3c",
+    ),
     # AWS Lambda (//src/komira_aws_lambda).
     "lambda": struct(
         api_version = "2015-03-31",
@@ -55,6 +70,11 @@ BOTOCORE_MODELS = {
     "scheduler": struct(
         api_version = "2021-06-30",
         sha256 = "428fbc6d766436e7b5394010e98987af0c738980ccab60d541dd5e5720e643e1",
+    ),
+    # AWS Secrets Manager (//src/komira_aws_secretsmanager).
+    "secretsmanager": struct(
+        api_version = "2017-10-17",
+        sha256 = "d568532fb0db48e0ce9c3c30b6f48aae734e1657105043990ef699ec48656671",
     ),
     # Amazon SES API v2 (//src/komira_aws_sesv2). Its endpoint prefix is
     # `email` and its signing name `ses`.
