@@ -11,19 +11,24 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # komira_objectstore's ObjectUrlSigner as a blob service SAS. The account
 # key comes from komira_azure_core's AzureSharedKey. No environment is read.
 #
-# komira_core supplies AzureFs's buffers, Slab and FS_SCHEME_AZURE, as it
-# does for S3Fs and GcsFs.
+# komira_core is a dep because komira_fs's FileSystem signatures name its
+# types (SharedAlignedBuffer, HeapRegion, Slab), so any conformer must import
+# them from there; AzureFs also takes FS_SCHEME_AZURE from it. S3Fs and GcsFs
+# depend on it for the same reason.
 #
 # The tests are hermetic, no socket: test_azure_signing (canonicalization and
-# the string-to-sign, and an Authorization header against a golden computed
-# independently), test_azure_signing_layer (the layer over a capturing
+# the string-to-sign, an Authorization header against a golden computed
+# independently, and a blob key's byte-wise encoding shared by the wire path
+# and the canonicalized resource), test_azure_signing_layer (the layer over a capturing
 # HttpService: a pinned x-ms-date stamped and signed, the wall clock's date
-# stamped when none is pinned, a List Blobs request's query parameters signed,
-# each against an independent golden), test_azure_xml (List Blobs entries,
+# stamped when none is pinned, a caller's date kept or replaced without a
+# duplicate, a List Blobs request's query parameters signed, each against an
+# independent golden, and query values that are not UTF-8 refused), test_azure_xml (List Blobs entries,
 # prefixes, markers, error bodies and entity decoding), test_azure_store_fs
 # (AzureStore, AzureClient and AzureFs over scripted HTTP: URLs, each verb,
-# the status taxonomy, NextMarker pagination, the shallow listing and the
-# refused writes), test_azure_presign (the service SAS against independent
+# the status taxonomy, NextMarker pagination, the shallow listing, the read
+# verbs reaching the transport, the refused writes and the inherited delete
+# default), test_azure_presign (the service SAS against independent
 # goldens, its sixteen-field string-to-sign and its refusals) and
 # test_no_env_reads (the package's sources read no environment).
 mojo_library(

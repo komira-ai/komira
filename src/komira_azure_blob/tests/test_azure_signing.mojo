@@ -6,7 +6,7 @@
 # headers lowercased, sorted, merged and trimmed; the canonicalized resource
 # with its query parameters lowercased, grouped and sorted; and the 13-field
 # string-to-sign.
-from std.testing import assert_equal, assert_true
+from std.testing import assert_equal, assert_false, assert_true
 
 from komira_azure_core import AzureSharedKey
 from komira_azure_blob import (
@@ -16,6 +16,7 @@ from komira_azure_blob import (
     canonicalize_headers,
     canonicalize_resource,
 )
+from komira_azure_blob.azure import AzureConfig, build_azure_blob_url
 from komira_azure_blob.azure_signing import Header
 
 
@@ -257,6 +258,54 @@ def test_azure_shared_key_sign_signature_differs_on_date_change() raises:
 # -----------------------------------------------------------------------------
 
 
+# -----------------------------------------------------------------------------
+# The wire path and the canonicalized resource are ONE encoded string.
+#
+# Shared Key's canonicalized resource carries the ENCODED URI path (only the
+# query values are decoded), and the signing layer reads it off the request
+# URL, which build_azure_blob_url encoded. So a blob name with a space or a
+# non-ASCII character is encoded byte-wise once, and the canonical resource
+# embeds that same encoding verbatim; were either side to encode differently
+# the HMAC would not verify.
+# -----------------------------------------------------------------------------
+
+
+def _blob_path(blob: String) -> String:
+    var url = build_azure_blob_url(
+        AzureConfig.azure(String("mystoraccount")), String("my-container"), blob
+    )
+    return url.path.copy()
+
+
+def test_blob_key_space_wire_matches_canonical() raises:
+    var wire_path = _blob_path(String("dt=2026 10/part 0.parquet"))
+    assert_equal(wire_path, String("/my-container/dt%3D2026%2010/part%200.parquet"))
+    assert_false(wire_path.find(String(" ")) >= 0, wire_path)
+    var canon = canonicalize_resource(
+        String("mystoraccount"), wire_path, List[Header]()
+    )
+    assert_equal(canon, String("/mystoraccount") + wire_path)
+
+
+def test_blob_key_non_ascii_encoded_bytewise_wire_matches_canonical() raises:
+    # "é" is U+00E9, UTF-8 bytes C3 A9: each byte is escaped on its own.
+    var bytes = List[UInt8]()
+    bytes.append(UInt8(0x63))  # c
+    bytes.append(UInt8(0x61))  # a
+    bytes.append(UInt8(0x66))  # f
+    bytes.append(UInt8(0xC3))
+    bytes.append(UInt8(0xA9))
+    bytes.append(UInt8(0x2F))  # /
+    bytes.append(UInt8(0x64))  # d
+    var blob = String(unsafe_from_utf8=Span(bytes))
+    var wire_path = _blob_path(blob)
+    assert_equal(wire_path, String("/my-container/caf%C3%A9/d"))
+    var canon = canonicalize_resource(
+        String("mystoraccount"), wire_path, List[Header]()
+    )
+    assert_equal(canon, String("/mystoraccount") + wire_path)
+
+
 def main() raises:
     test_canonicalize_headers_empty()
     test_canonicalize_headers_ignores_non_xms()
@@ -270,4 +319,6 @@ def main() raises:
     test_azure_shared_key_sign_signature_stable()
     test_azure_shared_key_sign_signature_differs_on_path_change()
     test_azure_shared_key_sign_signature_differs_on_date_change()
+    test_blob_key_space_wire_matches_canonical()
+    test_blob_key_non_ascii_encoded_bytewise_wire_matches_canonical()
     print("OK")

@@ -10,12 +10,14 @@
 # SharedKeySigningLayer adding `Authorization: SharedKey <account>:<sig>`,
 # and nothing for the empty (anonymous) credential; and AzureFs: open, the
 # capability flags, is_dir's `/`-normalized probe, `list` walking
-# `<NextMarker>` and unioning pages, `list_dir_shallow` across pages, and
-# the write verbs refused (AzureFs is read-only).
+# `<NextMarker>` and unioning pages, `list_dir_shallow` across pages, the
+# read verbs reaching the transport, the write verbs refused (AzureFs is
+# read-only) and delete left to komira_fs's raising default.
 from std.memory import ArcPointer
 from std.sys.info import CompilationTarget
 from std.testing import assert_equal, assert_false, assert_raises, assert_true
 
+from komira_fs.file_system import WriteMode
 from komira_fs.footer_region import FOOTER_SPECULATIVE_WINDOW
 from komira_async.ops.waker_sink import NoopSink
 from komira_async.reactor.reactor import (
@@ -52,7 +54,7 @@ from komira_azure_blob.azure import (
     build_azure_listing_url,
 )
 from komira_azure_blob.azure_client import AzureClient
-from komira_azure_blob.azure_fs import AzureFs, AzureFileHandle
+from komira_azure_blob.azure_fs import AzureFs, AzureFileHandle, AzureWriteFile
 from komira_azure_blob.azure_signing import (
     SharedKeySigningLayer,
     StaticSharedKeyProvider,
@@ -380,11 +382,11 @@ def test_list_page_xml_parse() raises:
         "<Blobs>"
         "<Blob><Name>data/a.parquet</Name><Properties>"
         "<Content-Length>123</Content-Length><Etag>0x8DAAAA</Etag>"
-        "<Last-Modified>Mon, 26 Jun 2015 23:39:12 GMT</Last-Modified>"
+        "<Last-Modified>Thu, 01 Oct 2026 12:00:12 GMT</Last-Modified>"
         "<BlobType>BlockBlob</BlobType></Properties></Blob>"
         "<Blob><Name>data/b.parquet</Name><Properties>"
         "<Content-Length>456</Content-Length><Etag>0x8DBBBB</Etag>"
-        "<Last-Modified>Mon, 26 Jun 2015 23:39:13 GMT</Last-Modified>"
+        "<Last-Modified>Thu, 01 Oct 2026 12:00:13 GMT</Last-Modified>"
         "<BlobType>BlockBlob</BlobType></Properties></Blob>"
         "<BlobPrefix><Name>data/sub/</Name></BlobPrefix>"
         "</Blobs>"
@@ -602,8 +604,8 @@ def test_azurefs_open_returns_handle() raises:
 
 def test_azurefs_read_at_on_sentinel_raises() raises:
     """AzureFs.read_at against an OWNED SENTINEL AzureClient raises a clear
-    error (Slot R3.5 P1: the FS owns the client; the read-path lazy-build
-    helper's is_configured() guard surfaces the sentinel)."""
+    error (the FS owns the client; the read-path lazy-build helper's
+    is_configured() guard surfaces the sentinel)."""
     var sentinel = AzureClient[ScriptedConnector]()
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
@@ -624,6 +626,10 @@ def test_azurefs_capability_queries() raises:
         )
     assert_equal(fs.prefetch_depth(), 64)
     assert_true(fs.supports_random_read())
+    # list + list_dir_shallow work, so a lazy Hive discovery may prune
+    # partitions over AzureFs; block-blob writes are never parallel.
+    assert_true(AzureFs[ScriptedConnector].SUPPORTS_LAZY_HIVE)
+    assert_false(AzureFs[ScriptedConnector].SUPPORTS_PARALLEL_WRITES)
 
 
 def _http_200_xml(xml: String) -> List[UInt8]:
@@ -1139,43 +1145,79 @@ def test_azurefs_list_dir_shallow_walks_nextmarker_across_pages() raises:
     )
 
 
-def test_azurefs_stubs_raise() raises:
-    """The write verbs are refused, naming the read-only file system. The
-    read verbs are wired: against this configured client with nothing
-    scripted they raise on the transport, never with the read-only text.
-    Their behaviour is pinned by the `list` / `list_dir_shallow` / footer
-    rows above."""
+def _transport_error_of_read_verb(which: Int) raises -> String:
+    """The error a read verb raises against a configured client whose
+    scripted connection answers nothing (0 list, 1 read_footer, 2
+    file_size), or "" if it did not raise."""
     var client = _make_configured_azure_client()
     var fs = AzureFs[ScriptedConnector](
         container=String("c"),
         client=client^,
         mk_client=_make_configured_azure_client,
+    )
+    try:
+        if which == 0:
+            var _l = fs.list(String("prefix/"))
+        elif which == 1:
+            var _f = fs.read_footer(
+                String("k.parquet"), FOOTER_SPECULATIVE_WINDOW
+            )
+        else:
+            var _s = fs.file_size(String("k.parquet"))
+    except e:
+        return String(e)
+    return String("")
+
+
+def test_azurefs_read_verbs_reach_the_transport() raises:
+    """The read verbs are wired: with nothing scripted on the connection
+    each one raises the HTTP client's own transport error (it reached the
+    wire), never the read-only refusal. Their success paths are pinned by
+    the `list` / `list_dir_shallow` / footer rows above."""
+    for which in range(3):
+        var msg = _transport_error_of_read_verb(which)
+        assert_true(
+            msg.find(String("HttpError[")) >= 0,
+            String("read verb ") + String(which)
+            + String(" must raise the transport's error; got: ") + msg,
         )
-    # list / read_footer / file_size are implemented: they raise on the
-    # transport, not with the read-only text.
-    var list_raised = False
-    try:
-        var _l = fs.list(String("prefix/"))
-    except e:
-        list_raised = True
-        assert_false(String(e).find(String("read-only")) >= 0)
-    assert_true(list_raised)
+        assert_false(msg.find(String("read-only")) >= 0, msg)
 
-    var footer_raised = False
-    try:
-        var _f = fs.read_footer(String("k.parquet"), FOOTER_SPECULATIVE_WINDOW)
-    except e:
-        footer_raised = True
-        assert_false(String(e).find(String("read-only")) >= 0)
-    assert_true(footer_raised)
 
-    var size_raised = False
-    try:
-        var _s = fs.file_size(String("k.parquet"))
-    except e:
-        size_raised = True
-        assert_false(String(e).find(String("read-only")) >= 0)
-    assert_true(size_raised)
+def test_azurefs_write_verbs_refused_read_only() raises:
+    """AzureFs has no write path: open_write, write_at and close_write each
+    refuse naming the read-only file system, and pwrite_at names the
+    missing parallel-write support."""
+    var client = _make_configured_azure_client()
+    var fs = AzureFs[ScriptedConnector](
+        container=String("c"),
+        client=client^,
+        mk_client=_make_configured_azure_client,
+    )
+    with assert_raises(contains="AzureFs.open_write: AzureFs is read-only"):
+        var _w = fs.open_write(String("w/obj"), WriteMode.create_truncate())
+    var data = List[UInt8]()
+    data.append(UInt8(1))
+    var wf = AzureWriteFile(_path=String("w/obj"))
+    with assert_raises(contains="AzureFs.write_at: AzureFs is read-only"):
+        _ = fs.write_at(wf, Span(data))
+    with assert_raises(contains="SUPPORTS_PARALLEL_WRITES"):
+        _ = fs.pwrite_at(wf, Int64(0), Span(data))
+    with assert_raises(contains="AzureFs.close_write: AzureFs is read-only"):
+        fs.close_write(wf^)
+
+
+def test_azurefs_delete_is_the_trait_default() raises:
+    """AzureFs does not implement delete: it inherits komira_fs's raising
+    default. A delete override must replace this row with its own."""
+    var client = _make_configured_azure_client()
+    var fs = AzureFs[ScriptedConnector](
+        container=String("c"),
+        client=client^,
+        mk_client=_make_configured_azure_client,
+    )
+    with assert_raises(contains="FileSystem.delete: unimplemented"):
+        fs.delete(String("k.parquet"))
 
 
 # -----------------------------------------------------------------------------
@@ -1207,5 +1249,7 @@ def main() raises:
     test_azurefs_list_walks_nextmarker_and_unions_pages()
     test_azurefs_list_single_page_does_not_loop()
     test_azurefs_list_dir_shallow_walks_nextmarker_across_pages()
-    test_azurefs_stubs_raise()
+    test_azurefs_read_verbs_reach_the_transport()
+    test_azurefs_write_verbs_refused_read_only()
+    test_azurefs_delete_is_the_trait_default()
     print("OK")
