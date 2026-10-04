@@ -585,6 +585,10 @@ def _simd_classify_into[
     lowered.resize(n, UInt8(0))
     ws.resize(n, UInt8(0))
 
+    # `lowered` and `ws` were resized to `n` just above and are not resized
+    # again in this function, and `bytes` has length `n`. The SIMD loop covers
+    # [0, simd_end) with simd_end = (n // W) * W; the scalar tail [simd_end, n).
+    # SAFETY: every load and store through these three pointers is at index < n.
     var src = bytes.unsafe_ptr()
     var lo_ptr = lowered.unsafe_ptr()
     var ws_ptr = ws.unsafe_ptr()
@@ -707,6 +711,9 @@ def _analyze_bytes_resolved[
     var lowered = List[UInt8]()
     var ws = List[UInt8]()
     var first_nonascii = _simd_classify_into(bytes, lowered, ws)
+    # SAFETY: `_simd_classify_into` leaves `ws` with length n = len(bytes), `ws`
+    # is not resized while `ws_ptr` is live, and every `ws_ptr[i]` below is
+    # guarded by `i < n` first.
     var ws_ptr = ws.unsafe_ptr()
 
     while i < n:
@@ -739,9 +746,11 @@ def _analyze_bytes_resolved[
             # branch). Fold is a no-op on ASCII, so both are exact.
             if do_lower:
                 var span = Span(lowered)[span_start:span_end]
+                # SAFETY: the span ends at or before `first_nonascii`: pure ASCII.
                 term = String(StringSlice(unsafe_from_utf8=span))
             else:
                 var span = bytes[span_start:span_end]
+                # SAFETY: the span ends at or before `first_nonascii`: pure ASCII.
                 term = String(StringSlice(unsafe_from_utf8=span))
         else:
             # Span touches a byte >= 0x80: run the EXISTING scalar lowercase +
@@ -788,6 +797,8 @@ def _analyze_bytes_resolved[
             # this cannot fire) — skip empties (no empty term is ever emitted).
             if len(term_bytes) == 0:
                 continue
+            # SAFETY: the cell is UTF-8 text, spans end at ASCII whitespace, and
+            # the fold maps emit whole UTF-8 sequences, so `term_bytes` is too.
             term = String(StringSlice(unsafe_from_utf8=Span(term_bytes)))
 
         # Stopword removal runs AFTER lowercase+fold (so "The" -> "the" matches).
