@@ -586,6 +586,8 @@ _REST_REFUSALS = [
     ("empty_pattern_segment", "pattern \"x//y\" of `a` must be"),
     ("double_star_not_last_in_pattern", "pattern \"**/x\" of `a` must be"),
     ("bytes_in_url", "field `blob` is `bytes`, which has no URL"),
+    ("optional_path_var", "path variable `name` is a proto3 `optional` field"),
+    ("oneof_path_leaf", "field `thing.id` is used in the path/query but is an arm of a oneof"),
 ]
 
 [
@@ -601,6 +603,27 @@ _REST_REFUSALS = [
     )
     for name, expect in _REST_REFUSALS
 ]
+
+# An Update method: `{thing.name=...}` is read from the body message after a
+# presence check that comes before the token is asked for, and the
+# FieldMask `update_mask` is the `updateMask` query parameter, sent as its
+# proto3 JSON string when set.
+proto_codegen_golden(
+    name = "update_rest",
+    srcs = [
+        _ANNOTATIONS,
+        "corpus/rest/v1/update_rest.proto",
+    ],
+    generate = ["rest/v1/update_rest.proto"],
+    golden = ["golden/update_rest/update_rest.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_update_rest",
+    present = [
+        "if not req.thing:",
+        "_rest_to_str(req.thing.value().name)",
+        "query += String(\"updateMask=\") + _rest_pct_encode(req.update_mask.value().to_proto3_json())",
+        "body_text = encode_json(req.thing.value())",
+    ],
+)
 
 # A rest target lists the unary method of a service that also has a
 # streaming one: the client holds GetItem, and nothing of WatchItems.
@@ -676,6 +699,34 @@ mojo_library(
 # weld, which will run openapi_emit.rs's own #[test]s. TODO(rust_test weld):
 # add the plugin target and an OpenAPI golden over corpus/shapes here.
 
+# `module_names` (import path -> module, `+`-joined), refused by the plugin
+# itself as well as by mojo_gcp_client, which passes it.
+_MODULE_NAMES_REFUSALS = [
+    ("malformed", "example/logging/v1/log_entry.proto", "is not `<proto path>:<module stem>`"),
+    ("empty_stem", "example/logging/v1/log_entry.proto:", "has an empty path or stem"),
+    (
+        "twice",
+        "example/logging/v1/log_entry.proto:a+example/logging/v1/log_entry.proto:b",
+        "names `example/logging/v1/log_entry.proto` twice",
+    ),
+    ("stray", "example/audit/v1/audit.proto:audit", "names `example/audit/v1/audit.proto`, which is not a file to generate"),
+    ("not_a_module", "example/logging/v1/log_entry.proto:log-entry", "module `log-entry`, which is not a Mojo module name"),
+    ("keyword", "example/logging/v1/log_entry.proto:import", "module `import`, a Mojo keyword"),
+    ("kept_name", "example/logging/v1/log_entry.proto:__init__", "a name the generated package keeps for itself"),
+    ("clash", "example/logging/v1/log_entry.proto:logging", "would both be generated as module `logging`"),
+]
+
+[
+    proto_codegen_golden(
+        name = "refuse_module_names_" + name,
+        srcs = _SRCS,
+        generate = _ALL,
+        expect_error = expect,
+        options = _PREFIX + ",module_names=" + value,
+    )
+    for name, value, expect in _MODULE_NAMES_REFUSALS
+]
+
 proto_codegen_goldens(
     name = "all",
     checks = [
@@ -720,5 +771,9 @@ proto_codegen_goldens(
         ":refuse_gcp_connect",
         ":shapes_rest",
         ":wkt_rest",
-    ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS],
+        ":update_rest",
+    ] + [":refuse_rest_" + name for name, _ in _REST_REFUSALS] + [
+        ":refuse_module_names_" + name
+        for name, _, _ in _MODULE_NAMES_REFUSALS
+    ],
 )

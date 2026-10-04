@@ -376,6 +376,25 @@ fn emit_rest_method(
                 m.name, f
             ));
         }
+        // A oneof arm is held in its oneof's storage, not as `req.<field>`,
+        // so the URL has no expression to read it through.
+        if fld.oneof_index.is_some() {
+            return Err(format!(
+                "REST method `{}`: field `{}` is used in the path/query but is \
+                 an arm of a oneof, which no URL field reads",
+                m.name, f
+            ));
+        }
+        // A path variable is read as `req.<field>` itself: a proto3
+        // `optional` one is an `Optional`, with no value to put in the path
+        // when unset.
+        if part.path_fields.contains(f) && fld.label == Label::Optional && is_scalar(&fld.ty) {
+            return Err(format!(
+                "REST method `{}`: path variable `{}` is a proto3 `optional` \
+                 field; a path variable takes a value the request always has",
+                m.name, f
+            ));
+        }
         // A FieldMask query parameter renders as its proto3 JSON string
         // (`updateMask=a,b.c`), the Update methods' form.
         let field_mask_query = is_field_mask(&fld.ty)
@@ -2066,6 +2085,51 @@ mod tests {
             let err = emit_rest_service(&file, &svc).unwrap_err();
             assert!(err.contains(want), "{path}: {err}");
         }
+    }
+
+    #[test]
+    fn a_path_leaf_must_be_a_plain_scalar_outside_a_oneof() {
+        // The leaf of a dotted variable is held to what a plain one is: a
+        // scalar the request always has, read as `req.<...>.<leaf>`.
+        let mut opt_name = scalar_field("opt_name", ScalarKind::String);
+        opt_name.label = Label::Optional;
+        let mut arm = scalar_field("arm", ScalarKind::String);
+        arm.oneof_index = Some(0);
+        let job = message(
+            "Job",
+            vec![
+                opt_name.clone(),
+                arm.clone(),
+                msg_field("spec", ".tiny.rest.v1.Job", "Job"),
+            ],
+        );
+        let req = message(
+            "R",
+            vec![msg_field("job", ".tiny.rest.v1.Job", "Job"), opt_name, arm],
+        );
+        for (path, want) in [
+            ("/v1/{job.opt_name}", "path variable `job.opt_name` is a proto3 `optional` field"),
+            ("/v1/{job.arm}", "field `job.arm` is used in the path/query but is an arm of a oneof"),
+            ("/v1/{job.spec}", "field `job.spec` is used in the path/query but is not a scalar"),
+            ("/v1/{opt_name}", "path variable `opt_name` is a proto3 `optional` field"),
+            ("/v1/{arm}", "field `arm` is used in the path/query but is an arm of a oneof"),
+        ] {
+            let svc = svc_of(vec![method("M", ".tiny.rest.v1.R", ".tiny.rest.v1.R", ("post", path, "*"))]);
+            let file = file_with(vec![req.clone(), job.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{path}: {err}");
+        }
+    }
+
+    #[test]
+    fn a_field_mask_in_a_oneof_stays_out_of_the_query() {
+        let mut mask = msg_field("update_mask", ".google.protobuf.FieldMask", "FieldMask");
+        mask.oneof_index = Some(0);
+        let req = message("ListReq", vec![mask]);
+        let svc = svc_of(vec![method("List", ".tiny.rest.v1.ListReq", ".tiny.rest.v1.ListReq", ("get", "/v1/things", ""))]);
+        let file = file_with(vec![req], svc.clone());
+        let err = emit_rest_service(&file, &svc).unwrap_err();
+        assert!(err.contains("field `update_mask` is used in the path/query but is an arm of a oneof"), "{err}");
     }
 
     #[test]
