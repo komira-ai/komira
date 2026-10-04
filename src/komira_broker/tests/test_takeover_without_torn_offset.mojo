@@ -51,6 +51,9 @@ from komira_objectstore.cas_manifest import decode_chunk_record_count
 comptime _Store = SharedInMemoryConditionalStore
 
 
+# creation_ts_ms is a placeholder nothing in this harness reads, and a sample
+# timestamp in this tree must not decode to a real past date, so it is
+# 4_000_000_000_000 ms (a date in 2096) rather than a recent epoch value.
 def _producer_body(
     seg: String, rc: Int64, pid: Int64, epoch: Int64, first: Int64, last: Int64
 ) -> List[UInt8]:
