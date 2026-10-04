@@ -13,8 +13,8 @@
 #                  and the token files they and the environment name.
 #                  `ProcessFiles` reads the filesystem; `MapFiles` is a map.
 #   AwsClock    -- the wall clock, for SigV4 signing time and the default role
-#                  session name. `FixedClock` is a fixed instant. The
-#                  production clock arrives with the transport.
+#                  session name. `SystemAwsClock` reads the process's wall
+#                  clock (komira_clock); `FixedClock` is a fixed instant.
 #
 # ⛔ This file is the ONLY file of komira_aws_core that may read the process
 # environment. A welded test (tests/test_env_source_only.mojo) scans every
@@ -32,6 +32,7 @@
 from std.collections import Dict
 from std.os.path import exists, isfile
 
+from komira_clock import now_unix_ms
 from komira_core_ffi.posix import _read_env
 
 
@@ -143,6 +144,17 @@ trait AwsClock:
 
     def now_unix_seconds(mut self) -> Int:
         ...
+
+
+struct SystemAwsClock(AwsClock, Copyable, Movable, Deinitable):
+    """The process's wall clock (`CLOCK_REALTIME`, komira_clock), read
+    each time it is asked."""
+
+    def __init__(out self):
+        pass
+
+    def now_unix_seconds(mut self) -> Int:
+        return Int(now_unix_ms() // 1000)
 
 
 @fieldwise_init

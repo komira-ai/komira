@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_release_channel/artifact_types.mojo -- the artifact types a repository
-# may carry. A closed set, shared by the declaration and credential modules.
+# may carry. A closed set, shared by the channel and credential modules.
 # =============================================================================
 
 

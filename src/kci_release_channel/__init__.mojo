@@ -1,11 +1,11 @@
 # =============================================================================
-# kci_release_channel -- release-channel declarations.
+# kci_release_channel -- release channels.
 # =============================================================================
 #
 # A release channel is a publish destination: a name, a visibility and one
 # repository per artifact type, each with its push credential (names only).
-# `channel_declaration.mojo` holds the types, the lookups and
-# `validate_channel_declarations`; `channel_credential.mojo` the credential and
+# `channel.mojo` holds the types, the lookups and
+# `validate_channels`; `channel_credential.mojo` the credential and
 # its rules; `artifact_types.mojo` the closed artifact-type set; `parse.mojo`
 # reads a channels file with `parse_channels_file`.
 # =============================================================================
@@ -26,15 +26,15 @@ from kci_release_channel.channel_credential import (
     oidc_exchange_implemented,
     validate_channel_credential,
 )
-from kci_release_channel.channel_declaration import (
+from kci_release_channel.channel import (
     VISIBILITY_PRIVATE,
     VISIBILITY_PUBLIC,
-    ChannelDeclaration,
+    Channel,
     ChannelRepository,
     channel_names,
     find_channel,
     is_valid_channel_name,
     push_identity_environment,
-    validate_channel_declarations,
+    validate_channels,
 )
 from kci_release_channel.parse import parse_channels_file

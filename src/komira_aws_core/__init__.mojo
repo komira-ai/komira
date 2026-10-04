@@ -19,7 +19,7 @@ clients.
   `parse_<op>_response` reads) and `HttpResult` (what a transport returns).
   Every body is bytes.
 - `aws_error.mojo`: `AwsErrorInfo` (status, code, message, request id of a
-  failed response) and `aws_json_error_info`.
+  failed response), `aws_json_error_info` and `aws_query_error_code`.
 - `aws_codec.mojo`: the awsJson scalar encoding (`AwsJsonToken`, the
   `aws_token_*` encoders and decoders, the AWS_TS_* timestamp formats) and
   the error shape (`aws_error_code*`, `aws_error_message_from_body`).
@@ -44,13 +44,32 @@ clients.
 - `creds_source.mojo`: the `AwsCredsSource` trait a generated client signs
   through, a static source and the cached default chain.
 - `signed_request.mojo`: `build_sigv4_signed_request`, the socket-free half
-  of a send, and `AwsPayloadSigning` (hashed, unsigned or precomputed).
+  of a send, `AwsPayloadSigning` (hashed, unsigned or precomputed), and
+  `is_s3_signing_name`, the signing names signed by S3's rules.
 - `endpoint_rules.mojo`: `EndpointRuleSet`, the interpreter of a service's
   Smithy endpoint ruleset (`endpoint-rule-set-1.json`), with its standard
   library; `partitions.mojo`: `AwsPartitionSet`, the partitions.json table
   its `aws.partition` reads.
-- `s3_wire.mojo`: `s3_copy_source` and `s3_content_range_total`, the two S3
-  header values no model states.
+- `endpoint_signing.mojo`: `aws_signing_target`, a resolved endpoint as the
+  signer takes it (`AwsSigningTarget`: the `AwsEndpoint`, signing name and
+  region, and headers), refusing an auth scheme this core cannot sign.
+- `aws_send.mojo`: `send_sigv4_signed_request`, the transport half of a
+  send a generated client calls: signed, sent over komira_http_client
+  through a `Connector`, and retried; `send_sigv4_signed_request_with`
+  over injected seams (`AwsHttpTransport`, the clocks, the retry loop and
+  budget), and `AwsConnectorTransport`.
+- `aws_retry.mojo`: `AwsRetryClassifier`, botocore's standard retry
+  conditions for komira_retry over an `AwsAttempt`, with
+  `aws_standard_retry_policy` and `AwsRetryQuota`, the retry quota a
+  client keeps; every operation is retried alike, whatever its method,
+  but a conditional write the service may have acted on
+  (`aws_request_is_conditional`), which is not resent.
+- `echo_connector.mojo`: `AwsEchoConnector`, a test double whose stream
+  answers each request with an error naming the request head as it reached
+  the wire, so a test of a generated client asserts each verb's request.
+- `s3_wire.mojo`: `s3_copy_source`, `s3_content_range_total` and
+  `s3_apply_request_checksum` (over `s3_crc32` / `s3_checksum_crc32`), the
+  S3 header values no model states.
 """
 
 from .aws_codec import (
@@ -96,6 +115,7 @@ from .aws_error import (
     AWS_REQUEST_ID_MAX_BYTES,
     AwsErrorInfo,
     aws_json_error_info,
+    aws_query_error_code,
     aws_request_id,
 )
 from .aws_request import AwsRequest, AwsResponse, HttpResult
@@ -130,6 +150,43 @@ from .aws_text import (
     aws_text_media,
     aws_text_ts,
     aws_ts_from_text,
+)
+from .aws_retry import (
+    AWS_DYNAMODB_CRC32_HEADER,
+    AWS_IDP_COMMUNICATION_ERROR,
+    AWS_NO_RETRY_INCREMENT,
+    AWS_RETRY_COST,
+    AWS_RETRY_QUOTA_CAPACITY,
+    AWS_STANDARD_MAX_ATTEMPTS,
+    AWS_TIMEOUT_RETRY_COST,
+    AwsAttempt,
+    AwsRetryClassifier,
+    AwsRetryQuota,
+    aws_dynamodb_crc32_mismatch,
+    aws_is_throttling_code,
+    aws_is_transient_code,
+    aws_is_transient_status,
+    aws_request_is_conditional,
+    aws_standard_retry_policy,
+    aws_transport_error_is_timeout,
+    aws_transport_error_kind,
+    aws_transport_error_unsent,
+)
+from .aws_send import (
+    AwsConnectorTransport,
+    AwsHttpTransport,
+    AwsMonotonicClock,
+    AwsReactorSleeper,
+    aws_system_retry_loop,
+    aws_response_error_code,
+    send_sigv4_signed_request,
+    send_sigv4_signed_request_with,
+)
+from .echo_connector import (
+    AWS_ECHO_CODE,
+    AwsEchoConnector,
+    AwsEchoStream,
+    aws_echo_head,
 )
 from .aws_xml import (
     aws_rest_xml_error,
@@ -227,6 +284,7 @@ from .endpoint_rules import (
     ResolvedEndpoint,
     is_valid_host_label,
 )
+from .endpoint_signing import AwsSigningTarget, aws_signing_target
 from .imds_credentials import (
     build_imds_credentials_request,
     build_imds_role_request,
@@ -237,7 +295,14 @@ from .imds_credentials import (
     parse_imds_token,
 )
 from .partitions import AwsPartitionSet
-from .s3_wire import s3_content_range_total, s3_copy_source
+from .s3_wire import (
+    S3_DEFAULT_CHECKSUM_ALGORITHM,
+    s3_apply_request_checksum,
+    s3_checksum_crc32,
+    s3_content_range_total,
+    s3_copy_source,
+    s3_crc32,
+)
 from .shared_config import (
     AwsProfile,
     AwsProfileSet,
@@ -248,7 +313,11 @@ from .shared_config import (
     select_profile,
     shared_file_paths,
 )
-from .signed_request import AwsPayloadSigning, build_sigv4_signed_request
+from .signed_request import (
+    AwsPayloadSigning,
+    build_sigv4_signed_request,
+    is_s3_signing_name,
+)
 from .sigv4 import (
     EMPTY_PAYLOAD_SHA256,
     MAX_PRESIGN_EXPIRES_SECONDS,
@@ -278,6 +347,7 @@ from .sources import (
     MapFiles,
     ProcessEnv,
     ProcessFiles,
+    SystemAwsClock,
     amz_date_from_unix,
 )
 from .sts_credentials import (

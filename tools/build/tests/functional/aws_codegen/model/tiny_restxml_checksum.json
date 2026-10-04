@@ -1,0 +1,27 @@
+{
+ "version": "2.0",
+ "metadata": {
+  "apiVersion": "2026-10-02",
+  "endpointPrefix": "tiny",
+  "protocol": "rest-xml",
+  "serviceFullName": "Tiny Example Service",
+  "serviceId": "Tiny",
+  "signatureVersion": "v4",
+  "uid": "tiny-2026-10-02"
+ },
+ "operations": {
+  "Ping": {
+   "name": "Ping",
+   "http": {"method": "PUT", "requestUri": "/ping"},
+   "input": {"shape": "PingRequest", "locationName": "PingRequest"},
+   "httpChecksum": {"requestAlgorithmMember": "ChecksumAlgorithm", "requestChecksumRequired": true}
+  }
+ },
+ "shapes": {
+  "PingRequest": {"type": "structure", "members": {
+   "ChecksumAlgorithm": {"shape": "String", "location": "header", "locationName": "x-amz-sdk-checksum-algorithm"},
+   "Kind": {"shape": "String"}
+  }},
+  "String": {"type": "string"}
+ }
+}

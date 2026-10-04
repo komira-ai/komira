@@ -1,0 +1,55 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The object-store-native message broker core: the produce path (coalesced
+# produce over a conditional-write store), partition maps and assignment
+# (split, merge, triggers, lease generations), the consumer source and
+# read-committed isolation, transactions, producer idempotence, retention and
+# log compaction, and the sub-lineage write path. Storage is a trait
+# parameter (komira_objectstore's ConditionalWriteStore / AsyncCasStore), so
+# the concrete cloud conformer is chosen by the program that instantiates the
+# broker, not by this library.
+
+mojo_library(
+    name = "komira_broker",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_core:komira_core",
+        "//src/komira_metrics:komira_metrics",
+        "//src/komira_objectstore:komira_objectstore",
+        "//src/komira_scan_resolver:komira_scan_resolver",
+    ],
+    test_srcs = [
+        "tests/test_assignment_binary_codec.mojo",
+        "tests/test_assignment_generation_continuity_merge_split.mojo",
+        "tests/test_assignment_lease_generations.mojo",
+        "tests/test_assignment_zero_copy_view.mojo",
+        "tests/test_broker_coalescing_produce.mojo",
+        "tests/test_broker_compacted_reap_guard_offline.mojo",
+        "tests/test_broker_compaction_index_offline.mojo",
+        "tests/test_broker_flush_local_head_cache_offline.mojo",
+        "tests/test_broker_flush_op_elision_offline.mojo",
+        "tests/test_broker_format_firewall_smoke.mojo",
+        "tests/test_broker_log_compaction_offline.mojo",
+        "tests/test_broker_log_start_advance_consistency_offline.mojo",
+        "tests/test_broker_maintenance_authoritative_tail_offline.mojo",
+        "tests/test_broker_retention_offline.mojo",
+        "tests/test_broker_scan_kind.mojo",
+        "tests/test_broker_scan_kind_budget.mojo",
+        "tests/test_broker_scan_kind_compaction_race.mojo",
+        "tests/test_broker_segment_key_collision_offline.mojo",
+        "tests/test_broker_sublineage_write_soak_offline.mojo",
+        "tests/test_broker_txn_control_offline.mojo",
+        "tests/test_cluster_assignment_store.mojo",
+        "tests/test_out_of_core_scan_source.mojo",
+        "tests/test_takeover_without_torn_offset.mojo",
+        "tests/test_partition_assignment.mojo",
+        "tests/test_partition_map_unit.mojo",
+        "tests/test_partition_merge_map_unit.mojo",
+        "tests/test_partition_merge_trigger_unit.mojo",
+        "tests/test_partition_trigger_unit.mojo",
+        "tests/test_scan_identity_coverage.mojo",
+        "tests/test_writer_lease_epoch_fence.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

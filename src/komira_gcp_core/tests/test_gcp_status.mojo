@@ -21,9 +21,14 @@ from komira_gcp_core import (
     ENVELOPE_PRESENT,
     ENVELOPE_ABSENT,
     ENVELOPE_MALFORMED,
+    CODE_DATA_LOSS,
+    GcpGrpcStatusError,
+    code_from_grpc_status,
     code_from_http_status,
     code_from_name,
     code_name,
+    gcp_grpc_error_code,
+    gcp_grpc_status_error,
     gcp_status_error,
     parse_gcp_status,
 )
@@ -316,6 +321,182 @@ def test_http_status_mapping() raises:
     assert_equal(code_from_http_status(505), CODE_UNKNOWN)
 
 
+def test_grpc_status_mapping() raises:
+    # gRPC's codes are google.rpc.Code's, number for number.
+    for c in range(17):
+        assert_equal(code_from_grpc_status(c), c)
+    assert_equal(code_from_grpc_status(14), CODE_UNAVAILABLE)
+    assert_equal(code_from_grpc_status(16), CODE_UNAUTHENTICATED)
+    assert_equal(code_from_grpc_status(15), CODE_DATA_LOSS)
+    # A status gRPC does not define is UNKNOWN.
+    assert_equal(code_from_grpc_status(17), CODE_UNKNOWN)
+    assert_equal(code_from_grpc_status(99), CODE_UNKNOWN)
+    assert_equal(code_from_grpc_status(-1), CODE_UNKNOWN)
+
+
+def test_grpc_status_error_names_the_code_not_the_text() raises:
+    var server_text = String(
+        "[grpc:7] Permission denied on projects/acme-secret-project for"
+        " leaked@example.com"
+    )
+    var rpc = String("/google.storage.v2.Storage/ReadObject")
+    var e = GcpGrpcStatusError.from_transport_text(rpc, 7, server_text)
+    assert_equal(e.code(), CODE_PERMISSION_DENIED)
+    assert_equal(e.attempts, 1)
+    # What follows the anchor and its space: the grpc-message.
+    assert_equal(e.message_bytes, server_text.byte_length() - 9)
+    var text = String(gcp_grpc_status_error(rpc, 7, server_text))
+    assert_equal(text, e.message())
+    assert_equal(
+        text,
+        String("[grpc:7] gRPC /google.storage.v2.Storage/ReadObject:")
+        + " PERMISSION_DENIED (code 7), error text "
+        + String(server_text.byte_length() - 9)
+        + " bytes",
+    )
+    for leak in ["acme-secret-project", "leaked@example.com", "Permission denied"]:
+        assert_false(_has(text, leak), String("echoed: ") + leak)
+
+
+def test_grpc_status_error_keeps_a_readable_code_anchor() raises:
+    # The anchor carries the google.rpc.Code, at the front, in komira_grpc's
+    # `[grpc:N]` shape, so `parse_grpc_status_code` reads the mapped code.
+    for status in [5, 14, 16]:
+        var text = String(
+            gcp_grpc_status_error("/a.B/C", status, String("[grpc:") + String(status) + "] x")
+        )
+        assert_true(
+            text.startswith(String("[grpc:") + String(status) + "] gRPC /a.B/C: "), text
+        )
+    # A status outside google.rpc.Code is anchored as UNKNOWN.
+    assert_true(
+        String(gcp_grpc_status_error("/a.B/C", 42, "[grpc:42] x")).startswith(
+            "[grpc:2] gRPC /a.B/C: UNKNOWN"
+        )
+    )
+
+
+def test_unknown_grpc_status_is_named_as_received() raises:
+    var text = String(gcp_grpc_status_error("/a.B/C", 42, "[grpc:42] "))
+    assert_equal(
+        text,
+        "[grpc:2] gRPC /a.B/C: UNKNOWN (code 2), grpc-status 42, error text 0 bytes",
+    )
+
+
+def test_retry_exhaustion_is_stated_and_counts_only_the_last_status_text() raises:
+    var last = String("Service unavailable for acme-secret-bucket")
+    var text = (
+        String("[grpc-retry:EXHAUSTED] gave up replaying /a.B/C after 4")
+        + " attempt(s) (policy max_attempts=4, max_backoff_ms=1000); every"
+        + " attempt returned a status this method's policy treats as transient."
+        + " Last: [grpc:14] "
+        + last
+    )
+    var e = GcpGrpcStatusError.from_transport_text("/a.B/C", 14, text)
+    assert_equal(e.attempts, 4)
+    assert_equal(e.message_bytes, last.byte_length())
+    assert_equal(
+        String(gcp_grpc_status_error("/a.B/C", 14, text)),
+        String("[grpc:14] gRPC /a.B/C: UNAVAILABLE (code 14), retries exhausted")
+        + " after 4 attempts, error text "
+        + String(last.byte_length())
+        + " bytes",
+    )
+    # Not an exhaustion error, or one whose count does not read: one attempt.
+    assert_equal(
+        GcpGrpcStatusError.from_transport_text("/a.B/C", 14, "[grpc:14] after 9").attempts,
+        1,
+    )
+    assert_equal(
+        GcpGrpcStatusError.from_transport_text(
+            "/a.B/C", 14, "[grpc-retry:EXHAUSTED] gave up after x [grpc:14] y"
+        ).attempts,
+        1,
+    )
+    # No anchor at all: the whole text is counted.
+    assert_equal(
+        GcpGrpcStatusError.from_transport_text("/a.B/C", 2, "abc").message_bytes, 3
+    )
+
+
+def _status_err(rpc: String, status: Int, message: String) -> String:
+    """What a generated client raises for komira_grpc's `[grpc:N] message`."""
+    return String(
+        gcp_grpc_status_error(rpc, status, String("[grpc:") + String(status) + "] " + message)
+    )
+
+
+def test_grpc_error_code_reads_back_every_code() raises:
+    """What `gcp_grpc_status_error` renders, `gcp_grpc_error_code` reads back:
+    every google.rpc.Code, a status outside it as UNKNOWN, and a call whose
+    retries ran out."""
+    var rpc = String("/google.storage.v2.Storage/WriteObject")
+    for c in range(17):
+        assert_equal(gcp_grpc_error_code(rpc, _status_err(rpc, c, "acme-secret-bucket")), c)
+    assert_equal(gcp_grpc_error_code(rpc, _status_err(rpc, 42, "")), CODE_UNKNOWN)
+    var big = String()
+    for _ in range(123456):
+        big += "x"
+    assert_equal(gcp_grpc_error_code(rpc, _status_err(rpc, 7, big)), CODE_PERMISSION_DENIED)
+    var exhausted = (
+        String("[grpc-retry:EXHAUSTED] gave up replaying ")
+        + rpc
+        + " after 4 attempt(s) (policy max_attempts=4, max_backoff_ms=1000);"
+        + " Last: [grpc:14] Service unavailable"
+    )
+    var mapped = String(gcp_grpc_status_error(rpc, 14, exhausted))
+    assert_true(_has(mapped, "retries exhausted after 4 attempts"))
+    assert_equal(gcp_grpc_error_code(rpc, mapped), CODE_UNAVAILABLE)
+
+
+def test_grpc_error_code_refuses_anything_else() raises:
+    """-1 for an error from another RPC, for an error that carries no status
+    (a transport fault the generated client passes on unchanged), for
+    komira_grpc's own `[grpc:N]` text, and for a message that only resembles
+    the rendered form."""
+    var rpc = String("/google.storage.v2.Storage/GetObject")
+    var other = _status_err("/google.storage.v2.Storage/ReadObject", 5, "abc")
+    assert_equal(gcp_grpc_error_code(rpc, other), -1)
+    assert_equal(gcp_grpc_error_code(rpc, "HttpError[EOF_MID_RESPONSE]: peer closed"), -1)
+    assert_equal(gcp_grpc_error_code(rpc, "[grpc:5] no such object"), -1)
+    var good = _status_err(rpc, 5, "abc")
+    assert_equal(good, "[grpc:5] gRPC " + rpc + ": NOT_FOUND (code 5), error text 3 bytes")
+    assert_equal(gcp_grpc_error_code(rpc, good), CODE_NOT_FOUND)
+    # A wrong name for the code, an anchor that disagrees with the code, a
+    # trailing byte, a missing count.
+    assert_equal(
+        gcp_grpc_error_code(rpc, "[grpc:5] gRPC " + rpc + ": INTERNAL (code 5), error text 3 bytes"),
+        -1,
+    )
+    assert_equal(
+        gcp_grpc_error_code(rpc, "[grpc:9] gRPC " + rpc + ": NOT_FOUND (code 5), error text 3 bytes"),
+        -1,
+    )
+    assert_equal(gcp_grpc_error_code(rpc, good + "x"), -1)
+    assert_equal(
+        gcp_grpc_error_code(rpc, "[grpc:5] gRPC " + rpc + ": NOT_FOUND (code 5), error text  bytes"),
+        -1,
+    )
+    # A grpc-status that is itself a google.rpc.Code is never rendered, nor
+    # is an exhaustion of one attempt.
+    assert_equal(
+        gcp_grpc_error_code(
+            rpc, "[grpc:5] gRPC " + rpc + ": NOT_FOUND (code 5), grpc-status 5, error text 3 bytes"
+        ),
+        -1,
+    )
+    assert_equal(
+        gcp_grpc_error_code(
+            rpc,
+            "[grpc:5] gRPC "
+            + rpc
+            + ": NOT_FOUND (code 5), retries exhausted after 1 attempts, error text 3 bytes",
+        ),
+        -1,
+    )
+
+
 def main() raises:
     test_full_envelope_is_classified()
     test_the_body_is_never_echoed()
@@ -332,4 +513,11 @@ def main() raises:
     test_non_utf8_message_is_counted_not_decoded()
     test_code_tables()
     test_http_status_mapping()
+    test_grpc_status_mapping()
+    test_grpc_status_error_names_the_code_not_the_text()
+    test_grpc_status_error_keeps_a_readable_code_anchor()
+    test_unknown_grpc_status_is_named_as_received()
+    test_retry_exhaustion_is_stated_and_counts_only_the_last_status_text()
+    test_grpc_error_code_reads_back_every_code()
+    test_grpc_error_code_refuses_anything_else()
     print("all gcp status tests passed")
