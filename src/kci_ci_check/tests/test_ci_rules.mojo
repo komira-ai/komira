@@ -158,6 +158,20 @@ def test_r4_id_token_exactly_where_needed() raises:
     _reports(_mutated(String("permissions: {}\n"), String("permissions:\n  id-token: write\n")), String("R4: `id-token: write` at the workflow level"))
 
 
+def test_r4_permissions_write_all_is_refused() raises:
+    # job level, on a stage that needs the token: write-all grants it and every other permission
+    _reports(
+        _mutated(String("    environment: build\n    permissions:\n      contents: read\n      id-token: write\n"), String("    environment: build\n    permissions: write-all\n")),
+        String("job 'build': R4: `permissions: write-all` grants permissions no map names"),
+    )
+    # workflow level: it reaches every job, the identity token among it
+    var wf = _mutated(String("permissions: {}\n"), String("permissions: write-all\n"))
+    _reports(wf, String("workflow: R4: `permissions: write-all` grants permissions no map names"))
+    _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
+    # read-all is the one scalar accepted
+    assert_equal(len(_findings(_mutated(String("permissions: {}\n"), String("permissions: read-all\n")))), 0)
+
+
 def test_r4_no_token_on_a_stage_that_neither_publishes_nor_connects() raises:
     # build is not farm-connected here, and it publishes nothing: its token goes
     var machine = String(_MACHINE).replace(String(" farm_connected: true"), String(""))

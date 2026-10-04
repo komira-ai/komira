@@ -294,6 +294,33 @@ def test_a_farm_connected_pull_request_job_needs_its_token() raises:
     _reports(_pr(String("      id-token: write\n"), String("")), String("job 'pr': R4: stage 'pr' is farm-connected, so the job needs `id-token: write`"))
 
 
+def test_write_all_is_refused_on_a_pull_request_job() raises:
+    # `write-all` grants `id-token: write` with no map entry naming it
+    var machine = String(_MACHINE).replace(String("trigger: PULL_REQUEST farm_connected: true"), String("trigger: PULL_REQUEST"))
+    var wf = _pr(String("    if: github.event.pull_request.head.repo.full_name == github.repository\n"), String(""))
+    wf = wf.replace(String("      - name: farm\n        uses: ./.github/actions/farm-connect\n        with:\n          ts-client-id: ${{ vars.TS_CLIENT_ID }}\n"), String(""))
+    wf = wf.replace(String("    permissions:\n      contents: read\n      id-token: write\n"), String("    permissions: write-all\n"))
+    _reports_on(machine, wf, String("job 'pr': R4: `permissions: write-all` grants permissions no map names"))
+    _reports_on(machine, wf, String("job 'pr': R4: has `id-token: write`, but stage 'pr' publishes to no OIDC channel"))
+    # on the farm-connected stage's job, which does need the token
+    _reports(_pr(String("    permissions:\n      contents: read\n      id-token: write\n"), String("    permissions: write-all\n")), String("job 'pr': R4: `permissions: write-all` grants permissions no map names"))
+
+
+def test_write_all_is_refused_at_the_pull_request_workflow_level() raises:
+    var wf = _pr(String("permissions: {}\n"), String("permissions: write-all\n"))
+    _reports(wf, String("workflow: R4: `permissions: write-all` grants permissions no map names"))
+    _reports(wf, String("R4: `id-token: write` at the workflow level reaches every job"))
+
+
+def test_write_all_is_refused_on_a_release_job() raises:
+    var wf = _release(String("    environment: gamma\n    permissions:\n      id-token: write\n"), String("    environment: gamma\n    permissions: write-all\n"))
+    _reports_on(String(_MACHINE), wf, String("job 'publish-gamma': R4: `permissions: write-all` grants permissions no map names"))
+
+
+def test_read_all_and_an_empty_map_are_accepted() raises:
+    _agrees(String(_MACHINE), _pr(String("permissions: {}\n"), String("permissions: read-all\n")))
+
+
 def test_a_push_stage_never_carries_affected_by() raises:
     _reports(
         _release(String("kci run --stage build --summary-file"), String("kci run --stage build --affected-by ${{ github.event.pull_request.base.sha }} --summary-file")),
