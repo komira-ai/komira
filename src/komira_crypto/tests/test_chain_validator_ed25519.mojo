@@ -9,7 +9,7 @@
 # (replace all three `_XXX_ed25519_cert_der` functions together).
 #
 # All three certs use:
-#   - validity period 2026-10-01T00:00:00Z to 2034-01-01T00:00:00Z
+#   - validity period 2024-01-01T00:00:00Z to 2034-01-01T00:00:00Z
 #   - "now" timestamp in tests = 2025-06-15T12:00:00Z (well inside)
 #   - Ed25519 signatures (OID 1.3.101.112)
 #   - Ed25519 pubkeys (SPKI BIT STRING = raw 32 bytes; no 0x04 prefix,
