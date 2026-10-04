@@ -207,6 +207,22 @@ def _loop() raises -> RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng]:
     )
 
 
+def _assert_uuid4(tok: String) raises:
+    """A version 4 UUID in its lowercase hyphenated form, as botocore's
+    `str(uuid.uuid4())` writes it: 36 bytes, hyphens at 8, 13, 18 and 23,
+    the version nibble 4 and a variant nibble of 8, 9, a or b."""
+    assert_equal(tok.byte_length(), 36, tok)
+    var hex = String("0123456789abcdef")
+    for i in range(36):
+        var ch = String(tok[byte=i:i+1])
+        if i == 8 or i == 13 or i == 18 or i == 23:
+            assert_equal(ch, "-", tok)
+        else:
+            assert_true(hex.find(ch) >= 0, tok)
+    assert_equal(String(tok[byte=14:15]), "4", tok)
+    assert_true(String("89ab").find(String(tok[byte=19:20])) >= 0, tok)
+
+
 def _token(req: CredentialHttpRequest) raises -> String:
     """The body's ClientRequestToken, or "" when it carries none."""
     var body = req.body_text()
@@ -253,8 +269,9 @@ def test_create_secret_fills_its_token_once() raises:
     assert_equal(parse_create_secret_response(res^.into_response()).name.value(), "app/db")
     assert_equal(len(t.sent), 2)
     var first = _token(t.sent[0])
-    # A hyphenated UUID, inside the model's 32..64.
+    # A version 4 UUID, as botocore makes one, inside the model's 32..64.
     assert_equal(first.byte_length(), 36, t.sent[0].body_text())
+    _assert_uuid4(first)
     assert_equal(_token(t.sent[1]), first)
 
     # Each call makes its own.
@@ -264,7 +281,7 @@ def test_create_secret_fills_its_token_once() raises:
         SecretsManagerCreateSecretRequest(String("app/db")), again, clock, loop2, quota
     )
     assert_equal(len(again.sent), 1)
-    assert_equal(_token(again.sent[0]).byte_length(), 36)
+    _assert_uuid4(_token(again.sent[0]))
     assert_true(_token(again.sent[0]) != first)
 
 

@@ -177,6 +177,22 @@ struct _Recording(AwsHttpTransport, Movable, Deinitable):
         return self.inner.send(req)
 
 
+def _assert_uuid4(tok: String) raises:
+    """A version 4 UUID in its lowercase hyphenated form, as botocore's
+    `str(uuid.uuid4())` writes it: 36 bytes, hyphens at 8, 13, 18 and 23,
+    the version nibble 4 and a variant nibble of 8, 9, a or b."""
+    assert_equal(tok.byte_length(), 36, tok)
+    var hex = String("0123456789abcdef")
+    for i in range(36):
+        var ch = String(tok[byte=i:i+1])
+        if i == 8 or i == 13 or i == 18 or i == 23:
+            assert_equal(ch, "-", tok)
+        else:
+            assert_true(hex.find(ch) >= 0, tok)
+    assert_equal(String(tok[byte=14:15]), "4", tok)
+    assert_true(String("89ab").find(String(tok[byte=19:20])) >= 0, tok)
+
+
 def _token(req: CredentialHttpRequest) raises -> String:
     """The body's clientToken, or "" when it carries none."""
     var body = req.body_text()
@@ -227,10 +243,13 @@ def test_run_task_retries_under_one_token() raises:
     # task.
     var sent = _run_task(ECSRunTaskRequest(String("jobs:3")), _500_then_200())
     assert_equal(len(sent), 2)
-    assert_equal(sent[0].byte_length(), 36)
+    # A version 4 UUID, as botocore makes one.
+    _assert_uuid4(sent[0])
     assert_equal(sent[1], sent[0])
     # Each call makes its own.
     var again = _run_task(ECSRunTaskRequest(String("jobs:3")), _500_then_200())
+    _assert_uuid4(again[0])
+    assert_equal(again[1], again[0])
     assert_true(again[0] != sent[0])
 
     var input = ECSRunTaskRequest(String("jobs:3"))

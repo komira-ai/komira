@@ -100,7 +100,8 @@ def test_the_scan_saw_the_client() raises:
         2,
     )
     assert_equal(_count(text, "if not filled.client_request_token:"), 4)
-    assert_equal(_count(text, "generate_uuidv7().to_hyphenated()"), 4)
+    assert_equal(_count(text, "Optional[String](aws_idempotency_token())"), 4)
+    assert_equal(_count(text, "from komira_aws_core import aws_idempotency_token\n"), 1)
 
 
 def main() raises:
