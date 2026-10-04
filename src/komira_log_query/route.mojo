@@ -259,6 +259,11 @@ def service_log_response(
     # ⛔ AN INVERTED WINDOW IS REFUSED, NEVER NORMALISED. Swapping the bounds for
     # the caller would answer a different question than the one asked and look
     # like it worked; returning an empty page would read as "nothing was logged".
+    var beyond = _beyond_ns_window(SERVICE_LOG_SINCE_PARAM, since_ms)
+    if not beyond:
+        beyond = _beyond_ns_window(SERVICE_LOG_UNTIL_PARAM, until_ms)
+    if beyond:
+        return _error_json(Int32(400), beyond.value())
     if since_ms > until_ms:
         return _error_json(
             Int32(400),
@@ -359,6 +364,30 @@ def service_log_response(
 # =============================================================================
 
 
+comptime _MAX_WINDOW_MS: Int64 = 9_223_372_036_854
+"""The last millisecond whose nanosecond value fits an Int64 (`Int64.MAX //
+1_000_000`). The window reaches the conformer in NANOSECONDS, so a larger bound
+would wrap to a negative time: a different window from the one asked for."""
+
+
+def _beyond_ns_window(param: String, ms: Int64) -> Optional[String]:
+    """The 400 message for a bound that cannot be expressed in nanoseconds, or
+    None when it fits. Refused rather than clamped or wrapped, for the same
+    reason the window is not reordered: either would answer a different
+    question than the one asked."""
+    if ms <= _MAX_WINDOW_MS:
+        return None
+    return Optional(
+        String("'")
+        + param
+        + String("' (")
+        + String(ms)
+        + String(") is beyond the last millisecond a nanosecond window can hold (")
+        + String(_MAX_WINDOW_MS)
+        + String("). A bound that does not fit is refused, not wrapped.")
+    )
+
+
 def _render_page(
     q: String,
     limit: Int,
@@ -429,7 +458,13 @@ def _render_hit(hit: ServiceLogHit) -> String:
     var out = String('{"timestamp_ns":')
     out += String(hit.timestamp_ns)
     out += String(',"score":')
-    out += String(hit.score)
+    if _is_finite(hit.score):
+        out += String(hit.score)
+    else:
+        # NaN and +/-Inf have no JSON spelling (RFC 8259 section 6); `nan` or
+        # `inf` in the body would be the malformed response the embed-or-quote
+        # rule exists to prevent.
+        out += String("null")
     out += String(',"source":')
     if _is_json_object(hit.source_json):
         out += hit.source_json
@@ -453,6 +488,11 @@ def _render_hit(hit: ServiceLogHit) -> String:
 # deeply-nested blob costs heap instead of C stack and the depth bound is a
 # number rather than a crash.
 # ---------------------------------------------------------------------------
+
+def _is_finite(v: Float64) -> Bool:
+    """False for NaN and +/-Inf: `v - v` is NaN for both and 0 otherwise."""
+    return (v - v) == Float64(0)
+
 
 comptime _JSON_MAX_DEPTH: Int = 64
 """Nesting ceiling. A blob deeper than this is treated as NOT an object and gets
@@ -696,28 +736,89 @@ def _json_escape(s: String) -> String:
     `\\u00XX` for the rest of C0). Hand-rolled so this package stays a clean leaf
     on komira_http alone."""
     var b = s.as_bytes()
-    var out = String("")
-    for i in range(len(b)):
+    var out = List[UInt8]()
+    var i = 0
+    var n = len(b)
+    while i < n:
         var c = Int(b[i])
         if c == ord('"'):
-            out += '\\"'
+            _append_str(out, '\\"')
         elif c == ord("\\"):
-            out += "\\\\"
+            _append_str(out, "\\\\")
         elif c == ord("\n"):
-            out += "\\n"
+            _append_str(out, "\\n")
         elif c == ord("\r"):
-            out += "\\r"
+            _append_str(out, "\\r")
         elif c == ord("\t"):
-            out += "\\t"
+            _append_str(out, "\\t")
         elif c < 0x20:
-            var hexd = "0123456789abcdef"
-            var hb = hexd.as_bytes()
-            out += "\\u00"
-            out += chr(Int(hb[(c >> 4) & 0xF]))
-            out += chr(Int(hb[c & 0xF]))
+            var hb = "0123456789abcdef".as_bytes()
+            _append_str(out, "\\u00")
+            out.append(hb[(c >> 4) & 0xF])
+            out.append(hb[c & 0xF])
+        elif c < 0x80:
+            out.append(b[i])
         else:
-            out += chr(c)
-    return out^
+            # A multi-byte sequence is copied byte for byte when it is
+            # well-formed UTF-8. Appending each byte as a code point (`chr`)
+            # would re-encode it: "\u00e9" (c3 a9) would become c3 83 c2 a9.
+            # A byte that starts no well-formed sequence (a percent-decoded
+            # %FF, a lone continuation byte) becomes U+FFFD, so the body stays
+            # valid UTF-8, which RFC 8259 requires of JSON.
+            var k = _utf8_seq_len(b, i)
+            if k == 0:
+                _append_str(out, "\\ufffd")
+            else:
+                for j in range(k):
+                    out.append(b[i + j])
+                i += k
+                continue
+        i += 1
+    return String(unsafe_from_utf8=out^)
+
+
+def _append_str(mut out: List[UInt8], s: String):
+    var sb = s.as_bytes()
+    for i in range(len(sb)):
+        out.append(sb[i])
+
+
+def _utf8_seq_len(b: Span[UInt8, _], i: Int) -> Int:
+    """The length of the well-formed UTF-8 sequence (RFC 3629 section 4)
+    starting at `b[i]`, a byte >= 0x80; 0 when none starts there (a
+    continuation byte, an overlong lead, a surrogate, past U+10FFFF, or a
+    sequence cut short by the end of `b`)."""
+    var n = len(b)
+    var c = Int(b[i])
+    var need = 0
+    var lo = 0x80
+    var hi = 0xBF
+    if c >= 0xC2 and c <= 0xDF:
+        need = 1
+    elif c >= 0xE0 and c <= 0xEF:
+        need = 2
+        if c == 0xE0:
+            lo = 0xA0
+        elif c == 0xED:
+            hi = 0x9F
+    elif c >= 0xF0 and c <= 0xF4:
+        need = 3
+        if c == 0xF0:
+            lo = 0x90
+        elif c == 0xF4:
+            hi = 0x8F
+    else:
+        return 0
+    if i + need >= n:
+        return 0
+    var c1 = Int(b[i + 1])
+    if c1 < lo or c1 > hi:
+        return 0
+    for k in range(2, need + 1):
+        var ck = Int(b[i + k])
+        if ck < 0x80 or ck > 0xBF:
+            return 0
+    return need + 1
 
 
 def _json_response(var body: String, status: Int32) -> HttpResponse:
@@ -858,12 +959,16 @@ def _hex_val(c: UInt8) -> Int:
     return -1
 
 
+comptime _I64_MAX: Int64 = 9_223_372_036_854_775_807
+
+
 def _query_param_i64(
     query_string: String, key: String, default: Int64
 ) -> Int64:
     """`key`'s value as an Int64, or `default` when absent / empty /
     non-numeric. Spelled here so this package stays a clean leaf. A malformed
-    value falls back to the default rather than erroring the request."""
+    value, including one with more digits than an Int64 holds, falls back to
+    the default rather than erroring the request."""
     var qb = query_string.as_bytes()
     var kb = key.as_bytes()
     var n = len(qb)
@@ -889,7 +994,13 @@ def _query_param_i64(
                 for j in range(eq + 1, seg_end):
                     var c = qb[j]
                     if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
-                        val = val * Int64(10) + Int64(Int(c) - ord("0"))
+                        var d = Int64(Int(c) - ord("0"))
+                        # More digits than an Int64 holds is malformed: a
+                        # wrapping parse would read 2^64 + 1 as 1.
+                        if val > (_I64_MAX - d) // Int64(10):
+                            ok = False
+                            break
+                        val = val * Int64(10) + d
                         any_digit = True
                     else:
                         ok = False
