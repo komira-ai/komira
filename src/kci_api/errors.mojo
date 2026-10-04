@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/errors.mojo -- the stable error ids a result document
+# src/kci_api/errors.mojo -- the stable error ids a result document
 #   carries in `error.id`.
 # =============================================================================
 #

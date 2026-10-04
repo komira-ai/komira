@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_contract/tests/test_platform_layout.mojo
+# src/kci_api/tests/test_platform_layout.mojo
 #   The platform table pinned by value, the release/member rules, and the
 #   release directory layout.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_contract import (
+from kci_api import (
     ARTIFACT_MANIFEST_NAME,
     DEFAULT_MACHINE_FILE,
     RELEASE_MANIFEST_NAME,

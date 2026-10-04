@@ -3,12 +3,12 @@
 #   object per package file, saying what the file is and what it hashes to.
 # =============================================================================
 #
-#   {"format": "kci.artifact_manifest",  the format (kci_contract's table)
+#   {"format": "kci.artifact_manifest",  the format (kci_api's table)
 #    "schema_version": 1,                 its major (an integer)
 #    "artifact_type": "CONDA",            CONDA or PYTHON
 #    "name": "example-pkg",               the package name
 #    "version": "1.2.3",
-#    "platform": "linux-x86_64",          kci_contract's platform table
+#    "platform": "linux-x86_64",          kci_api's platform table
 #    "subdir": "linux-64",                CONDA only: the channel subdir,
 #                                         the platform's conda subdir
 #    "file": "linux-64/example-pkg-1.2.3-h0_0.conda",
@@ -16,10 +16,10 @@
 #    "metadata": "METADATA"}              PYTHON: the wheel's METADATA
 #                                         CONDA: the build's metadata.json
 #
-# `format` and `schema_version` are read first (kci_contract's
+# `format` and `schema_version` are read first (kci_api's
 # `produced_header`): another format, or a major this kci does not read, is
 # refused. Inside major 1 an unknown key is IGNORED and listed in
-# `ignored_keys` (kci_contract's policy: writers only ever add keys inside a
+# `ignored_keys` (kci_api's policy: writers only ever add keys inside a
 # major). `platform` is the platform the artifact was built for: a released
 # one or `noarch`; a CONDA artifact's `subdir` must be its platform's conda
 # subdir. Nothing run-specific (a run id, an attempt) is ever in a manifest:
@@ -45,7 +45,7 @@ from std.pathlib import Path
 
 from komira_json import JSON_STRING, JsonValue, parse_json_value
 
-from kci_contract import (
+from kci_api import (
     FORMAT_ARTIFACT_MANIFEST,
     conda_subdir_of,
     current_major,

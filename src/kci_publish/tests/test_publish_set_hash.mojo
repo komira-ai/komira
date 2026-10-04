@@ -28,8 +28,8 @@ from std.ffi import external_call
 from std.os import getenv, makedirs
 from std.testing import assert_equal, assert_true
 
-from kci_contract import ERROR_MEMBER, EXIT_REFUSED, MemoryRecorder
-from kci_contract import RunResult as KciRunResult
+from kci_api import ERROR_MEMBER, EXIT_REFUSED, MemoryRecorder
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet
 from kci_publish import (
     ActionsOidcEnv,

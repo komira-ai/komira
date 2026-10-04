@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/outcome.mojo -- the closed vocabularies of a run's verdict:
+# src/kci_api/outcome.mojo -- the closed vocabularies of a run's verdict:
 #   the OUTCOME of a run or of one step, and the RETRY advice that goes
 #   with it.
 # =============================================================================

@@ -12,7 +12,7 @@
 #   declarations_file     the artifact declarations (what the release is)
 #   release_dir           --release-dir: the top release directory; this
 #                         step reads `<release_dir>/<platform>/`
-#                         (kci_contract's layout), which a BUILD step wrote
+#                         (kci_api's layout), which a BUILD step wrote
 #   platform              the step's platform: must be the one
 #                         `release.json` names
 #   revision_id           --revision-id: a full commit id; must be the one
@@ -33,7 +33,7 @@
 #   plan                  `kci run --plan`: no write to the channel; under
 #                         CI, an OIDC channel's token is exchanged and
 #                         discarded (flow.mojo)
-#   run                   --run-id, --attempt, --context (kci_contract)
+#   run                   --run-id, --attempt, --context (kci_api)
 #
 # Which names the release publishes is the declarations file's: there is no
 # per-run claim and no approved-set input. A name new to the channel is
@@ -44,7 +44,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import RunIdentity, release_platform_dir
+from kci_api import RunIdentity, release_platform_dir
 
 from .workers import DEFAULT_CONCURRENCY
 

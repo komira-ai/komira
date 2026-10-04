@@ -48,9 +48,9 @@ from kci_artifact_declaration.contract import (
     require_one_manifest,
     substitute_placeholders,
 )
-# The full-commit-id check moved to kci_contract; it stays importable from
+# The full-commit-id check moved to kci_api; it stays importable from
 # here so callers keep one import.
-from kci_contract import require_full_commit_id
+from kci_api import require_full_commit_id
 from kci_artifact_declaration.parse import (
     parse_artifact_declarations,
     read_artifact_declarations,

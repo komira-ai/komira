@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_contract/tests/test_run_identity.mojo
+# src/kci_api/tests/test_run_identity.mojo
 #   --run-id / --attempt / --context: each limit at its edge, each refusal by
 #   its message.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_contract import (
+from kci_api import (
     ContextEntry,
     RunIdentity,
     parse_attempt,
