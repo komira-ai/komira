@@ -87,16 +87,21 @@ fn parse_args(argv: &[String]) -> Result<Args, String> {
 /// An error case reads the code and message as its protocol's client does:
 /// awsJson from the body (`aws_error_code_from_body` /
 /// `aws_error_message_from_body`), restJson1 with `aws_rest_json_error`,
-/// restXml with `aws_rest_xml_error`.
+/// restXml with `aws_rest_xml_error`, awsQuery and ec2Query with
+/// `aws_query_error`.
 fn driver_protocol(p: &str) -> Result<AwsProtocol, String> {
     match AwsProtocol::from_botocore(p) {
-        Some(proto @ (AwsProtocol::Json | AwsProtocol::RestJson | AwsProtocol::RestXml)) => {
-            Ok(proto)
-        }
+        Some(
+            proto @ (AwsProtocol::Json
+            | AwsProtocol::RestJson
+            | AwsProtocol::RestXml
+            | AwsProtocol::Query
+            | AwsProtocol::Ec2),
+        ) => Ok(proto),
         Some(_) => Err(format!(
             "--protocol `{p}`: the conformance driver reads errors as awsJson, \
-             restJson1 and restXml clients do, so it drives `json`, `rest-json` \
-             and `rest-xml` only"
+             restJson1, restXml, awsQuery and ec2Query clients do, so it drives \
+             `json`, `rest-json`, `rest-xml`, `query` and `ec2` only"
         )),
         None => Err(format!("--protocol `{p}` is not a botocore protocol name")),
     }
@@ -318,6 +323,35 @@ fn first_line(s: &str) -> &str {
     s.split('\n').next().unwrap_or(s)
 }
 
+/// MIRRORS botocore's tests/unit/test_protocols.py (`test_output_compliance`):
+/// for a `query` suite whose output shape has members, the harness sets the
+/// output's `resultWrapper` to `<operation>Result`, which the case files do
+/// not state and every real awsQuery model does. The response bodies hold
+/// that element.
+fn wrap_query_result(given: &mut Json, shapes: Option<&Json>) {
+    let Json::Object(g) = given else { return };
+    let Some(name) = g.get("name").and_then(Json::as_str).map(str::to_string) else {
+        return;
+    };
+    let Some(Json::Object(output)) = g.get("output").cloned() else {
+        return;
+    };
+    let has_members = output
+        .get("shape")
+        .and_then(Json::as_str)
+        .and_then(|s| shapes.and_then(|sh| sh.as_object()).and_then(|sh| sh.get(s)))
+        .and_then(|s| s.as_object())
+        .and_then(|s| s.get("members"))
+        .and_then(Json::as_object)
+        .is_some_and(|m| m.iter_declared().next().is_some());
+    if !has_members {
+        return;
+    }
+    let mut output = output;
+    output.insert("resultWrapper".into(), Json::Str(format!("{name}Result")));
+    g.insert("output".into(), Json::Object(output));
+}
+
 /// Reassemble a conformance suite into a botocore service model and lower it.
 fn build_suite(
     obj: &JsonObject,
@@ -332,6 +366,7 @@ fn build_suite(
     let mut operations = JsonObject::new();
     let mut op_names: Vec<String> = Vec::new();
     let mut keyed: Vec<(String, Json)> = Vec::new();
+    let protocol = meta.get("protocol").and_then(Json::as_str).unwrap_or("");
     for c in cases {
         let co = c
             .as_object()
@@ -340,10 +375,13 @@ fn build_suite(
             .get("id")
             .and_then(Json::as_str)
             .ok_or_else(|| "case has no id".to_string())?;
-        let given = co
+        let mut given = co
             .get("given")
             .cloned()
             .ok_or_else(|| format!("case {id} has no `given`"))?;
+        if protocol == "query" && direction == Direction::Output {
+            wrap_query_result(&mut given, obj.get("shapes"));
+        }
         let name = given
             .as_object()
             .and_then(|g| g.get("name"))
@@ -472,6 +510,9 @@ fn driver_header(
     }
     if protocols.contains("rest-xml") {
         o.line("    aws_rest_xml_error,");
+    }
+    if protocols.contains("query") || protocols.contains("ec2") {
+        o.line("    aws_query_error,");
     }
     o.line(")");
     o.line("");
@@ -757,12 +798,17 @@ fn emit_output_case(
     // MIRRORS the generated client's error builder (`_<module>_error` in
     // emit_aws/mod.rs, the code and message expressions of the protocol's
     // binding): awsJson reads the body only, restJson1 the X-Amzn-Errortype
-    // header and then the body, restXml the <Error> element. The builder is
-    // not called, so a defect in it would not show here.
+    // header and then the body, restXml the <Error> element, awsQuery and
+    // ec2Query <ErrorResponse><Error> or <Response><Errors><Error>. The
+    // builder is not called, so a defect in it would not show here.
     o.line("if aws_is_error_status(_resp.status):");
     o.indent += 1;
     if s.lowering.service.protocol == "rest-xml" {
         o.line("var _ei = aws_rest_xml_error(_resp)");
+        o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(_ei.code))");
+        o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(_ei.message))");
+    } else if s.lowering.service.protocol == "query" || s.lowering.service.protocol == "ec2" {
+        o.line("var _ei = aws_query_error(_resp)");
         o.line("_rec.set_member(String(\"errorCode\"), JsonValue.from_string(_ei.code))");
         o.line("_rec.set_member(String(\"errorMessage\"), JsonValue.from_string(_ei.message))");
     } else if s.lowering.service.protocol == "rest-json" {
