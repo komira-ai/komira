@@ -1,0 +1,35 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The validations of a stage's steps (`kci run --stage S`; the machine file
+# declares them on a step, kci_stage_graph parses them). One kind today,
+# CONDA_INSTALL_SMOKE: after a PUBLISH step, install the release from that
+# step's channel into a clean pixi environment (started with exactly PATH,
+# HOME, PIXI_HOME, PIXI_CACHE_DIR and TMPDIR, so no CI credential reaches the
+# solver), check every installed record's name, version, build, sha256 and
+# channel against the release's own, and run a smoke program that must print
+# `<stem> smoke: OK`. Every failure, an installer that cannot start included,
+# is VALIDATION_FAILED (exit 7); there is no skip. Under --plan it runs
+# nothing and reports WOULD_VALIDATE.
+#
+# The welded tests drive kci_build's ScriptedRunner over release directories
+# kci_publish's ExampleRelease writes under TEST_TMPDIR: no pixi, no network.
+mojo_library(
+    name = "kci_validate",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_build:kci_build_lib",
+        "//src/kci_contract:kci_contract",
+        "//src/kci_publish:kci_publish_lib",
+        "//src/kci_release_channel:kci_release_channel",
+        "//src/kci_release_set:kci_release_set",
+        "//src/kci_stage_graph:kci_stage_graph",
+        "//src/komira_json:komira_json",
+    ],
+    test_srcs = [
+        # a pass; install fails, sha256 differs, another channel, a member missing,
+        # no OK line, installer cannot start: each VALIDATION_FAILED; the child's
+        # exact environment; --plan runs nothing; a used scratch dir is refused
+        "tests/test_conda_install_smoke.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
