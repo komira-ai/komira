@@ -22,8 +22,9 @@
 #   (7) a member that reads back with other bytes at step 3 =
 #       READ_BACK_MISMATCH: PARTIAL (exit 6), retry NEEDS_HUMAN;
 #   (8) in 4 to 7 the recorded requests hold NO metapackage upload;
-#   (9) `ApprovedNames` built from the listing plus claims refuses a name in
-#       neither with ZERO requests;
+#   (9) `ApprovedNames` approves exactly the declared set's names, whatever
+#       the channel holds; an undeclared name reaching the uploader is refused
+#       with ZERO requests;
 #  (10) --concurrency 1, 2 and 4 give the same final state over every
 #       scenario above: the reason, every report row and line, the channel's
 #       stored files, the uploads per file;
@@ -43,7 +44,7 @@ from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_false, assert_true
 
 from kci_contract import EXIT_OK, EXIT_PARTIAL, RETRY_NEEDS_HUMAN
-from kci_pkg_upload import SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
+from kci_pkg_upload import SUBSTRATE_PREFIX_DEV_CONDA, SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
 from kci_publish import (
     NoWaitSleeper,
     REASON_FAILED,
@@ -60,7 +61,7 @@ from kci_publish import (
     read_channel,
     run_publish,
 )
-from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_targets
+from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_channel_path, example_targets
 from kci_publish.scripted_channel import (
     UPLOAD_ANSWER_400,
     UPLOAD_LOSE_NOT_STORED,
@@ -104,8 +105,8 @@ def _targets(tag: String) raises -> List[PublishTarget]:
     return example_targets(r, d)
 
 
-def _channel() -> ScriptedChannel:
-    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+def _channel() raises -> ScriptedChannel:
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
     ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
     ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
     ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
@@ -133,7 +134,7 @@ def _run(
 ) -> PublishReport:
     var sl = NoWaitSleeper()
     return run_publish(
-        targets, List[String](), reg, src, False,
+        targets, reg, src, False,
         RunOptions(2, 0, upload_attempts, 0, 0, 1, 0, concurrency=concurrency), sl, PublishReport(),
     )
 
@@ -271,29 +272,37 @@ def test_a_read_back_mismatch_withholds_the_metapackage() raises:
     print("  test_a_read_back_mismatch_withholds_the_metapackage: PASS")
 
 
-def test_the_uploader_gate_is_built_from_listing_and_claims() raises:
+def test_the_uploader_gate_is_the_declared_set() raises:
     var t = _targets(String("gate"))
-    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
     ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
     var reg = _registry(ch^)
-    var channel_read = read_channel(reg, t)
-    var claims = List[String]()
-    claims.append(String("komira"))
-    var names = approved_names_for(t, channel_read, claims)
+    var names = approved_names_for(t)
+    # every declared name, held by the channel or new to it, and nothing else
+    assert_equal(names.count(), 3)
+    assert_true(names.is_approved(String("komira_alpha"), SUBSTRATE_PREFIX_DEV_CONDA))
+    assert_true(names.is_approved(String("komira_beta"), SUBSTRATE_PREFIX_DEV_CONDA))
+    assert_true(names.is_approved(String("komira"), SUBSTRATE_PREFIX_DEV_CONDA))
+    assert_false(names.is_approved(String("komira_extra"), SUBSTRATE_PREFIX_DEV_CONDA))
+    # an undeclared coordinate injected below the plan is still refused
+    var stray = t[1].copy()
+    stray.coordinate.distribution = String("komira_extra")
+    var renamed = stray.coordinate.file_name.replace(String("komira_beta"), String("komira_extra"))
+    stray.coordinate.file_name = renamed^
     var before = reg.transport().call_count()
     reg.credential().arm(String("Bearer pfx-test-token"))
     var raised = False
     try:
-        _ = reg.upload(package_file_of(t[1]), names)
+        _ = reg.upload(package_file_of(stray), names)
     except e:
         raised = True
-        assert_true(String(e).find(String("'komira_beta' is not in the approved-names list")) >= 0, String(e))
-    assert_true(raised, String("komira_beta was neither held nor claimed"))
+        assert_true(String(e).find(String("'komira_extra' is not in the approved-names list")) >= 0, String(e))
+    assert_true(raised, String("an undeclared name reached the channel"))
     assert_equal(reg.transport().call_count(), before)
-    print("  test_the_uploader_gate_is_built_from_listing_and_claims: PASS")
+    print("  test_the_uploader_gate_is_the_declared_set: PASS")
 
 
-def _scenario_channel(t: List[PublishTarget], scenario: Int) -> ScriptedChannel:
+def _scenario_channel(t: List[PublishTarget], scenario: Int) raises -> ScriptedChannel:
     var ch = _channel()
     if scenario == 1:
         ch.plan_upload(t[0].coordinate.file_name, UPLOAD_STORE_LOSE_ANSWER)
@@ -403,7 +412,7 @@ def main() raises:
     test_a_409_is_settled_by_what_the_channel_holds()
     test_a_rejection_fails_and_withholds_the_metapackage()
     test_a_read_back_mismatch_withholds_the_metapackage()
-    test_the_uploader_gate_is_built_from_listing_and_claims()
+    test_the_uploader_gate_is_the_declared_set()
     test_concurrency_1_and_4_end_in_the_same_state()
     test_the_workers_really_run_in_parallel()
     print("test_publish_run: ALL PASS")

@@ -18,7 +18,7 @@
 #                      the default machine file
 #   selection.mojo     `--only step:|validation:` selectors, step names, the
 #                      FULL / SELECTIVE scope of a run
-#   verbs.mojo         verbs (`run`, `ci-check`) and step kinds
+#   verbs.mojo         the one verb (`run`), step kinds, validation kinds
 #   result.mojo        the result document, RunRecorder, MemoryRecorder
 #
 # Pure: no file I/O, no clock, no environment, no process.
@@ -41,7 +41,6 @@ from kci_contract.errors import (
     ERROR_PLATFORM,
     ERROR_PLATFORM_MISMATCH,
     ERROR_PUBLISH_DIFFERENT_BYTES,
-    ERROR_PUBLISH_NEW_NAME,
     ERROR_PUBLISH_READ_BACK,
     ERROR_PUBLISH_UPLOAD,
     ERROR_RESULT_FILE,
@@ -53,6 +52,8 @@ from kci_contract.errors import (
     ERROR_STAGE_ENVIRONMENT,
     ERROR_STAGE_UNKNOWN,
     ERROR_USAGE,
+    ERROR_VALIDATION,
+    ERROR_WORKFLOW_MISMATCH,
     ErrorRow,
     error_table,
     is_error_id,
@@ -148,16 +149,29 @@ from kci_contract.result import (
     ARTIFACT_UPLOADED,
     ARTIFACT_WOULD_BUILD,
     ARTIFACT_WOULD_UPLOAD,
+    CREDENTIAL_PROBE_MINTED,
+    CREDENTIAL_PROBE_NOT_OIDC,
+    CREDENTIAL_PROBE_NOT_UNDER_CI,
     KCI_VERSION,
     STATUS_FINISHED,
     STATUS_RUNNING,
+    VALIDATION_NOT_REACHED,
+    VALIDATION_VALIDATED,
+    VALIDATION_WOULD_VALIDATE,
+    WORKFLOW_NOT_REACHED,
+    WORKFLOW_PATH_PREFIX,
     MemoryRecorder,
     ResultArtifact,
     ResultError,
+    ResultNewName,
     ResultStep,
+    ResultValidation,
+    ResultValidationCheck,
     RunRecorder,
     RunResult,
     all_artifact_effects,
+    all_credential_probes,
+    all_validation_effects,
     parse_result,
     render_result,
     reserved_result_keys,
@@ -195,10 +209,12 @@ from kci_contract.verbs import (
     STEP_KIND_BUILD,
     STEP_KIND_DEPLOY,
     STEP_KIND_PUBLISH,
-    VERB_CI_CHECK,
+    VALIDATION_KIND_CONDA_INSTALL_SMOKE,
     VERB_RUN,
     all_step_kinds,
+    all_validation_kinds,
     all_verbs,
     require_step_kind,
+    require_validation_kind,
     require_verb,
 )

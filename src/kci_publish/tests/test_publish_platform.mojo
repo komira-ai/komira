@@ -17,10 +17,10 @@
 #       (KCI-E-MEMBER), zero requests;
 #   (4) every file lands in its platform's conda subdir (linux-x86_64 ->
 #       linux-64), and the result's rows name the platform and the revision;
-#   (5) the request's own values: an `--expect-set-hash` that is not 64 hex,
-#       a concurrency outside 1..16, a claim given twice and an empty stage
-#       are each REFUSED with KCI-E-USAGE, which the exit table makes exit 2,
-#       before anything is read.
+#   (5) the request's own values: a concurrency outside 1..16 and an empty
+#       stage are each REFUSED with KCI-E-USAGE, which the exit table makes
+#       exit 2, before anything is read. There is no set-hash or claim input
+#       to refuse.
 #
 # Hermetic: TEST_TMPDIR, ScriptedChannel; no network.
 # =============================================================================
@@ -45,6 +45,7 @@ from kci_contract import (
 from kci_contract import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
+    ActionsOidcEnv,
     NoSecretStore,
     NoWaitSleeper,
     PublishCredential,
@@ -54,7 +55,7 @@ from kci_publish import (
     ScriptedChannel,
     publish_flow,
 )
-from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, write_example_inputs
+from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_channel_path, write_example_inputs
 
 
 def _root(tag: String) raises -> String:
@@ -76,8 +77,8 @@ def _bytes(s: String) -> List[UInt8]:
     return out^
 
 
-def _channel() -> ScriptedChannel:
-    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+def _channel() raises -> ScriptedChannel:
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
     ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
     ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
     ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
@@ -96,7 +97,7 @@ def _refused_before_anything(
     var sl = NoWaitSleeper()
     var result = KciRunResult(String("run"), String("publish"))
     var rec = MemoryRecorder()
-    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), store, RunOptions(), sl)
+    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, RunOptions(), sl)
     var lines = String("\n").join(rep.lines)
     assert_equal(rep.outcome(), String("REFUSED"), lines)
     assert_equal(rep.exit_code(), exit_code, lines)
@@ -156,7 +157,7 @@ def test_files_land_in_the_platforms_subdir() raises:
     var rec = MemoryRecorder()
     # an API-token channel; the store refuses, so make it a dry run's reads only
     req.plan = True
-    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), store, RunOptions(), sl)
+    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, RunOptions(), sl)
     assert_equal(rep.exit_code(), EXIT_OK, String("\n").join(rep.lines))
     for i in range(len(rep.files)):
         assert_equal(rep.files[i].subdir, String("linux-64"))
@@ -172,16 +173,9 @@ def test_files_land_in_the_platforms_subdir() raises:
 
 
 def test_the_requests_own_values() raises:
-    var a = _req(String("u_hash"))
-    a.expect_set_hash = String("ABC")
-    _refused_before_anything(a, String(ERROR_USAGE), String("--expect-set-hash 'ABC' is not 64 lowercase hex"), EXIT_USAGE)
     var b = _req(String("u_conc"))
     b.concurrency = 0
     _refused_before_anything(b, String(ERROR_USAGE), String("--concurrency 0 is not in 1..16"), EXIT_USAGE)
-    var c = _req(String("u_claim"))
-    c.claims.append(String("komira"))
-    c.claims.append(String("komira"))
-    _refused_before_anything(c, String(ERROR_USAGE), String("--claim-new-name komira is given twice"), EXIT_USAGE)
     var d = _req(String("u_stage"))
     d.stage = String("")
     _refused_before_anything(d, String(ERROR_USAGE), String("the stage is EMPTY"), EXIT_USAGE)

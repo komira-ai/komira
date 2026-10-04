@@ -15,7 +15,8 @@
 #   PARTIAL            some effect landed and the rest did not
 #   INTERRUPTED        kci was stopped mid-run (a result file still saying
 #                      RUNNING is read as this)
-#   VALIDATION_FAILED  reserved for the deploy side; nothing emits it yet
+#   VALIDATION_FAILED  a validation of what a step produced failed (a
+#                      release's install smoke; the deploy side's later)
 #   INDETERMINATE      kci cannot say whether the end state holds; never a pass
 #   CANCELLED          the driver cancelled the run; whether an effect landed
 #                      is told by the result's steps and artifacts

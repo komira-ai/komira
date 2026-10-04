@@ -30,9 +30,11 @@
 #   longer say which artifacts are members). Until that question is settled
 #   the rule is the strict one, which is the safe direction.
 #
-# `require_set_hash(loaded, expect)` (0.5) -- the set hash recomputed from
-#   the member directories equals `--expect-set-hash`. (`load_release`
-#   already refused a `release.json` that differs from the recomputation.)
+# The set hash (0.5) has no check here: `load_release` refuses a
+#   `release.json` whose set hash is not what the member directories
+#   recompute to, and the result records the recomputed one. There is no
+#   approved-hash input to compare it with: what a release publishes is its
+#   declarations file's.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -285,28 +287,3 @@ def require_closure(members: List[ReleaseMember]) raises:
             )
     if len(refusals) > 0:
         _refuse(String("requirement closure"), refusals)
-
-
-def is_lower_hex_64(s: String) -> Bool:
-    var b = s.as_bytes()
-    if len(b) != 64:
-        return False
-    for i in range(len(b)):
-        var c = b[i]
-        if not ((c >= UInt8(48) and c <= UInt8(57)) or (c >= UInt8(97) and c <= UInt8(102))):
-            return False
-    return True
-
-
-def require_set_hash(loaded: LoadedRelease, expect: String) raises:
-    """Contract 0.5: the recomputed set hash is `--expect-set-hash`."""
-    if loaded.set_hash() != expect:
-        var refusals = List[String]()
-        refusals.append(
-            String("the members recompute to set hash ")
-            + loaded.set_hash()
-            + String(", --expect-set-hash is ")
-            + expect
-            + String(": this is not the set that was approved")
-        )
-        _refuse(String("the set hash"), refusals)
