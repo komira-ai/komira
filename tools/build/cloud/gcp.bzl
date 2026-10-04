@@ -69,10 +69,10 @@ empty, which the plugin refuses); with `False`, it must be empty.
 Module names. Each generated `.proto` is the module `<stem>`, its basename
 without `.proto`. Where that cannot be the module, `module_names` names one
 (import path -> module, passed to the plugin as `module_names`): a basename
-that is not a Mojo module name (`google/cloud/run/v2/k8s.min.proto`), or two
-bundled files with one basename (`google/rpc/status.proto` beside
-`google/cloud/run/v2/status.proto`), which the flat package cannot hold
-apart. A generated file whose stem is not a module name and is not renamed is
+that is not a Mojo module name (`google/cloud/run/v2/k8s.min.proto`, or a
+Mojo keyword such as `import`), or two bundled files with one basename
+(`google/rpc/status.proto` beside `google/cloud/run/v2/status.proto`), which
+the flat package cannot hold apart. A generated file whose stem is not a module name and is not renamed is
 refused, and so is a `module_names` entry for a file the target does not
 generate; two files generating one module are refused as before.
 
@@ -128,11 +128,27 @@ def _check_items(ctx, attr, items):
 
 _MODULE_NAME = "^[A-Za-z_][A-Za-z0-9_]*$"
 
+# Mojo keywords: an identifier no import can name. The plugin refuses the
+# same list (proto-codegen's mojo_names.rs `KEYWORDS`); this one reports it
+# at analysis, against the target's own attribute.
+_MOJO_KEYWORDS = [
+    "alias", "and", "as", "async", "await", "break", "comptime", "continue",
+    "def", "del", "elif", "else", "except", "False", "fieldwise_init",
+    "finally", "fn", "for", "from", "global", "if", "import", "in", "is",
+    "lambda", "mut", "None", "nonlocal", "not", "or", "out", "owned", "pass",
+    "raise", "raises", "read", "ref", "return", "self", "struct", "trait",
+    "True", "try", "var", "while", "with", "yield",
+    "imm", "deinit",
+]
+
+def _is_module_name(m):
+    return regex_match(_MODULE_NAME, m) and m not in _MOJO_KEYWORDS
+
 def _check_module_names(ctx, generate, module_names):
     for p, m in module_names.items():
         if p not in generate:
             fail("{}: `module_names` names `{}`, which this target does not generate".format(ctx.label, p))
-        if not regex_match(_MODULE_NAME, m) or m in ["__init__", _LAYOUT_PROBE[:-len(".mojo")]]:
+        if not _is_module_name(m) or m in ["__init__", _LAYOUT_PROBE[:-len(".mojo")]]:
             fail("{}: `module_names` gives `{}` the module `{}`, which is not a Mojo module name the generated package can hold".format(ctx.label, p, m))
         if _LIST_SEPARATOR in p or "," in p or ":" in p:
             fail("{}: `module_names` path `{}` holds `{}`, `,` or `:`, which the plugin option cannot carry".format(ctx.label, p, _LIST_SEPARATOR))
@@ -140,7 +156,7 @@ def _check_module_names(ctx, generate, module_names):
         if p in module_names:
             continue
         stem = p.rsplit("/", 1)[-1][:-len(".proto")]
-        if not regex_match(_MODULE_NAME, stem):
+        if not _is_module_name(stem):
             fail("{}: `{}` would be generated as module `{}`, which is not a Mojo module name: give it one in `module_names`".format(ctx.label, p, stem))
 
 def _gcp_client_gen_impl(ctx):

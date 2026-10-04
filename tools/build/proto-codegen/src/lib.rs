@@ -201,7 +201,7 @@ fn parse_module_names(key: &str, value: &str) -> Result<lower::ModuleNames, Stri
 }
 
 /// Hold the generated files' modules to what a Mojo package can import: each
-/// a Mojo identifier, none the package's own `__init__` or the layout
+/// a Mojo identifier and not a keyword, none the package's own `__init__` or the layout
 /// probe, no two the same (the package is flat), and every `module_names`
 /// entry a file that is generated (a misspelt path renames nothing).
 fn check_module_names(
@@ -227,6 +227,12 @@ fn check_module_names(
             return Err(format!(
                 "`{path}` would be generated as module `{stem}`, which is not a Mojo \
                  module name: name one in `module_names`"
+            ));
+        }
+        if mojo_names::KEYWORDS.contains(&stem.as_str()) {
+            return Err(format!(
+                "`{path}` would be generated as module `{stem}`, a Mojo keyword, \
+                 which no import can name: name one in `module_names`"
             ));
         }
         if stem == "__init__" || format!("{stem}.mojo") == emit::LAYOUT_PROBE_FILE {
@@ -530,6 +536,14 @@ mod tests {
         let mut bad = names.clone();
         bad.insert("g/rpc/status.proto".into(), "_layout_probe".into());
         assert!(check_module_names(&files, &bad).unwrap_err().contains("keeps for itself"));
+        // A keyword is an identifier no import can name, renamed or not.
+        let mut kw = names.clone();
+        kw.insert("g/rpc/status.proto".into(), "import".into());
+        assert!(check_module_names(&files, &kw).unwrap_err().contains("module `import`, a Mojo keyword"));
+        let kw_file: Vec<String> = vec!["g/struct.proto".into()];
+        assert!(check_module_names(&kw_file, &lower::ModuleNames::new())
+            .unwrap_err()
+            .contains("module `struct`, a Mojo keyword"));
         let mut stray = names.clone();
         stray.insert("g/other.proto".into(), "other".into());
         assert!(check_module_names(&files, &stray)

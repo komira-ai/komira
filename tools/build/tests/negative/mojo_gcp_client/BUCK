@@ -195,3 +195,31 @@ mojo_gcp_client(
     roots = ["Item"],
     deps = _RUNTIME,
 )
+
+# "is not a Mojo module name the generated package can hold": a keyword is an
+# identifier, and no import can name it.
+mojo_gcp_client(
+    name = "module_names_keyword",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/item.proto": "import"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "which is not a Mojo module name: give it one in `module_names`": a
+# generated file whose stem is not a module name, and that `module_names`
+# does not rename, is refused at analysis rather than written as a module no
+# import can name.
+mojo_gcp_client(
+    name = "module_names_unrenamed_stem",
+    bundle_only = [],
+    bundle_proto_deps = False,
+    messages_only = True,
+    protos = ["example/neg/v1/thing.min.proto"],
+    roots = ["Thing"],
+    deps = _RUNTIME,
+)

@@ -130,6 +130,38 @@ gen_check(
     ],
 )
 
+# `module_names` on one of the target's own `protos`, under an
+# `import_prefix`: an own file is named by its import path (the prefix, then
+# its source path), and the library's sources are that module's file.
+mojo_gcp_client(
+    name = "komira_gcp_shop_own_renamed",
+    bundle_only = ["example/shop/v1/item.proto"],
+    bundle_proto_deps = True,
+    import_prefix = "fixture",
+    messages_only = True,
+    methods = ["ShopService.GetItem"],
+    module_names = {"fixture/example/shop/v1/shop.proto": "shop_api"},
+    proto_deps = [":shop_deps"],
+    protos = ["example/shop/v1/shop.proto"],
+    deps = ["//functional/proto:komira_proto_codec"],
+)
+
+gen_check(
+    name = "komira_gcp_shop_own_renamed_modules",
+    absent = ["size_of[shop."],
+    files = [
+        "__init__.mojo",
+        "_layout_probe.mojo",
+        "item.mojo",
+        "shop_api.mojo",
+    ],
+    gen = ":komira_gcp_shop_own_renamed[gen]",
+    present = [
+        "struct GetItemRequest(",
+        "size_of[shop_api.GetItemRequest]()",
+    ],
+)
+
 # The layout probe is welded into each library, not only generated: the
 # libraries ran exactly these tests, and each passed. gen_check reads `[gen]`
 # and cannot see the weld.
