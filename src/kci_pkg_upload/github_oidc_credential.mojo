@@ -51,7 +51,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from std.os import getenv
+from komira_libc.posix import _read_env
 
 from komira_encoding import base64_url_decode
 from komira_http_core.codec.types import HTTP_METHOD_GET, HTTP_METHOD_POST
@@ -74,8 +74,8 @@ from .transport import PkgRequest, PkgResponse, PkgTransport, try_exchange
 from .wire import bytes_of, decode_utf8
 
 
-comptime ACTIONS_ID_TOKEN_REQUEST_URL: String = "ACTIONS_ID_TOKEN_REQUEST_URL"
-comptime ACTIONS_ID_TOKEN_REQUEST_TOKEN: String = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+comptime ACTIONS_ID_TOKEN_REQUEST_URL: StaticString = "ACTIONS_ID_TOKEN_REQUEST_URL"
+comptime ACTIONS_ID_TOKEN_REQUEST_TOKEN: StaticString = "ACTIONS_ID_TOKEN_REQUEST_TOKEN"
 comptime PREFIX_DEV_MINT_PATH: String = "/api/oidc/mint_token"
 comptime PYPI_OIDC_AUDIENCE_PATH: String = "/_/oidc/audience"
 comptime PYPI_OIDC_MINT_PATH: String = "/_/oidc/mint-token"
@@ -333,8 +333,11 @@ struct GithubOidcCredential[T: PkgTransport](RegistryCredential, Deinitable):
         environment this package reads. RAISES naming each one that is unset
         or empty: the job lacks `permissions: id-token: write`, or is not a
         GitHub Actions job."""
-        var url = getenv(String(ACTIONS_ID_TOKEN_REQUEST_URL), String(""))
-        var token = getenv(String(ACTIONS_ID_TOKEN_REQUEST_TOKEN), String(""))
+        # Read through komira_libc, the one getenv declaration: a second
+        # (std.os.getenv) in the same binary is a conflicting-signature
+        # link error once komira_libc is linked too (bin/kci links both).
+        var url = _read_env(ACTIONS_ID_TOKEN_REQUEST_URL)
+        var token = _read_env(ACTIONS_ID_TOKEN_REQUEST_TOKEN)
         var missing = String("")
         if url.byte_length() == 0:
             missing += String(ACTIONS_ID_TOKEN_REQUEST_URL)

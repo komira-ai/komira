@@ -22,7 +22,7 @@
 # Hermetic: files under the test's own temporary directory; no network.
 # =============================================================================
 
-from std.os import getenv
+from komira_libc.posix import _read_env
 from std.pathlib import Path
 from std.testing import assert_equal, assert_raises, assert_true
 
@@ -51,9 +51,9 @@ comptime _TOKEN: String = "static-probe-token-0123456789abcdef"
 
 
 def _tmp(name: String) raises -> String:
-    var dir = getenv("TEST_TMPDIR", "")
+    var dir = _read_env("TEST_TMPDIR")
     if dir == "":
-        dir = getenv("TMPDIR", "")
+        dir = _read_env("TMPDIR")
     if dir == "":
         raise Error("no TEST_TMPDIR or TMPDIR for this test's files")
     return dir + String("/") + name
