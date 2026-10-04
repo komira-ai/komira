@@ -81,7 +81,7 @@ from komira_textproto import (
 
 from kci_api import FORMAT_MACHINE, authored_schema_version, skip_schema_version
 
-from .graph import Stage, ReleaseMachine, StageStep, StageValidation, validate_release_machine
+from .graph import ReleaseMachine, Stage, StageStep, StageValidation, validate_release_machine
 
 
 def machine_field_names() -> List[String]:

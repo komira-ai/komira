@@ -4,7 +4,7 @@
 # =============================================================================
 #
 # `ValidateRequest` is one validation of one PUBLISH step: the step's inputs
-# (declarations, channels file, channel, platform), the run's (release
+# (artifacts, channels file, channel, platform), the run's (release
 # directory, revision, scratch directory, the repository root the program is
 # read from, --plan) and the validation itself (kci_release_machine's
 # `StageValidation`).
@@ -14,7 +14,7 @@
 # as (the caller's own, so what it writes into the mount is readable after).
 #
 # `load_validated_release` reads the release the validation checks, with the
-# PUBLISH step's own rules: the declarations file, the release directory of
+# PUBLISH step's own rules: the artifacts file, the release directory of
 # the step's platform (`<release-dir>/<platform>`), release.json's revision
 # equal to --revision-id, every member verified (kci_publish
 # `load_release`). Then the channel's CONDA location from the channels file.
@@ -34,7 +34,7 @@
 
 from std.os.path import exists
 
-from kci_artifact_declaration import read_artifact_declarations
+from kci_artifact import read_artifacts
 from kci_api import release_platform_dir
 from kci_publish.inputs import LoadedRelease, load_release
 from kci_release_channel import ARTIFACT_TYPE_CONDA, find_channel, parse_channels_file
@@ -51,7 +51,7 @@ struct ValidateRequest(Copyable, Movable):
     var stage: String
     var step_name: String
     var validation: StageValidation
-    var declarations_file: String
+    var artifacts_file: String
     var channels_file: String
     var channel: String
     var release_dir: String
@@ -65,7 +65,7 @@ struct ValidateRequest(Copyable, Movable):
         self.stage = String("")
         self.step_name = String("")
         self.validation = validation^
-        self.declarations_file = String("")
+        self.artifacts_file = String("")
         self.channels_file = String("")
         self.channel = String("")
         self.release_dir = String("")
@@ -107,7 +107,7 @@ struct ValidatedRelease(Movable):
 def load_validated_release(req: ValidateRequest) raises -> ValidatedRelease:
     """The release and the channel location (file header). RAISES with the
     reason."""
-    var decls = read_artifact_declarations(req.declarations_file)
+    var arts = read_artifacts(req.artifacts_file)
     var dir = release_platform_dir(req.release_dir, req.platform)
     var manifest_path = dir + String("/") + String(RELEASE_MANIFEST_NAME)
     if not exists(manifest_path):
@@ -118,7 +118,7 @@ def load_validated_release(req: ValidateRequest) raises -> ValidatedRelease:
             String("the release in '") + dir + String("' was built from revision ") + recorded.revision
             + String(", not --revision-id ") + req.revision_id
         )
-    var loaded = load_release(decls, dir)
+    var loaded = load_release(arts, dir)
     var text: String
     try:
         text = open(req.channels_file, "r").read()

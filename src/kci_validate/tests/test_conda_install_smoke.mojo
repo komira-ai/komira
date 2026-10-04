@@ -108,7 +108,7 @@ struct Fixture(Movable):
         var req = ValidateRequest(_validation())
         req.stage = String("gamma")
         req.step_name = String("publish")
-        req.declarations_file = p.declarations_file.copy()
+        req.artifacts_file = p.artifacts_file.copy()
         req.channels_file = p.channels_file.copy()
         req.channel = String("gamma")
         req.release_dir = p.release_dir.copy()
