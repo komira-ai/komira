@@ -1,0 +1,71 @@
+load("@komira//tools/build/lint:defs.bzl", "mojo_deps")
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Run a RequestDispatcher on AWS Lambda behind API Gateway, without the
+# dispatcher learning it is on Lambda: the API Gateway payload-format-2.0
+# proxy event <-> komira_http_core's HttpRequest / HttpResponse, the REQUEST
+# authorizer event and its simple response, the EventBridge Scheduler tick,
+# and the three invoke loops that drive them.
+#
+# It is a conformer-shaped package, not a subsystem: the request seam
+# (komira_http_server's RequestDispatcher) and the runtime seam
+# (komira_async's Runtime and AwsLambdaRuntime) are its deps, and it changes
+# neither. It depends on no Runtime API client and on no log drain: the
+# loops are parametric over LambdaInvocationTransport and
+# LambdaPostResponseFlush, and a binary supplies the forwarding adapters.
+# That is also what lets every test drive the loops with no socket and no
+# cloud. The JSON DOM comes from komira_json and base64 from
+# komira_encoding; neither is re-implemented here.
+#
+# It reads no environment. AWS_LAMBDA_RUNTIME_API and the other variables
+# the Lambda platform sets are read, if at all, by the binary's Runtime API
+# client; everything else a binary configures arrives as a parameter.
+#
+# The tests are hermetic: test_apigw_v2 (the conversion field by field in
+# both directions, every refusal, and an h1-parsed request as the parity
+# oracle), test_apigw_authorizer (the REQUEST-authorizer event, the simple
+# response, the deny direction pinned four ways), test_pump_flush_ordering
+# (the proxy loop: the drain after the result POST and before the next poll,
+# with a detector on each side, the two failure channels, and the authorizer
+# context reaching a recording dispatcher), test_authorizer_pump (the
+# authorizer loop: three answers, two channels, the same drain position),
+# test_eventbridge_tick (the tick converter, the classifying loop, the
+# mirror-image refusals between the tick and API Gateway converters, and the
+# drain position for that loop) and test_no_env_reads (the package's sources
+# read no environment).
+mojo_library(
+    name = "komira_aws_lambda_http",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_encoding:komira_encoding",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_http_server:komira_http_server",
+        "//src/komira_json:komira_json",
+    ],
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "src/" + f: f
+            for f in glob(["*.mojo"])
+        },
+    },
+    test_srcs = [
+        "tests/test_apigw_authorizer.mojo",
+        "tests/test_apigw_v2.mojo",
+        "tests/test_authorizer_pump.mojo",
+        "tests/test_eventbridge_tick.mojo",
+        "tests/test_no_env_reads.mojo",
+        "tests/test_pump_flush_ordering.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)
+
+# The deps above name every komira_* module the library and its tests import
+# (tools/build/lint: mojo_deps), so a missing dep fails here, in review, and
+# not only in the compile.
+mojo_deps(
+    name = "deps_lint",
+    buck = "BUCK",
+    srcs = glob(["**/*.mojo"]),
+    visibility = ["komira//:tests_lints"],
+)
