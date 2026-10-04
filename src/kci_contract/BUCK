@@ -25,7 +25,7 @@ mojo_library(
         "tests/test_exit_table.mojo",
         # error ids: unique, well-formed, every one stated with a meaning
         "tests/test_error_ids.mojo",
-        # the verb table is exactly run and ci-check; the step kinds
+        # the verb table is exactly run; the step kinds and validation kinds
         "tests/test_verbs.mojo",
         # the --only selector grammar, the scope words, the evidence line
         "tests/test_selector.mojo",

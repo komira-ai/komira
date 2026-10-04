@@ -37,13 +37,14 @@ comptime ERROR_MEMBER: String = "KCI-E-MEMBER"
 comptime ERROR_SET_HASH: String = "KCI-E-SET-HASH"
 comptime ERROR_CHANNEL: String = "KCI-E-CHANNEL"
 comptime ERROR_CREDENTIAL: String = "KCI-E-CREDENTIAL"
-comptime ERROR_PUBLISH_NEW_NAME: String = "KCI-E-PUBLISH-NEW-NAME"
 comptime ERROR_PUBLISH_DIFFERENT_BYTES: String = "KCI-E-PUBLISH-DIFFERENT-BYTES"
 comptime ERROR_PUBLISH_UPLOAD: String = "KCI-E-PUBLISH-UPLOAD"
 comptime ERROR_PUBLISH_READ_BACK: String = "KCI-E-PUBLISH-READ-BACK"
 comptime ERROR_IMAGE_PLATFORM: String = "KCI-E-IMAGE-PLATFORM"
 comptime ERROR_IMAGE_PUSH: String = "KCI-E-IMAGE-PUSH"
 comptime ERROR_CANNOT_TELL: String = "KCI-E-CANNOT-TELL"
+comptime ERROR_WORKFLOW_MISMATCH: String = "KCI-E-WORKFLOW-MISMATCH"
+comptime ERROR_VALIDATION: String = "KCI-E-VALIDATION"
 
 
 struct ErrorRow(Copyable, Movable):
@@ -78,16 +79,17 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_DECLARATION), String("an artifact declaration is refused")))
     t.append(ErrorRow(String(ERROR_BUILD_FAILED), String("an artifact's build failed")))
     t.append(ErrorRow(String(ERROR_MEMBER), String("a built artifact's directory is refused")))
-    t.append(ErrorRow(String(ERROR_SET_HASH), String("the release set is not the one approved")))
+    t.append(ErrorRow(String(ERROR_SET_HASH), String("the release set's hash is not the one recorded for it")))
     t.append(ErrorRow(String(ERROR_CHANNEL), String("a release channel is refused")))
     t.append(ErrorRow(String(ERROR_CREDENTIAL), String("a channel credential is missing or refused")))
-    t.append(ErrorRow(String(ERROR_PUBLISH_NEW_NAME), String("publishing would create a name the channel does not hold yet")))
     t.append(ErrorRow(String(ERROR_PUBLISH_DIFFERENT_BYTES), String("the channel holds different bytes under the same file name")))
     t.append(ErrorRow(String(ERROR_PUBLISH_UPLOAD), String("an upload failed")))
     t.append(ErrorRow(String(ERROR_PUBLISH_READ_BACK), String("the bytes read back after an upload are not the bytes sent")))
     t.append(ErrorRow(String(ERROR_IMAGE_PLATFORM), String("an image layout is for another platform than the step's")))
     t.append(ErrorRow(String(ERROR_IMAGE_PUSH), String("an image push did not end in the pushed state")))
     t.append(ErrorRow(String(ERROR_CANNOT_TELL), String("kci cannot tell whether the end state holds")))
+    t.append(ErrorRow(String(ERROR_WORKFLOW_MISMATCH), String("the CI workflow running kci does not match the machine file")))
+    t.append(ErrorRow(String(ERROR_VALIDATION), String("a validation of what a step produced failed")))
     return t^
 
 
