@@ -206,11 +206,10 @@ struct StatusHookConfig(Copyable, ImplicitlyCopyable, Movable, Deinitable):
 trait HookCredential(Movable, Deinitable):
     """Produces the auth headers for one usage POST, or RAISES.
 
-    ⚠ THE SIGNATURE IS DELIBERATELY `jm_auth.jm_auth_headers`' SIGNATURE. The
-    GCP conformer is then a ~10-line adapter over the EXISTING
-    `jm_audience()` + `GcpMetadataMinter`, written at the app layer (which sees
-    both `komira_job_supervisor` and `komira_http`; this package cannot, because
-    `komira_job_supervisor` depends on it). Nothing here re-implements a token minter.
+    ⚠ THE SHAPE IS DELIBERATELY THE ONE `komira_job_supervisor`'s
+    `HeartbeatAuth.headers` HAS: headers computed from the request, so a
+    credential scheme is one conformer, written by the embedding binary.
+    Nothing here re-implements a token minter.
 
     `scheme`/`host`/`port` are passed so a conformer can derive the audience
     itself — including the rule that the audience must OMIT the default port,
