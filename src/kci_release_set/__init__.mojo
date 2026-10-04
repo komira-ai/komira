@@ -18,7 +18,6 @@
 # =============================================================================
 
 from kci_release_set.conda_metadata import (
-    CONDA_METADATA_SCHEMA,
     KIND_LIBRARY,
     KIND_METAPACKAGE,
     CondaMetadata,

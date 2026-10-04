@@ -7,7 +7,9 @@
 # (packaging/conda/README.md, "What a package is"): one JSON object, sorted
 # compact, with
 #
-#   every package   schema (integer, 1), kind ("library" | "metapackage"),
+#   every package   format ("kci.conda_metadata"), schema_version (integer,
+#                   kci_contract's format table), kind ("library" |
+#                   "metapackage"),
 #                   name, version, subdir, build, build_number (integer >= 0),
 #                   file_name, size (integer > 0), depends (array of
 #                   strings), timestamp_ms (integer), source_commit,
@@ -22,12 +24,17 @@
 # (`MetaMember.has_build`). Whether a release may ship a row without it is
 # the PUBLISH step's rule, not the reader's.
 #
+# `format` and `schema_version` are read first (kci_contract's
+# `produced_header`): another format, or a major this kci does not read, is
+# refused. Inside a known major an unknown key is IGNORED and listed in
+# `ignored_keys` (kci_contract's policy: writers only ever add keys inside a
+# major).
+#
 # Refused, naming the file and the key: not JSON, not an object, a key given
-# twice, an unknown key, a key of the other kind, a missing key, a value of
-# the wrong JSON type, an empty string (only `source_commit` of an unstamped
-# package may be empty: the packer writes "" when no commit was given), a
-# sha256 that is not 64 lowercase hex characters, an unknown `kind`, a
-# `schema` other than 1.
+# twice, a key of the other kind, a missing key, a value of the wrong JSON
+# type, an empty string (only `source_commit` of an unstamped package may be
+# empty: the packer writes "" when no commit was given), a sha256 that is not
+# 64 lowercase hex characters, an unknown `kind`.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -45,9 +52,7 @@ from komira_json import (
 )
 
 from kci_artifact_manifest import is_sha256_hex
-
-comptime CONDA_METADATA_SCHEMA: Int = 1
-"""The one `schema` this reader knows."""
+from kci_contract import FORMAT_CONDA_METADATA, produced_header
 
 comptime KIND_LIBRARY: String = "library"
 comptime KIND_METAPACKAGE: String = "metapackage"
@@ -81,7 +86,7 @@ struct CondaMetadata(Copyable, Movable):
     Layout: owned values only. No pointer field."""
 
     var source: String
-    var schema: Int
+    var schema_version: Int
     var kind: String
     var name: String
     var version: String
@@ -100,10 +105,12 @@ struct CondaMetadata(Copyable, Movable):
     var payload_path: String
     var payload_sha256: String
     var members: List[MetaMember]
+    # Set by the parser only: keys of a known major it ignored (file header).
+    var ignored_keys: List[String]
 
     def __init__(out self, var source: String):
         self.source = source^
-        self.schema = 0
+        self.schema_version = 0
         self.kind = String("")
         self.name = String("")
         self.version = String("")
@@ -122,6 +129,7 @@ struct CondaMetadata(Copyable, Movable):
         self.payload_path = String("")
         self.payload_sha256 = String("")
         self.members = List[MetaMember]()
+        self.ignored_keys = List[String]()
 
     def is_metapackage(self) -> Bool:
         return self.kind == KIND_METAPACKAGE
@@ -133,7 +141,8 @@ def _refuse(source: String, why: String) raises:
 
 def _common_keys() -> List[String]:
     var k = List[String]()
-    k.append(String("schema"))
+    k.append(String("format"))
+    k.append(String("schema_version"))
     k.append(String("kind"))
     k.append(String("name"))
     k.append(String("version"))
@@ -172,16 +181,23 @@ def _in(keys: List[String], key: String) -> Bool:
     return False
 
 
-def _no_twice_no_unknown(
-    doc: JsonValue, known: List[String], source: String, what: String
+def _no_twice_note_unknown(
+    doc: JsonValue,
+    known: List[String],
+    source: String,
+    what: String,
+    note: String,
+    mut ignored: List[String],
 ) raises:
+    """Refuse a key given twice; list (never refuse) a key not in `known`, as
+    `note + key`."""
     for i in range(doc.num_members()):
         var key = doc.key_at(i)
         for j in range(i):
             if doc.key_at(j) == key:
                 _refuse(source, what + String("'") + key + String("' is given twice"))
         if not _in(known, key):
-            _refuse(source, what + String("unknown key '") + key + String("'"))
+            ignored.append(note + key)
 
 
 def _need(doc: JsonValue, key: String, source: String, what: String) raises -> JsonValue:
@@ -216,7 +232,7 @@ def _hex(doc: JsonValue, key: String, source: String, what: String = String(""))
     return s^
 
 
-def _member_row(row: JsonValue, index: Int, source: String) raises -> MetaMember:
+def _member_row(row: JsonValue, index: Int, source: String, mut ignored: List[String]) raises -> MetaMember:
     var what = String("members[") + String(index) + String("]: ")
     if row.kind_tag() != JSON_OBJECT:
         _refuse(source, what + String("not an object"))
@@ -225,7 +241,9 @@ def _member_row(row: JsonValue, index: Int, source: String) raises -> MetaMember
     known.append(String("version"))
     known.append(String("build"))
     known.append(String("sha256"))
-    _no_twice_no_unknown(row, known, source, what)
+    _no_twice_note_unknown(
+        row, known, source, what, String("members[") + String(index) + String("]."), ignored
+    )
     var m = MetaMember()
     m.name = _string(row, String("name"), source, what)
     m.version = _string(row, String("version"), source, what)
@@ -252,9 +270,14 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     var all_keys = common.copy()
     all_keys.extend(library.copy())
     all_keys.extend(meta.copy())
-    _no_twice_no_unknown(doc, all_keys, source, String(""))
-
     var md = CondaMetadata(source.copy())
+    _no_twice_note_unknown(doc, all_keys, source, String(""), String(""), md.ignored_keys)
+    # produced_header's refusals start "<its source>: ", so it is given this
+    # file's refusal prefix as its source.
+    md.schema_version = produced_header(
+        doc, String(FORMAT_CONDA_METADATA), String("conda metadata '") + source + String("'")
+    )
+
     md.kind = _string(doc, String("kind"), source)
     var own: List[String]
     var other: List[String]
@@ -282,13 +305,6 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
     for i in range(len(own)):
         _ = _need(doc, own[i], source, String(""))
 
-    md.schema = _integer(doc, String("schema"), source)
-    if md.schema != CONDA_METADATA_SCHEMA:
-        _refuse(
-            source,
-            String("schema ") + String(md.schema) + String(" is not ")
-            + String(CONDA_METADATA_SCHEMA),
-        )
     md.name = _string(doc, String("name"), source)
     md.version = _string(doc, String("version"), source)
     md.subdir = _string(doc, String("subdir"), source)
@@ -330,7 +346,7 @@ def parse_conda_metadata(text: String, source: String) raises -> CondaMetadata:
         if rows.kind_tag() != JSON_ARRAY:
             _refuse(source, String("'members' is not an array"))
         for i in range(rows.array_len()):
-            md.members.append(_member_row(rows.element_at(i), i, source))
+            md.members.append(_member_row(rows.element_at(i), i, source, md.ignored_keys))
     return md^
 
 
