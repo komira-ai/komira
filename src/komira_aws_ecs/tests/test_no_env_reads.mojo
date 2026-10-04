@@ -90,6 +90,14 @@ def test_the_scan_saw_the_client() raises:
         # the verb and the same verb over injected seams (`<op>_with`)
         2,
     )
+    # RunTask resolves and builds the input whose unset clientToken the
+    # verb filled, in each verb.
+    assert_equal(
+        _count(text, "resolve_run_task_endpoint(self._rules, self._endpoint_config, filled)"),
+        2,
+    )
+    assert_equal(_count(text, "if not filled.client_token:"), 2)
+    assert_equal(_count(text, "generate_uuidv7().to_hyphenated()"), 2)
 
 
 def main() raises:

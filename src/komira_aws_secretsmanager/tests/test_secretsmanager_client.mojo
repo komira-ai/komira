@@ -10,22 +10,37 @@
 # naming the request head, so the row asserts the request line, the Host the
 # endpoint ruleset resolved, the awsJson target and content type and the
 # SigV4 scope, through the generated client.
+#
+# Then the writes' idempotency token, over a transport that records each
+# attempt: a CreateSecret sent without a ClientRequestToken carries one the
+# client made, and its retry after a 500 carries the same one; a token the
+# caller set is sent as set, on a PutSecretValue.
 from komira_aws_secretsmanager.komira_aws_secretsmanager import (
     SecretsManagerCreateSecretRequest,
     SecretsManagerDescribeSecretRequest,
     SecretsManagerEndpointConfig,
     SecretsManagerGetSecretValueRequest,
+    SecretsManagerPutSecretValueRequest,
     SecretsManagerSecretsManagerClient,
+    parse_create_secret_response,
 )
 from komira_aws_core import (
     AWS_ECHO_CODE,
+    AwsClock,
+    AwsConnectorTransport,
     AwsCredential,
     AwsEchoConnector,
+    AwsHttpTransport,
+    AwsRetryQuota,
+    CredentialHttpRequest,
+    HttpResult,
     StaticCredsSource,
+    aws_standard_retry_policy,
 )
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_retry import ManualClock, RecordingSleeper, RetryLoop, SplitMix64Rng
 from std.testing import assert_equal, assert_raises, assert_true
 
 
@@ -135,8 +150,116 @@ def test_create_secret_on_the_wire() raises:
     assert_true(wire.find("x-amzn-query-mode") < 0, wire)
 
 
+struct _Clock(AwsClock, Movable):
+    def __init__(out self):
+        pass
+
+    def now_unix_seconds(mut self) -> Int:
+        return 1_790_000_000
+
+
+struct _Recording(AwsHttpTransport, Movable, Deinitable):
+    """Keeps each attempt's signed request, then sends it on."""
+
+    var inner: AwsConnectorTransport[ScriptedConnector]
+    var sent: List[CredentialHttpRequest]
+
+    def __init__(out self, var c: ScriptedConnector) raises:
+        self.inner = AwsConnectorTransport[ScriptedConnector](c^)
+        self.sent = List[CredentialHttpRequest]()
+
+    def send(mut self, req: CredentialHttpRequest) raises -> HttpResult:
+        self.sent.append(req.copy())
+        return self.inner.send(req)
+
+
+def _loop() raises -> RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng]:
+    return RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+        aws_standard_retry_policy(), ManualClock(), RecordingSleeper(), SplitMix64Rng(7)
+    )
+
+
+def _token(req: CredentialHttpRequest) raises -> String:
+    """The body's ClientRequestToken, or "" when it carries none."""
+    var body = req.body_text()
+    var key = String('"ClientRequestToken":"')
+    var at = body.find(key)
+    if at < 0:
+        return String("")
+    var start = at + key.byte_length()
+    var end = body.find('"', start)
+    assert_true(end > start, body)
+    return String(body[byte=start:end])
+
+
+def test_create_secret_fills_its_token_once() raises:
+    # The model marks ClientRequestToken an idempotency token, and the
+    # service refuses a CreateSecret without one. Left unset, the client
+    # makes one (a UUID, as botocore does) before the send, so the retry
+    # after the 500 is the same request.
+    var c = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            '{"__type":"InternalServiceError","Message":"try again"}',
+            "",
+        )
+    )
+    c.arm_next(
+        _answer(
+            200,
+            "OK",
+            '{"ARN":"arn:aws:secretsmanager:us-east-1:000000000000:secret:app/db-AbCdEf","Name":"app/db","VersionId":"a1b2c3d4-5678-90ab-cdef-EXAMPLE11111"}',
+            "",
+        )
+    )
+    var t = _Recording(c^)
+    var clock = _Clock()
+    var loop = _loop()
+    var quota = AwsRetryQuota()
+    var client = _client(_mk_ok)
+    var res = client.create_secret_with(
+        SecretsManagerCreateSecretRequest(String("app/db")), t, clock, loop, quota
+    )
+    assert_equal(res.status, 200)
+    assert_equal(parse_create_secret_response(res^.into_response()).name.value(), "app/db")
+    assert_equal(len(t.sent), 2)
+    var first = _token(t.sent[0])
+    # A hyphenated UUID, inside the model's 32..64.
+    assert_equal(first.byte_length(), 36, t.sent[0].body_text())
+    assert_equal(_token(t.sent[1]), first)
+
+    # Each call makes its own.
+    var again = _Recording(ScriptedConnector.with_stream(_answer(200, "OK", "{}", "")))
+    var loop2 = _loop()
+    _ = client.create_secret_with(
+        SecretsManagerCreateSecretRequest(String("app/db")), again, clock, loop2, quota
+    )
+    assert_equal(len(again.sent), 1)
+    assert_equal(_token(again.sent[0]).byte_length(), 36)
+    assert_true(_token(again.sent[0]) != first)
+
+
+def test_a_token_the_caller_set_is_sent_as_set() raises:
+    var input = SecretsManagerPutSecretValueRequest(String("app/db"))
+    input.secret_string = Optional[String](String("s3cr3t"))
+    input.client_request_token = Optional[String](
+        String("EXAMPLE1-90ab-cdef-fedc-ba987EXAMPLE")
+    )
+    var t = _Recording(ScriptedConnector.with_stream(_answer(200, "OK", "{}", "")))
+    var clock = _Clock()
+    var loop = _loop()
+    var quota = AwsRetryQuota()
+    var client = _client(_mk_ok)
+    _ = client.put_secret_value_with(input, t, clock, loop, quota)
+    assert_equal(len(t.sent), 1)
+    assert_equal(_token(t.sent[0]), "EXAMPLE1-90ab-cdef-fedc-ba987EXAMPLE")
+
+
 def main() raises:
     test_get_secret_value()
     test_an_error_is_raised_under_its_code()
     test_create_secret_on_the_wire()
+    test_create_secret_fills_its_token_once()
+    test_a_token_the_caller_set_is_sent_as_set()
     print("OK")

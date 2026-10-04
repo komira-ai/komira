@@ -77,11 +77,22 @@ def test_the_scan_saw_the_client() raises:
     assert_equal(
         _count(
             text,
-            "resolve_create_secret_endpoint(self._rules, self._endpoint_config, input)",
+            "resolve_get_secret_value_endpoint(self._rules, self._endpoint_config, input)",
         ),
         # the verb and the same verb over injected seams (`<op>_with`)
         2,
     )
+    # A write resolves and builds the input whose unset idempotency token
+    # the verb filled: CreateSecret and PutSecretValue, in each verb.
+    assert_equal(
+        _count(
+            text,
+            "resolve_create_secret_endpoint(self._rules, self._endpoint_config, filled)",
+        ),
+        2,
+    )
+    assert_equal(_count(text, "if not filled.client_request_token:"), 4)
+    assert_equal(_count(text, "generate_uuidv7().to_hyphenated()"), 4)
 
 
 def main() raises:

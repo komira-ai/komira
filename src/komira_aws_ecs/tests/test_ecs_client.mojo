@@ -9,6 +9,11 @@
 # naming the request head, so the row asserts the request line, the Host the
 # endpoint ruleset resolved, the awsJson target and content type and the
 # SigV4 scope, through the generated client.
+#
+# Then RunTask's idempotency token, over a transport that records each
+# attempt: a RunTask sent without a clientToken carries one the client made,
+# and its retry after a 500 carries the same one, so the service starts the
+# task once; a token the caller set is sent as set.
 from komira_aws_ecs.komira_aws_ecs import (
     ECSECSClient,
     ECSEndpointConfig,
@@ -18,13 +23,21 @@ from komira_aws_ecs.komira_aws_ecs import (
 )
 from komira_aws_core import (
     AWS_ECHO_CODE,
+    AwsClock,
+    AwsConnectorTransport,
     AwsCredential,
     AwsEchoConnector,
+    AwsHttpTransport,
+    AwsRetryQuota,
+    CredentialHttpRequest,
+    HttpResult,
     StaticCredsSource,
+    aws_standard_retry_policy,
 )
 from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
+from komira_retry import ManualClock, RecordingSleeper, RetryLoop, SplitMix64Rng
 from std.testing import assert_equal, assert_raises, assert_true
 
 
@@ -141,8 +154,96 @@ def test_run_task_on_the_wire() raises:
     assert_true(wire.find("x-amzn-query-mode") < 0, wire)
 
 
+struct _Clock(AwsClock, Movable):
+    def __init__(out self):
+        pass
+
+    def now_unix_seconds(mut self) -> Int:
+        return 1_790_000_000
+
+
+struct _Recording(AwsHttpTransport, Movable, Deinitable):
+    """Keeps each attempt's signed request, then sends it on."""
+
+    var inner: AwsConnectorTransport[ScriptedConnector]
+    var sent: List[CredentialHttpRequest]
+
+    def __init__(out self, var c: ScriptedConnector) raises:
+        self.inner = AwsConnectorTransport[ScriptedConnector](c^)
+        self.sent = List[CredentialHttpRequest]()
+
+    def send(mut self, req: CredentialHttpRequest) raises -> HttpResult:
+        self.sent.append(req.copy())
+        return self.inner.send(req)
+
+
+def _token(req: CredentialHttpRequest) raises -> String:
+    """The body's clientToken, or "" when it carries none."""
+    var body = req.body_text()
+    var key = String('"clientToken":"')
+    var at = body.find(key)
+    if at < 0:
+        return String("")
+    var start = at + key.byte_length()
+    var end = body.find('"', start)
+    assert_true(end > start, body)
+    return String(body[byte=start:end])
+
+
+def _run_task(var input: ECSRunTaskRequest, var c: ScriptedConnector) raises -> List[String]:
+    """Each attempt's clientToken, for one RunTask over `c`."""
+    var t = _Recording(c^)
+    var clock = _Clock()
+    var loop = RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+        aws_standard_retry_policy(), ManualClock(), RecordingSleeper(), SplitMix64Rng(7)
+    )
+    var quota = AwsRetryQuota()
+    var client = _client(_mk_ok)
+    var res = client.run_task_with(input, t, clock, loop, quota)
+    assert_equal(res.status, 200)
+    var out = List[String]()
+    for i in range(len(t.sent)):
+        out.append(_token(t.sent[i]))
+    return out^
+
+
+def _500_then_200() -> ScriptedConnector:
+    var c = ScriptedConnector.with_stream(
+        _answer(
+            500,
+            "Internal Server Error",
+            '{"__type":"ServerException","message":"try again"}',
+            "",
+        )
+    )
+    c.arm_next(_answer(200, "OK", '{"tasks":[],"failures":[]}', ""))
+    return c^
+
+
+def test_run_task_retries_under_one_token() raises:
+    # clientToken is an idempotency token in the model: left unset, the
+    # client makes one (a UUID, as botocore does) before the send, so the
+    # retry after the 500 is the same request and does not start a second
+    # task.
+    var sent = _run_task(ECSRunTaskRequest(String("jobs:3")), _500_then_200())
+    assert_equal(len(sent), 2)
+    assert_equal(sent[0].byte_length(), 36)
+    assert_equal(sent[1], sent[0])
+    # Each call makes its own.
+    var again = _run_task(ECSRunTaskRequest(String("jobs:3")), _500_then_200())
+    assert_true(again[0] != sent[0])
+
+    var input = ECSRunTaskRequest(String("jobs:3"))
+    input.client_token = Optional[String](String("run-2026-10-04-jobs-3"))
+    var given = _run_task(input^, _500_then_200())
+    assert_equal(len(given), 2)
+    assert_equal(given[0], "run-2026-10-04-jobs-3")
+    assert_equal(given[1], "run-2026-10-04-jobs-3")
+
+
 def main() raises:
     test_list_clusters()
     test_an_error_is_raised_under_its_code()
     test_run_task_on_the_wire()
+    test_run_task_retries_under_one_token()
     print("OK")
