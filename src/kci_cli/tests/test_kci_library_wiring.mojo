@@ -28,7 +28,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_libc.posix import _read_env
 
 from kci_cli import ComposedSecretStore, LibrarySteps, SecretStoreChoice, kci_main_with, recorder_for, write_whole_file
-from kci_contract import parse_result
+from kci_api import parse_result
 from kci_publish.release_fixture import (
     EXAMPLE_ENVIRONMENT,
     EXAMPLE_STAGE,

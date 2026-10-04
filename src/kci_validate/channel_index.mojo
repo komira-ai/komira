@@ -49,7 +49,7 @@ from komira_crypto import hex_lower_array_32, sha256
 from komira_json import JsonValue, parse_json_value
 from komira_retry import Sleeper
 
-from kci_contract import ResultValidationCheck
+from kci_api import ResultValidationCheck
 from kci_pkg_upload import PkgTransport
 from kci_pkg_upload.conda_repodata import CONDA_PACKAGES_KEY
 from kci_pkg_upload.http_read import GetResult, get_following_redirects

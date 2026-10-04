@@ -18,8 +18,8 @@ from kci_cli import (
     require_stage_flags,
     selectors_of,
 )
-from kci_contract import DEFAULT_MACHINE_FILE, Selector
-from kci_stage_graph import Selection, Stage, parse_machine_file, resolve_selection
+from kci_api import DEFAULT_MACHINE_FILE, Selector
+from kci_release_machine import Selection, Stage, parse_machine_file, resolve_selection
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 
@@ -70,7 +70,7 @@ def test_run_reads_every_flag() raises:
 
 
 def test_the_machine_file_defaults() raises:
-    # the one default is kci_contract's; kci_cli spells no path of its own
+    # the one default is kci_api's; kci_cli spells no path of its own
     assert_equal(String(DEFAULT_MACHINE_FILE), String("release/machine.textproto"))
     assert_equal(parse_kci_args(_run()).machine, String(DEFAULT_MACHINE_FILE))
 

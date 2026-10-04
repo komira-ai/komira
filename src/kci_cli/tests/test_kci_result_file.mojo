@@ -16,9 +16,9 @@ from komira_libc.posix import _read_env
 
 from kci_build import BuildRequest
 from kci_cli import TMP_SUFFIX, CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, recorder_for, write_whole_file
-from kci_contract import OUTCOME_SUCCEEDED, parse_result
-from kci_contract import ResultValidation
-from kci_contract import RunResult as KciRunResult
+from kci_api import OUTCOME_SUCCEEDED, parse_result
+from kci_api import ResultValidation
+from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
 from kci_validate import ValidateRequest
 

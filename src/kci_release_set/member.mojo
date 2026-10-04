@@ -49,7 +49,7 @@ from kci_artifact_declaration import (
     require_one_manifest,
 )
 from kci_artifact_manifest import ArtifactManifest, read_artifact_manifest
-from kci_contract import require_member_platform
+from kci_api import require_member_platform
 from kci_release_channel import ARTIFACT_TYPE_CONDA
 
 from kci_release_set.conda_metadata import CondaMetadata, read_conda_metadata

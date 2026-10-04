@@ -10,7 +10,7 @@
 from std.testing import TestSuite, assert_equal, assert_true
 
 from kci_ci_check import check_workflow
-from kci_stage_graph import parse_machine_file
+from kci_release_machine import parse_machine_file
 
 comptime _MACHINE: String = (
     "schema_version: 1\n"

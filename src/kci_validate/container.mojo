@@ -54,7 +54,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_stage_graph import EXTRA_CHANNEL_CONDA_FORGE, StageValidation
+from kci_release_machine import EXTRA_CHANNEL_CONDA_FORGE, StageValidation
 
 from .request import InstallPin
 

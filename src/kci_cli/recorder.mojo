@@ -3,12 +3,12 @@
 #   file `--result-file` names, written temp-and-rename.
 # =============================================================================
 #
-# `CliRecorder` is the one `RunRecorder` (kci_contract) the CLI hands every
+# `CliRecorder` is the one `RunRecorder` (kci_api) the CLI hands every
 # step: with no `--result-file` it records nothing; with one, every record
 # (`begin`: RUNNING, `finish`: FINISHED) replaces the file whole, through
 # `<path>.kci-tmp` and rename(2), so a reader never sees half a document. A
 # file still at RUNNING means the run was stopped (a signal, out of memory),
-# and kci_contract reads it as INTERRUPTED. `memory()` keeps every record in
+# and kci_api reads it as INTERRUPTED. `memory()` keeps every record in
 # memory as well, for the welded tests.
 #
 # A record that cannot be written RAISES: before the first effect that stops
@@ -28,7 +28,7 @@ from std.os import remove
 from std.os.path import exists
 from std.pathlib import Path
 
-from kci_contract import RunRecorder, RunResult, render_result
+from kci_api import RunRecorder, RunResult, render_result
 
 comptime TMP_SUFFIX: String = ".kci-tmp"
 

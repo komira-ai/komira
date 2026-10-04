@@ -53,7 +53,7 @@ from std.pathlib import Path
 
 from kci_artifact_declaration import ReleaseStamp
 
-from kci_contract import (
+from kci_api import (
     ERROR_CANNOT_TELL,
     ERROR_REVISION,
     OUTCOME_INDETERMINATE,

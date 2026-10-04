@@ -6,7 +6,7 @@
 # `ValidateRequest` is one validation of one PUBLISH step: the step's inputs
 # (declarations, channels file, channel, platform), the run's (release
 # directory, revision, scratch directory, the repository root the program is
-# read from, --plan) and the validation itself (kci_stage_graph's
+# read from, --plan) and the validation itself (kci_release_machine's
 # `StageValidation`).
 #
 # `ContainerHost` is how this machine starts the container: the docker
@@ -35,12 +35,12 @@
 from std.os.path import exists
 
 from kci_artifact_declaration import read_artifact_declarations
-from kci_contract import release_platform_dir
+from kci_api import release_platform_dir
 from kci_publish.inputs import LoadedRelease, load_release
 from kci_release_channel import ARTIFACT_TYPE_CONDA, find_channel, parse_channels_file
 from kci_release_set.conda_metadata import KIND_LIBRARY
 from kci_release_set.release_manifest import RELEASE_MANIFEST_NAME, read_release_manifest
-from kci_stage_graph import StageValidation
+from kci_release_machine import StageValidation
 
 
 struct ValidateRequest(Copyable, Movable):

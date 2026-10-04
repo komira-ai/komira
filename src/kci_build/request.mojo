@@ -7,8 +7,8 @@
 # environment or parses a command line (the kci binary's one parser builds
 # the request from its flags and the machine file's BUILD step).
 #
-# How a build ends is an OUTCOME word and an error id from kci_contract;
-# the exit number follows from those two (kci_contract's exit table), so
+# How a build ends is an OUTCOME word and an error id from kci_api;
+# the exit number follows from those two (kci_api's exit table), so
 # this package spells no exit number:
 #
 #   SUCCEEDED      every declared artifact was built and verified, and
@@ -37,7 +37,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     OUTCOME_SUCCEEDED,
     RunIdentity,
     exit_code_of,
@@ -54,7 +54,7 @@ struct BuildRequest(Copyable, Movable):
     """The inputs of one BUILD step. `step_name` is the step's name in the
     machine file (the result's `steps[].name`). `release_dir` is the top
     release directory (`--release-dir`); this step writes only under
-    `<release_dir>/<platform>` (kci_contract's layout). `plan` is `kci run
+    `<release_dir>/<platform>` (kci_api's layout). `plan` is `kci run
     --plan`: resolve and render, build nothing (build.mojo).
 
     Layout: owned values only. No pointer field."""
@@ -116,7 +116,7 @@ struct BuildOutcome(Copyable, Movable):
         return self.outcome == OUTCOME_SUCCEEDED
 
     def exit_code(self) raises -> Int:
-        """The exit number of this outcome (kci_contract's exit table)."""
+        """The exit number of this outcome (kci_api's exit table)."""
         require_outcome(self.outcome)
         if self.error_id.byte_length() > 0:
             require_error_id(self.error_id)

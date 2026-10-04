@@ -1,6 +1,6 @@
 # =============================================================================
 # kci_ci_check -- the workflow consistency check: a hand-written CI workflow
-#   held to the machine file's stage graph (library code; used by the welded
+#   held to the release machine (library code; used by the welded
 #   test and by `kci run` at start-up).
 # =============================================================================
 #
@@ -12,7 +12,7 @@
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`
 #
-# The machine file owns the stage graph; the workflow is written by hand and
+# The machine file owns the release machine; the workflow is written by hand and
 # checked against it. This package reads text it is given: it opens no file.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.

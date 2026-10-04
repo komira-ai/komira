@@ -38,7 +38,7 @@
 #
 # Under `--plan` nothing runs: no request, no container, no directory. The
 # row says WOULD_VALIDATE with no outcome and no checks, so it can never read
-# as a pass (kci_contract refuses a WOULD_VALIDATE row with either).
+# as a pass (kci_api refuses a WOULD_VALIDATE row with either).
 #
 # The seams: kci_build's `ProcessRunner` starts docker (SupervisorRunner for
 # real, ScriptedRunner in the welded tests, which plays the container by
@@ -56,7 +56,7 @@ from std.os.path import exists, isdir
 from komira_retry import Sleeper
 
 from kci_build.runner import ProcessRunner, RunSpec
-from kci_contract import (
+from kci_api import (
     OUTCOME_SUCCEEDED,
     OUTCOME_VALIDATION_FAILED,
     VALIDATION_KIND_CONDA_INSTALL_SMOKE,
