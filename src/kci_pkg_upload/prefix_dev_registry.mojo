@@ -3,11 +3,22 @@
 #   channel on prefix.dev (or a server speaking its upload API).
 # =============================================================================
 #
-# The coordinate's `repo` is `<host>/<channel>` — one channel segment, no
-# scheme (`prefix_dev_repo_of_location` turns `https://<host>/<channel>` into
-# it). Every request is HTTPS on 443.
+# The coordinate's `repo` is `<host>/<channel>`, no scheme, where `<channel>`
+# is prefix.dev's channel path: `<namespace>` for a namespace's primary
+# channel, `<namespace>/<channel>` for any other, e.g.
+# `prefix.dev/komira-ai/gamma` (`prefix_dev_repo_of_location` turns
+# `https://<host>/<channel>` into it). The two segments travel unchanged in
+# every path below. The `@` of the website route
+# (`https://prefix.dev/channels/@<namespace>/...`) is never part of an upload,
+# API or repository path, and is refused. Every request is HTTPS on 443.
+#   Sources: https://prefix.dev/docs/prefix/channels/concepts (channel paths,
+#   the `@`), https://prefix.dev/docs/prefix/api (`POST
+#   /api/v1/upload/:channel`, "The channel path uses format
+#   `namespace/channel`"), https://prefix.dev/docs/prefix/channels/use (the
+#   repository URL `https://prefix.dev/<namespace>/<channel>`).
 #
 #   upload     POST https://<host>/api/v1/upload/<channel>
+#              e.g. POST https://prefix.dev/api/v1/upload/komira-ai/gamma
 #              Authorization: Bearer <token>   (surface PREFIX_DEV)
 #              multipart/form-data, ONE part named `file`:
 #                Content-Disposition: form-data; name="file"; filename="<file>"
@@ -17,6 +28,9 @@
 #                X-File-SHA256: <hex>
 #              — the part rattler's `upload prefix` sends.
 #   read_back  GET https://<host>/<channel>/<subdir>/repodata.json, the file's
+#              (e.g. https://prefix.dev/komira-ai/gamma/linux-64/repodata.json;
+#              the `<subdir>/repodata.json` suffix is the conda channel
+#              layout, not stated by the pages above)
 #              `sha256` (`conda_repodata.mojo`). The server answers 303 to a
 #              signed URL on another host; the credential is carried only to
 #              hops on `<host>`.
@@ -95,9 +109,11 @@ comptime _BOUNDARY_DOMAIN: String = "kci_pkg_upload prefix.dev boundary\n"
 
 
 def prefix_dev_repo_of_location(location: String) raises -> String:
-    """`https://<host>/<channel>` as a coordinate's `repo` (`<host>/<channel>`).
-    RAISES (a local fault) unless the location is exactly that: HTTPS, a host
-    with no port, and ONE non-empty channel segment."""
+    """`https://<host>/<channel>` as a coordinate's `repo` (`<host>/<channel>`),
+    where `<channel>` is `<namespace>` or `<namespace>/<channel>`. RAISES (a
+    local fault) unless the location is exactly that: HTTPS, a host with no
+    port, and one or two non-empty channel path segments (`prefix_dev_channel`).
+    """
     var scheme = String("https://")
     if not location.startswith(scheme):
         raise Error(
@@ -111,30 +127,81 @@ def prefix_dev_repo_of_location(location: String) raises -> String:
 
 
 def prefix_dev_channel(repo: String) raises -> String:
-    """The channel name of a `<host>/<channel>` repo. RAISES (a local fault)
-    when the path is not exactly one non-empty segment, or holds a query, a
-    fragment or a percent sign — a channel name is sent in a URL path as is."""
+    """The channel path of a `<host>/<channel>` repo: `<namespace>` or
+    `<namespace>/<channel>`, the `/` kept, as the upload path and the
+    repository path both carry it. RAISES (a local fault) when the path is not
+    one or two segments, a segment is empty, `.` or `..`, or the path holds an
+    `@`, a query, a fragment or a percent sign: a channel path is sent in a URL
+    path as is."""
     var path = repo_path(repo)
     if path.byte_length() < 2:
         raise Error(
             String("kci_pkg_upload: conda repo '")
             + repo
-            + String("' names no channel; write it as <host>/<channel>")
+            + String(
+                "' names no channel; write it as <host>/<namespace> or"
+                " <host>/<namespace>/<channel>"
+            )
         )
     var channel = String(path[byte=1:])
     if (
-        channel.find(String("/")) >= 0
-        or channel.find(String("?")) >= 0
+        channel.find(String("?")) >= 0
         or channel.find(String("#")) >= 0
         or channel.find(String("%")) >= 0
     ):
         raise Error(
             String("kci_pkg_upload: conda repo '")
             + repo
-            + String("' must name exactly one channel segment after the host")
+            + String(
+                "' holds a query, a fragment or a percent sign; a channel path"
+                " is sent in a URL path as is"
+            )
+        )
+    if channel.find(String("@")) >= 0:
+        raise Error(
+            String("kci_pkg_upload: conda repo '")
+            + repo
+            + String(
+                "' holds an '@'. prefix.dev writes '@' only in its website"
+                " route; an upload, API or repository path names the channel"
+                " as <namespace>/<channel>"
+            )
+        )
+    var segments = List[String]()
+    var rest = channel.copy()
+    while True:
+        var cut = rest.find(String("/"))
+        if cut < 0:
+            segments.append(rest.copy())
+            break
+        segments.append(String(rest[byte=:cut]))
+        var tail = String(rest[byte = cut + 1 :])
+        rest = tail^
+    for i in range(len(segments)):
+        if segments[i].byte_length() == 0:
+            raise Error(
+                String("kci_pkg_upload: conda repo '")
+                + repo
+                + String("' has an EMPTY channel path segment")
+            )
+        if segments[i] == String(".") or segments[i] == String(".."):
+            raise Error(
+                String("kci_pkg_upload: conda repo '")
+                + repo
+                + String("': '")
+                + segments[i]
+                + String("' is not a channel path segment")
+            )
+    if len(segments) > 2:
+        raise Error(
+            String("kci_pkg_upload: conda repo '")
+            + repo
+            + String(
+                "' must name <namespace> or <namespace>/<channel> after the"
+                " host, nothing more"
+            )
         )
     return channel^
-
 
 def _refuse_malformed_subdir(c: PackageCoordinate) raises:
     if c.subdir.byte_length() == 0:
@@ -166,8 +233,8 @@ def refuse_malformed_subdir_segment(subdir: String) raises:
 
 
 def refuse_malformed_conda_coordinate(c: PackageCoordinate) raises:
-    """The local checks every conda request makes before it is composed: one
-    channel segment, one subdir segment, a one-segment file name ending in
+    """The local checks every conda request makes before it is composed: a
+    channel path of one or two segments, one subdir segment, a one-segment file name ending in
     `.conda` or `.tar.bz2`."""
     _ = prefix_dev_channel(c.repo)
     _refuse_malformed_subdir(c)

@@ -1,6 +1,6 @@
 # =============================================================================
-# kci_artifact_manifest -- the artifact manifest that `kci build` writes and
-#   `kci publish` reads.
+# kci_artifact_manifest -- the artifact manifest that the BUILD step writes and
+#   the PUBLISH step reads.
 # =============================================================================
 #
 # `manifest.mojo` holds `ArtifactManifest`, `parse_artifact_manifest`,
