@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_contract/tests/test_revision.mojo
+# src/kci_api/tests/test_revision.mojo
 #   Full commit ids only; an artifact reference names revision, platform and
 #   name, and output names it with its revision.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import ArtifactRef, is_full_commit_id, require_full_commit_id
+from kci_api import ArtifactRef, is_full_commit_id, require_full_commit_id
 
 comptime _REV = "0123456789abcdef0123456789abcdef01234567"
 

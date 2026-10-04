@@ -1,6 +1,6 @@
 # =============================================================================
-# src/kci_contract/exit_codes.mojo -- the ONE exit-code table of every kci
-#   verb and alias.
+# src/kci_api/exit_codes.mojo -- the ONE exit-code table of every kci
+#   verb.
 # =============================================================================
 #
 #   exit  name                     outcomes (outcome.mojo)       meaning
@@ -11,23 +11,24 @@
 #   1     EXIT_INTERNAL            (error KCI-E-INTERNAL)        kci itself raised past its handlers
 #   2     EXIT_USAGE               (error KCI-E-USAGE)           the command line is wrong; nothing read
 #   3     EXIT_REFUSED             REFUSED                       a check refused; nothing external changed
-#   4     EXIT_FAILED              FAILED                        an action failed and no external effect
+#   4     EXIT_FAILED              FAILED                        a step failed and no external effect
 #                                                                landed; re-running is safe
 #   5     EXIT_CANNOT_TELL         INDETERMINATE                 kci cannot say whether the end state
 #                                                                holds; never a pass
 #   6     EXIT_PARTIAL             PARTIAL, INTERRUPTED,         some effect landed and the rest did not,
 #                                  CANCELLED                     or the run stopped mid-way; look before
 #                                                                re-running
-#   7     EXIT_VALIDATION_FAILED   VALIDATION_FAILED             reserved for the deploy side
+#   7     EXIT_VALIDATION_FAILED   VALIDATION_FAILED             a validation failed
 #   8     EXIT_LEFT_BEHIND         (none yet)                    reserved: resources left behind
 #
 # A driver branches on the result document's `outcome`, `retry` and
 # `error.id`; the number is for shells. The numbers are v1 and live ONLY
 # here: no other kci package may write an exit literal or its own `EXIT_*`.
 #
-# Two error ids pick the number by themselves (errors.mojo): KCI-E-INTERNAL
-# is 1 and KCI-E-USAGE is 2, whatever the outcome. Every other number
-# follows from the outcome alone.
+# Three error ids pick the number by themselves (errors.mojo): KCI-E-INTERNAL
+# is 1, and KCI-E-USAGE and KCI-E-SELECTOR (a malformed or repeated `--only`,
+# which is a command-line error) are 2, whatever the outcome. Every other
+# number follows from the outcome alone.
 #
 # Retry advice follows from the number (`default_retry`): 0 and 4 are SAFE,
 # 6 is UNSAFE, every other number NEEDS_HUMAN. A verb may give stronger
@@ -37,8 +38,8 @@
 # Pure functions; no pointer.
 # =============================================================================
 
-from kci_contract.errors import ERROR_INTERNAL, ERROR_USAGE
-from kci_contract.outcome import (
+from kci_api.errors import ERROR_INTERNAL, ERROR_SELECTOR, ERROR_USAGE
+from kci_api.outcome import (
     OUTCOME_FAILED,
     OUTCOME_INDETERMINATE,
     OUTCOME_NOOP,
@@ -85,10 +86,10 @@ def exit_table() -> List[ExitRow]:
     t.append(ExitRow(EXIT_INTERNAL, String("EXIT_INTERNAL"), String("kci itself raised past its handlers")))
     t.append(ExitRow(EXIT_USAGE, String("EXIT_USAGE"), String("the command line is wrong; nothing was read")))
     t.append(ExitRow(EXIT_REFUSED, String("EXIT_REFUSED"), String("a check refused; nothing external changed")))
-    t.append(ExitRow(EXIT_FAILED, String("EXIT_FAILED"), String("an action failed and no external effect landed")))
+    t.append(ExitRow(EXIT_FAILED, String("EXIT_FAILED"), String("a step failed and no external effect landed")))
     t.append(ExitRow(EXIT_CANNOT_TELL, String("EXIT_CANNOT_TELL"), String("kci cannot say whether the end state holds")))
     t.append(ExitRow(EXIT_PARTIAL, String("EXIT_PARTIAL"), String("some effect landed and the rest did not, or the run stopped mid-way")))
-    t.append(ExitRow(EXIT_VALIDATION_FAILED, String("EXIT_VALIDATION_FAILED"), String("reserved: the deployed thing failed validation")))
+    t.append(ExitRow(EXIT_VALIDATION_FAILED, String("EXIT_VALIDATION_FAILED"), String("a validation of what a step produced failed")))
     t.append(ExitRow(EXIT_LEFT_BEHIND, String("EXIT_LEFT_BEHIND"), String("reserved: resources were left behind")))
     return t^
 
@@ -99,7 +100,7 @@ def exit_code_of(outcome: String, error_id: String = String("")) raises -> Int:
     require_outcome(outcome)
     if error_id == ERROR_INTERNAL:
         return EXIT_INTERNAL
-    if error_id == ERROR_USAGE:
+    if error_id == ERROR_USAGE or error_id == ERROR_SELECTOR:
         return EXIT_USAGE
     if outcome == OUTCOME_SUCCEEDED or outcome == OUTCOME_NOOP:
         return EXIT_OK
