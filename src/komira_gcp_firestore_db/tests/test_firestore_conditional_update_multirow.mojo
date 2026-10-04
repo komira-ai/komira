@@ -10,8 +10,8 @@
 # lowest doc id) and then check the rest of the guard against that one.
 #
 # WHAT A ONE-DOCUMENT RESOLVER WOULD BREAK. A provisioned-resource store's two
-# stamping updates guard on `(org_id, env_id, app_id, kind, resource_name,
-# <flag>)` and name no PK: one arbitrary row of the org would be resolved and
+# stamping updates guard on `(owner_id, scope_id, item_id, kind, resource_name,
+# <flag>)` and name no PK: one arbitrary row of the owner would be resolved and
 # fail its client-side pre-check, so 0 rows are stamped and a teardown
 # interlock `REAPABLE <=> (NOT delete_protected) AND created_by_deployment`
 # can never be satisfied.
@@ -62,9 +62,9 @@ comptime _FsDb = FirestoreDatabase[_MockT]
 # `id` — the shape of a table whose guards name a scope tuple rather than the
 # row id.
 comptime _TABLE: String = "gizmo"
-comptime _ORG: String = "org-A"
-comptime _ENV: String = "env-1"
-comptime _APP: String = "hello-world-stateful"
+comptime _OWNER: String = "owner-A"
+comptime _SCOPE: String = "scope-1"
+comptime _ITEM: String = "item-x"
 
 
 def _rt() raises -> _Rt:
@@ -84,9 +84,9 @@ def _fs_db(var transport: MockFirestore) -> _FsDb:
 def _cols() -> List[String]:
     var out = List[String]()
     out.append(String("id"))
-    out.append(String("org_id"))
-    out.append(String("env_id"))
-    out.append(String("app_id"))
+    out.append(String("owner_id"))
+    out.append(String("scope_id"))
+    out.append(String("item_id"))
     out.append(String("kind"))
     out.append(String("resource_name"))
     out.append(String("flag"))
@@ -96,18 +96,18 @@ def _cols() -> List[String]:
 
 def _row(
     id: String,
-    org: String,
-    env: String,
-    app: String,
+    owner: String,
+    scope: String,
+    item: String,
     kind: Int32,
     name: String,
     flag: Int32,
 ) -> List[DbValue]:
     var out = List[DbValue]()
     out.append(DbValue.text(id))
-    out.append(DbValue.text(org))
-    out.append(DbValue.text(env))
-    out.append(DbValue.text(app))
+    out.append(DbValue.text(owner))
+    out.append(DbValue.text(scope))
+    out.append(DbValue.text(item))
     out.append(DbValue.int4(kind))
     out.append(DbValue.text(name))
     out.append(DbValue.int4(flag))
@@ -117,12 +117,12 @@ def _row(
 
 def _scope_guard(kind: Int32, name: String) raises -> List[Pred]:
     """The five-predicate scope narrowing every provisioned-resource write uses.
-    NONE of them is the PK, and the FIRST one (`org_id`) matches EVERY row of the
-    org — which is exactly what made the one-doc resolver pick the wrong row."""
+    NONE of them is the PK, and the FIRST one (`owner_id`) matches EVERY row of the
+    owner — which is exactly what made the one-doc resolver pick the wrong row."""
     var g = List[Pred]()
-    g.append(Pred.eq(String("org_id"), DbValue.text(_ORG)))
-    g.append(Pred.eq(String("env_id"), DbValue.text(_ENV)))
-    g.append(Pred.eq(String("app_id"), DbValue.text(_APP)))
+    g.append(Pred.eq(String("owner_id"), DbValue.text(_OWNER)))
+    g.append(Pred.eq(String("scope_id"), DbValue.text(_SCOPE)))
+    g.append(Pred.eq(String("item_id"), DbValue.text(_ITEM)))
     g.append(Pred.eq(String("kind"), DbValue.int4(kind)))
     g.append(Pred.eq(String("resource_name"), DbValue.text(name)))
     return g^
@@ -154,13 +154,13 @@ def _version_of(
 
 def _seed(mut db: _FsDb, mut reactor: Reactor[NoopSink]) raises:
     """Four rows. `r-decoy` sorts FIRST by doc-id AND matches the guard's first
-    equality (`org_id`), so the old resolver always landed on it and then failed
+    equality (`owner_id`), so the old resolver always landed on it and then failed
     its own client-side kind/name pre-check -> 0 rows, silently."""
     _ = db.put[_Rt](
         reactor,
         _TABLE,
         _cols(),
-        _row(String("r-decoy"), _ORG, _ENV, _APP, Int32(1), String("svc"), Int32(0)),
+        _row(String("r-decoy"), _OWNER, _SCOPE, _ITEM, Int32(1), String("svc"), Int32(0)),
     )
     # TWO rows describing the SAME resource — `record` INSERTs one per run, which
     # is why the write must reach EVERY matching row and not just one.
@@ -168,24 +168,24 @@ def _seed(mut db: _FsDb, mut reactor: Reactor[NoopSink]) raises:
         reactor,
         _TABLE,
         _cols(),
-        _row(String("r-hit-1"), _ORG, _ENV, _APP, Int32(7), String("db"), Int32(0)),
+        _row(String("r-hit-1"), _OWNER, _SCOPE, _ITEM, Int32(7), String("db"), Int32(0)),
     )
     _ = db.put[_Rt](
         reactor,
         _TABLE,
         _cols(),
-        _row(String("r-hit-2"), _ORG, _ENV, _APP, Int32(7), String("db"), Int32(0)),
+        _row(String("r-hit-2"), _OWNER, _SCOPE, _ITEM, Int32(7), String("db"), Int32(0)),
     )
-    # A different ORG — must never be reachable.
+    # A different OWNER — must never be reachable.
     _ = db.put[_Rt](
         reactor,
         _TABLE,
         _cols(),
         _row(
-            String("r-other-org"),
-            String("org-B"),
-            _ENV,
-            _APP,
+            String("r-other-owner"),
+            String("owner-B"),
+            _SCOPE,
+            _ITEM,
             Int32(7),
             String("db"),
             Int32(0),
@@ -264,7 +264,7 @@ def test_a_row_matching_only_the_first_equality_is_never_written() raises:
         _flag_of(db, reactor, String("r-decoy")),
         Int64(0),
         (
-            "the decoy matches org_id (the guard's first equality) and NOTHING"
+            "the decoy matches owner_id (the guard's first equality) and NOTHING"
             " else — it must not be written"
         ),
     )
@@ -274,14 +274,14 @@ def test_a_row_matching_only_the_first_equality_is_never_written() raises:
         "an unmatched row is not even version-bumped",
     )
     assert_equal(
-        _flag_of(db, reactor, String("r-other-org")),
+        _flag_of(db, reactor, String("r-other-owner")),
         Int64(0),
-        "another org's row is unreachable",
+        "another owner's row is unreachable",
     )
     assert_equal(
-        _version_of(db, reactor, String("r-other-org")),
+        _version_of(db, reactor, String("r-other-owner")),
         Int64(1),
-        "another org's row is not version-bumped",
+        "another owner's row is not version-bumped",
     )
     _ = db^
     print("    [PASS] a row matching only the first equality is never written")
@@ -374,7 +374,7 @@ def test_put_refuses_a_minted_doc_id_for_a_declared_table() raises:
     var rt = _rt()
     ref reactor = rt.reactor()
     var keys = TableKeys()
-    keys.declare(String("org_settings"), String("org_id"))
+    keys.declare(String("owner_settings"), String("owner_id"))
     var client = FirestoreClient[_MockT](
         MockFirestore().connector(),
         String("test-project"),
@@ -383,7 +383,7 @@ def test_put_refuses_a_minted_doc_id_for_a_declared_table() raises:
     )
     var db = _FsDb(client^, DeclaredIndexSet(), keys^)
 
-    # `org_settings` is declared with PK `org_id` (it has no `id` column at all).
+    # `owner_settings` is declared with PK `owner_id` (it has no `id` column at all).
     # A projection that omits it is exactly the disagreement the refusal names.
     var cols = List[String]()
     cols.append(String("settings_json"))
@@ -392,7 +392,7 @@ def test_put_refuses_a_minted_doc_id_for_a_declared_table() raises:
     vals.append(DbValue.text(String("{}")))
     vals.append(DbValue.int8(Int64(1)))
     with assert_raises(contains="REFUSED a random document id"):
-        _ = db.put[_Rt](reactor, String("org_settings"), cols, vals)
+        _ = db.put[_Rt](reactor, String("owner_settings"), cols, vals)
 
     # The SAME projection on an UNDECLARED table still mints, deliberately: a
     # caller that never declared its keys must not turn into a hard failure.

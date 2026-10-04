@@ -273,7 +273,7 @@ struct FirestoreDatabase[
         it at the point the handle is built is what makes the omission visible.
 
         Declares NO table keys: every table is keyed on `id`. A database whose
-        tables are keyed on another column (`org_id`, `email`, ...) must use the
+        tables are keyed on another column (`owner_id`, `email`, ...) must use the
         three-argument form; under this one such a table's documents are named
         by its `id` column, or by a minted id when the projection has none."""
         self._client = client^
@@ -507,7 +507,7 @@ struct FirestoreDatabase[
         # ---------------------------------------------------------------------
         # (a) THE PK FAST PATH — the guard has an EQ pred on the table's PK
         #     column, so the doc-id IS that value: a direct GET + one CAS
-        #     (`id=$`, or a declared key such as `org_id=$`). NO query is
+        #     (`id=$`, or a declared key such as `owner_id=$`). NO query is
         #     issued; a point update must not become a collection query.
         # ---------------------------------------------------------------------
         var pk_val_opt = _pk_pred_value(self._table_keys, guard, table)
@@ -1235,7 +1235,7 @@ def _guard_matches(doc: FirestoreDocument, guard: Filter) raises -> Bool:
     A document written before a column existed simply has no such field, and this
     evaluator cannot know what DDL default the SQL backends materialized for it.
     Answering "yes, it equals what you asked" would turn every identity predicate
-    (`org_id`, `env_id`, `app_id`) into a wildcard on exactly the oldest rows, so
+    (`owner_id`, `scope_id`, `item_id`) into a wildcard on exactly the oldest rows, so
     EQ stays fail-closed. The predicate that CAN answer honestly is `PRED_NE`:
     "is the stored value distinct from `val`" is TRUE when there is no stored
     value, and that is how the restamp guard reaches a legacy row."""
