@@ -1,0 +1,41 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The artifacts: the reviewed list of what kci builds and
+# publishes. A file declares build systems (a program and the args it always
+# gets; kci names no build tool) and artifacts (a name, the build system and
+# the args appended for it). Reads an artifacts file (textproto) into the
+# generated `kci.release.v1.Artifacts`, validates it, and renders
+# the argv that builds one artifact into an output
+# directory (the six placeholders substituted in one pass: `{out_dir}`,
+# `{release_dir}` and the git-derived stamp `{revision_id}`,
+# `{source_commit}`, `{build_number}`, `{timestamp_ms}`; artifacts build in
+# file order, so a metapackage declared last reads its members' manifests
+# under `{release_dir}`). One artifact per entry: it also
+# holds the two refusals over what a build left (exactly one `manifest.json`
+# at the top of the directory; its `name` equal to the artifact's,
+# exactly). Pure: it runs no process and reads no directory; `kci build`
+# does.
+#
+# The welded tests parse and refuse synthetic files in memory, assert each
+# refusal by its message, round-trip the parsed value on the proto binary
+# wire with every field number pinned as bytes, and render argvs exactly,
+# including from `example.textproto`, staged as test data.
+mojo_library(
+    name = "kci_artifact",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/kci_artifact_proto:kci_artifact_proto",
+        "//src/kci_api:kci_api",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_textproto:komira_textproto",
+    ],
+    test_srcs = [
+        "tests/test_artifact_parse.mojo",
+        "tests/test_artifact_render.mojo",
+        "tests/test_artifact_validate.mojo",
+    ],
+    test_data = {
+        "tests/test_artifact_render.mojo": ["example.textproto"],
+    },
+    visibility = ["PUBLIC"],
+)

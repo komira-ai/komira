@@ -3,12 +3,12 @@
 #   object per package file, saying what the file is and what it hashes to.
 # =============================================================================
 #
-#   {"format": "kci.artifact_manifest",  the format (kci_contract's table)
+#   {"format": "kci.artifact_manifest",  the format (kci_api's table)
 #    "schema_version": 1,                 its major (an integer)
 #    "artifact_type": "CONDA",            CONDA or PYTHON
 #    "name": "example-pkg",               the package name
 #    "version": "1.2.3",
-#    "platform": "linux-x86_64",          kci_contract's platform table
+#    "platform": "linux-x86_64",          kci_api's platform table
 #    "subdir": "linux-64",                CONDA only: the channel subdir,
 #                                         the platform's conda subdir
 #    "file": "linux-64/example-pkg-1.2.3-h0_0.conda",
@@ -16,10 +16,10 @@
 #    "metadata": "METADATA"}              PYTHON: the wheel's METADATA
 #                                         CONDA: the build's metadata.json
 #
-# `format` and `schema_version` are read first (kci_contract's
+# `format` and `schema_version` are read first (kci_api's
 # `produced_header`): another format, or a major this kci does not read, is
 # refused. Inside major 1 an unknown key is IGNORED and listed in
-# `ignored_keys` (kci_contract's policy: writers only ever add keys inside a
+# `ignored_keys` (kci_api's policy: writers only ever add keys inside a
 # major). `platform` is the platform the artifact was built for: a released
 # one or `noarch`; a CONDA artifact's `subdir` must be its platform's conda
 # subdir. Nothing run-specific (a run id, an attempt) is ever in a manifest:
@@ -29,14 +29,14 @@
 # `metadata` is required for both artifact types. `file` and `metadata` are
 # paths; a relative one is relative to the directory holding the manifest.
 # A CONDA `metadata` is a bare file name: the file sits next to the
-# manifest, so copying the manifest's directory (as `kci build` does)
+# manifest, so copying the manifest's directory (as the BUILD step does)
 # cannot separate the two. Every value but `schema_version` is a string. A
 # missing required key, a key given twice, a key that does not belong to the
 # artifact type, a non-string or empty value and a sha256 that is not 64
 # lowercase hex characters are each refused, naming the manifest and the key.
 #
 # `render_artifact_manifest` writes the same format back, keys in the order
-# above, so what `kci build` writes is exactly what `kci publish` reads.
+# above, so what the BUILD step writes is exactly what the PUBLISH step reads.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
@@ -45,7 +45,7 @@ from std.pathlib import Path
 
 from komira_json import JSON_STRING, JsonValue, parse_json_value
 
-from kci_contract import (
+from kci_api import (
     FORMAT_ARTIFACT_MANIFEST,
     conda_subdir_of,
     current_major,
@@ -97,7 +97,7 @@ struct ArtifactManifest(Copyable, Movable, Deinitable):
 
         It is read from `file_path`, the path whose bytes get uploaded, and
         not from `file`, so the name and the bytes cannot come from two
-        different fields. A parsed manifest and `kci build` set both, and
+        different fields. A parsed manifest and the BUILD step set both, and
         both give the same last segment; a caller that builds a manifest by
         hand and sets only `file_path` still gets the right name."""
         var slash = self.file_path.rfind(String("/"))
@@ -263,9 +263,9 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
             source,
             String("artifact_type '")
             + m.artifact_type
-            # kci_publish's welded test matches this wording by its text;
-            # keep it unchanged so that verb can switch to this package.
-            + String("' is not published by kci publish (CONDA or PYTHON)"),
+            # Names the PUBLISH step: `kci run --stage S` is the one verb
+            # for stages.
+            + String("' is not published by the PUBLISH step (CONDA or PYTHON)"),
         )
     return m^
 

@@ -8,7 +8,7 @@
 # compact, with
 #
 #   every package   format ("kci.conda_metadata"), schema_version (integer,
-#                   kci_contract's format table), kind ("library" |
+#                   kci_api's format table), kind ("library" |
 #                   "metapackage"),
 #                   name, version, subdir, build, build_number (integer >= 0),
 #                   file_name, size (integer > 0), depends (array of
@@ -22,12 +22,12 @@
 # {name, sha256, version} and the compiler-version change of the packer adds
 # `build`; the reader accepts both and records whether it was there
 # (`MetaMember.has_build`). Whether a release may ship a row without it is
-# `kci publish`'s rule, not the reader's.
+# the PUBLISH step's rule, not the reader's.
 #
-# `format` and `schema_version` are read first (kci_contract's
+# `format` and `schema_version` are read first (kci_api's
 # `produced_header`): another format, or a major this kci does not read, is
 # refused. Inside a known major an unknown key is IGNORED and listed in
-# `ignored_keys` (kci_contract's policy: writers only ever add keys inside a
+# `ignored_keys` (kci_api's policy: writers only ever add keys inside a
 # major).
 #
 # Refused, naming the file and the key: not JSON, not an object, a key given
@@ -52,7 +52,7 @@ from komira_json import (
 )
 
 from kci_artifact_manifest import is_sha256_hex
-from kci_contract import FORMAT_CONDA_METADATA, produced_header
+from kci_api import FORMAT_CONDA_METADATA, produced_header
 
 comptime KIND_LIBRARY: String = "library"
 comptime KIND_METAPACKAGE: String = "metapackage"

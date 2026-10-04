@@ -20,7 +20,7 @@
 #
 # THE CONTRACT, each held by a test in this package or by the conformance kit:
 #   * `implemented` and `absences` together name every catalog type exactly
-#     once (`clouds.declaration_problems`): a new type forces a decision on
+#     once (`clouds.artifact_problems`): a new type forces a decision on
 #     every cloud.
 #   * ABSENT_BY_DESIGN is legal only for a CLOUD_BOUND type, NOT_YET only
 #     for a PORTABLE one, and an adapter that calls itself complete has no
