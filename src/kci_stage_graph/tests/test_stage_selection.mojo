@@ -9,7 +9,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import SCOPE_FULL, SCOPE_SELECTIVE, Selector, parse_selectors
+from kci_api import SCOPE_FULL, SCOPE_SELECTIVE, Selector, parse_selectors
 from kci_stage_graph import Selection, Stage, parse_machine_file, resolve_selection
 
 

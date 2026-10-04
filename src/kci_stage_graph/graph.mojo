@@ -27,7 +27,7 @@
 #                                                       "needs a newer kci"
 #
 # A stage may hold steps of different kinds. The kind words are
-# kci_contract's (verbs.mojo), and so is the name grammar (selection.mojo).
+# kci_api's (verbs.mojo), and so is the name grammar (selection.mojo).
 #
 # DEPLOY, reserved. When its body lands, a DEPLOY step names a CELL (one
 # deploy target: an account or project in one region), and the cell names
@@ -37,7 +37,7 @@
 #
 # VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
 # what it published. A validation name is unique in its stage (the grammar of
-# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_contract):
+# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_api):
 #
 #   install        the package to install from the step's channel, at this
 #                  release's version and build (kci checks it is a declared
@@ -64,7 +64,7 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     SCOPE_FULL,
     SCOPE_SELECTIVE,
     STEP_KIND_BUILD,
@@ -85,7 +85,7 @@ comptime EXTRA_CHANNEL_CONDA_FORGE: String = "conda-forge"
 
 comptime NAME_MAX_BYTES: Int = STEP_NAME_MAX_BYTES
 """Longest stage or step name: a stage name is also a CI job id and a
-GitHub environment name (kci_contract states the number)."""
+GitHub environment name (kci_api states the number)."""
 
 
 struct StageValidation(Copyable, Movable):
@@ -242,7 +242,7 @@ def joined_names(names: List[String]) -> String:
 
 def is_stage_or_step_name(name: String) -> Bool:
     """`[a-z][a-z0-9-]*`, at most `NAME_MAX_BYTES` bytes, not ending in `-`
-    (kci_contract's `is_step_name`)."""
+    (kci_api's `is_step_name`)."""
     return is_step_name(name)
 
 
