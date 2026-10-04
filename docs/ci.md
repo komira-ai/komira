@@ -216,16 +216,19 @@ can start a scratch daemon or clone and are still to be analysed.
 packages that `release/artifacts.textproto` declares, through `kci` (`bin/kci`).
 It is written by hand. The stages are owned by the release machine,
 [`release/machine.textproto`](../release/machine.textproto): `build`, then
-`gamma`, then `prod`. The workflow runs one job per stage; each job is named
-for its stage, runs in the stage's GitHub environment, and runs exactly one
-`kci run --stage <its name>`. kci reads `release/machine.textproto` by
+`gamma`, then `prod`. The workflow runs one job per stage, named for its
+stage, running in the stage's GitHub environment and running exactly one
+`kci run --stage <its name>`, except that `gamma` is split over two jobs:
+`gamma` runs its step (`--only step:publish`) and `validate` its validation
+(`--only validation:install`). kci reads `release/machine.textproto` by
 convention (its one default path), so no line of the workflow names it.
 
 | job (stage) | runner | what it does |
 |---|---|---|
 | `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
-| `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
-| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
+| `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
+| `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
+| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -236,21 +239,24 @@ value, and the release's `release_produced_by` names the one build run.
   no `kci build`, `kci publish` or `kci ci check`. `kci run` also takes
   `--only step:<name>` / `--only validation:<name>` (repeatable) to run a
   selection; such a run is recorded with `scope: SELECTIVE` and its last
-  stderr line says `-- not a full run`. The release jobs never pass `--only`
-  (rule R9), so every release run is a FULL run. `--plan` is the dry run of a
-  whole stage.
+  stderr line says `-- not a full run`. `--only step:<name>` runs the step
+  WITHOUT its validations; only a FULL run runs both. A release job runs its
+  whole stage unless the stage is split over jobs that together run all of
+  it exactly once (rule R9, amended and pending a ruling): here only `gamma`
+  is, into `gamma` and `validate`. `--plan` is the dry run of a whole stage.
 - **The workflow is checked at start-up.** Under GitHub Actions
   (`GITHUB_ACTIONS=true`), before it runs anything, `kci run` reads the
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
   path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
   machine file and every channels file it names (rules R1-R12 of
-  `src/kci_ci_check/rules.mojo`: job ids are the stages, each job's
-  environment is its stage's, `needs` is the stage's `after`, `id-token:
-  write` only where a stage publishes by trusted publishing or is
-  farm-connected, one `kci run --stage <its id>` per job with
-  `--summary-file`, no `--only`, no `pull_request` trigger, a `revision`
-  input, every `uses:` pinned, `farm-connect` exactly on farm-connected
-  stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
+  `src/kci_ci_check/rules.mojo`: a job per stage named for it, each job's
+  environment its stage's, `needs` the jobs that run the stage's `after`,
+  `id-token: write` only where a stage publishes by trusted publishing or is
+  farm-connected, one `kci run` per job with `--summary-file`, `--only` only
+  in a split stage whose jobs run all of it once (a validations-only job has
+  no environment, no identity token, and needs the stage's own job), no
+  `pull_request` trigger, a `revision` input, every `uses:` pinned,
+  `farm-connect` exactly on farm-connected stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
   missing variable, is exit 5 and never a pass. The same check is the welded
   test `src/kci_ci_check/tests/test_repo_kci_yml.mojo`, so a drift also
@@ -303,11 +309,30 @@ value, and the release's `release_produced_by` names the one build run.
   run is identified by `--run-id gh-<run id>`, `--attempt <run attempt>` and
   `--context` lines. The exit numbers are kci's one table: publishing a set
   the channel already holds, byte for byte, is exit 0.
-- **Validations.** The machine file format can declare a validation on a
-  publish step (`validation { kind: CONDA_INSTALL_SMOKE ... }`). This kci
-  cannot run one yet, so a declared validation is refused (exit 3), never
-  skipped; the release machine declares none until the validation runner
-  lands.
+- **Validations.** A publish step can declare a validation (`validation {
+  kind: CONDA_INSTALL_SMOKE ... }`); gamma's is `install`. kci runs it after
+  the step in a FULL run, or alone with `--only validation:install` against
+  what is already published. In order, each failure exit 7
+  (`VALIDATION_FAILED`, a row per finding in the result and the job summary),
+  never a skip: (1) the pins: `release.json`'s version, build and sha256 of
+  `komira_encoding` and `komira_all`, `metadata.json`'s payload sha256 and
+  `mojo_pin`; (2) the channel, read from the runner ANONYMOUSLY: the index
+  lists each file with the build's sha256 and the channel serves those bytes
+  (only a file's absence, or a 404 index, is waited for, up to 600 s, then it
+  fails; a 401 or another sha256 fails at once); (3) `docker run` of
+  `ghcr.io/prefix-dev/pixi:0.67.2-bookworm-slim` pinned by digest, read-only,
+  no capabilities, as the runner's uid, with only `HOME`, `PIXI_HOME`,
+  `PIXI_CACHE_DIR` and `TMPDIR` set and one scratch mount: `pixi install` of
+  the pinned packages from the channel and `mojo-compiler ==<mojo_pin>` from
+  Modular's channel, then `mojo run` of
+  [release/smoke/smoke_komira_encoding.mojo](../release/smoke/smoke_komira_encoding.mojo);
+  (4) read back from the mount: every installed record has the release's
+  version, build and sha256 and comes from a declared channel, the
+  installed `.mojoc` is the build's, and the program printed
+  `komira_encoding validation: N of N checks passed`, N > 0. Under `--plan`
+  nothing runs (`WOULD_VALIDATE`). The same program is a `mojo_test` against
+  the in-repository library, so an API change fails `./buck2 test //...`
+  before it can fail a release.
 - **The channels.** prefix.dev channels `komira-ai/gamma` and
   `komira-ai/prod` ([release/channels.textproto](../release/channels.textproto)),
   both public. Uploads go to `https://prefix.dev/api/v1/upload/komira-ai/<channel>`
