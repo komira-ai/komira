@@ -15,7 +15,7 @@
 # repository komira-ai/komira, the workflow file kci.yml and ONE GitHub
 # environment (gamma, prod). The publish job mints the job's ID token
 # (audience prefix.dev) and exchanges it at prefix.dev's mint endpoint for a
-# short-lived upload token, so no secret exists anywhere, and the declaration
+# short-lived upload token, so no secret exists anywhere, and the channel
 # names none. `push_identity` is the subject claim of that token: the only
 # principal that may push.
 #

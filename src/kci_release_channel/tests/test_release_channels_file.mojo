@@ -29,13 +29,13 @@ def _read() raises -> String:
 
 
 def test_the_two_channels_are_gamma_and_prod() raises:
-    var decls = parse_channels_file(_read())
-    assert_equal(len(decls), 2)
-    assert_equal(decls[0].name, String("gamma"))
-    assert_equal(decls[1].name, String("prod"))
-    for i in range(len(decls)):
-        assert_true(decls[i].is_public())
-        assert_equal(len(decls[i].repositories), 1)
+    var channels = parse_channels_file(_read())
+    assert_equal(len(channels), 2)
+    assert_equal(channels[0].name, String("gamma"))
+    assert_equal(channels[1].name, String("prod"))
+    for i in range(len(channels)):
+        assert_true(channels[i].is_public())
+        assert_equal(len(channels[i].repositories), 1)
 
 
 def _check(name: String) raises:
