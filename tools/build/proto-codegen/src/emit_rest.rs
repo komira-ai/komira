@@ -95,19 +95,12 @@ pub fn emit_rest_service(
             ));
         }
     }
-    let default_host = rest_default_host(file, svc)?;
+    let fq_service = fq_service_name(file, svc);
+    let default_host = rest_default_host(&fq_service, svc)?;
 
     let struct_name = format!("{}Client", svc.name);
-    let fq_service = if file.proto_package.is_empty() {
-        svc.name.clone()
-    } else {
-        format!("{}.{}", file.proto_package, svc.name)
-    };
     w.blank();
-    w.line(&format!(
-        "# REST/JSON client for `{}.{}`.",
-        file.proto_package, svc.name
-    ));
+    w.line(&format!("# REST/JSON client for `{fq_service}`."));
     w.line(&format!(
         "struct {struct_name}[C: Connector, T: {GCP_TOKEN_SOURCE}](Movable, Deinitable):"
     ));
@@ -270,6 +263,16 @@ pub fn emit_rest_service(
     })
 }
 
+/// The full proto name of `svc`: `pkg.Service`, or the bare service name for
+/// a file that declares no package.
+fn fq_service_name(file: &IrFile, svc: &IrService) -> String {
+    if file.proto_package.is_empty() {
+        svc.name.clone()
+    } else {
+        format!("{}.{}", file.proto_package, svc.name)
+    }
+}
+
 /// The host a generated client of `svc` starts at: its
 /// `(google.api.default_host)`, or `None` when it declares none. googleapis
 /// writes the option as a bare host (`logging.googleapis.com`), and some
@@ -277,7 +280,7 @@ pub fn emit_rest_service(
 /// HTTPS on the default port. Anything else (another port, a scheme, a path,
 /// an empty value, a character outside a DNS name) is refused by name rather
 /// than written into the client.
-fn rest_default_host(file: &IrFile, svc: &IrService) -> Result<Option<String>, String> {
+fn rest_default_host(fq_service: &str, svc: &IrService) -> Result<Option<String>, String> {
     let Some(declared) = &svc.default_host else {
         return Ok(None);
     };
@@ -293,10 +296,9 @@ fn rest_default_host(file: &IrFile, svc: &IrService) -> Result<Option<String>, S
         });
     if !dns_name {
         return Err(format!(
-            "service `{}.{}` declares `(google.api.default_host)` = {declared:?}, which is \
-             not a host name (optionally `:443`): a REST client sends to it over HTTPS on \
-             the default port",
-            file.proto_package, svc.name
+            "service `{fq_service}` declares `(google.api.default_host)` = {declared:?}, \
+             which is not a host name (optionally `:443`): a REST client sends to it over \
+             HTTPS on the default port"
         ));
     }
     Ok(Some(host.to_string()))
@@ -1148,6 +1150,10 @@ mod tests {
     }
 
     fn with_host(host: Option<&str>) -> Result<RestServiceEmit, String> {
+        with_host_in("tiny.rest.v1", host)
+    }
+
+    fn with_host_in(package: &str, host: Option<&str>) -> Result<RestServiceEmit, String> {
         let req = IrMessage {
             name: "Req".into(),
             mojo_name: "Req".into(),
@@ -1175,7 +1181,8 @@ mod tests {
                 routing_rule: None,
             }],
         };
-        let file = file_with(vec![req], svc.clone());
+        let mut file = file_with(vec![req], svc.clone());
+        file.proto_package = package.to_string();
         emit_rest_service(&file, &svc)
     }
 
@@ -1234,6 +1241,12 @@ mod tests {
                 "{bad}: {err}"
             );
         }
+        // A file with no package names the bare service, not `.Logging`.
+        let err = with_host_in("", Some("https://logging.googleapis.com")).unwrap_err();
+        assert!(
+            err.contains("service `Logging` declares `(google.api.default_host)`"),
+            "{err}"
+        );
     }
 
     #[test]
