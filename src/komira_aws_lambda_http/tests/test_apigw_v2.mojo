@@ -93,7 +93,7 @@ def _base_event_json() -> String:
         '"requestContext": {'
         '"http": {"method": "POST", "path": "/api/v1/items"},'
         '"authorizer": {"lambda": {'
-        '"orgId": "org-real",'
+        '"subjectId": "subject-real",'
         '"Plan": "enterprise",'
         '"seatCount": 12'
         '}}'
@@ -281,8 +281,8 @@ def test_the_authorizer_context_reaches_the_request_as_reserved_headers() raises
     carries."""
     var req = api_gateway_v2_event_to_request(_base_event_json())
     assert_equal(
-        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("orgid")),
-        String("org-real"),
+        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")),
+        String("subject-real"),
     )
     assert_equal(
         _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("plan")),
@@ -310,20 +310,20 @@ def test_a_forged_authorizer_header_never_reaches_the_dispatcher() raises:
     THE NO-AUTHORIZER ARM IS THE POINT, and it is the ONE field that differs
     from the fixture below it: an implementation that strips only what it is
     about to overwrite passes the with-authorizer case and FAILS here, leaving
-    `org-victim` in the handler's hands on every unauthenticated route.
+    `subject-victim` in the handler's hands on every unauthenticated route.
 
     FAILS ON A "strip only what we overwrite" CONVERTER: `req.headers` would
-    contain `x-komira-authorizer-orgid: org-victim`."""
+    contain `x-komira-authorizer-subjectid: subject-victim`."""
     var event = String(
         '{"version": "2.0", "rawPath": "/public", "rawQueryString": "",'
-        '"headers": {"x-komira-authorizer-orgid": "org-victim",'
+        '"headers": {"x-komira-authorizer-subjectid": "subject-victim",'
         '"X-Komira-Authorizer-Plan": "enterprise",'
         '"x-request-id": "req-9"},'
         '"requestContext": {"http": {"method": "GET"}}}'
     )
     var req = api_gateway_v2_event_to_request(event)
     assert_false(
-        (String(AUTHORIZER_HEADER_PREFIX) + String("orgid")) in req.headers
+        (String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")) in req.headers
     )
     assert_false(
         (String(AUTHORIZER_HEADER_PREFIX) + String("plan")) in req.headers
@@ -338,19 +338,19 @@ def test_the_authorizer_wins_over_a_client_header_of_the_same_name() raises:
     field vs the fixture above). The handler must see the AUTHORIZER's value.
 
     FALSIFIES the injection-then-copy ordering: injecting first and copying
-    client headers second lets the client's `org-victim` overwrite
-    `org-real` — the same hole upside down, and it passes the no-authorizer
+    client headers second lets the client's `subject-victim` overwrite
+    `subject-real` — the same hole upside down, and it passes the no-authorizer
     test."""
     var event = String(
         '{"version": "2.0", "rawPath": "/private", "rawQueryString": "",'
-        '"headers": {"x-komira-authorizer-orgid": "org-victim"},'
+        '"headers": {"x-komira-authorizer-subjectid": "subject-victim"},'
         '"requestContext": {"http": {"method": "GET"},'
-        '"authorizer": {"lambda": {"orgId": "org-real"}}}}'
+        '"authorizer": {"lambda": {"subjectId": "subject-real"}}}}'
     )
     var req = api_gateway_v2_event_to_request(event)
     assert_equal(
-        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("orgid")),
-        String("org-real"),
+        _header(req.headers, String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")),
+        String("subject-real"),
     )
 
 

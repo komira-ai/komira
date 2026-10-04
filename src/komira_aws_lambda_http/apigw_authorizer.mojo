@@ -332,7 +332,7 @@ struct AuthorizerAnswer(Movable, Deinitable):
 
         ⛔ REFUSES AN EMPTY KEY AND A DUPLICATE KEY. API Gateway's own
         serializer would accept both and the LAST duplicate would silently win —
-        so a caller that computed an org id twice, differently, would ship the
+        so a caller that computed a subject id twice, differently, would ship the
         second one with no diagnostic. Refusing is the only outcome that cannot
         be a silently-wrong identity.
 

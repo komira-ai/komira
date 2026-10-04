@@ -417,7 +417,7 @@ def test_a_converted_tick_carries_NO_headers_AT_ALL() raises:
         _ = kv
         n += 1
     assert_equal(n, 0)
-    var reserved = String(AUTHORIZER_HEADER_PREFIX) + String("orgid")
+    var reserved = String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")
     assert_false(reserved in req.headers)
 
 
@@ -497,7 +497,7 @@ def test_refuses_a_tick_payload_that_tries_to_carry_headers() raises:
     _must_raise_tick(
         String(
             '{"httpMethod":"POST","path":"/internal/tick/reconcile",'
-            '"headers":{"x-komira-authorizer-orgid":"org-victim"}}'
+            '"headers":{"x-komira-authorizer-subjectid":"subject-victim"}}'
         ),
         String("a tick payload carrying `headers`"),
     )

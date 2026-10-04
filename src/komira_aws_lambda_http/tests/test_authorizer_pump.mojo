@@ -197,8 +197,8 @@ struct _ScriptedAuthorizer(
 
         var out = AuthorizerAnswer(kind)
         if kind == AUTHZ_ANSWER_ALLOW:
-            out.add_context(String("org_id"), String("org-proven"))
-            out.add_context(String("app_deployment_id"), String("dep-proven"))
+            out.add_context(String("subject_id"), String("subject-proven"))
+            out.add_context(String("session_id"), String("session-proven"))
         return out^
 
 
@@ -298,7 +298,7 @@ def test_an_ALLOW_is_POSTED_with_its_context_and_no_error() raises:
     assert_equal(transport.post_count, 1)
     assert_equal(transport.error_count, 0)
     assert_true(_is_authorized_of(transport.last_payload))
-    assert_true(transport.last_payload.find(String("org-proven")) >= 0)
+    assert_true(transport.last_payload.find(String("subject-proven")) >= 0)
     # And the decider was handed the REAL parsed fields, not a default event.
     assert_equal(authorizer.authorize_count, 1)
     assert_equal(authorizer.seen_route_key, String("POST /v1/messages"))

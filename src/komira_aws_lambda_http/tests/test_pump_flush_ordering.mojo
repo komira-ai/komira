@@ -288,12 +288,12 @@ def _send_event(rid_tag: String) -> String:
         '{"version": "2.0", "rawPath": "/api/v1/items",'
         '"rawQueryString": "tag=a&tag=b",'
         '"headers": {"Content-Type": "application/json",'
-        '"x-komira-authorizer-orgid": "org-victim",'
+        '"x-komira-authorizer-subjectid": "subject-victim",'
         '"X-Request-Id": "'
     ) + rid_tag + String(
         '"},'
         '"requestContext": {"http": {"method": "POST"},'
-        '"authorizer": {"lambda": {"orgId": "org-real"}}},'
+        '"authorizer": {"lambda": {"subjectId": "subject-real"}}},'
         '"body": "{}", "isBase64Encoded": false}'
     )
 
@@ -682,8 +682,8 @@ def test_the_authorizer_identity_reaches_the_dispatcher_and_the_forgery_does_not
     after the whole pump, not at the converter's return value.
 
     The scripted event carries BOTH a client-supplied
-    `x-komira-authorizer-orgid: org-victim` AND a real authorizer context
-    `{"orgId": "org-real"}`. The handler must act on `org-real`.
+    `x-komira-authorizer-subjectid: subject-victim` AND a real authorizer context
+    `{"subjectId": "subject-real"}`. The handler must act on `subject-real`.
 
     FAILS ON: injecting the authorizer context BEFORE copying client headers
     (the client's copy then overwrites it); and on stripping only the keys about
@@ -700,10 +700,10 @@ def test_the_authorizer_identity_reaches_the_dispatcher_and_the_forgery_does_not
         _RecordingDispatcher, _Rt, _ScriptedTransport, _CountingFlush
     ](transport, dispatcher, reactor, flusher, 1)
 
-    var key = String(AUTHORIZER_HEADER_PREFIX) + String("orgid")
+    var key = String(AUTHORIZER_HEADER_PREFIX) + String("subjectid")
     assert_true(key in dispatcher.seen_headers)
-    assert_equal(dispatcher.seen_headers[key], String("org-real"))
-    assert_false(dispatcher.seen_headers[key] == String("org-victim"))
+    assert_equal(dispatcher.seen_headers[key], String("subject-real"))
+    assert_false(dispatcher.seen_headers[key] == String("subject-victim"))
 
 
 # =============================================================================

@@ -46,7 +46,7 @@
 #
 #   **the client controls `headers` too.**
 #
-# A caller who writes `x-komira-authorizer-org-id: org-victim` into their own
+# A caller who writes `x-komira-authorizer-subject: subject-victim` into their own
 # request has, absent a defence, just handed the handler an identity that no
 # authorizer vouched for. The defence is one rule, applied UNCONDITIONALLY:
 #

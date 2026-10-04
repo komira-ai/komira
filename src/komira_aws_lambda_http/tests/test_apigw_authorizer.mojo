@@ -328,9 +328,9 @@ def test_an_allow_serializes_true_and_carries_its_context() raises:
     and dropped the context would satisfy "an allow is an allow" and leave the
     backend with no identity."""
     var a = AuthorizerAnswer(AUTHZ_ANSWER_ALLOW)
-    a.add_context(String("org_id"), String("11111111-1111-1111-1111-111111111111"))
+    a.add_context(String("subject_id"), String("11111111-1111-1111-1111-111111111111"))
     a.add_context(
-        String("app_deployment_id"),
+        String("session_id"),
         String("22222222-2222-2222-2222-222222222222"),
     )
     var payload = authorizer_simple_response_json(a)
@@ -338,11 +338,11 @@ def test_an_allow_serializes_true_and_carries_its_context() raises:
     assert_true(_is_authorized_of(payload))
     assert_equal(_context_member_count_of(payload), 2)
     assert_equal(
-        _context_value_of(payload, String("org_id")),
+        _context_value_of(payload, String("subject_id")),
         String("11111111-1111-1111-1111-111111111111"),
     )
     assert_equal(
-        _context_value_of(payload, String("app_deployment_id")),
+        _context_value_of(payload, String("session_id")),
         String("22222222-2222-2222-2222-222222222222"),
     )
 
@@ -383,8 +383,8 @@ def test_a_DENY_serializes_an_EMPTY_context_EVEN_WHEN_ONE_WAS_ADDED() raises:
     """⛔⛔ THE STRUCTURAL ENFORCEMENT, and the reason it is in the SERIALIZER.
 
     A refusal must not carry the claimed identity — `authorizer._empty_
-    principal()`'s rule, one layer up. A populated org on a refusal is
-    indistinguishable from a populated org on an allow at exactly the point
+    principal()`'s rule, one layer up. A populated subject on a refusal is
+    indistinguishable from a populated subject on an allow at exactly the point
     where the difference is the whole decision.
 
     ⚠ THE FIXTURE DELIBERATELY DOES THE WRONG THING: it builds a DENY and then
@@ -393,18 +393,18 @@ def test_a_DENY_serializes_an_EMPTY_context_EVEN_WHEN_ONE_WAS_ADDED() raises:
     every construction site instead, this test would be asserting a
     convention."""
     var a = AuthorizerAnswer(AUTHZ_ANSWER_DENY)
-    a.add_context(String("org_id"), String("org-victim"))
-    a.add_context(String("app_deployment_id"), String("dep-victim"))
+    a.add_context(String("subject_id"), String("subject-victim"))
+    a.add_context(String("session_id"), String("session-victim"))
     assert_equal(a.context_len(), 2)
 
     var payload = authorizer_simple_response_json(a)
     assert_false(_is_authorized_of(payload))
     assert_equal(_context_member_count_of(payload), 0)
-    assert_equal(_context_value_of(payload, String("org_id")), String(""))
+    assert_equal(_context_value_of(payload, String("subject_id")), String(""))
     # And the string itself must not contain the leaked value anywhere — a
     # member emitted under a different key would satisfy the count assertion.
-    assert_true(payload.find(String("org-victim")) < 0)
-    assert_true(payload.find(String("dep-victim")) < 0)
+    assert_true(payload.find(String("subject-victim")) < 0)
+    assert_true(payload.find(String("session-victim")) < 0)
 
 
 def test_the_UNAVAILABLE_ordinal_also_drops_its_context() raises:
@@ -412,11 +412,11 @@ def test_the_UNAVAILABLE_ordinal_also_drops_its_context() raises:
     serializer keys on `is_allowed()` and not on `kind == DENY`, and a
     `kind != DENY` implementation would pass the DENY case and leak here."""
     var a = AuthorizerAnswer(AUTHZ_ANSWER_UNAVAILABLE)
-    a.add_context(String("org_id"), String("org-victim"))
+    a.add_context(String("subject_id"), String("subject-victim"))
     var payload = authorizer_simple_response_json(a)
     assert_false(_is_authorized_of(payload))
     assert_equal(_context_member_count_of(payload), 0)
-    assert_true(payload.find(String("org-victim")) < 0)
+    assert_true(payload.find(String("subject-victim")) < 0)
 
 
 def test_context_is_ALWAYS_emitted_so_the_shape_never_depends_on_the_verdict() raises:
@@ -438,18 +438,18 @@ def test_a_duplicate_context_key_is_REFUSED() raises:
     """The last write would silently win, so two disagreeing values for one
     identity fact would ship the second with no diagnostic."""
     var a = AuthorizerAnswer(AUTHZ_ANSWER_ALLOW)
-    a.add_context(String("org_id"), String("org-a"))
+    a.add_context(String("subject_id"), String("subject-a"))
     var raised = False
     try:
-        a.add_context(String("org_id"), String("org-b"))
+        a.add_context(String("subject_id"), String("subject-b"))
     except e:
         raised = True
         _ = e
     assert_true(raised)
     assert_equal(a.context_len(), 1)
     assert_equal(
-        _context_value_of(authorizer_simple_response_json(a), String("org_id")),
-        String("org-a"),
+        _context_value_of(authorizer_simple_response_json(a), String("subject_id")),
+        String("subject-a"),
     )
 
 
