@@ -12,8 +12,10 @@
 #     or a relative path for one (`./buck2`, `bin/buck2`: the file does not
 #     state the directory it would resolve against);
 #   * an empty entry in any args list;
-#   * a placeholder other than `{out_dir}` in any arg: `{<identifier>}`,
-#     the identifier `[A-Za-z_][A-Za-z0-9_]*`; any other brace is literal;
+#   * a placeholder that is not one of placeholders.mojo's seven (`{out_dir}`,
+#     `{release_dir}`, `{platform}`, `{revision_id}`, `{source_commit}`,
+#     `{build_number}`, `{timestamp_ms}`) in any arg: `{<identifier>}`, the identifier
+#     `[A-Za-z_][A-Za-z0-9_]*`; any other brace is literal;
 #   * an artifact whose `build_system` is empty or names no declared one;
 #   * an artifact with no args;
 #   * an artifact whose combined args (its build system's, then its own)
@@ -25,9 +27,10 @@
 # whose `name` is the artifact's, exactly) is checked by placeholders.mojo's
 # `require_one_manifest` and `require_manifest_name`, after the build.
 #
-# Not here, by design (kci publish, over the built manifests): every
-# declared artifact built, versions in lockstep, a metapackage after its
-# members, requirement closure over the set.
+# Not here, by design (the PUBLISH step, over the built manifests): every
+# declared artifact built, versions in lockstep, exactly one metapackage
+# whose members are every library (a recommendation the CEO has not
+# answered; placeholders.mojo), requirement closure over the set.
 #
 # Owned values only; no pointer.
 # =============================================================================
@@ -38,7 +41,7 @@ from kci_artifact_proto.artifact import (
     BuildSystem,
 )
 
-from .placeholders import OUT_DIR_PLACEHOLDER, placeholders_in
+from .placeholders import OUT_DIR_PLACEHOLDER, is_known_placeholder, known_placeholders, placeholders_in
 
 comptime _DEFAULT_SOURCE: String = "artifacts"
 
@@ -119,13 +122,23 @@ def _check_name(source: String, who: String, name: String) raises:
         _refuse(source, who, String("name is not [a-z][a-z0-9_]*"))
 
 
+def _known_text() -> String:
+    var known = known_placeholders()
+    var s = String("")
+    for i in range(len(known)):
+        if i > 0:
+            s += String(" ")
+        s += known[i]
+    return s^
+
+
 def _check_args(source: String, who: String, args: List[String]) raises:
     for i in range(len(args)):
         if args[i].byte_length() == 0:
             _refuse(source, who, String("arg #") + String(i + 1) + String(" is empty"))
         var ph = placeholders_in(args[i])
         for k in range(len(ph)):
-            if ph[k] != OUT_DIR_PLACEHOLDER:
+            if not is_known_placeholder(ph[k]):
                 _refuse(
                     source,
                     who,
@@ -133,9 +146,9 @@ def _check_args(source: String, who: String, args: List[String]) raises:
                     + args[i]
                     + String("' holds the unknown placeholder '")
                     + ph[k]
-                    + String("' (the only one is '")
-                    + String(OUT_DIR_PLACEHOLDER)
-                    + String("')"),
+                    + String("' (known: ")
+                    + _known_text()
+                    + String(")"),
                 )
 
 

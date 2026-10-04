@@ -12,12 +12,19 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
+from kci_artifact_proto.artifact import Artifacts
 from kci_artifact import (
     is_valid_artifact_name,
     parse_artifacts,
 )
 
 comptime _PREFIX = "artifacts.textproto: "
+
+
+def _parse(text: String) raises -> Artifacts:
+    """`parse_artifacts` over `text` with `schema_version: 1`
+    prepended on its FIRST line, so no line number a refusal names moves."""
+    return parse_artifacts(String("schema_version: 1 ") + text, String("artifacts.textproto"))
 
 
 def _items(field: String, xs: String) -> String:
@@ -60,7 +67,7 @@ def _art(
 
 def _refusal(text: String) -> String:
     try:
-        _ = parse_artifacts(text, String("artifacts.textproto"))
+        _ = _parse(text)
     except e:
         return String(e)
     return String("<parsed>")
@@ -146,7 +153,8 @@ def test_build_system_refusals() raises:
         _bs(args = String("build|--x={foo}")) + _art(),
         String(
             "build system 'buck2' arg '--x={foo}' holds the unknown placeholder"
-            " '{foo}' (the only one is '{out_dir}')"
+            " '{foo}' (known: {out_dir} {release_dir} {platform} {revision_id} {source_commit}"
+            " {build_number} {timestamp_ms})"
         ),
     )
 
@@ -176,11 +184,59 @@ def test_artifact_refusals() raises:
         _bs() + _art(args = String("//pkg:a|--out|{OUT_DIR}")),
         String(
             "artifact 'a' arg '{OUT_DIR}' holds the unknown placeholder"
-            " '{OUT_DIR}' (the only one is '{out_dir}')"
+            " '{OUT_DIR}' (known: {out_dir} {release_dir} {platform} {revision_id} {source_commit}"
+            " {build_number} {timestamp_ms})"
         ),
     )
     _expect(
         _bs() + _art(args = String("//pkg:a|--out|/tmp/out")),
+        String(
+            "artifact 'a' has no '{out_dir}' in its args or in the args of build"
+            " system 'buck2': kci could not find what the build made"
+        ),
+    )
+
+
+def test_the_seven_placeholders_are_accepted_anywhere_in_args() raises:
+    # Each of the seven, in a build system's args and in an artifact's, alone
+    # and inside a longer arg: all accepted.
+    assert_equal(
+        _refusal(
+            _bs(args = String("build|-c|komira.package_stamp={build_number}|--x={release_dir}/m|--p={platform}"))
+            + _art(
+                args = String(
+                    "//pkg:a[release]|-c|komira.package_commit={source_commit}"
+                    "|-c|komira.package_timestamp_ms={timestamp_ms}|--label=r{revision_id}"
+                    "|--out|{out_dir}"
+                )
+            )
+        ),
+        String("<parsed>"),
+    )
+    # A near-miss of each is an unknown placeholder.
+    var near = List[String]()
+    near.append(String("{build_num}"))
+    near.append(String("{Build_number}"))
+    near.append(String("{revision}"))
+    near.append(String("{commit}"))
+    near.append(String("{timestamp}"))
+    near.append(String("{releasedir}"))
+    near.append(String("{Platform}"))
+    for i in range(len(near)):
+        _expect(
+            _bs() + _art(args = String("//pkg:a|--out|{out_dir}|") + near[i]),
+            String("artifact 'a' arg '")
+            + near[i]
+            + String("' holds the unknown placeholder '")
+            + near[i]
+            + String(
+                "' (known: {out_dir} {release_dir} {platform} {revision_id} {source_commit}"
+                " {build_number} {timestamp_ms})"
+            ),
+        )
+    # `{release_dir}` alone does not say where THIS build's output goes.
+    _expect(
+        _bs() + _art(args = String("//pkg:a|--out|{release_dir}")),
         String(
             "artifact 'a' has no '{out_dir}' in its args or in the args of build"
             " system 'buck2': kci could not find what the build made"
