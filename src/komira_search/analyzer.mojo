@@ -585,6 +585,10 @@ def _simd_classify_into[
     lowered.resize(n, UInt8(0))
     ws.resize(n, UInt8(0))
 
+    # SAFETY: `lowered` and `ws` were resized to `n` just above and are not
+    # resized again in this function, and `bytes` has length `n`. Every load and
+    # store below is at an index < n: the SIMD loop covers [0, simd_end) with
+    # simd_end = (n // W) * W, and the scalar tail covers [simd_end, n).
     var src = bytes.unsafe_ptr()
     var lo_ptr = lowered.unsafe_ptr()
     var ws_ptr = ws.unsafe_ptr()
@@ -707,6 +711,9 @@ def _analyze_bytes_resolved[
     var lowered = List[UInt8]()
     var ws = List[UInt8]()
     var first_nonascii = _simd_classify_into(bytes, lowered, ws)
+    # SAFETY: `_simd_classify_into` leaves `ws` with length n = len(bytes), `ws`
+    # is not resized while `ws_ptr` is live, and every `ws_ptr[i]` below is
+    # guarded by `i < n` first.
     var ws_ptr = ws.unsafe_ptr()
 
     while i < n:

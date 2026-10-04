@@ -790,9 +790,7 @@ struct DocStoreBuilder(Movable, Deinitable):
                 # 0 path reconstructs it; no FFI call). offset unchanged.
                 comp_offset.append(len(comp_area))
                 continue
-            var blob_span = Span[UInt8, origin_of(self._blob_area)](
-                unsafe_ptr=self._blob_area.unsafe_ptr() + u_start, length=u_len
-            )
+            var blob_span = Span(self._blob_area)[u_start : u_start + u_len]
             var compressed = lz4_compress(blob_span)
             for i in range(len(compressed)):
                 comp_area.append(compressed[i])
@@ -1820,33 +1818,27 @@ struct SplitView(Movable, Deinitable):
         return len(self._bytes)
 
     # ---- borrowed region accessors (Span tied to the INNER field) ----
+    # Each is a slice of `Span(self._bytes)`, so it cannot reach past `_bytes`.
+    # The offsets and lengths are checked against `len(self._bytes)` by
+    # `_validate_region` when the split is parsed.
 
     def term_dict_region(
         self,
     ) -> Span[UInt8, origin_of(self._bytes)]:
         """The verbatim term-dict region bytes (== TermDictionary.serialize)."""
-        return Span[UInt8, origin_of(self._bytes)](
-            unsafe_ptr=self._bytes.unsafe_ptr() + self._termdict_offset,
-            length=self._termdict_len,
-        )
+        return Span(self._bytes)[self._termdict_offset : self._termdict_offset + self._termdict_len]
 
     def postings_region(
         self,
     ) -> Span[UInt8, origin_of(self._bytes)]:
         """The posting-lists region bytes (FROZEN 128-doc blocks per ordinal)."""
-        return Span[UInt8, origin_of(self._bytes)](
-            unsafe_ptr=self._bytes.unsafe_ptr() + self._postings_offset,
-            length=self._postings_len,
-        )
+        return Span(self._bytes)[self._postings_offset : self._postings_offset + self._postings_len]
 
     def docstore_region(
         self,
     ) -> Span[UInt8, origin_of(self._bytes)]:
         """The doc-store region bytes."""
-        return Span[UInt8, origin_of(self._bytes)](
-            unsafe_ptr=self._bytes.unsafe_ptr() + self._docstore_offset,
-            length=self._docstore_len,
-        )
+        return Span(self._bytes)[self._docstore_offset : self._docstore_offset + self._docstore_len]
 
     def fastfields_region(
         self,
@@ -1854,10 +1846,7 @@ struct SplitView(Movable, Deinitable):
         """The fast-fields region bytes ("THFF"...; fast-fields). Span tied to the INNER
         _bytes field origin (the SearchCore gotcha — NOT a Span param). An EMPTY span
         when absent (has_fastfields() False)."""
-        return Span[UInt8, origin_of(self._bytes)](
-            unsafe_ptr=self._bytes.unsafe_ptr() + self._fastfields_offset,
-            length=self._fastfields_len,
-        )
+        return Span(self._bytes)[self._fastfields_offset : self._fastfields_offset + self._fastfields_len]
 
     def blockmax_region(
         self,
@@ -1865,10 +1854,7 @@ struct SplitView(Movable, Deinitable):
         """The BLOCKMAX region bytes (WAND Phase 2 / BMW two-tier SoA skip-list).
         Span tied to the INNER _bytes field origin. An EMPTY span
         when absent (has_blockmax() False)."""
-        return Span[UInt8, origin_of(self._bytes)](
-            unsafe_ptr=self._bytes.unsafe_ptr() + self._blockmax_offset,
-            length=self._blockmax_len,
-        )
+        return Span(self._bytes)[self._blockmax_offset : self._blockmax_offset + self._blockmax_len]
 
     def l0_posting_region(
         self,
@@ -1877,10 +1863,7 @@ struct SplitView(Movable, Deinitable):
         doc-id deltas + per-doc TF; the format owned by komira_log_index).
         Span tied to the INNER _bytes field origin. An EMPTY span
         when absent (has_l0_posting() False — an optimized split)."""
-        return Span[UInt8, origin_of(self._bytes)](
-            unsafe_ptr=self._bytes.unsafe_ptr() + self._l0_posting_offset,
-            length=self._l0_posting_len,
-        )
+        return Span(self._bytes)[self._l0_posting_offset : self._l0_posting_offset + self._l0_posting_len]
 
 
 def _validate_region(
