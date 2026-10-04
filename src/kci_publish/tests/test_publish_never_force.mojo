@@ -19,7 +19,7 @@ from komira_http_core.codec.types import HTTP_METHOD_POST
 
 from kci_pkg_upload import SURFACE_PREFIX_DEV, PkgRequest, RegistrySet, ScriptedCredential
 from kci_publish import PublishCredential, PublishReport, PublishTarget, RunOptions, ScriptedChannel, run_publish
-from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_targets
+from kci_publish.release_fixture import EXAMPLE_HOST, ExampleRelease, example_channel_path, example_targets
 from kci_publish.scripted_channel import (
     UPLOAD_ANSWER_400,
     UPLOAD_ANSWER_500,
@@ -83,7 +83,7 @@ def _assert_no_force(req: PkgRequest, scenario: String) raises:
 
 
 def _scenario(t: List[PublishTarget], kind: Int, name: String) raises -> Int:
-    var ch = ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64"))
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64"))
     ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
     ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
     ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
@@ -97,7 +97,7 @@ def _scenario(t: List[PublishTarget], kind: Int, name: String) raises -> Int:
     var src = ScriptedCredential()
     src.serve(SURFACE_PREFIX_DEV, String("Bearer pfx-test-token"))
     var sl = NoWaitSleeper()
-    var rep = run_publish(t, List[String](), reg, src, False, RunOptions(2, 0, 3, 0, 0, 1, 0), sl, PublishReport())
+    var rep = run_publish(t, reg, src, False, RunOptions(2, 0, 3, 0, 0, 1, 0), sl, PublishReport())
     ref got = reg.transport()
     assert_equal(got.force_request_count(), 0, name)
     var posts = 0

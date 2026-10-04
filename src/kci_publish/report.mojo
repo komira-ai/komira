@@ -1,6 +1,6 @@
 # =============================================================================
 # src/kci_publish/report.mojo -- how a PUBLISH step ended, and its part of
-#   the run's result document (kci_contract's `kci.result`).
+#   the run's result document (kci_api's `kci.result`).
 # =============================================================================
 #
 # `PublishReport` is the step's working record: the REASON it stopped (a
@@ -10,14 +10,13 @@
 # `record_publish_result` puts this step's part into it.
 #
 # THE OUTCOME follows from the reason and from whether an upload landed
-# (kci_contract's outcome words; the exit number is the contract's, so this
+# (kci_api's outcome words; the exit number is the contract's, so this
 # package spells none):
 #
 #   reason                 nothing landed       an upload landed   error id
 #   PUBLISHED              SUCCEEDED            SUCCEEDED          -
 #   ALREADY_PUBLISHED      NOOP                 (cannot happen)    -
 #   REFUSED                REFUSED              (cannot happen)    the check's
-#   STOP_NEW_NAME          REFUSED              PARTIAL            KCI-E-PUBLISH-NEW-NAME
 #   STOP_DIFFERENT_BYTES   REFUSED              PARTIAL            KCI-E-PUBLISH-DIFFERENT-BYTES
 #   FAILED                 FAILED               PARTIAL            KCI-E-PUBLISH-UPLOAD, or
 #                                                                  KCI-E-CREDENTIAL
@@ -31,6 +30,13 @@
 # and there is no second "green" number. A dry run that found nothing wrong
 # is SUCCEEDED (exit 0) with every file it would send marked WOULD_UPLOAD.
 #
+# NEW NAMES are part of the report, not of the outcome: `new_names` lists the
+# set names the channel held no file of at step 1 (`names_known` False when
+# step 1 could not tell), and `record_publish_result` puts them into the
+# result's `new_names[]`. `credential_probe` is a dry run's probe of the
+# publishing credential (flow.mojo): MINTED, NOT_UNDER_CI or NOT_OIDC, and ""
+# when the run is not a dry run or stopped before the probe.
+#
 # ⛔ NO SECRET: nothing a credential produced is placed in a row, a line or
 # the error message -- only file names, digests, states and the channel's
 # answers, which kci_pkg_upload has already passed through its
@@ -39,7 +45,7 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import (
+from kci_api import (
     STEP_KIND_PUBLISH,
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_NOT_REACHED,
@@ -47,7 +53,6 @@ from kci_contract import (
     ARTIFACT_WOULD_UPLOAD,
     ERROR_CANNOT_TELL,
     ERROR_PUBLISH_DIFFERENT_BYTES,
-    ERROR_PUBLISH_NEW_NAME,
     ERROR_PUBLISH_READ_BACK,
     ERROR_PUBLISH_UPLOAD,
     OUTCOME_FAILED,
@@ -57,13 +62,14 @@ from kci_contract import (
     OUTCOME_REFUSED,
     OUTCOME_SUCCEEDED,
     RETRY_NEEDS_HUMAN,
+    ResultNewName,
     ResultStep,
     ResultArtifact,
     exit_code_of,
     platform_of_conda_subdir,
     require_error_id,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 
 from .plan import STATE_ABSENT, STATE_NOT_READ, STATE_SAME, PublishTarget, state_name
 
@@ -74,7 +80,6 @@ comptime REASON_REFUSED: String = "REFUSED"
 comptime REASON_FAILED: String = "FAILED"
 comptime REASON_CANNOT_TELL: String = "CANNOT_TELL"
 comptime REASON_STOP_DIFFERENT_BYTES: String = "STOP_DIFFERENT_BYTES"
-comptime REASON_STOP_NEW_NAME: String = "STOP_NEW_NAME"
 comptime REASON_PARTIAL: String = "PARTIAL"
 comptime REASON_READ_BACK_MISMATCH: String = "READ_BACK_MISMATCH"
 
@@ -116,7 +121,11 @@ struct PublishReport(Copyable, Movable):
     var reason: String
     var error_id: String
     var channel: String
+    var channel_path: String
     var plan: Bool
+    var credential_probe: String
+    var names_known: Bool
+    var new_names: List[String]
     var set_hash: String
     var release_commit: String
     var has_produced_by: Bool
@@ -129,7 +138,11 @@ struct PublishReport(Copyable, Movable):
         self.reason = String(REASON_PUBLISHED)
         self.error_id = String("")
         self.channel = String("")
+        self.channel_path = String("")
         self.plan = False
+        self.credential_probe = String("")
+        self.names_known = False
+        self.new_names = List[String]()
         self.set_hash = String("")
         self.release_commit = String("")
         self.has_produced_by = False
@@ -161,9 +174,7 @@ struct PublishReport(Copyable, Movable):
         """End with `reason` and the error id that reason carries (file
         header), then the RESULT line."""
         var id = String("")
-        if reason == REASON_STOP_NEW_NAME:
-            id = String(ERROR_PUBLISH_NEW_NAME)
-        elif reason == REASON_STOP_DIFFERENT_BYTES:
+        if reason == REASON_STOP_DIFFERENT_BYTES:
             id = String(ERROR_PUBLISH_DIFFERENT_BYTES)
         elif reason == REASON_FAILED or reason == REASON_PARTIAL:
             id = String(ERROR_PUBLISH_UPLOAD)
@@ -196,17 +207,17 @@ struct PublishReport(Copyable, Movable):
             return String(OUTCOME_PARTIAL)
         if self.reason == REASON_FAILED:
             return String(OUTCOME_FAILED)
-        return String(OUTCOME_REFUSED)  # REFUSED, STOP_NEW_NAME, STOP_DIFFERENT_BYTES
+        return String(OUTCOME_REFUSED)  # REFUSED, STOP_DIFFERENT_BYTES
 
     def retry(self) -> String:
         """Retry advice stronger than the exit number's default, or "" for
-        the default (kci_contract's exit table)."""
+        the default (kci_api's exit table)."""
         if self.reason == REASON_READ_BACK_MISMATCH:
             return String(RETRY_NEEDS_HUMAN)
         return String("")
 
     def exit_code(self) raises -> Int:
-        """The exit number (kci_contract's exit table)."""
+        """The exit number (kci_api's exit table)."""
         if self.error_id.byte_length() > 0:
             require_error_id(self.error_id)
         return exit_code_of(self.outcome(), self.error_id)
@@ -244,14 +255,27 @@ def artifact_effect_of(row: FileRow, plan: Bool) -> String:
 
 
 def record_publish_result(
-    r: PublishReport, step_name: String, revision: String, platform: String, mut result: KciRunResult
+    r: PublishReport,
+    step_name: String,
+    stage: String,
+    revision: String,
+    platform: String,
+    mut result: KciRunResult,
 ) raises:
     """Put this step's part into the run's result document: its row (its
-    name, kind PUBLISH), the channel, the plan flag, the recomputed set hash, who
-    produced the release, one artifact row per file, and the first error
-    (its message is the report's lines, which hold no secret)."""
+    name, kind PUBLISH, a dry run's credential probe), the channel, the plan
+    flag, the recomputed set hash, who produced the release, one artifact row
+    per file, one `new_names[]` row per name new to the channel, and the
+    first error (its message is the report's lines, which hold no secret)."""
     var outcome = r.outcome()
-    result.steps.append(ResultStep(step_name.copy(), String(STEP_KIND_PUBLISH), platform.copy(), outcome.copy()))
+    var row_step = ResultStep(step_name.copy(), String(STEP_KIND_PUBLISH), platform.copy(), outcome.copy())
+    if r.plan:
+        row_step.credential_probe = r.credential_probe.copy()
+    result.steps.append(row_step^)
+    for i in range(len(r.new_names)):
+        result.new_names.append(
+            ResultNewName(stage.copy(), step_name.copy(), r.channel.copy(), r.new_names[i].copy())
+        )
     result.channel = r.channel.copy()
     result.plan = r.plan
     if r.set_hash.byte_length() > 0:

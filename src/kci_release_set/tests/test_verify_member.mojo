@@ -132,7 +132,7 @@ def _expect(dir: String, why: String) raises:
 def test_control_good_directory_is_verified() raises:
     var d = _good(String("control"))
     var m = verify_member(String(_NAME), d)
-    assert_equal(m.declaration, String(_NAME))
+    assert_equal(m.artifact, String(_NAME))
     assert_equal(m.dir, d)
     assert_equal(m.manifest.name, String(_NAME))
     assert_equal(m.manifest.sha256_hex, _hash(String(_CONTENT)))
@@ -177,12 +177,12 @@ def test_refuses_a_manifest_that_does_not_parse() raises:
     )
 
 
-def test_refuses_a_name_that_is_not_the_declarations() raises:
+def test_refuses_a_name_that_is_not_the_artifacts() raises:
     var d = _good(String("name"))
     _write(d + String("/manifest.json"), _manifest(name=String("komira_name_registry2")))
     _expect(
         d,
-        String("the built manifest's name 'komira_name_registry2' is not the declaration's name")
+        String("the built manifest's name 'komira_name_registry2' is not the artifact's name")
         + String(" (compared exactly)"),
     )
 
