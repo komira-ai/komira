@@ -1,8 +1,8 @@
 # =============================================================================
-# src/kci_artifact_declaration/tests/test_declaration_render.mojo
+# src/kci_artifact/tests/test_artifact_render.mojo
 #   The argv kci runs for one artifact, `{out_dir}` substitution, the
-#   example declarations file, and the two refusals over what a build left
-#   (exactly one `manifest.json`; its `name` the declaration's, exactly).
+#   example artifacts file, and the two refusals over what a build left
+#   (exactly one `manifest.json`; its `name` the artifact's, exactly).
 # =============================================================================
 #
 # `render_build_argv` is pure: these cases compare argv lists exactly and
@@ -12,17 +12,17 @@
 
 from std.testing import TestSuite, assert_equal
 
-from kci_artifact_declaration_proto.artifact_declaration import (
-    ArtifactDeclaration,
-    ArtifactDeclarations,
+from kci_artifact_proto.artifact import (
+    Artifact,
+    Artifacts,
     BuildSystem,
 )
-from kci_artifact_declaration import (
+from kci_artifact import (
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
-    parse_artifact_declarations,
+    parse_artifacts,
     placeholders_in,
-    read_artifact_declarations,
+    read_artifacts,
     render_build_argv,
     require_manifest_name,
     require_one_manifest,
@@ -42,21 +42,21 @@ def _expect_argv(got: List[String], want: List[String]) raises:
         assert_equal(got[i], want[i])
 
 
-def _refusal(decls: ArtifactDeclarations, artifact: String, out_dir: String) -> String:
+def _refusal(arts: Artifacts, artifact: String, out_dir: String) -> String:
     try:
-        _ = render_build_argv(decls, artifact, out_dir)
+        _ = render_build_argv(arts, artifact, out_dir)
     except e:
         return String(e)
     return String("<rendered>")
 
 
-def test_contract_words() raises:
+def test_placeholder_words() raises:
     assert_equal(String(OUT_DIR_PLACEHOLDER), String("{out_dir}"))
     assert_equal(String(KCI_MANIFEST_NAME), String("manifest.json"))
 
 
 def test_example_file_renders_the_buck2_build() raises:
-    var d = read_artifact_declarations(String("src/kci_artifact_declaration/example.textproto"))
+    var d = read_artifacts(String("src/kci_artifact/example.textproto"))
     _expect_argv(
         render_build_argv(d, String("komira_encoding"), String("/work/out/komira_encoding")),
         _argv(
@@ -81,7 +81,7 @@ def _file() -> String:
 
 
 def test_substitution_in_build_system_and_artifact_args() raises:
-    var d = parse_artifact_declarations(_file(), String("decl.textproto"))
+    var d = parse_artifacts(_file(), String("artifacts.textproto"))
     _expect_argv(
         render_build_argv(d, String("a"), String("/o")),
         _argv("/opt/tool/bin/tool", "--root=/o/root", "run", "x/oy/oz", "{}", "{k: 1}", "{out_dir"),
@@ -95,15 +95,15 @@ def test_substitution_in_build_system_and_artifact_args() raises:
 
 
 def test_render_refusals() raises:
-    var d = parse_artifact_declarations(_file(), String("decl.textproto"))
+    var d = parse_artifacts(_file(), String("artifacts.textproto"))
     assert_equal(_refusal(d, String("a"), String("out")), String("out_dir 'out' is not an absolute path"))
     assert_equal(_refusal(d, String("a"), String("")), String("out_dir '' is not an absolute path"))
     assert_equal(_refusal(d, String("nope"), String("/o")), String("no artifact 'nope' is declared"))
     # A value that never went through the validator.
     var systems = List[BuildSystem]()
-    var artifacts = List[ArtifactDeclaration]()
-    artifacts.append(ArtifactDeclaration(String("a"), String("zz"), _argv("{out_dir}")))
-    var raw = ArtifactDeclarations(systems^, artifacts^)
+    var artifacts = List[Artifact]()
+    artifacts.append(Artifact(String("a"), String("zz"), _argv("{out_dir}")))
+    var raw = Artifacts(systems^, artifacts^)
     assert_equal(
         _refusal(raw, String("a"), String("/o")),
         String("artifact 'a': build_system 'zz' is not declared"),
@@ -118,17 +118,17 @@ def test_placeholders_in() raises:
     _expect_argv(placeholders_in(String("{{out_dir}}")), _argv("{out_dir}"))
 
 
-def _one_manifest_refusal(declaration: String, top_level: List[String]) -> String:
+def _one_manifest_refusal(artifact: String, top_level: List[String]) -> String:
     try:
-        require_one_manifest(declaration, top_level)
+        require_one_manifest(artifact, top_level)
     except e:
         return String(e)
     return String("<accepted>")
 
 
-def _name_refusal(declaration: String, manifest_name: String) -> String:
+def _name_refusal(artifact: String, manifest_name: String) -> String:
     try:
-        require_manifest_name(declaration, manifest_name)
+        require_manifest_name(artifact, manifest_name)
     except e:
         return String(e)
     return String("<accepted>")
@@ -161,12 +161,12 @@ def test_exactly_one_manifest_at_the_top() raises:
         _one_manifest_refusal(String("a"), _argv("manifest.json", "x", "manifest.json")),
         String(
             "artifact 'a': the output directory lists manifest.json 2 times;"
-            " one artifact per declaration means exactly one"
+            " one artifact per entry means exactly one"
         ),
     )
 
 
-def test_manifest_name_is_the_declaration_name_exactly() raises:
+def test_manifest_name_is_the_artifact_name_exactly() raises:
     assert_equal(_name_refusal(String("komira_encoding"), String("komira_encoding")), String("<accepted>"))
     var wrong = List[String]()
     wrong.append(String("komira_json"))
@@ -182,7 +182,7 @@ def test_manifest_name_is_the_declaration_name_exactly() raises:
             _name_refusal(String("komira_encoding"), wrong[i]),
             String("artifact 'komira_encoding': the built manifest's name '")
             + wrong[i]
-            + String("' is not the declaration's name (compared exactly)"),
+            + String("' is not the artifact's name (compared exactly)"),
         )
 
 

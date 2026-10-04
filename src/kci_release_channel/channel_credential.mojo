@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # Every repository of a channel declares exactly one credential: the means
-# by which its push identity authenticates. The declaration carries only
+# by which its push identity authenticates. The channel carries only
 # NAMES, never secret material:
 #
 #   kind          API_TOKEN or OIDC_TRUSTED_PUBLISHING.

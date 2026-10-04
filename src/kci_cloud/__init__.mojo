@@ -87,7 +87,7 @@ from kci_cloud.clouds import (
     Clouds,
     CloudEntry,
     describe,
-    declaration_problems,
+    artifact_problems,
 )
 from kci_cloud.validate import (
     graph_findings,

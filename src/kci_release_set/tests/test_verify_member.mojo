@@ -59,9 +59,12 @@ def _manifest(
 ) -> String:
     var digest = sha.copy() if sha.byte_length() > 0 else _hash(String(_CONTENT))
     var subdir = String('"subdir":"linux-64",') if artifact_type == "CONDA" else String("")
+    var platform = String("linux-x86_64") if artifact_type == "CONDA" else String("noarch")
     return (
-        String('{"artifact_type":"') + artifact_type + String('","name":"') + name
-        + String('","version":"0.1.7",') + subdir + String('"file":"') + file
+        String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"')
+        + artifact_type + String('","name":"') + name
+        + String('","version":"0.1.7","platform":"') + platform + String('",') + subdir
+        + String('"file":"') + file
         + String('","sha256":"') + digest + String('","metadata":"') + metadata + String('"}\n')
     )
 
@@ -129,7 +132,7 @@ def _expect(dir: String, why: String) raises:
 def test_control_good_directory_is_verified() raises:
     var d = _good(String("control"))
     var m = verify_member(String(_NAME), d)
-    assert_equal(m.declaration, String(_NAME))
+    assert_equal(m.artifact, String(_NAME))
     assert_equal(m.dir, d)
     assert_equal(m.manifest.name, String(_NAME))
     assert_equal(m.manifest.sha256_hex, _hash(String(_CONTENT)))
@@ -174,12 +177,12 @@ def test_refuses_a_manifest_that_does_not_parse() raises:
     )
 
 
-def test_refuses_a_name_that_is_not_the_declarations() raises:
+def test_refuses_a_name_that_is_not_the_artifacts() raises:
     var d = _good(String("name"))
     _write(d + String("/manifest.json"), _manifest(name=String("komira_name_registry2")))
     _expect(
         d,
-        String("the built manifest's name 'komira_name_registry2' is not the declaration's name")
+        String("the built manifest's name 'komira_name_registry2' is not the artifact's name")
         + String(" (compared exactly)"),
     )
 
@@ -311,10 +314,12 @@ def test_refuses_a_sha256_mismatch() raises:
 
 def test_refuses_metadata_that_does_not_parse() raises:
     var d = _good(String("badmeta"))
-    _write(d + String("/metadata.json"), String('{"zzz":1,') + String(_metadata()[byte = 1:]))
+    _write(d + String("/metadata.json"), _metadata(String("schema_version"), String("2")))
     _expect(
         d,
-        String("conda metadata '") + d + String("/metadata.json': unknown key 'zzz'"),
+        String("conda metadata '") + d
+        + String("/metadata.json': schema_version 2 needs a newer kci (this kci reads")
+        + String(" kci.conda_metadata up to major 1)"),
     )
 
 

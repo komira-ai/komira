@@ -1,23 +1,23 @@
 # =============================================================================
-# src/kci_artifact_declaration/tests/test_declaration_validate.mojo
-#   Every refusal of `validate_artifact_declarations`, one case per message.
+# src/kci_artifact/tests/test_artifact_validate.mojo
+#   Every refusal of `validate_artifacts`, one case per message.
 # =============================================================================
 #
 # Each case builds a file that is valid except for one thing (the control
 # case shows the unbroken file is accepted) and asserts the message names
 # that thing. Validation runs inside the parser, so every case goes through
-# `parse_artifact_declarations`, the path kci uses. List arguments below are
+# `parse_artifacts`, the path kci uses. List arguments below are
 # `|`-separated; "" is the empty list.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_artifact_declaration import (
-    is_valid_declaration_name,
-    parse_artifact_declarations,
+from kci_artifact import (
+    is_valid_artifact_name,
+    parse_artifacts,
 )
 
-comptime _PREFIX = "decl.textproto: "
+comptime _PREFIX = "artifacts.textproto: "
 
 
 def _items(field: String, xs: String) -> String:
@@ -60,7 +60,7 @@ def _art(
 
 def _refusal(text: String) -> String:
     try:
-        _ = parse_artifact_declarations(text, String("decl.textproto"))
+        _ = parse_artifacts(text, String("artifacts.textproto"))
     except e:
         return String(e)
     return String("<parsed>")
@@ -189,14 +189,14 @@ def test_artifact_refusals() raises:
 
 
 def test_name_predicate() raises:
-    assert_true(is_valid_declaration_name(String("komira_json")))
-    assert_true(is_valid_declaration_name(String("b2")))
-    assert_false(is_valid_declaration_name(String("komira-json")))
-    assert_false(is_valid_declaration_name(String("komiraJson")))
-    assert_false(is_valid_declaration_name(String("aB")))
-    assert_false(is_valid_declaration_name(String("_x")))
-    assert_false(is_valid_declaration_name(String("2b")))
-    assert_false(is_valid_declaration_name(String("")))
+    assert_true(is_valid_artifact_name(String("komira_json")))
+    assert_true(is_valid_artifact_name(String("b2")))
+    assert_false(is_valid_artifact_name(String("komira-json")))
+    assert_false(is_valid_artifact_name(String("komiraJson")))
+    assert_false(is_valid_artifact_name(String("aB")))
+    assert_false(is_valid_artifact_name(String("_x")))
+    assert_false(is_valid_artifact_name(String("2b")))
+    assert_false(is_valid_artifact_name(String("")))
 
 
 def main() raises:

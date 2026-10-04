@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_release_channel/channel_declaration.mojo -- the `channel` declaration.
+# kci_release_channel/channel.mojo -- a `channel` entry.
 # =============================================================================
 #
 # A release channel is a publish destination and nothing else:
@@ -15,10 +15,10 @@
 #                 principal authenticates: a kind and, for API_TOKEN, the
 #                 NAME of the secret; see `channel_credential.mojo`).
 #
-# Every function here takes the declaration list as an argument, so adding a
+# Every function here takes the channel list as an argument, so adding a
 # channel is adding one value.
 #
-# `validate_channel_declarations` states every rule the list must satisfy and
+# `validate_channels` states every rule the list must satisfy and
 # refuses each with a message naming the offending channel, repository or
 # location.
 #
@@ -68,7 +68,7 @@ struct ChannelRepository(Copyable, Movable):
     var location: String
     var push_identity: String
     var credential: Optional[ChannelCredential]
-    """None when the declaration names no credential; validation refuses
+    """None when the channel names no credential; validation refuses
     that, so a validated repository always carries one."""
 
     def __init__(
@@ -95,7 +95,35 @@ struct ChannelRepository(Copyable, Movable):
         return self.credential.value().copy()
 
 
-struct ChannelDeclaration(Copyable, Movable):
+comptime _ENVIRONMENT_MARK: String = ":environment:"
+
+
+def push_identity_environment(repo: ChannelRepository) -> String:
+    """The CI environment a trusted-publishing push identity names, or "".
+
+    For OIDC_TRUSTED_PUBLISHING the push identity is the subject claim of the
+    CI's identity token; GitHub's for a job in an environment is
+    `repo:<owner>/<repo>:environment:<name>`. This returns `<name>`: the
+    GitHub environment whose job may publish here. The stage that may publish
+    here is the one whose `environment` (by default its name) equals it, so
+    kci can refuse a publish from any other stage: stage `publish-gamma` runs
+    in environment `gamma`, whose trusted publisher names `gamma`. "" for an API_TOKEN repository, a
+    repository with no credential, and a subject that names no environment
+    (or an empty one, or one holding `:`)."""
+    if not repo.credential:
+        return String("")
+    if not repo.credential.value().is_oidc_trusted_publishing():
+        return String("")
+    var at = repo.push_identity.rfind(String(_ENVIRONMENT_MARK))
+    if at < 0:
+        return String("")
+    var env = String(repo.push_identity[byte = at + String(_ENVIRONMENT_MARK).byte_length() :])
+    if env.byte_length() == 0 or env.find(String(":")) >= 0:
+        return String("")
+    return env^
+
+
+struct Channel(Copyable, Movable):
     """One release channel. See the module header."""
 
     var name: String
@@ -131,27 +159,27 @@ struct ChannelDeclaration(Copyable, Movable):
         )
 
 
-def channel_names(decls: List[ChannelDeclaration]) -> List[String]:
-    """Every declared channel's name, in declaration order."""
+def channel_names(channels: List[Channel]) -> List[String]:
+    """Every declared channel's name, in file order."""
     var out = List[String]()
-    for i in range(len(decls)):
-        out.append(decls[i].name.copy())
+    for i in range(len(channels)):
+        out.append(channels[i].name.copy())
     return out^
 
 
 def find_channel(
-    decls: List[ChannelDeclaration], name: String
-) raises -> ChannelDeclaration:
-    """The declaration named `name`. Raises on an unknown name; an unknown
+    channels: List[Channel], name: String
+) raises -> Channel:
+    """The channel named `name`. Raises on an unknown name; an unknown
     channel never falls back to another one."""
-    for i in range(len(decls)):
-        if decls[i].name == name:
-            return decls[i].copy()
+    for i in range(len(channels)):
+        if channels[i].name == name:
+            return channels[i].copy()
     raise Error(
         String("unknown release channel '")
         + name
         + String("' (declared: ")
-        + String(", ").join(channel_names(decls))
+        + String(", ").join(channel_names(channels))
         + String(")")
     )
 
@@ -165,7 +193,7 @@ def _is_blank(value: String) -> Bool:
     return value.strip().byte_length() == 0
 
 
-def validate_channel_declarations(decls: List[ChannelDeclaration]) raises:
+def validate_channels(channels: List[Channel]) raises:
     """Every rule a channel list must satisfy, each refused by its own message:
 
       * a non-empty name of the allowed charset, declared once;
@@ -181,8 +209,8 @@ def validate_channel_declarations(decls: List[ChannelDeclaration]) raises:
     var locations = List[String]()
     var owners = List[String]()
     var owner_types = List[String]()
-    for i in range(len(decls)):
-        ref d = decls[i]
+    for i in range(len(channels)):
+        ref d = channels[i]
         if d.name.byte_length() == 0:
             raise Error(
                 String("channel #") + String(i + 1) + String(" has no name")
@@ -196,7 +224,7 @@ def validate_channel_declarations(decls: List[ChannelDeclaration]) raises:
                 + String(" at most 63 bytes")
             )
         for k in range(i):
-            if decls[k].name == d.name:
+            if channels[k].name == d.name:
                 _refuse(d.name, String("is declared twice"))
         if d.visibility.byte_length() == 0:
             _refuse(
