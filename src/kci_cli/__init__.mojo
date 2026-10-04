@@ -39,6 +39,7 @@ from kci_cli.args import (
     find_summary_file,
     parse_kci_args,
     publish_flags,
+    validation_flags,
     require_stage_flags,
     selectors_of,
 )
@@ -54,9 +55,9 @@ from kci_cli.dispatch import (
     append_summary,
     kci_main_with,
     recorder_for,
-    refused_validations,
     run_stage_with,
     run_summary_markdown,
+    validation_failure_message,
     workflow_path_of,
 )
 from kci_cli.library_verbs import ComposedSecretStore, LibrarySteps, RefusingSecretStore, kci_main

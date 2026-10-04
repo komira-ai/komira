@@ -15,8 +15,7 @@
 #     }
 #   }
 #   stage {
-#     name: "publish-gamma"
-#     environment: "gamma"
+#     name: "gamma"
 #     after: "build"
 #     step {
 #       name: "publish"
@@ -26,19 +25,21 @@
 #       channels: "release/channels.textproto"
 #       channel: "gamma"
 #       validation {
-#         name: "install-smoke"
+#         name: "install"
 #         kind: CONDA_INSTALL_SMOKE
+#         image: "<reference>@sha256:<64 hex>"
+#         install: "komira_encoding"
 #         install: "komira_all"
-#         extra_channel: "https://conda.modular.com/max"
+#         compiler_channel: "https://conda.modular.com/max"
 #         extra_channel: "conda-forge"
 #         program: "release/smoke/smoke_komira_encoding.mojo"
+#         wait_for_index_seconds: 600
 #       }
 #     }
 #   }
 #   stage {
-#     name: "publish-prod"
-#     environment: "prod"
-#     after: "publish-gamma"
+#     name: "prod"
+#     after: "gamma"
 #     step { ... channel: "prod" }
 #   }
 #
@@ -54,8 +55,9 @@
 # (`true` or `false`, default false), each at most once, and `step`
 # (repeated). A step: `name`, `kind`, `platform`, `declarations`, `channels`,
 # `channel`, each at most once, and `validation` (a block, repeated). A
-# validation: `name`, `kind`, `install`, `program`, `tool`, each at most once,
-# and `extra_channel` (repeated). A `:` before a `{` is optional; a scalar may
+# validation: `name`, `kind`, `image`, `compiler_channel`, `program`,
+# `wait_for_index_seconds` (an integer), each at most once, and `install` and
+# `extra_channel` (each repeated). A `:` before a `{` is optional; a scalar may
 # be quoted or bare.
 #
 # Every refusal starts `<source>: line N:`. The parser refuses an unknown
@@ -103,10 +105,12 @@ def machine_field_names() -> List[String]:
     out.append(String("step.validation"))
     out.append(String("validation.name"))
     out.append(String("validation.kind"))
+    out.append(String("validation.image"))
     out.append(String("validation.install"))
+    out.append(String("validation.compiler_channel"))
     out.append(String("validation.extra_channel"))
     out.append(String("validation.program"))
-    out.append(String("validation.tool"))
+    out.append(String("validation.wait_for_index_seconds"))
     return out^
 
 
@@ -130,6 +134,28 @@ def _scalar(mut c: TokenCursor, field: String, source: String) raises -> String:
     return v.text.copy()
 
 
+def _seconds(mut c: TokenCursor, field: String, source: String, where: String) raises -> Int:
+    """A non-negative decimal integer of at most 6 digits (the range is
+    graph.mojo's rule)."""
+    _ = c.expect(TOKEN_COLON)
+    var v = c.next(String("a value for '") + field + String("'"))
+    var b = v.text.as_bytes()
+    var ok = v.kind == TOKEN_NUMBER and len(b) > 0 and len(b) <= 6
+    var n = 0
+    for i in range(len(b)):
+        var d = Int(b[i])
+        if d < 48 or d > 57:
+            ok = False
+        else:
+            n = n * 10 + (d - 48)
+    if not ok:
+        raise Error(
+            _at(source, v.line) + String("field '") + field + String("' of ") + where + String(" is '") + v.text
+            + String("'; it is a whole number of seconds")
+        )
+    return n
+
+
 def _twice(source: String, line: Int, field: String, where: String) raises:
     raise Error(_at(source, line) + String("field '") + field + String("' is set twice in ") + where)
 
@@ -149,7 +175,7 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             _ = c.expect(TOKEN_RBRACE)
             break
         var f = c.expect(TOKEN_WORD)
-        if f.text != "extra_channel":
+        if f.text != "extra_channel" and f.text != "install":
             for i in range(len(seen)):
                 if seen[i] == f.text:
                     _twice(source, f.line, f.text, where)
@@ -157,18 +183,23 @@ def _parse_validation(mut c: TokenCursor, source: String, step_where: String, op
             v.name = _scalar(c, f.text, source)
         elif f.text == "kind":
             v.kind = _scalar(c, f.text, source)
+        elif f.text == "image":
+            v.image = _scalar(c, f.text, source)
         elif f.text == "install":
-            v.install = _scalar(c, f.text, source)
+            v.installs.append(_scalar(c, f.text, source))
+        elif f.text == "compiler_channel":
+            v.compiler_channel = _scalar(c, f.text, source)
         elif f.text == "extra_channel":
             v.extra_channels.append(_scalar(c, f.text, source))
         elif f.text == "program":
             v.program = _scalar(c, f.text, source)
-        elif f.text == "tool":
-            v.tool = _scalar(c, f.text, source)
+        elif f.text == "wait_for_index_seconds":
+            v.wait_for_index_seconds = _seconds(c, f.text, source, where)
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
-                + String(" (expected name, kind, install, extra_channel, program, tool)")
+                + String(" (expected name, kind, image, install, compiler_channel, extra_channel, program,")
+                + String(" wait_for_index_seconds)")
             )
         seen.append(f.text.copy())
     return v^

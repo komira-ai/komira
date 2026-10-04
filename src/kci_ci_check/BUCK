@@ -12,8 +12,12 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # the farm-connected stages, one literal `kci run --stage <id>` per job with a
 # `--summary-file`, no pull_request trigger, a `revision` input on
 # workflow_dispatch, every `uses:` pinned to a commit id (the farm-connect
-# action excepted), no `--only` on a release job, and every `kci run` reading
-# the machine file being checked (the default, or its `--machine`).
+# action excepted), no `--only` on a release job unless the stage is SPLIT
+# (the job named after the stage runs its steps, other jobs run its
+# validations, and together they run each step and validation exactly once;
+# a validations job holds no environment and no id-token and needs the step
+# job), and every `kci run` reading the machine file being checked (the
+# default, or its `--machine`).
 #
 # The workflow is read by a RESTRICTED reader of the YAML subset it uses;
 # anything else (anchors, aliases, tags, flow mappings, tabs, a second document)
@@ -37,6 +41,9 @@ mojo_library(
         # a fixture that agrees, one mutation per rule R1-R12, the id-token
         # stages, the start-up entry point
         "tests/test_ci_rules.mojo",
+        # one stage split over jobs whose --only parts run all of it once
+        # (R1 and R9 as amended)
+        "tests/test_ci_split_stage.mojo",
     ],
     visibility = ["PUBLIC"],
 )

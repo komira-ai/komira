@@ -17,15 +17,10 @@
 #      message lists the stages); then the selection (kci_stage_graph
 #      `resolve_selection`): a selector that matches nothing in S is
 #      REFUSED (KCI-E-SELECTOR-NO-MATCH, exit 3, naming S's steps and
-#      validations); then the flags the SELECTED steps' kinds take
-#      (args.mojo `require_stage_flags`, exit 2);
-#   3. VALIDATIONS. This kci parses and selects a step's validations but
-#      cannot run them yet (the validation runner is not part of it). A
-#      validation the selection would run is therefore REFUSED
-#      (KCI-E-VALIDATION, exit 3), naming it, before anything is run, under
-#      `--plan` too. It is never skipped: a validation that did not run must
-#      never read as a pass. A stage without validations, or a selection
-#      that runs none, is unaffected;
+#      validations); then the flags the SELECTED steps' kinds take, and
+#      `--scratch-dir` exactly when a validation is selected (args.mojo
+#      `require_stage_flags`, exit 2);
+#   3. (no longer a refusal: validations run, step 6);
 #   4. THE WORKFLOW CHECK, when the platform-set `GITHUB_ACTIONS` is "true":
 #      the workflow file running this job is the one `GITHUB_WORKFLOW_REF`
 #      names (`<GITHUB_REPOSITORY>/<path>@<ref>`, the path under
@@ -48,8 +43,17 @@
 #      platform, the run identity, `--plan` and its own inputs. Each step adds
 #      its row, artifacts, new names and first error to the result; a step
 #      `--only` did not select gets a row with `selected: false` and no
-#      outcome. The run stops at the first step that does not end SUCCEEDED
-#      or NOOP;
+#      outcome. Right after a step's row come its SELECTED validations
+#      (kci_stage_graph `resolve_selection`: all of them in a FULL run; in a
+#      selective one only those `--only validation:<name>` names, whether or
+#      not the step itself ran, since a validation checks what the step
+#      published, now or in an earlier run), each through `steps.validate`
+#      (kci_validate), each adding its `validations[]` row and printing each
+#      of its checks. The run stops at the first step that does not end
+#      SUCCEEDED or NOOP and at the first validation that does not end
+#      SUCCEEDED (VALIDATION_FAILED, KCI-E-VALIDATION, exit 7); a selected
+#      validation after that point gets a NOT_REACHED row. Under `--plan` a
+#      validation runs nothing and its row is WOULD_VALIDATE;
 #   7. NEW NAMES AHEAD: when the run ended SUCCEEDED or NOOP, every PUBLISH
 #      step of each stage whose `after` is S is read through `steps.lookahead`
 #      (anonymous reads of that stage's channel, kci_publish
@@ -64,7 +68,8 @@
 #   9. `--summary-file`: a markdown block APPENDED to that file on every exit
 #      path after the command line parsed (`run_summary_markdown`): the
 #      outcome and exit number, the scope, the revision and set hash, the
-#      workflow check, the steps, and each NEW NAMES block (this stage's
+#      workflow check, the steps, the validations with each failed check's
+#      finding, and each NEW NAMES block (this stage's
 #      PUBLISH steps, then the stages after it). A file that cannot be
 #      written is said on stderr; the exit number stands;
 #  10. the LAST stderr line is the run's evidence (kci_contract
@@ -97,6 +102,7 @@ from komira_clock import now_unix_ms
 from kci_build import BuildRequest
 from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
 from kci_contract import (
+    VALIDATION_NOT_REACHED,
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
     ERROR_FORMAT,
@@ -122,6 +128,7 @@ from kci_contract import (
     WORKFLOW_PATH_PREFIX,
     ResultNewName,
     ResultStep,
+    ResultValidation,
     Selector,
     is_full_commit_id,
     run_evidence_line,
@@ -129,12 +136,14 @@ from kci_contract import (
 )
 from kci_contract import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest, new_names_markdown
+from kci_validate import ValidateRequest
 from kci_release_set.member import file_sha256_hex
 from kci_stage_graph import (
     Selection,
     Stage,
     StageGraph,
     StageStep,
+    StageValidation,
     machine_schema_version,
     parse_machine_file,
     resolve_selection,
@@ -208,6 +217,12 @@ trait StageSteps:
     def publish(
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
+        ...
+
+    def validate(mut self, req: ValidateRequest) -> ResultValidation:
+        """One validation of a step (file header, 6): its row, VALIDATED
+        with an outcome and its checks, or WOULD_VALIDATE under --plan.
+        Never raises: a validation that cannot run is a failed check."""
         ...
 
     def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
@@ -362,30 +377,37 @@ def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> P
 
 
 
-def refused_validations(stage: Stage, sel: Selection) -> String:
-    """Why the validations `sel` would run are refused (file header, 3), or
-    "" when it runs none."""
-    if len(sel.validations) == 0:
-        return String("")
-    var named = String("")
-    for k in range(len(stage.steps)):
-        ref step = stage.steps[k]
-        for m in range(len(step.validations)):
-            ref v = step.validations[m]
-            for j in range(len(sel.validations)):
-                if sel.validations[j] == v.name:
-                    if named.byte_length() > 0:
-                        named += String(", ")
-                    named += (
-                        String("'") + v.name + String("' (") + v.kind + String(", step '") + step.name
-                        + String("')")
-                    )
-    return (
-        String("stage '") + stage.name + String("' declares validation ") + named
-        + String(", and this kci cannot run validations: the validation runner is not built yet. The stage is")
-        + String(" refused rather than run without it, because a validation that did not run must never read as")
-        + String(" a pass (run a selection with --only step:<name> to run the steps alone, as a SELECTIVE run)")
-    )
+def _validate_request(cmd: KciCommand, stage: Stage, step: StageStep, v: StageValidation) -> ValidateRequest:
+    var req = ValidateRequest(v.copy())
+    req.stage = stage.name.copy()
+    req.step_name = step.name.copy()
+    req.declarations_file = step.declarations.copy()
+    req.channels_file = step.channels.copy()
+    req.channel = step.channel.copy()
+    req.release_dir = cmd.release_dir.copy()
+    req.platform = step.platform.copy()
+    req.revision_id = cmd.revision_id.copy()
+    req.scratch_dir = cmd.scratch_dir.copy()
+    req.repo_root = String(".")
+    req.plan = cmd.plan
+    return req^
+
+
+def _selected(sel: Selection, name: String) -> Bool:
+    for i in range(len(sel.validations)):
+        if sel.validations[i] == name:
+            return True
+    return False
+
+
+def validation_failure_message(row: ResultValidation) -> String:
+    """The run's error message for a failed validation: its name and each
+    failed check's finding."""
+    var s = String("validation '") + row.name + String("' of step '") + row.step + String("' failed:")
+    for i in range(len(row.checks)):
+        if not row.checks[i].ok:
+            s += String("\n") + row.checks[i].got
+    return s^
 
 
 def workflow_path_of(ref_value: String, repository: String) raises -> String:
@@ -588,6 +610,15 @@ def run_summary_markdown(result: KciRunResult, step_blocks: List[String], ahead:
             elif o.byte_length() == 0:
                 o = String("not reached")
             s += String("| ") + st.name + String(" | ") + st.kind + String(" | ") + o + String(" |\n")
+    if len(result.validations) > 0:
+        s += String("\n| validation | step | outcome |\n|---|---|---|\n")
+        for i in range(len(result.validations)):
+            ref v = result.validations[i]
+            var o = v.outcome.copy() if v.outcome.byte_length() > 0 else v.effect.copy()
+            s += String("| ") + v.name + String(" | ") + v.step + String(" | ") + o + String(" |\n")
+            for k in range(len(v.checks)):
+                if not v.checks[k].ok:
+                    s += String("| | | `") + v.checks[k].got + String("` |\n")
     s += String("\n")
     for i in range(len(step_blocks)):
         s += step_blocks[i]
@@ -607,6 +638,38 @@ def append_summary(path: String, text: String):
         f.close()
     except e:
         _say(String("kci: the summary file '") + path + String("' could not be written: ") + String(e))
+
+
+def _run_step[S: StageSteps](
+    cmd: KciCommand,
+    stage: Stage,
+    step: StageStep,
+    mut steps: S,
+    mut recorder: CliRecorder,
+    mut result: KciRunResult,
+    mut step_blocks: List[String],
+) -> StepEnd:
+    """One selected step (file header, 6): run it, print its lines, keep its
+    summary block."""
+    _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
+    var end: StepEnd
+    try:
+        if step.is_build():
+            end = steps.build(_build_request(cmd, step), result, recorder)
+        else:
+            end = steps.publish(_publish_request(cmd, stage, step), result, recorder, cmd.store)
+            # the run's dry-run flag is the command line's: a step refused
+            # before it read its request records `plan` false
+            result.plan = cmd.plan
+    except e:
+        end = StepEnd(String(OUTCOME_INDETERMINATE), String(ERROR_INTERNAL), String(e))
+    for k in range(len(end.lines)):
+        _say(end.lines[k])
+    if end.message.byte_length() > 0 and not end.ok():
+        _say(end.message)
+    if end.summary.byte_length() > 0:
+        step_blocks.append(end.summary.copy())
+    return end^
 
 
 def _run_stage[S: StageSteps](
@@ -655,16 +718,16 @@ def _run_stage[S: StageSteps](
         require_stage_flags(cmd, stage, sel)
     except e:
         return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_USAGE), String(e))
-    # 3. validations: refused, never skipped
-    var no_validations = refused_validations(stage, sel)
-    if no_validations.byte_length() > 0:
-        return _stop_run(result, recorder, String(OUTCOME_REFUSED), String(ERROR_VALIDATION), no_validations)
     # 4. the workflow this job runs under, held to the machine file
     var verdict = _check_workflow_at_start(cmd, g, steps, result)
     if verdict.outcome.byte_length() > 0:
         return _stop_run(result, recorder, verdict.outcome, verdict.error_id, verdict.message)
     for i in range(len(stage.steps)):
-        if sel.steps[i] and stage.steps[i].is_publish():
+        var validated = False
+        for m in range(len(stage.steps[i].validations)):
+            if _selected(sel, stage.steps[i].validations[m].name):
+                validated = True
+        if (sel.steps[i] or validated) and stage.steps[i].is_publish():
             result.channel = stage.steps[i].channel.copy()
             break
     try:
@@ -677,43 +740,63 @@ def _run_stage[S: StageSteps](
     var outcome = String(OUTCOME_NOOP)
     var retry = String("")
     var changed_outside = False
+    var stopped = False
     for i in range(len(stage.steps)):
         ref step = stage.steps[i]
-        if not sel.steps[i]:
+        # a step after the one that stopped the run has no row, and neither
+        # have its validations (a validation row names a step of steps[])
+        var has_row = not stopped
+        if stopped:
+            pass
+        elif not sel.steps[i]:
             _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(": not selected (--only)"))
             result.steps.append(ResultStep.unselected(step.name.copy(), step.kind.copy(), step.platform.copy()))
-            continue
-        _say(String("kci: stage ") + stage.name + String(", step ") + step.name + String(" (") + step.kind + String(")"))
-        var end: StepEnd
-        try:
-            if step.is_build():
-                end = steps.build(_build_request(cmd, step), result, recorder)
+        else:
+            var end = _run_step(cmd, stage, step, steps, recorder, result, step_blocks)
+            try:
+                outcome = worst_outcome(outcome, end.outcome)
+            except e:
+                outcome = String(OUTCOME_INDETERMINATE)
+            if end.retry.byte_length() > 0:
+                retry = end.retry.copy()
+            if not end.ok():
+                if changed_outside and (end.outcome == OUTCOME_REFUSED or end.outcome == OUTCOME_FAILED):
+                    outcome = String(OUTCOME_PARTIAL)
+                    retry = String("")
+                stopped = True
+            if end.changed_outside:
+                changed_outside = True
+        # the step's selected validations, right after it
+        for m in range(len(step.validations)):
+            ref v = step.validations[m]
+            if not _selected(sel, v.name) or not has_row:
+                continue
+            if stopped:
+                result.validations.append(
+                    ResultValidation(v.name.copy(), step.name.copy(), v.kind.copy(), String(VALIDATION_NOT_REACHED), String(""))
+                )
+                _say(String("kci: validation ") + v.name + String(": not reached"))
+                continue
+            _say(String("kci: stage ") + stage.name + String(", validation ") + v.name + String(" (") + v.kind + String(") of step ") + step.name)
+            var row = steps.validate(_validate_request(cmd, stage, step, v))
+            for k in range(len(row.checks)):
+                ref c = row.checks[k]
+                _say(String("kci: ") + (String("ok    ") if c.ok else String("FAIL  ")) + c.got)
+            if row.effect == String(VALIDATION_NOT_REACHED) or row.outcome.byte_length() == 0:
+                _say(String("kci: validation ") + v.name + String(": ") + row.effect)
             else:
-                end = steps.publish(_publish_request(cmd, stage, step), result, recorder, cmd.store)
-                # the run's dry-run flag is the command line's: a step refused
-                # before it read its request records `plan` false
-                result.plan = cmd.plan
-        except e:
-            end = StepEnd(String(OUTCOME_INDETERMINATE), String(ERROR_INTERNAL), String(e))
-        for k in range(len(end.lines)):
-            _say(end.lines[k])
-        if end.message.byte_length() > 0 and not end.ok():
-            _say(end.message)
-        if end.summary.byte_length() > 0:
-            step_blocks.append(end.summary.copy())
-        try:
-            outcome = worst_outcome(outcome, end.outcome)
-        except e:
-            outcome = String(OUTCOME_INDETERMINATE)
-        if end.retry.byte_length() > 0:
-            retry = end.retry.copy()
-        if not end.ok():
-            if changed_outside and (end.outcome == OUTCOME_REFUSED or end.outcome == OUTCOME_FAILED):
-                outcome = String(OUTCOME_PARTIAL)
-                retry = String("")
-            break
-        if end.changed_outside:
-            changed_outside = True
+                _say(String("kci: validation ") + v.name + String(": ") + row.outcome)
+                try:
+                    outcome = worst_outcome(outcome, row.outcome)
+                except e:
+                    outcome = String(OUTCOME_INDETERMINATE)
+                if row.outcome != String(OUTCOME_SUCCEEDED):
+                    try:
+                        result.set_error(String(ERROR_VALIDATION), validation_failure_message(row))
+                    except e:
+                        _say(String("kci: ") + String(e))
+                    stopped = True
+            result.validations.append(row^)
     # 7. the stages after this one: their new names, before their approval
     if outcome == OUTCOME_SUCCEEDED or outcome == OUTCOME_NOOP:
         ahead = _lookahead(cmd, g, stage, steps, result)

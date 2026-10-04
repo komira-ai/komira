@@ -3,30 +3,51 @@
 #   produced, run after it.
 # =============================================================================
 #
-#   conda_install_smoke.mojo  run_install_smoke: a CONDA_INSTALL_SMOKE
-#                             validation of a PUBLISH step. Install the
-#                             release from the step's channel into a clean
-#                             environment, check every installed record
-#                             against the release's own (name, version,
-#                             build, sha256, the channel), run a smoke
-#                             program. Fails closed; WOULD_VALIDATE under
-#                             --plan.
+#   conda_install_smoke.mojo  `run_install_smoke`: a CONDA_INSTALL_SMOKE
+#                             validation of a PUBLISH step. Read the channel
+#                             anonymously, install the release inside a
+#                             digest-pinned container, read back what was
+#                             installed, run a program. Fails closed;
+#                             WOULD_VALIDATE under --plan.
+#   request.mojo              `ValidateRequest`, `ContainerHost`; the release
+#                             and the pins, read the PUBLISH step's way
+#   channel_index.mojo        check 1: the index lists and serves the bytes
+#                             the build made, with the wait for the index
+#   container.mojo            the scratch layout, pixi.toml, the script and
+#                             the exact `docker` command lines
+#   readback.mojo             checks 2 to 4: records, payloads, the count
 #
 # Which validations a step has is the machine file's (kci_stage_graph); the
 # result rows are kci_contract's; processes start through kci_build's
-# ProcessRunner seam. The command line is the kci binary's (`kci run`).
+# ProcessRunner seam and the channel is read through kci_pkg_upload's
+# PkgTransport. The command line is the kci binary's (`kci run`).
 # =============================================================================
 
-from kci_validate.conda_install_smoke import (
+from kci_validate.channel_index import CHECK_CHANNEL, WAIT_POLL_SECONDS, ChannelUrl, check_channel
+from kci_validate.conda_install_smoke import run_install_smoke
+from kci_validate.container import (
+    COMPILER_PACKAGE,
+    CONDA_FORGE_URL,
     ENV_DIR,
-    INSTALL_TIMEOUT_S,
     MANIFEST_NAME,
-    SMOKE_OK_SUFFIX,
-    SMOKE_TIMEOUT_S,
-    check_installed_records,
+    PROGRAM_COPY,
+    PULL_TIMEOUT_S,
+    RUN_TIMEOUT_S,
+    WORK_MOUNT,
+    channel_url_of,
+    container_script,
+    docker_child_env,
     install_manifest_text,
-    run_install_smoke,
-    smoke_child_env,
-    smoke_ok_line,
-    smoke_stem,
+    payload_record_name,
+    pull_argv,
+    run_argv,
+)
+from kci_validate.readback import program_stem
+from kci_validate.request import (
+    ContainerHost,
+    InstallPin,
+    ValidateRequest,
+    install_pins,
+    load_validated_release,
+    mojo_pin_of,
 )

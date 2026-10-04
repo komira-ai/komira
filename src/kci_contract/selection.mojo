@@ -3,9 +3,13 @@
 #   name grammar, and the two scope words of a run.
 # =============================================================================
 #
-#   --only step:<name>         run step <name> of the stage (and, once the
-#                              format has validations, its validations)
+#   --only step:<name>         run step <name> of the stage, WITHOUT its
+#                              validations
 #   --only validation:<name>   run validation <name> only, and no step
+#
+# Only a FULL run (no `--only`) runs every step and every validation, so a
+# stage split over several CI jobs (one `--only step:<s>`, one `--only
+# validation:<v>`) runs each part exactly once.
 #
 # `--only` is repeatable and POSITIVE: it names what to run, never what to
 # skip, so a step added to the machine file later is not run by an old
