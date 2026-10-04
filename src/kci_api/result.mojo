@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/result.mojo -- the ONE result document `kci run` writes
+# src/kci_api/result.mojo -- the ONE result document `kci run` writes
 #   with `--result-file`, rendered and parsed.
 # =============================================================================
 #
@@ -105,15 +105,15 @@
 
 from komira_json import JSON_ARRAY, JSON_BOOL, JSON_NUMBER, JSON_OBJECT, JSON_STRING, JsonValue, parse_json_value
 
-from kci_contract.errors import require_error_id
-from kci_contract.exit_codes import EXIT_PARTIAL, default_retry, exit_code_of, require_retry_for
-from kci_contract.formats import FORMAT_RESULT, current_major, produced_header
-from kci_contract.outcome import OUTCOME_INTERRUPTED, OUTCOME_SUCCEEDED, RETRY_UNSAFE, require_outcome
-from kci_contract.platform import platform_row
-from kci_contract.revision import is_full_commit_id
-from kci_contract.run_identity import ContextEntry, RunIdentity
-from kci_contract.selection import SCOPE_FULL, SCOPE_SELECTIVE, parse_selector, require_scope
-from kci_contract.verbs import STEP_KIND_PUBLISH, require_step_kind, require_validation_kind, require_verb
+from kci_api.errors import require_error_id
+from kci_api.exit_codes import EXIT_PARTIAL, default_retry, exit_code_of, require_retry_for
+from kci_api.formats import FORMAT_RESULT, current_major, produced_header
+from kci_api.outcome import OUTCOME_INTERRUPTED, OUTCOME_SUCCEEDED, RETRY_UNSAFE, require_outcome
+from kci_api.platform import platform_row
+from kci_api.revision import is_full_commit_id
+from kci_api.run_identity import ContextEntry, RunIdentity
+from kci_api.selection import SCOPE_FULL, SCOPE_SELECTIVE, parse_selector, require_scope
+from kci_api.verbs import STEP_KIND_PUBLISH, require_step_kind, require_validation_kind, require_verb
 
 comptime KCI_VERSION: String = "0.0.0-unreleased"
 """This kci's version, until kci itself is released."""

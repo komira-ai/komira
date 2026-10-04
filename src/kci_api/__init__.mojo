@@ -1,5 +1,5 @@
 # =============================================================================
-# kci_contract -- the one place that states every number, word and name kci
+# kci_api -- the one place that states every number, word and name kci
 #   owns: exit codes, outcomes, error ids, document formats and their schema
 #   majors, produced file names, the release layout, the platform table, the
 #   run identity flags, revision ids, verbs, and the result document.
@@ -25,8 +25,8 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract.authored import authored_schema_version, skip_schema_version
-from kci_contract.errors import (
+from kci_api.authored import authored_schema_version, skip_schema_version
+from kci_api.errors import (
     ERROR_BUILD_FAILED,
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
@@ -60,7 +60,7 @@ from kci_contract.errors import (
     is_error_id_well_formed,
     require_error_id,
 )
-from kci_contract.exit_codes import (
+from kci_api.exit_codes import (
     EXIT_CANNOT_TELL,
     EXIT_FAILED,
     EXIT_INTERNAL,
@@ -76,7 +76,7 @@ from kci_contract.exit_codes import (
     exit_table,
     require_retry_for,
 )
-from kci_contract.formats import (
+from kci_api.formats import (
     FORMAT_ARTIFACT_DECLARATIONS,
     FORMAT_ARTIFACT_MANIFEST,
     FORMAT_CHANNELS,
@@ -97,7 +97,7 @@ from kci_contract.formats import (
     produced_header,
     unknown_keys,
 )
-from kci_contract.layout import (
+from kci_api.layout import (
     ARTIFACT_MANIFEST_NAME,
     DEFAULT_MACHINE_FILE,
     RELEASE_MANIFEST_NAME,
@@ -105,7 +105,7 @@ from kci_contract.layout import (
     release_manifest_path,
     release_platform_dir,
 )
-from kci_contract.outcome import (
+from kci_api.outcome import (
     OUTCOME_CANCELLED,
     OUTCOME_FAILED,
     OUTCOME_INDETERMINATE,
@@ -126,7 +126,7 @@ from kci_contract.outcome import (
     require_retry,
     worst_outcome,
 )
-from kci_contract.platform import (
+from kci_api.platform import (
     PLATFORM_DARWIN_ARM64,
     PLATFORM_LINUX_ARM64,
     PLATFORM_LINUX_X86_64,
@@ -142,7 +142,7 @@ from kci_contract.platform import (
     require_member_platform,
     require_release_platform,
 )
-from kci_contract.result import (
+from kci_api.result import (
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_BUILT,
     ARTIFACT_NOT_REACHED,
@@ -176,8 +176,8 @@ from kci_contract.result import (
     render_result,
     reserved_result_keys,
 )
-from kci_contract.revision import ArtifactRef, is_full_commit_id, require_full_commit_id
-from kci_contract.run_identity import (
+from kci_api.revision import ArtifactRef, is_full_commit_id, require_full_commit_id
+from kci_api.run_identity import (
     CONTEXT_KEY_MAX_BYTES,
     CONTEXT_MAX_ENTRIES,
     CONTEXT_VALUE_MAX_BYTES,
@@ -191,7 +191,7 @@ from kci_contract.run_identity import (
     require_context_value,
     require_run_id,
 )
-from kci_contract.selection import (
+from kci_api.selection import (
     SCOPE_FULL,
     SCOPE_SELECTIVE,
     SELECTOR_STEP,
@@ -205,7 +205,7 @@ from kci_contract.selection import (
     run_evidence_line,
     scope_of,
 )
-from kci_contract.verbs import (
+from kci_api.verbs import (
     STEP_KIND_BUILD,
     STEP_KIND_DEPLOY,
     STEP_KIND_PUBLISH,

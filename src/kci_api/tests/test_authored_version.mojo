@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/tests/test_authored_version.mojo
+# src/kci_api/tests/test_authored_version.mojo
 #   schema_version of an authored file: found at the top level only, read
 #   before the file's own fields, each refusal by its message.
 # =============================================================================
@@ -8,7 +8,7 @@ from std.testing import TestSuite, assert_equal, assert_true
 
 from komira_textproto import TOKEN_WORD, TokenCursor, lex
 
-from kci_contract import FORMAT_CHANNELS, FORMAT_MACHINE, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_CHANNELS, FORMAT_MACHINE, authored_schema_version, skip_schema_version
 
 
 def _v(text: String) -> String:

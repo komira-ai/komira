@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/tests/test_result_document.mojo
+# src/kci_api/tests/test_result_document.mojo
 #   The result document: a byte-exact golden, render/parse round trips, the
 #   RUNNING-then-FINISHED records, unknown keys ignored, every refusal, the
 #   FULL / SELECTIVE scope (a selective run never reads as a full one), and
@@ -9,7 +9,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import (
+from kci_api import (
     ARTIFACT_ALREADY_PRESENT,
     ARTIFACT_WOULD_BUILD,
     CREDENTIAL_PROBE_MINTED,
