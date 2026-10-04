@@ -3,7 +3,10 @@
 # to read, and everything else arrives as a parameter. The package's sources
 # are staged as this test's data, at src/<file>; the test reads each one and
 # fails if any names a way to read the environment or the FFI a read would go
-# through, and checks that the files it read are every staged one.
+# through, and checks that the files it read are every staged one. Every
+# library source is staged, subdirectories included, so a source added under a
+# subdirectory shows up in src/ as an entry the scan does not know and fails
+# the completeness check until the scan learns it.
 from std.os import listdir
 from std.testing import assert_equal, assert_true
 
@@ -35,8 +38,12 @@ comptime _FILES: List[String] = [
 def test_no_environment_read() raises:
     var banned: List[String] = [
         "getenv",
+        "setenv",
+        "os.environ",
         "_read_env",
         "std.os",
+        "import os",
+        "import_module",
         "EnvSource",
         "ProcessEnv",
         "komira_core_ffi",

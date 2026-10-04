@@ -46,7 +46,7 @@ mojo_library(
     test_data = {
         "tests/test_no_env_reads.mojo": {
             "src/" + f: f
-            for f in glob(["*.mojo"])
+            for f in glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"])
         },
     },
     test_srcs = [
