@@ -58,7 +58,7 @@ wildcard-origin field.
 from .agent_config import AgentConfig
 
 # the co-located broker NODE's startup config (read
-# from THORIUM_BROKER_* env). The broker process runs its OWN broker-heartbeat
+# from KOMIRA_BROKER_* env). The broker process runs its OWN broker-heartbeat
 # loop to the coordinator; this is the deploy surface for that process.
 from .agent_config import BrokerConfig
 from .agent_state import AgentPhase, AgentState, FailureReport

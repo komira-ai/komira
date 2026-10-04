@@ -13,7 +13,7 @@
 # door.
 #
 # ⛔ AND A SECOND, INDEPENDENT DEFECT ON THE SAME PATH, WHICH ARM 3 IS ABOUT.
-# `AgentConfig.from_env` defaulted `THORIUM_AGENT_JM_PORT` to a flat `8081`
+# `AgentConfig.from_env` defaulted `KOMIRA_AGENT_JM_PORT` to a flat `8081`
 # regardless of scheme. `pod_spec._split_url_host_port` returns an EMPTY port
 # for a URL carrying none — and a Cloud Run URL
 # (`https://job-manager-….run.app`) carries none — so a correctly `https`-
@@ -58,9 +58,9 @@ from komira_agent.agent_config import AgentConfig
 from komira_agent.heartbeat_client import HEARTBEAT_STATUS_AUTH_UNAVAILABLE
 # The env names ARM 9 sets: the agent's placement contract, the names the job
 # manager's pod render stamps and `AgentConfig.from_env` reads.
-comptime AGENT_ENV_JM_PORT: StaticString = "THORIUM_AGENT_JM_PORT"
-comptime AGENT_ENV_JM_SCHEME: StaticString = "THORIUM_AGENT_JM_SCHEME"
-comptime AGENT_ENV_JM_AUTH: StaticString = "THORIUM_AGENT_JM_AUTH"
+comptime AGENT_ENV_JM_PORT: StaticString = "KOMIRA_AGENT_JM_PORT"
+comptime AGENT_ENV_JM_SCHEME: StaticString = "KOMIRA_AGENT_JM_SCHEME"
+comptime AGENT_ENV_JM_AUTH: StaticString = "KOMIRA_AGENT_JM_AUTH"
 from komira_agent.jm_auth import (
     GcpMetadataMinter,
     JmAuthMode,
@@ -90,7 +90,7 @@ def _setenv(name: String, value: String):
 
 def _unsetenv(name: String):
     """libc unsetenv. ⚠ LOAD-BEARING FOR ARM 3, NOT TIDINESS: the arm's whole
-    subject is what happens when THORIUM_AGENT_JM_PORT is ABSENT, and env is
+    subject is what happens when KOMIRA_AGENT_JM_PORT is ABSENT, and env is
     process-global — a sibling arm's `_setenv` would otherwise decide this
     arm's verdict."""
     var name_str = name
@@ -99,19 +99,19 @@ def _unsetenv(name: String):
 
 
 def _required_agent_env():
-    """The three REQUIRED THORIUM_AGENT_* vars, so `from_env` reaches the
+    """The three REQUIRED KOMIRA_AGENT_* vars, so `from_env` reaches the
     fields the arms are about instead of fail-fasting on a missing job id."""
     _setenv(
-        String("THORIUM_AGENT_JOB_ID"),
+        String("KOMIRA_AGENT_JOB_ID"),
         String("11111111-2222-3333-4444-555555555555"),
     )
-    _setenv(String("THORIUM_AGENT_POD_NAME"), String("pod-jm-auth-seam"))
-    _setenv(String("THORIUM_AGENT_JOB_BINARY"), String("/bin/true"))
-    _setenv(String("THORIUM_AGENT_JM_HOST"), String("jm.example.com"))
+    _setenv(String("KOMIRA_AGENT_POD_NAME"), String("pod-jm-auth-seam"))
+    _setenv(String("KOMIRA_AGENT_JOB_BINARY"), String("/bin/true"))
+    _setenv(String("KOMIRA_AGENT_JM_HOST"), String("jm.example.com"))
     # This file is about auth + port; keep the posture arms from leaking into
     # the port arms and vice versa.
-    _unsetenv(String("THORIUM_AGENT_JM_AUTH"))
-    _unsetenv(String("THORIUM_AGENT_JM_AUDIENCE"))
+    _unsetenv(String("KOMIRA_AGENT_JM_AUTH"))
+    _unsetenv(String("KOMIRA_AGENT_JM_AUDIENCE"))
 
 
 def _contains(haystack: String, needle: String) -> Bool:
@@ -250,14 +250,14 @@ def test_jm_auth_posture_is_a_closed_set() raises:
 def test_https_with_no_port_defaults_to_443() raises:
     """⛔ THE ONE ARM THAT WAS RED ON UNMODIFIED SOURCE WITHOUT A COMPILE ERROR.
 
-    Measured against the untouched tree: with THORIUM_AGENT_JM_SCHEME=https and
-    THORIUM_AGENT_JM_PORT UNSET, `from_env()` produced jm_port=8081 and
+    Measured against the untouched tree: with KOMIRA_AGENT_JM_SCHEME=https and
+    KOMIRA_AGENT_JM_PORT UNSET, `from_env()` produced jm_port=8081 and
     jm_uses_tls=True — i.e. `https://jm.example.com:8081`, while Cloud Run
     serves 443. Every other arm in this file is red BEFORE only as a compile
     error (the surface did not exist), which is a weaker red than this one."""
     _required_agent_env()
-    _setenv(String("THORIUM_AGENT_JM_SCHEME"), String("https"))
-    _unsetenv(String("THORIUM_AGENT_JM_PORT"))
+    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("https"))
+    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
     var cfg = AgentConfig.from_env()
     assert_true(
         cfg.jm_uses_tls(),
@@ -279,8 +279,8 @@ def test_https_with_no_port_defaults_to_443() raises:
     # CONTROL: http with no port keeps TODAY'S 8081 exactly, so every
     # in-cluster manifest renders byte-identically. Without this control the
     # arm above is satisfied by defaulting everything to 443.
-    _setenv(String("THORIUM_AGENT_JM_SCHEME"), String("http"))
-    _unsetenv(String("THORIUM_AGENT_JM_PORT"))
+    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("http"))
+    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
     var http_cfg = AgentConfig.from_env()
     assert_equal(
         Int(http_cfg.jm_port),
@@ -291,8 +291,8 @@ def test_https_with_no_port_defaults_to_443() raises:
     # CONTROL: an EXPLICIT port always wins over the scheme default, under both
     # schemes -- a default that overrode an operator's explicit value would be
     # a worse bug than the one being fixed.
-    _setenv(String("THORIUM_AGENT_JM_SCHEME"), String("https"))
-    _setenv(String("THORIUM_AGENT_JM_PORT"), String("9443"))
+    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("https"))
+    _setenv(String("KOMIRA_AGENT_JM_PORT"), String("9443"))
     var explicit_cfg = AgentConfig.from_env()
     assert_equal(
         Int(explicit_cfg.jm_port),
@@ -304,7 +304,7 @@ def test_https_with_no_port_defaults_to_443() raises:
         String("https://jm.example.com:9443"),
         "CONTROL: a non-default explicit port reaches the audience",
     )
-    _unsetenv(String("THORIUM_AGENT_JM_PORT"))
+    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
     print("  test_https_with_no_port_defaults_to_443: PASS")
 
 
@@ -315,20 +315,20 @@ def test_the_posture_and_audience_come_off_the_placement_env() raises:
 
     RED before the fix: neither var was read; `AgentConfig` had no such field."""
     _required_agent_env()
-    _setenv(String("THORIUM_AGENT_JM_SCHEME"), String("https"))
-    _unsetenv(String("THORIUM_AGENT_JM_PORT"))
+    _setenv(String("KOMIRA_AGENT_JM_SCHEME"), String("https"))
+    _unsetenv(String("KOMIRA_AGENT_JM_PORT"))
 
-    _setenv(String("THORIUM_AGENT_JM_AUTH"), String("gcp-metadata"))
+    _setenv(String("KOMIRA_AGENT_JM_AUTH"), String("gcp-metadata"))
     var cfg = AgentConfig.from_env()
     assert_false(
         cfg.jm_auth_mode.is_none(),
-        "a stamped THORIUM_AGENT_JM_AUTH must reach AgentConfig -- without"
+        "a stamped KOMIRA_AGENT_JM_AUTH must reach AgentConfig -- without"
         " this the placement cannot turn auth on at all",
     )
 
     # The override wins over the derived audience when present.
     _setenv(
-        String("THORIUM_AGENT_JM_AUDIENCE"),
+        String("KOMIRA_AGENT_JM_AUDIENCE"),
         String("https://proxy.example.com"),
     )
     var over_cfg = AgentConfig.from_env()
@@ -337,11 +337,11 @@ def test_the_posture_and_audience_come_off_the_placement_env() raises:
         String("https://proxy.example.com"),
         "an explicit audience override must win over the derived one",
     )
-    _unsetenv(String("THORIUM_AGENT_JM_AUDIENCE"))
+    _unsetenv(String("KOMIRA_AGENT_JM_AUDIENCE"))
 
     # CONTROL: an ABSENT posture is `none` -- the default, and byte-identical
     # to the pre-fix agent.
-    _unsetenv(String("THORIUM_AGENT_JM_AUTH"))
+    _unsetenv(String("KOMIRA_AGENT_JM_AUTH"))
     var default_cfg = AgentConfig.from_env()
     assert_true(
         default_cfg.jm_auth_mode.is_none(),
@@ -349,7 +349,7 @@ def test_the_posture_and_audience_come_off_the_placement_env() raises:
     )
 
     # CONTROL: a TYPO'd posture refuses `from_env` outright.
-    _setenv(String("THORIUM_AGENT_JM_AUTH"), String("gcp_metadata"))
+    _setenv(String("KOMIRA_AGENT_JM_AUTH"), String("gcp_metadata"))
     var raised = False
     try:
         var _c = AgentConfig.from_env()
@@ -360,7 +360,7 @@ def test_the_posture_and_audience_come_off_the_placement_env() raises:
         "CONTROL: a misspelled posture must abort boot -- degrading it to"
         " `none` would beat bearer-less into a 403 forever",
     )
-    _unsetenv(String("THORIUM_AGENT_JM_AUTH"))
+    _unsetenv(String("KOMIRA_AGENT_JM_AUTH"))
     print("  test_the_posture_and_audience_come_off_the_placement_env: PASS")
 
 

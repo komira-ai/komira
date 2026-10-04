@@ -14,29 +14,29 @@
 #     `k8s_https_request_authed`'s host+port surface (the HttpClient parses a
 #     dotted-quad / hostname directly, no URL-parse step).
 #
-# ENV CONTRACT (THORIUM_AGENT_*):
-#   THORIUM_AGENT_JOB_ID            hyphenated job UUID            (REQUIRED)
-#   THORIUM_AGENT_POD_NAME          this pod's name                (REQUIRED)
-#   THORIUM_AGENT_JOB_BINARY        local path to the job binary   (REQUIRED)
-#   THORIUM_AGENT_JM_HOST           job-manager host               (default 127.0.0.1)
-#   THORIUM_AGENT_JM_PORT           job-manager port               (default 8081)
-#   THORIUM_AGENT_JM_SCHEME         `http` | `https`               (default http)
-#   THORIUM_AGENT_HEARTBEAT_SECS    heartbeat interval seconds     (default 5)
-#   THORIUM_AGENT_MAX_STDERR_LINES  stderr ring capacity           (default 100)
-#   THORIUM_AGENT_LOG_CHUNK_BYTES   streaming-log chunk threshold  (default 64 KiB)
-#   THORIUM_AGENT_LOG_FLUSH_SECS    streaming-log flush interval   (default 10s)
+# ENV CONTRACT (KOMIRA_AGENT_*):
+#   KOMIRA_AGENT_JOB_ID             hyphenated job UUID            (REQUIRED)
+#   KOMIRA_AGENT_POD_NAME           this pod's name                (REQUIRED)
+#   KOMIRA_AGENT_JOB_BINARY         local path to the job binary   (REQUIRED)
+#   KOMIRA_AGENT_JM_HOST            job-manager host               (default 127.0.0.1)
+#   KOMIRA_AGENT_JM_PORT            job-manager port               (default 8081)
+#   KOMIRA_AGENT_JM_SCHEME          `http` | `https`               (default http)
+#   KOMIRA_AGENT_HEARTBEAT_SECS     heartbeat interval seconds     (default 5)
+#   KOMIRA_AGENT_MAX_STDERR_LINES   stderr ring capacity           (default 100)
+#   KOMIRA_AGENT_LOG_CHUNK_BYTES    streaming-log chunk threshold  (default 64 KiB)
+#   KOMIRA_AGENT_LOG_FLUSH_SECS     streaming-log flush interval   (default 10s)
 #
 # DEPLOYMENT-REAL S3 surface (all OPTIONAL — when BINARY_S3_URI is unset the
 # agent runs the LOCAL JOB_BINARY and skips the S3 download/upload entirely, so
 # the in-process e2e keeps working):
-#   THORIUM_AGENT_BINARY_S3_URI     s3://bucket/<sha>/binary       (optional)
-#   THORIUM_AGENT_BINARY_SHA256     expected SHA-256 hex override  (optional)
-#   THORIUM_AGENT_LOG_BUCKET        bucket for crash-report+logs   (optional)
-#   THORIUM_AGENT_S3_ENDPOINT       S3 endpoint override (MinIO)   (optional)
+#   KOMIRA_AGENT_BINARY_S3_URI      s3://bucket/<sha>/binary       (optional)
+#   KOMIRA_AGENT_BINARY_SHA256      expected SHA-256 hex override  (optional)
+#   KOMIRA_AGENT_LOG_BUCKET         bucket for crash-report+logs   (optional)
+#   KOMIRA_AGENT_S3_ENDPOINT        S3 endpoint override (MinIO)   (optional)
 #                                   ⚠ UNSET MEANS **REAL AWS S3**, which is
 #                                   HTTPS-ONLY -- so absence selects TLS here,
 #                                   it does not select plaintext.
-#   THORIUM_AGENT_S3_REGION         AWS region                     (default us-east-1)
+#   KOMIRA_AGENT_S3_REGION          AWS region                     (default us-east-1)
 #   (+ the AWS cred env the default chain reads: AWS_ACCESS_KEY_ID /
 #    AWS_SECRET_ACCESS_KEY / AWS_WEB_IDENTITY_TOKEN_FILE / AWS_ROLE_ARN / ...)
 #
@@ -59,8 +59,8 @@ from komira_agent.jm_auth import (
 # The two names the (scheme, posture) refusal in `from_env` has to cite. Each
 # is ALSO the name `from_env` reads, so the refusal cannot name a variable the
 # reader does not.
-comptime _ENV_JM_SCHEME: StaticString = "THORIUM_AGENT_JM_SCHEME"
-comptime _ENV_JM_AUTH: StaticString = "THORIUM_AGENT_JM_AUTH"
+comptime _ENV_JM_SCHEME: StaticString = "KOMIRA_AGENT_JM_SCHEME"
+comptime _ENV_JM_AUTH: StaticString = "KOMIRA_AGENT_JM_AUTH"
 
 
 # =============================================================================
@@ -132,8 +132,8 @@ def _agent_require_env(name: StaticString, label: String) raises -> String:
             + String(" (")
             + label
             + String(
-                "). Set THORIUM_AGENT_JOB_ID / THORIUM_AGENT_POD_NAME /"
-                " THORIUM_AGENT_JOB_BINARY before starting the agent."
+                "). Set KOMIRA_AGENT_JOB_ID / KOMIRA_AGENT_POD_NAME /"
+                " KOMIRA_AGENT_JOB_BINARY before starting the agent."
             )
         )
     return v^
@@ -216,7 +216,7 @@ struct AgentConfig(Movable):
     # beat-then-stopped ambiguity the heartbeat contract exists to remove.
     #
     # ⚠ DEFAULTING TO `none` MEANS THIS FIELD ALONE CHANGES NOTHING. Nothing
-    # authenticates until the placement STAMPS THORIUM_AGENT_JM_AUTH, which is
+    # authenticates until the placement STAMPS KOMIRA_AGENT_JM_AUTH, which is
     # `komira_job_manager/pod_spec.mojo`'s job, not this file's.
     var jm_auth_mode: JmAuthMode
 
@@ -344,22 +344,22 @@ struct AgentConfig(Movable):
 
     @staticmethod
     def from_env() raises -> AgentConfig:
-        """Build the config from THORIUM_AGENT_* env (the deploy surface).
+        """Build the config from KOMIRA_AGENT_* env (the deploy surface).
         job_id / pod_name / job_binary are REQUIRED (fail-fast); host / port /
         cadence / ring-size are defaulted. argv is read as a single
-        space-joined THORIUM_AGENT_JOB_ARGV (MVP — no shell quoting; the prod
+        space-joined KOMIRA_AGENT_JOB_ARGV (MVP — no shell quoting; the prod
         job is a single binary path with simple positional args)."""
         var job_id = _agent_require_env(
-            "THORIUM_AGENT_JOB_ID", String("job uuid")
+            "KOMIRA_AGENT_JOB_ID", String("job uuid")
         )
         var pod_name = _agent_require_env(
-            "THORIUM_AGENT_POD_NAME", String("pod name")
+            "KOMIRA_AGENT_POD_NAME", String("pod name")
         )
         var job_binary = _agent_require_env(
-            "THORIUM_AGENT_JOB_BINARY", String("job binary path")
+            "KOMIRA_AGENT_JOB_BINARY", String("job binary path")
         )
         var host = _agent_env_or(
-            "THORIUM_AGENT_JM_HOST", String("127.0.0.1")
+            "KOMIRA_AGENT_JM_HOST", String("127.0.0.1")
         )
         # ★ THE SCHEME IS READ BEFORE THE PORT BECAUSE THE PORT'S DEFAULT
         # DEPENDS ON IT, AND GETTING THAT ORDER WRONG WAS A LIVE DEFECT.
@@ -373,7 +373,7 @@ struct AgentConfig(Movable):
         # which is the worst shape: the transport decision LOOKS right in every
         # log line and the connection goes nowhere.
         var jm_scheme = _agent_env_or(_ENV_JM_SCHEME, String("http"))
-        var port_raw = _read_env("THORIUM_AGENT_JM_PORT")
+        var port_raw = _read_env("KOMIRA_AGENT_JM_PORT")
         var port_s = port_raw
         if port_raw.byte_length() == 0:
             # `http` keeps TODAY'S 8081 exactly, so every in-cluster manifest
@@ -389,20 +389,20 @@ struct AgentConfig(Movable):
         # line said the agent was healthy. Refusing here surfaces it at boot.
         var jm_auth_mode = parse_jm_auth_mode(_read_env(_ENV_JM_AUTH))
         # Absent => derive from scheme/host/port (the ordinary Cloud Run case).
-        var jm_audience_override = _read_env("THORIUM_AGENT_JM_AUDIENCE")
+        var jm_audience_override = _read_env("KOMIRA_AGENT_JM_AUDIENCE")
 
-        var hb_s = _agent_env_or("THORIUM_AGENT_HEARTBEAT_SECS", String("5"))
+        var hb_s = _agent_env_or("KOMIRA_AGENT_HEARTBEAT_SECS", String("5"))
         var ring_s = _agent_env_or(
-            "THORIUM_AGENT_MAX_STDERR_LINES", String("100")
+            "KOMIRA_AGENT_MAX_STDERR_LINES", String("100")
         )
         var stdout_bytes_s = _agent_env_or(
-            "THORIUM_AGENT_MAX_STDOUT_BYTES", String("8388608")  # 8 MiB
+            "KOMIRA_AGENT_MAX_STDOUT_BYTES", String("8388608")  # 8 MiB
         )
 
         var port = atol(port_s)
         if port <= 0 or port > 65535:
             raise Error(
-                String("agent: THORIUM_AGENT_JM_PORT out of range: ") + port_s
+                String("agent: KOMIRA_AGENT_JM_PORT out of range: ") + port_s
             )
         var hb = atol(hb_s)
         if hb <= 0:
@@ -417,7 +417,7 @@ struct AgentConfig(Movable):
         # MVP argv: a single space-split env (no shell quoting). Empty when
         # unset — most jobs are a bare binary path.
         var argv = List[String]()
-        var argv_raw = _read_env("THORIUM_AGENT_JOB_ARGV")
+        var argv_raw = _read_env("KOMIRA_AGENT_JOB_ARGV")
         if argv_raw.byte_length() > 0:
             var cur = String("")
             var bytes = argv_raw.as_bytes()
@@ -434,32 +434,32 @@ struct AgentConfig(Movable):
 
         # ---- DEPLOYMENT-REAL S3 surface (all optional) ----
         var binary_s3_uri = Optional[String]()
-        var s3_uri_raw = _read_env("THORIUM_AGENT_BINARY_S3_URI")
+        var s3_uri_raw = _read_env("KOMIRA_AGENT_BINARY_S3_URI")
         if s3_uri_raw.byte_length() > 0:
             binary_s3_uri = Optional[String](s3_uri_raw^)
         var binary_sha = Optional[String]()
-        var sha_raw = _read_env("THORIUM_AGENT_BINARY_SHA256")
+        var sha_raw = _read_env("KOMIRA_AGENT_BINARY_SHA256")
         if sha_raw.byte_length() > 0:
             binary_sha = Optional[String](sha_raw^)
         var log_bucket = Optional[String]()
-        var lb_raw = _read_env("THORIUM_AGENT_LOG_BUCKET")
+        var lb_raw = _read_env("KOMIRA_AGENT_LOG_BUCKET")
         if lb_raw.byte_length() > 0:
             log_bucket = Optional[String](lb_raw^)
         var s3_endpoint = Optional[String]()
-        var ep_raw = _read_env("THORIUM_AGENT_S3_ENDPOINT")
+        var ep_raw = _read_env("KOMIRA_AGENT_S3_ENDPOINT")
         if ep_raw.byte_length() > 0:
             s3_endpoint = Optional[String](ep_raw^)
         var s3_region = _agent_env_or(
-            "THORIUM_AGENT_S3_REGION", String("us-east-1")
+            "KOMIRA_AGENT_S3_REGION", String("us-east-1")
         )
 
         # Streaming-log tunables (defaults: 64 KiB / 10s). 0/neg falls back
         # to the default inside __init__.
         var chunk_bytes_s = _agent_env_or(
-            "THORIUM_AGENT_LOG_CHUNK_BYTES", String("65536")  # 64 KiB
+            "KOMIRA_AGENT_LOG_CHUNK_BYTES", String("65536")  # 64 KiB
         )
         var flush_secs_s = _agent_env_or(
-            "THORIUM_AGENT_LOG_FLUSH_SECS", String("10")
+            "KOMIRA_AGENT_LOG_FLUSH_SECS", String("10")
         )
         var chunk_bytes = atol(chunk_bytes_s)
         if chunk_bytes <= 0:
@@ -622,28 +622,28 @@ struct BrokerConfig(Movable):
 
     @staticmethod
     def from_env() raises -> BrokerConfig:
-        """Build the broker-node config from THORIUM_BROKER_* env (the deploy
+        """Build the broker-node config from KOMIRA_BROKER_* env (the deploy
         surface — the container stack's ENV contract). node_id / bucket / cluster
         / s3_endpoint are REQUIRED (fail-fast); listen-port / topic / partitions
         / jm-host / jm-port / heartbeat-cadence are defaulted.
 
-        ENV CONTRACT (THORIUM_BROKER_*):
-          THORIUM_BROKER_NODE_ID        broker node id (int)           (REQUIRED)
-          KOMIRA_BROKER_S3_BUCKET      S3 bucket                      (REQUIRED)
-          KOMIRA_BROKER_CLUSTER        cluster id (S3 prefix + key)   (REQUIRED)
-          KOMIRA_BROKER_S3_ENDPOINT    S3 endpoint (MinIO)            (REQUIRED)
-          THORIUM_BROKER_LISTEN_PORT    Kafka listen port              (default 0 / ephemeral)
-          THORIUM_BROKER_TOPIC          topic name                     (default thorium-data)
-          THORIUM_BROKER_PARTITIONS     P                              (default 6)
-          KOMIRA_BROKER_S3_REGION      AWS region                     (default us-east-1)
-          THORIUM_BROKER_JM_HOST        coordinator host               (default 127.0.0.1)
-          THORIUM_BROKER_JM_PORT        coordinator port               (default 8082)
-          THORIUM_BROKER_HEARTBEAT_SECS heartbeat interval seconds     (default 5)
-          THORIUM_BROKER_ADVERTISED_HOST Metadata-advertised host       (default 127.0.0.1;
+        ENV CONTRACT (KOMIRA_BROKER_*):
+          KOMIRA_BROKER_NODE_ID         broker node id (int)           (REQUIRED)
+          KOMIRA_BROKER_S3_BUCKET       S3 bucket                      (REQUIRED)
+          KOMIRA_BROKER_CLUSTER         cluster id (S3 prefix + key)   (REQUIRED)
+          KOMIRA_BROKER_S3_ENDPOINT     S3 endpoint (MinIO)            (REQUIRED)
+          KOMIRA_BROKER_LISTEN_PORT     Kafka listen port              (default 0 / ephemeral)
+          KOMIRA_BROKER_TOPIC           topic name                     (default komira-data)
+          KOMIRA_BROKER_PARTITIONS      P                              (default 6)
+          KOMIRA_BROKER_S3_REGION       AWS region                     (default us-east-1)
+          KOMIRA_BROKER_JM_HOST         coordinator host               (default 127.0.0.1)
+          KOMIRA_BROKER_JM_PORT         coordinator port               (default 8082)
+          KOMIRA_BROKER_HEARTBEAT_SECS  heartbeat interval seconds     (default 5)
+          KOMIRA_BROKER_ADVERTISED_HOST Metadata-advertised host       (default 127.0.0.1;
                                         set to the container service name in the
                                         multi-node stack so peers/clients route
                                         back correctly + the broker binds 0.0.0.0)
-          THORIUM_BROKER_SERVE_WORKERS  # of share-nothing serve workers  (default 1;
+          KOMIRA_BROKER_SERVE_WORKERS   # of share-nothing serve workers  (default 1;
                                         BROKER-PERF-CORE-SCALING — N per-core
                                         pthreads accepting on the shared
                                         listener fd, each its own serve loop +
@@ -652,7 +652,7 @@ struct BrokerConfig(Movable):
                                         1..64; out-of-range -> 1)
         """
         var node_id_s = _agent_require_env(
-            "THORIUM_BROKER_NODE_ID", String("broker node id")
+            "KOMIRA_BROKER_NODE_ID", String("broker node id")
         )
         var bucket = _agent_require_env(
             "KOMIRA_BROKER_S3_BUCKET", String("S3 bucket")
@@ -667,29 +667,29 @@ struct BrokerConfig(Movable):
         var node_id = atol(node_id_s)
         if node_id < 0:
             raise Error(
-                String("broker: THORIUM_BROKER_NODE_ID must be >= 0 (got ")
+                String("broker: KOMIRA_BROKER_NODE_ID must be >= 0 (got ")
                 + node_id_s
                 + String(")")
             )
 
         var listen_port_s = _agent_env_or(
-            "THORIUM_BROKER_LISTEN_PORT", String("0")
+            "KOMIRA_BROKER_LISTEN_PORT", String("0")
         )
         var listen_port = atol(listen_port_s)
         if listen_port < 0 or listen_port > 65535:
             raise Error(
-                String("broker: THORIUM_BROKER_LISTEN_PORT out of range: ")
+                String("broker: KOMIRA_BROKER_LISTEN_PORT out of range: ")
                 + listen_port_s
             )
 
         var topic = _agent_env_or(
-            "THORIUM_BROKER_TOPIC", String("thorium-data")
+            "KOMIRA_BROKER_TOPIC", String("komira-data")
         )
-        var parts_s = _agent_env_or("THORIUM_BROKER_PARTITIONS", String("6"))
+        var parts_s = _agent_env_or("KOMIRA_BROKER_PARTITIONS", String("6"))
         var parts = atol(parts_s)
         if parts <= 0:
             raise Error(
-                String("broker: THORIUM_BROKER_PARTITIONS must be >= 1 (got ")
+                String("broker: KOMIRA_BROKER_PARTITIONS must be >= 1 (got ")
                 + parts_s
                 + String(")")
             )
@@ -698,32 +698,32 @@ struct BrokerConfig(Movable):
             "KOMIRA_BROKER_S3_REGION", String("us-east-1")
         )
         var jm_host = _agent_env_or(
-            "THORIUM_BROKER_JM_HOST", String("127.0.0.1")
+            "KOMIRA_BROKER_JM_HOST", String("127.0.0.1")
         )
-        var jm_port_s = _agent_env_or("THORIUM_BROKER_JM_PORT", String("8082"))
+        var jm_port_s = _agent_env_or("KOMIRA_BROKER_JM_PORT", String("8082"))
         var jm_port = atol(jm_port_s)
         if jm_port <= 0 or jm_port > 65535:
             raise Error(
-                String("broker: THORIUM_BROKER_JM_PORT out of range: ")
+                String("broker: KOMIRA_BROKER_JM_PORT out of range: ")
                 + jm_port_s
             )
-        var hb_s = _agent_env_or("THORIUM_BROKER_HEARTBEAT_SECS", String("5"))
+        var hb_s = _agent_env_or("KOMIRA_BROKER_HEARTBEAT_SECS", String("5"))
         var hb = atol(hb_s)
         if hb <= 0:
             hb = 5
 
         var advertised_host = _agent_env_or(
-            "THORIUM_BROKER_ADVERTISED_HOST", String("127.0.0.1")
+            "KOMIRA_BROKER_ADVERTISED_HOST", String("127.0.0.1")
         )
 
         # BROKER-PERF-CORE-SCALING: the number of share-nothing serve workers
         # (per-core pthreads). Default 1 (single-threaded back-compat). A garbage
         # / out-of-range value falls back to 1 rather than failing the boot.
-        var workers_s = _agent_env_or("THORIUM_BROKER_SERVE_WORKERS", String("1"))
+        var workers_s = _agent_env_or("KOMIRA_BROKER_SERVE_WORKERS", String("1"))
         var workers = atol(workers_s)
         if workers < 1 or workers > 64:
             print(
-                String("broker: THORIUM_BROKER_SERVE_WORKERS '")
+                String("broker: KOMIRA_BROKER_SERVE_WORKERS '")
                 + workers_s
                 + String("' out of range [1, 64]; using default 1")
             )

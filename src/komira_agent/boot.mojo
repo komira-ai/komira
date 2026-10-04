@@ -170,7 +170,7 @@ def _mkdir_parents(path: String) raises:
     """Ensure every PARENT directory of `path` exists (the `mkdir -p` of the
     dirname), so a subsequent file write at `path` can `openat()` it.
 
-    The job manager's placement sets `THORIUM_AGENT_JOB_BINARY` to a nested
+    The job manager's placement sets `KOMIRA_AGENT_JOB_BINARY` to a nested
     `/tmp/<agent-dir>/<job-id>/job_binary` path; the agent downloads the S3
     binary there, but `RawWriteFd.open_truncate` does NOT create the parent
     dir, so without this a scheduler-spawned download fails with

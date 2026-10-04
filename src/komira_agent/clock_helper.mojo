@@ -135,8 +135,7 @@ def amz_stamps_now() -> AmzStamps:
          (the deterministic-test override, mirrors os_read_s3_microbench),
          use them verbatim.
       2. Else derive from the live system clock
-         (`komira_clock.now_unix_ms`, which itself honors the
-         `THORIUM_MOCK_NOW_MS` test hook).
+         (`komira_clock.now_unix_ms`).
 
     This is the SAME helper for both the deterministic MinIO e2e and the
     live-clock production agent — the only difference is whether the env

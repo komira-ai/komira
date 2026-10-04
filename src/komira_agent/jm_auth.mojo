@@ -44,7 +44,7 @@
 # silently send the beat bearer-less — re-creating exactly the
 # never-beat-at-all / beat-then-stopped ambiguity the heartbeat contract exists to
 # remove. A declared posture is also the symmetric answer to the JM's own
-# `THORIUM_JM_INTERNAL_AUTH=iam`.
+# `KOMIRA_JM_INTERNAL_AUTH=iam`.
 #
 # ⛔ THE TOKEN IS SECRET MATERIAL AND LIVES ON NO CONFIGURATION CHANNEL. It is
 # minted at run time off the metadata server into a local var, attached to one
@@ -83,7 +83,7 @@ comptime _METADATA_IDENTITY_PATH: String = (
 comptime _METADATA_FLAVOR_HEADER: String = "Metadata-Flavor"
 comptime _METADATA_FLAVOR_VALUE: String = "Google"
 
-# The accepted spellings of THORIUM_AGENT_JM_AUTH, rendered into the refusal so
+# The accepted spellings of KOMIRA_AGENT_JM_AUTH, rendered into the refusal so
 # a typo tells the operator what it should have been.
 comptime JM_AUTH_MODE_NONE_SPELLING: String = ""
 comptime JM_AUTH_MODE_GCP_METADATA_SPELLING: String = "gcp-metadata"
@@ -158,7 +158,7 @@ def parse_jm_auth_mode(s: String) raises -> JmAuthMode:
     if s == JM_AUTH_MODE_GCP_METADATA_SPELLING:
         return JmAuthMode.gcp_metadata()
     raise Error(
-        String("agent: THORIUM_AGENT_JM_AUTH: unknown posture '")
+        String("agent: KOMIRA_AGENT_JM_AUTH: unknown posture '")
         + s
         + String("' (accepted: '' for none, '")
         + JM_AUTH_MODE_GCP_METADATA_SPELLING
