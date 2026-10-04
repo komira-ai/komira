@@ -479,6 +479,64 @@ def test_refuses_a_payload_that_is_not_a_json_object() raises:
     _must_raise(String('["not", "a", "proxy", "event"]'), String("JSON array"))
 
 
+def _event_with_body(body_json: String, is_b64: Bool) -> String:
+    """A minimal 2.0 event whose `body` member is `body_json`, written as JSON
+    source text (escapes and all), with `isBase64Encoded` set to `is_b64`."""
+    return (
+        String('{"version": "2.0", "rawPath": "/bin", "rawQueryString": "",')
+        + String('"requestContext": {"http": {"method": "POST"}},')
+        + String('"body": "')
+        + body_json
+        + String('", "isBase64Encoded": ')
+        + (String("true") if is_b64 else String("false"))
+        + String("}")
+    )
+
+
+def test_an_escaped_surrogate_pair_body_arrives_as_one_4_byte_character() raises:
+    """A text body carrying `\\ud83d\\ude00` (U+1F600, escaped as a UTF-16
+    surrogate pair, which is how a JSON encoder writes a non-BMP character)
+    arrives as its one 4-byte UTF-8 sequence, F0 9F 98 80.
+
+    FALSIFIES: a JSON reader that decodes each `\\u` escape on its own, which
+    turns the pair into two 3-byte sequences (ED A0 BD ED B8 80) — ill-formed
+    UTF-8 handed to the handler as the client's text."""
+    var req = api_gateway_v2_event_to_request(
+        _event_with_body(String("\\ud83d\\ude00"), False)
+    )
+    var want = List[UInt8]()
+    want.append(UInt8(0xF0))
+    want.append(UInt8(0x9F))
+    want.append(UInt8(0x98))
+    want.append(UInt8(0x80))
+    assert_true(_bytes_equal(req.body, want))
+
+
+def test_refuses_a_body_carrying_a_lone_surrogate_escape() raises:
+    """A lone `\\ud800` has no UTF-8 encoding, so a text body carrying one has
+    no bytes to become. It is refused (the event goes to the invocation ERROR
+    channel) rather than handed on as ill-formed UTF-8."""
+    _must_raise(
+        _event_with_body(String("\\ud800"), False),
+        String("a lone surrogate escape in a text body"),
+    )
+
+
+def test_refuses_a_non_canonical_base64_body() raises:
+    """`QR==` has non-zero unused trailing bits; the canonical spelling of the
+    same byte is `QQ==`. The decoder is strict, so the non-canonical form is
+    the "undecodable base64 body" refusal. The canonical form is decoded
+    first, so the refusal is about the trailing bits and not the byte."""
+    var req = api_gateway_v2_event_to_request(
+        _event_with_body(String("QQ=="), True)
+    )
+    assert_equal(_bytes_to_ascii(req.body), String("A"))
+    _must_raise(
+        _event_with_body(String("QR=="), True),
+        String("non-canonical base64 (non-zero unused bits)"),
+    )
+
+
 def test_the_pinned_version_is_2_0() raises:
     """The constant the refusals are written against. If this changes, every
     fixture above is describing a different contract."""
@@ -847,6 +905,9 @@ def main() raises:
     test_refuses_a_2_0_event_with_no_request_context_http()
     test_refuses_a_base64_body_that_does_not_decode()
     test_refuses_a_payload_that_is_not_a_json_object()
+    test_an_escaped_surrogate_pair_body_arrives_as_one_4_byte_character()
+    test_refuses_a_body_carrying_a_lone_surrogate_escape()
+    test_refuses_a_non_canonical_base64_body()
     test_the_pinned_version_is_2_0()
 
     test_a_text_response_goes_out_as_text_with_the_flag_false()
