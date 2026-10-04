@@ -72,7 +72,7 @@ it): ten keys, in this order, compact, one trailing newline.
 {"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"CONDA","name":"komira_json","version":"1.0.0","platform":"linux-x86_64","subdir":"linux-64","file":"komira_json-1.0.0-h0123abcd_57.conda","sha256":"<64 hex>","metadata":"metadata.json"}
 ```
 
-`format` and `schema_version` are kci's format name and major (kci_contract's
+`format` and `schema_version` are kci's format name and major (kci_api's
 format table): kci refuses another format or a major it does not read, and
 ignores a key it does not know inside a major it reads (a writer only ever
 adds keys inside a major). `platform` is the kci platform of `subdir`.
