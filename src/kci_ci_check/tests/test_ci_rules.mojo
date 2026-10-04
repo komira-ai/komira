@@ -8,7 +8,7 @@
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow, check_workflow, id_token_stages, kci_run_calls
-from kci_stage_graph import parse_machine_file
+from kci_release_machine import parse_machine_file
 
 
 comptime _MACHINE: String = (
