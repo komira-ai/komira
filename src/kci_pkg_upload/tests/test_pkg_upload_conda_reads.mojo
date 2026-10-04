@@ -33,7 +33,11 @@
 #       <name>-<version>-<build>, a 5xx, a transport fault) is UNKNOWN with NO
 #       name and `holds` / `files_of` RAISE on it, never answering "not held"; a 403 is
 #       AUTH_REFUSED; PyPI has no subdir listing and a malformed subdir is a
-#       local fault — both RAISE with ZERO requests.
+#       local fault — both RAISE with ZERO requests;
+#   (8) a NAMESPACED channel (`<host>/<namespace>/<channel>`) is listed at
+#       `/<namespace>/<channel>/<subdir>/repodata.json`, the two segments
+#       unchanged; a third segment or an `@` is a local fault with ZERO
+#       requests.
 #
 # Hermetic: ScriptedPkgTransport + ScriptedCredential; no network.
 # =============================================================================
@@ -449,7 +453,37 @@ def test_conda_package_name_of_file() raises:
     print("  test_conda_package_name_of_file: PASS")
 
 
+def test_a_namespaced_channel_is_listed_at_its_two_segments() raises:
+    var t = ScriptedPkgTransport()
+    t.queue(_json(String('{"packages.conda": {"komira_encoding-1.0.0-h0_0.conda": {}}}')))
+    var rs = _set(t^)
+    var n = rs.package_names(
+        SUBSTRATE_PREFIX_DEV_CONDA, String("prefix.dev/komira-ai/prod"), String("linux-64")
+    )
+    assert_equal(n.kind, READ_PRESENT, read_kind_name(n.kind) + n.detail)
+    assert_true(n.holds(String("komira_encoding")))
+    assert_false(n.holds(String("komira_all")))
+    assert_equal(rs.transport().call_count(), 1)
+    assert_equal(rs.transport().call(0).host, String("prefix.dev"))
+    assert_equal(
+        rs.transport().call(0).path, String("/komira-ai/prod/linux-64/repodata.json")
+    )
+    var bad = List[String]()
+    bad.append(String("prefix.dev/komira-ai/prod/x"))
+    bad.append(String("prefix.dev/@komira-ai/prod"))
+    for i in range(len(bad)):
+        var raised = False
+        try:
+            _ = rs.package_names(SUBSTRATE_PREFIX_DEV_CONDA, bad[i], String("linux-64"))
+        except:
+            raised = True
+        assert_true(raised, String("repo '") + bad[i] + String("' was sent"))
+    assert_equal(rs.transport().call_count(), 1)
+    print("  test_a_namespaced_channel_is_listed_at_its_two_segments: PASS")
+
+
 def main() raises:
+    test_a_namespaced_channel_is_listed_at_its_two_segments()
     test_repodata_kinds()
     test_the_redirect_and_where_the_credential_goes()
     test_absent_only_from_a_listing_that_was_read()

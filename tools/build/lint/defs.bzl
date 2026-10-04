@@ -102,7 +102,7 @@ def _action_pins_impl(ctx):
 
 action_pins_rule = rule(
     impl = _action_pins_impl,
-    doc = "Every `uses:` in the workflow files names a full 40-hex commit SHA. Refuses a set with no `uses:` at all.",
+    doc = "Every `uses:` in the workflow files (and local actions) names a full 40-hex commit SHA, except a local action (`./path`), which is part of the checkout. Refuses a set with no `uses:` at all.",
     attrs = _COMMON | {"srcs": attrs.list(attrs.source())},
 )
 
@@ -147,6 +147,24 @@ mojo_deps_rule = rule(
     attrs = _COMMON | {
         "buck": attrs.source(),
         "srcs": attrs.list(attrs.source()),
+    },
+)
+
+def _retired_names_impl(ctx):
+    if not ctx.attrs.names:
+        fail("retired_names {}: names is empty, so it would check nothing".format(ctx.label))
+    staged, copy = _stage(ctx, ctx.attrs.srcs)
+    tree = ctx.attrs.tree[DefaultInfo].default_outputs[0]
+    args = [tree, "{}//".format(ctx.label.cell)] + ctx.attrs.names + ["--"] + [copy[s.short_path] for s in ctx.attrs.srcs]
+    return _lint(ctx, "retired_names", [], args, staged)
+
+retired_names_rule = rule(
+    impl = _retired_names_impl,
+    doc = "No file of `tree` (a doc_tree target: the root one holds every file of the cell) and no file in `srcs` (the dotfiles a glob skips) holds one of `names`, fixed strings, on a line without a YYYY-MM-DD date: a renamed package or type survives only in a dated history note. Spell each name in parts (`\"kci\" + \"_old\"`) so the BUCK file naming it does not hold it.",
+    attrs = _COMMON | {
+        "names": attrs.list(attrs.string()),
+        "srcs": attrs.list(attrs.source(), default = []),
+        "tree": attrs.dep(providers = [DocTreeInfo]),
     },
 )
 
@@ -238,6 +256,9 @@ def push_verdicts(**kwargs):
 def mojo_deps(**kwargs):
     mojo_deps_rule(**_linux(kwargs))
 
+def retired_names(**kwargs):
+    retired_names_rule(**_linux(kwargs))
+
 def tar_member(**kwargs):
     tar_member_rule(**_linux(kwargs))
 
@@ -254,6 +275,7 @@ markdown_docs = declares_docs(markdown_docs)
 mojo_deps = declares_docs(mojo_deps)
 no_endpoint = declares_docs(no_endpoint)
 push_verdicts = declares_docs(push_verdicts)
+retired_names = declares_docs(retired_names)
 shell_lint = declares_docs(shell_lint)
 tar_member = declares_docs(tar_member)
 workflow_lint = declares_docs(workflow_lint)
