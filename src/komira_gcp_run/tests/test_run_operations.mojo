@@ -159,7 +159,7 @@ def test_wait_operation_done_with_an_error() raises:
         _wire(capture),
         _expected(
             String("POST /v2/") + _OP + ":wait",
-            String('{"name":"') + _OP + '","timeout":"30s"}',
+            String('{"timeout":"30s"}'),
         ),
     )
     assert_true(op.done)

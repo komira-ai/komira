@@ -15,12 +15,11 @@
 # socket is opened. Each client is pointed at `localhost` with
 # `set_rest_host`; the default host is test_run_endpoint's subject.
 #
-# Two parts of the bodies are the codec's, not the API's. komira_proto_codec
-# writes default-valued fields, which the proto3 JSON mapping lets a writer
-# omit and the service reads as unset. And a `body: "*"` method (RunJob,
-# CancelExecution) carries its path field (`name`) in the body as well, with
-# the value the path has; the HTTP transcoding binds the path value either
-# way.
+# komira_proto_codec writes a scalar or enum at its default (`"uid":""`,
+# `..._UNSPECIFIED`), which the proto3 JSON mapping lets a writer omit and
+# the service reads as unset; an empty list or map it leaves out. A
+# `body: "*"` method (RunJob, CancelExecution) leaves its path field
+# (`name`) out of the body, as google/api/http.proto states.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -70,15 +69,15 @@ comptime _JOB = (
 
 # The same job as the client writes it, after its name.
 comptime _JOB_WIRE_TAIL = (
-    '"uid":"","generation":"0","labels":{},"annotations":{},"creator":"",'
+    '"uid":"","generation":"0","creator":"",'
     + '"lastModifier":"","client":"","clientVersion":"",'
-    + '"launchStage":"LAUNCH_STAGE_UNSPECIFIED","template":{"labels":{},"annotations":{},'
+    + '"launchStage":"LAUNCH_STAGE_UNSPECIFIED","template":{'
     + '"parallelism":0,"taskCount":1,"template":{"containers":[{"name":"",'
-    + '"image":"us-docker.pkg.dev/demo-project/apps/build@sha256:9a8b","command":[],'
-    + '"args":[],"env":[],"ports":[],"volumeMounts":[],"workingDir":"","dependsOn":[],'
-    + '"baseImageUri":""}],"volumes":[],"timeout":"600s","serviceAccount":"",'
+    + '"image":"us-docker.pkg.dev/demo-project/apps/build@sha256:9a8b",'
+    + '"workingDir":"",'
+    + '"baseImageUri":""}],"timeout":"600s","serviceAccount":"",'
     + '"executionEnvironment":"EXECUTION_ENVIRONMENT_UNSPECIFIED","encryptionKey":"",'
-    + '"maxRetries":0}},"observedGeneration":"0","conditions":[],"executionCount":0,'
+    + '"maxRetries":0}},"observedGeneration":"0","executionCount":0,'
     + '"reconciling":false,"satisfiesPzs":false,"etag":""}'
 )
 
@@ -312,9 +311,7 @@ def test_run_job() raises:
         _wire(capture),
         _expected(
             String("POST /v2/") + _NAME + ":run",
-            String('{"name":"')
-            + _NAME
-            + '","validateOnly":false,"etag":"","overrides":{"containerOverrides":'
+            String('{"validateOnly":false,"etag":"","overrides":{"containerOverrides":')
             + '[{"name":"","args":["--commit=4f2a"],"env":[{"name":"STAGE","value":"test"}],'
             + '"clearArgs":false}],"taskCount":1,"timeout":"600s"}}',
         ),
@@ -380,7 +377,7 @@ def test_cancel_execution() raises:
         _wire(capture),
         _expected(
             String("POST /v2/") + _EXECUTION + ":cancel",
-            String('{"name":"') + _EXECUTION + '","validateOnly":false,"etag":""}',
+            String('{"validateOnly":false,"etag":""}'),
         ),
     )
     assert_false(op.done)

@@ -11,12 +11,11 @@
 # (resolved without the network) with `set_rest_host`; the default host is
 # test_secretmanager_endpoint's subject.
 #
-# Two parts of the bodies are the codec's, not the API's. komira_proto_codec
-# writes default-valued fields (`"name":""`, `"labels":{}`, an enum's
+# komira_proto_codec writes a scalar or enum at its default (`"name":""`,
 # `..._UNSPECIFIED`), which the proto3 JSON mapping lets a writer omit and
-# the service reads as unset. And a `body: "*"` method (AddSecretVersion)
-# carries its path field (`parent`) in the body as well, with the value the
-# path has; the HTTP transcoding binds the path value either way.
+# the service reads as unset; an empty list or map it leaves out. A
+# `body: "*"` method (AddSecretVersion) leaves its path field (`parent`)
+# out of the body, as google/api/http.proto states.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -150,8 +149,7 @@ def test_add_secret_version() raises:
         _wire(capture),
         _expected(
             "POST /v1/projects/demo-project/secrets/smtp-password:addVersion",
-            '{"parent":"projects/demo-project/secrets/smtp-password",'
-            + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}',
+            '{"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}',
         ),
     )
     assert_equal(resp.name, "projects/123456789012/secrets/smtp-password/versions/4")
@@ -186,7 +184,7 @@ def test_create_secret() raises:
         _expected(
             "POST /v1/projects/demo-project/secrets?secretId=smtp-password",
             '{"name":"","replication":{"automatic":{}},"labels":{"owner":"deploy"},'
-            + '"topics":[],"etag":"","versionAliases":{},"annotations":{},"tags":{},'
+            + '"etag":"",'
             + '"secretType":"SECRET_TYPE_UNSPECIFIED"}',
         ),
     )

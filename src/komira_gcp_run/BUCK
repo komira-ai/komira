@@ -34,14 +34,6 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # upstream data here: it goes when the generator applies a service
 # configuration's `http.rules` itself.
 #
-# Methods whose request is the whole body (`body: "*"`: RunJob,
-# CancelExecution, WaitOperation) also write the path-bound `name` into the
-# body, with the value the path carries, and the codec writes each field at
-# its default. google/api/http.proto puts only the fields the path does not
-# bind in such a body; the service binds the path's value and reads a
-# default as unset, so the extra fields carry nothing it uses. The tests
-# pin those exact bodies, so a change to either shows up there.
-#
 # `bundle_only` is the part of the run_v2 closure those methods reach.
 # `module_names` gives two files their modules: `k8s.min.proto` (its stem
 # is not a module name) and Run's own `status.proto`, beside
