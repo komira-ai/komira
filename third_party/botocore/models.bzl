@@ -32,6 +32,11 @@ BOTOCORE_MODELS = {
         api_version = "2014-03-28",
         sha256 = "b3c6eb36bc6e4975bdbab2592fcea79c21ce323c29ddb7f40ff1b0d0a5838c30",
     ),
+    # Amazon Route 53 (//src/komira_aws_route53).
+    "route53": struct(
+        api_version = "2013-04-01",
+        sha256 = "29dae1683f6128df6cad788a27af0e1aa1ce0e71a99e99b1c4e4d6f24e2b159b",
+    ),
     # Amazon S3 (//src/komira_aws_s3). Its ruleset and endpoint test cases
     # are also run through komira_aws_core's interpreter and a generated
     # test client, whose bindings are checked against this model.

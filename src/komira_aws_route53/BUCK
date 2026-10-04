@@ -1,0 +1,102 @@
+load(
+    "@komira//third_party/botocore:models.bzl",
+    "botocore_endpoint_file",
+    "botocore_endpoint_tests_path",
+    "botocore_model",
+)
+load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
+
+# Amazon Route 53: a restXml client generated at build time from
+# botocore's route53 model (//third_party/botocore, pinned by sha256;
+# nothing of it is copied here), in client mode: each operation's request
+# builder and response parser, its endpoint resolved through Route 53's
+# published endpoint ruleset and partition table, embedded in the module,
+# and `Route53Route53Client`, which resolves each call's endpoint and sends
+# through komira_aws_core's send_sigv4_signed_request (signing name
+# `route53`) over the komira_http_core Connector it is given, retried as
+# botocore's standard mode retries (PriorRequestNotComplete, Route 53's
+# answer while an earlier change to a zone is being applied, is a throttle).
+#
+# Route 53 is a global service. The ruleset sends every call to one
+# endpoint per partition, whatever region the client is configured in
+# (https://route53.amazonaws.com in `aws`), and names the region it is
+# signed in through the endpoint's `authSchemes` (us-east-1 in `aws`,
+# cn-northwest-1 in `aws-cn`, us-gov-west-1 in `aws-us-gov`), which
+# komira_aws_core's aws_signing_target applies. Nothing here names a host
+# or a signing region. A custom endpoint (LocalStack) states no scheme and
+# is signed in the client's region, as botocore signs it.
+#
+# `operations` is what a DNS-record resource needs: the hosted zone that
+# covers a name, the record sets at a name and type, and an UPSERT or
+# DELETE of a record set. An operation joins the list with its own rows in
+# the tests below. The generator refuses none of Route 53's operations at
+# the pinned model.
+#
+# Left to the caller, which botocore does for Route 53 in a handler beyond
+# the model (`fix_route53_ids`): an Id is passed bare (`Z1D633PJN98FT9`),
+# without the `/hostedzone/` or `/change/` prefix Route 53 answers with. A
+# prefixed one is sent percent-encoded as one path segment and answered as
+# an unknown zone (test_route53_requests).
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Amazon Route 53 API reference (no upstream test body is
+# copied): test_route53_requests (the request each operation builds,
+# exactly), test_route53_responses (each result decoded, and the
+# <ErrorResponse> error form read through komira_aws_core),
+# test_route53_endpoints (botocore's endpoint cases for route53 through
+# every operation's resolver, each signing region checked against the
+# case's auth scheme; a client in eu-west-1 sent to the global endpoint
+# and signed in us-east-1; the China and GovCloud partitions, FIPS,
+# dual-stack and LocalStack; and two requests signed end to end against
+# independently computed signatures), test_no_env_reads (the generated
+# module reads no environment) and test_route53_client (the generated
+# client over a scripted connector: a call answered, a missing zone
+# raised under its code, each verb's request as it reached the wire
+# through komira_aws_core's AwsEchoConnector, and over injected seams a
+# regional client's calls to the global endpoint, a
+# PriorRequestNotComplete resent).
+#
+# No test here talks to the service.
+
+_ROUTE53 = botocore_model("route53")
+
+_ENDPOINT_TESTS = botocore_endpoint_tests_path("route53")
+
+mojo_aws_client(
+    name = "komira_aws_route53",
+    endpoint_rules = _ROUTE53.endpoint_rules,
+    mode = "client",
+    model = _ROUTE53.model,
+    model_sha256 = _ROUTE53.sha256,
+    operations = [
+        "ChangeResourceRecordSets",
+        "ListHostedZonesByName",
+        "ListResourceRecordSets",
+    ],
+    partitions = _ROUTE53.partitions,
+    test_data = {
+        "tests/test_no_env_reads.mojo": {
+            "gen/" + f: ":komira_aws_route53_gen[{}]".format(f)
+            for f in ["__init__.mojo", "_layout_probe.mojo", "komira_aws_route53.mojo"]
+        },
+        "tests/test_route53_endpoints.mojo": {
+            _ENDPOINT_TESTS: botocore_endpoint_file(_ENDPOINT_TESTS),
+        },
+    },
+    test_srcs = [
+        "tests/test_no_env_reads.mojo",
+        "tests/test_route53_client.mojo",
+        "tests/test_route53_endpoints.mojo",
+        "tests/test_route53_requests.mojo",
+        "tests/test_route53_responses.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        # The client's `send_with` and `<op>_with` take a komira_retry loop.
+        "//src/komira_retry:komira_retry",
+        "//src/komira_xml:komira_xml",
+    ],
+)
