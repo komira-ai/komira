@@ -21,25 +21,43 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 #
 # EC2's model declares several hundred operations; the generator is
 # operation-scoped, so only the closure of the twelve below is emitted.
-# They are what komira's callers do with EC2: an instance launched (on
-# demand or spot), found and terminated; a spot request read and cancelled;
-# the VPCs and subnets of an account read; a security group created, read,
-# opened, closed and deleted. The generator refuses none of them. An
-# operation joins the list with its own rows in the tests below.
+# They cover an instance's, a spot request's and a security group's
+# lifecycle: an instance launched (on demand or spot), found and
+# terminated; a spot request read and cancelled; the VPCs and subnets of an
+# account read; a security group created, read, opened, closed and deleted.
+# The generator refuses none of them. An operation joins the list with its
+# own rows in the tests below.
+#
+# RunInstances' ClientToken is the model's idempotency token. When the
+# caller leaves it unset, the client fills it with a fresh UUID once per
+# call, before the request is built, as botocore does
+# (generate_idempotent_uuid), so a launch retried after a 5xx or a dropped
+# response carries the same token and EC2 does not launch twice. A
+# caller's own token is sent as given (test_ec2_client).
+#
+# One departure from botocore: a 200 with an empty body parses as a result
+# with no members set, where botocore's EC2QueryParser raises a
+# ResponseParserError (the shared awsQuery/ec2Query reader,
+# komira_aws_core's aws_query.mojo, reads an empty body as an empty
+# element). test_ec2_responses pins it.
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the EC2 API reference (no upstream test body is copied):
 # test_ec2_requests (the form body each operation builds, exactly: ec2
 # names, unwrapped lists, nested structures), test_ec2_responses (each
-# result read from the root, and the <Response><Errors><Error> document and
-# a throttle read through komira_aws_core), test_ec2_endpoints (botocore's
+# result read from the root, the <Response><Errors><Error> document, a
+# throttle read through komira_aws_core and counted a throttle by its
+# retry classifier, and an empty body), test_ec2_endpoints (botocore's
 # endpoint cases for ec2 through every operation's resolver, the regional,
 # FIPS, dual-stack and LocalStack endpoints, and two requests signed end to
 # end against independently computed signatures), test_no_env_reads (the
 # generated module reads no environment) and test_ec2_client (the generated
 # client over a scripted connector, a missing instance raised under its
-# code, and the DescribeVpcs request as it reached the wire, through
-# komira_aws_core's AwsEchoConnector).
+# code, the DescribeVpcs request as it reached the wire, through
+# komira_aws_core's AwsEchoConnector, and over the verbs' seams: a
+# RunInstances resent after a 503 with the token it filled, a token the
+# caller sets sent as given, and a RequestLimitExceeded resent after one
+# backoff).
 #
 # No test here talks to the service.
 

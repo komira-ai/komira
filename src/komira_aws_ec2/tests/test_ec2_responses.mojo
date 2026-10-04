@@ -23,7 +23,13 @@ from komira_aws_ec2.komira_aws_ec2 import (
     parse_run_instances_response,
     parse_terminate_instances_response,
 )
-from komira_aws_core import AwsResponse, HttpResult, aws_query_error, aws_response_error_code
+from komira_aws_core import (
+    AwsResponse,
+    HttpResult,
+    aws_is_throttling_code,
+    aws_query_error,
+    aws_response_error_code,
+)
 from std.testing import assert_equal, assert_false, assert_true
 
 
@@ -312,6 +318,10 @@ def test_delete_security_group() raises:
 
 
 def test_an_empty_body_sets_nothing() raises:
+    # A DEPARTURE FROM BOTOCORE, pinned so it cannot change unseen: its
+    # EC2QueryParser raises a ResponseParserError on an empty 200 body, and
+    # komira_aws_core's shared awsQuery/ec2Query reader reads an empty body
+    # as an empty element, so no member is set (the BUCK file says so).
     var out = parse_delete_security_group_response(AwsResponse.of_text(200, String("")))
     assert_false(Bool(out.return_))
     assert_false(Bool(out.group_id))
@@ -346,6 +356,8 @@ def test_a_throttle_is_read_by_its_code() raises:
     bytes.extend(Span(body.as_bytes()))
     assert_equal(aws_response_error_code(HttpResult(503, bytes^)), "RequestLimitExceeded")
     assert_equal(aws_query_error(AwsResponse.of_text(503, body)).code, "RequestLimitExceeded")
+    # And the classifier counts it a throttle (test_ec2_client resends one).
+    assert_true(aws_is_throttling_code(String("RequestLimitExceeded")))
 
 
 def main() raises:
