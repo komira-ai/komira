@@ -432,7 +432,11 @@ proto_codegen_golden(
 # ---- REST clients: path templates, query fields and refusals ---------------
 # corpus/google/api/annotations.proto declares the `(google.api.http)` option
 # every REST fixture imports, and corpus/google/api/client.proto the
-# `(google.api.default_host)` service option.
+# `(google.api.default_host)` service option. Both are stubs declaring only
+# the extension protoc-gen-mojo reads, not the googleapis files: a case's
+# srcs are its corpus, every file under corpus/ (defs.bzl), so the pinned
+# //tools/vendor/googleapis files cannot be named here until the case rule
+# takes a second import root.
 
 _ANNOTATIONS = "corpus/google/api/annotations.proto"
 
