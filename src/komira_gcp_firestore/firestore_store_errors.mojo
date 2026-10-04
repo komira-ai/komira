@@ -12,9 +12,9 @@
 # is not re-emitted in the vocabulary they read turns an ordinary
 # concurrent-deploy retry into a fatal write failure.
 #
-# The two classifiers this module is written against — copied here verbatim so
-# the thing being satisfied is visible next to the thing satisfying it — are
-# `komira_service_registry/directory.mojo`'s:
+# The two classifiers this module is written against — the substring
+# predicates generic `ConditionalWriteStore` consumers carry, written out here
+# so the thing being satisfied is visible next to the thing satisfying it — are:
 #
 #     _is_precondition_failed(e):  "StoreError[PRECONDITION]" | "precondition"
 #                                  | "Precondition" | "PreconditionFailed" | "412"
@@ -48,16 +48,16 @@
 #
 #   * `FirestoreDatabaseAbsent:` — the configured DATABASE does not exist. It is
 #     an HTTP **404** whose body says **NOT_FOUND**. Pass that text through and
-#     `_is_not_found` fires: every lookup answers "not registered", the serving
-#     app returns `200 {"found":false}` forever, and the registry reports an
+#     `_is_not_found` fires: every lookup answers "absent", a caller serving
+#     those lookups answers "not found" forever, and the store looks like an
 #     empty world instead of a broken deploy. (This is the same conflation that
 #     let a service run for days against a database that did not exist; see
 #     `FIRESTORE_DATABASE_ABSENT_PREFIX`'s own comment.)
 #   * `FirestoreDatabasePrecondition:` — a missing COMPOSITE INDEX. The token
 #     `Precondition` is IN THE SENTINEL'S OWN NAME. Pass it through and
-#     `_is_precondition_failed` fires: `publish_endpoint` reads a permanent
-#     database fault as a lost CAS race, retries once, fails identically, and
-#     raises "persistent CAS contention — retry the deploy". The diagnosis is
+#     `_is_precondition_failed` fires: a last-writer-wins publisher reads a
+#     permanent database fault as a lost CAS race, retries once, fails
+#     identically, and raises "persistent CAS contention — retry". The diagnosis is
 #     wrong, the remedy printed to the operator is wrong, and the real cause
 #     (apply an index) is never named.
 #
@@ -274,8 +274,8 @@ def defusing_changed(s: String) -> Bool:
 
 
 def store_error_says_precondition(msg: String) -> Bool:
-    """`komira_service_registry/directory.mojo:_is_precondition_failed`, verbatim
-    — the predicate the emitted message will be read by."""
+    """The consumer-side `_is_precondition_failed` substring predicate, token
+    for token — the predicate the emitted message will be read by."""
     return (
         msg.find("StoreError[PRECONDITION]") >= 0
         or msg.find("precondition") >= 0
@@ -286,7 +286,7 @@ def store_error_says_precondition(msg: String) -> Bool:
 
 
 def store_error_says_not_found(msg: String) -> Bool:
-    """`komira_service_registry/directory.mojo:_is_not_found`, verbatim."""
+    """The consumer-side `_is_not_found` substring predicate, token for token."""
     return (
         msg.find("StoreError[NOT_FOUND]") >= 0
         or msg.find("not_found") >= 0
@@ -383,8 +383,8 @@ def firestore_store_error_kind(err: String) -> String:
 
       * DATABASE ABSENT -> MALFORMED, **not** NOT_FOUND. It is a permanent
         configuration fault affecting every request forever. As NOT_FOUND the
-        registry would answer `found:false` for every service in the world and
-        look healthy doing it.
+        store would answer "absent" for every key in the world and look healthy
+        doing it.
       * DATABASE PRECONDITION (a missing composite index) -> MALFORMED, **not**
         PRECONDITION. It is permanent; as a CAS conflict the caller retries,
         fails identically, and reports contention that does not exist."""

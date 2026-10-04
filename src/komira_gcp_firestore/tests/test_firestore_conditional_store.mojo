@@ -1,7 +1,9 @@
 """Acceptance gate — the FIRESTORE `ConditionalWriteStore` conformer.
 
-The service registry's directory is `[Store: ConditionalWriteStore]`-generic;
-this file proves the Firestore conformer is one it can run on.
+A consumer written generically over `[Store: ConditionalWriteStore]` must be
+able to run on this conformer unchanged; this file proves it, by driving the
+conformer through `_LastWriterWinsKv` (§5), a neutral in-file generic consumer
+whose call sequences are the canonical ones such a consumer makes.
 
 ⛔ WHAT THIS FILE IS ACTUALLY ABOUT, AND IT IS NOT THE CAS. Both CAS primitives
 already existed on `FirestoreClient` (`create_if_absent`,
@@ -11,50 +13,54 @@ conflict?" and "was that an absent object?" by SUBSTRING-SCANNING the error
 message, so a mapping that is right in the code and wrong in the WORDS is
 undetectable by inspection and catastrophic in production.
 
-The two classifiers being satisfied (`komira_service_registry/directory.mojo`)
-are re-implemented here from their own source text — `_directory_says_*` — so
-what the gates assert is the consumer's real predicate, not a paraphrase of it.
+The two classifiers being satisfied are the substring predicates generic
+`ConditionalWriteStore` consumers carry (`_consumer_says_*`, §0), and
+`_LastWriterWinsKv` makes every one of its decisions with exactly those two, so
+what the gates assert is the predicate a caller really reads, not a paraphrase
+of it.
 
 GATES
 
-  1. KEY MAPPING. `service/<name>` -> collection `service`, document `<name>`;
+  1. KEY MAPPING. `item/<name>` -> collection `item`, document `<name>`;
      a 4-segment key is a sub-collection document; an ODD segment count is a
      REFUSAL (it names a collection, and there is no document there); reserved
      `__…__` ids and over-long ids are refusals.
-  2. DISCOVERY, END TO END, THROUGH `ServiceDirectory` over a stateful Firestore
-     double at the HTTP boundary: publish -> resolve -> REPUBLISH (last-writer-
-     wins) -> resolve, plus `publish_endpoint_if_changed` writing iff changed.
+  2. LAST-WRITER-WINS, END TO END, THROUGH `_LastWriterWinsKv` over a stateful
+     Firestore double at the HTTP boundary: publish -> read -> REPUBLISH (head +
+     CAS on the etag) -> read, plus `publish_if_changed` writing iff changed.
   3. CREATE-OR-CONFLICT on the stateful double: a SECOND create of a key is
      REFUSED as a precondition, and the stored value is UNCHANGED.
   5. ★ THE 412. A Firestore 409 ALREADY_EXISTS (the create precondition lost)
      becomes `StoreError[PRECONDITION] … status=412`, and the CONSUMER's
      predicate reads it as a conflict and NOT as an absence.
   6. ★ THE OTHER 412. A 400 FAILED_PRECONDITION (the updateTime CAS lost) maps
-     the same way — and drives `publish_endpoint`'s retry-once rather than a
+     the same way — and drives `publish`'s retry-once rather than a
      fatal write.
   7. AN ABSENT DOCUMENT is `StoreError[NOT_FOUND] … status=404`, which
-     `ServiceDirectory` turns into `found=0 source=store` — not a raise.
+     a generic reader turns into an absent answer (`found=False`) — not a
+     raise.
   8. ★★ AN ABSENT **DATABASE** IS NOT AN ABSENT OBJECT. Firestore answers both
      with NOT_FOUND to a document GET; the client reads documents with
      BatchGetDocuments, where an absent document is a `missing` result, so a
      NOT_FOUND status is the database. Passed through as NOT_FOUND, every
-     lookup would answer "not registered" and the registry report an empty
-     world while a deploy is broken. The mapped error must be read as NEITHER
-     family, and `resolve_endpoint` must RAISE.
+     lookup would answer "absent" and the store look like an empty world
+     while it is broken. The mapped error must be read as NEITHER
+     family, and `read` must RAISE.
   9. ★★ A MISSING COMPOSITE INDEX IS NOT A LOST CAS. The sentinel's own name
-     contains the token `Precondition`. Passed through, `publish_endpoint` reads
-     a permanent database fault as contention and reports "retry the deploy".
+     contains the token `Precondition`. Passed through, `publish` reads
+     a permanent database fault as contention and reports "retry".
  10. THE REST OF THE TAXONOMY: 403 -> PERMISSION_DENIED, 503 -> THROTTLED,
      500 -> TRANSPORT — every one of them read as NEITHER family, so the
      consumer re-raises instead of swallowing.
- 11. ★★ THE DEFUSER. A service literally NAMED `404` must not be able to
+ 11. ★★ THE DEFUSER. A key literally NAMED `404` must not be able to
      change the class of the error it appears in, and a Google message
      containing the word `precondition` never reaches the error at all (the
      generated client keeps no byte of a body). This is the arm that makes
      gates 8/9/10 hold for inputs nobody chose.
  12. ★ THE CAS HANDLE IS `head().etag`, NOT ONLY `.version`. This is the
      leg-C `_HEAD`-advance defect `GcsGrpcConditionalStore` documents, and
-     `ServiceDirectory._try_last_writer_wins` reads exactly `meta.etag`.
+     a last-writer-wins publish (`_LastWriterWinsKv._try_once`) reads exactly
+     `meta.etag`.
  13. DELETE is idempotent on an absent DOCUMENT and RAISES on an absent
      DATABASE — the swallow is on the typed prefix, tested before mapping.
  14. LIST returns full object keys a caller can feed back to `get`; the ROOT
@@ -64,9 +70,9 @@ GATES
      read as an empty object.
  16. ⛔ THE REFUSE-EVERYTHING CONTROL. A store whose transport raises on every
      call, driven through every positive gate above. Each one must RAISE — and
-     in particular `resolve_endpoint` must RAISE rather than answer
-     `found=false`, because a dead transport reported as an unregistered service
-     is gate 8's failure wearing a different hat.
+     in particular `read` must RAISE rather than answer
+     `found=false`, because a dead transport reported as an absent key is
+     gate 8's failure wearing a different hat.
 
 HERMETIC. A stateful in-file Firestore double (`_FakeFirestore`, served by
 komira_gcp_firestore's `ExchangeConnector`) and the shipped `ScriptedFirestore`,
@@ -127,31 +133,29 @@ from komira_gcp_firestore.firestore_store_errors import (
 )
 
 from komira_objectstore.path import Path
+from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import ObjectMeta, WritePrecondition
-
-from komira_service_registry import (
-    RESOLVE_SOURCE_STORE,
-    ServiceDirectory,
-)
 
 
 comptime _PROJECT: StaticString = "example-project"
-comptime _DATABASE: StaticString = "registry"
+comptime _DATABASE: StaticString = "example-db"
 
 
 # =============================================================================
 # §0 — THE CONSUMER'S OWN PREDICATES.
 #
-# ⛔ COPIED FROM `komira_service_registry/directory.mojo`, NOT PARAPHRASED. The
-# whole point of this file is that a message can be correctly CLASSIFIED and
-# still be MISREAD, and the only thing that can prove it is not misread is the
-# reader's real code. If `directory.mojo` gains a token these must gain it too —
-# and so must `firestore_store_errors._token`, which is the same list a third
-# time and is what gate 11 exists to police.
+# ⛔ THE SUBSTRING PREDICATES A GENERIC `ConditionalWriteStore` CONSUMER CARRIES,
+# TOKEN FOR TOKEN, NOT PARAPHRASED. The whole point of this file is that a
+# message can be correctly CLASSIFIED and still be MISREAD, and the only thing
+# that can prove it is not misread is the reader's real predicate — which is
+# why `_LastWriterWinsKv` (§5) decides every branch with exactly these two. If
+# the consumer-side token list gains a token these must gain it too — and so
+# must `firestore_store_errors._token`, which is the same list a third time and
+# is what gate 11 exists to police.
 # =============================================================================
 
 
-def _directory_says_precondition(msg: String) -> Bool:
+def _consumer_says_precondition(msg: String) -> Bool:
     return (
         msg.find("StoreError[PRECONDITION]") >= 0
         or msg.find("precondition") >= 0
@@ -161,7 +165,7 @@ def _directory_says_precondition(msg: String) -> Bool:
     )
 
 
-def _directory_says_not_found(msg: String) -> Bool:
+def _consumer_says_not_found(msg: String) -> Bool:
     return (
         msg.find("StoreError[NOT_FOUND]") >= 0
         or msg.find("not_found") >= 0
@@ -179,8 +183,8 @@ def _assert_reads_as(
     ⚠ BOTH DIRECTIONS, ALWAYS. Asserting only "reads as a conflict" would pass
     for a message that reads as a conflict AND as an absence, which is precisely
     what an undefused Firestore 404-with-a-database-message is."""
-    var pre = _directory_says_precondition(msg)
-    var nf = _directory_says_not_found(msg)
+    var pre = _consumer_says_precondition(msg)
+    var nf = _consumer_says_not_found(msg)
     if pre != want_precondition:
         raise Error(
             ctx + ": the CONSUMER's precondition predicate says "
@@ -239,7 +243,7 @@ def _found(doc_json: String) -> String:
 
 def _body_database_absent() -> String:
     return String(
-        '{"error":{"code":404,"message":"The database registry does not exist'
+        '{"error":{"code":404,"message":"The database example-db does not exist'
         ' for project example-project. Please visit'
         ' https://console.cloud.google.com/datastore/setup?project=example-project'
         ' to add a Cloud Datastore or Cloud Firestore database.",'
@@ -494,10 +498,10 @@ def _fake_store(var t: _FakeFirestore) -> FirestoreConditionalStore[_Fake]:
     return FirestoreConditionalStore[_Fake](c^, String(_DATABASE))
 
 
-def _fake_directory(
+def _fake_consumer(
     var t: _FakeFirestore,
-) -> ServiceDirectory[FirestoreConditionalStore[_Fake]]:
-    return ServiceDirectory[FirestoreConditionalStore[_Fake]](_fake_store(t^))
+) -> _LastWriterWinsKv[FirestoreConditionalStore[_Fake]]:
+    return _LastWriterWinsKv[FirestoreConditionalStore[_Fake]](_fake_store(t^))
 
 
 def _scripted_store(
@@ -509,14 +513,14 @@ def _scripted_store(
     return FirestoreConditionalStore[ScriptedConnector](c^, String(_DATABASE))
 
 
-def _refusing_directory() -> ServiceDirectory[FirestoreConditionalStore[_Fake]]:
+def _refusing_consumer() -> _LastWriterWinsKv[FirestoreConditionalStore[_Fake]]:
     var c = FirestoreClient[_Fake](
         _Fake.refuse_every_dial(ArcPointer[_FakeFirestore](_FakeFirestore())),
         String(_PROJECT),
         String(_DATABASE),
         String("test-bearer"),
     )
-    return ServiceDirectory[FirestoreConditionalStore[_Fake]](
+    return _LastWriterWinsKv[FirestoreConditionalStore[_Fake]](
         FirestoreConditionalStore[_Fake](c^, String(_DATABASE))
     )
 
@@ -536,6 +540,137 @@ def _s(b: List[UInt8]) -> String:
     return out^
 
 
+# =============================================================================
+# §5 — A NEUTRAL GENERIC CONSUMER: `_LastWriterWinsKv[Store]`.
+#
+# What the gates need is not a particular product but the CALL SEQUENCES a
+# consumer generic over `ConditionalWriteStore` makes, decided by the §0
+# predicates. This is the smallest such consumer, written against the trait
+# only, so it runs unchanged on any conformer:
+#
+#   publish            head -> absent ? conditional_put(If-None-Match: *)
+#                                     : compare_and_swap(head().etag)
+#                      a 412 (either arm) is a lost race: RETRY ONCE, then raise.
+#   publish_if_changed read first; write only when the stored value differs.
+#   read               get; a NOT_FOUND is an ABSENT answer, anything else RAISES.
+#   remove             head-then-delete; True iff something was there.
+#   list_names         list_with_delimiter("item/"), prefix stripped.
+#
+# Every `except` arm reads the error ONLY through `_consumer_says_*` — the point
+# of the file. A conformer whose words lie is caught here exactly as it would
+# be by a real caller.
+# =============================================================================
+
+comptime _ITEM_PREFIX: StaticString = "item"
+
+
+@fieldwise_init
+struct _Lookup(Copyable, Movable):
+    """One read: the key consulted, whether it was present, and the value."""
+
+    var found: Bool
+    var value: String
+    var key: String
+
+
+struct _LastWriterWinsKv[Store: ConditionalWriteStore](Movable):
+    """`item/<name>` -> value bytes, last writer wins, over ONE moved-in store."""
+
+    var _store: Self.Store
+
+    def __init__(out self, var store: Self.Store):
+        self._store = store^
+
+    def into_store(deinit self) -> Self.Store:
+        return self._store^
+
+    def key_of(self, name: String) -> String:
+        return String(_ITEM_PREFIX) + String("/") + name
+
+    def publish(mut self, name: String, value: String) raises:
+        var path = Path.parse(self.key_of(name))
+        var bytes = _b(value)
+        if self._try_once(path, bytes):
+            return
+        if self._try_once(path, bytes):
+            return
+        raise Error(
+            "last-writer-wins: persistent CAS contention writing '" + name
+            + "' (412 twice) — retry"
+        )
+
+    def publish_if_changed(mut self, name: String, value: String) raises -> Bool:
+        var cur = self.read(name)
+        if cur.found and cur.value == value:
+            return False
+        self.publish(name, value)
+        return True
+
+    def read(self, name: String) raises -> _Lookup:
+        var key = self.key_of(name)
+        try:
+            var bytes = self._store.get(Path.parse(key))
+            return _Lookup(True, _s(bytes), key)
+        except e:
+            if _consumer_says_not_found(String(e)):
+                return _Lookup(False, String(""), key)
+            raise e^
+
+    def remove(mut self, name: String) raises -> Bool:
+        var path = Path.parse(self.key_of(name))
+        try:
+            _ = self._store.head(path)
+        except e:
+            if _consumer_says_not_found(String(e)):
+                return False
+            raise e^
+        try:
+            self._store.delete(path)
+        except e:
+            if _consumer_says_not_found(String(e)):
+                return False
+            raise e^
+        return True
+
+    def list_names(self) raises -> List[String]:
+        var head = String(_ITEM_PREFIX) + String("/")
+        var res = self._store.list_with_delimiter(Path.parse(head))
+        var out = List[String]()
+        for i in range(len(res.objects)):
+            var loc = String(res.objects[i].location)
+            if not loc.startswith(head):
+                raise Error("last-writer-wins: listed key outside prefix: " + loc)
+            out.append(String(unsafe_from_utf8=loc.as_bytes()[head.byte_length() :]))
+        return out^
+
+    def _try_once(self, path: Path, bytes: List[UInt8]) raises -> Bool:
+        """One head + conditional-write cycle. True on commit, False on a 412."""
+        var cur_etag = Optional[String]()
+        try:
+            var meta = self._store.head(path)
+            cur_etag = Optional[String](meta.etag)
+        except e:
+            if not _consumer_says_not_found(String(e)):
+                raise e^
+        if not cur_etag:
+            try:
+                _ = self._store.conditional_put(
+                    path, bytes, WritePrecondition.if_none_match_star()
+                )
+                return True
+            except e:
+                if _consumer_says_precondition(String(e)):
+                    return False
+                raise e^
+        try:
+            _ = self._store.compare_and_swap(path, bytes, cur_etag.value())
+            return True
+        except e:
+            if _consumer_says_precondition(String(e)):
+                return False
+            raise e^
+
+
 
 # =============================================================================
 # GATE 1 — the key mapping.
@@ -543,17 +678,17 @@ def _s(b: List[UInt8]) -> String:
 
 
 def test_gate1_an_object_key_is_a_firestore_document_path() raises:
-    var two = split_document_path(String("service/api-svc"))
-    assert_equal(String(two[0]), String("service"))
+    var two = split_document_path(String("item/api-svc"))
+    assert_equal(String(two[0]), String("item"))
     assert_equal(String(two[1]), String("api-svc"))
 
-    # The identity keyspace: a fingerprint is `<platform>.<escaped principal>`,
-    # which is `[A-Za-z0-9.-_]` by construction — every byte of it is a legal
-    # Firestore id, and it can never begin `__` because a platform token is
-    # `[a-z0-9-]`. So the enrollment keyspace needs NO escaping here.
-    var idk = String("identity/gcp.worker_40example-project.iam.gserviceaccount.com")
+    # A dotted, escaped id (`<platform>.<escaped principal>`) is
+    # `[A-Za-z0-9.-_]` by construction — every byte of it is a legal Firestore
+    # id, and it can never begin `__` when its first token is `[a-z0-9-]`. So
+    # such a keyspace needs NO escaping here.
+    var idk = String("owner/gcp.worker_40example-project.iam.gserviceaccount.com")
     var ident = split_document_path(idk)
-    assert_equal(String(ident[0]), String("identity"))
+    assert_equal(String(ident[0]), String("owner"))
     assert_equal(
         String(ident[1]),
         String("gcp.worker_40example-project.iam.gserviceaccount.com"),
@@ -568,7 +703,7 @@ def test_gate1_an_object_key_is_a_firestore_document_path() raises:
     # it is a refusal — never a silently-synthesised segment.
     var odd_raised = False
     try:
-        _ = split_document_path(String("service"))
+        _ = split_document_path(String("item"))
     except e:
         odd_raised = True
         _assert_contains(String(e), String("EVEN"), "one-segment key")
@@ -585,7 +720,7 @@ def test_gate1_an_object_key_is_a_firestore_document_path() raises:
     # Firestore's reserved id form.
     var reserved = False
     try:
-        _ = split_document_path(String("service/__name__"))
+        _ = split_document_path(String("item/__name__"))
     except e:
         reserved = True
         _assert_contains(String(e), String("RESERVED"), "reserved id")
@@ -597,7 +732,7 @@ def test_gate1_an_object_key_is_a_firestore_document_path() raises:
         long_name += String("x")
     var too_long = False
     try:
-        _ = split_document_path(String("service/") + long_name)
+        _ = split_document_path(String("item/") + long_name)
     except e:
         too_long = True
         _assert_contains(String(e), String("1500"), "over-long id")
@@ -607,10 +742,10 @@ def test_gate1_an_object_key_is_a_firestore_document_path() raises:
     assert_equal(
         key_from_document_name(
             String(
-                "projects/example-project/databases/registry/documents/service/api"
+                "projects/example-project/databases/example-db/documents/item/api"
             )
         ),
-        String("service/api"),
+        String("item/api"),
     )
 
 
@@ -622,47 +757,45 @@ def test_gate1_an_object_key_is_a_firestore_document_path() raises:
 def test_gate2_discovery_is_last_writer_wins_end_to_end() raises:
     var fake = _FakeFirestore()
     var obs = fake.handle()
-    var d = _fake_directory(fake^)
+    var d = _fake_consumer(fake^)
 
-    d.publish_endpoint(String("api-svc"), String("https://api-1.run.app"))
-    var r1 = d.resolve_endpoint(String("api-svc"))
+    d.publish(String("api-svc"), String("https://api-1.run.app"))
+    var r1 = d.read(String("api-svc"))
     assert_true(r1.found)
     assert_equal(r1.value, String("https://api-1.run.app"))
-    assert_equal(r1.key, String("service/api-svc"))
-    assert_equal(r1.source, RESOLVE_SOURCE_STORE)
+    assert_equal(r1.key, String("item/api-svc"))
 
-    # A REDEPLOY overwrites: the newest URL is the one peers must reach. This is
-    # the head+CAS path, not a create — the object already exists.
-    d.publish_endpoint(String("api-svc"), String("https://api-2.run.app"))
-    var r2 = d.resolve_endpoint(String("api-svc"))
+    # A REPUBLISH overwrites: the newest value wins. This is the head+CAS path,
+    # not a create — the object already exists.
+    d.publish(String("api-svc"), String("https://api-2.run.app"))
+    var r2 = d.read(String("api-svc"))
     assert_equal(r2.value, String("https://api-2.run.app"))
 
-    # `publish_endpoint_if_changed` is a PURE READ when nothing moved. Asserted
+    # `publish_if_changed` is a PURE READ when nothing moved. Asserted
     # on the double's WRITE COUNTER, because the return value would be equally
     # False for a store that wrote and then lied about it.
     var writes_before = obs[].n_writes()
-    var wrote = d.publish_endpoint_if_changed(
+    var wrote = d.publish_if_changed(
         String("api-svc"), String("https://api-2.run.app")
     )
     assert_false(wrote)
     assert_equal(obs[].n_writes(), writes_before)
 
-    var wrote2 = d.publish_endpoint_if_changed(
+    var wrote2 = d.publish_if_changed(
         String("api-svc"), String("https://api-3.run.app")
     )
     assert_true(wrote2)
     assert_true(obs[].n_writes() > writes_before)
     assert_equal(
-        d.resolve_endpoint(String("api-svc")).value,
+        d.read(String("api-svc")).value,
         String("https://api-3.run.app"),
     )
 
-    # An unregistered name is an ABSENT result SOURCED FROM THE STORE — never a
-    # raise, and never a third source. This is what the serving app renders as
-    # `200 {"found":false}`.
-    var miss = d.resolve_endpoint(String("never-deployed"))
+    # A never-written name is an ABSENT answer read from the store — never a
+    # raise.
+    var miss = d.read(String("never-written"))
     assert_false(miss.found)
-    assert_equal(miss.source, RESOLVE_SOURCE_STORE)
+    assert_equal(miss.key, String("item/never-written"))
 
 
 # =============================================================================
@@ -675,7 +808,7 @@ def test_gate3_a_second_create_is_refused_and_the_incumbent_stays() raises:
     var fake = _FakeFirestore()
     var obs = fake.handle()
     var store = _fake_store(fake^)
-    var key = Path.parse(String("identity/gcp.worker"))
+    var key = Path.parse(String("owner/gcp.worker"))
 
     _ = store.conditional_put(
         key, _b(String("worker")), WritePrecondition.if_none_match_star()
@@ -714,7 +847,7 @@ def test_gate5_a_create_conflict_is_StoreError_PRECONDITION_412() raises:
         409,
         _body_already_exists(
             String(
-                "projects/example-project/databases/registry/documents/identity/"
+                "projects/example-project/databases/example-db/documents/owner/"
                 "gcp.a"
             )
         ),
@@ -723,7 +856,7 @@ def test_gate5_a_create_conflict_is_StoreError_PRECONDITION_412() raises:
     var raised = False
     try:
         _ = store.conditional_put(
-            Path.parse(String("identity/gcp.a")),
+            Path.parse(String("owner/gcp.a")),
             _b(String("worker")),
             WritePrecondition.if_none_match_star(),
         )
@@ -733,8 +866,9 @@ def test_gate5_a_create_conflict_is_StoreError_PRECONDITION_412() raises:
         _assert_contains(m, String("StoreError[PRECONDITION]"), "create 412")
         _assert_contains(m, String("status=412"), "create 412")
         # ★ THE ASSERTION THE GATE IS NAMED FOR: the CONSUMER reads it as a
-        # conflict and NOT as an absence. A message that is both is what turns
-        # `enroll_identity`'s read-back into a fabricated revocation.
+        # conflict and NOT as an absence. A message that is both turns a
+        # create-or-conflict caller's "someone else owns it" into "it is gone",
+        # which that caller answers by writing again.
         _assert_reads_as(m, True, False, "create 412")
     assert_true(raised)
 
@@ -751,7 +885,7 @@ def test_gate6_a_cas_conflict_is_StoreError_PRECONDITION_412() raises:
     var raised = False
     try:
         _ = store.compare_and_swap(
-            Path.parse(String("service/api-svc")),
+            Path.parse(String("item/api-svc")),
             _b(String("https://x")),
             String("2026-10-01T12:00:01.000000Z"),
         )
@@ -765,16 +899,16 @@ def test_gate6_a_cas_conflict_is_StoreError_PRECONDITION_412() raises:
 
 def test_gate6b_a_concurrent_publisher_is_a_RETRY_not_a_fatal_write() raises:
     """The behavioural half of gate 6: a 412 that is not re-emitted in the consumer's vocabulary
-    turns an ordinary concurrent-deploy retry into a fatal write failure.
+    turns an ordinary concurrent-writer retry into a fatal write failure.
 
-    Scripted, in `publish_endpoint`'s exact call order:
+    Scripted, in `publish`'s exact call order:
       batchGet 200 -> the object exists at version T1   (head)
       commit   400 -> FAILED_PRECONDITION               (the CAS lost the race)
       batchGet 200 -> version T2                        (the retry's head)
       commit   200 -> committed                         (the retry wins)"""
     var t = ScriptedFirestore()
     var name = String(
-        "projects/example-project/databases/registry/documents/service/api-svc"
+        "projects/example-project/databases/example-db/documents/item/api-svc"
     )
     t.queue_response(
         200,
@@ -802,11 +936,11 @@ def test_gate6b_a_concurrent_publisher_is_a_RETRY_not_a_fatal_write() raises:
             '"commitTime":"2026-10-01T12:00:03.000000Z"}'
         ),
     )
-    var d = ServiceDirectory[
+    var d = _LastWriterWinsKv[
         FirestoreConditionalStore[ScriptedConnector]
     ](_scripted_store(t))
     # No raise: the 412 was READ AS A 412, so the retry ran and committed.
-    d.publish_endpoint(String("api-svc"), String("https://new"))
+    d.publish(String("api-svc"), String("https://new"))
 
 
 # =============================================================================
@@ -820,14 +954,14 @@ def test_gate7_an_absent_document_is_StoreError_NOT_FOUND_404() raises:
         200,
         _body_doc_not_found(
             String(
-                "projects/example-project/databases/registry/documents/service/x"
+                "projects/example-project/databases/example-db/documents/item/x"
             )
         ),
     )
     var store = _scripted_store(t)
     var raised = False
     try:
-        _ = store.get(Path.parse(String("service/x")))
+        _ = store.get(Path.parse(String("item/x")))
     except e:
         raised = True
         var m = String(e)
@@ -836,22 +970,22 @@ def test_gate7_an_absent_document_is_StoreError_NOT_FOUND_404() raises:
         _assert_reads_as(m, False, True, "absent doc")
     assert_true(raised)
 
-    # And through the directory: `found=0 source=store`, not a raise.
+    # And through a generic reader: `found=False`, not a raise.
     var t2 = ScriptedFirestore()
     t2.queue_response(
         200,
         _body_doc_not_found(
             String(
-                "projects/example-project/databases/registry/documents/service/x"
+                "projects/example-project/databases/example-db/documents/item/x"
             )
         ),
     )
-    var d = ServiceDirectory[
+    var d = _LastWriterWinsKv[
         FirestoreConditionalStore[ScriptedConnector]
     ](_scripted_store(t2))
-    var r = d.resolve_endpoint(String("x"))
+    var r = d.read(String("x"))
     assert_false(r.found)
-    assert_equal(r.source, RESOLVE_SOURCE_STORE)
+    assert_equal(r.key, String("item/x"))
 
 
 # =============================================================================
@@ -864,15 +998,14 @@ def test_gate8_an_absent_DATABASE_never_reads_as_an_absent_object() raises:
     with the SAME HTTP 404 and the SAME `NOT_FOUND` status token; only
     `error.message` differs. The client reads with BatchGetDocuments, where
     an absent document is a `missing` result, so NOT_FOUND is the database.
-    Read as an absent object instead, every lookup answers "not registered",
-    the serving app returns `200 {"found":false}` for every service in the
-    world, and a broken deploy looks like an empty registry."""
+    Read as an absent object instead, every lookup answers "absent" for every
+    key in the world, and a broken deploy looks like an empty store."""
     var t = ScriptedFirestore()
     t.queue_response(404, _body_database_absent())
     var store = _scripted_store(t)
     var raised = False
     try:
-        _ = store.get(Path.parse(String("service/api-svc")))
+        _ = store.get(Path.parse(String("item/api-svc")))
     except e:
         raised = True
         var m = String(e)
@@ -883,25 +1016,25 @@ def test_gate8_an_absent_DATABASE_never_reads_as_an_absent_object() raises:
         _assert_reads_as(m, False, False, "absent database")
         # The line names the store's own database and the method, status and
         # code; no byte of Google's message (it names projects and databases).
-        _assert_contains(m, String("firestore://registry/"), "absent database detail")
+        _assert_contains(m, String("firestore://example-db/"), "absent database detail")
         _assert_contains(m, String("NOT_FOUND (code 5)"), "absent database detail")
         _assert_lacks(m, String("does not exist"), "absent database detail")
         _assert_lacks(m, String("example-project"), "absent database detail")
     assert_true(raised)
 
-    # And through the directory: `_read` RE-RAISES. It must not manufacture an
+    # And through a generic reader: `read` RE-RAISES. It must not manufacture an
     # `absent` result out of a database that is not there.
     var t2 = ScriptedFirestore()
     t2.queue_response(404, _body_database_absent())
-    var d = ServiceDirectory[
+    var d = _LastWriterWinsKv[
         FirestoreConditionalStore[ScriptedConnector]
     ](_scripted_store(t2))
     var propagated = False
     try:
-        var r = d.resolve_endpoint(String("api-svc"))
+        var r = d.read(String("api-svc"))
         raise Error(
-            "resolve_endpoint reported found=" + String(r.found)
-            + " for a database that DOES NOT EXIST — the registry would report"
+            "read reported found=" + String(r.found)
+            + " for a database that DOES NOT EXIST — the store would report"
             " an empty world and look healthy doing it"
         )
     except e:
@@ -926,7 +1059,7 @@ def test_gate9_a_missing_index_never_reads_as_a_lost_cas() raises:
     var store = _scripted_store(t)
     var raised = False
     try:
-        _ = store.list_with_delimiter(Path.parse(String("service/")))
+        _ = store.list_with_delimiter(Path.parse(String("item/")))
     except e:
         raised = True
         var m = String(e)
@@ -940,22 +1073,22 @@ def test_gate9_a_missing_index_never_reads_as_a_lost_cas() raises:
     assert_true(raised)
 
     # Through a READ: a database-state precondition must not be laundered into
-    # "the service is not registered".
+    # "that key is absent".
     var t2 = ScriptedFirestore()
     t2.queue_response(400, _body_missing_index())
-    var d = ServiceDirectory[
+    var d = _LastWriterWinsKv[
         FirestoreConditionalStore[ScriptedConnector]
     ](_scripted_store(t2))
     var propagated = False
     try:
-        var r = d.resolve_endpoint(String("api-svc"))
+        var r = d.read(String("api-svc"))
         raise Error(
-            "resolve_endpoint reported found=" + String(r.found)
+            "read reported found=" + String(r.found)
             + " for a DATABASE-STATE precondition (a missing index)"
         )
     except e:
         propagated = True
-        _assert_reads_as(String(e), False, False, "missing index via directory")
+        _assert_reads_as(String(e), False, False, "missing index via reader")
     assert_true(propagated)
 
 
@@ -984,7 +1117,7 @@ def test_gate10_the_remaining_arms_are_neither_family() raises:
         var store = _scripted_store(t)
         var raised = False
         try:
-            _ = store.get(Path.parse(String("service/api-svc")))
+            _ = store.get(Path.parse(String("item/api-svc")))
         except e:
             raised = True
             var m = String(e)
@@ -1005,7 +1138,7 @@ def test_gate10_the_remaining_arms_are_neither_family() raises:
     assert_equal(
         firestore_http_status(
             String(
-                "FirestoreClient.get_document: service/api-404-500 (POST"
+                "FirestoreClient.get_document: item/api-404-500 (POST"
                 " BatchGetDocuments: HTTP 503, UNAVAILABLE (code 14), body 0 bytes)"
             )
         ),
@@ -1022,23 +1155,23 @@ def test_gate10_the_remaining_arms_are_neither_family() raises:
 
 
 def test_gate11_a_classifier_token_in_the_payload_cannot_change_the_class() raises:
-    # (a) A SERVICE LITERALLY NAMED `404`. The resource is interpolated into
+    # (a) A KEY LITERALLY NAMED `404`. The resource is interpolated into
     #     every error about it, so an undefused mapper turns every TRANSPORT
-    #     failure on this service into an absent-object verdict.
+    #     failure on this key into an absent-object verdict.
     var t = ScriptedFirestore()
     t.queue_response(500, _body_internal())
     var store = _scripted_store(t)
     var raised = False
     try:
-        _ = store.get(Path.parse(String("service/404")))
+        _ = store.get(Path.parse(String("item/404")))
     except e:
         raised = True
         var m = String(e)
-        _assert_contains(m, String("StoreError[TRANSPORT]"), "service named 404")
-        _assert_reads_as(m, False, False, "service named 404")
+        _assert_contains(m, String("StoreError[TRANSPORT]"), "key named 404")
+        _assert_reads_as(m, False, False, "key named 404")
         # Defused, not deleted — an operator must still be able to read which
-        # service the failure was about.
-        _assert_contains(m, String("4[0]4"), "service named 404")
+        # key the failure was about.
+        _assert_contains(m, String("4[0]4"), "key named 404")
     assert_true(raised)
 
     # (b) A GOOGLE MESSAGE CONTAINING THE WORD `precondition` ON A 403. Read as
@@ -1056,7 +1189,7 @@ def test_gate11_a_classifier_token_in_the_payload_cannot_change_the_class() rais
     var store2 = _scripted_store(t2)
     var raised2 = False
     try:
-        _ = store2.get(Path.parse(String("service/api-svc")))
+        _ = store2.get(Path.parse(String("item/api-svc")))
     except e:
         raised2 = True
         var m2 = String(e)
@@ -1073,12 +1206,12 @@ def test_gate11_a_classifier_token_in_the_payload_cannot_change_the_class() rais
         String("HTTP 4[0]4 and 4[1]2 and P[r]econdition"),
     )
     assert_false(
-        _directory_says_not_found(
+        _consumer_says_not_found(
             defuse_classifier_tokens(String("NotFound not_found NoSuchKey 404"))
         )
     )
     assert_false(
-        _directory_says_precondition(
+        _consumer_says_precondition(
             defuse_classifier_tokens(
                 String("PreconditionFailed precondition 412")
             )
@@ -1098,13 +1231,13 @@ def test_gate11_a_classifier_token_in_the_payload_cannot_change_the_class() rais
 
 
 def test_gate12_head_returns_the_cas_handle_in_etag_not_only_version() raises:
-    """`ServiceDirectory._try_last_writer_wins` reads `meta.etag` and feeds it
-    straight to `compare_and_swap`. A conformer that puts the CAS token only in
+    """A last-writer-wins publish (`_LastWriterWinsKv._try_once`) reads
+    `meta.etag` and feeds it straight to `compare_and_swap`. A conformer that puts the CAS token only in
     `version` makes every last-writer-wins publish CAS against `""` — the leg-C
     `_HEAD`-advance defect `GcsGrpcConditionalStore` documents."""
     var fake = _FakeFirestore()
     var store = _fake_store(fake^)
-    var p = Path.parse(String("service/api-svc"))
+    var p = Path.parse(String("item/api-svc"))
     var created = store.conditional_put(
         p, _b(String("https://a")), WritePrecondition.if_none_match_star()
     )
@@ -1115,10 +1248,10 @@ def test_gate12_head_returns_the_cas_handle_in_etag_not_only_version() raises:
     assert_true(meta.etag.byte_length() > 0)
     assert_equal(meta.etag, meta.version)
     assert_equal(meta.etag, created.etag)
-    assert_equal(meta.location, String("service/api-svc"))
+    assert_equal(meta.location, String("item/api-svc"))
     assert_equal(meta.size, Int64(9))
 
-    # THE HANDLE ROUND-TRIPS: head -> compare_and_swap, exactly as the directory
+    # THE HANDLE ROUND-TRIPS: head -> compare_and_swap, exactly as `_try_once`
     # does it.
     var swapped = store.compare_and_swap(p, _b(String("https://b")), meta.etag)
     assert_true(swapped.etag != meta.etag)
@@ -1154,18 +1287,18 @@ def test_gate12_head_returns_the_cas_handle_in_etag_not_only_version() raises:
 def test_gate13_delete_is_idempotent_but_not_on_an_absent_database() raises:
     var fake = _FakeFirestore()
     var store = _fake_store(fake^)
-    var p = Path.parse(String("service/api-svc"))
+    var p = Path.parse(String("item/api-svc"))
     _ = store.put(p, _b(String("https://a")))
     store.delete(p)
     # Idempotent: a second reap pass is not an error.
     store.delete(p)
 
-    # The directory's head-then-delete reports present/absent.
+    # A generic head-then-delete reports present/absent.
     var fake2 = _FakeFirestore()
-    var d = _fake_directory(fake2^)
-    d.publish_endpoint(String("gone"), String("https://gone"))
-    assert_true(d.withdraw_endpoint(String("gone")))
-    assert_false(d.withdraw_endpoint(String("gone")))
+    var d = _fake_consumer(fake2^)
+    d.publish(String("gone"), String("https://gone"))
+    assert_true(d.remove(String("gone")))
+    assert_false(d.remove(String("gone")))
 
     # ⛔ AN ABSENT DATABASE IS ALSO AN HTTP 404. The swallow is on the TYPED
     # prefix, tested BEFORE mapping, so it cannot reach this arm — otherwise
@@ -1175,7 +1308,7 @@ def test_gate13_delete_is_idempotent_but_not_on_an_absent_database() raises:
     var store3 = _scripted_store(t)
     var raised = False
     try:
-        store3.delete(Path.parse(String("service/api-svc")))
+        store3.delete(Path.parse(String("item/api-svc")))
     except e:
         raised = True
         _assert_contains(
@@ -1191,34 +1324,34 @@ def test_gate13_delete_is_idempotent_but_not_on_an_absent_database() raises:
 
 def test_gate14_list_returns_keys_a_caller_can_feed_back_to_get() raises:
     var fake = _FakeFirestore()
-    var d = _fake_directory(fake^)
-    d.publish_endpoint(String("api-svc"), String("https://api"))
-    d.publish_endpoint(String("worker"), String("https://worker"))
+    var d = _fake_consumer(fake^)
+    d.publish(String("api-svc"), String("https://api"))
+    d.publish(String("worker"), String("https://worker"))
 
-    var names = d.list_endpoints()
+    var names = d.list_names()
     assert_equal(len(names), 2)
 
-    # A document in a SIBLING collection must not leak into the `service/`
+    # A document in a SIBLING collection must not leak into the `item/`
     # listing: without it the 2-count below holds whether or not the listing
     # is scoped to its collection.
     var store = d^.into_store()
     _ = store.conditional_put(
-        Path.parse(String("identity/gcp.worker")),
+        Path.parse(String("owner/gcp.worker")),
         _b(String("worker")),
         WritePrecondition.if_none_match_star(),
     )
-    var ids = store.list_with_delimiter(Path.parse(String("identity/")))
+    var ids = store.list_with_delimiter(Path.parse(String("owner/")))
     assert_equal(len(ids.objects), 1)
-    assert_equal(String(ids.objects[0].location), String("identity/gcp.worker"))
+    assert_equal(String(ids.objects[0].location), String("owner/gcp.worker"))
 
     # The store-level listing hands back FULL object keys, and each one round
     # trips through `get`.
-    var res = store.list_with_delimiter(Path.parse(String("service/")))
+    var res = store.list_with_delimiter(Path.parse(String("item/")))
     assert_equal(len(res.objects), 2)
     assert_equal(len(res.common_prefixes), 0)
     for i in range(len(res.objects)):
         var loc = String(res.objects[i].location)
-        _assert_contains(loc, String("service/"), "listed key")
+        _assert_contains(loc, String("item/"), "listed key")
         var body = store.get(Path.parse(loc))
         assert_true(len(body) > 0)
         assert_true(res.objects[i].etag.byte_length() > 0)
@@ -1245,36 +1378,36 @@ def test_gate14_list_returns_keys_a_caller_can_feed_back_to_get() raises:
 
     # ⚠ A FOREIGN DOCUMENT IN THE COLLECTION IS LISTED WITH size=-1, NOT
     # refused. A listing that aborts on one document nobody here wrote cannot
-    # enumerate at all — and `list_endpoints` reads only `location`, so raising
+    # enumerate at all — and `list_names` reads only `location`, so raising
     # would break a verb over a field it never looks at.
     var t3 = ScriptedFirestore()
     t3.queue_response(
         200,
         String(
-            '[{"document":{"name":"projects/example-project/databases/registry/'
-            'documents/service/mine","fields":{"value":{"stringValue":'
+            '[{"document":{"name":"projects/example-project/databases/example-db/'
+            'documents/item/mine","fields":{"value":{"stringValue":'
             '"https://mine"}},"updateTime":"2026-10-01T12:00:01.000000Z"}},'
-            '{"document":{"name":"projects/example-project/databases/registry/'
-            'documents/service/foreign","fields":{"url":{"stringValue":'
+            '{"document":{"name":"projects/example-project/databases/example-db/'
+            'documents/item/foreign","fields":{"url":{"stringValue":'
             '"https://x"}},"updateTime":"2026-10-01T12:00:02.000000Z"}}]'
         ),
     )
     var store3 = _scripted_store(t3)
-    var listed = store3.list_with_delimiter(Path.parse(String("service/")))
+    var listed = store3.list_with_delimiter(Path.parse(String("item/")))
     assert_equal(len(listed.objects), 2)
     var saw_unknown = False
     for i in range(len(listed.objects)):
-        if listed.objects[i].location == String("service/foreign"):
+        if listed.objects[i].location == String("item/foreign"):
             assert_equal(listed.objects[i].size, Int64(-1))
             saw_unknown = True
-        if listed.objects[i].location == String("service/mine"):
+        if listed.objects[i].location == String("item/mine"):
             assert_equal(listed.objects[i].size, Int64(12))
     assert_true(saw_unknown)
 
-    assert_equal(collection_from_prefix(Path.parse(String("service/"))),
-                 String("service"))
-    assert_equal(collection_from_prefix(Path.parse(String("identity/"))),
-                 String("identity"))
+    assert_equal(collection_from_prefix(Path.parse(String("item/"))),
+                 String("item"))
+    assert_equal(collection_from_prefix(Path.parse(String("owner/"))),
+                 String("owner"))
 
 
 # =============================================================================
@@ -1288,12 +1421,12 @@ def test_gate15_the_body_round_trips_and_refuses_what_it_cannot_hold() raises:
 
     # Round trip, including the bytes that make a JSON string interesting.
     var payload = String("https://a.run.app/x?q=\"1\"&p=a\\b")
-    var p = Path.parse(String("service/api-svc"))
+    var p = Path.parse(String("item/api-svc"))
     _ = store.put(p, _b(payload))
     assert_equal(_s(store.get(p)), payload)
 
     # An EMPTY body is a legitimate stored value, and `head` reports size 0.
-    var p2 = Path.parse(String("service/empty"))
+    var p2 = Path.parse(String("item/empty"))
     _ = store.put(p2, List[UInt8]())
     assert_equal(len(store.get(p2)), 0)
     assert_equal(store.head(p2).size, Int64(0))
@@ -1316,7 +1449,7 @@ def test_gate15_the_body_round_trips_and_refuses_what_it_cannot_hold() raises:
     binary.append(UInt8(0xA9))
     var refused = False
     try:
-        _ = store.put(Path.parse(String("service/binary")), binary)
+        _ = store.put(Path.parse(String("item/binary")), binary)
     except e:
         refused = True
         _assert_contains(String(e), String("printable ASCII"), "binary body")
@@ -1336,8 +1469,8 @@ def test_gate15_the_body_round_trips_and_refuses_what_it_cannot_hold() raises:
         200,
         _found(
             String(
-                '{"name":"projects/example-project/databases/registry/documents/'
-                'service/foreign","fields":{"url":{"stringValue":"https://x"}},'
+                '{"name":"projects/example-project/databases/example-db/documents/'
+                'item/foreign","fields":{"url":{"stringValue":"https://x"}},'
                 '"updateTime":"2026-10-01T12:00:01.000000Z"}'
             )
         ),
@@ -1345,7 +1478,7 @@ def test_gate15_the_body_round_trips_and_refuses_what_it_cannot_hold() raises:
     var store2 = _scripted_store(t)
     var foreign = False
     try:
-        _ = store2.get(Path.parse(String("service/foreign")))
+        _ = store2.get(Path.parse(String("item/foreign")))
     except e:
         foreign = True
         _assert_contains(String(e), String("carries no 'value' field"), "foreign")
@@ -1372,47 +1505,47 @@ def test_gate16_CONTROL_every_positive_gate_reds_on_refuse_everything() raises:
     ⛔ THE SECOND ASSERTION IN EACH BLOCK IS THE POINT, NOT THE FIRST. It is not
     enough that a lookup fails — it must fail LOUDLY. A dead transport reported
     as `found=false` is gate 8's catastrophe with a different cause: the
-    registry would answer "that service is not registered" for every service,
+    store would answer "that key is absent" for every key,
     forever, while looking healthy."""
-    var d = _refusing_directory()
+    var d = _refusing_consumer()
 
     var pub = False
     try:
-        d.publish_endpoint(String("api-svc"), String("https://a"))
+        d.publish(String("api-svc"), String("https://a"))
     except:
         pub = True
-    _must_raise(pub, "publish_endpoint")
+    _must_raise(pub, "publish")
 
     var res = False
     try:
-        var r = d.resolve_endpoint(String("api-svc"))
+        var r = d.read(String("api-svc"))
         # ★ NOT AN ABSENT RESULT. This is the arm that matters.
         raise Error(
-            "resolve_endpoint returned found=" + String(r.found) + " source="
-            + r.source_name() + " from a store that answers NOTHING"
+            "read returned found=" + String(r.found)
+            + " from a store that answers NOTHING"
         )
     except:
         res = True
-    _must_raise(res, "resolve_endpoint")
+    _must_raise(res, "read")
 
     var lst = False
     try:
-        _ = d.list_endpoints()
+        _ = d.list_names()
     except:
         lst = True
-    _must_raise(lst, "list_endpoints")
+    _must_raise(lst, "list_names")
 
     var wd = False
     try:
-        _ = d.withdraw_endpoint(String("api-svc"))
+        _ = d.remove(String("api-svc"))
     except:
         wd = True
-    _must_raise(wd, "withdraw_endpoint")
+    _must_raise(wd, "remove")
 
     var store = d^.into_store()
     var hd = False
     try:
-        _ = store.head(Path.parse(String("service/api-svc")))
+        _ = store.head(Path.parse(String("item/api-svc")))
     except e:
         hd = True
         # A dead transport carries no HTTP frame, so it is TRANSPORT — and it is
@@ -1423,7 +1556,7 @@ def test_gate16_CONTROL_every_positive_gate_reds_on_refuse_everything() raises:
 
     var pt = False
     try:
-        _ = store.put(Path.parse(String("service/x")), _b(String("u")))
+        _ = store.put(Path.parse(String("item/x")), _b(String("u")))
     except:
         pt = True
     _must_raise(pt, "put")
@@ -1431,7 +1564,7 @@ def test_gate16_CONTROL_every_positive_gate_reds_on_refuse_everything() raises:
     var cp = False
     try:
         _ = store.conditional_put(
-            Path.parse(String("service/x")),
+            Path.parse(String("item/x")),
             _b(String("u")),
             WritePrecondition.if_none_match_star(),
         )
@@ -1442,7 +1575,7 @@ def test_gate16_CONTROL_every_positive_gate_reds_on_refuse_everything() raises:
     var cas = False
     try:
         _ = store.compare_and_swap(
-            Path.parse(String("service/x")), _b(String("u")), String("t")
+            Path.parse(String("item/x")), _b(String("u")), String("t")
         )
     except:
         cas = True
@@ -1450,28 +1583,28 @@ def test_gate16_CONTROL_every_positive_gate_reds_on_refuse_everything() raises:
 
     var gt = False
     try:
-        _ = store.get(Path.parse(String("service/x")))
+        _ = store.get(Path.parse(String("item/x")))
     except:
         gt = True
     _must_raise(gt, "get")
 
     var gr = False
     try:
-        _ = store.get_range(Path.parse(String("service/x")), Int64(0), Int64(4))
+        _ = store.get_range(Path.parse(String("item/x")), Int64(0), Int64(4))
     except:
         gr = True
     _must_raise(gr, "get_range")
 
     var dl = False
     try:
-        store.delete(Path.parse(String("service/x")))
+        store.delete(Path.parse(String("item/x")))
     except:
         dl = True
     _must_raise(dl, "delete")
 
     var ls = False
     try:
-        _ = store.list_with_delimiter(Path.parse(String("service/")))
+        _ = store.list_with_delimiter(Path.parse(String("item/")))
     except:
         ls = True
     _must_raise(ls, "list_with_delimiter")
@@ -1487,17 +1620,17 @@ def test_the_typed_sentinels_are_pairwise_disjoint_prefixes() raises:
     than on a substring, which is what makes it a decision procedure with no
     ordering hazard. That property is not free — it holds because the five
     prefixes are pairwise disjoint — so it is asserted rather than assumed."""
-    var doc404 = String("FirestoreNotFound: get_document: service/x")
+    var doc404 = String("FirestoreNotFound: get_document: item/x")
     var db404 = String(
-        "FirestoreDatabaseAbsent: get_document: service/x (POST"
+        "FirestoreDatabaseAbsent: get_document: item/x (POST"
         " BatchGetDocuments: HTTP 404, NOT_FOUND (code 5), body 0 bytes)"
     )
     var already = String(
-        "FirestoreAlreadyExists: create_if_absent: identity/gcp.a (POST Commit:"
+        "FirestoreAlreadyExists: create_if_absent: owner/gcp.a (POST Commit:"
         " HTTP 409, ALREADY_EXISTS (code 6), body 0 bytes)"
     )
     var cas = String(
-        "FirestorePreconditionFailed: update_if_unchanged: service/x (POST"
+        "FirestorePreconditionFailed: update_if_unchanged: item/x (POST"
         " Commit: HTTP 400, FAILED_PRECONDITION (code 9), body 0 bytes)"
     )
     var idx = String(
@@ -1523,9 +1656,9 @@ def test_the_typed_sentinels_are_pairwise_disjoint_prefixes() raises:
     # ★ AND THE RAW TEXT OF THE TWO PERMANENT ONES IS EXACTLY WHAT WOULD FOOL A
     #   SUBSTRING CLASSIFIER — which is why the mapper defuses rather than
     #   forwards.
-    assert_true(_directory_says_not_found(db404))
-    assert_true(_directory_says_precondition(idx))
-    var uri = String("firestore://registry/service/x")
+    assert_true(_consumer_says_not_found(db404))
+    assert_true(_consumer_says_precondition(idx))
+    var uri = String("firestore://example-db/item/x")
     _assert_reads_as(
         String(map_firestore_error_to_store_error(String("get"), uri, db404)),
         False,
@@ -1559,10 +1692,10 @@ def test_the_self_check_backstop_detects_a_misclassified_message() raises:
     asserts is a backstop nobody would notice the removal of.
 
     ⛔ AND THE THIRD COPY OF THE TOKEN LIST IS CHECKED HERE TOO: the two
-    predicates below must agree with `_directory_says_*` at the top of this file,
-    which are copied from the CONSUMER. Three copies of one list is the standing
-    hazard `identity.mojo`'s header names ("two guards is how two mirrors come to
-    disagree"); this is the guard that makes it one."""
+    predicates below must agree with `_consumer_says_*` at the top of this file,
+    which are the CONSUMER's, token for token. Three copies of one list is a
+    standing hazard (two guards is how two mirrors come to disagree); this is
+    the guard that makes it one."""
     # The predicates agree with the consumer's, token for token.
     var probes = List[String]()
     probes.append(String("StoreError[PRECONDITION] x status=412"))
@@ -1575,11 +1708,11 @@ def test_the_self_check_backstop_detects_a_misclassified_message() raises:
     for i in range(len(probes)):
         assert_equal(
             store_error_says_precondition(probes[i]),
-            _directory_says_precondition(probes[i]),
+            _consumer_says_precondition(probes[i]),
         )
         assert_equal(
             store_error_says_not_found(probes[i]),
-            _directory_says_not_found(probes[i]),
+            _consumer_says_not_found(probes[i]),
         )
 
     # A message whose class is RIGHT.
