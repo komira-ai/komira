@@ -1,15 +1,15 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_multiwriter_gcs_occ.mojo
-#   THE MULTI-WRITER PROOF — pgstore-on-GCS is safe for
+# src/komira_table_store/tests/test_table_store_multiwriter_gcs_occ.mojo
+#   THE MULTI-WRITER PROOF — table-store-on-GCS is safe for
 #   ANY number of concurrent writers. Retires the "single-writer discipline"
 #   posture; the base OCC path is multi-writer-safe by construction.
 # =============================================================================
 #
 # Design driver: "There can be any number of callers and it
 # should just work, just like any number of callers to Postgres just works."
-# Design: the pgstore multi-writer design note.
+# Design: the table-store multi-writer design note.
 #
-# THE CLAIM THIS TEST PROVES. A pgstore commit is ONE create-CAS append at
+# THE CLAIM THIS TEST PROVES. A table store commit is ONE create-CAS append at
 # EXACTLY `auth_head+1` (`try_append_at_seq`) gated by an OCC first-committer-
 # wins check against the AUTHORITATIVE head. This is the canonical object-store
 # OCC pattern (Delta Lake / Iceberg / Aurora DSQL all converge here). N
@@ -43,7 +43,7 @@
 # LIST head every commit. (The lease epochs default (0,0) = no fence — the
 # irreducible-TOCTOU epoch fence of memo §2(b)/§2(c) is not engaged.)
 #
-# WHAT THIS TEST ADDS over test_pgstore_concurrency.mojo (which hammers ONE HOT
+# WHAT THIS TEST ADDS over test_table_store_concurrency.mojo (which hammers ONE HOT
 # key + private keys and audits the HOT version-chain):
 #   (T1) N writers each commit M DISTINCT rows (writer-partitioned keyspace) to
 #        the SAME lineage; the final MATERIALIZED table (read via `scan`) is the
@@ -64,7 +64,7 @@
 #
 # Threading idiom: K pthreads via the sanctioned FFI-BOUNDARY pthread-launch
 # carve-out (heap-boxed arg + per-thread heap-stable results slot read after
-# join, DISJOINT slots), IDENTICAL to the in-tree test_pgstore_concurrency.mojo.
+# join, DISJOINT slots), IDENTICAL to the in-tree test_table_store_concurrency.mojo.
 # stale-reuse: no byte-slab element, no wildcard-origin FIELD, no unsafe_from_address
 # except the two sanctioned FFI void*/results-addr ABI args (each SAFETY-blocked).
 # Tagged `large`.
@@ -85,8 +85,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
-from komira_pgstore.pgstore_codec import bytes_eq
-from komira_pgstore.table_store import (
+from komira_table_store.table_store_codec import bytes_eq
+from komira_table_store.table_store import (
     TableStore,
     Txn,
     is_commit_retryable,
@@ -117,7 +117,7 @@ def _str(b: List[UInt8]) -> String:
 @always_inline
 def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
     """A NULL typed pointer with a concrete origin (b2-safe null idiom; mirrors
-    test_pgstore_concurrency.mojo).
+    test_table_store_concurrency.mojo).
 
     # SAFETY: `Optional[UnsafePointer[...]]` is layout-compatible with the bare
     # pointer; `None` is the all-zero (NULL) bit pattern. Origin `o` is concrete;
@@ -585,7 +585,7 @@ def test_t2_forced_conflict_clean_40001() raises:
 # instantly still gets a clean typed conflict, never a torn commit, and the WAL
 # stays gapless. (The retryable-EXHAUSTION path under a 412 storm — the
 # COMMIT_RETRYABLE / "(retryable)" signal — is separately proven by the K>=16
-# broker_contention soak in test_pgstore_concurrency.mojo; this leg pins the
+# broker_contention soak in test_table_store_concurrency.mojo; this leg pins the
 # deterministic "clean-conflict-under-no-budget" corner.)
 #
 # We drive this SINGLE-THREADED + DETERMINISTIC: two same-key txns at one
@@ -756,7 +756,7 @@ def test_t4_sustained_sequential_rpc_no_wedge() raises:
 
 
 def main() raises:
-    print("== pgstore-on-GCS MULTI-WRITER PROOF ==")
+    print("== table-store-on-GCS MULTI-WRITER PROOF ==")
     # (T2)/(T3) deterministic conflict proofs first (fast, no threads).
     test_t2_forced_conflict_clean_40001()
     test_t3_zero_budget_loser_clean_conflict()
@@ -766,7 +766,7 @@ def main() raises:
     test_t1_multiwriter_union_16()
     test_t1_multiwriter_union_32()
     print(
-        "[OK] test_pgstore_multiwriter_gcs_occ — pgstore-on-GCS is MULTI-WRITER"
+        "[OK] test_table_store_multiwriter_gcs_occ — table-store-on-GCS is MULTI-WRITER"
         " SAFE (OCC): N concurrent writers -> linearizable union, no lost update,"
         " no torn read, gapless WAL; losers surface CLEAN typed conflicts; the"
         " sequential-RPC leg holds (guard). Throughput serializes on"

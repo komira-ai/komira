@@ -1,12 +1,14 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# A Postgres-style table store on a conditional-write object store: a single-
-# table key -> row MVCC store whose write-ahead log is the CAS manifest of
+# A table store on a conditional-write object store: a single-table
+# key -> row MVCC store whose write-ahead log is the CAS manifest of
 # komira_objectstore. It holds the row / version / commit-chunk codec
-# (pgstore_codec), the in-memory key index and MVCC visibility (key_index), the
-# optimistic-concurrency commit loop and recovery on open (table_store), the
-# group-commit consumer of the coalescing window (group_commit) and the
-# key-partitioned router over N table stores (partitioned_table_store).
+# (table_store_codec), the in-memory key index and MVCC visibility
+# (key_index), the optimistic-concurrency commit loop and recovery on open
+# (table_store), the group-commit consumer of the coalescing window
+# (group_commit) and the key-partitioned router over N table stores
+# (partitioned_table_store). It does not parse SQL and does not speak the
+# Postgres protocol; a SQL layer is a consumer of this package.
 #
 # Everything is generic over `Store: ConditionalWriteStore`, so the same code
 # runs over the in-memory, shared-in-memory and local-filesystem conformers
@@ -18,7 +20,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # stores, some on real threads, and drive the parkable commit through a reactor.
 
 mojo_library(
-    name = "komira_pgstore",
+    name = "komira_table_store",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/komira_async:komira_async",
@@ -37,21 +39,21 @@ mojo_library(
         "tests/test_group_commit_crash_atomicity.mojo",
         "tests/test_group_commit_e2e.mojo",
         "tests/test_partitioned_table_store.mojo",
-        "tests/test_pgstore_async_commit_park_e2e.mojo",
-        "tests/test_pgstore_concurrency.mojo",
-        "tests/test_pgstore_correctness.mojo",
-        "tests/test_pgstore_head_regression_torn_read.mojo",
-        "tests/test_pgstore_lease_default_on.mojo",
-        "tests/test_pgstore_lease_enablement_battery.mojo",
-        "tests/test_pgstore_lease_listelision.mojo",
-        "tests/test_pgstore_list_delimiter_audit.mojo",
-        "tests/test_pgstore_multiwriter_gcs_occ.mojo",
-        "tests/test_pgstore_recovery_chaos.mojo",
-        "tests/test_pgstore_secondary_index.mojo",
-        "tests/test_pgstore_si_occ_property.mojo",
-        "tests/test_pgstore_si_property.mojo",
-        "tests/test_pgstore_si_thread_property.mojo",
-        "tests/test_pgstore_unique_index.mojo",
+        "tests/test_table_store_async_commit_park_e2e.mojo",
+        "tests/test_table_store_concurrency.mojo",
+        "tests/test_table_store_correctness.mojo",
+        "tests/test_table_store_head_regression_torn_read.mojo",
+        "tests/test_table_store_lease_default_on.mojo",
+        "tests/test_table_store_lease_enablement_battery.mojo",
+        "tests/test_table_store_lease_listelision.mojo",
+        "tests/test_table_store_list_delimiter_audit.mojo",
+        "tests/test_table_store_multiwriter_gcs_occ.mojo",
+        "tests/test_table_store_recovery_chaos.mojo",
+        "tests/test_table_store_secondary_index.mojo",
+        "tests/test_table_store_si_occ_property.mojo",
+        "tests/test_table_store_si_property.mojo",
+        "tests/test_table_store_si_thread_property.mojo",
+        "tests/test_table_store_unique_index.mojo",
     ],
     visibility = ["PUBLIC"],
 )

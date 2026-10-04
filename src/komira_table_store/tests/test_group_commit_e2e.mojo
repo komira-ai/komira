@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_group_commit_e2e.mojo
+# src/komira_table_store/tests/test_group_commit_e2e.mojo
 #   GROUP-COMMIT Phase-3 e2e: N concurrent commits COALESCE into
 #   ONE create-CAS chunk via the CoalescingWindow over a slow AsyncCasStore on a
 #   real reactor.
@@ -56,19 +56,19 @@ from komira_objectstore.coalescing_window import (
     RamAccumulator,
 )
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
 )
-from komira_pgstore.group_commit import (
+from komira_table_store.group_commit import (
     PG_GC_WIN,
     PgGroupCommitFactory,
     PgGroupCommitItem,
     PgGroupOutcome,
 )
-from komira_pgstore.table_store import TableStore
+from komira_table_store.table_store import TableStore
 
 
 comptime _Slow = SharedInMemorySlowCasStore

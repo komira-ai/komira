@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pgstore/key_index.mojo
+# komira_table_store/key_index.mojo
 #   KeyIndex / KeyChain — the in-RAM MVCC memtable + the visibility rules.
 # =============================================================================
 #
@@ -8,7 +8,7 @@
 # function of the chain (§4): the newest version with `commit_lsn <= S`,
 # suppressed if it is a tombstone.
 #
-# Design: the serverless-Postgres correctness-slice design
+# Design: the table-store correctness-slice design
 # §1.4 (index representation) + §4 (MVCC visibility).
 #
 # -----------------------------------------------------------------------------
@@ -22,7 +22,7 @@
 #     methods take/return refs + typed values only.
 # =============================================================================
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     RowVersion,

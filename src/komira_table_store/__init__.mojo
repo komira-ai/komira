@@ -1,5 +1,4 @@
-"""`komira_pgstore` — serverless-Postgres correctness slice (single-table.
+"""`komira_table_store` — a single-table key->row MVCC table store.
 
-key->row MVCC store over a CAS-manifest WAL). See table_store.mojo.
+Its write-ahead log is a CAS manifest. See table_store.mojo.
 """
-

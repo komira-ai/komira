@@ -1,12 +1,12 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_head_regression_torn_read.mojo
+# src/komira_table_store/tests/test_table_store_head_regression_torn_read.mojo
 #   P0 CONCURRENCY BUG (found in production) — the
-#   pgstore-on-GCS `_HEAD`-advance protocol corrupts under a 2nd / interrupted
+#   table-store-on-GCS `_HEAD`-advance protocol corrupts under a 2nd / interrupted
 #   writer, producing a torn read at a fresh open.
 # =============================================================================
 #
 # THE PROD SYMPTOM. Running a 2nd writer (a seeding CLI) against the LIVE
-# pgstore-on-GCS store corrupted it: a fresh API boot's `begin()` / open
+# table-store-on-GCS store corrupted it: a fresh API boot's `begin()` / open
 # followed the durable `_HEAD` pointer to a chunk it does NOT fully point at,
 # then `cas_manifest: truncated i64 at offset 0` — and every subsequent open
 # (API boot) crash-looped. Killing a writer mid-commit left the same torn state.
@@ -78,12 +78,12 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import WritePrecondition
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     WriteOp,
     encode_commit_chunk,
 )
-from komira_pgstore.table_store import TableStore, Txn
+from komira_table_store.table_store import TableStore, Txn
 
 
 comptime _Store = SharedInMemoryConditionalStore
@@ -371,7 +371,7 @@ def test_interrupted_writer_durable_chunk_no_torn_open() raises:
 
 def main() raises:
     print(
-        "=== pgstore _HEAD-regression torn-read ==="
+        "=== table store _HEAD-regression torn-read ==="
     )
     test_fast_head_advance_never_regresses()
     test_two_writers_fresh_open_sees_all_rows()

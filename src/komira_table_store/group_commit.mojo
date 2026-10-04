@@ -1,17 +1,17 @@
 # =============================================================================
-# komira_pgstore/group_commit.mojo
-#   pgstore GROUP-COMMIT — the CoalescingWindow Phase-3 consumer.
+# komira_table_store/group_commit.mojo
+#   table store GROUP-COMMIT — the CoalescingWindow Phase-3 consumer.
 #   N concurrent commits coalesce into ONE create-CAS chunk via the landed
 #   `CoalescingWindow` primitive (komira_objectstore/coalescing_window.mojo).
 # =============================================================================
 #
-# WHY: the landed pgstore serialization queue (pgwire `_pg_kick_next_queued_
+# WHY: the landed table store serialization queue (pgwire `_pg_kick_next_queued_
 # commit`) starts ONE queued commit at a time — N concurrent commits cost N
 # create-CAS round-trips. Group-commit COALESCES N non-conflicting commits into
 # ONE merged chunk = ONE create-CAS. The queue IS the coalescing window (it
 # deepens under contention — exactly when coalescing pays).
 #
-# THE SEAM → pgstore MAPPING (the four CoalescingWindow seams + the appender):
+# THE SEAM → table store MAPPING (the four CoalescingWindow seams + the appender):
 #   * Item    = PgGroupCommitItem{snapshot_lsn, write_set} — the per-member
 #               payload, built from each conn's extracted Txn.
 #   * Head    = PgGroupHead{chunk_seq, next_offset} — from the AUTHORITATIVE
@@ -102,13 +102,13 @@ from komira_objectstore.coalescing_window import (
     _CoalesceSpine,
 )
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     WriteOp,
     bytes_eq,
     decode_commit_chunk_keys,
     encode_commit_chunk,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
     COMMIT_RETRYABLE_TOKEN,
     TableStore,
     _is_lost_slot_412,
@@ -240,11 +240,11 @@ def _encode_head_body(chunk_seq: Int64, next_offset: Int64) -> List[UInt8]:
 # §2 — PgHeadReader (SEAM 2: AuthHeadReader).
 # =============================================================================
 # Reads the AUTHORITATIVE manifest head (read_head_authoritative — a LIST, the
-# §8 OCC-coupling head). The landed pgstore design keeps the head-read BLOCKING
+# §8 OCC-coupling head). The landed table store design keeps the head-read BLOCKING
 # (a LIST is not poll-shapeable via the AsyncCasStore ABI, and on the warm path
 # it hits the local cache — no RTT), so read_head_start does the read
 # SYNCHRONOUSLY and returns READY immediately (no park) — identical to the
-# landed `commit_prelude_occ` blocking head-read. The pgstore group-commit's ONE
+# landed `commit_prelude_occ` blocking head-read. The table store group-commit's ONE
 # parkable I/O step is the create-CAS (the appender), the single ALWAYS-PRESENT
 # object-store WRITE per batch.
 #
@@ -520,7 +520,7 @@ struct PgGroupCommitCodec[Store: ConditionalWriteStore & AsyncCasStore](
 
     def estimate_bytes(self, ref it: PgGroupCommitItem) -> Int:
         # The size contribution = the member's write-set byte total (rough — the
-        # framing overhead is small). Used only by the size band; pgstore forces
+        # framing overhead is small). Used only by the size band; the table store forces
         # EXPLICIT flushes (the queue drain), so this is informational.
         var n = 0
         for i in range(len(it.write_set)):

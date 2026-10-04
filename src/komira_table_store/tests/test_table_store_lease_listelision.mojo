@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_lease_listelision.mojo
+# src/komira_table_store/tests/test_table_store_lease_listelision.mojo
 #   Single-writer LEASE LIST-elision fast-path — the
 #   correctness + win-mechanism tests. The concurrent + 412 tests are
 #   single-threaded DETERMINISTIC interleaves over a shared store (two
@@ -64,15 +64,15 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from komira_pgstore.key_index import KeyValue
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.key_index import KeyValue
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
     encode_commit_chunk,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
     CommitResult,
     TableStore,
     Txn,

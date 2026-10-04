@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_partitioned_table_store.mojo
+# src/komira_table_store/tests/test_partitioned_table_store.mojo
 #   WS-2 — PartitionedTableStore router + per-shard commit (RELAXED §10 scope).
 #   (heap Model-2 sharding campaign).
 # =============================================================================
@@ -43,14 +43,14 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 )
 from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 
-from komira_pgstore.key_index import KeyValue
-from komira_pgstore.pgstore_codec import bytes_eq, WriteOp, PG_OP_PUT
-from komira_pgstore.table_store import (
+from komira_table_store.key_index import KeyValue
+from komira_table_store.table_store_codec import bytes_eq, WriteOp, PG_OP_PUT
+from komira_table_store.table_store import (
     TableStore,
     Txn,
     is_occ_conflict,
 )
-from komira_pgstore.partitioned_table_store import (
+from komira_table_store.partitioned_table_store import (
     PartitionedTableStore,
     PartitionSpec,
     hash_shard_to_id,

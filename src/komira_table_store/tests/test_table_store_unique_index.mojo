@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_unique_index.mojo
+# src/komira_table_store/tests/test_table_store_unique_index.mojo
 #   SI-7 UNIQUE enforcement — the STORAGE-LEVEL discriminating falsifiers for
 #   the §7 first-committer-wins protocol over a pk-SUFFIXED unique index.
 # =============================================================================
@@ -66,8 +66,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 )
 from komira_objectstore.store import ConditionalWriteStore
 
-from komira_pgstore.key_index import KeyValue
-from komira_pgstore.table_store import (
+from komira_table_store.key_index import KeyValue
+from komira_table_store.table_store import (
 
 
     TableStore,
@@ -94,9 +94,9 @@ def _null_ptr[T: AnyType, o: Origin]() -> UnsafePointer[T, o]:
 
 
 # =============================================================================
-# Storage-level key helpers — lifted from test_pgstore_secondary_index.mojo. We
+# Storage-level key helpers — lifted from test_table_store_secondary_index.mojo. We
 # hand-encode the 4-byte big-endian lineage-ordinal prefix that
-# `TableStore._key_lineage_ord` reads, staying on the pgstore leaf (no pgsql
+# `TableStore._key_lineage_ord` reads, staying on the table store leaf (no pgsql
 # codec import). The unique index keyspace + the guard keyspace are two DISJOINT
 # high-band ordinals (§7.2a — one guard ordinal per unique index).
 # =============================================================================
@@ -918,16 +918,16 @@ def test_c_null_multiple_allowed() raises:
 # is now LIVE at the DRIVER tier:
 # the driver's cold-tier lifecycle test,
 # `test_b_cold_aware_unique_rejects_columnarized_reaped_duplicate`. There the
-# `PgstoreDatabase` owns a paired `ColumnarCatalog` and the SI-7 UNIQUE check
+# SQL driver's database owns a paired `ColumnarCatalog` and the SI-7 UNIQUE check
 # routes through `index_scan_visible_dual_tier`, so a columnarized+reaped
 # committed duplicate is SEEN (a hot-only check silently accepts it — the
 # discriminator that test asserts side-by-side).
 #
-# This LEAF-level (`komira_pgstore`) variant stays out of scope BY DESIGN: the
-# reuse-safe `komira_pgstore` leaf deliberately has NO columnar/Parquet
+# This LEAF-level (`komira_table_store`) variant stays out of scope BY DESIGN: the
+# reuse-safe `komira_table_store` leaf deliberately has NO columnar/Parquet
 # dependency (the cycle ban at table_store.mojo:819-832), so the dual-tier
 # cold-read machinery (`heap_visible_at_dual_tier` / `index_scan_visible_dual_
-# tier` in `komira_pgstore_columnar`) is consumed by the ADAPTER tier (the
+# tier` in the columnar adapter package) is consumed by the ADAPTER tier (the
 # driver + the SQL executor), not by this leaf. The pk-SUFFIXED keying this file
 # enforces is precisely what makes the driver-tier falsifier pass: `(U,pk1)` and
 # `(U,pk2)` are distinct `__key`s, so `_assign_xmax` chains each independently
@@ -935,7 +935,7 @@ def test_c_null_multiple_allowed() raises:
 
 
 def main() raises:
-    print("== pgstore SI-7 UNIQUE enforcement (storage-level §7 protocol) ==")
+    print("== table store SI-7 UNIQUE enforcement (storage-level §7 protocol) ==")
     # Discriminating self-tests FIRST (prove the falsifiers are not tautologies).
     test_a_disc_stub_both_commits()
     test_b_disc_buffer_dedup_does_not_catch()
@@ -946,7 +946,7 @@ def main() raises:
     # failure in the deterministic checks surfaces first.
     test_a_concurrent_first_committer_wins()
     print(
-        "[OK] test_pgstore_unique_index — (a) concurrent FCW + (b) intra-txn +"
+        "[OK] test_table_store_unique_index — (a) concurrent FCW + (b) intra-txn +"
         " (c) NULL + discriminating self-tests — exactly-one-commit, terminal"
         " 23505, no both-commit / no perpetual 40001 loop (§7)"
     )

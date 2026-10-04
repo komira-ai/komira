@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_si_property.mojo
+# src/komira_table_store/tests/test_table_store_si_property.mojo
 #   HARNESS 1 — randomized Snapshot-Isolation PROPERTY check (Jepsen-style).
 # =============================================================================
 #
@@ -48,7 +48,7 @@
 # are plain owned structs in plain Lists (reuse-safe trivially), never byte-slab
 # elements.
 #
-# Design: the serverless-Postgres correctness-slice design §3.4 / §4 / §7.
+# Design: the table-store correctness-slice design §3.4 / §4 / §7.
 # =============================================================================
 
 from std.testing import assert_equal, assert_true
@@ -62,8 +62,12 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 )
 from komira_objectstore.store import ConditionalWriteStore
 
-from komira_pgstore.pgstore_codec import PG_OP_PUT, PG_OP_TOMBSTONE, bytes_eq
-from komira_pgstore.table_store import (
+from komira_table_store.table_store_codec import (
+    PG_OP_PUT,
+    PG_OP_TOMBSTONE,
+    bytes_eq,
+)
+from komira_table_store.table_store import (
     TableStore,
     Txn,
     is_commit_retryable,
@@ -565,12 +569,12 @@ def test_si_property_high_contention_few_keys() raises:
 
 
 def main() raises:
-    print("== pgstore SI property checker (Jepsen-style, seeded) ==")
+    print("== table store SI property checker (Jepsen-style, seeded) ==")
     test_si_property_in_memory_seed_sweep()
     test_si_property_shared_seed_sweep()
     test_si_property_high_contention_few_keys()
     print(
-        "[OK] test_pgstore_si_property — randomized SI histories self-checked"
+        "[OK] test_table_store_si_property — randomized SI histories self-checked"
         " against a totally-ordered reference model across 144 seeds"
         " (InMemory + SharedInMemory): no lost update, no dirty/non-repeatable"
         " read, RYOW correct, first-committer-wins exact"

@@ -1,6 +1,6 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_group_commit_conflict_fuzz.mojo
-#   MANDATORY adversarial conflict-FUZZ for pgstore GROUP-COMMIT.
+# src/komira_table_store/tests/test_group_commit_conflict_fuzz.mojo
+#   MANDATORY adversarial conflict-FUZZ for table store GROUP-COMMIT.
 #   The HIGHEST-RISK surface: a missed key-intersection in the codec's
 #   arbitration / per-member OCC is a SILENT LOST-UPDATE.
 # =============================================================================
@@ -57,14 +57,14 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
 )
 from komira_objectstore.coalescing_window import EncodedBatch
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     WriteOp,
     bytes_eq,
     decode_commit_chunk,
     encode_commit_chunk,
 )
-from komira_pgstore.group_commit import (
+from komira_table_store.group_commit import (
     PG_GC_LOSS_INTRA,
     PG_GC_LOSS_OCC,
     PG_GC_WIN,
@@ -467,7 +467,7 @@ def test_per_member_occ_stale_snapshot_loses_to_committed_competitor() raises:
     var competitor = List[WriteOp]()
     competitor.append(WriteOp(PG_OP_PUT, _key(7), _row(7)))
     # encode_commit_chunk + try_append_at_seq lands it at slot 0.
-    from komira_pgstore.pgstore_codec import encode_commit_chunk
+    from komira_table_store.table_store_codec import encode_commit_chunk
 
     var body = encode_commit_chunk(Int64(-1), competitor)
     var maybe = seed_wal.try_append_at_seq(Int64(0), Int64(0), body^, Int64(1))

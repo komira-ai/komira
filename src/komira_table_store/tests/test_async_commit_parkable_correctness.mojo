@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_async_commit_parkable_correctness.mojo
+# src/komira_table_store/tests/test_async_commit_parkable_correctness.mojo
 #   COMPREHENSIVE parkable-commit CORRECTNESS gate — the
 #   DRIVER-LEVEL half: scenarios that exercise the `commit_async_*` poll-shaped
 #   commit driver (table_store) DIRECTLY over a controllable-slow / one-shot-
@@ -80,8 +80,8 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from komira_pgstore.pgstore_codec import bytes_eq
-from komira_pgstore.table_store import (
+from komira_table_store.table_store_codec import bytes_eq
+from komira_table_store.table_store import (
     AsyncCommitOp,
     TableStore,
     commit_async_poll,

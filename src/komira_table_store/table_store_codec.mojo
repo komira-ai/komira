@@ -1,15 +1,15 @@
 # =============================================================================
-# komira_pgstore/pgstore_codec.mojo
+# komira_table_store/table_store_codec.mojo
 #   RowVersion / WriteOp / CommitChunk encode+decode — the WAL wire format.
 # =============================================================================
 #
-# The serverless-Postgres correctness slice's row + version + commit-chunk
+# The table-store correctness slice's row + version + commit-chunk
 # encoding. Mirrors `komira_objectstore/cas_manifest.mojo`'s little-endian
 # framing (no JSON on the hot path), in a
 # POD-of-owned-bytes shape (op: UInt8, seq: Int64, key/value: List[UInt8]) —
 # the documented reuse-safe trivially shape.
 #
-# Design: the serverless-Postgres correctness-slice design
+# Design: the table-store correctness-slice design
 # §1 (row + version encoding) + §2 (WAL chunk format).
 #
 # -----------------------------------------------------------------------------
@@ -108,13 +108,13 @@ comptime PG_STAMP_LSN_UNSET: Int64 = -1
 def _format_version_from_magic(magic: UInt32) raises -> UInt32:
     """Validate the "PGC" lineage prefix and return the format version digit.
 
-    Raises if the low-24-bit lineage tag is not "PGC" (a corrupt / non-pgstore
+    Raises if the low-24-bit lineage tag is not "PGC" (a corrupt / non-table-store
     chunk), or if the high byte is not an ASCII digit '0'..'9' (a garbage
     version byte). The caller then branches on the returned version and REJECTS
     any version it does not know how to decode — never silently misparses."""
     if (magic & UInt32(0x00FFFFFF)) != PG_COMMIT_MAGIC_PREFIX:
         raise Error(
-            "pgstore_codec: bad commit-chunk magic prefix (got "
+            "table_store_codec: bad commit-chunk magic prefix (got "
             + String(Int(magic))
             + ', want "PGC" lineage '
             + String(Int(PG_COMMIT_MAGIC_PREFIX))
@@ -123,7 +123,7 @@ def _format_version_from_magic(magic: UInt32) raises -> UInt32:
     var digit = (magic >> UInt32(24)) & UInt32(0xFF)
     if digit < UInt32(0x30) or digit > UInt32(0x39):
         raise Error(
-            "pgstore_codec: commit-chunk magic version byte is not an ASCII"
+            "table_store_codec: commit-chunk magic version byte is not an ASCII"
             " digit (got " + String(Int(digit)) + ")"
         )
     return digit - UInt32(0x30)
@@ -191,7 +191,7 @@ def _put_u32_le(mut out: List[UInt8], v: UInt32):
 @always_inline
 def _get_u32_le(bytes: List[UInt8], off: Int) raises -> UInt32:
     if off + 4 > len(bytes):
-        raise Error("pgstore_codec: truncated u32 at offset " + String(off))
+        raise Error("table_store_codec: truncated u32 at offset " + String(off))
     var u = UInt32(0)
     for i in range(4):
         u |= UInt32(Int(bytes[off + i])) << UInt32(8 * i)
@@ -208,7 +208,7 @@ def _put_i32_le(mut out: List[UInt8], v: Int32):
 @always_inline
 def _get_i32_le(bytes: List[UInt8], off: Int) raises -> Int32:
     if off + 4 > len(bytes):
-        raise Error("pgstore_codec: truncated i32 at offset " + String(off))
+        raise Error("table_store_codec: truncated i32 at offset " + String(off))
     var u = UInt32(0)
     for i in range(4):
         u |= UInt32(Int(bytes[off + i])) << UInt32(8 * i)
@@ -225,7 +225,7 @@ def _put_i64_le(mut out: List[UInt8], v: Int64):
 @always_inline
 def _get_i64_le(bytes: List[UInt8], off: Int) raises -> Int64:
     if off + 8 > len(bytes):
-        raise Error("pgstore_codec: truncated i64 at offset " + String(off))
+        raise Error("table_store_codec: truncated i64 at offset " + String(off))
     var u = UInt64(0)
     for i in range(8):
         u |= UInt64(Int(bytes[off + i])) << UInt64(8 * i)
@@ -368,7 +368,7 @@ def _get_bytes_lp(bytes: List[UInt8], mut off: Int) raises -> List[UInt8]:
     off += 8
     if n < 0 or off + n > len(bytes):
         raise Error(
-            "pgstore_codec: truncated lp-bytes (len="
+            "table_store_codec: truncated lp-bytes (len="
             + String(n)
             + ", off="
             + String(off)
@@ -386,7 +386,7 @@ def _get_bytes_lp(bytes: List[UInt8], mut off: Int) raises -> List[UInt8]:
 def decode_commit_chunk(body: List[UInt8]) raises -> CommitChunk:
     """Decode a commit chunk body back into its snapshot + schema_version +
     stamp_lsn + write-set. Validates the magic guard AND the format version: a
-    corrupt / non-pgstore chunk fails loud, and an UNKNOWN format version is
+    corrupt / non-table-store chunk fails loud, and an UNKNOWN format version is
     REJECTED with a clear typed error rather than silently misparsed.
 
     v2 chunks decode with `stamp_lsn == PG_STAMP_LSN_UNSET` (-1 = "fold at the
@@ -400,7 +400,7 @@ def decode_commit_chunk(body: List[UInt8]) raises -> CommitChunk:
         version != PG_COMMIT_FORMAT_VERSION_V3
     ):
         raise Error(
-            "pgstore_codec: unsupported commit-chunk format version "
+            "table_store_codec: unsupported commit-chunk format version "
             + String(Int(version))
             + " (this build decodes versions "
             + String(Int(PG_COMMIT_FORMAT_VERSION))
@@ -422,12 +422,12 @@ def decode_commit_chunk(body: List[UInt8]) raises -> CommitChunk:
     var n_writes = Int(_get_i64_le(body, off_n_writes))
     if n_writes < 0:
         raise Error(
-            "pgstore_codec: negative n_writes " + String(n_writes)
+            "table_store_codec: negative n_writes " + String(n_writes)
         )
     var write_set = List[WriteOp]()
     for _ in range(n_writes):
         if off + 1 > len(body):
-            raise Error("pgstore_codec: truncated WriteOp op tag")
+            raise Error("table_store_codec: truncated WriteOp op tag")
         var op = body[off]
         off += 1
         var key = _get_bytes_lp(body, off)
@@ -449,7 +449,7 @@ def decode_commit_chunk_keys(body: List[UInt8]) raises -> List[List[UInt8]]:
         version != PG_COMMIT_FORMAT_VERSION_V3
     ):
         raise Error(
-            "pgstore_codec: unsupported commit-chunk format version "
+            "table_store_codec: unsupported commit-chunk format version "
             + String(Int(version))
             + " in key-decode (this build decodes versions "
             + String(Int(PG_COMMIT_FORMAT_VERSION))
@@ -464,11 +464,13 @@ def decode_commit_chunk_keys(body: List[UInt8]) raises -> List[List[UInt8]]:
         off = _OFF_WRITES_V3
     var n_writes = Int(_get_i64_le(body, off_n_writes))
     if n_writes < 0:
-        raise Error("pgstore_codec: negative n_writes " + String(n_writes))
+        raise Error("table_store_codec: negative n_writes " + String(n_writes))
     var keys = List[List[UInt8]]()
     for _ in range(n_writes):
         if off + 1 > len(body):
-            raise Error("pgstore_codec: truncated WriteOp op tag (key-decode)")
+            raise Error(
+                "table_store_codec: truncated WriteOp op tag (key-decode)"
+            )
         off += 1  # skip op tag
         var key = _get_bytes_lp(body, off)
         # skip the row payload

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_lease_default_on.mojo
+# src/komira_table_store/tests/test_table_store_lease_default_on.mojo
 #   DEFAULT-ON regression guard for the single-writer LEASE LIST-elision
 #   fast-path (the global default-ON flip).
 # =============================================================================
@@ -37,8 +37,8 @@
 # field).
 #
 # Design: the lease fast-path scope note;
-#   the default-OFF coverage at test_pgstore_lease_listelision.mojo (5 tests) +
-#   test_pgstore_lease_enablement_battery.mojo (6-part flip-readiness battery).
+#   the default-OFF coverage at test_table_store_lease_listelision.mojo (5 tests) +
+#   test_table_store_lease_enablement_battery.mojo (6-part flip-readiness battery).
 # =============================================================================
 
 from std.testing import assert_equal, assert_false, assert_true
@@ -65,13 +65,13 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
     CommitResult,
     TableStore,
     Txn,
@@ -525,12 +525,12 @@ def test_3_412_fallback_no_data_loss_default_on() raises:
 
 
 def main() raises:
-    print("== pgstore LEASE DEFAULT-ON regression guard ==")
+    print("== table store LEASE DEFAULT-ON regression guard ==")
     test_1_default_on_elides_list_and_replay()
     test_2_escape_hatch_reaches_list_fallback()
     test_3_412_fallback_no_data_loss_default_on()
     print(
-        "[OK] test_pgstore_lease_default_on — the default is ON (elides the LIST"
+        "[OK] test_table_store_lease_default_on — the default is ON (elides the LIST"
         " + replay with NO enable call); the escape-hatch (ctor arg / runtime"
         " disable) reaches the LIST fallback; default-ON loses NO data under"
         " multi-writer-same-lineage contention (disjoint monotone, zero"

@@ -1,12 +1,12 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_lease_enablement_battery.mojo
+# src/komira_table_store/tests/test_table_store_lease_enablement_battery.mojo
 #   COMPREHENSIVE ENABLEMENT CORRECTNESS BATTERY for the single-writer LEASE
 #   LIST-elision fast-path — the flip-readiness gate before a
 #   future default-ON flip.
 # =============================================================================
 #
 # The lease fast-path landed DEFAULT-OFF. Existing
-# coverage (test_pgstore_lease_listelision.mojo, 5 discriminating tests) proves
+# coverage (test_table_store_lease_listelision.mojo, 5 discriminating tests) proves
 # the single-writer byte-identity + win-mechanism + 412/fence/OCC soundness on a
 # handful of FIXED schedules. THIS battery GENERALIZES that to a broad,
 # deterministic-random schedule SPACE and adds the stress / fault / crash / stale-reuse
@@ -87,13 +87,13 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
     CommitResult,
     TableStore,
     Txn,
@@ -1317,7 +1317,7 @@ def test_6_elision_effectiveness_broad() raises:
 
 
 def main() raises:
-    print("== pgstore LEASE ENABLEMENT CORRECTNESS BATTERY ==")
+    print("== table store LEASE ENABLEMENT CORRECTNESS BATTERY ==")
     test_1_property_differential_on_eq_off()       # headline differential
     test_2_high_concurrency_stress()               # shared-store interleave
     test_3_fault_injection_lease_recovers()        # transient fault self-heal
@@ -1325,7 +1325,7 @@ def main() raises:
     test_5_stale_reuse_churn_soak()                        # destroy-recreate stale-reuse soak
     test_6_elision_effectiveness_broad()           # broad win-mechanism
     print(
-        "[OK] test_pgstore_lease_enablement_battery — the flip-readiness gate:"
+        "[OK] test_table_store_lease_enablement_battery — the flip-readiness gate:"
         " lease-ON ==byte== lease-OFF across a broad schedule space; concurrency"
         " invariants hold; transient faults self-heal; crash-recovery loses no"
         " write; stale-reuse churn is clean; the elision win holds broadly"

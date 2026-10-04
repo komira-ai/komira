@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_recovery_chaos.mojo
+# src/komira_table_store/tests/test_table_store_recovery_chaos.mojo
 #   HARNESS 2 — CRASH-RECOVERY under FAILURE INJECTION (the chaos pass).
 # =============================================================================
 #
@@ -45,7 +45,7 @@
 # written through the store's typed `conditional_put` / `chunk_key` /
 # `encode_chunk` surface; the reference history is plain owned Lists.
 #
-# Design: the serverless-Postgres correctness-slice design §5 (recovery) +
+# Design: the table-store correctness-slice design §5 (recovery) +
 #   §2 (commit-chunk-as-one-create atomicity).
 # =============================================================================
 
@@ -69,14 +69,14 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import WritePrecondition
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
     encode_commit_chunk,
 )
-from komira_pgstore.table_store import TableStore, Txn
+from komira_table_store.table_store import TableStore, Txn
 from komira_runtime_paths import test_tmpdir
 
 
@@ -703,7 +703,7 @@ def test_recovery_pre_append_crash_shared() raises:
 
 
 def main() raises:
-    print("== pgstore crash-recovery under failure injection (chaos) ==")
+    print("== table store crash-recovery under failure injection (chaos) ==")
     test_recovery_pre_append_crash_shared()         # I1
     test_recovery_durable_but_unacked_shared()      # I2
     test_recovery_stale_head_shared()               # I3
@@ -711,7 +711,7 @@ def main() raises:
     test_recovery_crash_at_every_position_shared()  # I5 (shared)
     test_recovery_crash_at_every_position_fs()      # I5 (LocalFs — true disk)
     print(
-        "[OK] test_pgstore_recovery_chaos — crash-recovery under failure"
+        "[OK] test_table_store_recovery_chaos — crash-recovery under failure"
         " injection at 5 classes of points (pre-append / durable-but-unacked /"
         " stale-_HEAD / torn-create / crash-at-every-position): recovered state"
         " == committed history EXACTLY (multi-version + tombstones); no"

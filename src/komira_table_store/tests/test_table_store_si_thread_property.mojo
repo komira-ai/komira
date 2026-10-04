@@ -1,10 +1,10 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_si_thread_property.mojo
+# src/komira_table_store/tests/test_table_store_si_thread_property.mojo
 #   C-SI-THREAD-PROPERTY (PRIORITY 2) — true OS-thread randomized N-conn x M-op
 #   interleavings, audited against a MERGED-HISTORY REFERENCE MODEL after join.
 # =============================================================================
 #
-# The SI-property harness (test_pgstore_si_property.mojo, 144 seeds) drives a
+# The SI-property harness (test_table_store_si_property.mojo, 144 seeds) drives a
 # SINGLE-THREAD seeded interleave (the PRNG, not the OS scheduler, picks the
 # next micro-action) and self-checks each read against a totally-ordered
 # reference model. That proves the generic code is SI-correct, but it does NOT
@@ -48,7 +48,7 @@
 # ANY interleave — that is the property).
 #
 # Threading: K pthreads via the sanctioned FFI carve-out (mirror of
-# test_pgstore_concurrency.mojo's _spawn_writer). Each thread owns its
+# test_table_store_concurrency.mojo's _spawn_writer). Each thread owns its
 # TableStore over a clone() of the shared store; cross-thread visibility goes
 # through the WAL. Per-thread results are heap-stable OwnedPointer pointees read
 # after join (DISJOINT slots — writer w writes only its own).
@@ -74,13 +74,13 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 )
 from komira_objectstore.store import ConditionalWriteStore
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
 
 
     TableStore,
@@ -662,12 +662,12 @@ def test_si_thread_property_seed_sweep() raises:
 
 
 def main() raises:
-    print("== pgstore SI thread property (C-SI-THREAD-PROPERTY, PRIORITY 2) ==")
+    print("== table store SI thread property (C-SI-THREAD-PROPERTY, PRIORITY 2) ==")
     test_si_thread_property_k4()
     test_si_thread_property_k8_hot()
     test_si_thread_property_seed_sweep()
     print(
-        "[OK] test_pgstore_si_thread_property — K real OS threads x randomized"
+        "[OK] test_table_store_si_thread_property — K real OS threads x randomized"
         " interleavings: every pinned-snapshot read matched the WAL-visible"
         " reference (in-thread SI self-check) AND the post-join merged-history"
         " auditor held the invariant battery (INV-2/3/4/6/11) for every"

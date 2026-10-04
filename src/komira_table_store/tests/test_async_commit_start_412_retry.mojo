@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_async_commit_start_412_retry.mojo
+# src/komira_table_store/tests/test_async_commit_start_412_retry.mojo
 #   START-PATH 412 RETRY PROOF for the parkable AsyncCommitOp (BLOCKER-1,
 #   adversarial review of ).
 # =============================================================================
@@ -75,8 +75,8 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from komira_pgstore.pgstore_codec import bytes_eq
-from komira_pgstore.table_store import (
+from komira_table_store.table_store_codec import bytes_eq
+from komira_table_store.table_store import (
     AsyncCommitOp,
     TableStore,
     commit_async_poll,
@@ -346,4 +346,4 @@ def test_start_path_412_reruns_prelude_and_commits() raises:
 
 def main() raises:
     test_start_path_412_reruns_prelude_and_commits()
-    print("ALL pgstore async-commit START-412 retry tests PASSED")
+    print("ALL table store async-commit START-412 retry tests PASSED")

@@ -1,5 +1,5 @@
 # =============================================================================
-# komira_pgstore/partitioned_table_store.mojo
+# komira_table_store/partitioned_table_store.mojo
 #   WS-2 — the shard-aware ROUTER + per-shard commit (the RELAXED §10 scope).
 #   (heap Model-2 sharding campaign).
 # =============================================================================
@@ -14,7 +14,7 @@
 #     §10.3 — what this DROPS vs full-transparent: §2.4 topology-epoch closure,
 #             §2.3 HASH k-way ordered merge, §2.5 falsifier-as-gate.
 #     §1.4  — the ADR §4 constraint: routing policy (hash%K / route / route_range)
-#             is CALLER policy here in pgstore, NOT in the neutral kernel.
+#             is CALLER policy here in the table store, NOT in the neutral kernel.
 #
 # WHAT THIS IS — a SIDECAR router the common case never touches.
 # ---------------------------------------------------------------------------
@@ -84,9 +84,9 @@ from komira_objectstore.cas_manifest import CasManifestStore, RetryPolicy
 from komira_objectstore.sharded_lineage import ShardedLineage
 from komira_objectstore.store import CloneableConditionalWriteStore
 
-from komira_pgstore.key_index import KeyValue
-from komira_pgstore.pgstore_codec import WriteOp, bytes_cmp
-from komira_pgstore.table_store import (
+from komira_table_store.key_index import KeyValue
+from komira_table_store.table_store_codec import WriteOp, bytes_cmp
+from komira_table_store.table_store import (
     CommitResult,
     TableStore,
     Txn,
@@ -144,7 +144,7 @@ def is_cross_shard_unsupported(msg: String) -> Bool:
 #
 # These are the genuine net-new of WS-2: the per-KEY map (a heap keyspace
 # partition), as opposed to the kernel's per-WRITER identity (`make_shard_id`).
-# They live HERE in pgstore — never reaching down into `komira_objectstore` —
+# They live HERE in the table store — never reaching down into `komira_objectstore` —
 # so the kernel stays routing-policy-agnostic (it does not bake hash%K OR
 # replicate-all, which would pre-empt the §8 decision).
 
@@ -638,7 +638,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
         over the COVERING shards (RANGE prunes to adjacent shards; HASH/NONE
         scatter to all). Each shard is scanned at ITS OWN fresh snapshot
         (`begin()` per shard — a cross-shard autocommit read is NOT a single
-        global cut; §10.2 / F3, which is the pgstore default + SQL-legal). Rows
+        global cut; §10.2 / F3, which is the table store default + SQL-legal). Rows
         are concatenated in shard-slot order, NO global merge, NO dedup. Returns
         the union of all covering shards' visible rows.
 
@@ -726,7 +726,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
     # `clone()` of the shared store) — NOT a
     # new owned field on this struct: the catalog is a thin `CasManifestStore`
     # handle over `<part>/_lineage/<shard_id>/_columnar`, the SAME sibling
-    # manifest the un-partitioned `PgstoreDatabase.with_columnar` path opens, so a
+    # manifest the un-partitioned SQL driver's `with_columnar` path opens, so a
     # row columnarized for shard `slot` is read back exactly. Building per-call
     # keeps the reuse-safe struct unchanged (no new slab/field) and keeps the
     # zero-overhead-at-NONE contract (a NONE table never reaches this).
@@ -736,7 +736,7 @@ struct PartitionedTableStore[Store: CloneableConditionalWriteStore](
     ) raises -> CasManifestStore[Self.Store]:
         """The `CasManifestStore` for shard `slot`'s COLUMNAR catalog lineage:
         `<part>/_lineage/<shard_id>/_columnar`. The caller wraps it in a
-        `ColumnarCatalog` (the adapter type lives in komira_pgstore_columnar,
+        `ColumnarCatalog` (the adapter type lives in the columnar adapter package,
         which depends on THIS leaf — so the leaf returns the raw lineage store and
         the driver constructs the `ColumnarCatalog`, keeping the cycle-free
         direction). Backed by a `clone()` of the shared store (same bucket)."""

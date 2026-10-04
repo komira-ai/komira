@@ -1,6 +1,6 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_correctness.mojo
-#   Serverless-Postgres correctness slice — the DETERMINISTIC invariant tests
+# src/komira_table_store/tests/test_table_store_correctness.mojo
+#   Table-store correctness slice — the DETERMINISTIC invariant tests
 #   (a),(b),(c),(e),(f) + the (d) deterministic discriminating variant.
 # =============================================================================
 #
@@ -12,7 +12,7 @@
 # bottom, which exercise the property directly and would fail on the naive
 # shape).
 #
-# Design: the serverless-Postgres correctness-slice design §7.
+# Design: the table-store correctness-slice design §7.
 #
 # Runs against InMemoryConditionalStore (single-thread, deterministic) AND
 # LocalFsConditionalStore (real filesystem — the durability/recovery test (e)
@@ -41,8 +41,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
     SharedInMemoryConditionalStore,
 )
 
-from komira_pgstore.key_index import KeyValue
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.key_index import KeyValue
+from komira_table_store.table_store_codec import (
     PG_COMMIT_FORMAT_VERSION,
     PG_OP_PUT,
     PG_SCHEMA_VERSION_UNSET,
@@ -52,7 +52,7 @@ from komira_pgstore.pgstore_codec import (
     decode_commit_chunk_keys,
     encode_commit_chunk,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
     CommitResult,
     TableStore,
     Txn,
@@ -389,7 +389,7 @@ def test_e_recovery_in_memory() raises:
 
 def test_e_recovery_local_fs() raises:
     print("[e] durability / recovery (LocalFs — TRUE crash-recovery on disk)")
-    var root = (_scratch_dir() + String("/pgstore_test_e_")) + _unique()
+    var root = (_scratch_dir() + String("/table_store_test_e_")) + _unique()
     var prefix = String("pg/e/fs")
 
     # ---- scope 1: write, then DROP the TableStore (simulating a crash) ----
@@ -1058,7 +1058,7 @@ def _unique() -> String:
 
 
 def main() raises:
-    print("== pgstore correctness slice (deterministic) ==")
+    print("== table store correctness slice (deterministic) ==")
     test_a_commit_atomicity()
     test_b_snapshot_isolation()
     test_c_read_your_own_writes()
@@ -1075,7 +1075,7 @@ def main() raises:
     test_k_format_version_roundtrip()
     test_k_reject_unknown_format_version()
     print(
-        "[OK] test_pgstore_correctness — (a) atomicity, (b) SI, (c) RYOW,"
+        "[OK] test_table_store_correctness — (a) atomicity, (b) SI, (c) RYOW,"
         " (d) OCC-deterministic, (e) recovery (mem+fs), (f) scan,"
         " (h) cross-handle SI, (i) auth-head coupling, (j) single-slot CAS,"
         " (k) WAL format version reject — all green"

@@ -1,6 +1,6 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_async_commit_park_e2e.mojo
-#   PARK-PROOF for the pgstore parkable AsyncCommitOp (P2) — THE
+# src/komira_table_store/tests/test_table_store_async_commit_park_e2e.mojo
+#   PARK-PROOF for the table store parkable AsyncCommitOp (P2) — THE
 #   GATE: while connection A's commit is PARKED on its in-flight create-CAS,
 #   connection B executes AND completes its own work; A's commit still lands
 #   durably + atomically after the park.
@@ -57,8 +57,8 @@ from komira_objectstore.shared_in_memory_slow_cas_store import (
     SharedInMemorySlowCasStore,
 )
 
-from komira_pgstore.pgstore_codec import bytes_eq
-from komira_pgstore.table_store import (
+from komira_table_store.table_store_codec import bytes_eq
+from komira_table_store.table_store import (
     AsyncCommitOp,
     TableStore,
     commit_async_poll,
@@ -280,4 +280,4 @@ def main() raises:
     test_commit_parks_and_other_conn_completes()
     test_zero_slow_ticks_commit_completes_in_one_step()
     test_empty_txn_commit_is_read_only_no_park()
-    print("ALL pgstore async-commit park-proof tests PASSED")
+    print("ALL table store async-commit park-proof tests PASSED")

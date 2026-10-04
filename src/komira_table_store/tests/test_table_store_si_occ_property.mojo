@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_si_occ_property.mojo
+# src/komira_table_store/tests/test_table_store_si_occ_property.mojo
 #   PRIORITY 2 (storage-level SI/OCC) — the three additive deterministic
 #   witnesses the existing harnesses do not already pin:
 #     C-SI-WRITESKEW   — SI is NOT serializable (an explicit write-skew witness).
@@ -10,10 +10,10 @@
 #                        B's snapshot; begin() pins max(read_head, _folded_seq).
 #
 # These complement (NOT duplicate) the existing storage tests:
-#   * test_pgstore_correctness.mojo (d) is a 2-writer deterministic OCC; this
+#   * test_table_store_correctness.mojo (d) is a 2-writer deterministic OCC; this
 #     generalizes to N∈{3,5,10} with the exactly-one-winner + version-chain
 #     invariants asserted per round.
-#   * test_pgstore_correctness.mojo (h) proves cross-handle VISIBILITY; this
+#   * test_table_store_correctness.mojo (h) proves cross-handle VISIBILITY; this
 #     pins the begin()-snapshot-pinning rule (max(read_head, _folded_seq)) that
 #     makes B see A's just-committed chunk at B's snapshot.
 #   * The SI-property harness (144 seeds) checks SI holds; NONE of them states
@@ -28,7 +28,7 @@
 #
 # DETERMINISTIC (single-driver, no OS threads): these are reproducible
 # witnesses, not a race — the interleave is forced by hand. The OS-thread
-# randomized property runs in test_pgstore_si_thread_property.mojo (C-SI-THREAD-
+# randomized property runs in test_table_store_si_thread_property.mojo (C-SI-THREAD-
 # PROPERTY).
 #
 # Encapsulation / stale-reuse: ZERO UnsafePointer in any signature; ZERO wildcard
@@ -44,8 +44,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 )
 from komira_objectstore.store import ConditionalWriteStore
 
-from komira_pgstore.pgstore_codec import bytes_eq
-from komira_pgstore.table_store import (
+from komira_table_store.table_store_codec import bytes_eq
+from komira_table_store.table_store import (
     TableStore,
     Txn,
     is_commit_retryable,
@@ -391,12 +391,12 @@ def test_c_cross_handle_fold() raises:
 
 
 def main() raises:
-    print("== pgstore storage-level SI/OCC property (PRIORITY 2) ==")
+    print("== table store storage-level SI/OCC property (PRIORITY 2) ==")
     test_c_si_writeskew_both_commit()
     test_c_si_fcw_nway()
     test_c_cross_handle_fold()
     print(
-        "[OK] test_pgstore_si_occ_property — write-skew ADMITTED (INV-1);"
+        "[OK] test_table_store_si_occ_property — write-skew ADMITTED (INV-1);"
         " N-way FCW exactly-one-winner + strictly-increasing HOT chain (INV-4);"
         " cross-handle fold pins max(read_head, _folded_seq) (INV-2/INV-3)"
     )

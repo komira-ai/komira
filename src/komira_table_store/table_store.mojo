@@ -1,17 +1,17 @@
 # =============================================================================
-# komira_pgstore/table_store.mojo
+# komira_table_store/table_store.mojo
 #   TableStore[Store] / Txn / CommitResult — the single-table key->row MVCC
-#   store over a CAS-manifest WAL (the serverless-Postgres correctness slice).
+#   store over a CAS-manifest WAL (the table-store correctness slice).
 # =============================================================================
 #
-# The minimal correctness proof of the storage core behind the serverless-
-# Postgres RFC: commit = ONE create-CAS append to `CasManifestStore`, and
+# The minimal correctness proof of this storage core: commit = ONE create-CAS
+# append to `CasManifestStore`, and
 # snapshot-isolation MVCC over that log is correct under real concurrency.
 # Pure Mojo API; generic over `[Store: ConditionalWriteStore]` so the IDENTICAL
 # code runs on the in-memory / shared-in-memory (real threads) / local-fs
 # conformers today and S3/GCS later UNCHANGED.
 #
-# Design: the serverless-Postgres correctness-slice design
+# Design: the table-store correctness-slice design
 #   §3 (commit protocol) + §4 (visibility) + §5 (recovery) + §6 (interface)
 #   + §8 (the ONE correctness subtlety: OCC head/create-CAS coupling).
 #
@@ -79,8 +79,8 @@ from std.memory import OwnedPointer
 
 from komira_collections.slab import Slab
 
-from komira_pgstore.key_index import KeyIndex, KeyValue, VisibleVersion
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.key_index import KeyIndex, KeyValue, VisibleVersion
+from komira_table_store.table_store_codec import (
     CommitChunk,
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
@@ -366,7 +366,7 @@ struct Txn(Movable, Deinitable):
 # =============================================================================
 # AsyncCommitOp — the carried-across-park state for a poll-shaped commit.
 # =============================================================================
-# (pgstore P2). The parkable commit's in-flight state, owned by
+# (table-store P2). The parkable commit's in-flight state, owned by
 # the caller (PgConnState's Slab) across the create-CAS round-trip. The
 # TableStore drives it via `commit_async_start`/`commit_async_poll`; the
 # IN-FLIGHT create-CAS op (transport buffers) lives inside the `_wal._store`
@@ -1035,7 +1035,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         ahead of committed truth). Taking the MAX also keeps the common warm
         single-writer case (where `_HEAD` == tail >= `_folded_seq`) unchanged.
 
-        OCC-STARVATION FIX (pgstore LocalFs K-writer soak livelock). The
+        OCC-STARVATION FIX (table-store LocalFs K-writer soak livelock). The
         `max` above is ALSO floored by `_observed_auth_seq` — the highest
         AUTHORITATIVE tail this handle has ever read. Without it a contended
         writer STARVES FOREVER, and this is not a tail-probability effect but a
@@ -1311,7 +1311,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
             continue
 
     # =========================================================================
-    # POLL-SHAPED (parkable) commit support (pgstore P2).
+    # POLL-SHAPED (parkable) commit support (table-store P2).
     # =========================================================================
     # The serve thread parks across the create-CAS round-trip so OTHER
     # connections progress while one txn's commit is in flight. Durability is
@@ -1780,13 +1780,13 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
 
         SI-6c NOTE: the dual-tier (hot + cold split) merge that CLOSES the §6.1
         INDEX-hot-vs-HEAP-cold hole lives ONE TIER UP, in
-        `komira_pgstore_columnar.dual_tier_read.heap_visible_at_dual_tier`, NOT
+        the columnar adapter's `dual_tier_read.heap_visible_at_dual_tier`, NOT
         here. That is a deliberate ENCAPSULATION decision: the cold tier is
         Parquet + the `ColumnarCatalog` lineage, both owned by the adapter
         package; folding the cold-split substrate into the reuse-safe
-        `komira_pgstore` LEAF would force the leaf to gain a
-        Parquet/columnar dependency (and create an `komira_pgstore` <->
-        `komira_pgstore_columnar` cycle — the columnar adapter already depends
+        `komira_table_store` LEAF would force the leaf to gain a
+        Parquet/columnar dependency (and create an `komira_table_store` <->
+        columnar-adapter cycle — the columnar adapter already depends
         on this leaf). The leaf instead exposes `heap_hot_version_at` (the HOT
         side of the merge, with the winning version's `commit_lsn` +
         tombstone flag preserved); the adapter composes it with the cold-split
@@ -1951,7 +1951,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         `hi_unbounded` is False, else `[lo, +inf)` (the `hi` arg is ignored)."""
         if len(txn.write_set) == 0:
             return base^
-        from komira_pgstore.pgstore_codec import bytes_cmp
+        from komira_table_store.table_store_codec import bytes_cmp
 
         var out = List[KeyValue]()
         for i in range(len(base)):
@@ -1998,7 +1998,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
         var chunk = decode_commit_chunk(self._wal.read_chunk(seq))
         return chunk.write_set.copy()
 
-    # ---- durable catalog sidecar (serverless-PG A1 — catalog durability) ----
+    # ---- durable catalog sidecar (A1 — catalog durability) ----
     #
     # The TABLE SCHEMA must survive a container restart (Phase-1a was an
     # in-memory catalog only — the A1 hard blocker). The schema lives in an
@@ -2006,10 +2006,10 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
     # single mutable, etag-CAS-versioned blob — same shape as `_HEAD` /
     # `_LOG_START`). The STORAGE layer round-trips the blob VERBATIM and never
     # interprets it; the SQL layer (komira_pgsql.catalog_codec) owns the
-    # encoding (TableSchema/ColumnDef <-> bytes) — so the reuse-safe pgstore
+    # encoding (TableSchema/ColumnDef <-> bytes) — so the reuse-safe table store
     # leaf gains NO knowledge of SQL types. These thin accessors expose the
     # sidecar through the store the SQL layer already holds, keeping the raw
-    # CAS confined to the CasManifestStore (no store handle escapes pgstore).
+    # CAS confined to the CasManifestStore (no store handle escapes the table store).
 
     def read_catalog_blob(self) raises -> CatalogSidecar:
         """Read the persisted catalog sidecar (opaque blob + etag + present
@@ -2034,7 +2034,7 @@ struct TableStore[Store: ConditionalWriteStore](Movable, Deinitable):
 def _sort_kv(mut xs: List[KeyValue]):
     """Insertion sort `xs` ascending by key (byte-lexicographic). Small result
     sets in the correctness slice."""
-    from komira_pgstore.pgstore_codec import bytes_cmp
+    from komira_table_store.table_store_codec import bytes_cmp
 
     var n = len(xs)
     var i = 1
@@ -2050,7 +2050,7 @@ def _sort_kv(mut xs: List[KeyValue]):
 
 
 # =============================================================================
-# Poll-shaped commit DRIVER (pgstore P2) — free functions
+# Poll-shaped commit DRIVER (table-store P2) — free functions
 # parameterized `[Store: ConditionalWriteStore & AsyncCasStore]`.
 # =============================================================================
 # These orchestrate the parkable commit over a `TableStore[Store]` + an

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_list_delimiter_audit.mojo
+# src/komira_table_store/tests/test_table_store_list_delimiter_audit.mojo
 #   C-LIST-DELIMITER (PRIORITY 1) — the highest-leverage production-bug guard.
 # =============================================================================
 #
@@ -19,37 +19,37 @@
 #      `InMemoryConditionalStore` collapses to objects-only (the trap baseline).
 #      This makes the store itself a discriminating instrument, not a black box.
 #
-#   2. THE pgstore COMMIT + RECOVERY PATH IS NOT VULNERABLE. Commit a NON-EMPTY
+#   2. THE table store COMMIT + RECOVERY PATH IS NOT VULNERABLE. Commit a NON-EMPTY
 #      history on one handle, then drive a COLD `TableStore.open` recovery on a
 #      FRESH handle over a CLONE of the SAME backing store (bucket-is-truth) and
 #      assert the recovered head == the true tail AND every committed row reads
 #      back. The recovery's only input is the faithful-listing bucket
-#      (`_recover_head_by_list` -> `_list_chunks`). The pgstore WAL chunk keys
+#      (`_recover_head_by_list` -> `_list_chunks`). The table store WAL chunk keys
 #      are FLAT leaf files directly under `<prefix>/manifest/`
 #      (`<prefix>/manifest/<seq:020d>.chunk`), so the objects-only fold is SOUND
 #      over a faithful store — this is the NON-VACUOUS proof of that (count > 0;
 #      recovered tail == committed tail). If any commit/recovery enumeration on
-#      the pgstore path EVER folded a NESTED prefix objects-only, recovery would
+#      the table store path EVER folded a NESTED prefix objects-only, recovery would
 #      miss chunks here -> RED.
 #
 #   3. THE TRAP IS REAL FOR NESTED PREFIXES. A direct demonstration that an
 #      objects-only fold of a NESTED prefix (`_meta/dedup/<pid>/<seq>.seq` shape,
-#      the pgstore/broker sentinel layout) returns EMPTY on the faithful store
+#      the table-store/broker sentinel layout) returns EMPTY on the faithful store
 #      while the correct `objects ∪ seq-bearing(common_prefixes)` fold finds the
 #      rollups — so a future enumeration that adopts that shape WITHOUT folding
 #      common_prefixes would be caught here (INV-10 enumeration completeness).
 #
 # AUDIT FINDING (documented for the COO; the source is NOT changed here):
-#   Every enumeration in the pgstore commit + recovery path
+#   Every enumeration in the table store commit + recovery path
 #   (`table_store.mojo` -> `CasManifestStore.read_head_authoritative` ->
 #   `_recover_head_by_list` -> `_list_chunks`) lists the FLAT `<prefix>/manifest/`
 #   prefix and folds `res.objects`. Because the chunk keys are leaf files (no '/'
 #   after the prefix), objects-only is the CORRECT fold for that prefix — the
-#   pgstore recovery path is NOT vulnerable to the LIST-delimiter trap. The
+#   table store recovery path is NOT vulnerable to the LIST-delimiter trap. The
 #   NESTED enumerations in `cas_manifest.mojo` (the reaper's `_meta/dedup/` LIST,
-#   tombstones) are NOT on the pgstore commit/recovery path (pgstore never
+#   tombstones) are NOT on the table store commit/recovery path (the table store never
 #   produces dedup sentinels). This test pins that finding so a future refactor
-#   that moves a pgstore enumeration onto a nested prefix without folding
+#   that moves a table store enumeration onto a nested prefix without folding
 #   common_prefixes is caught.
 #
 # Encapsulation / stale-reuse: ZERO UnsafePointer in any signature; ZERO wildcard
@@ -73,8 +73,8 @@ from komira_objectstore.path import Path
 from komira_objectstore.store import ConditionalWriteStore
 from komira_objectstore.types import WritePrecondition
 
-from komira_pgstore.pgstore_codec import bytes_eq
-from komira_pgstore.table_store import TableStore, Txn
+from komira_table_store.table_store_codec import bytes_eq
+from komira_table_store.table_store import TableStore, Txn
 
 
 # =============================================================================
@@ -178,7 +178,7 @@ def test_s5_store_is_delimiter_faithful() raises:
 
 
 # =============================================================================
-# (2) THE pgstore COMMIT + RECOVERY PATH IS SOUND over a FAITHFUL store.
+# (2) THE table store COMMIT + RECOVERY PATH IS SOUND over a FAITHFUL store.
 #     (NON-VACUOUS: a non-empty set of committed chunks; recovered head == tail.)
 # =============================================================================
 
@@ -195,18 +195,18 @@ def _new_ts(
     )
 
 
-def test_pgstore_recovery_over_faithful_store_nonvacuous() raises:
+def test_table_store_recovery_over_faithful_store_nonvacuous() raises:
     """Drive a REAL cold TableStore recovery over the delimiter-faithful store
     with a NON-EMPTY committed history and assert the recovered head == the true
     tail + every row reads back. The recovery's ONLY input is the faithful
     bucket (a FRESH handle over a clone of the same backing store — no _HEAD in
     the fresh handle's index, so `open()` LIST-recovers via `_list_chunks`). If
-    any commit/recovery enumeration on the pgstore path folded a NESTED prefix
+    any commit/recovery enumeration on the table store path folded a NESTED prefix
     objects-only, recovery would MISS chunks here -> RED. Today it is GREEN
-    because the pgstore WAL chunk keys are FLAT leaves under `<prefix>/manifest/`
+    because the table store WAL chunk keys are FLAT leaves under `<prefix>/manifest/`
     (objects-only is the correct fold for that flat prefix)."""
     print(
-        "[c-list-delimiter] (2) pgstore cold recovery over the FAITHFUL store"
+        "[c-list-delimiter] (2) table store cold recovery over the FAITHFUL store"
         " (non-vacuous)"
     )
     var shared = DelimiterFaithfulConditionalStore()
@@ -267,7 +267,7 @@ def test_pgstore_recovery_over_faithful_store_nonvacuous() raises:
     _ = shared^
     print(
         "    [OK] (2) cold recovery via LIST found the true tail (head=",
-        Int(true_head), ") + every row correct — pgstore recovery is NOT"
+        Int(true_head), ") + every row correct — table store recovery is NOT"
         " vulnerable to the LIST-delimiter trap",
     )
 
@@ -279,11 +279,11 @@ def test_pgstore_recovery_over_faithful_store_nonvacuous() raises:
 
 def test_nested_prefix_objects_only_fold_is_empty() raises:
     """A direct demonstration of WHY common_prefixes must be folded for a NESTED
-    enumeration. Put keys in the pgstore/broker sentinel shape
+    enumeration. Put keys in the table-store/broker sentinel shape
     (`_meta/dedup/<pid>/<seq>.seq`) and show that an objects-only fold of the
     nested `_meta/dedup/` prefix returns EMPTY on the faithful store, while the
     correct `objects ∪ seq-bearing(common_prefixes)` fold finds the rollups.
-    (This is the falsifier any future pgstore enumeration over a NESTED prefix
+    (This is the falsifier any future table store enumeration over a NESTED prefix
     would have to pass — INV-10 enumeration completeness.)
     """
     print(
@@ -346,13 +346,13 @@ def test_nested_prefix_objects_only_fold_is_empty() raises:
 
 
 def main() raises:
-    print("== pgstore LIST-delimiter audit (C-LIST-DELIMITER, PRIORITY 1) ==")
+    print("== table store LIST-delimiter audit (C-LIST-DELIMITER, PRIORITY 1) ==")
     test_s5_store_is_delimiter_faithful()
-    test_pgstore_recovery_over_faithful_store_nonvacuous()
+    test_table_store_recovery_over_faithful_store_nonvacuous()
     test_nested_prefix_objects_only_fold_is_empty()
     print(
-        "[OK] test_pgstore_list_delimiter_audit — the S-5 faithful store is a"
-        " discriminating instrument; the pgstore commit/recovery path folds"
+        "[OK] test_table_store_list_delimiter_audit — the S-5 faithful store is a"
+        " discriminating instrument; the table store commit/recovery path folds"
         " objects-only over the FLAT manifest prefix (SOUND, proven"
         " non-vacuously); the nested-prefix trap is demonstrated so a future"
         " nested enumeration without common_prefixes is caught (INV-10)"

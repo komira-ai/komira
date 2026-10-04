@@ -1,6 +1,6 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_concurrency.mojo
-#   Serverless-Postgres correctness slice — the REAL-OS-THREAD tests:
+# src/komira_table_store/tests/test_table_store_concurrency.mojo
+#   Table-store correctness slice — the REAL-OS-THREAD tests:
 #   (d) real-thread OCC write-write + (g) K>=16 concurrency soak.
 # =============================================================================
 #
@@ -11,7 +11,7 @@
 # simplification — it proves the lock-free OCC loop is correct under real
 # threads contending one shared store's create-CAS slot.
 #
-# Design: the serverless-Postgres correctness-slice design §7(d),(g).
+# Design: the table-store correctness-slice design §7(d),(g).
 #
 # Thread idiom mirrors objectstore/test_cas_manifest_concurrent_offline.mojo:
 # pthread_create with a heap-boxed arg + a per-thread heap-stable results slot
@@ -49,14 +49,14 @@ from komira_objectstore.types import (
     WritePrecondition,
 )
 
-from komira_pgstore.pgstore_codec import (
+from komira_table_store.table_store_codec import (
     PG_OP_PUT,
     PG_OP_TOMBSTONE,
     WriteOp,
     bytes_eq,
     encode_commit_chunk,
 )
-from komira_pgstore.table_store import (
+from komira_table_store.table_store import (
 
 
     TableStore,
@@ -601,7 +601,7 @@ struct _TornHeadStore(
             c.head_gets += Int64(1)
             if c.hard_error:
                 raise Error(
-                    "pgstore-test: injected NON-transient store failure on"
+                    "table-store-test: injected NON-transient store failure on"
                     " _HEAD (permission denied)"
                 )
             if c.torn_remaining > Int64(0):
@@ -1259,7 +1259,7 @@ def _run_soak_fs(k: Int, rounds: Int64) raises:
         "[g] LocalFs soak K=" + String(k) + " x " + String(Int(rounds))
         + " rounds (O_EXCL create path)"
     )
-    var root = (_scratch_dir() + String("/pgstore_soak_fs_")) + _unique()
+    var root = (_scratch_dir() + String("/table_store_soak_fs_")) + _unique()
     var prefix = String("pg/g_fs")
 
     # Create the root once (the first ctor is fallible; clones are infallible).
@@ -1354,7 +1354,7 @@ def _unique() -> String:
 
 
 def main() raises:
-    print("== pgstore concurrency slice (real OS threads) ==")
+    print("== table store concurrency slice (real OS threads) ==")
     # MUST-FIX #3 — prove the HOT-chain audit discriminates a lost update
     # BEFORE the soak relies on it (deterministic, fast).
     test_audit_discriminates_lost_update()
@@ -1372,7 +1372,7 @@ def main() raises:
     # (g) LocalFs variant (O_EXCL path) — smaller R (disk-bound) but K>=16.
     _run_soak_fs(16, Int64(10))
     print(
-        "[OK] test_pgstore_concurrency — (audit-disc) lost-update detector +"
+        "[OK] test_table_store_concurrency — (audit-disc) lost-update detector +"
         " (d) real-thread OCC + (g) K=16 soak (SharedInMemory R=50, LocalFs"
         " R=10) — no lost updates / torn state / gaps / SIGSEGV"
     )

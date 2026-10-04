@@ -1,5 +1,5 @@
 # =============================================================================
-# src/komira_pgstore/tests/test_pgstore_secondary_index.mojo
+# src/komira_table_store/tests/test_table_store_secondary_index.mojo
 #   SI slice 1 — the STORAGE-LEVEL discriminating falsifiers for the per-index
 #   memtable family in TableStore (register_index + routed fold + index_scan_
 #   visible). These probe the index MEMTABLE directly, so a stub that does NOT
@@ -35,8 +35,8 @@ from komira_objectstore.shared_in_memory_conditional_store import (
 )
 from komira_objectstore.store import ConditionalWriteStore
 
-from komira_pgstore.key_index import KeyValue
-from komira_pgstore.table_store import TableStore, Txn
+from komira_table_store.key_index import KeyValue
+from komira_table_store.table_store import TableStore, Txn
 from komira_runtime_paths import test_tmpdir
 
 
@@ -51,13 +51,13 @@ def _scratch_dir() raises -> String:
 
 # =============================================================================
 # Helpers — build storage-level keys WITHOUT the pgsql codec (keep this test on
-# the pgstore leaf only). An index lineage ordinal lives in the disjoint high
+# the table store leaf only). An index lineage ordinal lives in the disjoint high
 # band; a heap key in the low band. We hand-encode the 4-byte big-endian ordinal
 # prefix that `TableStore._key_lineage_ord` reads.
 # =============================================================================
 
 # The disjoint high-band base mirrors row_image_codec.INDEX_LINEAGE_BAND_BASE
-# (2^30) — but this test stays on the pgstore leaf, so we hard-code the band.
+# (2^30) — but this test stays on the table store leaf, so we hard-code the band.
 comptime _IDX_BAND: Int32 = 0x40000000
 comptime _HEAP_TID: Int32 = 0  # the heap table ordinal (low band)
 
