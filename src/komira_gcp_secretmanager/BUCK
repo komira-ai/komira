@@ -27,14 +27,9 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # `google.api.default_host` of the pinned proto. Regional secrets
 # (`projects/*/locations/*/secrets/*`, served at
 # secretmanager.<location>.rep.googleapis.com) are every method's
-# `additional_bindings`, which the generator does not emit: a regional
-# secret name is refused before anything is sent.
-#
-# AddSecretVersion's request is the whole body (`body: "*"`), so the body
-# also carries the path-bound `parent`, with the value the path carries.
-# google/api/http.proto puts only the fields the path does not bind in such
-# a body; the service binds the path's value, so the extra field carries
-# nothing it uses. test_secretmanager_methods pins that exact body.
+# `additional_bindings`: a regional name is sent at its regional path, to
+# the host the caller sets, and a name no binding matches is refused before
+# anything is sent.
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the Secret Manager v1 REST reference (no upstream test body is
@@ -44,9 +39,10 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 # body byte for byte, and its response decoded), test_secretmanager_errors
 # (one google.rpc.Status envelope per method mapped to its code, the body
 # never quoted), test_secretmanager_endpoint (the default host read without
-# sending, an override dialled, a regional secret name refused before the
-# token is asked) and test_no_env_reads (no generated module reads the
-# environment, and only the methods above are generated).
+# sending, an override dialled, a regional secret name sent at its regional
+# path, a name no binding matches refused before the token is asked) and
+# test_no_env_reads (no generated module reads the environment, and only
+# the methods above are generated).
 #
 # No test here talks to the service.
 mojo_gcp_client(

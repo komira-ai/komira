@@ -14,12 +14,11 @@
 # Regional endpoints: Secret Manager also serves regional secrets at
 # `secretmanager.<location>.rep.googleapis.com`, named
 # `projects/*/locations/*/secrets/*`. Those paths are each method's
-# `additional_bindings`, which the generator does not emit: the client
-# holds the global bindings only (`projects/*/secrets/*`). A caller can
-# point it at a regional host, but a regional secret's name does not match
-# the global pattern and is refused before the token source is asked or
-# anything is dialled, rather than sent to a path the service would read
-# differently.
+# `additional_bindings`, which the generated method tries after the global
+# one: a regional name is sent at its regional path, to whichever host the
+# caller set (the regional host is the caller's to set). A name that
+# matches no binding is refused before the token source is asked or
+# anything is dialled.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_true
 
@@ -110,7 +109,31 @@ def test_set_rest_host_is_what_is_dialled() raises:
     ))
 
 
-def test_a_regional_secret_name_is_refused_before_any_send() raises:
+def test_a_regional_secret_name_is_sent_at_its_regional_path() raises:
+    var capture = ArcPointer[List[UInt8]](List[UInt8]())
+    var c = SecretManagerServiceClient[ScriptedConnector, StaticTokenSource](
+        HttpClient[ScriptedConnector].with_defaults(
+            ScriptedConnector.with_stream_tls(
+                ScriptedStream.from_read_script_with_capture(_ok(), capture)
+            )
+        ),
+        StaticTokenSource(String("test-access-token")),
+    )
+    c.set_rest_host(String("localhost"))
+    var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
+    ref reactor = rt.reactor()
+    _ = c.access_secret_version[_RT](
+        _access("projects/demo-project/locations/us-central1/secrets/s/versions/1"),
+        reactor,
+    )
+    var wire = String(unsafe_from_utf8=Span(capture[]))
+    assert_true(wire.startswith(
+        "GET /v1/projects/demo-project/locations/us-central1/secrets/s/versions/1:access"
+        + " HTTP/1.1\r\n"
+    ), wire)
+
+
+def test_a_name_no_binding_matches_is_refused_before_any_send() raises:
     var calls = ArcPointer[Int](0)
     var c = SecretManagerServiceClient[ScriptedConnector, CountingTokenSource](
         HttpClient[ScriptedConnector].with_defaults(
@@ -118,20 +141,18 @@ def test_a_regional_secret_name_is_refused_before_any_send() raises:
         ),
         CountingTokenSource(calls),
     )
-    c.set_rest_host(String("secretmanager.us-central1.rep.googleapis.com"))
-    assert_equal(c._rest_host, "secretmanager.us-central1.rep.googleapis.com")
+    c.set_rest_host(String("localhost"))
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var raised = False
     try:
         _ = c.access_secret_version[_RT](
-            _access("projects/demo-project/locations/us-central1/secrets/s/versions/1"),
-            reactor,
+            _access("projects/demo-project/secrets/s"), reactor
         )
     except e:
         raised = True
-        assert_true("name" in String(e), String(e))
-    assert_true(raised, "a regional secret name was sent on a global binding")
+        assert_true("matches none of its paths" in String(e), String(e))
+    assert_true(raised, "a name matching no binding was sent")
     assert_equal(calls[], 0)
     assert_equal(c._client._connector.connect_call_count(), 0)
 
@@ -139,5 +160,6 @@ def test_a_regional_secret_name_is_refused_before_any_send() raises:
 def main() raises:
     test_a_fresh_client_starts_at_the_default_host()
     test_set_rest_host_is_what_is_dialled()
-    test_a_regional_secret_name_is_refused_before_any_send()
+    test_a_regional_secret_name_is_sent_at_its_regional_path()
+    test_a_name_no_binding_matches_is_refused_before_any_send()
     print("OK")
