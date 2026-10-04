@@ -173,13 +173,20 @@ impl AwsOverrides {
                     ))
                 }
             };
+            // A parametric owner (`def f[C: Connector, ...](`), as one taking
+            // the generated client is, opens its parameter list with `[`.
             let def_fn = format!("def {}(", ov.hand_symbol);
+            let def_param_fn = format!("def {}[", ov.hand_symbol);
             let def_struct = format!("struct {}", ov.hand_symbol);
-            if !text.contains(&def_fn) && !text.contains(&def_struct) {
+            if !text.contains(&def_fn)
+                && !text.contains(&def_param_fn)
+                && !text.contains(&def_struct)
+            {
                 return Err(format!(
                     "overrides: `{op}` names owner symbol `{}` in `{path}`, and that file \
-                     defines neither `{def_fn}…` nor `{def_struct}`. An override whose owner \
-                     does not exist is a claim the build believed and nothing checked.",
+                     defines none of `{def_fn}…`, `{def_param_fn}…` and `{def_struct}`. An \
+                     override whose owner does not exist is a claim the build believed and \
+                     nothing checked.",
                     ov.hand_symbol
                 ));
             }
@@ -280,5 +287,28 @@ mod tests {
             "def delete_secret(mut c: X) raises -> Y:\n    pass\n".into(),
         )])
         .expect("accepts");
+    }
+
+    #[test]
+    fn check_symbols_accepts_a_parametric_owner() {
+        let m = AwsOverrides::parse_manifest(&manifest(&format!(
+            r#"{{"operation":"DeleteSecret","hand_module":"komira_aws_secretsmanager_ext.sm_overrides",
+                 "hand_symbol":"delete_secret","reason":"{REASON}"}}"#
+        )))
+        .unwrap();
+        let sm = "src/komira_aws_secretsmanager_ext/sm_overrides.mojo";
+        m.check_symbols(&[(
+            sm.into(),
+            "def delete_secret[C: Connector](mut c: X[C]) raises -> Y:\n    pass\n".into(),
+        )])
+        .expect("accepts");
+        // A longer name sharing the prefix is not the owner.
+        let err = m
+            .check_symbols(&[(
+                sm.into(),
+                "def delete_secret_raw[C: Connector](mut c: X[C]):\n    pass\n".into(),
+            )])
+            .unwrap_err();
+        assert!(err.contains("delete_secret"), "{err}");
     }
 }
