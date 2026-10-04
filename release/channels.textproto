@@ -12,7 +12,7 @@
 # repository komira-ai/komira, the workflow file kci.yml and the GitHub
 # environment prod. The prod job of kci.yml mints the job's ID token and
 # exchanges it with prefix.dev for a short-lived upload token, so no secret
-# exists anywhere, and the declaration names none. `push_identity` is the
+# exists anywhere, and the channel names none. `push_identity` is the
 # subject claim of that token: the only principal that may push.
 #
 # `location` is the channel's address on prefix.dev, `https://<host>/<channel>`:
@@ -21,7 +21,7 @@
 # test src/kci_release_channel/tests/test_release_channels_file.mojo reads
 # this file through the real parser.
 
-# The file format's major (kci_contract's format table): kci refuses a file
+# The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
 schema_version: 1
 
