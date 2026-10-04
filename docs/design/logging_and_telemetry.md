@@ -203,7 +203,7 @@ Each library below welds its tests with `test_srcs`, so building it runs them.
 | `komira_log_query` | 1, `test_service_log_route` | path match, the access hook and the one 404, window and limit, term decoding, the conformer-raise split, page rendering, the erased facade |
 | `komira_name_registry` | 1, `test_name_registry` | name registry |
 
-Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry`.
+Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry //src/komira_log_query:komira_log_query`.
 
 `test_log_p2c_aot_perf` compares the typed and ambient reaches and only reports. Not tested: `emit_erased` has tests and no caller in these libraries.
 
