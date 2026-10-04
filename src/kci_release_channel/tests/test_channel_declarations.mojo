@@ -56,13 +56,19 @@ channel: {
 """
 
 
+def _parse(text: String) raises -> List[ChannelDeclaration]:
+    """`parse_channels_file` over `text` with `schema_version: 1` prepended on
+    its FIRST line, so no line number a refusal names moves."""
+    return parse_channels_file(String("schema_version: 1 ") + text)
+
+
 def _assert_contains(haystack: String, needle: String) raises:
     if needle not in haystack:
         raise Error(String("expected '") + needle + String("' in: ") + haystack)
 
 
 def test_a_channels_file_parses_in_order() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     assert_equal(len(decls), 2)
     var names = channel_names(decls)
     assert_equal(names[0], String("beta"))
@@ -74,13 +80,13 @@ def test_a_channels_file_parses_in_order() raises:
 
 
 def test_visibility_reads_back() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     assert_false(find_channel(decls, String("beta")).is_public())
     assert_true(find_channel(decls, String("stable")).is_public())
 
 
 def test_repository_for_reads_every_field() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     var r = find_channel(decls, String("stable")).repository_for(
         String(ARTIFACT_TYPE_PYTHON)
     )
@@ -109,7 +115,7 @@ def test_repository_for_reads_every_field() raises:
 
 
 def test_a_missing_repository_is_refused_not_defaulted() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     var msg = String("")
     try:
         _ = find_channel(decls, String("beta")).repository_for(
@@ -121,7 +127,7 @@ def test_a_missing_repository_is_refused_not_defaulted() raises:
 
 
 def test_an_unknown_channel_is_refused_naming_the_declared_ones() raises:
-    var decls = parse_channels_file(String(_FILE))
+    var decls = _parse(String(_FILE))
     var msg = String("")
     try:
         _ = find_channel(decls, String("nightly"))
