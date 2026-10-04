@@ -5,8 +5,8 @@
 #
 # The forms are written here from the Service Usage v1 REST reference:
 # `services.enable` and `services.disable` (POST
-# /v1/<parent>/services/<service>:enable / :disable, the request message as
-# the body, answered with a long-running `Operation`) and `services.get`
+# /v1/<parent>/services/<service>:enable / :disable, the request message,
+# less the `name` the path carries, as the body, answered with a long-running `Operation`) and `services.get`
 # (GET on the service's name, answered with a `Service`). A service is
 # named `projects/<project>/services/<service>` (a project number or id),
 # which the binding `*/*/services/*` takes.
@@ -123,7 +123,7 @@ comptime _FAILED = (
 )
 
 
-def test_enable_sends_the_name_and_reads_a_running_operation() raises:
+def test_enable_sends_the_name_in_the_path_and_reads_a_running_operation() raises:
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var c = _client(capture, String(_RUNNING))
     var rt = _rt()
@@ -135,7 +135,8 @@ def test_enable_sends_the_name_and_reads_a_running_operation() raises:
         "POST /v1/projects/demo-project/services/run.googleapis.com:enable HTTP/1.1",
     )
     assert_true(_has_header(wire, "content-type"))
-    assert_equal(_body(wire), String('{"name":"') + _SVC + '"}')
+    # `name` is in the path, so the body is every other field: none.
+    assert_equal(_body(wire), "{}")
 
     assert_equal(op.name, "operations/op-1")
     assert_false(op.done)
@@ -204,9 +205,7 @@ def test_disable() raises:
     )
     assert_equal(
         _body(wire),
-        String('{"name":"')
-        + _SVC
-        + '","disableDependentServices":false,"checkIfServiceHasUsage":"CHECK"}',
+        '{"disableDependentServices":false,"checkIfServiceHasUsage":"CHECK"}',
     )
 
 
@@ -274,7 +273,7 @@ def test_a_name_outside_the_binding_is_refused_before_the_dial() raises:
 
 
 def main() raises:
-    test_enable_sends_the_name_and_reads_a_running_operation()
+    test_enable_sends_the_name_in_the_path_and_reads_a_running_operation()
     test_enable_reads_an_operation_that_is_already_done()
     test_enable_reads_a_failed_operation()
     test_disable()

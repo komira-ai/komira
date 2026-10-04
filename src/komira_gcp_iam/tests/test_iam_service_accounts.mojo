@@ -7,7 +7,8 @@
 # `projects.serviceAccounts.list` (GET .../serviceAccounts, `pageSize` and
 # `pageToken` in the query), `get` (GET on the account's name), `create`
 # (POST .../serviceAccounts, a `CreateServiceAccountRequest` body: the
-# `accountId` and the `serviceAccount` to create) and `delete` (DELETE on
+# `accountId` and the `serviceAccount` to create, its `name` being the
+# path's) and `delete` (DELETE on
 # the name, answering an empty JSON object). An account is named
 # `projects/<project>/serviceAccounts/<email or unique id>`; the `@` of an
 # email is percent-encoded in the path, which the API reads as the same
@@ -243,7 +244,7 @@ def test_create() raises:
     assert_equal(_header(wire, "content-type"), "application/json")
     assert_equal(
         _body(wire),
-        '{"name":"projects/demo-project","accountId":"runner",'
+        '{"accountId":"runner",'
         + '"serviceAccount":{"name":"","projectId":"","uniqueId":"","email":"",'
         + '"displayName":"Runner","etag":"","description":"runs the nightly jobs",'
         + '"oauth2ClientId":"","disabled":false}}',

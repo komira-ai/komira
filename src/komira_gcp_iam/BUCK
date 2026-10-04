@@ -54,6 +54,10 @@ load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
 #
 # GetIamPolicy's binding has no body, so its `GetPolicyOptions` (the policy
 # version asked for) rides the query as `options.requestedPolicyVersion`.
+# A method whose body is the whole request (`body: "*"`) sends every field
+# but those its path carries, as google/api/http.proto defines that body:
+# SetIamPolicy's `resource`, CreateRole's `parent` and
+# CreateServiceAccount's `name` are in the URL only.
 #
 # A policy change is a read-modify-write: the caller reads the policy with
 # GetIamPolicy, changes the bindings and sends it back with SetIamPolicy

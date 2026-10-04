@@ -424,11 +424,23 @@ fn query_items(
             items.push(QueryItem::Leaf(leaf));
             continue;
         }
-        let IrType::Message(tref) = &fld.ty else {
-            return Err(format!(
-                "REST method `{}`: query field `{f}` is a map, which has no query form",
-                m.name
-            ));
+        let tref = match &fld.ty {
+            IrType::Message(tref) => tref,
+            IrType::Map(..) => {
+                return Err(format!(
+                    "REST method `{}`: query field `{f}` is a map, which has no query form",
+                    m.name
+                ))
+            }
+            // Scalars and enums were taken above; a nested list is built
+            // only by the AWS front end, never for a proto field.
+            _ => {
+                return Err(format!(
+                    "REST method `{}`: query field `{f}` is a list of lists, which has no \
+                     query form",
+                    m.name
+                ))
+            }
         };
         if fld.label == Label::Repeated {
             return Err(format!(
@@ -445,6 +457,16 @@ fn query_items(
                 kind: LeafKind::FieldMask,
             }));
             continue;
+        }
+        // Any other well-known type is one parameter too, its JSON string
+        // (`2024-01-01T00:00:00Z`, `1.5s`), never `ts.seconds=&ts.nanos=`:
+        // sending its fields would be wrong even if its file were generated.
+        if tref.fq_name.starts_with(".google.protobuf.") {
+            return Err(format!(
+                "REST method `{}`: query field `{f}` is a `{}`, whose query form is its \
+                 JSON string, which is implemented only for `{FIELD_MASK}`",
+                m.name, tref.fq_name
+            ));
         }
         let sub = idx.get(&tref.fq_name).ok_or_else(|| {
             format!(
@@ -750,6 +772,13 @@ fn emit_path_alternatives(
             w.line("if path.byte_length() == 0:");
             w.indent();
         }
+        // The bare `except` catches only a mismatch: the block is
+        // `emit_path_segments`' `path += ...` lines alone, where a String
+        // append and `_rest_to_str` / `_rest_bool_str` cannot raise, so the
+        // only raises are `_rest_path_var` / `_rest_path_segment` refusing
+        // this binding's value (the unit test
+        // `a_binding_fallback_catches_only_the_path_helpers` holds this).
+        w.line("# Only a path variable that does not match this binding raises here.");
         w.line("try:");
         w.indent();
         emit_path_segments(w, template, bool_fields);
@@ -924,8 +953,11 @@ fn emit_query_leaf(w: &mut Writer, leaf: &QueryLeaf) {
     }
 }
 
-/// Emit the JSON-body build. For `body: "*"` the whole `req` serializes; for a
-/// named field the single field's message serializes. Both go through
+/// Emit the JSON-body build. For `body: "*"` the whole `req` serializes, less
+/// the fields its path binds: `google/api/http.proto` defines that body as
+/// every field *not* bound by the path template, so a field the URL carries is
+/// left out of the body (`_rest_drop_members`). For a named field the single
+/// field's message serializes. Both go through
 /// `komira_proto_codec.codec.encode_json`, so a well-known type writes its
 /// canonical JSON value.
 fn emit_body_build(
@@ -938,8 +970,31 @@ fn emit_body_build(
     // value, which only the codec's comptime branch does. For any other
     // message it is the same encode + `finish()`.
     match &part.body {
-        BodyDesignator::Whole => {
+        BodyDesignator::Whole if part.path_fields.is_empty() => {
             w.line("var body_text = encode_json(req)");
+        }
+        BodyDesignator::Whole => {
+            // The members are dropped from the encoded text by JSON name, so
+            // every other value keeps the codec's exact rendering.
+            let mut names = Vec::new();
+            for f in &part.path_fields {
+                let fld = req_msg
+                    .fields
+                    .iter()
+                    .find(|x| &x.name == f)
+                    .expect("partition field came from the message");
+                names.push(format!(
+                    "String(\"{}\")",
+                    fld.json_name.replace('\\', "\\\\").replace('"', "\\\"")
+                ));
+            }
+            w.line(&format!(
+                "var _rest_path_members: List[String] = [{}]",
+                names.join(", ")
+            ));
+            w.line(
+                "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)",
+            );
         }
         BodyDesignator::Field(name) => {
             let fld = req_msg
@@ -1107,6 +1162,79 @@ def _rest_path_var(value: String, pattern: String, field: String) raises -> Stri
             + String("` has an empty, `.` or `..` segment")
         )
     return out^
+
+
+def _rest_drop_members(json: String, names: List[String]) raises -> String:
+    """`json` without its top-level members whose key is in `names`: the
+    `body: "*"` of a method whose path binds fields, which
+    `google/api/http.proto` defines as every field the path does not bind.
+    `json` is an object as `encode_json` writes it, with no whitespace; each
+    kept member is copied byte for byte, so no value is rendered again. An
+    error never echoes the text."""
+    var b = json.as_bytes()
+    var n = len(b)
+    if n < 2 or b[0] != 0x7B or b[n - 1] != 0x7D:
+        raise Error(String("REST body is not a JSON object"))
+    var out = List[UInt8](capacity=n)
+    out.append(0x7B)  # '{'
+    var kept = 0
+    var i = 1
+    while i < n - 1:
+        var start = i
+        # The key: a JSON string, its escapes skipped.
+        if b[i] != 0x22:
+            raise Error(String("REST body member has no key"))
+        var k = i + 1
+        while k < n - 1 and b[k] != 0x22:
+            if b[k] == 0x5C:
+                k += 1
+            k += 1
+        if k + 1 >= n - 1 or b[k] != 0x22 or b[k + 1] != 0x3A:
+            raise Error(String("REST body member has no key"))
+        var drop = False
+        for name in names:
+            var nb = name.as_bytes()
+            if len(nb) == k - i - 1:
+                var same = True
+                var t = 0
+                while same and t < len(nb):
+                    same = nb[t] == b[i + 1 + t]
+                    t += 1
+                if same:
+                    drop = True
+        # The value: up to the `,` at this depth, or the closing `}`.
+        var depth = 0
+        var in_str = False
+        var j = k + 2
+        while j < n - 1:
+            var c = b[j]
+            if in_str:
+                if c == 0x5C:
+                    j += 1
+                elif c == 0x22:
+                    in_str = False
+            elif c == 0x22:
+                in_str = True
+            elif c == 0x7B or c == 0x5B:
+                depth += 1
+            elif c == 0x7D or c == 0x5D:
+                depth -= 1
+            elif c == 0x2C and depth == 0:
+                break
+            j += 1
+        if in_str or depth != 0 or j > n - 1:
+            raise Error(String("REST body member has an unterminated value"))
+        if not drop:
+            if kept > 0:
+                out.append(0x2C)  # ','
+            var x = start
+            while x < j:
+                out.append(b[x])
+                x += 1
+            kept += 1
+        i = j + 1
+    out.append(0x7D)  # '}'
+    return String(unsafe_from_utf8=Span(out))
 
 
 def _rest_hex_upper(nibble: UInt8) -> String:
@@ -1638,7 +1766,15 @@ mod tests {
         };
         let file = file_with(vec![req, out], svc.clone());
         let emit = emit_rest_service(&file, &svc).unwrap();
-        assert!(emit.source.contains("var body_text = encode_json(req)"));
+        // `shelf` is in the path, so it is not in the body: the body is
+        // every field the path does not bind (google/api/http.proto).
+        assert!(!emit.source.contains("var body_text = encode_json(req)\n"));
+        assert!(emit
+            .source
+            .contains("var _rest_path_members: List[String] = [String(\"shelf\")]"));
+        assert!(emit.source.contains(
+            "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)"
+        ));
         assert!(emit.source.contains("BytesBody.from_str(body_text)"));
         assert!(emit.source.contains("HttpMethod.delete()"));
         assert!(emit.source.contains("Content-Type"));
@@ -1979,6 +2115,28 @@ mod tests {
         let e = one_method(vec![], "post", "/v2/entries:list", "*").unwrap();
         assert!(e.source.contains("path += String(\"/entries\")\n"), "{}", e.source);
         assert!(e.source.contains("path += String(\":list\")\n"), "{}", e.source);
+        // No field in the path: the whole request is the body.
+        assert!(e.source.contains("var body_text = encode_json(req)\n"), "{}", e.source);
+        assert!(!e.source.contains("_rest_path_members"), "{}", e.source);
+    }
+
+    #[test]
+    fn a_whole_body_leaves_out_every_path_field_by_its_json_name() {
+        let mut user = scalar_field("user_id", ScalarKind::String);
+        user.json_name = "userId".into();
+        let e = one_method(
+            vec![scalar_field("shelf", ScalarKind::String), user, scalar_field("note", ScalarKind::String)],
+            "post",
+            "/v1/shelves/{shelf}/users/{user_id}:grant",
+            "*",
+        )
+        .unwrap();
+        assert!(e.source.contains(
+            "var _rest_path_members: List[String] = [String(\"shelf\"), String(\"userId\")]\n"
+        ), "{}", e.source);
+        assert!(e.source.contains(
+            "var body_text = _rest_drop_members(encode_json(req), _rest_path_members)\n"
+        ), "{}", e.source);
     }
 
     #[test]
@@ -2197,6 +2355,52 @@ mod tests {
     }
 
     #[test]
+    fn a_binding_fallback_catches_only_the_path_helpers() {
+        // The generated `except:` is bare, which is sound only while the
+        // `try:` block holds nothing that can raise but the two path helpers
+        // refusing a value: each line is a `path +=` of a literal, of
+        // `_rest_path_var(...)` or of `_rest_path_segment(...)`.
+        let req = msg_in(
+            "tiny.rest.v1",
+            "Req",
+            vec![scalar_field("name", ScalarKind::String), scalar_field("flag", ScalarKind::Bool)],
+        );
+        let svc = svc_over(
+            &req,
+            rule("get", "/v1/{name=roles/*}/{flag}", "", &["/v1/{name=projects/*/roles/*}/{flag}:x"]),
+        );
+        let file = file_with(vec![req], svc.clone());
+        let src = emit_rest_service(&file, &svc).unwrap().source;
+        let lines: Vec<&str> = src.lines().collect();
+        let mut blocks = 0;
+        let mut i = 0;
+        while i < lines.len() {
+            if lines[i].trim() == "try:" {
+                blocks += 1;
+                let indent = lines[i].len() - lines[i].trim_start().len();
+                i += 1;
+                while lines[i].trim() != "except:" {
+                    let l = lines[i].trim();
+                    assert!(lines[i].len() - lines[i].trim_start().len() > indent, "{src}");
+                    let ok = l.starts_with("path += String(\"")
+                        || l.starts_with("path += _rest_path_var(")
+                        || l.starts_with("path += _rest_path_segment(");
+                    assert!(ok, "a line that may raise otherwise: {l}\n{src}");
+                    i += 1;
+                }
+            }
+            i += 1;
+        }
+        assert_eq!(blocks, 2, "{src}");
+        // The helpers are called on `_rest_to_str` / `_rest_bool_str`, neither
+        // of which raises.
+        let helpers = rest_helper_functions();
+        assert!(helpers.contains("def _rest_to_str[T: Writable](v: T) -> String:"));
+        assert!(helpers.contains("def _rest_bool_str(b: Bool) -> String:"));
+        assert!(src.contains("_rest_path_segment(_rest_bool_str(req.flag), String(\"flag\"))"), "{src}");
+    }
+
+    #[test]
     fn a_binding_with_another_verb_body_or_variables_is_refused() {
         let req = msg_in(
             "tiny.rest.v1",
@@ -2292,6 +2496,44 @@ mod tests {
         ));
         let mojo = crate::emit::Emitter::with_protocol(&file, crate::ProtocolMode::Rest).emit();
         assert!(mojo.contains("\nfrom komira_encoding import base64_encode\n"), "{mojo}");
+    }
+
+    #[test]
+    fn a_map_or_a_well_known_type_query_field_is_refused_by_its_own_name() {
+        let map = IrField {
+            name: "labels".into(),
+            ty: IrType::Map(
+                Box::new(IrType::Scalar(ScalarKind::String)),
+                Box::new(IrType::Scalar(ScalarKind::String)),
+            ),
+            label: Label::Single,
+            proto_field_number: 1,
+            json_name: "labels".into(),
+            oneof_index: None,
+        };
+        let ts = msg_field("at", ".google.protobuf.Timestamp", "Timestamp");
+        // Declared among the generated files, the Timestamp is still refused:
+        // its fields are not its query form.
+        let ts_msg = msg_in(
+            "google.protobuf",
+            "Timestamp",
+            vec![scalar_field("seconds", ScalarKind::Int64), scalar_field("nanos", ScalarKind::Int32)],
+        );
+        let cases = [
+            (map, "query field `labels` is a map, which has no query form"),
+            (
+                ts,
+                "query field `at` is a `.google.protobuf.Timestamp`, whose query form is its \
+                 JSON string, which is implemented only for `.google.protobuf.FieldMask`",
+            ),
+        ];
+        for (fld, want) in cases {
+            let req = msg_in("tiny.rest.v1", "Req", vec![fld]);
+            let svc = svc_over(&req, rule("get", "/v1/x", "", &[]));
+            let file = file_with(vec![req, ts_msg.clone()], svc.clone());
+            let err = emit_rest_service(&file, &svc).unwrap_err();
+            assert!(err.contains(want), "{err}");
+        }
     }
 
     #[test]

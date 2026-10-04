@@ -213,7 +213,7 @@ def test_create_sends_the_role_id_and_the_role() raises:
     assert_true(_has_header(wire, "content-type"))
     assert_equal(
         _body(wire),
-        '{"parent":"projects/demo-project","roleId":"deployer","role":{"name":"",'
+        '{"roleId":"deployer","role":{"name":"",'
         + '"title":"Deployer","description":"deploys the services",'
         + '"includedPermissions":["run.services.get","run.services.update"],'
         + '"stage":"GA","etag":"","deleted":false}}',

@@ -6,8 +6,8 @@
 # `projects.serviceAccounts.getIamPolicy` and `setIamPolicy`. getIamPolicy
 # is a POST with NO body in iam.proto's binding, so its
 # `GetPolicyOptions` rides the query as `options.requestedPolicyVersion`;
-# setIamPolicy's body is the `SetIamPolicyRequest` (`policy`, and
-# `updateMask` when given).
+# setIamPolicy's body is the `SetIamPolicyRequest` less the `resource` its
+# path carries (`policy`, and `updateMask` when given).
 #
 # A policy change is a read-modify-write: the caller reads the policy,
 # changes its bindings and sends it back with the etag it read. The etag is
@@ -176,9 +176,7 @@ def test_read_modify_write_sends_back_the_etag_it_read() raises:
     var body = _body(wire)
     assert_equal(
         body,
-        String('{"resource":"')
-        + _SA
-        + '","policy":{"version":3,"bindings":['
+        String('{"policy":{"version":3,"bindings":[')
         + '{"role":"roles/iam.serviceAccountUser","members":['
         + '"serviceAccount:deployer@demo-project.iam.gserviceaccount.com",'
         + '"serviceAccount:ci@demo-project.iam.gserviceaccount.com"]},'

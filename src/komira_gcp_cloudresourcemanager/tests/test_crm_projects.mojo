@@ -8,7 +8,8 @@
 # `projects.get` (GET /v3/projects/<id or number>, answering a `Project`
 # whose `name` is `projects/<number>`), and `projects.getIamPolicy`,
 # `setIamPolicy` and `testIamPermissions` (POST
-# /v3/projects/<project>:<verb>, the request message as the body). Unlike
+# /v3/projects/<project>:<verb>, the request message as the body, less
+# the `resource` the path carries). Unlike
 # IAM's service-account binding, getIamPolicy here takes a body, so its
 # `options` ride in it.
 #
@@ -174,10 +175,9 @@ def test_get_iam_policy_sends_its_options_in_the_body() raises:
         _request_line(wire), "POST /v3/projects/demo-project:getIamPolicy HTTP/1.1"
     )
     assert_true(_has_header(wire, "content-type"))
-    assert_equal(
-        _body(wire),
-        '{"resource":"projects/demo-project","options":{"requestedPolicyVersion":3}}',
-    )
+    # The body is every field the path does not bind: `resource` is in the
+    # URL, so it is not in the body.
+    assert_equal(_body(wire), '{"options":{"requestedPolicyVersion":3}}')
     assert_equal(p.version, 1)
     assert_equal(len(p.bindings), 2)
     assert_equal(p.bindings[1].members[0], "group:readers@example.com")
@@ -191,7 +191,7 @@ def test_get_iam_policy_without_options() raises:
     _ = c.get_iam_policy[_RT](
         GetIamPolicyRequest(String("projects/demo-project"), None), reactor
     )
-    assert_equal(_body(_wire(capture)), '{"resource":"projects/demo-project"}')
+    assert_equal(_body(_wire(capture)), "{}")
 
 
 def test_read_modify_write_sends_back_the_etag_it_read() raises:
@@ -218,7 +218,7 @@ def test_read_modify_write_sends_back_the_etag_it_read() raises:
     )
     assert_equal(
         _body(wire),
-        '{"resource":"projects/demo-project","policy":{"version":1,"bindings":['
+        '{"policy":{"version":1,"bindings":['
         + '{"role":"roles/viewer","members":["group:readers@example.com"]}],'
         + '"auditConfigs":[],"etag":"BwXhqDuVJ8g="}}',
     )
@@ -247,8 +247,7 @@ def test_test_iam_permissions() raises:
     )
     assert_equal(
         _body(wire),
-        '{"resource":"projects/demo-project",'
-        + '"permissions":["run.jobs.run","iam.serviceAccounts.actAs"]}',
+        '{"permissions":["run.jobs.run","iam.serviceAccounts.actAs"]}',
     )
     assert_equal(len(held.permissions), 1)
     assert_equal(held.permissions[0], "run.jobs.run")
