@@ -20,6 +20,8 @@
 from kci_release_machine.graph import (
     EXTRA_CHANNEL_CONDA_FORGE,
     NAME_MAX_BYTES,
+    STAGE_TRIGGER_PULL_REQUEST,
+    STAGE_TRIGGER_PUSH,
     VALIDATION_PROGRAM_DIR,
     VALIDATION_WAIT_MAX_SECONDS,
     ReleaseMachine,

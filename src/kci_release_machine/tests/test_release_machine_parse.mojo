@@ -301,6 +301,73 @@ def test_farm_connected() raises:
     )
 
 
+def _pr_and_release(pr_body: String, release_after: String = String("build")) -> String:
+    return (
+        String("schema_version: 1\n")
+        + String("stage {\n name: \"build\"\n") + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"prod\"\n after: \"") + release_after + String("\"\n") + String(_PUBLISH_STEP)
+        + String("}\n")
+        + String("stage {\n name: \"pr\"\n") + pr_body + String("}\n")
+    )
+
+
+def test_trigger_defaults_to_push() raises:
+    var g = parse_machine_file(_two_stages(), String(_SRC))
+    for i in range(len(g.stages)):
+        assert_equal(g.stages[i].trigger, String("PUSH"))
+        assert_false(g.stages[i].is_pull_request())
+        # a PUSH stage's environment defaults to its name
+        assert_equal(g.stages[i].environment, g.stages[i].name)
+
+
+def test_a_pull_request_stage_reads_back_with_no_environment() raises:
+    var g = parse_machine_file(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n farm_connected: true\n") + String(_BUILD_STEP)), String(_SRC)
+    )
+    var pr = g.stage(String("pr"))
+    assert_equal(pr.trigger, String("PULL_REQUEST"))
+    assert_true(pr.is_pull_request())
+    assert_true(pr.farm_connected)
+    # no environment is defaulted: the job runs in none
+    assert_equal(pr.environment, String(""))
+    assert_equal(g.stage(String("prod")).environment, String("prod"))
+    # PUSH written out is the default
+    var push = parse_machine_file(_one_stage(String(" name: \"b\"\n trigger: PUSH\n") + String(_BUILD_STEP)), String(_SRC))
+    assert_false(push.stages[0].is_pull_request())
+
+
+def test_pull_request_stage_refusals() raises:
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n trigger: MERGE\n") + String(_BUILD_STEP)),
+        String("line 2: stage 'b' has trigger 'MERGE'; a trigger is PUSH or PULL_REQUEST"),
+    )
+    _assert_refused(
+        _one_stage(String(" name: \"b\"\n trigger: PUSH\n trigger: PUSH\n") + String(_BUILD_STEP)),
+        String("field 'trigger' is set twice in stage 'b'"),
+    )
+    # no environment: no secret or approval reaches a pull request's code
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n environment: \"pr\"\n") + String(_BUILD_STEP)),
+        String("line 18: stage 'pr' is a PULL_REQUEST stage and has environment 'pr': its job runs a pull request's code in NO environment"),
+    )
+    # it runs after nothing, and nothing runs after it
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n after: \"build\"\n") + String(_BUILD_STEP)),
+        String("stage 'pr' is a PULL_REQUEST stage and runs after 'build'"),
+    )
+    _assert_refused(
+        String("schema_version: 1\n")
+        + String("stage {\n name: \"pr\"\n trigger: PULL_REQUEST\n") + String(_BUILD_STEP) + String("}\n")
+        + String("stage {\n name: \"prod\"\n after: \"pr\"\n") + String(_PUBLISH_STEP) + String("}\n"),
+        String("line 7: stage 'prod' runs after 'pr', a PULL_REQUEST stage: no stage runs after a pull request's check"),
+    )
+    # BUILD steps only: nothing is published from a pull request
+    _assert_refused(
+        _pr_and_release(String(" trigger: PULL_REQUEST\n") + String(_BUILD_STEP) + String(_PUBLISH_STEP)),
+        String("stage 'pr' is a PULL_REQUEST stage and has PUBLISH step 'publish': a pull request's check builds and never publishes"),
+    )
+
+
 def test_validation_reads_back_alone() raises:
     var g = parse_machine_file(_with_validation(String(_V_OK)), String(_SRC))
     ref v = g.stages[0].steps[0].validations[0]
