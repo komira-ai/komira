@@ -1,17 +1,20 @@
 # CI for komira: one job, on a GitHub-hosted runner that reaches the build farm
 # over a tailnet. See docs/ci.md; in short:
 #
-# The runner is a thin buck2 client. `./buck2 build //...` asks the farm to
-# build every target, and a target cannot build unless the tests welded to
-# it, and to each of its dependencies, pass and every lint that guards it is
-# clean (lints are validations, tools/build/lint). `./buck2 test //...` runs
-# the standalone tests. The tests cell is a cell of its own, so //... does not
-# reach it: `./buck2 build tests//functional/...` builds every target there that
-# must work (the targets that must fail are tests//negative, which run_tests.sh
-# builds as expect_reds). The last step tests what a build does not:
-# buck2's own behaviour (where actions ran, cache identity, refusals). A
-# contributor runs the same commands locally; the last one needs a Linux
-# x86_64 client.
+# THE BUILD IS THE GATE. Building a release target runs the tests welded to it
+# and to each of its dependencies, and a target cannot build unless they pass
+# and every lint that guards it is clean (lints are validations,
+# tools/build/lint). So this job is exactly three buck2 commands, each a named
+# target set and nothing else:
+#   ./buck2 build //...                         every target builds only if its
+#                                               welded tests pass
+#   ./buck2 test //...                          the standalone tests
+#   ./buck2 build tests//functional/...         the tests cell, a cell of its
+#                                               own that //... does not reach
+# The runner is a thin buck2 client: the farm does the work. A contributor runs
+# the same commands locally. buck2's own behaviour (cache identity, refusals,
+# fresh-clone runs) is tested by a separate workflow, build_system_selftests.yml,
+# which is not part of this gate.
 #
 # The farm connection is made by the first step, the local action
 # .github/actions/farm-connect: it joins the tailnet by workload identity
@@ -81,10 +84,6 @@ jobs:
       # --keep-going: one run lists every red positive target.
       - name: ./buck2 build tests//functional/...
         run: ./buck2 build --keep-going tests//functional/...
-      - name: tools/build/tests/run_tests.sh
-        run: |
-          mkdir -p "$RUNNER_TEMP/tests"
-          TMPDIR="$RUNNER_TEMP/tests" tools/build/tests/run_tests.sh
       - name: Stop buck2
         if: always()
         run: ./buck2 kill || true
