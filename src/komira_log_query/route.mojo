@@ -246,20 +246,24 @@ def service_log_response(
     # the window".
     var q = _query_param_decoded(req.query_string, SERVICE_LOG_QUERY_PARAM)
 
-    var until_ms = _query_param_i64(
-        req.query_string,
-        SERVICE_LOG_UNTIL_PARAM,
-        now_ns // Int64(1_000_000),
-    )
-    var since_ms = _query_param_i64(
-        req.query_string,
-        SERVICE_LOG_SINCE_PARAM,
-        until_ms - SERVICE_LOG_DEFAULT_LOOKBACK_MS,
+    var until_p = _query_param_i64(req.query_string, SERVICE_LOG_UNTIL_PARAM)
+    var since_p = _query_param_i64(req.query_string, SERVICE_LOG_SINCE_PARAM)
+    var until_ms = until_p.or_default(now_ns // Int64(1_000_000))
+    var since_ms = since_p.or_default(
+        until_ms - SERVICE_LOG_DEFAULT_LOOKBACK_MS
     )
     # ⛔ AN INVERTED WINDOW IS REFUSED, NEVER NORMALISED. Swapping the bounds for
     # the caller would answer a different question than the one asked and look
     # like it worked; returning an empty page would read as "nothing was logged".
-    var beyond = _beyond_ns_window(SERVICE_LOG_SINCE_PARAM, since_ms)
+    # A bound with more digits than an Int64 holds is beyond the window too: it
+    # is refused like the smaller beyond-the-window value, never defaulted.
+    var beyond = Optional[String](None)
+    if since_p.overflow:
+        beyond = _overflows_ns_window(SERVICE_LOG_SINCE_PARAM)
+    if not beyond:
+        beyond = _beyond_ns_window(SERVICE_LOG_SINCE_PARAM, since_ms)
+    if not beyond and until_p.overflow:
+        beyond = _overflows_ns_window(SERVICE_LOG_UNTIL_PARAM)
     if not beyond:
         beyond = _beyond_ns_window(SERVICE_LOG_UNTIL_PARAM, until_ms)
     if beyond:
@@ -282,13 +286,13 @@ def service_log_response(
             ),
         )
 
-    var limit = Int(
-        _query_param_i64(
-            req.query_string,
-            SERVICE_LOG_LIMIT_PARAM,
-            Int64(SERVICE_LOG_DEFAULT_LIMIT),
-        )
-    )
+    # A limit with more digits than an Int64 holds is clamped to the ceiling,
+    # as every other value above it is; a malformed one takes the default.
+    var limit_p = _query_param_i64(req.query_string, SERVICE_LOG_LIMIT_PARAM)
+    var limit = SERVICE_LOG_MAX_LIMIT
+    if not limit_p.overflow:
+        var raw = limit_p.or_default(Int64(SERVICE_LOG_DEFAULT_LIMIT))
+        limit = Int(min(raw, Int64(SERVICE_LOG_MAX_LIMIT)))
     if limit < 1:
         limit = 1
     if limit > SERVICE_LOG_MAX_LIMIT:
@@ -383,6 +387,21 @@ def _beyond_ns_window(param: String, ms: Int64) -> Optional[String]:
         + String("' (")
         + String(ms)
         + String(") is beyond the last millisecond a nanosecond window can hold (")
+        + String(_MAX_WINDOW_MS)
+        + String("). A bound that does not fit is refused, not wrapped.")
+    )
+
+
+def _overflows_ns_window(param: String) -> String:
+    """The 400 message for a bound with more digits than an Int64 holds. The
+    value is not echoed: its length is unbounded."""
+    return (
+        String("'")
+        + param
+        + String(
+            "' has more digits than an Int64 holds, so it is beyond the last"
+            " millisecond a nanosecond window can hold ("
+        )
         + String(_MAX_WINDOW_MS)
         + String("). A bound that does not fit is refused, not wrapped.")
     )
@@ -962,13 +981,29 @@ def _hex_val(c: UInt8) -> Int:
 comptime _I64_MAX: Int64 = 9_223_372_036_854_775_807
 
 
-def _query_param_i64(
-    query_string: String, key: String, default: Int64
-) -> Int64:
-    """`key`'s value as an Int64, or `default` when absent / empty /
-    non-numeric. Spelled here so this package stays a clean leaf. A malformed
-    value, including one with more digits than an Int64 holds, falls back to
-    the default rather than erroring the request."""
+@fieldwise_init
+struct _I64Param(Copyable, Movable):
+    """One numeric query parameter as read: its value, or that it was absent or
+    malformed, or that it was all digits and more of them than an Int64
+    holds."""
+
+    var value: Int64
+    var present: Bool
+    var overflow: Bool
+
+    def or_default(self, default: Int64) -> Int64:
+        if self.present:
+            return self.value
+        return default
+
+
+def _query_param_i64(query_string: String, key: String) -> _I64Param:
+    """`key`'s value as an Int64. Absent, empty or non-numeric is not
+    `present`, and the caller takes its default. A value of digits only with
+    more of them than an Int64 holds is `overflow`, not malformed: it is a
+    number larger than any the caller accepts, and each caller treats it as
+    it treats its largest value. Spelled here so this package stays a clean
+    leaf."""
     var qb = query_string.as_bytes()
     var kb = key.as_bytes()
     var n = len(qb)
@@ -989,24 +1024,23 @@ def _query_param_i64(
                     break
             if matched and eq < seg_end:
                 var val = Int64(0)
-                var any_digit = False
-                var ok = True
+                var overflow = False
+                if eq + 1 == seg_end:
+                    return _I64Param(Int64(0), False, False)
                 for j in range(eq + 1, seg_end):
                     var c = qb[j]
-                    if c >= UInt8(ord("0")) and c <= UInt8(ord("9")):
-                        var d = Int64(Int(c) - ord("0"))
-                        # More digits than an Int64 holds is malformed: a
-                        # wrapping parse would read 2^64 + 1 as 1.
-                        if val > (_I64_MAX - d) // Int64(10):
-                            ok = False
-                            break
-                        val = val * Int64(10) + d
-                        any_digit = True
+                    if c < UInt8(ord("0")) or c > UInt8(ord("9")):
+                        return _I64Param(Int64(0), False, False)
+                    if overflow:
+                        continue
+                    var d = Int64(Int(c) - ord("0"))
+                    # A wrapping parse would read 2^64 + 1 as 1.
+                    if val > (_I64_MAX - d) // Int64(10):
+                        overflow = True
                     else:
-                        ok = False
-                        break
-                if ok and any_digit:
-                    return val
-                return default
+                        val = val * Int64(10) + d
+                if overflow:
+                    return _I64Param(_I64_MAX, False, True)
+                return _I64Param(val, True, False)
         i = seg_end + 1
-    return default
+    return _I64Param(Int64(0), False, False)

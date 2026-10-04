@@ -8,7 +8,8 @@
 # embed-or-quote rule for `source_json`; and that the rendered body is valid
 # UTF-8 JSON for any input (non-ASCII terms and blobs are copied, not re-encoded
 # byte by byte; non-finite scores render as null; a bound that does not fit the
-# nanosecond window is refused rather than wrapped).
+# nanosecond window, including one with more digits than an Int64 holds, is
+# refused rather than wrapped or defaulted).
 #
 # The fake echoes the query it received as a hit, so the window, term and limit
 # the conformer saw are read back from the rendered body; no shared state.
@@ -314,17 +315,51 @@ def test_since_beyond_nanosecond_range_is_400() raises:
     assert_true(String("'since_ms'") in _body(r), _body(r))
 
 
-def test_overflowing_digits_are_malformed() raises:
-    # 2^64 + 1: a wrapping parser reads 1. It is malformed, so the default holds.
+def test_overflowing_window_bound_is_400() raises:
+    # More digits than an Int64 holds is a bound beyond the nanosecond window,
+    # refused like MAX_MS + 1, never read as the default. 2^64 + 1 is the value
+    # a wrapping parser would read as 1.
+    var cases = List[String]()
+    cases.append(String("99999999999999999999"))
+    cases.append(String("18446744073709551617"))
+    cases.append(String("9223372036854775808"))  # Int64.MAX + 1
+    for i in range(len(cases)):
+        var v = cases[i]
+        var ru = _call(String("since_ms=0&until_ms=") + v)
+        assert_equal(ru.status, Int32(400), _body(ru))
+        assert_true(String("'until_ms'") in _body(ru), _body(ru))
+        var rs = _call(String("since_ms=") + v)
+        assert_equal(rs.status, Int32(400), _body(rs))
+        assert_true(String("'since_ms'") in _body(rs), _body(rs))
+    # The largest Int64 parses and is refused as beyond the window.
+    var r = _call(String("since_ms=0&until_ms=9223372036854775807"))
+    assert_equal(r.status, Int32(400), _body(r))
+    assert_true(String("'until_ms'") in _body(r), _body(r))
+
+
+def test_overflow_then_garbage_is_malformed() raises:
+    # A value that is not all digits is malformed however long its digit
+    # prefix, so the default holds.
     _expect_echo(
-        _call(String("since_ms=18446744073709551617")),
+        _call(String("until_ms=99999999999999999999x")),
         NOW_MS - SERVICE_LOG_DEFAULT_LOOKBACK_MS,
         NOW_MS,
         String(""),
         50,
     )
+
+
+def test_overflowing_limit_clamps_to_max() raises:
+    # limit=100000 clamps to the ceiling, so a larger value does too.
     _expect_echo(
         _call(String("limit=18446744073709551623")),
+        NOW_MS - SERVICE_LOG_DEFAULT_LOOKBACK_MS,
+        NOW_MS,
+        String(""),
+        SERVICE_LOG_MAX_LIMIT,
+    )
+    _expect_echo(
+        _call(String("limit=99999999999999999999x")),
         NOW_MS - SERVICE_LOG_DEFAULT_LOOKBACK_MS,
         NOW_MS,
         String(""),
@@ -514,7 +549,9 @@ def main() raises:
     test_largest_representable_until()
     test_until_beyond_nanosecond_range_is_400()
     test_since_beyond_nanosecond_range_is_400()
-    test_overflowing_digits_are_malformed()
+    test_overflowing_window_bound_is_400()
+    test_overflow_then_garbage_is_malformed()
+    test_overflowing_limit_clamps_to_max()
     test_conformer_raise_split()
     test_empty_page_renders_every_count()
     test_source_embed_or_quote()
