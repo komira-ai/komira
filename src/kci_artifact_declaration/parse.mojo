@@ -4,7 +4,7 @@
 #
 # A declarations file is textproto for `kci.release.v1.ArtifactDeclarations`
 # (//src/kci_artifact_declaration_proto), under its format's major
-# (kci_contract's format table, `kci.artifact_declarations`):
+# (kci_api's format table, `kci.artifact_declarations`):
 #
 #   schema_version: 1
 #   build_systems {
@@ -30,7 +30,7 @@
 # Every value but `schema_version` is a quoted string. A `:` before a `{` is
 # optional, as in textproto; `#` starts a comment.
 #
-# `schema_version` is read FIRST, before any other field (kci_contract's
+# `schema_version` is read FIRST, before any other field (kci_api's
 # `authored_schema_version`): missing, set twice, not an integer, or a major
 # this kci does not read is refused, so a file written for a newer kci says
 # "needs a newer kci" rather than naming a field the newer major added.
@@ -57,7 +57,7 @@ from komira_textproto import (
     lex,
 )
 
-from kci_contract import FORMAT_ARTIFACT_DECLARATIONS, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_ARTIFACT_DECLARATIONS, authored_schema_version, skip_schema_version
 
 from kci_artifact_declaration_proto.artifact_declaration import (
     ArtifactDeclaration,

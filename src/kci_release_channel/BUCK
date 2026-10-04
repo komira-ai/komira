@@ -8,7 +8,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # parser sees all of them and can refuse what no single channel can see: two
 # channels with one name, or two channels sharing a location.
 #
-# The deps are the textproto lexer and kci_contract (the file's
+# The deps are the textproto lexer and kci_api (the file's
 # `schema_version` and the format table it is checked against). The welded
 # tests read declarations back through the lookups, and assert each refusal
 # by its message. One more reads the repository's own
@@ -18,7 +18,7 @@ mojo_library(
     name = "kci_release_channel",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/komira_textproto:komira_textproto",
     ],
     test_srcs = [

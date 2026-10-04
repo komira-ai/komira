@@ -471,6 +471,8 @@ def _identity_env(kind_block: String, identity: String) raises -> String:
 def test_push_identity_environment() raises:
     var oidc = String("    credential { kind: OIDC_TRUSTED_PUBLISHING }\n")
     var token = String("    credential { kind: API_TOKEN secret_name: \"T\" }\n")
+    # the two release channels' trusted publishers: environments gamma and prod
+    assert_equal(_identity_env(oidc, String("repo:komira-ai/komira:environment:gamma")), String("gamma"))
     assert_equal(_identity_env(oidc, String("repo:komira-ai/komira:environment:prod")), String("prod"))
     assert_equal(_identity_env(oidc, String("repo:o/r:environment:build-2")), String("build-2"))
     # no environment, an empty one, or a further claim after it: none

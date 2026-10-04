@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/authored.mojo -- `schema_version` of an authored
+# src/kci_api/authored.mojo -- `schema_version` of an authored
 #   (textproto) file, read before anything else in it.
 # =============================================================================
 #
@@ -20,7 +20,7 @@
 
 from komira_textproto import TOKEN_COLON, TOKEN_LBRACE, TOKEN_NUMBER, TOKEN_RBRACE, TOKEN_WORD, Token, TokenCursor
 
-from kci_contract.formats import SCHEMA_VERSION_KEY, check_authored_version
+from kci_api.formats import SCHEMA_VERSION_KEY, check_authored_version
 
 
 def _decimal(text: String) -> Int:
