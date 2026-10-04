@@ -13,7 +13,7 @@
 #
 #   * args.mojo           the one parser: `parse_kci_args`, `KciCommand`,
 #                         `selectors_of`, `require_stage_flags`, `KCI_USAGE`
-#                         (the default machine file is kci_contract's
+#                         (the default machine file is kci_api's
 #                         `DEFAULT_MACHINE_FILE`)
 #   * recorder.mojo       `CliRecorder`: the result document, written
 #                         temp-and-rename to `--result-file`
@@ -25,7 +25,7 @@
 #
 # A thin shell: flags and the machine file -> one request per step -> the
 # library. All step logic lives in kci_build and kci_publish; every exit
-# number and outcome word is kci_contract's.
+# number and outcome word is kci_api's.
 # =============================================================================
 
 from kci_cli.args import (

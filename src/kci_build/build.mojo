@@ -6,17 +6,17 @@
 # `run_build(req, result, recorder, runner, git)`:
 #
 # 0. Checks that read but change nothing, each REFUSED before anything is
-#    recorded or run: the platform is one kci releases (kci_contract's
+#    recorded or run: the platform is one kci releases (kci_api's
 #    platform table); `--revision-id` is a full commit id; then the path
 #    flags, a wrong one being a usage error (KCI-E-USAGE, exit 2): `--work-dir`
 #    is an absolute path to a directory; the platform's release directory
-#    `<--release-dir>/<platform>` (kci_contract's layout) is absent or
+#    `<--release-dir>/<platform>` (kci_api's layout) is absent or
 #    empty; and `--log-dir` is neither `--release-dir` nor under it (both
 #    compared absolute, `.`/`..` folded and every existing prefix resolved
 #    through its symlinks): the release directory holds only member
 #    directories and `release.json`; last, the declarations read and
 #    validate (kci_artifact_declaration).
-# 1. `recorder.begin` gets the RUNNING record (kci_contract's result
+# 1. `recorder.begin` gets the RUNNING record (kci_api's result
 #    document) BEFORE the first effect (the first mkdir, the first git
 #    command). A recorder that cannot record stops the step FAILED with
 #    nothing done.
@@ -96,7 +96,7 @@ from std.os.path import exists, isdir, realpath
 
 from kci_artifact_declaration import read_artifact_declarations, render_build_argv
 from kci_artifact_declaration_proto.artifact_declaration import ArtifactDeclarations
-from kci_contract import (
+from kci_api import (
     ARTIFACT_BUILT,
     ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
@@ -120,7 +120,7 @@ from kci_contract import (
     require_member_platform,
     require_release_platform,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_release_set import (
     ReleaseIdentity,
     ReleaseMember,

@@ -1,6 +1,6 @@
 # =============================================================================
-# src/kci_stage_graph/parse.mojo -- read a machine file (format
-#   `kci.machine`, kci_contract's format table).
+# src/kci_release_machine/parse.mojo -- read a machine file (format
+#   `kci.machine`, kci_api's format table).
 # =============================================================================
 #
 #   schema_version: 1
@@ -42,7 +42,7 @@
 #     step { ... channel: "prod" }
 #   }
 #
-# `schema_version` is read FIRST (kci_contract's `authored_schema_version`):
+# `schema_version` is read FIRST (kci_api's `authored_schema_version`):
 # missing, set twice, not an integer, or a major this kci does not read is
 # refused, so a file written for a newer kci says "needs a newer kci" rather
 # than naming a field the newer major added. `machine_schema_version` does
@@ -60,7 +60,7 @@
 #
 # Every refusal starts `<source>: line N:`. The parser refuses an unknown
 # field at any level, a scalar set twice, and a block never closed; every
-# other rule is graph.mojo's `validate_stage_graph`, run before the graph is
+# other rule is graph.mojo's `validate_release_machine`, run before the graph is
 # returned.
 #
 # Pure functions over owned values; no pointer, no file I/O.
@@ -77,9 +77,9 @@ from komira_textproto import (
     lex,
 )
 
-from kci_contract import FORMAT_MACHINE, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_MACHINE, authored_schema_version, skip_schema_version
 
-from .graph import Stage, StageGraph, StageStep, StageValidation, validate_stage_graph
+from .graph import ReleaseMachine, Stage, StageStep, StageValidation, validate_release_machine
 
 
 def machine_field_names() -> List[String]:
@@ -283,13 +283,13 @@ def machine_schema_version(text: String, source: String) raises -> Int:
     return authored_schema_version(tokens, String(FORMAT_MACHINE), source)
 
 
-def parse_machine_file(text: String, source: String) raises -> StageGraph:
+def parse_machine_file(text: String, source: String) raises -> ReleaseMachine:
     """Parse and validate a machine file; `source` names it in every
     refusal. Raises on the first refusal."""
     var tokens = lex(text, source)
     var major = authored_schema_version(tokens, String(FORMAT_MACHINE), source)
     var c = TokenCursor(tokens^, source)
-    var g = StageGraph(major)
+    var g = ReleaseMachine(major)
     while not c.at_end():
         var f = c.expect(TOKEN_WORD)
         if f.text == "schema_version":
@@ -302,5 +302,5 @@ def parse_machine_file(text: String, source: String) raises -> StageGraph:
             )
         var line = _open_block(c)
         g.stages.append(_parse_stage(c, source, len(g.stages) + 1, line))
-    validate_stage_graph(g, source)
+    validate_release_machine(g, source)
     return g^
