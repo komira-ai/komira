@@ -397,9 +397,11 @@ trait SplitReader(Movable, Deinitable):
 # same `R`, so the reinterpret of `_home`'s bytes back to `R` is type-correct.
 # The pointer is formed from the live `_home` at each call and borrowed for that
 # call only; only the drop arm consumes the home, once, from the destructor.
+# SAFETY: private vtable slot type for `_home` (see the block above).
 comptime _PollFn = def (
     UnsafePointer[UInt8, MutUntrackedOrigin], Int64, Int64
 ) raises thin -> SplitPoll
+# SAFETY: private vtable slot type for `_home` (see the block above).
 comptime _DropReaderFn = def (UnsafePointer[UInt8, MutUntrackedOrigin]) thin -> None
 
 
@@ -451,11 +453,14 @@ struct ErasedSplitReader(SplitReader, Movable, Deinitable):
         are bound for the SAME `R`, so the in-body reinterpret of the home ptr
         is type-correct by construction.
         """
+        # SAFETY: one uninitialised slot for R, filled on the next line;
+        # `_home` below owns it and `_drop_fn` frees it exactly once.
         var home_typed = alloc[R](1)
         # SAFETY: fresh allocation we own; move-construct `reader` into it.
         UnsafePointer(to=home_typed[]).unsafe_write(reader^)
         self._abi = SCAN_RESOLVER_ABI_VERSION
         self._home = OwnedPointer[UInt8](
+            # SAFETY: `_home` becomes the single owner of the R slot.
             unsafe_from_raw_pointer=home_typed.bitcast[UInt8]()
         )
         self._kind_id = kind_id
@@ -508,6 +513,8 @@ struct ErasedSplitReader(SplitReader, Movable, Deinitable):
                 + self._kind_name
                 + String("' already answered END")
             )
+        # SAFETY: see the docstring: only the bound `_poll_fn` reaches the
+        # home, for this call only.
         var p = self._home.unsafe_ptr().unsafe_mut_cast[True]().unsafe_origin_cast[
             MutUntrackedOrigin
         ]()
@@ -528,6 +535,7 @@ struct ErasedSplitReader(SplitReader, Movable, Deinitable):
         SAFETY: `unsafe_leak()` relinquishes the home's free so it does NOT also
         free the buffer; `_drop_fn` reconstructs one `OwnedPointer[R]` over the
         SAME allocation and runs destroy + free exactly once."""
+        # SAFETY: the home's free is relinquished here; `_drop_fn` frees it once.
         var raw = self._home^.unsafe_take_allocation().unsafe_leak().unsafe_origin_cast[
             MutUntrackedOrigin
         ]()
@@ -550,15 +558,19 @@ def _require_abi(found: UInt32, expected: UInt32, what: String) raises:
 def _erased_split_poll_for[
     R: SplitReader
 ](
+    # SAFETY: private trampoline; `home` is the R home bound at construction.
     home: UnsafePointer[UInt8, MutUntrackedOrigin], max_rows: Int64, max_bytes: Int64
 ) raises -> SplitPoll:
     """SAFETY: `home` is the byte-cast of the live `OwnedPointer[R]` home the
     facade owns (the same R bound here at construction); it is reinterpreted to
     `R*` and R's `poll` runs in place — R is neither moved nor freed."""
+    # SAFETY: `home` holds the live R bound at construction; R is
+    # borrowed for this call, neither moved nor freed.
     var rp = home.bitcast[R]()
     return rp[].poll(max_rows, max_bytes)
 
 
+# SAFETY: private trampoline; `home` is the R home bound at construction.
 def _erased_split_drop_for[
     R: SplitReader
 ](home: UnsafePointer[UInt8, MutUntrackedOrigin]):
@@ -569,6 +581,8 @@ def _erased_split_drop_for[
     facade's `__deinit__` relinquished (`unsafe_leak()`); reconstructing the
     single owner over the SAME bytes makes destroy + free happen exactly once.
     """
+    # SAFETY: rebuilds the single owner of the home whose free `__deinit__`
+    # relinquished, so destroy + free run exactly once.
     var owned = OwnedPointer[R](unsafe_from_raw_pointer=home.bitcast[R]())
     var r = owned^.into_inner()
     _ = r^
