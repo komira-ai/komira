@@ -117,5 +117,31 @@ def test_scope_and_evidence_line() raises:
     assert_equal(refused, 3)
 
 
+def test_affected_by_evidence_line() raises:
+    var none = List[String]()
+    var base = String("0123456789abcdef0123456789abcdef01234567")
+    var line = run_evidence_line(String(SCOPE_SELECTIVE), String("pr"), none, String("SUCCEEDED"), base)
+    assert_equal(
+        line,
+        String(
+            "kci: SELECTIVE run of stage pr (affected-by 0123456789abcdef0123456789abcdef01234567):"
+            " SUCCEEDED -- not a full run"
+        ),
+    )
+    assert_false(line.startswith(String("kci: FULL run")))
+    var refused = String("<rendered>")
+    try:
+        _ = run_evidence_line(String(SCOPE_FULL), String("pr"), none, String("SUCCEEDED"), base)
+    except e:
+        refused = String(e)
+    assert_equal(refused, String("a FULL run has no --affected-by"))
+    refused = String("<rendered>")
+    try:
+        _ = run_evidence_line(String(SCOPE_SELECTIVE), String("pr"), none, String("SUCCEEDED"))
+    except e:
+        refused = String(e)
+    assert_equal(refused, String("a SELECTIVE run names its --only or its --affected-by"))
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()
