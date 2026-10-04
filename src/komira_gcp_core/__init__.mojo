@@ -39,8 +39,10 @@ komira_retry):
                       `gcp_status_error` (the generated REST clients'
                       contract); and gRPC statuses: `code_from_grpc_status`,
                       `GcpGrpcStatusError` and `gcp_grpc_status_error` (the
-                      generated gRPC clients' contract). Never echoes a body
-                      byte or a `grpc-message`.
+                      generated gRPC clients' contract), and
+                      `gcp_grpc_error_code`, which reads the code back out of
+                      such an error. Never echoes a body byte or a
+                      `grpc-message`.
   - pagination.mojo : `pageToken` / `nextPageToken` paging (AIP-158):
                       `PageCursor`, `next_page_token`, `with_page_token`.
   - retry.mojo      : `GcpRetryClassifier` (AIP-194 retryable codes, with
@@ -92,6 +94,7 @@ from .status import (
     code_from_http_status,
     code_from_name,
     code_name,
+    gcp_grpc_error_code,
     gcp_grpc_status_error,
     gcp_status_error,
     parse_gcp_status,
