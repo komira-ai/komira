@@ -2,7 +2,7 @@
 
 ## What is it for, and what is out of scope?
 
-These libraries give a Mojo process one way to write diagnostics. A call site writes `log.info[fmt, module](*args)`. The format string and module tag are compile-time parameters, so a record carries 32-bit ids and encoded arguments instead of text. A `SharedEngine` holds one ring of fixed-size records per worker, and a drain decodes each record into a text line, a span or a metric point. A read seam, `ServiceLogSearch`, and an operator-only route over it let a service answer queries about its own log.
+These libraries give a Mojo process one way to write diagnostics. A call site writes `log.info[fmt, module](*args)`. The format string and module tag are compile-time parameters, so a record carries 32-bit ids and encoded arguments instead of text. A `SharedEngine` holds one ring of fixed-size records per worker, and a drain decodes each record into a text line, a span or a metric point. A read seam, `ServiceLogSearch`, and a route over it, gated by an access hook the service supplies, let a service answer queries about a log it writes to an object store.
 
 | Library | Role |
 |---|---|
@@ -12,7 +12,7 @@ These libraries give a Mojo process one way to write diagnostics. A call site wr
 | `komira_clock` (`src/komira_clock`) | The clock reads: `now_ns`, `now_unix_ms`, `now_unix_us`, `thread_cpu_ns` |
 | `komira_name_registry` (`src/komira_name_registry`) | `NameRegistry` and `name_id`, the compile-time name to 32-bit id mapping the metric and span libraries share |
 | `komira_spsc_ring` (`src/komira_spsc_ring`) | The generic single-producer single-consumer ring `SpscRing[T]` under both the log record ring and the span rings |
-| `komira_log_query` (`src/komira_log_query`) | The `ServiceLogSearch` trait, its erased facade, and the `GET /internal/logs` route |
+| `komira_log_query` (`src/komira_log_query`) | The `ServiceLogSearch` trait, its erased facade, the `LogReadAccess` hook, and the `GET <path>` route |
 
 Out of scope:
 
@@ -81,7 +81,7 @@ The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_tabl
 
 `ServiceLogSearch` (`komira_log_query/search_seam.mojo`) is the read trait, with one method, `scan(q: ServiceLogQuery) raises -> ServiceLogPage`. A `ServiceLogQuery` carries a nanosecond window, a term and a limit; a `ServiceLogPage` carries `ServiceLogHit`s. `ErasedServiceLogSearch` holds one conformer behind function pointers so a dispatcher holds a single non-generic field and the conformer's storage type instantiates only at `erase[S]`. The package depends on `komira_http_core` and nothing else. No conformer ships in this tree.
 
-`service_log_response(search, req, expected_token, now_ns)` in `route.mojo` serves `GET /internal/logs`; `is_service_log_request` matches the exact path and method. It checks the `x-komira-log-read-token` header first, then reads `q`, `since_ms`, `until_ms` and `limit`. The window ends at `now_ns` by default and starts 2,592,000,000 ms (30 days) before its end. `since_ms` after `until_ms` is a 400. The limit defaults to 50, is raised to 1 if lower, and is capped at 500. The function never raises. When `scan` raises, a query with no term (`q` empty) becomes a 400 that carries the conformer's own message, because the conformer could not answer a time-range query by itself; a query with a term becomes a 500, `log index read failed`, that names the fault.
+`service_log_response(search, req, access, now_ns)` in `route.mojo` serves the route; `is_service_log_request(req, path)` matches `GET` at the exact path the service mounted it on. It asks the `access` hook first (`LogReadAccess.allows(req)` in `access.mojo`), then reads `q`, `since_ms`, `until_ms` and `limit`. The window ends at `now_ns` by default and starts 2,592,000,000 ms (30 days) before its end. `since_ms` after `until_ms` is a 400. The limit defaults to 50, is raised to 1 if lower, and is capped at 500. The function never raises. When `scan` raises, a query with no term (`q` empty) becomes a 400 that carries the conformer's own message, because the conformer could not answer a time-range query by itself; a query with a term becomes a 500, `log index read failed`, that names the fault.
 
 ## Why is it built this way?
 
@@ -124,32 +124,34 @@ The second instrument is shaped after OpenTelemetry. `SeriesTable` (`series_tabl
 
 **Revisit if.** Mojo gains module-level globals.
 
+### Who decides who may read the log?
+
+**Decision.** The embedding service, through a `LogReadAccess` hook that `service_log_response` takes as a required argument. A read is denied unless the hook says yes: the two hooks shipped, `DenyLogReads` and `HeaderTokenAccess(header, token)`, both answer no by default (`HeaderTokenAccess` while its header name or secret is empty), a hook that raises is a no, and no allow-everything hook ships.
+
+**Because.** `access.mojo`'s header records it: who may read depends on the service (a shared secret, a token its front end verified, a role in its own user table), so the library cannot choose. The route returns the whole log, and a service's log names data from every one of its callers, so a read surface open whenever nobody configured it is open when nobody is looking. A service that wants an open log writes that hook itself, where a reviewer sees it.
+
+**Alternatives weighed.**
+
+- A built-in token header: it fixes one policy and one header name for every service.
+- Allow when no hook is configured: the open-when-unconfigured failure above.
+
 ### Why does the log route answer 404 to every refusal?
 
-**Decision.** `service_log_response` answers the same 404 for a missing configured token, a wrong or absent token, and a service with no reader, and it validates arguments only after authorization.
+**Decision.** `service_log_response` answers the same 404 when the hook says no, when it raises, and when the service has no reader, and it validates arguments only after the access check.
 
-**Because.** The route's header records it: these records are the service's own diagnostics, with no tenant attribution, so the route is operator-only and fails closed when unconfigured. A distinct 401 or 403 would tell an unauthenticated caller that the route exists. The token rides a dedicated header, not `Authorization`, because behind private Cloud Run ingress `Authorization` still carries the platform's own token. It reaches the function as an argument: the caller fetches it from its secret store, since argv is world-readable.
+**Because.** The route's header records it: a distinct 401 or 403 would tell an unauthenticated caller that the route exists. Validating arguments first would show such a caller a 400 on a service with the route and a 404 on one without.
 
-**Alternatives weighed.**
+An allowed caller can still see a 400: an inverted window (`since_ms` after `until_ms`), a bound past the nanosecond range, or a term-free query that the wired conformer cannot answer.
 
-- Open when no token is configured: a read surface open whenever someone forgot to configure it is open when nobody is looking.
-- Validate arguments first: an unauthenticated caller would then see 400 on a service with the route and 404 on one without.
+### Why does the read seam take no caller?
 
-An authorized caller can still see a 400: an inverted window (`since_ms` after `until_ms`), or a term-free query that the wired conformer cannot answer.
+**Decision.** `ServiceLogSearch.scan` takes a window, a term and a limit, and nothing that names the caller.
 
-**Revisit if.** Records gain a tenant attribution, which would allow a per-tenant route.
-
-### Why does the read seam take no tenant?
-
-**Decision.** `ServiceLogSearch.scan` takes a window, a term and a limit, and nothing that names an org or a run.
-
-**Because.** The header of `search_seam.mojo` records it: a service-level record carries no `org_id` and no `run_id`, so a tenant parameter would invent an attribution. A genuinely run-scoped stream belongs in a different, tenant-scoped sink behind a different, tenant-gated route.
+**Because.** The header of `search_seam.mojo` records it: a conformer reads one log and answers from all of it; who may read it is decided before the read, by the hook. A service with separate logs for separate audiences wires a reader and mounts a route, with its own hook, for each.
 
 **Alternatives weighed.**
 
-- A `search(org_id, ...)` overload: that is the invented attribution, a tenancy leak rather than a logging upgrade.
-
-**Revisit if.** Records gain a tenant attribution.
+- A caller argument on `scan`: every conformer would become an access-control enforcer.
 
 ## What must always hold?
 
@@ -180,7 +182,7 @@ An authorized caller can still see a 400: an inverted window (`since_ms` after `
 | `src/komira_trace/tracer.mojo`, `exporter.mojo`, `span_ring.mojo` | Spans | `Tracer`, `JsonlFileExporter`, `SpanPacketRing` |
 | `src/komira_log/log_write.mojo`, `structured_log.mojo` | Writes, JSON selection | `write_log_line`, `log_format_is_json` |
 | `src/komira_clock/clock.mojo`, `src/komira_spsc_ring/spsc_ring.mojo` | Clocks, the generic ring | `now_ns`, `SpscRing` |
-| `src/komira_log_query/route.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, trait and values | `service_log_response`, `ServiceLogSearch`, `ServiceLogQuery` |
+| `src/komira_log_query/route.mojo`, `access.mojo`, `search_seam.mojo`, `hit.mojo` | Read route, access hook, trait and values | `service_log_response`, `LogReadAccess`, `ServiceLogSearch`, `ServiceLogQuery` |
 
 Entry points:
 
@@ -189,7 +191,7 @@ Entry points:
 
 ## How is it tested?
 
-Each library below welds its tests with `test_srcs`, so building it runs them. `komira_log_query` declares none, and nothing in this tree exercises its seam or route.
+Each library below welds its tests with `test_srcs`, so building it runs them.
 
 | Library | Welded tests | Covers |
 |---|---|---|
@@ -198,6 +200,7 @@ Each library below welds its tests with `test_srcs`, so building it runs them. `
 | `komira_trace` | 7, all of `src/komira_trace/tests/` | tracer, JSONL exporter, span records, drain throughput |
 | `komira_spsc_ring` | 2, `test_spsc_ring` and `test_ring_variants` | the generic ring: order, wrap, block and drop policies |
 | `komira_clock` | 1, `test_clock` | clock reads |
+| `komira_log_query` | 1, `test_service_log_route` | path match, the access hook and the one 404, window and limit, term decoding, the conformer-raise split, page rendering, the erased facade |
 | `komira_name_registry` | 1, `test_name_registry` | name registry |
 
 Run: `./buck2 build //src/komira_log:komira_log //src/komira_trace:komira_trace //src/komira_metrics:komira_metrics //src/komira_spsc_ring:komira_spsc_ring //src/komira_clock:komira_clock //src/komira_name_registry:komira_name_registry`.

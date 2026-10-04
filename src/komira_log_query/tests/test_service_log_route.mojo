@@ -1,8 +1,11 @@
-# komira_log_query: the `GET /internal/logs` route over a fake `ServiceLogSearch`.
+# komira_log_query: the `GET <path>` route over a fake `ServiceLogSearch`.
 #
-# What is pinned, in the route's own order: the path match; the four refusals
-# (no configured token, absent token, wrong token, no reader) answer one
-# byte-identical 404, and authorization runs before argument checks; the window
+# What is pinned, in the route's own order: the path match at the mount path
+# the service chose; the access hook alone decides who reads (a hook that allows
+# needs no header, `DenyLogReads` refuses everyone, a hook that raises refuses,
+# `HeaderTokenAccess` refuses while its secret or header name is empty); every
+# refusal and a missing reader answer one byte-identical 404, and access runs
+# before argument checks; the window
 # defaults and bounds; the limit clamp; term decoding; the conformer-raise split
 # (400 for a term-free window, 500 otherwise); the page rendering, including the
 # embed-or-quote rule for `source_json`; and that the rendered body is valid
@@ -18,12 +21,13 @@ from std.memory import ArcPointer
 
 from komira_http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
 from komira_log_query import (
+    DenyLogReads,
     ErasedServiceLogSearch,
+    HeaderTokenAccess,
+    LogReadAccess,
     SERVICE_LOG_DEFAULT_LIMIT,
     SERVICE_LOG_DEFAULT_LOOKBACK_MS,
     SERVICE_LOG_MAX_LIMIT,
-    SERVICE_LOG_ROUTE_PATH,
-    SERVICE_LOG_TOKEN_HEADER,
     ServiceLogHit,
     ServiceLogPage,
     ServiceLogQuery,
@@ -35,7 +39,11 @@ from komira_log_query import (
 from std.testing import assert_equal, assert_false, assert_true
 
 
-comptime TOKEN = "operator-secret-0123456789"
+# The mount path and header are the embedding service's choice; these are the
+# test's.
+comptime PATH = "/logs"
+comptime HEADER = "x-log-read-token"
+comptime TOKEN = "reader-secret-0123456789"
 # A "now" far from any real clock: 4e12 ms. Only arithmetic on it matters.
 comptime NOW_MS: Int64 = 4_000_000_000_000
 comptime NOW_NS: Int64 = NOW_MS * 1_000_000
@@ -99,11 +107,31 @@ struct Counted(ServiceLogSearch, Movable, Deinitable):
         return ServiceLogPage()
 
 
+struct AllowAll(LogReadAccess):
+    def __init__(out self):
+        pass
+
+    def allows(self, req: HttpRequest) raises -> Bool:
+        return True
+
+
+struct RaisingAccess(LogReadAccess):
+    def __init__(out self):
+        pass
+
+    def allows(self, req: HttpRequest) raises -> Bool:
+        raise Error("key fetch failed")
+
+
+def _access() -> HeaderTokenAccess:
+    return HeaderTokenAccess(String(HEADER), String(TOKEN))
+
+
 def _req(query: String, token: String = TOKEN) -> HttpRequest:
-    var r = HttpRequest(HttpMethod.get(), String(SERVICE_LOG_ROUTE_PATH))
+    var r = HttpRequest(HttpMethod.get(), String(PATH))
     r.query_string = query
     if token.byte_length() > 0:
-        r.headers[String(SERVICE_LOG_TOKEN_HEADER)] = token
+        r.headers[String(HEADER)] = token
     return r^
 
 
@@ -117,7 +145,7 @@ def _body(r: HttpResponse) -> String:
 
 def _call(query: String, var fake: Fake = Fake()) -> HttpResponse:
     var s = _wired(fake^)
-    return service_log_response(s, _req(query), String(TOKEN), NOW_NS)
+    return service_log_response(s, _req(query), _access(), NOW_NS)
 
 
 def _expect_echo(
@@ -182,16 +210,21 @@ def _is_valid_utf8(b: List[UInt8]) -> Bool:
 # Path match.
 # -----------------------------------------------------------------------------
 def test_path_match() raises:
-    assert_true(is_service_log_request(_req(String(""))))
-    var post = HttpRequest(HttpMethod.post(), String(SERVICE_LOG_ROUTE_PATH))
-    assert_false(is_service_log_request(post))
-    for p in ["/internal/logs/", "/internal/logs/x", "/internal/log", "/logs"]:
+    assert_true(is_service_log_request(_req(String("")), String(PATH)))
+    var post = HttpRequest(HttpMethod.post(), String(PATH))
+    assert_false(is_service_log_request(post, String(PATH)))
+    for p in ["/logs/", "/logs/x", "/log", "/", "/LOGS"]:
         var r = HttpRequest(HttpMethod.get(), String(p))
-        assert_false(is_service_log_request(r), String(p))
+        assert_false(is_service_log_request(r, String(PATH)), String(p))
+    # The mount path is the service's: the same request matches where it is
+    # mounted and nowhere else.
+    var r2 = HttpRequest(HttpMethod.get(), String("/ops/v1/logs"))
+    assert_true(is_service_log_request(r2, String("/ops/v1/logs")))
+    assert_false(is_service_log_request(r2, String(PATH)))
 
 
 # -----------------------------------------------------------------------------
-# Refusals: one byte-identical 404, authorization before argument checks.
+# Refusals: one byte-identical 404, access before argument checks.
 # -----------------------------------------------------------------------------
 def _same_response(a: HttpResponse, b: HttpResponse) raises:
     assert_equal(a.status, b.status)
@@ -204,34 +237,93 @@ def _same_response(a: HttpResponse, b: HttpResponse) raises:
 
 def test_refusals_are_one_404() raises:
     var bad_args = String("since_ms=9&until_ms=1&limit=x")
-    # 1. no expected token configured (even when the caller presents one).
+    # 1. no secret configured (even when the caller presents one).
     var s1 = _wired(Fake())
-    var r1 = service_log_response(s1, _req(bad_args), String(""), NOW_NS)
+    var r1 = service_log_response(
+        s1, _req(bad_args), HeaderTokenAccess(String(HEADER), String("")), NOW_NS
+    )
     # 2. absent presented token.
     var s2 = _wired(Fake())
     var r2 = service_log_response(
-        s2, _req(bad_args, String("")), String(TOKEN), NOW_NS
+        s2, _req(bad_args, String("")), _access(), NOW_NS
     )
     # 3. wrong token: a prefix, an extension, one changed byte, another case.
     var s3 = _wired(Fake())
     var wrong = List[String]()
-    wrong.append(String("operator-secret-012345678"))
+    wrong.append(String("reader-secret-012345678"))
     wrong.append(String(TOKEN) + String("x"))
-    wrong.append(String("operator-secret-0123456788"))
-    wrong.append(String("OPERATOR-SECRET-0123456789"))
-    # 4. the right token, but no reader wired.
+    wrong.append(String("reader-secret-0123456788"))
+    wrong.append(String("READER-SECRET-0123456789"))
+    # 4. a hook that allows, but no reader wired.
     var none = Optional[ErasedServiceLogSearch](None)
-    var r4 = service_log_response(none, _req(bad_args), String(TOKEN), NOW_NS)
+    var r4 = service_log_response(none, _req(bad_args), AllowAll(), NOW_NS)
+    # 5. the deny-everything hook, with the right token presented.
+    var s5 = _wired(Fake())
+    var r5 = service_log_response(s5, _req(bad_args), DenyLogReads(), NOW_NS)
+    # 6. a hook that raises.
+    var s6 = _wired(Fake())
+    var r6 = service_log_response(s6, _req(bad_args), RaisingAccess(), NOW_NS)
+    # 7. no header name configured.
+    var s7 = _wired(Fake())
+    var r7 = service_log_response(
+        s7, _req(bad_args), HeaderTokenAccess(String(""), String(TOKEN)), NOW_NS
+    )
+    # 8. no secret configured and an EMPTY token presented: empty equals empty,
+    # and must still not open the route.
+    var s8 = _wired(Fake())
+    var req8 = _req(bad_args, String(""))
+    req8.headers[String(HEADER)] = String("")
+    var r8 = service_log_response(
+        s8, req8, HeaderTokenAccess(String(HEADER), String("")), NOW_NS
+    )
 
     assert_equal(r1.status, Int32(404))
     assert_equal(_body(r1), String('{"error":"not found"}'))
     _same_response(r1, r2)
     _same_response(r1, r4)
+    _same_response(r1, r5)
+    _same_response(r1, r6)
+    _same_response(r1, r7)
+    _same_response(r1, r8)
     for i in range(len(wrong)):
         var r3 = service_log_response(
-            s3, _req(bad_args, wrong[i]), String(TOKEN), NOW_NS
+            s3, _req(bad_args, wrong[i]), _access(), NOW_NS
         )
         _same_response(r1, r3)
+
+
+# -----------------------------------------------------------------------------
+# The hook alone decides.
+# -----------------------------------------------------------------------------
+def test_allowing_hook_needs_no_header() raises:
+    # The route has no access rule of its own: a hook that allows lets a
+    # request with no header at all through to the read.
+    var s = _wired(Fake())
+    var r = service_log_response(
+        s, _req(String("since_ms=10&until_ms=20"), String("")), AllowAll(), NOW_NS
+    )
+    _expect_echo(r, 10, 20, String(""), 50)
+
+
+def test_header_token_access() raises:
+    var acc = _access()
+    assert_true(acc.allows(_req(String(""))))
+    assert_false(acc.allows(_req(String(""), String(""))))
+    assert_false(acc.allows(_req(String(""), String("nope"))))
+    # The token in a different header does not count.
+    var other = HttpRequest(HttpMethod.get(), String(PATH))
+    other.headers[String("authorization")] = String(TOKEN)
+    assert_false(acc.allows(other))
+    # The configured header name is case-insensitive (the request parser
+    # stores names lowercased); the token is not.
+    var mixed = HeaderTokenAccess(String("X-Log-Read-Token"), String(TOKEN))
+    assert_true(mixed.allows(_req(String(""))))
+    var s = _wired(Fake())
+    var r = service_log_response(
+        s, _req(String("since_ms=1&until_ms=2")), mixed, NOW_NS
+    )
+    _expect_echo(r, 1, 2, String(""), 50)
+    assert_false(DenyLogReads().allows(_req(String(""))))
 
 
 def test_authorized_bad_window_is_400() raises:
@@ -541,6 +633,8 @@ def test_erased_facade_drops_conformer_once() raises:
 def main() raises:
     test_path_match()
     test_refusals_are_one_404()
+    test_allowing_hook_needs_no_header()
+    test_header_token_access()
     test_authorized_bad_window_is_400()
     test_default_window_and_limit()
     test_explicit_inclusive_window()

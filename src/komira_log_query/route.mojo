@@ -1,92 +1,54 @@
 # =============================================================================
-# komira_log_query/route.mojo — THE MOUNTABLE ROUTE: match `GET /internal/logs`,
-#   authorize it, read the service's own operational log, render the JSON.
+# komira_log_query/route.mojo: THE MOUNTABLE ROUTE. Match `GET <path>`, ask the
+#   service's access hook, read the log through the wired conformer, render JSON.
 # =============================================================================
 #
 # ── WHAT IT IS FOR ──────────────────────────────────────────────────────────
-# A service that installs `ServiceLogSink` (`komira_log_index`) switches its
-# log drain: before the install a bare `log.info[...]` takes the synchronous
-# stderr path; after it, the same call leaves the process as an object-store
-# `.split`. The sink can MIRROR to stderr as well, but stderr is neither durable
-# past the instance nor searchable. Without a reader, the service's operational
-# log accumulates in a bucket nothing deployed can open. THIS IS THE READER.
+# A service whose log is written to an object store needs a way to read it back.
+# This route is that reader, mounted in the service itself: the service already
+# holds the store client its log is written through, so a reader there needs no
+# second set of credentials and no second process.
 #
-# ── ★ IT IS A ROUTE, NOT A SERVICE ──────────────────────────────────────────
-# A reader of these splits needs exactly three things — the search engine, its
-# object-store binding and the expression evaluator (`komira_search`,
-# `komira_search_s3`, `komira_eval`) — and a service that installed the sink
-# already links all three. Mounting a route costs that service nothing.
+# ── WHAT THE EMBEDDING SERVICE SUPPLIES ─────────────────────────────────────
+#   | supplied by the service      | what it decides                              |
+#   |------------------------------|----------------------------------------------|
+#   | the mount `path`             | where the route lives (`is_service_log_request`) |
+#   | a `LogReadAccess` hook       | who may read (`access.mojo`)                  |
+#   | an `ErasedServiceLogSearch`  | what is read (`search_seam.mojo`), or None    |
+#   | `now_ns`                     | the end of the default window                 |
 #
-# A standalone search server is the right FORMAT reader and can be the wrong
-# DEPLOYMENT: if it is bound to one object-store client while the service writes
-# through another, bridging the two needs interop credentials. A route in the
-# writing service reads through the store it already holds.
+# This package fixes none of the four, and reads no env, no clock and no file:
+# every branch below is drivable by a test that passes different values.
 #
-# ── ★★ THE AUTHORIZATION MODEL, STATED RATHER THAN ASSUMED ──────────────────
-# WHO MAY READ THIS: **the operator, and nobody else.** Not a customer, not an
-# org admin, not a tenant-scoped anything. The reason is structural and is not a
-# policy choice this route is free to revisit:
+# ── ⛔ ONE 404 FOR EVERY REFUSAL ────────────────────────────────────────────
+#   | condition                              | answer |
+#   |----------------------------------------|--------|
+#   | the hook answers no                    | 404    |
+#   | the hook raises                        | 404    |
+#   | no reader wired into the service       | 404    |
 #
-#   * these are the service's OWN diagnostics, emitted from across its binary;
-#   * they name OTHER tenants' org ids, run ids, project ids, resource names and
-#     failure reasons, in one undifferentiated stream;
-#   * and they cannot be split per tenant: a service-level record carries no
-#     `org_id` and no `run_id`, so it cannot be filed into a tenant's readable
-#     keyspace without inventing an attribution.
+# All three are byte-identical, and identical to the `{"error":"not found"}` a
+# service answers for a path it does not serve. A distinguishable 401/403 would
+# tell an unauthenticated caller that THIS service has a log-read surface; here
+# the thing being hidden is the route itself.
 #
-# A customer's genuinely run-scoped narration belongs in a DIFFERENT,
-# tenant-scoped sink, read through a DIFFERENT, tenant-gated route that checks
-# the caller's org against the run's own `org_id`.
-# ⛔ DO NOT "unify" the two. They differ in audience, in key root, and in whether
-# a record carries a tenant anchor at all.
-#
-# ── ⛔ FAIL-CLOSED, AND 404 FOR EVERY REFUSAL ───────────────────────────────
-# THREE refusals, ONE response, byte-identical:
-#
-#   | condition                        | answer |
-#   |----------------------------------|--------|
-#   | no expected token configured     | 404    |
-#   | wrong / absent presented token   | 404    |
-#   | no reader wired into the service | 404    |
-#
-# ⚠ FAIL-CLOSED WHEN UNCONFIGURED, ON PURPOSE. A gate that ALLOWS every caller
-# when its token is unset (relying on a network or ingress gate instead) can be
-# a defensible trade for a verb like a reconcile tick. It is not defensible for
-# a verb that returns the service's entire operational log: a route that is open
-# whenever somebody forgot to configure it is open exactly when nobody is
-# looking. An unconfigured deployment therefore has NO log-read surface at all.
-#
-# ⚠ AND 404 RATHER THAN 401/403, WHICH IS NOT PEDANTRY. A distinguishable
-# refusal tells an unauthenticated caller that THIS DEPLOYMENT HAS AN
-# OPERATIONAL-LOG SURFACE — the one fact an attacker learns for free from a
-# fixed path. Un-addressable and un-entitled must be indistinguishable; here
-# there is no id to protect, so the thing being hidden is the route itself.
-#
-# ⚠⚠ THE ORDER OF THE CHECKS IS LOAD-BEARING. AUTHORIZATION RUNS FIRST, THEN
-# ARGUMENT VALIDITY. If an argument were validated first, then
-# `GET /internal/logs` with no token would answer **400 for this service and 404
-# for one without the route** — an existence oracle handed out by the very check
-# meant to be non-revealing. Every unauthorized caller sees exactly one response.
-#
-# ⛔ NO ENV IS READ HERE. `expected_token` arrives as a `String` the caller
-# already resolved, exactly as `ServiceLogSink` takes a built store rather than a
-# bucket name. That is what makes the whole policy above drivable by a test with
-# no process state.
-#
-# ⚠ THE TOKEN IS SECRET MATERIAL, SO THE CALLER MUST NOT TAKE IT FROM ARGV.
-# `/proc/<pid>/cmdline` is world-readable, and the same string lands in `ps`, the
-# revision spec and every deploy audit log. The caller fetches it from its secret
-# store (by a name it was configured with) and passes the value here.
+# ⚠⚠ THE ORDER OF THE CHECKS IS LOAD-BEARING. ACCESS RUNS FIRST, THEN ARGUMENT
+# VALIDITY. If an argument were validated first, an unauthenticated
+# `GET <path>?since_ms=9&until_ms=1` would answer 400 on a service with the
+# route and 404 on one without it: an existence oracle handed out by the very
+# check meant to be non-revealing. Every refused caller sees exactly one
+# response.
 #
 # ── ENCAPSULATION ───────────────────────────────────────────────────────────
 # Value-typed: `HttpRequest` (borrowed) in, `HttpResponse` (moved) out. ZERO
-# UnsafePointer crosses any boundary; no wildcard origin. NEVER raises — a store
-# fault becomes a 500 that names it (this response reaches only an authorized
-# operator, so the fault text is information rather than a leak).
+# UnsafePointer crosses any boundary; no wildcard origin. NEVER raises: a store
+# fault becomes a 500 that names it (it reaches only a caller the hook let
+# through, so the fault text is information rather than a leak).
 # =============================================================================
 
 from komira_http_core.codec.types import HttpMethod, HttpRequest, HttpResponse
 
+from komira_log_query.access import LogReadAccess
 from komira_log_query.hit import (
     ServiceLogHit,
     ServiceLogPage,
@@ -96,54 +58,29 @@ from komira_log_query.search_seam import ErasedServiceLogSearch
 
 
 # =============================================================================
-# §1 — the wire vocabulary. Spelled ONCE so the route, the caller's gate and the
-#      tests cannot disagree about it.
+# §1 — the query-string vocabulary. Spelled ONCE so the route and the tests
+#      cannot disagree about it. The PATH is not here: the service chooses it.
 # =============================================================================
-
-comptime SERVICE_LOG_ROUTE_PATH: String = "/internal/logs"
-"""The mount point. `/internal/*` is the operator / service-account prefix, so
-the path itself states the audience.
-
-⛔ NOT under a customer-facing, tenant-gated prefix that a front door proxies;
-an operator-only verb sitting inside one is one copy-pasted route arm away from
-being proxied too."""
-
-comptime SERVICE_LOG_TOKEN_HEADER: String = "x-komira-log-read-token"
-"""The DEDICATED header the app-level token rides. Lowercased — the H1 parser
-canonicalizes header names.
-
-⚠ NOT `Authorization`: behind PRIVATE Cloud Run ingress the front end validates
-the caller's Google OIDC ID token against the service's `aud` + `run.invoker`
-grant and then FORWARDS the request WITH that ID token still in `Authorization`.
-By the time the app runs, `Authorization` carries the platform's token, not ours.
-A distinct header is what lets BOTH auth layers coexist.
-
-⚠ AND IT IS ITS OWN SECRET, NOT a token shared with another internal verb.
-Reusing, say, a reconcile token would mean every service account that may POST a
-reconcile tick may also read the whole operational log. Same custody, wildly
-different blast radius."""
 
 comptime SERVICE_LOG_QUERY_PARAM: String = "q"
 """The full-text term(s) to match against the record's `message` field.
 
-⭐ OPTIONAL. Requiring it would encode a property of the SPLIT FORMAT, not of
-log reading: the split catalog entry carries no time range at all, so for splits
-a term is the only bound a reader has. The time-partitioned at-rest format
-bounds by TIME, so `?since_ms=`/`?until_ms=` is the primary bound and `?q=`
-narrows within it — which is exactly what a customer's own direct query over
-their bucket does."""
+⭐ OPTIONAL. Requiring it would encode a property of one at-rest layout, not of
+log reading: a layout whose catalog carries no time range can bound a read only
+by a term, while a time-partitioned layout bounds it by TIME. So
+`?since_ms=`/`?until_ms=` is the primary bound and `?q=` narrows within it."""
 
 comptime SERVICE_LOG_SINCE_PARAM: String = "since_ms"
 """Window start, UNIX epoch MILLISECONDS, INCLUSIVE. Defaults to
 `until_ms - SERVICE_LOG_DEFAULT_LOOKBACK_MS`.
 
-⚠ MILLISECONDS, NOT NANOSECONDS OR A DATE STRING. Nanoseconds because an operator
+⚠ MILLISECONDS, NOT NANOSECONDS OR A DATE STRING. Nanoseconds because a person
 types this by hand and a 19-digit literal is a transcription error waiting to
 happen; not a date string because parsing one needs a timezone policy, and the
 one thing worse than an awkward parameter is a window that silently means a
-different hour than the operator meant. The log index's own resolution is ONE
-MILLISECOND anyway (the sink stamps `wall_ms * 1_000_000`), so a
-millisecond parameter loses exactly nothing."""
+different hour than the reader meant. A log written from a millisecond wall
+clock has no finer resolution anyway, so a millisecond parameter loses
+nothing."""
 
 comptime SERVICE_LOG_UNTIL_PARAM: String = "until_ms"
 """Window end, UNIX epoch MILLISECONDS, INCLUSIVE. Defaults to NOW — which the
@@ -153,17 +90,15 @@ stays drivable by a test with no process state."""
 comptime SERVICE_LOG_DEFAULT_LOOKBACK_MS: Int64 = 2_592_000_000
 """30 days, the DEFAULT window when neither bound is given.
 
-⚠ IT MATCHES THE DEFAULT LOG RETENTION, NOT A ROUND NUMBER. A log bucket whose
-lifecycle rule deletes at 30 days cannot hold older records, so a default that
-reached further back would scan day partitions that CANNOT contain data — cost
-with no possible result. Widening this without widening retention buys nothing;
-narrowing it hides records that still exist."""
+A log bucket whose lifecycle rule deletes at 30 days cannot hold older records,
+so a default that reached further back would scan partitions that cannot
+contain data. A caller wanting older records passes `since_ms`."""
 
 comptime SERVICE_LOG_LIMIT_PARAM: String = "limit"
 """The page bound. Clamped to `[1, SERVICE_LOG_MAX_LIMIT]`."""
 
 comptime SERVICE_LOG_DEFAULT_LIMIT: Int = 50
-"""What an operator gets for `?q=x` with no `limit`. A screenful."""
+"""What a reader gets for `?q=x` with no `limit`. A screenful."""
 
 comptime SERVICE_LOG_MAX_LIMIT: Int = 500
 """The CEILING, clamped rather than refused.
@@ -171,7 +106,7 @@ comptime SERVICE_LOG_MAX_LIMIT: Int = 500
 ⚠ IT IS A MEMORY BOUND, NOT A COURTESY. Each hit carries the record's whole
 `_source` blob, and this runs inside a service instance sized for HTTP, not for
 a log query. A refusal would be more honest but would also make the obvious
-`?limit=100000` a failed page instead of a big one, and an operator debugging an
+`?limit=100000` a failed page instead of a big one, and a reader debugging an
 outage should not have to bisect a limit."""
 
 
@@ -180,20 +115,17 @@ outage should not have to bisect a limit."""
 # =============================================================================
 
 
-def is_service_log_request(req: HttpRequest) -> Bool:
-    """True iff this is `GET /internal/logs`.
+def is_service_log_request(req: HttpRequest, path: String) -> Bool:
+    """True iff this is `GET <path>`, with `path` the mount point the service
+    chose.
 
     EXACT path match and GET only. A prefix match would put every
-    `/internal/logs/<anything>` on this handler — a surface with no purpose and
-    one more thing for a future reader to reason about.
+    `<path>/<anything>` on this handler, a surface with no purpose.
 
     ⛔ THIS FUNCTION IS NOT A GATE. It answers "is this that path", nothing more;
-    a caller that mounts it without calling `service_log_response` — which owns
-    every refusal in §3 — has mounted an unauthenticated log dump."""
-    return (
-        req.method == HttpMethod.get()
-        and req.path == SERVICE_LOG_ROUTE_PATH
-    )
+    a caller that mounts it without calling `service_log_response`, which owns
+    every refusal in §3, has mounted an unauthenticated log dump."""
+    return req.method == HttpMethod.get() and req.path == path
 
 
 # =============================================================================
@@ -201,38 +133,37 @@ def is_service_log_request(req: HttpRequest) -> Bool:
 # =============================================================================
 
 
-def service_log_response(
+def service_log_response[
+    A: LogReadAccess
+](
     mut search: Optional[ErasedServiceLogSearch],
     req: HttpRequest,
-    expected_token: String,
+    access: A,
     now_ns: Int64,
 ) -> HttpResponse:
-    """Authorize, resolve the window, read, render. NEVER raises.
+    """Ask the hook, resolve the window, read, render. NEVER raises.
 
-    `search` is the service's wired reader — `None` for a service that never
-    configured a log sink, which is INDISTINGUISHABLE from unauthorized by
-    construction (see the header's refusal table).
+    `search` is the service's wired reader: `None` for a service that never
+    configured one, which is INDISTINGUISHABLE from a refusal by construction
+    (see the header's refusal table).
 
-    `expected_token` is the operator secret the caller resolved. EMPTY means the
-    route is DISABLED, not that everything is allowed.
+    `access` decides who may read. It is required: pass `DenyLogReads()` while
+    the service has no policy. Its "no" and its raise are the same 404.
 
     ⚠ `now_ns` IS A PARAMETER, NOT A CLOCK READ. It anchors the default window's
-    upper bound. The same division of duty as `expected_token`: this handler
-    touches NO process state — no env, no clock — which is what makes every
-    branch below drivable by a test that just passes different numbers. A
-    `time.now()` call here would make the default-window behaviour untestable
-    except by luck.
+    upper bound, so the default-window behaviour is testable by passing a
+    number rather than by luck.
 
-    ⚠ THE ARGUMENT CHECKS RUN AFTER THE AUTH CHECKS. See the header — inverting
+    ⚠ THE ARGUMENT CHECKS RUN AFTER THE ACCESS CHECK. See the header: inverting
     them turns this route into an existence oracle."""
 
-    # ---- (1) AUTHORIZATION. Three conditions, one byte-identical answer. ----
-    if expected_token.byte_length() == 0:
-        return _not_found()
-    var presented = _token_from_request(req)
-    if presented.byte_length() == 0:
-        return _not_found()
-    if not _const_time_eq(presented, expected_token):
+    # ---- (1) ACCESS. Three conditions, one byte-identical answer. ----
+    var allowed = False
+    try:
+        allowed = access.allows(req)
+    except:
+        allowed = False
+    if not allowed:
         return _not_found()
     if not search:
         return _not_found()
@@ -314,9 +245,9 @@ def service_log_response(
     except e:
         # ⭐ A TERM-FREE QUERY THAT THE WIRED CONFORMER CANNOT ANSWER IS A 400,
         # NOT A 500, AND IT CARRIES THE CONFORMER'S OWN SENTENCE. It is not a
-        # server fault: it is an honest statement that THIS deployment's at-rest
-        # format cannot bound a read by time alone, and the fix is an argument
-        # the caller can supply (`?q=`). A 500 would send an operator hunting a
+        # server fault: it is an honest statement that THIS service's at-rest
+        # layout cannot bound a read by time alone, and the fix is an argument
+        # the caller can supply (`?q=`). A 500 would send a reader hunting a
         # bucket outage that is not happening.
         #
         # ⚠ The discriminator is `has_term()`, NOT the message text. Keying on a
@@ -326,15 +257,14 @@ def service_log_response(
         # REQUEST was, which cannot drift.
         # ⚠⚠ A KNOWN RESIDUAL, STATED RATHER THAN LEFT TO BE REDISCOVERED. A
         # TERMED query over an ABSURDLY WIDE window is reported as a 500, and it
-        # is really a client error. `TelemetryLogSearch` refuses a span over
-        # `TELEMETRY_MAX_DAYS_PER_SCAN` (400 days) rather than clamping it, and
-        # that refusal arrives here as a raise indistinguishable from a store
-        # fault. The message it carries is fully diagnostic — it names the span,
-        # the ceiling, and why a clamp would be worse — so an operator is not
-        # stuck; only the status code is wrong.
+        # is really a client error. A conformer that refuses a span wider than
+        # its own ceiling (rather than clamping it) can only say so by raising,
+        # and that raise arrives here indistinguishable from a store fault. Its
+        # message names the span and the ceiling, so the reader is not stuck;
+        # only the status code is wrong.
         #
         # ⛔ NOT FIXED WITH A SECOND CEILING HERE, DELIBERATELY. This package is
-        # a clean leaf on komira_http and cannot import the
+        # a clean leaf on komira_http_core and cannot import a
         # conformer's constant, so a route-side ceiling would be a RE-SPELLING
         # that can drift — tighter and it refuses queries the reader would have
         # served, looser and the gap is exactly this 500 again. ⛔ AND NOT FIXED
@@ -346,7 +276,7 @@ def service_log_response(
             return _error_json(
                 Int32(400),
                 String(
-                    "this deployment's log index cannot answer a time-range"
+                    "this service's log index cannot answer a time-range"
                     " query with no '"
                 )
                 + SERVICE_LOG_QUERY_PARAM
@@ -422,8 +352,8 @@ def _render_page(
     reads exactly like "your term did not match"."""
     var out = String('{"index":"logs","q":"')
     out += _json_escape(q)
-    # ⭐ THE WINDOW IS RENDERED, ALWAYS, INCLUDING WHEN IT WAS DEFAULTED. An
-    # operator who omits both bounds gets a 30-day window; without these two
+    # ⭐ THE WINDOW IS RENDERED, ALWAYS, INCLUDING WHEN IT WAS DEFAULTED. A
+    # reader who omits both bounds gets a 30-day window; without these two
     # fields an empty page would be indistinguishable from "your records are
     # older than the window I silently chose for you".
     out += String('","since_ms":')
@@ -454,8 +384,8 @@ def _render_hit(hit: ServiceLogHit) -> String:
     is embedded VERBATIM when it really is one, so a consumer gets structure
     rather than a string it has to parse twice. But a blob that is not an object
     — a format change, a truncated write, a conformer bug — must not be able to
-    produce a MALFORMED response, because malformed JSON is the one failure an
-    operator's tooling reports as "the reader is broken" rather than "the data
+    produce a MALFORMED response, because malformed JSON is the one failure a
+    reader's tooling reports as "the reader is broken" rather than "the data
     is odd". So a non-object blob is emitted as a JSON STRING instead. Both
     shapes are valid JSON, and the string shape IS the signal that something
     below changed.
@@ -753,7 +683,7 @@ def _is_json_object(s: String) -> Bool:
 def _json_escape(s: String) -> String:
     """Minimal RFC-8259 string escaping (`"`, `\\`, the three named controls, and
     `\\u00XX` for the rest of C0). Hand-rolled so this package stays a clean leaf
-    on komira_http alone."""
+    on komira_http_core alone."""
     var b = s.as_bytes()
     var out = List[UInt8]()
     var i = 0
@@ -842,9 +772,8 @@ def _utf8_seq_len(b: Span[UInt8, _], i: Int) -> Int:
 
 def _json_response(var body: String, status: Int32) -> HttpResponse:
     """An `application/json` response with an accurate `content-length`. Inlined
-    rather than taken from `komira_handler_kit`: a dispatcher that mounts this
-    route need not link that package, and adding it to reuse eight lines would
-    grow a closure to save none."""
+    so a service that mounts this route needs no HTTP helper package beyond
+    komira_http_core."""
     var r = HttpResponse(status=status)
     r.headers[String("content-type")] = String("application/json")
     var bytes_ref = body.as_bytes()
@@ -858,21 +787,20 @@ def _json_response(var body: String, status: Int32) -> HttpResponse:
 
 
 def _error_json(status: Int32, var message: String) -> HttpResponse:
-    """`{"error": "..."}`, matching the shape every other route on this service
-    emits."""
+    """`{"error": "..."}`."""
     return _json_response(
         String('{"error":"') + _json_escape(message) + String('"}'), status
     )
 
 
 def _not_found() -> HttpResponse:
-    """⭐ THE ONE REFUSAL. Every unauthorized, unconfigured and unwired case
-    returns THIS — byte-identical, so no caller can tell them apart. See the
-    header's refusal table.
+    """⭐ THE ONE REFUSAL. Every refused and unwired case returns THIS,
+    byte-identical, so no caller can tell them apart. See the header's refusal
+    table.
 
-    The body matches the dispatcher's own catch-all `_error_json(404, "not
-    found")` so that a service WITHOUT this route mounted and a service WITH it
-    but refusing are indistinguishable on the wire, not merely equal in status."""
+    A service that wants a refused request to look exactly like an unserved
+    path answers its own unknown paths with this same body,
+    `{"error":"not found"}`."""
     return _error_json(Int32(404), String("not found"))
 
 
@@ -881,41 +809,17 @@ def _not_found() -> HttpResponse:
 # =============================================================================
 
 
-def _token_from_request(req: HttpRequest) -> String:
-    """The RAW app-level token off `SERVICE_LOG_TOKEN_HEADER` (NO `Bearer `
-    scheme prefix — see the constant). "" when absent. Non-raising."""
-    var maybe = req.headers.get(SERVICE_LOG_TOKEN_HEADER)
-    if not maybe:
-        return String("")
-    return maybe.value()
-
-
-def _const_time_eq(a: String, b: String) -> Bool:
-    """A length-checked, branch-uniform compare for the token (no early exit on
-    the first mismatched byte). Not a hardware-constant-time primitive — it is
-    spelled here so this package stays a clean leaf — but it removes the
-    trivially-obvious early-return timing signal."""
-    var ab = a.as_bytes()
-    var bb = b.as_bytes()
-    if len(ab) != len(bb):
-        return False
-    var diff = UInt8(0)
-    for i in range(len(ab)):
-        diff = diff | (ab[i] ^ bb[i])
-    return diff == UInt8(0)
-
-
 def _query_param_decoded(query_string: String, key: String) -> String:
     """`key`'s value out of a `k=v&k=v` query string (NO leading '?', the
     `HttpRequest.query_string` shape), PERCENT- AND PLUS-DECODED. "" when absent
     or empty.
 
-    ⚠ IT DECODES, AND A TENANCY PARSER DELIBERATELY DOES NOT. A parser whose
-    consumer is `?org=<uuid>`, an AUTHORIZATION input, must refuse to decode: a
-    half-understood value must fail the uuid parse and be refused rather than
-    silently reinterpreted. This parameter is the opposite kind of input: a
-    SEARCH TERM, which is handed to an analyzer and can match nothing worse than
-    the wrong records. An operator searching for `deploy failed` types a space,
+    ⚠ IT DECODES, ON PURPOSE. A parser whose value feeds an AUTHORIZATION
+    decision should refuse to decode, so a half-understood value is refused
+    rather than silently reinterpreted. This parameter is the opposite kind of
+    input: a SEARCH TERM, which is handed to an analyzer and can match nothing
+    worse than the wrong records. A reader searching for `deploy failed` types
+    a space,
     and a non-decoding parser would silently search for the single token
     `deploy%20failed` and answer "no matches" — indistinguishable from a real
     absence, which is exactly the failure this whole route exists to end.
