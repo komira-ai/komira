@@ -1,0 +1,28 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# The distributed shuffle over an object store: the map-side sink (rows
+# partitioned by a hash radix into `.seg` objects with a dense index trailer,
+# plus a manifest entry), the seal (the sole read barrier, verified as a
+# producer SET), the reduce-side source, the pull-via-claim create-CAS that lets
+# a variable number of reducers share the partitions, and the retention reaper.
+# It builds on `komira_objectstore` (the CAS manifest, the conditional-write
+# stores, Path); the object-storage layer does not depend on it.
+# komira_runtime_paths is declared because the tests take their scratch
+# directory from `test_tmpdir()`.
+
+mojo_library(
+    name = "komira_shuffle",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_objectstore:komira_objectstore",
+        "//tools/build/mojo/runtime_paths:komira_runtime_paths",
+    ],
+    test_srcs = [
+        "tests/test_shuffle_claim_fail_closed.mojo",
+        "tests/test_shuffle_continuous_epoch_seal.mojo",
+        "tests/test_shuffle_retention_reaper.mojo",
+        "tests/test_shuffle_seal_codec_driver.mojo",
+        "tests/test_shuffle_seal_phase_a.mojo",
+    ],
+    visibility = ["PUBLIC"],
+)

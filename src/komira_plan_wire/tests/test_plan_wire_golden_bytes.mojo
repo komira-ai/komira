@@ -99,6 +99,12 @@
 #                      `WireScanNode.filter` and `WireJoinNode.residual` are
 #                      `repeated` fields that legally hold EXACTLY ONE element,
 #                      and a frontend author needs to see one.
+#   topic_live         a REGISTERED-KIND leaf (`komira.broker.topic`): the
+#                      binding's kind name, typed params, identity, gate and
+#                      the LIVE policy with a zero token, as a context that
+#                      registered the kind receives them.
+#   index_pinned       the same for `komira.search.index`, pinned by a
+#                      `generation` PARAM rather than by `SNAPSHOT_PINNED`.
 #
 # ============================= HOW TO REGOLD =================================
 #
@@ -157,8 +163,10 @@ from komira_core.source.scan_binding import (
     ScanBinding,
     scan_kind_id,
     SNAPSHOT_PINNED,
+    SCAN_ORIENTATION_COLUMNAR,
+    SNAPSHOT_LIVE,
 )
-from komira_core.source.scan_params import ScanParams
+from komira_core.source.scan_params import ScanParams, param_hash_string
 from komira_core.source.source_variant import SourceVariant, SOURCE_VARIANT_ORC
 
 from komira_plan_wire import plan_to_bytes, plan_from_bytes
@@ -852,6 +860,146 @@ def _corpus_aggregate() raises -> LogicalPlan:
     )
     return LogicalPlan.aggregate(gb^, ax^, _corpus_scan())
 
+# -----------------------------------------------------------------------------
+# THE REGISTERED-KIND LEAVES
+#
+# A plan that roots at `komira.broker.topic` or `komira.search.index` is the
+# first plan whose bytes leave a process to be executed by a context that has
+# REGISTERED the kind: a decoded binding is always unbound and resolves at the
+# executing context. So these two are frozen as the wire form of the binding
+# itself — kind name, params, identity, gate, policy and the LIVE token.
+#
+# ⚠ BUILT HERE, NOT BY THE KINDS' OWN CONSTRUCTORS, AND THAT IS A LAYERING
+# CHOICE. `komira_plan_wire` sits directly above `komira_core`; importing
+# `komira_broker` / `komira_search_runtime` into its welded test would put both
+# kinds' closures under the codec's gate. So each case restates, from core
+# primitives alone, exactly what the kind's SHIPPING constructor returns for
+# the same inputs:
+#   topic_live    == `BrokerScanRuntime.build_binding({topic: "orders",
+#                    partitions: "0,3", start_offset: 1000})` over a topic
+#                    whose config declares `_topic_schema()` minus its last
+#                    column — i.e. the relation schema FOLLOWED BY the
+#                    `__partition INT64 NOT NULL` column the kind appends.
+#                    `build_binding` is the only EXECUTABLE topic binding: the
+#                    kind's `open_scan` refuses any binding whose schema does
+#                    not end in `__partition` (BROKER_SCAN_NOT_EXECUTABLE_
+#                    BINDING), so freezing the bare `broker_topic_binding(p,
+#                    <relation schema>)` would freeze bytes no registered
+#                    context can run. Canonical param order and identity fold
+#                    are `broker_topic_binding`'s (`_broker_fingerprint`,
+#                    default isolation, so no isolation fold), which
+#                    `build_binding` returns.
+#   index_pinned  == `search_scan_binding("docs", "body", "error timeout",
+#                    0x5EA2C4, generation=42)` (`komira_search_scan`),
+#                    identity `_identity_of`.
+# The kind names are the registered names. The LINK from each shipping
+# constructor to these bytes belongs in a test that can import the kind:
+# `komira_broker`'s `build_binding` (the topic kind) and
+# `komira_search_scan`'s `search_scan_binding` each encode their binding
+# through `plan_to_bytes` and compare it to the checked-in `.hex`. Those link
+# tests sit outside this package so that `komira_plan_wire` keeps no broker or
+# search dependency. This file owns the claim that the SHAPE has one frozen
+# spelling on the wire; the link tests own the claim that the constructors
+# still produce that shape.
+#
+# ⚠ `komira.logs` IS NOT HERE: no logs scan kind exists in this repository
+# yet. When one does, it gets a case in this same shape.
+# -----------------------------------------------------------------------------
+
+comptime _TOPIC_KIND: StaticString = "komira.broker.topic"
+comptime _INDEX_KIND: StaticString = "komira.search.index"
+
+
+def _topic_schema() raises -> Schema:
+    """The schema `build_binding` emits for the `orders` topic: the relation
+    schema its config declares (plain scalar columns: a topic config carries
+    name, type and nullability only — no metadata, no children), then the
+    `__partition INT64 NOT NULL` column the kind appends and its `open_scan`
+    requires last."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("order_id", ArrowType.INT64, False))
+    sb.add_field(Field("amount", ArrowType.INT64, True))
+    sb.add_field(Field("note", ArrowType.STRING, True))
+    sb.add_field(Field("__partition", ArrowType.INT64, False))
+    return sb.build()
+
+
+def _corpus_topic_live() raises -> LogicalPlan:
+    """`read_topic("orders", partitions=[0, 3], start_offset=1000)`: LIVE, so
+    the plan's snapshot token is ZERO. A LIVE token is written only to the
+    per-execution copy, never back into a plan, so a non-zero token in these
+    bytes would be a cached plan that pinned an offset nobody asked for."""
+    var kind = String(_TOPIC_KIND)
+    var kid = scan_kind_id(kind)
+    var p = ScanParams()
+    p.put_str(String("topic"), String("orders"))
+    p.put_str(String("partitions"), String("0,3"))
+    p.put_i64(String("start_offset"), Int64(1000))
+    # The broker identity fold: topic, then each canonical partition. The
+    # offset is EXCLUDED — that is what LIVE means.
+    var fp = param_hash_string(String("orders"), UInt64(kid))
+    fp = (fp ^ UInt64(0)) * UInt64(1099511628211)
+    fp = (fp ^ UInt64(3)) * UInt64(1099511628211)
+    var binding = ScanBinding(
+        kind_id=kid,
+        kind_name=kind^,
+        name=String("orders"),
+        params=p^,
+        schema=_topic_schema(),
+        fingerprint=fp,
+        structural_id=fp,
+        gate=PushdownGate.conjunctive_comparison(require_stat_friendly_col=False),
+        snapshot_policy=SNAPSHOT_LIVE,
+        snapshot_token=UInt64(0),
+        orientation=SCAN_ORIENTATION_COLUMNAR,
+    )
+    return LogicalPlan.scan_from_source(
+        SourceVariant.from_binding(binding^), _topic_schema()
+    )
+
+
+def _hit_schema() raises -> Schema:
+    """`komira_search.source.hit_schema()`, restated: `_score` F64, `_id` I64,
+    `_source` STRING, none nullable."""
+    var sb = SchemaBuilder()
+    sb.add_field(Field("_score", ArrowType.FLOAT64, False))
+    sb.add_field(Field("_id", ArrowType.INT64, False))
+    sb.add_field(Field("_source", ArrowType.STRING, False))
+    return sb.build()
+
+
+def _corpus_index_pinned() raises -> LogicalPlan:
+    """`read_index("docs", field="body", query="error timeout",
+    generation=42)`: PINNED. The search kind pins by a `generation` PARAM, not
+    by `SNAPSHOT_PINNED` — the policy stays LIVE and the token stays zero — so
+    the pin is in identity through params, and these bytes freeze that
+    spelling rather than a token."""
+    var kind = String(_INDEX_KIND)
+    var kid = scan_kind_id(kind)
+    var p = ScanParams()
+    p.put_str(String("index"), String("docs"))
+    p.put_str(String("field"), String("body"))
+    p.put_str(String("query"), String("error timeout"))
+    p.put_u64(String("analyzer_fp"), UInt64(0x5EA2C4))
+    p.put_i64(String("generation"), Int64(42))
+    var fp = p.hash_into(param_hash_string(kind, UInt64(kid)))
+    var binding = ScanBinding(
+        kind_id=kid,
+        kind_name=kind^,
+        name=String("docs"),
+        params=p^,
+        schema=_hit_schema(),
+        fingerprint=fp,
+        structural_id=fp,
+        gate=PushdownGate.conjunctive_comparison(require_stat_friendly_col=False),
+        snapshot_policy=SNAPSHOT_LIVE,
+        snapshot_token=UInt64(0),
+        orientation=SCAN_ORIENTATION_COLUMNAR,
+    )
+    return LogicalPlan.scan_from_source(
+        SourceVariant.from_binding(binding^), _hit_schema()
+    )
+
 
 # =============================================================================
 # THE THREE LEGS
@@ -1104,6 +1252,32 @@ def test_correlated_subquery_bytes_are_frozen() raises:
     )
 
 
+def _assert_kind_leaf(name: String, kind: String, var plan: LogicalPlan) raises:
+    """The EXPLAIN half: the plan renders its leaf through the binding's own
+    `render()`, so the kind name must be visible in the text LEG B compares.
+    A kind-agnostic render would let two kinds with equal params collide in
+    every EXPLAIN a human reads."""
+    var text = String(plan)
+    assert_true(
+        text.find(kind) >= 0,
+        name + ": the plan text does not name its scan kind `" + kind
+        + "`:\n" + text,
+    )
+    _assert_frozen(name, plan^)
+
+
+def test_topic_live_bytes_are_frozen() raises:
+    _assert_kind_leaf(
+        String("topic_live"), String(_TOPIC_KIND), _corpus_topic_live()
+    )
+
+
+def test_index_pinned_bytes_are_frozen() raises:
+    _assert_kind_leaf(
+        String("index_pinned"), String(_INDEX_KIND), _corpus_index_pinned()
+    )
+
+
 def test_the_fixtures_are_not_all_the_same_bytes() raises:
     """★ THE CONTROL. N `assert_equal(actual, frozen)` legs are all satisfied
     by N fixtures holding the SAME bytes — if the encoder collapsed every plan
@@ -1132,6 +1306,8 @@ def test_the_fixtures_are_not_all_the_same_bytes() raises:
         String("project_exprs"),
         String("asof_join"),
         String("correlated_subquery"),
+        String("topic_live"),
+        String("index_pinned"),
     ]
     var seen = List[String]()
     for i in range(len(names)):
@@ -1208,6 +1384,8 @@ def main() raises:
     suite.test[test_project_exprs_bytes_are_frozen]()
     suite.test[test_asof_join_bytes_are_frozen]()
     suite.test[test_correlated_subquery_bytes_are_frozen]()
+    suite.test[test_topic_live_bytes_are_frozen]()
+    suite.test[test_index_pinned_bytes_are_frozen]()
     suite.test[test_the_fixtures_are_not_all_the_same_bytes]()
     suite.test[test_a_fixture_is_longer_than_the_plan_it_nests_inside]()
     suite^.run()
