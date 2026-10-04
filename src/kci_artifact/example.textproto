@@ -1,9 +1,9 @@
-# An example artifact declarations file (kci.release.v1.ArtifactDeclarations).
-# The welded test tests/test_declaration_render.mojo reads this file (staged
+# An example artifacts file (kci.release.v1.Artifacts).
+# The welded test tests/test_artifact_render.mojo reads this file (staged
 # as its test data), so it always parses, validates and renders.
 #
 # kci runs the artifacts one at a time, in THIS FILE'S ORDER, with R the
-# release directory and S the git-derived stamp (contract.mojo):
+# release directory and S the git-derived stamp (placeholders.mojo):
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
 #     -c komira.package_timestamp_ms=<T> \
@@ -26,10 +26,10 @@
 # below left `komira_encoding-1.0.0-h<8 hex of C>_154.conda` whose metadata
 # says `build_number` 154, `source_commit` C, `timestamp_ms` T, `stamped`
 # true. Without them `[release]` does not exist (an unstamped build is not a
-# release), so a declaration that forgets the stamp fails here rather than
+# release), so an artifact that forgets the stamp fails here rather than
 # shipping.
 #
-# THE METAPACKAGE is the LAST declaration: `{release_dir}` holds every
+# THE METAPACKAGE is the LAST artifact: `{release_dir}` holds every
 # artifact above it, already built and verified, so it names their manifests.
 # It is built by komira_pack through `buck2 run` (a program name, so the file
 # needs no absolute path), whose cwd is kci's `--work-dir`: the LICENSE below

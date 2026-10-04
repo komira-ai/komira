@@ -60,7 +60,7 @@ def test_the_release_machine() raises:
     assert_equal(len(b.steps), 1)
     assert_true(b.steps[0].is_build())
     assert_equal(b.steps[0].platform, String("linux-x86_64"))
-    assert_equal(b.steps[0].declarations, String("release/artifacts.textproto"))
+    assert_equal(b.steps[0].artifacts, String("release/artifacts.textproto"))
     var channels = parse_channels_file(Path(String("channels.textproto")).read_text())
     var after = String("build")
     for name in [String("gamma"), String("prod")]:
@@ -70,7 +70,7 @@ def test_the_release_machine() raises:
         assert_false(p.farm_connected)
         assert_equal(len(p.steps), 1)
         assert_true(p.steps[0].is_publish())
-        assert_equal(p.steps[0].declarations, String("release/artifacts.textproto"))
+        assert_equal(p.steps[0].artifacts, String("release/artifacts.textproto"))
         assert_equal(p.steps[0].channels, String("release/channels.textproto"))
         assert_equal(p.steps[0].channel, name)
         # gamma's step carries the install validation; prod's none

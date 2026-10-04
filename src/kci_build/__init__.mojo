@@ -15,8 +15,8 @@
 #   build.mojo              run_build: the flow (and the --plan path), and
 #                           the step's part of the run's result document
 #
-# What to build, and with which program, is the declarations file's
-# (kci_artifact_declaration); what a build must leave is checked by
+# What to build, and with which program, is the artifacts file's
+# (kci_artifact); what a build must leave is checked by
 # kci_release_set.verify_member, the same function a PUBLISH step runs. The
 # command line is the kci binary's (`kci run`, its one command); this package
 # parses none.

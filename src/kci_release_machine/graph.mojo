@@ -19,9 +19,9 @@
 # kind:
 #
 #   kind      inputs                                    what it does
-#   BUILD     platform, declarations                    kci_build: one build per
+#   BUILD     platform, artifacts                    kci_build: one build per
 #                                                       declared artifact
-#   PUBLISH   platform, declarations, channels, channel kci_publish: the release
+#   PUBLISH   platform, artifacts, channels, channel kci_publish: the release
 #                                                       set to one channel
 #   DEPLOY    (none yet)                                reserved: refused as
 #                                                       "needs a newer kci"
@@ -143,7 +143,7 @@ struct StageStep(Copyable, Movable):
     var name: String
     var kind: String
     var platform: String
-    var declarations: String
+    var artifacts: String
     var channels: String
     var channel: String
     var validations: List[StageValidation]
@@ -153,7 +153,7 @@ struct StageStep(Copyable, Movable):
         self.name = String("")
         self.kind = String("")
         self.platform = String("")
-        self.declarations = String("")
+        self.artifacts = String("")
         self.channels = String("")
         self.channel = String("")
         self.validations = List[StageValidation]()
@@ -458,8 +458,8 @@ def _check_step(source: String, stage: Stage, step: StageStep) raises:
         require_release_platform(step.platform)
     except e:
         raise Error(_at(source, step.line) + where + String(": ") + String(e))
-    if step.declarations.byte_length() == 0:
-        raise Error(_at(source, step.line) + where + String(" has no declarations (the artifact declarations file)"))
+    if step.artifacts.byte_length() == 0:
+        raise Error(_at(source, step.line) + where + String(" has no artifacts (the artifacts file)"))
     if step.kind == STEP_KIND_BUILD:
         if step.channels.byte_length() > 0 or step.channel.byte_length() > 0:
             raise Error(

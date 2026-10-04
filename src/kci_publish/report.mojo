@@ -10,7 +10,7 @@
 # `record_publish_result` puts this step's part into it.
 #
 # THE OUTCOME follows from the reason and from whether an upload landed
-# (kci_api's outcome words; the exit number is kci_api's, so this
+# (kci_api's outcome words; the exit number is the contract's, so this
 # package spells none):
 #
 #   reason                 nothing landed       an upload landed   error id

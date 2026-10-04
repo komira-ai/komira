@@ -33,8 +33,8 @@ from komira_json import JSON_NUMBER, JSON_STRING, JsonValue
 comptime KIND_AUTHORED: String = "AUTHORED"
 comptime KIND_PRODUCED: String = "PRODUCED"
 
-comptime FORMAT_ARTIFACT_DECLARATIONS: String = "kci.artifact_declarations"
-"""The artifact declarations file (textproto, written by people)."""
+comptime FORMAT_ARTIFACTS: String = "kci.artifacts"
+"""The artifacts file (textproto, written by people)."""
 comptime FORMAT_CHANNELS: String = "kci.channels"
 """The release channels file (textproto, written by people)."""
 comptime FORMAT_MACHINE: String = "kci.machine"
@@ -72,7 +72,7 @@ struct FormatRow(Copyable, Movable):
 def format_table() -> List[FormatRow]:
     """Every document, authored files first."""
     var t = List[FormatRow]()
-    t.append(FormatRow(String(FORMAT_ARTIFACT_DECLARATIONS), String(KIND_AUTHORED), 1, 1))
+    t.append(FormatRow(String(FORMAT_ARTIFACTS), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_CHANNELS), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_MACHINE), String(KIND_AUTHORED), 1, 1))
     t.append(FormatRow(String(FORMAT_ARTIFACT_MANIFEST), String(KIND_PRODUCED), 1, 1))

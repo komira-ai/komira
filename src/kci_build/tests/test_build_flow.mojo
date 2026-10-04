@@ -33,13 +33,13 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from komira_crypto import hex_lower_array_32, sha256_string
 
-from kci_artifact_declaration import ReleaseStamp, read_artifact_declarations, render_build_argv
+from kci_artifact import ReleaseStamp, read_artifacts, render_build_argv
 from kci_api import (
     ARTIFACT_BUILT,
     ARTIFACT_WOULD_BUILD,
     ERROR_BUILD_FAILED,
     ERROR_CANNOT_TELL,
-    ERROR_DECLARATION,
+    ERROR_ARTIFACT,
     ERROR_MEMBER,
     ERROR_PLATFORM,
     ERROR_RESULT_FILE,
@@ -73,7 +73,7 @@ from kci_build import (
 )
 from kci_release_set import read_release_manifest
 
-comptime _EXAMPLE = "src/kci_artifact_declaration/example.textproto"
+comptime _EXAMPLE = "src/kci_artifact/example.textproto"
 comptime _SET_THREE = "ea878fe9fdaf3371bc17a6315984290078e3f59f3a1e199b0b594957ebeb3e9e"
 comptime _SET_EXAMPLE = "325dc7021b024291f5838382d72106390c37b2e3bd63eafa42f5643fea187f50"
 comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
@@ -139,11 +139,11 @@ def _fresh(tag: String) raises -> String:
     return realpath(d)
 
 
-def _request(root: String, decls_text: String = String(_THREE)) raises -> BuildRequest:
+def _request(root: String, arts_text: String = String(_THREE)) raises -> BuildRequest:
     var run = RunIdentity(String("gh-7"), 2)
     var r = BuildRequest(run^)
-    r.declarations_file = root + String("/decls.textproto")
-    write_text_file(r.declarations_file, decls_text)
+    r.artifacts_file = root + String("/artifacts.textproto")
+    write_text_file(r.artifacts_file, arts_text)
     r.work_dir = root + String("/repo")
     r.release_dir = root + String("/release")
     r.log_dir = root + String("/logs")
@@ -246,8 +246,8 @@ def _metadata(
 
 def _expected_argv(req: BuildRequest, name: String) raises -> List[String]:
     """argv[1:] of `render_build_argv` for `name` into `<out>/<name>`."""
-    var decls = read_artifact_declarations(req.declarations_file)
-    var argv = render_build_argv(decls, name, req.platform_dir(), req.platform, _stamp())
+    var arts = read_artifacts(req.artifacts_file)
+    var argv = render_build_argv(arts, name, req.platform_dir(), req.platform, _stamp())
     var rest = List[String]()
     for i in range(1, len(argv)):
         rest.append(argv[i].copy())
@@ -390,7 +390,7 @@ def test_three_artifacts_two_build_systems_in_file_order() raises:
     assert_equal(outcome.exit_code(), EXIT_OK, outcome.message)
     assert_equal(runner.inner.remaining(), 0)
     assert_equal(len(runner.inner.calls), 3)
-    # declaration-file order, each with its own build system's program
+    # artifacts-file order, each with its own build system's program
     assert_equal(runner.inner.calls[0].path, String("buck2"))
     assert_equal(runner.inner.calls[1].path, String("buck2"))
     assert_equal(runner.inner.calls[2].path, String(_PACK))
@@ -574,14 +574,14 @@ def test_a_recorder_that_cannot_record_stops_before_the_first_effect() raises:
     assert_false(exists(req.platform_dir()))
 
 
-def test_invalid_declarations_are_refused_with_zero_runs() raises:
+def test_invalid_artifacts_are_refused_with_zero_runs() raises:
     var root = _fresh(String("baddecl"))
     var req = _request(root, String('schema_version: 1 build_systems { name: "buck2" executable: "buck2" }\n'))
     var runner = ScriptedRunner()
     var git = _git_ok()
     var outcome = _run(req, runner, git)
     assert_equal(outcome.exit_code(), EXIT_REFUSED)
-    assert_equal(outcome.error_id, String(ERROR_DECLARATION))
+    assert_equal(outcome.error_id, String(ERROR_ARTIFACT))
     assert_true(outcome.message.startswith(String("BUILD step: ")), outcome.message)
     assert_equal(len(runner.calls), 0)
     assert_false(exists(req.platform_dir()))
@@ -743,7 +743,7 @@ def test_name_mismatch_is_refused() raises:
     _expect_refused(
         String("r2"),
         2,
-        String("the built manifest's name 'komira_hash2' is not the declaration's name (compared exactly)"),
+        String("the built manifest's name 'komira_hash2' is not the artifact's name (compared exactly)"),
     )
 
 
@@ -917,7 +917,7 @@ def test_a_stray_sibling_in_the_release_dir_is_refused() raises:
     assert_equal(
         r.message,
         String("BUILD step: the release directory '") + r.req.platform_dir()
-        + String("' holds 'BUILD_SUMMARY.txt', which no declaration names: it holds only the")
+        + String("' holds 'BUILD_SUMMARY.txt', which no artifact names: it holds only the")
         + String(" member directories and release.json (a build wrote outside its own directory)"),
     )
     assert_equal(r.remaining, 0)

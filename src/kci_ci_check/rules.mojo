@@ -89,7 +89,7 @@
 # =============================================================================
 
 from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
-from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
+from kci_release_channel import Channel, find_channel, parse_channels_file
 from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
@@ -136,7 +136,7 @@ def channels_paths(g: ReleaseMachine) -> List[String]:
     return out^
 
 
-def _channel_is_oidc(ch: ChannelDeclaration) -> Bool:
+def _channel_is_oidc(ch: Channel) -> Bool:
     for i in range(len(ch.repositories)):
         ref r = ch.repositories[i]
         if r.credential and r.credential.value().is_oidc_trusted_publishing():
@@ -156,8 +156,8 @@ def id_token_stages(g: ReleaseMachine, files: List[ChannelsFile]) raises -> List
             ref s = st.steps[k]
             if not s.is_publish():
                 continue
-            var decls = parse_channels_file(_channels_text(files, s.channels))
-            var ch = find_channel(decls, s.channel)
+            var channels = parse_channels_file(_channels_text(files, s.channels))
+            var ch = find_channel(channels, s.channel)
             if _channel_is_oidc(ch):
                 needs = True
         if needs:

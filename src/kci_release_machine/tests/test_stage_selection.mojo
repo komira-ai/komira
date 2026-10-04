@@ -17,8 +17,8 @@ from kci_release_machine import Selection, Stage, parse_machine_file, resolve_se
 comptime _MACHINE: String = (
     "schema_version: 1\n"
     "stage { name: \"release\"\n"
-    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d.textproto\" }\n"
-    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+    "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
+    "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\"\n"
     "    validation { name: \"install-smoke\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"release/s.mojo\"\n"
     "       image: \"r.example.invalid/p@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\" compiler_channel: \"https://c.example.invalid/max\" }\n"
@@ -162,7 +162,7 @@ def test_unknown_validation_is_refused_with_the_names() raises:
 def test_a_stage_without_validations_says_none() raises:
     var g = parse_machine_file(
         String("schema_version: 1\nstage { name: \"build\"\n")
-        + String("  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n"),
+        + String("  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
         String("machine file"),
     )
     var t = List[String]()

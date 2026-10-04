@@ -80,7 +80,7 @@ def _args(dir: String, result_file: String) raises -> List[String]:
     var m = dir + String("/m.textproto")
     write_whole_file(
         m,
-        String("schema_version: 1\nstage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" declarations: \"d\" } }\n"),
+        String("schema_version: 1\nstage { name: \"build\" step { name: \"b\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d\" } }\n"),
     )
     var l = List[String]()
     for s in ["run", "--stage", "build", "--run-id", "gh-3", "--attempt", "1", "--release-dir", "/r", "--work-dir", "/w", "--log-dir", "/l"]:

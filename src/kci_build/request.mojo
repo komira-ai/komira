@@ -13,11 +13,11 @@
 #
 #   SUCCEEDED      every declared artifact was built and verified, and
 #                  `release.json` was written; under `plan`, every
-#                  declaration rendered for the resolved revision and
+#                  artifact rendered for the resolved revision and
 #                  nothing was built
 #   REFUSED        an input, the checkout, or a build's output breaks the
 #                  contract; later artifacts not built. Error ids:
-#                  KCI-E-DECLARATION, KCI-E-PLATFORM, KCI-E-REVISION,
+#                  KCI-E-ARTIFACT, KCI-E-PLATFORM, KCI-E-REVISION,
 #                  KCI-E-MEMBER, KCI-E-PLATFORM-MISMATCH; and KCI-E-USAGE
 #                  for a path flag that names a wrong place (a work dir
 #                  that is not one, a used release directory, a log dir
@@ -60,7 +60,7 @@ struct BuildRequest(Copyable, Movable):
     Layout: owned values only. No pointer field."""
 
     var step_name: String
-    var declarations_file: String
+    var artifacts_file: String
     var work_dir: String
     var release_dir: String
     var log_dir: String
@@ -72,7 +72,7 @@ struct BuildRequest(Copyable, Movable):
 
     def __init__(out self, var run: RunIdentity):
         self.step_name = String("")
-        self.declarations_file = String("")
+        self.artifacts_file = String("")
         self.work_dir = String("")
         self.release_dir = String("")
         self.log_dir = String("")
@@ -84,7 +84,7 @@ struct BuildRequest(Copyable, Movable):
 
     def platform_dir(self) raises -> String:
         """`<release_dir>/<platform>`: the directory this step builds into,
-        and what `{release_dir}` stands for in the declarations."""
+        and what `{release_dir}` stands for in the artifacts."""
         return release_platform_dir(self.release_dir, self.platform)
 
 

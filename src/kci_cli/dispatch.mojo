@@ -346,7 +346,7 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
     var req = BuildRequest(cmd.run_identity())
     req.step_name = step.name.copy()
     req.plan = cmd.plan
-    req.declarations_file = step.declarations.copy()
+    req.artifacts_file = step.artifacts.copy()
     req.work_dir = cmd.work_dir.copy()
     req.release_dir = cmd.release_dir.copy()
     req.log_dir = cmd.log_dir.copy()
@@ -360,7 +360,7 @@ def _build_request(cmd: KciCommand, step: StageStep) raises -> BuildRequest:
 def _publish_request(cmd: KciCommand, stage: Stage, step: StageStep) raises -> PublishRequest:
     var req = PublishRequest(cmd.run_identity())
     req.step_name = step.name.copy()
-    req.declarations_file = step.declarations.copy()
+    req.artifacts_file = step.artifacts.copy()
     req.release_dir = cmd.release_dir.copy()
     req.platform = step.platform.copy()
     req.revision_id = cmd.revision_id.copy()

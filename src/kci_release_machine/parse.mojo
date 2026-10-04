@@ -11,7 +11,7 @@
 #       name: "build"
 #       kind: BUILD
 #       platform: "linux-x86_64"
-#       declarations: "release/artifacts.textproto"
+#       artifacts: "release/artifacts.textproto"
 #     }
 #   }
 #   stage {
@@ -21,7 +21,7 @@
 #       name: "publish"
 #       kind: PUBLISH
 #       platform: "linux-x86_64"
-#       declarations: "release/artifacts.textproto"
+#       artifacts: "release/artifacts.textproto"
 #       channels: "release/channels.textproto"
 #       channel: "gamma"
 #       validation {
@@ -53,7 +53,7 @@
 # welded golden test). Top level: `schema_version`, `stage`. A stage: `name`,
 # `after`, `environment` (default: the stage's name), `farm_connected`
 # (`true` or `false`, default false), each at most once, and `step`
-# (repeated). A step: `name`, `kind`, `platform`, `declarations`, `channels`,
+# (repeated). A step: `name`, `kind`, `platform`, `artifacts`, `channels`,
 # `channel`, each at most once, and `validation` (a block, repeated). A
 # validation: `name`, `kind`, `image`, `compiler_channel`, `program`,
 # `wait_for_index_seconds` (an integer), each at most once, and `install` and
@@ -81,7 +81,7 @@ from komira_textproto import (
 
 from kci_api import FORMAT_MACHINE, authored_schema_version, skip_schema_version
 
-from .graph import ReleaseMachine, Stage, StageStep, StageValidation, validate_release_machine
+from .graph import Stage, ReleaseMachine, StageStep, StageValidation, validate_release_machine
 
 
 def machine_field_names() -> List[String]:
@@ -99,7 +99,7 @@ def machine_field_names() -> List[String]:
     out.append(String("step.name"))
     out.append(String("step.kind"))
     out.append(String("step.platform"))
-    out.append(String("step.declarations"))
+    out.append(String("step.artifacts"))
     out.append(String("step.channels"))
     out.append(String("step.channel"))
     out.append(String("step.validation"))
@@ -226,8 +226,8 @@ def _parse_step(mut c: TokenCursor, source: String, stage_name: String, open_lin
             s.kind = _scalar(c, f.text, source)
         elif f.text == "platform":
             s.platform = _scalar(c, f.text, source)
-        elif f.text == "declarations":
-            s.declarations = _scalar(c, f.text, source)
+        elif f.text == "artifacts":
+            s.artifacts = _scalar(c, f.text, source)
         elif f.text == "channels":
             s.channels = _scalar(c, f.text, source)
         elif f.text == "channel":
@@ -241,7 +241,7 @@ def _parse_step(mut c: TokenCursor, source: String, stage_name: String, open_lin
         else:
             raise Error(
                 _at(source, f.line) + String("unknown field '") + f.text + String("' in ") + where
-                + String(" (expected name, kind, platform, declarations, channels, channel, validation)")
+                + String(" (expected name, kind, platform, artifacts, channels, channel, validation)")
             )
         seen.append(f.text.copy())
     return s^

@@ -1,10 +1,10 @@
 # =============================================================================
-# src/kci_artifact_declaration/tests/test_declaration_render.mojo
+# src/kci_artifact/tests/test_artifact_render.mojo
 #   The argv kci runs for one artifact: the six placeholders substituted in
 #   one pass, `{out_dir}` derived as `<release_dir>/<artifact>`, the stamp's
-#   own refusals, the example declarations file (two libraries' build system
+#   own refusals, the example artifacts file (two libraries' build system
 #   plus the metapackage last), and the two refusals over what a build left
-#   (exactly one `manifest.json`; its `name` the declaration's, exactly).
+#   (exactly one `manifest.json`; its `name` the artifact's, exactly).
 # =============================================================================
 #
 # `render_build_argv` is pure: these cases compare argv lists exactly and
@@ -14,12 +14,12 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_artifact_declaration_proto.artifact_declaration import (
-    ArtifactDeclaration,
-    ArtifactDeclarations,
+from kci_artifact_proto.artifact import (
+    Artifact,
+    Artifacts,
     BuildSystem,
 )
-from kci_artifact_declaration import (
+from kci_artifact import (
     BUILD_NUMBER_PLACEHOLDER,
     KCI_MANIFEST_NAME,
     OUT_DIR_PLACEHOLDER,
@@ -30,9 +30,9 @@ from kci_artifact_declaration import (
     TIMESTAMP_MS_PLACEHOLDER,
     ReleaseStamp,
     known_placeholders,
-    parse_artifact_declarations,
+    parse_artifacts,
     placeholders_in,
-    read_artifact_declarations,
+    read_artifacts,
     render_build_argv,
     require_full_commit_id,
     require_manifest_name,
@@ -43,10 +43,10 @@ comptime _REV = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 comptime _SRC = "f0e1d2c3b4a5968778695a4b3c2d1e0f12345678"
 
 
-def _parse(text: String) raises -> ArtifactDeclarations:
-    """`parse_artifact_declarations` over `text` with `schema_version: 1`
+def _parse(text: String) raises -> Artifacts:
+    """`parse_artifacts` over `text` with `schema_version: 1`
     prepended on its FIRST line, so no line number a refusal names moves."""
-    return parse_artifact_declarations(String("schema_version: 1 ") + text, String("decl.textproto"))
+    return parse_artifacts(String("schema_version: 1 ") + text, String("artifacts.textproto"))
 
 
 def _stamp() raises -> ReleaseStamp:
@@ -66,15 +66,15 @@ def _expect_argv(got: List[String], want: List[String]) raises:
         assert_equal(got[i], want[i])
 
 
-def _refusal(decls: ArtifactDeclarations, artifact: String, release_dir: String) raises -> String:
+def _refusal(arts: Artifacts, artifact: String, release_dir: String) raises -> String:
     try:
-        _ = render_build_argv(decls, artifact, release_dir, String("linux-x86_64"), _stamp())
+        _ = render_build_argv(arts, artifact, release_dir, String("linux-x86_64"), _stamp())
     except e:
         return String(e)
     return String("<rendered>")
 
 
-def test_contract_words() raises:
+def test_placeholder_words() raises:
     assert_equal(String(OUT_DIR_PLACEHOLDER), String("{out_dir}"))
     assert_equal(String(RELEASE_DIR_PLACEHOLDER), String("{release_dir}"))
     assert_equal(String(PLATFORM_PLACEHOLDER), String("{platform}"))
@@ -93,7 +93,7 @@ def test_contract_words() raises:
 
 
 def test_example_file_renders_the_stamped_library_then_the_metapackage() raises:
-    var d = read_artifact_declarations(String("src/kci_artifact_declaration/example.textproto"))
+    var d = read_artifacts(String("src/kci_artifact/example.textproto"))
     # File order is build order: the library, then the metapackage last.
     assert_equal(len(d.artifacts), 2)
     assert_equal(d.artifacts[0].name, String("komira_encoding"))
@@ -222,9 +222,9 @@ def test_render_refusals() raises:
     assert_true(refused.find(String("never a release's")) >= 0, refused)
     # A value that never went through the validator.
     var systems = List[BuildSystem]()
-    var artifacts = List[ArtifactDeclaration]()
-    artifacts.append(ArtifactDeclaration(String("a"), String("zz"), _argv("{out_dir}")))
-    var raw = ArtifactDeclarations(systems^, artifacts^, Int32(1))
+    var artifacts = List[Artifact]()
+    artifacts.append(Artifact(String("a"), String("zz"), _argv("{out_dir}")))
+    var raw = Artifacts(systems^, artifacts^, Int32(1))
     assert_equal(
         _refusal(raw, String("a"), String("/o")),
         String("artifact 'a': build_system 'zz' is not declared"),
@@ -233,9 +233,9 @@ def test_render_refusals() raises:
     # validator is refused, not passed through.
     var systems2 = List[BuildSystem]()
     systems2.append(BuildSystem(String("t"), String("t"), List[String]()))
-    var artifacts2 = List[ArtifactDeclaration]()
-    artifacts2.append(ArtifactDeclaration(String("a"), String("t"), _argv("{out_dir}", "{nope}")))
-    var raw2 = ArtifactDeclarations(systems2^, artifacts2^, Int32(1))
+    var artifacts2 = List[Artifact]()
+    artifacts2.append(Artifact(String("a"), String("t"), _argv("{out_dir}", "{nope}")))
+    var raw2 = Artifacts(systems2^, artifacts2^, Int32(1))
     assert_equal(_refusal(raw2, String("a"), String("/o")), String("unknown placeholder '{nope}'"))
 
 
@@ -295,17 +295,17 @@ def test_placeholders_in() raises:
     _expect_argv(placeholders_in(String("{{out_dir}}")), _argv("{out_dir}"))
 
 
-def _one_manifest_refusal(declaration: String, top_level: List[String]) -> String:
+def _one_manifest_refusal(artifact: String, top_level: List[String]) -> String:
     try:
-        require_one_manifest(declaration, top_level)
+        require_one_manifest(artifact, top_level)
     except e:
         return String(e)
     return String("<accepted>")
 
 
-def _name_refusal(declaration: String, manifest_name: String) -> String:
+def _name_refusal(artifact: String, manifest_name: String) -> String:
     try:
-        require_manifest_name(declaration, manifest_name)
+        require_manifest_name(artifact, manifest_name)
     except e:
         return String(e)
     return String("<accepted>")
@@ -338,12 +338,12 @@ def test_exactly_one_manifest_at_the_top() raises:
         _one_manifest_refusal(String("a"), _argv("manifest.json", "x", "manifest.json")),
         String(
             "artifact 'a': the output directory lists manifest.json 2 times;"
-            " one artifact per declaration means exactly one"
+            " one artifact per entry means exactly one"
         ),
     )
 
 
-def test_manifest_name_is_the_declaration_name_exactly() raises:
+def test_manifest_name_is_the_artifact_name_exactly() raises:
     assert_equal(_name_refusal(String("komira_encoding"), String("komira_encoding")), String("<accepted>"))
     var wrong = List[String]()
     wrong.append(String("komira_json"))
@@ -359,7 +359,7 @@ def test_manifest_name_is_the_declaration_name_exactly() raises:
             _name_refusal(String("komira_encoding"), wrong[i]),
             String("artifact 'komira_encoding': the built manifest's name '")
             + wrong[i]
-            + String("' is not the declaration's name (compared exactly)"),
+            + String("' is not the artifact's name (compared exactly)"),
         )
 
 

@@ -53,7 +53,7 @@ stage {
     name: "build"
     kind: BUILD
     platform: "linux-x86_64"
-    declarations: "release/artifacts.textproto"
+    artifacts: "release/artifacts.textproto"
   }
 }
 
@@ -65,7 +65,7 @@ stage {
     name: "publish"
     kind: PUBLISH
     platform: "linux-x86_64"
-    declarations: "release/artifacts.textproto"
+    artifacts: "release/artifacts.textproto"
     channels: "release/channels.textproto"
     channel: "gamma"
     validation {
@@ -96,7 +96,7 @@ stage {
     name: "publish"
     kind: PUBLISH
     platform: "linux-x86_64"
-    declarations: "release/artifacts.textproto"
+    artifacts: "release/artifacts.textproto"
     channels: "release/channels.textproto"
     channel: "prod"
   }

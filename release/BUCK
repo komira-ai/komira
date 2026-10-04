@@ -6,7 +6,7 @@
 # `./buck2 build //...`:
 #   machine.textproto    src/kci_ci_check (test_repo_kci_yml: the machine file,
 #                        and kci.yml held to it)
-#   artifacts.textproto  src/kci_artifact_declaration (test_release_artifacts_file)
+#   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
 #   channels.textproto   src/kci_release_channel (test_release_channels_file),
 #                        src/kci_ci_check (test_repo_kci_yml)
 # The programs the machine file's validations run are in release/smoke, each a
@@ -14,7 +14,7 @@
 # Changes need the release approver's review (.github/CODEOWNERS).
 export_file(
     name = "artifacts.textproto",
-    visibility = ["//src/kci_artifact_declaration:"],
+    visibility = ["//src/kci_artifact:"],
 )
 
 export_file(

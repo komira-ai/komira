@@ -99,7 +99,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  # The release machine: its stages, and through them the declarations, the
+  # The release machine: its stages, and through them the artifacts, the
   # channels file and the channels. kci reads it by convention (kci_api's
   # DEFAULT_MACHINE_FILE), so no `kci` line passes --machine; this name is used
   # only by the step that skips a revision without one. The welded test
@@ -171,7 +171,7 @@ jobs:
       - name: build kci
         if: steps.machine.outputs.release == 'true'
         run: ./buck2 build '//bin/kci:kci[runnable]' --out "$RUNNER_TEMP/kci"
-      # The declarations name the program `buck2`; the repository's is the
+      # The artifacts name the program `buck2`; the repository's is the
       # ./buck2 wrapper of this checkout.
       - name: buck2 on PATH
         if: steps.machine.outputs.release == 'true'
@@ -238,7 +238,7 @@ jobs:
       # ⛔ A push is ALWAYS a dry run: only a manual run can turn it off.
       DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
     steps:
-      # The machine file, the declarations, the channels file and
+      # The machine file, the artifacts, the channels file and
       # release_version.sh at the release revision, with the full history the
       # version (and the "on main" check, and kci's read of this workflow at
       # its commit) needs.

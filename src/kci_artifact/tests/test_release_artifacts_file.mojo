@@ -1,6 +1,6 @@
 # =============================================================================
-# src/kci_artifact_declaration/tests/test_release_artifacts_file.mojo
-#   The repository's own release declarations, release/artifacts.textproto,
+# src/kci_artifact/tests/test_release_artifacts_file.mojo
+#   The repository's own release artifacts, release/artifacts.textproto,
 #   read through the real reader: it parses and validates, the libraries
 #   build stamped, and the metapackage is last with every library a member.
 # =============================================================================
@@ -13,9 +13,9 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_artifact_declaration import (
+from kci_artifact import (
     ReleaseStamp,
-    read_artifact_declarations,
+    read_artifacts,
     render_build_argv,
 )
 
@@ -46,15 +46,15 @@ def _flag_values(argv: List[String], flag: String) -> List[String]:
 
 
 def test_the_first_release_is_komira_encoding_then_komira_all() raises:
-    assert_equal(read_artifact_declarations(String(_FILE)).schema_version, Int32(1))
-    var d = read_artifact_declarations(String(_FILE))
+    assert_equal(read_artifacts(String(_FILE)).schema_version, Int32(1))
+    var d = read_artifacts(String(_FILE))
     assert_equal(len(d.artifacts), 2)
     assert_equal(d.artifacts[0].name, String("komira_encoding"))
     assert_equal(d.artifacts[1].name, String("komira_all"))
 
 
 def test_every_library_builds_stamped_into_its_own_directory() raises:
-    var d = read_artifact_declarations(String(_FILE))
+    var d = read_artifacts(String(_FILE))
     for i in range(len(d.artifacts) - 1):
         var name = d.artifacts[i].name.copy()
         var argv = render_build_argv(d, name, String(_REL), String("linux-x86_64"), _stamp())
@@ -73,7 +73,7 @@ def test_every_library_builds_stamped_into_its_own_directory() raises:
 
 
 def test_the_metapackage_is_last_and_holds_every_library() raises:
-    var d = read_artifact_declarations(String(_FILE))
+    var d = read_artifacts(String(_FILE))
     var last = len(d.artifacts) - 1
     var meta = d.artifacts[last].name.copy()
     var argv = render_build_argv(d, meta, String(_REL), String("linux-x86_64"), _stamp())

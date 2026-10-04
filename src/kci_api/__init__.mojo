@@ -31,7 +31,7 @@ from kci_api.errors import (
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
     ERROR_CREDENTIAL,
-    ERROR_DECLARATION,
+    ERROR_ARTIFACT,
     ERROR_FORMAT,
     ERROR_FORMAT_VERSION,
     ERROR_IMAGE_PLATFORM,
@@ -77,7 +77,7 @@ from kci_api.exit_codes import (
     require_retry_for,
 )
 from kci_api.formats import (
-    FORMAT_ARTIFACT_DECLARATIONS,
+    FORMAT_ARTIFACTS,
     FORMAT_ARTIFACT_MANIFEST,
     FORMAT_CHANNELS,
     FORMAT_CONDA_METADATA,
