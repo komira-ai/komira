@@ -7,7 +7,9 @@
 #   workflow_reader.mojo  `read_workflow`: a RESTRICTED reader of the YAML
 #                         subset a workflow uses; anything else is "cannot
 #                         tell", never a pass
-#   rules.mojo            `check_workflow`: every disagreement (R1 to R12);
+#   rules.mojo            `check_workflow`: every disagreement (R1 to R12;
+#                         R6 holds a pull request workflow to the
+#                         PULL_REQUEST stages);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`
@@ -28,7 +30,10 @@ from kci_ci_check.workflow_reader import (
     read_workflow,
 )
 from kci_ci_check.rules import (
+    CHECKOUT_ACTION,
     FARM_CONNECT_ACTION,
+    PULL_REQUEST_BASE_EXPRESSION,
+    SAME_REPOSITORY_CONDITION,
     ChannelsFile,
     KciRunCall,
     channels_paths,
