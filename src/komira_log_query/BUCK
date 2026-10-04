@@ -1,10 +1,10 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The read side of a service's own operational log: format-neutral hit and
-# page values, the `ServiceLogSearch` trait with a type-erased facade a
-# dispatcher holds as one field, and the operator-only `GET /internal/logs`
-# route. A leaf on `komira_http_core` alone. The welded test drives the route
-# over a fake `ServiceLogSearch`.
+# Query a log a service writes to an object store: format-neutral hit and
+# page values, the `ServiceLogSearch` trait with a type-erased facade a service
+# holds as one field, the `LogReadAccess` hook the service supplies, and the
+# `GET <path>` route. A leaf on `komira_http_core` alone. The welded test drives
+# the route over a fake `ServiceLogSearch` and fake access hooks.
 mojo_library(
     name = "komira_log_query",
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
