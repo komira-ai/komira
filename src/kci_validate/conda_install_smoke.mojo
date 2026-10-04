@@ -110,11 +110,14 @@ def smoke_stem(program: String) -> String:
     `smoke_`."""
     var slash = program.rfind(String("/"))
     var base = String(program[byte = slash + 1 :]) if slash >= 0 else program.copy()
+    var n = base.byte_length()
+    var start = 0
+    var end = n
     if base.endswith(String(".mojo")):
-        base = String(base[byte = : base.byte_length() - 5])
-    if base.startswith(String("smoke_")) and base.byte_length() > 6:
-        base = String(base[byte=6:])
-    return base^
+        end = n - 5
+    if base.startswith(String("smoke_")) and end > 6:
+        start = 6
+    return String(base[byte=start:end])
 
 
 def smoke_ok_line(program: String) -> String:
@@ -295,9 +298,10 @@ def _has_line(text: String, line: String) -> Bool:
     var lines = text.split(String("\n"))
     for i in range(len(lines)):
         var l = String(lines[i])
+        var n = l.byte_length()
         if l.endswith(String("\r")):
-            l = String(l[byte = : l.byte_length() - 1])
-        if l == line:
+            n -= 1
+        if String(l[byte=0:n]) == line:
             return True
     return False
 
