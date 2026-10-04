@@ -59,9 +59,10 @@
 # infallible, so the store is built lazily, behind an
 # `ArcPointer[Optional[S3Store]]` reached mutably through the Arc, and a clone
 # gets a NEW empty Arc: two file systems never share a store (its connection
-# and HTTP client are not shared between threads). A clone copies the
-# configuration, the options, the credential source and the clock; the
-# connector factory is a thin function pointer (a code address, no heap).
+# and HTTP client are not shared between threads), and none shares a retry
+# quota. A clone copies the configuration, the caller's `HttpClientConfig`,
+# the options, the credential source and the clock; the connector factory is
+# a thin function pointer (a code address, no heap).
 #
 # No UnsafePointer in any public signature, no wildcard-origin field.
 # =============================================================================
@@ -80,6 +81,7 @@ from komira_fs.footer_region import FooterRegion, speculative_tail_start
 # `_shallow_basename` is komira_fs's one definition of a listing key's final
 # component, shared by every object-store FileSystem; a copy here could drift.
 from komira_fs.shallow_dir_entry import ShallowDirEntry, _shallow_basename
+from komira_http_client.client import HttpClientConfig
 from komira_http_core.transport.io_stream import Connector
 from komira_objectstore.store import PREFETCH_DEPTH_S3_STANDARD
 from komira_objectstore.types import GetRange, RangeSet, WritePrecondition
@@ -294,7 +296,8 @@ struct S3Fs[
         def mk() raises -> MyConnector: ...
 
         var fs = S3Fs[MyConnector, MyCreds, MyClock](
-            "lake", S3Config.aws("us-east-1"), mk, my_creds, my_clock,
+            "lake", S3Config.aws("us-east-1"), mk, HttpClientConfig.defaults(),
+            my_creds, my_clock,
         )
         var footer = fs.read_footer("events/part-0.parquet", 64 * 1024)
 
@@ -317,6 +320,7 @@ struct S3Fs[
     var _config: S3Config
     var _options: S3FsOptions
     var _mk_connector: def () raises thin -> Self.C
+    var _http_config: HttpClientConfig
     var _creds: Self.T
     var _clock: Self.K
     var _store: ArcPointer[Optional[S3Store[Self.C, Self.T, Self.K]]]
@@ -326,6 +330,7 @@ struct S3Fs[
         var bucket: String,
         var config: S3Config,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds: Self.T,
         var clock: Self.K,
         options: S3FsOptions = S3FsOptions.standard(),
@@ -338,6 +343,8 @@ struct S3Fs[
             config: The store's configuration (region, endpoint, retry, the
                 store's own in-flight bound, listing pages).
             mk_connector: Makes the connector each store dials through.
+            http_config: The caller's HTTP client configuration, which each
+                store's client is built from (it has no default).
             creds: The credential source requests are signed with.
             clock: The signing clock.
             options: The file system's settings (`S3FsOptions`).
@@ -346,6 +353,7 @@ struct S3Fs[
         self._config = config^
         self._options = options
         self._mk_connector = mk_connector
+        self._http_config = http_config.copy()
         self._creds = creds^
         self._clock = clock^
         self._store = ArcPointer[Optional[S3Store[Self.C, Self.T, Self.K]]](
@@ -357,6 +365,7 @@ struct S3Fs[
         var bucket: String,
         var config: S3Config,
         mk_connector: def () raises thin -> Self.C,
+        http_config: HttpClientConfig,
         var creds: Self.T,
         var clock: Self.K,
         options: S3FsOptions = S3FsOptions.standard(),
@@ -364,7 +373,9 @@ struct S3Fs[
         """A file system whose store is built now, so a failure to build it
         (a bad endpoint, a connector that cannot be made) raises here rather
         than on the first verb."""
-        var fs = Self(bucket^, config^, mk_connector, creds^, clock^, options)
+        var fs = Self(
+            bucket^, config^, mk_connector, http_config, creds^, clock^, options
+        )
         fs._build_if_absent()
         return fs^
 
@@ -377,6 +388,7 @@ struct S3Fs[
             self._bucket.copy(),
             self._config.copy(),
             self._mk_connector,
+            self._http_config,
             self._creds.copy(),
             self._clock.copy(),
             self._options,
@@ -389,6 +401,7 @@ struct S3Fs[
                 S3Store[Self.C, Self.T, Self.K](
                     self._config.copy(),
                     self._mk_connector,
+                    self._http_config,
                     self._creds.copy(),
                     self._clock.copy(),
                 )
