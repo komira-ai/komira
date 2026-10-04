@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/tests/test_verbs.mojo
+# src/kci_api/tests/test_verbs.mojo
 #   The verb table is exactly {run}: kci has one command, no alias, and no
 #   `ci check` (the workflow check is library code `kci run` runs at
 #   start-up). The step kinds are BUILD, PUBLISH and the reserved DEPLOY; the
@@ -8,7 +8,7 @@
 
 from std.testing import TestSuite, assert_equal, assert_true
 
-from kci_contract import (
+from kci_api import (
     STEP_KIND_BUILD,
     STEP_KIND_DEPLOY,
     STEP_KIND_PUBLISH,

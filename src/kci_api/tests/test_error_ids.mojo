@@ -1,11 +1,11 @@
 # =============================================================================
-# src/kci_contract/tests/test_error_ids.mojo
+# src/kci_api/tests/test_error_ids.mojo
 #   Error ids: unique, well-formed, each with a meaning.
 # =============================================================================
 
 from std.testing import TestSuite, assert_false, assert_true
 
-from kci_contract import (
+from kci_api import (
     OUTCOME_REFUSED,
     OUTCOME_VALIDATION_FAILED,
     error_table,

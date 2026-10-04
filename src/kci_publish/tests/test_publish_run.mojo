@@ -43,7 +43,7 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_false, assert_true
 
-from kci_contract import EXIT_OK, EXIT_PARTIAL, RETRY_NEEDS_HUMAN
+from kci_api import EXIT_OK, EXIT_PARTIAL, RETRY_NEEDS_HUMAN
 from kci_pkg_upload import SUBSTRATE_PREFIX_DEV_CONDA, SURFACE_PREFIX_DEV, RegistrySet, ScriptedCredential
 from kci_publish import (
     NoWaitSleeper,
@@ -72,7 +72,7 @@ from kci_publish.scripted_channel import (
 from kci_publish.upload import package_file_of
 
 def _ends(rep: PublishReport, reason: String, exit_code: Int, msg: String = String("")) raises:
-    """`rep` stopped for `reason`, and its exit number (kci_contract's) is
+    """`rep` stopped for `reason`, and its exit number (kci_api's) is
     `exit_code`."""
     assert_equal(rep.reason, reason, msg)
     assert_equal(rep.exit_code(), exit_code, msg)

@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/formats.mojo -- the FORMAT TABLE: every document kci reads
+# src/kci_api/formats.mojo -- the FORMAT TABLE: every document kci reads
 #   or writes, its name, and the schema majors this kci reads.
 # =============================================================================
 #

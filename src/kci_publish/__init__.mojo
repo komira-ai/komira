@@ -14,8 +14,8 @@ claim. Steps 2 to 4 upload the
 members still missing, read every member back, and only then publish the
 metapackage; the missing members upload on up to `--concurrency` worker
 threads. Step 6 is the step's part of the run's result document
-(kci_contract's `kci.result`): an outcome word, an error id, one artifact
-row per file. The exit number is kci_contract's: a release whose every file
+(kci_api's `kci.result`): an outcome word, an error id, one artifact
+row per file. The exit number is kci_api's: a release whose every file
 is already in the channel with the same bytes is NOOP, exit 0.
 
 The release is the one `--revision-id` names, built for the step's
