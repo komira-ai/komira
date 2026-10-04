@@ -1,5 +1,8 @@
 # actionlint configuration (read by //:workflow_lint).
+#
+# No workflow runs on a self-hosted runner: CI and kci.yml's build job use
+# GitHub-hosted runners joined to the farm's tailnet (docs/ci.md, "The
+# runner"), so no self-hosted runner label is declared. A workflow that names
+# one is then an actionlint finding.
 self-hosted-runner:
-  # The CI runner that lives on the build farm (docs/ci.md).
-  labels:
-    - komira-farm
+  labels: []
