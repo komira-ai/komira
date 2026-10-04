@@ -17,7 +17,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # - test_values_match_parquet_thrift: every enum value and ConvertedType
 #   constant against parquet.thrift, read from the parquet-format archive
 #   //third_party/parquet-format pins by sha256 and staged at format/; no
-#   expected value is written by hand.
+#   expected value is written by hand. It also holds the PageHeader.crc and
+#   Statistics.hll_registers docs to the spec's fields 4 and 9.
 # - test_no_env_reads: the package's sources read no environment, import no
 #   first-party package and hold no raw pointer. It is staged every source
 #   `srcs` compiles, subdirectories included, so a module the scan does not

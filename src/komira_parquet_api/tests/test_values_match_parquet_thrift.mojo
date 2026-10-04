@@ -236,5 +236,31 @@ def test_converted_type() raises:
     )
 
 
+def _struct_block(text: String, name: String) raises -> String:
+    var open_at = text.find(String("\nstruct ") + name + " {")
+    if open_at < 0:
+        raise Error("parquet.thrift has no struct " + name)
+    var close_at = text.find("\n}", open_at)
+    if close_at < 0:
+        raise Error("parquet.thrift struct " + name + " is not closed")
+    return String(text[byte=open_at:close_at])
+
+
+def test_statistics_field_9_is_the_spec_nan_count() raises:
+    # metadata.mojo's Statistics.hll_registers doc says field 9 is the spec's
+    # nan_count, so registers must not be written to or read from it. This
+    # keeps that doc true for the pinned spec.
+    var block = _struct_block(_read(_THRIFT), "Statistics")
+    assert_true(block.find("\n   9: optional i64 nan_count;") >= 0)
+
+
+def test_page_header_crc_is_optional_standard_crc32() raises:
+    # metadata.mojo's PageHeader.crc doc: field 4, optional i32, the standard
+    # CRC-32 (gzip's polynomial), not CRC-32C.
+    var block = _struct_block(_read(_THRIFT), "PageHeader")
+    assert_true(block.find("\n  4: optional i32 crc") >= 0)
+    assert_true(block.find("The standard CRC32 algorithm is used (with polynomial 0x04C11DB7") >= 0)
+
+
 def main() raises:
     TestSuite.discover_tests[__functions_in_module()]().run()

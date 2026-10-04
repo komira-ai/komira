@@ -329,6 +329,38 @@ def test_page_header_dictionary_page() raises:
     assert_equal(hdr.num_values, 256)
 
 
+def test_page_header_crc_absent_is_not_a_value() raises:
+    """A header with no `crc` has None; every 32-bit CRC, 0xFFFFFFFF too, is
+    a value distinct from absent."""
+    var none = PageHeader(
+        type=PageType.DATA_PAGE,
+        uncompressed_page_size=8,
+        compressed_page_size=8,
+        num_values=1,
+        encoding=Encoding.PLAIN,
+    )
+    assert_false(Bool(none.crc))
+    var all_ones = PageHeader(
+        type=PageType.DATA_PAGE,
+        uncompressed_page_size=8,
+        compressed_page_size=8,
+        num_values=1,
+        encoding=Encoding.PLAIN,
+        crc=UInt32(0xFFFFFFFF),
+    )
+    assert_true(Bool(all_ones.crc))
+    assert_equal(all_ones.crc.value(), UInt32(0xFFFFFFFF))
+    var zero = PageHeader(
+        type=PageType.DATA_PAGE,
+        uncompressed_page_size=8,
+        compressed_page_size=8,
+        num_values=1,
+        encoding=Encoding.PLAIN,
+        crc=UInt32(0),
+    )
+    assert_equal(zero.crc.value(), UInt32(0))
+
+
 # =============================================================================
 # ColumnMetaData tests
 # =============================================================================

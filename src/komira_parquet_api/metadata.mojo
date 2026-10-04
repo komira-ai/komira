@@ -74,12 +74,19 @@ struct Statistics(Movable, Copyable):
         is_max_value_exact: Whether max_value is exact (not truncated).
         min: Legacy minimum value (may have wrong sort order for signed ints).
         max: Legacy maximum value (may have wrong sort order for signed ints).
-        hll_registers: A non-standard Statistics field 9: a precision-12
-            HyperLogLog register array (4096 bytes, register-wise
-            max-mergeable). A reader can merge these across row groups
-            instead of summing `distinct_count`, which over-counts a key
-            that appears in several row groups. Absent in files from other
-            writers; a reader then falls back to summing `distinct_count`.
+        hll_registers: A precision-12 HyperLogLog register array (4096
+            bytes, register-wise max-mergeable), which a reader can merge
+            across row groups instead of summing `distinct_count` (which
+            over-counts a key that appears in several row groups). Absent
+            in files from other writers; a reader then falls back to
+            summing `distinct_count`. Not part of the Parquet format, and
+            its old placement as Statistics field 9 now collides with it:
+            parquet.thrift defines field 9 as `optional i64 nan_count`. A
+            spec-current reader meets a binary where it expects an i64, and
+            a reader that takes field 9 as registers would take another
+            writer's `nan_count` for them. Nothing here encodes or decodes
+            it; a writer must not put it in field 9, and a reader must not
+            accept field 9 as registers.
     """
 
     var null_count: Optional[Int]
@@ -202,8 +209,11 @@ struct PageHeader(Movable, Copyable):
         encoding: Encoding used for values.
         definition_level_encoding: Encoding for definition levels.
         repetition_level_encoding: Encoding for repetition levels.
-        crc: Optional CRC32C checksum of the compressed page body. -1
-            when the page header has no `crc` field (Thrift field 4).
+        crc: The page's CRC (Thrift field 4, `optional i32`), as its
+            unsigned 32-bit value, or None when the header has none. It is
+            the standard CRC-32 (polynomial 0x04C11DB7, as in gzip and
+            zlib), not CRC-32C, over the page as written after the header
+            (after compression and encryption).
     """
 
     var type: PageType
@@ -219,9 +229,10 @@ struct PageHeader(Movable, Copyable):
     var def_levels_byte_length: Int
     var rep_levels_byte_length: Int
     var is_compressed: Bool
-    # CRC32C of the compressed page body (Thrift field 4 on PageHeader).
-    # -1 means the page header did not include a `crc` field.
-    var crc: Int
+    # Standard CRC-32 of the page bytes after the header (Thrift field 4).
+    # Optional because the field is: every 32-bit value is a valid CRC, so no
+    # value can mean "absent".
+    var crc: Optional[UInt32]
 
     def __init__(
         out self,
@@ -237,7 +248,7 @@ struct PageHeader(Movable, Copyable):
         def_levels_byte_length: Int = 0,
         rep_levels_byte_length: Int = 0,
         is_compressed: Bool = True,
-        crc: Int = -1,
+        crc: Optional[UInt32] = None,
     ):
         self.type = type
         self.uncompressed_page_size = uncompressed_page_size
