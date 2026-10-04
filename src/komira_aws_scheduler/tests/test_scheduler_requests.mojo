@@ -155,12 +155,12 @@ def test_delete_schedule() raises:
     assert_equal(len(req.body), 0)
 
 
-def test_an_unset_client_token_is_omitted() raises:
-    # The model marks `ClientToken` an idempotency token, which botocore
-    # fills with a UUID when it is unset. The builder does not: an unset
-    # token is absent from the body (CreateSchedule, UpdateSchedule) and the
-    # query (DeleteSchedule), and a caller that needs a resent call to be
-    # idempotent sets it.
+def test_the_builder_omits_an_unset_client_token() raises:
+    # The model marks `ClientToken` an idempotency token. The client's verbs
+    # fill an unset one before they build the request (test_scheduler_client
+    # pins that on the wire); the builder serialises the input it is given,
+    # so an unset token is absent from the body (CreateSchedule,
+    # UpdateSchedule) and the query (DeleteSchedule).
     var create = SchedulerCreateScheduleInput(
         _off(), String("nightly-reap"), String("cron(0 3 * * ? *)"), _target()
     )
@@ -203,7 +203,7 @@ def main() raises:
     test_get_schedule_in_a_group()
     test_update_schedule_is_the_whole_schedule()
     test_delete_schedule()
-    test_an_unset_client_token_is_omitted()
+    test_the_builder_omits_an_unset_client_token()
     test_a_label_is_percent_encoded()
     test_refusals_before_the_wire()
     print("OK")

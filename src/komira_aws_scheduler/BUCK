@@ -23,16 +23,14 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # rows in the tests below.
 #
 # The model marks `ClientToken` on CreateSchedule, UpdateSchedule and
-# DeleteSchedule as an idempotency token, which botocore fills with one
-# fresh UUID per call when the caller leaves it unset. The generator does
-# not: an unset token is omitted. The client resends a 5xx whatever the
-# verb, as the standard retry mode does, so a CreateSchedule the service
-# applied before answering 500 is resent as a new create and answered
-# ConflictException. A caller must set `ClientToken` (one value per
-# logical call, reused on its retries) for a resent call to be idempotent.
-# test_scheduler_requests and test_scheduler_client pin both halves: an
-# unset token is absent on every attempt, and a set one rides unchanged on
-# the resend.
+# DeleteSchedule as an idempotency token (in the body on the first two, in
+# the `clientToken` query on DeleteSchedule). Each verb fills an unset one,
+# as botocore does, with one version 4 UUID per call (komira_aws_core's
+# aws_idempotency_token), before the request is built, so the client's
+# resend of a 5xx carries the same token and the service recognises it as
+# the same call rather than a second create. A token the caller set is
+# sent as given. test_scheduler_client pins both on the wire, across a 500
+# and its resend, for all three verbs.
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the EventBridge Scheduler API reference (no upstream test body is
@@ -44,9 +42,9 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # LocalStack endpoints, and two requests signed end to end against
 # independently computed signatures), test_scheduler_client (the generated
 # client over a scripted connector: two calls answered, one error per verb
-# raised under its code, and each verb's request as it reached the wire,
-# through komira_aws_core's AwsEchoConnector) and test_no_env_reads (the
-# generated module reads no environment).
+# raised under its code, each verb's request as it reached the wire,
+# through komira_aws_core's AwsEchoConnector, and the token rows above)
+# and test_no_env_reads (the generated module reads no environment).
 #
 # No test here talks to the service.
 

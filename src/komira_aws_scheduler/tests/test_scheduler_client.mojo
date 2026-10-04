@@ -15,12 +15,15 @@
 # query), the Host the endpoint ruleset resolved, the content type of a
 # request with a body, and the SigV4 scope (signing name `scheduler`).
 #
-# Last, a CreateSchedule that meets a 500 and is resent (the standard
-# retry mode resends a 500 whatever the verb), over `create_schedule_with`
-# and a transport that records each attempt: a `ClientToken` the caller set
-# rides on both attempts, unchanged, so the service can recognise the
-# resend as the same create; an unset one is not filled in, and both
-# attempts go without it.
+# Last, `ClientToken`, which the model marks an idempotency token on
+# CreateSchedule, UpdateSchedule and DeleteSchedule. Each verb meets a 500
+# and is resent (the standard retry mode resends a 500 whatever the verb),
+# over its `_with` form and a transport that records each attempt. An unset
+# token is filled, as botocore does, with one version 4 UUID per call: the
+# same token rides on both attempts, so the service can recognise the
+# resend as the same call, and the next call draws a new one. On
+# DeleteSchedule the token is bound to the query (`clientToken`), and is
+# filled there. A token the caller set rides on both attempts, unchanged.
 from komira_aws_scheduler.komira_aws_scheduler import (
     SchedulerCreateScheduleInput,
     SchedulerDeleteScheduleInput,
@@ -299,15 +302,22 @@ def test_update_schedule_on_the_wire() raises:
 
 
 def test_delete_schedule_on_the_wire() raises:
+    # The unset `ClientToken` is filled, and rides on the query ahead of
+    # `groupName`, as the builder adds them; its value is a fresh UUID.
     var client = _client(_mk_echo)
     try:
         _ = client.delete_schedule(_delete())
         raise Error("the echo answered nothing")
     except e:
-        _check(_wire_of(String(e), "DeleteSchedule"), "delete /schedules/nightly-reap?groupname=apps", False)
+        var wire = _wire_of(String(e), "DeleteSchedule")
+        var head = String("delete /schedules/nightly-reap?clienttoken=")
+        assert_true(wire.startswith(head), wire)
+        var token = String(wire[byte = head.byte_length() : head.byte_length() + 36])
+        _check_v4(token)
+        _check(wire, head + token + "&groupname=apps", False)
 
 
-# ---- a resent create ---------------------------------------------------------
+# ---- ClientToken on a resent call -------------------------------------------
 
 
 struct Recording[X: AwsHttpTransport](AwsHttpTransport, Movable, Deinitable):
@@ -327,9 +337,52 @@ def _never() raises -> ScriptedConnector:
     raise Error("a verb over injected seams dialed through the factory")
 
 
-def _resent_create(input: SchedulerCreateScheduleInput) raises -> List[String]:
-    """`input` sent over a connector that answers 500 then 200: each
-    attempt's body, as it reached the HTTP client."""
+comptime _CALLERS = "c0ffee00-0000-4000-8000-000000000001"
+
+
+def _check_v4(token: String) raises:
+    """`token` is a version 4 UUID in Python's `str(uuid.uuid4())` form:
+    36 bytes, lowercase hex in 8-4-4-4-12 groups, version nibble 4 and
+    variant 10xx."""
+    assert_equal(token.byte_length(), 36, msg=token)
+    var b = token.as_bytes()
+    for i in range(36):
+        var c = b[i]
+        if i == 8 or i == 13 or i == 18 or i == 23:
+            assert_equal(c, UInt8(ord("-")), msg=token)
+        else:
+            var hex = (c >= UInt8(ord("0")) and c <= UInt8(ord("9"))) or (
+                c >= UInt8(ord("a")) and c <= UInt8(ord("f"))
+            )
+            assert_true(hex, token)
+    assert_equal(b[14], UInt8(ord("4")), msg=token)
+    var v = b[19]
+    assert_true(
+        v == UInt8(ord("8")) or v == UInt8(ord("9")) or v == UInt8(ord("a")) or v == UInt8(ord("b")),
+        token,
+    )
+
+
+def _token_after(text: String, marker: String) raises -> String:
+    """The 36 bytes after `marker` in `text`, which must hold it once."""
+    var at = text.find(marker)
+    assert_true(at >= 0, marker + " is not in " + text)
+    assert_equal(text.find(marker, at + 1), -1, msg=text)
+    var start = at + marker.byte_length()
+    return String(text[byte = start : start + 36])
+
+
+def _body_token(req: CredentialHttpRequest) raises -> String:
+    return _token_after(req.body_text(), '"ClientToken":"')
+
+
+def _query_token(req: CredentialHttpRequest) raises -> String:
+    return _token_after(req.target, "clientToken=")
+
+
+def _resent(ok_body: String) raises -> Recording[AwsConnectorTransport[ScriptedConnector]]:
+    """A transport that answers 500 and then 200 with `ok_body`, and records
+    each attempt as it reached the HTTP client."""
     var script = ScriptedConnector.with_stream(
         _answer(
             500,
@@ -338,45 +391,118 @@ def _resent_create(input: SchedulerCreateScheduleInput) raises -> List[String]:
             "X-Amzn-Errortype: InternalServerException\r\n",
         )
     )
-    script.arm_next(_answer(200, "OK", String('{"ScheduleArn":"') + _ARN + '"}', ""))
-    var transport = Recording(
-        AwsConnectorTransport[ScriptedConnector](HttpClientConfig.defaults(), script^)
-    )
-    var clock = FixedClock(1790812800)
-    var loop = RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
+    script.arm_next(_answer(200, "OK", ok_body, ""))
+    return Recording(AwsConnectorTransport[ScriptedConnector](HttpClientConfig.defaults(), script^))
+
+
+def _loop() raises -> RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng]:
+    return RetryLoop[ManualClock, RecordingSleeper, SplitMix64Rng](
         aws_standard_retry_policy(), ManualClock(), RecordingSleeper(), SplitMix64Rng(7)
     )
+
+
+def _attempts(transport: Recording[AwsConnectorTransport[ScriptedConnector]]) raises -> List[CredentialHttpRequest]:
+    assert_equal(len(transport.sent), 2)
+    var out = List[CredentialHttpRequest]()
+    for i in range(len(transport.sent)):
+        out.append(transport.sent[i].copy())
+    return out^
+
+
+def _resent_create(input: SchedulerCreateScheduleInput) raises -> List[CredentialHttpRequest]:
+    var transport = _resent(String('{"ScheduleArn":"') + _ARN + '"}')
+    var clock = FixedClock(1790812800)
+    var loop = _loop()
     var budget = AwsRetryQuota()
     var client = _client(_never)
     var res = client.create_schedule_with(input, transport, clock, loop, budget)
     assert_equal(res.status, 200)
-    assert_equal(len(transport.sent), 2)
-    var out = List[String]()
-    for i in range(len(transport.sent)):
-        out.append(transport.sent[i].body_text())
-    return out^
+    return _attempts(transport)
+
+
+def _resent_update(input: SchedulerUpdateScheduleInput) raises -> List[CredentialHttpRequest]:
+    var transport = _resent(String('{"ScheduleArn":"') + _ARN + '"}')
+    var clock = FixedClock(1790812800)
+    var loop = _loop()
+    var budget = AwsRetryQuota()
+    var client = _client(_never)
+    var res = client.update_schedule_with(input, transport, clock, loop, budget)
+    assert_equal(res.status, 200)
+    return _attempts(transport)
+
+
+def _resent_delete(input: SchedulerDeleteScheduleInput) raises -> List[CredentialHttpRequest]:
+    var transport = _resent(String("{}"))
+    var clock = FixedClock(1790812800)
+    var loop = _loop()
+    var budget = AwsRetryQuota()
+    var client = _client(_never)
+    var res = client.delete_schedule_with(input, transport, clock, loop, budget)
+    assert_equal(res.status, 200)
+    return _attempts(transport)
 
 
 def test_a_resent_create_carries_the_callers_token() raises:
     var input = _create()
-    input.set_client_token(String("c0ffee00-0000-4000-8000-000000000001"))
-    var bodies = _resent_create(input)
-    assert_true(
-        bodies[0].find('"ClientToken":"c0ffee00-0000-4000-8000-000000000001"') >= 0,
-        bodies[0],
-    )
-    assert_equal(bodies[1], bodies[0])
+    input.set_client_token(String(_CALLERS))
+    var sent = _resent_create(input)
+    assert_equal(_body_token(sent[0]), _CALLERS)
+    assert_equal(sent[1].body_text(), sent[0].body_text())
 
 
-def test_an_unset_token_is_not_filled() raises:
-    # botocore fills an unset idempotency token with one UUID per call; this
-    # client does not, so a resent create without a token is not idempotent
-    # (the service answers the resend ConflictException). This row pins
-    # that: filling the token changes it.
-    var bodies = _resent_create(_create())
-    for i in range(len(bodies)):
-        assert_true(bodies[i].find("ClientToken") < 0, bodies[i])
-    assert_equal(bodies[1], bodies[0])
+def test_an_unset_create_token_is_filled_once_per_call() raises:
+    var first = _resent_create(_create())
+    var token = _body_token(first[0])
+    _check_v4(token)
+    # The resend is the same bytes, token and all.
+    assert_equal(first[1].body_text(), first[0].body_text())
+    # The next call is a new create, under a new token.
+    var second = _resent_create(_create())
+    var again = _body_token(second[0])
+    _check_v4(again)
+    assert_true(again != token, again)
+    assert_equal(_body_token(second[1]), again)
+
+
+def test_an_unset_update_token_is_filled_once_per_call() raises:
+    var first = _resent_update(_update())
+    var token = _body_token(first[0])
+    _check_v4(token)
+    assert_equal(first[1].body_text(), first[0].body_text())
+    var second = _resent_update(_update())
+    var again = _body_token(second[0])
+    _check_v4(again)
+    assert_true(again != token, again)
+
+
+def test_a_resent_update_carries_the_callers_token() raises:
+    var input = _update()
+    input.set_client_token(String(_CALLERS))
+    var sent = _resent_update(input)
+    assert_equal(_body_token(sent[0]), _CALLERS)
+    assert_equal(sent[1].body_text(), sent[0].body_text())
+
+
+def test_an_unset_delete_token_is_filled_on_the_query() raises:
+    # DeleteSchedule binds ClientToken to the query string, and the fill is
+    # before the request is built, so it rides there.
+    var first = _resent_delete(_delete())
+    var token = _query_token(first[0])
+    _check_v4(token)
+    assert_equal(first[0].target, String("/schedules/nightly-reap?clientToken=") + token + "&groupName=apps")
+    assert_equal(first[1].target, first[0].target)
+    var second = _resent_delete(_delete())
+    var again = _query_token(second[0])
+    _check_v4(again)
+    assert_true(again != token, again)
+
+
+def test_a_resent_delete_carries_the_callers_token() raises:
+    var input = _delete()
+    input.set_client_token(String(_CALLERS))
+    var sent = _resent_delete(input)
+    assert_equal(sent[0].target, String("/schedules/nightly-reap?clientToken=") + _CALLERS + "&groupName=apps")
+    assert_equal(sent[1].target, sent[0].target)
 
 
 def main() raises:
@@ -391,5 +517,9 @@ def main() raises:
     test_update_schedule_on_the_wire()
     test_delete_schedule_on_the_wire()
     test_a_resent_create_carries_the_callers_token()
-    test_an_unset_token_is_not_filled()
+    test_an_unset_create_token_is_filled_once_per_call()
+    test_an_unset_update_token_is_filled_once_per_call()
+    test_a_resent_update_carries_the_callers_token()
+    test_an_unset_delete_token_is_filled_on_the_query()
+    test_a_resent_delete_carries_the_callers_token()
     print("OK")
