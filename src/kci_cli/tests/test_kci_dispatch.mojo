@@ -813,6 +813,39 @@ def test_an_unread_later_channel_is_not_none() raises:
     assert_true(tail.find(String("\nnone\n")) < 0, tail)
 
 
+def test_a_run_without_a_release_version_skips_the_lookahead() raises:
+    # the validate job: `--only validation:install`, no --release-version. A
+    # later stage's names cannot be computed without the release version, so
+    # the lookahead is skipped and says so, never "cannot be read" of an
+    # empty path, and never "none"
+    var d = _root(String("ahead_norv"))
+    var m = _release_machine(d, True)
+    var steps = FakeSteps()
+    steps.ahead_names.append(String("komira_all"))
+    var rec = CliRecorder.memory(String(""))
+    var summary = d + String("/summary.md")
+    assert_equal(
+        kci_main_with(_run(m, String("gamma"), "--only", "validation:install", "--scratch-dir", "/s", "--summary-file", summary), steps, rec),
+        0,
+    )
+    for i in range(len(steps.reads)):
+        assert_true(not steps.reads[i].startswith(String("lookahead")), steps.reads[i])
+    assert_equal(len(_last(rec).new_names), 0)
+    var text = Path(summary).read_text()
+    var at = text.find(String("### NEW NAMES on prod"))
+    assert_true(at >= 0, text)
+    var tail = String(text[byte = at:])
+    assert_true(tail.find(String("lookahead skipped: no release version (plan-only or validation-only run)")) >= 0, tail)
+    assert_true(tail.find(String("cannot be read")) < 0, tail)
+    assert_true(tail.find(String("\nnone\n")) < 0, tail)
+    # a plan WITH a release version still reads prod's names
+    var steps2 = FakeSteps()
+    var rec2 = CliRecorder.memory(String(""))
+    assert_equal(kci_main_with(_gamma(m, "--plan", "--scratch-dir", "/s"), steps2, rec2), 0)
+    assert_equal(len(steps2.reads), 1)
+    assert_equal(steps2.reads[0], String("lookahead prod env=prod prod plan=True"))
+
+
 def test_no_lookahead_after_a_failure_and_the_last_stage_has_none() raises:
     var d = _root(String("ahead_none"))
     var m = _release_machine(d)

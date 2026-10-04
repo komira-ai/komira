@@ -60,7 +60,12 @@
 #      `lookahead_new_names`), so the names a later, approval-gated stage
 #      would publish for the first time are in THIS run's result
 #      (`new_names[]` rows naming that stage) and summary before anyone
-#      approves it. A channel that was not read says so, never "none";
+#      approves it. A channel that was not read says so, never "none".
+#      A run given no `--release-version` (the validation-only job, which
+#      selects no PUBLISH step) cannot name a later stage's files, so it
+#      reads nothing and each report says `lookahead skipped: no release
+#      version (plan-only or validation-only run)`, not an error about an
+#      empty path;
 #   8. the run's outcome is its worst step's (kci_api's `worst_outcome`),
 #      and PARTIAL when a step fails after an earlier PUBLISH step changed
 #      the channel; the FINISHED record, then the exit number
@@ -552,6 +557,11 @@ def _lookahead[S: StageSteps](
             if not step.is_publish():
                 continue
             var r: NewNamesReport
+            if cmd.release_version.byte_length() == 0:
+                r = NewNamesReport(later.name.copy(), step.name.copy(), step.channel.copy())
+                r.detail = String("lookahead skipped: no release version (plan-only or validation-only run)")
+                out.append(r^)
+                continue
             try:
                 r = steps.lookahead(_publish_request(cmd, later, step))
             except e:
