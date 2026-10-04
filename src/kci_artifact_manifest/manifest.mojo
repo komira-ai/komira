@@ -3,23 +3,37 @@
 #   object per package file, saying what the file is and what it hashes to.
 # =============================================================================
 #
-#   {"artifact_type": "CONDA",            CONDA or PYTHON
+#   {"format": "kci.artifact_manifest",  the format (kci_contract's table)
+#    "schema_version": 1,                 its major (an integer)
+#    "artifact_type": "CONDA",            CONDA or PYTHON
 #    "name": "example-pkg",               the package name
 #    "version": "1.2.3",
-#    "subdir": "linux-64",                CONDA only: the channel subdir
+#    "platform": "linux-x86_64",          kci_contract's platform table
+#    "subdir": "linux-64",                CONDA only: the channel subdir,
+#                                         the platform's conda subdir
 #    "file": "linux-64/example-pkg-1.2.3-h0_0.conda",
 #    "sha256": "<64 hex>",                the file's sha256, as built
 #    "metadata": "METADATA"}              PYTHON: the wheel's METADATA
 #                                         CONDA: the build's metadata.json
 #
+# `format` and `schema_version` are read first (kci_contract's
+# `produced_header`): another format, or a major this kci does not read, is
+# refused. Inside major 1 an unknown key is IGNORED and listed in
+# `ignored_keys` (kci_contract's policy: writers only ever add keys inside a
+# major). `platform` is the platform the artifact was built for: a released
+# one or `noarch`; a CONDA artifact's `subdir` must be its platform's conda
+# subdir. Nothing run-specific (a run id, an attempt) is ever in a manifest:
+# the package build writes it inside a cached build action, and a per-run
+# value would make every run a cache miss and the bytes differ per run.
+#
 # `metadata` is required for both artifact types. `file` and `metadata` are
 # paths; a relative one is relative to the directory holding the manifest.
 # A CONDA `metadata` is a bare file name: the file sits next to the
 # manifest, so copying the manifest's directory (as `kci build` does)
-# cannot separate the two. Every value is a string. A missing required
-# key, a key that does not belong to the artifact type, an unknown key, a
-# non-string or empty value and a sha256 that is not 64 lowercase hex
-# characters are each refused, naming the manifest and the key.
+# cannot separate the two. Every value but `schema_version` is a string. A
+# missing required key, a key given twice, a key that does not belong to the
+# artifact type, a non-string or empty value and a sha256 that is not 64
+# lowercase hex characters are each refused, naming the manifest and the key.
 #
 # `render_artifact_manifest` writes the same format back, keys in the order
 # above, so what `kci build` writes is exactly what `kci publish` reads.
@@ -31,6 +45,13 @@ from std.pathlib import Path
 
 from komira_json import JSON_STRING, JsonValue, parse_json_value
 
+from kci_contract import (
+    FORMAT_ARTIFACT_MANIFEST,
+    conda_subdir_of,
+    current_major,
+    produced_header,
+    require_artifact_platform,
+)
 from kci_release_channel import ARTIFACT_TYPE_CONDA, ARTIFACT_TYPE_PYTHON
 
 
@@ -47,24 +68,29 @@ struct ArtifactManifest(Copyable, Movable, Deinitable):
     var artifact_type: String
     var name: String
     var version: String
+    var platform: String
     var subdir: String
     var file: String
     var file_path: String
     var sha256_hex: String
     var metadata: String
     var metadata_path: String
+    # Set by the parser only: keys of a known major it ignored (file header).
+    var ignored_keys: List[String]
 
     def __init__(out self, var source: String):
         self.source = source^
         self.artifact_type = String("")
         self.name = String("")
         self.version = String("")
+        self.platform = String("")
         self.subdir = String("")
         self.file = String("")
         self.file_path = String("")
         self.sha256_hex = String("")
         self.metadata = String("")
         self.metadata_path = String("")
+        self.ignored_keys = List[String]()
 
     def file_name(self) -> String:
         """The last path segment of `file_path`: the name the registry sees.
@@ -123,9 +149,12 @@ def _string_member(doc: JsonValue, key: String, source: String) raises -> String
 
 def _known_keys() -> List[String]:
     var known = List[String]()
+    known.append(String("format"))
+    known.append(String("schema_version"))
     known.append(String("artifact_type"))
     known.append(String("name"))
     known.append(String("version"))
+    known.append(String("platform"))
     known.append(String("subdir"))
     known.append(String("file"))
     known.append(String("sha256"))
@@ -145,6 +174,17 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
         return ArtifactManifest(source.copy())
     if not doc.is_object():
         _refuse(source, String("not a JSON object"))
+    for i in range(doc.num_members()):
+        var key = doc.key_at(i)
+        for j in range(i):
+            if doc.key_at(j) == key:
+                _refuse(source, String("'") + key + String("' is given twice"))
+    # produced_header's refusals start "<its source>: ", so it is given this
+    # file's refusal prefix as its source.
+    _ = produced_header(
+        doc, String(FORMAT_ARTIFACT_MANIFEST), String("artifact manifest '") + source + String("'")
+    )
+    var m = ArtifactManifest(source.copy())
     var known = _known_keys()
     for i in range(doc.num_members()):
         var key = doc.key_at(i)
@@ -153,15 +193,12 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
             if known[j] == key:
                 ok = True
         if not ok:
-            _refuse(source, String("unknown key '") + key + String("'"))
-        for j in range(i):
-            if doc.key_at(j) == key:
-                _refuse(source, String("'") + key + String("' is given twice"))
-    var m = ArtifactManifest(source.copy())
+            m.ignored_keys.append(key^)
     var required = List[String]()
     required.append(String("artifact_type"))
     required.append(String("name"))
     required.append(String("version"))
+    required.append(String("platform"))
     required.append(String("file"))
     required.append(String("sha256"))
     for i in range(len(required)):
@@ -170,6 +207,11 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
     m.artifact_type = _string_member(doc, String("artifact_type"), source)
     m.name = _string_member(doc, String("name"), source)
     m.version = _string_member(doc, String("version"), source)
+    m.platform = _string_member(doc, String("platform"), source)
+    try:
+        require_artifact_platform(m.platform)
+    except e:
+        _refuse(source, String(e))
     var base = _dir_of(source)
     m.file = _string_member(doc, String("file"), source)
     m.file_path = _resolve(base, m.file)
@@ -199,6 +241,13 @@ def parse_artifact_manifest(text: String, source: String) raises -> ArtifactMani
                 source,
                 String("subdir 'noarch' is not published: a compiled package")
                 + String(" names its platform subdir"),
+            )
+        var want = conda_subdir_of(m.platform)
+        if m.subdir != want:
+            _refuse(
+                source,
+                String("subdir '") + m.subdir + String("' is not platform ") + m.platform
+                + String("'s conda subdir '") + want + String("'"),
             )
         if not m.file_name().endswith(String(".conda")):
             _refuse(source, String("a CONDA 'file' must end in .conda"))
@@ -238,12 +287,18 @@ def read_artifact_manifest(path: String) raises -> ArtifactManifest:
 
 def render_artifact_manifest(m: ArtifactManifest) raises -> String:
     """`m` as manifest text: compact JSON, keys in the header's order, with
-    `file` and `metadata` as written (not resolved). Parsing the result
-    at the same path gives back `m`."""
+    `file` and `metadata` as written (not resolved), at this kci's major.
+    Parsing the result at the same path gives back `m`."""
     var doc = JsonValue.empty_object()
+    doc.set_member(String("format"), JsonValue.from_string(String(FORMAT_ARTIFACT_MANIFEST)))
+    doc.set_member(
+        String("schema_version"),
+        JsonValue.from_i64(Int64(current_major(String(FORMAT_ARTIFACT_MANIFEST)))),
+    )
     doc.set_member(String("artifact_type"), JsonValue.from_string(m.artifact_type.copy()))
     doc.set_member(String("name"), JsonValue.from_string(m.name.copy()))
     doc.set_member(String("version"), JsonValue.from_string(m.version.copy()))
+    doc.set_member(String("platform"), JsonValue.from_string(m.platform.copy()))
     if m.artifact_type == ARTIFACT_TYPE_CONDA:
         doc.set_member(String("subdir"), JsonValue.from_string(m.subdir.copy()))
     doc.set_member(String("file"), JsonValue.from_string(m.file.copy()))
