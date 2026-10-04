@@ -37,25 +37,38 @@
 #
 # VALIDATIONS. A PUBLISH step may carry `validation { ... }` blocks that check
 # what it published. A validation name is unique in its stage (the grammar of
-# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_api):
+# a step name). The one kind is CONDA_INSTALL_SMOKE (kci_api), which
+# installs the published packages inside a container and runs a program
+# against them:
 #
-#   install        the package to install from the step's channel, at this
-#                  release's version and build (kci checks it is a declared
-#                  artifact when it runs; this package reads no other file)
-#   extra_channel  repeated: a channel that may supply only packages outside
-#                  the release set; an https:// URL or the bare `conda-forge`
-#   program        the smoke program, a relative path to a .mojo file in the
-#                  repository (no `..` segment)
-#   tool           the installer; `pixi`, the default, is the only one
+#   image             the container image, pinned by digest:
+#                     `<reference>@sha256:<64 lowercase hex>` (a tag alone is
+#                     refused: it names whatever the registry serves today)
+#   install           repeated, at least one: a package to install from the
+#                     step's channel at this release's version and build (kci
+#                     checks it is a member of the release set when it runs;
+#                     this package reads no other file)
+#   compiler_channel  the channel `mojo-compiler` is pinned to; an https:// URL
+#   extra_channel     repeated: a channel that may supply only packages
+#                     outside the release set; an https:// URL or the bare
+#                     `conda-forge`
+#   program           the program to run, a relative path to a .mojo file
+#                     under `release/` (no `..` segment)
+#   wait_for_index_seconds
+#                     how long to wait for the channel's index to LIST the
+#                     release's files (0, the default, waits not at all; at
+#                     most `VALIDATION_WAIT_MAX_SECONDS`)
 #
 # SELECTION. `resolve_selection` turns `kci run --only ...` into the steps
 # and validations to run (file order, whatever the order on the command line)
-# and the run's scope. `step:<name>` selects that step and its validations;
-# `validation:<name>` selects that validation and no step (it checks what an
-# earlier run published). A selector that matches nothing in the stage is
-# refused, listing the stage's step and validation names: a selective run that
-# runs nothing is never a pass. Any `--only` makes the run SELECTIVE, even one
-# that selects every step.
+# and the run's scope. `step:<name>` selects that step WITHOUT its
+# validations; `validation:<name>` selects that validation and no step (it
+# checks what an earlier run published). Only a FULL run (no `--only`) runs
+# every step and every validation. So a stage can be split over several CI
+# jobs, one per part, and the parts never overlap. A selector that matches
+# nothing in the stage is refused, listing the stage's step and validation
+# names: a selective run that runs nothing is never a pass. Any `--only`
+# makes the run SELECTIVE, even one that selects every step.
 #
 # `validate_release_machine` holds every rule the parser cannot see field by
 # field; a parsed graph is always a valid one. Paths are kept as written: a
@@ -77,8 +90,11 @@ from kci_api import (
     require_validation_kind,
 )
 
-comptime VALIDATION_TOOL_PIXI: String = "pixi"
-"""The one installer a CONDA_INSTALL_SMOKE validation runs, and the default."""
+comptime VALIDATION_PROGRAM_DIR: String = "release/"
+"""Where a validation's program lives: the release files' directory."""
+
+comptime VALIDATION_WAIT_MAX_SECONDS: Int = 3600
+"""The longest `wait_for_index_seconds` a validation may declare."""
 
 comptime EXTRA_CHANNEL_CONDA_FORGE: String = "conda-forge"
 """The one bare channel name an `extra_channel` may be."""
@@ -89,26 +105,31 @@ GitHub environment name (kci_api states the number)."""
 
 
 struct StageValidation(Copyable, Movable):
-    """One validation of a step (file header). `tool` is `pixi` unless the
-    file says otherwise; `line` is the line its block opens on.
+    """One validation of a step (file header). `installs` and
+    `extra_channels` are in file order; `line` is the line its block opens
+    on.
 
-    Layout: owned Strings, a List of Strings and an Int. No pointer field."""
+    Layout: owned Strings, Lists of Strings and Ints. No pointer field."""
 
     var name: String
     var kind: String
-    var install: String
+    var image: String
+    var installs: List[String]
+    var compiler_channel: String
     var extra_channels: List[String]
     var program: String
-    var tool: String
+    var wait_for_index_seconds: Int
     var line: Int
 
     def __init__(out self, line: Int):
         self.name = String("")
         self.kind = String("")
-        self.install = String("")
+        self.image = String("")
+        self.installs = List[String]()
+        self.compiler_channel = String("")
         self.extra_channels = List[String]()
         self.program = String("")
-        self.tool = String(VALIDATION_TOOL_PIXI)
+        self.wait_for_index_seconds = 0
         self.line = line
 
 
@@ -263,10 +284,35 @@ def _is_relative_mojo_path(path: String) -> Bool:
     return String(segments[len(segments) - 1]) != String(".mojo")
 
 
-def _is_extra_channel(channel: String) -> Bool:
-    """An https:// URL with a host, or the bare `conda-forge`."""
-    if channel == EXTRA_CHANNEL_CONDA_FORGE:
-        return True
+def _is_lower_hex(s: String) -> Bool:
+    var b = s.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if not ((c >= 48 and c <= 57) or (c >= 97 and c <= 102)):
+            return False
+    return True
+
+
+def is_digest_pinned_image(image: String) -> Bool:
+    """`<reference>@sha256:<64 lowercase hex>`, the reference non-empty and
+    nothing in it a shell or a registry would read twice (no space, quote or
+    second `@`)."""
+    var at = image.find(String("@sha256:"))
+    if at <= 0 or image.find(String("@")) != at or image.rfind(String("@")) != at:
+        return False
+    var digest = String(image[byte = at + 8 :])
+    if digest.byte_length() != 64 or not _is_lower_hex(digest):
+        return False
+    var b = image.as_bytes()
+    for i in range(len(b)):
+        var c = Int(b[i])
+        if c <= 32 or c == 34 or c == 39 or c == 92 or c >= 127:
+            return False
+    return True
+
+
+def _is_https_url(channel: String) -> Bool:
+    """An https:// URL with a host and no space, query, fragment or `@`."""
     var prefix = String("https://")
     if not channel.startswith(prefix):
         return False
@@ -278,7 +324,32 @@ def _is_extra_channel(channel: String) -> Bool:
         and rest.find(String("?")) < 0
         and rest.find(String("#")) < 0
         and rest.find(String("@")) < 0
+        and rest.find(String("'")) < 0
+        and rest.find(String('"')) < 0
     )
+
+
+def _is_extra_channel(channel: String) -> Bool:
+    """An https:// URL with a host, or the bare `conda-forge`."""
+    if channel == EXTRA_CHANNEL_CONDA_FORGE:
+        return True
+    return _is_https_url(channel)
+
+
+def _is_package_name(name: String) -> Bool:
+    """A conda package name: `[a-z0-9_.-]+`, starting with a letter or a
+    digit."""
+    var b = name.as_bytes()
+    if len(b) == 0:
+        return False
+    for i in range(len(b)):
+        var c = Int(b[i])
+        var alnum = (c >= 97 and c <= 122) or (c >= 48 and c <= 57)
+        if i == 0 and not alnum:
+            return False
+        if not (alnum or c == 95 or c == 46 or c == 45):
+            return False
+    return True
 
 
 def _check_validation(source: String, stage: Stage, step: StageStep, v: StageValidation) raises:
@@ -303,19 +374,45 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
         require_validation_kind(v.kind)
     except e:
         raise Error(_at(source, v.line) + where + String(": ") + String(e))
-    if v.install.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no install (the package to install)"))
+    if v.image.byte_length() == 0:
+        raise Error(_at(source, v.line) + where + String(" has no image (the container image, pinned by digest)"))
+    if not is_digest_pinned_image(v.image):
+        raise Error(
+            _at(source, v.line) + where + String(" has image '") + v.image
+            + String("'; an image is pinned by digest, <reference>@sha256:<64 lowercase hex>")
+        )
+    if len(v.installs) == 0:
+        raise Error(_at(source, v.line) + where + String(" has no install (a package to install)"))
+    for i in range(len(v.installs)):
+        ref name = v.installs[i]
+        if not _is_package_name(name):
+            raise Error(
+                _at(source, v.line) + where + String(" has install '") + name
+                + String("'; a package name is [a-z0-9_.-]+, starting with a letter or a digit")
+            )
+        for j in range(i):
+            if v.installs[j] == name:
+                raise Error(_at(source, v.line) + where + String(" names install '") + name + String("' twice"))
+    if v.compiler_channel.byte_length() == 0:
+        raise Error(
+            _at(source, v.line) + where + String(" has no compiler_channel (the channel mojo-compiler comes from)")
+        )
+    if not _is_https_url(v.compiler_channel):
+        raise Error(
+            _at(source, v.line) + where + String(" has compiler_channel '") + v.compiler_channel
+            + String("'; a compiler channel is an https:// URL")
+        )
     if v.program.byte_length() == 0:
-        raise Error(_at(source, v.line) + where + String(" has no program (the smoke program to run)"))
-    if not _is_relative_mojo_path(v.program):
+        raise Error(_at(source, v.line) + where + String(" has no program (the program to run)"))
+    if not _is_relative_mojo_path(v.program) or not v.program.startswith(String(VALIDATION_PROGRAM_DIR)):
         raise Error(
             _at(source, v.line) + where + String(" has program '") + v.program
-            + String("'; a program is a relative path to a .mojo file inside the repository")
+            + String("'; a program is a relative path to a .mojo file under ") + String(VALIDATION_PROGRAM_DIR)
         )
-    if v.tool != VALIDATION_TOOL_PIXI:
+    if v.wait_for_index_seconds < 0 or v.wait_for_index_seconds > VALIDATION_WAIT_MAX_SECONDS:
         raise Error(
-            _at(source, v.line) + where + String(" has tool '") + v.tool
-            + String("'; this kci installs with pixi")
+            _at(source, v.line) + where + String(" has wait_for_index_seconds ") + String(v.wait_for_index_seconds)
+            + String("; it is 0 to ") + String(VALIDATION_WAIT_MAX_SECONDS)
         )
     for i in range(len(v.extra_channels)):
         ref ch = v.extra_channels[i]
@@ -323,6 +420,11 @@ def _check_validation(source: String, stage: Stage, step: StageStep, v: StageVal
             raise Error(
                 _at(source, v.line) + where + String(" has extra_channel '") + ch
                 + String("'; an extra channel is an https:// URL or conda-forge")
+            )
+        if ch == v.compiler_channel:
+            raise Error(
+                _at(source, v.line) + where + String(" names '") + ch
+                + String("' as compiler_channel and as extra_channel")
             )
         for j in range(i):
             if v.extra_channels[j] == ch:
@@ -459,7 +561,8 @@ struct Selection(Copyable, Movable):
 
     `steps[i]` says whether the stage's step i runs; the steps run in file
     order. `validations` names every validation that runs, in file order:
-    each validation of a selected step, and each one selected on its own.
+    every one in a FULL run, and each one selected on its own in a SELECTIVE
+    run (a step selector does not bring its step's validations).
     `only` is every selector, canonical, in the order given. `scope` is FULL
     or SELECTIVE.
 
@@ -530,11 +633,13 @@ def resolve_selection(stage: Stage, selectors: List[Selector]) raises -> Selecti
                 String("--only '") + s.canonical() + String("' matches no step of stage '") + stage.name
                 + String("'; ") + _names_of(stage)
             )
-    # every validation that runs, once each, in file order
+    # every validation that runs, once each, in file order: all of them in a
+    # FULL run; in a selective one, only those named (a step selector never
+    # brings its step's validations)
     for k in range(len(stage.steps)):
         for m in range(len(stage.steps[k].validations)):
             ref name = stage.steps[k].validations[m].name
-            var runs = sel.steps[k]
+            var runs = all
             for j in range(len(picked)):
                 if picked[j] == name:
                     runs = True

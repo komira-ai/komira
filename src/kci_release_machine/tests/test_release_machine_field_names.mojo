@@ -28,10 +28,12 @@ def test_the_field_names_are_the_golden_list() raises:
     want.append(String("step.validation"))
     want.append(String("validation.name"))
     want.append(String("validation.kind"))
+    want.append(String("validation.image"))
     want.append(String("validation.install"))
+    want.append(String("validation.compiler_channel"))
     want.append(String("validation.extra_channel"))
     want.append(String("validation.program"))
-    want.append(String("validation.tool"))
+    want.append(String("validation.wait_for_index_seconds"))
     assert_equal(len(got), len(want))
     for i in range(len(want)):
         assert_equal(got[i], want[i])

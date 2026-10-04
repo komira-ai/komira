@@ -14,6 +14,10 @@
 #     PUBLISH step targets a PRIVATE channel with an API token resolves the
 #     token BEFORE any read; EXAMPLE_CONDA_TOKEN is unset, so the run ends
 #     FAILED (KCI-E-CREDENTIAL, exit 4) with no artifact row, whichever store.
+#
+#   The reads around the steps: `platform_env` reads this process's
+#   environment (KCI_CLI_TEST_SECRET is set by `test_env`; an unset name is
+#   ""), and `committed_file` refuses, naming RUNNER_TEMP, outside a runner.
 # =============================================================================
 
 from std.ffi import external_call
@@ -25,7 +29,13 @@ from komira_libc.posix import _read_env
 
 from kci_cli import ComposedSecretStore, LibrarySteps, SecretStoreChoice, kci_main_with, recorder_for, write_whole_file
 from kci_api import parse_result
-from kci_publish.release_fixture import EXAMPLE_STAGE, EXAMPLE_TOKEN_SECRET, ExampleRelease, write_example_inputs
+from kci_publish.release_fixture import (
+    EXAMPLE_ENVIRONMENT,
+    EXAMPLE_STAGE,
+    EXAMPLE_TOKEN_SECRET,
+    ExampleRelease,
+    write_example_inputs,
+)
 
 
 def _root(tag: String) raises -> String:
@@ -84,18 +94,19 @@ def _plan_private(tag: String, store: String) raises -> Tuple[Int, String]:
     write_whole_file(
         m,
         String("schema_version: 1\nstage { name: \"") + String(EXAMPLE_STAGE)
+        + String("\" environment: \"") + String(EXAMPLE_ENVIRONMENT)
         + String("\" step { name: \"publish\" kind: PUBLISH platform: \"") + req.platform
         + String("\" artifacts: \"") + req.artifacts_file + String("\" channels: \"") + req.channels_file
         + String("\" channel: \"example-private\" } }\n"),
     )
     var a = List[String]()
-    for s in ["run", "--stage", "prod", "--run-id", "gh-2", "--attempt", "1", "--plan"]:
+    for s in ["run", "--run-id", "gh-2", "--attempt", "1", "--plan"]:
         a.append(String(s))
+    _flag(a, String("--stage"), String(EXAMPLE_STAGE))
     _flag(a, String("--machine"), m)
     _flag(a, String("--revision-id"), req.revision_id)
     _flag(a, String("--release-dir"), req.release_dir)
     _flag(a, String("--release-version"), req.release_version_file)
-    _flag(a, String("--expect-set-hash"), req.expect_set_hash)
     _flag(a, String("--secret-store"), store)
     _flag(a, String("--result-file"), d + String("/result.json"))
     var steps = LibrarySteps()
@@ -142,6 +153,19 @@ def test_a_build_step_reaches_kci_build() raises:
     assert_equal(res.error.id, String("KCI-E-ARTIFACT"))
     assert_equal(res.steps[0].kind, String("BUILD"))
     assert_equal(res.steps[0].name, String("b"))
+
+
+def test_the_real_platform_env_and_committed_file() raises:
+    var steps = LibrarySteps()
+    assert_equal(steps.platform_env(String("KCI_CLI_TEST_SECRET")), String("kci-cli-test-value"))
+    assert_equal(steps.platform_env(String("KCI_CLI_TEST_UNSET_VARIABLE")), String(""))
+    if _read_env("RUNNER_TEMP").byte_length() == 0:
+        var why = String("<read>")
+        try:
+            _ = steps.committed_file(String("a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"), String(".github/workflows/kci.yml"))
+        except e:
+            why = String(e)
+        assert_true(why.find(String("RUNNER_TEMP is not set")) >= 0, why)
 
 
 def main() raises:
