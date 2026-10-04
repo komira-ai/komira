@@ -8,8 +8,12 @@ syntax = "proto3";
 package google.logging.v2;
 
 import "google/api/annotations.proto";
+import "google/api/client.proto";
 
 service LoggingServiceV2 {
+  // The host the generated client starts at.
+  option (google.api.default_host) = "logging.googleapis.com";
+
   // A custom-verb literal path, the whole request as the JSON body.
   rpc ListLogEntries(ListLogEntriesRequest) returns (ListLogEntriesResponse) {
     option (google.api.http) = {

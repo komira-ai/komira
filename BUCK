@@ -14,6 +14,11 @@ shell_lint(
 
 WORKFLOWS = glob([".github/workflows/*.yml"])
 
+# The local actions the workflows call (.github/actions/<name>/action.yml): not
+# workflows, so actionlint does not read them, but the pins and the endpoint
+# lints do.
+ACTIONS = glob([".github/actions/*/action.yml"])
+
 workflow_lint(
     name = "workflow_lint",
     srcs = WORKFLOWS,
@@ -22,7 +27,7 @@ workflow_lint(
 
 action_pins(
     name = "action_pins",
-    srcs = WORKFLOWS,
+    srcs = WORKFLOWS + ACTIONS,
 )
 
 push_verdicts(
@@ -36,7 +41,7 @@ no_endpoint(
     # example.* addresses, so it is only searched for addresses.
     buckconfigs = [".buckconfig", "tools/build/consumer.buckconfig"],
     gitignore = ".gitignore",
-    srcs = [".buckconfig.local.example"] + WORKFLOWS,
+    srcs = [".buckconfig.local.example"] + WORKFLOWS + ACTIONS,
 )
 
 # The shell lints of the tests cell (tools/build/tests: run_tests.sh and

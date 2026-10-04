@@ -2,7 +2,9 @@
 # on the wire, byte for byte: the request line, the Host, the headers and
 # the JSON body. The connector is komira_http_core's ScriptedConnector with
 # a shared write capture, so the bytes the client wrote outlive the stream
-# it dialled; no socket, no network.
+# it dialled; no socket is opened. The client is given no host, so it sends
+# to the service's default, logging.googleapis.com, and resolves that name
+# before the dial: the test needs a resolver, not the service.
 #
 # The expected forms are written here from the Cloud Logging v2 REST
 # reference for `entries.list` (POST https://logging.googleapis.com/v2/
@@ -37,7 +39,6 @@ from komira_http_client.header_map import HeaderMap
 from komira_http_core.transport.scripted import ScriptedConnector, ScriptedStream
 
 
-comptime _HOST = "logging.googleapis.com"
 comptime _TOKEN = "test-access-token"
 comptime _RT = BlockingRuntime[NoopSink]
 
@@ -71,7 +72,6 @@ def _client(
     var c = LoggingServiceV2Client[ScriptedConnector, StaticTokenSource](
         http^, StaticTokenSource(String(_TOKEN)), default_headers^
     )
-    c.set_rest_host(String(_HOST))
     return c^
 
 
