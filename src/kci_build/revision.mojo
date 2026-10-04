@@ -33,7 +33,7 @@
 # build):
 #   * a SHALLOW clone: the first-parent count there is the clone's depth,
 #     not the history's, so N would be wrong. kci does not deepen the clone
-#     (that would be a network fetch inside a build verb); the job checks out
+#     (that would be a network fetch inside a BUILD step); the job checks out
 #     with full history (actions/checkout `fetch-depth: 0`, or
 #     `git fetch --unshallow`) and runs kci again;
 #   * HEAD that is not C: the work dir holds other bytes than the commit the
