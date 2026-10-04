@@ -12,10 +12,12 @@
 //! Verb     = ":" LITERAL ;
 //! ```
 //!
-//! A client fills every variable from a request field, so two parts of the
-//! grammar are refused rather than half-supported: a bare `*`/`**` segment
-//! outside a variable (no field fills it) and a dotted field path (the
-//! generated code reads top-level request fields only).
+//! A client fills every variable from a request field, so a bare `*`/`**`
+//! segment outside a variable (no field fills it) is refused rather than
+//! half-supported. A dotted field path (`{service.name=...}`, the Update
+//! methods' form) is filled from a field of the request's message field;
+//! [`partition_fields`] accepts it only where that message is the body, so
+//! none of its other fields would have to travel as nested query parameters.
 
 /// One segment of a parsed path template.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -30,7 +32,8 @@ pub enum PathSegment {
 /// A variable of a path template.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct PathVar {
-    /// The request field the variable is filled from.
+    /// The request field the variable is filled from: a field name, or a
+    /// dotted path (`service.name`) through singular message fields.
     pub field: String,
     pub pattern: VarPattern,
     /// The variable was written `{field=...}`, `{field=*}` included. Its
@@ -132,6 +135,17 @@ impl PathTemplate {
             .iter()
             .any(|s| matches!(s, PathSegment::Var(PathVar { explicit_pattern: true, .. })))
     }
+
+    /// True when some variable names a dotted field path (`{a.b}`).
+    pub fn has_nested_vars(&self) -> bool {
+        self.vars.iter().any(|v| v.contains('.'))
+    }
+}
+
+/// The request field a (possibly dotted) path-variable name starts at:
+/// `service` for `service.name`, the name itself otherwise.
+pub fn top_level_field(var: &str) -> &str {
+    var.split('.').next().unwrap_or(var)
 }
 
 /// Split the custom verb off the template body (`rest`, after the leading
@@ -198,13 +212,7 @@ fn parse_var(template: &str, inner: &str) -> Result<PathVar, String> {
         Some((f, p)) => (f, Some(p)),
         None => (inner, None),
     };
-    if field.contains('.') {
-        return Err(format!(
-            "path template {template:?}: `{{{inner}}}` names a nested field path; \
-             only a top-level request field can be captured"
-        ));
-    }
-    if !is_simple_ident(field) {
+    if !field.split('.').all(is_simple_ident) {
         return Err(format!(
             "path template {template:?}: `{{{inner}}}` does not name a field identifier"
         ));
@@ -299,9 +307,11 @@ pub fn partition_fields(
     template: &PathTemplate,
     body: &str,
 ) -> Result<FieldPartition, String> {
-    // Every `{var}` must name a real request field.
+    // Every `{var}` must name a real request field (a dotted one, by its
+    // first component; the emitter checks the rest against the types).
     for v in &template.vars {
-        if !all_fields.iter().any(|f| f == v) {
+        let top = top_level_field(v);
+        if !all_fields.iter().any(|f| f == top) {
             return Err(format!(
                 "path template var `{{{v}}}` does not match any request field \
                  (have: {all_fields:?})"
@@ -322,6 +332,26 @@ pub fn partition_fields(
             BodyDesignator::Field(field.to_string())
         }
     };
+
+    // A dotted variable reads one field of a message field. That message
+    // must travel as the body (named, or inside `*`): anywhere else its
+    // other fields would be nested query parameters (`service.labels=...`),
+    // which this client does not send.
+    for v in template.vars.iter().filter(|v| v.contains('.')) {
+        let top = top_level_field(v);
+        let in_body = match &body_des {
+            BodyDesignator::Whole => true,
+            BodyDesignator::Field(b) => b == top,
+            BodyDesignator::None => false,
+        };
+        if !in_body {
+            return Err(format!(
+                "path template var `{{{v}}}` reads a field of `{top}`, which is not \
+                 the request body: `{top}`'s other fields would be nested query \
+                 parameters, which are not supported"
+            ));
+        }
+    }
 
     // Query fields = every leaf field that is NOT a path var and NOT the
     // body. With `body: "*"` there are no query fields (the whole message is
@@ -440,7 +470,6 @@ mod tests {
             "/v1/*/x",                      // the same, one segment
             "/v1/{a=**/x}",                 // `**` not last in its pattern
             "/v1/{a=x/**}/y",               // `**` variable not last in the path
-            "/v1/{a.b}",                    // nested field path
             "/v1/{a={b}}",                  // nested braces
             "/v1/{a",                       // unclosed
             "/v1/a}",                       // unbalanced
@@ -449,6 +478,8 @@ mod tests {
             "/v1/{a=x y}",                  // pattern literal outside the unreserved set
             "/v1/{a}/{a}",                  // captured twice
             "/v1/{a=x//y}",                 // empty pattern segment
+            "/v1/{a..b}",                   // empty component of a field path
+            "/v1/{a.}",                     // the same, last
         ] {
             assert!(PathTemplate::parse(bad).is_err(), "{bad} was accepted");
         }
@@ -515,6 +546,43 @@ mod tests {
         let t = PathTemplate::parse("/v1/{missing}").unwrap();
         let fields = vec!["other".to_string()];
         assert!(partition_fields(&fields, &t, "").is_err());
+    }
+
+    #[test]
+    fn parse_dotted_field_path() {
+        let t = PathTemplate::parse("/v2/{service.name=projects/*/services/*}").unwrap();
+        assert_eq!(t.vars, vec!["service.name".to_string()]);
+        assert!(t.has_nested_vars());
+        assert!(!PathTemplate::parse("/v2/{name=projects/*}").unwrap().has_nested_vars());
+        assert_eq!(top_level_field("service.name"), "service");
+        assert_eq!(top_level_field("name"), "name");
+    }
+
+    #[test]
+    fn partition_dotted_var_into_the_named_body() {
+        // PATCH /v1/{job.name=...} body:"job" — the Update form: `job` is the
+        // body, `update_mask` a query param, and nothing else is.
+        let t = PathTemplate::parse("/v1/{job.name=projects/*/jobs/*}").unwrap();
+        let fields = vec!["job".to_string(), "update_mask".to_string()];
+        let p = partition_fields(&fields, &t, "job").unwrap();
+        assert_eq!(p.path_fields, vec!["job.name"]);
+        assert_eq!(p.body, BodyDesignator::Field("job".to_string()));
+        assert_eq!(p.query_fields, vec!["update_mask"]);
+        // Inside a whole-request body as well.
+        assert!(partition_fields(&fields, &t, "*").is_ok());
+    }
+
+    #[test]
+    fn partition_refuses_a_dotted_var_outside_the_body() {
+        let t = PathTemplate::parse("/v1/{job.name}").unwrap();
+        let fields = vec!["job".to_string(), "other".to_string()];
+        for body in ["", "other"] {
+            let err = partition_fields(&fields, &t, body).unwrap_err();
+            assert!(err.contains("which is not the request body"), "{body}: {err}");
+        }
+        // The first component must be a request field.
+        let t = PathTemplate::parse("/v1/{nope.name}").unwrap();
+        assert!(partition_fields(&fields, &t, "*").is_err());
     }
 
     #[test]

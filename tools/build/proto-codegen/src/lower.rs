@@ -54,6 +54,9 @@ struct Lowerer {
     /// descriptor-set re-decode (`routing_options.rs`). Keyed by
     /// `(service_name, method_name)`.
     routing_rules: RoutingRuleTable,
+    /// The module a cross-file import names, for the files whose own stem
+    /// is not their module ([`ModuleNames`]).
+    module_names: ModuleNames,
 }
 
 /// Lower the full request's descriptor set to the IR.
@@ -126,8 +129,15 @@ pub fn lower_with_http_and_routing_rules(
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
 ) -> Result<IrModel, String> {
-    lower_all(proto_file, file_to_generate, package_prefix, http_rules, routing_rules)
-        .map(|(_, model)| model)
+    lower_all(
+        proto_file,
+        file_to_generate,
+        package_prefix,
+        http_rules,
+        routing_rules,
+        &ModuleNames::new(),
+    )
+    .map(|(_, model)| model)
 }
 
 /// Which of the request's types and methods to emit.
@@ -170,6 +180,9 @@ impl Scope {
 /// file of `file_to_generate` must keep at least one type or service: the
 /// set of generated files is then exactly the closure, so a rule's
 /// `bundle_only` cannot carry a file nothing uses.
+///
+/// `module_names` names the module of each generated file whose own stem is
+/// not it ([`ModuleNames`]); a cross-file import names that module.
 pub fn lower_scoped(
     proto_file: &[FileDescriptorProto],
     file_to_generate: &[String],
@@ -177,6 +190,7 @@ pub fn lower_scoped(
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
     scope: &Scope,
+    module_names: &ModuleNames,
 ) -> Result<IrModel, String> {
     let (lowerer, mut model) = lower_all(
         proto_file,
@@ -184,6 +198,7 @@ pub fn lower_scoped(
         package_prefix,
         http_rules,
         routing_rules,
+        module_names,
     )?;
     if scope.is_everything() {
         return Ok(model);
@@ -361,12 +376,14 @@ fn lower_all(
     package_prefix: &str,
     http_rules: HttpRuleTable,
     routing_rules: RoutingRuleTable,
+    module_names: &ModuleNames,
 ) -> Result<(Lowerer, IrModel), String> {
     let mut lowerer = Lowerer {
         types: BTreeMap::new(),
         mojo_package: package_prefix.to_string(),
         http_rules,
         routing_rules,
+        module_names: module_names.clone(),
     };
 
     // --- Pass 1: build the cross-file type table. ----------------------
@@ -571,7 +588,7 @@ impl Lowerer {
         // A user-imported `.proto`: the generated sibling module. The
         // `mojo_proto_library` rule emits a flat `<stem>.mojo` per file
         // under the `<mojo_package>` package directory.
-        let stem = proto_stem(nt.proto_path());
+        let stem = module_stem(nt.proto_path(), &self.module_names);
         IrImport {
             module: format!("{}.{}", self.mojo_package, stem),
             symbol: nt.mojo_name().to_string(),
@@ -955,9 +972,26 @@ fn wkt_symbol(fq_name: &str) -> Option<&'static str> {
     }
 }
 
+/// The module a generated `.proto` is written as, for the files whose own
+/// stem cannot be it: `proto path -> module stem`. A file named here is
+/// `<stem>.mojo` and imported as `<package>.<stem>`; every other file keeps
+/// [`proto_stem`]. Two cases need it: a basename that is not a Mojo module
+/// name (`k8s.min.proto`), and two files of one package with the same
+/// basename (`google/rpc/status.proto` beside `google/cloud/run/v2/status.proto`),
+/// which the flat generated package cannot hold apart.
+pub type ModuleNames = BTreeMap<String, String>;
+
+/// The module stem `proto_path` is generated as under `names`.
+pub fn module_stem(proto_path: &str, names: &ModuleNames) -> String {
+    names
+        .get(proto_path)
+        .cloned()
+        .unwrap_or_else(|| proto_stem(proto_path))
+}
+
 /// The flat module stem of a `.proto` path — `google/protobuf/foo.proto`
 /// -> `foo`. Mirrors `emit::proto_to_mojo_path` (which appends `.mojo`).
-fn proto_stem(proto_path: &str) -> String {
+pub fn proto_stem(proto_path: &str) -> String {
     let basename = proto_path.rsplit('/').next().unwrap_or(proto_path);
     basename
         .rsplit_once('.')

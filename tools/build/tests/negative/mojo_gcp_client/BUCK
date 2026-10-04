@@ -166,3 +166,32 @@ mojo_gcp_client(
     protos = [],
     deps = _RUNTIME,
 )
+
+# "which this target does not generate": a `module_names` entry for a file
+# outside the generated set renames nothing, so a misspelt path is refused
+# rather than ignored.
+mojo_gcp_client(
+    name = "module_names_stray",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/audit.proto": "audit"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)
+
+# "is not a Mojo module name the generated package can hold": a module name
+# with a `.` would be imported as a package and a module.
+mojo_gcp_client(
+    name = "module_names_not_a_module",
+    bundle_only = _ITEM,
+    bundle_proto_deps = True,
+    messages_only = True,
+    module_names = {"example/shop/v1/item.proto": "item.v1"},
+    proto_deps = _DEPS,
+    protos = [],
+    roots = ["Item"],
+    deps = _RUNTIME,
+)

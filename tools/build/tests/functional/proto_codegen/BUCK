@@ -574,7 +574,7 @@ proto_codegen_golden(
 _REST_REFUSALS = [
     ("bare_wildcard", "a bare `*` segment has no request field to fill it"),
     ("double_star_not_last", "must be the last segment"),
-    ("dotted_field", "names a nested field path"),
+    ("dotted_field", "reads a field of `thing`, which is not the request body"),
     ("repeated_path_var", "path variable `names` is a `repeated` field"),
     ("nested_braces", "nested `{` in a variable"),
     ("unclosed_brace", "unclosed `{`"),

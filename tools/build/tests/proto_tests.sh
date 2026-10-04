@@ -80,6 +80,8 @@ expect_red gcp_client_tests_check 'expected exactly:' tests//negative/mojo_gcp_c
 expect_red gcp_client_unknown_protocol '`protocol` `connect` is not one of "rest", "grpc"' tests//negative/mojo_gcp_client:unknown_protocol
 expect_red gcp_client_rest_reaches_plugin 'no `(google.api.http)` annotation' tests//negative/mojo_gcp_client:rest_reaches_plugin
 expect_red gcp_client_rest_streaming_method 'method `WatchItems` is server-streaming' tests//negative/mojo_gcp_client:rest_streaming_method
+expect_red gcp_client_module_names_stray 'which this target does not generate' tests//negative/mojo_gcp_client:module_names_stray
+expect_red gcp_client_module_names_not_a_module 'is not a Mojo module name the generated package can hold' tests//negative/mojo_gcp_client:module_names_not_a_module
 
 # 23, protoc-gen-mojo's options and text goldens (tests//functional/proto_codegen):
 # each case runs protoc over a corpus with one option string and holds the
