@@ -12,6 +12,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # lands in each of their closures.
 #
 # The welded tests:
+# - test_parquet_types: each enum's names and equality, and each footer
+#   struct built and read back.
 # - test_values_match_parquet_thrift: every enum value and ConvertedType
 #   constant against parquet.thrift, read from the parquet-format archive
 #   //third_party/parquet-format pins by sha256 and staged at format/; no
@@ -36,6 +38,7 @@ mojo_library(
     },
     test_srcs = [
         "tests/test_no_env_reads.mojo",
+        "tests/test_parquet_types.mojo",
         "tests/test_values_match_parquet_thrift.mojo",
     ],
     visibility = ["PUBLIC"],

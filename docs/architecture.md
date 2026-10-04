@@ -36,6 +36,7 @@ that header only re-exports, its BUCK file). The current list is `ls src/`.
 |---|---|
 | [`komira_lz4`](../src/komira_lz4/) | the shared LZ4 raw-block codec over liblz4, loaded at run time, with no first-party deps. |
 | [`komira_zlib`](../src/komira_zlib/) | a zero-dependency FFI facade over libz, so a consumer that needs only zlib framing does not depend on a file-format reader. |
+| [`komira_parquet_api`](../src/komira_parquet_api/) | the Parquet format's types and footer metadata: the Thrift enums (physical type, encoding, compression codec, page type) and the `FileMetaData` tree a footer decodes into, as plain values with no dependencies. |
 | [`komira_protobuf`](../src/komira_protobuf/) | a general-purpose Protocol Buffers wire codec (reader, writer, wire types), not tied to any one message set. |
 | [`komira_xml`](../src/komira_xml/) | a general XML codec: reader, tree, writer and escaping. |
 | [`komira_encoding`](../src/komira_encoding/) | binary-to-text encodings, base64, base64url, base32 and hex, and RFC 7468 PEM armor, in pure Mojo with no dependencies; decoding is strict and names the byte position of what it rejects. |
