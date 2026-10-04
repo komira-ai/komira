@@ -25,7 +25,7 @@ mojo_library(
     srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
     deps = [
         "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/komira_proto_codec:komira_proto_codec",
         "//src/komira_textproto:komira_textproto",
     ],

@@ -6,11 +6,12 @@
 #
 #   1. read the channel (`channel_state.mojo`): every file by download, every
 #      listed subdir's names; `plan_from_state` decides: STOP_DIFFERENT_BYTES,
-#      CANNOT_TELL, STOP_NEW_NAME or ALREADY_PUBLISHED stop here with NO write
-#      request;
+#      CANNOT_TELL or ALREADY_PUBLISHED stop here with NO write request. The
+#      names new to the channel go into the report whatever the verdict
+#      (unless step 1 could not tell);
 #   --plan stops here too, printing what steps 2 to 4 would do: no write
-#      request, and the channel's credential is never asked for a write
-#      value (no OIDC exchange);
+#      request, and `source` is never asked for a write value (a dry run's
+#      credential probe is the flow's, before this);
 #   2. the write credential is resolved ONCE (`PublishCredential.arm`), then
 #      every member still absent is uploaded by up to `--concurrency` workers
 #      (`upload.mojo`, `upload_members`). EVERY such member is attempted; when
@@ -50,13 +51,12 @@ from .plan import (
     VERDICT_CANNOT_TELL,
     VERDICT_PROCEED,
     VERDICT_STOP_DIFFERENT,
-    VERDICT_STOP_NEW_NAME,
     PublishTarget,
     approved_names_for,
     plan_from_state,
     state_name,
 )
-from kci_contract import ERROR_CREDENTIAL
+from kci_api import ERROR_CREDENTIAL
 
 from .report import (
     REASON_ALREADY_PUBLISHED,
@@ -66,7 +66,6 @@ from .report import (
     REASON_PUBLISHED,
     REASON_READ_BACK_MISMATCH,
     REASON_STOP_DIFFERENT_BYTES,
-    REASON_STOP_NEW_NAME,
     FileRow,
     PublishReport,
 )
@@ -91,8 +90,6 @@ def _reason_of_verdict(verdict: Int) -> String:
         return String(REASON_STOP_DIFFERENT_BYTES)
     if verdict == VERDICT_CANNOT_TELL:
         return String(REASON_CANNOT_TELL)
-    if verdict == VERDICT_STOP_NEW_NAME:
-        return String(REASON_STOP_NEW_NAME)
     if verdict == VERDICT_ALREADY_PUBLISHED:
         return String(REASON_ALREADY_PUBLISHED)
     return String(REASON_PUBLISHED)
@@ -145,7 +142,6 @@ def _record(mut r: PublishReport, i: Int, o: FileOutcome):
 
 def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
     targets: List[PublishTarget],
-    claims: List[String],
     mut registry: RegistrySet[T, PublishCredential],
     mut source: S,
     plan: Bool,
@@ -167,10 +163,12 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         r.files[i].state_after = channel_read.states[i].kind
     var verdict: Int
     try:
-        var v = plan_from_state(targets, channel_read, claims)
+        var v = plan_from_state(targets, channel_read)
         verdict = v.verdict
         for k in range(len(v.lines)):
             r.lines.append(v.lines[k].copy())
+        r.names_known = v.names_known
+        r.new_names = v.new_names.copy()
     except e:
         r.lines.append(String(e))
         r.end(String(REASON_CANNOT_TELL))
@@ -194,7 +192,7 @@ def run_publish[T: ChannelTransport, S: RegistryCredential, W: WorkerSleeper](
         return r^
     # ── step 2 ───────────────────────────────────────────────────────────────
     try:
-        var names = approved_names_for(targets, channel_read, claims)
+        var names = approved_names_for(targets)
         if not registry.credential().is_armed():
             try:
                 var host = repo_host(targets[0].coordinate.repo)

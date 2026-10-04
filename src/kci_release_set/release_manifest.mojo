@@ -3,7 +3,7 @@
 #   the BUILD step writes into a platform's release directory.
 # =============================================================================
 #
-# Format `kci.release_set`, schema_version 2 (kci_contract's format table):
+# Format `kci.release_set`, schema_version 2 (kci_api's format table):
 #
 #   {"format":"kci.release_set",
 #    "members":[{"artifact_type":..,"build":..,"dir":"<name>","kind":..,
@@ -17,7 +17,7 @@
 #
 # Sorted compact JSON (keys bytewise, members sorted bytewise by `name`),
 # one trailing newline. It lives at `<release-dir>/<platform>/release.json`
-# (kci_contract's layout), next to one directory per member. It is a commit
+# (kci_api's layout), next to one directory per member. It is a commit
 # marker and a convenience, never an authority: a build that stopped leaves
 # no `release.json`, and the PUBLISH step recomputes every member and the set
 # hash from the member directories and refuses a `release.json` that
@@ -36,7 +36,7 @@
 #
 # Major 1 (`"schema":"kci.release_set.v1"`, no revision, no platform) is no
 # longer read: a release directory is rebuilt, never carried across kci
-# versions. Unknown keys inside major 2 are ignored (kci_contract's policy)
+# versions. Unknown keys inside major 2 are ignored (kci_api's policy)
 # and listed in `ignored_keys`.
 #
 # `parse_release_manifest` refuses, naming the file: not JSON, not an
@@ -59,7 +59,7 @@ from std.pathlib import Path
 from komira_json import JSON_ARRAY, JSON_NUMBER, JSON_OBJECT, JSON_STRING, JsonValue, parse_json_value
 
 from kci_artifact_manifest import is_sha256_hex
-from kci_contract import (
+from kci_api import (
     FORMAT_RELEASE_SET,
     RELEASE_MANIFEST_NAME,
     conda_subdir_of,

@@ -10,17 +10,22 @@
 #       reads, ZERO write requests, every read anonymous, the secret store
 #       never asked (NoSecretStore would refuse), SUCCEEDED (exit 0), WOULD
 #       UPLOAD lines and WOULD_UPLOAD artifact rows;
-#   (2) dry run, PUBLIC OIDC channel: no OIDC exchange (the OIDC transport
-#       has no scripted answer and the job environment is unset: either
-#       would fail the run), exit 0;
+#   (2) dry run, PUBLIC OIDC channel, not under CI (no handshake variable):
+#       no OIDC exchange (the OIDC transport has no scripted answer: one
+#       would fail the run), exit 0, and the credential probe is recorded
+#       NOT_UNDER_CI, never MINTED (test_publish_plan_probe covers the CI
+#       case);
 #   (3) dry run, PRIVATE OIDC-only channel: REFUSED (exit 3,
 #       KCI-E-CREDENTIAL), naming why, with ZERO channel requests and no
 #       RUNNING record;
 #   (4) dry run, PRIVATE API-token channel: the token is resolved by secret
 #       name and carried on the reads; still ZERO writes;
 #   (5) an OIDC channel whose push identity names environment `prod`, run
-#       from stage `build`: REFUSED (KCI-E-STAGE-ENVIRONMENT), zero requests;
-#       an API-token channel has no such binding and runs from any stage;
+#       in environment `build`: REFUSED (KCI-E-STAGE-ENVIRONMENT), zero
+#       requests; the stage's name is not its environment (stage
+#       `publish-prod` runs in `prod`), and an empty environment is the
+#       stage's name; an API-token channel has no such binding and runs from
+#       any stage;
 #   (6) an API-token channel and a store that cannot resolve the name:
 #       FAILED (exit 4, KCI-E-CREDENTIAL), naming the secret, and ZERO
 #       writes (the token is resolved before the first write), after the
@@ -40,7 +45,7 @@ from std.testing import assert_equal, assert_false, assert_true
 
 from komira_secret_store import SecretStore, StaticSecretStore
 
-from kci_contract import (
+from kci_api import (
     ARTIFACT_WOULD_UPLOAD,
     ERROR_CREDENTIAL,
     ERROR_RESULT_FILE,
@@ -51,9 +56,10 @@ from kci_contract import (
     STATUS_RUNNING,
     MemoryRecorder,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet, ScriptedPkgTransport
 from kci_publish import (
+    ActionsOidcEnv,
     NoWaitSleeper,
     NoSecretStore,
     PublishCredential,
@@ -64,6 +70,7 @@ from kci_publish import (
     publish_flow,
 )
 from kci_publish.release_fixture import (
+    example_channel_path,
     EXAMPLE_HOST,
     EXAMPLE_TOKEN_SECRET,
     ExampleRelease,
@@ -110,13 +117,13 @@ struct _Rec(Movable):
 
 def _flow[S: SecretStore](
     f: PublishRequest, mut reg: RegistrySet[ScriptedChannel, PublishCredential], mut store: S, mut got: _Rec
-) -> PublishReport:
+) raises -> PublishReport:
     var sl = NoWaitSleeper()
-    return publish_flow(f, got.result, got.rec, reg, ScriptedPkgTransport(), store, _opts(), sl)
+    return publish_flow(f, got.result, got.rec, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, _opts(), sl)
 
 
-def _channel(name: String) -> ScriptedChannel:
-    var ch = ScriptedChannel(String(EXAMPLE_HOST), name.copy(), String("linux-64"))
+def _channel(name: String) raises -> ScriptedChannel:
+    var ch = ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(name), String("linux-64"))
     ch.put(String("linux-64"), String("komira_alpha-0.9.0-h00000000_1.conda"), _bytes(String("old a")))
     ch.put(String("linux-64"), String("komira_beta-0.9.0-h00000000_1.conda"), _bytes(String("old b")))
     ch.put(String("linux-64"), String("komira-0.9.0-h00000000_1.conda"), _bytes(String("old m")))
@@ -152,7 +159,7 @@ def test_dry_run_public_api_token() raises:
     print("  test_dry_run_public_api_token: PASS")
 
 
-def test_dry_run_public_oidc_mints_nothing() raises:
+def test_dry_run_public_oidc_not_under_ci_mints_nothing() raises:
     var f = _flags(String("dry_oidc"), String("example-oidc"), True)
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
     var store = NoSecretStore()
@@ -161,7 +168,9 @@ def test_dry_run_public_oidc_mints_nothing() raises:
     assert_equal(rep.exit_code(), EXIT_OK, String("\n").join(rep.lines))
     assert_equal(reg.transport().write_count(), 0)
     _all_anonymous(reg)
-    print("  test_dry_run_public_oidc_mints_nothing: PASS")
+    assert_equal(rep.credential_probe, String("NOT_UNDER_CI"))
+    assert_equal(got.result.steps[0].credential_probe, String("NOT_UNDER_CI"))
+    print("  test_dry_run_public_oidc_not_under_ci_mints_nothing: PASS")
 
 
 def test_dry_run_private_oidc_is_refused() raises:
@@ -197,17 +206,37 @@ def test_dry_run_private_api_token_reads_with_the_token() raises:
 def test_an_oidc_channel_publishes_only_from_its_stage() raises:
     # the push identity names environment `prod`; this step runs in `build`
     var f = _flags(String("stage"), String("example-oidc"), False)
-    f.stage = String("build")
+    f.environment = String("build")
     var reg = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
     var store = NoSecretStore()
     var got = _Rec()
     var rep = _flow(f, reg, store, got)
     assert_equal(rep.exit_code(), EXIT_REFUSED, String("\n").join(rep.lines))
     assert_equal(rep.error_id, String(ERROR_STAGE_ENVIRONMENT))
-    assert_true(rep.has_line_containing(String("names environment 'prod'; this PUBLISH step runs in stage 'build'")))
+    assert_true(
+        rep.has_line_containing(
+            String("names environment 'prod'; this PUBLISH step runs in stage 'publish-prod', in GitHub environment 'build'")
+        ),
+        String("\n").join(rep.lines),
+    )
     assert_equal(reg.transport().call_count(), 0)
     assert_equal(len(got.rec.records), 0)
     assert_equal(got.result.error.id, String(ERROR_STAGE_ENVIRONMENT))
+    # an empty environment is the stage's name: stage `prod` runs in `prod`
+    var e = _flags(String("stage_default"), String("example-oidc"), True)
+    e.stage = String("prod")
+    e.environment = String("")
+    var reg3 = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
+    var got3 = _Rec()
+    var rep3 = _flow(e, reg3, store, got3)
+    assert_equal(rep3.exit_code(), EXIT_OK, String("\n").join(rep3.lines))
+    # and stage `publish-prod` with no environment runs in `publish-prod`
+    var n = _flags(String("stage_noenv"), String("example-oidc"), True)
+    n.environment = String("")
+    var reg4 = RegistrySet[ScriptedChannel, PublishCredential](_channel(String("example-oidc")), PublishCredential())
+    var got4 = _Rec()
+    var rep4 = _flow(n, reg4, store, got4)
+    assert_equal(rep4.error_id, String(ERROR_STAGE_ENVIRONMENT), String("\n").join(rep4.lines))
     # an API-token channel names no environment: any stage may run it
     var g = _flags(String("stage_tok"), String("example-stable"), True)
     g.stage = String("build")
@@ -250,7 +279,7 @@ def test_a_recorder_that_cannot_record_sends_nothing() raises:
 
 def main() raises:
     test_dry_run_public_api_token()
-    test_dry_run_public_oidc_mints_nothing()
+    test_dry_run_public_oidc_not_under_ci_mints_nothing()
     test_dry_run_private_oidc_is_refused()
     test_dry_run_private_api_token_reads_with_the_token()
     test_an_oidc_channel_publishes_only_from_its_stage()

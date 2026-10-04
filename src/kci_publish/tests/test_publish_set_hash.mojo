@@ -1,6 +1,7 @@
 # =============================================================================
 # src/kci_publish/tests/test_publish_set_hash.mojo -- contract 0.5: the set
-#   hash publish recomputes from the member directories is the approved one.
+#   hash publish recomputes from the member directories is the one
+#   release.json records, and the result carries it.
 # =============================================================================
 #
 # ROWS
@@ -11,12 +12,14 @@
 #       linux-64\tCONDA\t<sha256>\n`, the metapackage included);
 #       `load_release` recomputes it and release.json records it;
 #   (2) one member's bytes changed (and its manifest and metadata with it,
-#       so the member verifies): the recomputed hash is another, and the
-#       approved one is refused;
-#   (3) the whole step with a wrong `--expect-set-hash`: REFUSED (exit 3,
-#       KCI-E-SET-HASH), the line names both hashes, nothing was recorded as
-#       RUNNING, and the channel saw ZERO requests (no read, no write) and
-#       the credential was never asked.
+#       so the member verifies): the recomputed hash is another;
+#   (3) the whole step over a release.json that records another set hash
+#       than the members recompute to: REFUSED (exit 3, KCI-E-MEMBER), the
+#       line names both hashes, nothing was recorded as RUNNING, and the
+#       channel saw ZERO requests (no read, no write). There is no
+#       approved-hash input: the set a release publishes is the one its
+#       declarations and its build produced, and the result records the
+#       recomputed hash for each channel it reaches.
 #
 # Hermetic: TEST_TMPDIR and ScriptedChannel; no network.
 # =============================================================================
@@ -27,10 +30,11 @@ from std.os import makedirs
 from komira_libc.posix import _read_env
 from std.testing import assert_equal, assert_true
 
-from kci_contract import ERROR_SET_HASH, EXIT_REFUSED, MemoryRecorder
-from kci_contract import RunResult as KciRunResult
+from kci_api import ERROR_MEMBER, EXIT_REFUSED, MemoryRecorder
+from kci_api import RunResult as KciRunResult
 from kci_pkg_upload import RegistrySet
 from kci_publish import (
+    ActionsOidcEnv,
     NoWaitSleeper,
     NoSecretStore,
     PublishCredential,
@@ -39,16 +43,15 @@ from kci_publish import (
     publish_flow,
 )
 from kci_publish.release_fixture import (
+    example_channel_path,
     EXAMPLE_HOST,
     ExampleRelease,
     example_loaded,
     write_example_inputs,
 )
-from kci_publish.verify import require_set_hash
 from kci_pkg_upload import ScriptedPkgTransport
 
 
-comptime _WRONG: String = "abababababababababababababababababababababababababababababababab"
 comptime _GOLDEN: String = "551855805f860054f4024e7ad1c219c54f0c30da078ff0ea273f9d19806292ef"
 
 
@@ -70,7 +73,6 @@ def test_golden() raises:
     var loaded = example_loaded(r, d + String("/release"))
     assert_equal(loaded.set_hash(), String(_GOLDEN))
     assert_equal(r.set_hash(d + String("/release")), String(_GOLDEN))
-    require_set_hash(loaded, String(_GOLDEN))
     print("  test_golden: PASS")
 
 
@@ -81,43 +83,45 @@ def test_other_bytes_other_hash() raises:
     r.write(d)
     var loaded = example_loaded(r, d)
     assert_true(loaded.set_hash() != String(_GOLDEN))
-    var raised = False
-    try:
-        require_set_hash(loaded, String(_GOLDEN))
-    except e:
-        raised = True
-        assert_true(String(e).find(String("--expect-set-hash is ") + String(_GOLDEN)) >= 0, String(e))
-        assert_true(String(e).find(loaded.set_hash()) >= 0, String(e))
-    assert_true(raised)
+    assert_equal(loaded.set_hash(), r.set_hash(d))
     print("  test_other_bytes_other_hash: PASS")
 
 
-def test_a_wrong_expectation_sends_nothing() raises:
+def test_a_release_json_of_another_set_sends_nothing() raises:
     var r = ExampleRelease()
     var d = _root(String("flow"))
     var req = write_example_inputs(r, d, String("example-stable"))
-    req.expect_set_hash = String(_WRONG)
+    # release.json now is another build's: self-consistent, but not what
+    # these members recompute to
+    var other = ExampleRelease()
+    other.members[1].content = String("beta conda bytes, rebuilt")
+    var od = _root(String("flow_other"))
+    other.write(od)
+    var other_hash = other.set_hash(od)
+    var f = open(req.platform_dir() + String("/release.json"), "w")
+    f.write(open(od + String("/release.json"), "r").read())
+    f.close()
     var reg = RegistrySet[ScriptedChannel, PublishCredential](
-        ScriptedChannel(String(EXAMPLE_HOST), String("example-stable"), String("linux-64")),
+        ScriptedChannel(String(EXAMPLE_HOST), example_channel_path(String("example-stable")), String("linux-64")),
         PublishCredential(),
     )
     var store = NoSecretStore()
     var sleeper = NoWaitSleeper()
     var result = KciRunResult(String("run"), String("publish"))
     var rec = MemoryRecorder()
-    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), store, RunOptions(), sleeper)
-    assert_equal(rep.exit_code(), EXIT_REFUSED)
-    assert_equal(rep.error_id, String(ERROR_SET_HASH))
-    assert_equal(result.error.id, String(ERROR_SET_HASH))
+    var rep = publish_flow(req, result, rec, reg, ScriptedPkgTransport(), ActionsOidcEnv.absent(), store, RunOptions(), sleeper)
+    assert_equal(rep.exit_code(), EXIT_REFUSED, String("\n").join(rep.lines))
+    assert_equal(rep.error_id, String(ERROR_MEMBER))
+    assert_equal(result.error.id, String(ERROR_MEMBER))
     assert_equal(len(rec.records), 0)
-    assert_true(rep.has_line_containing(String("--expect-set-hash is ") + String(_WRONG)))
+    assert_true(rep.has_line_containing(String("it says set hash ") + other_hash), String("\n").join(rep.lines))
     assert_true(rep.has_line_containing(String(_GOLDEN)))
     assert_equal(reg.transport().call_count(), 0)
-    print("  test_a_wrong_expectation_sends_nothing: PASS")
+    print("  test_a_release_json_of_another_set_sends_nothing: PASS")
 
 
 def main() raises:
     test_golden()
     test_other_bytes_other_hash()
-    test_a_wrong_expectation_sends_nothing()
+    test_a_release_json_of_another_set_sends_nothing()
     print("test_publish_set_hash: ALL PASS")

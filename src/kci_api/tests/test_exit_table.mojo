@@ -1,12 +1,12 @@
 # =============================================================================
-# src/kci_contract/tests/test_exit_table.mojo
+# src/kci_api/tests/test_exit_table.mojo
 #   The ONE exit table, pinned by value: a renumbering is an edit of this
 #   golden, never a side effect.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
-from kci_contract import (
+from kci_api import (
     ERROR_INTERNAL,
     ERROR_PUBLISH_READ_BACK,
     ERROR_USAGE,

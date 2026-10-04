@@ -1,5 +1,5 @@
 # =============================================================================
-# src/kci_contract/selection.mojo -- the `--only` selector grammar, the step
+# src/kci_api/selection.mojo -- the `--only` selector grammar, the step
 #   name grammar, and the two scope words of a run.
 # =============================================================================
 #
@@ -11,12 +11,12 @@
 # skip, so a step added to the machine file later is not run by an old
 # selective command. A name is a step name: `[a-z][a-z0-9-]*`, at most
 # `STEP_NAME_MAX_BYTES` bytes, not ending in `-` (the machine file's grammar
-# for stage and step names; kci_stage_graph uses this one).
+# for stage and step names; kci_release_machine uses this one).
 #
 # Refused here, before anything is read (a usage error, `KCI-E-SELECTOR`,
 # exit 2): an unknown prefix, a malformed name, and the same selector twice.
 # Resolving a selector against a stage, and refusing one that matches
-# nothing (`KCI-E-SELECTOR-NO-MATCH`, exit 3), is kci_stage_graph's job: this
+# nothing (`KCI-E-SELECTOR-NO-MATCH`, exit 3), is kci_release_machine's job: this
 # file is pure grammar.
 #
 # SCOPE. A run is FULL when no `--only` is given and SELECTIVE whenever one

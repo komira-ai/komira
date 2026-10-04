@@ -12,33 +12,39 @@
 #   declarations_file     the artifact declarations (what the release is)
 #   release_dir           --release-dir: the top release directory; this
 #                         step reads `<release_dir>/<platform>/`
-#                         (kci_contract's layout), which a BUILD step wrote
+#                         (kci_api's layout), which a BUILD step wrote
 #   platform              the step's platform: must be the one
 #                         `release.json` names
 #   revision_id           --revision-id: a full commit id; must be the one
 #                         `release.json` names (the set hash holds it too)
-#   stage                 the stage this step runs in: for a channel that
+#   stage                 the stage this step runs in (the result's
+#                         `new_names[].stage`)
+#   environment           the stage's GitHub environment (the machine file's
+#                         `environment`, by default the stage's name; ""
+#                         here means the stage's name). For a channel that
 #                         publishes with OIDC trusted publishing it must be
-#                         the GitHub environment the channel's push identity
-#                         names,
-#                         and the OIDC token's `environment` claim is held
-#                         to it
+#                         the environment the channel's push identity names,
+#                         and the OIDC token's `environment` claim is held to
+#                         it
 #   channels_file, channel  the channels file (kci_release_channel) and the
 #                         channel to publish to
 #   release_version_file  release_version.sh's stdout for the release commit
-#   expect_set_hash       the set hash that was approved
-#   claims                names this run may claim for the first time
 #   concurrency           how many members upload at once, 1..16
-#   plan                  `kci run --plan`: steps 0 and 1 only: reads, no
-#                         write
-#   run                   --run-id, --attempt, --context (kci_contract)
+#   plan                  `kci run --plan`: no write to the channel; under
+#                         CI, an OIDC channel's token is exchanged and
+#                         discarded (flow.mojo)
+#   run                   --run-id, --attempt, --context (kci_api)
+#
+# Which names the release publishes is the declarations file's: there is no
+# per-run claim and no approved-set input. A name new to the channel is
+# reported (`new_names`), never refused.
 #
 # ⛔ NO SECRET here: no field takes a token.
 #
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from kci_contract import RunIdentity, release_platform_dir
+from kci_api import RunIdentity, release_platform_dir
 
 from .workers import DEFAULT_CONCURRENCY
 
@@ -54,11 +60,10 @@ struct PublishRequest(Copyable, Movable):
     var platform: String
     var revision_id: String
     var stage: String
+    var environment: String
     var channels_file: String
     var channel: String
     var release_version_file: String
-    var expect_set_hash: String
-    var claims: List[String]
     var concurrency: Int
     var plan: Bool
     var run: RunIdentity
@@ -70,14 +75,20 @@ struct PublishRequest(Copyable, Movable):
         self.platform = String("")
         self.revision_id = String("")
         self.stage = String("")
+        self.environment = String("")
         self.channels_file = String("")
         self.channel = String("")
         self.release_version_file = String("")
-        self.expect_set_hash = String("")
-        self.claims = List[String]()
         self.concurrency = DEFAULT_CONCURRENCY
         self.plan = False
         self.run = run^
+
+    def github_environment(self) -> String:
+        """The stage's GitHub environment: `environment`, or the stage's
+        name when it is "" (the machine file's default)."""
+        if self.environment.byte_length() > 0:
+            return self.environment.copy()
+        return self.stage.copy()
 
     def platform_dir(self) raises -> String:
         """`<release_dir>/<platform>`: the release directory this step

@@ -3,7 +3,7 @@
 # =============================================================================
 #
 # The channels file is textproto, every channel defined once, under its
-# format's major (kci_contract's format table, `kci.channels`):
+# format's major (kci_api's format table, `kci.channels`):
 #
 #   schema_version: 1
 #   channel {
@@ -17,7 +17,7 @@
 #     }
 #   }
 #
-# `schema_version` is read FIRST, before any other field (kci_contract's
+# `schema_version` is read FIRST, before any other field (kci_api's
 # `authored_schema_version`): missing, set twice, not an integer, or a major
 # this kci does not read is refused, so a file written for a newer kci says
 # "needs a newer kci" rather than naming a field the newer major added.
@@ -53,7 +53,7 @@ from komira_textproto import (
     lex,
 )
 
-from kci_contract import FORMAT_CHANNELS, authored_schema_version, skip_schema_version
+from kci_api import FORMAT_CHANNELS, authored_schema_version, skip_schema_version
 
 from .channel_credential import ChannelCredential
 from .channel_declaration import (
