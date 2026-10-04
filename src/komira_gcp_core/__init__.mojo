@@ -233,6 +233,7 @@ from .adc import (
     adc_env_names,
     adc_probe_config,
     application_default_token_source,
+    application_default_token_source_from,
     application_default_token_source_with,
     gcloud_adc_path,
     resolve_adc,

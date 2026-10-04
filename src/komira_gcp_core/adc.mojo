@@ -18,13 +18,23 @@
 #      macOS and %APPDATA%\gcloud on Windows. A missing file moves on.
 #   3. The metadata server (GCE, Cloud Run, GKE, App Engine flexible): when
 #      GCE_METADATA_HOST is set, its host:port (Go's `compute/metadata`
-#      `OnGCE` takes that as being on Google Cloud); else when a GET of
+#      `OnGCE` takes that as being on Google Cloud); else when the DMI
+#      product name /sys/class/dmi/id/product_name starts with "Google"
+#      (google-auth's `detect_gce_residency_linux`); else when a GET of
 #      http://169.254.169.254/ answers `Metadata-Flavor: Google`
-#      (google-auth's `ping`, Go's `testOnGCE`); else when the DMI product
-#      name /sys/class/dmi/id/product_name starts with "Google" (google-auth's
-#      `detect_gce_residency_linux`). Tokens then come from
+#      (google-auth's `ping`, Go's `testOnGCE`). google-auth pings before it
+#      reads DMI; either signal gives the same answer, and reading the file
+#      first spares a GCE VM the network probe. Tokens then come from
 #      metadata.google.internal, or GCE_METADATA_HOST when set.
 #   4. Otherwise no credentials: Google's own refusal text.
+#
+# THE PROBE'S WORST CASE. komira_http_client has no connect timeout yet: the
+# probe's `PROBE_TIMEOUT_US` (3 s) bounds the request from send to parsed
+# head, not the TCP dial. Where 169.254.169.254 is unroutable the dial fails
+# at once; where a network DROPS the SYN, the dial waits out the kernel's SYN
+# retries (Linux's default `tcp_syn_retries` of 6 is about 127 s) before
+# the search ends in "not found". google-auth and Go bound the dial at about
+# 3 s. On GCE the DMI check answers first and no probe is sent.
 #
 # A credentials file (steps 1 and 2) is read by its `type`:
 #   * `service_account`: the JWT bearer grant with the caller's scopes, or a
@@ -37,11 +47,23 @@
 #
 # THE ENVIRONMENT. The chain reads exactly these variables, each one that
 # Google's own libraries read for the same purpose, through the `EnvSource`
-# seam (sources.mojo), and nothing else: GOOGLE_APPLICATION_CREDENTIALS,
-# CLOUDSDK_CONFIG, HOME, APPDATA, GCE_METADATA_HOST (`adc_env_names()`). A
-# welded test runs every branch over a `MapEnv` and checks every name read
-# is one of them, and scans the sources for any other. komira settings
-# (scopes, the audience, the HTTP config) are parameters.
+# seam (sources.mojo), and nothing else (`adc_env_names()`):
+#
+#   variable                        google-auth (Python)   Go cloud.google.com/go/auth
+#   GOOGLE_APPLICATION_CREDENTIALS  read                   read
+#   CLOUDSDK_CONFIG                 read                   not read
+#   HOME                            read (expanduser)      read
+#   APPDATA                         read (Windows)         read (Windows)
+#   GCE_METADATA_HOST               read                   read
+#
+# CLOUDSDK_CONFIG is google-auth's: gcloud itself honours it, so a developer
+# who moved gcloud's directory is found. An EMPTY value reads as unset, as
+# Go reads it (google-auth would try to open the empty path). Where HOME is
+# unset or empty the gcloud file is not looked for: Go and Python fall back
+# to the passwd entry, which this does not read. A welded test runs every
+# branch over a `MapEnv` and checks every name read is one of them, and
+# scans the sources for any other. komira settings (scopes, the audience,
+# the HTTP config) are parameters.
 #
 # Not done here, and said so: no retry of the probe or of a token fetch
 # (google-auth retries the probe three times); App Engine standard's legacy
@@ -329,19 +351,12 @@ def _probe_metadata[X: GcpHttpTransport](mut probe: X) -> Bool:
         return False
 
 
-def resolve_adc[E: EnvSource, F: FileSource, X: GcpHttpTransport](
-    mut env: E,
-    mut files: F,
-    mut probe: X,
-    options: AdcOptions,
-    windows: Bool = False,
-) raises -> AdcCredentials:
-    """Search for Application Default Credentials in Google's order (the
-    module header). `probe` carries the one metadata-server probe; it is
-    used only when steps 1 and 2 find nothing and GCE_METADATA_HOST is
-    unset. `windows` picks the well-known file's Windows location and skips
-    the Linux DMI check. Raises a named refusal for a file it cannot use,
-    and Google's own text when it finds nothing."""
+def _resolve_before_probe[E: EnvSource, F: FileSource](
+    mut env: E, mut files: F, options: AdcOptions, windows: Bool
+) raises -> Optional[AdcCredentials]:
+    """Every step of the search but the network probe: the two files,
+    GCE_METADATA_HOST and the DMI product name. None when the probe is all
+    that is left."""
     var explicit = env.get(ENV_GOOGLE_APPLICATION_CREDENTIALS)
     if explicit.byte_length() > 0:
         if not files.exists(explicit):
@@ -363,8 +378,6 @@ def resolve_adc[E: EnvSource, F: FileSource, X: GcpHttpTransport](
     var host = env.get(ENV_GCE_METADATA_HOST)
     if host.byte_length() > 0:
         return _metadata_credentials(metadata_endpoint(host))
-    if _probe_metadata(probe):
-        return _metadata_credentials(metadata_endpoint(String(METADATA_DEFAULT_HOST)))
     if not windows:
         var product = String(GCE_PRODUCT_NAME_FILE)
         if files.exists(product):
@@ -377,7 +390,34 @@ def resolve_adc[E: EnvSource, F: FileSource, X: GcpHttpTransport](
                 return _metadata_credentials(
                     metadata_endpoint(String(METADATA_DEFAULT_HOST))
                 )
+    return None
+
+
+def _resolve_after_probe(answered: Bool) raises -> AdcCredentials:
+    """The last step: the metadata server when the probe answered, else
+    Google's own text."""
+    if answered:
+        return _metadata_credentials(metadata_endpoint(String(METADATA_DEFAULT_HOST)))
     raise Error(String(ADC_NOT_FOUND))
+
+
+def resolve_adc[E: EnvSource, F: FileSource, X: GcpHttpTransport](
+    mut env: E,
+    mut files: F,
+    mut probe: X,
+    options: AdcOptions,
+    windows: Bool = False,
+) raises -> AdcCredentials:
+    """Search for Application Default Credentials in Google's order (the
+    module header). `probe` carries the one metadata-server probe; it is
+    used only when every other step finds nothing. `windows` picks the
+    well-known file's Windows location and skips the Linux DMI check.
+    Raises a named refusal for a file it cannot use, and Google's own text
+    when it finds nothing."""
+    var found = _resolve_before_probe(env, files, options, windows)
+    if found:
+        return found.take()
+    return _resolve_after_probe(_probe_metadata(probe))
 
 
 struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
@@ -385,7 +425,8 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
 ):
     """The fetcher for the credentials `resolve_adc` chose: one of the four
     of token_sources.mojo. `XP` is the plain-HTTP transport (the metadata
-    server), `XT` the TLS one (Google's token endpoint)."""
+    server), `XT` the TLS one (Google's token endpoint). Only the one the
+    credentials use need be given; the other may be None."""
 
     var kind: Int
     var _quota_project_id: String
@@ -397,8 +438,8 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
     def __init__(
         out self,
         var creds: AdcCredentials,
-        var plain: Self.XP,
-        var tls: Self.XT,
+        var plain: Optional[Self.XP],
+        var tls: Optional[Self.XT],
         var clock: Self.W,
         options: AdcOptions,
     ) raises:
@@ -409,12 +450,16 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
         self._jwt = None
         self._user = None
         if creds.kind == ADC_KIND_METADATA_SERVER:
+            if not plain:
+                raise Error("AdcFetcher: the metadata server needs the plain transport")
             self._metadata = MetadataServerFetcher[Self.XP](
-                plain^, creds.metadata.take(), options.scopes.copy()
+                plain.take(), creds.metadata.take(), options.scopes.copy()
             )
         elif creds.kind == ADC_KIND_SERVICE_ACCOUNT:
+            if not tls:
+                raise Error("AdcFetcher: a key's grant needs the TLS transport")
             self._key = ServiceAccountKeyFetcher[Self.XT, Self.W](
-                tls^, clock^, creds.key.take(), options.scopes.copy()
+                tls.take(), clock^, creds.key.take(), options.scopes.copy()
             )
         elif creds.kind == ADC_KIND_SELF_SIGNED_JWT:
             # google-auth: always_use_jwt_access with scopes signs a `scope`
@@ -435,8 +480,12 @@ struct AdcFetcher[XP: GcpHttpTransport, XT: GcpHttpTransport, W: WallClock](
             # scopes and never applies them (`oauth2.credentials.Credentials`
             # is `ReadOnlyScoped`, so `with_scopes_if_required` leaves it),
             # and Go's refresh sends no `scope` either.
+            if not tls:
+                raise Error(
+                    "AdcFetcher: an authorized_user refresh needs the TLS transport"
+                )
             self._user = AuthorizedUserFetcher[Self.XT](
-                tls^, creds.user.take(), List[String]()
+                tls.take(), creds.user.take(), List[String]()
             )
         else:
             raise Error("AdcFetcher: unknown credential kind " + String(creds.kind))
@@ -489,7 +538,69 @@ def application_default_token_source_with[
     first request."""
     var creds = resolve_adc(env, files, probe, options, windows)
     return CachingTokenSource[AdcFetcher[XP, XT, W], K](
-        AdcFetcher[XP, XT, W](creds^, plain^, tls^, clock^, options),
+        AdcFetcher[XP, XT, W](
+            creds^, Optional[XP](plain^), Optional[XT](tls^), clock^, options
+        ),
+        monotonic^,
+    )
+
+
+def application_default_token_source_from[
+    E: EnvSource,
+    F: FileSource,
+    P: Connector,
+    T: Connector,
+    W: WallClock,
+    K: MonotonicClock,
+](
+    mut env: E,
+    mut files: F,
+    http_config: HttpClientConfig,
+    mk_plain: def () raises thin -> P,
+    mk_tls: def () raises thin -> T,
+    var clock: W,
+    var monotonic: K,
+    options: AdcOptions,
+    windows: Bool = False,
+) raises -> CachingTokenSource[
+    AdcFetcher[GcpConnectorTransport[P], GcpConnectorTransport[T], W], K
+]:
+    """`application_default_token_source` over injected env, file and clock
+    seams, making connectors only as the search needs them: the probe's
+    plain connector only when the probe runs (a connector that cannot be
+    made counts as no answer, as a failed probe does), then the plain one
+    for the metadata server OR the TLS one for a token endpoint, never
+    both. So a missing trust store cannot fail ADC on Cloud Run, where only
+    the metadata server is used."""
+    var found = _resolve_before_probe(env, files, options, windows)
+    var creds: AdcCredentials
+    if found:
+        creds = found.take()
+    else:
+        var answered = False
+        try:
+            var probe = GcpConnectorTransport[P](
+                adc_probe_config(http_config), mk_plain()
+            )
+            answered = _probe_metadata(probe)
+        except:
+            answered = False
+        creds = _resolve_after_probe(answered)
+    var plain: Optional[GcpConnectorTransport[P]] = None
+    var tls: Optional[GcpConnectorTransport[T]] = None
+    if creds.kind == ADC_KIND_METADATA_SERVER:
+        plain = GcpConnectorTransport[P](http_config, mk_plain())
+    elif (
+        creds.kind == ADC_KIND_SERVICE_ACCOUNT
+        or creds.kind == ADC_KIND_AUTHORIZED_USER
+    ):
+        tls = GcpConnectorTransport[T](http_config, mk_tls())
+    return CachingTokenSource[
+        AdcFetcher[GcpConnectorTransport[P], GcpConnectorTransport[T], W], K
+    ](
+        AdcFetcher[GcpConnectorTransport[P], GcpConnectorTransport[T], W](
+            creds^, plain^, tls^, clock^, options
+        ),
         monotonic^,
     )
 
@@ -509,17 +620,19 @@ def application_default_token_source[P: Connector, T: Connector](
     plain-TCP one for the metadata server, `mk_tls` a TLS one for Google's
     token endpoint — each with an HTTP client built from `http_config` (the
     caller's; the metadata probe is further bounded by `PROBE_TIMEOUT_US`).
-    Raises when the chain finds nothing it can use."""
+    A connector is made only when the search needs it
+    (`application_default_token_source_from`). Raises when the chain finds
+    nothing it can use."""
     var env = ProcessEnv()
     var files = ProcessFiles()
     # Mojo builds no Windows target: the Windows arm of the search is tested,
     # and unreachable from here.
-    return application_default_token_source_with(
+    return application_default_token_source_from(
         env,
         files,
-        GcpConnectorTransport[P](adc_probe_config(http_config), mk_plain()),
-        GcpConnectorTransport[P](http_config, mk_plain()),
-        GcpConnectorTransport[T](http_config, mk_tls()),
+        http_config,
+        mk_plain,
+        mk_tls,
         SystemWallClock(),
         SystemClock(),
         options,

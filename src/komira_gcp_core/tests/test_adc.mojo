@@ -14,9 +14,9 @@
 #      with neither scopes nor an audience; an empty value is unset;
 #   2. the gcloud well-known file under CLOUDSDK_CONFIG, HOME and, on
 #      Windows, APPDATA;
-#   3. the metadata server: GCE_METADATA_HOST (no probe), the probe answered
-#      `Metadata-Flavor: Google`, the probe failed but the DMI product name
-#      says Google, and neither;
+#   3. the metadata server: GCE_METADATA_HOST (no probe), the DMI product
+#      name says Google (no probe), the probe answered
+#      `Metadata-Flavor: Google`, and neither;
 #   4. nothing found: Google's own text.
 #
 # After every case the variables read are checked against the five Google's
@@ -24,9 +24,11 @@
 #
 # `application_default_token_source_with` is then run end to end through
 # komira_http_client over ScriptedConnectors: the metadata token over the
-# plain transport and a key file's grant over the TLS one. The production
-# entry `application_default_token_source` is compiled here, not run: it
-# reads this process's environment.
+# plain transport and a key file's grant over the TLS one.
+# `application_default_token_source_from` is run with connector factories
+# that refuse, to show it makes only the connectors the search needs. The
+# production entry `application_default_token_source` is compiled here, not
+# run: it reads this process's environment.
 # =============================================================================
 
 from std.memory import ArcPointer
@@ -55,6 +57,7 @@ from komira_gcp_core import (
     adc_env_names,
     adc_probe_config,
     application_default_token_source,
+    application_default_token_source_from,
     application_default_token_source_with,
     gcloud_adc_path,
     resolve_adc,
@@ -489,7 +492,8 @@ def test_metadata_dmi_fallback(mut seen: Seen) raises:
     var probe = ScriptedProbe(_PROBE_RAISES)
     var c = _resolve(seen, env, files, probe, AdcOptions())
     assert_equal(c.source, ADC_SOURCE_METADATA)
-    assert_equal(len(probe.sent), 1)
+    # The DMI file answers before the network: no probe is sent.
+    assert_equal(len(probe.sent), 0)
 
 
 def test_nothing_found(mut seen: Seen) raises:
@@ -694,6 +698,104 @@ def test_end_to_end_always_self_signed(mut seen: Seen) raises:
     assert_false('"aud"' in claims, claims)
 
 
+def _mk_metadata_answer() raises -> ScriptedConnector:
+    var c = ScriptedConnector()
+    c.arm(ScriptedStream.from_read_script(_answer(_OK_BODY)))
+    return c^
+
+
+def _mk_tls_answer() raises -> ScriptedConnector:
+    return ScriptedConnector.with_stream_tls(
+        ScriptedStream.from_read_script(_answer(_OK_BODY))
+    )
+
+
+def _mk_refused() raises -> ScriptedConnector:
+    raise Error("this connector cannot be made")
+
+
+def test_from_makes_only_the_needed_connector(mut seen: Seen) raises:
+    # The metadata server through GCE_METADATA_HOST: no TLS connector is
+    # made (a missing trust store must not fail ADC on Cloud Run).
+    var env = MapEnv()
+    env.set(String("GCE_METADATA_HOST"), String("127.0.0.1:8080"))
+    var files = MapFiles()
+    var src = application_default_token_source_from(
+        env,
+        files,
+        HttpClientConfig.defaults(),
+        _mk_metadata_answer,
+        _mk_refused,
+        FixedWallClock(_T0),
+        ManualClock(0),
+        AdcOptions(),
+    )
+    seen.check(env)
+    assert_equal(src.access_token(), "ya29.ADC")
+
+    # A key file: no plain connector is made, for the probe or otherwise.
+    var kenv = MapEnv()
+    kenv.set(String(_GAC), String(_KEY_PATH))
+    var kfiles = MapFiles()
+    kfiles.put(
+        String(_KEY_PATH),
+        _key_text().replace(
+            "https://oauth2.googleapis.com/token", "https://127.0.0.1:8443/token"
+        ),
+    )
+    var ksrc = application_default_token_source_from(
+        kenv,
+        kfiles,
+        HttpClientConfig.defaults(),
+        _mk_refused,
+        _mk_tls_answer,
+        FixedWallClock(_T0),
+        ManualClock(0),
+        AdcOptions(_scopes()),
+    )
+    seen.check(kenv)
+    assert_equal(ksrc.access_token(), "ya29.ADC")
+
+    # A self-signed JWT needs neither.
+    var jenv = MapEnv()
+    jenv.set(String(_GAC), String(_KEY_PATH))
+    var jfiles = MapFiles()
+    jfiles.put(String(_KEY_PATH), _key_text())
+    var jsrc = application_default_token_source_from(
+        jenv,
+        jfiles,
+        HttpClientConfig.defaults(),
+        _mk_refused,
+        _mk_refused,
+        FixedWallClock(_T0),
+        ManualClock(0),
+        AdcOptions(List[String](), String("https://logging.googleapis.com/")),
+    )
+    seen.check(jenv)
+    assert_equal(len(jsrc.access_token().split(".")), 3)
+
+    # Nothing found, and the probe's connector cannot be made: that is no
+    # answer, so Google's text.
+    var nenv = MapEnv()
+    var nfiles = MapFiles()
+    var msg = String("<no error>")
+    try:
+        _ = application_default_token_source_from(
+            nenv,
+            nfiles,
+            HttpClientConfig.defaults(),
+            _mk_refused,
+            _mk_refused,
+            FixedWallClock(_T0),
+            ManualClock(0),
+            AdcOptions(),
+        )
+    except e:
+        msg = String(e)
+    seen.check(nenv)
+    assert_equal(msg, String(ADC_NOT_FOUND))
+
+
 def test_probe_config() raises:
     var d = adc_probe_config(HttpClientConfig.defaults())
     assert_equal(d.request_timeout_us, PROBE_TIMEOUT_US)
@@ -736,6 +838,7 @@ def main() raises:
     test_end_to_end_key_file(seen)
     test_end_to_end_authorized_user_sends_no_scope(seen)
     test_end_to_end_always_self_signed(seen)
+    test_from_makes_only_the_needed_connector(seen)
     test_every_google_variable_and_no_other(seen)
     test_probe_config()
     test_production_entry_compiles()
