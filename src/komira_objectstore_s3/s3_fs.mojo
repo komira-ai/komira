@@ -64,6 +64,14 @@
 # the options, the credential source and the clock; the connector factory is
 # a thin function pointer (a code address, no heap).
 #
+# CREDENTIALS THAT EXPIRE. `StaticCredsSource` is one fixed credential and
+# fits keys that do not expire. For temporary credentials (an instance or
+# container role, STS, SSO, web identity) `T` is komira_aws_core's
+# `SharedCredsSource`, whose copies share ONE refreshing chain: a clone signs
+# with the credential the chain holds now, refreshed before it expires, and
+# the chain is resolved once for every clone. `ProcessCredsSource` is that
+# source over the process's environment and files.
+#
 # No UnsafePointer in any public signature, no wildcard-origin field.
 # =============================================================================
 
@@ -295,9 +303,9 @@ struct S3Fs[
 
         def mk() raises -> MyConnector: ...
 
-        var fs = S3Fs[MyConnector, MyCreds, MyClock](
+        var fs = S3Fs[MyConnector, ProcessCredsSource, SystemAwsClock](
             "lake", S3Config.aws("us-east-1"), mk, HttpClientConfig.defaults(),
-            my_creds, my_clock,
+            my_creds, SystemAwsClock(),
         )
         var footer = fs.read_footer("events/part-0.parquet", 64 * 1024)
 

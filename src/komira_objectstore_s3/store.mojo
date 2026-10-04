@@ -16,8 +16,9 @@
 #
 # The parameters: `C` the komira_http_core connector (TCP, TLS, or a
 # scripted one in tests), `T` the credential source (komira_aws_core's
-# `AwsCredsSource`: a static one, the default chain), `K` the signing clock
-# (`AwsClock`: the system clock, a fixed one in tests). A store holds ONE
+# `AwsCredsSource`: a static one, the default chain, or the shared
+# refreshing chain a cloned client needs, `SharedCredsSource`), `K` the
+# signing clock (`AwsClock`: the system clock, a fixed one in tests). A store holds ONE
 # transport over one connector, so its requests share a kept-alive
 # connection, and it is not shared between threads: a second thread takes
 # its own store (S3ConditionalStore.clone).
@@ -204,7 +205,7 @@ def _failed(res: HttpResult) -> Bool:
 struct S3Store[C: Connector, T: AwsCredsSource, K: AwsClock & Movable & Deinitable](Movable):
     """The object verbs over the generated S3 client (module header).
 
-        var store = S3Store[KernelTcpConnector, StaticCredsSource, SystemAwsClock](
+        var store = S3Store[KernelTcpConnector, ProcessCredsSource, SystemAwsClock](
             S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
             mk_connector, HttpClientConfig.defaults(), creds^, SystemAwsClock(),
         )

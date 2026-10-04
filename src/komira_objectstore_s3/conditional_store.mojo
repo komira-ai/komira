@@ -30,6 +30,16 @@
 # the clock, so `T` and `K` are Copyable; the connector factory is a thin
 # function pointer (a code address, no heap).
 #
+# CREDENTIALS THAT EXPIRE. A copy of `T` must not be a copy of a credential
+# that goes stale. `StaticCredsSource` is one fixed credential and fits keys
+# that do not expire. For temporary credentials (an instance or container
+# role, STS, SSO, web identity) `T` is komira_aws_core's
+# `SharedCredsSource`, whose copies share ONE refreshing chain: every clone
+# of this store signs with the credential the chain holds now, refreshed
+# before it expires, and the chain is resolved once for all of them.
+# `ProcessCredsSource` is that source over the process's environment and
+# files.
+#
 # No UnsafePointer in any signature, no wildcard origin.
 # =============================================================================
 
@@ -74,7 +84,7 @@ struct S3ConditionalStore[
 ):
     """A `ConditionalWriteStore` over one S3 bucket (module header).
 
-        var store = S3ConditionalStore[KernelTcpConnector, StaticCredsSource, SystemAwsClock](
+        var store = S3ConditionalStore[KernelTcpConnector, ProcessCredsSource, SystemAwsClock](
             "lake", S3Config.custom_endpoint("us-east-1", "http://127.0.0.1:9000"),
             mk_connector, HttpClientConfig.defaults(), creds, SystemAwsClock(),
         )
