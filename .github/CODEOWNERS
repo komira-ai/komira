@@ -1,7 +1,7 @@
 # Code owners (GitHub reads this file from the default branch).
 #
 # THE RELEASE FILES. Everything under release/ decides what komira publishes
-# and where: the release declarations (which packages a release builds and
+# and where: the release artifacts (which packages a release builds and
 # ships) and the channels file (where, and with which credential). A name and
 # version published to the channel is permanent, so a change here needs the
 # release approver's review. The workflow that acts on them,

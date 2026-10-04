@@ -1,14 +1,14 @@
-# The release declarations (kci.release.v1.ArtifactDeclarations): what a
+# The release artifacts (kci.release.v1.Artifacts): what a
 # BUILD step (`kci run --stage <S>`) builds for a release of komira, in this
 # file's order, and the set a PUBLISH step ships. .github/workflows/kci.yml reads this file
-# (KCI_DECLARATIONS). Changing it changes what is released: CODEOWNERS
+# (KCI_ARTIFACTS). Changing it changes what is released: CODEOWNERS
 # requires the release approver's review for everything under release/.
 #
 # The first release is one library and its metapackage. kci builds them one
 # at a time, in THIS ORDER, each into its own empty directory under the
 # release directory R (`{release_dir}`: the platform's directory,
 # <--release-dir>/<platform>), with the git-derived stamp S of `kci run
-# --revision-id` (src/kci_artifact_declaration/contract.mojo):
+# --revision-id` (src/kci_artifact/placeholders.mojo):
 #
 #   buck2 build -c komira.package_stamp=<N> -c komira.package_commit=<C> \
 #     -c komira.package_timestamp_ms=<T> \
@@ -18,16 +18,16 @@
 #
 # THE STAMP is never typed here: `{build_number}`, `{source_commit}` and
 # `{timestamp_ms}` are placeholders kci fills from git. A library built
-# without them has no `[release]` sub-target, so a declaration that forgets
+# without them has no `[release]` sub-target, so an artifact that forgets
 # the stamp fails at build rather than shipping.
 #
-# THE METAPACKAGE `komira_all` is the LAST declaration: `{release_dir}` holds
+# THE METAPACKAGE `komira_all` is the LAST artifact: `{release_dir}` holds
 # every artifact above it, already built and verified. Its members are every
 # library of this file, one `--member-manifest` each; adding a library is
-# two edits here: its declaration above the metapackage, and its manifest in
+# two edits here: its entry above the metapackage, and its manifest in
 # the metapackage's args. A PUBLISH step refuses a set whose metapackage misses
 # a library, and the welded test
-# src/kci_artifact_declaration/tests/test_release_artifacts_file.mojo refuses
+# src/kci_artifact/tests/test_release_artifacts_file.mojo refuses
 # it at build time.
 #
 # A FIRST-TIME NAME is not approved here: a PUBLISH step refuses to upload a
@@ -38,7 +38,7 @@
 # Which farm buck2 builds on is the runner's machine configuration
 # (docs/ci.md), not this file's.
 #
-# The file format's major (kci_contract's format table): kci refuses a file
+# The file format's major (kci_api's format table): kci refuses a file
 # without it, and one written for a newer kci.
 
 schema_version: 1

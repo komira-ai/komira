@@ -2,12 +2,12 @@
 # and where it is published (channels.textproto). .github/workflows/kci.yml
 # reads both by path; nothing builds them. Each is welded to the test of the
 # parser that reads it, so a file kci would refuse fails `./buck2 build //...`:
-#   artifacts.textproto  src/kci_artifact_declaration (test_release_artifacts_file)
+#   artifacts.textproto  src/kci_artifact (test_release_artifacts_file)
 #   channels.textproto   src/kci_release_channel (test_release_channels_file)
 # Changes need the release approver's review (.github/CODEOWNERS).
 export_file(
     name = "artifacts.textproto",
-    visibility = ["//src/kci_artifact_declaration:"],
+    visibility = ["//src/kci_artifact:"],
 )
 
 export_file(

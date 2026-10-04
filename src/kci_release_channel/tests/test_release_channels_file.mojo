@@ -28,16 +28,16 @@ def _read() raises -> String:
 
 
 def test_the_one_channel_is_komira() raises:
-    var decls = parse_channels_file(_read())
-    assert_equal(len(decls), 1)
-    assert_equal(decls[0].name, String("komira"))
-    assert_true(decls[0].is_public())
-    assert_equal(len(decls[0].repositories), 1)
+    var channels = parse_channels_file(_read())
+    assert_equal(len(channels), 1)
+    assert_equal(channels[0].name, String("komira"))
+    assert_true(channels[0].is_public())
+    assert_equal(len(channels[0].repositories), 1)
 
 
 def test_komira_is_the_prefix_dev_conda_channel_by_trusted_publishing() raises:
-    var decls = parse_channels_file(_read())
-    var ch = find_channel(decls, String("komira"))
+    var channels = parse_channels_file(_read())
+    var ch = find_channel(channels, String("komira"))
     var repo = ch.repository_for(String(ARTIFACT_TYPE_CONDA))
     assert_equal(repo.location, String("https://prefix.dev/komira"))
     assert_equal(repo.push_identity, String("repo:komira-ai/komira:environment:prod"))
