@@ -104,7 +104,7 @@ def test_access_secret_version() raises:
     var c = _client(
         capture,
         '{"name":"projects/123456789012/secrets/smtp-password/versions/3",'
-        + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"2386484498"}}',
+        + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}',
     )
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
@@ -123,11 +123,12 @@ def test_access_secret_version() raises:
     assert_equal(resp.name, "projects/123456789012/secrets/smtp-password/versions/3")
     ref payload = resp.payload.value()
     assert_equal(String(unsafe_from_utf8=Span(payload.data)), "hunter2")
-    assert_equal(payload.data_crc32c.value(), Int64(2386484498))
+    assert_equal(payload.data_crc32c.value(), Int64(1736498283))
 
 
 def test_add_secret_version() raises:
-    # POST .../secrets/{secret}:addVersion with `body: "*"`.
+    # POST .../secrets/{secret}:addVersion with `body: "*"`. 1736498283 is the
+    # CRC32C (Castagnoli) of "hunter2", the decoded payload.
     var capture = ArcPointer[List[UInt8]](List[UInt8]())
     var c = _client(
         capture,
@@ -141,7 +142,7 @@ def test_add_secret_version() raises:
     var resp = c.add_secret_version[_RT](
         decode_json[AddSecretVersionRequest](
             '{"parent":"projects/demo-project/secrets/smtp-password",'
-            + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"2386484498"}}'
+            + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}'
         ),
         reactor,
     )
@@ -150,7 +151,7 @@ def test_add_secret_version() raises:
         _expected(
             "POST /v1/projects/demo-project/secrets/smtp-password:addVersion",
             '{"parent":"projects/demo-project/secrets/smtp-password",'
-            + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"2386484498"}}',
+            + '"payload":{"data":"aHVudGVyMg==","dataCrc32c":"1736498283"}}',
         ),
     )
     assert_equal(resp.name, "projects/123456789012/secrets/smtp-password/versions/4")
