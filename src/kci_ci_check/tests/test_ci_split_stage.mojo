@@ -169,6 +169,33 @@ def test_a_part_job_holds_no_token_no_environment_and_needs_the_step_job() raise
     )
 
 
+def test_a_later_stage_needs_every_job_of_a_split_stage() raises:
+    var three = String(_MACHINE) + String(
+        "stage { name: \"prod\" after: \"gamma\"\n"
+        "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" declarations: \"d.textproto\"\n"
+        "         channels: \"c.textproto\" channel: \"prod\" }\n"
+        "}\n"
+    )
+    var g = parse_machine_file(three, String("machine file"))
+    var tokens = _token_stages()
+    tokens.append(String("prod"))
+    var prod = (
+        String("  prod:\n    needs: [gamma, validate]\n    environment: prod\n    permissions:\n      id-token: write\n")
+        + String("    steps:\n      - run: kci run --stage prod --summary-file \"$GITHUB_STEP_SUMMARY\"\n")
+    )
+    var ok = check_workflow(String(_WF) + prod, g, tokens, String("release/machine.textproto"))
+    assert_equal(len(ok), 0, _all(ok))
+    # prod may not start before gamma's validations end
+    var early = check_workflow(
+        String(_WF) + prod.replace(String("[gamma, validate]"), String("gamma")), g, tokens, String("release/machine.textproto")
+    )
+    assert_equal(len(early), 1, _all(early))
+    assert_true(
+        early[0].find(String("job 'prod': R3: needs gamma; the stage runs after gamma (run by jobs gamma, validate)")) >= 0,
+        early[0],
+    )
+
+
 def test_a_part_job_of_no_stage_is_r1() raises:
     _reports(
         _mutated(String("kci run --stage gamma --only validation:install"), String("kci run --stage staging --only validation:install")),
