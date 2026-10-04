@@ -545,6 +545,7 @@ mod tests {
         let ty = TypeRef { fq_name: ".t.v1.Req".into(), mojo_name: "Req".into() };
         let svc = IrService {
             name: "S".into(),
+            default_host: None,
             methods: vec![IrMethod {
                 name: "M".into(),
                 input: ty.clone(),

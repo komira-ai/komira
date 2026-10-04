@@ -431,27 +431,41 @@ proto_codegen_golden(
 
 # ---- REST clients: path templates, query fields and refusals ---------------
 # corpus/google/api/annotations.proto declares the `(google.api.http)` option
-# every REST fixture imports.
+# every REST fixture imports, and corpus/google/api/client.proto the
+# `(google.api.default_host)` service option. Both are stubs declaring only
+# the extension protoc-gen-mojo reads, not the googleapis files: a case's
+# srcs are its corpus, every file under corpus/ (defs.bzl), so the pinned
+# //tools/vendor/googleapis files cannot be named here until the case rule
+# takes a second import root.
 
 _ANNOTATIONS = "corpus/google/api/annotations.proto"
+
+_CLIENT = "corpus/google/api/client.proto"
 
 # The Cloud Logging calls a log reader makes: a custom-verb literal path
 # (POST /v2/entries:list), a `{parent=projects/*}` capture and a repeated
 # query field. The REST client imports komira_gcp_core (its token source and
 # its google.rpc.Status error mapper).
+# The service declares `(google.api.default_host)`, so the client starts at
+# logging.googleapis.com.
 proto_codegen_golden(
     name = "logging_rest",
     srcs = [
         _ANNOTATIONS,
+        _CLIENT,
         "corpus/google/logging/v2/logging.proto",
     ],
     generate = ["google/logging/v2/logging.proto"],
     golden = ["golden/logging_rest/logging.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_gcp_logging",
+    absent = ["localhost"],
+    present = ["self._rest_host = String(\"logging.googleapis.com\")"],
 )
 
 # `**`, a verb after a capture, `{x=*}`, and repeated, optional and bool
-# query fields.
+# query fields. The service declares no `(google.api.default_host)`, so the
+# client starts with no host and every method refuses to send until
+# `set_rest_host` names one.
 proto_codegen_golden(
     name = "shapes_rest",
     srcs = [
@@ -461,6 +475,11 @@ proto_codegen_golden(
     generate = ["shapes/v1/shapes.proto"],
     golden = ["golden/shapes_rest/shapes.mojo.golden"],
     options = "default_protocol=rest,package_prefix=komira_test_shapes",
+    absent = ["localhost"],
+    present = [
+        "self._rest_host = String(\"\")",
+        "komira.test.shapes.v1.Shapes declares no google.api.default_host",
+    ],
 )
 
 # Well-known types as a GET response (Struct), a PUT response (Timestamp) and
@@ -495,6 +514,7 @@ proto_codegen_golden(
     name = "logging_rest_gcp",
     srcs = [
         _ANNOTATIONS,
+        _CLIENT,
         "corpus/google/logging/v2/logging.proto",
     ],
     generate = ["google/logging/v2/logging.proto"],
@@ -581,6 +601,51 @@ _REST_REFUSALS = [
     )
     for name, expect in _REST_REFUSALS
 ]
+
+# A rest target lists the unary method of a service that also has a
+# streaming one: the client holds GetItem, and nothing of WatchItems.
+proto_codegen_golden(
+    name = "rest_unary_beside_streaming",
+    srcs = [
+        _ANNOTATIONS,
+        "corpus/rest/v1/feed.proto",
+    ],
+    generate = ["rest/v1/feed.proto"],
+    golden = ["golden/rest_unary_beside_streaming/feed.mojo.golden"],
+    options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem",
+    absent = [
+        "WatchItems",
+        "watch_items",
+    ],
+    present = ["def get_item[RT: Runtime]"],
+)
+
+# A streaming method listed in `methods` is refused by name, not skipped:
+# skipped, the target would build a client without a method it lists.
+proto_codegen_golden(
+    name = "refuse_rest_streaming_method_listed",
+    srcs = [
+        _ANNOTATIONS,
+        "corpus/rest/v1/feed.proto",
+    ],
+    expect_error = "--mojo_out: protoc-gen-mojo: service `Feed` method `WatchItems` is server-streaming, and a `rest` target generates unary methods only",
+    generate = ["rest/v1/feed.proto"],
+    options = "default_protocol=rest,package_prefix=komira_test_feed,methods=Feed.GetItem+Feed.WatchItems",
+)
+
+# A `(google.api.default_host)` the client cannot send to (here a port other
+# than 443) is refused by name rather than written into the client.
+proto_codegen_golden(
+    name = "refuse_rest_default_host_with_port",
+    srcs = [
+        _ANNOTATIONS,
+        _CLIENT,
+        "corpus/refuse/default_host_with_port.proto",
+    ],
+    expect_error = "service `refused.v1.Ported` declares `(google.api.default_host)` = \"ported.example.com:8443\", which is not a host name",
+    generate = ["refuse/default_host_with_port.proto"],
+    options = "default_protocol=rest,package_prefix=refused",
+)
 
 # The URL helpers protoc-gen-mojo emits into every REST client, cut out of
 # the shapes client and compiled on their own (they need nothing outside the

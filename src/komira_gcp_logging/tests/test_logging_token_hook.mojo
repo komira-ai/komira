@@ -96,7 +96,6 @@ def test_each_request_asks_the_source() raises:
         HttpClient[ScriptedConnector].with_defaults(connector^),
         CountingTokenSource(calls),
     )
-    c.set_rest_host(String("logging.googleapis.com"))
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
 
@@ -130,7 +129,6 @@ def test_no_token_no_request() raises:
         ),
         FailingTokenSource(),
     )
-    c.set_rest_host(String("logging.googleapis.com"))
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var raised = String("")
