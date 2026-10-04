@@ -14,7 +14,7 @@
 #      (KCI-E-FORMAT-VERSION); any other refusal of the file is REFUSED
 #      (KCI-E-FORMAT);
 #   2. resolve S: an unknown stage is REFUSED (KCI-E-STAGE-UNKNOWN, the
-#      message lists the stages); then the selection (kci_stage_graph
+#      message lists the stages); then the selection (kci_release_machine
 #      `resolve_selection`): a selector that matches nothing in S is
 #      REFUSED (KCI-E-SELECTOR-NO-MATCH, exit 3, naming S's steps and
 #      validations); then the flags the SELECTED steps' kinds take, and
@@ -44,7 +44,7 @@
 #      its row, artifacts, new names and first error to the result; a step
 #      `--only` did not select gets a row with `selected: false` and no
 #      outcome. Right after a step's row come its SELECTED validations
-#      (kci_stage_graph `resolve_selection`: all of them in a FULL run; in a
+#      (kci_release_machine `resolve_selection`: all of them in a FULL run; in a
 #      selective one only those `--only validation:<name>` names, whether or
 #      not the step itself ran, since a validation checks what the step
 #      published, now or in an earlier run), each through `steps.validate`
@@ -61,10 +61,10 @@
 #      would publish for the first time are in THIS run's result
 #      (`new_names[]` rows naming that stage) and summary before anyone
 #      approves it. A channel that was not read says so, never "none";
-#   8. the run's outcome is its worst step's (kci_contract's `worst_outcome`),
+#   8. the run's outcome is its worst step's (kci_api's `worst_outcome`),
 #      and PARTIAL when a step fails after an earlier PUBLISH step changed
 #      the channel; the FINISHED record, then the exit number
-#      (kci_contract's exit table), which is the return value;
+#      (kci_api's exit table), which is the return value;
 #   9. `--summary-file`: a markdown block APPENDED to that file on every exit
 #      path after the command line parsed (`run_summary_markdown`): the
 #      outcome and exit number, the scope, the revision and set hash, the
@@ -72,7 +72,7 @@
 #      finding, and each NEW NAMES block (this stage's
 #      PUBLISH steps, then the stages after it). A file that cannot be
 #      written is said on stderr; the exit number stands;
-#  10. the LAST stderr line is the run's evidence (kci_contract
+#  10. the LAST stderr line is the run's evidence (kci_api
 #      `run_evidence_line`): `kci: FULL run of stage S: <OUTCOME>`, or
 #      `kci: SELECTIVE run of stage S (<only>): <OUTCOME> -- not a full run`.
 #      The result document says the same in `scope` and `only`. A selective
@@ -101,7 +101,7 @@ from komira_clock import now_unix_ms
 
 from kci_build import BuildRequest
 from kci_ci_check import ChannelsFile, channels_paths, check_running_workflow
-from kci_contract import (
+from kci_api import (
     VALIDATION_NOT_REACHED,
     ERROR_CANNOT_TELL,
     ERROR_CHANNEL,
@@ -134,14 +134,14 @@ from kci_contract import (
     run_evidence_line,
     worst_outcome,
 )
-from kci_contract import RunResult as KciRunResult
+from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest, new_names_markdown
 from kci_validate import ValidateRequest
 from kci_release_set.member import file_sha256_hex
-from kci_stage_graph import (
+from kci_release_machine import (
     Selection,
     Stage,
-    StageGraph,
+    ReleaseMachine,
     StageStep,
     StageValidation,
     machine_schema_version,
@@ -174,7 +174,7 @@ comptime NOT_UNDER_GITHUB_ACTIONS: String = "not under GitHub Actions"
 
 
 struct StepEnd(Copyable, Movable):
-    """How one step ended: its outcome and first error id (kci_contract),
+    """How one step ended: its outcome and first error id (kci_api),
     the lines to print, retry advice stronger than the exit number's ("" for
     the default), whether it changed something outside this machine, and
     its markdown for the job summary ("" for none; a PUBLISH step's NEW
@@ -291,7 +291,7 @@ def _read(path: String) raises -> String:
     return Path(path).read_text()
 
 
-def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> StageGraph:
+def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> ReleaseMachine:
     """Step 1 of the file header; raises `<error id>\\n<message>`."""
     if not isfile(cmd.machine):
         raise Error(
@@ -303,7 +303,7 @@ def _load_graph(cmd: KciCommand, mut result: KciRunResult) raises -> StageGraph:
         _ = machine_schema_version(text, cmd.machine)
     except e:
         raise Error(String(ERROR_FORMAT_VERSION) + String("\n") + String(e))
-    var g: StageGraph
+    var g: ReleaseMachine
     try:
         g = parse_machine_file(text, cmd.machine)
     except e:
@@ -461,7 +461,7 @@ struct _WorkflowVerdict(Copyable, Movable):
 
 
 def _check_workflow_at_start[S: StageSteps](
-    cmd: KciCommand, g: StageGraph, mut steps: S, mut result: KciRunResult
+    cmd: KciCommand, g: ReleaseMachine, mut steps: S, mut result: KciRunResult
 ) -> _WorkflowVerdict:
     """File header, 4. Records `workflow` in `result`."""
     if steps.platform_env(String(GITHUB_ACTIONS)) != String("true"):
@@ -538,7 +538,7 @@ def _check_workflow_at_start[S: StageSteps](
 
 
 def _lookahead[S: StageSteps](
-    cmd: KciCommand, g: StageGraph, stage: Stage, mut steps: S, mut result: KciRunResult
+    cmd: KciCommand, g: ReleaseMachine, stage: Stage, mut steps: S, mut result: KciRunResult
 ) -> List[NewNamesReport]:
     """File header, 7: every PUBLISH step of each stage whose `after` is
     `stage`; read names go into `result.new_names` under that stage."""
@@ -695,7 +695,7 @@ def _run_stage[S: StageSteps](
         result.only.append(selectors[i].canonical())
     if len(selectors) > 0:
         result.scope = String(SCOPE_SELECTIVE)
-    var g: StageGraph
+    var g: ReleaseMachine
     try:
         g = _load_graph(cmd, result)
     except e:

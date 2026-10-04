@@ -9,7 +9,7 @@
 # workflow it runs under and refuses to run on a mismatch
 # (`check_running_workflow`).
 #
-# The machine file owns the stage graph; the workflow is written by hand and
+# The machine file owns the release machine; the workflow is written by hand and
 # must agree with it. `check_workflow` returns every disagreement (empty =
 # they agree); it never stops at the first, so one run names them all:
 #
@@ -64,7 +64,7 @@
 #           `after` (R3).
 #   R10 each `kci run` reads the machine file being checked: a `--machine`
 #       must name that file, and a `kci run` without one reads the default
-#       (kci_contract's DEFAULT_MACHINE_FILE), which must then be that file.
+#       (kci_api's DEFAULT_MACHINE_FILE), which must then be that file.
 #       Paths are compared as written, after dropping a leading `./`
 #   R11 a job has a step `uses: ./.github/actions/farm-connect` exactly when
 #       its stage is farm-connected (the machine file's typed field, never a
@@ -88,9 +88,9 @@
 # Pure functions over owned values; no pointer, no file I/O.
 # =============================================================================
 
-from kci_contract import DEFAULT_MACHINE_FILE, Selector, parse_selector
+from kci_api import DEFAULT_MACHINE_FILE, Selector, parse_selector
 from kci_release_channel import ChannelDeclaration, find_channel, parse_channels_file
-from kci_stage_graph import Selection, Stage, StageGraph, joined_names, resolve_selection
+from kci_release_machine import Selection, Stage, ReleaseMachine, joined_names, resolve_selection
 
 from .workflow_reader import NODE_LIST, NODE_MAP, NODE_SCALAR, WorkflowDoc, read_workflow
 
@@ -118,7 +118,7 @@ def _channels_text(files: List[ChannelsFile], path: String) raises -> String:
     raise Error(String("the channels file '") + path + String("' was not given"))
 
 
-def channels_paths(g: StageGraph) -> List[String]:
+def channels_paths(g: ReleaseMachine) -> List[String]:
     """Every distinct channels path a PUBLISH step names, in file order: what
     `id_token_stages` needs read."""
     var out = List[String]()
@@ -144,7 +144,7 @@ def _channel_is_oidc(ch: ChannelDeclaration) -> Bool:
     return False
 
 
-def id_token_stages(g: StageGraph, files: List[ChannelsFile]) raises -> List[String]:
+def id_token_stages(g: ReleaseMachine, files: List[ChannelsFile]) raises -> List[String]:
     """The stages that need a CI identity token: those with a PUBLISH step
     whose channel publishes by OIDC trusted publishing. Raises when a
     channels file is not given or is refused, or names no such channel."""
@@ -545,7 +545,7 @@ def _check_job(
 
 
 def _check_part_job(
-    doc: WorkflowDoc, job_id: String, job: Int, st: Stage, g: StageGraph, machine_path: String, mut findings: List[String]
+    doc: WorkflowDoc, job_id: String, job: Int, st: Stage, g: ReleaseMachine, machine_path: String, mut findings: List[String]
 ):
     """R2, R3, R4, R11 for a job that runs a part of stage `st` (file
     header, R9); then R10 and R12."""
@@ -682,7 +682,7 @@ def _one_runner(st: Stage, over: String, kind: String, name: String, by: List[St
 
 
 def check_workflow_doc(
-    doc: WorkflowDoc, g: StageGraph, token_stages: List[String], machine_path: String
+    doc: WorkflowDoc, g: ReleaseMachine, token_stages: List[String], machine_path: String
 ) -> List[String]:
     """Every disagreement between `doc` and `g` (file header); empty when
     they agree. `machine_path` is the machine file `g` was read from, as the
@@ -768,7 +768,7 @@ def check_workflow_doc(
 
 
 def check_workflow(
-    workflow_text: String, g: StageGraph, token_stages: List[String], machine_path: String
+    workflow_text: String, g: ReleaseMachine, token_stages: List[String], machine_path: String
 ) raises -> List[String]:
     """`check_workflow_doc` over a workflow's text. Raises `cannot tell:` when
     the restricted reader cannot read it."""
@@ -777,7 +777,7 @@ def check_workflow(
 
 
 def check_running_workflow(
-    g: StageGraph, channels_files: List[ChannelsFile], workflow_text: String, machine_path: String
+    g: ReleaseMachine, channels_files: List[ChannelsFile], workflow_text: String, machine_path: String
 ) raises -> List[String]:
     """The check `kci run` makes at start-up on the workflow it runs under:
     every disagreement between `workflow_text` and `g` (empty = they agree).

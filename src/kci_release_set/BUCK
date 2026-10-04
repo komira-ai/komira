@@ -19,7 +19,7 @@ mojo_library(
     deps = [
         "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/kci_release_channel:kci_release_channel",
         "//src/komira_crypto:komira_crypto",
         "//src/komira_json:komira_json",

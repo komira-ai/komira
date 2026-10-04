@@ -56,7 +56,7 @@ from .plan import (
     plan_from_state,
     state_name,
 )
-from kci_contract import ERROR_CREDENTIAL
+from kci_api import ERROR_CREDENTIAL
 
 from .report import (
     REASON_ALREADY_PUBLISHED,
