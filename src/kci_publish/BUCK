@@ -72,6 +72,9 @@ mojo_library(
         # a dry run under CI mints and discards; a refused mint is red; not under CI
         # is recorded, never a mint
         "tests/test_publish_plan_probe.mojo",
+        # the runner's handshake is read through komira_libc's one getenv, so a
+        # binary that links both (bin/kci) links
+        "tests/test_publish_actions_env.mojo",
         # a later stage's NEW NAMES read anonymously; a PRIVATE channel is not read;
         # the job-summary block
         "tests/test_publish_new_names_summary.mojo",

@@ -1,17 +1,22 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The `kci` command line. `kci run --stage S` is THE verb for stages: it reads
-# the machine file (kci_release_machine; --machine, default
-# release/machine.textproto), resolves stage S and runs each of its steps in
-# order through kci_build (BUILD) or kci_publish (PUBLISH). `kci ci check` holds
-# a CI workflow to the same stages (kci_ci_check). There is no per-kind verb and
-# no alias. Every verb writes kci_api's result document to --result-file
+# The `kci` command line: ONE command, `kci run --stage S`. It reads the
+# machine file (kci_release_machine; --machine, default release/machine.textproto),
+# resolves stage S and runs each of its steps in order through kci_build
+# (BUILD) or kci_publish (PUBLISH). Under GitHub Actions it first holds the
+# workflow it runs under (read at its commit) to the machine file
+# (kci_ci_check, library code: a mismatch is exit 3, unreadable exit 5). It
+# reports the NEW NAMES of the stages after it, and appends a markdown summary
+# to --summary-file. A declared validation is refused (exit 3), never
+# skipped: this kci has no validation runner yet. There is no other verb and
+# no alias. Every run writes kci_api's result document to --result-file
 # (temp-and-rename, RUNNING before the first effect, FINISHED on every exit
 # path) and exits with kci_api's numbers. bin/kci is its `main`.
 #
 # The welded tests: the one parser and every usage refusal; the stage run over
 # a recording fake (order, stop at the first failure, worst outcome, PARTIAL
-# after a publish, the result records); the result file; the real libraries
+# after a publish, the result records, the workflow check, the validation
+# refusal, the lookahead, the summary); the result file; the real libraries
 # reached through a machine file; and a scan that no kci source but
 # kci_api spells an exit number.
 mojo_library(
@@ -32,7 +37,7 @@ mojo_library(
     test_srcs = [
         # the one parser: verbs, flags, the stage's flags, every usage refusal
         "tests/test_kci_args.mojo",
-        # kci run over a recording fake, kci ci check, the records in order
+        # kci run over a recording fake: the steps, the workflow check, validations, NEW NAMES, the summary
         "tests/test_kci_dispatch.mojo",
         # the result file: RUNNING then FINISHED, temp-and-rename, usage errors recorded
         "tests/test_kci_result_file.mojo",

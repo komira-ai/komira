@@ -13,6 +13,15 @@
 #                 env   EnvSecretStore[ProcessEnv] (komira_secret_env): the
 #                       secret NAME is the environment variable's name.
 #               An OIDC channel resolves no secret at all, whichever store.
+#               The step's NEW NAMES block goes to the job summary.
+#   lookahead      -> kci_publish.lookahead_new_names_https: a later stage's
+#                     NEW NAMES, anonymous reads over HTTPS.
+#   platform_env   -> this process's environment, for the platform-set
+#                     variables of the workflow check only (dispatch.mojo).
+#   committed_file -> `git show <commit>:<path>` through a `SupervisorRunner`
+#                     in the directory kci runs in; its output goes to
+#                     `$RUNNER_TEMP` (platform-set: the check runs only under
+#                     GitHub Actions), a missing RUNNER_TEMP is a refusal.
 #
 # Nothing here parses a flag or reads a file: that is args.mojo and
 # dispatch.mojo, and the libraries.
@@ -20,12 +29,25 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
+from std.ffi import external_call
+from std.os import remove
+from std.os.path import exists
+from std.pathlib import Path
+
 from komira_secret_env import EnvSecretStore, ProcessEnv
 from komira_secret_store import SecretStore, SecretValue
 
-from kci_build import BuildRequest, SupervisorRunner, run_build
+from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
+from kci_build import RunResult as ProcessResult
 from kci_api import RunResult as KciRunResult
-from kci_publish import PublishRequest, publish_release_with_store
+from kci_publish import (
+    NewNamesReport,
+    PublishRequest,
+    lookahead_new_names_https,
+    new_names_markdown,
+    new_names_of,
+    publish_release_with_store,
+)
 
 from .args import SecretStoreChoice
 from .dispatch import StageSteps, StepEnd, kci_main_with, recorder_for
@@ -91,7 +113,47 @@ struct LibrarySteps(StageSteps, Movable):
         end.lines = r.lines.copy()
         end.retry = r.retry()
         end.changed_outside = r.landed()
+        end.summary = new_names_markdown(new_names_of(r, req.stage, req.step_name))
         return end^
+
+    def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
+        return lookahead_new_names_https(req)
+
+    def platform_env(mut self, name: String) -> String:
+        var env = ProcessEnv()
+        try:
+            var v = env.lookup(name)
+            if not v:
+                return String("")
+            var b = v.value().revealed_bytes()
+            var out = String("")
+            for i in range(len(b)):
+                out += chr(Int(b[i]))
+            return out^
+        except:
+            return String("")
+
+    def committed_file(mut self, commit: String, path: String) raises -> String:
+        var tmp = self.platform_env(String("RUNNER_TEMP"))
+        if tmp.byte_length() == 0:
+            raise Error(String("RUNNER_TEMP is not set, so there is nowhere to put git's output"))
+        var base = tmp + String("/kci-workflow-") + String(Int(external_call["getpid", Int32]()))
+        var argv = List[String]()
+        argv.append(String("show"))
+        argv.append(commit + String(":") + path)
+        var spec = RunSpec(String(GIT_PROGRAM), argv^, String("."), 60, base + String(".stdout"), base + String(".stderr"))
+        var runner = SupervisorRunner()
+        var r: ProcessResult = runner.run(spec)
+        if not r.ok():
+            var why = String("`") + spec.command_line() + String("` ") + r.describe()
+            if r.stderr_tail.byte_length() > 0:
+                why += String(": ") + String(r.stderr_tail.strip())
+            raise Error(why^)
+        var text = Path(spec.stdout_path).read_text()
+        for p in [spec.stdout_path.copy(), spec.stderr_path.copy()]:
+            if exists(p):
+                remove(p)
+        return text^
 
 
 def kci_main(args: List[String]) -> Int:

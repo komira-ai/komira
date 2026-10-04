@@ -1,22 +1,21 @@
 # =============================================================================
-# src/kci_cli/args.mojo -- the `kci` command line: ONE parser for every verb.
+# src/kci_cli/args.mojo -- the `kci` command line: ONE parser, ONE command.
 # =============================================================================
 #
 #   kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]...
 #           [--plan] --revision-id <commit>
 #           --run-id <id> --attempt <n> [--context <key=value>]...
-#           --release-dir <dir> [--result-file <file>]
+#           --release-dir <dir> [--result-file <file>] [--summary-file <file>]
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
-#           [--expect-set-hash <hex>] [--claim-new-name <name>]...
 #           [--release-version <file>] [--concurrency <n>]
 #           [--secret-store <none|env>]
-#   kci ci check [--machine <file>] --workflow <file> [--result-file <file>]
 #   kci --help
 #
-# `kci run --stage S` is THE verb for stages: it runs every step of stage S
-# of the machine file, in order. There is no per-kind verb and no alias:
-# what a stage does is the machine file's to say. `ci check` is a utility
-# that changes nothing.
+# kci has exactly ONE command: `kci run --stage S` runs every step of stage S
+# of the machine file, in order. There is no per-kind verb, no alias and no
+# utility verb: the check of the CI workflow against the machine file is not a
+# command, it is what `kci run` does at start-up under GitHub Actions
+# (dispatch.mojo).
 #
 # The machine file is `--machine`, or kci_api's `DEFAULT_MACHINE_FILE`
 # (`release/machine.textproto`) when the flag is absent; a relative path is
@@ -33,23 +32,27 @@
 #             after the machine file is read (KCI-E-SELECTOR-NO-MATCH, 3).
 #   --plan    a dry run of the whole stage: a BUILD step resolves and
 #             renders and builds nothing; a PUBLISH step checks and reads
-#             and writes nothing.
+#             and writes nothing to the channel.
 #
-# Every other flag is an input, never a selector.
+# Every other flag is an input, never a selector. `--summary-file <file>`
+# (any stage) names a markdown file kci APPENDS its summary to (never
+# truncates): the outcome, the steps, and the NEW NAMES of this stage and of
+# the stages after it. kci.yml passes the job summary, "$GITHUB_STEP_SUMMARY".
 #
 # Which flags a stage takes depends on its steps, so `parse_kci_args` checks
 # only what the command line alone can say (unknown flags, values, flags
-# given twice, flags of another verb, the flags every run needs), and
-# `require_stage_flags` checks the rest once the stage is resolved:
+# given twice, the flags every run needs), and `require_stage_flags` checks
+# the rest once the stage is resolved:
 #
 #   a selected BUILD step    needs --work-dir and --log-dir; --build-timeout-s
 #                            optional
-#   a selected PUBLISH step  needs --expect-set-hash and --release-version;
-#                            --claim-new-name, --concurrency, --secret-store
-#                            optional
+#   a selected PUBLISH step  needs --release-version; --concurrency,
+#                            --secret-store optional
 #   no selected step of that kind   its flags are refused
 #
-# Only the SELECTED steps count (every step, without `--only`).
+# Only the SELECTED steps count (every step, without `--only`). Which names
+# a release publishes is its artifacts file's: there is no per-run claim
+# and no expected set hash on the command line.
 #
 # Every refusal here is a usage error (kci_api's KCI-E-USAGE, exit 2;
 # a malformed `--only` is KCI-E-SELECTOR, also exit 2).
@@ -74,24 +77,22 @@ from kci_api import (
 from kci_release_machine import Selection, Stage
 
 comptime CLI_VERB_RUN: String = "run"
-comptime CLI_VERB_CI_CHECK: String = "ci check"
 comptime CLI_VERB_HELP: String = "help"
 
 comptime KCI_USAGE: String = (
     "usage:\n"
     "  kci run [--machine <file>] --stage <S> [--only step:<name>|validation:<name>]... [--plan]\n"
     "          --revision-id <commit> --run-id <id> --attempt <n>\n"
-    "          [--context <key=value>]... --release-dir <dir> [--result-file <file>]\n"
+    "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
-    "          --expect-set-hash <hex> --release-version <file>\n"
-    "          [--claim-new-name <name>]... [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
-    "  kci ci check [--machine <file>] --workflow <file> [--result-file <file>]\n"
+    "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
     "  kci --help\n"
-    "kci run --stage S runs every step of stage S of the machine file, in order.\n"
+    "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
     "--only runs only the named steps (or validations): a SELECTIVE run, never reported as a full one.\n"
     "--plan: a dry run; a BUILD step builds nothing, a PUBLISH step checks and reads and writes nothing.\n"
-    "kci ci check holds a CI workflow to the machine file's stages.\n"
+    "--summary-file: a markdown file kci appends its summary to (the outcome, the steps, the NEW NAMES).\n"
+    "Under GitHub Actions kci first checks the workflow it runs under against the machine file.\n"
     "--secret-store: how a channel credential's secret NAME is resolved: none (default) refuses;\n"
     "env reads the environment variable of that name."
 )
@@ -139,12 +140,10 @@ struct KciCommand(Copyable, Movable):
     var log_dir: String
     var build_timeout_s: Int
     var plan: Bool
-    var expect_set_hash: String
-    var claims: List[String]
+    var summary_file: String
     var release_version: String
     var concurrency: Int
     var store: SecretStoreChoice
-    var workflow: String
     var only: List[String]
     var seen: List[String]
 
@@ -162,12 +161,10 @@ struct KciCommand(Copyable, Movable):
         self.log_dir = String("")
         self.build_timeout_s = 0
         self.plan = False
-        self.expect_set_hash = String("")
-        self.claims = List[String]()
+        self.summary_file = String("")
         self.release_version = String("")
         self.concurrency = 0
         self.store = SecretStoreChoice.NONE
-        self.workflow = String("")
         self.only = List[String]()
         self.seen = List[String]()
 
@@ -189,12 +186,12 @@ def usage_error(why: String) -> Error:
     return Error(String("kci: ") + why)
 
 
-# The flags of `run`, by the kind of step that takes them, and of `ci check`.
+# The flags of `run`, by the kind of step that takes them.
 def _run_common_flags() -> List[String]:
     var l = List[String]()
     for f in [
         "--machine", "--stage", "--only", "--plan", "--revision-id", "--run-id", "--attempt", "--context",
-        "--release-dir", "--result-file",
+        "--release-dir", "--result-file", "--summary-file",
     ]:
         l.append(String(f))
     return l^
@@ -209,14 +206,7 @@ def build_flags() -> List[String]:
 
 def publish_flags() -> List[String]:
     var l = List[String]()
-    for f in ["--expect-set-hash", "--claim-new-name", "--release-version", "--concurrency", "--secret-store"]:
-        l.append(String(f))
-    return l^
-
-
-def _ci_check_flags() -> List[String]:
-    var l = List[String]()
-    for f in ["--machine", "--workflow", "--result-file"]:
+    for f in ["--release-version", "--concurrency", "--secret-store"]:
         l.append(String(f))
     return l^
 
@@ -229,7 +219,7 @@ def _member(xs: List[String], x: String) -> Bool:
 
 
 def _repeatable(flag: String) -> Bool:
-    return flag == String("--context") or flag == String("--claim-new-name") or flag == String("--only")
+    return flag == String("--context") or flag == String("--only")
 
 
 def _boolean(flag: String) -> Bool:
@@ -296,29 +286,36 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.build_timeout_s = _positive_int(flag, value)
     elif flag == String("--plan"):
         cmd.plan = True
-    elif flag == String("--expect-set-hash"):
-        cmd.expect_set_hash = value.copy()
-    elif flag == String("--claim-new-name"):
-        cmd.claims.append(value.copy())
+    elif flag == String("--summary-file"):
+        cmd.summary_file = value.copy()
     elif flag == String("--release-version"):
         cmd.release_version = value.copy()
     elif flag == String("--concurrency"):
         cmd.concurrency = _positive_int(flag, value)
     elif flag == String("--secret-store"):
         cmd.store = _store_choice(value)
-    elif flag == String("--workflow"):
-        cmd.workflow = value.copy()
+
+
+def _find_value(args: List[String], flag: String) -> String:
+    var eq = flag + String("=")
+    for i in range(len(args)):
+        if args[i] == flag and i + 1 < len(args):
+            return args[i + 1].copy()
+        if args[i].startswith(eq):
+            return String(args[i][byte = eq.byte_length() :])
+    return String("")
 
 
 def find_result_file(args: List[String]) -> String:
     """`--result-file`'s value wherever it is, or "": so a refused command
     line can still be recorded in the file it names."""
-    for i in range(len(args)):
-        if args[i] == String("--result-file") and i + 1 < len(args):
-            return args[i + 1].copy()
-        if args[i].startswith(String("--result-file=")):
-            return String(args[i][byte = String("--result-file=").byte_length() :])
-    return String("")
+    return _find_value(args, String("--result-file"))
+
+
+def find_summary_file(args: List[String]) -> String:
+    """`--summary-file`'s value wherever it is, or "": so a refused command
+    line still reaches the job summary."""
+    return _find_value(args, String("--summary-file"))
 
 
 def parse_kci_args(args: List[String]) raises -> KciCommand:
@@ -326,32 +323,29 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
     header); nothing is read."""
     var cmd = KciCommand()
     if len(args) == 0:
-        raise usage_error(String("no verb: run or ci check"))
+        raise usage_error(String("no command: there is one, kci run --stage <S>"))
     var first = args[0]
     if first == String("--help") or first == String("-h"):
         cmd.verb = String(CLI_VERB_HELP)
         return cmd^
-    var start: Int
-    var allowed: List[String]
     if first == String("run"):
         cmd.verb = String(CLI_VERB_RUN)
-        start = 1
-        allowed = _run_common_flags()
-        allowed.extend(build_flags())
-        allowed.extend(publish_flags())
-    elif first == String("ci"):
-        if len(args) < 2 or args[1] != String("check"):
-            raise usage_error(String("`kci ci` takes one verb: check"))
-        cmd.verb = String(CLI_VERB_CI_CHECK)
-        start = 2
-        allowed = _ci_check_flags()
     elif first.startswith(String("-")):
-        raise usage_error(String("'") + first + String("' before the verb: the verb comes first (run or ci check)"))
+        raise usage_error(String("'") + first + String("' before the command: kci run comes first"))
+    elif first == String("ci"):
+        raise usage_error(
+            String("there is one command: kci run (`kci ci check` is gone: under GitHub Actions, kci run checks")
+            + String(" the workflow it runs under against the machine file at start-up)")
+        )
     else:
         raise usage_error(
-            String("unknown verb '") + first
-            + String("': `kci run --stage <S>` runs a stage (there is no build or publish verb), `kci ci check` checks a workflow")
+            String("unknown command '") + first
+            + String("': there is one command, `kci run --stage <S>` (no build, publish or other verb)")
         )
+    var start = 1
+    var allowed = _run_common_flags()
+    allowed.extend(build_flags())
+    allowed.extend(publish_flags())
     var i = start
     while i < len(args):
         var a = args[i]
@@ -383,17 +377,13 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
         _set(cmd, flag, value)
         cmd.seen.append(flag^)
         i += 1
-    if cmd.verb == String(CLI_VERB_RUN):
-        for f in ["--stage", "--revision-id", "--run-id", "--attempt", "--release-dir"]:
-            if not cmd.given(String(f)):
-                raise usage_error(String("kci run needs ") + String(f))
-        try:
-            _ = cmd.run_identity()
-        except e:
-            raise usage_error(String(e))
-    else:
-        if not cmd.given(String("--workflow")):
-            raise usage_error(String("kci ci check needs --workflow"))
+    for f in ["--stage", "--revision-id", "--run-id", "--attempt", "--release-dir"]:
+        if not cmd.given(String(f)):
+            raise usage_error(String("kci run needs ") + String(f))
+    try:
+        _ = cmd.run_identity()
+    except e:
+        raise usage_error(String(e))
     return cmd^
 
 
@@ -434,7 +424,7 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
             if cmd.given(bf[i]):
                 raise usage_error(bf[i] + String(" is a BUILD step's flag, and ") + which + holds_no + String(" BUILD step"))
     if has_publish:
-        for f in ["--expect-set-hash", "--release-version"]:
+        for f in ["--release-version"]:
             if not cmd.given(String(f)):
                 raise usage_error(which + has + String(" a PUBLISH step: kci run needs ") + String(f))
     else:

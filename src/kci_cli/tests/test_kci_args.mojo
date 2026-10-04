@@ -1,17 +1,19 @@
 # =============================================================================
-# src/kci_cli/tests/test_kci_args.mojo -- the one parser: `kci run` and
-#   `kci ci check`, every usage refusal, the `--only` grammar, `--plan` on
-#   any stage, and the flags the selected steps' kinds take
-#   (`require_stage_flags`).
+# src/kci_cli/tests/test_kci_args.mojo -- the one parser and kci's one
+#   command, `kci run`: every usage refusal (`ci check`, `--workflow`,
+#   `--claim-new-name` and `--expect-set-hash` are gone), `--summary-file`,
+#   the `--only` grammar, `--plan` on any stage, and the flags the selected
+#   steps' kinds take (`require_stage_flags`).
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
 
 from kci_cli import (
-    CLI_VERB_CI_CHECK,
+    KCI_USAGE,
     CLI_VERB_HELP,
     CLI_VERB_RUN,
     find_result_file,
+    find_summary_file,
     parse_kci_args,
     require_stage_flags,
     selectors_of,
@@ -71,18 +73,14 @@ def test_the_machine_file_defaults() raises:
     # the one default is kci_api's; kci_cli spells no path of its own
     assert_equal(String(DEFAULT_MACHINE_FILE), String("release/machine.textproto"))
     assert_equal(parse_kci_args(_run()).machine, String(DEFAULT_MACHINE_FILE))
-    var ci = parse_kci_args(_args("ci", "check", "--workflow", "w.yml"))
-    assert_equal(ci.verb, String(CLI_VERB_CI_CHECK))
-    assert_equal(ci.machine, String("release/machine.textproto"))
 
 
 def test_publish_flags() raises:
     var c = parse_kci_args(
-        _run("--plan", "--expect-set-hash", "ab", "--claim-new-name", "x", "--claim-new-name", "y",
-             "--release-version", "rv", "--concurrency", "4", "--secret-store", "env")
+        _run("--plan", "--release-version", "rv", "--concurrency", "4", "--secret-store", "env")
     )
     assert_true(c.plan)
-    assert_equal(len(c.claims), 2)
+    assert_equal(c.release_version, String("rv"))
     assert_equal(c.concurrency, 4)
     assert_equal(c.store.name(), String("env"))
 
@@ -114,8 +112,6 @@ def test_only_is_repeatable_and_positive() raises:
     _selector_refused(_run("--only", "step:b", "--only=step:b"), String("--only 'step:b' is given twice"))
     _refused(_run("--only"), String("--only needs a value"))
     _refused(_run("--only="), String("--only is EMPTY"))
-    # --only belongs to run only
-    _refused(_args("ci", "check", "--workflow", "w", "--only", "step:b"), String("unknown flag '--only' for kci ci check"))
 
 
 def test_no_other_operation_selector() raises:
@@ -130,15 +126,39 @@ def test_help() raises:
     assert_equal(parse_kci_args(_args("run", "-h")).verb, String(CLI_VERB_HELP))
 
 
-def test_one_verb_for_stages() raises:
-    _refused(_args(), String("no verb"))
-    _refused(_args("build", "--stage", "build"), String("unknown verb 'build'"))
-    _refused(_args("build", "--stage", "build"), String("there is no build or publish verb"))
-    _refused(_args("publish", "--stage", "prod"), String("unknown verb 'publish'"))
-    _refused(_args("deploy"), String("unknown verb 'deploy'"))
-    _refused(_args("--stage", "x", "run"), String("the verb comes first"))
-    _refused(_args("ci"), String("`kci ci` takes one verb: check"))
-    _refused(_args("ci", "lint"), String("`kci ci` takes one verb: check"))
+def test_one_command() raises:
+    _refused(_args(), String("no command: there is one, kci run --stage <S>"))
+    _refused(_args("build", "--stage", "build"), String("unknown command 'build'"))
+    _refused(_args("build", "--stage", "build"), String("no build, publish or other verb"))
+    _refused(_args("publish", "--stage", "prod"), String("unknown command 'publish'"))
+    _refused(_args("deploy"), String("unknown command 'deploy'"))
+    _refused(_args("trust"), String("unknown command 'trust'"))
+    _refused(_args("--stage", "x", "run"), String("kci run comes first"))
+    # `kci ci check` is gone: the workflow check is what `kci run` does at start-up
+    _refused(_args("ci", "check", "--workflow", "w.yml"), String("there is one command: kci run"))
+    _refused(_args("ci"), String("there is one command: kci run"))
+    # the usage text shows one command
+    assert_true(String(KCI_USAGE).find(String("kci ci")) < 0, String(KCI_USAGE))
+    assert_true(String(KCI_USAGE).find(String("--claim-new-name")) < 0, String(KCI_USAGE))
+    assert_true(String(KCI_USAGE).find(String("--expect-set-hash")) < 0, String(KCI_USAGE))
+    assert_true(String(KCI_USAGE).find(String("--summary-file")) >= 0, String(KCI_USAGE))
+
+
+def test_removed_flags_are_refused() raises:
+    _refused(_run("--workflow", "w"), String("unknown flag '--workflow' for kci run"))
+    _refused(_run("--claim-new-name", "komira_all"), String("unknown flag '--claim-new-name' for kci run"))
+    _refused(_run("--expect-set-hash", "ab"), String("unknown flag '--expect-set-hash' for kci run"))
+
+
+def test_summary_file() raises:
+    # accepted on any stage, by either spelling; not repeatable
+    assert_equal(parse_kci_args(_run("--summary-file", "/s.md")).summary_file, String("/s.md"))
+    assert_equal(parse_kci_args(_run("--summary-file=/t.md")).summary_file, String("/t.md"))
+    assert_equal(parse_kci_args(_run()).summary_file, String(""))
+    _refused(_run("--summary-file", "/a", "--summary-file", "/b"), String("--summary-file is given twice"))
+    _refused(_run("--summary-file="), String("--summary-file is EMPTY"))
+    assert_equal(find_summary_file(_args("ci", "--summary-file", "/s.md")), String("/s.md"))
+    assert_equal(find_summary_file(_args("run", "--summary-file=/q.md", "--bogus")), String("/q.md"))
 
 
 def test_run_refusals() raises:
@@ -154,7 +174,6 @@ def test_run_refusals() raises:
             i += 1
         _refused(a, String("kci run needs ") + String(f))
     _refused(_run("--dry-run"), String("unknown flag '--dry-run' for kci run"))
-    _refused(_run("--workflow", "w"), String("unknown flag '--workflow' for kci run"))
     _refused(_run("--stage", "prod"), String("--stage is given twice"))
     _refused(_run("--plan=yes"), String("--plan takes no value"))
     _refused(_run("--work-dir"), String("--work-dir needs a value"))
@@ -177,12 +196,6 @@ def test_run_identity_grammar() raises:
     _refused(_run("--context", "noequals"), String("is not key=value"))
     _refused(_run("--context", "Event=x"), String("is not [a-z][a-z0-9_]*"))
     _refused(_run("--context", "a=1", "--context", "a=2"), String("--context a is given twice"))
-
-
-def test_ci_check_refusals() raises:
-    _refused(_args("ci", "check"), String("kci ci check needs --workflow"))
-    _refused(_args("ci", "check", "--workflow", "w", "--run-id", "x"), String("unknown flag '--run-id' for kci ci check"))
-    _refused(_args("ci", "check", "--workflow", "w", "--stage", "x"), String("unknown flag '--stage'"))
 
 
 def test_find_result_file() raises:
@@ -220,29 +233,31 @@ def _stage_refused(args: List[String], stage: String, needle: String) raises:
 def test_stage_flags() raises:
     var g = parse_machine_file(String(_MACHINE), String("m"))
     require_stage_flags(parse_kci_args(_run("--work-dir", "/w", "--log-dir", "/l")), g.stage(String("build")), _all(g.stage(String("build"))))
-    require_stage_flags(parse_kci_args(_run("--expect-set-hash", "h", "--release-version", "rv", "--plan")), g.stage(String("prod")), _all(g.stage(String("prod"))))
+    require_stage_flags(parse_kci_args(_run("--release-version", "rv", "--plan")), g.stage(String("prod")), _all(g.stage(String("prod"))))
     require_stage_flags(
-        parse_kci_args(_run("--work-dir", "/w", "--log-dir", "/l", "--expect-set-hash", "h", "--release-version", "rv")),
+        parse_kci_args(_run("--work-dir", "/w", "--log-dir", "/l", "--release-version", "rv")),
         g.stage(String("all")),
         _all(g.stage(String("all"))),
     )
     _stage_refused(_run("--log-dir", "/l"), String("build"), String("stage 'build' has a BUILD step: kci run needs --work-dir"))
     # --plan is the whole run's dry run: accepted on a build-only stage
     require_stage_flags(parse_kci_args(_run("--work-dir", "/w", "--log-dir", "/l", "--plan")), g.stage(String("build")), _all(g.stage(String("build"))))
-    _stage_refused(_run("--work-dir", "/w", "--log-dir", "/l", "--expect-set-hash", "h"), String("build"), String("--expect-set-hash is a PUBLISH step's flag, and stage 'build' has no PUBLISH step"))
-    _stage_refused(_run("--expect-set-hash", "h", "--release-version", "rv", "--work-dir", "/w"), String("prod"), String("--work-dir is a BUILD step's flag"))
-    _stage_refused(_run("--release-version", "rv"), String("prod"), String("kci run needs --expect-set-hash"))
-    _stage_refused(_run("--work-dir", "/w", "--log-dir", "/l", "--expect-set-hash", "h"), String("all"), String("kci run needs --release-version"))
+    _stage_refused(_run("--work-dir", "/w", "--log-dir", "/l", "--release-version", "rv"), String("build"), String("--release-version is a PUBLISH step's flag, and stage 'build' has no PUBLISH step"))
+    _stage_refused(_run("--release-version", "rv", "--work-dir", "/w"), String("prod"), String("--work-dir is a BUILD step's flag"))
+    _stage_refused(_run("--plan"), String("prod"), String("stage 'prod' has a PUBLISH step: kci run needs --release-version"))
+    _stage_refused(_run("--work-dir", "/w", "--log-dir", "/l"), String("all"), String("kci run needs --release-version"))
+    # --summary-file is no step's flag: any stage takes it
+    require_stage_flags(parse_kci_args(_run("--work-dir", "/w", "--log-dir", "/l", "--summary-file", "/s")), g.stage(String("build")), _all(g.stage(String("build"))))
 
 
 def test_flags_follow_the_selected_steps() raises:
     var g = parse_machine_file(String(_MACHINE), String("m"))
     var st = g.stage(String("all"))
     # only the PUBLISH step selected: the BUILD flags are neither needed nor taken
-    var p = parse_kci_args(_run("--only", "step:p", "--expect-set-hash", "h", "--release-version", "rv"))
+    var p = parse_kci_args(_run("--only", "step:p", "--release-version", "rv"))
     require_stage_flags(p, st, resolve_selection(st, selectors_of(p)))
     _stage_refused(
-        _run("--only", "step:p", "--expect-set-hash", "h", "--release-version", "rv", "--work-dir", "/w"),
+        _run("--only", "step:p", "--release-version", "rv", "--work-dir", "/w"),
         String("all"),
         String("--work-dir is a BUILD step's flag, and the steps --only selects in stage 'all' hold no BUILD step"),
     )
