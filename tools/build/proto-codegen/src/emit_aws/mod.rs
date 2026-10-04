@@ -891,7 +891,7 @@ impl<'a> AwsEmitter<'a> {
                 None => self.unapplied_endpoint_bindings()?,
             };
             self.emit_header(&unapplied);
-            self.emit_imports();
+            self.emit_imports()?;
         }
         self.emit_constants();
         self.emit_enum_constants();
@@ -1053,7 +1053,8 @@ impl<'a> AwsEmitter<'a> {
         self.blank();
     }
 
-    fn emit_imports(&mut self) {
+    fn emit_imports(&mut self) -> Result<(), String> {
+        let fills_token = self.fills_idempotency_tokens()?;
         let section = aws_import_section_with(
             &[self.protocol],
             self.options.pure_only,
@@ -1062,8 +1063,12 @@ impl<'a> AwsEmitter<'a> {
             self.options.s3,
         );
         self.out.push_str(&section);
+        if fills_token {
+            self.out.push_str(&format!("from {AWS_CORE} import aws_idempotency_token\n"));
+        }
         self.blank();
         self.blank();
+        Ok(())
     }
 
     fn emit_constants(&mut self) {
@@ -1889,16 +1894,83 @@ impl<'a> AwsEmitter<'a> {
         self.line("extra^,");
     }
 
+    /// The input fields of `m` a client verb fills with a fresh token when
+    /// the caller leaves them unset: its input's members the model marks
+    /// `idempotencyToken`. botocore fills these, and only these top-level
+    /// members, before the request is built (`generate_idempotent_uuid`,
+    /// `if name not in params`), so every attempt of one call resends the
+    /// same token and the service can tell a retry from a new request. A
+    /// required member is taken by `__init__` and so always set by the
+    /// caller; it is never filled. REFUSED, by name (`idempotency-token`):
+    /// a token member that is not a string, which botocore would fill with
+    /// a string the shape cannot hold.
+    fn idempotency_fills(&self, m: &IrMethod) -> Result<Vec<String>, String> {
+        let Some(msg) = self.messages.values().find(|x| x.fq_name == m.input.fq_name) else {
+            return Ok(Vec::new());
+        };
+        let mut out = Vec::new();
+        for f in &msg.fields {
+            let mf = self.facts.member(&msg.fq_name, &f.name)?;
+            if !mf.idempotency_token || mf.required {
+                continue;
+            }
+            let ty = self.storage_type(msg, f)?;
+            if ty != "Optional[String]" {
+                return Err(format!(
+                    "emit_aws: REFUSED idempotency-token: the input `{}` of `{}` marks \
+                     `{}` as its idempotency token, and its type is `{ty}`; botocore fills \
+                     an unset token with a UUID string",
+                    msg.name, m.name, mf.member_name
+                ));
+            }
+            out.push(f.name.clone());
+        }
+        Ok(out)
+    }
+
+    /// Whether any client verb fills an idempotency token, and so whether
+    /// the module imports `aws_idempotency_token`. A pure-mode module has no
+    /// verb.
+    fn fills_idempotency_tokens(&self) -> Result<bool, String> {
+        if self.options.pure_only {
+            return Ok(false);
+        }
+        for m in &self.lowering.model.files[0].services[0].methods {
+            if !self.idempotency_fills(m)?.is_empty() {
+                return Ok(true);
+            }
+        }
+        Ok(false)
+    }
+
     /// An operation's request, and with a ruleset the target it resolves
-    /// to: `req` and `target`, as both of its verbs send them.
-    fn emit_op_request(&mut self, m: &IrMethod, ruleset: bool, p: &str) {
+    /// to: `req` and `target`, as both of its verbs send them. A client
+    /// verb builds and resolves from a copy of its input whose unset
+    /// idempotency tokens are filled (`idempotency_fills`), once, before
+    /// the retry loop, which resends the same bytes.
+    fn emit_op_request(&mut self, m: &IrMethod, ruleset: bool, p: &str) -> Result<(), String> {
         let fp = self.fn_prefix();
-        self.line(&format!("var req = {fp}build_{}_request(input)", m.name));
+        let fills = self.idempotency_fills(m)?;
+        let input = if fills.is_empty() {
+            "input"
+        } else {
+            // Filled once per call, before the request is built: the retry
+            // loop resends the request's bytes, token and all.
+            self.line("var filled = input.copy()");
+            for f in &fills {
+                self.line(&format!("if not filled.{f}:"));
+                self.push();
+                self.line(&format!("filled.{f} = Optional[String](aws_idempotency_token())"));
+                self.pop();
+            }
+            "filled"
+        };
+        self.line(&format!("var req = {fp}build_{}_request({input})", m.name));
         if ruleset {
             self.line("var target = aws_signing_target(");
             self.push();
             self.line(&format!(
-                "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, input),",
+                "{fp}resolve_{}_endpoint(self._rules, self._endpoint_config, {input}),",
                 m.name
             ));
             self.line("self._region.copy(),");
@@ -1906,6 +1978,7 @@ impl<'a> AwsEmitter<'a> {
             self.pop();
             self.line(")");
         }
+        Ok(())
     }
 
     fn emit_client(&mut self) -> Result<(), String> {
@@ -2175,7 +2248,7 @@ impl<'a> AwsEmitter<'a> {
             } else {
                 ""
             };
-            self.emit_op_request(m, ruleset, &p);
+            self.emit_op_request(m, ruleset, &p)?;
             if ruleset {
                 self.line(&format!("var res = self.send(req^, target{s3_200})"));
             } else {
@@ -2208,7 +2281,7 @@ impl<'a> AwsEmitter<'a> {
                 "    or not. `{fp}parse_{}_response` reads a successful one.\"\"\"",
                 m.name
             ));
-            self.emit_op_request(m, ruleset, &p);
+            self.emit_op_request(m, ruleset, &p)?;
             let tgt = if ruleset { "target, " } else { "" };
             self.line(&format!(
                 "return self.send_with(req^, {tgt}transport, clock, retry, budget{s3_200})"
@@ -2761,6 +2834,91 @@ mod tests {
             emit_with_error(retryable, true).unwrap();
         }
         emit_with_error("", false).unwrap();
+    }
+
+    /// A one-operation awsJson module whose input `In` holds `Token`, with
+    /// the given member text and `required` list, emitted with its preamble
+    /// (so its imports) in client or pure mode.
+    fn emit_with_token(member: &str, required: &str, pure_only: bool) -> Result<String, String> {
+        let model = crate::json::parse(&format!(
+            r#"{{"version": "2.0",
+                "metadata": {{"apiVersion": "2026-10-02", "endpointPrefix": "tiny",
+                    "jsonVersion": "1.1", "protocol": "json", "serviceFullName": "Tiny",
+                    "serviceId": "Tiny", "signatureVersion": "v4",
+                    "targetPrefix": "Tiny", "uid": "tiny-2026-10-02"}},
+                "operations": {{"Op": {{"name": "Op",
+                    "http": {{"method": "POST", "requestUri": "/"}},
+                    "input": {{"shape": "In"}}, "output": {{"shape": "Out"}}}}}},
+                "shapes": {{"In": {{"type": "structure", "required": [{required}],
+                                   "members": {{"Token": {member},
+                                               "Name": {{"shape": "S"}}}}}},
+                           "Out": {{"type": "structure", "members": {{}}}},
+                           "S": {{"type": "string"}},
+                           "N": {{"type": "integer"}}}}}}"#
+        ))
+        .unwrap();
+        let lowering = crate::aws_in::lower_aws_service(
+            &model,
+            "tiny",
+            &["Op".to_string()],
+            "tiny.json",
+            "aws.tiny",
+        )
+        .unwrap();
+        let options = AwsEmitOptions { pure_only, ..AwsEmitOptions::default() };
+        let prov = AwsProvenance { model_key: "tiny/2026-10-02", model_sha256: "m" };
+        emit_aws_module(&lowering, &AwsOverrides::empty(), "tiny", options, Some(prov))
+            .map(|e| e.source)
+    }
+
+    #[test]
+    fn an_unset_idempotency_token_is_filled_once_per_call() {
+        let token = r#"{"shape": "S", "idempotencyToken": true}"#;
+        let src = emit_with_token(token, "", false).unwrap();
+        let import = "from komira_aws_core import aws_idempotency_token\n";
+        assert_eq!(src.matches(import).count(), 1, "{src}");
+        // Both verbs fill it before building the request, and build from
+        // the filled copy.
+        let fill = "        var filled = input.copy()\n        if not filled.token:\n            \
+                    filled.token = Optional[String](aws_idempotency_token())\n        \
+                    var req = build_op_request(filled)\n";
+        assert_eq!(src.matches(fill).count(), 2, "{src}");
+        assert!(!src.contains("build_op_request(input)"), "{src}");
+        // One draw in each verb, and nowhere else.
+        assert_eq!(src.matches("aws_idempotency_token()").count(), 2, "{src}");
+        // Only the token member is filled.
+        assert!(!src.contains("filled.name"), "{src}");
+
+        // A pure-mode module has no verb, and so no fill.
+        let src = emit_with_token(token, "", true).unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
+        // A required token is the caller's: `__init__` takes it.
+        let src = emit_with_token(token, r#""Token""#, false).unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
+        // No token, no fill and no import.
+        let src = emit_with_token(r#"{"shape": "S"}"#, "", false).unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
+        assert!(!src.contains("filled"), "{src}");
+        assert!(src.contains("var req = build_op_request(input)\n"), "{src}");
+    }
+
+    #[test]
+    fn a_token_that_is_not_a_string_is_refused() {
+        let e = emit_with_token(r#"{"shape": "N", "idempotencyToken": true}"#, "", false)
+            .unwrap_err();
+        assert_eq!(
+            crate::aws_conformance::refusal_name(&e).as_deref(),
+            Some("idempotency-token"),
+            "{e}"
+        );
+        assert!(e.contains("`Token`"), "{e}");
+        // The refusal is the fill's: a pure module, which has no verb to
+        // fill it, sends the member as given and is not refused.
+        let src = emit_with_token(r#"{"shape": "N", "idempotencyToken": true}"#, "", true)
+            .unwrap();
+        assert!(!src.contains("aws_idempotency_token"), "{src}");
     }
 
     #[test]
