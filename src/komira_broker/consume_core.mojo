@@ -628,6 +628,18 @@ struct ConsumeCore[Storage: ConditionalWriteStore](Movable, Deinitable):
         )
 
     # -------------------------------------------------------------------------
+    # read_chunk_body — the raw manifest chunk body (compaction sidecar reader).
+    # -------------------------------------------------------------------------
+
+    def read_chunk_body(mut self, chunk_seq: Int64) raises -> List[UInt8]:
+        """The manifest chunk body at `chunk_seq`, undecoded. A caller that
+        must map a LOG-COMPACTED chunk's rows back to their preserved absolute
+        offsets reads the survivor sidecar off it
+        (`log_compaction.decode_compacted_survivor_offsets`); the core itself
+        stays free of the compaction codec."""
+        return self._manifest.read_chunk(chunk_seq)
+
+    # -------------------------------------------------------------------------
     # read_chunk_segment — read ONE segment by its manifest chunk seq (tail).
     # -------------------------------------------------------------------------
 

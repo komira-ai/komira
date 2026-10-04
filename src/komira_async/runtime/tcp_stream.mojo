@@ -151,7 +151,7 @@ def _tcp_deregister_only(fd: Int32, epoll_fd: Int32, registered: Bool):
 # bounded at all is that ONE conformer happened to pass a literal
 # (`kernel_tcp._CONNECT_TIMEOUT_US`). A bound that has to be re-stated at each
 # call site is missing at call site N+1 — and here N+1 had already arrived:
-# `komira_pg/pg_tls.mojo` and `komira_pipeline_runtime/socket_black_box_
+# `komira_db_postgres/wire/pg_tls.mojo` and `komira_pipeline_runtime/socket_black_box_
 # service.mojo` both dialled on the default and therefore on the UNBOUNDED arm.
 #
 # ⛔ AND THE UNBOUNDED ARM WAS ALSO WRONG ON ITS OWN TERMS. It did ONE

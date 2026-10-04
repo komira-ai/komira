@@ -25,6 +25,10 @@ from .plan_wire_codec import (
     # docstring for why each one is a wrong-plan-cache risk and not a decode
     # risk. So it gets the WHOLE `WireScanBinding` and splices it.
     binding_to_bytes,
+    # ★ ITS READ-SIDE PARTNER FOR AN OPEN SCAN KIND: a non-Mojo author names
+    # a kind's params as a typed map (a `WireScanBinding` with only `params`
+    # set) and the kind builds the rest. See its docstring.
+    scan_params_from_bytes,
     # ★ THE PER-FIELD LEDGER'S TOKENS. Exported for the same reason the two gates
     # below export theirs: a test asserting on one of these imports it, so the
     # assertion tracks the constant rather than a STRING LITERAL that does not.

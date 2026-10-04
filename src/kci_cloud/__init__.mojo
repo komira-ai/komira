@@ -3,7 +3,7 @@
 The catalog (`kci_resource_proto`) says WHAT an author can deploy and the
 engine (`kci_reconciler`) knows how to reconcile a graph of nodes; this
 package sits between them. A CLOUD is the deploy target of a cell (`gcp`,
-`aws`, `mem`): the id of a cloud adapter built into kci. It is not a
+`aws`, `fake`): the id of a cloud adapter built into kci. It is not a
 platform; a platform is an OS and a CPU (`Image.platform`). Every cloud is
 built into kci, so the list of clouds is closed and nothing here is a plugin
 interface. This package names no cloud:
@@ -36,8 +36,8 @@ interface. This package names no cloud:
   * conformance.mojo — the conformance kit every cloud runs (eleven steps,
                        from label stamping to two interleaved applies).
 
-The in-memory reference clouds that exercise all of it live in
-`kci_cloud_mem`.
+The fake clouds (working in-memory clouds, not mocks) that exercise all of it live in
+`kci_cloud_fake`.
 """
 
 from kci_cloud.cloud_id import CloudId
@@ -87,7 +87,7 @@ from kci_cloud.clouds import (
     Clouds,
     CloudEntry,
     describe,
-    declaration_problems,
+    artifact_problems,
 )
 from kci_cloud.validate import (
     graph_findings,
