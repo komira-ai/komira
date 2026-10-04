@@ -91,7 +91,7 @@ def _error(status: Int, kind: String, body: String) -> AwsResponse:
 def test_not_found() raises:
     var r = _error(
         404,
-        String("ResourceNotFoundException:http://internal.amazon.com/coral/com.amazonaws.chronos/"),
+        String("ResourceNotFoundException:http://example.com/doc/scheduler/"),
         String('{"Message":"Schedule nightly-reap does not exist."}'),
     )
     assert_true(aws_is_error_status(r.status))
