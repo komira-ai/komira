@@ -8,7 +8,7 @@
 #           --release-dir <dir> [--result-file <file>] [--summary-file <file>]
 #           [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]
 #           [--release-version <file>] [--concurrency <n>]
-#           [--secret-store <none|env>]
+#           [--secret-store <none|env>] [--scratch-dir <dir>]
 #   kci --help
 #
 # kci has exactly ONE command: `kci run --stage S` runs every step of stage S
@@ -48,9 +48,13 @@
 #                            optional
 #   a selected PUBLISH step  needs --release-version; --concurrency,
 #                            --secret-store optional
-#   no selected step of that kind   its flags are refused
+#   a selected validation    needs --scratch-dir, an ABSOLUTE path (the
+#                            container mounts a directory under it)
+#   no selected step of that kind   its flags are refused (and
+#                            --scratch-dir when no validation is selected)
 #
-# Only the SELECTED steps count (every step, without `--only`). Which names
+# Only the SELECTED steps and validations count (every one, without
+# `--only`; `--only step:<s>` selects no validation). Which names
 # a release publishes is its artifacts file's: there is no per-run claim
 # and no expected set hash on the command line.
 #
@@ -86,10 +90,12 @@ comptime KCI_USAGE: String = (
     "          [--context <key=value>]... --release-dir <dir> [--result-file <file>] [--summary-file <file>]\n"
     "          [--work-dir <dir> --log-dir <dir> [--build-timeout-s <n>]]         (a selected BUILD step)\n"
     "          --release-version <file> [--concurrency <n>] [--secret-store <none|env>]  (a selected PUBLISH step)\n"
+    "          --scratch-dir <dir>                                          (a selected validation)\n"
     "  kci --help\n"
     "kci has one command: kci run --stage S runs every step of stage S of the machine file, in order.\n"
     "--machine defaults to release/machine.textproto.\n"
     "--only runs only the named steps (or validations): a SELECTIVE run, never reported as a full one.\n"
+    "A step's validations run after it in a FULL run; with --only, only the validations it names run.\n"
     "--plan: a dry run; a BUILD step builds nothing, a PUBLISH step checks and reads and writes nothing.\n"
     "--summary-file: a markdown file kci appends its summary to (the outcome, the steps, the NEW NAMES).\n"
     "Under GitHub Actions kci first checks the workflow it runs under against the machine file.\n"
@@ -144,6 +150,7 @@ struct KciCommand(Copyable, Movable):
     var release_version: String
     var concurrency: Int
     var store: SecretStoreChoice
+    var scratch_dir: String
     var only: List[String]
     var seen: List[String]
 
@@ -165,6 +172,7 @@ struct KciCommand(Copyable, Movable):
         self.release_version = String("")
         self.concurrency = 0
         self.store = SecretStoreChoice.NONE
+        self.scratch_dir = String("")
         self.only = List[String]()
         self.seen = List[String]()
 
@@ -208,6 +216,12 @@ def publish_flags() -> List[String]:
     var l = List[String]()
     for f in ["--release-version", "--concurrency", "--secret-store"]:
         l.append(String(f))
+    return l^
+
+
+def validation_flags() -> List[String]:
+    var l = List[String]()
+    l.append(String("--scratch-dir"))
     return l^
 
 
@@ -294,6 +308,10 @@ def _set(mut cmd: KciCommand, flag: String, value: String) raises:
         cmd.concurrency = _positive_int(flag, value)
     elif flag == String("--secret-store"):
         cmd.store = _store_choice(value)
+    elif flag == String("--scratch-dir"):
+        if not value.startswith(String("/")):
+            raise usage_error(String("--scratch-dir '") + value + String("' is not an absolute path (a container mounts a directory under it)"))
+        cmd.scratch_dir = value.copy()
 
 
 def _find_value(args: List[String], flag: String) -> String:
@@ -346,6 +364,7 @@ def parse_kci_args(args: List[String]) raises -> KciCommand:
     var allowed = _run_common_flags()
     allowed.extend(build_flags())
     allowed.extend(publish_flags())
+    allowed.extend(validation_flags())
     var i = start
     while i < len(args):
         var a = args[i]
@@ -431,3 +450,11 @@ def require_stage_flags(cmd: KciCommand, stage: Stage, sel: Selection) raises:
         for i in range(len(pf)):
             if cmd.given(pf[i]):
                 raise usage_error(pf[i] + String(" is a PUBLISH step's flag, and ") + which + holds_no + String(" PUBLISH step"))
+    var vwhich = String("stage '") + stage.name + String("'")
+    if len(cmd.only) > 0:
+        vwhich = String("--only in stage '") + stage.name + String("'")
+    if len(sel.validations) > 0:
+        if not cmd.given(String("--scratch-dir")):
+            raise usage_error(vwhich + String(" selects a validation: kci run needs --scratch-dir"))
+    elif cmd.given(String("--scratch-dir")):
+        raise usage_error(String("--scratch-dir is a validation's flag, and ") + vwhich + String(" selects no validation"))

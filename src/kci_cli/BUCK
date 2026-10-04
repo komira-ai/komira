@@ -7,16 +7,19 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # workflow it runs under (read at its commit) to the machine file
 # (kci_ci_check, library code: a mismatch is exit 3, unreadable exit 5). It
 # reports the NEW NAMES of the stages after it, and appends a markdown summary
-# to --summary-file. A declared validation is refused (exit 3), never
-# skipped: this kci has no validation runner yet. There is no other verb and
+# to --summary-file. A step's validations run after it (kci_validate: the
+# release installed from the step's channel in a digest-pinned container);
+# `--only validation:<v>` runs one against what is already published, and
+# `--only step:<s>` runs the step without them. There is no other verb and
 # no alias. Every run writes kci_api's result document to --result-file
 # (temp-and-rename, RUNNING before the first effect, FINISHED on every exit
 # path) and exits with kci_api's numbers. bin/kci is its `main`.
 #
 # The welded tests: the one parser and every usage refusal; the stage run over
 # a recording fake (order, stop at the first failure, worst outcome, PARTIAL
-# after a publish, the result records, the workflow check, the validation
-# refusal, the lookahead, the summary); the result file; the real libraries
+# after a publish, the result records, the workflow check, validations after
+# their step and on their own, VALIDATION_FAILED and NOT_REACHED, the
+# lookahead, the summary); the result file; the real libraries
 # reached through a machine file; and a scan that no kci source but
 # kci_api spells an exit number.
 mojo_library(
@@ -26,10 +29,14 @@ mojo_library(
         "//src/kci_build:kci_build_lib",
         "//src/kci_ci_check:kci_ci_check",
         "//src/kci_api:kci_api",
+        "//src/kci_pkg_upload:kci_pkg_upload",
         "//src/kci_publish:kci_publish_lib",
         "//src/kci_release_set:kci_release_set",
         "//src/kci_release_machine:kci_release_machine",
+        "//src/kci_validate:kci_validate",
         "//src/komira_clock:komira_clock",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
         "//src/komira_libc:komira_libc",
         "//src/komira_secret_env:komira_secret_env",
         "//src/komira_secret_store:komira_secret_store",

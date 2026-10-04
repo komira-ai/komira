@@ -3,8 +3,9 @@
 #   `resolve_selection`: `kci run --only ...` against one stage. A step
 #   selector selects its step; one that matches nothing is refused with the
 #   stage's names; a validation selector selects that validation and no
-#   step; a step selector selects its step and the step's validations; any
-#   selector makes the run SELECTIVE; steps run in file order.
+#   step; a step selector selects its step WITHOUT the step's validations
+#   (only a FULL run runs both); any selector makes the run SELECTIVE; steps
+#   and validations run in file order.
 # =============================================================================
 
 from std.testing import TestSuite, assert_equal, assert_false, assert_true
@@ -19,8 +20,10 @@ comptime _MACHINE: String = (
     "  step { name: \"build\" kind: BUILD platform: \"linux-x86_64\" artifacts: \"d.textproto\" }\n"
     "  step { name: \"publish\" kind: PUBLISH platform: \"linux-x86_64\" artifacts: \"d.textproto\"\n"
     "         channels: \"c.textproto\" channel: \"gamma\"\n"
-    "    validation { name: \"install-smoke\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"s.mojo\" }\n"
-    "    validation { name: \"read-back\" kind: CONDA_INSTALL_SMOKE install: \"komira_encoding\" program: \"s.mojo\" }\n"
+    "    validation { name: \"install-smoke\" kind: CONDA_INSTALL_SMOKE install: \"komira_all\" program: \"release/s.mojo\"\n"
+    "       image: \"r.example.invalid/p@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\" compiler_channel: \"https://c.example.invalid/max\" }\n"
+    "    validation { name: \"read-back\" kind: CONDA_INSTALL_SMOKE install: \"komira_encoding\" program: \"release/s.mojo\"\n"
+    "       image: \"r.example.invalid/p@sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\" compiler_channel: \"https://c.example.invalid/max\" }\n"
     "  }\n"
     "}\n"
 )
@@ -65,8 +68,10 @@ def test_step_selector_selects_its_step() raises:
     assert_equal(s.selected_count(), 1)
     assert_equal(len(s.only), 1)
     assert_equal(s.only[0], String("step:publish"))
-    # a selected step brings its own validations
-    assert_equal(len(s.validations), 2)
+    # a selected step does NOT bring its validations: a stage split over two
+    # jobs (`--only step:publish`, then `--only validation:install-smoke`)
+    # runs each part once
+    assert_equal(len(s.validations), 0)
     var b = List[String]()
     b.append(String("step:build"))
     var only_build = _resolve(b)
@@ -122,13 +127,23 @@ def test_validation_selector_selects_the_validation_only() raises:
     assert_equal(s.only[0], String("validation:install-smoke"))
 
 
-def test_step_and_one_of_its_validations_is_not_doubled() raises:
+def test_step_and_one_of_its_validations_runs_that_one() raises:
     var t = List[String]()
     t.append(String("validation:read-back"))
     t.append(String("step:publish"))
     var s = _resolve(t)
     assert_true(s.steps[1])
-    # each validation once, in file order
+    # only the named validation: the step selector adds none
+    assert_equal(len(s.validations), 1)
+    assert_equal(s.validations[0], String("read-back"))
+
+
+def test_validations_run_in_file_order() raises:
+    var t = List[String]()
+    t.append(String("validation:read-back"))
+    t.append(String("validation:install-smoke"))
+    var s = _resolve(t)
+    assert_equal(s.selected_count(), 0)
     assert_equal(len(s.validations), 2)
     assert_equal(s.validations[0], String("install-smoke"))
     assert_equal(s.validations[1], String("read-back"))

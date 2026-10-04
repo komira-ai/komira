@@ -14,6 +14,13 @@
 #                       secret NAME is the environment variable's name.
 #               An OIDC channel resolves no secret at all, whichever store.
 #               The step's NEW NAMES block goes to the job summary.
+#   validate       -> kci_validate.run_install_smoke: a `SupervisorRunner`
+#                     for `docker`, anonymous HTTPS reads of the channel
+#                     (`HttpPkgTransport`, no credential), `UsleepSleeper`
+#                     for the index wait. The container runs as this
+#                     process's uid:gid; the docker CLI gets this process's
+#                     PATH (platform-set; a default when unset) and nothing
+#                     else it holds.
 #   lookahead      -> kci_publish.lookahead_new_names_https: a later stage's
 #                     NEW NAMES, anonymous reads over HTTPS.
 #   platform_env   -> this process's environment, for the platform-set
@@ -29,13 +36,20 @@
 # Encapsulation: owned values; no pointer, no wildcard origin.
 # =============================================================================
 
-from std.ffi import external_call
+from std.ffi import abort, external_call
 from std.os import remove
 from std.os.path import exists
 from std.pathlib import Path
 
+from komira_http_client.tls_connector import TlsConnector, build_public_ca_tls_connector
+from komira_http_core.transport.kernel_tcp import KernelTcpConnector
 from komira_secret_env import EnvSecretStore, ProcessEnv
 from komira_secret_store import SecretStore, SecretValue
+
+from kci_api import OUTCOME_VALIDATION_FAILED, VALIDATION_VALIDATED, ResultValidation, ResultValidationCheck
+from kci_pkg_upload import HttpPkgTransport
+from kci_publish import UsleepSleeper
+from kci_validate import ContainerHost, ValidateRequest, run_install_smoke
 
 from kci_build import GIT_PROGRAM, BuildRequest, RunSpec, SupervisorRunner, run_build
 from kci_build import RunResult as ProcessResult
@@ -90,6 +104,20 @@ struct ComposedSecretStore(SecretStore, Movable):
         return none.resolve(secret_ref)
 
 
+comptime DOCKER_PROGRAM: String = "docker"
+comptime DEFAULT_CHILD_PATH: String = "/usr/local/bin:/usr/bin:/bin"
+"""The docker CLI's PATH when this process has none."""
+
+comptime _Conn = TlsConnector[KernelTcpConnector]
+
+
+def _mk_connector(host: String) -> _Conn:
+    try:
+        return build_public_ca_tls_connector(host)
+    except e:
+        abort(String("validation: TLS connector for ") + host + String(": ") + String(e))
+
+
 struct LibrarySteps(StageSteps, Movable):
     """The steps as the kci binary runs them. Layout: no fields."""
 
@@ -115,6 +143,27 @@ struct LibrarySteps(StageSteps, Movable):
         end.changed_outside = r.landed()
         end.summary = new_names_markdown(new_names_of(r, req.stage, req.step_name))
         return end^
+
+    def validate(mut self, req: ValidateRequest) -> ResultValidation:
+        var path = self.platform_env(String("PATH"))
+        if path.byte_length() == 0:
+            path = String(DEFAULT_CHILD_PATH)
+        var user = String(Int(external_call["getuid", UInt32]())) + String(":") + String(
+            Int(external_call["getgid", UInt32]())
+        )
+        var host = ContainerHost(String(DOCKER_PROGRAM), path^, user^)
+        var runner = SupervisorRunner()
+        var transport = HttpPkgTransport[_Conn](_mk_connector)
+        var sleeper = UsleepSleeper()
+        try:
+            return run_install_smoke(runner, transport, sleeper, req, host)
+        except e:
+            var row = ResultValidation(
+                req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(),
+                String(VALIDATION_VALIDATED), String(OUTCOME_VALIDATION_FAILED),
+            )
+            row.checks.append(ResultValidationCheck(String("validation"), String("a validation kci runs"), String(e), False))
+            return row^
 
     def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
         return lookahead_new_names_https(req)

@@ -17,8 +17,10 @@ from komira_libc.posix import _read_env
 from kci_build import BuildRequest
 from kci_cli import TMP_SUFFIX, CliRecorder, SecretStoreChoice, StageSteps, StepEnd, kci_main_with, recorder_for, write_whole_file
 from kci_api import OUTCOME_SUCCEEDED, parse_result
+from kci_api import ResultValidation
 from kci_api import RunResult as KciRunResult
 from kci_publish import NewNamesReport, PublishRequest
+from kci_validate import ValidateRequest
 
 comptime _REV: String = "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678"
 
@@ -45,6 +47,12 @@ struct SpySteps(StageSteps, Movable):
         mut self, req: PublishRequest, mut result: KciRunResult, mut recorder: CliRecorder, store: SecretStoreChoice
     ) -> StepEnd:
         return StepEnd(String(OUTCOME_SUCCEEDED), String(""), String(""))
+
+    def validate(mut self, req: ValidateRequest) -> ResultValidation:
+        # no machine file here declares a validation
+        return ResultValidation(
+            req.validation.name.copy(), req.step_name.copy(), req.validation.kind.copy(), String("NOT_REACHED"), String("")
+        )
 
     def lookahead(mut self, req: PublishRequest) -> NewNamesReport:
         return NewNamesReport(req.stage.copy(), req.step_name.copy(), req.channel.copy())
