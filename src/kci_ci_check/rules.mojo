@@ -30,7 +30,11 @@
 #       credential is OIDC trusted publishing (`id_token_stages`), or it is
 #       farm-connected (the farm connection exchanges the job's identity
 #       token for a network credential). Never in the workflow-level
-#       `permissions`, which reach every job. No other job carries it
+#       `permissions`, which reach every job. No other job carries it.
+#       A `permissions:` written as a scalar, at either level, is
+#       `read-all`: `write-all` grants `id-token: write` with no map entry
+#       naming it, so any other scalar is a disagreement (and counts as
+#       holding the token)
 #   R5  each job's steps invoke `kci run` exactly once; a job named after a
 #       stage passes `--stage` its own id written literally (a `--stage`
 #       naming another stage, or one that is a variable, is a
@@ -432,8 +436,24 @@ def _triggers(doc: WorkflowDoc, on: Int) -> List[String]:
 
 
 def _id_token_write(doc: WorkflowDoc, perms: Int) -> Bool:
+    """`perms` grants `id-token: write`: the map entry, or the scalar
+    `write-all`, which grants every permission."""
+    if perms >= 0 and doc.kind(perms) == NODE_SCALAR:
+        return doc.text(perms) == String("write-all")
     var v = doc.child(perms, String("id-token"))
     return v >= 0 and doc.kind(v) == NODE_SCALAR and doc.text(v) == String("write")
+
+
+def _check_permissions_form(doc: WorkflowDoc, perms: Int, whose: String, mut findings: List[String]):
+    """R4: a `permissions:` that is a scalar is `read-all`; any other
+    scalar (`write-all` above all) grants permissions no map names."""
+    if perms < 0 or doc.kind(perms) != NODE_SCALAR or doc.text(perms) == String("read-all"):
+        return
+    findings.append(
+        _at(doc, perms) + whose + String("R4: `permissions: ") + doc.text(perms)
+        + String("` grants permissions no map names (`write-all` grants `id-token: write`);")
+        + String(" use an explicit permissions map, or `read-all` or `{}`")
+    )
 
 
 def _job_calls(doc: WorkflowDoc, job: Int) -> List[KciRunCall]:
@@ -815,7 +835,15 @@ def check_workflow_doc(
     var inputs = doc.child(doc.child(on, String("workflow_dispatch")), String("inputs"))
     if doc.child(inputs, String("revision")) < 0:
         findings.append(_at(doc, on) + String("R7: workflow_dispatch takes no input `revision` (the commit a manual run releases)"))
-    # R4, workflow level
+    # R4, workflow level, and the form of every `permissions:`
+    _check_permissions_form(doc, doc.child(root, String("permissions")), String("workflow: "), findings)
+    var all_jobs = doc.child(root, String("jobs"))
+    var all_ids = doc.keys(all_jobs)
+    var all_nodes = doc.items(all_jobs)
+    for i in range(len(all_ids)):
+        _check_permissions_form(
+            doc, doc.child(all_nodes[i], String("permissions")), String("job '") + all_ids[i] + String("': "), findings
+        )
     if _id_token_write(doc, doc.child(root, String("permissions"))):
         findings.append(
             _at(doc, doc.child(root, String("permissions")))
