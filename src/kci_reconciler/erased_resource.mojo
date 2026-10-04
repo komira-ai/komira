@@ -25,13 +25,17 @@
 # instantiated; the graph + engine monomorphize over `ErasedResource` ONLY.
 #
 # ── ENCAPSULATION (+ the FFI-POD fn-ptr carve-out) ──────────────────────────
-# The PUBLIC surface takes/returns only value PODs (`Creds`, `ResourceStatus`,
-# `ChangeAction`, `String`, `List[String]`, `Int`) + owned `Self`. ZERO
-# UnsafePointer crosses any PUBLIC signature. The `_home: OwnedPointer[UInt8]` is a
-# private field (CONCRETE origin, ASAP-tracked). The fn-ptrs are the sanctioned
-# FFI-POD carve-out — code pointers, no heap; the wildcard origin (`MutExternal
-# Origin`) lives ONLY in the fn-ptr comptime ALIASES + the cast-site bodies, NEVER
-# on a 4-space FIELD line. NO `unsafe_from_address`; NO wildcard-origin FIELD.
+# The PUBLIC surface is `erase[R](resource^)` plus the `Resource` verbs, which
+# take/return only value PODs (`Creds`, `ResourceStatus`, `ChangeAction`,
+# `String`, `List[String]`, `Int`) + owned `Self`. No pointer type appears in a
+# public signature. The constructor that takes the type-erased home and the
+# fn-ptr vtable is PRIVATE: keyword-only, every parameter underscore-named, called
+# only by `erase[R]` (tests/test_erased_resource_public_api.mojo holds this). The
+# `_home: OwnedPointer[UInt8]` is a private field (CONCRETE origin, ASAP-tracked).
+# The fn-ptrs are the FFI-POD carve-out — code pointers, no heap. The untracked
+# origin (`MutUntrackedOrigin`) appears ONLY in the private fn-ptr comptime
+# ALIASES, the private fields typed by them, the private constructor, and the
+# cast-site and trampoline bodies. NO `unsafe_from_address`; NO wildcard origin.
 #
 # ── DESTROY/RECREATE SAFETY + the single-consume drop ────────────────────────
 # `ErasedResource` is a graph NODE (built once at plan time, owned by the graph's
@@ -60,11 +64,18 @@ from kci_reconciler.resource import (
 
 # =============================================================================
 # §1 — the FFI-POD thin fn-ptr TYPE aliases (the manual vtable). Each takes the
-#      type-erased home byte ptr (MutExternalOrigin — the type-erasure handle, the
-#      blessed wildcard-in-alias carve-out) + the value-POD verb args, and returns
-#      the value-POD result (`raises` — a backend fault surfaces). The drop arm
-#      cannot raise.
+#      type-erased home byte ptr (MutUntrackedOrigin — the type-erasure handle)
+#      + the value-POD verb args, and returns the value-POD result (`raises` — a
+#      backend fault surfaces). The drop arm cannot raise.
 # =============================================================================
+# SAFETY: every alias below is private (underscore-named, not re-exported) and is
+# used only by this file's private fields, its private constructor and the
+# `_erased_*_for[R]` trampolines. The pointer each one takes is `_home`'s bytes,
+# formed at a cast site in this file from a live `OwnedPointer[UInt8]` that owns
+# a moved-in `R`, and each fn-ptr is bound by `erase[R]` for that same `R`, so
+# the trampoline's reinterpret back to `R` is type-correct. The pointer is
+# borrowed for the call only: no trampoline stores it, and only `_DropFn`
+# consumes the home (once, from `__del__`).
 
 # The read-only identity verbs (logical_id / retention take `self`; depends_on
 # takes `self`). The home byte ptr is the type-erasure handle.
@@ -206,8 +217,9 @@ struct ErasedResource(Resource, Movable, Deinitable):
     # ASAP-tracked. The single private pointer field — no wildcard origin.
     var _home: OwnedPointer[UInt8]
 
-    # FFI-POD thin fn-ptr fields (the FFI-POD carve-out — code pointers, no heap;
-    # the wildcard lives only in the alias signatures, the type-erasure handle).
+    # SAFETY: FFI-POD thin fn-ptr fields (code pointers, no heap). Private, typed
+    # by the private §1 aliases; the untracked-origin pointer in those types is the
+    # type-erasure handle, and §1 states why each call through it is sound.
     var _logical_id_fn: _LogicalIdFn
     var _depends_on_fn: _DependsOnFn
     var _retention_fn: _RetentionFn
@@ -233,53 +245,59 @@ struct ErasedResource(Resource, Movable, Deinitable):
 
     def __init__(
         out self,
-        var home: OwnedPointer[UInt8],
-        logical_id_fn: _LogicalIdFn,
-        depends_on_fn: _DependsOnFn,
-        retention_fn: _RetentionFn,
-        undeletable_reason_fn: _UndeletableReasonFn,
-        read_status_fn: _ReadStatusFn,
-        plan_fn: _PlanFn,
-        converge_mode_fn: _ConvergeModeFn,
-        create_fn: _CreateFn,
-        update_fn: _UpdateFn,
-        delete_fn: _DeleteFn,
-        prune_fn: _PruneFn,
-        fault_domain_fn: _FaultDomainFn,
-        input_refs_fn: _InputRefsFn,
-        bind_inputs_fn: _BindInputsFn,
-        outputs_fn: _OutputsFn,
-        owner_fn: _OwnerFn,
-        read_presence_fn: _ReadPresenceFn,
-        stamps_ownership_fn: _StampsOwnershipFn,
-        create_owned_fn: _CreateOwnedFn,
-        adopt_owned_fn: _AdoptOwnedFn,
-        wanted_fn: _WantedFn,
-        drop_fn: _DropFn,
+        *,
+        var _home: OwnedPointer[UInt8],
+        _logical_id_fn: _LogicalIdFn,
+        _depends_on_fn: _DependsOnFn,
+        _retention_fn: _RetentionFn,
+        _undeletable_reason_fn: _UndeletableReasonFn,
+        _read_status_fn: _ReadStatusFn,
+        _plan_fn: _PlanFn,
+        _converge_mode_fn: _ConvergeModeFn,
+        _create_fn: _CreateFn,
+        _update_fn: _UpdateFn,
+        _delete_fn: _DeleteFn,
+        _prune_fn: _PruneFn,
+        _fault_domain_fn: _FaultDomainFn,
+        _input_refs_fn: _InputRefsFn,
+        _bind_inputs_fn: _BindInputsFn,
+        _outputs_fn: _OutputsFn,
+        _owner_fn: _OwnerFn,
+        _read_presence_fn: _ReadPresenceFn,
+        _stamps_ownership_fn: _StampsOwnershipFn,
+        _create_owned_fn: _CreateOwnedFn,
+        _adopt_owned_fn: _AdoptOwnedFn,
+        _wanted_fn: _WantedFn,
+        _drop_fn: _DropFn,
     ):
-        self._home = home^
-        self._logical_id_fn = logical_id_fn
-        self._depends_on_fn = depends_on_fn
-        self._retention_fn = retention_fn
-        self._undeletable_reason_fn = undeletable_reason_fn
-        self._read_status_fn = read_status_fn
-        self._plan_fn = plan_fn
-        self._converge_mode_fn = converge_mode_fn
-        self._create_fn = create_fn
-        self._update_fn = update_fn
-        self._delete_fn = delete_fn
-        self._prune_fn = prune_fn
-        self._fault_domain_fn = fault_domain_fn
-        self._input_refs_fn = input_refs_fn
-        self._bind_inputs_fn = bind_inputs_fn
-        self._outputs_fn = outputs_fn
-        self._owner_fn = owner_fn
-        self._read_presence_fn = read_presence_fn
-        self._stamps_ownership_fn = stamps_ownership_fn
-        self._create_owned_fn = create_owned_fn
-        self._adopt_owned_fn = adopt_owned_fn
-        self._wanted_fn = wanted_fn
-        self._drop_fn = drop_fn
+        """PRIVATE. Only `erase[R]` calls this. Every parameter is keyword-only
+        and underscore-named (this module's spelling of private), because the
+        vtable aliases expand to untracked-origin pointer types and the home is
+        type-erased bytes. Construct an `ErasedResource` with
+        `ErasedResource.erase[R](resource^)`."""
+        self._home = _home^
+        self._logical_id_fn = _logical_id_fn
+        self._depends_on_fn = _depends_on_fn
+        self._retention_fn = _retention_fn
+        self._undeletable_reason_fn = _undeletable_reason_fn
+        self._read_status_fn = _read_status_fn
+        self._plan_fn = _plan_fn
+        self._converge_mode_fn = _converge_mode_fn
+        self._create_fn = _create_fn
+        self._update_fn = _update_fn
+        self._delete_fn = _delete_fn
+        self._prune_fn = _prune_fn
+        self._fault_domain_fn = _fault_domain_fn
+        self._input_refs_fn = _input_refs_fn
+        self._bind_inputs_fn = _bind_inputs_fn
+        self._outputs_fn = _outputs_fn
+        self._owner_fn = _owner_fn
+        self._read_presence_fn = _read_presence_fn
+        self._stamps_ownership_fn = _stamps_ownership_fn
+        self._create_owned_fn = _create_owned_fn
+        self._adopt_owned_fn = _adopt_owned_fn
+        self._wanted_fn = _wanted_fn
+        self._drop_fn = _drop_fn
 
     # =========================================================================
     # erase[R] — heap-box a concrete Resource into the runtime facade.
@@ -297,8 +315,8 @@ struct ErasedResource(Resource, Movable, Deinitable):
         fresh heap slot; `OwnedPointer(unsafe_from_raw_pointer=...)` takes single
         ownership of the byte-cast slot (concrete origin, ASAP-tracked). The
         trampolines are bound for the SAME `R`, so the in-body reinterpret of the
-        home ptr is type-correct by construction. The wildcard origin is confined
-        to the cast-site here + the trampoline bodies — never a struct field."""
+        home ptr is type-correct by construction. The untracked origin is confined
+        to the cast-site here + the trampoline bodies — never a public field."""
         var home_typed = alloc[R](1)
         # SAFETY: fresh allocation we own; in-place move-construct resource into it.
         UnsafePointer(to=home_typed[]).unsafe_write(resource^)
@@ -332,43 +350,43 @@ struct ErasedResource(Resource, Movable, Deinitable):
         var wanted_t: _WantedFn = _erased_wanted_for[R]
         var drop_t: _DropFn = _erased_drop_for[R]
         return ErasedResource(
-            home^,
-            logical_id_t,
-            depends_on_t,
-            retention_t,
-            undeletable_reason_t,
-            read_status_t,
-            plan_t,
-            converge_mode_t,
-            create_t,
-            update_t,
-            delete_t,
-            prune_t,
-            fault_domain_t,
-            input_refs_t,
-            bind_inputs_t,
-            outputs_t,
-            owner_t,
-            read_presence_t,
-            stamps_ownership_t,
-            create_owned_t,
-            adopt_owned_t,
-            wanted_t,
-            drop_t,
+            _home=home^,
+            _logical_id_fn=logical_id_t,
+            _depends_on_fn=depends_on_t,
+            _retention_fn=retention_t,
+            _undeletable_reason_fn=undeletable_reason_t,
+            _read_status_fn=read_status_t,
+            _plan_fn=plan_t,
+            _converge_mode_fn=converge_mode_t,
+            _create_fn=create_t,
+            _update_fn=update_t,
+            _delete_fn=delete_t,
+            _prune_fn=prune_t,
+            _fault_domain_fn=fault_domain_t,
+            _input_refs_fn=input_refs_t,
+            _bind_inputs_fn=bind_inputs_t,
+            _outputs_fn=outputs_t,
+            _owner_fn=owner_t,
+            _read_presence_fn=read_presence_t,
+            _stamps_ownership_fn=stamps_ownership_t,
+            _create_owned_fn=create_owned_t,
+            _adopt_owned_fn=adopt_owned_t,
+            _wanted_fn=wanted_t,
+            _drop_fn=drop_t,
         )
 
     # =========================================================================
     # The neutral value-typed Resource surface (what the graph + engine call).
-    # Each forms a MutExternalOrigin byte ptr to the home (the type-erasure
+    # Each forms a MutUntrackedOrigin byte ptr to the home (the type-erasure
     # handle) and invokes the bound trampoline, which reinterprets it back to the
-    # SAME R and drives the concrete verb IN-PLACE (not moved/freed). The wildcard
-    # origin is confined to each cast-site body — never a struct field.
+    # SAME R and drives the concrete verb IN-PLACE (not moved/freed). The
+    # untracked origin is confined to each cast-site body — never a public field.
     # =========================================================================
     def logical_id(mut self) -> String:
         """The graph-stable key. `mut self` — forming the mutable type-erasure
         handle to the home requires mutable access (the ErasedStorageApi shape,
         where every verb takes `mut self`). SAFETY: R is used in-place (read-only);
-        the wildcard is confined to this body.
+        the untracked origin is confined to this body.
 
         `Resource.logical_id` is non-raising, but the erased trampoline is `raises`
         (def carries implicit raises), so a (contract-forbidden) raise surfaces an
@@ -413,7 +431,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         conformer's reason in the tree would be silently replaced by the empty
         string — the teardown would still skip the right nodes and would report
         every one of them as "the conformer stated no reason". SAFETY: R read
-        in-place; the wildcard is confined to this cast-site body.
+        in-place; the untracked origin is confined to this cast-site body.
 
         Non-raising for the same reason `logical_id` is: a contract-forbidden
         raise surfaces an empty reason rather than failing a teardown over prose.
@@ -428,10 +446,10 @@ struct ErasedResource(Resource, Movable, Deinitable):
 
     def read_status(mut self, creds: Creds) raises -> ResourceStatus:
         """Read the live status AS `creds`. SAFETY: `_home` owns R's heap home for
-        this facade's lifetime; we form a MutExternalOrigin byte ptr (the
+        this facade's lifetime; we form a MutUntrackedOrigin byte ptr (the
         type-erasure handle) and invoke `_read_status_fn`, which reinterprets it to
-        the SAME R bound at erase[R] time and drives it in-place. The wildcard is
-        confined to this cast-site body."""
+        the SAME R bound at erase[R] time and drives it in-place. The untracked
+        origin is confined to this cast-site body."""
         var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
         return self._read_status_fn(p, creds)
 
@@ -458,7 +476,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
     def converge_mode(mut self, live: ResourceStatus) raises -> Int:
         """The converge mode (IN_PLACE or raise for REPLACE). `mut self` (see
         `logical_id`). SAFETY: R is used in-place (read-only over the live status);
-        the wildcard is confined to this body."""
+        the untracked origin is confined to this body."""
         var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
         return self._converge_mode_fn(p, live)
 
@@ -468,7 +486,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         FORWARDS to the concrete R's `prune` through `_prune_fn` — the trait default
         no-op would otherwise shadow the conformer's override at this facade, so the
         vtable entry is load-bearing. SAFETY: see `read_status` (R driven in-place;
-        the wildcard is confined to this cast-site body)."""
+        the untracked origin is confined to this cast-site body)."""
         var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
         self._prune_fn(p, creds)
 
@@ -488,7 +506,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         errors would land in our queue rather than vanish) and that is precisely
         why it would go unnoticed: the symptom of the bug is the same as the
         symptom of not having started yet. SAFETY: see `read_status` (R driven
-        in-place; the wildcard is confined to this cast-site body)."""
+        in-place; the untracked origin is confined to this cast-site body)."""
         var p = self._home.unsafe_ptr().unsafe_origin_cast[MutUntrackedOrigin]()
         return self._fault_domain_fn(p, verb)
 
@@ -496,8 +514,8 @@ struct ErasedResource(Resource, Movable, Deinitable):
     # Same reason as `prune` and `fault_domain`: the graph only holds erased
     # nodes, so a verb this facade does not forward is answered by the trait
     # default for every node. `test_resource_outputs` pins all four through an
-    # erased probe. SAFETY: see `read_status` (R driven in-place; the wildcard
-    # is confined to each cast-site body).
+    # erased probe. SAFETY: see `read_status` (R driven in-place; the untracked
+    # origin is confined to each cast-site body).
 
     def input_refs(mut self) -> List[InputRef]:
         """FORWARDED to the concrete R. `Resource.input_refs` does not raise;
@@ -593,7 +611,7 @@ struct ErasedResource(Resource, Movable, Deinitable):
         SAFETY: `_home` owns R's heap home; `unsafe_leak()` relinquishes its free so
         it does NOT also free the buffer; the bytes go to `_drop_fn` which
         reconstructs one `OwnedPointer[R]` over the SAME allocation and runs the
-        destroy+free in one shot. The wildcard origin is confined to this cast-site
+        destroy+free in one shot. The untracked origin is confined to this cast-site
         body. Runs exactly once per facade."""
         var raw = self._home^.unsafe_take_allocation().unsafe_leak().unsafe_origin_cast[
             MutUntrackedOrigin
