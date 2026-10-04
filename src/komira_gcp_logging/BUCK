@@ -1,0 +1,82 @@
+load("@komira//tools/build/cloud:gcp.bzl", "mojo_gcp_client")
+
+# Cloud Logging v2: a REST/JSON client generated at build time from the
+# googleapis protos //tools/vendor/googleapis:logging_v2 extracts from its
+# pinned archive (nothing of them is copied here). `LoggingServiceV2Client`
+# sends through komira_http_client's `HttpClient` over the komira_http_core
+# `Connector` it is given, takes each request's bearer token from a
+# komira_gcp_core `GcpTokenSource`, and raises a non-2xx answer through
+# komira_gcp_core's `gcp_status_error`. It reads no environment.
+#
+# `methods` is what a log reader calls: ListLogEntries (POST
+# /v2/entries:list), one page per call; a caller pages with the response's
+# `nextPageToken`. The service's other methods are not generated: the
+# writes and deletes (WriteLogEntries, DeleteLog), the listings
+# (ListLogs, ListMonitoredResourceDescriptors), and TailLogEntries, a
+# bidirectional stream with no unary REST form. A method joins the list
+# with its own rows in the tests below.
+#
+# `bundle_only` is the files the ListLogEntries closure reaches, each
+# generated into this package: the request and response (logging), the
+# entry (log_entry), its resource, request and severity types. LogEntry's
+# well-known types (Any, Struct, Timestamp, Duration) come from komira_wkt.
+#
+# The library is gated by its layout probe and these tests, hand-written
+# against the Cloud Logging v2 REST reference (no upstream test body is
+# copied), each sending through the generated client over komira_http_core's
+# ScriptedConnector (no socket): test_logging_requests (the request line,
+# Host, headers and JSON body of a first page, a next page, several
+# resource names and a caller's default header, byte for byte),
+# test_logging_responses (a page of entries with each payload arm and the
+# nested types decoded, unknown keys and names skipped, an empty page),
+# test_logging_token_hook (one token asked of the source per request, sent
+# as one `Bearer`; no token, no dial), test_logging_errors (the
+# google.rpc.Status envelope and bare HTTP statuses mapped to a code, a
+# 3xx included and never followed, the body never quoted) and
+# test_no_env_reads (every generated module reads no environment and holds
+# no method but ListLogEntries).
+#
+# No test here talks to the service.
+#
+# A live caller MUST call `set_rest_host("logging.googleapis.com")` on the
+# client. The generated client starts at the offline `localhost` placeholder
+# (the emitter does not read the service's `google.api.default_host` yet),
+# and without that call the bearer token goes to whatever answers on
+# https://localhost.
+
+mojo_gcp_client(
+    name = "komira_gcp_logging",
+    bundle_only = [
+        "google/logging/v2/logging.proto",
+        "google/logging/v2/log_entry.proto",
+        "google/api/monitored_resource.proto",
+        "google/logging/type/http_request.proto",
+        "google/logging/type/log_severity.proto",
+    ],
+    bundle_proto_deps = True,
+    methods = ["LoggingServiceV2.ListLogEntries"],
+    proto_deps = ["//tools/vendor/googleapis:logging_v2"],
+    protocol = "rest",
+    protos = [],
+    test_data = {
+        # The whole generated package, so the scan covers every file the
+        # generator writes with no second list of them to drift.
+        "tests/test_no_env_reads.mojo": {"gen": ":komira_gcp_logging_gen"},
+    },
+    test_srcs = [
+        "tests/test_logging_errors.mojo",
+        "tests/test_logging_requests.mojo",
+        "tests/test_logging_responses.mojo",
+        "tests/test_logging_token_hook.mojo",
+        "tests/test_no_env_reads.mojo",
+    ],
+    visibility = ["PUBLIC"],
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_proto_codec:komira_proto_codec",
+        "//src/komira_wkt:komira_wkt",
+    ],
+)
