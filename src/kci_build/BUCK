@@ -3,7 +3,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # One BUILD step of a stage (`kci run --stage S`; the kci binary's one parser
 # and the machine file make the request): check the release identity (--revision-id a full commit id that
 # must be the checkout's HEAD, in a full-history clone; the platform one kci
-# releases), record the run's RUNNING result (kci_contract) before the first
+# releases), record the run's RUNNING result (kci_api) before the first
 # effect, derive the release stamp from git, then for each artifact of the
 # declarations file (kci_artifact_declaration), in file order and one at a
 # time (a metapackage declared last reads its members under {release_dir}),
@@ -12,7 +12,7 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # kci_release_set.verify_member (the same checks a PUBLISH step re-runs) and
 # the manifest's platform; when every artifact passed, write release.json
 # (major 2: revision, platform, produced_by, members, set hash) LAST, as the
-# commit marker. The outcome is a kci_contract outcome word and error id; no
+# commit marker. The outcome is a kci_api outcome word and error id; no
 # exit number is spelled here. kci knows no build tool: the program, its args
 # and "build on the farm" are the declarations file's. The process is started
 # through the ProcessRunner seam: SupervisorRunner (komira_supervisor) for
@@ -53,7 +53,7 @@ mojo_library(
         "//src/kci_artifact_declaration:kci_artifact_declaration",
         "//src/kci_artifact_declaration_proto:kci_artifact_declaration_proto",
         "//src/kci_artifact_manifest:kci_artifact_manifest",
-        "//src/kci_contract:kci_contract",
+        "//src/kci_api:kci_api",
         "//src/kci_release_set:kci_release_set",
         "//src/komira_json:komira_json",
         "//src/komira_supervisor:komira_supervisor",
