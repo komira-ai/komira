@@ -45,6 +45,8 @@ comptime ERROR_IMAGE_PUSH: String = "KCI-E-IMAGE-PUSH"
 comptime ERROR_CANNOT_TELL: String = "KCI-E-CANNOT-TELL"
 comptime ERROR_WORKFLOW_MISMATCH: String = "KCI-E-WORKFLOW-MISMATCH"
 comptime ERROR_VALIDATION: String = "KCI-E-VALIDATION"
+comptime ERROR_AFFECTED: String = "KCI-E-AFFECTED"
+comptime ERROR_AFFECTED_VACUOUS: String = "KCI-E-AFFECTED-VACUOUS"
 
 
 struct ErrorRow(Copyable, Movable):
@@ -90,6 +92,8 @@ def error_table() -> List[ErrorRow]:
     t.append(ErrorRow(String(ERROR_CANNOT_TELL), String("kci cannot tell whether the end state holds")))
     t.append(ErrorRow(String(ERROR_WORKFLOW_MISMATCH), String("the CI workflow running kci does not match the machine file")))
     t.append(ErrorRow(String(ERROR_VALIDATION), String("a validation of what a step produced failed")))
+    t.append(ErrorRow(String(ERROR_AFFECTED), String("a build system's affected command failed or answered outside its grammar (never a widening)")))
+    t.append(ErrorRow(String(ERROR_AFFECTED_VACUOUS), String("a --affected-by change is empty, or reaches no declared unit")))
     return t^
 
 

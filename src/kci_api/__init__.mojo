@@ -53,6 +53,8 @@ from kci_api.errors import (
     ERROR_STAGE_UNKNOWN,
     ERROR_USAGE,
     ERROR_VALIDATION,
+    ERROR_AFFECTED,
+    ERROR_AFFECTED_VACUOUS,
     ERROR_WORKFLOW_MISMATCH,
     ErrorRow,
     error_table,
@@ -192,6 +194,8 @@ from kci_api.run_identity import (
     require_run_id,
 )
 from kci_api.selection import (
+    AFFECTED_VERDICT_AFFECTED,
+    AFFECTED_VERDICT_WIDENED,
     SCOPE_FULL,
     SCOPE_SELECTIVE,
     SELECTOR_STEP,

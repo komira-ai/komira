@@ -28,6 +28,13 @@
 # operator asked for, not on what was left out. A selective run is never
 # reported as a full one (result.mojo refuses to render that).
 #
+# `--affected-by <base commit>` (the per-change check: build only the units
+# a change reaches) is SELECTIVE too, even when the answer was WIDENED and
+# every unit was built: the operator asked for the change's units, and the
+# record says which base and which answer (`affected_by` in result.mojo).
+# The answer is one of two words: AFFECTED (these units) or WIDENED (every
+# declared unit, with a reason).
+#
 # Pure functions over owned values; no pointer.
 # =============================================================================
 
@@ -36,6 +43,9 @@ comptime SELECTOR_VALIDATION: String = "validation"
 
 comptime SCOPE_FULL: String = "FULL"
 comptime SCOPE_SELECTIVE: String = "SELECTIVE"
+
+comptime AFFECTED_VERDICT_AFFECTED: String = "AFFECTED"
+comptime AFFECTED_VERDICT_WIDENED: String = "WIDENED"
 
 comptime STEP_NAME_MAX_BYTES: Int = 63
 """Longest stage or step name: a stage name is also a CI job id and a
@@ -133,25 +143,35 @@ def require_scope(word: String) raises:
         raise Error(String("scope '") + word + String("' is not FULL or SELECTIVE"))
 
 
-def run_evidence_line(scope: String, stage: String, only: List[String], outcome: String) raises -> String:
+def run_evidence_line(
+    scope: String, stage: String, only: List[String], outcome: String, affected_by: String = String("")
+) raises -> String:
     """The one final stderr line of `kci run`. Prefix-safe: a grep for
-    `kci: FULL run` never matches a selective run.
+    `kci: FULL run` never matches a selective run. `affected_by` is
+    `--affected-by`'s base commit, "" when not given.
 
       kci: FULL run of stage S: <OUTCOME>
       kci: SELECTIVE run of stage S (step:a step:b): <OUTCOME> -- not a full run
+      kci: SELECTIVE run of stage S (affected-by <base>): <OUTCOME> -- not a full run
     """
     require_scope(scope)
     if scope == SCOPE_FULL:
         if len(only) > 0:
             raise Error(String("a FULL run has no --only"))
+        if affected_by.byte_length() > 0:
+            raise Error(String("a FULL run has no --affected-by"))
         return String("kci: FULL run of stage ") + stage + String(": ") + outcome
-    if len(only) == 0:
-        raise Error(String("a SELECTIVE run names its --only"))
+    if len(only) == 0 and affected_by.byte_length() == 0:
+        raise Error(String("a SELECTIVE run names its --only or its --affected-by"))
     var sel = String("")
     for i in range(len(only)):
         if i > 0:
             sel += String(" ")
         sel += only[i]
+    if affected_by.byte_length() > 0:
+        if sel.byte_length() > 0:
+            sel += String(" ")
+        sel += String("affected-by ") + affected_by
     return (
         String("kci: SELECTIVE run of stage ") + stage + String(" (") + sel + String("): ")
         + outcome + String(" -- not a full run")
