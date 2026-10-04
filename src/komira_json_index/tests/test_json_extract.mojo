@@ -1,5 +1,5 @@
 # =============================================================================
-# Tests for komira_jsonl/json_extract_kernel.mojo — the json_extract walker.
+# Tests for komira_json_index/json_extract_kernel.mojo — the json_extract walker.
 # =============================================================================
 #
 # Covers the stage-2-skip walker driving
@@ -31,7 +31,7 @@ from komira_core.plan.expr import (
     parse_json_path,
 )
 
-from komira_jsonl.json_extract_kernel import extract_column
+from komira_json_index.json_extract_kernel import extract_column
 from komira_core.io.heap_region import HeapRegion
 
 

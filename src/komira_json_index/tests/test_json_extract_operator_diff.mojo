@@ -35,7 +35,7 @@ from komira_core.arrow.column import Column
 from komira_core.arrow.string_array import StringArray
 from komira_core.plan.expr import parse_json_path
 
-from komira_jsonl.json_extract_kernel import extract_column
+from komira_json_index.json_extract_kernel import extract_column
 from komira_core.io.heap_region import HeapRegion
 
 

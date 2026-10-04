@@ -53,7 +53,7 @@ from komira_core.arrow_helpers.streaming_concat import (
 )
 
 from komira_jsonl.columnar_materializer import materialize_jsonl_to_batch
-from komira_jsonl.input_limits import (
+from komira_json_index.input_limits import (
     MAX_JSONL_LINE_BYTES,
     check_jsonl_carry_size,
 )

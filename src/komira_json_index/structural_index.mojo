@@ -41,8 +41,8 @@
 
 from std.bit import count_trailing_zeros
 
-from komira_jsonl.input_limits import check_structural_index_input_size
-from komira_jsonl.simd_primitives import (
+from komira_json_index.input_limits import check_structural_index_input_size
+from komira_json_index.simd_primitives import (
     scan_chunk,
     emit_offsets,
     tag_for_byte,
@@ -90,7 +90,7 @@ struct StructuralIndex(Copyable, Movable):
 # introduce a `columnar_materializer → schema_inference` import that
 # would cycle against the existing
 # `schema_inference → columnar_materializer._compute_jsonl_line_ranges`
-# import. `structural_index.mojo` is the leaf of the JSONL module DAG.
+# import. `structural_index.mojo` is the leaf of the JSON module DAG.
 
 
 @fieldwise_init

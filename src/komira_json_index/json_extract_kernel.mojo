@@ -44,7 +44,7 @@ from komira_core.arrow.column import Column
 from komira_core.arrow.string_array import StringArray
 from komira_core.io.heap_region import HeapRegion
 
-from komira_jsonl.simd_primitives import (
+from komira_json_index.simd_primitives import (
     TAG_OPEN_BRACE,
     TAG_CLOSE_BRACE,
     TAG_OPEN_BRACKET,
@@ -54,8 +54,8 @@ from komira_jsonl.simd_primitives import (
     TAG_QUOTE_OPEN,
     TAG_QUOTE_CLOSE,
 )
-from komira_jsonl.structural_index import StructuralIndex, build_structural_index
-from komira_jsonl.value_parsers.parse_string import (
+from komira_json_index.structural_index import StructuralIndex, build_structural_index
+from komira_json_index.parse_string import (
     parse_string_raw,
     parse_string_with_escapes,
 )
