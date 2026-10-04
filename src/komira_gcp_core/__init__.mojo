@@ -15,15 +15,18 @@ as each call's `authorization` metadata, and takes `gcp_grpc_status_error`
 for a non-OK gRPC status. Either may be composed with the pure pieces a
 caller puts into its own loop: `GcpRetryClassifier` (for a komira_retry
 `RetryLoop`), `PageCursor`, `next_page_token` and `with_page_token`. This
-package defines no request/response type and no send loop.
+package defines no request/response type and no send loop for a generated
+client; the only requests it sends are its own token requests
+(token_http.mojo), because the OAuth 2.0 token endpoint and the metadata
+server have no googleapis proto to generate a client from.
 
 Token sources: `application_default_token_source` resolves Application
 Default Credentials in Google's order (adc.mojo) and returns a
 `CachingTokenSource` over the fetcher it chose. The fetchers (metadata
 server, service-account key, self-signed JWT, authorized_user) send over
 komira_http_client through the caller's connectors and `HttpClientConfig`.
-Still to come: workload identity federation (`external_account` files,
-the STS exchange and `generateAccessToken`), which is komira_gcp_wif's.
+Not read here: workload identity federation's `external_account` files,
+which the chain refuses by name.
 
 Modules (only GCP-specific code lives here; JSON and its UTF-8 validation
 come from komira_json, and retry/backoff and the clock seam from

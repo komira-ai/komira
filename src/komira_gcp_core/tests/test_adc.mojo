@@ -9,8 +9,8 @@
 #   1. GOOGLE_APPLICATION_CREDENTIALS: each credential type (service_account
 #      as a JWT grant, as a self-signed JWT for an audience and with
 #      always_use_jwt_access; authorized_user), and each refusal: a missing
-#      file (which does NOT fall through), external_account (named: it is
-#      komira_gcp_wif's), the other Google types, an unknown type, a key
+#      file (which does NOT fall through), external_account (named), the
+#      other Google types, an unknown type, a key
 #      with neither scopes nor an audience; an empty value is unset;
 #   2. the gcloud well-known file under CLOUDSDK_CONFIG, HOME and, on
 #      Windows, APPDATA;
@@ -277,9 +277,8 @@ def test_env_file_refusals(mut seen: Seen) raises:
             AdcOptions(_scopes()),
         ),
         "ADC: the credentials file /secrets/sa.json is an external_account"
-        " (workload identity federation) file. komira_gcp_core does not read"
-        " one: workload identity federation belongs to komira_gcp_wif, which"
-        " is not on main yet",
+        " (workload identity federation) file, which komira_gcp_core does not"
+        " read",
     )
     assert_equal(
         _env_file_refusal(

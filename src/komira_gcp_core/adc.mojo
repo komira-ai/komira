@@ -32,8 +32,7 @@
 #     (`AdcOptions`);
 #   * `authorized_user`: the refresh-token grant;
 #   * `external_account` (workload identity federation): REFUSED by name.
-#     It is komira_gcp_wif's to read, and that package is not on this
-#     repository's main branch yet;
+#     No reader of that file type exists here;
 #   * any other type: refused, naming it when it is one of Google's.
 #
 # THE ENVIRONMENT. The chain reads exactly these variables, each one that
@@ -268,9 +267,8 @@ def _from_file(
     if t == "external_account":
         raise Error(
             "ADC: the credentials file " + where + " is an external_account"
-            " (workload identity federation) file. komira_gcp_core does not"
-            " read one: workload identity federation belongs to"
-            " komira_gcp_wif, which is not on main yet"
+            " (workload identity federation) file, which komira_gcp_core does"
+            " not read"
         )
     if (
         t == "impersonated_service_account"
