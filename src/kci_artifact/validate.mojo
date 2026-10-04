@@ -23,8 +23,13 @@
 #   (a placeholder in an executable is not substituted and not checked: the
 #   executable is a program name or an absolute path, never an arg);
 # and for the per-change check (the .proto's header):
-#   * a check named like an artifact, or two checks with one name: artifacts
-#     and checks are ONE name space of units;
+#   * a check named like an artifact, or two checks with one name: artifacts,
+#     checks and expect_red units are ONE name space of units;
+#   * an expect_red unit whose name breaks the grammar or is taken, whose
+#     `build_system` is empty, undeclared or declares no `build_targets`,
+#     whose `target` is missing or breaks the target rules below, or whose
+#     `message` is empty or holds a line break (a red without the text it
+#     must print proves nothing: a build can fail for any reason);
 #   * a check whose `build_system` is empty or undeclared, or declares no
 #     `build_targets` (kci could not build it), and a check with no targets;
 #   * a target (an artifact's or a check's) that is empty, holds whitespace
@@ -57,6 +62,7 @@ from kci_artifact_proto.artifact import (
     BuildSystem,
     Check,
     Command,
+    ExpectRed,
 )
 
 from .placeholders import (
@@ -93,6 +99,14 @@ def find_check(arts: Artifacts, name: String) -> Int:
     """The index of the check named exactly `name`, or -1."""
     for i in range(len(arts.checks)):
         if arts.checks[i].name == name:
+            return i
+    return -1
+
+
+def find_expect_red(arts: Artifacts, name: String) -> Int:
+    """The index of the expect_red unit named exactly `name`, or -1."""
+    for i in range(len(arts.expect_red)):
+        if arts.expect_red[i].name == name:
             return i
     return -1
 
@@ -234,6 +248,8 @@ def _check_artifact(source: String, arts: Artifacts, i: Int) raises:
         )
     if find_check(arts, a.name) >= 0:
         _refuse(source, who, String("is also the name of a check (artifacts and checks are one name space)"))
+    if find_expect_red(arts, a.name) >= 0:
+        _refuse(source, who, String("is also the name of an expect_red unit (units are one name space)"))
     _check_targets(source, who, a.targets)
 
 
@@ -324,6 +340,8 @@ def _check_check(source: String, arts: Artifacts, i: Int) raises:
         _refuse(source, who, String("is declared twice"))
     if find_artifact(arts, c.name) >= 0:
         _refuse(source, who, String("is also the name of an artifact (artifacts and checks are one name space)"))
+    if find_expect_red(arts, c.name) >= 0:
+        _refuse(source, who, String("is also the name of an expect_red unit (units are one name space)"))
     if c.build_system.byte_length() == 0:
         _refuse(source, who, String("names no build_system"))
     var b = find_build_system(arts, c.build_system)
@@ -338,6 +356,40 @@ def _check_check(source: String, arts: Artifacts, i: Int) raises:
     if len(c.targets) == 0:
         _refuse(source, who, String("has no targets (they are what the check builds)"))
     _check_targets(source, who, c.targets)
+
+
+def _check_expect_red(source: String, arts: Artifacts, i: Int) raises:
+    ref r = arts.expect_red[i]
+    var who = _who(String("expect_red unit"), r.name, i + 1)
+    _check_name(source, who, r.name)
+    if find_expect_red(arts, r.name) != i:
+        _refuse(source, who, String("is declared twice"))
+    if find_artifact(arts, r.name) >= 0 or find_check(arts, r.name) >= 0:
+        _refuse(source, who, String("is also the name of an artifact or a check (units are one name space)"))
+    if r.build_system.byte_length() == 0:
+        _refuse(source, who, String("names no build_system"))
+    var b = find_build_system(arts, r.build_system)
+    if b < 0:
+        _refuse(source, who, String("build_system '") + r.build_system + String("' is not declared"))
+    if not arts.build_systems[b].build_targets:
+        _refuse(
+            source, who,
+            String("build_system '") + r.build_system
+            + String("' declares no build_targets command: kci could not build the unit"),
+        )
+    if r.target.byte_length() == 0:
+        _refuse(source, who, String("has no target (the one target that must fail to build)"))
+    var one = List[String]()
+    one.append(r.target.copy())
+    _check_targets(source, who, one)
+    if r.message.byte_length() == 0:
+        _refuse(
+            source, who,
+            String("has no message: a build fails for many reasons, and only the declared text says it failed")
+            + String(" for the rule under test"),
+        )
+    if r.message.find(String("\n")) >= 0 or r.message.find(String("\r")) >= 0:
+        _refuse(source, who, String("message holds a line break (it is matched within one line)"))
 
 
 def require_affected_ready(arts: Artifacts, source: String = String(_DEFAULT_SOURCE)) raises:
@@ -361,6 +413,9 @@ def require_affected_ready(arts: Artifacts, source: String = String(_DEFAULT_SOU
         for k in range(len(arts.checks)):
             if arts.checks[k].build_system == b.name:
                 owns = True
+        for k in range(len(arts.expect_red)):
+            if arts.expect_red[k].build_system == b.name:
+                owns = True
         if not owns:
             continue
         var who = _who(String("build system"), b.name, i + 1)
@@ -375,7 +430,7 @@ def validate_artifacts(
 ) raises:
     """Every rule in this file's header. Raises on the first refusal, by a
     message starting with `source`: build systems first, then artifacts,
-    then checks, each in file order."""
+    then checks, then expect_red units, each in file order."""
     if len(arts.artifacts) == 0:
         raise Error(source + String(": declares no artifact"))
     for i in range(len(arts.build_systems)):
@@ -384,4 +439,6 @@ def validate_artifacts(
         _check_artifact(source, arts, i)
     for i in range(len(arts.checks)):
         _check_check(source, arts, i)
+    for i in range(len(arts.expect_red)):
+        _check_expect_red(source, arts, i)
 

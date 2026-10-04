@@ -25,6 +25,12 @@
 #     build_system: "buck2"
 #     targets: "//:docs"
 #   }
+#   expect_red {
+#     name: "gate_red"
+#     build_system: "buck2"
+#     target: "tests//negative/libgate_bad:libgate_bad"
+#     message: "GATED TEST FAILED"
+#   }
 #
 # A build system may also hold the two per-change commands, each a block:
 # `affected { executable: "..." args: "..." }` and `build_targets { ... }`
@@ -48,7 +54,7 @@
 # Refused here, each starting `<source>: line N:` (lexer refusals included):
 # an unknown field at any level, a non-repeated field set twice, an unquoted
 # value, a block never closed, any top-level field but `schema_version`,
-# `build_systems`, `artifacts` and `checks`. Everything else is `validate_artifacts`, run on the
+# `build_systems`, `artifacts`, `checks` and `expect_red`. Everything else is `validate_artifacts`, run on the
 # parsed value before it is returned, so a parsed value is always a valid one.
 #
 # Owned values only; no pointer.
@@ -75,6 +81,7 @@ from kci_artifact_proto.artifact import (
     BuildSystem,
     Check,
     Command,
+    ExpectRed,
 )
 
 from .validate import validate_artifacts
@@ -276,6 +283,35 @@ def _parse_check(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> Check:
     return Check(name^, build_system^, targets^)
 
 
+def _parse_expect_red(mut x: _Ctx, ordinal: Int, open_line: Int) raises -> ExpectRed:
+    var name = String("")
+    var build_system = String("")
+    var target = String("")
+    var message = String("")
+    var seen = List[String]()
+    while True:
+        var me = _label(String("expect_red unit"), name, ordinal)
+        var f = _field(x, open_line, me)
+        if not f:
+            break
+        var t = f.value().copy()
+        for i in range(len(seen)):
+            if seen[i] == t.text:
+                _twice(x, t.line, t.text, me)
+        if t.text == "name":
+            name = _string(x, t.text)
+        elif t.text == "build_system":
+            build_system = _string(x, t.text)
+        elif t.text == "target":
+            target = _string(x, t.text)
+        elif t.text == "message":
+            message = _string(x, t.text)
+        else:
+            _unknown(x, t.line, t.text, me, String("name, build_system, target, message"))
+        seen.append(t.text.copy())
+    return ExpectRed(name^, build_system^, target^, message^)
+
+
 def parse_artifacts(
     text: String, source: String
 ) raises -> Artifacts:
@@ -287,6 +323,7 @@ def parse_artifacts(
     var systems = List[BuildSystem]()
     var artifacts = List[Artifact]()
     var checks = List[Check]()
+    var reds = List[ExpectRed]()
     while not x.c.at_end():
         var t = x.c.expect(TOKEN_WORD)
         if t.text == "schema_version":
@@ -300,14 +337,17 @@ def parse_artifacts(
         elif t.text == "checks":
             var line = _open_block(x)
             checks.append(_parse_check(x, len(checks) + 1, line))
+        elif t.text == "expect_red":
+            var line = _open_block(x)
+            reds.append(_parse_expect_red(x, len(reds) + 1, line))
         else:
             raise Error(
                 x.at(t.line)
                 + String("unknown top-level field '")
                 + t.text
-                + String("' (expected schema_version, build_systems, artifacts, checks)")
+                + String("' (expected schema_version, build_systems, artifacts, checks, expect_red)")
             )
-    var arts = Artifacts(systems^, artifacts^, Int32(major), checks^)
+    var arts = Artifacts(systems^, artifacts^, Int32(major), checks^, reds^)
     validate_artifacts(arts, source)
     return arts^
 

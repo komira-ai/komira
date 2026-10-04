@@ -46,7 +46,8 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # change from git, each build system's `affected` command (the artifacts
 # file's; kci names no tool and no path), exactly the units it reaches built
 # with the `build_targets` command (every unit when an answer is WIDENED),
-# nothing written under the release directory. An empty change or one that
+# nothing written under the release directory; an expect_red unit passes
+# only when its build fails printing its declared message. An empty change or one that
 # reaches no unit is refused; a tool that fails is "cannot tell", never a
 # widening.
 #
@@ -75,6 +76,10 @@ mojo_library(
         # --affected-by: the change, the affected commands (golden argv, the
         # files they get), exactly the reached units, widening, every stop
         "tests/test_affected_flow.mojo",
+        # expect_red units in the per-change check: a red with its message
+        # passes, a green or a red without it fails and stops the step, a
+        # timeout proves nothing; a real /bin/sh build program both ways
+        "tests/test_expect_red_flow.mojo",
         # SupervisorRunner over /bin/sh: output files, exit codes, the timeout,
         # an explicit child environment and inheritance
         "tests/test_supervisor_runner.mojo",

@@ -4,9 +4,12 @@
 #   argvs it runs, and the one grammar of the command's answer.
 # =============================================================================
 #
-# A UNIT is an artifact or a check (one name space); `units_of` lists them
-# in the order kci builds them: artifacts in file order, then checks in file
-# order. The protocol (the .proto's header, in full):
+# A UNIT is an artifact, a check or an expect_red unit (one name space);
+# `units_of` lists them in the order kci builds them: artifacts, then checks,
+# then expect_red units, each in file order. An expect_red unit's one
+# `target` is its targets, and `expect_red_passed` reads its build's end
+# (the .proto's header: it passes when the build fails printing its
+# message). The protocol (the .proto's header, in full):
 #
 #   kci writes  {units_file}     `<unit>\t<target>\n` for every target of
 #                                every unit the build system owns, in unit
@@ -44,7 +47,9 @@ comptime VERDICT_WIDENED: String = AFFECTED_VERDICT_WIDENED
 
 
 struct Unit(Copyable, Movable):
-    """One unit of the per-change check: an artifact or a check.
+    """One unit of the per-change check: an artifact, a check, or an
+    expect_red unit (`is_expect_red`, with the `message` its failed build
+    must print; "" otherwise).
 
     Layout: owned values only. No pointer field."""
 
@@ -52,12 +57,24 @@ struct Unit(Copyable, Movable):
     var build_system: String
     var targets: List[String]
     var is_check: Bool
+    var is_expect_red: Bool
+    var message: String
 
-    def __init__(out self, var name: String, var build_system: String, var targets: List[String], is_check: Bool):
+    def __init__(
+        out self,
+        var name: String,
+        var build_system: String,
+        var targets: List[String],
+        is_check: Bool,
+        is_expect_red: Bool = False,
+        var message: String = String(""),
+    ):
         self.name = name^
         self.build_system = build_system^
         self.targets = targets^
         self.is_check = is_check
+        self.is_expect_red = is_expect_red
+        self.message = message^
 
 
 def units_of(arts: Artifacts) -> List[Unit]:
@@ -69,7 +86,29 @@ def units_of(arts: Artifacts) -> List[Unit]:
     for i in range(len(arts.checks)):
         ref c = arts.checks[i]
         out.append(Unit(c.name.copy(), c.build_system.copy(), c.targets.copy(), True))
+    for i in range(len(arts.expect_red)):
+        ref r = arts.expect_red[i]
+        var one = List[String]()
+        one.append(r.target.copy())
+        out.append(Unit(r.name.copy(), r.build_system.copy(), one^, False, True, r.message.copy()))
     return out^
+
+
+def find_unit(arts: Artifacts, name: String) raises -> Unit:
+    """The unit named `name`; raises when none is declared."""
+    var units = units_of(arts)
+    for i in range(len(units)):
+        if units[i].name == name:
+            return units[i].copy()
+    raise Error(String("no unit '") + name + String("' is declared"))
+
+
+def expect_red_passed(ended_by_exit: Bool, exit_code: Int, output: String, message: String) -> Bool:
+    """Whether an expect_red unit passed (file header): its build exited
+    (neither killed nor timed out) with a non-zero code and printed
+    `message` (`output` is its stdout and stderr). A build that succeeded,
+    was killed or timed out, or failed without the message did not."""
+    return ended_by_exit and exit_code != 0 and output.find(message) >= 0
 
 
 def unit_names_of(arts: Artifacts, build_system: String) -> List[String]:

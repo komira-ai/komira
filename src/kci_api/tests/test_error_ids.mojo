@@ -6,6 +6,8 @@
 from std.testing import TestSuite, assert_false, assert_true
 
 from kci_api import (
+    EXIT_FAILED,
+    OUTCOME_FAILED,
     OUTCOME_REFUSED,
     OUTCOME_VALIDATION_FAILED,
     error_table,
@@ -55,6 +57,13 @@ def test_one_command_ids() raises:
     # validation is 7
     assert_true(exit_code_of(String(OUTCOME_REFUSED), String("KCI-E-WORKFLOW-MISMATCH")) == 3)
     assert_true(exit_code_of(String(OUTCOME_VALIDATION_FAILED), String("KCI-E-VALIDATION")) == 7)
+
+
+def test_expect_red_id() raises:
+    # an expect_red unit that built, or failed for another reason: a failed
+    # check, never a number of its own
+    assert_true(is_error_id(String("KCI-E-EXPECT-RED")))
+    assert_true(exit_code_of(String(OUTCOME_FAILED), String("KCI-E-EXPECT-RED")) == EXIT_FAILED)
 
 
 def test_unknown_id_refused() raises:

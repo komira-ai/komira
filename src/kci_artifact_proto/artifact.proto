@@ -77,9 +77,10 @@
 // published to (the PUBLISH step's).
 //
 // THE PER-CHANGE CHECK (`kci run --stage <S> --affected-by <base commit>`).
-// A UNIT is an artifact or a check (`checks`: built, never shipped, no
-// manifest); both share one name space. Each unit names the build targets
-// it stands for (`targets`). A build system that owns a unit and is to take
+// A UNIT is an artifact, a check (`checks`: built, never shipped, no
+// manifest) or an expect_red unit (below); all share one name space. Each
+// unit names the build targets it stands for (`targets`, or an expect_red
+// unit's one `target`). A build system that owns a unit and is to take
 // part declares two commands:
 //
 //   affected       which units a change reaches. kci runs, in the work dir,
@@ -101,14 +102,23 @@
 //                  <the unit's targets...>, no placeholder, no output
 //                  directory and no manifest (nothing ships).
 //
+// An EXPECT_RED unit (`expect_red`) is a negative test of the build system
+// itself: ONE target that MUST fail to build, and the text its failure must
+// print. kci builds it with `build_targets` like a check and reverses the
+// verdict: the unit PASSES when the build exits non-zero (not killed, not
+// timed out) AND its stdout or stderr holds `message` (a plain substring,
+// as `grep -F` reads it); it FAILS when the build succeeds ("built, but it
+// must fail") or fails without the message (it failed for another reason,
+// which proves nothing about the rule under test).
+//
 // kci builds exactly the affected units (every declared unit when any
 // build system's answer is WIDENED), one at a time in file order, artifacts
-// then checks. A non-empty change reaching no unit is refused, and so is an
+// then checks then expect_red units. A non-empty change reaching no unit is refused, and so is an
 // empty change; a tool that fails or prints anything else is "cannot tell",
 // never a widening. A run that names a unit without `targets`, or a build
 // system owning a unit without both commands, is refused before anything
 // runs. A BUILD step without `--affected-by` builds the artifacts only and
-// ignores `checks`, `targets` and both commands.
+// ignores `checks`, `expect_red`, `targets` and both commands.
 //
 // Other `.proto` files import it as `kci/release/v1/artifact.proto`.
 syntax = "proto3";
@@ -132,6 +142,10 @@ message Artifacts {
   // tree, a tool, a test suite. Never built by a BUILD step without
   // `--affected-by`, never published.
   repeated Check checks = 4;
+
+  // Units that must FAIL to build (file header): the per-change check only,
+  // like `checks`.
+  repeated ExpectRed expect_red = 5;
 }
 
 // A program and its args, for one of a build system's per-change commands.
@@ -205,4 +219,23 @@ message Check {
 
   // Required: at least one; each entry as Artifact.targets.
   repeated string targets = 3;
+}
+
+// A unit whose one target must fail to build, printing `message` (file
+// header).
+message ExpectRed {
+  // `[a-z][a-z0-9_]*`, unique among the artifacts, the checks and the
+  // expect_red units.
+  string name = 1;
+
+  // The name of a declared BuildSystem that declares `build_targets`.
+  string build_system = 2;
+
+  // Required: exactly one target (one build, so a red is that target's),
+  // with the rules of Artifact.targets.
+  string target = 3;
+
+  // Required: text the failed build prints on stdout or stderr, compared as
+  // a plain substring; no newline.
+  string message = 4;
 }
