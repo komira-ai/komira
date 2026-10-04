@@ -22,9 +22,10 @@
 # `I_p_protocol`) and `enableCDN` on a backend service (`enable_c_d_n`).
 #
 # BackendServices.Patch and UrlMaps.Patch are JSON merge patches on the
-# server, and the encoder writes every repeated field (an empty one as
-# `[]`): a caller patches with the whole resource as it read it
-# (test_compute_network states the same for firewalls).
+# server. The encoder omits an empty list or map (and an unset optional
+# field), so a sparse patch sends only what the caller set and leaves every
+# other field as the server has it. test_backend_services_patch pins that
+# exact body.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -175,7 +176,7 @@ def test_global_addresses_insert() raises:
     )
     assert_equal(
         _body(capture),
-        '{"ipVersion":"IPV4","labels":{},"name":"web-ip","users":[]}',
+        '{"ipVersion":"IPV4","name":"web-ip"}',
     )
     assert_equal(op.name.value(), "operation-lb-1")
 
@@ -282,7 +283,7 @@ def test_region_network_endpoint_groups_insert() raises:
     )
     assert_equal(
         _body(capture),
-        '{"annotations":{},"cloudRun":{"service":"web"},"name":"web-neg",'
+        '{"cloudRun":{"service":"web"},"name":"web-neg",'
         + '"networkEndpointType":"SERVERLESS"}',
     )
 
@@ -326,8 +327,7 @@ def test_backend_buckets_insert() raises:
     )
     assert_equal(
         _body(capture),
-        '{"bucketName":"demo-static","customResponseHeaders":[],"enableCdn":true,'
-        + '"name":"static","usedBy":[]}',
+        '{"bucketName":"demo-static","enableCdn":true,"name":"static"}',
     )
 
 
@@ -392,8 +392,15 @@ def test_backend_services_patch() raises:
     c.set_rest_host(String("localhost"))
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
+    # A sparse patch: repoint the backends, guarded by the fingerprint read
+    # before. Nothing else may be on the wire -- an empty
+    # `customRequestHeaders`, `healthChecks` or any other list sent as `[]`
+    # would clear it on the server.
     var bs = decode_json_lenient[BackendService](
-        String('{"name":"web-backend","fingerprint":"abc=","enableCDN":false}')
+        String(
+            '{"fingerprint":"abc=","backends":'
+            + '[{"group":"regions/us-central1/networkEndpointGroups/web-neg-v2"}]}'
+        )
     )
     _ = c.patch[_RT](
         PatchBackendServiceRequest(
@@ -405,11 +412,11 @@ def test_backend_services_patch() raises:
         _head(capture),
         "PATCH /compute/v1/projects/demo-project/global/backendServices/web-backend HTTP/1.1",
     )
-    var body = _body(capture)
-    assert_true('"enableCDN":false' in body)
-    assert_true('"fingerprint":"abc="' in body)
-    # Every list is written, empty or not (module header).
-    assert_true('"backends":[]' in body)
+    assert_equal(
+        _body(capture),
+        '{"backends":[{"group":"regions/us-central1/networkEndpointGroups/web-neg-v2"}],'
+        + '"fingerprint":"abc="}',
+    )
 
 
 def test_url_maps_get() raises:
@@ -458,8 +465,7 @@ def test_url_maps_insert() raises:
     )
     assert_equal(
         _body(capture),
-        '{"defaultService":"global/backendServices/web-backend","hostRules":[],'
-        + '"name":"web","pathMatchers":[],"tests":[]}',
+        '{"defaultService":"global/backendServices/web-backend","name":"web"}',
     )
 
 
@@ -483,9 +489,11 @@ def test_url_maps_patch() raises:
         _head(capture),
         "PATCH /compute/v1/projects/demo-project/global/urlMaps/web HTTP/1.1",
     )
-    var body = _body(capture)
-    assert_true('"fingerprint":"f1="' in body)
-    assert_true('"defaultService":"global/backendServices/web-backend-v2"' in body)
+    assert_equal(
+        _body(capture),
+        '{"defaultService":"global/backendServices/web-backend-v2",'
+        + '"fingerprint":"f1=","name":"web"}',
+    )
 
 
 def test_url_maps_invalidate_cache() raises:
@@ -507,7 +515,7 @@ def test_url_maps_invalidate_cache() raises:
     )
     assert_equal(
         _body(capture),
-        '{"cacheTags":[],"host":"app.example.com","path":"/static/*"}',
+        '{"host":"app.example.com","path":"/static/*"}',
     )
 
 

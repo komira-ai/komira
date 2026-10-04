@@ -646,14 +646,15 @@ fn emit_query_build(
         let (guard, value_expr) = match label {
             Label::Optional => (Some(format!("if req.{f}:")), stringify(&format!("req.{f}.value()"))),
             Label::Repeated => (Some(format!("for _rest_v in req.{f}:")), stringify("_rest_v")),
-            // An implicit-presence scalar at its default is omitted, as the
-            // proto3 JSON mapping omits it: no `pageToken=` on a first page.
-            // An enum renders whatever its value is.
+            // An implicit-presence scalar or enum at its default is omitted, as
+            // the proto3 JSON mapping omits it: no `pageToken=` on a first page,
+            // no `view=VIEW_UNSPECIFIED` when the caller set no view.
             Label::Single => {
                 let guard = match fld.map(|x| &x.ty) {
                     Some(IrType::Scalar(ScalarKind::String)) => Some(format!("if req.{f}.byte_length() > 0:")),
                     Some(IrType::Scalar(ScalarKind::Bool)) => Some(format!("if req.{f}:")),
                     Some(IrType::Scalar(_)) => Some(format!("if req.{f} != 0:")),
+                    Some(IrType::Enum(_)) => Some(format!("if req.{f}.number() != 0:")),
                     _ => None,
                 };
                 (guard, stringify(&format!("req.{f}")))
@@ -1678,7 +1679,6 @@ mod tests {
         assert!(emit.source.contains("resp_text = String(\"{}\")"));
     }
 
-    /// One service `Logging` with one unary method `M` over request `Req`.
     /// A service whose one method takes `.tiny.rest.v1.GetReq`, declared in
     /// `messages.proto` (not the service's file) and referenced through that
     /// file's module, as the lowering names a cross-file type.
@@ -1745,6 +1745,7 @@ mod tests {
         }
     }
 
+    /// One service `Logging` with one unary method `M` over request `Req`.
     fn one_method(fields: Vec<IrField>, verb: &str, path: &str, body: &str) -> Result<RestServiceEmit, String> {
         let req = IrMessage {
             name: "Req".into(),
@@ -1844,6 +1845,11 @@ mod tests {
             enum_field("tier"),
         ];
         let src = one_method(fields, "get", "/v1/{name=things/*}/tiers/{tier}", "").unwrap().source;
+        // A plain enum at its zero value stays out of the query; an optional
+        // one is sent whenever it is set, and a path variable always is.
+        assert!(src.contains("if req.view.number() != 0:"), "{src}");
+        assert!(!src.contains("if req.mode.number()"), "{src}");
+        assert!(!src.contains("if req.tier.number()"), "{src}");
         assert!(src.contains("query += String(\"view=\") + _rest_pct_encode(req.view.json_name())"), "{src}");
         assert!(src.contains("query += String(\"mode=\") + _rest_pct_encode(req.mode.value().json_name())"), "{src}");
         assert!(src.contains("query += String(\"kinds=\") + _rest_pct_encode(_rest_v.json_name())"), "{src}");

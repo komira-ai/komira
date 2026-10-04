@@ -13,14 +13,16 @@
 # delete): the parent or name in the path, `apiId`, `apiConfigId`,
 # `gatewayId` and `view` in the query, and the resource as the body of a
 # create. An OpenAPI document's `contents` is bytes, base64 in JSON. `view`
-# is an enum and goes into the query as its name (`view=FULL`), the
-# unspecified value included.
+# is an enum and goes into the query as its name (`view=FULL`); left at its
+# zero value (CONFIG_VIEW_UNSPECIFIED) it is not sent at all, as the proto3
+# JSON mapping omits a default.
 #
 # Part of each create body is NOT from the reference: the default-valued
-# keys (`"name":""`, `"labels":{}`, the `*_UNSPECIFIED` enums, empty lists).
-# komira_proto_codec's JsonEncoder writes defaults today, where the proto3
-# JSON mapping omits them; the server reads each as unset, and output-only
-# fields (`state`, `defaultHostname`) are ignored on a create.
+# keys (`"name":""` and the `*_UNSPECIFIED` enums). komira_proto_codec's
+# JsonEncoder writes a plain scalar or enum at its default, where the proto3
+# JSON mapping omits it (it does omit an empty list or map); the server
+# reads each as unset, and output-only fields (`state`, `defaultHostname`)
+# are ignored on a create.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -239,7 +241,7 @@ def test_get_api_config_full_view() raises:
     assert_equal(config.service_config_id, "orders-v1-0a1b2c3d4e5f")
 
 
-def test_get_api_config_unspecified_view() raises:
+def test_get_api_config_unspecified_view_is_not_sent() raises:
     var capture = _capture()
     var c = _client(capture, '{"name":"x"}')
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
@@ -256,7 +258,7 @@ def test_get_api_config_unspecified_view() raises:
     assert_equal(
         _head(capture),
         "GET /v1/projects/demo-project/locations/global/apis/orders/configs/orders-v1"
-        + "?view=CONFIG_VIEW_UNSPECIFIED HTTP/1.1",
+        + " HTTP/1.1",
     )
 
 
@@ -299,7 +301,7 @@ def test_create_gateway() raises:
     )
     assert_equal(
         _body(capture),
-        '{"name":"","labels":{},"displayName":"orders",'
+        '{"name":"","displayName":"orders",'
         + '"apiConfig":"projects/demo-project/locations/global/apis/orders/configs/orders-v1",'
         + '"state":"STATE_UNSPECIFIED","defaultHostname":"",'
         + '"streamingMode":"STREAMING_MODE_UNSPECIFIED",'
@@ -361,7 +363,7 @@ def main() raises:
     test_delete_api()
     test_create_api_config_with_an_openapi_document()
     test_get_api_config_full_view()
-    test_get_api_config_unspecified_view()
+    test_get_api_config_unspecified_view_is_not_sent()
     test_delete_api_config()
     test_create_gateway()
     test_get_gateway()

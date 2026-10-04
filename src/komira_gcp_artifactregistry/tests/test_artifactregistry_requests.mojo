@@ -15,10 +15,11 @@
 # query, and the Repository as the body of a create.
 #
 # Part of the create body is NOT from the reference: the default-valued keys
-# (`"name":""`, `"kmsKeyName":""`, `"sizeBytes":"0"`, the false booleans,
-# `"cleanupPolicies":{}`). komira_proto_codec's JsonEncoder writes defaults
-# today, where the proto3 JSON mapping omits them; those keys pin codec
-# behaviour, not the API, and the server reads each as unset.
+# (`"name":""`, `"kmsKeyName":""`, `"sizeBytes":"0"`, the false booleans).
+# komira_proto_codec's JsonEncoder writes a plain scalar at its default,
+# where the proto3 JSON mapping omits it (it does omit an empty list or
+# map, so the empty `cleanupPolicies` map is not sent); those keys pin
+# codec behaviour, not the API, and the server reads each as unset.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -134,7 +135,7 @@ def test_create_repository() raises:
         _body(capture),
         '{"name":"","format":"DOCKER","description":"build images",'
         + '"labels":{"owner":"ci"},"kmsKeyName":"","mode":"STANDARD_REPOSITORY",'
-        + '"cleanupPolicies":{},"sizeBytes":"0","satisfiesPzs":false,'
+        + '"sizeBytes":"0","satisfiesPzs":false,'
         + '"cleanupPolicyDryRun":false,"disallowUnspecifiedMode":false,'
         + '"satisfiesPzi":false,"registryUri":"",'
         + '"dockerConfig":{"immutableTags":true}}',

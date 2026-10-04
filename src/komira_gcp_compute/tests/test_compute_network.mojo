@@ -18,10 +18,10 @@
 #
 # Firewalls.Patch is a JSON merge patch on the server: a key present in the
 # body replaces that field, and a key absent leaves it. komira_proto_codec's
-# JsonEncoder writes every repeated field, an empty one as `[]` (the exact
-# body below pins that), so a patch clears every list the caller left
-# empty. A caller patches with the whole resource as it read it (get,
-# change, patch), never with only the fields it means to change.
+# JsonEncoder omits an empty list or map and an unset optional field, so a
+# sparse patch sends only the fields the caller set (the exact body below
+# pins that). An empty `targetTags` sent as `[]` would widen the rule to
+# every instance on the network. The flip side: a patch cannot clear a list.
 from std.memory import ArcPointer
 from std.testing import assert_equal, assert_false, assert_true
 
@@ -164,8 +164,7 @@ def test_networks_insert() raises:
     )
     assert_equal(
         _body(capture),
-        '{"autoCreateSubnetworks":false,"mtu":1460,"name":"apps","peerings":[],'
-        + '"subnetworks":[]}',
+        '{"autoCreateSubnetworks":false,"mtu":1460,"name":"apps"}',
     )
     assert_equal(op.name.value(), "operation-g-1")
 
@@ -324,21 +323,17 @@ def test_firewalls_insert() raises:
     assert_true('"sourceRanges":["35.191.0.0/16"]' in body)
 
 
-def test_firewalls_patch_sends_every_list() raises:
-    # The exact body: every repeated field is written, the empty ones as
-    # `[]`, which the server's merge patch reads as "set to empty" (module
-    # header).
+def test_firewalls_patch_sends_only_what_is_set() raises:
+    # The exact body: the one list the caller set, and no other key. An
+    # empty list sent as `[]` would be read by the server's merge patch as
+    # "set to empty" (module header).
     var capture = _capture()
     var c = FirewallsClient[SC, TS](_http(capture, _GLOBAL_OP), _token())
     c.set_rest_host(String("localhost"))
     var rt = _RT.new(NoopSink(_placeholder=UInt8(0)))
     ref reactor = rt.reactor()
     var fw = decode_json_lenient[Firewall](
-        String(
-            '{"name":"allow-health-checks","network":"global/networks/apps",'
-            + '"allowed":[{"IPProtocol":"tcp","ports":["8080"]}],'
-            + '"sourceRanges":["35.191.0.0/16"]}'
-        )
+        String('{"sourceRanges":["35.191.0.0/16","130.211.0.0/22"]}')
     )
     var op = c.patch[_RT](
         PatchFirewallRequest(
@@ -352,11 +347,7 @@ def test_firewalls_patch_sends_every_list() raises:
     )
     assert_equal(
         _body(capture),
-        '{"allowed":[{"IPProtocol":"tcp","ports":["8080"]}],"denied":[],'
-        + '"destinationRanges":[],"name":"allow-health-checks",'
-        + '"network":"global/networks/apps","sourceRanges":["35.191.0.0/16"],'
-        + '"sourceServiceAccounts":[],"sourceTags":[],'
-        + '"targetServiceAccounts":[],"targetTags":[]}',
+        '{"sourceRanges":["35.191.0.0/16","130.211.0.0/22"]}',
     )
     assert_equal(op.name.value(), "operation-g-1")
 
@@ -389,6 +380,6 @@ def main() raises:
     test_subnetworks_delete()
     test_firewalls_get()
     test_firewalls_insert()
-    test_firewalls_patch_sends_every_list()
+    test_firewalls_patch_sends_only_what_is_set()
     test_firewalls_delete()
     print("OK")
