@@ -66,13 +66,29 @@ pub fn rest_imports() -> &'static [&'static str] {
     ]
 }
 
-/// Emit the REST client struct for `svc`, looking up request messages in
-/// `file`. Returns the generated source, or a hard error naming the service
+/// Emit the REST client struct for `svc`, a service of `file`, looking up
+/// request messages in `file` alone. [`emit_rest_service_in`] is the same
+/// emit with the other files of the generated package in reach.
+pub fn emit_rest_service(
+    file: &IrFile,
+    svc: &IrService,
+) -> Result<RestServiceEmit, String> {
+    emit_rest_service_in(std::slice::from_ref(file), file, svc)
+}
+
+/// Emit the REST client struct for `svc`, a service of `file`, looking up
+/// each request message in `file` and then in `files`, the files generated
+/// into the same package. A request declared in another file of the package
+/// (Google APIs often keep a service and its request messages in separate
+/// files) is referenced through that file's module, which the lowering
+/// imports. Returns the generated source, or a hard error naming the service
 /// and method for: a streaming method (it has no REST form, and a kept
 /// method that silently generated nothing would be a client missing a
 /// method its target listed), an un-annotated method (the missing-annotation
-/// rule), or a `(google.api.default_host)` that is not a plain host name.
-pub fn emit_rest_service(
+/// rule), a request type no generated file declares, or a
+/// `(google.api.default_host)` that is not a plain host name.
+pub fn emit_rest_service_in(
+    files: &[IrFile],
     file: &IrFile,
     svc: &IrService,
 ) -> Result<RestServiceEmit, String> {
@@ -254,7 +270,7 @@ pub fn emit_rest_service(
                 svc.name, m.name
             ));
         };
-        emit_rest_method(&mut w, file, m, rule)?;
+        emit_rest_method(&mut w, files, file, m, rule)?;
     }
 
     w.dedent();
@@ -307,6 +323,7 @@ fn rest_default_host(fq_service: &str, svc: &IrService) -> Result<Option<String>
 /// Emit one annotated unary REST method.
 fn emit_rest_method(
     w: &mut Writer,
+    files: &[IrFile],
     file: &IrFile,
     m: &IrMethod,
     rule: &IrHttpRule,
@@ -315,14 +332,18 @@ fn emit_rest_method(
     let req_ty = &m.input.mojo_name;
     let resp_ty = &m.output.mojo_name;
 
+    // The request's fields decide the path, query and body, so its message
+    // must be one this package generates: in the service's own file, or in
+    // another file of the package.
     let req_msg = file
         .messages
         .iter()
+        .chain(files.iter().flat_map(|f| f.messages.iter()))
         .find(|msg| msg.fq_name == m.input.fq_name)
         .ok_or_else(|| {
             format!(
-                "REST method `{}`: request type `{}` not found in this file \
-                 (cross-file request types are unsupported in Phase 1)",
+                "REST method `{}`: request type `{}` is declared in no file this \
+                 package generates (bundle the file that declares it)",
                 m.name, m.input.fq_name
             )
         })?;
@@ -335,6 +356,8 @@ fn emit_rest_method(
     let part = partition_or_err(m, &leaf_fields, &template, &rule.body)?;
 
     let mut bool_fields: std::collections::BTreeSet<String> =
+        std::collections::BTreeSet::new();
+    let mut enum_fields: std::collections::BTreeSet<String> =
         std::collections::BTreeSet::new();
     for f in part.path_fields.iter().chain(part.query_fields.iter()) {
         let fld = req_msg
@@ -368,7 +391,11 @@ fn emit_rest_method(
         if matches!(&fld.ty, IrType::Scalar(ScalarKind::Bool)) {
             bool_fields.insert(f.clone());
         }
+        if matches!(&fld.ty, IrType::Enum(_)) {
+            enum_fields.insert(f.clone());
+        }
     }
+    let url_fields = UrlFields { bools: &bool_fields, enums: &enum_fields };
 
     let verb = rule.verb.as_str();
     let has_body = !matches!(part.body, BodyDesignator::None);
@@ -388,10 +415,10 @@ fn emit_rest_method(
     w.line(&format!("self._rest_require_host(String(\"{method_name}\"))"));
 
     // -- path substitution ---------------------------------------------------
-    emit_path_build(w, &template, &bool_fields);
+    emit_path_build(w, &template, &url_fields);
 
     // -- query params --------------------------------------------------------
-    emit_query_build(w, &part, &bool_fields, req_msg);
+    emit_query_build(w, &part, &url_fields, req_msg);
 
     w.line(&format!(
         "var url = Url.https(self._rest_host.copy(), UInt16({REST_PORT}), path^)"
@@ -514,11 +541,7 @@ fn emit_rest_method(
 
 /// Emit the path-string build: `var path = String("") + "/" + seg + ...`, each
 /// variable filled from its request field, then the `:verb` suffix.
-fn emit_path_build(
-    w: &mut Writer,
-    template: &PathTemplate,
-    bool_fields: &std::collections::BTreeSet<String>,
-) {
+fn emit_path_build(w: &mut Writer, template: &PathTemplate, url_fields: &UrlFields) {
     // Build the path incrementally so a variable's runtime value is encoded.
     w.line("var path = String(\"\")");
     for seg in &template.segments {
@@ -530,7 +553,7 @@ fn emit_path_build(
                 ));
             }
             PathSegment::Var(var) => {
-                let value = field_to_str_expr(&var.field, bool_fields);
+                let value = url_fields.render(&format!("req.{}", var.field), &var.field);
                 w.line("path += String(\"/\")");
                 match &var.pattern {
                     // `{field}` / `{field=*}`: one segment, `/` included in
@@ -568,26 +591,37 @@ fn emit_path_build(
     }
 }
 
-/// The Mojo expression that stringifies `req.{field}` for URL path/query use.
-/// A proto `bool` field MUST render as proto3-JSON lowercase `true`/`false`
-/// (`_rest_bool_str`); Mojo's generic `String(Bool)` yields `True`/`False`,
-/// which is wrong on the wire. Every other scalar uses the generic
-/// `_rest_to_str`.
-fn field_to_str_expr(
-    field: &str,
-    bool_fields: &std::collections::BTreeSet<String>,
-) -> String {
-    if bool_fields.contains(field) {
-        format!("_rest_bool_str(req.{field})")
-    } else {
-        format!("_rest_to_str(req.{field})")
+/// The request fields of one method whose URL rendering is not the generic
+/// `_rest_to_str`: its `bool` fields and its enum fields.
+struct UrlFields<'a> {
+    bools: &'a std::collections::BTreeSet<String>,
+    enums: &'a std::collections::BTreeSet<String>,
+}
+
+impl UrlFields<'_> {
+    /// The Mojo expression that stringifies `expr`, a value of request field
+    /// `field`, for URL path/query use. A proto `bool` MUST render as
+    /// proto3-JSON lowercase `true`/`false` (`_rest_bool_str`); Mojo's
+    /// generic `String(Bool)` yields `True`/`False`, which is wrong on the
+    /// wire. An enum renders as its value's proto name (`json_name()`, the
+    /// proto3 JSON form, which `google.api.http` reads in a query), never its
+    /// number; the generated enum wrapper is not `Writable`, so the generic
+    /// path would not compile. Every other scalar uses `_rest_to_str`.
+    fn render(&self, expr: &str, field: &str) -> String {
+        if self.bools.contains(field) {
+            format!("_rest_bool_str({expr})")
+        } else if self.enums.contains(field) {
+            format!("{expr}.json_name()")
+        } else {
+            format!("_rest_to_str({expr})")
+        }
     }
 }
 
 fn emit_query_build(
     w: &mut Writer,
     part: &FieldPartition,
-    bool_fields: &std::collections::BTreeSet<String>,
+    url_fields: &UrlFields,
     req_msg: &IrMessage,
 ) {
     if part.query_fields.is_empty() {
@@ -605,13 +639,7 @@ fn emit_query_build(
         let fld = req_msg.fields.iter().find(|x| &x.name == f);
         let key = fld.map(|x| x.json_name.as_str()).unwrap_or(f.as_str());
         let label = fld.map(|x| x.label).unwrap_or(Label::Single);
-        let stringify = |expr: &str| {
-            if bool_fields.contains(f) {
-                format!("_rest_bool_str({expr})")
-            } else {
-                format!("_rest_to_str({expr})")
-            }
-        };
+        let stringify = |expr: &str| url_fields.render(expr, f);
         // An `Optional[T]` field reads through `.value()` INSIDE its presence
         // check; a repeated one appends its key once per element, in order
         // (`?resourceNames=a&resourceNames=b`); a plain field reads directly.
@@ -628,7 +656,7 @@ fn emit_query_build(
                     Some(IrType::Scalar(_)) => Some(format!("if req.{f} != 0:")),
                     _ => None,
                 };
-                (guard, field_to_str_expr(f, bool_fields))
+                (guard, stringify(&format!("req.{f}")))
             }
         };
         if let Some(g) = &guard {
@@ -1651,6 +1679,72 @@ mod tests {
     }
 
     /// One service `Logging` with one unary method `M` over request `Req`.
+    /// A service whose one method takes `.tiny.rest.v1.GetReq`, declared in
+    /// `messages.proto` (not the service's file) and referenced through that
+    /// file's module, as the lowering names a cross-file type.
+    fn split_service() -> (IrFile, IrFile, IrService) {
+        let req = IrMessage {
+            name: "GetReq".into(),
+            mojo_name: "GetReq".into(),
+            fq_name: ".tiny.rest.v1.GetReq".into(),
+            is_map_entry: false,
+            fields: vec![
+                scalar_field("name", ScalarKind::String),
+                scalar_field("view", ScalarKind::String),
+            ],
+            oneofs: vec![],
+        };
+        let ty = TypeRef { fq_name: ".tiny.rest.v1.GetReq".into(), mojo_name: "messages.GetReq".into() };
+        let svc = IrService {
+            name: "Svc".into(),
+            default_host: None,
+            methods: vec![IrMethod {
+                name: "Get".into(),
+                input: ty.clone(),
+                output: ty,
+                client_streaming: false,
+                server_streaming: false,
+                idempotent: false,
+                http_rule: Some(IrHttpRule {
+                    verb: "get".into(),
+                    path_template: "/v1/{name=things/*}".into(),
+                    body: String::new(),
+                }),
+                routing_rule: None,
+            }],
+        };
+        let service_file = file_with(vec![], svc.clone());
+        let mut messages_file = file_with(vec![req], svc.clone());
+        messages_file.proto_path = "messages.proto".into();
+        messages_file.services = vec![];
+        (service_file, messages_file, svc)
+    }
+
+    #[test]
+    fn a_request_declared_in_another_file_of_the_package_is_found() {
+        let (service_file, messages_file, svc) = split_service();
+        let files = vec![service_file.clone(), messages_file];
+        let src = emit_rest_service_in(&files, &service_file, &svc).unwrap().source;
+        assert!(src.contains("req: messages.GetReq,"), "{src}");
+        assert!(src.contains("_rest_path_var(_rest_to_str(req.name), String(\"things/*\"), String(\"name\"))"), "{src}");
+        assert!(src.contains("query += String(\"view=\") + _rest_pct_encode(_rest_to_str(req.view))"), "{src}");
+    }
+
+    #[test]
+    fn a_request_declared_in_no_generated_file_is_refused() {
+        // The service's own file alone (what `emit_rest_service` searches),
+        // and a package without the declaring file: both refuse by name.
+        let (service_file, _, svc) = split_service();
+        let alone = emit_rest_service(&service_file, &svc).unwrap_err();
+        let without = emit_rest_service_in(std::slice::from_ref(&service_file), &service_file, &svc).unwrap_err();
+        for err in [alone, without] {
+            assert!(
+                err.contains("REST method `Get`: request type `.tiny.rest.v1.GetReq` is declared in no file this package generates"),
+                "{err}"
+            );
+        }
+    }
+
     fn one_method(fields: Vec<IrField>, verb: &str, path: &str, body: &str) -> Result<RestServiceEmit, String> {
         let req = IrMessage {
             name: "Req".into(),
@@ -1719,6 +1813,42 @@ mod tests {
         assert!(e.source.contains(
             "query += String(\"resourceNames=\") + _rest_pct_encode(_rest_to_str(_rest_v))"
         ));
+    }
+
+    fn enum_field(name: &str) -> IrField {
+        IrField {
+            name: name.to_string(),
+            ty: IrType::Enum(TypeRef {
+                fq_name: ".tiny.rest.v1.View".into(),
+                mojo_name: "View".into(),
+            }),
+            label: Label::Single,
+            proto_field_number: 2,
+            json_name: name.to_string(),
+            oneof_index: None,
+        }
+    }
+
+    #[test]
+    fn an_enum_in_the_url_renders_its_proto_name() {
+        // The enum wrapper is not `Writable`: `_rest_to_str(req.view)` would
+        // not compile. A plain, an optional and a repeated enum query field,
+        // and an enum path variable, all render through `json_name()`.
+        let mut optional = enum_field("mode");
+        optional.label = Label::Optional;
+        let fields = vec![
+            scalar_field("name", ScalarKind::String),
+            enum_field("view"),
+            optional,
+            repeated(enum_field("kinds")),
+            enum_field("tier"),
+        ];
+        let src = one_method(fields, "get", "/v1/{name=things/*}/tiers/{tier}", "").unwrap().source;
+        assert!(src.contains("query += String(\"view=\") + _rest_pct_encode(req.view.json_name())"), "{src}");
+        assert!(src.contains("query += String(\"mode=\") + _rest_pct_encode(req.mode.value().json_name())"), "{src}");
+        assert!(src.contains("query += String(\"kinds=\") + _rest_pct_encode(_rest_v.json_name())"), "{src}");
+        assert!(src.contains("path += _rest_path_segment(req.tier.json_name(), String(\"tier\"))"), "{src}");
+        assert!(!src.contains("_rest_to_str(req.view)"), "{src}");
     }
 
     #[test]

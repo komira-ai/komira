@@ -220,7 +220,7 @@ fn generate_scoped(
         // Result error rather than the emitter's panic backstop.
         for file in &model.files {
             for svc in &file.services {
-                emit_rest::emit_rest_service(file, svc)?;
+                emit_rest::emit_rest_service_in(&model.files, file, svc)?;
             }
         }
     }

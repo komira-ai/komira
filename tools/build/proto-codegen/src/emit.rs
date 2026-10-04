@@ -105,6 +105,9 @@ pub const GCP_GRPC_STATUS_ERROR: &str = "gcp_grpc_status_error";
 /// The programmatic Mojo emitter — one per generated `.mojo` file.
 pub struct Emitter<'a> {
     file: &'a IrFile,
+    /// Every file generated into the same package, `file` among them: where
+    /// a REST method's request message declared in another file is found.
+    package_files: &'a [IrFile],
     buf: String,
     /// The current indentation depth, in 4-space units.
     indent: usize,
@@ -137,9 +140,21 @@ impl<'a> Emitter<'a> {
     /// with `gcp` set, the Google Cloud shape of the gRPC service clients
     /// (see the `gcp` field).
     pub fn with_options(file: &'a IrFile, protocol: ProtocolMode, gcp: bool) -> Self {
+        Self::in_package(std::slice::from_ref(file), file, protocol, gcp)
+    }
+
+    /// [`Emitter::with_options`] for `file`, one of `package_files`, the
+    /// files generated into the same package.
+    pub fn in_package(
+        package_files: &'a [IrFile],
+        file: &'a IrFile,
+        protocol: ProtocolMode,
+        gcp: bool,
+    ) -> Self {
         Self {
             boxed: recursion_breaking_edges(file),
             file,
+            package_files,
             buf: String::new(),
             indent: 0,
             protocol,
@@ -184,7 +199,7 @@ impl<'a> Emitter<'a> {
     }
 
     fn emit_rest_service_or_panic(&mut self, svc: &IrService) {
-        match crate::emit_rest::emit_rest_service(self.file, svc) {
+        match crate::emit_rest::emit_rest_service_in(self.package_files, self.file, svc) {
             Ok(emit) => self.buf.push_str(&emit.source),
             Err(e) => panic!("REST emit failed for service `{}`: {e}", svc.name),
         }
@@ -1858,7 +1873,7 @@ pub fn emit_model_with_options(
         .iter()
         .map(|file| {
             let mojo_path = proto_to_mojo_path(&file.proto_path);
-            let source = Emitter::with_options(file, protocol, gcp).emit();
+            let source = Emitter::in_package(&model.files, file, protocol, gcp).emit();
             (mojo_path, source)
         })
         .collect()
