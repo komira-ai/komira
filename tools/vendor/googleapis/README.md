@@ -18,6 +18,10 @@ file at the pinned commit.
 | `:googleapis` | the files extracted from it, each a sub-target named by its path (`:googleapis[google/rpc/status.proto]`, `:googleapis[LICENSE]`) |
 | `:logging_v2` | the Cloud Logging v2 protos (roots `google/logging/v2/{logging,log_entry}.proto`, for `ListLogEntries`), checked to be exactly their import closure |
 | `:storage_v2` | the Cloud Storage v2 protos (root `google/storage/v2/storage.proto`, the gRPC storage API), checked the same way |
+| `:run_v2` | the Cloud Run Admin v2 protos (roots `google/cloud/run/v2/{execution,job,revision,service}.proto`), checked the same way |
+| `:cloudscheduler_v1` | the Cloud Scheduler v1 protos (root `google/cloud/scheduler/v1/cloudscheduler.proto`), checked the same way |
+| `:secretmanager_v1` | the Secret Manager v1 protos (root `google/cloud/secretmanager/v1/service.proto`), checked the same way |
+| `:googleapis[google/cloud/run/v2/run_v2.yaml]` | the Cloud Run Admin v2 service configuration, whose `http.rules` bind the long-running operations mixin to Run's paths (no `.proto` states them) |
 
 ## Using the protos
 
@@ -48,7 +52,10 @@ build on its own.
 3. Build `//tools/vendor/googleapis:` (every checked closure). If the new
    commit changed an import closure, its check names the file to add to (or
    drop from) that closure's list (`_LOGGING_V2_CLOSURE`,
-   `_STORAGE_V2_CLOSURE`).
+   `_STORAGE_V2_CLOSURE`, ...). Then build the generated clients
+   (`//src/komira_gcp_*:`): komira_gcp_run's test_run_operations_mixin
+   fails if run_v2.yaml moved the operations paths its client was generated
+   with.
 
 ## Adding a client
 
