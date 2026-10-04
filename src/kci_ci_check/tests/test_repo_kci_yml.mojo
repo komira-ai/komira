@@ -26,12 +26,12 @@ from kci_ci_check import (
     kci_run_calls,
     read_workflow,
 )
-from kci_contract import DEFAULT_MACHINE_FILE
+from kci_api import DEFAULT_MACHINE_FILE
 from kci_release_channel import find_channel, parse_channels_file, push_identity_environment
-from kci_stage_graph import StageGraph, parse_machine_file
+from kci_release_machine import ReleaseMachine, parse_machine_file
 
 
-def _graph() raises -> StageGraph:
+def _graph() raises -> ReleaseMachine:
     return parse_machine_file(Path(String("machine.textproto")).read_text(), String("release/machine.textproto"))
 
 
@@ -52,7 +52,7 @@ def test_the_release_machine() raises:
     assert_equal(len(b.steps), 1)
     assert_true(b.steps[0].is_build())
     assert_equal(b.steps[0].platform, String("linux-x86_64"))
-    assert_equal(b.steps[0].declarations, String("release/artifacts.textproto"))
+    assert_equal(b.steps[0].artifacts, String("release/artifacts.textproto"))
     var p = g.stage(String("prod"))
     assert_equal(p.after, String("build"))
     assert_equal(len(p.steps), 1)
