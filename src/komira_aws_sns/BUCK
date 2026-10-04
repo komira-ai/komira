@@ -17,11 +17,11 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # POST, and a call is retried as botocore's standard mode retries it
 # (komira_aws_core's aws_retry.mojo).
 #
-# `operations` is what komira's callers do with SNS: a topic created, its
-# attributes read and set, and deleted; an endpoint subscribed, the topic's
-# subscriptions listed, a subscription's attributes read and set, and the
-# subscription removed. The generator refuses none of them. An operation
-# joins the list with its own rows in the tests below.
+# `operations` covers a topic's and a subscription's lifecycle: a topic
+# created, its attributes read and set, and deleted; an endpoint
+# subscribed, the topic's subscriptions listed, a subscription's attributes
+# read and set, and the subscription removed. The generator refuses none of
+# them. An operation joins the list with its own rows in the tests below.
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the Amazon SNS API reference (no upstream test body is copied):

@@ -26,8 +26,8 @@ BOTOCORE_MODELS = {
         api_version = "2012-08-10",
         sha256 = "c9ee3a42d8c16be98f1029d368f0b6e7f62a47305c8f80cd6dd5318d6e4984c0",
     ),
-    # Amazon EC2 (//src/komira_aws_ec2), an ec2Query client of the handful
-    # of operations komira calls. Its latest api version; botocore keeps the
+    # Amazon EC2 (//src/komira_aws_ec2), an ec2Query client of twelve of its
+    # operations. Its latest api version; botocore keeps the
     # older ones beside it.
     "ec2": struct(
         api_version = "2016-11-15",

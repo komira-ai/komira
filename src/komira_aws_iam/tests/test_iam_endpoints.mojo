@@ -20,6 +20,10 @@
 # signatures were computed by an independent SigV4 implementation (one that
 # reproduces komira_aws_sqs's signed rows) over the canonical requests
 # stated beside them.
+# The method, to rerun: the SHA-256 of the canonical request, then the
+# SigV4 HMAC-SHA256 key chain (date, region, service, "aws4_request") and
+# the HMAC-SHA256 of the string-to-sign, each step a standard openssl
+# invocation (`openssl dgst -sha256 [-mac HMAC -macopt hexkey:<key>]`).
 from komira_json import (
     JSON_ARRAY,
     JSON_BOOL,

@@ -29,11 +29,12 @@ load("@komira//tools/build/cloud:aws.bzl", "mojo_aws_client")
 # AssumeRolePolicyDocument) is returned as IAM sends it, percent-encoded:
 # botocore decodes it in a handler of its own, not in its parser.
 #
-# `operations` is what komira's callers do with IAM: a user given an access
-# key and an inline policy; a role created, read, retrusted, given, listed
-# and relieved of inline policies, tagged and deleted; an OIDC provider read
-# and its client ids added and removed. The generator refuses none of them.
-# An operation joins the list with its own rows in the tests below.
+# `operations` covers users, roles and OIDC providers: a user given an
+# access key and an inline policy; a role created, read, retrusted, given,
+# listed and relieved of inline policies, tagged and deleted; an OIDC
+# provider read and its client ids added and removed. The generator refuses
+# none of them. An operation joins the list with its own rows in the tests
+# below.
 #
 # The library is gated by its layout probe and these tests, hand-written
 # against the IAM API reference (no upstream test body is copied):
