@@ -7,7 +7,7 @@
 #   workflow_reader.mojo  `read_workflow`: a RESTRICTED reader of the YAML
 #                         subset a workflow uses; anything else is "cannot
 #                         tell", never a pass
-#   rules.mojo            `check_workflow`: every disagreement (R1 to R12);
+#   rules.mojo            `check_workflow`: every disagreement (R1 to R13);
 #                         `check_running_workflow`: the start-up check `kci
 #                         run` makes; `id_token_stages`: which stages publish
 #                         by OIDC; `kci_run_calls`

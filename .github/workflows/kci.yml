@@ -45,8 +45,17 @@
 #          re-publishing.
 #   prod   the same as gamma, after gamma AND validate, in the GitHub
 #          environment `prod` (its required reviewer approves the job), to
-#          prefix.dev komira-ai/prod. Only a manual run reaches it, so a push
-#          to main never waits on the prod approval.
+#          prefix.dev komira-ai/prod. ⛔ It runs ONLY on a manual run that
+#          sets the input publish_prod (default false) AND sets dry_run to
+#          false: the machine file's `manual_gate: "publish_prod"` on the
+#          stage, held here by rule R13 of the workflow check (the job's
+#          `if:` must have the conjunct `inputs.publish_prod == true`). So a
+#          push never reaches it, and neither does a manual run that only
+#          asks for gamma, whether or not the environment has a reviewer.
+#          The last step of `validate` says plainly whether prod is skipped
+#          and why (`stage prod: SKIPPED (...)`), or asked for; the last step
+#          of `prod` says `stage prod: RAN (<status>)`, in the job summary
+#          and as the job's last stderr line.
 #
 # Each channel trusts this repository, this file (kci.yml) and one environment
 # (trusted publishing): no secret is stored anywhere. The publish jobs stay
@@ -73,7 +82,8 @@
 # job's ID token and exchanges it at prefix.dev, then discards the minted token
 # unused: that proves a trusted publisher accepts this job, not that it may
 # write (docs/ci.md). The first real upload to komira-ai/prod happens with the
-# release approver present.
+# release approver present. A manual run with dry_run false publishes to gamma
+# only, unless it also sets publish_prod (the prod job, above).
 name: kci
 
 on:
@@ -89,6 +99,14 @@ on:
         description: "dry run: check and read the channels, publish nothing"
         type: boolean
         default: true
+      # The manual gate of the stage prod (release/machine.textproto,
+      # `manual_gate`; rule R13): prod runs only when this is true and dry_run
+      # is false. It is false by default, so no run reaches prod unless its
+      # operator asks for prod by name.
+      publish_prod:
+        description: "publish to komira-ai/prod as well (needs dry_run false); default: gamma only"
+        type: boolean
+        default: false
 
 permissions: {}
 
@@ -344,14 +362,39 @@ jobs:
           path: ${{ runner.temp }}/kci-result-validate.json
           if-no-files-found: warn
           retention-days: 90
+      # The run's plain word on prod, whatever happened above: skipped and
+      # why, or asked for (the prod job then says RAN). Last, so it is this
+      # job's last stderr line.
+      - name: stage prod
+        if: always()
+        env:
+          PUBLISH_PROD: ${{ inputs.publish_prod }}
+          DRY_RUN_INPUT: ${{ inputs.dry_run }}
+          VALIDATE_STATUS: ${{ job.status }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" != workflow_dispatch ]; then
+            line="stage prod: SKIPPED (a push never reaches prod)"
+          elif [ "$PUBLISH_PROD" != true ]; then
+            line="stage prod: SKIPPED (publish_prod not set)"
+          elif [ "$DRY_RUN_INPUT" != false ]; then
+            line="stage prod: SKIPPED (dry run)"
+          elif [ "$VALIDATE_STATUS" != success ]; then
+            line="stage prod: SKIPPED (validate $VALIDATE_STATUS)"
+          else
+            line="stage prod: REQUESTED (publish_prod set): the prod job runs next and says RAN"
+          fi
+          echo "### $line" >> "$GITHUB_STEP_SUMMARY"
+          echo "$line" >&2
 
   prod:
     # after the stage gamma: its publish AND its validation
     needs: [gamma, validate]
-    # A manual run only: a push to main stops at gamma's dry run, so it never
-    # waits on the prod environment's reviewer. (Skipped with gamma when the
+    # ⛔ A manual run that asks for prod by name, and is not a dry run: the
+    # stage's manual gate (rule R13 holds the conjunct
+    # `inputs.publish_prod == true`). A push never reaches it, and neither does
+    # a manual run that leaves publish_prod false. (Skipped with gamma when the
     # revision has no release machine.)
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_prod == true && inputs.dry_run == false
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     environment: prod
@@ -359,7 +402,9 @@ jobs:
       contents: read
       id-token: write
     env:
-      # ⛔ A push is ALWAYS a dry run: only a manual run can turn it off.
+      # ⛔ A push is ALWAYS a dry run: only a manual run can turn it off. (The
+      # job's `if:` already requires dry_run false; this line stays as the
+      # second lock.)
       DRY_RUN: ${{ github.event_name != 'workflow_dispatch' || inputs.dry_run }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -409,3 +454,13 @@ jobs:
           path: ${{ runner.temp }}/kci-result-prod.json
           if-no-files-found: warn
           retention-days: 90
+      # The run's plain word on prod: it ran, and how it ended. Last, so it is
+      # this job's last stderr line.
+      - name: stage prod
+        if: always()
+        env:
+          PROD_STATUS: ${{ job.status }}
+        run: |
+          line="stage prod: RAN ($PROD_STATUS)"
+          echo "### $line" >> "$GITHUB_STEP_SUMMARY"
+          echo "$line" >&2

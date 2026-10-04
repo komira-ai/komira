@@ -169,6 +169,46 @@ def test_kci_yml_splits_only_gamma_and_reads_the_default_machine_file() raises:
     assert_equal(prod_needs[1], String("validate"))
 
 
+def test_prod_runs_only_when_a_manual_run_sets_publish_prod() raises:
+    # the machine file gates prod, and only prod, on the input publish_prod (R13)
+    var g = _graph()
+    assert_equal(g.stage(String("build")).manual_gate, String(""))
+    assert_equal(g.stage(String("gamma")).manual_gate, String(""))
+    assert_equal(g.stage(String("prod")).manual_gate, String("publish_prod"))
+    var text = Path(String("kci.yml")).read_text()
+    var doc = read_workflow(text)
+    var gate = doc.child(doc.child(doc.child(doc.child(0, String("on")), String("workflow_dispatch")), String("inputs")), String("publish_prod"))
+    assert_true(gate >= 0, String("kci.yml declares no input publish_prod"))
+    assert_equal(doc.text(doc.child(gate, String("type"))), String("boolean"))
+    assert_equal(doc.text(doc.child(gate, String("default"))), String("false"))
+    # the prod job's condition: a manual run, publish_prod set, not a dry run
+    var cond = doc.child(doc.child(doc.child(0, String("jobs")), String("prod")), String("if"))
+    assert_equal(
+        doc.text(cond),
+        String("github.event_name == 'workflow_dispatch' && inputs.publish_prod == true && inputs.dry_run == false"),
+    )
+    # the same file with the gate's conjunct removed is refused, by the
+    # check `kci run` makes at start-up
+    var conjunct = String("inputs.publish_prod == true && ")
+    assert_true(text.find(conjunct) >= 0, String("kci.yml has no '") + conjunct + String("'"))
+    var findings = check_running_workflow(g, _channels(), text.replace(conjunct, String("")), String(DEFAULT_MACHINE_FILE))
+    assert_equal(len(findings), 1)
+    assert_true(
+        findings[0].find(String("R13: stage 'prod' has manual_gate 'publish_prod': its job's `if:` must have")) >= 0,
+        findings[0],
+    )
+    # every run says plainly whether prod ran (the build job: skipped or
+    # asked for; the prod job: ran)
+    for line in [
+        String("stage prod: SKIPPED (publish_prod not set)"),
+        String("stage prod: SKIPPED (a push never reaches prod)"),
+        String("stage prod: SKIPPED (dry run)"),
+        String("stage prod: REQUESTED (publish_prod set"),
+        String("stage prod: RAN ("),
+    ]:
+        assert_true(text.find(line) >= 0, String("kci.yml never says '") + line + String("'"))
+
+
 def test_kci_yml_names_no_removed_input_and_no_other_channel() raises:
     var text = Path(String("kci.yml")).read_text()
     for gone in [String("ci check"), String("claim"), String("expect_set_hash"), String("approved_names"), String("rehearsal")]:

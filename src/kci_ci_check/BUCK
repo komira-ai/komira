@@ -16,8 +16,10 @@ load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 # (the job named after the stage runs its steps, other jobs run its
 # validations, and together they run each step and validation exactly once;
 # a validations job holds no environment and no id-token and needs the step
-# job), and every `kci run` reading the machine file being checked (the
-# default, or its `--machine`).
+# job), every `kci run` reading the machine file being checked (the
+# default, or its `--machine`), and a stage with a `manual_gate` running only
+# when a manual run sets that boolean input true (an `if:` conjunct, the
+# input false by default).
 #
 # The workflow is read by a RESTRICTED reader of the YAML subset it uses;
 # anything else (anchors, aliases, tags, flow mappings, tabs, a second document)
@@ -44,6 +46,9 @@ mojo_library(
         # one stage split over jobs whose --only parts run all of it once
         # (R1 and R9 as amended)
         "tests/test_ci_split_stage.mojo",
+        # a stage with a manual_gate runs only when a manual run sets that
+        # input true (R13): each way to lose the gate is refused
+        "tests/test_ci_manual_gate.mojo",
         # the repository's own kci.yml held to its own release/machine.textproto
         "tests/test_repo_kci_yml.mojo",
     ],

@@ -72,6 +72,16 @@
 #   R12 every `kci run` passes `--summary-file` (the job summary carries the
 #       run's outcome and the NEW NAMES an approver reads before approving a
 #       later stage)
+#   R13 a stage whose machine file names a `manual_gate` input runs only when
+#       a manual run sets that input true: `workflow_dispatch` declares the
+#       input with `type: boolean` and `default: false`, and the job named
+#       after the stage has an `if:` with the TOP-LEVEL conjunct
+#       `inputs.<gate> == true` and no top-level `||` (a `${{ }}` around the
+#       expression and the spacing are ignored; `&&`, `||` and parentheses
+#       inside a '...' string are text). So a push, whose `inputs` are empty,
+#       and a manual run that does not ask for the stage by name both skip
+#       it. A job that runs only validations of the stage (R9) holds no
+#       identity token and needs the stage's job, so it is not held to this.
 #
 # How `kci run` is found (R5): each `run:` block is split into shell words
 # (a line ending in `\` continues; quotes around a word are dropped); an
@@ -681,6 +691,95 @@ def _one_runner(st: Stage, over: String, kind: String, name: String, by: List[St
         )
 
 
+# ---- R13: the manual gate ----------------------------------------------------------
+
+
+def _if_terms(expr: String, mut has_or: Bool) -> List[String]:
+    """The top-level `&&` conjuncts of a job's `if:` expression, each with
+    its spaces removed; `has_or` is set when it has a top-level `||` (file
+    header, R13). A `${{ ... }}` around the whole expression is dropped first."""
+    var e = String(expr.strip())
+    if e.startswith(String("${{")) and e.endswith(String("}}")):
+        var inner = String(String(e[byte = 3 : e.byte_length() - 2]).strip())
+        e = inner^
+    var b = e.as_bytes()
+    var terms = List[String]()
+    has_or = False
+    var depth = 0
+    var quoted = False
+    var start = 0
+    var i = 0
+    while i < len(b):
+        var c = Int(b[i])
+        if quoted:
+            if c == 39:  # '
+                quoted = False
+        elif c == 39:
+            quoted = True
+        elif c == 40:  # (
+            depth += 1
+        elif c == 41:  # )
+            depth -= 1
+        elif depth == 0 and i + 1 < len(b) and Int(b[i + 1]) == c and (c == 38 or c == 124):  # && ||
+            if c == 124:
+                has_or = True
+            terms.append(String(e[byte=start:i]))
+            i += 2
+            start = i
+            continue
+        i += 1
+    terms.append(String(e[byte=start:]))
+    var out = List[String]()
+    for k in range(len(terms)):
+        out.append(terms[k].replace(String(" "), String("")))
+    return out^
+
+
+def _check_manual_gate(doc: WorkflowDoc, job_id: String, job: Int, st: Stage, inputs: Int, mut findings: List[String]):
+    """R13 for the job named after a stage with a `manual_gate`."""
+    ref gate = st.manual_gate
+    var said = String("stage '") + st.name + String("' has manual_gate '") + gate + String("'")
+    var decl = doc.child(inputs, gate)
+    if decl < 0:
+        findings.append(
+            _at(doc, inputs) + String("R13: ") + said + String(", and workflow_dispatch declares no input `") + gate
+            + String("` (type: boolean, default: false)")
+        )
+    else:
+        var of = String("R13: workflow_dispatch input `") + gate + String("` (the manual gate of stage '") + st.name
+        of += String("') is not ")
+        var t = doc.child(decl, String("type"))
+        if t < 0 or doc.kind(t) != NODE_SCALAR or doc.text(t) != String("boolean"):
+            findings.append(_at(doc, decl) + of + String("`type: boolean`"))
+        var d = doc.child(decl, String("default"))
+        if d < 0 or doc.kind(d) != NODE_SCALAR or doc.text(d) != String("false"):
+            findings.append(
+                _at(doc, decl) + of + String("`default: false`: a manual run must ask for the stage by name")
+            )
+    var where = _at(doc, job) + String("job '") + job_id + String("': ")
+    var want = String("inputs.") + gate + String("==true")
+    var cond = doc.child(job, String("if"))
+    var found = False
+    if cond >= 0 and doc.kind(cond) == NODE_SCALAR:
+        var has_or = False
+        var terms = _if_terms(doc.text(cond), has_or)
+        if has_or:
+            findings.append(
+                where + String("R13: stage '") + st.name
+                + String("': its job's `if:` has a top-level `||`, which runs the job without its manual gate `inputs.")
+                + gate + String(" == true`")
+            )
+            return
+        for k in range(len(terms)):
+            if terms[k] == want:
+                found = True
+    if not found:
+        findings.append(
+            where + String("R13: ") + said + String(": its job's `if:` must have the top-level conjunct `inputs.") + gate
+            + String(" == true`, so neither a push nor a manual run that does not set it reaches the stage")
+        )
+
+
 def check_workflow_doc(
     doc: WorkflowDoc, g: ReleaseMachine, token_stages: List[String], machine_path: String
 ) -> List[String]:
@@ -758,6 +857,9 @@ def check_workflow_doc(
             doc, job_ids[found], job_nodes[found], st, _member(token_stages, st.name), machine_path, len(parts) > 0,
             after_jobs, findings,
         )
+        # R13
+        if st.manual_gate.byte_length() > 0:
+            _check_manual_gate(doc, job_ids[found], job_nodes[found], st, inputs, findings)
         for k in range(len(parts)):
             _check_part_job(doc, job_ids[parts[k]], job_nodes[parts[k]], st, g, machine_path, findings)
         if split:

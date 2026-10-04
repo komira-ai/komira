@@ -143,13 +143,14 @@ tool that writes them is itself a pinned build output.
 `kci.machine`, read by `src/kci_release_machine`) is komira's own release machine:
 its stages in order, and the steps of each. `kci run --stage <S>` runs one
 stage. Three stages today: `build` (one BUILD step), `gamma` and `prod` (one
-PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Three
+PUBLISH step each, to prefix.dev `komira-ai/gamma` and `komira-ai/prod`). Four
 fields of a stage carry what the CI workflow must agree with:
 
 | field | meaning |
 |---|---|
 | `stage.environment` | the GitHub environment the stage's job runs in (default: the stage's name). A trusted-publishing channel's push identity must name it, or kci refuses the publish. |
 | `stage.farm_connected` | the stage's job joins the build farm's tailnet (the `farm-connect` action), which needs the job's ID token. A farm-connected stage may not publish: the job that holds a tailnet node never holds a publishing token. |
+| `stage.manual_gate` | the name of a boolean `workflow_dispatch` input (`[a-z][a-z0-9_]*`). The stage's job runs only on a manual run that sets it true: the input defaults to false and the job's `if:` has the top-level conjunct `inputs.<gate> == true` (rule R13). `prod` names `publish_prod`, so no run reaches prod unless its operator asks for it by name. |
 | `step.validation` | a check of what a PUBLISH step published, by kind (`CONDA_INSTALL_SMOKE`: `image` pinned by digest, `install` (repeated), `compiler_channel`, `extra_channel`, `program` under `release/`, `wait_for_index_seconds`). A FULL run runs it after its step; `--only validation:<name>` runs it alone against what is published; `--only step:<name>` runs the step without it. A failure is exit 7, never a skip. |
 
 The workflow that runs the stages, `.github/workflows/kci.yml`, is held to this

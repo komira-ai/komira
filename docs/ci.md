@@ -228,7 +228,7 @@ convention (its one default path), so no line of the workflow names it.
 | `build` | GitHub-hosted (`ubuntu-24.04`) joined to the farm by [`farm-connect`](#how-it-reaches-the-farm), environment `build`, `contents: read` + `id-token: write` (for the tailnet only) | builds `//bin/kci:kci[runnable]`, then `kci run --stage build --revision-id <REVISION>`: every declared artifact, built on the farm, stamped from git, verified, and `release.json` with the set hash. The release directory, the kci binary and the build's result file leave the job as one workflow artifact named `kci-release-<REVISION>`. |
 | `gamma` | GitHub-hosted (`ubuntu-24.04`), environment `gamma`, `id-token: write` | runs `release_version.sh` at `REVISION`, then `kci run --stage gamma --only step:publish`: the release directory `build` made, published to the channel `komira-ai/gamma`. Nothing is built here. |
 | `validate` (stage `gamma`) | GitHub-hosted (`ubuntu-24.04`, docker installed), no environment, `contents: read` only | `kci run --stage gamma --only validation:install`: what `gamma` published, installed from the channel the way a consumer gets it, in a digest-pinned container (see Validations). Holds no identity token; re-running it re-validates without re-publishing. |
-| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
+| `prod` | GitHub-hosted (`ubuntu-24.04`), environment `prod`, `id-token: write` | after `gamma` and `validate`, and ONLY on a manual run with `publish_prod` true and `dry_run` false: the same bytes, published to `komira-ai/prod`, after the prod environment's reviewer approves. Nothing is built here. |
 
 The same release directory, from the one artifact `kci-release-<REVISION>`,
 is published to each channel: it is never rebuilt. `build.set_hash`,
@@ -248,7 +248,7 @@ value, and the release's `release_produced_by` names the one build run.
   (`GITHUB_ACTIONS=true`), before it runs anything, `kci run` reads the
   workflow file it runs under as it was committed (`GITHUB_WORKFLOW_REF`'s
   path at `GITHUB_WORKFLOW_SHA`, through `git show`) and holds it to the
-  machine file and every channels file it names (rules R1-R12 of
+  machine file and every channels file it names (rules R1-R13 of
   `src/kci_ci_check/rules.mojo`: a job per stage named for it, each job's
   environment its stage's, `needs` the jobs that run the stage's `after`,
   `id-token: write` only where a stage publishes by trusted publishing or is
@@ -256,7 +256,8 @@ value, and the release's `release_produced_by` names the one build run.
   in a split stage whose jobs run all of it once (a validations-only job has
   no environment, no identity token, and needs the stage's own job), no
   `pull_request` trigger, a `revision` input, every `uses:` pinned,
-  `farm-connect` exactly on farm-connected stages). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
+  `farm-connect` exactly on farm-connected stages, and a stage with a
+  `manual_gate` run only when a manual run sets that boolean input true). A mismatch is refused (exit 3, `KCI-E-WORKFLOW-MISMATCH`, every
   finding listed, nothing run); an unreadable workflow or channels file, or a
   missing variable, is exit 5 and never a pass. The same check is the welded
   test `src/kci_ci_check/tests/test_repo_kci_yml.mojo`, so a drift also
@@ -275,8 +276,21 @@ value, and the release's `release_produced_by` names the one build run.
 - **Dry run by default.** Every run is a dry run (`--plan`) unless it is a
   manual run with the input `dry_run` set to false; a push to `main` is always
   a dry run, pinned by the `DRY_RUN` line of each publish job. A push runs
-  `build` and `gamma` only: `prod` runs for a manual run, so a push does not
-  wait on the prod reviewer for a dry run.
+  `build`, `gamma` and `validate` only.
+- **⛔ Prod only when asked for by name.** The `prod` job runs only on a
+  manual run that sets the input `publish_prod` (a boolean, false by
+  default) and sets `dry_run` to false. A manual run with `dry_run` false and
+  nothing else publishes to `komira-ai/gamma` only. The machine file holds
+  this as a typed field of the stage, `manual_gate: "publish_prod"`, and rule
+  R13 holds the workflow to it: `workflow_dispatch` declares the input as a
+  boolean that defaults to false, and the `prod` job's `if:` has the
+  top-level conjunct `inputs.publish_prod == true` with no top-level `||`. A
+  required reviewer on the `prod` environment is the second, separate gate
+  (a repository setting). Every run says which: the last step of `validate`
+  writes `stage prod: SKIPPED (<why>)` (a push, `publish_prod not set`, a dry
+  run, or a failed validation) or `stage prod: REQUESTED`, and the last step
+  of `prod` writes `stage prod: RAN (<status>)`, each to the job summary and
+  as the job's last stderr line.
 - **What a dry run proves.** For each publish job: the release set verifies
   (members, closure, set hash, platform); the channel's repodata and files
   read anonymously at the URLs kci builds; the job gets a GitHub ID token
@@ -299,7 +313,10 @@ value, and the release's `release_produced_by` names the one build run.
   the stages after it: **the `gamma` job's summary shows the names new to
   `komira-ai/prod`; read it before approving `prod`.** A channel that could
   not be read is reported "not read", never "none". A dry run reports the
-  same.
+  same. The `validate` job passes no `--release-version` (it selects no
+  publish step), so it cannot name prod's files: its summary says `lookahead
+  skipped: no release version (plan-only or validation-only run)` for prod,
+  and the `gamma` job's summary is the one to read.
 - **One record.** Every kci invocation writes kci's result document
   (`--result-file`, format `kci.result`): RUNNING before the first effect and
   FINISHED on every exit, with the workflow check (`workflow`), the steps, the
