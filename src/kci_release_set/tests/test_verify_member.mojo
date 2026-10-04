@@ -18,7 +18,7 @@ from std.testing import TestSuite, assert_equal, assert_false, assert_true
 from komira_crypto import hex_lower_array_32, sha256_string
 from komira_json import JsonValue, parse_json_value
 
-from kci_release_set import verify_member
+from kci_release_set import member_platform, verify_member
 
 comptime _NAME = "komira_name_registry"
 comptime _FILE = "komira_name_registry-0.1.7-0.conda"
@@ -59,9 +59,12 @@ def _manifest(
 ) -> String:
     var digest = sha.copy() if sha.byte_length() > 0 else _hash(String(_CONTENT))
     var subdir = String('"subdir":"linux-64",') if artifact_type == "CONDA" else String("")
+    var platform = String("linux-x86_64") if artifact_type == "CONDA" else String("noarch")
     return (
-        String('{"artifact_type":"') + artifact_type + String('","name":"') + name
-        + String('","version":"0.1.7",') + subdir + String('"file":"') + file
+        String('{"format":"kci.artifact_manifest","schema_version":1,"artifact_type":"')
+        + artifact_type + String('","name":"') + name
+        + String('","version":"0.1.7","platform":"') + platform + String('",') + subdir
+        + String('"file":"') + file
         + String('","sha256":"') + digest + String('","metadata":"') + metadata + String('"}\n')
     )
 
@@ -129,7 +132,7 @@ def _expect(dir: String, why: String) raises:
 def test_control_good_directory_is_verified() raises:
     var d = _good(String("control"))
     var m = verify_member(String(_NAME), d)
-    assert_equal(m.declaration, String(_NAME))
+    assert_equal(m.artifact, String(_NAME))
     assert_equal(m.dir, d)
     assert_equal(m.manifest.name, String(_NAME))
     assert_equal(m.manifest.sha256_hex, _hash(String(_CONTENT)))
@@ -174,12 +177,12 @@ def test_refuses_a_manifest_that_does_not_parse() raises:
     )
 
 
-def test_refuses_a_name_that_is_not_the_declarations() raises:
+def test_refuses_a_name_that_is_not_the_artifacts() raises:
     var d = _good(String("name"))
     _write(d + String("/manifest.json"), _manifest(name=String("komira_name_registry2")))
     _expect(
         d,
-        String("the built manifest's name 'komira_name_registry2' is not the declaration's name")
+        String("the built manifest's name 'komira_name_registry2' is not the artifact's name")
         + String(" (compared exactly)"),
     )
 
@@ -311,10 +314,12 @@ def test_refuses_a_sha256_mismatch() raises:
 
 def test_refuses_metadata_that_does_not_parse() raises:
     var d = _good(String("badmeta"))
-    _write(d + String("/metadata.json"), String('{"zzz":1,') + String(_metadata()[byte = 1:]))
+    _write(d + String("/metadata.json"), _metadata(String("schema_version"), String("2")))
     _expect(
         d,
-        String("conda metadata '") + d + String("/metadata.json': unknown key 'zzz'"),
+        String("conda metadata '") + d
+        + String("/metadata.json': schema_version 2 needs a newer kci (this kci reads")
+        + String(" kci.conda_metadata up to major 1)"),
     )
 
 
@@ -361,6 +366,27 @@ def test_python_is_accepted_without_conda_metadata() raises:
     assert_false(m.has_conda)
     assert_equal(m.build(), String(""))
     assert_equal(m.kind(), String(""))
+
+
+def test_a_members_platform_is_its_manifests() raises:
+    # A PYTHON wheel whose manifest says `noarch` is a noarch member of a
+    # linux-x86_64 release, not a linux-x86_64 one: the manifest states the
+    # platform (kci_artifact_manifest), and release.json records that one.
+    var d = _root(String("python_noarch")) + String("/") + String(_NAME)
+    makedirs(d, exist_ok=True)
+    var wheel = String("komira_name_registry-0.1.7-py3-none-any.whl")
+    _write(d + String("/") + wheel, String(_CONTENT))
+    _write(d + String("/METADATA"), String("Metadata-Version: 2.1\n"))
+    _write(
+        d + String("/manifest.json"),
+        _manifest(file=wheel, artifact_type=String("PYTHON"), metadata=String("METADATA")),
+    )
+    var m = verify_member(String(_NAME), d)
+    assert_equal(m.manifest.platform, String("noarch"))
+    assert_equal(member_platform(m, String("linux-x86_64")), String("noarch"))
+    # a CONDA member is its manifest's platform too
+    var c = verify_member(String(_NAME), _good(String("conda_platform")))
+    assert_equal(member_platform(c, String("linux-x86_64")), String("linux-x86_64"))
 
 
 def main() raises:

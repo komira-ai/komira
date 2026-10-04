@@ -1,6 +1,6 @@
 load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
 
-# The clouds of the kci deploy side: the catalog's types as data, the
+# The clouds of kci's deploy side: the catalog's types as data, the
 # CloudAdapter trait every cloud built into kci implements (an internal
 # module boundary, not a plugin interface), Clouds (the closed list of
 # built-in clouds; every cloud declares every catalog type), the validate

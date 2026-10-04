@@ -60,11 +60,15 @@ nothing else:
     <name>-<version>-<build>.conda
                                the channel's file name
     manifest.json              the artifact manifest, exactly the contract of
-                               kci's kci_artifact_manifest: artifact_type
-                               (`CONDA`), name, version (the compiler version),
+                               kci's kci_artifact_manifest: format
+                               (`kci.artifact_manifest`), schema_version (1),
+                               artifact_type (`CONDA`), name, version (the
+                               compiler version), platform (`linux-x86_64`),
                                subdir, file, sha256, metadata (`metadata.json`:
                                the file below, named next to the manifest)
-    metadata.json              every other fact: kind, build (string),
+    metadata.json              every other fact: format
+                               (`kci.conda_metadata`), schema_version (1),
+                               kind, build (string),
                                build_number, size,
                                depends, mojo_pin, source_commit, stamped,
                                timestamp_ms, label, import_name, payload_path,

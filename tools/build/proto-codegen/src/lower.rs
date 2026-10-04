@@ -853,7 +853,7 @@ impl Lowerer {
                 // `None` for every gRPC / db / OpenAPI path (the overlay is
                 // empty there); `Some` only for `rest`-target annotated
                 // methods. The `rest`-mode validation (un-annotated method =
-                // loud error; streaming + http_rule = skip-with-note) lives
+                // loud error; a streaming method = loud error) lives
                 // at the emit boundary where `ProtocolMode` is known.
                 let http_rule = self
                     .http_rules
@@ -896,6 +896,9 @@ impl Lowerer {
         IrService {
             name: svc_name,
             methods,
+            // Filled after lowering from the recovered service options
+            // (`service_options.rs`), on the paths that recover them.
+            default_host: None,
         }
     }
 
