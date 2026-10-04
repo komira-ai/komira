@@ -1,0 +1,54 @@
+load("@komira//tools/build/mojo:defs.bzl", "mojo_library")
+
+# Google Cloud workload identity federation from AWS: an AWS workload's role
+# exchanged for a Google access token, and that token used to mint a JWT
+# self-signed by a service account (IAM Credentials signJwt).
+#
+#   aws_subject - the `aws1` subject token: a SigV4-signed GetCallerIdentity
+#                 (komira_aws_core's signer) serialized as Google's
+#                 external-account credentials expect it. Pure.
+#   sts         - AwsWifTokenFetcher, a komira_gcp_core AccessTokenFetcher
+#                 that exchanges the subject token at Google STS; wrapped in
+#                 CachingTokenSource it is a GcpTokenSource.
+#   sign_jwt    - WifTokenMinter: signJwt with the bearer from any
+#                 GcpTokenSource. Never dialed when the source raises.
+#
+# Both legs send through komira_http_client over the komira_http_core
+# Connector the caller binds, and report a non-2xx answer through
+# komira_gcp_core's parse_gcp_status, which never echoes a body. Neither
+# service has a generated client in this repository, so the two REST calls
+# are written here. The package reads no environment: the AWS credential
+# comes from a komira_aws_core AwsCredsSource and everything else is a
+# parameter.
+#
+# test_aws_subject checks the subject token with a fixed signing time: the
+# canonical request byte for byte (what AWS verifies), the header list in the
+# reference implementation's order, the JSON text whole and its encoding.
+# test_wif_mint runs both legs over komira_http_core's ScriptedConnector (no
+# socket, AWS's documentation key pair): the exact header sets and bodies on
+# the wire, the twice-encoded subject token, the token cache, signJwt never
+# dialed after a refused or tokenless leg 1, and failure messages holding no
+# token and no body byte. test_env_source_only scans the package's own
+# sources, staged as its data, for any environment read.
+mojo_library(
+    name = "komira_gcp_wif",
+    srcs = glob(["**/*.mojo"], exclude = ["tests/**/*.mojo"]),
+    deps = [
+        "//src/komira_async:komira_async",
+        "//src/komira_aws_core:komira_aws_core",
+        "//src/komira_gcp_core:komira_gcp_core",
+        "//src/komira_http_client:komira_http_client",
+        "//src/komira_http_core:komira_http_core",
+        "//src/komira_json:komira_json",
+        "//src/komira_retry:komira_retry",
+    ],
+    test_srcs = [
+        "tests/test_aws_subject.mojo",
+        "tests/test_wif_mint.mojo",
+        "tests/test_env_source_only.mojo",
+    ],
+    test_data = {
+        "tests/test_env_source_only.mojo": glob(["*.mojo"]),
+    },
+    visibility = ["PUBLIC"],
+)
